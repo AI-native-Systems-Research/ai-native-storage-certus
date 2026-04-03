@@ -4,7 +4,7 @@ members = ["tmp-project"]
 
 # Shared dependencies for all workspace members (optional)
 [workspace.dependencies]
-log = "0.4"
+
 
 # Use the latest dependency resolver
 resolver = "2"
