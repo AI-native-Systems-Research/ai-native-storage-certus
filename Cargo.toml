@@ -5,6 +5,7 @@ members = [
     "components/component-framework/crates/component-macros",
     "components/component-framework/crates/component-framework",
     "components/component-framework/examples",
+    "components/example-helloworld",
 ]
 
 resolver = "2"
