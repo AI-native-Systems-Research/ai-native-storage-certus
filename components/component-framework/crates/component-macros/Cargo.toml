@@ -1,0 +1,16 @@
+[package]
+name = "component-macros"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Procedural macros for the COM-style component framework"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+component-core = { path = "../component-core" }
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full", "extra-traits"] }

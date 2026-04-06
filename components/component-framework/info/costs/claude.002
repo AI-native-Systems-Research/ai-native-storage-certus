@@ -1,0 +1,9 @@
+Including 001 and 002 (continued session)
+
+/cost                                                                                                                                                           
+  ⎿  Total cost:            $30.38
+     Total duration (API):  1h 6m 53s                                                                                                                             
+     Total duration (wall): 2h 2m 24s                                                                                            
+     Total code changes:    6605 lines added, 699 lines removed                                                                                                   
+     Usage by model:                                                                                                                                              
+          claude-opus-4-6:  36.7k input, 148.3k output, 34.8m cache read, 1.5m cache write ($30.38) 

@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "extensions": {
+    "sync": {
+      "version": "0.1.0",
+      "source": "local",
+      "manifest_hash": "sha256:94eb5685bb305f9bb7a9ac921d7b03557999626df7de74bc643e03416e1bca06",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "claude": [
+          "speckit.sync.analyze",
+          "speckit.drift",
+          "speckit.sync.propose",
+          "speckit.sync.apply",
+          "speckit.sync.conflicts",
+          "speckit.sync.backfill"
+        ]
+      },
+      "installed_at": "2026-03-30T22:36:15.236622+00:00"
+    }
+  }
+}

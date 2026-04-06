@@ -1,0 +1,141 @@
+{
+  "generated": "2026-04-06T12:00:00Z",
+  "project": "component-framework",
+  "summary": {
+    "specs_analyzed": 6,
+    "requirements_checked": 97,
+    "aligned": 83,
+    "drifted": 12,
+    "not_implemented": 2,
+    "unspecced_features": 0
+  },
+  "specs": [
+    {
+      "id": "001-com-component-framework",
+      "title": "COM-Style Component Framework",
+      "aligned": ["FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-008", "FR-009", "FR-010", "FR-011", "FR-013", "SC-001", "SC-002", "SC-003", "SC-006"],
+      "drifted": [
+        {
+          "requirement": "FR-007",
+          "spec_text": "The framework MUST produce compile-time errors when macro usage is incorrect",
+          "actual": "Compile-time errors exist but no trybuild/compile-fail tests validate them",
+          "location": "crates/component-macros/src/define_interface.rs:44-68",
+          "severity": "minor"
+        },
+        {
+          "requirement": "FR-012",
+          "spec_text": "The framework MUST provide a prelude module that re-exports the most commonly used types",
+          "actual": "Prelude module missing query_interface! macro and Receptacle from explicit re-exports",
+          "location": "crates/component-core/src/prelude.rs",
+          "severity": "minor"
+        },
+        {
+          "requirement": "SC-004",
+          "spec_text": "100% of public APIs have passing doc tests and unit tests",
+          "actual": "Most public APIs have doc tests but gaps remain (InterfaceMap::info(), prelude doc test is inert)",
+          "location": "crates/component-core/src/",
+          "severity": "minor"
+        },
+        {
+          "requirement": "SC-005",
+          "spec_text": "All Criterion benchmarks demonstrate no regressions between releases",
+          "actual": "Benchmarks exist but no CI regression gate (cargo bench not in CI pipeline)",
+          "location": "crates/component-framework/benches/",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": []
+    },
+    {
+      "id": "002-registry-refcount-binding",
+      "title": "Registry, Reference Counting, and Binding",
+      "aligned": ["FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014", "FR-015", "FR-016", "FR-017", "FR-019"],
+      "drifted": [
+        {
+          "requirement": "FR-018",
+          "spec_text": "Factory functions MUST return components with an initial reference count of 1",
+          "actual": "Macro-generated components have higher initial ref count due to internal self-referential Arcs in interface map; tests use base_count workaround",
+          "location": "crates/component-framework/tests/component_ref.rs:129-146",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "FR-020",
+          "spec_text": "The registry MUST provide a simplified factory registration method (register_simple)",
+          "actual": "register_simple is implemented with doc-test but has no integration test in tests/registry.rs",
+          "location": "crates/component-core/src/registry.rs:147-152",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": []
+    },
+    {
+      "id": "003-actor-channels",
+      "title": "Actor Model with Channel Components",
+      "aligned": ["FR-001", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014", "FR-015", "FR-016", "FR-017", "FR-020", "FR-021", "FR-022", "FR-023", "FR-024", "FR-025", "FR-026", "FR-027"],
+      "drifted": [
+        {
+          "requirement": "FR-002",
+          "spec_text": "Actor components MUST use the same component, interface, and receptacle model as plain components (defined via the existing macro system)",
+          "actual": "Actor<M,H> is hand-coded with manual IUnknown impl, bypassing define_component! macro",
+          "location": "crates/component-core/src/actor.rs:348-366",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "FR-018",
+          "spec_text": "Actor and channel components MUST be registerable in the existing component registry",
+          "actual": "Only actor registration tested; channel components never registered as named factories in registry",
+          "location": "crates/component-framework/tests/actor.rs:274-321",
+          "severity": "minor"
+        },
+        {
+          "requirement": "FR-019",
+          "spec_text": "Actor and channel components MUST support both first-party and third-party binding",
+          "actual": "Third-party binding (string-name bind()) never tested for actor-to-channel wiring; all examples use first-party only",
+          "location": "N/A — no test exists",
+          "severity": "moderate"
+        }
+      ],
+      "not_implemented": []
+    },
+    {
+      "id": "004-channel-benchmarks",
+      "title": "Channel Backend Benchmarks",
+      "aligned": ["FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014", "FR-015", "FR-016"],
+      "drifted": [],
+      "not_implemented": []
+    },
+    {
+      "id": "005-numa-aware-actors",
+      "title": "NUMA-Aware Actor Thread Pinning and Memory Allocation",
+      "aligned": ["FR-001", "FR-002", "FR-003", "FR-005", "FR-006", "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014", "FR-015", "FR-018", "FR-019", "FR-020"],
+      "drifted": [
+        {
+          "requirement": "FR-004",
+          "spec_text": "The framework MUST validate CPU IDs against the system's available CPUs and return an error for invalid IDs before spawning the thread",
+          "actual": "validate_cpus() function exists at cpuset.rs:355 but is NOT called in Actor::activate(); invalid CPUs produce generic kernel errors instead of structured CpuOffline(id) errors",
+          "location": "crates/component-core/src/actor.rs:614-616",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "FR-016",
+          "spec_text": "Channel buffers SHOULD be allocated on the NUMA node associated with the actor's CPU affinity",
+          "actual": "SpscChannel::new_numa and MpscChannel::new_numa accept node parameter but discard it, delegating to Self::new(capacity); NumaAllocator not used for ring buffer allocation",
+          "location": "crates/component-core/src/channel/spsc.rs:145-147",
+          "severity": "moderate"
+        }
+      ],
+      "not_implemented": [
+        "FR-017"
+      ]
+    },
+    {
+      "id": "006-log-handler",
+      "title": "Generic Log Handler",
+      "aligned": ["FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007", "FR-008"],
+      "drifted": [],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [],
+  "conflicts": []
+}

@@ -1,0 +1,55 @@
+[package]
+name = "examples"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+component-framework.workspace = true
+component-core.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+
+[[example]]
+name = "basic"
+path = "basic.rs"
+
+[[example]]
+name = "wiring"
+path = "wiring.rs"
+
+[[example]]
+name = "introspection"
+path = "introspection.rs"
+
+[[example]]
+name = "binding"
+path = "binding.rs"
+
+[[example]]
+name = "actor_ping_pong"
+path = "actor_ping_pong.rs"
+
+[[example]]
+name = "actor_pipeline"
+path = "actor_pipeline.rs"
+
+[[example]]
+name = "actor_fan_in"
+path = "actor_fan_in.rs"
+
+[[example]]
+name = "tokio_ping_pong"
+path = "tokio_ping_pong.rs"
+
+[[example]]
+name = "numa_pinning"
+path = "numa_pinning.rs"
+
+[[example]]
+name = "actor_factory"
+path = "actor_factory.rs"
+
+[[example]]
+name = "actor_log"
+path = "actor_log.rs"
