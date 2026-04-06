@@ -50,7 +50,7 @@ A performance engineer runs benchmarks that measure actor-to-actor message passi
 
 **Acceptance Scenarios**:
 
-1. **Given** a system with at least 2 NUMA nodes, **When** the benchmark runs the same-node configuration, **Then** both actors are pinned to CPUs on the same NUMA node and latency results are recorded.
+1. **Given** a system with at least 2 NUMA nodes, **When** the benchmark runs the same-node configuration, **Then** the sender and receiver are pinned to **distinct** CPUs on the same NUMA node (not the same CPU) and latency results are recorded.
 2. **Given** a system with at least 2 NUMA nodes, **When** the benchmark runs the cross-node configuration, **Then** the two actors are pinned to CPUs on different NUMA nodes and latency results are recorded.
 3. **Given** both benchmark configurations have completed, **When** the results are compared, **Then** cross-node latency is measurably higher than same-node latency (demonstrates NUMA effect).
 4. **Given** a system with at least 2 NUMA nodes, **When** the throughput benchmark runs, **Then** messages-per-second is recorded for both same-node and cross-node configurations.
@@ -80,6 +80,7 @@ A developer learning the framework runs a self-contained example that demonstrat
 - What happens when a CPU is offline? The framework MUST detect offline CPUs and exclude them from topology results; pinning to an offline CPU MUST return an error.
 - What happens when topology information is unavailable (e.g., a VM that hides NUMA details)? The framework MUST fall back to reporting a single NUMA node containing all CPUs.
 - What happens when an actor is deactivated and reactivated with a different CPU affinity? The new affinity MUST apply to the newly spawned thread.
+- What happens when a NUMA node has fewer than 2 CPUs? Same-node benchmarks MUST skip gracefully with an explanatory message rather than pinning both threads to the same CPU.
 
 ## Requirements *(mandatory)*
 
@@ -128,6 +129,7 @@ A developer learning the framework runs a self-contained example that demonstrat
 - **FR-012**: The framework MUST include benchmarks measuring actor-to-actor message passing throughput for same-node and cross-node configurations.
 - **FR-013**: Benchmark results MUST be labeled with the NUMA configuration (same-node vs cross-node) for direct comparison.
 - **FR-020**: Benchmarks MUST compare NUMA-local allocated channels vs default-allocated channels to quantify the memory locality benefit.
+- **FR-021**: Same-node benchmarks MUST pin sender and receiver threads to **distinct CPUs** within the same NUMA node. Pinning both threads to the same CPU produces contention artifacts that invalidate the measurement.
 
 **Example**:
 
@@ -152,6 +154,7 @@ A developer learning the framework runs a self-contained example that demonstrat
 - **SC-006**: The NUMA pinning example compiles, runs, and produces correct output on a multi-NUMA system.
 - **SC-007**: Benchmarks produce results for at least 2 configurations (same-node, cross-node) and results are directly comparable (same message count, same methodology).
 - **SC-008**: NUMA-local allocated channels show measurably lower latency than default-allocated channels when actors are pinned to the same NUMA node as the allocation.
+- **SC-009**: Same-node benchmarks use two distinct CPU IDs from the same NUMA node, verified by the benchmark selecting at least 2 CPUs from the node's CPU set.
 
 ## Assumptions
 

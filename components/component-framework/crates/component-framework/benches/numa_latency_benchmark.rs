@@ -21,6 +21,14 @@ fn first_cpu(topo: &NumaTopology, node_id: usize) -> Option<usize> {
     topo.node(node_id).and_then(|n| n.cpus().iter().next())
 }
 
+/// Pick two distinct CPUs from the same NUMA node.
+fn two_cpus(topo: &NumaTopology, node_id: usize) -> Option<(usize, usize)> {
+    let mut it = topo.node(node_id)?.cpus().iter();
+    let a = it.next()?;
+    let b = it.next()?;
+    Some((a, b))
+}
+
 fn numa_latency(c: &mut Criterion) {
     let topo = match NumaTopology::discover() {
         Ok(t) => t,
@@ -35,14 +43,23 @@ fn numa_latency(c: &mut Criterion) {
         None => return,
     };
 
+    // Two distinct CPUs on node 0 for same-node benchmarks (sender != receiver).
+    let (node0_cpu_a, node0_cpu_b) = match two_cpus(&topo, 0) {
+        Some(pair) => pair,
+        None => {
+            eprintln!("Node 0 has fewer than 2 CPUs — skipping same-node benchmarks");
+            return;
+        }
+    };
+
     let mut group = c.benchmark_group("numa_latency");
     group.sample_size(50);
 
     // --- Same-node ---
     group.bench_with_input(
         BenchmarkId::new("spsc", "same_node"),
-        &node0_cpu,
-        |b, &cpu| {
+        &(node0_cpu_a, node0_cpu_b),
+        |b, &(cpu_send, cpu_recv)| {
             b.iter_custom(|iters| {
                 let ch = SpscChannel::<u64>::new(CAPACITY);
                 let tx = ch.sender().unwrap();
@@ -53,7 +70,7 @@ fn numa_latency(c: &mut Criterion) {
                 let total_msgs = iters * ITERATIONS;
 
                 let consumer = std::thread::spawn(move || {
-                    let cs = CpuSet::from_cpu(cpu).unwrap();
+                    let cs = CpuSet::from_cpu(cpu_recv).unwrap();
                     let _ = set_thread_affinity(&cs);
                     let mut count = 0u64;
                     while count < total_msgs {
@@ -64,7 +81,7 @@ fn numa_latency(c: &mut Criterion) {
                     done2.store(true, Ordering::Release);
                 });
 
-                let cs = CpuSet::from_cpu(cpu).unwrap();
+                let cs = CpuSet::from_cpu(cpu_send).unwrap();
                 let _ = set_thread_affinity(&cs);
                 let start = Instant::now();
                 for _ in 0..total_msgs {
@@ -85,11 +102,11 @@ fn numa_latency(c: &mut Criterion) {
     // --- Same-node with new_numa ---
     group.bench_with_input(
         BenchmarkId::new("spsc_numa_alloc", "same_node"),
-        &node0_cpu,
-        |b, &cpu| {
+        &(node0_cpu_a, node0_cpu_b),
+        |b, &(cpu_send, cpu_recv)| {
             b.iter_custom(|iters| {
                 // Construct on a pinned thread for first-touch locality.
-                let cs = CpuSet::from_cpu(cpu).unwrap();
+                let cs = CpuSet::from_cpu(cpu_send).unwrap();
                 let _ = set_thread_affinity(&cs);
 
                 let ch = SpscChannel::<u64>::new_numa(CAPACITY, 0);
@@ -101,7 +118,7 @@ fn numa_latency(c: &mut Criterion) {
                 let total_msgs = iters * ITERATIONS;
 
                 let consumer = std::thread::spawn(move || {
-                    let cs = CpuSet::from_cpu(cpu).unwrap();
+                    let cs = CpuSet::from_cpu(cpu_recv).unwrap();
                     let _ = set_thread_affinity(&cs);
                     let mut count = 0u64;
                     while count < total_msgs {

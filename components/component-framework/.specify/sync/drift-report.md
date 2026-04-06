@@ -160,7 +160,8 @@ Project: component-framework
 - FR-007: NUMA topology discovery via sysfs → `numa/topology.rs:135-152`
 - FR-008: All CPUs in exactly one node → `topology.rs:384-396`
 - FR-009: Fallback to single node when NUMA unavailable → `topology.rs:136-151`
-- FR-010: Same-node latency benchmark → `benches/numa_latency_benchmark.rs:41-83`
+- FR-010: Same-node latency benchmark → `benches/numa_latency_benchmark.rs:41-90`
+- FR-021: Same-node benchmarks pin sender/receiver to distinct CPUs on same node → `benches/numa_latency_benchmark.rs:37-40` (`two_cpus` helper)
 - FR-011: Cross-node latency benchmark → `benches/numa_latency_benchmark.rs:132-230`
 - FR-012: Throughput benchmark (same/cross node) → `benches/numa_throughput_benchmark.rs:22-198`
 - FR-013: Benchmark results labeled with NUMA config
