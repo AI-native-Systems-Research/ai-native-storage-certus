@@ -7,6 +7,8 @@ members = [
     "components/component-framework/examples",
     "components/example-helloworld",
     "components/example-logger",
+    "components/spdk-sys",
+    "components/spdk-env",
     "apps/helloworld-mainline",
 ]
 
@@ -23,3 +25,5 @@ component-macros = { path = "components/component-framework/crates/component-mac
 component-framework = { path = "components/component-framework/crates/component-framework" }
 example-logger = { path = "components/example-logger" }
 example-helloworld = { path = "components/example-helloworld" }
+spdk-sys = { path = "components/spdk-sys" }
+spdk-env = { path = "components/spdk-env" }
