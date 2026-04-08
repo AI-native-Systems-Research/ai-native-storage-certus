@@ -1,0 +1,25 @@
+[package]
+name = "spdk-simple-block-device"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+component-framework.workspace = true
+component-core.workspace = true
+spdk-sys.workspace = true
+spdk-env.workspace = true
+example-logger.workspace = true
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[example]]
+name = "basic_io"
+path = "examples/basic_io.rs"
+
+[[example]]
+name = "actor_io"
+path = "examples/actor_io.rs"

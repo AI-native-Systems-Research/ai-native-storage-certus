@@ -118,25 +118,70 @@ fn init_spdk_env() -> Result<(), SpdkEnvError> {
 }
 
 /// Enumerate all PCI devices visible to SPDK after environment initialization.
+///
+/// We call `spdk_pci_enumerate` with the NVMe driver to discover devices,
+/// but return **non-zero** from the callback so the devices are NOT attached
+/// (claimed) by the PCI driver. This leaves them available for
+/// `spdk_nvme_probe` to claim later in the block device component.
+///
+/// Device info is collected directly in the enumerate callback context.
 fn enumerate_devices(_comp: &SPDKEnvComponent) -> Result<Vec<VfioDevice>, SpdkEnvError> {
     let mut devices = Vec::new();
 
-    // Ask SPDK to enumerate devices for common drivers (e.g., NVMe).
-    // This will attempt to attach supported devices so that
-    // `spdk_pci_for_each_device` will iterate them.
     unsafe {
+        /// Callback for `spdk_pci_enumerate`: reads device info into the
+        /// context vector but returns 1 (non-zero) so the device is NOT
+        /// attached. This preserves the device for later `spdk_nvme_probe`.
         extern "C" fn enum_cb(
-            _ctx: *mut std::ffi::c_void,
-            _dev: *mut spdk_sys::spdk_pci_device,
+            ctx: *mut std::ffi::c_void,
+            dev: *mut spdk_sys::spdk_pci_device,
         ) -> i32 {
-            // Return 0 to indicate device should be attached.
-            0
+            let devices = unsafe { &mut *(ctx as *mut Vec<VfioDevice>) };
+
+            let addr = unsafe { spdk_sys::spdk_pci_device_get_addr(dev) };
+            let id = unsafe { spdk_sys::spdk_pci_device_get_id(dev) };
+            let numa = unsafe { spdk_sys::spdk_pci_device_get_numa_id(dev) };
+
+            let dev_type = unsafe {
+                if !(*dev).type_.is_null() {
+                    std::ffi::CStr::from_ptr((*dev).type_)
+                        .to_string_lossy()
+                        .into_owned()
+                } else {
+                    "unknown".to_string()
+                }
+            };
+
+            devices.push(VfioDevice {
+                address: PciAddress {
+                    domain: addr.domain,
+                    bus: addr.bus,
+                    dev: addr.dev,
+                    func: addr.func,
+                },
+                id: PciId {
+                    class_id: id.class_id,
+                    vendor_id: id.vendor_id,
+                    device_id: id.device_id,
+                    subvendor_id: id.subvendor_id,
+                    subdevice_id: id.subdevice_id,
+                },
+                numa_node: numa,
+                device_type: dev_type,
+            });
+
+            // Return non-zero: do NOT attach/claim the device.
+            1
         }
 
         let nvme_name = std::ffi::CString::new("nvme").unwrap();
         let driver = spdk_sys::spdk_pci_get_driver(nvme_name.as_ptr());
         if !driver.is_null() {
-            let rc = spdk_sys::spdk_pci_enumerate(driver, Some(enum_cb), std::ptr::null_mut());
+            let rc = spdk_sys::spdk_pci_enumerate(
+                driver,
+                Some(enum_cb),
+                &mut devices as *mut Vec<VfioDevice> as *mut std::ffi::c_void,
+            );
             if rc != 0 {
                 eprintln!("[spdk-env] warning: spdk_pci_enumerate returned {rc}");
             }
@@ -149,64 +194,7 @@ fn enumerate_devices(_comp: &SPDKEnvComponent) -> Result<Vec<VfioDevice>, SpdkEn
         }
     }
 
-    // SAFETY: spdk_pci_for_each_device iterates attached PCI devices.
-    // The callback receives a valid spdk_pci_device pointer for each device.
-    // We only read from the device struct via accessor functions.
-    // The callback context pointer is valid for the duration of the call.
-    unsafe {
-        spdk_sys::spdk_pci_for_each_device(
-            &mut devices as *mut Vec<VfioDevice> as *mut std::ffi::c_void,
-            Some(pci_device_callback),
-        );
-    }
-
     Ok(devices)
-}
-
-/// Callback invoked by `spdk_pci_for_each_device` for each attached PCI device.
-///
-/// # Safety
-///
-/// This is called from C code. `ctx` must point to a valid `Vec<VfioDevice>`.
-/// `dev` must be a valid `spdk_pci_device` pointer.
-unsafe extern "C" fn pci_device_callback(
-    ctx: *mut std::ffi::c_void,
-    dev: *mut spdk_sys::spdk_pci_device,
-) {
-    let devices = &mut *(ctx as *mut Vec<VfioDevice>);
-
-    // SAFETY: All accessor functions take a valid spdk_pci_device pointer
-    // and return scalar values. The pointer is valid for this callback's duration.
-    let addr = spdk_sys::spdk_pci_device_get_addr(dev);
-    let id = spdk_sys::spdk_pci_device_get_id(dev);
-    let numa = spdk_sys::spdk_pci_device_get_numa_id(dev);
-
-    // Read the device type string from the struct directly.
-    let dev_type = if !(*dev).type_.is_null() {
-        std::ffi::CStr::from_ptr((*dev).type_)
-            .to_string_lossy()
-            .into_owned()
-    } else {
-        "unknown".to_string()
-    };
-
-    devices.push(VfioDevice {
-        address: PciAddress {
-            domain: addr.domain,
-            bus: addr.bus,
-            dev: addr.dev,
-            func: addr.func,
-        },
-        id: PciId {
-            class_id: id.class_id,
-            vendor_id: id.vendor_id,
-            device_id: id.device_id,
-            subvendor_id: id.subvendor_id,
-            subdevice_id: id.subdevice_id,
-        },
-        numa_node: numa,
-        device_type: dev_type,
-    });
 }
 
 /// Call `spdk_env_fini()` and clear the singleton flag.

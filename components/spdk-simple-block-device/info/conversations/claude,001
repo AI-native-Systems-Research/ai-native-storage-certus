@@ -1,0 +1,651 @@
+ ▐▛███▜▌   Claude Code v2.1.94
+▝▜█████▛▘  Sonnet 4.6 · API Usage Billing
+  ▘▘ ▝▝    ~/ai-native-storage-certus/components/spdk-simple-block-device
+
+✻ Conversation compacted (ctrl+o for history)
+
+  ⎿  Read src/actor.rs (332 lines)
+  ⎿  Read src/io.rs (382 lines)
+  ⎿  Read src/lib.rs (298 lines)
+  ⎿  Read examples/basic_io.rs (127 lines)
+  ⎿  Read ../spdk-sys/build.rs (200 lines)
+  ⎿  Plan file referenced (~/.claude/plans/compiled-crunching-engelbart.md)
+  ⎿  Skills restored (init)
+
+● I need to understand how receptacles work to rewrite the IBlockDevice impl.
+  Let me check the component framework.
+
+  Searched for 2 patterns (ctrl+o to expand)
+
+● Good — receptacle.get() returns Result<Arc<T>, ReceptacleError>. Now I can
+  update lib.rs.
+
+● Update(src/lib.rs)
+  ⎿  Added 2 lines
+      38  //! // bdev.read_blocks(0, &mut buf).unwrap();
+      39  //! ```
+      40  
+      41 +pub mod actor;                                                 
+      42  pub mod error;
+      43  pub mod io;
+      44  
+      45 +pub use actor::{BlockDeviceClient, BlockDeviceHandler, BlockIoR
+         +equest, DeviceInfo};                                           
+      46  pub use error::BlockDeviceError;
+      47  
+      48  use component_framework::{define_component, define_interface};
+
+● Now fix the IBlockDevice impl to use the standalone io functions:
+
+● Update(src/lib.rs)
+  ⎿  Added 36 lines, removed 4 lines
+      107  
+      108  impl IBlockDevice for SimpleBlockDevice {
+      109      fn open(&self) -> Result<(), BlockDeviceError> {
+      110 -        io::do_open(self)                                     
+      110 +        if !self.logger.is_connected() {                      
+      111 +            return Err(BlockDeviceError::LoggerNotConnected(  
+      112 +                "Logger receptacle not connected.".into(),    
+      113 +            ));                                               
+      114 +        }                                                     
+      115 +        let env = self                                        
+      116 +            .spdk_env                                         
+      117 +            .get()                                            
+      118 +            .map_err(|_| BlockDeviceError::EnvNotInitialized("
+          +spdk_env receptacle not connected.".into()))?;                
+      119 +                                                              
+      120 +        let mut guard = self.inner.lock().expect("inner lock p
+          +oisoned");                                                    
+      121 +        if guard.is_some() {                                  
+      122 +            return Err(BlockDeviceError::AlreadyOpen(         
+      123 +                "Block device already open. Call close() first
+          +.".into(),                                                    
+      124 +            ));                                               
+      125 +        }                                                     
+      126 +                                                              
+      127 +        let state = io::open_device(&*env)?;                  
+      128 +        *guard = Some(state);                                 
+      129 +        Ok(())                                                
+      130      }
+      131  
+      132      fn read_blocks(&self, lba: u64, buf: &mut [u8]) -> Result<
+           (), BlockDeviceError> {
+      114 -        io::do_read(self, lba, buf)                           
+      133 +        let guard = self.inner.lock().expect("inner lock poiso
+          +ned");                                                        
+      134 +        let state = guard                                     
+      135 +            .as_ref()                                         
+      136 +            .ok_or_else(|| BlockDeviceError::NotOpen("Block de
+          +vice not open.".into()))?;                                    
+      137 +        io::read_blocks(state, lba, buf)                      
+      138      }
+      139  
+      140      fn write_blocks(&self, lba: u64, buf: &[u8]) -> Result<(),
+            BlockDeviceError> {
+      118 -        io::do_write(self, lba, buf)                          
+      141 +        let guard = self.inner.lock().expect("inner lock poiso
+          +ned");                                                        
+      142 +        let state = guard                                     
+      143 +            .as_ref()                                         
+      144 +            .ok_or_else(|| BlockDeviceError::NotOpen("Block de
+          +vice not open.".into()))?;                                    
+      145 +        io::write_blocks(state, lba, buf)                     
+      146      }
+      147  
+      148      fn close(&self) -> Result<(), BlockDeviceError> {
+      122 -        io::do_close(self)                                    
+      149 +        let mut guard = self.inner.lock().expect("inner lock p
+          +oisoned");                                                    
+      150 +        let state = guard                                     
+      151 +            .take()                                           
+      152 +            .ok_or_else(|| BlockDeviceError::NotOpen("Block de
+          +vice not open.".into()))?;                                    
+      153 +        io::close_device(state);                              
+      154 +        Ok(())                                                
+      155      }
+      156  
+      157      fn sector_size(&self) -> u32 {
+
+● Now check that Cargo.toml has the component-framework dependency with the
+  actor feature for the actor module:
+
+  Searched for 2 patterns, read 1 file (ctrl+o to expand)
+
+● The actor module is in component-core, not behind a feature gate. Let me
+  verify the actor types are accessible through component-framework:
+
+  Searched for 3 patterns (ctrl+o to expand)
+
+● Good — component-framework re-exports everything from component-core via pub 
+  use component_core::*, which includes the actor module. The import use 
+  component_framework::actor::{ActorHandle, ActorHandler} in actor.rs should
+  work.
+
+  Now let me add the actor_io example entry to Cargo.toml and create the
+  example:
+
+● Update(Cargo.toml)
+  ⎿  Added 4 lines
+      19  [[example]]
+      20  name = "basic_io"
+      21  path = "examples/basic_io.rs"
+      22 +                                                               
+      23 +[[example]]                                                    
+      24 +name = "actor_io"                                              
+      25 +path = "examples/actor_io.rs"                                  
+
+● Now let me check the Actor API to create the example correctly:
+
+  Read 1 file (ctrl+o to expand)
+
+● Now I have all the context. Let me create the actor_io example.
+
+● Write(examples/actor_io.rs)  ⎿  Wrote 161 lines to examples/actor_io.rs
+       1 //! Actor-based block I/O example.
+       2 //!
+       3 //! Wires the logger and SPDK environment components, then uses 
+         the actor-based
+       4 //! block device client to perform a write-read-verify cycle.
+       5 //!
+       6 //! All NVMe operations run on the actor's dedicated thread, sat
+         isfying SPDK's
+       7 //! single-thread-per-qpair requirement without the caller needi
+         ng to worry
+       8 //! about it.
+       9 //!
+      10 //! # Prerequisites
+     … +151 lines (ctrl+o to expand)
+
+● Now let me build and test.
+
+● Bash(cd /home/dwaddington/ai-native-storage-certus && cargo build -p
+      spdk-simple-block-device 2>&1)
+  ⎿     Compiling spdk-simple-block-device v0.1.0 (/home/dwaddington/ai-nat
+     ive-storage-certus/components/spdk-simple-block-device)
+         Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.45
+     s
+  ⎿  Shell cwd was reset to /home/dwaddington/ai-native-storage-certus/component
+     s/spdk-simple-block-device
+
+● Build succeeds. Now tests and clippy:
+
+● Bash(cd /home/dwaddington/ai-native-storage-certus && cargo test -p
+      spdk-simple-block-device 2>&1)
+  ⎿     Compiling spdk-simple-block-device v0.1.0 (/home/dwaddington/ai-nat
+     ive-storage-certus/components/spdk-simple-block-device)
+         Finished `test` profile [unoptimized + debuginfo] target(s) in 0.8
+     … +32 lines (ctrl+o to expand)
+  ⎿  Shell cwd was reset to /home/dwaddington/ai-native-storage-certus/component
+     s/spdk-simple-block-device
+
+● Bash(cd /home/dwaddington/ai-native-storage-certus && cargo clippy -p
+      spdk-simple-block-device -- -D warnings 2>&1)
+  ⎿      Checking spdk-simple-block-device v0.1.0 (/home/dwaddington/ai-nat
+     ive-storage-certus/components/spdk-simple-block-device)
+         Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.25
+     s
+  ⎿  Shell cwd was reset to /home/dwaddington/ai-native-storage-certus/component
+     s/spdk-simple-block-device
+
+● All 33 tests pass and clippy is clean. Let me also verify the examples
+  compile:
+
+● Bash(cd /home/dwaddington/ai-native-storage-certus && cargo build --example
+      actor_io --example basic_io -p spdk-simple-block-device 2>&1)
+  ⎿      Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08
+     s
+  ⎿  Shell cwd was reset to /home/dwaddington/ai-native-storage-certus/component
+     s/spdk-simple-block-device
+
+● Everything builds, tests pass (33/33), clippy is clean, and both examples
+  compile. Here's a summary of the actor conversion:
+
+  New/changed files:
+
+  - src/actor.rs — Actor module with BlockDeviceHandler (implements
+  ActorHandler<BlockIoRequest>), BlockIoRequest message enum, BlockDeviceClient
+  (synchronous wrapper around ActorHandle), and DeviceInfo struct
+  - src/io.rs — Refactored to standalone functions: open_device(),
+  close_device(), read_blocks(), write_blocks() operating on InnerState directly
+  - src/lib.rs — Added pub mod actor, re-exports actor types, updated
+  IBlockDevice impl to use standalone io functions
+  - examples/actor_io.rs — New example demonstrating the actor-based API:
+  single-sector and multi-sector write/read/verify, device info query, clean
+  shutdown
+
+  Architecture:
+
+  BlockDeviceClient ──BlockIoRequest──> Actor thread (BlockDeviceHandler)
+    (any thread)       (mpsc channel)      (owns InnerState, runs all NVMe I/O)
+
+  The client sends typed request messages with one-shot SyncSender reply
+  channels. The handler processes them sequentially on a dedicated thread,
+  naturally satisfying SPDK's single-thread-per-qpair requirement.
+
+✻ Brewed for 8m 18s
+
+❯ run the actor_io example                                                      
+
+● Bash(cd /home/dwaddington/ai-native-storage-certus && cargo run --example
+      actor_io -p spdk-simple-block-device 2>&1)
+  ⎿  Error: Exit code 101
+         Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+          Running `target/debug/examples/actor_io`
+     === Actor Block Device Example ===
+
+     Initializing SPDK environment...
+     [spdk-env] Pre-flight checks passed. Initializing SPDK/DPDK environment...
+     [spdk-env] SPDK/DPDK environment initialized. Enumerating devices...
+     [spdk-env] Device enumeration complete. Found 1 device(s).
+     SPDK environment initialized. Found 1 device(s).
+     … +9 lines (ctrl+o to see all)
+
+● The SPDK environment sees PCI device 0000:d9:00.0 but NVMe probe fails —
+  likely a permissions or driver binding issue. Let me check:
+
+● Bash(ls -la /sys/bus/pci/devices/0000:d9:00.0/driver 2>&1; echo "---"; cat
+      /sys/bus/pci/devices/0000:d9:00.0/driver/module/drivers/*/name 2>/dev/null
+       || readlink /sy…)
+  ⎿  lrwxrwxrwx. 1 root root 0 Apr  7 17:22 /sys/bus/pci/devices/0000:d9:00
+     .0/driver -> ../../../../bus/pci/drivers/vfio-pci
+     ---
+     … +5 lines (ctrl+o to expand)
+
+● Device is bound to vfio-pci. The issue is likely that we need root (or VFIO
+  group membership) for SPDK to access the device. Let me check VFIO group
+  permissions:
+
+● Bash(ls -la /dev/vfio/ 2>&1; echo "---"; cat
+      /sys/bus/pci/devices/0000:d9:00.0/iommu_group/name 2>/dev/null; readlink
+      /sys/bus/pci/devices/0000:d9:00.0/iommu_group 2…)
+  ⎿  total 0
+     drwxrwxrwx.  3 root root      100 Apr  7 17:22 .
+     drwxr-xr-x. 21 root root     4040 Apr  7 17:22 ..
+     … +7 lines (ctrl+o to expand)
+
+● VFIO permissions look open (world rwx). Hugepages are low (4 = 8MB). Let me
+  try with sudo:
+
+● Bash(cd /home/dwaddington/ai-native-storage-certus && sudo
+      target/debug/examples/actor_io 2>&1)
+  ⎿  Error: Exit code 1
+     sudo: a terminal is required to read the password; either use the -S option
+      to read from standard input or configure an askpass helper
+     sudo: a password is required
+
+● No passwordless sudo. Let me check if there's a hugepage issue — SPDK needs
+  substantial hugepages for DMA buffers:
+
+  Listed 1 directory (ctrl+o to expand)
+
+● The 4 hugepages are 1GB each (4GB total), so memory isn't the issue. Let me
+  check if the non-actor basic_io example works — the difference is that
+  basic_io probes on the same thread that initialized SPDK, while actor_io
+  probes on the actor's thread:
+
+● Bash(cd /home/dwaddington/ai-native-storage-certus && cargo run --example
+      basic_io -p spdk-simple-block-device 2>&1)  ⎿  Error: Exit code 101
+         Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+          Running `target/debug/examples/basic_io`
+     === Simple Block Device Example ===
+
+     Components wired. Initializing SPDK environment...
+
+     [spdk-env] Pre-flight checks passed. Initializing SPDK/DPDK environment...
+     [spdk-env] SPDK/DPDK environment initialized. Enumerating devices...
+     [spdk-env] Device enumeration complete. Found 1 device(s).
+     … +10 lines (ctrl+o to see all)
+
+● Same failure with basic_io — this is not actor-related, it's an NVMe probe
+  issue on this system. Let me check the device type:
+
+● Bash(lspci -s d9:00.0 -v 2>&1 | head -20; echo "---"; lspci -s d9:00.0 -n
+      2>&1)
+  ⎿  d9:00.0 Non-Volatile memory controller: Intel Corporation NVMe DC SSD
+     [3DNAND, Sentinel Rock Controller] (prog-if 02 [NVM Express])
+        Subsystem: Lenovo Device 4842
+     … +10 lines (ctrl+o to expand)
+
+● The device is an Intel NVMe SSD (0108: 8086:0b60) correctly bound to vfio-pci.
+   Both examples fail identically at the spdk_nvme_probe step — this is a
+  system-level SPDK/DPDK configuration issue, not a code problem.
+
+  Possible causes:
+  1. DPDK EAL not mapping the device — the EAL init may need the PCI address
+  explicitly allowed
+  2. IOMMU group access — the device is on NUMA node 1; the EAL may need
+  --socket-mem or similar config
+  3. Capabilities access denied — lspci shows <access denied> for PCI
+  capabilities, suggesting the current user may lack the needed IOMMU/VFIO
+  permissions despite the open /dev/vfio/17 perms
+
+  You may need to run as root, or check that the SPDK setup script
+  (deps/spdk/scripts/setup.sh) was run with appropriate IOMMU configuration. The
+   actor conversion itself is working correctly — both basic_io and actor_io
+  reach the same probe point and fail identically.
+
+✻ Cooked for 1m 13s
+
+❯ I have checked access to the device and it is ok                              
+
+● Explore(Investigate SPDK probe failure)
+  ⎿  Done (0 tool uses · 0 tokens · 3m 4s)
+  (ctrl+o to expand)
+
+● Explore(Investigate SPDK probe failure) Sonnet 4.6
+  ⎿  Done (29 tool uses · 72.4k tokens · 2m 29s)
+  (ctrl+o to expand)
+
+● Let me diagnose the root cause.
+
+● Bash(nm /home/dwaddington/ai-native-storage-certus/deps/spdk-build/lib/libspdk
+      _nvme.a 2>/dev/null | grep -E
+      'nvme_pcie|transport_register|TRANSPORT_REGISTER' | head…)
+  ⎿  nvme_pcie_common.o:
+     0000000000000000 d g_nvme_pcie_build_req_table
+     0000000000003b50 T nvme_pcie_admin_qpair_abort_aers
+     … +20 lines (ctrl+o to expand)
+
+  Listed 1 directory (ctrl+o to expand)
+
+● Bash(nm /home/dwaddington/ai-native-storage-certus/deps/spdk-build/lib/libspdk
+      _nvme.a 2>/dev/null | grep -iE
+      'spdk_nvme_transport_register|spdk_pci_driver_register|_…)
+  ⎿                   U spdk_nvme_transport_register
+     0000000000000020 t _spdk_nvme_transport_register_pcie
+                      U spdk_pci_driver_register
+     … +23 lines (ctrl+o to expand)
+
+● The constructor symbols exist. Let me check if they're properly in .init_array
+   and verify the actual binary:
+
+● Bash(objdump -t /home/dwaddington/ai-native-storage-certus/deps/spdk-build/lib
+      /libspdk_nvme.a 2>/dev/null | grep -E
+      'init_array|_spdk_nvme_transport_register_pcie|_s…)
+  ⎿  0000000000000000 l    d  .init_array       0000000000000000 .init_array
+     0000000000000000 l     F .text.startup     0000000000000018 _spdk_pci_drive
+     r_register_nvme
+     … +8 lines (ctrl+o to expand)
+
+
+● Bash(nm
+      /home/dwaddington/ai-native-storage-certus/target/debug/examples/actor_io
+      2>/dev/null | grep -E
+      '_spdk_nvme_transport_register_pcie|_spdk_pci_driver_register…)
+  ⎿  0000000000179fe0 t _spdk_nvme_transport_register_pcie
+     0000000000179fc0 t _spdk_pci_driver_register_nvme
+
+● Constructors are present in the final binary. Let me verify they're in
+  .init_array and add diagnostic logging to probe_cb:
+
+● Bash(objdump -s -j .init_array
+      /home/dwaddington/ai-native-storage-certus/target/debug/examples/actor_io
+      2>/dev/null | grep -c "179f" ; echo "---"; readelf -r /home/…)
+  ⎿  0
+     ---
+     0000002152b8  000000000008 R_X86_64_RELATIVE                    179fc0
+     0000002152c0  000000000008 R_X86_64_RELATIVE                    179fe0
+
+● Constructors are correctly linked. The issue is elsewhere. Let me add
+  diagnostic logging to understand what spdk_nvme_probe is doing:
+
+  Read 1 file (ctrl+o to expand)
+
+● I see the issue. In spdk-env/src/env.rs:128-149, enumerate_devices calls
+  spdk_pci_enumerate(nvme_driver, enum_cb, ...) with enum_cb returning 0, which
+  claims/attaches the PCI device to the NVMe PCI driver. When spdk_nvme_probe
+  later runs, the device is already claimed, so its internal enumerate sees no
+  unclaimed devices and never calls probe_cb.
+
+  The fix: collect device info in the enumerate callback but return non-zero to
+  NOT claim the device, and pass the device list through the callback context
+  instead of relying on spdk_pci_for_each_device.
+
+● Update(~/ai-native-storage-certus/components/spdk-env/src/env.rs)
+  ⎿  Added 53 lines, removed 19 lines
+      118  }
+      119  
+      120  /// Enumerate all PCI devices visible to SPDK after environmen
+           t initialization.
+      121 +///                                                           
+      122 +/// We call `spdk_pci_enumerate` with the NVMe driver to disco
+          +ver devices,                                                  
+      123 +/// but return **non-zero** from the callback so the devices a
+          +re NOT attached                                               
+      124 +/// (claimed) by the PCI driver. This leaves them available fo
+          +r                                                             
+      125 +/// `spdk_nvme_probe` to claim later in the block device compo
+          +nent.                                                         
+      126 +///                                                           
+      127 +/// Device info is collected directly in the enumerate callbac
+          +k context.                                                    
+      128  fn enumerate_devices(_comp: &SPDKEnvComponent) -> Result<Vec<V
+           fioDevice>, SpdkEnvError> {
+      129      let mut devices = Vec::new();
+      130  
+      124 -    // Ask SPDK to enumerate devices for common drivers (e.g.,
+          - NVMe).                                                       
+      125 -    // This will attempt to attach supported devices so that  
+      126 -    // `spdk_pci_for_each_device` will iterate them.          
+      131      unsafe {
+      132 +        /// Callback for `spdk_pci_enumerate`: reads device in
+          +fo into the                                                   
+      133 +        /// context vector but returns 1 (non-zero) so the dev
+          +ice is NOT                                                    
+      134 +        /// attached. This preserves the device for later `spd
+          +k_nvme_probe`.                                                
+      135          extern "C" fn enum_cb(
+      129 -            _ctx: *mut std::ffi::c_void,                      
+      130 -            _dev: *mut spdk_sys::spdk_pci_device,             
+      136 +            ctx: *mut std::ffi::c_void,                       
+      137 +            dev: *mut spdk_sys::spdk_pci_device,              
+      138          ) -> i32 {
+      132 -            // Return 0 to indicate device should be attached.
+      133 -            0                                                 
+      139 +            let devices = unsafe { &mut *(ctx as *mut Vec<Vfio
+          +Device>) };                                                   
+      140 +                                                              
+      141 +            let addr = unsafe { spdk_sys::spdk_pci_device_get_
+          +addr(dev) };                                                  
+      142 +            let id = unsafe { spdk_sys::spdk_pci_device_get_id
+          +(dev) };                                                      
+      143 +            let numa = unsafe { spdk_sys::spdk_pci_device_get_
+          +numa_id(dev) };                                               
+      144 +                                                              
+      145 +            let dev_type = unsafe {                           
+      146 +                if !(*dev).type_.is_null() {                  
+      147 +                    std::ffi::CStr::from_ptr((*dev).type_)    
+      148 +                        .to_string_lossy()                    
+      149 +                        .into_owned()                         
+      150 +                } else {                                      
+      151 +                    "unknown".to_string()                     
+      152 +                }                                             
+      153 +            };                                                
+      154 +                                                              
+      155 +            devices.push(VfioDevice {                         
+      156 +                address: PciAddress {                         
+      157 +                    domain: addr.domain,                      
+      158 +                    bus: addr.bus,                            
+      159 +                    dev: addr.dev,                            
+      160 +                    func: addr.func,                          
+      161 +                },                                            
+      162 +                id: PciId {                                   
+      163 +                    class_id: id.class_id,                    
+      164 +                    vendor_id: id.vendor_id,                  
+      165 +                    device_id: id.device_id,                  
+      166 +                    subvendor_id: id.subvendor_id,            
+      167 +                    subdevice_id: id.subdevice_id,            
+      168 +                },                                            
+      169 +                numa_node: numa,                              
+      170 +                device_type: dev_type,                        
+      171 +            });                                               
+      172 +                                                              
+      173 +            // Return non-zero: do NOT attach/claim the device
+          +.                                                             
+      174 +            1                                                 
+      175          }
+      176  
+      177          let nvme_name = std::ffi::CString::new("nvme").unwrap(
+           );
+      178          let driver = spdk_sys::spdk_pci_get_driver(nvme_name.a
+           s_ptr());
+      179          if !driver.is_null() {
+      139 -            let rc = spdk_sys::spdk_pci_enumerate(driver, Some
+          -(enum_cb), std::ptr::null_mut());                             
+      180 +            let rc = spdk_sys::spdk_pci_enumerate(            
+      181 +                driver,                                       
+      182 +                Some(enum_cb),                                
+      183 +                &mut devices as *mut Vec<VfioDevice> as *mut s
+          +td::ffi::c_void,                                              
+      184 +            );                                                
+      185              if rc != 0 {
+      186                  eprintln!("[spdk-env] warning: spdk_pci_enumer
+           ate returned {rc}");
+      187              }
+     ...
+      194          }
+      195      }
+      196  
+      152 -    // SAFETY: spdk_pci_for_each_device iterates attached PCI 
+          -devices.                                                      
+      153 -    // The callback receives a valid spdk_pci_device pointer f
+          -or each device.                                               
+      154 -    // We only read from the device struct via accessor functi
+          -ons.                                                          
+      155 -    // The callback context pointer is valid for the duration 
+          -of the call.                                                  
+      156 -    unsafe {                                                  
+      157 -        spdk_sys::spdk_pci_for_each_device(                   
+      158 -            &mut devices as *mut Vec<VfioDevice> as *mut std::
+          -ffi::c_void,                                                  
+      159 -            Some(pci_device_callback),                        
+      160 -        );                                                    
+      161 -    }                                                         
+      162 -                                                              
+      197      Ok(devices)
+      198  }
+      199  
+
+● Now remove the now-unused pci_device_callback function:
+
+● Update(~/ai-native-storage-certus/components/spdk-env/src/env.rs)  ⎿  Removed 46 lines
+      197      Ok(devices)
+      198  }
+      199  
+      200 -/// Callback invoked by `spdk_pci_for_each_device` for each at
+          -tached PCI device.                                            
+      201 -///                                                           
+      202 -/// # Safety                                                  
+      203 -///                                                           
+      204 -/// This is called from C code. `ctx` must point to a valid `V
+          -ec<VfioDevice>`.                                              
+      205 -/// `dev` must be a valid `spdk_pci_device` pointer.          
+      206 -unsafe extern "C" fn pci_device_callback(                     
+      207 -    ctx: *mut std::ffi::c_void,                               
+      208 -    dev: *mut spdk_sys::spdk_pci_device,                      
+      209 -) {                                                           
+      210 -    let devices = &mut *(ctx as *mut Vec<VfioDevice>);        
+      211 -                                                              
+      212 -    // SAFETY: All accessor functions take a valid spdk_pci_de
+          -vice pointer                                                  
+      213 -    // and return scalar values. The pointer is valid for this
+          - callback's duration.                                         
+      214 -    let addr = spdk_sys::spdk_pci_device_get_addr(dev);       
+      215 -    let id = spdk_sys::spdk_pci_device_get_id(dev);           
+      216 -    let numa = spdk_sys::spdk_pci_device_get_numa_id(dev);    
+      217 -                                                              
+      218 -    // Read the device type string from the struct directly.  
+      219 -    let dev_type = if !(*dev).type_.is_null() {               
+      220 -        std::ffi::CStr::from_ptr((*dev).type_)                
+      221 -            .to_string_lossy()                                
+      222 -            .into_owned()                                     
+      223 -    } else {                                                  
+      224 -        "unknown".to_string()                                 
+      225 -    };                                                        
+      226 -                                                              
+      227 -    devices.push(VfioDevice {                                 
+      228 -        address: PciAddress {                                 
+      229 -            domain: addr.domain,                              
+      230 -            bus: addr.bus,                                    
+      231 -            dev: addr.dev,                                    
+      232 -            func: addr.func,                                  
+      233 -        },                                                    
+      234 -        id: PciId {                                           
+      235 -            class_id: id.class_id,                            
+      236 -            vendor_id: id.vendor_id,                          
+      237 -            device_id: id.device_id,                          
+      238 -            subvendor_id: id.subvendor_id,                    
+      239 -            subdevice_id: id.subdevice_id,                    
+      240 -        },                                                    
+      241 -        numa_node: numa,                                      
+      242 -        device_type: dev_type,                                
+      243 -    });                                                       
+      244 -}                                                             
+      245 -                                                              
+      200  /// Call `spdk_env_fini()` and clear the singleton flag.
+      201  pub(crate) fn do_fini() {
+      202      // SAFETY: spdk_env_fini is safe to call after successful 
+           spdk_env_init.
+
+● Now build everything and run:
+
+● Bash(cd /home/dwaddington/ai-native-storage-certus && cargo build -p spdk-env
+      -p spdk-simple-block-device 2>&1)
+  ⎿     Compiling spdk-env v0.1.0 (/home/dwaddington/ai-native-storage-cert
+     us/components/spdk-env)
+        Compiling spdk-simple-block-device v0.1.0 (/home/dwaddington/ai-nat
+     … +3 lines (ctrl+o to expand)
+  ⎿  Shell cwd was reset to /home/dwaddington/ai-native-storage-certus/component
+     s/spdk-simple-block-device
+
+● Bash(cd /home/dwaddington/ai-native-storage-certus && cargo run --example
+      actor_io -p spdk-simple-block-device 2>&1)
+  ⎿     Compiling spdk-env v0.1.0 (/home/dwaddington/ai-native-storage-cert
+     us/components/spdk-env)
+        Compiling spdk-simple-block-device v0.1.0 (/home/dwaddington/ai-nat
+     … +22 lines (ctrl+o to expand)
+  ⎿  Shell cwd was reset to /home/dwaddington/ai-native-storage-certus/component
+     s/spdk-simple-block-device
+  ⎿  (timeout 1m)
+
+● Everything works. The actor-based block device successfully:
+  - Probed and attached the 3TB Intel NVMe SSD (512B sectors, 6.25B sectors)
+  - Single-sector write/read/verify passed
+  - Multi-sector (4 sectors) write/read/verify passed
+  - Device info query confirmed
+  - Clean close and actor shutdown
+
+  The root cause was spdk_pci_enumerate in spdk-env's init claiming the PCI
+  device before spdk_nvme_probe could see it. The fix: the enumerate callback
+  now returns non-zero (don't attach) and collects device info directly, leaving
+   the device unclaimed for spdk_nvme_probe.
+
+  Let me also verify the basic_io example and tests still work:
+
+● Bash(cd /home/dwaddington/ai-native-storage-certus && cargo run --example
+      basic_io -p spdk-simple-block-device 2>&1)
+  ⎿     Compiling spdk-simple-block-device v0.1.0 (/home/dwaddington/ai-nat
+     ive-storage-certus/components/spdk-simple-block-device)
+         Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20
+     … +20 lines (ctrl+o to expand)
+  ⎿  Shell cwd was reset to /home/dwaddington/ai-native-storage-certus/comp
+     onents/spdk-simple-block-device
+  ⎿  (timeout 1m)
+
+● Bash(cd /home/dwaddington/ai-native-storage-certus && cargo test -p spdk-env
+      -p spdk-simple-block-device 2>&1)
+  ⎿     Compiling spdk-env v0.1.0 (/home/dwaddington/ai-native-storage-cert
+     us/components/spdk-env)
+        Compiling spdk-simple-block-device v0.1.0 (/home/dwaddington/ai-nat
+     … +97 lines (ctrl+o to expand)
+  ⎿  Shell cwd was reset to /home/dwaddington/ai-native-storage-certus/comp
+     onents/spdk-simple-block-device
+
+● All green:
+  - actor_io example: single + multi-sector write/read/verify passed on the 3TB
+  NVMe SSD
+  - basic_io example: also working now (same fix)
+  - 108 tests pass across both crates (75 spdk-env + 33
+  spdk-simple-block-device)
+
+✻ Baked for 8m 59s
