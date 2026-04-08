@@ -8,6 +8,11 @@ Certus is a generative domain-specific filesystem for inferencing workloads. The
 
 - Rust toolchain (edition 2021, MSRV 1.75)
 - Linux (tested on RHEL/Fedora)
+- `memlock` set to unlimited in `/etc/security/limits.conf` (required for SPDK hugepage and VFIO usage):
+  ```
+  * - memlock unlimited
+  ```
+  Log out and back in after making this change for it to take effect.
 
 ### Building without SPDK
 
