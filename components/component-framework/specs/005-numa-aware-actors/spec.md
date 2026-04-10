@@ -2,7 +2,7 @@
 
 **Feature Branch**: `005-numa-aware-actors`
 **Created**: 2026-03-31
-**Status**: Draft
+**Status**: Complete
 **Input**: User description: "The framework should be NUMA-aware and allow actor threads to be bound to one or more CPUs. Any performance tests should analyze threads bound to the same NUMA zone and also to different NUMA zones. You can assume that all systems have at least 2 NUMA zones. Include an example of using NUMA pinning."
 
 ## User Scenarios & Testing *(mandatory)*

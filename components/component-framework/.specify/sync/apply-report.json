@@ -1,32 +1,72 @@
 {
-  "applied_at": "2026-04-06T13:00:00Z",
-  "based_on": "proposals from 2026-04-06T12:30:00Z",
+  "applied_at": "2026-04-10T12:00:00Z",
+  "based_on": "proposals from 2026-04-10T12:00:00Z",
   "summary": {
-    "specs_updated": 4,
-    "code_files_modified": 6,
-    "tests_added": 3,
-    "compile_fail_tests_added": 3,
-    "bugs_fixed": 1
+    "drift_proposals_applied": 0,
+    "recommendations_applied": 2,
+    "specs_updated": 6,
+    "new_specs_created": 0,
+    "tasks_generated": 0
   },
-  "applied_proposals": [
-    {"id": 1, "direction": "ALIGN", "status": "applied", "files": ["crates/component-core/src/actor.rs"]},
-    {"id": 2, "direction": "BACKFILL", "status": "applied", "files": ["specs/005-numa-aware-actors/spec.md"]},
-    {"id": 3, "direction": "BACKFILL", "status": "applied", "files": ["specs/005-numa-aware-actors/spec.md"]},
-    {"id": 4, "direction": "BACKFILL", "status": "applied", "files": ["specs/003-actor-channels/spec.md"]},
-    {"id": 5, "direction": "ALIGN", "status": "applied", "files": ["crates/component-framework/tests/actor.rs"]},
-    {"id": 6, "direction": "ALIGN", "status": "applied", "files": ["crates/component-framework/tests/actor.rs"]},
-    {"id": 7, "direction": "BACKFILL", "status": "applied", "files": ["specs/002-registry-refcount-binding/spec.md"]},
-    {"id": 8, "direction": "ALIGN", "status": "applied", "files": ["crates/component-framework/tests/registry.rs"]},
-    {"id": 9, "direction": "ALIGN", "status": "applied", "files": ["crates/component-framework/src/lib.rs"]},
-    {"id": 10, "direction": "ALIGN", "status": "applied", "files": ["crates/component-core/src/prelude.rs"]},
-    {"id": 11, "direction": "ALIGN", "status": "applied", "files": ["CLAUDE.md", "specs/001-com-component-framework/spec.md"]},
-    {"id": 12, "direction": "ALIGN", "status": "applied", "files": ["crates/component-core/src/component.rs"]}
+  "changes": [
+    {
+      "recommendation": "REC-001",
+      "type": "status_update",
+      "spec": "001-com-component-framework",
+      "before": "Draft",
+      "after": "Complete"
+    },
+    {
+      "recommendation": "REC-001",
+      "type": "status_update",
+      "spec": "002-registry-refcount-binding",
+      "before": "Draft",
+      "after": "Complete"
+    },
+    {
+      "recommendation": "REC-001",
+      "type": "status_update",
+      "spec": "003-actor-channels",
+      "before": "Draft",
+      "after": "Complete"
+    },
+    {
+      "recommendation": "REC-001",
+      "type": "status_update",
+      "spec": "004-channel-benchmarks",
+      "before": "Draft",
+      "after": "Complete"
+    },
+    {
+      "recommendation": "REC-001",
+      "type": "status_update",
+      "spec": "005-numa-aware-actors",
+      "before": "Draft",
+      "after": "Complete"
+    },
+    {
+      "recommendation": "REC-001",
+      "type": "status_update",
+      "spec": "006-log-handler",
+      "before": "Backfilled",
+      "after": "Complete"
+    },
+    {
+      "recommendation": "REC-002",
+      "type": "section_removed",
+      "spec": "006-log-handler",
+      "section": "Backfill Notice"
+    }
   ],
-  "verification": {
-    "fmt": "pass",
-    "clippy": "pass",
-    "test": "pass",
-    "doc": "pass",
-    "bench_compile": "pass"
+  "backups": {
+    "directory": ".specify/sync/backups/2026-04-10/",
+    "files": [
+      "001-spec.md",
+      "002-spec.md",
+      "003-spec.md",
+      "004-spec.md",
+      "005-spec.md",
+      "006-spec.md"
+    ]
   }
 }

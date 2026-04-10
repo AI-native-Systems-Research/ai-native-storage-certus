@@ -2,7 +2,7 @@
 
 **Feature Branch**: `004-channel-benchmarks`
 **Created**: 2026-03-31
-**Status**: Draft
+**Status**: Complete
 **Input**: User description: "Implement channels based on crossbeam, kanal, rtrb and tokio lock-free queues. Implement performance benchmarks for different channels available so that their performance can be compared."
 
 ## User Scenarios & Testing *(mandatory)*

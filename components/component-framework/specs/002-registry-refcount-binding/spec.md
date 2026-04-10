@@ -2,7 +2,7 @@
 
 **Feature Branch**: `002-registry-refcount-binding`
 **Created**: 2026-03-31
-**Status**: Draft
+**Status**: Complete
 **Input**: User description: "The framework must support first-party and third-party binding. Atomic reference counting with explicit attach/release should be used for safe destruction of components. Implement a component registry that uses a factory pattern to instantiate components."
 
 ## User Scenarios & Testing *(mandatory)*
