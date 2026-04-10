@@ -12,7 +12,7 @@ example-logger.workspace = true
 interfaces = { workspace = true, features = ["spdk"] }
 spdk-sys.workspace = true
 libc = "0.2"
-interfaces = { workspace = true, features = ["spdk"] }
+
 
 [dev-dependencies]
 tempfile = "3"
