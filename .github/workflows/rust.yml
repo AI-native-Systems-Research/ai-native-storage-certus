@@ -19,6 +19,12 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - name: Install dependencies
+        run:
+          dnf install -y rust cargo gcc  # Basic Rust toolchain
+          dnf install -y openssl-devel # Example for projects with C dependencies
+          rustup toolchain install nightly-2025-12-11
+
     - name: Build
       run: cargo build --verbose
     - name: Run tests
