@@ -85,3 +85,9 @@ capabilities.
 + Modify the framework to support dynamic component loading using an definition-only 
     representation of component interfaces that are bound without access to
 their implementations. This is to enables a paradigm of independent extensibility.
+
++ Modify DmaBuffer to include a function pointer that can be used to deallocate the buffer.  DmaBuffer should support memory allocated through SPDK and memory   
+  allocated by other means, e.g., allocated from GPU via CUDA. 
+
++ Extend DmaBuffer to include the numa zone from which it was allocated from.  The numa zone identifier is an int and should be -1 if unknown.  Also add optional key-value field that can be used to include other information such as associated GPU device identifier.  Extend fmt::Debug to print this additional state.
+

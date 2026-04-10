@@ -2,7 +2,7 @@
 
 **Feature Branch**: `003-actor-channels`
 **Created**: 2026-03-31
-**Status**: Draft
+**Status**: Complete
 **Input**: User description: "In addition to plain components, the framework should support an Actor-based model whereby components own their own threads and can exchange messages via channels. Actors should use the basic component, interfaces and receptacles paradigm. Channels must be components themselves, as first-class entities, which are bound accordingly. Default channel implementations include shared memory with lock-free queues. At least SPSC and MPSC channels are provided. Channel binds should be restricted depending on whether they inherently support single (e.g., SPSC) or multiple (e.g. MPSC) bindings. Provide examples of using actor components."
 
 ## User Scenarios & Testing

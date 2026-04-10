@@ -9,6 +9,7 @@ publish = false
 component-framework.workspace = true
 component-core.workspace = true
 example-logger.workspace = true
+interfaces = { workspace = true, features = ["spdk"] }
 spdk-sys.workspace = true
 libc = "0.2"
 interfaces = { workspace = true, features = ["spdk"] }

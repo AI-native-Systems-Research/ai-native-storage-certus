@@ -81,7 +81,7 @@ fn main() {
 
     // Allocate DMA buffer and fill with test pattern.
     let mut write_buf =
-        DmaBuffer::new(sector_size, sector_size).expect("DMA alloc failed");
+        DmaBuffer::new(sector_size, sector_size, None).expect("DMA alloc failed");
     for (i, byte) in write_buf.as_mut_slice().iter_mut().enumerate() {
         *byte = (i % 251) as u8;
     }
@@ -93,7 +93,7 @@ fn main() {
     // Read it back into a separate DMA buffer.
     println!("Reading back LBA {test_lba}...");
     let mut read_buf =
-        DmaBuffer::new(sector_size, sector_size).expect("DMA alloc failed");
+        DmaBuffer::new(sector_size, sector_size, None).expect("DMA alloc failed");
     bdev.read_blocks(test_lba, &mut read_buf)
         .expect("Read failed");
     println!("Read complete.");

@@ -2,13 +2,8 @@
 
 **Feature Branch**: `006-log-handler`
 **Created**: 2026-04-01
-**Status**: Backfilled
+**Status**: Complete
 **Source**: Generated from existing implementation via `speckit.sync.propose`
-
-## Backfill Notice
-
-> This spec was generated from existing code via `speckit.sync.propose`.
-> It documents current behavior. Review and update to reflect desired behavior.
 
 ## User Scenarios & Testing
 

@@ -34,7 +34,7 @@
 //! // bdev.open().unwrap();
 //!
 //! // Zero-copy read/write with DMA buffers.
-//! // let mut buf = spdk_env::DmaBuffer::new(bdev.sector_size() as usize, bdev.sector_size() as usize).unwrap();
+//! // let mut buf = spdk_env::DmaBuffer::new(bdev.sector_size() as usize, bdev.sector_size() as usize, None).unwrap();
 //! // bdev.read_blocks(0, &mut buf).unwrap();
 //! ```
 

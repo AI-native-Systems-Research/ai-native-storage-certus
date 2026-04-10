@@ -261,7 +261,7 @@ impl BlockDeviceClient {
             BlockDeviceError::NotOpen("Cannot allocate DMA buffer: device not open.".into())
         })?;
         let size = num_sectors as usize * info.sector_size as usize;
-        DmaBuffer::new(size, info.sector_size as usize).map_err(|e| match e {
+        DmaBuffer::new(size, info.sector_size as usize, None).map_err(|e| match e {
             SpdkEnvError::DmaAllocationFailed(msg) => {
                 BlockDeviceError::DmaAllocationFailed(msg)
             }
