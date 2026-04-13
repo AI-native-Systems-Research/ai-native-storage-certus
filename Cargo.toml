@@ -12,6 +12,7 @@ members = [
     "components/spdk-env",
     "components/spdk-simple-block-device",
     "apps/helloworld-mainline",
+    "kernel/modules/nvidia_p2p/rust",
 ]
 
 # SPDK crates require pre-built native libraries at deps/spdk-build/.

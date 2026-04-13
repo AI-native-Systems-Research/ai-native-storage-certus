@@ -1,0 +1,1 @@
+cmd_/home/dwaddington/ai-native-storage-certus/kernel/modules/nvidia_p2p/kernel/nvidia_p2p_pin.mod := printf '%s\n'   nvidia_p2p_pin.o | awk '!x[$$0]++ { print("/home/dwaddington/ai-native-storage-certus/kernel/modules/nvidia_p2p/kernel/"$$0) }' > /home/dwaddington/ai-native-storage-certus/kernel/modules/nvidia_p2p/kernel/nvidia_p2p_pin.mod
