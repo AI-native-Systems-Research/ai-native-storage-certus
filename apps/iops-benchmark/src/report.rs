@@ -22,14 +22,66 @@ pub fn print_config(config: &BenchConfig, pci_addr_str: &str, ns_info: &Namespac
 }
 
 /// Print a per-second progress line to stderr.
-pub fn print_progress(elapsed_secs: u64, instant_iops: u64) {
-    eprintln!("[{:3}s] {} IOPS", elapsed_secs, instant_iops);
+///
+/// When `per_thread_iops` has more than one entry, a per-thread breakdown is shown.
+pub fn print_progress(elapsed_secs: u64, total_iops: u64, per_thread_iops: &[u64]) {
+    if per_thread_iops.len() > 1 {
+        let parts: Vec<String> = per_thread_iops
+            .iter()
+            .enumerate()
+            .map(|(i, &iops)| format!("T{}:{}", i, iops))
+            .collect();
+        eprintln!(
+            "[{:3}s] {} IOPS  ({})",
+            elapsed_secs,
+            total_iops,
+            parts.join(", ")
+        );
+    } else {
+        eprintln!("[{:3}s] {} IOPS", elapsed_secs, total_iops);
+    }
 }
 
 /// Print the final benchmark report to stdout.
-pub fn print_final(report: &FinalReport, op_type: OpType) {
+pub fn print_final(
+    report: &FinalReport,
+    op_type: OpType,
+    thread_results: &[crate::stats::ThreadResult],
+) {
     println!("=== Results ===");
     println!("Duration:     {:.2} seconds", report.duration_secs);
+
+    // Per-thread breakdown.
+    if thread_results.len() > 1 {
+        println!();
+        println!("Per-thread IOPS:");
+        for (i, tr) in thread_results.iter().enumerate() {
+            let thread_ops = tr.read_ops + tr.write_ops;
+            let thread_iops = if report.duration_secs > 0.0 {
+                thread_ops as f64 / report.duration_secs
+            } else {
+                0.0
+            };
+            if op_type == OpType::ReadWrite {
+                let read_iops = tr.read_ops as f64 / report.duration_secs;
+                let write_iops = tr.write_ops as f64 / report.duration_secs;
+                println!(
+                    "  Thread {:2}:   {} IOPS  (read: {}, write: {})",
+                    i,
+                    format_count(thread_iops as u64),
+                    format_count(read_iops as u64),
+                    format_count(write_iops as u64),
+                );
+            } else {
+                println!(
+                    "  Thread {:2}:   {} IOPS",
+                    i,
+                    format_count(thread_iops as u64)
+                );
+            }
+        }
+        println!();
+    }
 
     if op_type == OpType::ReadWrite {
         println!(

@@ -232,18 +232,26 @@ fn main() {
 
     // Progress reporting on main thread.
     if !config.quiet {
-        let mut prev_total: u64 = 0;
+        let mut prev_counts: Vec<u64> = vec![0; op_counters.len()];
         let mut elapsed = 0u64;
 
         while !stop_flag.load(Ordering::Relaxed) {
             std::thread::sleep(std::time::Duration::from_secs(1));
             elapsed += 1;
 
-            let current_total: u64 = op_counters.iter().map(|c| c.load(Ordering::Relaxed)).sum();
-            let instant_iops = current_total - prev_total;
-            prev_total = current_total;
+            let per_thread_iops: Vec<u64> = op_counters
+                .iter()
+                .zip(prev_counts.iter_mut())
+                .map(|(counter, prev)| {
+                    let current = counter.load(Ordering::Relaxed);
+                    let delta = current - *prev;
+                    *prev = current;
+                    delta
+                })
+                .collect();
+            let total_iops: u64 = per_thread_iops.iter().sum();
 
-            report::print_progress(elapsed, instant_iops);
+            report::print_progress(elapsed, total_iops, &per_thread_iops);
         }
     }
 
@@ -266,7 +274,7 @@ fn main() {
     // --- Report ---
     println!();
     let report = FinalReport::from_results(&results, actual_duration, config.block_size);
-    report::print_final(&report, config.op);
+    report::print_final(&report, config.op, &results);
 
     std::process::exit(0);
 }
