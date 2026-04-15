@@ -147,6 +147,28 @@ sudo deps/spdk/scripts/setup.sh
 sudo sh -c 'echo 1024 > /proc/sys/vm/nr_hugepages'
 ```
 
+### IOPS Benchmark
+
+An NVMe IOPS benchmark application that measures read/write IOPS, throughput (MB/s), and latency percentiles using the `block-device-spdk-nvme` component. Requires SPDK built and NVMe devices bound to VFIO/UIO.
+
+```bash
+# Build
+cargo build -p iops-benchmark --release
+
+# Run with defaults (4KB random reads, QD=32, 1 thread, 10s)
+sudo ./target/release/iops-benchmark
+
+# Custom workload
+sudo ./target/release/iops-benchmark \
+  --op write --block-size 65536 --queue-depth 64 \
+  --threads 4 --duration 30 --pattern sequential
+
+# Mixed read/write, quiet mode
+sudo ./target/release/iops-benchmark --op rw --quiet
+```
+
+See [apps/iops-benchmark/README.md](apps/iops-benchmark/README.md) for full CLI options and sample output.
+
 ## Component Framework
 
 The core infrastructure is a Rust component framework inspired by COM (Component Object Model) principles.

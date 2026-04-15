@@ -1,0 +1,207 @@
+ ▐▛███▜▌   Claude Code v2.1.108
+▝▜█████▛▘  Sonnet 4.6 · API Usage Billing
+  ▘▘ ▝▝    ~/ai-native-storage-certus
+
+✻ Conversation compacted (ctrl+o for history)
+
+  ⎿  Read apps/iops-benchmark/README.md (104 lines)
+  ⎿  Read components/block-device-spdk-nvme/v1/specs/002-iops-benchmark/tasks.md (210 lines)
+  ⎿  Read apps/iops-benchmark/src/worker.rs (222 lines)
+  ⎿  Read apps/iops-benchmark/src/stats.rs (225 lines)
+  ⎿  Read apps/iops-benchmark/src/main.rs (300 lines)
+  ⎿  Plan file referenced (~/.claude/plans/majestic-nibbling-zephyr.md)
+  ⎿  Skills restored (speckit-implement, speckit-tasks, speckit-plan, speckit-clarify, speckit-specify, speckit-sync-analyze)
+
+  Read 1 file (ctrl+o to expand)
+
+● The fix replaces the HashMap<OpHandle, (Instant, bool)> in-flight tracking
+  with a VecDeque<(Instant, bool)> FIFO queue. The worker can't predict
+  actor-assigned OpHandle values, so instead it tracks submissions in order and
+  pops completions from the front regardless of handle.
+
+● Update(apps/iops-benchmark/src/worker.rs)
+  ⎿  Added 2 lines, removed 2 lines
+       1  /// Per-thread IO worker for the IOPS benchmark.
+       2 -use std::collections::HashMap;                                 
+       2 +use std::collections::VecDeque;                                
+       3  use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+       4  use std::sync::{Arc, Mutex};
+       5  use std::time::Instant;
+       6  
+       7  use interfaces::{
+       8 -    ClientChannels, Command, Completion, DmaBuffer, NamespaceIn
+         -fo, NvmeBlockError, OpHandle,                                  
+       8 +    ClientChannels, Command, Completion, DmaBuffer, NamespaceIn
+         +fo, NvmeBlockError,                                            
+       9  };
+      10  
+      11  use crate::config::{BenchConfig, OpType, Pattern};
+
+● Update(apps/iops-benchmark/src/worker.rs)
+  ⎿  Added 4 lines, removed 2 lines
+      19      ns_info: NamespaceInfo,
+      20      read_bufs: Vec<Arc<Mutex<DmaBuffer>>>,
+      21      write_bufs: Vec<Arc<DmaBuffer>>,
+      22 -    in_flight: HashMap<OpHandle, (Instant, bool)>, // (start_ti
+         -me, is_read)                                                   
+      22 +    /// FIFO queue of (submit_time, is_read) for in-flight ops.
+         + Completions                                                   
+      23 +    /// arrive in submission order per-client, so we pop from t
+         +he front.                                                      
+      24 +    in_flight: VecDeque<(Instant, bool)>,                      
+      25      op_counter: Arc<AtomicU64>,
+      26      stop_flag: Arc<AtomicBool>,
+      25 -    next_handle: u64,                                          
+      27 +    submit_count: u64,                                         
+      28      lba_gen: Box<dyn LbaGenerator + Send>,
+      29  }
+      30  
+
+● Update(apps/iops-benchmark/src/worker.rs)
+  ⎿  Added 2 lines, removed 2 lines
+      75              ns_info,
+      76              read_bufs,
+      77              write_bufs,
+      78 -            in_flight: HashMap::new(),                         
+      78 +            in_flight: VecDeque::new(),                        
+      79              op_counter,
+      80              stop_flag,
+      81 -            next_handle: 0,                                    
+      81 +            submit_count: 0,                                   
+      82              lba_gen,
+      83          })
+      84      }
+
+● Now update submit_one() to push to the FIFO instead of inserting into a
+  HashMap with a fabricated handle:
+
+● Update(apps/iops-benchmark/src/worker.rs)
+  ⎿  Added 3 lines, removed 4 lines
+      138      /// Submit a single async IO operation.
+      139      fn submit_one(&mut self, timeout_ms: u64) {
+      140          let lba = self.lba_gen.next_lba();
+      141 -        let slot = self.next_handle as usize % self.config.que
+          -ue_depth as usize;                                            
+      141 +        let slot = self.submit_count as usize % self.config.qu
+          +eue_depth as usize;                                           
+      142          let is_read = self.choose_is_read();
+      143  
+      144          let cmd = if is_read {
+     ...
+      158          };
+      159  
+      160          if self.channels.command_tx.send(cmd).is_ok() {
+      161 -            let handle = OpHandle(self.next_handle);          
+      162 -            self.in_flight.insert(handle, (Instant::now(), is_
+          -read));                                                       
+      163 -            self.next_handle += 1;                            
+      161 +            self.in_flight.push_back((Instant::now(), is_read)
+          +);                                                            
+      162 +            self.submit_count += 1;                           
+      163          }
+      164      }
+      165  
+
+● Now update handle_completion() to pop from the FIFO front instead of looking
+  up by handle:
+
+● Update(apps/iops-benchmark/src/worker.rs)
+  ⎿  Added 8 lines, removed 10 lines
+      182      /// Process a single completion message.
+      183      fn handle_completion(&mut self, completion: Completion, re
+           sult: &mut ThreadResult) {
+      184          match completion {
+      185 -            Completion::ReadDone { handle, result: r } => {   
+      186 -                if let Some((start, _)) = self.in_flight.remov
+          -e(&handle) {                                                  
+      185 +            Completion::ReadDone { result: r, .. } => {       
+      186 +                if let Some((start, _)) = self.in_flight.pop_f
+          +ront() {                                                      
+      187                      let latency_ns = start.elapsed().as_nanos(
+           ) as u64;
+      188                      result.latencies_ns.push(latency_ns);
+      189                      if r.is_ok() {
+     ...
+      194                      }
+      195                  }
+      196              }
+      197 -            Completion::WriteDone { handle, result: r } => {  
+      198 -                if let Some((start, _)) = self.in_flight.remov
+          -e(&handle) {                                                  
+      197 +            Completion::WriteDone { result: r, .. } => {      
+      198 +                if let Some((start, _)) = self.in_flight.pop_f
+          +ront() {                                                      
+      199                      let latency_ns = start.elapsed().as_nanos(
+           ) as u64;
+      200                      result.latencies_ns.push(latency_ns);
+      201                      if r.is_ok() {
+     ...
+      206                      }
+      207                  }
+      208              }
+      209 -            Completion::Timeout { handle } => {               
+      210 -                self.in_flight.remove(&handle);               
+      209 +            Completion::Timeout { .. } => {                   
+      210 +                self.in_flight.pop_front();                   
+      211                  result.errors += 1;
+      212              }
+      213 -            Completion::Error { handle, .. } => {             
+      214 -                if let Some(h) = handle {                     
+      215 -                    self.in_flight.remove(&h);                
+      216 -                }                                             
+      213 +            Completion::Error { .. } => {                     
+      214 +                self.in_flight.pop_front();                   
+      215                  result.errors += 1;
+      216              }
+      217              _ => {} // Ignore other completions
+
+● Now verify the full file looks correct:
+
+  Read 1 file (ctrl+o to expand)
+
+● Good. Now let me also check that the unused import OpHandle was properly
+  removed, and verify the build compiles and tests pass.
+
+● Bash(cargo build -p iops-benchmark 2>&1)
+  ⎿     Compiling iops-benchmark v0.1.0 (/home/dwaddington/ai-native-storag
+     e-certus/apps/iops-benchmark)
+         Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.42
+     s
+
+● Bash(cargo test -p iops-benchmark 2>&1)
+  ⎿     Compiling iops-benchmark v0.1.0 (/home/dwaddington/ai-native-storag
+     e-certus/apps/iops-benchmark)
+         Finished `test` profile [unoptimized + debuginfo] target(s) in 0.3
+     … +16 lines (ctrl+o to expand)
+
+● Bash(cargo clippy -p iops-benchmark -- -D warnings 2>&1)
+  ⎿      Checking spdk-sys v0.1.0 (/home/dwaddington/ai-native-storage-cert
+     us/components/spdk-sys)
+         Checking interfaces v0.1.0 (/home/dwaddington/ai-native-storage-ce
+     … +9 lines (ctrl+o to expand)
+
+● All 18 tests pass, clippy is clean with zero warnings.
+
+  Root cause: The worker was fabricating its own OpHandle values (starting at 0
+  per worker) and storing them in a HashMap. But the actor assigns handles from
+  a single global counter shared across all clients. With thread 0 getting actor
+   handles 1-32 and thread 1 getting 33-64, thread 1's completions never matched
+   its local handles 0-31 — so all completions were silently discarded and the
+  in-flight map stayed permanently full.
+
+  Fix: Replaced HashMap<OpHandle, (Instant, bool)> with VecDeque<(Instant, 
+  bool)>. The worker no longer tries to correlate by handle at all. Since
+  completions arrive in submission order on the per-client SPSC channel, we just
+   push on submit and pop from the front on completion. This works correctly
+  regardless of what handle values the actor assigns.
+
+✻ Brewed for 8m 0s
+
+❯ /cost                                                                         
+  ⎿  Total cost:            $22.27
+     Total duration (API):  1h 27m 54s
+     Total duration (wall): 16h 45m 32s
+     Total code changes:    3226 lines added, 286 lines removed
+     Usage by model:
+          claude-opus-4-6:  386.3k input, 133.8k output, 21.3m cache read, 737.6k cache write ($20.51)
+        claude-sonnet-4-6:  6.7k input, 18.0k output, 1.9m cache read, 242.9k cache write ($1.76)
