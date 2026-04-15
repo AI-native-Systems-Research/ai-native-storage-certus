@@ -9,7 +9,7 @@
 //! Tests that require a live NVMe device use [`try_init_spdk`] for runtime
 //! detection — they pass but do nothing when SPDK hardware is unavailable.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use block_device_spdk_nvme::{BlockDeviceSpdkNvmeComponentV1, IBlockDevice};
 use component_core::binding::bind;
@@ -368,3 +368,293 @@ fn write_read_roundtrip() {
         "read data does not match written pattern"
     );
 }
+
+/// Helper: probe namespaces on a connected client and return the namespace list.
+///
+/// Panics if the probe fails or returns an unexpected completion type.
+fn probe_namespaces(
+    channels: &interfaces::ClientChannels,
+    block_dev: &BlockDeviceSpdkNvmeComponentV1,
+) -> Vec<interfaces::NamespaceInfo> {
+    channels
+        .command_tx
+        .send(block_device_spdk_nvme::Command::NsProbe)
+        .expect("send NsProbe failed");
+    block_dev.flush_io().expect("flush_io");
+
+    match channels.completion_rx.recv().expect("recv failed") {
+        block_device_spdk_nvme::Completion::NsProbeResult { namespaces } => namespaces,
+        other => panic!("expected NsProbeResult, got {other:?}"),
+    }
+}
+
+/// Helper: flush and poll until a completion arrives.
+///
+/// Async SPDK operations may not complete within a single `flush_io()` cycle,
+/// so this loops calling `flush_io()` + `try_recv()` until the actor delivers
+/// the completion.
+fn flush_until_completion(
+    block_dev: &BlockDeviceSpdkNvmeComponentV1,
+    channels: &interfaces::ClientChannels,
+) -> block_device_spdk_nvme::Completion {
+    loop {
+        block_dev.flush_io().expect("flush_io");
+        if let Ok(c) = channels.completion_rx.try_recv() {
+            return c;
+        }
+        std::thread::yield_now();
+    }
+}
+
+#[test]
+fn sync_write_async_read_roundtrip() {
+    let Some(ctx) = get_spdk_context() else {
+        eprintln!("skipping sync_write_async_read_roundtrip: no SPDK hardware");
+        return;
+    };
+
+    let ibd = query::<dyn IBlockDevice + Send + Sync>(&*ctx.block_dev).unwrap();
+    let channels = ibd.connect_client().expect("connect_client failed");
+    let namespaces = probe_namespaces(&channels, &ctx.block_dev);
+    assert!(!namespaces.is_empty(), "no namespaces found");
+    let ns = &namespaces[0];
+    let sector_size = ns.sector_size as usize;
+
+    // Sync write a known pattern to LBA 3.
+    let mut write_buf =
+        interfaces::DmaBuffer::new(sector_size, sector_size, None).expect("DMA alloc failed");
+    let pattern: Vec<u8> = (0..sector_size).map(|i| ((i + 0xCD) % 256) as u8).collect();
+    write_buf.as_mut_slice().copy_from_slice(&pattern);
+    let write_buf = Arc::new(write_buf);
+
+    channels
+        .command_tx
+        .send(block_device_spdk_nvme::Command::WriteSync {
+            ns_id: ns.ns_id,
+            lba: 3,
+            buf: write_buf,
+        })
+        .expect("send WriteSync failed");
+    ctx.block_dev.flush_io().expect("flush_io");
+
+    match channels.completion_rx.recv().expect("recv failed") {
+        block_device_spdk_nvme::Completion::WriteDone { result, .. } => {
+            result.expect("write failed")
+        }
+        other => panic!("expected WriteDone, got {other:?}"),
+    }
+
+    // Async read back from LBA 3 to test async read path.
+    let read_buf =
+        interfaces::DmaBuffer::new(sector_size, sector_size, None).expect("DMA alloc failed");
+    let read_buf = Arc::new(Mutex::new(read_buf));
+
+    channels
+        .command_tx
+        .send(block_device_spdk_nvme::Command::ReadAsync {
+            ns_id: ns.ns_id,
+            lba: 3,
+            buf: Arc::clone(&read_buf),
+            timeout_ms: 5000,
+        })
+        .expect("send ReadAsync failed");
+
+    match flush_until_completion(&ctx.block_dev, &channels) {
+        block_device_spdk_nvme::Completion::ReadDone { result, .. } => {
+            result.expect("async read failed")
+        }
+        other => panic!("expected ReadDone, got {other:?}"),
+    }
+
+    let guard = read_buf.lock().unwrap();
+    assert_eq!(
+        guard.as_slice(),
+        &pattern[..],
+        "async read data does not match sync-written pattern"
+    );
+}
+
+#[test]
+fn write_on_one_client_read_on_another() {
+    let Some(ctx) = get_spdk_context() else {
+        eprintln!("skipping write_on_one_client_read_on_another: no SPDK hardware");
+        return;
+    };
+
+    let ibd = query::<dyn IBlockDevice + Send + Sync>(&*ctx.block_dev).unwrap();
+
+    // Client A: write.
+    let client_a = ibd.connect_client().expect("connect_client A failed");
+    let namespaces = probe_namespaces(&client_a, &ctx.block_dev);
+    assert!(!namespaces.is_empty(), "no namespaces found");
+    let ns = &namespaces[0];
+    let sector_size = ns.sector_size as usize;
+
+    let mut write_buf =
+        interfaces::DmaBuffer::new(sector_size, sector_size, None).expect("DMA alloc failed");
+    let pattern: Vec<u8> = (0..sector_size).map(|i| ((i + 0xCD) % 256) as u8).collect();
+    write_buf.as_mut_slice().copy_from_slice(&pattern);
+    let write_buf = Arc::new(write_buf);
+
+    client_a
+        .command_tx
+        .send(block_device_spdk_nvme::Command::WriteSync {
+            ns_id: ns.ns_id,
+            lba: 2,
+            buf: write_buf,
+        })
+        .expect("send WriteSync failed");
+    ctx.block_dev.flush_io().expect("flush_io");
+
+    match client_a.completion_rx.recv().expect("recv failed") {
+        block_device_spdk_nvme::Completion::WriteDone { result, .. } => {
+            result.expect("write failed")
+        }
+        other => panic!("expected WriteDone, got {other:?}"),
+    }
+
+    // Client B: read back the same LBA written by client A.
+    let client_b = ibd.connect_client().expect("connect_client B failed");
+    let read_buf =
+        interfaces::DmaBuffer::new(sector_size, sector_size, None).expect("DMA alloc failed");
+    let read_buf = Arc::new(Mutex::new(read_buf));
+
+    client_b
+        .command_tx
+        .send(block_device_spdk_nvme::Command::ReadSync {
+            ns_id: ns.ns_id,
+            lba: 2,
+            buf: Arc::clone(&read_buf),
+        })
+        .expect("send ReadSync failed");
+    ctx.block_dev.flush_io().expect("flush_io");
+
+    match client_b.completion_rx.recv().expect("recv failed") {
+        block_device_spdk_nvme::Completion::ReadDone { result, .. } => {
+            result.expect("read failed")
+        }
+        other => panic!("expected ReadDone, got {other:?}"),
+    }
+
+    let guard = read_buf.lock().unwrap();
+    assert_eq!(
+        guard.as_slice(),
+        &pattern[..],
+        "client B read does not match client A write"
+    );
+}
+
+#[test]
+fn multi_thread_concurrent_io() {
+    let Some(ctx) = get_spdk_context() else {
+        eprintln!("skipping multi_thread_concurrent_io: no SPDK hardware");
+        return;
+    };
+
+    let ibd = query::<dyn IBlockDevice + Send + Sync>(&*ctx.block_dev).unwrap();
+
+    // Probe once to get namespace info.
+    let probe_channels = ibd.connect_client().expect("connect_client probe failed");
+    let namespaces = probe_namespaces(&probe_channels, &ctx.block_dev);
+    assert!(!namespaces.is_empty(), "no namespaces found");
+    let ns = namespaces[0].clone();
+    drop(probe_channels);
+
+    let num_threads = 4u32;
+    let ops_per_thread = 16u32;
+    let sector_size = ns.sector_size as usize;
+    let block_dev = Arc::clone(&ctx.block_dev);
+
+    let handles: Vec<_> = (0..num_threads)
+        .map(|tid| {
+            let ibd = query::<dyn IBlockDevice + Send + Sync>(&*block_dev).unwrap();
+            let channels = ibd.connect_client().expect("connect_client failed");
+            let ns = ns.clone();
+            let block_dev = Arc::clone(&block_dev);
+
+            std::thread::spawn(move || {
+                // Each thread writes to a unique LBA range to avoid conflicts.
+                let base_lba = 100 + (tid as u64) * (ops_per_thread as u64);
+
+                for i in 0..ops_per_thread {
+                    let lba = base_lba + i as u64;
+                    let tag = ((tid * 64 + i) % 256) as u8;
+
+                    // Write a pattern tagged with (tid, i).
+                    let mut wbuf = interfaces::DmaBuffer::new(sector_size, sector_size, None)
+                        .expect("DMA alloc failed");
+                    for byte in wbuf.as_mut_slice().iter_mut() {
+                        *byte = tag;
+                    }
+                    let wbuf = Arc::new(wbuf);
+
+                    channels
+                        .command_tx
+                        .send(block_device_spdk_nvme::Command::WriteSync {
+                            ns_id: ns.ns_id,
+                            lba,
+                            buf: wbuf,
+                        })
+                        .expect("send WriteSync failed");
+                    block_dev.flush_io().expect("flush_io");
+
+                    match channels.completion_rx.recv().expect("recv failed") {
+                        block_device_spdk_nvme::Completion::WriteDone { result, .. } => {
+                            result.expect("write failed")
+                        }
+                        other => panic!("expected WriteDone, got {other:?}"),
+                    }
+
+                    // Read back and verify.
+                    let rbuf = interfaces::DmaBuffer::new(sector_size, sector_size, None)
+                        .expect("DMA alloc failed");
+                    let rbuf = Arc::new(Mutex::new(rbuf));
+
+                    channels
+                        .command_tx
+                        .send(block_device_spdk_nvme::Command::ReadSync {
+                            ns_id: ns.ns_id,
+                            lba,
+                            buf: Arc::clone(&rbuf),
+                        })
+                        .expect("send ReadSync failed");
+                    block_dev.flush_io().expect("flush_io");
+
+                    match channels.completion_rx.recv().expect("recv failed") {
+                        block_device_spdk_nvme::Completion::ReadDone { result, .. } => {
+                            result.expect("read failed")
+                        }
+                        other => panic!("expected ReadDone, got {other:?}"),
+                    }
+
+                    let guard = rbuf.lock().unwrap();
+                    for (j, &byte) in guard.as_slice().iter().enumerate() {
+                        assert_eq!(
+                            byte, tag,
+                            "thread {tid} op {i}: byte {j} mismatch (expected {tag:#x}, got {byte:#x})"
+                        );
+                    }
+                }
+
+                ops_per_thread
+            })
+        })
+        .collect();
+
+    let mut total_ops = 0u32;
+    for h in handles {
+        total_ops += h.join().expect("worker thread panicked");
+    }
+
+    assert_eq!(
+        total_ops,
+        num_threads * ops_per_thread,
+        "not all operations completed"
+    );
+}
+
+// NOTE: WriteAsync has a known data-integrity bug: the Arc<DmaBuffer> is dropped
+// after SPDK submission but before the NVMe device finishes DMA-reading from it,
+// so the device reads freed memory. Async write tests are excluded until the
+// component pins the write buffer in PendingOp until completion. ReadAsync works
+// correctly because the caller retains an Arc clone of the read buffer.

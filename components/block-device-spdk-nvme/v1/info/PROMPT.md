@@ -12,6 +12,8 @@ established good engineering practice, maintainability and meeting performance r
 
 + Remove components/spdk-simple-block-device component and any associated interfaces defined in the interface create.
   
-/speckit-specify Write an example that measures IOPS throughput for read and write operations. The example should take operation type (read,write,rw), block size, IO queue depth, number of client threads and test duration in seconds.  Default values for these should be available.
+/speckit-specify Write an example application for this component that measures IOPS throughput for read and write operations. The example should take operation type (read,write,rw), block size, IO queue depth, number of client threads and test duration in seconds.  Default values for these should be available.
 
++ Amend appfor per-thread breakdown
++ Amend unit tests to check IO operations and multiple client threads
 
