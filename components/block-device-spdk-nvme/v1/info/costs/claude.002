@@ -9,4 +9,16 @@ With iops_benchmark:
           claude-opus-4-6:  386.3k input, 133.8k output, 21.3m cache read, 737.6k cache write ($20.51)                                                        
         claude-sonnet-4-6:  6.7k input, 18.0k output, 1.9m cache read, 242.9k cache write ($1.76)                                        
                 
+After fixing tests:
+
+                /cost                                                                                                                                                           
+  ?  Total cost:            $27.01
+     Total duration (API):  1h 41m 27s                                                                                                                            
+     Total duration (wall): 17h 22m 24s                                                                                        
+     Total code changes:    3841 lines added, 529 lines removed                                                                                               
+     Usage by model:                                                                                                                    
+          claude-opus-4-6:  386.4k input, 165.9k output, 26.4m cache read, 895.7k cache write ($24.88)                                                        
+        claude-sonnet-4-6:  6.7k input, 23.3k output, 2.0m cache read, 309.7k cache write ($2.13)                                        
+                    
+
                 
