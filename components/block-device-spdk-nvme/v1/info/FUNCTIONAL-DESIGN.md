@@ -1,4 +1,4 @@
-# "/speckit-specify @info/DESIGN.md"
+# "/speckit-specify @info/FUNCTIONAL-DESIGN.md"
 
 Component is called BlockDeviceSpdkNvmeComponentV1.  
 

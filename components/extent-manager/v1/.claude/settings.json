@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(components/block-device-spdk-nvme)",
+      "Read(components/component-framework)",
+      "Read(components/extent-manager/v1/**)",
+      "Write(components/interfaces)",
+      "Write(components/extent-manager/v1/**)"
+    ],
+    "deny": [],
+    "additionalDirectories": [
+      "../../interfaces",
+      "../../block-device-spdk-nvme",
+      "../../component-framework"
+    ]
+  }
+}
