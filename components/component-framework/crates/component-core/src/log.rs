@@ -396,7 +396,7 @@ mod tests {
 
     #[test]
     fn handler_on_stop_flushes() {
-        let path = "/tmp/component_log_test_flush.log";
+        let path = "component_log_test_flush.log";
         let _ = fs::remove_file(path);
 
         let handler = LogHandler::with_file(path).unwrap();
@@ -407,8 +407,7 @@ mod tests {
 
         // After deactivate (which calls on_stop), file must be flushed.
         let contents = fs::read_to_string(path).unwrap();
-        // this is break CI gate!
-        //assert!(contents.contains("flushed"));
+        assert!(contents.contains("flushed"));
         let _ = fs::remove_file(path);
     }
 
