@@ -13,7 +13,6 @@ members = [
     "apps/helloworld-mainline",
     "apps/iops-benchmark",
     "components/block-device-spdk-nvme/v1",
-    "components/extent-manager/v1",
 ]
 
 # SPDK crates require pre-built native libraries at deps/spdk-build/.
