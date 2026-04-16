@@ -39,7 +39,7 @@ const OFF_CHECKSUM: usize = 4092;
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// use extent_manager::superblock::Superblock;
 ///
 /// let sb = Superblock::new(

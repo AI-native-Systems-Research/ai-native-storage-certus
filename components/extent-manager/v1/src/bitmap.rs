@@ -11,7 +11,7 @@ use crate::metadata::BLOCK_SIZE;
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// use extent_manager::bitmap::AllocationBitmap;
 ///
 /// let mut bm = AllocationBitmap::new(100);

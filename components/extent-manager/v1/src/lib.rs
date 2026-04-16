@@ -37,7 +37,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, RwLock};
 
 use component_framework::define_component;
-use interfaces::{IBlockDevice, IExtentManager, ILogger};
+use interfaces::{IBlockDevice, IExtentManager, IExtentManagerAdmin, ILogger};
 
 use crate::block_device::DmaAllocFn;
 
@@ -80,7 +80,7 @@ struct ExtentManagerState {
 define_component! {
     pub ExtentManagerComponentV1 {
         version: "0.1.0",
-        provides: [IExtentManager],
+        provides: [IExtentManager, IExtentManagerAdmin],
         receptacles: {
             block_device: IBlockDevice,
             logger: ILogger,
@@ -107,7 +107,7 @@ impl ExtentManagerComponentV1 {
     /// Set a custom DMA allocator (used in tests to avoid SPDK dependency).
     ///
     /// If not set, the default SPDK hugepage allocator is used.
-    pub(crate) fn set_dma_alloc(&self, alloc: DmaAllocFn) {
+    fn set_dma_alloc(&self, alloc: DmaAllocFn) {
         *self.dma_alloc.lock().expect("dma_alloc lock poisoned") = Some(alloc);
     }
 
@@ -152,7 +152,7 @@ impl ExtentManagerComponentV1 {
     ///
     /// Returns an error if receptacles are not wired, the device is too small,
     /// or I/O fails.
-    pub(crate) fn initialize(
+    fn initialize(
         &self,
         sizes: &[u32],
         slots: &[u32],
@@ -224,7 +224,7 @@ impl ExtentManagerComponentV1 {
     ///
     /// Returns an error if the superblock is invalid, receptacles are not
     /// wired, or I/O fails.
-    pub(crate) fn open(&self, ns_id: u32) -> Result<RecoveryResult, ExtentManagerError> {
+    fn open(&self, ns_id: u32) -> Result<RecoveryResult, ExtentManagerError> {
         self.log_debug(&format!("opening existing store, ns_id={ns_id}"));
 
         let bd = self.connect_block_device(ns_id)?;
@@ -446,6 +446,7 @@ impl interfaces::IExtentManagerAdmin for ExtentManagerComponentV1 {
         Ok(interfaces::RecoveryResult {
             extents_loaded: stats.extents_loaded,
             orphans_cleaned: stats.orphans_cleaned,
+            corrupt_records: stats.corrupt_records,
         })
     }
 }

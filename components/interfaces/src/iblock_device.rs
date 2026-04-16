@@ -447,6 +447,7 @@ define_interface! {
 pub struct RecoveryResult {
     pub extents_loaded: u64,
     pub orphans_cleaned: u64,
+    pub corrupt_records: u64,
 }
 
 define_interface! {
