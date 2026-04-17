@@ -99,3 +99,10 @@ This project uses speckit v0.4.0 for spec-driven development. Feature artifacts 
 - `/speckit-constitution` — Define/update project principles
 - `/speckit-analyze` — Cross-artifact consistency check
 - `/speckit-drift` — Analyze drift between specs and code
+
+## Active Technologies
+- Rust stable, edition 2021, MSRV 1.75 + component-framework (component-core, component-macros) at `../../component-framework/crates/`; interfaces at `../../interfaces`; `crc32fast` for CRC-32 checksums; `criterion` for benchmarks (001-extent-management)
+- NVMe SSD via IBlockDevice receptacle; 4KiB-aligned atomic writes; on-disk layout: superblock + bitmap region + extent record region (001-extent-management)
+
+## Recent Changes
+- 001-extent-management: Added Rust stable, edition 2021, MSRV 1.75 + component-framework (component-core, component-macros) at `../../component-framework/crates/`; interfaces at `../../interfaces`; `crc32fast` for CRC-32 checksums; `criterion` for benchmarks

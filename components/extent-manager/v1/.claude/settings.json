@@ -4,10 +4,10 @@
       "Read(components/block-device-spdk-nvme)",
       "Read(components/component-framework)",
       "Read(components/extent-manager/v1/**)",
-      "Write(components/interfaces)",
+      "Write(components/interfaces/**)",
       "Write(components/extent-manager/v1/**)"
     ],
-    "deny": [],
+    "deny": ["Read(components/extent-manager/v0/**)"],
     "additionalDirectories": [
       "../../interfaces",
       "../../block-device-spdk-nvme",
