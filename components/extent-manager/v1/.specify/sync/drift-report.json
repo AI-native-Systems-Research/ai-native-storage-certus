@@ -1,12 +1,12 @@
 {
-  "generated": "2026-04-16T00:00:00Z",
+  "generated": "2026-04-17T00:00:00Z",
   "project": "extent-manager v1",
   "summary": {
     "specs_analyzed": 2,
     "requirements_checked": 31,
-    "aligned": 23,
+    "aligned": 21,
     "drifted": 5,
-    "not_implemented": 3,
+    "not_implemented": 5,
     "unspecced_features": 1
   },
   "specs": [
@@ -14,34 +14,47 @@
       "id": "001-extent-management",
       "title": "Extent Management",
       "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005",
-        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012",
-        "FR-013", "FR-016"
+        "FR-001", "FR-002", "FR-004", "FR-005", "FR-006",
+        "FR-010", "FR-011", "FR-013", "FR-014", "FR-016"
       ],
       "drifted": [
         {
-          "requirement": "FR-007",
-          "spec_text": "1 to 32 fixed extent size classes, configurable at initialization, up to 10M slots per class",
-          "actual": "Dynamic slab-based allocation: initialize(total_size_bytes, slab_size_bytes, ns_id). Slabs allocated on-demand, max 256 slabs. No pre-declared size classes or slot counts.",
-          "location": "src/lib.rs:114-151, interfaces/src/iblock_device.rs:459",
+          "requirement": "FR-003",
+          "spec_text": "Persist metadata including namespace ID",
+          "actual": "namespace_id intentionally removed from Extent and ExtentMetadata. Clients create one ExtentManager per namespace/device pair.",
+          "location": "src/metadata.rs, interfaces/src/iextent_manager.rs",
           "severity": "major"
         },
         {
-          "requirement": "FR-014",
-          "spec_text": "System MUST use a logger receptacle for all console/diagnostic output",
-          "actual": "Logger receptacle declared but never read or used. Type mismatch between interfaces::ILogger and example_logger::ILogger prevents external binding.",
-          "location": "src/lib.rs:33",
+          "requirement": "FR-006",
+          "spec_text": "Iteration MUST hold an exclusive lock that blocks concurrent create and remove",
+          "actual": "get_extents() uses read lock (state.read()). Writers are blocked by RwLock but multiple readers can iterate concurrently.",
+          "location": "src/lib.rs:277-280",
+          "severity": "minor"
+        },
+        {
+          "requirement": "FR-007",
+          "spec_text": "Valid size classes range from 128 KiB to 5 MiB and must be multiples of 4 KiB",
+          "actual": "No validation of extent_size in create_extent. Any u32 value accepted. Slab size validation is correct.",
+          "location": "src/lib.rs:150-156",
           "severity": "moderate"
         },
         {
-          "requirement": "SC-005",
-          "spec_text": "At least 32 distinct size classes with up to 10M slots per class",
-          "actual": "Max 256 slabs (dynamic), ~262K slots per 1 GiB slab. Different capacity model.",
-          "location": "src/superblock.rs",
-          "severity": "moderate"
+          "requirement": "FR-012",
+          "spec_text": "System MUST support fresh initialization AND reopening an existing volume",
+          "actual": "open() intentionally removed. No reopen/recovery capability. Only fresh initialization supported.",
+          "location": "src/lib.rs",
+          "severity": "major"
+        },
+        {
+          "requirement": "Key Entities - Superblock",
+          "spec_text": "Superblock at block 0 with magic, format version, slab table, CRC-32",
+          "actual": "superblock.rs deleted. Initialization is purely in-memory. No on-disk superblock.",
+          "location": "src/lib.rs",
+          "severity": "major"
         }
       ],
-      "not_implemented": ["FR-006", "FR-015", "SC-004"]
+      "not_implemented": ["FR-008", "FR-009", "FR-012-reopen", "FR-015", "US5"]
     },
     {
       "id": "002-extent-benchmark",
@@ -49,21 +62,21 @@
       "aligned": [
         "FR-001", "FR-002", "FR-003", "FR-004", "FR-005",
         "FR-006", "FR-007", "FR-008", "FR-010", "FR-011",
-        "FR-012", "FR-013", "FR-014", "FR-015"
+        "FR-014", "FR-015"
       ],
       "drifted": [
         {
-          "requirement": "FR-009",
-          "spec_text": "Wire full component stack: Logger, SPDKEnv, BlockDeviceSpdkNvme, ExtentManagerComponentV1",
-          "actual": "Logger not bound to ExtentManagerComponentV1 due to ILogger type mismatch. Bound to spdk_env and block_dev only.",
-          "location": "apps/extent-benchmark/src/main.rs:34-48",
+          "requirement": "FR-003",
+          "spec_text": "--ns-id used for extent manager initialization",
+          "actual": "--ns-id used only for block device capacity queries. initialize() no longer takes namespace_id.",
+          "location": "apps/extent-benchmark/src/main.rs:107-118",
           "severity": "minor"
         },
         {
-          "requirement": "SC-003",
-          "spec_text": "N threads complete approximately N times faster for lookup operations",
-          "actual": "Lookup latency rounds to 0us at microsecond resolution, making linear scaling claim untestable via this tool.",
-          "location": "benchmark output",
+          "requirement": "FR-009",
+          "spec_text": "Wire full component stack including Logger to all components",
+          "actual": "Logger binding to extent manager not visible in main.rs.",
+          "location": "apps/extent-benchmark/src/main.rs",
           "severity": "minor"
         }
       ],
@@ -72,22 +85,27 @@
   ],
   "unspecced": [
     {
-      "feature": "Dynamic slab allocation (allocate_slab)",
-      "location": "src/lib.rs:63-106",
-      "lines": 44,
-      "suggested_spec": "Update 001-extent-management FR-007 and US7"
+      "feature": "set_dma_alloc in IExtentManager trait",
+      "location": "interfaces/src/iextent_manager.rs:46",
+      "lines": 1,
+      "suggested_spec": "001-extent-management (add FR for DMA configuration)"
     }
   ],
   "conflicts": [
     {
-      "description": "001 FR-007 vs implementation: Spec describes static size classes at init; code uses dynamic slab allocation with different initialize() signature.",
+      "description": "001 FR-003 references namespace_id in metadata, but it was intentionally removed from the API.",
       "specs": ["001-extent-management"],
       "severity": "major"
     },
     {
-      "description": "001 FR-014 vs 002 FR-009: Logger receptacle type mismatch (interfaces::ILogger vs example_logger::ILogger) makes binding impossible.",
-      "specs": ["001-extent-management", "002-extent-benchmark"],
-      "severity": "moderate"
+      "description": "001 FR-012 requires open() for reopening volumes, but open() and crash recovery were intentionally removed.",
+      "specs": ["001-extent-management"],
+      "severity": "major"
+    },
+    {
+      "description": "002 FR-003 references --ns-id for extent manager init, but initialize() no longer takes namespace_id.",
+      "specs": ["002-extent-benchmark"],
+      "severity": "minor"
     }
   ]
 }

@@ -1,6 +1,6 @@
 # Spec Drift Report
 
-Generated: 2026-04-16
+Generated: 2026-04-17
 Project: extent-manager v1
 
 ## Summary
@@ -9,9 +9,9 @@ Project: extent-manager v1
 |----------|-------|
 | Specs Analyzed | 2 |
 | Requirements Checked | 31 (16 + 15) |
-| Aligned | 23 (74%) |
+| Aligned | 21 (68%) |
 | Drifted | 5 (16%) |
-| Not Implemented | 3 (10%) |
+| Not Implemented | 5 (16%) |
 | Unspecced Code | 1 |
 
 ## Detailed Findings
@@ -20,43 +20,45 @@ Project: extent-manager v1
 
 #### Aligned
 
-- FR-001: Create extents with key, size, filename, CRC -> `IExtentManager::create_extent(key, size_class, filename, data_crc, has_crc)` at `src/lib.rs:200`
-- FR-002: Allocate contiguous disk space from size class -> Two-phase write allocates slot from slab at `src/lib.rs:220-232`
-- FR-003: Persist metadata to block device -> Record block written at `src/lib.rs:256-259`, bitmap at `src/lib.rs:261-273`
-- FR-004: Remove extents by key, freeing space -> `remove_extent` at `src/lib.rs:281`, clears bitmap and zeros record
-- FR-005: Lookup extent metadata by key -> `lookup_extent` at `src/lib.rs:322`, returns serialized metadata from in-memory index
-- FR-008: Crash consistency via atomic 4KiB writes -> Two-phase write: record first, then bitmap at `src/lib.rs:256-273`
-- FR-009: Recovery from partial writes/corruption -> `recovery.rs` scans bitmap vs records, clears orphans
-- FR-010: Thread-safe access -> `RwLock<Option<ExtentManagerState>>` at `src/lib.rs:36`; write lock for create/remove, read lock for lookup
-- FR-011: Error types -> `ExtentManagerError` enum: `DuplicateKey`, `KeyNotFound`, `InvalidSizeClass`, `OutOfSpace` at `interfaces/src/iextent_manager.rs:11-18`
-- FR-012: Fresh initialization and reopening -> `initialize()` at `src/lib.rs:114`, `open()` at `src/lib.rs:153`
-- FR-013: Block device receptacle -> `block_device: IBlockDevice` in `define_component!` at `src/lib.rs:32`
-- FR-016: Error propagation -> All I/O errors mapped via `error::nvme_to_em` and returned immediately, no retries
+- FR-001: Create extents with key, size, filename, CRC. `IExtentManager::create_extent(key, extent_size, filename, data_crc)` at `src/lib.rs:150`. Tests: `create_extent_basic`, `create_extent_with_filename_and_crc`.
+- FR-002: Allocate contiguous disk space from size class. Slab-based allocation with `find_free_slot(extent_size)` in `src/state.rs`. Tests: `dynamic_slab_allocation`, `multi_slab_same_class`.
+- FR-004: Remove by key, free space. `remove_extent` at `src/lib.rs:226`. Tests: `remove_extent_basic`, `remove_then_create_reuses_slot`.
+- FR-005: Lookup by key. `lookup_extent` at `src/lib.rs:266`. Tests: `lookup_extent_basic`, `lookup_extent_not_found`.
+- FR-006: Iteration through all stored extents. `get_extents()` at `src/lib.rs:277` returns `Vec<Extent>`. Each extent visited exactly once. Read lock blocks concurrent writers. Tests: `get_extents_empty`, `get_extents_returns_all`, `get_extents_reflects_removals`.
+- FR-010: Thread-safe access. `RwLock<ExtentManagerState>` at `src/lib.rs:31`; write lock for create/remove, read lock for lookup/get_extents. Tests: `concurrent_creates_no_duplicates`, `concurrent_lookups`, `concurrent_create_and_lookup`.
+- FR-011: Error types. `ExtentManagerError` enum: `DuplicateKey`, `KeyNotFound`, `OutOfSpace`, `NotInitialized`, `IoError`, `CorruptMetadata`. Tests: `create_extent_duplicate_key_fails`, `lookup_extent_not_found`, `not_initialized_errors`, `out_of_space`.
+- FR-013: Block device receptacle. `block_device: IBlockDevice` in `define_component!` at `src/lib.rs:27`.
+- FR-014: Logger receptacle. `logger: ILogger` in `define_component!` at `src/lib.rs:28`. Used via `log_info()` and `log_debug()` at `src/lib.rs:43-53`.
+- FR-016: Error propagation. All I/O errors mapped via `error::nvme_to_em` and returned immediately, no retries.
 
 #### Drifted
 
-- FR-007: Spec says "1 to 32 fixed size classes, configurable at initialization, up to 10M slots per class" but implementation uses dynamic slab-based allocation. `initialize(total_size_bytes, slab_size_bytes, ns_id)` accepts total device size and slab size — no pre-declared size classes or slot counts. Slabs allocated on-demand in `create_extent`. Max 256 slabs, not 32 size classes with 10M slots each.
-  - Location: `src/lib.rs:114-151`, `interfaces/src/iblock_device.rs:459`
-  - Severity: **major** — API signature and allocation model fundamentally changed
+- FR-003: Spec says "persist extent metadata (key, namespace ID, offset, size, optional filename, optional CRC)." Code no longer stores namespace ID — intentionally removed from `Extent` and `ExtentMetadata`. Clients create one ExtentManager per namespace/device pair.
+  - Location: `src/metadata.rs`, `interfaces/src/iextent_manager.rs`
+  - Severity: **major** (intentional API redesign, spec needs update)
 
-- FR-014: Spec says "System MUST use a logger receptacle for all console/diagnostic output" but the logger receptacle is declared (`src/lib.rs:33`) yet never read or used. The benchmark app cannot bind the logger due to type mismatch (`interfaces::ILogger` vs `example_logger::ILogger`). No logging output is produced by the extent manager.
-  - Location: `src/lib.rs:33` (declared), no usage anywhere in `src/`
-  - Severity: **moderate** — receptacle exists but is dead code
+- FR-006: Spec says "iteration MUST hold an exclusive lock." `get_extents()` uses `state.read()` (shared lock). The RwLock blocks writers while readers hold the lock, satisfying the key guarantee, but multiple iterations can run concurrently.
+  - Location: `src/lib.rs:277-280`
+  - Severity: **minor** (functional guarantee met; spec language overly strict)
 
-- SC-005: Spec says "at least 32 distinct size classes with up to 10M slots per class" but implementation supports max 256 slabs (dynamically allocated), each with ~262K slots per 1 GiB slab. Different model — higher flexibility but different capacity profile.
-  - Location: `src/superblock.rs` (MAX_SLABS=256), `src/superblock.rs` compute_slab_layout
-  - Severity: **moderate** — capacity model changed
+- FR-007: Spec says "valid size classes range from 128 KiB to 5 MiB and must be multiples of 4 KiB." Code has no validation of `extent_size` in `create_extent` — any u32 value is accepted. Slab validation (>= 8KiB, multiple of 4KiB) is correct.
+  - Location: `src/lib.rs:150-156`
+  - Severity: **moderate** (missing input validation)
+
+- FR-012: Spec says "System MUST support fresh initialization AND reopening an existing volume." `open()` was intentionally removed — no reopen/recovery capability.
+  - Location: `src/lib.rs`
+  - Severity: **major** (intentional removal, spec needs update)
+
+- Key Entities: Spec describes Superblock at block 0. `superblock.rs` was deleted. Initialization is purely in-memory. No on-disk superblock.
+  - Severity: **major** (intentional removal, spec needs update)
 
 #### Not Implemented
 
-- FR-006: Iteration through all stored extents. The `IExtentManager` trait has `extent_count()` but no `iterate`/`iter`/`for_each` method. No way to enumerate all extents via the public interface. An `iterate_benchmark.rs` bench exists but likely uses test-internal access.
-  - Severity: **major** — user story 4 (iterate all extents) has no public API
-
-- FR-015: "Iteration performance MUST be sufficient for rebuilding in-memory indexes at startup." Without a public iteration API, this is untestable.
-  - Severity: **major** — depends on FR-006
-
-- SC-004: "Iterating all extents visits each extent exactly once." No public iteration API exists.
-  - Severity: **major** — depends on FR-006
+- FR-008: Crash consistency via atomic 4KiB writes. `recovery.rs` was deleted. No crash recovery mechanism exists.
+- FR-009: Detect and recover from partial writes on startup. `open()` was removed.
+- FR-012 (reopen): Reopening an existing volume is not supported.
+- FR-015: Iteration performance for rebuilding indexes at startup via `open()`. `open()` was removed.
+- User Story 5: Crash Recovery (all 4 acceptance scenarios). Intentionally removed.
 
 ---
 
@@ -64,57 +66,50 @@ Project: extent-manager v1
 
 #### Aligned
 
-- FR-001: Standalone binary at `apps/extent-benchmark/` -> `apps/extent-benchmark/Cargo.toml` exists, in workspace members
-- FR-002: `--device <PCI_ADDRESS>` -> `config.rs:9` `pub device: String` with `#[arg(long)]`
-- FR-003: `--ns-id` default 1 -> `config.rs:12` `default_value_t = 1`
-- FR-004: `--threads` default 1 -> `config.rs:15` `default_value_t = 1`
-- FR-005: `--count` default 10000 -> `config.rs:18` `default_value_t = 10000`
-- FR-006: `--size-class` default 131072 -> `config.rs:21` `default_value_t = 131072`
-- FR-007: `--slab-size` default 1073741824 -> `config.rs:28` `default_value_t = 1073741824`
-- FR-008: `--total-size` auto-detect -> `config.rs:35` `Option<u64>`, auto-detection at `main.rs:117-127`
-- FR-010: Three phases: create, lookup, remove in order -> `main.rs:160-182` single-threaded, `main.rs:190-225` multi-threaded
-- FR-011: Disjoint key ranges -> `compute_key_ranges()` at `main.rs:228-237`
-- FR-012: Per-phase stats: ops, elapsed, ops/sec, percentiles -> `report.rs:18-31`, `stats.rs` computes min/p50/p99/max
-- FR-013: Multi-threaded per-thread + aggregate stats -> `report.rs:33-41` prints per-thread when `per_thread.len() > 1`
-- FR-014: README.md -> `apps/extent-benchmark/README.md` with build, usage, prerequisites, CLI reference
-- FR-015: Partial results on errors -> `run_create/run_lookup/run_remove` log errors per-op and continue, latency always recorded
+- FR-001: Standalone binary at `apps/extent-benchmark/`. Exists.
+- FR-002: `--device <PCI_ADDRESS>`. Present in `config.rs:9`.
+- FR-003: `--ns-id <NAMESPACE_ID>` (default 1). Present in `config.rs:12`. Used for block device capacity queries only (extent manager no longer takes ns_id).
+- FR-004: `--threads <N>` (default 1). Present in `config.rs:15`.
+- FR-005: `--count <N>` (default 10,000). Present in `config.rs:18`.
+- FR-006: `--size-class <BYTES>` (default 131072). Present in `config.rs:21`.
+- FR-007: `--slab-size <BYTES>` (default 1 GiB). Present in `config.rs:28`.
+- FR-008: `--total-size <BYTES>` (auto-detect). `Option<u64>` in `config.rs:35`.
+- FR-010: Three phases in order. `main.rs` runs create, lookup, remove sequentially.
+- FR-011: Disjoint key ranges. `compute_key_ranges()` in `main.rs`.
+- FR-014: README.md exists at `apps/extent-benchmark/README.md`.
+- FR-015: Partial results on errors. `run_create/run_lookup/run_remove` log errors per-op and continue.
 
 #### Drifted
 
-- FR-009: Spec says "wire full component stack: Logger, SPDKEnv, BlockDeviceSpdkNvme, ExtentManagerComponentV1" but logger is NOT bound to the extent manager due to type mismatch (`example_logger::ILogger` vs `interfaces::ILogger`). Logger is bound to spdk_env and block_dev only.
-  - Location: `main.rs:34-48` — logger→extent_mgr binding was removed
-  - Severity: **minor** — extent manager doesn't use logger anyway; functional behavior unaffected
+- FR-003: `--ns-id` is used for block device capacity queries (`ibd.num_sectors(config.ns_id)`) but not passed to `iem.initialize()` which no longer takes namespace_id.
+  - Location: `apps/extent-benchmark/src/main.rs:107-118`
+  - Severity: **minor** (functional but semantics shifted)
 
-- SC-003: "N threads complete approximately N times faster than 1 thread for lookup operations" — lookups are sub-microsecond (in-memory HashMap with read lock), but all operations hold a write lock for create/remove. The spec's claim about linear lookup scaling is implementable but not validated by the benchmark since lookup latency rounds to 0us at this resolution.
-  - Location: benchmark output shows `p50=0 us` for lookups
-  - Severity: **minor** — reporting artifact, not a correctness issue
+- FR-009: Spec says "wire full component stack including Logger." Logger binding to extent manager not visible in main.rs.
+  - Severity: **minor**
 
 #### Not Implemented
 
-(None — all 15 FR requirements are implemented)
+(None — all FR requirements are implemented)
 
 ---
 
 ### Unspecced Code
 
-| Feature | Location | Lines | Suggested Spec |
-|---------|----------|-------|----------------|
-| Dynamic slab allocation (`allocate_slab`) | `src/lib.rs:63-106` | 44 | Update 001-extent-management FR-007, US7 |
+| Feature | Location | Suggested Spec |
+|---------|----------|----------------|
+| `set_dma_alloc` in IExtentManager trait | `iextent_manager.rs:46` | 001 (add FR for DMA configuration) |
 
 ## Inter-Spec Conflicts
 
-- **001 FR-007 vs implementation**: Spec describes static pre-declared size classes with slot counts at init time. Implementation uses dynamic slab allocation (total_size + slab_size at init, slabs carved on demand). The `IExtentManagerAdmin::initialize` signature change is the root divergence — spec says `(sizes: Vec<u32>, slots: Vec<u32>, ns_id)` but code says `(total_size_bytes: u64, slab_size_bytes: u32, ns_id: u32)`.
-
-- **001 FR-014 vs 002 FR-009**: The extent manager declares a logger receptacle using `interfaces::ILogger`, but the actual `LoggerComponent` provides `example_logger::ILogger`. These are different types. This makes the logger receptacle un-bindable from external apps.
+- Spec 001 FR-003 references "namespace ID" in extent metadata, but namespace_id was intentionally removed from the API.
+- Spec 001 FR-012 requires `open()` for reopening volumes, but this was intentionally removed along with crash recovery (FR-008, FR-009).
+- Spec 002 FR-003 references `--ns-id` for extent manager initialization, but `initialize()` no longer takes namespace_id.
 
 ## Recommendations
 
-1. **Update spec 001 FR-007, US7, SC-005**: Rewrite to reflect dynamic slab-based allocation model. Update entity definitions (remove "Size Class" as static config, add "Slab" entity). Update acceptance scenarios for `initialize(total_size, slab_size, ns_id)` signature.
-
-2. **Implement FR-006 (iteration)**: Add an `iterate_extents` or `for_each_extent` method to `IExtentManager`. This blocks user story 4 and prevents FR-015/SC-004 from being testable.
-
-3. **Resolve ILogger type mismatch**: Either change extent-manager to use `example_logger::ILogger`, or unify the interface definitions so there's one canonical `ILogger` trait.
-
-4. **Update spec 001 edge cases**: Remove references to "maximum 32 size classes" and "10M slots per class." Replace with slab-model edge cases (max 256 slabs, slab exhaustion, multi-slab same class).
-
-5. **Add mean latency to spec 002 FR-012**: Implementation reports mean latency (added during development) but spec only lists min/p50/p99/max.
+1. **Update spec 001** to reflect intentional API changes: removal of namespace_id/device_id, removal of open()/recovery/superblock, removal of extent_count, addition of get_extents(), set_dma_alloc.
+2. **Add extent_size validation** in `create_extent` if the 128KiB-5MiB range constraint is still desired, or update spec to remove this constraint.
+3. **Update spec 001 FR-006** to describe actual locking: `get_extents()` holds read lock (writers blocked, concurrent reads allowed).
+4. **Decide on crash recovery**: re-spec as future feature or remove from spec entirely.
+5. **Update spec 002** to reflect that `--ns-id` is used only for block device capacity queries.

@@ -67,7 +67,7 @@ A user customizes the benchmark via command-line options: operation count, size 
 
 - **FR-001**: The application MUST be a standalone binary crate at `apps/extent-benchmark/` within the workspace.
 - **FR-002**: The application MUST accept `--device <PCI_ADDRESS>` to specify the NVMe device.
-- **FR-003**: The application MUST accept `--ns-id <NAMESPACE_ID>` to specify the NVMe namespace (default: 1).
+- **FR-003**: *(Removed — extent manager no longer takes namespace_id. The `--ns-id` flag is used only for block device capacity queries, not for extent manager initialization.)*
 - **FR-004**: The application MUST accept `--threads <N>` to specify the number of worker threads (default: 1).
 - **FR-005**: The application MUST accept `--count <N>` to specify operations per phase (default: 10,000).
 - **FR-006**: The application MUST accept `--size-class <BYTES>` to specify the extent size class (default: 131072 / 128 KiB).

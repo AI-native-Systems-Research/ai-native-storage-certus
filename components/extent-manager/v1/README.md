@@ -1,50 +1,81 @@
 # extent-manager
 
-Fixed-size storage extent allocator with crash-consistent on-disk layout for NVMe SSDs. Part of the Certus project.
+Fixed-size storage extent allocator for NVMe SSDs. Part of the Certus project.
 
 ## Overview
 
-The extent manager allocates, tracks, and recovers named extents (size-classified storage regions) on block devices. It uses a two-phase write protocol with CRC-32 integrity checks for power-fail safety.
+The extent manager allocates, tracks, and persists named extents (size-classified storage regions) on block devices. It uses a slab-based pool allocator with CRC-32 integrity checks and 4KiB-atomic writes for data safety.
 
-## On-Disk Layout
+## Architecture
+
+### Slab-Based Pool Allocator
+
+The device is divided into a pool of fixed-size slabs. Slabs are allocated on demand when a new extent size class is requested and no existing slab has free slots.
+
+Each slab contains:
+- **Bitmap region** — one bit per slot, rounded up to 4KiB blocks
+- **Record region** — one 4KiB block per slot, holding extent metadata with CRC-32
 
 ```
-Block 0:          Superblock (magic "EXTMGRV1", format v1, slab table, CRC-32)
-Blocks 1..N:      Per-slab bitmap regions (one bit per slot, rounded up to 4KiB blocks)
-Blocks N+1..M:    Per-slab extent record regions (one 4KiB block per slot)
+Pool layout on device:
+
+|--- Slab 0 (size class A) ---|--- Slab 1 (size class B) ---|--- free ---|
+| bitmap blocks | record blocks | bitmap blocks | record blocks |          |
 ```
 
-Each extent record is a 4096-byte block containing metadata (key, size class, namespace ID, LBA offset, filename, data CRC) with a CRC-32 checksum at bytes 4092-4096.
+Maximum 256 slabs per pool.
 
-### Crash Consistency
+### Extent Records
 
-Write protocol:
-1. Write the extent record block (with CRC-32)
-2. Flip the bitmap bit atomically
+Each extent record is a 4096-byte block containing:
+- Key (u64), size class (u32), LBA offset (u64)
+- Optional filename (up to 255 bytes) and data CRC-32
+- Record CRC-32 checksum at bytes 4092–4096
+
+### Write Protocol
+
+1. Write the extent record block (with CRC-32) atomically
+2. Flip the bitmap bit and persist the bitmap block
 3. Update the in-memory index
-
-On recovery (`open()`), the manager scans for inconsistencies:
-- **Orphan records** (bitmap bit not set but record exists) — zeroed out
-- **Corrupt CRC records** — cleared from bitmap and zeroed
 
 ## Interfaces
 
 | Interface | Role | Description |
 |-----------|------|-------------|
-| `IExtentManager` | Provided | Extent CRUD operations |
-| `IExtentManagerAdmin` | Provided | Lifecycle management (DMA setup, initialize, open) |
+| `IExtentManager` | Provided | Extent lifecycle and CRUD operations |
 | `IBlockDevice` | Receptacle | Underlying NVMe block device |
+| `ILogger` | Receptacle | Structured logging |
 
 ### IExtentManager API
 
 | Method | Description |
 |--------|-------------|
-| `create_extent(key, size_class, filename, data_crc, has_crc)` | Allocate an extent, returns serialized metadata |
-| `remove_extent(key)` | Deallocate an extent |
-| `lookup_extent(key)` | Find an extent by key, returns serialized metadata |
-| `extent_count()` | Number of allocated extents |
+| `set_dma_alloc(alloc)` | Set the DMA allocator for block device I/O |
+| `initialize(total_size_bytes, slab_size_bytes)` | Initialize the pool with given capacity and slab size |
+| `create_extent(key, extent_size, filename, data_crc)` | Allocate an extent, returns `Extent` |
+| `remove_extent(key)` | Deallocate an extent by key |
+| `lookup_extent(key)` | Find an extent by key, returns `Extent` |
+| `get_extents()` | Return all allocated extents as `Vec<Extent>` |
 
-Valid size classes: 128KiB to 5MiB, must be 4KiB-aligned.
+### Extent
+
+Returned by `create_extent`, `lookup_extent`, and `get_extents`:
+
+```rust
+pub struct Extent {
+    pub key: u64,
+    pub size: u32,
+    pub offset: u64,
+    pub filename: String,
+    pub crc: u32,
+}
+```
+
+### Lifecycle
+
+```
+new_default() → wire receptacles → set_dma_alloc() → initialize() → use CRUD methods
+```
 
 ## Build
 
@@ -70,8 +101,7 @@ All tests run without NVMe hardware using `MockBlockDevice`, an in-memory block 
 
 | File | Coverage |
 |------|----------|
-| `tests/api_operations.rs` | Create, remove, lookup, extent count, error cases |
-| `tests/crash_recovery.rs` | Orphan detection, CRC corruption, bitmap/record consistency |
+| `tests/api_operations.rs` | Create, remove, lookup, get_extents, error cases |
 | `tests/thread_safety.rs` | Concurrent access patterns |
 
 ## Benchmarks
@@ -85,29 +115,24 @@ cargo bench -p extent-manager
 cargo bench -p extent-manager --bench create_benchmark
 cargo bench -p extent-manager --bench remove_benchmark
 cargo bench -p extent-manager --bench lookup_benchmark
-cargo bench -p extent-manager --bench iterate_benchmark
 ```
 
 ## Source Layout
 
 ```
 src/
-  lib.rs            ExtentManagerComponentV1 definition, IExtentManager/IExtentManagerAdmin impls
+  lib.rs            ExtentManagerComponentV1 definition, IExtentManager impl
   metadata.rs       ExtentMetadata, OnDiskExtentRecord (4KiB block with CRC-32)
-  superblock.rs     Superblock format (magic, version, slab table, CRC-32)
   bitmap.rs         AllocationBitmap (bit-per-slot, multi-block serialization)
   block_device.rs   BlockDeviceClient wrapper (read_block/write_block at 4KiB granularity)
-  state.rs          ExtentManagerState (in-memory index, slab descriptors, free-LBA cursor)
-  recovery.rs       Crash recovery: scan and repair orphan/corrupt records on open()
+  state.rs          PoolState, SlabDescriptor, ExtentManagerState (in-memory index)
   error.rs          Error constructors
   test_support.rs   MockBlockDevice, FaultConfig, test helpers (feature = "testing")
 tests/
   api_operations.rs   Extent CRUD and error handling tests
-  crash_recovery.rs   Power-fail recovery tests
   thread_safety.rs    Concurrent access tests
 benches/
   create_benchmark.rs
   remove_benchmark.rs
   lookup_benchmark.rs
-  iterate_benchmark.rs
 ```

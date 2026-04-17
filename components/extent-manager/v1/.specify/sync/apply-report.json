@@ -1,33 +1,39 @@
 {
-  "applied": "2026-04-16",
-  "specs_updated": [
-    {
-      "spec": "001-extent-management",
-      "changes": [
-        {"requirement": "Status", "type": "modified"},
-        {"requirement": "Clarifications", "type": "modified"},
-        {"requirement": "US7", "type": "rewritten"},
-        {"requirement": "Edge Cases", "type": "rewritten"},
-        {"requirement": "FR-007", "type": "modified"},
-        {"requirement": "FR-015", "type": "modified"},
-        {"requirement": "SC-005", "type": "modified"},
-        {"requirement": "Key Entities", "type": "rewritten"},
-        {"requirement": "Assumptions", "type": "modified"}
-      ]
-    },
-    {
-      "spec": "002-extent-benchmark",
-      "changes": [
-        {"requirement": "FR-009", "type": "modified"},
-        {"requirement": "SC-003", "type": "modified"}
-      ]
-    }
+  "applied_at": "2026-04-17",
+  "based_on": "proposals from 2026-04-17",
+  "changes": {
+    "specs_updated": [
+      {
+        "spec": "001-extent-management",
+        "changes": [
+          {"proposal": 1, "requirement": "FR-003", "type": "modified", "description": "Removed namespace_id from persisted metadata description"},
+          {"proposal": 2, "requirement": "FR-006", "type": "modified", "description": "Changed exclusive lock to read lock for iteration"},
+          {"proposal": 3, "requirement": "FR-007", "type": "modified", "description": "Removed size class range constraint (128KiB-5MiB)"},
+          {"proposal": 4, "requirement": "FR-012", "type": "modified", "description": "Removed reopen requirement; fresh init only"},
+          {"proposal": 5, "requirement": "Key Entities - Superblock", "type": "modified", "description": "Replaced Superblock with On-Disk Layout entity"},
+          {"proposal": 10, "requirement": "FR-017", "type": "added", "description": "Added DMA allocator requirement (set_dma_alloc)"},
+          {"proposal": 11, "requirement": "Multiple sections", "type": "modified", "description": "Removed all namespace_id references from entities, assumptions, scenarios"},
+          {"proposal": 12, "requirement": "US7/Scenario5", "type": "moved", "description": "Moved reopen scenario from US7 to US5 (crash recovery)"}
+        ]
+      },
+      {
+        "spec": "002-extent-benchmark",
+        "changes": [
+          {"proposal": 8, "requirement": "FR-003", "type": "removed", "description": "Removed --ns-id from spec; extent manager no longer takes namespace_id"}
+        ]
+      }
+    ],
+    "new_specs": [],
+    "align_tasks_generated": [
+      {"proposal": 9, "spec": "002-extent-benchmark", "requirement": "FR-009", "description": "Wire logger to extent manager in benchmark app"}
+    ]
+  },
+  "not_applied": [
+    {"proposal": 6, "reason": "Rejected — crash recovery requirements kept in spec for future implementation"},
+    {"proposal": 7, "reason": "Approved as keep — FR-015 stays in spec tied to crash recovery"}
   ],
-  "new_specs": [],
-  "tasks_generated": 2,
-  "tasks_file": ".specify/sync/align-tasks.md",
-  "backups": [
-    ".specify/sync/backups/001-spec.md.bak",
-    ".specify/sync/backups/002-spec.md.bak"
-  ]
+  "backups": {
+    "001": ".specify/sync/backups/001-extent-management-spec.md.bak",
+    "002": ".specify/sync/backups/002-extent-benchmark-spec.md.bak"
+  }
 }
