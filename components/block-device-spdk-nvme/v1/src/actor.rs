@@ -12,7 +12,7 @@ use std::time::Instant;
 use component_core::actor::ActorHandler;
 use component_core::channel::ChannelError;
 
-use interfaces::{Command, Completion, DmaBuffer, NvmeBlockError, OpHandle};
+use interfaces::{Command, Completion, DmaBuffer, ILogger, NvmeBlockError, OpHandle};
 
 use crate::command::{ClientSession, ControlMessage};
 use crate::controller::NvmeController;
@@ -149,6 +149,8 @@ pub(crate) struct BlockDeviceHandler {
     pub telemetry: Arc<TelemetryStats>,
     /// Last time `check_timeouts()` was called, used to throttle to ~1ms.
     last_timeout_check: Instant,
+    /// Optional logger from the component's ILogger receptacle.
+    logger: Option<Arc<dyn ILogger + Send + Sync>>,
 }
 
 /// Completion context for synchronous SPDK NVMe commands.
@@ -189,7 +191,10 @@ unsafe extern "C" fn sync_completion_cb(
 
 impl BlockDeviceHandler {
     /// Create a new handler with the given controller.
-    pub(crate) fn new(controller: NvmeController) -> Self {
+    pub(crate) fn new(
+        controller: NvmeController,
+        logger: Option<Arc<dyn ILogger + Send + Sync>>,
+    ) -> Self {
         Self {
             controller,
             clients: Vec::new(),
@@ -198,6 +203,7 @@ impl BlockDeviceHandler {
             #[cfg(feature = "telemetry")]
             telemetry: Arc::new(TelemetryStats::new()),
             last_timeout_check: Instant::now(),
+            logger,
         }
     }
 
@@ -206,6 +212,7 @@ impl BlockDeviceHandler {
     pub(crate) fn with_telemetry(
         controller: NvmeController,
         telemetry: Arc<TelemetryStats>,
+        logger: Option<Arc<dyn ILogger + Send + Sync>>,
     ) -> Self {
         Self {
             controller,
@@ -214,6 +221,19 @@ impl BlockDeviceHandler {
             async_completions: Vec::new(),
             telemetry,
             last_timeout_check: Instant::now(),
+            logger,
+        }
+    }
+
+    fn log_info(&self, msg: &str) {
+        if let Some(ref log) = self.logger {
+            log.info(msg);
+        }
+    }
+
+    fn log_debug(&self, msg: &str) {
+        if let Some(ref log) = self.logger {
+            log.debug(msg);
         }
     }
 
@@ -266,7 +286,10 @@ impl BlockDeviceHandler {
                 }
             }
             if disconnected {
-                // FR-019: silently discard pending ops and remove client.
+                self.log_debug(&format!(
+                    "client {} disconnected (channel closed)",
+                    self.clients[i].session.id
+                ));
                 self.clients.swap_remove(i);
             } else {
                 i += 1;
@@ -339,6 +362,9 @@ impl BlockDeviceHandler {
 
     /// Handle a controller reset, cancelling ALL clients' pending ops.
     fn handle_controller_reset(&mut self, requesting_client_id: u64) {
+        self.log_info(&format!(
+            "controller reset requested by client {requesting_client_id}"
+        ));
         for client in &mut self.clients {
             for (&h, _) in client.pending_ops.iter() {
                 let _ = client.session.callback_tx.send(Completion::Error {
@@ -909,13 +935,14 @@ impl ActorHandler<ControlMessage> for BlockDeviceHandler {
     fn handle(&mut self, msg: ControlMessage) {
         match msg {
             ControlMessage::ConnectClient { session } => {
+                self.log_debug(&format!("client {} connected", session.id));
                 self.clients.push(ClientState {
                     session,
                     pending_ops: HashMap::new(),
                 });
             }
             ControlMessage::DisconnectClient { client_id } => {
-                // FR-019: silently discard pending ops and remove client.
+                self.log_debug(&format!("client {client_id} disconnected"));
                 if let Some(pos) = self.clients.iter().position(|c| c.session.id == client_id) {
                     self.clients.swap_remove(pos);
                 }
@@ -942,11 +969,14 @@ impl ActorHandler<ControlMessage> for BlockDeviceHandler {
     }
 
     fn on_start(&mut self) {
-        // Actor thread is now running on NUMA-local core.
+        self.log_info("actor started on NUMA-local core");
     }
 
     fn on_stop(&mut self) {
-        // Clean up: notify all clients of disconnect.
+        self.log_info(&format!(
+            "actor shutting down, {} clients connected",
+            self.clients.len()
+        ));
         for client in &self.clients {
             for &h in client.pending_ops.keys() {
                 let _ = client.session.callback_tx.send(Completion::Error {

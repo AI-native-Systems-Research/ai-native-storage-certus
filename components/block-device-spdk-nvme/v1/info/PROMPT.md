@@ -17,3 +17,5 @@ established good engineering practice, maintainability and meeting performance r
 + Amend app for per-thread breakdown
 + Amend unit tests to check IO operations and multiple client threads
 
+After logger component was made available:
++ Modify the block-device-spdk-nvme component to include an ILogger receptacle.  Modify the component to out info and debug messages through the log component.

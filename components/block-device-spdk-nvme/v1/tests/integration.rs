@@ -14,19 +14,27 @@ use std::sync::{Arc, Mutex, OnceLock};
 use block_device_spdk_nvme::{BlockDeviceSpdkNvmeComponentV1, IBlockDevice};
 use component_core::binding::bind;
 use component_core::iunknown::{query, IUnknown};
+use logger::LoggerComponentV1;
 use spdk_env::SPDKEnvComponent;
 
 /// Create a fully-wired component set without initializing SPDK.
 ///
 /// Returns (block_device_component, spdk_env_component).
-fn wire_components() -> (Arc<BlockDeviceSpdkNvmeComponentV1>, Arc<SPDKEnvComponent>) {
+fn wire_components() -> (
+    Arc<BlockDeviceSpdkNvmeComponentV1>,
+    Arc<SPDKEnvComponent>,
+    Arc<LoggerComponentV1>,
+) {
     let spdk_env = SPDKEnvComponent::new_default();
     let block_dev = BlockDeviceSpdkNvmeComponentV1::new_default();
+    let logger = LoggerComponentV1::new_default();
 
     bind(&*spdk_env, "ISPDKEnv", &*block_dev, "spdk_env")
         .expect("failed to bind spdk_env receptacle");
+    bind(&*logger, "ILogger", &*block_dev, "logger")
+        .expect("failed to bind logger receptacle");
 
-    (block_dev, spdk_env)
+    (block_dev, spdk_env, logger)
 }
 
 /// Result of a successful SPDK hardware initialization.
@@ -39,6 +47,8 @@ struct SpdkHardwareContext {
     block_dev: Arc<BlockDeviceSpdkNvmeComponentV1>,
     #[allow(dead_code)]
     spdk_env: Arc<SPDKEnvComponent>,
+    #[allow(dead_code)]
+    logger: Arc<LoggerComponentV1>,
 }
 
 // SAFETY: The component Arcs are Send+Sync (they use internal Mutex/RwLock).
@@ -77,7 +87,7 @@ fn get_spdk_context() -> Option<&'static SpdkHardwareContext> {
                 return None;
             }
 
-            let (block_dev, spdk_env) = wire_components();
+            let (block_dev, spdk_env, logger) = wire_components();
 
             // Initialize the SPDK environment.
             let ienv = query::<dyn spdk_env::ISPDKEnv + Send + Sync>(&*spdk_env)
@@ -119,6 +129,7 @@ fn get_spdk_context() -> Option<&'static SpdkHardwareContext> {
             Some(SpdkHardwareContext {
                 block_dev,
                 spdk_env,
+                logger,
             })
         })
         .as_ref()
@@ -130,7 +141,7 @@ fn get_spdk_context() -> Option<&'static SpdkHardwareContext> {
 
 #[test]
 fn component_wiring_succeeds() {
-    let (block_dev, _spdk_env) = wire_components();
+    let (block_dev, _spdk_env, _logger) = wire_components();
 
     // Verify receptacles are connected.
     let receps = block_dev.receptacles();
@@ -138,11 +149,15 @@ fn component_wiring_succeeds() {
         receps.iter().any(|r| r.name == "spdk_env"),
         "spdk_env receptacle not found"
     );
+    assert!(
+        receps.iter().any(|r| r.name == "logger"),
+        "logger receptacle not found"
+    );
 }
 
 #[test]
 fn query_iblock_device_interface() {
-    let (block_dev, _spdk_env) = wire_components();
+    let (block_dev, _spdk_env, _logger) = wire_components();
 
     // Query the IBlockDevice interface from the component.
     let ibd = query::<dyn IBlockDevice + Send + Sync>(&*block_dev);
@@ -151,7 +166,7 @@ fn query_iblock_device_interface() {
 
 #[test]
 fn device_info_before_initialize() {
-    let (block_dev, _spdk_env) = wire_components();
+    let (block_dev, _spdk_env, _logger) = wire_components();
 
     let ibd = query::<dyn IBlockDevice + Send + Sync>(&*block_dev).unwrap();
 
@@ -166,7 +181,7 @@ fn device_info_before_initialize() {
 
 #[test]
 fn connect_client_before_initialize_returns_error() {
-    let (block_dev, _spdk_env) = wire_components();
+    let (block_dev, _spdk_env, _logger) = wire_components();
 
     let ibd = query::<dyn IBlockDevice + Send + Sync>(&*block_dev).unwrap();
 
@@ -179,7 +194,7 @@ fn connect_client_before_initialize_returns_error() {
 
 #[test]
 fn telemetry_without_feature_returns_error() {
-    let (block_dev, _spdk_env) = wire_components();
+    let (block_dev, _spdk_env, _logger) = wire_components();
 
     let ibd = query::<dyn IBlockDevice + Send + Sync>(&*block_dev).unwrap();
 
@@ -189,7 +204,7 @@ fn telemetry_without_feature_returns_error() {
 
 #[test]
 fn sector_size_before_initialize_returns_error() {
-    let (block_dev, _spdk_env) = wire_components();
+    let (block_dev, _spdk_env, _logger) = wire_components();
 
     let ibd = query::<dyn IBlockDevice + Send + Sync>(&*block_dev).unwrap();
 

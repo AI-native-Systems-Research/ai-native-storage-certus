@@ -49,7 +49,7 @@ use std::sync::{Mutex, RwLock};
 use component_core::actor::{Actor, ActorHandle};
 use component_core::channel::spsc::SpscChannel;
 use component_framework::define_component;
-use interfaces::PciAddress;
+use interfaces::{ILogger, PciAddress};
 use spdk_env::ISPDKEnv;
 
 // Re-export interface types from the interfaces crate for consumer convenience.
@@ -76,6 +76,7 @@ define_component! {
         provides: [IBlockDevice, IBlockDeviceAdmin],
         receptacles: {
             spdk_env: ISPDKEnv,
+            logger: ILogger,
         },
         fields: {
             pci_address: RwLock<Option<PciAddress>>,
@@ -117,11 +118,21 @@ impl BlockDeviceSpdkNvmeComponentV1 {
     /// Returns [`NvmeBlockError::NotInitialized`] if receptacles are not
     /// wired, or if the SPDK environment is not initialized.
     pub(crate) fn initialize(&self) -> Result<(), NvmeBlockError> {
+        let logger: Option<std::sync::Arc<dyn ILogger + Send + Sync>> =
+            self.logger.get().ok();
+
         if !self.spdk_env.is_connected() {
             return Err(NvmeBlockError::NotInitialized(
                 "spdk_env receptacle not connected — wire ISPDKEnv before calling initialize()"
                     .into(),
             ));
+        }
+
+        if let Some(ref log) = logger {
+            let guard = self.pci_address.read().expect("pci_address lock poisoned");
+            if let Some(addr) = guard.as_ref() {
+                log.info(&format!("initializing block device for PCI address {addr}"));
+            }
         }
 
         // SPDK probe/attach for our PCI address.
@@ -148,16 +159,31 @@ impl BlockDeviceSpdkNvmeComponentV1 {
             .write()
             .expect("controller_info lock poisoned") = Some(snapshot.clone());
 
+        if let Some(ref log) = logger {
+            log.debug(&format!(
+                "controller attached: sector_size={}, num_sectors={}, max_queue_depth={}, \
+                 num_io_queues={}, numa_node={}",
+                snapshot.sector_size,
+                snapshot.num_sectors,
+                snapshot.max_queue_depth,
+                snapshot.num_io_queues,
+                snapshot.numa_node,
+            ));
+        }
+
         // Create the actor handler.
         #[cfg(feature = "telemetry")]
         let telemetry = std::sync::Arc::new(crate::telemetry::TelemetryStats::new());
 
         #[cfg(feature = "telemetry")]
-        let handler =
-            BlockDeviceHandler::with_telemetry(controller, std::sync::Arc::clone(&telemetry));
+        let handler = BlockDeviceHandler::with_telemetry(
+            controller,
+            std::sync::Arc::clone(&telemetry),
+            logger.clone(),
+        );
 
         #[cfg(not(feature = "telemetry"))]
-        let handler = BlockDeviceHandler::new(controller);
+        let handler = BlockDeviceHandler::new(controller, logger.clone());
 
         // Store telemetry for snapshot queries (type-erased via Any).
         #[cfg(feature = "telemetry")]
@@ -195,6 +221,10 @@ impl BlockDeviceSpdkNvmeComponentV1 {
             .actor_handle
             .lock()
             .expect("actor_handle lock poisoned") = Some(handle);
+
+        if let Some(ref log) = logger {
+            log.info("block device initialized, actor started");
+        }
 
         Ok(())
     }
@@ -314,6 +344,10 @@ impl IBlockDevice for BlockDeviceSpdkNvmeComponentV1 {
         })?;
 
         let client_id = self.next_client_id.fetch_add(1, Ordering::Relaxed);
+
+        if let Ok(log) = self.logger.get() {
+            log.debug(&format!("connecting client {client_id}"));
+        }
 
         // Create per-client SPSC channels.
         let ingress_ch = SpscChannel::<Command>::new(CLIENT_CHANNEL_CAPACITY);
@@ -460,6 +494,7 @@ mod tests {
         let comp = make_component();
         let receps = comp.receptacles();
         assert!(receps.iter().any(|r| r.name == "spdk_env"));
+        assert!(receps.iter().any(|r| r.name == "logger"));
     }
 
     #[test]
