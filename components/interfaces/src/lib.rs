@@ -7,8 +7,10 @@
 //! SPDK-dependent interfaces and types are gated behind the `spdk` Cargo feature.
 
 mod igreeter;
+mod ilogger;
 
 pub use igreeter::IGreeter;
+pub use ilogger::ILogger;
 
 #[cfg(feature = "spdk")]
 pub mod spdk_types;
