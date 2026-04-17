@@ -49,7 +49,7 @@ use std::sync::{Mutex, RwLock};
 use component_core::actor::{Actor, ActorHandle};
 use component_core::channel::spsc::SpscChannel;
 use component_framework::define_component;
-use example_logger::ILogger;
+use console_logger::ILogger;
 use interfaces::PciAddress;
 use spdk_env::ISPDKEnv;
 

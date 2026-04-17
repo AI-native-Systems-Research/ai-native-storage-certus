@@ -11,6 +11,6 @@ component-core.workspace = true
 component-framework.workspace = true
 interfaces = { workspace = true, features = ["spdk"] }
 spdk-env.workspace = true
-example-logger.workspace = true
+console-logger.workspace = true
 extent-manager = { path = "../../components/extent-manager/v1" }
 clap = { version = "4", features = ["derive"] }

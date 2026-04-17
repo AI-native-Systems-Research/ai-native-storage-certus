@@ -55,7 +55,7 @@ fn batch_write_throughput(c: &mut Criterion) {
     use block_device_spdk_nvme::{BlockDeviceSpdkNvmeComponentV1, IBlockDevice};
     use component_core::binding::bind;
     use component_core::iunknown::query;
-    use example_logger::LoggerComponent;
+    use console_logger::LoggerComponent;
     use spdk_env::SPDKEnvComponent;
 
     // Runtime hardware detection.

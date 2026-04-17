@@ -24,7 +24,7 @@ use block_device_spdk_nvme::{BlockDeviceSpdkNvmeComponentV1, Command, Completion
 use component_core::binding::bind;
 use component_core::iunknown::query;
 use component_core::numa::{set_thread_affinity, CpuSet, NumaTopology};
-use example_logger::LoggerComponent;
+use console_logger::LoggerComponent;
 use spdk_env::SPDKEnvComponent;
 
 use config::BenchConfig;

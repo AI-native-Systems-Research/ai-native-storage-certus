@@ -17,7 +17,7 @@ component-framework.workspace = true
 interfaces = { workspace = true, features = ["spdk"] }
 spdk-sys.workspace = true
 spdk-env.workspace = true
-example-logger.workspace = true
+console-logger.workspace = true
 crossbeam-channel = "0.5"
 
 [dev-dependencies]

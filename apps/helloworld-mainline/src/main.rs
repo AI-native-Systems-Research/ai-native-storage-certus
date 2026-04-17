@@ -7,7 +7,7 @@
 use component_framework::actor::Actor;
 use component_framework::iunknown::{query, IUnknown};
 use example_helloworld::{GreetRequest, GreeterHandler, HelloWorldComponent, IGreeter};
-use example_logger::{ConsoleLogHandler, ConsoleLogRequest, ILogger, LogLevel, LoggerComponent};
+use console_logger::{ConsoleLogHandler, ConsoleLogRequest, ILogger, LogLevel, LoggerComponent};
 
 fn main() {
     println!("=== Hello World Mainline Application ===\n");

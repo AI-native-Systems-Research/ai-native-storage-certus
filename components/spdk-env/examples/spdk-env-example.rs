@@ -20,7 +20,7 @@
 //! ```
 
 use component_framework::iunknown::{query, IUnknown};
-use example_logger::{ILogger, LoggerComponent};
+use console_logger::{ILogger, LoggerComponent};
 use spdk_env::{ISPDKEnv, SPDKEnvComponent};
 
 fn main() {

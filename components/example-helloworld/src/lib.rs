@@ -2,13 +2,13 @@
 //!
 //! Provides a greeter actor that receives [`GreetRequest`] messages, prints
 //! hello messages, and forwards log entries to a logger actor from
-//! [`example_logger`].
+//! [`console_logger`].
 //!
 //! # Quick start
 //!
 //! ```
 //! use example_helloworld::{GreetRequest, GreeterHandler};
-//! use example_logger::{ConsoleLogHandler, ConsoleLogRequest};
+//! use console_logger::{ConsoleLogHandler, ConsoleLogRequest};
 //! use component_framework::actor::Actor;
 //!
 //! let logger = Actor::simple(ConsoleLogHandler::new());
@@ -23,7 +23,7 @@
 
 use component_framework::actor::{ActorHandle, ActorHandler};
 use component_framework::{define_component, define_interface};
-use example_logger::{ConsoleLogRequest, LogLevel};
+use console_logger::{ConsoleLogRequest, LogLevel};
 
 // Define an interface for the greeter component.
 define_interface! {

@@ -29,7 +29,7 @@ pub use dma::DmaBuffer;
 pub use error::SpdkEnvError;
 
 use component_framework::{define_component, define_interface};
-use example_logger::ILogger;
+use console_logger::ILogger;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
 
@@ -101,7 +101,7 @@ impl Drop for SPDKEnvComponent {
 mod tests {
     use super::*;
     use component_framework::iunknown::{query, IUnknown};
-    use example_logger::{ILogger, LoggerComponent};
+    use console_logger::{ILogger, LoggerComponent};
     use std::sync::Arc;
 
     fn make_component() -> Arc<SPDKEnvComponent> {

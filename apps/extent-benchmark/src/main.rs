@@ -11,7 +11,7 @@ use clap::Parser;
 use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponentV1;
 use component_core::binding::bind;
 use component_core::iunknown::query;
-use example_logger::LoggerComponent;
+use console_logger::LoggerComponent;
 use extent_manager::ExtentManagerComponentV1;
 use interfaces::DmaBuffer;
 use spdk_env::SPDKEnvComponent;

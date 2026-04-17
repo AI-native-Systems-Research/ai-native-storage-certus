@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use block_device_spdk_nvme::{BlockDeviceSpdkNvmeComponentV1, IBlockDevice};
 use component_core::binding::bind;
 use component_core::iunknown::{query, IUnknown};
-use example_logger::LoggerComponent;
+use console_logger::LoggerComponent;
 use spdk_env::SPDKEnvComponent;
 
 /// Create a fully-wired component set without initializing SPDK.
