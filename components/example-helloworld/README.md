@@ -42,6 +42,14 @@ cargo build -p example-helloworld
 cargo test -p example-helloworld
 ```
 
+To see `println!`/`eprintln!` output and log messages during tests:
+
+```bash
+RUST_LOG=debug cargo test -p example-helloworld -- --nocapture
+```
+
+`RUST_LOG` controls the logger's level threshold (`error`, `warn`, `info`, `debug`). `--nocapture` prevents the test harness from swallowing stdout/stderr.
+
 ## Usage
 
 See `apps/helloworld-mainline/` for a full example that instantiates this component, queries its interface, wires up the actor, and sends messages.

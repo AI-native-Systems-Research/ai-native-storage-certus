@@ -8,3 +8,5 @@ publish = false
 [dependencies]
 component-framework.workspace = true
 component-core.workspace = true
+interfaces.workspace = true
+logger.workspace = true
