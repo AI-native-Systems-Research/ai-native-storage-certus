@@ -6,9 +6,9 @@ use std::fmt;
 /// A storage extent returned by the extent manager.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Extent {
-    pub key: u64, /// Key corresponding to cache block
-    pub size: u32, /// Size of the extent in bytes
-    pub offset: u64, /// Offset in bytes in the logical space
+    pub key: u64,    // Key corresponding to cache block
+    pub size: u32,   // Size of the extent in bytes
+    pub offset: u64, // Offset in bytes in the logical space
 }
 
 /// Errors returned by `IExtentManager` operations.
