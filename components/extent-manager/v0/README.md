@@ -28,8 +28,9 @@ Maximum 256 slabs per pool.
 ### Extent Records
 
 Each extent record is a 4096-byte block containing:
-- Key (u64), size class (u32), LBA offset (u64)
-- Optional filename (up to 255 bytes) and data CRC-32
+- Key (`u64`, bytes 0–7)
+- Size class (`u32`, bytes 8–11)
+- LBA offset (`u64`, bytes 12–19)
 - Record CRC-32 checksum at bytes 4092–4096
 
 ### Write Protocol
@@ -42,7 +43,7 @@ Each extent record is a 4096-byte block containing:
 
 | Interface | Role | Description |
 |-----------|------|-------------|
-| `IExtentManager` | Provided | Extent lifecycle and CRUD operations |
+| `IExtentManager` | Provided | Extent lifecycle, CRUD operations, and initialization |
 | `IBlockDevice` | Receptacle | Underlying NVMe block device |
 | `ILogger` | Receptacle | Structured logging |
 
@@ -52,10 +53,11 @@ Each extent record is a 4096-byte block containing:
 |--------|-------------|
 | `set_dma_alloc(alloc)` | Set the DMA allocator for block device I/O |
 | `initialize(total_size_bytes, slab_size_bytes)` | Initialize the pool with given capacity and slab size |
-| `create_extent(key, extent_size, filename, data_crc)` | Allocate an extent, returns `Extent` |
+| `create_extent(key, extent_size)` | Allocate an extent, returns `Extent` |
 | `remove_extent(key)` | Deallocate an extent by key |
 | `lookup_extent(key)` | Find an extent by key, returns `Extent` |
 | `get_extents()` | Return all allocated extents as `Vec<Extent>` |
+| `for_each_extent(cb)` | Iterate extents without allocation via callback |
 
 ### Extent
 
@@ -63,11 +65,9 @@ Returned by `create_extent`, `lookup_extent`, and `get_extents`:
 
 ```rust
 pub struct Extent {
-    pub key: u64,
+    pub key: ExtentKey,
     pub size: u32,
     pub offset: u64,
-    pub filename: String,
-    pub crc: u32,
 }
 ```
 

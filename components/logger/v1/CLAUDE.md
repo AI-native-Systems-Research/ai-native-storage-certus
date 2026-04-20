@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Logger v1 — a logging component for the Certus storage system. Provides console and file-based logging with configurable log levels via the `RUST_LOG` environment variable (matching `env_logger` conventions). Built with the component-framework using `define_component!` and `define_interface!` macros.
 
-This component is not yet implemented. The design spec lives at `info/PROMPT.md`. Use existing components (`example-helloworld`, `extent-manager/v0`, `block-device-spdk-nvme/v1`) as architectural reference for the component pattern.
+This component is fully implemented. The feature spec lives at `specs/001-logger-component/spec.md`. All functional requirements (FR-001 through FR-011) and success criteria (SC-001 through SC-007) are satisfied with unit, integration, doc tests, and Criterion benchmarks.
 
 ## Build and Test Commands
 

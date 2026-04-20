@@ -147,8 +147,13 @@ methods through the receptacle and verify output.
 - **ILogger**: The interface trait defined via `define_interface!` in
   the interfaces crate. Provides error(), warn(), info(), debug()
   methods.
-- **Log Level**: Severity classification (Error, Warn, Info, Debug)
-  parsed from RUST_LOG environment variable.
+- **LogLevel**: Public enum representing severity classification
+  (Error, Warn, Info, Debug) with `Ord` ordering (Error < Warn <
+  Info < Debug). Provides `from_env_str(&str)` for programmatic
+  parsing (case-insensitive, "trace" maps to Debug, invalid defaults
+  to Info) and a `Display` impl producing 5-char padded uppercase
+  strings (e.g., "INFO ", "ERROR"). Parsed from the RUST_LOG
+  environment variable at construction time.
 
 ## Success Criteria *(mandatory)*
 

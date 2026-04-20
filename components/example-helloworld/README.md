@@ -6,6 +6,7 @@ A reference component demonstrating the Certus component framework. Shows how to
 
 - **Interface definition** with `define_interface!` — the `IGreeter` trait
 - **Component definition** with `define_component!` — `HelloWorldComponent` providing `IGreeter`
+- **Receptacle wiring** — optional `ILogger` receptacle for structured logging
 - **Actor model** — `GreeterHandler` processes `GreetRequest` messages on a dedicated thread, counting greetings and printing them to stdout
 
 ## Public API
@@ -23,12 +24,16 @@ define_interface! {
 ### HelloWorldComponent
 
 - Provides: `IGreeter`
+- Receptacles: `logger` (`ILogger`, optional)
 - Version: `"0.1.0"`
 - `greeting_prefix()` returns `"Hello"`
 
 ### GreeterHandler (Actor)
 
-Handles `GreetRequest { name: String }` messages. Each message prints a greeting to stdout with a running count. Logs actor start/stop to stderr.
+Handles `GreetRequest { name: String }` messages. Each message prints a greeting to stdout with a running count.
+
+- `GreeterHandler::new()` — create without logging
+- `GreeterHandler::with_logger(logger)` — create with an `Arc<dyn ILogger + Send + Sync>` for structured logging
 
 ## Build
 
@@ -48,8 +53,13 @@ To see `println!`/`eprintln!` output and log messages during tests:
 RUST_LOG=debug cargo test -p example-helloworld -- --nocapture
 ```
 
-`RUST_LOG` controls the logger's level threshold (`error`, `warn`, `info`, `debug`). `--nocapture` prevents the test harness from swallowing stdout/stderr.
-
 ## Usage
 
 See `apps/helloworld-mainline/` for a full example that instantiates this component, queries its interface, wires up the actor, and sends messages.
+
+## Source Layout
+
+```
+src/
+  lib.rs    Component definition, IGreeter impl, GreeterHandler actor
+```

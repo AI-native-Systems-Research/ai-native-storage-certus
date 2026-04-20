@@ -167,6 +167,23 @@ impl LoggerComponentV1 {
     /// Create a logger with an explicit writer, level, and color setting.
     ///
     /// Primarily used for testing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use logger::{LogLevel, LoggerComponentV1};
+    /// use interfaces::ILogger;
+    /// use component_core::query_interface;
+    ///
+    /// let buf: Vec<u8> = Vec::new();
+    /// let component = LoggerComponentV1::new_with_writer(
+    ///     Box::new(buf),
+    ///     LogLevel::Debug,
+    ///     false,
+    /// );
+    /// let log = query_interface!(component, ILogger).unwrap();
+    /// log.info("captured to buffer");
+    /// ```
     pub fn new_with_writer(
         writer: Box<dyn Write + Send>,
         level: LogLevel,

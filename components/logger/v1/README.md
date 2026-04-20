@@ -43,11 +43,27 @@ cargo build -p logger
 cargo test -p logger
 ```
 
+### Test Suites
+
+| Location | Coverage |
+|----------|----------|
+| `src/lib.rs` (unit) | Log level ordering, parsing, display, message formatting, level filtering, ANSI color output, file output, file creation/error |
+| `tests/integration.rs` | IUnknown query, version, provided interfaces, receptacle binding, concurrent logging (4 threads x 100 messages) |
+
 ## Benchmarks
+
+Criterion-based benchmarks using a null writer:
 
 ```bash
 cargo bench -p logger
 ```
+
+| Benchmark | Description |
+|-----------|-------------|
+| `log_info` | Single info message throughput (no color) |
+| `log_info_colored` | Single info message throughput (with ANSI color) |
+| `log_filtered_out` | Cost of a filtered-out message (level below threshold) |
+| `log_concurrent_4_threads` | 4 threads x 100 messages concurrently |
 
 ## Usage
 
@@ -92,3 +108,14 @@ consumer.connect_receptacle_raw("logger", &*logger_comp).unwrap();
 ```
 
 Console output includes ANSI colors when stderr is a terminal. File output never contains ANSI escape codes.
+
+## Source Layout
+
+```
+src/
+  lib.rs                LoggerComponentV1 definition, ILogger impl, LogLevel, LoggerState
+tests/
+  integration.rs        Component framework integration tests
+benches/
+  log_throughput.rs     Criterion throughput benchmarks
+```
