@@ -7,7 +7,7 @@ Building the skeleton for component named $0 involves the following steps:
 
 1. The interface name is the component name prefixed with the letter 'I'.  The component name is $0, e.g., FooBar is the component name, IFooBar is its interface name.
 
-2. The component should be an actor. It must support an actor channel and provide a method on the interface to open the channels.  Implement a skeleton message protocol.
+2. The component should be an actor. It must support an actor channel and provide a method on the interface to open the channels.  Implement a skeleton message protocol along with the interface definition.
 
 3. If it does not already exist, create interface definition file, e.g., ifoobar.rs in components/interfaces directory.
 
