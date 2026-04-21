@@ -8,11 +8,9 @@
 
 mod igreeter;
 mod ilogger;
-mod izimbar;
 
 pub use igreeter::IGreeter;
 pub use ilogger::ILogger;
-pub use izimbar::IZimBar;
 
 #[cfg(feature = "spdk")]
 pub mod spdk_types;
