@@ -7,33 +7,40 @@ argument-hint: [output_path]
 
 Save the current Claude Code session transcript as a markdown file with token usage and cost stats.
 
+The user may pass an optional output path as an argument. If provided, use it as OUT. Otherwise default to the current directory.
+
 ## Steps
 
 1. Derive the project key from the current working directory and find the most recent session JSONL:
 
 ```bash
-PROJECT_KEY=$(pwd | sed 's|/|-|g' | sed 's|^-||')
+PROJECT_KEY=$(pwd | sed 's|/|-|g')
 JSONL=$(ls -t ~/.claude/projects/${PROJECT_KEY}/*.jsonl 2>/dev/null | head -1)
-echo "JSONL: $JSONL"
+if [[ -z "$JSONL" ]]; then
+    echo "No session JSONL found for project key: $PROJECT_KEY" >&2
+    exit 1
+fi
 ```
 
-2. Determine output path — save into the current working directory unless an argument was passed:
+2. Determine output path — use the argument if provided, otherwise save to current directory:
 
 ```bash
 SESSION_ID=$(basename "$JSONL" .jsonl)
 DATE=$(date +%Y-%m-%d)
-if [[ -n "$ARGUMENTS" ]]; then
-    OUT="$ARGUMENTS"
-else
-    OUT="$(pwd)/transcript_${SESSION_ID}_${DATE}.md"
-fi
+OUT="$(pwd)/transcript_${SESSION_ID}_${DATE}.md"
 ```
 
-3. Run the save script (path is relative to the repo root so it works for anyone who clones this repo):
+If the user passed an argument, use that as OUT instead.
+
+3. Find the save script relative to the repo root (works for any clone location):
 
 ```bash
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-bash "$(git rev-parse --show-toplevel)/.claude/skills/save/save.sh" "$JSONL" "$OUT"
+SAVE_SCRIPT="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/skills/save/save.sh"
+if [[ ! -f "$SAVE_SCRIPT" ]]; then
+    # fallback: search relative to ~/.claude
+    SAVE_SCRIPT=~/.claude/skills/save/save.sh
+fi
+bash "$SAVE_SCRIPT" "$JSONL" "$OUT"
 ```
 
 4. Report the output path and total estimated cost.

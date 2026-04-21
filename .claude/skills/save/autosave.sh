@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+REPO_ROOT="$(git -C "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" rev-parse --show-toplevel)"
 SAVE_SCRIPT="$REPO_ROOT/.claude/skills/save/save.sh"
 TRANSCRIPTS_DIR="$REPO_ROOT/transcripts"
 PROJECTS_DIR=~/.claude/projects
