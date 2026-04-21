@@ -1,0 +1,747 @@
+ ▐▛███▜▌   Claude Code v2.1.116
+▝▜█████▛▘  Sonnet 4.6 · API Usage Billing
+  ▘▘ ▝▝    ~/…/ai-native-storage-certus/components/extent-manager/v2
+
+✻ Conversation compacted (ctrl+o for history)
+
+  ⎿  Read src/lib.rs (409 lines)
+  ⎿  Referenced file specs/001-metadata-manager/tasks.md
+  ⎿  Read src/superblock.rs (190 lines)
+  ⎿  Read src/checkpoint.rs (389 lines)
+  ⎿  Read src/state.rs (141 lines)
+  ⎿  Skills restored (speckit.implement, speckit.analyze, speckit.tasks, speckit.plan, speckit.clarify)
+
+⏺ Let me wire the background checkpoint thread into format() and initialize(),
+  and address the old checkpoint chain cleanup.
+
+  Read 6 files (ctrl+o to expand)
+
+⏺ Now let me read the remaining files and the test/bench files to do a thorough
+  review.
+
+  Read 3 files (ctrl+o to expand)
+
+⏺ Now let me read the integration test files.
+
+  Read 6 files (ctrl+o to expand)
+
+⏺ Good, I've reviewed all the files. Now let me address the two key remaining
+  issues:
+
+  1. Wire start_background_checkpoint() into format() and initialize() — but
+  since format() and initialize() take &self not &Arc<Self>, I need a different
+  approach. The start_background_checkpoint method requires &Arc<Self>. The
+  proper way is to have callers invoke it after format/initialize, or make it
+  callable from &self by storing a Weak<Self>. Given the component framework
+  where the component is always behind Arc, the cleanest approach is to document
+   that start_background_checkpoint should be called by the orchestrator after
+  format/initialize. But actually, looking at the trait definition — format and
+  initialize are trait methods taking &self, and we can't get Arc<Self> from
+  &self without extra machinery. I'll leave start_background_checkpoint as an
+  explicit opt-in method that callers invoke.
+  2. Old checkpoint chain cleanup in write_checkpoint — free the third-oldest
+  chain's space back to the buddy allocator.
+
+  Let me also do a thorough scan for potential compilation issues.
+
+⏺ Explore(Check interfaces crate types)
+  ⎿  Done (0 tool uses · 0 tokens · 3m 1s)
+  (ctrl+o to expand)
+
+⏺ Explore(Check interfaces crate types) Sonnet 4.6
+  ⎿  Done (11 tool uses · 55.2k tokens · 59s)
+  (ctrl+o to expand)
+
+⏺ Good, now I have the exact type signatures. Let me identify compilation
+  issues:
+
+  1. Receptacle::get() returns Result<Arc<T>, ReceptacleError>, not
+  Option<Arc<T>>. Our code uses .get().ok_or_else(...) which assumes Option.
+  This needs to change to .get().map_err(...) or similar.
+  2. ClientChannels uses Sender<Command> and Receiver<Completion> from
+  component_core::channel, not std::sync::mpsc. The send() and recv() return
+  Result<(), ChannelError> and Result<T, ChannelError> respectively — our error
+  handling in block_io.rs uses .send(...).map_err(|_| ...) which should still
+  work since ChannelError doesn't match the std mpsc pattern, but the actual
+  error type differs.
+  3. NvmeBlockError has impl Display? — Our error::nvme_to_em calls
+  e.to_string(), need to verify. If it derives Debug but not Display, we'd need
+  format!("{e:?}").
+
+  Let me check a couple more things and then fix the issues.
+
+  Searched for 5 patterns (ctrl+o to expand)
+
+⏺ Good — NvmeBlockError, ExtentManagerError, and ReceptacleError all have
+  Display impls. Now let me check what Receptacle::get() actually returns and
+  how the define_component! macro exposes receptacles.
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Critical finding: Receptacle::get() returns Result<Arc<T>, ReceptacleError>,
+  not Option<Arc<T>>. But I need to check what the define_component! macro
+  actually generates — it may wrap the Receptacle differently.
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+⏺ Now I can see exactly what the macro generates. The receptacles are pub fields
+   of type Receptacle<dyn IBlockDevice + Send + Sync> etc. So our code calling
+  self.block_device.get() returns Result<Arc<dyn IBlockDevice + Send + Sync>, 
+  ReceptacleError>, not Option.
+
+  This is the critical fix needed. Let me also check how the v0 extent-manager
+  handles this pattern to see if there's a precedent.
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ Found all the places where we use .get() assuming it returns Option. There are
+   two patterns:
+
+  1. self.block_device.get().ok_or_else(...) — needs to change since .get()
+  returns Result, not Option
+  2. if let Some(logger) = self.logger.get() — needs to change to if let 
+  Ok(logger) = self.logger.get()
+
+  Let me also check the test_support.rs for similar patterns.
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ The connect() calls in test_support.rs need as Arc<dyn IBlockDevice + Send + 
+  Sync> (with + Send + Sync) to match the receptacle type Receptacle<dyn 
+  IBlockDevice + Send + Sync>. Let me check if this matters — looking at the
+  macro, receptacles are Receptacle<dyn IBlockDevice + Send + Sync>, so
+  connect() expects Arc<dyn IBlockDevice + Send + Sync>. The cast mock.clone() 
+  as Arc<dyn IBlockDevice> would fail to compile because dyn IBlockDevice != dyn
+   IBlockDevice + Send + Sync.
+
+  Now let me fix all these issues systematically.
+
+⏺ Update(src/lib.rs)
+  ⎿  Added 1 line, removed 1 line
+      71          let bd = self
+      72              .block_device
+      73              .get()
+      74 -            .ok_or_else(|| error::not_initialized("block device
+         - not connected"))?;                                            
+      74 +            .map_err(|_| error::not_initialized("block device n
+         +ot connected"))?;                                              
+      75  
+      76          let channels = bd
+      77              .connect_client()
+
+⏺ Update(src/lib.rs)
+  ⎿  Added 3 lines, removed 3 lines
+      123      }
+      124  
+      125      fn log_info(&self, msg: &str) {
+      126 -        if let Some(logger) = self.logger.get() {             
+      126 +        if let Ok(logger) = self.logger.get() {               
+      127              logger.info(msg);
+      128          }
+      129      }
+      130  
+      131      fn log_error(&self, msg: &str) {
+      132 -        if let Some(logger) = self.logger.get() {             
+      132 +        if let Ok(logger) = self.logger.get() {               
+      133              logger.error(msg);
+      134          }
+      135      }
+      136  
+      137      fn log_warn(&self, msg: &str) {
+      138 -        if let Some(logger) = self.logger.get() {             
+      138 +        if let Ok(logger) = self.logger.get() {               
+      139              logger.warn(msg);
+      140          }
+      141      }
+
+⏺ Now fix the format() method which also calls self.block_device.get():
+
+⏺ Update(src/lib.rs)
+  ⎿  Added 1 line, removed 1 line
+      203          let bd = self
+      204              .block_device
+      205              .get()
+      206 -            .ok_or_else(|| error::not_initialized("block devic
+          -e not connected"))?;                                          
+      206 +            .map_err(|_| error::not_initialized("block device 
+          +not connected"))?;                                            
+      207          let disk_size = bd.num_sectors(1).map_err(error::nvme_
+           to_em)?
+      208              * bd.sector_size(1).map_err(error::nvme_to_em)? as
+            u64;
+      209  
+
+⏺ Now fix the test_support.rs — the cast needs + Send + Sync to match the
+  receptacle type:
+
+⏺ Update(src/test_support.rs)
+  ⎿  Added 1 line, removed 1 line
+      292      let component = crate::MetadataManagerV2::new_inner();
+      293      component
+      294          .block_device
+      295 -        .connect(mock.clone() as Arc<dyn IBlockDevice>)       
+      295 +        .connect(mock.clone() as Arc<dyn IBlockDevice + Send +
+          + Sync>)                                                       
+      296          .expect("connect mock block device");
+      297  
+      298      let logger = Arc::new(MockLogger);
+⏺ Now fix the checkpoint test file which has several manual connect() calls:
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ All the Arc<dyn IBlockDevice> casts need + Send + Sync:
+
+⏺ Update(tests/checkpoint.rs)
+  ⎿  Added 9 lines, removed 9 lines
+      80      {
+      81          let c = extent_manager_v2::MetadataManagerV2::new_inner
+          ();
+      82          c.block_device
+      83 -            .connect(mock.clone() as Arc<dyn IBlockDevice>)    
+      83 +            .connect(mock.clone() as Arc<dyn IBlockDevice + Sen
+         +d + Sync>)                                                     
+      84              .unwrap();
+      85          c.logger
+      86              .connect(Arc::new(MockLogger) as Arc<dyn ILogger + 
+          Send + Sync>)
+     ...
+      92      let mock2 = Arc::new(MockBlockDevice::reboot_from(&shared))
+          ;
+      93      let c2 = extent_manager_v2::MetadataManagerV2::new_inner();
+      94      c2.block_device
+      95 -        .connect(mock2 as Arc<dyn IBlockDevice>)               
+      95 +        .connect(mock2 as Arc<dyn IBlockDevice + Send + Sync>) 
+      96          .unwrap();
+      97      c2.logger
+      98          .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send
+           + Sync>)
+     ...
+      111      {
+      112          let c = extent_manager_v2::MetadataManagerV2::new_inne
+           r();
+      113          c.block_device
+      114 -            .connect(mock.clone() as Arc<dyn IBlockDevice>)   
+      114 +            .connect(mock.clone() as Arc<dyn IBlockDevice + Se
+          +nd + Sync>)                                                   
+      115              .unwrap();
+      116          c.logger
+      117              .connect(Arc::new(MockLogger) as Arc<dyn ILogger +
+            Send + Sync>)
+     ...
+      129      let mock2 = Arc::new(MockBlockDevice::reboot_from(&shared)
+           );
+      130      let c2 = extent_manager_v2::MetadataManagerV2::new_inner()
+           ;
+      131      c2.block_device
+      132 -        .connect(mock2 as Arc<dyn IBlockDevice>)              
+      132 +        .connect(mock2 as Arc<dyn IBlockDevice + Send + Sync>)
+      133          .unwrap();
+      134      c2.logger
+      135          .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Sen
+           d + Sync>)
+     ...
+      152      {
+      153          let c = extent_manager_v2::MetadataManagerV2::new_inne
+           r();
+      154          c.block_device
+      155 -            .connect(mock.clone() as Arc<dyn IBlockDevice>)   
+      155 +            .connect(mock.clone() as Arc<dyn IBlockDevice + Se
+          +nd + Sync>)                                                   
+      156              .unwrap();
+      157          c.logger
+      158              .connect(Arc::new(MockLogger) as Arc<dyn ILogger +
+            Send + Sync>)
+     ...
+      176      let mock2 = Arc::new(MockBlockDevice::reboot_from(&shared)
+           );
+      177      let c2 = extent_manager_v2::MetadataManagerV2::new_inner()
+           ;
+      178      c2.block_device
+      179 -        .connect(mock2 as Arc<dyn IBlockDevice>)              
+      179 +        .connect(mock2 as Arc<dyn IBlockDevice + Send + Sync>)
+      180          .unwrap();
+      181      c2.logger
+      182          .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Sen
+           d + Sync>)
+     ...
+      204      {
+      205          let c = extent_manager_v2::MetadataManagerV2::new_inne
+           r();
+      206          c.block_device
+      207 -            .connect(mock.clone() as Arc<dyn IBlockDevice>)   
+      207 +            .connect(mock.clone() as Arc<dyn IBlockDevice + Se
+          +nd + Sync>)                                                   
+      208              .unwrap();
+      209          c.logger
+      210              .connect(Arc::new(MockLogger) as Arc<dyn ILogger +
+            Send + Sync>)
+     ...
+      242      let mock2 = Arc::new(MockBlockDevice::reboot_from(&shared)
+           );
+      243      let c2 = extent_manager_v2::MetadataManagerV2::new_inner()
+           ;
+      244      c2.block_device
+      245 -        .connect(mock2 as Arc<dyn IBlockDevice>)              
+      245 +        .connect(mock2 as Arc<dyn IBlockDevice + Send + Sync>)
+      246          .unwrap();
+      247      c2.logger
+      248          .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Sen
+           d + Sync>)
+     ...
+      269  
+      270      let c = extent_manager_v2::MetadataManagerV2::new_inner();
+      271      c.block_device
+      272 -        .connect(mock as Arc<dyn IBlockDevice>)               
+      272 +        .connect(mock as Arc<dyn IBlockDevice + Send + Sync>) 
+      273          .unwrap();
+      274      c.logger
+      275          .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Sen
+           d + Sync>)
+
+⏺ Now let me check block_io.rs for the Sender/Receiver imports. The
+  ClientChannels fields are Sender<Command> and Receiver<Completion> from
+  component_core::channel, but we import them from interfaces. Let me check what
+   interfaces re-exports:
+
+  Searched for 2 patterns, read 1 file (ctrl+o to expand)
+
+⏺ Good — ClientChannels, Command, Completion, and OpHandle are all re-exported
+  from interfaces under the spdk feature. Our imports in block_io.rs and
+  test_support.rs should work.
+
+  Now let me check Sender and Receiver — our ClientChannels struct uses them.
+  The test_support.rs uses SpscChannel from component_core::channel and
+  constructs ClientChannels with its sender/receiver. Let me verify the
+  Sender/Receiver types match:
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Good — ClientChannels uses Sender/Receiver from component_core::channel. And
+  test_support.rs correctly imports SpscChannel from the same place and calls
+  .sender() / .receiver(). The types will match.
+
+  Now let me check one more potential issue — the SUPERBLOCK_SIZE import in
+  block_io.rs. It's imported but I don't see it used there:
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ Unused import — this will cause a compiler warning (and with -D warnings, a
+  failure). Let me remove it.
+
+⏺ Update(src/block_io.rs)
+  ⎿  Removed 1 line
+       4  use std::sync::{Arc, Mutex};
+       5  
+       6  use crate::error;
+       7 -use crate::superblock::SUPERBLOCK_SIZE;                        
+       7  
+       8  pub(crate) struct BlockDeviceClient {
+       9      channels: ClientChannels,
+
+⏺ Now let me check for unused imports more broadly across all source files:
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ Let me check which of those imports are actually used. IExtentManagerV2 is
+  imported on line 3 — is it used in test_support.rs?
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ IExtentManagerV2 is imported but only used on line 3 as an import. It's not
+  referenced anywhere else in test_support.rs. Let me check more carefully — the
+   create_test_component function calls component.set_dma_alloc(...) which is a
+  trait method of IExtentManagerV2. So the trait import is needed to bring the
+  method into scope. Good, that's used.
+
+  Let me check OpHandle — is it used?
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ Good, OpHandle is used. Let me also check TelemetrySnapshot:
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ Good. Now let me check lib.rs imports:
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ I see IBlockDevice and ILogger are imported from interfaces — these are needed
+   for the define_component! macro to generate the receptacle types. Extent,
+  ExtentKey, WriteHandle, FormatParams are used in the trait impl. DmaAllocFn is
+   used in the fields. All good.
+
+  But wait — Superblock is used but I need to check that the import path works
+  when superblock module is pub(crate) vs pub. The import use 
+  crate::superblock::{Superblock, SUPERBLOCK_SIZE} should work in both cases
+  since it's within the crate. Good.
+
+  Now let me check another potential issue: checkpoint.rs uses
+  Arc<RwLock<Option<ManagerState>>> where RwLock is parking_lot::RwLock. The
+  write_checkpoint function takes state: &Arc<RwLock<Option<ManagerState>>>. Let
+   me check it imports parking_lot::RwLock:
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Good. Let me check if Extent and ExtentKey are actually used in checkpoint.rs:
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ All used. Now let me check the old checkpoint chain cleanup issue. Currently
+  write_checkpoint stores the old_previous but never frees it:
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ The old_previous is captured on line 270 but never used. To properly free the
+  old chain, we'd need to traverse it and free each chunk's allocation back to
+  the buddy allocator. However, the checkpoint chunks are allocated from the
+  buddy allocator, and we'd need both the LBA chain and chunk count to free
+  them. For now, let me free the old chain's space if old_previous != 0. We need
+   to traverse the old chain to find all its LBAs, then free them.
+
+  Actually, this is tricky — we need to convert LBAs back to buddy offsets and
+  know the chunk_size. We can traverse the old chain reading next_lba fields to
+  find all chunks, then free each chunk's buddy allocation. But reading
+  corrupt/old data is risky. Let me add a best-effort cleanup:
+
+⏺ Update(src/checkpoint.rs)
+  ⎿  Added 4 lines
+      276          let mut state_write = state.write();
+      277          let s = state_write.as_mut().unwrap();
+      278          s.checkpoint_seq = new_seq;
+      279 +                                                              
+      280 +        if old_previous != 0 {                                
+      281 +            free_chain_allocations(client, old_previous, chunk
+          +_size, s);                                                    
+      282 +        }                                                     
+      283      }
+      284  
+      285      Ok(())
+
+⏺ Now add the free_chain_allocations function:
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Update(src/checkpoint.rs)
+  ⎿  Added 26 lines
+      285      Ok(())
+      286  }
+      287  
+      288 +fn free_chain_allocations(                                    
+      289 +    client: &BlockDeviceClient,                               
+      290 +    head_lba: u64,                                            
+      291 +    chunk_size: u32,                                          
+      292 +    state: &mut ManagerState,                                 
+      293 +) {                                                           
+      294 +    let mut current_lba = head_lba;                           
+      295 +    while current_lba != 0 {                                  
+      296 +        let buddy_offset =                                    
+      297 +            current_lba * client.block_size() as u64 - SUPERBL
+          +OCK_SIZE as u64;                                              
+      298 +        let next = client                                     
+      299 +            .read_blocks(current_lba, chunk_size as usize)    
+      300 +            .ok()                                             
+      301 +            .and_then(|raw| {                                 
+      302 +                let magic = u32::from_le_bytes(raw[0..4].try_i
+          +nto().ok()?);                                                 
+      303 +                if magic != CHUNK_MAGIC {                     
+      304 +                    return None;                              
+      305 +                }                                             
+      306 +                Some(u64::from_le_bytes(raw[20..28].try_into()
+          +.ok()?))                                                      
+      307 +            })                                                
+      308 +            .unwrap_or(0);                                    
+      309 +        state.buddy.free(buddy_offset, chunk_size as u64);    
+      310 +        current_lba = next;                                   
+      311 +    }                                                         
+      312 +}                                                             
+      313 +                                                              
+      314  pub(crate) fn read_chunk_chain(
+      315      client: &BlockDeviceClient,
+      316      head_lba: u64,
+
+⏺ Now let me verify the overall state of lib.rs to make sure all edits are
+  consistent:
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ The code looks clean. Let me now check if there are any remaining issues I
+  should fix.
+
+  One thing I notice: initialize() reconstructs buddy.mark_allocated() for slab
+  allocations, but doesn't mark the checkpoint chunks themselves as allocated.
+  After recovery, the checkpoint chain LBAs should be reserved in the buddy
+  allocator. Let me also check the recovery flow — during initialize(), the
+  current checkpoint chain (and previous) should be marked as allocated.
+  Otherwise, after recovery, a new slab allocation could overwrite checkpoint
+  data.
+
+  Let me check if write_checkpoint handles this — yes it allocates from buddy
+  for new chunks, but after recovery we need to mark the existing checkpoint
+  chunks as allocated too.
+  Read 1 file (ctrl+o to expand)
+
+⏺ I need to add checkpoint chain reservation during recovery. After
+  reconstructing slabs, I should mark the current and previous checkpoint chains
+   as allocated in the buddy allocator:
+
+⏺ Update(src/lib.rs)
+  ⎿  Added 12 lines
+      269              }
+      270          }
+      271  
+      272 +        for &chain_lba in &[sb.current_index_lba, sb.previous_
+          +index_lba] {                                                  
+      273 +            if chain_lba != 0 {                               
+      274 +                mark_chain_allocated(                         
+      275 +                    &client,                                  
+      276 +                    chain_lba,                                
+      277 +                    sb.chunk_size,                            
+      278 +                    sb.block_size,                            
+      279 +                    &mut buddy,                               
+      280 +                );                                            
+      281 +            }                                                 
+      282 +        }                                                     
+      283 +                                                              
+      284          let format_params = FormatParams {
+      285              slab_size: sb.slab_size,
+      286              max_element_size: sb.max_element_size,
+
+⏺ Now add the helper function mark_chain_allocated:
+
+⏺ Update(src/lib.rs)
+  ⎿  Added 26 lines
+      173      }
+      174  }
+      175  
+      176 +fn mark_chain_allocated(                                      
+      177 +    client: &BlockDeviceClient,                               
+      178 +    head_lba: u64,                                            
+      179 +    chunk_size: u32,                                          
+      180 +    block_size: u32,                                          
+      181 +    buddy: &mut BuddyAllocator,                               
+      182 +) {                                                           
+      183 +    let mut current_lba = head_lba;                           
+      184 +    while current_lba != 0 {                                  
+      185 +        let buddy_offset = current_lba * block_size as u64 - S
+          +UPERBLOCK_SIZE as u64;                                        
+      186 +        buddy.mark_allocated(buddy_offset, chunk_size as u64);
+      187 +        let next = client                                     
+      188 +            .read_blocks(current_lba, chunk_size as usize)    
+      189 +            .ok()                                             
+      190 +            .and_then(|raw| {                                 
+      191 +                let magic = u32::from_le_bytes(raw[0..4].try_i
+          +nto().ok()?);                                                 
+      192 +                if magic != checkpoint::CHUNK_MAGIC {         
+      193 +                    return None;                              
+      194 +                }                                             
+      195 +                Some(u64::from_le_bytes(raw[20..28].try_into()
+          +.ok()?))                                                      
+      196 +            })                                                
+      197 +            .unwrap_or(0);                                    
+      198 +        current_lba = next;                                   
+      199 +    }                                                         
+      200 +}                                                             
+      201 +                                                              
+      202  impl IExtentManagerV2 for MetadataManagerV2 {
+      203      fn set_dma_alloc(&self, alloc: DmaAllocFn) {
+      204          *self.dma_alloc.lock().unwrap() = Some(alloc);
+
+⏺ Now let me also check the ManagerState for the buddy field visibility —
+  free_chain_allocations in checkpoint.rs accesses s.buddy. Let me verify:
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ Good, buddy is pub (within the crate scope since ManagerState is pub(crate)).
+
+  Now let me do a final check — are there unused imports from the edits? Let me
+  verify the final state of checkpoint.rs to make sure ManagerState is imported:
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Good. ManagerState is already imported at line 9 and SUPERBLOCK_SIZE at line
+  10. CHUNK_MAGIC is defined in the same module.
+
+  Let me now check Extent — the clone() call on line 327 of lib.rs. Extent
+  derives Clone per the interface definition:
+
+  Searched for 2 patterns (ctrl+o to expand)
+
+⏺ Good, Extent derives Clone. The extent.clone() call on lib.rs:327 works, and
+  .cloned() on iterators works too.
+
+  Now let me verify the full lib.rs one more time to confirm everything is
+  coherent:
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ The code looks solid. Let me now check for one more potential issue — the
+  concurrent.rs test wraps the component in an extra Arc:
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ create_test_component returns Arc<MetadataManagerV2>. Then Arc::new(c) wraps
+  it in Arc<Arc<MetadataManagerV2>>. This is a problem because IExtentManagerV2
+  is implemented for MetadataManagerV2, not Arc<MetadataManagerV2>. The methods
+  called would be on the outer Arc<Arc<...>> which doesn't implement the trait.
+
+  Wait — actually in Rust, method resolution on Arc<T> derefs to T. So
+  c.format(...) on Arc<MetadataManagerV2> calls MetadataManagerV2::format. And
+  Arc::new(c) wrapping an Arc<MetadataManagerV2> produces
+  Arc<Arc<MetadataManagerV2>>. When you call .reserve_extent() on this, it
+  derefs to Arc<MetadataManagerV2>, which then derefs to MetadataManagerV2. So
+  it should work, just unnecessarily double-wrapped.
+
+  But wait — Arc::clone(&c) in the thread would clone the outer Arc. Methods
+  deref through both. It's fine functionally but ugly. The real question is: do
+  the trait methods need to be in scope? In the concurrent test,
+  IExtentManagerV2 is imported in the use statement. So method dispatch will
+  find reserve_extent through auto-deref. This should compile and run correctly.
+
+  Let me also verify the block_io.rs final state:
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Good, unused SUPERBLOCK_SIZE import removed.
+
+  Let me check if DmaBuffer is used directly in block_io.rs:
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ DmaBuffer is used as a return type. Good.
+
+  Now let me check ClientChannels — the fields command_tx and completion_rx are
+  Sender<Command> and Receiver<Completion>. In our code (line 65-66, 74), we use
+   self.channels.command_tx.send(...) and self.channels.completion_rx.recv().
+  The send() returns Result<(), ChannelError> and recv() returns Result<T, 
+  ChannelError>. Our error handling uses .map_err(|_| ...) which should work
+  fine.
+
+  Let me do a final scan for any other compilation issues I might have missed.
+  Let me check if Completion variants used match the actual definition:
+
+  The actual Completion definition (from the agent's research) has:
+  - ReadDone { handle: OpHandle, result: Result<(), NvmeBlockError> }
+  - WriteDone { handle: OpHandle, result: Result<(), NvmeBlockError> }
+  - Error { handle: Option<OpHandle>, error: NvmeBlockError }
+
+  In block_io.rs, we match on:
+  - Completion::WriteDone { result, .. } — correct (destructures result)
+  - Completion::Error { error: e, .. } — correct (renames error to e)
+  - Completion::ReadDone { result: res, .. } — correct (renames result to res)
+
+  All look correct. Let me also verify one more thing — the test_support.rs
+  process_command function creates completions:
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ All completion variant constructions match the actual type definition. The
+  code looks correct.
+
+  Let me also check one subtle issue — in the checkpoint.rs::write_checkpoint,
+  we take a write lock on state, then drop it, then take a read lock. But the
+  free_chain_allocations call is inside a new write lock scope. Let me re-read:
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Good — the free_chain_allocations runs inside the write lock scope, so it has
+  exclusive access to ManagerState and can safely modify s.buddy.
+
+  Now let me update the task status and provide a summary of all changes made.
+
+⏺ Here's a summary of the fixes made in this session:
+
+  Compilation fixes:
+  1. Receptacle::get() returns Result, not Option — Fixed all 5 call sites in
+  lib.rs:
+    - self.block_device.get().ok_or_else(...) → .map_err(|_| ...)  (2
+  occurrences)
+    - if let Some(logger) = self.logger.get() → if let Ok(logger) = ...  (3
+  occurrences)
+  2. Receptacle type mismatch in connect() calls — The macro generates
+  Receptacle<dyn IBlockDevice + Send + Sync>, so connect() expects Arc<dyn 
+  IBlockDevice + Send + Sync>. Fixed casts in:
+    - test_support.rs (1 occurrence)
+    - tests/checkpoint.rs (6 occurrences)
+  3. Unused import — Removed dead use crate::superblock::SUPERBLOCK_SIZE from
+  block_io.rs.
+
+  Correctness fixes:
+  4. Checkpoint chain space reclamation — Added free_chain_allocations() in
+  checkpoint.rs to free the third-oldest checkpoint chain's buddy allocations
+  when a new checkpoint completes. Previously old chains leaked space forever.
+
+  5. Checkpoint chain reservation during recovery — Added mark_chain_allocated()
+   in lib.rs to mark both current and previous checkpoint chain LBAs as
+  allocated in the buddy allocator during initialize(). Without this, new slab
+  allocations could overwrite checkpoint metadata.
+
+✻ Brewed for 31m 25s
+
+※ recap: Implementing the MetadataManagerV2 extent manager component. Just finished fixing compilation issues and correctness bugs around receptacle API usage, checkpoint chain space reclamation, and recovery. Next step is verifying the build compiles on Linux. (disable recaps in /config)
+
+❯ Could you please check in our new files and changes to git?                   
+
+⏺ Let me check the current state of the repo and prepare the commit.
+
+⏺ Bash(git status)
+  ⎿  On branch main
+     Your branch is up to date with 'origin/main'.
+     … +13 lines (ctrl+o to expand)
+
+⏺ Bash(git diff)
+  ⎿  diff --git a/Cargo.toml b/Cargo.toml
+     index 2584d38..b6782bf 100644
+     --- a/Cargo.toml
+     … +26 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/scooter/work/2026-AINS-For-Storage/ai-native-storage-certus &&
+      git log --oneline -10)
+  ⎿  deca8e2 Merge pull request #16 from AI-native-Systems-Research/compone
+     nt-skills
+     685d403 Actor version
+     … +9 lines (ctrl+o to expand)
+  ⎿  Shell cwd was reset to /Users/scooter/work/2026-AINS-For-Storage/ai-na
+     tive-storage-certus/components/extent-manager/v2
+
+⏺ Bash(git status -u -- .)  ⎿  On branch main
+     Your branch is up to date with 'origin/main'.
+     … +32 lines (ctrl+o to expand)
+
+⏺ There are a lot of files. Let me separate the implementation files from the
+  speckit tooling files. I'll add just the source code, tests, benches, specs,
+  Cargo.toml, CLAUDE.md, .gitignore, and the interface changes — not the
+  .specify/ scaffolding, .claude/commands/, or the stray text file.
+
+⏺ Bash(cd /Users/scooter/work/2026-AINS-For-Storage/ai-native-storage-certus &&
+      git add \
+        Cargo.toml \…)
+  ⎿  Shell cwd was reset to /Users/scooter/work/2026-AINS-For-Storage/ai-na
+     tive-storage-certus/components/extent-manager/v2
+
+⏺ Bash(cd /Users/scooter/work/2026-AINS-For-Storage/ai-native-storage-certus &&
+      git diff --cached --stat)
+  ⎿   Cargo.toml                                         |   1 +
+      components/extent-manager/v2/.gitignore            |   9 +
+      components/extent-manager/v2/CLAUDE.md             |  36 ++
+     … +27 lines (ctrl+o to expand)
+  ⎿  Shell cwd was reset to /Users/scooter/work/2026-AINS-For-Storage/ai-na
+     tive-storage-certus/components/extent-manager/v2
+
+⏺ 31 files, 4770 lines added. Looks right.
+
+⏺ Bash(cd /Users/scooter/work/2026-AINS-For-Storage/ai-native-storage-certus &&
+      git commit -m "$(cat <<'EOF'
+      Add extent-manager v2: metadata manager with checkpoint/re…)
+  ⎿  [main 9452900] Add extent-manager v2: metadata manager with checkpoint
+     /recovery
+      31 files changed, 4770 insertions(+)
+     … +29 lines (ctrl+o to expand)
+  ⎿  Shell cwd was reset to /Users/scooter/work/2026-AINS-For-Storage/ai-na
+     tive-storage-certus/components/extent-manager/v2
+
+⏺ Committed as 9452900. 31 files, 4770 lines — covers the full v2
+  implementation, interface definition, tests, benchmarks, and design specs. The
+   .specify/ tooling and .claude/commands/ were intentionally left out of the
+  commit.
+
+✻ Crunched for 38s
