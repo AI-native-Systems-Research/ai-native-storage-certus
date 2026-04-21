@@ -21,5 +21,7 @@ Building the skeleton for component named $0 involves the following steps:
 
 8. Add a permissions file .claude/settings.json, in the newly created sub-directory, that allows access to the component itself, components/component-framework and any other directories corresponding to components that are listed as receptacles.  We want to avoid given access to other components that are not directly used.
 
+9. Copy skills, except those name with a prefix 'component-' from github root directory .claude/skills into the new component directory .claude/skills.
+
 
 
