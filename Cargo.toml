@@ -16,6 +16,7 @@ members = [
     "components/extent-manager/v0",
     "components/extent-manager/v2",
     "components/logger/v1",
+    "components/zim-bar",
 ]
 
 # SPDK crates require pre-built native libraries at deps/spdk-build/.
@@ -29,6 +30,7 @@ default-members = [
     "components/example-helloworld",
     "apps/helloworld-mainline",
     "components/logger/v1",
+    "components/zim-bar",
 ]
 
 resolver = "2"
@@ -48,4 +50,5 @@ spdk-sys = { path = "components/spdk-sys" }
 spdk-env = { path = "components/spdk-env" }
 block-device-spdk-nvme = { path = "components/block-device-spdk-nvme/v1" }
 logger = { path = "components/logger/v1" }
+zim-bar = { path = "components/zim-bar" }
 
