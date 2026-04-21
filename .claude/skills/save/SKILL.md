@@ -27,18 +27,20 @@ fi
 ```bash
 SESSION_ID=$(basename "$JSONL" .jsonl)
 DATE=$(date +%Y-%m-%d)
-OUT="$(pwd)/transcript_${SESSION_ID}_${DATE}.md"
+if [[ -n "$ARGUMENTS" ]]; then
+    OUT="$ARGUMENTS"
+else
+    OUT="$(pwd)/transcript_${SESSION_ID}_${DATE}.md"
+fi
 ```
 
-If the user passed an argument, use that as OUT instead.
-
-3. Find the save script relative to the repo root (works for any clone location):
+3. Find and run the save script relative to the repo root:
 
 ```bash
 SAVE_SCRIPT="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/skills/save/save.sh"
 if [[ ! -f "$SAVE_SCRIPT" ]]; then
-    # fallback: search relative to ~/.claude
-    SAVE_SCRIPT=~/.claude/skills/save/save.sh
+    echo "save.sh not found at: $SAVE_SCRIPT" >&2
+    exit 1
 fi
 bash "$SAVE_SCRIPT" "$JSONL" "$OUT"
 ```
