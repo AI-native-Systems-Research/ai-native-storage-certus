@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
 
-use interfaces::{FormatParams, IExtentManagerV2};
+use interfaces::{FormatParams, IExtentManager};
 
 use extent_manager_v2::test_support::create_test_component;
 

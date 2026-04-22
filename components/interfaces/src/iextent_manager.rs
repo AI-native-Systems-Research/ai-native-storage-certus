@@ -1,4 +1,4 @@
-//! Interface for the extent-manager component and shared error type.
+//! Interface for the extent-manager component and shared types.
 
 use component_macros::define_interface;
 use std::fmt;
@@ -9,9 +9,9 @@ pub type ExtentKey = u64;
 /// A storage extent returned by the extent manager.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Extent {
-    pub key: ExtentKey, // Key corresponding to cache block
-    pub size: u32,      // Size of the extent in bytes
-    pub offset: u64,    // Offset in bytes in the logical space
+    pub key: ExtentKey,
+    pub size: u32,
+    pub offset: u64,
 }
 
 /// Errors returned by `IExtentManager` operations.
@@ -40,40 +40,100 @@ impl fmt::Display for ExtentManagerError {
 
 impl std::error::Error for ExtentManagerError {}
 
+#[derive(Debug, Clone)]
+pub struct FormatParams {
+    pub slab_size: u32,
+    pub max_element_size: u32,
+    pub metadata_block_size: u32,
+    pub sector_size: u32,
+    pub region_count: u32,
+}
+
+pub struct WriteHandle {
+    key: ExtentKey,
+    offset: u64,
+    size: u32,
+    publish_fn: Option<Box<dyn FnOnce() -> Result<Extent, ExtentManagerError> + Send>>,
+    abort_fn: Option<Box<dyn FnOnce() + Send>>,
+}
+
+impl WriteHandle {
+    pub fn new(
+        key: ExtentKey,
+        offset: u64,
+        size: u32,
+        publish_fn: Box<dyn FnOnce() -> Result<Extent, ExtentManagerError> + Send>,
+        abort_fn: Box<dyn FnOnce() + Send>,
+    ) -> Self {
+        Self {
+            key,
+            offset,
+            size,
+            publish_fn: Some(publish_fn),
+            abort_fn: Some(abort_fn),
+        }
+    }
+
+    pub fn key(&self) -> ExtentKey {
+        self.key
+    }
+
+    pub fn extent_offset(&self) -> u64 {
+        self.offset
+    }
+
+    pub fn extent_size(&self) -> u32 {
+        self.size
+    }
+
+    pub fn publish(mut self) -> Result<Extent, ExtentManagerError> {
+        let f = self
+            .publish_fn
+            .take()
+            .expect("publish called on consumed handle");
+        self.abort_fn.take();
+        f()
+    }
+
+    pub fn abort(mut self) {
+        self.publish_fn.take();
+        if let Some(f) = self.abort_fn.take() {
+            f();
+        }
+    }
+}
+
+impl Drop for WriteHandle {
+    fn drop(&mut self) {
+        if let Some(f) = self.abort_fn.take() {
+            f();
+        }
+    }
+}
+
 #[cfg(feature = "spdk")]
 define_interface! {
     pub IExtentManager {
-        /// Set the DMA allocator used for block device I/O.
         fn set_dma_alloc(&self, alloc: crate::spdk_types::DmaAllocFn);
 
-        /// Initialize the extent manager with the given capacity.
-        fn initialize(
-            &self,
-            total_size_bytes: u64,
-            slab_size_bytes: u32,
-        ) -> Result<(), ExtentManagerError>;
+        fn format(&self, params: FormatParams) -> Result<(), ExtentManagerError>;
 
-        /// Allocate a new extent.
-        fn create_extent(
+        fn initialize(&self) -> Result<(), ExtentManagerError>;
+
+        fn reserve_extent(
             &self,
             key: ExtentKey,
-            extent_size: u32,
-        ) -> Result<Extent, ExtentManagerError>;
+            size: u32,
+        ) -> Result<WriteHandle, ExtentManagerError>;
 
-        /// Free an extent
-        fn remove_extent(&self, key: ExtentKey) -> Result<(), ExtentManagerError>;
-
-        /// Get info about an extent
         fn lookup_extent(&self, key: ExtentKey) -> Result<Extent, ExtentManagerError>;
 
-        /// Return all currently allocated extents. 
         fn get_extents(&self) -> Vec<Extent>;
 
-        /// Iterate through all currently allocated extents without
-        /// allocating a `Vec` or returning owned copies. The callback is
-        /// invoked while the implementation holds a read lock; callers
-        /// must not retain the reference passed to the callback after
-        /// the callback returns.
         fn for_each_extent(&self, cb: &mut dyn FnMut(&Extent));
+
+        fn remove_extent(&self, key: ExtentKey) -> Result<(), ExtentManagerError>;
+
+        fn checkpoint(&self) -> Result<(), ExtentManagerError>;
     }
 }

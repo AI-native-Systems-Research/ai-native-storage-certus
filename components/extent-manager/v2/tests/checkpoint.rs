@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use interfaces::{ExtentManagerError, FormatParams, IBlockDevice, IExtentManagerV2, ILogger};
+use interfaces::{ExtentManagerError, FormatParams, IBlockDevice, IExtentManager, ILogger};
 
 use extent_manager_v2::test_support::{
     create_test_component, heap_dma_alloc, MockBlockDevice, MockLogger,

@@ -6,7 +6,7 @@ checkpointing, and recovery for a single block device.
 
 ## Overview
 
-`MetadataManagerV2` implements the `IExtentManagerV2` trait from the
+`MetadataManagerV2` implements the `IExtentManager` trait from the
 `interfaces` crate. It provides:
 
 - **Two-phase extent allocation** -- reserve space, write data, then atomically
@@ -22,7 +22,7 @@ checkpointing, and recovery for a single block device.
 
 ## API
 
-The component implements `IExtentManagerV2`:
+The component implements `IExtentManager`:
 
 ```rust
 // One-time setup
@@ -146,7 +146,7 @@ backing store.
 
 ```rust
 use extent_manager_v2::test_support::create_test_component;
-use interfaces::{FormatParams, IExtentManagerV2};
+use interfaces::{FormatParams, IExtentManager};
 
 let (component, _mock) = create_test_component(64 * 1024 * 1024);
 component.format(FormatParams {

@@ -1,6 +1,6 @@
 use component_core::channel::SpscChannel;
 use interfaces::{
-    ClientChannels, Command, Completion, DmaAllocFn, DmaBuffer, IBlockDevice, IExtentManagerV2,
+    ClientChannels, Command, Completion, DmaAllocFn, DmaBuffer, IBlockDevice, IExtentManager,
     ILogger, NvmeBlockError, OpHandle, TelemetrySnapshot,
 };
 use std::collections::HashMap;

@@ -24,7 +24,7 @@ use parking_lot::RwLock;
 
 use interfaces::{
     DmaAllocFn, Extent, ExtentKey, ExtentManagerError, FormatParams, IBlockDevice,
-    IExtentManagerV2, ILogger, WriteHandle,
+    IExtentManager, ILogger, WriteHandle,
 };
 
 use component_macros::define_component;
@@ -43,7 +43,7 @@ struct CheckpointCoalesce {
 define_component! {
     pub MetadataManagerV2 {
         version: "0.2.0",
-        provides: [IExtentManagerV2],
+        provides: [IExtentManager],
         receptacles: {
             block_device: IBlockDevice,
             logger: ILogger,
@@ -243,7 +243,7 @@ fn mark_chain_allocated(
     }
 }
 
-impl IExtentManagerV2 for MetadataManagerV2 {
+impl IExtentManager for MetadataManagerV2 {
     fn set_dma_alloc(&self, alloc: DmaAllocFn) {
         *self.dma_alloc.lock().unwrap() = Some(alloc);
     }

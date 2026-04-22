@@ -1,4 +1,4 @@
-use interfaces::{ExtentManagerError, FormatParams, IExtentManagerV2};
+use interfaces::{ExtentManagerError, FormatParams, IExtentManager};
 
 use extent_manager_v2::test_support::{create_test_component, heap_dma_alloc};
 
