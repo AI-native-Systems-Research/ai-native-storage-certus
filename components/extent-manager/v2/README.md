@@ -6,7 +6,7 @@ checkpointing, and recovery for a single block device.
 
 ## Overview
 
-`MetadataManager` implements the `IExtentManager` trait from the
+`MetadataManagerV2` implements the `IExtentManager` trait from the
 `interfaces` crate. It provides:
 
 - **Two-phase extent allocation** -- reserve space, write data, then atomically
@@ -164,7 +164,7 @@ assert_eq!(component.lookup_extent(42).unwrap().offset, extent.offset);
 
 ## Component framework
 
-`MetadataManager` is built with the `define_component!` macro from
+`MetadataManagerV2` is built with the `define_component!` macro from
 `component-macros`. This provides receptacle-based dependency injection:
 the `block_device` and `logger` receptacles are wired at assembly time,
 decoupling the component from concrete implementations.
