@@ -11,7 +11,7 @@ pub(crate) type PerRegionData = Vec<(HashMap<ExtentKey, Extent>, Vec<SlabDescrip
 
 pub(crate) fn recover(
     client: &BlockDeviceClient,
-    component: &crate::MetadataManagerV2,
+    component: &crate::MetadataManager,
 ) -> Result<(Superblock, PerRegionData), ExtentManagerError> {
     let sb_data = client.read_blocks(0, SUPERBLOCK_SIZE)?;
     let sb = Superblock::deserialize(&sb_data)?;

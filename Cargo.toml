@@ -13,7 +13,6 @@ members = [
     "apps/iops-benchmark",
     "apps/extent-benchmark",
     "components/block-device-spdk-nvme/v1",
-    "components/extent-manager/v0",
     "components/extent-manager/v2",
     "components/logger/v1"
 ]
