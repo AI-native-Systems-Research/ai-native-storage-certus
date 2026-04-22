@@ -1,6 +1,7 @@
 ---
 name: component-remove
 description: Remove a component from the code base.
+argument-hint: "[component-name]"
 ---
 
 Building the skeleton for component named $0 involves the following steps:

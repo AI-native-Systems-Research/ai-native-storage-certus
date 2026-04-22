@@ -1,6 +1,7 @@
 ---
 name: component-new-version
 description: Create a new version of a component
+argument-hint: "[component-name]"
 ---
 
 Creating a new version of component named $0 involves the following steps:

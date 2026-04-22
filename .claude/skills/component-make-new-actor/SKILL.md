@@ -1,6 +1,7 @@
 ---
 name: component-make-new-actor
 description: Create a new actor component skeleton
+argument-hint: "[component-name,receptacle-names,...]"
 ---
 
 Building the skeleton for component named $0 involves the following steps:

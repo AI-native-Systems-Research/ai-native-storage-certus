@@ -1,6 +1,7 @@
 ---
 name: component-make-new
 description: Create a new component skeleton
+argument-hint: "[component-name, receptacle-names...]"
 ---
 
 Building the skeleton for component named $0 involves the following steps:
