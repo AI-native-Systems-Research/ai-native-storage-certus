@@ -3,17 +3,17 @@ use interfaces::{ExtentManagerError, FormatParams, IExtentManagerV2};
 use extent_manager_v2::test_support::create_test_component;
 
 const DISK_SIZE: u64 = 64 * 1024 * 1024;
-const BLOCK_SIZE: u32 = 4096;
+const SECTOR_SIZE: u32 = 4096;
 const SLAB_SIZE: u32 = 1024 * 1024;
 const MAX_ELEMENT_SIZE: u32 = 65536;
-const CHUNK_SIZE: u32 = 131072;
+const METADATA_BLOCK_SIZE: u32 = 131072;
 
 fn format_params() -> FormatParams {
     FormatParams {
         slab_size: SLAB_SIZE,
         max_element_size: MAX_ELEMENT_SIZE,
-        chunk_size: CHUNK_SIZE,
-        block_size: BLOCK_SIZE,
+        metadata_block_size: METADATA_BLOCK_SIZE,
+        sector_size: SECTOR_SIZE,
         region_count: 4,
     }
 }
@@ -44,25 +44,25 @@ fn key_max_valid() {
 
 #[test]
 fn out_of_space_returns_error() {
-    let small_disk: u64 = SLAB_SIZE as u64 + BLOCK_SIZE as u64 * 2;
+    let small_disk: u64 = SLAB_SIZE as u64 + SECTOR_SIZE as u64 * 2;
     let (c, _mock) = create_test_component(small_disk);
     c.format(FormatParams {
         slab_size: SLAB_SIZE,
         max_element_size: MAX_ELEMENT_SIZE,
-        chunk_size: BLOCK_SIZE,
-        block_size: BLOCK_SIZE,
+        metadata_block_size: SECTOR_SIZE,
+        sector_size: SECTOR_SIZE,
         region_count: 1,
     })
     .expect("format");
 
-    let slots_per_slab = SLAB_SIZE / BLOCK_SIZE;
+    let slots_per_slab = SLAB_SIZE / SECTOR_SIZE;
     let available = slots_per_slab - 1; // slot 0 reserved for superblock
     let mut handles = Vec::new();
     for i in 0..available as u64 {
-        handles.push(c.reserve_extent(i, BLOCK_SIZE).expect("reserve"));
+        handles.push(c.reserve_extent(i, SECTOR_SIZE).expect("reserve"));
     }
 
-    match c.reserve_extent(999999, BLOCK_SIZE) {
+    match c.reserve_extent(999999, SECTOR_SIZE) {
         Err(ExtentManagerError::OutOfSpace) => {}
         other => panic!("expected OutOfSpace, got: {other:?}"),
     }

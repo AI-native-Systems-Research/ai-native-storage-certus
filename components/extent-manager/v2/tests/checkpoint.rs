@@ -7,17 +7,17 @@ use extent_manager_v2::test_support::{
 };
 
 const DISK_SIZE: u64 = 64 * 1024 * 1024;
-const BLOCK_SIZE: u32 = 4096;
+const SECTOR_SIZE: u32 = 4096;
 const SLAB_SIZE: u32 = 1024 * 1024;
 const MAX_ELEMENT_SIZE: u32 = 65536;
-const CHUNK_SIZE: u32 = 131072;
+const METADATA_BLOCK_SIZE: u32 = 131072;
 
 fn format_params() -> FormatParams {
     FormatParams {
         slab_size: SLAB_SIZE,
         max_element_size: MAX_ELEMENT_SIZE,
-        chunk_size: CHUNK_SIZE,
-        block_size: BLOCK_SIZE,
+        metadata_block_size: METADATA_BLOCK_SIZE,
+        sector_size: SECTOR_SIZE,
         region_count: 4,
     }
 }

@@ -130,12 +130,12 @@ pub(crate) fn write_checkpoint(
         .as_ref()
         .ok_or_else(|| error::not_initialized("component not initialized"))?;
 
-    let (chunk_size, block_size) = {
+    let (metadata_block_size, sector_size) = {
         let r = regions[0].read();
-        (r.format_params.chunk_size, r.format_params.block_size)
+        (r.format_params.metadata_block_size, r.format_params.sector_size)
     };
 
-    let max_payload = chunk_size as usize - CHUNK_HEADER_SIZE;
+    let max_payload = metadata_block_size as usize - CHUNK_HEADER_SIZE;
     let region_count = regions.len();
 
     // Phase 1: Per-region exclusive lock → size + allocate → downgrade → serialize → release
@@ -158,9 +158,9 @@ pub(crate) fn write_checkpoint(
             for _ in 0..new_chunks_needed {
                 let abs_offset = region
                     .buddy
-                    .alloc(chunk_size as u64)
+                    .alloc(metadata_block_size as u64)
                     .ok_or_else(error::out_of_space)?;
-                let lba = abs_offset / block_size as u64;
+                let lba = abs_offset / sector_size as u64;
                 chunk_lbas.push(lba);
             }
         }
@@ -177,9 +177,9 @@ pub(crate) fn write_checkpoint(
         let mut region = region_arc.write();
         let abs_offset = region
             .buddy
-            .alloc(chunk_size as u64)
+            .alloc(metadata_block_size as u64)
             .ok_or_else(error::out_of_space)?;
-        let lba = abs_offset / block_size as u64;
+        let lba = abs_offset / sector_size as u64;
         chunk_lbas.push(lba);
     }
 
@@ -212,7 +212,7 @@ pub(crate) fn write_checkpoint(
         };
 
         let mut chunk_data = header.serialize(payload);
-        chunk_data.resize(chunk_size as usize, 0);
+        chunk_data.resize(metadata_block_size as usize, 0);
 
         client.write_blocks(lba, &chunk_data)?;
         payload_offset = payload_end;
@@ -232,7 +232,7 @@ pub(crate) fn write_checkpoint(
     }
 
     if old_previous != 0 {
-        free_chain_allocations(client, old_previous, chunk_size, block_size, regions);
+        free_chain_allocations(client, old_previous, metadata_block_size, sector_size, regions);
     }
 
     Ok(())
@@ -253,16 +253,16 @@ fn find_region_for_offset(regions: &[Arc<RwLock<RegionState>>], byte_offset: u64
 fn free_chain_allocations(
     client: &BlockDeviceClient,
     head_lba: u64,
-    chunk_size: u32,
-    block_size: u32,
+    metadata_block_size: u32,
+    sector_size: u32,
     regions: &[Arc<RwLock<RegionState>>],
 ) {
     let mut current_lba = head_lba;
     while current_lba != 0 {
-        let byte_offset = current_lba * block_size as u64;
+        let byte_offset = current_lba * sector_size as u64;
 
         let next = client
-            .read_blocks(current_lba, chunk_size as usize)
+            .read_blocks(current_lba, metadata_block_size as usize)
             .ok()
             .and_then(|raw| {
                 let magic = u32::from_le_bytes(raw[0..4].try_into().ok()?);
@@ -274,7 +274,7 @@ fn free_chain_allocations(
             .unwrap_or(0);
 
         let region_idx = find_region_for_offset(regions, byte_offset);
-        regions[region_idx].write().buddy.free(byte_offset, chunk_size as u64);
+        regions[region_idx].write().buddy.free(byte_offset, metadata_block_size as u64);
 
         current_lba = next;
     }
@@ -284,13 +284,13 @@ pub(crate) fn read_chunk_chain(
     client: &BlockDeviceClient,
     head_lba: u64,
     expected_seq: u64,
-    chunk_size: u32,
+    metadata_block_size: u32,
 ) -> Result<Vec<u8>, ExtentManagerError> {
     let mut data = Vec::new();
     let mut current_lba = head_lba;
 
     while current_lba != 0 {
-        let raw = client.read_blocks(current_lba, chunk_size as usize)?;
+        let raw = client.read_blocks(current_lba, metadata_block_size as usize)?;
         let (header, payload) = ChunkHeader::deserialize(&raw)?;
 
         if header.seq != expected_seq {
@@ -441,8 +441,8 @@ mod tests {
         let fp = FormatParams {
             slab_size: 1024 * 1024,
             max_element_size: 65536,
-            chunk_size: 131072,
-            block_size: 4096,
+            metadata_block_size: 131072,
+            sector_size: 4096,
             region_count: 2,
         };
 

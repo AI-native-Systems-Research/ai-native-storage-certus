@@ -28,7 +28,7 @@ pub(crate) fn recover(
             client,
             sb.current_index_lba,
             sb.checkpoint_seq,
-            sb.chunk_size,
+            sb.metadata_block_size,
         ) {
             Ok(data) => {
                 let regions = checkpoint::deserialize_index_and_slabs(&data)?;
@@ -48,7 +48,7 @@ pub(crate) fn recover(
             client,
             sb.previous_index_lba,
             prev_seq,
-            sb.chunk_size,
+            sb.metadata_block_size,
         ) {
             Ok(data) => {
                 let regions = checkpoint::deserialize_index_and_slabs(&data)?;

@@ -12,10 +12,10 @@ pub struct Superblock {
     pub disk_size: u64,
     pub current_index_lba: u64,
     pub previous_index_lba: u64,
-    pub block_size: u32,
+    pub sector_size: u32,
     pub slab_size: u32,
     pub max_element_size: u32,
-    pub chunk_size: u32,
+    pub metadata_block_size: u32,
     pub region_count: u32,
     pub checkpoint_seq: u64,
     pub checksum: u32,
@@ -24,10 +24,10 @@ pub struct Superblock {
 impl Superblock {
     pub fn new(
         disk_size: u64,
-        block_size: u32,
+        sector_size: u32,
         slab_size: u32,
         max_element_size: u32,
-        chunk_size: u32,
+        metadata_block_size: u32,
         region_count: u32,
     ) -> Self {
         Self {
@@ -36,10 +36,10 @@ impl Superblock {
             disk_size,
             current_index_lba: 0,
             previous_index_lba: 0,
-            block_size,
+            sector_size,
             slab_size,
             max_element_size,
-            chunk_size,
+            metadata_block_size,
             region_count,
             checkpoint_seq: 0,
             checksum: 0,
@@ -62,14 +62,14 @@ impl Superblock {
         buf[pos..pos + 8]
             .copy_from_slice(&self.previous_index_lba.to_le_bytes());
         pos += 8;
-        buf[pos..pos + 4].copy_from_slice(&self.block_size.to_le_bytes());
+        buf[pos..pos + 4].copy_from_slice(&self.sector_size.to_le_bytes());
         pos += 4;
         buf[pos..pos + 4].copy_from_slice(&self.slab_size.to_le_bytes());
         pos += 4;
         buf[pos..pos + 4]
             .copy_from_slice(&self.max_element_size.to_le_bytes());
         pos += 4;
-        buf[pos..pos + 4].copy_from_slice(&self.chunk_size.to_le_bytes());
+        buf[pos..pos + 4].copy_from_slice(&self.metadata_block_size.to_le_bytes());
         pos += 4;
         buf[pos..pos + 4].copy_from_slice(&self.region_count.to_le_bytes());
         pos += 4;
@@ -110,7 +110,7 @@ impl Superblock {
         let previous_index_lba =
             u64::from_le_bytes(buf[pos..pos + 8].try_into().unwrap());
         pos += 8;
-        let block_size =
+        let sector_size =
             u32::from_le_bytes(buf[pos..pos + 4].try_into().unwrap());
         pos += 4;
         let slab_size =
@@ -119,7 +119,7 @@ impl Superblock {
         let max_element_size =
             u32::from_le_bytes(buf[pos..pos + 4].try_into().unwrap());
         pos += 4;
-        let chunk_size =
+        let metadata_block_size =
             u32::from_le_bytes(buf[pos..pos + 4].try_into().unwrap());
         pos += 4;
         let region_count =
@@ -145,10 +145,10 @@ impl Superblock {
             disk_size,
             current_index_lba,
             previous_index_lba,
-            block_size,
+            sector_size,
             slab_size,
             max_element_size,
-            chunk_size,
+            metadata_block_size,
             region_count,
             checkpoint_seq,
             checksum: stored_crc,
@@ -170,10 +170,10 @@ mod tests {
         assert_eq!(recovered.magic, SUPERBLOCK_MAGIC);
         assert_eq!(recovered.version, FORMAT_VERSION);
         assert_eq!(recovered.disk_size, 1024 * 1024 * 1024);
-        assert_eq!(recovered.block_size, 4096);
+        assert_eq!(recovered.sector_size, 4096);
         assert_eq!(recovered.slab_size, 1024 * 1024);
         assert_eq!(recovered.max_element_size, 65536);
-        assert_eq!(recovered.chunk_size, 131072);
+        assert_eq!(recovered.metadata_block_size, 131072);
         assert_eq!(recovered.region_count, 32);
         assert_eq!(recovered.checkpoint_seq, 0);
     }

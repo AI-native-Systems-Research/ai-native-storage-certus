@@ -37,15 +37,15 @@ impl RegionState {
         }
     }
 
-    fn align_to_block_size(&self, size: u32, block_size: u32) -> u32 {
-        (size + block_size - 1) / block_size * block_size
+    fn align_to_sector_size(&self, size: u32, sector_size: u32) -> u32 {
+        (size + sector_size - 1) / sector_size * sector_size
     }
 
     pub fn alloc_extent(
         &mut self,
         size: u32,
     ) -> Result<(usize, usize, u64), ExtentManagerError> {
-        let element_size = self.align_to_block_size(size, self.format_params.block_size);
+        let element_size = self.align_to_sector_size(size, self.format_params.sector_size);
 
         for &slab_idx in self.size_classes.get_slabs(element_size) {
             if let Some((slot_idx, offset)) = self.slabs[slab_idx].alloc_slot() {
@@ -113,7 +113,7 @@ impl RegionState {
             .remove(&key)
             .ok_or_else(|| error::key_not_found(key))?;
 
-        let aligned_size = self.align_to_block_size(extent.size, self.format_params.block_size);
+        let aligned_size = self.align_to_sector_size(extent.size, self.format_params.sector_size);
         for (slab_idx, slab) in self.slabs.iter().enumerate() {
             if slab.element_size == aligned_size {
                 if let Some(slot_idx) = slab.slot_for_offset(extent.offset) {

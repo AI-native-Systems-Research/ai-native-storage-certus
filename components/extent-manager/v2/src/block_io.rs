@@ -8,20 +8,20 @@ use crate::error;
 pub(crate) struct BlockDeviceClient {
     channels: ClientChannels,
     alloc: DmaAllocFn,
-    block_size: u32,
+    sector_size: u32,
 }
 
 impl BlockDeviceClient {
-    pub fn new(channels: ClientChannels, alloc: DmaAllocFn, block_size: u32) -> Self {
+    pub fn new(channels: ClientChannels, alloc: DmaAllocFn, sector_size: u32) -> Self {
         Self {
             channels,
             alloc,
-            block_size,
+            sector_size,
         }
     }
 
     pub fn alloc_buffer(&self, size: usize) -> Result<DmaBuffer, NvmeBlockError> {
-        let align = self.block_size as usize;
+        let align = self.sector_size as usize;
         (self.alloc)(size, align, None).map_err(|e| {
             NvmeBlockError::BlockDevice(interfaces::BlockDeviceError::DmaAllocationFailed(e))
         })
@@ -33,8 +33,8 @@ impl BlockDeviceClient {
         data: &[u8],
     ) -> Result<(), interfaces::ExtentManagerError> {
         let num_blocks =
-            (data.len() + self.block_size as usize - 1) / self.block_size as usize;
-        let buf_size = num_blocks * self.block_size as usize;
+            (data.len() + self.sector_size as usize - 1) / self.sector_size as usize;
+        let buf_size = num_blocks * self.sector_size as usize;
 
         let mut buf = self.alloc_buffer(buf_size).map_err(error::nvme_to_em)?;
         buf.as_mut_slice()[..data.len()].copy_from_slice(data);
@@ -49,13 +49,13 @@ impl BlockDeviceClient {
 
         for i in 0..num_blocks {
             let block_lba = lba + i as u64;
-            let block_start = i * self.block_size as usize;
-            let block_end = block_start + self.block_size as usize;
+            let block_start = i * self.sector_size as usize;
+            let block_end = block_start + self.sector_size as usize;
 
             let mut block_buf = self
-                .alloc_buffer(self.block_size as usize)
+                .alloc_buffer(self.sector_size as usize)
                 .map_err(error::nvme_to_em)?;
-            block_buf.as_mut_slice()[..self.block_size as usize]
+            block_buf.as_mut_slice()[..self.sector_size as usize]
                 .copy_from_slice(&buf.as_slice()[block_start..block_end]);
 
             #[allow(clippy::arc_with_non_send_sync)]
@@ -95,13 +95,13 @@ impl BlockDeviceClient {
         num_bytes: usize,
     ) -> Result<Vec<u8>, interfaces::ExtentManagerError> {
         let num_blocks =
-            (num_bytes + self.block_size as usize - 1) / self.block_size as usize;
+            (num_bytes + self.sector_size as usize - 1) / self.sector_size as usize;
         let mut result = Vec::with_capacity(num_bytes);
 
         for i in 0..num_blocks {
             let block_lba = lba + i as u64;
             let buf = self
-                .alloc_buffer(self.block_size as usize)
+                .alloc_buffer(self.sector_size as usize)
                 .map_err(error::nvme_to_em)?;
             let buf = Arc::new(Mutex::new(buf));
 
@@ -119,7 +119,7 @@ impl BlockDeviceClient {
                     res.map_err(error::nvme_to_em)?;
                     let locked = buf.lock().unwrap();
                     let remaining = num_bytes - result.len();
-                    let to_copy = remaining.min(self.block_size as usize);
+                    let to_copy = remaining.min(self.sector_size as usize);
                     result.extend_from_slice(&locked.as_slice()[..to_copy]);
                 }
                 Ok(Completion::Error { error: e, .. }) => {
@@ -137,7 +137,7 @@ impl BlockDeviceClient {
         Ok(result)
     }
 
-    pub fn block_size(&self) -> u32 {
-        self.block_size
+    pub fn sector_size(&self) -> u32 {
+        self.sector_size
     }
 }

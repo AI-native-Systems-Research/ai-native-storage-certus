@@ -7,8 +7,8 @@ use crate::iextent_manager::{Extent, ExtentKey, ExtentManagerError};
 pub struct FormatParams {
     pub slab_size: u32,
     pub max_element_size: u32,
-    pub chunk_size: u32,
-    pub block_size: u32,
+    pub metadata_block_size: u32,
+    pub sector_size: u32,
     pub region_count: u32,
 }
 

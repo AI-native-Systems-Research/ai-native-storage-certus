@@ -1,14 +1,14 @@
 pub(crate) struct BuddyAllocator {
     base_offset: u64,
     total_usable_size: u64,
-    block_size: u32,
+    sector_size: u32,
     max_order: usize,
     free_lists: Vec<Vec<u64>>,
 }
 
 impl BuddyAllocator {
-    pub fn new(base_offset: u64, total_usable_size: u64, block_size: u32) -> Self {
-        let usable_blocks = total_usable_size / block_size as u64;
+    pub fn new(base_offset: u64, total_usable_size: u64, sector_size: u32) -> Self {
+        let usable_blocks = total_usable_size / sector_size as u64;
         let max_order = if usable_blocks > 1 {
             63 - usable_blocks.leading_zeros() as usize
         } else if usable_blocks == 1 {
@@ -17,7 +17,7 @@ impl BuddyAllocator {
             return Self {
                 base_offset,
                 total_usable_size,
-                block_size,
+                sector_size,
                 max_order: 0,
                 free_lists: vec![Vec::new()],
             };
@@ -30,7 +30,7 @@ impl BuddyAllocator {
         while remaining > 0 {
             let order = 63 - remaining.leading_zeros() as usize;
             let blocks = 1u64 << order;
-            let byte_offset = offset * block_size as u64;
+            let byte_offset = offset * sector_size as u64;
             free_lists[order].push(byte_offset);
             offset += blocks;
             remaining -= blocks;
@@ -39,7 +39,7 @@ impl BuddyAllocator {
         Self {
             base_offset,
             total_usable_size,
-            block_size,
+            sector_size,
             max_order,
             free_lists,
         }
@@ -51,7 +51,7 @@ impl BuddyAllocator {
 
     pub fn alloc(&mut self, size: u64) -> Option<u64> {
         let blocks_needed =
-            (size + self.block_size as u64 - 1) / self.block_size as u64;
+            (size + self.sector_size as u64 - 1) / self.sector_size as u64;
         let order_needed = if blocks_needed <= 1 {
             0
         } else {
@@ -71,7 +71,7 @@ impl BuddyAllocator {
 
         for split_order in (order_needed..found_order).rev() {
             let buddy_offset =
-                local_offset + ((1u64 << split_order) * self.block_size as u64);
+                local_offset + ((1u64 << split_order) * self.sector_size as u64);
             self.free_lists[split_order].push(buddy_offset);
         }
 
@@ -80,7 +80,7 @@ impl BuddyAllocator {
 
     pub fn free(&mut self, abs_offset: u64, size: u64) {
         let offset = abs_offset - self.base_offset;
-        let blocks = size / self.block_size as u64;
+        let blocks = size / self.sector_size as u64;
         let mut order = if blocks <= 1 {
             0
         } else {
@@ -89,7 +89,7 @@ impl BuddyAllocator {
         let mut current_offset = offset;
 
         while order < self.max_order {
-            let block_span = (1u64 << order) * self.block_size as u64;
+            let block_span = (1u64 << order) * self.sector_size as u64;
             let buddy_offset = current_offset ^ block_span;
 
             if buddy_offset + block_span > self.total_usable_size {
@@ -113,7 +113,7 @@ impl BuddyAllocator {
 
     pub fn mark_allocated(&mut self, abs_offset: u64, size: u64) {
         let offset = abs_offset - self.base_offset;
-        let blocks = size / self.block_size as u64;
+        let blocks = size / self.sector_size as u64;
         let target_order = if blocks <= 1 {
             0
         } else {
@@ -130,7 +130,7 @@ impl BuddyAllocator {
 
         for search_order in (target_order + 1)..=self.max_order {
             let block_span =
-                (1u64 << search_order) * self.block_size as u64;
+                (1u64 << search_order) * self.sector_size as u64;
             let aligned_start = offset & !(block_span - 1);
 
             if let Some(pos) = self.free_lists[search_order]
@@ -142,7 +142,7 @@ impl BuddyAllocator {
                 let mut split_offset = aligned_start;
                 for so in (target_order..search_order).rev() {
                     let half_span =
-                        (1u64 << so) * self.block_size as u64;
+                        (1u64 << so) * self.sector_size as u64;
                     if offset >= split_offset + half_span {
                         self.free_lists[so].push(split_offset);
                         split_offset += half_span;
@@ -160,7 +160,7 @@ impl BuddyAllocator {
         let mut total = 0u64;
         for (order, list) in self.free_lists.iter().enumerate() {
             total +=
-                list.len() as u64 * (1u64 << order) * self.block_size as u64;
+                list.len() as u64 * (1u64 << order) * self.sector_size as u64;
         }
         total
     }
@@ -169,8 +169,8 @@ impl BuddyAllocator {
         self.total_usable_size
     }
 
-    pub fn block_size(&self) -> u32 {
-        self.block_size
+    pub fn sector_size(&self) -> u32 {
+        self.sector_size
     }
 }
 

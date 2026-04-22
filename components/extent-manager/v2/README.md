@@ -50,7 +50,7 @@ fn checkpoint(&self) -> Result<(), ExtentManagerError>;
 | `ExtentKey` | `u64` -- caller-chosen logical identifier |
 | `Extent` | `{ key, offset, size }` -- a published mapping from key to disk location |
 | `WriteHandle` | RAII handle from `reserve_extent`; call `.publish()` to commit or `.abort()` (or drop) to release |
-| `FormatParams` | `{ block_size, slab_size, max_element_size, chunk_size, region_count }` |
+| `FormatParams` | `{ sector_size, slab_size, max_element_size, metadata_block_size, region_count }` |
 
 ### Lifecycle
 
@@ -107,7 +107,7 @@ threads request one.
 
 ### Checkpoint format
 
-A checkpoint is a linked list of fixed-size chunks (each `chunk_size` bytes),
+A checkpoint is a linked list of fixed-size chunks (each `metadata_block_size` bytes),
 where each chunk has a CRC32-protected header:
 
 ```
@@ -150,10 +150,10 @@ use interfaces::{FormatParams, IExtentManagerV2};
 
 let (component, _mock) = create_test_component(64 * 1024 * 1024);
 component.format(FormatParams {
-    block_size: 4096,
+    sector_size: 4096,
     slab_size: 1024 * 1024,
     max_element_size: 65536,
-    chunk_size: 131072,
+    metadata_block_size: 131072,
     region_count: 4,
 }).unwrap();
 
