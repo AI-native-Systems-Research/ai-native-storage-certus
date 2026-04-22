@@ -287,9 +287,9 @@ unsafe extern "C" fn heap_free(ptr: *mut std::ffi::c_void) {
 
 pub fn create_test_component(
     disk_size: u64,
-) -> (Arc<crate::MetadataManagerV2>, Arc<MockBlockDevice>) {
+) -> (Arc<crate::ExtentManagerV2>, Arc<MockBlockDevice>) {
     let mock = Arc::new(MockBlockDevice::new(disk_size));
-    let component = crate::MetadataManagerV2::new_inner();
+    let component = crate::ExtentManagerV2::new_inner();
     component
         .block_device
         .connect(mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)

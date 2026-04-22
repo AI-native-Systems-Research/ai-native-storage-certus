@@ -41,7 +41,7 @@ struct CheckpointCoalesce {
 }
 
 define_component! {
-    pub MetadataManagerV2 {
+    pub ExtentManagerV2 {
         version: "0.2.0",
         provides: [IExtentManager],
         receptacles: {
@@ -61,9 +61,9 @@ define_component! {
     }
 }
 
-impl MetadataManagerV2 {
+impl ExtentManagerV2 {
     pub fn new_inner() -> Arc<Self> {
-        let component = MetadataManagerV2::new_default();
+        let component = ExtentManagerV2::new_default();
         component
             .checkpoint_interval_ms
             .store(5000, Ordering::Relaxed);
@@ -194,7 +194,7 @@ impl MetadataManagerV2 {
     }
 }
 
-impl Drop for MetadataManagerV2 {
+impl Drop for ExtentManagerV2 {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::Relaxed);
         if let Some(handle) = self.checkpoint_thread.lock().unwrap().take() {
@@ -243,7 +243,7 @@ fn mark_chain_allocated(
     }
 }
 
-impl IExtentManager for MetadataManagerV2 {
+impl IExtentManager for ExtentManagerV2 {
     fn set_dma_alloc(&self, alloc: DmaAllocFn) {
         *self.dma_alloc.lock().unwrap() = Some(alloc);
     }

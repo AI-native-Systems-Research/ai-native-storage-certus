@@ -1,12 +1,12 @@
 # extent-manager-v2
 
-A metadata manager for AI-native storage that maps logical extent keys to
+An extent manager for AI-native storage that maps logical extent keys to
 physical disk locations. It manages space allocation, crash-consistent
 checkpointing, and recovery for a single block device.
 
 ## Overview
 
-`MetadataManagerV2` implements the `IExtentManager` trait from the
+`ExtentManagerV2` implements the `IExtentManager` trait from the
 `interfaces` crate. It provides:
 
 - **Two-phase extent allocation** -- reserve space, write data, then atomically
@@ -164,7 +164,7 @@ assert_eq!(component.lookup_extent(42).unwrap().offset, extent.offset);
 
 ## Component framework
 
-`MetadataManagerV2` is built with the `define_component!` macro from
+`ExtentManagerV2` is built with the `define_component!` macro from
 `component-macros`. This provides receptacle-based dependency injection:
 the `block_device` and `logger` receptacles are wired at assembly time,
 decoupling the component from concrete implementations.

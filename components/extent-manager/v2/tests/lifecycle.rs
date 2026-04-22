@@ -18,7 +18,7 @@ fn format_params() -> FormatParams {
     }
 }
 
-fn setup() -> std::sync::Arc<extent_manager_v2::MetadataManagerV2> {
+fn setup() -> std::sync::Arc<extent_manager_v2::ExtentManagerV2> {
     let (component, _mock) = create_test_component(DISK_SIZE);
     component.format(format_params()).expect("format");
     component
