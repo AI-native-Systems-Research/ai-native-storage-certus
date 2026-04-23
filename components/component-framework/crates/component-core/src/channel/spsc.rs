@@ -81,6 +81,8 @@ impl<T: Send + 'static> SpscChannel<T> {
             sender_count: std::sync::atomic::AtomicUsize::new(0),
             receiver_thread: std::sync::Mutex::new(None),
             sender_thread: std::sync::Mutex::new(None),
+            receiver_parked: std::sync::atomic::AtomicBool::new(false),
+            sender_parked: std::sync::atomic::AtomicBool::new(false),
             force_closed: std::sync::atomic::AtomicBool::new(false),
         });
 

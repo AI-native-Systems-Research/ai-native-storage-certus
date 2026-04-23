@@ -135,6 +135,10 @@ pub(crate) struct ChannelState<T> {
     pub(crate) sender_count: AtomicUsize,
     pub(crate) receiver_thread: std::sync::Mutex<Option<Thread>>,
     pub(crate) sender_thread: std::sync::Mutex<Option<Thread>>,
+    /// Fast-path flags: checked with a Relaxed load before acquiring the
+    /// corresponding Mutex. Set before parking, cleared after waking.
+    pub(crate) receiver_parked: AtomicBool,
+    pub(crate) sender_parked: AtomicBool,
     /// Force-close flag set by actor deactivation to ensure the receiver
     /// exits even when other senders (from IUnknown queries) are still alive.
     pub(crate) force_closed: AtomicBool,
@@ -203,22 +207,24 @@ impl<T: Send + 'static> Sender<T> {
         loop {
             match self.state.queue.push(val) {
                 Ok(()) => {
-                    // Wake the receiver if it's parked
-                    if let Ok(guard) = self.state.receiver_thread.lock() {
-                        if let Some(ref t) = *guard {
-                            t.unpark();
+                    if self.state.receiver_parked.load(Ordering::Relaxed) {
+                        if let Ok(guard) = self.state.receiver_thread.lock() {
+                            if let Some(ref t) = *guard {
+                                t.unpark();
+                            }
                         }
                     }
                     return Ok(());
                 }
                 Err(returned) => {
                     val = returned;
-                    // Queue is full — park and retry
                     {
                         let mut guard = self.state.sender_thread.lock().unwrap();
                         *guard = Some(thread::current());
                     }
+                    self.state.sender_parked.store(true, Ordering::Release);
                     thread::park_timeout(std::time::Duration::from_millis(1));
+                    self.state.sender_parked.store(false, Ordering::Relaxed);
                 }
             }
         }
@@ -245,10 +251,11 @@ impl<T: Send + 'static> Sender<T> {
     pub fn try_send(&self, value: T) -> Result<(), ChannelError> {
         match self.state.queue.push(value) {
             Ok(()) => {
-                // Wake the receiver if it's parked
-                if let Ok(guard) = self.state.receiver_thread.lock() {
-                    if let Some(ref t) = *guard {
-                        t.unpark();
+                if self.state.receiver_parked.load(Ordering::Relaxed) {
+                    if let Ok(guard) = self.state.receiver_thread.lock() {
+                        if let Some(ref t) = *guard {
+                            t.unpark();
+                        }
                     }
                 }
                 Ok(())
@@ -349,35 +356,34 @@ impl<T: Send + 'static> Receiver<T> {
     pub fn recv(&self) -> Result<T, ChannelError> {
         loop {
             if let Some(value) = self.state.queue.pop() {
-                // Wake sender if it's parked
-                if let Ok(guard) = self.state.sender_thread.lock() {
-                    if let Some(ref t) = *guard {
-                        t.unpark();
+                if self.state.sender_parked.load(Ordering::Relaxed) {
+                    if let Ok(guard) = self.state.sender_thread.lock() {
+                        if let Some(ref t) = *guard {
+                            t.unpark();
+                        }
                     }
                 }
                 return Ok(value);
             }
 
-            // Queue is empty — check if channel is closed
             let naturally_closed = !self.state.queue.sender_alive.load(Ordering::Acquire)
                 && self.state.sender_count.load(Ordering::Acquire) == 0;
             let force_closed = self.state.force_closed.load(Ordering::Acquire);
 
             if naturally_closed || force_closed {
-                // Double-check: try one more pop in case a value was pushed
-                // between our pop() and the closed check
                 if let Some(value) = self.state.queue.pop() {
                     return Ok(value);
                 }
                 return Err(ChannelError::Closed);
             }
 
-            // Park until a sender wakes us
             {
                 let mut guard = self.state.receiver_thread.lock().unwrap();
                 *guard = Some(thread::current());
             }
+            self.state.receiver_parked.store(true, Ordering::Release);
             thread::park_timeout(std::time::Duration::from_millis(1));
+            self.state.receiver_parked.store(false, Ordering::Relaxed);
         }
     }
 
@@ -404,10 +410,11 @@ impl<T: Send + 'static> Receiver<T> {
     /// ```
     pub fn try_recv(&self) -> Result<T, ChannelError> {
         if let Some(value) = self.state.queue.pop() {
-            // Wake sender if it's parked
-            if let Ok(guard) = self.state.sender_thread.lock() {
-                if let Some(ref t) = *guard {
-                    t.unpark();
+            if self.state.sender_parked.load(Ordering::Relaxed) {
+                if let Ok(guard) = self.state.sender_thread.lock() {
+                    if let Some(ref t) = *guard {
+                        t.unpark();
+                    }
                 }
             }
             Ok(value)

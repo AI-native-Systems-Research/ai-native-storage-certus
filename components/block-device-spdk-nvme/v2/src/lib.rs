@@ -40,6 +40,7 @@ pub(crate) mod qpair;
 
 pub(crate) mod command;
 pub(crate) mod telemetry;
+pub(crate) mod tsc;
 
 mod actor;
 

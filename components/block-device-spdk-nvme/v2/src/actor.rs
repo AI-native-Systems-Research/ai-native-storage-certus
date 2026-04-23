@@ -7,7 +7,8 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+
+use crate::tsc::TscClock;
 
 use component_core::actor::ActorHandler;
 use component_core::channel::ChannelError;
@@ -51,9 +52,11 @@ struct AsyncIoContext {
     completions: *mut Vec<AsyncCompletionEntry>,
     pool: *mut ContextPool,
     #[cfg(feature = "telemetry")]
-    start: Instant,
+    start: u64,
     #[cfg(feature = "telemetry")]
     bytes: u64,
+    #[cfg(feature = "telemetry")]
+    tsc: *const TscClock,
 }
 
 // SAFETY: AsyncIoContext is only used on the actor thread. Raw pointers
@@ -84,9 +87,11 @@ impl ContextPool {
                 completions: std::ptr::null_mut(),
                 pool: std::ptr::null_mut(),
                 #[cfg(feature = "telemetry")]
-                start: Instant::now(),
+                start: 0,
                 #[cfg(feature = "telemetry")]
                 bytes: 0,
+                #[cfg(feature = "telemetry")]
+                tsc: std::ptr::null(),
             })
         })
     }
@@ -137,7 +142,12 @@ unsafe extern "C" fn async_completion_cb(
     let handle = io_ctx.handle;
     let is_read = io_ctx.is_read;
     #[cfg(feature = "telemetry")]
-    let latency_ns = io_ctx.start.elapsed().as_nanos() as u64;
+    let latency_ns = {
+        // SAFETY: tsc pointer is valid — it points to the handler's TscClock
+        // which outlives all in-flight IOs.
+        let tsc = unsafe { &*io_ctx.tsc };
+        tsc.ticks_to_ns(crate::tsc::rdtsc() - io_ctx.start)
+    };
     #[cfg(feature = "telemetry")]
     let bytes = io_ctx.bytes;
 
@@ -165,8 +175,8 @@ unsafe extern "C" fn async_completion_cb(
 pub(crate) struct PendingOp {
     /// Component-assigned operation handle.
     pub handle: u64,
-    /// Timeout deadline.
-    pub deadline: Instant,
+    /// Timeout deadline (TSC ticks).
+    pub deadline: u64,
     /// Index of the queue pair used for this operation.
     pub qpair_idx: usize,
     /// Pinned read buffer — keeps DMA memory alive until SPDK completion.
@@ -210,8 +220,10 @@ pub(crate) struct BlockDeviceHandler {
     /// Telemetry stats collector (feature-gated).
     #[cfg(feature = "telemetry")]
     pub telemetry: Arc<TelemetryStats>,
-    /// Last time `check_timeouts()` was called, used to throttle to ~1ms.
-    last_timeout_check: Instant,
+    /// Last time `check_timeouts()` was called (TSC ticks), throttled to ~1ms.
+    last_timeout_check: u64,
+    /// Low-overhead TSC clock for hot-path timing.
+    tsc: TscClock,
     /// Optional logger from the component's ILogger receptacle.
     logger: Option<Arc<dyn ILogger + Send + Sync>>,
 }
@@ -262,6 +274,8 @@ impl BlockDeviceHandler {
         controller: NvmeController,
         logger: Option<Arc<dyn ILogger + Send + Sync>>,
     ) -> Self {
+        let tsc = TscClock::new();
+        let now = tsc.now();
         Self {
             controller,
             clients: Vec::new(),
@@ -272,7 +286,8 @@ impl BlockDeviceHandler {
             timeout_scratch: Vec::new(),
             #[cfg(feature = "telemetry")]
             telemetry: Arc::new(TelemetryStats::new()),
-            last_timeout_check: Instant::now(),
+            last_timeout_check: now,
+            tsc,
             logger,
         }
     }
@@ -284,6 +299,8 @@ impl BlockDeviceHandler {
         telemetry: Arc<TelemetryStats>,
         logger: Option<Arc<dyn ILogger + Send + Sync>>,
     ) -> Self {
+        let tsc = TscClock::new();
+        let now = tsc.now();
         Self {
             controller,
             clients: Vec::new(),
@@ -293,7 +310,8 @@ impl BlockDeviceHandler {
             context_pool: ContextPool::new(Self::CONTEXT_POOL_CAPACITY),
             timeout_scratch: Vec::new(),
             telemetry,
-            last_timeout_check: Instant::now(),
+            last_timeout_check: now,
+            tsc,
             logger,
         }
     }
@@ -348,6 +366,7 @@ impl BlockDeviceHandler {
                             &self.telemetry,
                             &mut self.async_completions,
                             &mut self.context_pool,
+                            &self.tsc,
                             None,
                             cmd,
                         );
@@ -418,7 +437,7 @@ impl BlockDeviceHandler {
 
     /// Check for timed-out async operations across all clients.
     fn check_timeouts(&mut self) {
-        let now = Instant::now();
+        let now = self.tsc.now();
         for client in &mut self.clients {
             self.timeout_scratch.clear();
             for (&handle, op) in &client.pending_ops {
@@ -488,6 +507,7 @@ impl BlockDeviceHandler {
         #[cfg(feature = "telemetry")] telemetry: &TelemetryStats,
         async_completions: &mut Vec<AsyncCompletionEntry>,
         context_pool: &mut ContextPool,
+        tsc: &TscClock,
         qp_idx_override: Option<usize>,
         cmd: Command,
     ) {
@@ -503,13 +523,13 @@ impl BlockDeviceHandler {
                 };
 
                 #[cfg(feature = "telemetry")]
-                let start = Instant::now();
+                let start = tsc.now();
 
                 let result = Self::do_sync_read(controller, ns_id, lba, &buf);
 
                 #[cfg(feature = "telemetry")]
                 if result.is_ok() {
-                    telemetry.record(start.elapsed().as_nanos() as u64, bytes);
+                    telemetry.record(tsc.ticks_to_ns(tsc.now() - start), bytes);
                 }
 
                 let _ = session.callback_tx.send(Completion::ReadDone {
@@ -525,13 +545,13 @@ impl BlockDeviceHandler {
                 let bytes = buf.len() as u64;
 
                 #[cfg(feature = "telemetry")]
-                let start = Instant::now();
+                let start = tsc.now();
 
                 let result = Self::do_sync_write(controller, ns_id, lba, &buf);
 
                 #[cfg(feature = "telemetry")]
                 if result.is_ok() {
-                    telemetry.record(start.elapsed().as_nanos() as u64, bytes);
+                    telemetry.record(tsc.ticks_to_ns(tsc.now() - start), bytes);
                 }
 
                 let _ = session.callback_tx.send(Completion::WriteDone {
@@ -560,13 +580,14 @@ impl BlockDeviceHandler {
                 #[allow(unused_variables)]
                 let (ns_ptr, num_blocks, buf_ptr, buf_len) = validation.unwrap();
 
+                let now = tsc.now();
                 let qp_idx = qp_idx_override
                     .unwrap_or_else(|| controller.qpairs.select_index(pending_ops.len() + 1));
                 pending_ops.insert(
                     handle,
                     PendingOp {
                         handle,
-                        deadline: Instant::now() + std::time::Duration::from_millis(timeout_ms),
+                        deadline: tsc.deadline_from_ms(now, timeout_ms),
                         qpair_idx: qp_idx,
                         read_buf: Some(buf.clone()),
                         write_buf: None,
@@ -582,8 +603,9 @@ impl BlockDeviceHandler {
                 ctx.pool = context_pool as *mut ContextPool;
                 #[cfg(feature = "telemetry")]
                 {
-                    ctx.start = Instant::now();
+                    ctx.start = now;
                     ctx.bytes = buf_len;
+                    ctx.tsc = tsc as *const TscClock;
                 }
 
                 let qp = controller
@@ -641,13 +663,14 @@ impl BlockDeviceHandler {
                 }
                 let (ns_ptr, num_blocks) = validation.unwrap();
 
+                let now = tsc.now();
                 let qp_idx = qp_idx_override
                     .unwrap_or_else(|| controller.qpairs.select_index(pending_ops.len() + 1));
                 pending_ops.insert(
                     handle,
                     PendingOp {
                         handle,
-                        deadline: Instant::now() + std::time::Duration::from_millis(timeout_ms),
+                        deadline: tsc.deadline_from_ms(now, timeout_ms),
                         qpair_idx: qp_idx,
                         read_buf: None,
                         write_buf: Some(buf.clone()),
@@ -663,8 +686,9 @@ impl BlockDeviceHandler {
                 ctx.pool = context_pool as *mut ContextPool;
                 #[cfg(feature = "telemetry")]
                 {
-                    ctx.start = Instant::now();
+                    ctx.start = now;
                     ctx.bytes = buf.len() as u64;
+                    ctx.tsc = tsc as *const TscClock;
                 }
 
                 let qp = controller
@@ -731,6 +755,7 @@ impl BlockDeviceHandler {
                         telemetry,
                         async_completions,
                         context_pool,
+                        tsc,
                         Some(batch_qp_idx),
                         op,
                     );
@@ -1056,11 +1081,8 @@ impl ActorHandler<ControlMessage> for BlockDeviceHandler {
 
     fn on_idle(&mut self) {
         self.poll_clients();
-        // Throttle timeout checks to ~1ms — check_timeouts() allocates a Vec
-        // and calls Instant::now() for every pending op, which is too expensive
-        // to run on every poll iteration (millions/sec).
-        let now = Instant::now();
-        if now.duration_since(self.last_timeout_check).as_millis() >= 1 {
+        let now = self.tsc.now();
+        if now >= self.tsc.deadline_from_ms(self.last_timeout_check, 1) {
             self.check_timeouts();
             self.last_timeout_check = now;
         }
@@ -1093,9 +1115,10 @@ mod tests {
 
     #[test]
     fn pending_op_fields() {
+        let tsc = TscClock::new();
         let op = PendingOp {
             handle: 42,
-            deadline: Instant::now() + std::time::Duration::from_secs(5),
+            deadline: tsc.deadline_from_ms(tsc.now(), 5000),
             qpair_idx: 0,
             read_buf: None,
             write_buf: None,
