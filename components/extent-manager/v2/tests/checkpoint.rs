@@ -8,7 +8,7 @@ use extent_manager_v2::test_support::{
 
 const DISK_SIZE: u64 = 64 * 1024 * 1024;
 const SECTOR_SIZE: u32 = 4096;
-const SLAB_SIZE: u32 = 1024 * 1024;
+const SLAB_SIZE: u64 = 1024 * 1024;
 const MAX_ELEMENT_SIZE: u32 = 65536;
 const METADATA_BLOCK_SIZE: u32 = 131072;
 

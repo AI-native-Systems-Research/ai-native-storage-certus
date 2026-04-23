@@ -252,12 +252,12 @@ impl IExtentManager for ExtentManagerV2 {
         if params.sector_size == 0 {
             return Err(error::corrupt_metadata("sector_size must be > 0"));
         }
-        if params.slab_size % params.sector_size != 0 {
+        if params.slab_size % params.sector_size as u64 != 0 {
             return Err(error::corrupt_metadata(
                 "slab_size must be a multiple of sector_size",
             ));
         }
-        if params.max_element_size > params.slab_size {
+        if params.max_element_size as u64 > params.slab_size {
             return Err(error::corrupt_metadata(
                 "max_element_size must be <= slab_size",
             ));
@@ -296,7 +296,7 @@ impl IExtentManager for ExtentManagerV2 {
             let mut buddy = BuddyAllocator::new(base, size, params.sector_size);
 
             let metadata_offset = buddy
-                .alloc(params.slab_size as u64)
+                .alloc(params.slab_size)
                 .ok_or_else(error::out_of_space)?;
 
             let mut region = RegionState::new(i, buddy, params.clone());
@@ -384,7 +384,7 @@ impl IExtentManager for ExtentManagerV2 {
                 );
                 let slab_idx = slabs.len();
                 size_classes.add_slab(desc.element_size, slab_idx);
-                buddy.mark_allocated(desc.start_offset, desc.slab_size as u64);
+                buddy.mark_allocated(desc.start_offset, desc.slab_size);
                 slabs.push(slab);
             }
 

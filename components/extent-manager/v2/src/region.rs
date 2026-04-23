@@ -56,7 +56,7 @@ impl RegionState {
         let slab_size = self.format_params.slab_size;
         let disk_offset = self
             .buddy
-            .alloc(slab_size as u64)
+            .alloc(slab_size)
             .ok_or_else(error::out_of_space)?;
 
         let slab = Slab::new(disk_offset, slab_size, element_size);
@@ -79,7 +79,7 @@ impl RegionState {
             let disk_offset = slab.start_offset;
             let element_size = slab.element_size;
 
-            self.buddy.free(disk_offset, self.format_params.slab_size as u64);
+            self.buddy.free(disk_offset, self.format_params.slab_size);
             self.size_classes.remove_slab(element_size, slab_idx);
 
             if slab_idx < self.slabs.len() - 1 {

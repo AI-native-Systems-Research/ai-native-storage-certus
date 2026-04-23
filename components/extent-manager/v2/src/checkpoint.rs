@@ -12,7 +12,7 @@ pub(crate) const CHUNK_MAGIC: u32 = 0x434B_4E4B; // "CKNK"
 pub(crate) const CHUNK_HEADER_SIZE: usize = 36;
 
 const INDEX_ENTRY_SIZE: usize = 20; // u64 key + u64 offset + u32 size
-const SLAB_ENTRY_SIZE: usize = 16;  // u64 start_offset + u32 slab_size + u32 element_size
+const SLAB_ENTRY_SIZE: usize = 20;  // u64 start_offset + u64 slab_size + u32 element_size
 
 #[derive(Debug, Clone)]
 pub(crate) struct ChunkHeader {
@@ -310,7 +310,7 @@ pub(crate) fn read_chunk_chain(
 #[derive(Debug, Clone)]
 pub(crate) struct SlabDescriptor {
     pub start_offset: u64,
-    pub slab_size: u32,
+    pub slab_size: u64,
     pub element_size: u32,
 }
 
@@ -369,8 +369,8 @@ pub(crate) fn deserialize_index_and_slabs(
             }
             let start_offset = u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
             pos += 8;
-            let slab_size = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap());
-            pos += 4;
+            let slab_size = u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
+            pos += 8;
             let element_size = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap());
             pos += 4;
 

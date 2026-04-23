@@ -118,7 +118,7 @@ fn main() {
     let params = FormatParams {
         slab_size: config.slab_size,
         max_element_size: config.size_class,
-        metadata_block_size: config.slab_size.min(131072),
+        metadata_block_size: config.slab_size.min(131072) as u32,
         sector_size: 4096,
         region_count: 32,
     };
@@ -326,7 +326,7 @@ fn validate_config(config: &BenchmarkConfig) -> Result<(), String> {
         ));
     }
     if let Some(total) = config.total_size {
-        if total <= config.slab_size as u64 {
+        if total <= config.slab_size {
             return Err(format!(
                 "total-size ({total}) must be greater than slab-size ({})",
                 config.slab_size

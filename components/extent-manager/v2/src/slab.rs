@@ -4,15 +4,15 @@ use crate::bitmap::AllocationBitmap;
 
 pub(crate) struct Slab {
     pub start_offset: u64,
-    pub slab_size: u32,
+    pub slab_size: u64,
     pub element_size: u32,
     pub bitmap: AllocationBitmap,
     rover: usize,
 }
 
 impl Slab {
-    pub fn new(start_offset: u64, slab_size: u32, element_size: u32) -> Self {
-        let num_slots = slab_size / element_size;
+    pub fn new(start_offset: u64, slab_size: u64, element_size: u32) -> Self {
+        let num_slots = (slab_size / element_size as u64) as u32;
         Self {
             start_offset,
             slab_size,
@@ -68,7 +68,7 @@ impl Slab {
 
     pub fn contains_offset(&self, byte_offset: u64) -> bool {
         byte_offset >= self.start_offset
-            && byte_offset < self.start_offset + self.slab_size as u64
+            && byte_offset < self.start_offset + self.slab_size
     }
 }
 

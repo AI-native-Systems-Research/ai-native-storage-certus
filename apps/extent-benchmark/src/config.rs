@@ -30,7 +30,7 @@ pub struct BenchmarkConfig {
         default_value_t = 1073741824,
         help = "Slab size in bytes (default 1 GiB)"
     )]
-    pub slab_size: u32,
+    pub slab_size: u64,
 
     #[arg(
         long,

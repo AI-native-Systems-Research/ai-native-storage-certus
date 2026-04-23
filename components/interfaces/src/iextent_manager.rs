@@ -42,10 +42,15 @@ impl std::error::Error for ExtentManagerError {}
 
 #[derive(Debug, Clone)]
 pub struct FormatParams {
-    pub slab_size: u32,
+    /// Size of each slab in bytes. Must be a multiple of `sector_size`.
+    pub slab_size: u64,
+    /// Maximum extent element size in bytes. Must be <= `slab_size`.
     pub max_element_size: u32,
+    /// Checkpoint chunk size in bytes. Must be a multiple of `sector_size`.
     pub metadata_block_size: u32,
+    /// Device sector size in bytes.
     pub sector_size: u32,
+    /// Number of regions (must be a power of two).
     pub region_count: u32,
 }
 

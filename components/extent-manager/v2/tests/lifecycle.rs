@@ -4,7 +4,7 @@ use extent_manager_v2::test_support::{create_test_component, heap_dma_alloc};
 
 const DISK_SIZE: u64 = 64 * 1024 * 1024; // 64 MiB
 const SECTOR_SIZE: u32 = 4096;
-const SLAB_SIZE: u32 = 1024 * 1024; // 1 MiB
+const SLAB_SIZE: u64 = 1024 * 1024; // 1 MiB
 const MAX_ELEMENT_SIZE: u32 = 65536;
 const METADATA_BLOCK_SIZE: u32 = 131072; // 128 KiB
 
@@ -101,7 +101,7 @@ fn key_max_is_valid() {
 
 #[test]
 fn out_of_space() {
-    let small_disk: u64 = SLAB_SIZE as u64 + SECTOR_SIZE as u64 * 2;
+    let small_disk: u64 = SLAB_SIZE + SECTOR_SIZE as u64 * 2;
     let (c, _mock) = create_test_component(small_disk);
     c.format(FormatParams {
         slab_size: SLAB_SIZE,

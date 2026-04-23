@@ -13,7 +13,7 @@ pub struct Superblock {
     pub current_index_lba: u64,
     pub previous_index_lba: u64,
     pub sector_size: u32,
-    pub slab_size: u32,
+    pub slab_size: u64,
     pub max_element_size: u32,
     pub metadata_block_size: u32,
     pub region_count: u32,
@@ -25,7 +25,7 @@ impl Superblock {
     pub fn new(
         disk_size: u64,
         sector_size: u32,
-        slab_size: u32,
+        slab_size: u64,
         max_element_size: u32,
         metadata_block_size: u32,
         region_count: u32,
@@ -64,8 +64,8 @@ impl Superblock {
         pos += 8;
         buf[pos..pos + 4].copy_from_slice(&self.sector_size.to_le_bytes());
         pos += 4;
-        buf[pos..pos + 4].copy_from_slice(&self.slab_size.to_le_bytes());
-        pos += 4;
+        buf[pos..pos + 8].copy_from_slice(&self.slab_size.to_le_bytes());
+        pos += 8;
         buf[pos..pos + 4]
             .copy_from_slice(&self.max_element_size.to_le_bytes());
         pos += 4;
@@ -114,8 +114,8 @@ impl Superblock {
             u32::from_le_bytes(buf[pos..pos + 4].try_into().unwrap());
         pos += 4;
         let slab_size =
-            u32::from_le_bytes(buf[pos..pos + 4].try_into().unwrap());
-        pos += 4;
+            u64::from_le_bytes(buf[pos..pos + 8].try_into().unwrap());
+        pos += 8;
         let max_element_size =
             u32::from_le_bytes(buf[pos..pos + 4].try_into().unwrap());
         pos += 4;

@@ -4,7 +4,7 @@ use extent_manager_v2::test_support::create_test_component;
 
 const DISK_SIZE: u64 = 64 * 1024 * 1024;
 const SECTOR_SIZE: u32 = 4096;
-const SLAB_SIZE: u32 = 1024 * 1024;
+const SLAB_SIZE: u64 = 1024 * 1024;
 const MAX_ELEMENT_SIZE: u32 = 65536;
 const METADATA_BLOCK_SIZE: u32 = 131072;
 
@@ -44,7 +44,7 @@ fn key_max_valid() {
 
 #[test]
 fn out_of_space_returns_error() {
-    let small_disk: u64 = SLAB_SIZE as u64 + SECTOR_SIZE as u64 * 2;
+    let small_disk: u64 = SLAB_SIZE + SECTOR_SIZE as u64 * 2;
     let (c, _mock) = create_test_component(small_disk);
     c.format(FormatParams {
         slab_size: SLAB_SIZE,
@@ -55,7 +55,7 @@ fn out_of_space_returns_error() {
     })
     .expect("format");
 
-    let slots_per_slab = SLAB_SIZE / SECTOR_SIZE;
+    let slots_per_slab = SLAB_SIZE / SECTOR_SIZE as u64;
     let available = slots_per_slab - 1; // slot 0 reserved for superblock
     let mut handles = Vec::new();
     for i in 0..available as u64 {
