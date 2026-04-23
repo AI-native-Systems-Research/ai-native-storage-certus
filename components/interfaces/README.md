@@ -27,6 +27,7 @@ Centralized interface trait definitions for the Certus component system. Compone
 | `IBlockDevice` | `connect_client()`, `sector_size()`, `num_sectors()`, `max_queue_depth()`, `num_io_queues()`, `max_transfer_size()`, `block_size()`, `numa_node()`, `nvme_version()`, `telemetry()` | NVMe block device client access |
 | `IBlockDeviceAdmin` | `set_pci_address()`, `initialize()` | NVMe controller configuration |
 | `IExtentManager` | `set_dma_alloc()`, `initialize()`, `create_extent()`, `remove_extent()`, `lookup_extent()`, `get_extents()`, `for_each_extent()` | Extent allocation and lifecycle |
+| `IExtentManagerV2` | `set_dma_alloc()`, `format()`, `initialize()`, `reserve_extent()`, `lookup_extent()`, `remove_extent()`, `get_extents()`, `for_each_extent()`, `checkpoint()` | Two-phase extent allocation with crash-consistent checkpointing |
 
 ### SPDK Types
 
@@ -37,6 +38,8 @@ When the `spdk` feature is enabled, the crate also exports supporting types:
 - `PciAddress`, `PciId`, `VfioDevice` — device identification
 - `TelemetrySnapshot`, `OpHandle`, `NamespaceInfo`, `ClientChannels` — block device support types
 - `SpdkEnvError`, `BlockDeviceError`, `NvmeBlockError` — error types
+- `FormatParams` — configuration for extent manager v2 formatting (slab size, chunk size, region count, etc.)
+- `WriteHandle` — RAII handle from `reserve_extent`; call `.publish()` to commit or `.abort()` (or drop) to release
 
 ## Build
 
@@ -58,11 +61,12 @@ cargo test -p interfaces
 
 ```
 src/
-  lib.rs               Module declarations and re-exports
-  igreeter.rs          IGreeter interface
-  ilogger.rs           ILogger interface
-  iextent_manager.rs   IExtentManager interface + Extent, ExtentKey, ExtentManagerError
-  ispdk_env.rs         ISPDKEnv interface (feature = "spdk")
-  iblock_device.rs     IBlockDevice, IBlockDeviceAdmin (feature = "spdk")
-  spdk_types.rs        DmaBuffer, PciAddress, error types (feature = "spdk")
+  lib.rs                  Module declarations and re-exports
+  igreeter.rs             IGreeter interface
+  ilogger.rs              ILogger interface
+  iextent_manager.rs      IExtentManager interface + Extent, ExtentKey, ExtentManagerError
+  iextent_manager_v2.rs   IExtentManagerV2 interface + FormatParams, WriteHandle (feature = "spdk")
+  ispdk_env.rs            ISPDKEnv interface (feature = "spdk")
+  iblock_device.rs        IBlockDevice, IBlockDeviceAdmin (feature = "spdk")
+  spdk_types.rs           DmaBuffer, PciAddress, error types (feature = "spdk")
 ```

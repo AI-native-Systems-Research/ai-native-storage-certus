@@ -131,13 +131,25 @@ On `initialize()`, the recovery module:
 4. Rebuilds each region's buddy allocator, slab state, and extent index
    from the recovered data
 
-## Testing
+## Build
+
+```bash
+# Default build (with SPDK feature)
+cargo build -p extent-manager-v2
+
+# Without SPDK (for testing only)
+cargo build -p extent-manager-v2 --no-default-features
+```
+
+This crate is excluded from the workspace `default-members` and must be built explicitly.
+
+## Test
 
 Tests use an in-memory `MockBlockDevice` and heap-based DMA allocation,
 both provided by the `test_support` module (gated on the `testing` feature).
 
-```sh
-cargo test
+```bash
+cargo test -p extent-manager-v2
 ```
 
 The mock supports fault injection (`FaultConfig`) for testing write failures,
@@ -162,9 +174,67 @@ let extent = handle.publish().unwrap();
 assert_eq!(component.lookup_extent(42).unwrap().offset, extent.offset);
 ```
 
-## Component framework
+### Test Suites
+
+| File | Coverage |
+|------|----------|
+| `tests/lifecycle.rs` | Reserve, publish, lookup, remove, abort, get_extents, for_each_extent |
+| `tests/checkpoint.rs` | Checkpoint persistence, recovery after reboot, dual-chain rotation |
+| `tests/concurrent.rs` | Multi-threaded reserve/publish/lookup, concurrent checkpoints |
+| `tests/edge_cases.rs` | Key zero, duplicate keys, large extents, boundary conditions |
+
+## Benchmarks
+
+Criterion-based benchmarks using `MockBlockDevice`:
+
+```bash
+cargo bench -p extent-manager-v2
+```
+
+## Component Framework
 
 `MetadataManagerV2` is built with the `define_component!` macro from
 `component-macros`. This provides receptacle-based dependency injection:
 the `block_device` and `logger` receptacles are wired at assembly time,
 decoupling the component from concrete implementations.
+
+### Interfaces
+
+| Interface | Role | Description |
+|-----------|------|-------------|
+| `IExtentManagerV2` | Provided | Two-phase extent allocation, checkpointing, recovery |
+| `IBlockDevice` | Receptacle | Underlying NVMe block device |
+| `ILogger` | Receptacle | Structured logging |
+
+## Source Layout
+
+```
+src/
+  lib.rs            MetadataManagerV2 definition, IExtentManagerV2 impl
+  bitmap.rs         Slab bitmap for slot-level allocation tracking
+  block_io.rs       BlockDeviceClient wrapper (read/write at block granularity)
+  buddy.rs          BuddyAllocator for coarse-grained slab allocation
+  checkpoint.rs     Checkpoint write: linked chain of CRC-protected chunks
+  error.rs          Error constructors
+  recovery.rs       Checkpoint recovery: chain traversal, fallback, index rebuild
+  region.rs         RegionState, SharedState, SizeClassManager
+  slab.rs           Slab allocator (element-size bitmap within buddy-allocated chunks)
+  superblock.rs     Superblock serialization (magic, CRC, chain pointers)
+  test_support.rs   MockBlockDevice, FaultConfig, test helpers (feature = "testing")
+  write_handle.rs   WriteHandle RAII type (publish/abort semantics)
+tests/
+  lifecycle.rs      Extent CRUD and lifecycle tests
+  checkpoint.rs     Checkpoint persistence and recovery tests
+  concurrent.rs     Multi-threaded concurrency tests
+  edge_cases.rs     Boundary condition and error handling tests
+benches/
+  benchmarks.rs     Criterion benchmarks (reserve/publish throughput)
+```
+
+## CI Gate
+
+All must pass before merge:
+
+```bash
+cargo fmt -p extent-manager-v2 --check && cargo clippy -p extent-manager-v2 -- -D warnings && cargo test -p extent-manager-v2 && cargo doc -p extent-manager-v2 --no-deps && cargo bench -p extent-manager-v2 --no-run
+```
