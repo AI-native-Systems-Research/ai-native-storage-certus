@@ -24,7 +24,7 @@ use parking_lot::RwLock;
 
 use interfaces::{
     DmaAllocFn, Extent, ExtentKey, ExtentManagerError, FormatParams, IBlockDevice,
-    IExtentManagerV2, ILogger, WriteHandle,
+    IExtentManager, ILogger, WriteHandle,
 };
 
 use component_macros::define_component;
@@ -41,9 +41,9 @@ struct CheckpointCoalesce {
 }
 
 define_component! {
-    pub MetadataManagerV2 {
+    pub MetadataManager {
         version: "0.2.0",
-        provides: [IExtentManagerV2],
+        provides: [IExtentManager],
         receptacles: {
             block_device: IBlockDevice,
             logger: ILogger,
@@ -61,9 +61,9 @@ define_component! {
     }
 }
 
-impl MetadataManagerV2 {
+impl MetadataManager {
     pub fn new_inner() -> Arc<Self> {
-        let component = MetadataManagerV2::new_default();
+        let component = MetadataManager::new_default();
         component
             .checkpoint_interval_ms
             .store(5000, Ordering::Relaxed);
@@ -92,15 +92,15 @@ impl MetadataManagerV2 {
             .clone()
             .ok_or_else(|| error::not_initialized("DMA allocator not set"))?;
 
-        let block_size = {
+        let sector_size = {
             let shared = self.shared.lock().unwrap();
             match shared.as_ref() {
-                Some(s) => s.format_params.block_size,
+                Some(s) => s.format_params.sector_size,
                 None => 4096,
             }
         };
 
-        Ok(BlockDeviceClient::new(channels, alloc, block_size))
+        Ok(BlockDeviceClient::new(channels, alloc, sector_size))
     }
 
     fn region_for_key(&self, key: ExtentKey) -> Result<Arc<RwLock<RegionState>>, ExtentManagerError> {
@@ -194,7 +194,7 @@ impl MetadataManagerV2 {
     }
 }
 
-impl Drop for MetadataManagerV2 {
+impl Drop for MetadataManager {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::Relaxed);
         if let Some(handle) = self.checkpoint_thread.lock().unwrap().take() {
@@ -218,18 +218,18 @@ fn find_region_for_offset(regions: &[Arc<RwLock<RegionState>>], byte_offset: u64
 fn mark_chain_allocated(
     client: &BlockDeviceClient,
     head_lba: u64,
-    chunk_size: u32,
-    block_size: u32,
+    metadata_block_size: u32,
+    sector_size: u32,
     regions: &[Arc<RwLock<RegionState>>],
 ) {
     let mut current_lba = head_lba;
     while current_lba != 0 {
-        let byte_offset = current_lba * block_size as u64;
+        let byte_offset = current_lba * sector_size as u64;
         let region_idx = find_region_for_offset(regions, byte_offset);
-        regions[region_idx].write().buddy.mark_allocated(byte_offset, chunk_size as u64);
+        regions[region_idx].write().buddy.mark_allocated(byte_offset, metadata_block_size as u64);
 
         let next = client
-            .read_blocks(current_lba, chunk_size as usize)
+            .read_blocks(current_lba, metadata_block_size as usize)
             .ok()
             .and_then(|raw| {
                 let magic = u32::from_le_bytes(raw[0..4].try_into().ok()?);
@@ -243,18 +243,18 @@ fn mark_chain_allocated(
     }
 }
 
-impl IExtentManagerV2 for MetadataManagerV2 {
+impl IExtentManager for MetadataManager {
     fn set_dma_alloc(&self, alloc: DmaAllocFn) {
         *self.dma_alloc.lock().unwrap() = Some(alloc);
     }
 
     fn format(&self, params: FormatParams) -> Result<(), ExtentManagerError> {
-        if params.block_size == 0 {
-            return Err(error::corrupt_metadata("block_size must be > 0"));
+        if params.sector_size == 0 {
+            return Err(error::corrupt_metadata("sector_size must be > 0"));
         }
-        if params.slab_size % params.block_size != 0 {
+        if params.slab_size % params.sector_size != 0 {
             return Err(error::corrupt_metadata(
-                "slab_size must be a multiple of block_size",
+                "slab_size must be a multiple of sector_size",
             ));
         }
         if params.max_element_size > params.slab_size {
@@ -262,9 +262,9 @@ impl IExtentManagerV2 for MetadataManagerV2 {
                 "max_element_size must be <= slab_size",
             ));
         }
-        if params.chunk_size % params.block_size != 0 {
+        if params.metadata_block_size % params.sector_size != 0 {
             return Err(error::corrupt_metadata(
-                "chunk_size must be a multiple of block_size",
+                "metadata_block_size must be a multiple of sector_size",
             ));
         }
         if params.region_count == 0 || !params.region_count.is_power_of_two() {
@@ -293,7 +293,7 @@ impl IExtentManagerV2 for MetadataManagerV2 {
             } else {
                 disk_size - (region_count as u64 - 1) * region_bytes
             };
-            let mut buddy = BuddyAllocator::new(base, size, params.block_size);
+            let mut buddy = BuddyAllocator::new(base, size, params.sector_size);
 
             let metadata_offset = buddy
                 .alloc(params.slab_size as u64)
@@ -301,10 +301,10 @@ impl IExtentManagerV2 for MetadataManagerV2 {
 
             let mut region = RegionState::new(i, buddy, params.clone());
             let metadata_slab =
-                crate::slab::Slab::new(metadata_offset, params.slab_size, params.chunk_size);
+                crate::slab::Slab::new(metadata_offset, params.slab_size, params.metadata_block_size);
             let slab_idx = region.slabs.len();
             region.slabs.push(metadata_slab);
-            region.size_classes.add_slab(params.chunk_size, slab_idx);
+            region.size_classes.add_slab(params.metadata_block_size, slab_idx);
 
             if i == 0 {
                 region.slabs[slab_idx].mark_slot_allocated(0);
@@ -315,10 +315,10 @@ impl IExtentManagerV2 for MetadataManagerV2 {
 
         let sb = Superblock::new(
             disk_size,
-            params.block_size,
+            params.sector_size,
             params.slab_size,
             params.max_element_size,
-            params.chunk_size,
+            params.metadata_block_size,
             params.region_count,
         );
 
@@ -349,8 +349,8 @@ impl IExtentManagerV2 for MetadataManagerV2 {
         let format_params = FormatParams {
             slab_size: sb.slab_size,
             max_element_size: sb.max_element_size,
-            chunk_size: sb.chunk_size,
-            block_size: sb.block_size,
+            metadata_block_size: sb.metadata_block_size,
+            sector_size: sb.sector_size,
             region_count: sb.region_count,
         };
 
@@ -365,7 +365,7 @@ impl IExtentManagerV2 for MetadataManagerV2 {
             } else {
                 sb.disk_size - (region_count as u64 - 1) * region_bytes
             };
-            let mut buddy = BuddyAllocator::new(base, size, sb.block_size);
+            let mut buddy = BuddyAllocator::new(base, size, sb.sector_size);
 
             let (index, slab_descriptors) = if i < per_region_data.len() {
                 per_region_data[i].clone()
@@ -390,7 +390,7 @@ impl IExtentManagerV2 for MetadataManagerV2 {
 
             for extent in index.values() {
                 let aligned_size =
-                    (extent.size + sb.block_size - 1) / sb.block_size * sb.block_size;
+                    (extent.size + sb.sector_size - 1) / sb.sector_size * sb.sector_size;
                 for slab in slabs.iter_mut() {
                     if slab.element_size == aligned_size {
                         if let Some(slot_idx) = slab.slot_for_offset(extent.offset) {
@@ -423,8 +423,8 @@ impl IExtentManagerV2 for MetadataManagerV2 {
                 mark_chain_allocated(
                     &client,
                     chain_lba,
-                    sb.chunk_size,
-                    sb.block_size,
+                    sb.metadata_block_size,
+                    sb.sector_size,
                     &region_vec,
                 );
             }
@@ -455,7 +455,7 @@ impl IExtentManagerV2 for MetadataManagerV2 {
         let (slab_idx, slot_idx, offset, aligned_size) = {
             let mut r = region.write();
             let (si, sli, off) = r.alloc_extent(size)?;
-            let bs = r.format_params.block_size;
+            let bs = r.format_params.sector_size;
             (si, sli, off, (size + bs - 1) / bs * bs)
         };
 

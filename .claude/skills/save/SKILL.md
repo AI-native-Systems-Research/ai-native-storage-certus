@@ -11,15 +11,19 @@ The user may pass an optional output path as an argument. If provided, use it as
 
 ## Steps
 
-1. Derive the project key from the current working directory and find the most recent session JSONL:
+1. Find the most recent session JSONL. Try exact project key first, then fall back to the most recently modified JSONL across all projects (which is almost certainly this session):
 
 ```bash
 PROJECT_KEY=$(pwd | sed 's|/|-|g')
 JSONL=$(ls -t ~/.claude/projects/${PROJECT_KEY}/*.jsonl 2>/dev/null | head -1)
 if [[ -z "$JSONL" ]]; then
-    echo "No session JSONL found for project key: $PROJECT_KEY" >&2
+    JSONL=$(find ~/.claude/projects/ -maxdepth 2 -name '*.jsonl' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+fi
+if [[ -z "$JSONL" ]]; then
+    echo "No session JSONL found" >&2
     exit 1
 fi
+echo "JSONL: $JSONL"
 ```
 
 2. Determine output path — use the argument if provided, otherwise save to current directory:

@@ -11,8 +11,8 @@ use clap::Parser;
 use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponentV1;
 use component_core::binding::bind;
 use component_core::iunknown::query;
-use extent_manager::ExtentManagerComponentV0;
-use interfaces::DmaBuffer;
+use extent_manager_v2::MetadataManager;
+use interfaces::{DmaBuffer, FormatParams};
 use spdk_env::SPDKEnvComponent;
 
 use config::BenchmarkConfig;
@@ -27,7 +27,7 @@ fn main() {
 
     let spdk_env_comp = SPDKEnvComponent::new_default();
     let block_dev = BlockDeviceSpdkNvmeComponentV1::new_default();
-    let extent_mgr = ExtentManagerComponentV0::new_default();
+    let extent_mgr = MetadataManager::new_inner();
 
     bind(&*spdk_env_comp, "ISPDKEnv", &*block_dev, "spdk_env").unwrap_or_else(|e| {
         eprintln!("error: bind spdk_env→block_dev: {e}");
@@ -115,8 +115,15 @@ fn main() {
         sectors * sector_size as u64
     });
 
-    if let Err(e) = iem.initialize(total_size, config.slab_size) {
-        eprintln!("error: extent manager init failed: {e}");
+    let params = FormatParams {
+        slab_size: config.slab_size,
+        max_element_size: config.size_class,
+        metadata_block_size: config.slab_size.min(131072),
+        sector_size: 4096,
+        region_count: 32,
+    };
+    if let Err(e) = iem.format(params) {
+        eprintln!("error: extent manager format failed: {e}");
         std::process::exit(2);
     }
 
@@ -236,10 +243,14 @@ fn run_create(
     for i in 0..count {
         let key = key_start + i;
         let start = Instant::now();
-        match iem.create_extent(key, size_class) {
-            Ok(_) => {}
+        match iem.reserve_extent(key, size_class) {
+            Ok(handle) => {
+                if let Err(e) = handle.publish() {
+                    eprintln!("  publish({key}) failed: {e}");
+                }
+            }
             Err(e) => {
-                eprintln!("  create_extent({key}) failed: {e}");
+                eprintln!("  reserve_extent({key}) failed: {e}");
             }
         }
         latencies.push(start.elapsed());

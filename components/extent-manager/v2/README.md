@@ -6,7 +6,7 @@ checkpointing, and recovery for a single block device.
 
 ## Overview
 
-`MetadataManagerV2` implements the `IExtentManagerV2` trait from the
+`MetadataManager` implements the `IExtentManager` trait from the
 `interfaces` crate. It provides:
 
 - **Two-phase extent allocation** -- reserve space, write data, then atomically
@@ -22,7 +22,7 @@ checkpointing, and recovery for a single block device.
 
 ## API
 
-The component implements `IExtentManagerV2`:
+The component implements `IExtentManager`:
 
 ```rust
 // One-time setup
@@ -50,7 +50,7 @@ fn checkpoint(&self) -> Result<(), ExtentManagerError>;
 | `ExtentKey` | `u64` -- caller-chosen logical identifier |
 | `Extent` | `{ key, offset, size }` -- a published mapping from key to disk location |
 | `WriteHandle` | RAII handle from `reserve_extent`; call `.publish()` to commit or `.abort()` (or drop) to release |
-| `FormatParams` | `{ block_size, slab_size, max_element_size, chunk_size, region_count }` |
+| `FormatParams` | `{ sector_size, slab_size, max_element_size, metadata_block_size, region_count }` |
 
 ### Lifecycle
 
@@ -107,7 +107,7 @@ threads request one.
 
 ### Checkpoint format
 
-A checkpoint is a linked list of fixed-size chunks (each `chunk_size` bytes),
+A checkpoint is a linked list of fixed-size chunks (each `metadata_block_size` bytes),
 where each chunk has a CRC32-protected header:
 
 ```
@@ -158,14 +158,14 @@ backing store.
 
 ```rust
 use extent_manager_v2::test_support::create_test_component;
-use interfaces::{FormatParams, IExtentManagerV2};
+use interfaces::{FormatParams, IExtentManager};
 
 let (component, _mock) = create_test_component(64 * 1024 * 1024);
 component.format(FormatParams {
-    block_size: 4096,
+    sector_size: 4096,
     slab_size: 1024 * 1024,
     max_element_size: 65536,
-    chunk_size: 131072,
+    metadata_block_size: 131072,
     region_count: 4,
 }).unwrap();
 
@@ -193,7 +193,7 @@ cargo bench -p extent-manager-v2
 
 ## Component Framework
 
-`MetadataManagerV2` is built with the `define_component!` macro from
+`MetadataManager` is built with the `define_component!` macro from
 `component-macros`. This provides receptacle-based dependency injection:
 the `block_device` and `logger` receptacles are wired at assembly time,
 decoupling the component from concrete implementations.

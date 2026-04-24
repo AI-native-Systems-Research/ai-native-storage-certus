@@ -14,8 +14,6 @@ members = [
     "apps/iops-benchmark-md",
     "apps/extent-benchmark",
     "components/block-device-spdk-nvme/v1",
-    "components/block-device-spdk-nvme/v2",
-    "components/extent-manager/v0",
     "components/extent-manager/v2",
     "components/logger/v1"
 ]

@@ -1,6 +1,6 @@
 use component_core::channel::SpscChannel;
 use interfaces::{
-    ClientChannels, Command, Completion, DmaAllocFn, DmaBuffer, IBlockDevice, IExtentManagerV2,
+    ClientChannels, Command, Completion, DmaAllocFn, DmaBuffer, IBlockDevice, IExtentManager,
     ILogger, NvmeBlockError, OpHandle, TelemetrySnapshot,
 };
 use std::collections::HashMap;
@@ -287,9 +287,9 @@ unsafe extern "C" fn heap_free(ptr: *mut std::ffi::c_void) {
 
 pub fn create_test_component(
     disk_size: u64,
-) -> (Arc<crate::MetadataManagerV2>, Arc<MockBlockDevice>) {
+) -> (Arc<crate::MetadataManager>, Arc<MockBlockDevice>) {
     let mock = Arc::new(MockBlockDevice::new(disk_size));
-    let component = crate::MetadataManagerV2::new_inner();
+    let component = crate::MetadataManager::new_inner();
     component
         .block_device
         .connect(mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)

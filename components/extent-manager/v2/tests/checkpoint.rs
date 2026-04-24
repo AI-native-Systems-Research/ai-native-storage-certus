@@ -1,23 +1,23 @@
 use std::sync::Arc;
 
-use interfaces::{ExtentManagerError, FormatParams, IBlockDevice, IExtentManagerV2, ILogger};
+use interfaces::{ExtentManagerError, FormatParams, IBlockDevice, IExtentManager, ILogger};
 
 use extent_manager_v2::test_support::{
     create_test_component, heap_dma_alloc, MockBlockDevice, MockLogger,
 };
 
 const DISK_SIZE: u64 = 64 * 1024 * 1024;
-const BLOCK_SIZE: u32 = 4096;
+const SECTOR_SIZE: u32 = 4096;
 const SLAB_SIZE: u32 = 1024 * 1024;
 const MAX_ELEMENT_SIZE: u32 = 65536;
-const CHUNK_SIZE: u32 = 131072;
+const METADATA_BLOCK_SIZE: u32 = 131072;
 
 fn format_params() -> FormatParams {
     FormatParams {
         slab_size: SLAB_SIZE,
         max_element_size: MAX_ELEMENT_SIZE,
-        chunk_size: CHUNK_SIZE,
-        block_size: BLOCK_SIZE,
+        metadata_block_size: METADATA_BLOCK_SIZE,
+        sector_size: SECTOR_SIZE,
         region_count: 4,
     }
 }
@@ -79,7 +79,7 @@ fn format_fresh_then_initialize() {
     let shared = mock.shared_state();
 
     {
-        let c = extent_manager_v2::MetadataManagerV2::new_inner();
+        let c = extent_manager_v2::MetadataManager::new_inner();
         c.block_device
             .connect(mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
             .unwrap();
@@ -91,7 +91,7 @@ fn format_fresh_then_initialize() {
     }
 
     let mock2 = Arc::new(MockBlockDevice::reboot_from(&shared));
-    let c2 = extent_manager_v2::MetadataManagerV2::new_inner();
+    let c2 = extent_manager_v2::MetadataManager::new_inner();
     c2.block_device
         .connect(mock2 as Arc<dyn IBlockDevice + Send + Sync>)
         .unwrap();
@@ -110,7 +110,7 @@ fn recover_checkpointed_extents() {
     let shared = mock.shared_state();
 
     {
-        let c = extent_manager_v2::MetadataManagerV2::new_inner();
+        let c = extent_manager_v2::MetadataManager::new_inner();
         c.block_device
             .connect(mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
             .unwrap();
@@ -128,7 +128,7 @@ fn recover_checkpointed_extents() {
     }
 
     let mock2 = Arc::new(MockBlockDevice::reboot_from(&shared));
-    let c2 = extent_manager_v2::MetadataManagerV2::new_inner();
+    let c2 = extent_manager_v2::MetadataManager::new_inner();
     c2.block_device
         .connect(mock2 as Arc<dyn IBlockDevice + Send + Sync>)
         .unwrap();
@@ -151,7 +151,7 @@ fn uncheckpointed_extents_lost_after_restart() {
     let shared = mock.shared_state();
 
     {
-        let c = extent_manager_v2::MetadataManagerV2::new_inner();
+        let c = extent_manager_v2::MetadataManager::new_inner();
         c.block_device
             .connect(mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
             .unwrap();
@@ -175,7 +175,7 @@ fn uncheckpointed_extents_lost_after_restart() {
     }
 
     let mock2 = Arc::new(MockBlockDevice::reboot_from(&shared));
-    let c2 = extent_manager_v2::MetadataManagerV2::new_inner();
+    let c2 = extent_manager_v2::MetadataManager::new_inner();
     c2.block_device
         .connect(mock2 as Arc<dyn IBlockDevice + Send + Sync>)
         .unwrap();
@@ -203,7 +203,7 @@ fn corrupt_primary_falls_back_to_previous() {
     let shared = mock.shared_state();
 
     {
-        let c = extent_manager_v2::MetadataManagerV2::new_inner();
+        let c = extent_manager_v2::MetadataManager::new_inner();
         c.block_device
             .connect(mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
             .unwrap();
@@ -241,7 +241,7 @@ fn corrupt_primary_falls_back_to_previous() {
     }
 
     let mock2 = Arc::new(MockBlockDevice::reboot_from(&shared));
-    let c2 = extent_manager_v2::MetadataManagerV2::new_inner();
+    let c2 = extent_manager_v2::MetadataManager::new_inner();
     c2.block_device
         .connect(mock2 as Arc<dyn IBlockDevice + Send + Sync>)
         .unwrap();
@@ -269,7 +269,7 @@ fn invalid_magic_returns_error() {
         state.blocks.insert(0, bad_sb);
     }
 
-    let c = extent_manager_v2::MetadataManagerV2::new_inner();
+    let c = extent_manager_v2::MetadataManager::new_inner();
     c.block_device
         .connect(mock as Arc<dyn IBlockDevice + Send + Sync>)
         .unwrap();
