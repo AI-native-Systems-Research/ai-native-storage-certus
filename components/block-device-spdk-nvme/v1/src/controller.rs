@@ -74,7 +74,7 @@ impl NvmeNamespaceInfo {
     /// assert_eq!(ns.capacity_bytes(), 2048 * 4096);
     /// ```
     #[allow(dead_code)]
-    pub(crate) fn capacity_bytes(&self) -> u64 {
+    pub fn capacity_bytes(&self) -> u64 {
         self.num_sectors * self.sector_size as u64
     }
 }

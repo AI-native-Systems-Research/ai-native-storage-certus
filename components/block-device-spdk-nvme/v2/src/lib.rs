@@ -34,9 +34,9 @@
 //! - `qpair` — IO queue pair pool with depth-based selection
 //! - `namespace` — Namespace management operations
 
-pub(crate) mod controller;
+pub mod controller;
 pub(crate) mod namespace;
-pub(crate) mod qpair;
+pub mod qpair;
 
 pub(crate) mod command;
 pub(crate) mod telemetry;

@@ -1,5 +1,4 @@
 use component_macros::define_interface;
-use std::sync::Arc;
 
 use crate::iextent_manager::{Extent, ExtentKey, ExtentManagerError};
 
@@ -71,6 +70,16 @@ impl Drop for WriteHandle {
         if let Some(f) = self.abort_fn.take() {
             f();
         }
+    }
+}
+
+impl std::fmt::Debug for WriteHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WriteHandle")
+            .field("key", &self.key)
+            .field("offset", &self.offset)
+            .field("size", &self.size)
+            .finish()
     }
 }
 

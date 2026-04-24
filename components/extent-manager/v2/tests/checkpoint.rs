@@ -262,7 +262,8 @@ fn corrupt_primary_falls_back_to_previous() {
 fn invalid_magic_returns_error() {
     let mock = Arc::new(MockBlockDevice::new(DISK_SIZE));
     {
-        let mut state = mock.shared_state().lock().unwrap();
+        let shared = mock.shared_state();
+        let mut state = shared.lock().unwrap();
         let mut bad_sb = vec![0u8; 4096];
         bad_sb[0..8].copy_from_slice(&0xDEADu64.to_le_bytes());
         state.blocks.insert(0, bad_sb);

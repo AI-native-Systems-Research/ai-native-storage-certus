@@ -46,7 +46,6 @@ impl QueuePair {
     /// let qp = QueuePair::new_detached(64);
     /// assert_eq!(qp.depth(), 64);
     /// ```
-    #[cfg(test)]
     pub fn new_detached(depth: u32) -> Self {
         Self {
             qpair_ptr: std::ptr::null_mut(),
@@ -207,7 +206,6 @@ impl QueuePairPool {
         Ok(Self { qpairs })
     }
 
-    #[cfg(test)]
     pub fn from_detached(depths: &[u32]) -> Self {
         let qpairs = depths.iter().map(|&d| QueuePair::new_detached(d)).collect();
         Self { qpairs }
