@@ -1,0 +1,189 @@
+<svg width="100%" viewBox="0 0 780 980" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>GPU cache get/hit-flow data flow diagram</title>
+  <desc>Data flow diagram showing the cache get/hit path: client gRPC request, hash table lookup, ref count, DMA from DRAM or SSD to GPU via GPUDirect Storage, and ref count release.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      text { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
+      .title { font-size: 14px; font-weight: 600; }
+      .subtitle { font-size: 11px; font-weight: 400; }
+      .label { font-size: 11px; font-weight: 400; }
+      .legend { font-size: 11px; }
+      .note { font-size: 10px; font-style: italic; }
+      .section { font-size: 11px; font-weight: 600; letter-spacing: 0.5px; }
+    </style>
+  </defs>
+
+  <!-- ── Legend ─────────────────────────────────────────────── -->
+  <line x1="30" y1="20" x2="66" y2="20" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="72" y="24" class="legend" fill="#3D3D3A">Happy path (hit)</text>
+  <line x1="210" y1="20" x2="246" y2="20" stroke="#C0392B" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#arrow)"/>
+  <text x="252" y="24" class="legend" fill="#3D3D3A">Miss / error path</text>
+
+  <!-- Color key -->
+  <rect x="580" y="12" width="12" height="12" rx="2" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+  <text x="596" y="22" class="legend" fill="#3D3D3A">Dispatcher / Hash table</text>
+  <rect x="580" y="28" width="12" height="12" rx="2" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+  <text x="596" y="38" class="legend" fill="#3D3D3A">DRAM</text>
+  <rect x="680" y="12" width="12" height="12" rx="2" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+  <text x="696" y="22" class="legend" fill="#3D3D3A">SSD</text>
+  <rect x="680" y="28" width="12" height="12" rx="2" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
+  <text x="696" y="38" class="legend" fill="#3D3D3A">Client / GPU</text>
+
+  <!-- ══════════════════════════════════════════════════════════
+       ROW 0 — CLIENT → DISPATCHER (gRPC request)
+       ══════════════════════════════════════════════════════════ -->
+
+  <!-- Client -->
+  <rect x="30" y="70" width="200" height="56" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
+  <text x="130" y="93" text-anchor="middle" class="title" fill="#444441">Client process</text>
+  <text x="130" y="111" text-anchor="middle" class="subtitle" fill="#5F5E5A">key + GPU IPC handle + size</text>
+
+  <!-- Arrow: gRPC request -->
+  <line x1="230" y1="98" x2="378" y2="98" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="304" y="90" text-anchor="middle" class="label" fill="#3D3D3A">1  gRPC get request</text>
+
+  <!-- Dispatcher -->
+  <rect x="380" y="70" width="270" height="56" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+  <text x="515" y="93" text-anchor="middle" class="title" fill="#085041">Request Dispatcher</text>
+  <text x="515" y="111" text-anchor="middle" class="subtitle" fill="#0F6E56">Validate size matches fixed block size</text>
+
+  <!-- Size mismatch error arrow -->
+  <path d="M515 126 L515 146 L260 146 L260 128" fill="none" stroke="#C0392B" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#arrow)"/>
+  <text x="388" y="140" text-anchor="middle" class="label" fill="#C0392B">Size mismatch → error response</text>
+
+  <!-- ══════════════════════════════════════════════════════════
+       ROW 1 — HASH TABLE LOOKUP
+       ══════════════════════════════════════════════════════════ -->
+
+  <!-- Arrow down -->
+  <line x1="515" y1="126" x2="515" y2="186" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="527" y="162" class="label" fill="#3D3D3A">2  Lookup key</text>
+
+  <!-- Hash table -->
+  <rect x="380" y="188" width="270" height="70" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+  <text x="515" y="209" text-anchor="middle" class="title" fill="#085041">Hash table</text>
+  <text x="515" y="227" text-anchor="middle" class="subtitle" fill="#0F6E56">key → { state: DRAM ptr | SSD offset, ref_count }</text>
+  <text x="515" y="245" text-anchor="middle" class="note" fill="#0F6E56">Concurrent gets: each increments ref_count independently</text>
+
+  <!-- Miss arrow back to client -->
+  <path d="M380 215 L280 215 L280 128" fill="none" stroke="#C0392B" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#arrow)"/>
+  <text x="295" y="210" class="label" fill="#C0392B">3  Miss → return immediately</text>
+  <text x="310" y="224" class="note" fill="#C0392B">Client handles fill (no transparent fetch)</text>
+
+  <!-- ══════════════════════════════════════════════════════════
+       ROW 2 — REF COUNT INCREMENT
+       ══════════════════════════════════════════════════════════ -->
+
+  <!-- Arrow down -->
+  <line x1="515" y1="258" x2="515" y2="308" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="527" y="288" class="label" fill="#3D3D3A">4  Hit: incr ref count</text>
+
+  <!-- Ref count box -->
+  <rect x="380" y="310" width="270" height="70" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+  <text x="515" y="331" text-anchor="middle" class="title" fill="#085041">Ref count held</text>
+  <text x="515" y="349" text-anchor="middle" class="subtitle" fill="#0F6E56">Blocks puts and evictions for this key</text>
+  <text x="515" y="367" text-anchor="middle" class="note" fill="#0F6E56">Evictor skips ref-counted entries, picks another key</text>
+
+  <!-- ══════════════════════════════════════════════════════════
+       ROW 3 — DMA TRANSFER (branching: DRAM or SSD)
+       ══════════════════════════════════════════════════════════ -->
+
+  <!-- Arrow down to decision -->
+  <line x1="515" y1="380" x2="515" y2="430" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="527" y="410" class="label" fill="#3D3D3A">5  Initiate DMA to GPU</text>
+
+  <!-- Decision diamond -->
+  <polygon points="515,432 605,472 515,512 425,472" fill="#FFF9EE" stroke="#854F0B" stroke-width="0.5"/>
+  <text x="515" y="468" text-anchor="middle" class="title" fill="#633806">Entry</text>
+  <text x="515" y="484" text-anchor="middle" class="title" fill="#633806">state?</text>
+
+  <!-- LEFT branch: DRAM path -->
+  <line x1="425" y1="472" x2="232" y2="472" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="330" y="464" text-anchor="middle" class="label" fill="#3D3D3A">DRAM-resident</text>
+
+  <!-- DRAM staging buffer -->
+  <rect x="30" y="444" width="200" height="56" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+  <text x="130" y="467" text-anchor="middle" class="title" fill="#0C447C">DRAM staging buffer</text>
+  <text x="130" y="485" text-anchor="middle" class="subtitle" fill="#185FA5">Source for DRAM → GPU DMA</text>
+
+  <!-- Arrow: DRAM → GPU -->
+  <line x1="130" y1="500" x2="130" y2="570" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="142" y="540" class="label" fill="#3D3D3A">DRAM → GPU</text>
+
+  <!-- RIGHT branch: SSD path -->
+  <line x1="605" y1="472" x2="728" y2="472" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="668" y="464" text-anchor="middle" class="label" fill="#3D3D3A">SSD-resident</text>
+
+  <!-- SSD -->
+  <rect x="548" y="444" width="200" height="56" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5" transform="translate(182, 0)"/>
+  <rect x="548" y="444" width="200" height="56" rx="8" fill="none" stroke="none"/>
+  <!-- redraw SSD properly -->
+  <g>
+    <rect x="730" y="444" width="10" height="56" rx="0" fill="none" stroke="none"/>
+  </g>
+
+  <!-- SSD box (proper position) -->
+  <rect x="30" y="572" width="200" height="56" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
+  <text x="130" y="595" text-anchor="middle" class="title" fill="#444441">GPU memory</text>
+  <text x="130" y="613" text-anchor="middle" class="subtitle" fill="#5F5E5A">Client tensor (destination)</text>
+
+  <!-- SSD box right side -->
+  <rect x="548" y="444" width="200" height="56" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+  <text x="648" y="467" text-anchor="middle" class="title" fill="#633806">SSD extent</text>
+  <text x="648" y="485" text-anchor="middle" class="subtitle" fill="#854F0B">GPUDirect Storage source</text>
+
+  <!-- Arrow: SSD → GPU -->
+  <line x1="648" y1="500" x2="648" y2="570" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="660" y="540" class="label" fill="#3D3D3A">SSD → GPU direct</text>
+
+  <!-- GPU memory (right side, for SSD path) -->
+  <rect x="548" y="572" width="200" height="56" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
+  <text x="648" y="595" text-anchor="middle" class="title" fill="#444441">GPU memory</text>
+  <text x="648" y="613" text-anchor="middle" class="subtitle" fill="#5F5E5A">Client tensor (destination)</text>
+
+  <!-- DMA failure note spanning both paths -->
+  <text x="390" y="548" text-anchor="middle" class="note" fill="#C0392B">DMA failure on either path → FATAL (hardware fault)</text>
+
+  <!-- ══════════════════════════════════════════════════════════
+       ROW 4 — CONVERGE: REF COUNT RELEASE + ACK
+       ══════════════════════════════════════════════════════════ -->
+
+  <!-- Converge arrows down to ref release -->
+  <line x1="130" y1="628" x2="130" y2="680" stroke="#1D9E75" stroke-width="1.5"/>
+  <line x1="648" y1="628" x2="648" y2="680" stroke="#1D9E75" stroke-width="1.5"/>
+  <line x1="130" y1="680" x2="648" y2="680" stroke="#1D9E75" stroke-width="1.5"/>
+  <line x1="390" y1="680" x2="390" y2="710" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <text x="390" y="674" text-anchor="middle" class="label" fill="#3D3D3A">6  DMA complete</text>
+
+  <!-- Ref count release -->
+  <rect x="255" y="712" width="270" height="56" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+  <text x="390" y="733" text-anchor="middle" class="title" fill="#085041">Decrement ref count</text>
+  <text x="390" y="751" text-anchor="middle" class="subtitle" fill="#0F6E56">ref_count → 0: entry eligible for puts and evictions</text>
+
+  <!-- ══════════════════════════════════════════════════════════
+       ROW 5 — ACK TO CLIENT
+       ══════════════════════════════════════════════════════════ -->
+
+  <!-- Arrow down to ack -->
+  <line x1="390" y1="768" x2="390" y2="818" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="402" y="798" class="label" fill="#3D3D3A">7  Send response</text>
+
+  <!-- ACK response -->
+  <rect x="255" y="820" width="270" height="56" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.5"/>
+  <text x="390" y="841" text-anchor="middle" class="title" fill="#444441">gRPC hit response</text>
+  <text x="390" y="859" text-anchor="middle" class="subtitle" fill="#5F5E5A">ACK → client (data now in GPU tensor)</text>
+
+  <!-- ══════════════════════════════════════════════════════════
+       SUMMARY
+       ══════════════════════════════════════════════════════════ -->
+  <line x1="30" y1="900" x2="750" y2="900" stroke="#888" stroke-width="0.5"/>
+
+  <text x="390" y="924" text-anchor="middle" class="section" fill="#444441">CONCURRENCY RULES</text>
+  <text x="390" y="944" text-anchor="middle" class="label" fill="#3D3D3A">ref_count > 0: puts blocked (deferred) | evictions skip to another key</text>
+  <text x="390" y="962" text-anchor="middle" class="label" fill="#3D3D3A">Multiple concurrent gets per key: each holds independent ref, parallel DMA transfers</text>
+
+</svg>
