@@ -160,7 +160,9 @@ impl ExtentManagerV2 {
             let regions = self.regions.read();
             if let Some(regions) = regions.as_ref() {
                 for region in regions {
-                    region.write().dirty = false;
+                    let mut r = region.write();
+                    r.dirty = false;
+                    r.flush_pending_frees();
                 }
             }
         }
@@ -528,9 +530,7 @@ impl IExtentManager for ExtentManagerV2 {
     fn remove_extent(&self, key: ExtentKey) -> Result<(), ExtentManagerError> {
         let region = self.region_for_key(key)?;
         let mut r = region.write();
-        let (slab_idx, slot_idx) = r.remove_extent(key)?;
-        r.free_slot(slab_idx, slot_idx);
-        Ok(())
+        r.remove_extent(key)
     }
 
     fn checkpoint(&self) -> Result<(), ExtentManagerError> {

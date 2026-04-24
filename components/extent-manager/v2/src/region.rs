@@ -15,6 +15,7 @@ pub(crate) struct RegionState {
     pub buddy: BuddyAllocator,
     pub dirty: bool,
     pub format_params: FormatParams,
+    pending_frees: Vec<(usize, usize)>,
 }
 
 pub(crate) struct SharedState {
@@ -34,6 +35,7 @@ impl RegionState {
             buddy,
             dirty: false,
             format_params,
+            pending_frees: Vec::new(),
         }
     }
 
@@ -107,7 +109,7 @@ impl RegionState {
     pub fn remove_extent(
         &mut self,
         key: ExtentKey,
-    ) -> Result<(usize, usize), ExtentManagerError> {
+    ) -> Result<(), ExtentManagerError> {
         let extent = self
             .index
             .remove(&key)
@@ -117,8 +119,9 @@ impl RegionState {
         for (slab_idx, slab) in self.slabs.iter().enumerate() {
             if slab.element_size == aligned_size {
                 if let Some(slot_idx) = slab.slot_for_offset(extent.offset) {
+                    self.pending_frees.push((slab_idx, slot_idx));
                     self.dirty = true;
-                    return Ok((slab_idx, slot_idx));
+                    return Ok(());
                 }
             }
         }
@@ -128,5 +131,35 @@ impl RegionState {
             "extent for key {} at offset {} not found in any slab",
             key, extent.offset
         )))
+    }
+
+    pub fn flush_pending_frees(&mut self) {
+        if self.pending_frees.is_empty() {
+            return;
+        }
+
+        let frees = std::mem::take(&mut self.pending_frees);
+        for &(slab_idx, slot_idx) in &frees {
+            self.slabs[slab_idx].free_slot(slot_idx);
+        }
+
+        let mut i = self.slabs.len();
+        while i > 0 {
+            i -= 1;
+            if self.slabs[i].is_empty() {
+                let disk_offset = self.slabs[i].start_offset;
+                let element_size = self.slabs[i].element_size;
+
+                self.buddy.free(disk_offset, self.format_params.slab_size);
+                self.size_classes.remove_slab(element_size, i);
+
+                if i < self.slabs.len() - 1 {
+                    let last_idx = self.slabs.len() - 1;
+                    let last_element_size = self.slabs[last_idx].element_size;
+                    self.size_classes.update_slab_index(last_element_size, last_idx, i);
+                }
+                self.slabs.swap_remove(i);
+            }
+        }
     }
 }

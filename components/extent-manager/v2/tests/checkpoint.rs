@@ -259,6 +259,74 @@ fn corrupt_primary_falls_back_to_previous() {
 }
 
 #[test]
+fn remove_realloc_crash_does_not_corrupt() {
+    let mock = Arc::new(MockBlockDevice::new(DISK_SIZE));
+    let shared = mock.shared_state();
+
+    let original_offset;
+    {
+        let c = extent_manager_v2::ExtentManagerV2::new_inner();
+        c.block_device
+            .connect(mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
+            .unwrap();
+        c.logger
+            .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
+            .unwrap();
+        c.set_dma_alloc(heap_dma_alloc());
+        c.format(format_params()).unwrap();
+
+        let h = c.reserve_extent(1, SECTOR_SIZE).unwrap();
+        let ext = h.publish().unwrap();
+        original_offset = ext.offset;
+        c.checkpoint().unwrap();
+
+        c.remove_extent(1).unwrap();
+
+        let h2 = c.reserve_extent(2, SECTOR_SIZE).unwrap();
+        let ext2 = h2.publish().unwrap();
+        assert_ne!(
+            ext2.offset, original_offset,
+            "removed slot must not be reused before checkpoint"
+        );
+    }
+
+    let mock2 = Arc::new(MockBlockDevice::reboot_from(&shared));
+    let c2 = extent_manager_v2::ExtentManagerV2::new_inner();
+    c2.block_device
+        .connect(mock2 as Arc<dyn IBlockDevice + Send + Sync>)
+        .unwrap();
+    c2.logger
+        .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
+        .unwrap();
+    c2.set_dma_alloc(heap_dma_alloc());
+    c2.initialize().unwrap();
+
+    let recovered = c2.lookup_extent(1).unwrap();
+    assert_eq!(recovered.offset, original_offset);
+}
+
+#[test]
+fn remove_then_checkpoint_frees_slot() {
+    let (c, _mock) = create_test_component(DISK_SIZE);
+    c.format(format_params()).unwrap();
+
+    let h = c.reserve_extent(1, SECTOR_SIZE).unwrap();
+    let ext = h.publish().unwrap();
+    let original_offset = ext.offset;
+    c.checkpoint().unwrap();
+
+    c.remove_extent(1).unwrap();
+    c.checkpoint().unwrap();
+
+    let h2 = c.reserve_extent(2, SECTOR_SIZE).unwrap();
+    let ext2 = h2.publish().unwrap();
+    assert_eq!(
+        ext2.offset, original_offset,
+        "slot should be reused after checkpoint persisted the removal"
+    );
+}
+
+#[test]
 fn invalid_magic_returns_error() {
     let mock = Arc::new(MockBlockDevice::new(DISK_SIZE));
     {
