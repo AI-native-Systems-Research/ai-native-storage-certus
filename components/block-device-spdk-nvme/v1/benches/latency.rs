@@ -8,7 +8,7 @@
 //!
 //! Hardware-dependent benchmarks use runtime detection via
 //! `spdk_env::checks` — they are silently skipped when no SPDK hardware
-#![cfg(feature = "spdk-test")]
+//#![cfg(feature = "spdk-test")]
 //! is available.
 //!
 //! Run with: `cargo bench --bench latency`

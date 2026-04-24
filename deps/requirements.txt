@@ -1,3 +1,4 @@
 meson
 pyelftools
 patchelf
+uv
