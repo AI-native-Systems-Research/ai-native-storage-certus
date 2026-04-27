@@ -165,6 +165,7 @@ fn main() {
         sector_size: 4096,
         region_count: 32,
         metadata_alignment: 1048576, // 1 MiB
+        instance_id: 0,
     };
     if let Err(e) = iem.format(params) {
         eprintln!("error: extent manager format failed: {e}");

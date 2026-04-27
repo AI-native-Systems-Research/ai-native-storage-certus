@@ -277,6 +277,7 @@ mod tests {
             sector_size: 4096,
             region_count: 2,
             metadata_alignment: 1048576,
+            instance_id: 0,
         };
 
         let mut r0 = RegionState::new(0, BuddyAllocator::new(0, 1024 * 1024, 4096), fp.clone());

@@ -21,6 +21,7 @@ fn format_params() -> FormatParams {
         sector_size: SECTOR_SIZE,
         region_count: 4,
         metadata_alignment: METADATA_ALIGNMENT,
+        instance_id: 0,
     }
 }
 

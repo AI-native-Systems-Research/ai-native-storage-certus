@@ -306,7 +306,9 @@ impl IExtentManager for ExtentManagerV2 {
         }
 
         // Write superblock to metadata device
-        let instance_id = {
+        let instance_id = if params.instance_id != 0 {
+            params.instance_id
+        } else {
             use std::io::Read;
             let mut buf = [0u8; 8];
             std::fs::File::open("/dev/urandom")
@@ -358,6 +360,7 @@ impl IExtentManager for ExtentManagerV2 {
             sector_size: sb.sector_size,
             region_count: sb.region_count,
             metadata_alignment: sb.checkpoint_region_offset,
+            instance_id: sb.instance_id,
         };
 
         let data_disk_size = sb.data_disk_size;
