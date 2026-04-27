@@ -5,23 +5,25 @@ use interfaces::{FormatParams, IExtentManager};
 use extent_manager_v2::test_support::create_test_component;
 
 const DISK_SIZE: u64 = 1024 * 1024 * 1024; // 1 GiB
+const METADATA_DISK_SIZE: u64 = 64 * 1024 * 1024; // 64 MiB
 const SECTOR_SIZE: u32 = 4096;
 const SLAB_SIZE: u64 = 1024 * 1024;
-const MAX_ELEMENT_SIZE: u32 = 65536;
-const METADATA_BLOCK_SIZE: u32 = 131072;
+const MAX_EXTENT_SIZE: u32 = 65536;
+const METADATA_ALIGNMENT: u64 = 1048576;
 
 fn format_params() -> FormatParams {
     FormatParams {
+        data_disk_size: DISK_SIZE,
         slab_size: SLAB_SIZE,
-        max_element_size: MAX_ELEMENT_SIZE,
-        metadata_block_size: METADATA_BLOCK_SIZE,
+        max_extent_size: MAX_EXTENT_SIZE,
         sector_size: SECTOR_SIZE,
         region_count: 32,
+        metadata_alignment: METADATA_ALIGNMENT,
     }
 }
 
 fn bench_reserve_publish(c: &mut Criterion) {
-    let (component, _mock) = create_test_component(DISK_SIZE);
+    let (component, _data_mock, _metadata_mock) = create_test_component(DISK_SIZE, METADATA_DISK_SIZE);
     component.format(format_params()).expect("format");
 
     let mut key = 0u64;
@@ -38,7 +40,7 @@ fn bench_lookup(c: &mut Criterion) {
     let mut group = c.benchmark_group("lookup");
 
     for &count in &[1, 1_000, 100_000] {
-        let (component, _mock) = create_test_component(DISK_SIZE);
+        let (component, _data_mock, _metadata_mock) = create_test_component(DISK_SIZE, METADATA_DISK_SIZE);
         component.format(format_params()).expect("format");
 
         for k in 1..=count {
@@ -64,7 +66,7 @@ fn bench_lookup(c: &mut Criterion) {
 fn bench_remove(c: &mut Criterion) {
     c.bench_function("remove", |b| {
         b.iter_custom(|iters| {
-            let (component, _mock) = create_test_component(DISK_SIZE);
+            let (component, _data_mock, _metadata_mock) = create_test_component(DISK_SIZE, METADATA_DISK_SIZE);
             component.format(format_params()).expect("format");
 
             for k in 1..=iters {
@@ -85,7 +87,7 @@ fn bench_checkpoint(c: &mut Criterion) {
     let mut group = c.benchmark_group("checkpoint");
 
     for &count in &[100, 10_000] {
-        let (component, _mock) = create_test_component(DISK_SIZE);
+        let (component, _data_mock, _metadata_mock) = create_test_component(DISK_SIZE, METADATA_DISK_SIZE);
         component.format(format_params()).expect("format");
 
         for k in 1..=count {

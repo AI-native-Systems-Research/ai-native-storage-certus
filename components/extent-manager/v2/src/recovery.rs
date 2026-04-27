@@ -10,45 +10,51 @@ use crate::superblock::{Superblock, SUPERBLOCK_SIZE};
 pub(crate) type PerRegionData = Vec<(HashMap<ExtentKey, Extent>, Vec<SlabDescriptor>)>;
 
 pub(crate) fn recover(
-    client: &BlockDeviceClient,
+    metadata_client: &BlockDeviceClient,
     component: &crate::ExtentManagerV2,
 ) -> Result<(Superblock, PerRegionData), ExtentManagerError> {
-    let sb_data = client.read_blocks(0, SUPERBLOCK_SIZE)?;
+    let sb_data = metadata_client.read_blocks(0, SUPERBLOCK_SIZE)?;
     let sb = Superblock::deserialize(&sb_data)?;
 
-    if sb.current_index_lba == 0 && sb.previous_index_lba == 0 {
+    if sb.checkpoint_seq == 0 {
         let empty: PerRegionData = (0..sb.region_count as usize)
             .map(|_| (HashMap::new(), Vec::new()))
             .collect();
         return Ok((sb, empty));
     }
 
-    if sb.current_index_lba != 0 {
-        match checkpoint::read_chunk_chain(
-            client,
-            sb.current_index_lba,
-            sb.checkpoint_seq,
-            sb.metadata_block_size,
-        ) {
-            Ok(data) => {
-                let regions = checkpoint::deserialize_index_and_slabs(&data)?;
-                return Ok((sb, regions));
-            }
-            Err(e) => {
-                component.log_warn(&format!(
-                    "recovery_fallback: primary chain corrupt: {e}"
-                ));
-            }
+    let active_offset = sb.checkpoint_region_offset
+        + sb.active_copy as u64 * sb.checkpoint_region_size;
+    let inactive_offset = sb.checkpoint_region_offset
+        + (1 - sb.active_copy) as u64 * sb.checkpoint_region_size;
+
+    // Try active copy first
+    match checkpoint::read_checkpoint_region(
+        metadata_client,
+        active_offset,
+        sb.checkpoint_region_size,
+        sb.checkpoint_seq,
+    ) {
+        Ok(data) => {
+            let regions = checkpoint::deserialize_index_and_slabs(&data)?;
+            return Ok((sb, regions));
+        }
+        Err(e) => {
+            component.log_warn(&format!(
+                "recovery_fallback: active checkpoint (copy {}) corrupt: {e}",
+                sb.active_copy
+            ));
         }
     }
 
-    if sb.previous_index_lba != 0 {
-        let prev_seq = sb.checkpoint_seq.saturating_sub(1);
-        match checkpoint::read_chunk_chain(
-            client,
-            sb.previous_index_lba,
+    // Fall back to inactive copy (previous checkpoint)
+    let prev_seq = sb.checkpoint_seq.saturating_sub(1);
+    if prev_seq > 0 {
+        match checkpoint::read_checkpoint_region(
+            metadata_client,
+            inactive_offset,
+            sb.checkpoint_region_size,
             prev_seq,
-            sb.metadata_block_size,
         ) {
             Ok(data) => {
                 let regions = checkpoint::deserialize_index_and_slabs(&data)?;
@@ -56,13 +62,13 @@ pub(crate) fn recover(
             }
             Err(e) => {
                 component.log_error(&format!(
-                    "corruption_detected: both checkpoint chains corrupt: {e}"
+                    "corruption_detected: both checkpoint copies corrupt: {e}"
                 ));
             }
         }
     }
 
     Err(error::corrupt_metadata(
-        "both primary and fallback checkpoint chains are corrupt",
+        "both active and inactive checkpoint copies are corrupt",
     ))
 }

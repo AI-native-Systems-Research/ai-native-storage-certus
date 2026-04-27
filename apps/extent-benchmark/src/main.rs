@@ -26,17 +26,31 @@ fn main() {
     }
 
     let spdk_env_comp = SPDKEnvComponent::new_default();
-    let block_dev = BlockDeviceSpdkNvmeComponentV1::new_default();
+
+    // Data device
+    let data_block_dev = BlockDeviceSpdkNvmeComponentV1::new_default();
+    // Metadata device
+    let metadata_block_dev = BlockDeviceSpdkNvmeComponentV1::new_default();
+
     let extent_mgr = ExtentManagerV2::new_inner();
 
-    bind(&*spdk_env_comp, "ISPDKEnv", &*block_dev, "spdk_env").unwrap_or_else(|e| {
-        eprintln!("error: bind spdk_env→block_dev: {e}");
+    bind(&*spdk_env_comp, "ISPDKEnv", &*data_block_dev, "spdk_env").unwrap_or_else(|e| {
+        eprintln!("error: bind spdk_env→data_block_dev: {e}");
         std::process::exit(2);
     });
-    bind(&*block_dev, "IBlockDevice", &*extent_mgr, "block_device").unwrap_or_else(|e| {
-        eprintln!("error: bind block_dev→extent_mgr: {e}");
+    bind(&*spdk_env_comp, "ISPDKEnv", &*metadata_block_dev, "spdk_env").unwrap_or_else(|e| {
+        eprintln!("error: bind spdk_env→metadata_block_dev: {e}");
         std::process::exit(2);
     });
+    bind(&*data_block_dev, "IBlockDevice", &*extent_mgr, "block_device").unwrap_or_else(|e| {
+        eprintln!("error: bind data_block_dev→extent_mgr: {e}");
+        std::process::exit(2);
+    });
+    bind(&*metadata_block_dev, "IBlockDevice", &*extent_mgr, "metadata_device").unwrap_or_else(|e| {
+        eprintln!("error: bind metadata_block_dev→extent_mgr: {e}");
+        std::process::exit(2);
+    });
+
     let ienv =
         query::<dyn spdk_env::ISPDKEnv + Send + Sync>(&*spdk_env_comp).unwrap_or_else(|| {
             eprintln!("error: failed to query ISPDKEnv");
@@ -53,39 +67,68 @@ fn main() {
         std::process::exit(2);
     }
 
-    let target = parse_pci_addr(&config.device).unwrap_or_else(|| {
-        eprintln!("error: invalid PCI address format: {}", config.device);
+    // Initialize data device
+    let data_target = parse_pci_addr(&config.device).unwrap_or_else(|| {
+        eprintln!("error: invalid data device PCI address format: {}", config.device);
         std::process::exit(1);
     });
 
-    let _device = devices
+    let _data_device = devices
         .iter()
         .find(|d| {
-            d.address.domain == target.domain
-                && d.address.bus == target.bus
-                && d.address.dev == target.dev
-                && d.address.func == target.func
+            d.address.domain == data_target.domain
+                && d.address.bus == data_target.bus
+                && d.address.dev == data_target.dev
+                && d.address.func == data_target.func
         })
         .unwrap_or_else(|| {
             eprintln!("error: no NVMe device found at {}", config.device);
             std::process::exit(1);
         });
 
-    let admin = query::<dyn interfaces::IBlockDeviceAdmin + Send + Sync>(&*block_dev)
+    let data_admin = query::<dyn interfaces::IBlockDeviceAdmin + Send + Sync>(&*data_block_dev)
         .unwrap_or_else(|| {
-            eprintln!("error: failed to query IBlockDeviceAdmin");
+            eprintln!("error: failed to query IBlockDeviceAdmin for data device");
             std::process::exit(2);
         });
+    data_admin.set_pci_address(data_target);
+    if let Err(e) = data_admin.initialize() {
+        eprintln!("error: data block device init failed: {e}");
+        std::process::exit(2);
+    }
 
-    admin.set_pci_address(target);
+    // Initialize metadata device
+    let metadata_target = parse_pci_addr(&config.metadata_device).unwrap_or_else(|| {
+        eprintln!("error: invalid metadata device PCI address format: {}", config.metadata_device);
+        std::process::exit(1);
+    });
 
-    if let Err(e) = admin.initialize() {
-        eprintln!("error: block device init failed: {e}");
+    let _metadata_device = devices
+        .iter()
+        .find(|d| {
+            d.address.domain == metadata_target.domain
+                && d.address.bus == metadata_target.bus
+                && d.address.dev == metadata_target.dev
+                && d.address.func == metadata_target.func
+        })
+        .unwrap_or_else(|| {
+            eprintln!("error: no NVMe device found at {}", config.metadata_device);
+            std::process::exit(1);
+        });
+
+    let metadata_admin = query::<dyn interfaces::IBlockDeviceAdmin + Send + Sync>(&*metadata_block_dev)
+        .unwrap_or_else(|| {
+            eprintln!("error: failed to query IBlockDeviceAdmin for metadata device");
+            std::process::exit(2);
+        });
+    metadata_admin.set_pci_address(metadata_target);
+    if let Err(e) = metadata_admin.initialize() {
+        eprintln!("error: metadata block device init failed: {e}");
         std::process::exit(2);
     }
 
     let ibd =
-        query::<dyn interfaces::IBlockDevice + Send + Sync>(&*block_dev).unwrap_or_else(|| {
+        query::<dyn interfaces::IBlockDevice + Send + Sync>(&*data_block_dev).unwrap_or_else(|| {
             eprintln!("error: failed to query IBlockDevice");
             std::process::exit(2);
         });
@@ -116,11 +159,12 @@ fn main() {
     });
 
     let params = FormatParams {
+        data_disk_size: total_size,
         slab_size: config.slab_size,
-        max_element_size: config.size_class,
-        metadata_block_size: config.slab_size.min(131072) as u32,
+        max_extent_size: config.size_class,
         sector_size: 4096,
         region_count: 32,
+        metadata_alignment: 1048576, // 1 MiB
     };
     if let Err(e) = iem.format(params) {
         eprintln!("error: extent manager format failed: {e}");

@@ -286,14 +286,20 @@ unsafe extern "C" fn heap_free(ptr: *mut std::ffi::c_void) {
 }
 
 pub fn create_test_component(
-    disk_size: u64,
-) -> (Arc<crate::ExtentManagerV2>, Arc<MockBlockDevice>) {
-    let mock = Arc::new(MockBlockDevice::new(disk_size));
+    data_disk_size: u64,
+    metadata_disk_size: u64,
+) -> (Arc<crate::ExtentManagerV2>, Arc<MockBlockDevice>, Arc<MockBlockDevice>) {
+    let data_mock = Arc::new(MockBlockDevice::new(data_disk_size));
+    let metadata_mock = Arc::new(MockBlockDevice::new(metadata_disk_size));
     let component = crate::ExtentManagerV2::new_inner();
     component
         .block_device
-        .connect(mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
-        .expect("connect mock block device");
+        .connect(data_mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
+        .expect("connect data block device");
+    component
+        .metadata_device
+        .connect(metadata_mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
+        .expect("connect metadata block device");
 
     let logger = Arc::new(MockLogger);
     component
@@ -302,5 +308,5 @@ pub fn create_test_component(
         .expect("connect logger");
 
     component.set_dma_alloc(heap_dma_alloc());
-    (component, mock)
+    (component, data_mock, metadata_mock)
 }

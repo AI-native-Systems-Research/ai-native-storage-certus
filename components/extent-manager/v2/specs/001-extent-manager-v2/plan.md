@@ -1,16 +1,16 @@
 # Implementation Plan: Extent Manager V2
 
-**Branch**: `001-extent-manager-v2` | **Date**: 2026-04-23 | **Spec**: [spec.md](spec.md)
-**Context**: Backfilled from existing implementation. Documents current architecture.
+**Branch**: `001-extent-manager-v2` | **Date**: 2026-04-27 | **Spec**: [spec.md](spec.md)
+**Context**: Updated for two-device architecture (separate data + metadata disks).
 
 ## Summary
 
 ExtentManagerV2 is a crash-consistent extent-to-disk-location mapper
-for AI-native storage. It uses a two-level allocator (buddy + slab),
-region-based sharding for concurrency, and a dual-chain checkpoint
-format for resilience. The component is built on the Certus component
-framework using `define_component!` with receptacle-based dependency
-injection.
+for AI-native storage. It uses a two-level allocator (buddy + slab) on
+a dedicated data device, region-based sharding for concurrency, and a
+dual-copy checkpoint format on a dedicated metadata device for
+resilience. The component is built on the Certus component framework
+using `define_component!` with receptacle-based dependency injection.
 
 ## Technical Context
 
@@ -18,13 +18,15 @@ injection.
 **Primary Dependencies**:
 - `component-core` / `component-macros` / `component-framework` -- Certus component model
 - `interfaces` (with `spdk` feature) -- shared trait definitions
-- `crc32fast` -- CRC32 checksums for superblock and checkpoint chunks
+- `crc32fast` -- CRC32 checksums for superblock and checkpoint regions
 - `parking_lot` -- `RwLock` with downgrade support for checkpoint serialization
 
-**Storage**: Single NVMe block device via IBlockDevice receptacle
+**Storage**: Two NVMe block devices via IBlockDevice receptacles
+  - `block_device` — data device for user extents
+  - `metadata_device` — metadata device for superblock + checkpoint regions
 **Testing**: `cargo test` with in-memory MockBlockDevice and heap DMA allocation
 **Target Platform**: Linux (SPDK/VFIO), macOS for development (mock-only)
-**Performance Goals**: ~100M extents on a 10 TB device with 128 KiB extents
+**Performance Goals**: ~100M extents on a 10 TB data device with 128 KiB extents
 **Constraints**: Sector-atomic writes assumed; checkpoint must be crash-consistent
 
 ## Architecture
@@ -34,7 +36,8 @@ injection.
 ```
 ExtentManagerV2 (define_component!)
 ├── Receptacles
-│   ├── block_device: IBlockDevice
+│   ├── block_device: IBlockDevice     (data device)
+│   ├── metadata_device: IBlockDevice  (metadata device)
 │   └── logger: ILogger
 ├── State
 │   ├── regions: RwLock<Vec<Arc<RwLock<RegionState>>>>
@@ -54,12 +57,30 @@ RegionState
 ├── index: HashMap<ExtentKey, Extent>    -- the extent map
 ├── slabs: Vec<Slab>                     -- slab allocators
 ├── size_classes: SizeClassManager       -- element_size -> [slab indices]
-├── buddy: BuddyAllocator               -- coarse allocation
+├── buddy: BuddyAllocator               -- coarse allocation on data device
 ├── dirty: bool                          -- checkpoint skip optimization
+├── pending_frees: Vec<(usize, usize)>  -- deferred slot frees
 └── format_params: FormatParams
 ```
 
-### Space Allocation: Buddy + Slab
+### Device Layout
+
+```
+Metadata Device:
+┌──────────┬────────────┬──────────────────┬──────────────────┐
+│Superblock│  Padding   │ Checkpoint Copy 0│ Checkpoint Copy 1│
+│  4 KiB   │ (to       │ checkpoint_      │ checkpoint_      │
+│          │ alignment) │ region_size      │ region_size      │
+└──────────┴────────────┴──────────────────┴──────────────────┘
+
+Data Device:
+┌─────────────────────────────────────────────────────────────┐
+│ Region 0 (buddy)│ Region 1 (buddy)│ ... │ Region N (buddy) │
+│ slabs + extents │ slabs + extents │     │ slabs + extents  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Space Allocation: Buddy + Slab (data device only)
 
 Two-level scheme avoids external fragmentation (buddy manages slab-
 sized chunks) while efficiently packing same-size extents (slab
@@ -82,53 +103,60 @@ checkpoint()
   1. Coalesce check: if checkpoint in progress, wait for next completion
   2. If no region is dirty, skip
   3. Serialize all regions (index entries + slab descriptors)
-  4. Allocate chunk blocks from per-region buddy allocators
-  5. Write linked chain of CRC32-protected chunks
-  6. Rotate superblock: previous <- current, current <- new chain
-  7. Write superblock atomically (single sector)
-  8. Free old previous chain blocks back to buddy allocators
+  4. Determine inactive copy (1 - active_copy)
+  5. Write contiguous blob to inactive checkpoint region on metadata device
+  6. Update superblock: active_copy = inactive, bump checkpoint_seq
+  7. Write superblock to metadata device LBA 0
+  8. Clear dirty flags, flush pending frees
 ```
 
 ### Recovery Flow
 
 ```
 initialize()
-  1. Read superblock at LBA 0, validate magic + CRC
-  2. Follow current_index_lba chain, verify per-chunk CRCs
-  3. If current chain fails: follow previous_index_lba chain
+  1. Read superblock at LBA 0 of metadata device, validate magic + CRC
+  2. Read active checkpoint region, verify seq + CRC
+  3. If active copy fails: read inactive copy as fallback
   4. Deserialize region data (index + slab descriptors)
-  5. Rebuild buddy allocators, mark slab blocks as allocated
-  6. Mark individual extent slots as allocated in slab bitmaps
+  5. Query data device size, set up buddy allocators per region
+  6. Rebuild slab bitmaps from index entries
   7. Rebuild size class managers
 ```
 
 ### Key Design Decisions
 
-1. **Region sharding by key hash**: Keys are hashes, so
+1. **Separate metadata and data devices**: Metadata goes on a
+   dedicated device with a simple contiguous layout. This decouples
+   metadata I/O from data I/O and eliminates the need to allocate
+   checkpoint storage from the data device's buddy allocator.
+
+2. **Two contiguous checkpoint copies**: Instead of linked chunk
+   chains allocated from buddy, each checkpoint is a single
+   contiguous write to a fixed region. This simplifies both the
+   write path (no chunk allocation) and the read path (no chain
+   following).
+
+3. **Region sharding by key hash**: Keys are hashes, so
    `key & (region_count - 1)` gives uniform distribution. Each region
    is independently locked, so N regions allows N concurrent writers.
 
-2. **Buddy + slab two-level allocation**: Buddy handles coarse (slab-
+4. **Buddy + slab two-level allocation**: Buddy handles coarse (slab-
    sized) allocation with O(log N) splits/merges. Slab handles fine-
    grained allocation with O(1) bitmap scan. This avoids both external
    and internal fragmentation.
 
-3. **Checkpoint coalescing**: A Condvar-based version scheme ensures
+5. **Checkpoint coalescing**: A Condvar-based version scheme ensures
    at most two checkpoint I/O operations execute, regardless of how
    many threads request one. This prevents thundering-herd I/O.
 
-4. **Dual checkpoint chains**: The superblock stores both current and
-   previous chain pointers. Since the superblock write is sector-
-   atomic, both pointers are always consistent. The previous chain is
-   a fallback if media errors corrupt the current chain.
-
-5. **Two-phase reserve/publish**: The caller gets a disk offset from
+6. **Two-phase reserve/publish**: The caller gets a disk offset from
    `reserve_extent`, writes data there, then calls `publish()`. This
    ensures the mapping is only visible after data is on disk. Drop-
    as-abort provides safety if the caller forgets to commit.
 
-6. **Rover-based slab allocation**: The bitmap rover distributes
-   allocations across slots, reducing hot-spotting on the first slots.
+7. **Deferred slot freeing**: Removed extents keep their disk slots
+   allocated until after the next successful checkpoint, preventing
+   a crash-after-reallocation corruption scenario.
 
 ## Project Structure
 
@@ -141,11 +169,11 @@ components/extent-manager/v2/
 ├── src/
 │   ├── lib.rs            -- component definition, IExtentManager impl
 │   ├── error.rs          -- ExtentManagerError factory functions
-│   ├── superblock.rs     -- on-disk superblock serialize/deserialize
-│   ├── checkpoint.rs     -- checkpoint write/read/deserialize
+│   ├── superblock.rs     -- on-disk superblock serialize/deserialize (v3)
+│   ├── checkpoint.rs     -- checkpoint write/read (contiguous regions)
 │   ├── recovery.rs       -- recover() from superblock + checkpoint
 │   ├── region.rs         -- RegionState, SharedState
-│   ├── buddy.rs          -- BuddyAllocator
+│   ├── buddy.rs          -- BuddyAllocator (data device)
 │   ├── slab.rs           -- Slab, SizeClassManager
 │   ├── bitmap.rs         -- AllocationBitmap
 │   ├── block_io.rs       -- BlockDeviceClient (sync wrapper)
@@ -179,6 +207,9 @@ mock supports:
   same backing store
 - `shared_state()` to extract the backing store for reboot simulation
 
+`create_test_component(data_disk_size, metadata_disk_size)` creates
+both mock devices and wires both receptacles.
+
 Test files: `tests/lifecycle.rs`, `tests/checkpoint.rs`,
 `tests/concurrent.rs`, `tests/edge_cases.rs`.
 
@@ -192,4 +223,6 @@ Benchmarks: `benches/benchmarks.rs` (Criterion).
   on each checkpoint. At 100M extents this could be expensive.
 - Checkpoint compression: the payload is uncompressed; at scale,
   compression could reduce checkpoint I/O.
-- Multi-device support: currently scoped to a single block device.
+- Multi-data-device support: currently scoped to one data device.
+  Supporting multiple data devices would require region-to-device
+  mapping.

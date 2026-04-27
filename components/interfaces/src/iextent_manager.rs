@@ -42,16 +42,20 @@ impl std::error::Error for ExtentManagerError {}
 
 #[derive(Debug, Clone)]
 pub struct FormatParams {
+    /// Total size of the data disk in bytes.
+    pub data_disk_size: u64,
     /// Size of each slab in bytes. Must be a multiple of `sector_size`.
     pub slab_size: u64,
-    /// Maximum extent element size in bytes. Must be <= `slab_size`.
-    pub max_element_size: u32,
-    /// Checkpoint chunk size in bytes. Must be a multiple of `sector_size`.
-    pub metadata_block_size: u32,
+    /// Maximum extent size in bytes. Must be <= `slab_size`.
+    pub max_extent_size: u32,
     /// Device sector size in bytes.
     pub sector_size: u32,
     /// Number of regions (must be a power of two).
     pub region_count: u32,
+    /// Alignment of checkpoint regions on the metadata disk.
+    /// The first checkpoint region starts at the first multiple of this
+    /// value that is >= the superblock size.
+    pub metadata_alignment: u64,
 }
 
 pub struct WriteHandle {

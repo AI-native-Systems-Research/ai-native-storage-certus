@@ -8,89 +8,10 @@ use crate::block_io::BlockDeviceClient;
 use crate::error;
 use crate::region::{RegionState, SharedState};
 
-pub(crate) const CHUNK_MAGIC: u32 = 0x434B_4E4B; // "CKNK"
-pub(crate) const CHUNK_HEADER_SIZE: usize = 36;
+pub(crate) const CHECKPOINT_HEADER_SIZE: usize = 16; // u64 seq + u32 payload_len + u32 CRC
 
 const INDEX_ENTRY_SIZE: usize = 20; // u64 key + u64 offset + u32 size
 const SLAB_ENTRY_SIZE: usize = 20;  // u64 start_offset + u64 slab_size + u32 element_size
-
-#[derive(Debug, Clone)]
-pub(crate) struct ChunkHeader {
-    pub magic: u32,
-    pub seq: u64,
-    pub prev_lba: u64,
-    pub next_lba: u64,
-    pub payload_len: u32,
-    pub checksum: u32,
-}
-
-impl ChunkHeader {
-    pub fn serialize(&self, payload: &[u8]) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(CHUNK_HEADER_SIZE + payload.len());
-
-        buf.extend_from_slice(&self.magic.to_le_bytes());
-        buf.extend_from_slice(&self.seq.to_le_bytes());
-        buf.extend_from_slice(&self.prev_lba.to_le_bytes());
-        buf.extend_from_slice(&self.next_lba.to_le_bytes());
-        buf.extend_from_slice(&self.payload_len.to_le_bytes());
-
-        let crc_placeholder = 0u32;
-        buf.extend_from_slice(&crc_placeholder.to_le_bytes());
-
-        buf.extend_from_slice(payload);
-
-        let crc = crc32fast::hash(&buf);
-        buf[32..36].copy_from_slice(&crc.to_le_bytes());
-
-        buf
-    }
-
-    pub fn deserialize(buf: &[u8]) -> Result<(Self, &[u8]), ExtentManagerError> {
-        if buf.len() < CHUNK_HEADER_SIZE {
-            return Err(error::corrupt_metadata("chunk too short"));
-        }
-
-        let magic = u32::from_le_bytes(buf[0..4].try_into().unwrap());
-        if magic != CHUNK_MAGIC {
-            return Err(error::corrupt_metadata(&format!(
-                "invalid chunk magic: {magic:#x}"
-            )));
-        }
-
-        let seq = u64::from_le_bytes(buf[4..12].try_into().unwrap());
-        let prev_lba = u64::from_le_bytes(buf[12..20].try_into().unwrap());
-        let next_lba = u64::from_le_bytes(buf[20..28].try_into().unwrap());
-        let payload_len = u32::from_le_bytes(buf[28..32].try_into().unwrap());
-        let stored_crc = u32::from_le_bytes(buf[32..36].try_into().unwrap());
-
-        let crc_end = CHUNK_HEADER_SIZE + payload_len as usize;
-        let mut check_buf = buf[..crc_end].to_vec();
-        check_buf[32..36].copy_from_slice(&0u32.to_le_bytes());
-        let computed_crc = crc32fast::hash(&check_buf);
-
-        if stored_crc != computed_crc {
-            return Err(error::corrupt_metadata(&format!(
-                "chunk CRC mismatch: stored={stored_crc:#x} computed={computed_crc:#x}"
-            )));
-        }
-
-        let payload_end = CHUNK_HEADER_SIZE + payload_len as usize;
-        if buf.len() < payload_end {
-            return Err(error::corrupt_metadata("chunk payload truncated"));
-        }
-
-        let header = Self {
-            magic,
-            seq,
-            prev_lba,
-            next_lba,
-            payload_len,
-            checksum: stored_crc,
-        };
-
-        Ok((header, &buf[CHUNK_HEADER_SIZE..payload_end]))
-    }
-}
 
 fn serialize_region(region: &RegionState) -> Vec<u8> {
     let mut data = Vec::new();
@@ -116,12 +37,8 @@ fn serialize_region(region: &RegionState) -> Vec<u8> {
     data
 }
 
-fn region_serialized_size(region: &RegionState) -> usize {
-    4 + region.index.len() * INDEX_ENTRY_SIZE + 4 + region.slabs.len() * SLAB_ENTRY_SIZE
-}
-
 pub(crate) fn write_checkpoint(
-    client: &BlockDeviceClient,
+    metadata_client: &BlockDeviceClient,
     regions_lock: &RwLock<Option<Vec<Arc<RwLock<RegionState>>>>>,
     shared_mutex: &Mutex<Option<SharedState>>,
 ) -> Result<(), ExtentManagerError> {
@@ -130,181 +47,108 @@ pub(crate) fn write_checkpoint(
         .as_ref()
         .ok_or_else(|| error::not_initialized("component not initialized"))?;
 
-    let (metadata_block_size, sector_size) = {
-        let r = regions[0].read();
-        (r.format_params.metadata_block_size, r.format_params.sector_size)
-    };
-
-    let max_payload = metadata_block_size as usize - CHUNK_HEADER_SIZE;
     let region_count = regions.len();
 
-    // Phase 1: Per-region exclusive lock → size + allocate → downgrade → serialize → release
-    let mut all_data = Vec::new();
-    all_data.extend_from_slice(&(region_count as u32).to_le_bytes());
-
-    let mut chunk_lbas: Vec<u64> = Vec::new();
+    // Phase 1: Serialize all regions
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&(region_count as u32).to_le_bytes());
 
     for region_arc in regions.iter() {
-        let mut region = region_arc.write();
-
-        let needed_bytes = region_serialized_size(&region);
-        let allocated_payload_space = chunk_lbas.len() * max_payload;
-        let remaining_space = allocated_payload_space.saturating_sub(all_data.len());
-
-        if needed_bytes > remaining_space {
-            let deficit = needed_bytes - remaining_space;
-            let new_chunks_needed = (deficit + max_payload - 1) / max_payload;
-
-            for _ in 0..new_chunks_needed {
-                let abs_offset = region
-                    .buddy
-                    .alloc(metadata_block_size as u64)
-                    .ok_or_else(error::out_of_space)?;
-                let lba = abs_offset / sector_size as u64;
-                chunk_lbas.push(lba);
-            }
-        }
-
-        let region = parking_lot::RwLockWriteGuard::downgrade(region);
+        let region = region_arc.read();
         let region_data = serialize_region(&region);
-        all_data.extend_from_slice(&region_data);
-        drop(region);
+        payload.extend_from_slice(&region_data);
     }
 
-    // Ensure we have at least one chunk
-    if chunk_lbas.is_empty() {
-        let region_arc = &regions[regions.len() - 1];
-        let mut region = region_arc.write();
-        let abs_offset = region
-            .buddy
-            .alloc(metadata_block_size as u64)
-            .ok_or_else(error::out_of_space)?;
-        let lba = abs_offset / sector_size as u64;
-        chunk_lbas.push(lba);
-    }
-
-    // Phase 2: Build chunks with headers and write to disk
-    let new_seq = {
+    // Phase 2: Build checkpoint region data with header
+    let (inactive_copy, region_offset, region_size, new_seq) = {
         let shared = shared_mutex.lock().unwrap();
         let s = shared.as_ref().unwrap();
-        s.checkpoint_seq + 1
+        let inactive = 1 - s.superblock.active_copy;
+        let offset = s.superblock.checkpoint_region_offset
+            + inactive as u64 * s.superblock.checkpoint_region_size;
+        let size = s.superblock.checkpoint_region_size;
+        let seq = s.checkpoint_seq + 1;
+        (inactive, offset, size, seq)
     };
 
-    let mut payload_offset = 0;
-    for (i, &lba) in chunk_lbas.iter().enumerate() {
-        let payload_end = (payload_offset + max_payload).min(all_data.len());
-        let payload = &all_data[payload_offset..payload_end];
-
-        let prev_lba = if i == 0 { 0 } else { chunk_lbas[i - 1] };
-        let next_lba = if i + 1 < chunk_lbas.len() {
-            chunk_lbas[i + 1]
-        } else {
-            0
-        };
-
-        let header = ChunkHeader {
-            magic: CHUNK_MAGIC,
-            seq: new_seq,
-            prev_lba,
-            next_lba,
-            payload_len: payload.len() as u32,
-            checksum: 0,
-        };
-
-        let mut chunk_data = header.serialize(payload);
-        chunk_data.resize(metadata_block_size as usize, 0);
-
-        client.write_blocks(lba, &chunk_data)?;
-        payload_offset = payload_end;
+    let total_needed = CHECKPOINT_HEADER_SIZE + payload.len();
+    if total_needed as u64 > region_size {
+        return Err(error::corrupt_metadata(&format!(
+            "checkpoint payload ({} bytes) exceeds region size ({} bytes)",
+            total_needed, region_size
+        )));
     }
 
-    // Phase 3: Update superblock and free old chain
-    let old_previous;
+    // Build the header + payload blob
+    let mut blob = Vec::with_capacity(region_size as usize);
+    blob.extend_from_slice(&new_seq.to_le_bytes());           // 8 bytes
+    blob.extend_from_slice(&(payload.len() as u32).to_le_bytes()); // 4 bytes
+    blob.extend_from_slice(&0u32.to_le_bytes());               // 4 bytes CRC placeholder
+    blob.extend_from_slice(&payload);
+
+    let crc = crc32fast::hash(&blob);
+    blob[12..16].copy_from_slice(&crc.to_le_bytes());
+
+    // Pad to region size
+    blob.resize(region_size as usize, 0);
+
+    // Phase 3: Write to metadata device
+    let sector_size = metadata_client.sector_size();
+    let lba = region_offset / sector_size as u64;
+    metadata_client.write_blocks(lba, &blob)?;
+
+    // Phase 4: Update superblock
     {
         let mut shared = shared_mutex.lock().unwrap();
         let s = shared.as_mut().unwrap();
-
-        old_previous = s.superblock.previous_index_lba;
-        s.superblock.previous_index_lba = s.superblock.current_index_lba;
-        s.superblock.current_index_lba = chunk_lbas[0];
+        s.superblock.active_copy = inactive_copy;
         s.superblock.checkpoint_seq = new_seq;
         s.checkpoint_seq = new_seq;
-    }
-
-    if old_previous != 0 {
-        free_chain_allocations(client, old_previous, metadata_block_size, sector_size, regions);
     }
 
     Ok(())
 }
 
-fn find_region_for_offset(regions: &[Arc<RwLock<RegionState>>], byte_offset: u64) -> usize {
-    for (i, region) in regions.iter().enumerate() {
-        let r = region.read();
-        let base = r.buddy.base_offset();
-        let end = base + r.buddy.total_usable_size();
-        if byte_offset >= base && byte_offset < end {
-            return i;
-        }
-    }
-    0
-}
-
-fn free_chain_allocations(
-    client: &BlockDeviceClient,
-    head_lba: u64,
-    metadata_block_size: u32,
-    sector_size: u32,
-    regions: &[Arc<RwLock<RegionState>>],
-) {
-    let mut current_lba = head_lba;
-    while current_lba != 0 {
-        let byte_offset = current_lba * sector_size as u64;
-
-        let next = client
-            .read_blocks(current_lba, metadata_block_size as usize)
-            .ok()
-            .and_then(|raw| {
-                let magic = u32::from_le_bytes(raw[0..4].try_into().ok()?);
-                if magic != CHUNK_MAGIC {
-                    return None;
-                }
-                Some(u64::from_le_bytes(raw[20..28].try_into().ok()?))
-            })
-            .unwrap_or(0);
-
-        let region_idx = find_region_for_offset(regions, byte_offset);
-        regions[region_idx].write().buddy.free(byte_offset, metadata_block_size as u64);
-
-        current_lba = next;
-    }
-}
-
-pub(crate) fn read_chunk_chain(
-    client: &BlockDeviceClient,
-    head_lba: u64,
+pub(crate) fn read_checkpoint_region(
+    metadata_client: &BlockDeviceClient,
+    region_byte_offset: u64,
+    region_size: u64,
     expected_seq: u64,
-    metadata_block_size: u32,
 ) -> Result<Vec<u8>, ExtentManagerError> {
-    let mut data = Vec::new();
-    let mut current_lba = head_lba;
+    let sector_size = metadata_client.sector_size();
+    let lba = region_byte_offset / sector_size as u64;
+    let raw = metadata_client.read_blocks(lba, region_size as usize)?;
 
-    while current_lba != 0 {
-        let raw = client.read_blocks(current_lba, metadata_block_size as usize)?;
-        let (header, payload) = ChunkHeader::deserialize(&raw)?;
-
-        if header.seq != expected_seq {
-            return Err(error::corrupt_metadata(&format!(
-                "chunk seq mismatch: expected={expected_seq} got={}",
-                header.seq
-            )));
-        }
-
-        data.extend_from_slice(payload);
-        current_lba = header.next_lba;
+    if raw.len() < CHECKPOINT_HEADER_SIZE {
+        return Err(error::corrupt_metadata("checkpoint region too short"));
     }
 
-    Ok(data)
+    let seq = u64::from_le_bytes(raw[0..8].try_into().unwrap());
+    let payload_len = u32::from_le_bytes(raw[8..12].try_into().unwrap()) as usize;
+    let stored_crc = u32::from_le_bytes(raw[12..16].try_into().unwrap());
+
+    if seq != expected_seq {
+        return Err(error::corrupt_metadata(&format!(
+            "checkpoint seq mismatch: expected={expected_seq} got={seq}"
+        )));
+    }
+
+    let total = CHECKPOINT_HEADER_SIZE + payload_len;
+    if total > raw.len() {
+        return Err(error::corrupt_metadata("checkpoint payload truncated"));
+    }
+
+    let mut check_buf = raw[..total].to_vec();
+    check_buf[12..16].copy_from_slice(&0u32.to_le_bytes());
+    let computed_crc = crc32fast::hash(&check_buf);
+
+    if stored_crc != computed_crc {
+        return Err(error::corrupt_metadata(&format!(
+            "checkpoint CRC mismatch: stored={stored_crc:#x} computed={computed_crc:#x}"
+        )));
+    }
+
+    Ok(raw[CHECKPOINT_HEADER_SIZE..total].to_vec())
 }
 
 #[derive(Debug, Clone)]
@@ -392,44 +236,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn chunk_header_round_trip() {
+    fn checkpoint_header_round_trip() {
         let payload = b"hello world";
-        let header = ChunkHeader {
-            magic: CHUNK_MAGIC,
-            seq: 42,
-            prev_lba: 0,
-            next_lba: 100,
-            payload_len: payload.len() as u32,
-            checksum: 0,
-        };
+        let seq = 42u64;
+        let payload_len = payload.len() as u32;
 
-        let serialized = header.serialize(payload);
-        let (recovered, recovered_payload) = ChunkHeader::deserialize(&serialized).unwrap();
+        let mut blob = Vec::new();
+        blob.extend_from_slice(&seq.to_le_bytes());
+        blob.extend_from_slice(&payload_len.to_le_bytes());
+        blob.extend_from_slice(&0u32.to_le_bytes());
+        blob.extend_from_slice(payload);
 
-        assert_eq!(recovered.magic, CHUNK_MAGIC);
-        assert_eq!(recovered.seq, 42);
-        assert_eq!(recovered.prev_lba, 0);
-        assert_eq!(recovered.next_lba, 100);
+        let crc = crc32fast::hash(&blob);
+        blob[12..16].copy_from_slice(&crc.to_le_bytes());
+
+        let recovered_seq = u64::from_le_bytes(blob[0..8].try_into().unwrap());
+        let recovered_len = u32::from_le_bytes(blob[8..12].try_into().unwrap());
+        let recovered_crc = u32::from_le_bytes(blob[12..16].try_into().unwrap());
+        let recovered_payload = &blob[CHECKPOINT_HEADER_SIZE..CHECKPOINT_HEADER_SIZE + recovered_len as usize];
+
+        assert_eq!(recovered_seq, 42);
+        assert_eq!(recovered_len, payload.len() as u32);
         assert_eq!(recovered_payload, payload);
-    }
 
-    #[test]
-    fn chunk_corrupt_crc() {
-        let payload = b"data";
-        let header = ChunkHeader {
-            magic: CHUNK_MAGIC,
-            seq: 1,
-            prev_lba: 0,
-            next_lba: 0,
-            payload_len: payload.len() as u32,
-            checksum: 0,
-        };
-
-        let mut serialized = header.serialize(payload);
-        serialized[CHUNK_HEADER_SIZE] ^= 0xFF;
-
-        let err = ChunkHeader::deserialize(&serialized).unwrap_err();
-        assert!(err.to_string().contains("CRC mismatch"));
+        let mut check = blob[..CHECKPOINT_HEADER_SIZE + recovered_len as usize].to_vec();
+        check[12..16].copy_from_slice(&0u32.to_le_bytes());
+        assert_eq!(recovered_crc, crc32fast::hash(&check));
     }
 
     #[test]
@@ -439,14 +271,15 @@ mod tests {
         use interfaces::FormatParams;
 
         let fp = FormatParams {
+            data_disk_size: 2 * 1024 * 1024,
             slab_size: 1024 * 1024,
-            max_element_size: 65536,
-            metadata_block_size: 131072,
+            max_extent_size: 65536,
             sector_size: 4096,
             region_count: 2,
+            metadata_alignment: 1048576,
         };
 
-        let mut r0 = RegionState::new(0, BuddyAllocator::new(4096, 1024 * 1024, 4096), fp.clone());
+        let mut r0 = RegionState::new(0, BuddyAllocator::new(0, 1024 * 1024, 4096), fp.clone());
         r0.index.insert(
             42,
             Extent {
@@ -456,7 +289,7 @@ mod tests {
             },
         );
 
-        let mut r1 = RegionState::new(1, BuddyAllocator::new(4096 + 1024 * 1024, 1024 * 1024, 4096), fp);
+        let mut r1 = RegionState::new(1, BuddyAllocator::new(1024 * 1024, 1024 * 1024, 4096), fp);
         r1.index.insert(
             99,
             Extent {
@@ -467,7 +300,7 @@ mod tests {
         );
 
         let mut all_data = Vec::new();
-        all_data.extend_from_slice(&2u32.to_le_bytes()); // region_count
+        all_data.extend_from_slice(&2u32.to_le_bytes());
         all_data.extend_from_slice(&serialize_region(&r0));
         all_data.extend_from_slice(&serialize_region(&r1));
 

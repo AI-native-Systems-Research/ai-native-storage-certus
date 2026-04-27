@@ -6,8 +6,11 @@ use clap::Parser;
     about = "Benchmark extent manager create/lookup/remove operations"
 )]
 pub struct BenchmarkConfig {
-    #[arg(long, help = "NVMe device PCI address (e.g., 0000:03:00.0)")]
+    #[arg(long, help = "Data NVMe device PCI address (e.g., 0000:03:00.0)")]
     pub device: String,
+
+    #[arg(long, help = "Metadata NVMe device PCI address (e.g., 0000:04:00.0)")]
+    pub metadata_device: String,
 
     #[arg(long, default_value_t = 1, help = "NVMe namespace ID")]
     pub ns_id: u32,

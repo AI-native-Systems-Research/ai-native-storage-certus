@@ -9,8 +9,8 @@
 - [ ] Verify requirements match intended behavior, not just current
       behavior -- are there any bugs documented as features?
 - [ ] Check on-disk format tables against the code -- ensure byte
-      offsets and sizes are accurate after the recent u32->u64
-      slab_size change
+      offsets and sizes are accurate after the two-device rework
+      (v3 superblock, contiguous checkpoint regions)
 - [ ] Review success criteria SC-005 (100M extents at scale) -- is
       this the right target? Are there latency requirements?
 - [ ] Decide whether FR-014 (background checkpoint interval) needs
