@@ -135,7 +135,7 @@
   <rect x="380" y="572" width="270" height="70" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
   <text x="515" y="593" text-anchor="middle" class="title" fill="#633806">SSD (allocated extent)</text>
   <text x="515" y="611" text-anchor="middle" class="subtitle" fill="#854F0B">DMA write in progress</text>
-  <text x="515" y="629" text-anchor="middle" class="note" fill="#C0392B">DMA failure → FATAL (hardware fault)</text>
+  <text x="515" y="629" text-anchor="middle" class="note" fill="#C0392B">DMA failure → FATAL (logs error)</text>
 
   <!-- Arrow DRAM → SSD -->
   <line x1="220" y1="606" x2="378" y2="606" stroke="#7F77DD" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arrow)"/>
@@ -153,17 +153,18 @@
   <rect x="380" y="694" width="165" height="66" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
   <text x="462" y="715" text-anchor="middle" class="title" fill="#633806">Marker block</text>
   <text x="462" y="731" text-anchor="middle" class="subtitle" fill="#854F0B">Write to SSD tail</text>
-  <text x="462" y="747" text-anchor="middle" class="note" fill="#854F0B">key, size, checksum, timestamp</text>
+  <text x="462" y="747" text-anchor="middle" class="note" fill="#854F0B">key, size, checksum, timestamp, ...</text>
 
   <!-- Arrow: marker → extent finalize -->
   <line x1="545" y1="727" x2="578" y2="727" stroke="#7F77DD" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arrow)"/>
   <text x="562" y="718" text-anchor="middle" class="label" fill="#3D3D3A">then</text>
 
   <!-- Extent finalize -->
-  <rect x="580" y="694" width="165" height="66" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
-  <text x="662" y="715" text-anchor="middle" class="title" fill="#3C3489">Extent manager</text>
-  <text x="662" y="731" text-anchor="middle" class="subtitle" fill="#534AB7">7b  Mark finalized</text>
-  <text x="662" y="747" text-anchor="middle" class="note" fill="#534AB7">Persistent (survives crash)</text>
+  <rect x="580" y="694" width="165" height="76" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
+  <text x="662" y="712" text-anchor="middle" class="title" fill="#3C3489">Extent manager</text>
+  <text x="662" y="728" text-anchor="middle" class="subtitle" fill="#534AB7">7b  Mark finalized</text>
+  <text x="662" y="744" text-anchor="middle" class="note" fill="#534AB7">Persistent (survives crash)</text>
+  <text x="662" y="758" text-anchor="middle" class="note" fill="#534AB7">Non-finalized cleaned up after timeout</text>
 
   <!-- ══════════════════════════════════════════════════════════
        ROW 6 — HASH TABLE UPDATE (DRAM → SSD)
@@ -200,7 +201,7 @@
   <text x="390" y="1044" text-anchor="middle" class="label" fill="#3D3D3A">Cache block SSD-resident | hash table updated | staging freed | available for get</text>
 
   <text x="390" y="1074" text-anchor="middle" class="section" fill="#444441">CRASH RECOVERY</text>
-  <text x="390" y="1094" text-anchor="middle" class="label" fill="#3D3D3A">Hash table rebuilt by iterating extent manager finalized extents</text>
-  <text x="390" y="1112" text-anchor="middle" class="note" fill="#5F5E5A">Non-finalized extents reclaimed | DRAM-only entries lost (cache semantics: acceptable)</text>
+  <text x="390" y="1094" text-anchor="middle" class="label" fill="#3D3D3A">Hash table rebuilt from finalized extents (marker: key, offset, size, ownership id, priority)</text>
+  <text x="390" y="1112" text-anchor="middle" class="note" fill="#5F5E5A">Non-finalized extents reclaimed after timeout | DRAM-only entries lost (cache semantics: acceptable)</text>
 
 </svg>

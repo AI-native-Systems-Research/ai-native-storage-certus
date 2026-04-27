@@ -1,6 +1,6 @@
-<svg width="100%" viewBox="0 0 780 980" role="img" xmlns="http://www.w3.org/2000/svg">
+<svg width="100%" viewBox="0 0 780 1000" role="img" xmlns="http://www.w3.org/2000/svg">
   <title>GPU cache get/hit-flow data flow diagram</title>
-  <desc>Data flow diagram showing the cache get/hit path: client gRPC request, hash table lookup, ref count, DMA from DRAM or SSD to GPU via GPUDirect Storage, and ref count release.</desc>
+  <desc>Data flow diagram showing the cache get/hit path: client gRPC request, hash table lookup, ref count, DMA from DRAM or SSD to GPU via peer-to-peer DMA, and ref count release.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
       <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -48,11 +48,7 @@
   <!-- Dispatcher -->
   <rect x="380" y="70" width="270" height="56" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
   <text x="515" y="93" text-anchor="middle" class="title" fill="#085041">Request Dispatcher</text>
-  <text x="515" y="111" text-anchor="middle" class="subtitle" fill="#0F6E56">Validate size matches fixed block size</text>
-
-  <!-- Size mismatch error arrow -->
-  <path d="M515 126 L515 146 L260 146 L260 128" fill="none" stroke="#C0392B" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#arrow)"/>
-  <text x="388" y="140" text-anchor="middle" class="label" fill="#C0392B">Size mismatch → error response</text>
+  <text x="515" y="111" text-anchor="middle" class="subtitle" fill="#0F6E56">Receives get requests</text>
 
   <!-- ══════════════════════════════════════════════════════════
        ROW 1 — HASH TABLE LOOKUP
@@ -79,12 +75,12 @@
 
   <!-- Arrow down -->
   <line x1="515" y1="258" x2="515" y2="308" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arrow)"/>
-  <text x="527" y="288" class="label" fill="#3D3D3A">4  Hit: incr ref count</text>
+  <text x="527" y="288" class="label" fill="#3D3D3A">4  Hit: validate size, incr ref count</text>
 
   <!-- Ref count box -->
   <rect x="380" y="310" width="270" height="70" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
   <text x="515" y="331" text-anchor="middle" class="title" fill="#085041">Ref count held</text>
-  <text x="515" y="349" text-anchor="middle" class="subtitle" fill="#0F6E56">Blocks puts and evictions for this key</text>
+  <text x="515" y="349" text-anchor="middle" class="subtitle" fill="#0F6E56">Validates size, then blocks puts and evictions</text>
   <text x="515" y="367" text-anchor="middle" class="note" fill="#0F6E56">Evictor skips ref-counted entries, picks another key</text>
 
   <!-- ══════════════════════════════════════════════════════════
@@ -133,7 +129,7 @@
   <!-- SSD box right side -->
   <rect x="548" y="444" width="200" height="56" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
   <text x="648" y="467" text-anchor="middle" class="title" fill="#633806">SSD extent</text>
-  <text x="648" y="485" text-anchor="middle" class="subtitle" fill="#854F0B">GPUDirect Storage source</text>
+  <text x="648" y="485" text-anchor="middle" class="subtitle" fill="#854F0B">Peer-to-peer DMA source</text>
 
   <!-- Arrow: SSD → GPU -->
   <line x1="648" y1="500" x2="648" y2="570" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arrow)"/>
@@ -182,8 +178,9 @@
        ══════════════════════════════════════════════════════════ -->
   <line x1="30" y1="900" x2="750" y2="900" stroke="#888" stroke-width="0.5"/>
 
-  <text x="390" y="924" text-anchor="middle" class="section" fill="#444441">CONCURRENCY RULES</text>
+  <text x="390" y="924" text-anchor="middle" class="section" fill="#444441">CONCURRENCY &amp; EVICTION RULES</text>
   <text x="390" y="944" text-anchor="middle" class="label" fill="#3D3D3A">ref_count > 0: puts blocked (deferred) | evictions skip to another key</text>
-  <text x="390" y="962" text-anchor="middle" class="label" fill="#3D3D3A">Multiple concurrent gets per key: each holds independent ref, parallel DMA transfers</text>
+  <text x="390" y="962" text-anchor="middle" class="label" fill="#3D3D3A">Eviction uses last access timestamp + priority level (SLO) to select victims</text>
+  <text x="390" y="980" text-anchor="middle" class="label" fill="#3D3D3A">Multiple concurrent gets per key: each holds independent ref, parallel DMA transfers</text>
 
 </svg>
