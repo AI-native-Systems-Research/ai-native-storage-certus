@@ -2,14 +2,9 @@
 
 **Feature Branch**: `001-extent-manager-v2`
 **Created**: 2026-04-23
-**Status**: Backfilled
-**Source**: Generated from existing implementation
-
-## Backfill Notice
-
-> This spec was generated from existing code via `speckit.sync.backfill`.
-> It documents current behavior and intended design. Review carefully
-> and update to reflect any desired changes.
+**Updated**: 2026-04-27
+**Status**: Active
+**Source**: Generated from implementation, updated for two-device architecture
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -26,13 +21,13 @@ mappings only become visible after the data they reference is on disk.
 Every other feature depends on being able to allocate, publish, and
 look up extents.
 
-**Independent Test**: Create an ExtentManagerV2 with a mock block
-device, format it, reserve an extent, publish it, then look it up
-and verify key/offset/size match.
+**Independent Test**: Create an ExtentManagerV2 with mock block
+devices (data + metadata), format it, reserve an extent, publish it,
+then look it up and verify key/offset/size match.
 
 **Acceptance Scenarios**:
 
-1. **Given** a formatted device, **When** the application calls
+1. **Given** a formatted device pair, **When** the application calls
    `reserve_extent(key, size)`, **Then** it receives a WriteHandle
    with a valid disk offset and the sector-aligned size.
 2. **Given** a WriteHandle, **When** the application calls `publish()`,
@@ -51,26 +46,28 @@ and verify key/offset/size match.
 
 ### User Story 2 - Crash-Consistent Checkpointing (Priority: P1)
 
-The application periodically checkpoints the extent index to disk so
-that the mapping survives device reboots. After a successful
-checkpoint, all published extents are durable. Extents published after
-the last checkpoint are lost on crash, but internal consistency is
-always maintained. A background thread automatically triggers
-checkpoints on a configurable interval.
+The application periodically checkpoints the extent index to a
+dedicated metadata disk so that the mapping survives device reboots.
+The metadata disk contains a superblock followed by two contiguous
+checkpoint regions that alternate. Checkpoints write to the inactive
+region, then update the superblock to switch the active pointer. After
+a successful checkpoint, all published extents are durable. Extents
+published after the last checkpoint are lost on crash, but internal
+consistency is always maintained.
 
 **Why this priority**: Without checkpointing, all extent mappings are
 lost on restart. This is equally critical to allocation.
 
-**Independent Test**: Format a device, publish extents, checkpoint,
+**Independent Test**: Format a device pair, publish extents, checkpoint,
 simulate a reboot via `reboot_from()`, call `initialize()`, and verify
 all checkpointed extents are recovered.
 
 **Acceptance Scenarios**:
 
 1. **Given** published extents and a successful `checkpoint()` call,
-   **When** the device is rebooted and `initialize()` is called,
-   **Then** all extents from the checkpoint are recovered with correct
-   key/offset/size.
+   **When** the metadata device is rebooted and `initialize()` is
+   called, **Then** all extents from the checkpoint are recovered with
+   correct key/offset/size.
 2. **Given** extents published after the last checkpoint, **When** the
    device is rebooted, **Then** those extents are not present after
    recovery (last-checkpoint consistency).
@@ -84,31 +81,30 @@ all checkpointed extents are recovered.
 
 ---
 
-### User Story 3 - Recovery with Dual-Chain Fallback (Priority: P2)
+### User Story 3 - Recovery with Dual-Copy Fallback (Priority: P2)
 
-On `initialize()`, the recovery module reads the superblock, follows
-the current checkpoint chain, and rebuilds the in-memory index. If
-the current chain is corrupt (media error, partial write), recovery
-falls back to the previous checkpoint chain. This provides an extra
-layer of resilience against single-checkpoint corruption.
+On `initialize()`, the recovery module reads the superblock from the
+metadata disk, reads the active checkpoint region, and rebuilds the
+in-memory index. If the active copy is corrupt (media error, partial
+write), recovery falls back to the inactive copy. This provides
+resilience against single-checkpoint corruption.
 
 **Why this priority**: Recovery is essential but depends on
-checkpointing working first. The dual-chain fallback is a resilience
+checkpointing working first. The dual-copy fallback is a resilience
 enhancement beyond the basic recovery path.
 
 **Independent Test**: Format, publish extents, checkpoint twice (so
-both current and previous chains exist), corrupt the first block of
-the current chain, then initialize and verify the previous chain's
-extents are recovered.
+both copies have been written), corrupt the active copy's first sector,
+then initialize and verify the inactive copy's extents are recovered.
 
 **Acceptance Scenarios**:
 
-1. **Given** a device with a valid current checkpoint chain, **When**
-   `initialize()` is called, **Then** the current chain is used and
-   all its extents are restored.
-2. **Given** a device where the current chain's first block is
-   corrupt, **When** `initialize()` is called, **Then** the previous
-   chain is used as fallback and its extents are restored.
+1. **Given** a metadata device with a valid active checkpoint copy,
+   **When** `initialize()` is called, **Then** the active copy is used
+   and all its extents are restored.
+2. **Given** a metadata device where the active copy's first sector is
+   corrupt, **When** `initialize()` is called, **Then** the inactive
+   copy is used as fallback and its extents are restored.
 3. **Given** a superblock with invalid magic, **When** `initialize()`
    is called, **Then** it returns CorruptMetadata with a message
    identifying the magic mismatch.
@@ -217,7 +213,7 @@ again to verify the old slot is now reusable.
 
 ### Edge Cases
 
-- What happens when the device is completely full?
+- What happens when the data device is completely full?
   `reserve_extent` returns OutOfSpace.
 - What happens with key 0 or key u64::MAX?
   Both are valid extent keys.
@@ -225,6 +221,9 @@ again to verify the old slot is now reusable.
   (e.g., `sector_size = 0`, `slab_size` not a multiple of
   `sector_size`, `region_count` not a power of two)?
   Returns CorruptMetadata with a descriptive message.
+- What happens when the metadata device is too small for two
+  checkpoint regions?
+  `format()` returns CorruptMetadata.
 - What happens when operations are called before `format()` or
   `initialize()`?
   Returns NotInitialized.
@@ -251,22 +250,26 @@ again to verify the old slot is now reusable.
 
 - **FR-001**: The component MUST be named ExtentManagerV2 and defined
   using the `define_component!` macro, providing the IExtentManager
-  interface.
+  interface with two IBlockDevice receptacles: `block_device` (data)
+  and `metadata_device` (metadata).
 - **FR-002**: `format()` MUST validate all FormatParams: `sector_size
   > 0`, `slab_size` is a multiple of `sector_size`, `max_element_size
-  <= slab_size`, `metadata_block_size` is a multiple of `sector_size`,
-  `region_count` is a positive power of two.
-- **FR-003**: `format()` MUST write a superblock at LBA 0 containing
-  format parameters, disk geometry, and a CRC32 checksum.
-- **FR-004**: `initialize()` MUST read the superblock, validate its
-  magic and CRC, recover the extent index from the checkpoint chain,
-  and rebuild all in-memory state.
+  <= slab_size`, `region_count` is a positive power of two, metadata
+  device is large enough for two checkpoint regions.
+- **FR-003**: `format()` MUST write a superblock at LBA 0 of the
+  metadata device containing format parameters, checkpoint region
+  layout, and a CRC32 checksum.
+- **FR-004**: `initialize()` MUST read the superblock from the
+  metadata device, validate its magic and CRC, recover the extent
+  index from the active checkpoint region, and rebuild all in-memory
+  state from the data device.
 
 #### Extent Lifecycle
 
 - **FR-005**: `reserve_extent(key, size)` MUST allocate a sector-
-  aligned slot and return a WriteHandle with the disk byte offset.
-  The extent MUST NOT be visible in the index until `publish()`.
+  aligned slot on the data device and return a WriteHandle with the
+  disk byte offset. The extent MUST NOT be visible in the index until
+  `publish()`.
 - **FR-006**: `WriteHandle::publish()` MUST atomically insert the
   extent into the region's index. If the key already exists, it MUST
   return DuplicateKey.
@@ -287,9 +290,9 @@ again to verify the old slot is now reusable.
 #### Persistence & Recovery
 
 - **FR-011**: `checkpoint()` MUST serialize all region indexes and
-  slab descriptors into a linked chain of CRC32-protected chunks,
-  rotate the superblock's chain pointers, and free the old previous
-  chain.
+  slab descriptors into a contiguous CRC32-protected blob, write it
+  to the inactive checkpoint region on the metadata device, then
+  update the superblock to switch the active copy.
 - **FR-012**: `checkpoint()` MUST skip I/O if no region has been
   modified since the last checkpoint.
 - **FR-013**: Concurrent `checkpoint()` calls MUST be coalesced: at
@@ -297,9 +300,9 @@ again to verify the old slot is now reusable.
   how many callers request one.
 - **FR-014**: A background thread MUST call `checkpoint()` at a
   configurable interval (default 5000 ms).
-- **FR-015**: Recovery MUST attempt the current checkpoint chain
-  first; if it is unreadable (CRC failure, media error), recovery
-  MUST fall back to the previous chain.
+- **FR-015**: Recovery MUST attempt the active checkpoint copy first;
+  if it is unreadable (CRC failure, media error), recovery MUST fall
+  back to the inactive copy.
 - **FR-016**: After a successful checkpoint followed by a reboot,
   `initialize()` MUST restore all extents that were published before
   the checkpoint. Internal consistency MUST always be maintained.
@@ -308,7 +311,7 @@ again to verify the old slot is now reusable.
 
 - **FR-017**: Each region MUST use a buddy allocator for coarse-
   grained allocation of slab-sized chunks from its contiguous byte
-  range.
+  range on the data device.
 - **FR-018**: Each slab MUST use a bitmap allocator to pack same-
   size extents, with a rover for even distribution.
 - **FR-019**: A size-class manager MUST index slabs by element size
@@ -342,14 +345,16 @@ again to verify the old slot is now reusable.
   slot; call `publish()` to commit or `abort()` / drop to release.
 - **FormatParams**: Configuration for `format()`. All size fields
   are in bytes: `slab_size` (u64), `max_element_size` (u32),
-  `metadata_block_size` (u32), `sector_size` (u32), plus
+  `sector_size` (u32), `metadata_padding` (u64), plus
   `region_count` (u32).
-- **Superblock**: On-disk header at LBA 0 (4096 bytes). Contains
-  format parameters, checkpoint chain pointers, sequence number,
-  and CRC32 checksum. Magic: `0x4345_5254_5553_5632` ("CERTUSV2").
-- **Checkpoint Chain**: Linked list of CRC32-protected chunks, each
-  `metadata_block_size` bytes. Encodes the complete extent index and
-  slab descriptors for all regions.
+- **Superblock**: On-disk header at LBA 0 of the metadata device
+  (4096 bytes). Contains format parameters, active checkpoint
+  indicator, checkpoint region layout, sequence number, and CRC32.
+  Magic: `0x4345_5254_5553_5633` ("CERTUSV3").
+- **Checkpoint Region**: Contiguous CRC32-protected blob on the
+  metadata device. Two copies alternate; the superblock records which
+  is active. Encodes the complete extent index and slab descriptors
+  for all regions.
 - **Region**: Independent shard with its own index, slab set, buddy
   allocator, and lock. Region count must be a power of two.
 
@@ -362,48 +367,60 @@ again to verify the old slot is now reusable.
   unit and integration tests.
 - **SC-002**: Checkpoint + recovery round-trip preserves 100% of
   published extents with correct key/offset/size.
-- **SC-003**: Dual-chain fallback successfully recovers from
-  single-chain corruption.
+- **SC-003**: Dual-copy fallback successfully recovers from
+  single-copy corruption.
 - **SC-004**: Concurrent operations from 8+ threads produce no
   data races, lost updates, or panics.
 - **SC-005**: The component supports approximately 100 million
-  extents on a 10 TB device with 128 KiB extent size (target
+  extents on a 10 TB data device with 128 KiB extent size (target
   scale).
 - **SC-006**: Checkpoint coalescing limits concurrent checkpoint
   I/O to at most two active operations regardless of caller count.
 
 ## On-Disk Format Reference
 
-### Superblock (LBA 0, 4096 bytes)
+### Metadata Device Layout
+
+```
+[Superblock: 4096 bytes]
+[Padding: metadata_padding bytes]
+[Checkpoint Copy 0: checkpoint_region_size bytes]
+[Checkpoint Copy 1: checkpoint_region_size bytes]
+```
+
+Where:
+- `checkpoint_region_offset = 4096 + metadata_padding`
+- `checkpoint_region_size = (metadata_disk_size - checkpoint_region_offset) / 2`
+  (rounded down to sector alignment)
+
+### Superblock (LBA 0 of metadata device, 4096 bytes)
 
 | Offset | Size | Field |
 |--------|------|-------|
-| 0 | 8 | magic (`0x4345_5254_5553_5632`) |
-| 8 | 4 | version (2) |
-| 12 | 8 | disk_size |
-| 20 | 8 | current_index_lba |
-| 28 | 8 | previous_index_lba |
-| 36 | 4 | sector_size |
-| 40 | 8 | slab_size |
-| 48 | 4 | max_element_size |
-| 52 | 4 | metadata_block_size |
-| 56 | 4 | region_count |
-| 60 | 8 | checkpoint_seq |
-| 68 | 4 | CRC32 of bytes 0-67 |
-| 72 | 4024 | zero padding |
+| 0 | 8 | magic (`0x4345_5254_5553_5633`) |
+| 8 | 4 | version (3) |
+| 12 | 8 | data_disk_size |
+| 20 | 4 | sector_size |
+| 24 | 8 | slab_size |
+| 32 | 4 | max_element_size |
+| 36 | 4 | region_count |
+| 40 | 8 | checkpoint_seq |
+| 48 | 1 | active_copy (0 or 1) |
+| 49 | 7 | reserved (zero) |
+| 56 | 8 | checkpoint_region_offset |
+| 64 | 8 | checkpoint_region_size |
+| 72 | 4 | CRC32 of bytes 0-71 |
+| 76 | 4020 | zero padding |
 
-### Checkpoint Chunk Header (36 bytes)
+### Checkpoint Region Header (16 bytes)
 
 | Offset | Size | Field |
 |--------|------|-------|
-| 0 | 4 | magic (`0x434B4E4B` / "CKNK") |
-| 4 | 8 | seq |
-| 12 | 8 | prev_lba |
-| 20 | 8 | next_lba |
-| 28 | 4 | payload_len |
-| 32 | 4 | CRC32 |
+| 0 | 8 | checkpoint_seq |
+| 8 | 4 | payload_len |
+| 12 | 4 | CRC32 (of header + payload, with CRC field zeroed) |
 
-### Checkpoint Payload (concatenated across chain)
+### Checkpoint Payload (follows header)
 
 ```
 u32 region_count
@@ -414,6 +431,12 @@ per region:
     per slab (20 bytes): u64 start_offset, u64 slab_size, u32 element_size
 ```
 
+### Data Device Layout
+
+The entire data device is available for user extents. No superblock
+or reserved regions. Each region's buddy allocator manages a
+contiguous byte range of the data device.
+
 ## Assumptions
 
 - Keys are hashes with good distribution; the component does not
@@ -423,7 +446,9 @@ per region:
 - The superblock fits in a single sector (4096 bytes).
 - DMA-capable memory allocation is provided by the caller via
   `set_dma_alloc()` before I/O operations.
-- The component manages a single block device; multi-device
-  coordination is out of scope.
-- Log rotation and compaction of the checkpoint chain are out of
-  scope; the chain is fully rewritten on each checkpoint.
+- The component manages two block devices: a data device for user
+  extents and a metadata device for the superblock and checkpoint
+  regions.
+- Both devices share the same sector size.
+- A crash during checkpoint may corrupt the inactive (being-written)
+  copy, but the active copy and superblock remain consistent.

@@ -46,12 +46,13 @@ pub struct FormatParams {
     pub slab_size: u64,
     /// Maximum extent element size in bytes. Must be <= `slab_size`.
     pub max_element_size: u32,
-    /// Checkpoint chunk size in bytes. Must be a multiple of `sector_size`.
-    pub metadata_block_size: u32,
     /// Device sector size in bytes.
     pub sector_size: u32,
     /// Number of regions (must be a power of two).
     pub region_count: u32,
+    /// Bytes of padding between the superblock and checkpoint regions
+    /// on the metadata disk. Allows future superblock expansion.
+    pub metadata_padding: u64,
 }
 
 pub struct WriteHandle {

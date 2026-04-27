@@ -6,24 +6,25 @@ use interfaces::{FormatParams, IExtentManager};
 use extent_manager_v2::test_support::create_test_component;
 
 const DISK_SIZE: u64 = 256 * 1024 * 1024;
+const METADATA_DISK_SIZE: u64 = 16 * 1024 * 1024;
 const SECTOR_SIZE: u32 = 4096;
 const SLAB_SIZE: u64 = 1024 * 1024;
 const MAX_ELEMENT_SIZE: u32 = 65536;
-const METADATA_BLOCK_SIZE: u32 = 131072;
+const METADATA_PADDING: u64 = 1048576;
 
 fn format_params() -> FormatParams {
     FormatParams {
         slab_size: SLAB_SIZE,
         max_element_size: MAX_ELEMENT_SIZE,
-        metadata_block_size: METADATA_BLOCK_SIZE,
         sector_size: SECTOR_SIZE,
         region_count: 8,
+        metadata_padding: METADATA_PADDING,
     }
 }
 
 #[test]
 fn concurrent_reserve_publish_lookup() {
-    let (c, _mock) = create_test_component(DISK_SIZE);
+    let (c, _data_mock, _metadata_mock) = create_test_component(DISK_SIZE, METADATA_DISK_SIZE);
     c.format(format_params()).expect("format");
 
     let c = Arc::new(c);
@@ -55,7 +56,7 @@ fn concurrent_reserve_publish_lookup() {
 
 #[test]
 fn concurrent_reserve_abort() {
-    let (c, _mock) = create_test_component(DISK_SIZE);
+    let (c, _data_mock, _metadata_mock) = create_test_component(DISK_SIZE, METADATA_DISK_SIZE);
     c.format(format_params()).expect("format");
 
     let c = Arc::new(c);
@@ -88,7 +89,7 @@ fn concurrent_reserve_abort() {
 
 #[test]
 fn concurrent_publish_remove() {
-    let (c, _mock) = create_test_component(DISK_SIZE);
+    let (c, _data_mock, _metadata_mock) = create_test_component(DISK_SIZE, METADATA_DISK_SIZE);
     c.format(format_params()).expect("format");
 
     for k in 0..800u64 {

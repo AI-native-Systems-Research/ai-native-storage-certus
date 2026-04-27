@@ -7,18 +7,19 @@ use extent_manager_v2::test_support::{
 };
 
 const DISK_SIZE: u64 = 64 * 1024 * 1024;
+const METADATA_DISK_SIZE: u64 = 16 * 1024 * 1024;
 const SECTOR_SIZE: u32 = 4096;
 const SLAB_SIZE: u64 = 1024 * 1024;
 const MAX_ELEMENT_SIZE: u32 = 65536;
-const METADATA_BLOCK_SIZE: u32 = 131072;
+const METADATA_PADDING: u64 = 1048576;
 
 fn format_params() -> FormatParams {
     FormatParams {
         slab_size: SLAB_SIZE,
         max_element_size: MAX_ELEMENT_SIZE,
-        metadata_block_size: METADATA_BLOCK_SIZE,
         sector_size: SECTOR_SIZE,
         region_count: 4,
+        metadata_padding: METADATA_PADDING,
     }
 }
 
@@ -28,7 +29,7 @@ fn format_params() -> FormatParams {
 
 #[test]
 fn checkpoint_persists_extents() {
-    let (c, _mock) = create_test_component(DISK_SIZE);
+    let (c, _data_mock, _metadata_mock) = create_test_component(DISK_SIZE, METADATA_DISK_SIZE);
     c.format(format_params()).expect("format");
 
     for k in 1..=10u64 {
@@ -45,7 +46,7 @@ fn checkpoint_persists_extents() {
 
 #[test]
 fn checkpoint_skips_when_clean() {
-    let (c, _mock) = create_test_component(DISK_SIZE);
+    let (c, _data_mock, _metadata_mock) = create_test_component(DISK_SIZE, METADATA_DISK_SIZE);
     c.format(format_params()).expect("format");
 
     c.checkpoint().expect("first checkpoint (noop)");
@@ -54,7 +55,7 @@ fn checkpoint_skips_when_clean() {
 
 #[test]
 fn two_sequential_checkpoints() {
-    let (c, _mock) = create_test_component(DISK_SIZE);
+    let (c, _data_mock, _metadata_mock) = create_test_component(DISK_SIZE, METADATA_DISK_SIZE);
     c.format(format_params()).expect("format");
 
     let h = c.reserve_extent(1, 4096).expect("reserve");
@@ -75,13 +76,17 @@ fn two_sequential_checkpoints() {
 
 #[test]
 fn format_fresh_then_initialize() {
-    let mock = Arc::new(MockBlockDevice::new(DISK_SIZE));
-    let shared = mock.shared_state();
+    let data_mock = Arc::new(MockBlockDevice::new(DISK_SIZE));
+    let metadata_mock = Arc::new(MockBlockDevice::new(METADATA_DISK_SIZE));
+    let metadata_shared = metadata_mock.shared_state();
 
     {
         let c = extent_manager_v2::ExtentManagerV2::new_inner();
         c.block_device
-            .connect(mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
+            .connect(data_mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
+            .unwrap();
+        c.metadata_device
+            .connect(metadata_mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
             .unwrap();
         c.logger
             .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
@@ -90,10 +95,14 @@ fn format_fresh_then_initialize() {
         c.format(format_params()).expect("format");
     }
 
-    let mock2 = Arc::new(MockBlockDevice::reboot_from(&shared));
+    let data_mock2 = Arc::new(MockBlockDevice::new(DISK_SIZE));
+    let metadata_mock2 = Arc::new(MockBlockDevice::reboot_from(&metadata_shared));
     let c2 = extent_manager_v2::ExtentManagerV2::new_inner();
     c2.block_device
-        .connect(mock2 as Arc<dyn IBlockDevice + Send + Sync>)
+        .connect(data_mock2 as Arc<dyn IBlockDevice + Send + Sync>)
+        .unwrap();
+    c2.metadata_device
+        .connect(metadata_mock2 as Arc<dyn IBlockDevice + Send + Sync>)
         .unwrap();
     c2.logger
         .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
@@ -106,13 +115,18 @@ fn format_fresh_then_initialize() {
 
 #[test]
 fn recover_checkpointed_extents() {
-    let mock = Arc::new(MockBlockDevice::new(DISK_SIZE));
-    let shared = mock.shared_state();
+    let data_mock = Arc::new(MockBlockDevice::new(DISK_SIZE));
+    let metadata_mock = Arc::new(MockBlockDevice::new(METADATA_DISK_SIZE));
+    let data_shared = data_mock.shared_state();
+    let metadata_shared = metadata_mock.shared_state();
 
     {
         let c = extent_manager_v2::ExtentManagerV2::new_inner();
         c.block_device
-            .connect(mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
+            .connect(data_mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
+            .unwrap();
+        c.metadata_device
+            .connect(metadata_mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
             .unwrap();
         c.logger
             .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
@@ -127,10 +141,14 @@ fn recover_checkpointed_extents() {
         c.checkpoint().expect("checkpoint");
     }
 
-    let mock2 = Arc::new(MockBlockDevice::reboot_from(&shared));
+    let data_mock2 = Arc::new(MockBlockDevice::reboot_from(&data_shared));
+    let metadata_mock2 = Arc::new(MockBlockDevice::reboot_from(&metadata_shared));
     let c2 = extent_manager_v2::ExtentManagerV2::new_inner();
     c2.block_device
-        .connect(mock2 as Arc<dyn IBlockDevice + Send + Sync>)
+        .connect(data_mock2 as Arc<dyn IBlockDevice + Send + Sync>)
+        .unwrap();
+    c2.metadata_device
+        .connect(metadata_mock2 as Arc<dyn IBlockDevice + Send + Sync>)
         .unwrap();
     c2.logger
         .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
@@ -147,13 +165,18 @@ fn recover_checkpointed_extents() {
 
 #[test]
 fn uncheckpointed_extents_lost_after_restart() {
-    let mock = Arc::new(MockBlockDevice::new(DISK_SIZE));
-    let shared = mock.shared_state();
+    let data_mock = Arc::new(MockBlockDevice::new(DISK_SIZE));
+    let metadata_mock = Arc::new(MockBlockDevice::new(METADATA_DISK_SIZE));
+    let data_shared = data_mock.shared_state();
+    let metadata_shared = metadata_mock.shared_state();
 
     {
         let c = extent_manager_v2::ExtentManagerV2::new_inner();
         c.block_device
-            .connect(mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
+            .connect(data_mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
+            .unwrap();
+        c.metadata_device
+            .connect(metadata_mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
             .unwrap();
         c.logger
             .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
@@ -174,10 +197,14 @@ fn uncheckpointed_extents_lost_after_restart() {
         // no checkpoint for keys 6-10
     }
 
-    let mock2 = Arc::new(MockBlockDevice::reboot_from(&shared));
+    let data_mock2 = Arc::new(MockBlockDevice::reboot_from(&data_shared));
+    let metadata_mock2 = Arc::new(MockBlockDevice::reboot_from(&metadata_shared));
     let c2 = extent_manager_v2::ExtentManagerV2::new_inner();
     c2.block_device
-        .connect(mock2 as Arc<dyn IBlockDevice + Send + Sync>)
+        .connect(data_mock2 as Arc<dyn IBlockDevice + Send + Sync>)
+        .unwrap();
+    c2.metadata_device
+        .connect(metadata_mock2 as Arc<dyn IBlockDevice + Send + Sync>)
         .unwrap();
     c2.logger
         .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
@@ -198,14 +225,19 @@ fn uncheckpointed_extents_lost_after_restart() {
 }
 
 #[test]
-fn corrupt_primary_falls_back_to_previous() {
-    let mock = Arc::new(MockBlockDevice::new(DISK_SIZE));
-    let shared = mock.shared_state();
+fn corrupt_active_falls_back_to_previous() {
+    let data_mock = Arc::new(MockBlockDevice::new(DISK_SIZE));
+    let metadata_mock = Arc::new(MockBlockDevice::new(METADATA_DISK_SIZE));
+    let data_shared = data_mock.shared_state();
+    let metadata_shared = metadata_mock.shared_state();
 
     {
         let c = extent_manager_v2::ExtentManagerV2::new_inner();
         c.block_device
-            .connect(mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
+            .connect(data_mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
+            .unwrap();
+        c.metadata_device
+            .connect(metadata_mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
             .unwrap();
         c.logger
             .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
@@ -226,24 +258,32 @@ fn corrupt_primary_falls_back_to_previous() {
         c.checkpoint().expect("second checkpoint");
     }
 
-    // Read the superblock to find current_index_lba and corrupt it
+    // Read superblock to find the active copy and corrupt it
     {
-        let state = shared.lock().unwrap();
+        let state = metadata_shared.lock().unwrap();
         let sb_data = state.blocks.get(&0).cloned().unwrap_or_default();
         let sb = extent_manager_v2::superblock::Superblock::deserialize(&sb_data).unwrap();
         drop(state);
 
-        let mut state = shared.lock().unwrap();
-        if let Some(block) = state.blocks.get_mut(&sb.current_index_lba) {
+        let active_offset = sb.checkpoint_region_offset
+            + sb.active_copy as u64 * sb.checkpoint_region_size;
+        let active_lba = active_offset / SECTOR_SIZE as u64;
+
+        let mut state = metadata_shared.lock().unwrap();
+        if let Some(block) = state.blocks.get_mut(&active_lba) {
             block[0] ^= 0xFF;
             block[1] ^= 0xFF;
         }
     }
 
-    let mock2 = Arc::new(MockBlockDevice::reboot_from(&shared));
+    let data_mock2 = Arc::new(MockBlockDevice::reboot_from(&data_shared));
+    let metadata_mock2 = Arc::new(MockBlockDevice::reboot_from(&metadata_shared));
     let c2 = extent_manager_v2::ExtentManagerV2::new_inner();
     c2.block_device
-        .connect(mock2 as Arc<dyn IBlockDevice + Send + Sync>)
+        .connect(data_mock2 as Arc<dyn IBlockDevice + Send + Sync>)
+        .unwrap();
+    c2.metadata_device
+        .connect(metadata_mock2 as Arc<dyn IBlockDevice + Send + Sync>)
         .unwrap();
     c2.logger
         .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
@@ -260,14 +300,19 @@ fn corrupt_primary_falls_back_to_previous() {
 
 #[test]
 fn remove_realloc_crash_does_not_corrupt() {
-    let mock = Arc::new(MockBlockDevice::new(DISK_SIZE));
-    let shared = mock.shared_state();
+    let data_mock = Arc::new(MockBlockDevice::new(DISK_SIZE));
+    let metadata_mock = Arc::new(MockBlockDevice::new(METADATA_DISK_SIZE));
+    let data_shared = data_mock.shared_state();
+    let metadata_shared = metadata_mock.shared_state();
 
     let original_offset;
     {
         let c = extent_manager_v2::ExtentManagerV2::new_inner();
         c.block_device
-            .connect(mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
+            .connect(data_mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
+            .unwrap();
+        c.metadata_device
+            .connect(metadata_mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
             .unwrap();
         c.logger
             .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
@@ -290,10 +335,14 @@ fn remove_realloc_crash_does_not_corrupt() {
         );
     }
 
-    let mock2 = Arc::new(MockBlockDevice::reboot_from(&shared));
+    let data_mock2 = Arc::new(MockBlockDevice::reboot_from(&data_shared));
+    let metadata_mock2 = Arc::new(MockBlockDevice::reboot_from(&metadata_shared));
     let c2 = extent_manager_v2::ExtentManagerV2::new_inner();
     c2.block_device
-        .connect(mock2 as Arc<dyn IBlockDevice + Send + Sync>)
+        .connect(data_mock2 as Arc<dyn IBlockDevice + Send + Sync>)
+        .unwrap();
+    c2.metadata_device
+        .connect(metadata_mock2 as Arc<dyn IBlockDevice + Send + Sync>)
         .unwrap();
     c2.logger
         .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
@@ -307,7 +356,7 @@ fn remove_realloc_crash_does_not_corrupt() {
 
 #[test]
 fn remove_then_checkpoint_frees_slot() {
-    let (c, _mock) = create_test_component(DISK_SIZE);
+    let (c, _data_mock, _metadata_mock) = create_test_component(DISK_SIZE, METADATA_DISK_SIZE);
     c.format(format_params()).unwrap();
 
     let h = c.reserve_extent(1, SECTOR_SIZE).unwrap();
@@ -328,18 +377,21 @@ fn remove_then_checkpoint_frees_slot() {
 
 #[test]
 fn invalid_magic_returns_error() {
-    let mock = Arc::new(MockBlockDevice::new(DISK_SIZE));
+    let metadata_mock = Arc::new(MockBlockDevice::new(METADATA_DISK_SIZE));
     {
-        let shared = mock.shared_state();
-        let mut state = shared.lock().unwrap();
+        let mut state = metadata_mock.shared_state().lock().unwrap();
         let mut bad_sb = vec![0u8; 4096];
         bad_sb[0..8].copy_from_slice(&0xDEADu64.to_le_bytes());
         state.blocks.insert(0, bad_sb);
     }
 
+    let data_mock = Arc::new(MockBlockDevice::new(DISK_SIZE));
     let c = extent_manager_v2::ExtentManagerV2::new_inner();
     c.block_device
-        .connect(mock as Arc<dyn IBlockDevice + Send + Sync>)
+        .connect(data_mock as Arc<dyn IBlockDevice + Send + Sync>)
+        .unwrap();
+    c.metadata_device
+        .connect(metadata_mock as Arc<dyn IBlockDevice + Send + Sync>)
         .unwrap();
     c.logger
         .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
