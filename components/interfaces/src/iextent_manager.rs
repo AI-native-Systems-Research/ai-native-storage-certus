@@ -144,5 +144,7 @@ define_interface! {
         fn remove_extent(&self, key: ExtentKey) -> Result<(), ExtentManagerError>;
 
         fn checkpoint(&self) -> Result<(), ExtentManagerError>;
+
+        fn get_instance_id(&self) -> Result<u64, ExtentManagerError>;
     }
 }

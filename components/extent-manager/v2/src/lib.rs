@@ -306,6 +306,15 @@ impl IExtentManager for ExtentManagerV2 {
         }
 
         // Write superblock to metadata device
+        let instance_id = {
+            use std::io::Read;
+            let mut buf = [0u8; 8];
+            std::fs::File::open("/dev/urandom")
+                .and_then(|mut f| f.read_exact(&mut buf))
+                .map(|_| u64::from_le_bytes(buf))
+                .map_err(|e| error::io_error(&format!("failed to generate instance_id: {e}")))?
+        };
+
         let sb = Superblock::new(
             data_disk_size,
             params.sector_size,
@@ -314,6 +323,7 @@ impl IExtentManager for ExtentManagerV2 {
             params.region_count,
             checkpoint_region_offset,
             checkpoint_region_size,
+            instance_id,
         );
 
         let metadata_client = self.get_metadata_client()?;
@@ -506,6 +516,14 @@ impl IExtentManager for ExtentManagerV2 {
         let region = self.region_for_key(key)?;
         let mut r = region.write();
         r.remove_extent(key)
+    }
+
+    fn get_instance_id(&self) -> Result<u64, ExtentManagerError> {
+        let shared = self.shared.lock().unwrap();
+        let shared = shared
+            .as_ref()
+            .ok_or_else(|| error::not_initialized("component not initialized"))?;
+        Ok(shared.superblock.instance_id)
     }
 
     fn checkpoint(&self) -> Result<(), ExtentManagerError> {

@@ -2,8 +2,8 @@ use crate::error;
 use interfaces::ExtentManagerError;
 
 pub const SUPERBLOCK_SIZE: usize = 4096;
-pub const SUPERBLOCK_MAGIC: u64 = 0x4345_5254_5553_5633; // "CERTUSV3"
-pub const FORMAT_VERSION: u32 = 3;
+pub const SUPERBLOCK_MAGIC: u64 = 0x4345_5254_5553_5634; // "CERTUSV4"
+pub const FORMAT_VERSION: u32 = 4;
 
 #[derive(Debug, Clone)]
 pub struct Superblock {
@@ -18,6 +18,7 @@ pub struct Superblock {
     pub active_copy: u8,
     pub checkpoint_region_offset: u64,
     pub checkpoint_region_size: u64,
+    pub instance_id: u64,
     pub checksum: u32,
 }
 
@@ -30,6 +31,7 @@ impl Superblock {
         region_count: u32,
         checkpoint_region_offset: u64,
         checkpoint_region_size: u64,
+        instance_id: u64,
     ) -> Self {
         Self {
             magic: SUPERBLOCK_MAGIC,
@@ -43,6 +45,7 @@ impl Superblock {
             active_copy: 0,
             checkpoint_region_offset,
             checkpoint_region_size,
+            instance_id,
             checksum: 0,
         }
     }
@@ -74,6 +77,8 @@ impl Superblock {
         buf[pos..pos + 8].copy_from_slice(&self.checkpoint_region_offset.to_le_bytes());
         pos += 8;
         buf[pos..pos + 8].copy_from_slice(&self.checkpoint_region_size.to_le_bytes());
+        pos += 8;
+        buf[pos..pos + 8].copy_from_slice(&self.instance_id.to_le_bytes());
         pos += 8;
 
         let crc = crc32fast::hash(&buf[..pos]);
@@ -119,6 +124,8 @@ impl Superblock {
         pos += 8;
         let checkpoint_region_size = u64::from_le_bytes(buf[pos..pos + 8].try_into().unwrap());
         pos += 8;
+        let instance_id = u64::from_le_bytes(buf[pos..pos + 8].try_into().unwrap());
+        pos += 8;
 
         let stored_crc = u32::from_le_bytes(buf[pos..pos + 4].try_into().unwrap());
         let computed_crc = crc32fast::hash(&buf[..pos]);
@@ -141,6 +148,7 @@ impl Superblock {
             active_copy,
             checkpoint_region_offset,
             checkpoint_region_size,
+            instance_id,
             checksum: stored_crc,
         })
     }
@@ -160,6 +168,7 @@ mod tests {
             32,
             1048576 + 4096, // 1 MiB padding + superblock
             512 * 1024 * 1024, // 512 MiB per copy
+            0xDEAD_BEEF_CAFE_1234,
         );
         let buf = sb.serialize();
         assert_eq!(buf.len(), SUPERBLOCK_SIZE);
@@ -176,11 +185,12 @@ mod tests {
         assert_eq!(recovered.active_copy, 0);
         assert_eq!(recovered.checkpoint_region_offset, 1048576 + 4096);
         assert_eq!(recovered.checkpoint_region_size, 512 * 1024 * 1024);
+        assert_eq!(recovered.instance_id, 0xDEAD_BEEF_CAFE_1234);
     }
 
     #[test]
     fn corrupt_crc_detected() {
-        let sb = Superblock::new(1024 * 1024, 4096, 65536, 4096, 32, 4096 + 1048576, 65536);
+        let sb = Superblock::new(1024 * 1024, 4096, 65536, 4096, 32, 4096 + 1048576, 65536, 0);
         let mut buf = sb.serialize();
         buf[10] ^= 0xFF;
         let err = Superblock::deserialize(&buf).unwrap_err();
@@ -189,7 +199,7 @@ mod tests {
 
     #[test]
     fn invalid_magic_detected() {
-        let sb = Superblock::new(1024 * 1024, 4096, 65536, 4096, 32, 4096 + 1048576, 65536);
+        let sb = Superblock::new(1024 * 1024, 4096, 65536, 4096, 32, 4096 + 1048576, 65536, 0);
         let mut buf = sb.serialize();
         buf[0] = 0xFF;
         let err = Superblock::deserialize(&buf).unwrap_err();
