@@ -19,3 +19,16 @@ established good engineering practice, maintainability and meeting performance r
 
 After logger component was made available:
 + Modify the block-device-spdk-nvme component to include an ILogger receptacle.  Modify the component to out info and debug messages through the log component.
+
+/speckit-specify @info/FUNCTIONAL-DESIGN.md
+
+/speckit-clarify
+
+Build README.md to summarize the component.
+
+/speckit-plan
+
+/speckit-tasks
+
+/speckit-implement
+

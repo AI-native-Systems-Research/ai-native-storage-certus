@@ -19,8 +19,8 @@
 
 **Purpose**: Project initialization and file structure
 
-- [ ] T001 Update Cargo.toml to add criterion dev-dependency and any needed test dependencies in components/dispatch-map/v0/Cargo.toml
-- [ ] T002 Create source module files src/entry.rs and src/state.rs with module declarations in src/lib.rs
+- [x] T001 Update Cargo.toml to add criterion dev-dependency and any needed test dependencies in components/dispatch-map/v0/Cargo.toml
+- [x] T002 Create source module files src/entry.rs and src/state.rs with module declarations in src/lib.rs
 
 ---
 
@@ -28,12 +28,12 @@
 
 **Purpose**: Define all shared types in the interfaces crate and core internal data structures. MUST complete before any user story.
 
-- [ ] T003 Define CacheKey type alias, DispatchMapError enum (with Display, Error impls), and LookupResult enum in components/interfaces/src/idispatch_map.rs
-- [ ] T004 Rewrite IDispatchMap trait with full method signatures (spdk-gated, matching contracts/idispatch_map.md) in components/interfaces/src/idispatch_map.rs
-- [ ] T005 Update components/interfaces/src/lib.rs with re-exports for CacheKey, DispatchMapError, LookupResult, and spdk-gated IDispatchMap
-- [ ] T006 [P] Implement Location enum and DispatchEntry struct with doc comments in src/entry.rs
-- [ ] T007 [P] Implement DispatchMapState struct (Mutex + Condvar + entries HashMap + buffers HashMap + dma_alloc Option) with blocking helper method in src/state.rs
-- [ ] T008 Update define_component! macro invocation and IDispatchMap impl skeleton (all methods returning todo!) in src/lib.rs
+- [x] T003 Define CacheKey type alias, DispatchMapError enum (with Display, Error impls), and LookupResult enum in components/interfaces/src/idispatch_map.rs
+- [x] T004 Rewrite IDispatchMap trait with full method signatures (spdk-gated, matching contracts/idispatch_map.md) in components/interfaces/src/idispatch_map.rs
+- [x] T005 Update components/interfaces/src/lib.rs with re-exports for CacheKey, DispatchMapError, LookupResult, and spdk-gated IDispatchMap
+- [x] T006 [P] Implement Location enum and DispatchEntry struct with doc comments in src/entry.rs
+- [x] T007 [P] Implement DispatchMapState struct (Mutex + Condvar + entries HashMap + buffers HashMap + dma_alloc Option) with blocking helper method in src/state.rs
+- [x] T008 Update define_component! macro invocation and IDispatchMap impl skeleton (all methods returning todo!) in src/lib.rs
 
 **Checkpoint**: All types compile; `cargo build -p dispatch-map` succeeds with todo! stubs.
 
@@ -47,12 +47,12 @@
 
 ### Implementation
 
-- [ ] T009 [US4] Implement take_read(key, timeout) and take_write(key, timeout) with Condvar wait_timeout loop in src/lib.rs
-- [ ] T010 [P] [US4] Implement release_read(key) and release_write(key) with underflow error checking and condvar.notify_all() in src/lib.rs
-- [ ] T011 [US4] Implement downgrade_reference(key) — atomic write-to-read transition in src/lib.rs
-- [ ] T012 [US4] Add doc tests for take_read, take_write, release_read, release_write, downgrade_reference in src/lib.rs
-- [ ] T013 [US4] Unit tests: single-threaded ref counting — take/release happy path, underflow errors, no-write downgrade error in src/lib.rs (#[cfg(test)] module)
-- [ ] T014 [US4] Integration tests: multi-threaded concurrent access — multiple readers, writer blocks until readers release, timeout error after deadline in tests/integration.rs
+- [x] T009 [US4] Implement take_read(key, timeout) and take_write(key, timeout) with Condvar wait_timeout loop in src/lib.rs
+- [x] T010 [P] [US4] Implement release_read(key) and release_write(key) with underflow error checking and condvar.notify_all() in src/lib.rs
+- [x] T011 [US4] Implement downgrade_reference(key) — atomic write-to-read transition in src/lib.rs
+- [x] T012 [US4] Add doc tests for take_read, take_write, release_read, release_write, downgrade_reference in src/lib.rs
+- [x] T013 [US4] Unit tests: single-threaded ref counting — take/release happy path, underflow errors, no-write downgrade error in src/lib.rs (#[cfg(test)] module)
+- [x] T014 [US4] Integration tests: multi-threaded concurrent access — multiple readers, writer blocks until readers release, timeout error after deadline in tests/integration.rs
 
 **Checkpoint**: All ref counting methods work correctly under single-threaded and multi-threaded access. `cargo test -p dispatch-map` passes.
 
@@ -66,10 +66,10 @@
 
 ### Implementation
 
-- [ ] T015 [US1] Implement set_dma_alloc(alloc) — store DmaAllocFn in component state in src/lib.rs
-- [ ] T016 [US1] Implement create_staging(key, size) — validate size>0, allocate DMA buffer via DmaAllocFn, insert entry with write_ref=1, store buffer in side map, return ptr in src/lib.rs
-- [ ] T017 [US1] Add doc tests for set_dma_alloc and create_staging in src/lib.rs
-- [ ] T018 [US1] Unit tests: create_staging happy path, size=0 error, allocation failure error, duplicate key error in src/lib.rs (#[cfg(test)] module)
+- [x] T015 [US1] Implement set_dma_alloc(alloc) — store DmaAllocFn in component state in src/lib.rs
+- [x] T016 [US1] Implement create_staging(key, size) — validate size>0, allocate DMA buffer via DmaAllocFn, insert entry with write_ref=1, store buffer in side map, return ptr in src/lib.rs
+- [x] T017 [US1] Add doc tests for set_dma_alloc and create_staging in src/lib.rs
+- [x] T018 [US1] Unit tests: create_staging happy path, size=0 error, allocation failure error, duplicate key error in src/lib.rs (#[cfg(test)] module)
 
 **Checkpoint**: Staging buffers can be allocated and entries tracked. Tests pass.
 
@@ -83,9 +83,9 @@
 
 ### Implementation
 
-- [ ] T019 [US2] Implement lookup(key, timeout) — check entry exists, block if write_ref>0 (reuse blocking helper), return LookupResult variant, increment read_ref in src/lib.rs
-- [ ] T020 [US2] Add doc tests for lookup in src/lib.rs
-- [ ] T021 [US2] Unit tests: lookup NotExist, Staging result, BlockDevice result, blocked-by-writer with timeout, MismatchSize in src/lib.rs (#[cfg(test)] module)
+- [x] T019 [US2] Implement lookup(key, timeout) — check entry exists, block if write_ref>0 (reuse blocking helper), return LookupResult variant, increment read_ref in src/lib.rs
+- [x] T020 [US2] Add doc tests for lookup in src/lib.rs
+- [x] T021 [US2] Unit tests: lookup NotExist, Staging result, BlockDevice result, blocked-by-writer with timeout, MismatchSize in src/lib.rs (#[cfg(test)] module)
 
 **Checkpoint**: Lookups return correct location types. Blocking on active writers works. Tests pass.
 
@@ -99,9 +99,9 @@
 
 ### Implementation
 
-- [ ] T022 [US3] Implement convert_to_storage(key, offset, block_device_id) — validate entry is Staging, update Location to BlockDevice, remove DMA buffer from side map in src/lib.rs
-- [ ] T023 [US3] Add doc tests for convert_to_storage in src/lib.rs
-- [ ] T024 [US3] Unit tests: happy path transition, key-not-found error, non-staging (InvalidState) error in src/lib.rs (#[cfg(test)] module)
+- [x] T022 [US3] Implement convert_to_storage(key, offset, block_device_id) — validate entry is Staging, update Location to BlockDevice, remove DMA buffer from side map in src/lib.rs
+- [x] T023 [US3] Add doc tests for convert_to_storage in src/lib.rs
+- [x] T024 [US3] Unit tests: happy path transition, key-not-found error, non-staging (InvalidState) error in src/lib.rs (#[cfg(test)] module)
 
 **Checkpoint**: Full write flow works: stage → release write → convert to storage → lookup returns BlockDevice. Tests pass.
 
@@ -115,9 +115,9 @@
 
 ### Implementation
 
-- [ ] T025 [US5] Implement initialize() — call extent_manager receptacle's for_each_extent, populate entries as BlockDevice locations, log recovery count via ILogger in src/lib.rs
-- [ ] T026 [US5] Add doc tests for initialize in src/lib.rs
-- [ ] T027 [US5] Integration tests: recovery with mock extent manager (populated case — verify all extents in map; empty case — verify empty map) in tests/integration.rs
+- [x] T025 [US5] Implement initialize() — call extent_manager receptacle's for_each_extent, populate entries as BlockDevice locations, log recovery count via ILogger in src/lib.rs
+- [x] T026 [US5] Add doc tests for initialize in src/lib.rs
+- [x] T027 [US5] Integration tests: recovery with mock extent manager (populated case — verify all extents in map; empty case — verify empty map) in tests/integration.rs
 
 **Checkpoint**: Recovery populates the map correctly from the extent manager. Tests pass.
 
@@ -131,9 +131,9 @@
 
 ### Implementation
 
-- [ ] T028 [US6] Implement remove(key) — validate no active refs, delete entry from map and buffer from side map, error on active refs or key-not-found in src/lib.rs
-- [ ] T029 [US6] Add doc tests for remove in src/lib.rs
-- [ ] T030 [US6] Unit tests: happy path removal, active-refs error, key-not-found error in src/lib.rs (#[cfg(test)] module)
+- [x] T028 [US6] Implement remove(key) — validate no active refs, delete entry from map and buffer from side map, error on active refs or key-not-found in src/lib.rs
+- [x] T029 [US6] Add doc tests for remove in src/lib.rs
+- [x] T030 [US6] Unit tests: happy path removal, active-refs error, key-not-found error in src/lib.rs (#[cfg(test)] module)
 
 **Checkpoint**: Entries can be removed. Full lifecycle works: stage → convert → remove. Tests pass.
 
@@ -143,12 +143,12 @@
 
 **Purpose**: Logging, benchmarks, lint compliance, final validation
 
-- [ ] T031 [P] Add ILogger info/debug/error calls throughout all IDispatchMap method implementations in src/lib.rs
-- [ ] T032 [P] Implement Criterion benchmarks: lookup latency (no contention), ref op throughput, entry size assertion (≤32 bytes) in benches/dispatch_map_benchmark.rs
-- [ ] T033 Run cargo fmt -p dispatch-map --check and cargo clippy -p dispatch-map -- -D warnings — fix all issues
-- [ ] T034 Run cargo doc -p dispatch-map --no-deps — fix all warnings; verify module-level //! docs present in all source files
-- [ ] T035 Run full test suite with --test-threads 1 to verify single-threaded CI compatibility
-- [ ] T036 Run quickstart.md validation — verify usage example compiles and described flows work
+- [x] T031 [P] Add ILogger info/debug/error calls throughout all IDispatchMap method implementations in src/lib.rs
+- [x] T032 [P] Implement Criterion benchmarks: lookup latency (no contention), ref op throughput, entry size assertion (≤32 bytes) in benches/dispatch_map_benchmark.rs
+- [x] T033 Run cargo fmt -p dispatch-map --check and cargo clippy -p dispatch-map -- -D warnings — fix all issues
+- [x] T034 Run cargo doc -p dispatch-map --no-deps — fix all warnings; verify module-level //! docs present in all source files
+- [x] T035 Run full test suite with --test-threads 1 to verify single-threaded CI compatibility
+- [x] T036 Run quickstart.md validation — verify usage example compiles and described flows work
 
 **Checkpoint**: All quality gates pass. Component is ready for integration.
 

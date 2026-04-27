@@ -220,8 +220,11 @@ pub type DmaAllocFn =
     std::sync::Arc<dyn Fn(usize, usize, Option<i32>) -> Result<DmaBuffer, String> + Send + Sync>;
 
 // SAFETY: The underlying hugepage memory has no thread affinity.
-// It is valid from any thread once allocated.
+// It is valid from any thread once allocated. Sync is required for
+// Arc<DmaBuffer> to be Send, and access is serialized by the dispatch
+// map's Mutex.
 unsafe impl Send for DmaBuffer {}
+unsafe impl Sync for DmaBuffer {}
 
 impl DmaBuffer {
     /// Allocate a zero-initialized DMA buffer.

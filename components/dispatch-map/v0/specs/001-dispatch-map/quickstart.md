@@ -15,18 +15,18 @@ cargo test -p dispatch-map -- --test-threads 1  # CI mode
 
 ## Usage
 
-```rust
-use dispatch_map::DispatchMapComponentV0;
+```rust,ignore
+use dispatch_map::{DispatchMapComponentV0, DispatchMapState};
 use interfaces::{IDispatchMap, IExtentManager, ILogger};
-use component_core::query_interface;
+use component_core::{query_interface, iunknown::IUnknown};
 use std::time::Duration;
 
 // 1. Create the component
-let component = DispatchMapComponentV0::new();
+let component = DispatchMapComponentV0::new(DispatchMapState::new());
 
 // 2. Bind receptacles
-component.bind("logger", &logger_component);
-component.bind("extent_manager", &extent_manager_component);
+component.connect_receptacle_raw("logger", &*logger_component).unwrap();
+component.connect_receptacle_raw("extent_manager", &*extent_manager_component).unwrap();
 
 // 3. Set DMA allocator and initialize (recovers extents)
 let dm = query_interface!(component, IDispatchMap).unwrap();
@@ -41,7 +41,7 @@ dm.release_write(42).unwrap();  // release implicit write ref
 // 5. Commit to storage
 dm.take_write(42, Duration::from_secs(5)).unwrap();
 dm.convert_to_storage(42, 8192, 1).unwrap();
-// write ref consumed by convert
+dm.release_write(42).unwrap();
 
 // 6. Read back
 let result = dm.lookup(42, Duration::from_secs(5)).unwrap();

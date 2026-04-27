@@ -27,6 +27,20 @@ Build README.md to summarize the component.
 
 /speckit-tasks
 
-/speckit-impl
+/speckit-implement
 
+>>> Problem. Passing raw pointers for DMA buffers instead of using DmaBuffer type.
 
+create_staging() and lookup() should use Arc<DmaBuffer> references for DMA buffers.  DmaBuffer is defined in spdk_types.h
+
+>>> Problem. Asking for DMA memory allocator function, instead of using SPDK default.
+
+Can you use DmaBuffer::new to allocate buffers?
+
+>>> Unnecessary complexity (bad spec)
+
+Remove block_device_id since this is known implicitly and need not be specified. 
+
+Remove the timeout parameters and have a statically configured time out of 100ms. We don't need variable timeout and don't want the expense of passing parameter/setting the timeout.
+
+Add tests to make sure the locking is correct. 
