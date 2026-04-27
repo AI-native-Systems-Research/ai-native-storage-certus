@@ -15,7 +15,6 @@ pub(crate) enum Location {
 
 /// Per-key metadata stored in the dispatch map.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub(crate) struct DispatchEntry {
     pub location: Location,
     pub size_blocks: u32,

@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use component_core::query_interface;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
@@ -46,7 +45,7 @@ fn bench_lookup_no_contention(c: &mut Criterion) {
 
     c.bench_function("lookup_no_contention", |b| {
         b.iter(|| {
-            let result = dm.lookup(black_box(1), Duration::from_millis(10)).unwrap();
+            let result = dm.lookup(black_box(1)).unwrap();
             dm.release_read(black_box(1)).unwrap();
             black_box(result);
         });
@@ -63,16 +62,14 @@ fn bench_ref_ops_throughput(c: &mut Criterion) {
 
     c.bench_function("take_release_read", |b| {
         b.iter(|| {
-            dm.take_read(black_box(1), Duration::from_millis(10))
-                .unwrap();
+            dm.take_read(black_box(1)).unwrap();
             dm.release_read(black_box(1)).unwrap();
         });
     });
 
     c.bench_function("take_release_write", |b| {
         b.iter(|| {
-            dm.take_write(black_box(1), Duration::from_millis(10))
-                .unwrap();
+            dm.take_write(black_box(1)).unwrap();
             dm.release_write(black_box(1)).unwrap();
         });
     });

@@ -479,6 +479,10 @@ impl IExtentManager for MockExtentManagerComponent {
     fn checkpoint(&self) -> Result<(), ExtentManagerError> {
         Ok(())
     }
+
+    fn get_instance_id(&self) -> Result<u64, ExtentManagerError> {
+        Ok((1))
+    }
 }
 
 #[test]
