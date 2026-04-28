@@ -9,14 +9,16 @@ pub(crate) struct BlockDeviceClient {
     channels: ClientChannels,
     alloc: DmaAllocFn,
     sector_size: u32,
+    ns_id: u32,
 }
 
 impl BlockDeviceClient {
-    pub fn new(channels: ClientChannels, alloc: DmaAllocFn, sector_size: u32) -> Self {
+    pub fn new(channels: ClientChannels, alloc: DmaAllocFn, sector_size: u32, ns_id: u32) -> Self {
         Self {
             channels,
             alloc,
             sector_size,
+            ns_id,
         }
     }
 
@@ -64,7 +66,7 @@ impl BlockDeviceClient {
             self.channels
                 .command_tx
                 .send(Command::WriteSync {
-                    ns_id: 1,
+                    ns_id: self.ns_id,
                     lba: block_lba,
                     buf: block_buf,
                 })
@@ -108,7 +110,7 @@ impl BlockDeviceClient {
             self.channels
                 .command_tx
                 .send(Command::ReadSync {
-                    ns_id: 1,
+                    ns_id: self.ns_id,
                     lba: block_lba,
                     buf: Arc::clone(&buf),
                 })

@@ -75,7 +75,7 @@ impl ExtentManagerV2 {
             .store(interval.as_millis() as u64, Ordering::Relaxed);
     }
 
-    fn get_metadata_client(&self) -> Result<BlockDeviceClient, ExtentManagerError> {
+    fn get_metadata_client(&self, ns_id: u32) -> Result<BlockDeviceClient, ExtentManagerError> {
         let bd = self
             .metadata_device
             .get()
@@ -100,7 +100,7 @@ impl ExtentManagerV2 {
             }
         };
 
-        Ok(BlockDeviceClient::new(channels, alloc, sector_size))
+        Ok(BlockDeviceClient::new(channels, alloc, sector_size, ns_id))
     }
 
     fn region_for_key(&self, key: ExtentKey) -> Result<Arc<RwLock<RegionState>>, ExtentManagerError> {
@@ -145,7 +145,11 @@ impl ExtentManagerV2 {
 
         self.log_info("checkpoint_start");
 
-        let metadata_client = self.get_metadata_client()?;
+        let ns_id = {
+            let shared = self.shared.lock().unwrap();
+            shared.as_ref().map_or(1, |s| s.format_params.metadata_disk_ns_id)
+        };
+        let metadata_client = self.get_metadata_client(ns_id)?;
 
         checkpoint::write_checkpoint(&metadata_client, &self.regions, &self.shared)?;
 
@@ -238,8 +242,8 @@ impl IExtentManager for ExtentManagerV2 {
             .metadata_device
             .get()
             .map_err(|_| error::not_initialized("metadata block device not connected"))?;
-        let metadata_disk_size = metadata_bd.num_sectors(1).map_err(error::nvme_to_em)?
-            * metadata_bd.sector_size(1).map_err(error::nvme_to_em)? as u64;
+        let metadata_disk_size = metadata_bd.num_sectors(params.metadata_disk_ns_id).map_err(error::nvme_to_em)?
+            * metadata_bd.sector_size(params.metadata_disk_ns_id).map_err(error::nvme_to_em)? as u64;
 
         // Compute checkpoint region layout on metadata device
         let alignment = params.metadata_alignment;
@@ -300,7 +304,7 @@ impl IExtentManager for ExtentManagerV2 {
             instance_id,
         );
 
-        let metadata_client = self.get_metadata_client()?;
+        let metadata_client = self.get_metadata_client(params.metadata_disk_ns_id)?;
         let sb_data = sb.serialize();
         metadata_client.write_blocks(0, &sb_data)?;
 
@@ -322,7 +326,7 @@ impl IExtentManager for ExtentManagerV2 {
     fn initialize(&self) -> Result<(), ExtentManagerError> {
         self.log_info("recovery_start");
 
-        let metadata_client = self.get_metadata_client()?;
+        let metadata_client = self.get_metadata_client(1)?;
         let (sb, per_region_data) = recovery::recover(&metadata_client, self)?;
 
         let format_params = FormatParams {
@@ -333,6 +337,7 @@ impl IExtentManager for ExtentManagerV2 {
             region_count: sb.region_count,
             metadata_alignment: sb.checkpoint_region_offset,
             instance_id: Some(sb.instance_id),
+            metadata_disk_ns_id: 1,
         };
 
         let data_disk_size = sb.data_disk_size;

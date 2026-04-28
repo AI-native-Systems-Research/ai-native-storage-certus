@@ -59,6 +59,8 @@ pub struct FormatParams {
     /// Instance identifier stored in the superblock. If None, a random
     /// value is generated at format time.
     pub instance_id: Option<u64>,
+    /// NVMe namespace identifier for the metadata disk.
+    pub metadata_disk_ns_id: u32,
 }
 
 impl FormatParams {
@@ -80,6 +82,7 @@ impl Default for FormatParams {
             region_count: 16,
             metadata_alignment: 128 * 1024,          // 128 KiB
             instance_id: None,
+            metadata_disk_ns_id: 1,
         }
     }
 }

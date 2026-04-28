@@ -162,6 +162,7 @@ fn main() {
         region_count: 32,
         metadata_alignment: 1048576, // 1 MiB
         instance_id: None,
+        metadata_disk_ns_id: 1,
     };
     if let Err(e) = iem.format(params) {
         eprintln!("error: extent manager format failed: {e}");
