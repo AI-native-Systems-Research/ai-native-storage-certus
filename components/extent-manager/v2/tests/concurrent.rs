@@ -21,6 +21,7 @@ fn format_params() -> FormatParams {
         region_count: 8,
         metadata_alignment: METADATA_ALIGNMENT,
         instance_id: None,
+        metadata_disk_ns_id: 1,
     }
 }
 
