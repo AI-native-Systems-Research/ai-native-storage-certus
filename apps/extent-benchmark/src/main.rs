@@ -42,10 +42,6 @@ fn main() {
         eprintln!("error: bind spdk_env→metadata_block_dev: {e}");
         std::process::exit(2);
     });
-    bind(&*data_block_dev, "IBlockDevice", &*extent_mgr, "block_device").unwrap_or_else(|e| {
-        eprintln!("error: bind data_block_dev→extent_mgr: {e}");
-        std::process::exit(2);
-    });
     bind(&*metadata_block_dev, "IBlockDevice", &*extent_mgr, "metadata_device").unwrap_or_else(|e| {
         eprintln!("error: bind metadata_block_dev→extent_mgr: {e}");
         std::process::exit(2);

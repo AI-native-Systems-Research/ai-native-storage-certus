@@ -45,7 +45,6 @@ define_component! {
         version: "0.3.0",
         provides: [IExtentManager],
         receptacles: {
-            block_device: IBlockDevice,
             metadata_device: IBlockDevice,
             logger: ILogger,
         },
@@ -74,34 +73,6 @@ impl ExtentManagerV2 {
     pub fn set_checkpoint_interval(&self, interval: std::time::Duration) {
         self.checkpoint_interval_ms
             .store(interval.as_millis() as u64, Ordering::Relaxed);
-    }
-
-    fn get_data_client(&self) -> Result<BlockDeviceClient, ExtentManagerError> {
-        let bd = self
-            .block_device
-            .get()
-            .map_err(|_| error::not_initialized("data block device not connected"))?;
-
-        let channels = bd
-            .connect_client()
-            .map_err(error::nvme_to_em)?;
-
-        let alloc = self
-            .dma_alloc
-            .lock()
-            .unwrap()
-            .clone()
-            .ok_or_else(|| error::not_initialized("DMA allocator not set"))?;
-
-        let sector_size = {
-            let shared = self.shared.lock().unwrap();
-            match shared.as_ref() {
-                Some(s) => s.format_params.sector_size,
-                None => 4096,
-            }
-        };
-
-        Ok(BlockDeviceClient::new(channels, alloc, sector_size))
     }
 
     fn get_metadata_client(&self) -> Result<BlockDeviceClient, ExtentManagerError> {

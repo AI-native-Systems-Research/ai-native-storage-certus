@@ -26,7 +26,7 @@ fn format_params() -> FormatParams {
 
 #[test]
 fn concurrent_reserve_publish_lookup() {
-    let (c, _data_mock, _metadata_mock) = create_test_component(DISK_SIZE, METADATA_DISK_SIZE);
+    let (c, _metadata_mock) = create_test_component(METADATA_DISK_SIZE);
     c.format(format_params()).expect("format");
 
     let c = Arc::new(c);
@@ -58,7 +58,7 @@ fn concurrent_reserve_publish_lookup() {
 
 #[test]
 fn concurrent_reserve_abort() {
-    let (c, _data_mock, _metadata_mock) = create_test_component(DISK_SIZE, METADATA_DISK_SIZE);
+    let (c, _metadata_mock) = create_test_component(METADATA_DISK_SIZE);
     c.format(format_params()).expect("format");
 
     let c = Arc::new(c);
@@ -91,7 +91,7 @@ fn concurrent_reserve_abort() {
 
 #[test]
 fn concurrent_publish_remove() {
-    let (c, _data_mock, _metadata_mock) = create_test_component(DISK_SIZE, METADATA_DISK_SIZE);
+    let (c, _metadata_mock) = create_test_component(METADATA_DISK_SIZE);
     c.format(format_params()).expect("format");
 
     for k in 0..800u64 {

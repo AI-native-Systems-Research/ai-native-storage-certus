@@ -22,7 +22,7 @@ fn format_params() -> FormatParams {
 }
 
 fn setup() -> std::sync::Arc<extent_manager_v2::ExtentManagerV2> {
-    let (component, _data_mock, _metadata_mock) = create_test_component(DISK_SIZE, METADATA_DISK_SIZE);
+    let (component, _metadata_mock) = create_test_component(METADATA_DISK_SIZE);
     component.format(format_params()).expect("format");
     component
 }
@@ -105,7 +105,7 @@ fn key_max_is_valid() {
 #[test]
 fn out_of_space() {
     let small_disk: u64 = SLAB_SIZE + SECTOR_SIZE as u64 * 2;
-    let (c, _data_mock, _metadata_mock) = create_test_component(small_disk, METADATA_DISK_SIZE);
+    let (c, _metadata_mock) = create_test_component(METADATA_DISK_SIZE);
     c.format(FormatParams {
         data_disk_size: small_disk,
         slab_size: SLAB_SIZE,
