@@ -60,7 +60,12 @@ pub(crate) fn to_namespace_info_list(namespaces: &[NvmeNamespaceInfo]) -> Vec<Na
     namespaces.iter().map(to_namespace_info).collect()
 }
 
-/// Create a new namespace on the controller.
+/// Create a new namespace on the controller (always uses lbaf=0).
+///
+/// Use `format()` after creation to change the LBA format.
+/// When `size_sectors` is 0, uses all remaining unallocated capacity.
+/// `current_namespaces` is the actor's up-to-date namespace list (used for
+/// capacity computation when SPDK's cached identify data is stale).
 ///
 /// # Safety
 ///
@@ -68,11 +73,23 @@ pub(crate) fn to_namespace_info_list(namespaces: &[NvmeNamespaceInfo]) -> Vec<Na
 pub(crate) unsafe fn create(
     ctrlr_ptr: *mut spdk_sys::spdk_nvme_ctrlr,
     size_sectors: u64,
+    current_namespaces: &[NvmeNamespaceInfo],
 ) -> Result<u32, NvmeBlockError> {
-    // SAFETY: zeroed spdk_nvme_ns_data is a valid default.
+    let sector_size = current_namespaces
+        .first()
+        .map(|ns| ns.sector_size as u64)
+        .unwrap_or(512);
+
+    let effective_size = if size_sectors == 0 {
+        unallocated_sectors(ctrlr_ptr, current_namespaces, sector_size)?
+    } else {
+        size_sectors
+    };
+
+    // SAFETY: zeroed spdk_nvme_ns_data is a valid default (lbaf=0).
     let mut ns_data: spdk_sys::spdk_nvme_ns_data = std::mem::zeroed();
-    ns_data.nsze = size_sectors;
-    ns_data.ncap = size_sectors;
+    ns_data.nsze = effective_size;
+    ns_data.ncap = effective_size;
 
     // SAFETY: ctrlr_ptr is valid; ns_data is properly initialized.
     let ns_id = spdk_sys::spdk_nvme_ctrlr_create_ns(ctrlr_ptr, &mut ns_data);
@@ -85,7 +102,74 @@ pub(crate) unsafe fn create(
     Ok(ns_id)
 }
 
+/// Query unallocated NVM capacity and return it as a sector count.
+///
+/// Reads `unvmcap` (unallocated NVM capacity in bytes) from the Identify
+/// Controller data and divides by the sector size of LBA format 0.
+///
+/// # Safety
+///
+/// `ctrlr_ptr` must be a valid SPDK NVMe controller pointer.
+/// NVMe Identify Controller byte offsets for capacity fields (128-bit LE).
+const TNVMCAP_OFFSET: usize = 280;
+const UNVMCAP_OFFSET: usize = 296;
+
+/// Read a 128-bit LE value from the Identify Controller data at `offset`.
+unsafe fn read_cdata_u128(cdata: *const spdk_sys::spdk_nvme_ctrlr_data, offset: usize) -> u128 {
+    let base = cdata as *const u8;
+    let lo = std::ptr::read_unaligned(base.add(offset) as *const u64);
+    let hi = std::ptr::read_unaligned(base.add(offset + 8) as *const u64);
+    lo as u128 | ((hi as u128) << 64)
+}
+
+unsafe fn unallocated_sectors(
+    ctrlr_ptr: *mut spdk_sys::spdk_nvme_ctrlr,
+    current_namespaces: &[NvmeNamespaceInfo],
+    target_sector_size: u64,
+) -> Result<u64, NvmeBlockError> {
+    // SAFETY: ctrlr_ptr is valid; returns a pointer to the 4096-byte Identify Controller data.
+    let cdata = spdk_sys::spdk_nvme_ctrlr_get_data(ctrlr_ptr);
+    if cdata.is_null() {
+        return Err(NvmeBlockError::NotSupported(
+            "failed to get controller identify data".into(),
+        ));
+    }
+
+    let unvmcap_bytes = read_cdata_u128(cdata, UNVMCAP_OFFSET);
+    let tnvmcap_bytes = read_cdata_u128(cdata, TNVMCAP_OFFSET);
+
+    // Prefer unvmcap if reported by the controller.
+    if unvmcap_bytes > 0 {
+        return Ok((unvmcap_bytes / target_sector_size as u128) as u64);
+    }
+
+    // Fallback: compute from tnvmcap minus allocated namespace sizes.
+    // Uses the actor's refreshed namespace list (not SPDK's stale cache).
+    if tnvmcap_bytes > 0 {
+        let allocated: u128 = current_namespaces
+            .iter()
+            .map(|ns| ns.num_sectors as u128 * ns.sector_size as u128)
+            .sum();
+        let remaining = tnvmcap_bytes.saturating_sub(allocated);
+        if remaining == 0 {
+            return Err(NvmeBlockError::NotSupported(
+                "no unallocated capacity remaining on controller".into(),
+            ));
+        }
+        return Ok((remaining / target_sector_size as u128) as u64);
+    }
+
+    Err(NvmeBlockError::NotSupported(
+        "controller does not report NVM capacity (tnvmcap/unvmcap both zero)".into(),
+    ))
+}
+
 /// Format an existing namespace (erases all data).
+///
+/// Sets the LBA format to `lbaf` (e.g., 0 for 512B, 2 for 4KiB on most
+/// controllers). After a successful format, the caller must issue a
+/// controller reset so the host re-reads the namespace's identify data
+/// and recognizes the new sector size.
 ///
 /// # Safety
 ///
@@ -93,15 +177,17 @@ pub(crate) unsafe fn create(
 pub(crate) unsafe fn format(
     ctrlr_ptr: *mut spdk_sys::spdk_nvme_ctrlr,
     ns_id: u32,
+    lbaf: u8,
 ) -> Result<(), NvmeBlockError> {
-    // SAFETY: zeroed spdk_nvme_format is a valid default (LBA format 0, no secure erase).
+    // SAFETY: zeroed spdk_nvme_format is a valid default (no secure erase).
     let mut format_opts: spdk_sys::spdk_nvme_format = std::mem::zeroed();
+    format_opts.set_lbaf((lbaf & 0x0F) as u32);
 
     // SAFETY: ctrlr_ptr is valid.
     let rc = spdk_sys::spdk_nvme_ctrlr_format(ctrlr_ptr, ns_id, &mut format_opts);
     if rc != 0 {
         return Err(NvmeBlockError::NotSupported(format!(
-            "spdk_nvme_ctrlr_format(ns_id={ns_id}) failed with rc={rc}"
+            "spdk_nvme_ctrlr_format(ns_id={ns_id}, lbaf={lbaf}) failed with rc={rc}"
         )));
     }
     Ok(())

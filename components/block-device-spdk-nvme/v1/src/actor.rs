@@ -664,7 +664,9 @@ impl BlockDeviceHandler {
             }
             Command::NsCreate { size_sectors } => {
                 // SAFETY: controller pointer is valid while actor is running.
-                let result = unsafe { namespace::create(controller.as_ptr(), size_sectors) };
+                let result = unsafe {
+                    namespace::create(controller.as_ptr(), size_sectors, &controller.namespaces)
+                };
                 match result {
                     Ok(ns_id) => {
                         controller.refresh_namespaces();
@@ -678,11 +680,15 @@ impl BlockDeviceHandler {
                     }
                 }
             }
-            Command::NsFormat { ns_id } => {
+            Command::NsFormat { ns_id, lbaf } => {
                 // SAFETY: controller pointer is valid while actor is running.
-                let result = unsafe { namespace::format(controller.as_ptr(), ns_id) };
+                let result = unsafe { namespace::format(controller.as_ptr(), ns_id, lbaf) };
                 match result {
                     Ok(()) => {
+                        // SAFETY: reset ensures the host re-reads identify data
+                        // so the new LBA format is visible.
+                        unsafe { spdk_sys::spdk_nvme_ctrlr_reset(controller.as_ptr()) };
+                        controller.refresh_namespaces();
                         let _ = session.callback_tx.send(Completion::NsFormatted { ns_id });
                     }
                     Err(e) => {
