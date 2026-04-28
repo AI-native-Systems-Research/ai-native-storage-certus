@@ -137,7 +137,7 @@ fn main() {
     loop {
         println!();
         print_menu();
-        let _ = write!(stdout, "Select [1-4]: ");
+        let _ = write!(stdout, "Select [1-6]: ");
         let _ = stdout.flush();
 
         let line = match read_line(&stdin) {
@@ -152,25 +152,27 @@ fn main() {
                     Some(v) => v,
                     None => continue,
                 };
-                let sector_size = match prompt_with_default::<u32>(
-                    &stdin,
-                    &mut stdout,
-                    "Sector size in bytes",
-                    4096,
-                ) {
+                cmd_create(&channels, size_sectors);
+            }
+            "3" => {
+                cmd_create(&channels, 0);
+            }
+            "4" => {
+                let ns_id = match prompt_value::<u32>(&stdin, &mut stdout, "Namespace ID") {
                     Some(v) => v,
                     None => continue,
                 };
-                cmd_create(&channels, size_sectors, sector_size);
+                let lbaf = prompt_with_default::<u8>(&stdin, &mut stdout, "LBAF index", 0);
+                cmd_format(&channels, ns_id, lbaf);
             }
-            "3" => {
+            "5" => {
                 let ns_id = match prompt_value::<u32>(&stdin, &mut stdout, "Namespace ID") {
                     Some(v) => v,
                     None => continue,
                 };
                 cmd_delete(&channels, ns_id);
             }
-            "4" => break,
+            "6" => break,
             _ => eprintln!("Invalid selection."),
         }
     }
@@ -181,8 +183,10 @@ fn main() {
 fn print_menu() {
     println!("  1) List namespaces");
     println!("  2) Create namespace");
-    println!("  3) Delete namespace");
-    println!("  4) Quit");
+    println!("  3) Create namespace (use all remaining capacity)");
+    println!("  4) Format namespace");
+    println!("  5) Delete namespace");
+    println!("  6) Quit");
 }
 
 fn read_line(stdin: &io::Stdin) -> Option<String> {
@@ -216,20 +220,13 @@ fn prompt_with_default<T: std::str::FromStr + std::fmt::Display>(
     stdout: &mut io::Stdout,
     label: &str,
     default: T,
-) -> Option<T> {
-    let _ = write!(stdout, "  {label} [{default}]: ");
+) -> T {
+    let _ = write!(stdout, "  {label} [default {default}]: ");
     let _ = stdout.flush();
-    let line = read_line(stdin)?;
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return Some(default);
-    }
-    match trimmed.parse::<T>() {
-        Ok(v) => Some(v),
-        Err(_) => {
-            eprintln!("error: invalid input");
-            None
-        }
+    match read_line(stdin) {
+        Some(line) if line.trim().is_empty() => default,
+        Some(line) => line.trim().parse::<T>().unwrap_or(default),
+        None => default,
     }
 }
 
@@ -272,18 +269,44 @@ fn cmd_list(channels: &ClientChannels) {
     }
 }
 
-fn cmd_create(channels: &ClientChannels, size_sectors: u64, sector_size: u32) {
-    if let Err(e) = channels.command_tx.send(Command::NsCreate { size_sectors, sector_size }) {
+fn cmd_create(channels: &ClientChannels, size_sectors: u64) {
+    if let Err(e) = channels.command_tx.send(Command::NsCreate { size_sectors }) {
         eprintln!("error: failed to send NsCreate: {e}");
         return;
     }
 
     match channels.completion_rx.recv() {
         Ok(Completion::NsCreated { ns_id }) => {
-            println!("Namespace created: ns_id={ns_id}, size={size_sectors} sectors, sector_size={sector_size} B");
+            if size_sectors == 0 {
+                println!("Namespace created: ns_id={ns_id} (all remaining capacity)");
+            } else {
+                println!("Namespace created: ns_id={ns_id}, size={size_sectors} sectors");
+            }
         }
         Ok(Completion::Error { error, .. }) => {
             eprintln!("error: namespace create failed: {error}");
+        }
+        Ok(other) => {
+            eprintln!("error: unexpected completion: {other:?}");
+        }
+        Err(e) => {
+            eprintln!("error: failed to receive completion: {e}");
+        }
+    }
+}
+
+fn cmd_format(channels: &ClientChannels, ns_id: u32, lbaf: u8) {
+    if let Err(e) = channels.command_tx.send(Command::NsFormat { ns_id, lbaf }) {
+        eprintln!("error: failed to send NsFormat: {e}");
+        return;
+    }
+
+    match channels.completion_rx.recv() {
+        Ok(Completion::NsFormatted { ns_id }) => {
+            println!("Namespace {ns_id} formatted with lbaf={lbaf}.");
+        }
+        Ok(Completion::Error { error, .. }) => {
+            eprintln!("error: namespace format failed: {error}");
         }
         Ok(other) => {
             eprintln!("error: unexpected completion: {other:?}");

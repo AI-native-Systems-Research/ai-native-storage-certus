@@ -163,6 +163,7 @@ fn main() {
         .allowlist_function("spdk_nvme_ctrlr_process_admin_completions")
         .allowlist_function("spdk_nvme_ctrlr_get_default_ctrlr_opts")
         .allowlist_function("spdk_nvme_ctrlr_reset")
+        .allowlist_function("spdk_nvme_ctrlr_get_data")
         // NVMe admin commands
         .allowlist_function("spdk_nvme_ctrlr_cmd_admin_raw")
         // NVMe namespace management
@@ -194,6 +195,8 @@ fn main() {
         .allowlist_type("spdk_pci_device")
         .allowlist_type("spdk_pci_driver")
         .allowlist_type("spdk_nvme_ctrlr")
+        .allowlist_type("spdk_nvme_ctrlr_data")
+        .opaque_type("spdk_nvme_ctrlr_data")
         .allowlist_type("spdk_nvme_ctrlr_opts")
         .allowlist_type("spdk_nvme_ns")
         .allowlist_type("spdk_nvme_qpair")

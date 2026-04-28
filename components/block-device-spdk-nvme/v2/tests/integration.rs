@@ -818,7 +818,7 @@ fn multi_client_independent_streams() {
 fn create_namespace(channels: &interfaces::ClientChannels, size_sectors: u64) -> u32 {
     channels
         .command_tx
-        .send(block_device_spdk_nvme_v2::Command::NsCreate { size_sectors, sector_size: 4096 })
+        .send(block_device_spdk_nvme_v2::Command::NsCreate { size_sectors })
         .expect("send NsCreate failed");
 
     match wait_for_completion(channels) {

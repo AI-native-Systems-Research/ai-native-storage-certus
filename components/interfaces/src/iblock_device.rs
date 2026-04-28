@@ -244,17 +244,18 @@ pub enum Command {
     },
     /// Probe all namespaces on the controller.
     NsProbe,
-    /// Create a new namespace with the given size.
+    /// Create a new namespace with the given size (always uses lbaf=0).
+    /// Use NsFormat to change the LBA format after creation.
     NsCreate {
-        /// Size of the namespace in sectors.
+        /// Size of the namespace in sectors (0 = use all remaining capacity).
         size_sectors: u64,
-        /// Sector size in bytes (e.g. 512, 4096).
-        sector_size: u32,
     },
     /// Format an existing namespace (erases all data).
     NsFormat {
         /// NVMe namespace identifier to format.
         ns_id: u32,
+        /// LBA format index from the controller's format table (default 0).
+        lbaf: u8,
     },
     /// Delete an existing namespace.
     NsDelete {
