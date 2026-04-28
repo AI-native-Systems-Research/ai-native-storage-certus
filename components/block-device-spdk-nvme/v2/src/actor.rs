@@ -779,9 +779,9 @@ impl BlockDeviceHandler {
                     .callback_tx
                     .send(Completion::NsProbeResult { namespaces });
             }
-            Command::NsCreate { size_sectors } => {
+            Command::NsCreate { size_sectors, sector_size } => {
                 // SAFETY: controller pointer is valid while actor is running.
-                let result = unsafe { namespace::create(controller.as_ptr(), size_sectors) };
+                let result = unsafe { namespace::create(controller.as_ptr(), size_sectors, sector_size) };
                 match result {
                     Ok(ns_id) => {
                         controller.refresh_namespaces();

@@ -1,0 +1,45 @@
+{
+  "generated": "2026-04-17T00:00:00Z",
+  "based_on": "drift-report from 2026-04-17T00:00:00Z",
+  "proposals": [
+    {
+      "id": 1,
+      "spec": "001-logger-component",
+      "requirement": "SC-007",
+      "direction": "ALIGN",
+      "description": "Add doc test to new_with_writer() to satisfy SC-007",
+      "spec_text": "All public APIs have doc tests with runnable examples",
+      "actual": "new_with_writer() at src/lib.rs:170 has no doc test",
+      "resolution": "Add a runnable doc test example to new_with_writer()",
+      "rationale": "SC-007 requires all public APIs to have doc tests. new_with_writer() is public and needs coverage.",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": 2,
+      "spec": "001-logger-component",
+      "requirement": "Key Entities",
+      "direction": "BACKFILL",
+      "description": "Add LogLevel to spec Key Entities with its public API surface",
+      "spec_text": "Key Entities lists LogLevel by name only with 'Error, Warn, Info, Debug parsed from RUST_LOG'",
+      "actual": "LogLevel is a public enum with from_env_str(), Display impl, and Ord ordering",
+      "resolution": "Expand the LogLevel entry in Key Entities to document from_env_str() and Display as public API",
+      "rationale": "LogLevel is part of the public API surface used by consumers (especially via new_with_writer). Documenting it makes the spec more complete.",
+      "confidence": "HIGH",
+      "approved": true
+    },
+    {
+      "id": 3,
+      "spec": "CLAUDE.md",
+      "requirement": "metadata",
+      "direction": "ALIGN",
+      "description": "Fix stale 'not yet implemented' text in CLAUDE.md",
+      "spec_text": "N/A",
+      "actual": "CLAUDE.md line 9 says 'This component is not yet implemented' but the component is fully implemented",
+      "resolution": "Update CLAUDE.md to reflect implementation status",
+      "rationale": "Stale documentation is misleading for future development sessions.",
+      "confidence": "HIGH",
+      "approved": true
+    }
+  ]
+}

@@ -68,11 +68,22 @@ pub(crate) fn to_namespace_info_list(namespaces: &[NvmeNamespaceInfo]) -> Vec<Na
 pub(crate) unsafe fn create(
     ctrlr_ptr: *mut spdk_sys::spdk_nvme_ctrlr,
     size_sectors: u64,
+    sector_size: u32,
 ) -> Result<u32, NvmeBlockError> {
+    if !sector_size.is_power_of_two() || sector_size < 512 {
+        return Err(NvmeBlockError::NotSupported(format!(
+            "sector_size must be a power of two >= 512, got {sector_size}"
+        )));
+    }
+
+    let target_lbads = sector_size.trailing_zeros();
+    let format_idx = find_lba_format(ctrlr_ptr, target_lbads)?;
+
     // SAFETY: zeroed spdk_nvme_ns_data is a valid default.
     let mut ns_data: spdk_sys::spdk_nvme_ns_data = std::mem::zeroed();
     ns_data.nsze = size_sectors;
     ns_data.ncap = size_sectors;
+    ns_data.flbas.set_format(format_idx as u8);
 
     // SAFETY: ctrlr_ptr is valid; ns_data is properly initialized.
     let ns_id = spdk_sys::spdk_nvme_ctrlr_create_ns(ctrlr_ptr, &mut ns_data);
@@ -82,7 +93,144 @@ pub(crate) unsafe fn create(
                 .into(),
         ));
     }
+
+    // SAFETY: Attach the newly created namespace to this controller so it becomes active.
+    let ctrlr_id = spdk_sys::spdk_nvme_ctrlr_get_id(ctrlr_ptr);
+    let mut ctrlr_list: spdk_sys::spdk_nvme_ctrlr_list = std::mem::zeroed();
+    ctrlr_list.ctrlr_count = 1;
+    ctrlr_list.ctrlr_list[0] = ctrlr_id;
+
+    let rc = spdk_sys::spdk_nvme_ctrlr_attach_ns(ctrlr_ptr, ns_id, &mut ctrlr_list);
+    if rc != 0 {
+        let _ = spdk_sys::spdk_nvme_ctrlr_delete_ns(ctrlr_ptr, ns_id);
+        return Err(NvmeBlockError::NotSupported(
+            format!("spdk_nvme_ctrlr_attach_ns(ns_id={ns_id}) failed with rc={rc}"),
+        ));
+    }
+
     Ok(ns_id)
+}
+
+/// Find the LBA format index on the controller that matches `target_lbads` (log2 of sector size).
+///
+/// First tries cached namespace identify data (fast path). If no usable data
+/// is found (e.g. all namespaces deleted), issues a raw Identify Namespace
+/// admin command with NSID=0xFFFFFFFF to query the common namespace
+/// capabilities directly from the controller.
+///
+/// # Safety
+///
+/// `ctrlr_ptr` must be a valid SPDK NVMe controller pointer.
+unsafe fn find_lba_format(
+    ctrlr_ptr: *mut spdk_sys::spdk_nvme_ctrlr,
+    target_lbads: u32,
+) -> Result<u32, NvmeBlockError> {
+    // Fast path: scan cached namespace identify data.
+    let num_ns = spdk_sys::spdk_nvme_ctrlr_get_num_ns(ctrlr_ptr);
+    for ns_id in 1..=num_ns {
+        let ns_ptr = spdk_sys::spdk_nvme_ctrlr_get_ns(ctrlr_ptr, ns_id);
+        if ns_ptr.is_null() {
+            continue;
+        }
+        let ns_data = spdk_sys::spdk_nvme_ns_get_data(ns_ptr);
+        if ns_data.is_null() {
+            continue;
+        }
+        if let Some(idx) = scan_lbaf(&*ns_data, target_lbads) {
+            return Ok(idx);
+        }
+        return Err(NvmeBlockError::NotSupported(format!(
+            "controller does not support sector size {} (lbads={})",
+            1u32 << target_lbads,
+            target_lbads
+        )));
+    }
+
+    // Slow path: issue Identify Namespace (CNS=0x00, NSID=0xFFFFFFFF) to get
+    // the common namespace capabilities with the full LBA format table.
+    identify_common_ns_lba_format(ctrlr_ptr, target_lbads)
+}
+
+/// Scan the lbaf table in namespace identify data for a matching lbads value.
+fn scan_lbaf(ns_data: &spdk_sys::spdk_nvme_ns_data, target_lbads: u32) -> Option<u32> {
+    (0..64u32).find(|&i| ns_data.lbaf[i as usize].lbads() == target_lbads)
+}
+
+/// Issue Identify Namespace with NSID=0xFFFFFFFF to query common LBA formats.
+///
+/// # Safety
+///
+/// `ctrlr_ptr` must be a valid SPDK NVMe controller pointer.  Must be called
+/// from the actor thread (same thread that processes admin completions).
+unsafe fn identify_common_ns_lba_format(
+    ctrlr_ptr: *mut spdk_sys::spdk_nvme_ctrlr,
+    target_lbads: u32,
+) -> Result<u32, NvmeBlockError> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    // SAFETY: DMA-accessible buffer for the 4096-byte identify data.
+    let buf = spdk_sys::spdk_zmalloc(
+        std::mem::size_of::<spdk_sys::spdk_nvme_ns_data>(),
+        4096,
+        std::ptr::null_mut(),
+        -1i32,
+        0u32,
+    );
+    if buf.is_null() {
+        return Err(NvmeBlockError::NotSupported(
+            "failed to allocate DMA buffer for identify command".into(),
+        ));
+    }
+
+    let done = AtomicBool::new(false);
+    let done_ptr: *mut AtomicBool = &done as *const AtomicBool as *mut AtomicBool;
+
+    // Build Identify command: opcode=0x06, CNS=0x00 (in cdw10), NSID=0xFFFFFFFF.
+    let mut cmd: spdk_sys::spdk_nvme_cmd = std::mem::zeroed();
+    cmd.set_opc(0x06); // SPDK_NVME_OPC_IDENTIFY
+    cmd.nsid = 0xFFFF_FFFF;
+    cmd.__bindgen_anon_1.cdw10 = 0x00; // CNS=0x00 (Identify Namespace)
+
+    unsafe extern "C" fn identify_cb(
+        ctx: *mut std::os::raw::c_void,
+        _cpl: *const spdk_sys::spdk_nvme_cpl,
+    ) {
+        let flag = &*(ctx as *const AtomicBool);
+        flag.store(true, Ordering::Release);
+    }
+
+    let rc = spdk_sys::spdk_nvme_ctrlr_cmd_admin_raw(
+        ctrlr_ptr,
+        &mut cmd,
+        buf,
+        std::mem::size_of::<spdk_sys::spdk_nvme_ns_data>() as u32,
+        Some(identify_cb),
+        done_ptr as *mut std::os::raw::c_void,
+    );
+
+    if rc != 0 {
+        spdk_sys::spdk_free(buf);
+        return Err(NvmeBlockError::NotSupported(format!(
+            "identify admin command failed to submit (rc={rc})"
+        )));
+    }
+
+    // Poll for completion.
+    while !done.load(Ordering::Acquire) {
+        spdk_sys::spdk_nvme_ctrlr_process_admin_completions(ctrlr_ptr);
+    }
+
+    let ns_data = &*(buf as *const spdk_sys::spdk_nvme_ns_data);
+    let result = scan_lbaf(ns_data, target_lbads);
+    spdk_sys::spdk_free(buf);
+
+    result.ok_or_else(|| {
+        NvmeBlockError::NotSupported(format!(
+            "controller does not support sector size {} (lbads={})",
+            1u32 << target_lbads,
+            target_lbads
+        ))
+    })
 }
 
 /// Format an existing namespace (erases all data).

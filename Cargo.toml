@@ -12,6 +12,7 @@ members = [
     "apps/helloworld-mainline",
     "apps/iops-benchmark",
     "apps/iops-benchmark-md",
+    "apps/nvme-ns-manager",
     "apps/extent-benchmark",
     "components/block-device-spdk-nvme/v1",
     "components/extent-manager/v2",

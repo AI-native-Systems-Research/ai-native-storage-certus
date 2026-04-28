@@ -1,0 +1,54 @@
+{
+  "generated": "2026-04-17T00:00:00Z",
+  "project": "Logger Component (components/logger/v1)",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 18,
+    "aligned": 17,
+    "drifted": 1,
+    "not_implemented": 0,
+    "unspecced_features": 3
+  },
+  "specs": [
+    {
+      "id": "001-logger-component",
+      "title": "Logger Component",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005",
+        "FR-006", "FR-007", "FR-008", "FR-009", "FR-010", "FR-011",
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006"
+      ],
+      "drifted": [
+        {
+          "requirement": "SC-007",
+          "spec_text": "All public APIs have doc tests with runnable examples and Criterion benchmarks for performance-sensitive operations.",
+          "actual": "Criterion benchmarks exist. Doc tests exist for module, LogLevel, from_env_str(), new_with_file(). However, new_with_writer() (public method at src/lib.rs:170) lacks a doc test.",
+          "location": "src/lib.rs:170",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "LogLevel public enum with from_env_str() and Display",
+      "location": "src/lib.rs:36-98",
+      "lines": 63,
+      "suggested_spec": "Backfill into 001-logger-component Key Entities"
+    },
+    {
+      "feature": "new_with_writer() public constructor",
+      "location": "src/lib.rs:170-179",
+      "lines": 10,
+      "suggested_spec": "Backfill into 001-logger-component as testing utility"
+    },
+    {
+      "feature": "LoggerState public struct",
+      "location": "src/lib.rs:104-108",
+      "lines": 5,
+      "suggested_spec": "No action needed - macro artifact"
+    }
+  ],
+  "conflicts": []
+}

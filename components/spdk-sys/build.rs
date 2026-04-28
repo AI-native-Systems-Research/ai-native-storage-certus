@@ -163,12 +163,17 @@ fn main() {
         .allowlist_function("spdk_nvme_ctrlr_process_admin_completions")
         .allowlist_function("spdk_nvme_ctrlr_get_default_ctrlr_opts")
         .allowlist_function("spdk_nvme_ctrlr_reset")
+        // NVMe admin commands
+        .allowlist_function("spdk_nvme_ctrlr_cmd_admin_raw")
         // NVMe namespace management
         .allowlist_function("spdk_nvme_ctrlr_create_ns")
+        .allowlist_function("spdk_nvme_ctrlr_attach_ns")
         .allowlist_function("spdk_nvme_ctrlr_delete_ns")
         .allowlist_function("spdk_nvme_ctrlr_format")
+        .allowlist_function("spdk_nvme_ctrlr_get_id")
         // NVMe namespace
         .allowlist_function("spdk_nvme_ns_is_active")
+        .allowlist_function("spdk_nvme_ns_get_data")
         .allowlist_function("spdk_nvme_ns_get_sector_size")
         .allowlist_function("spdk_nvme_ns_get_num_sectors")
         .allowlist_function("spdk_nvme_ns_get_size")
@@ -195,8 +200,10 @@ fn main() {
         .allowlist_type("spdk_nvme_transport_id")
         .allowlist_type("spdk_nvme_cpl")
         .allowlist_type("spdk_nvme_io_qpair_opts")
+        .allowlist_type("spdk_nvme_cmd")
         .allowlist_type("spdk_nvme_ns_data")
         .allowlist_type("spdk_nvme_format")
+        .allowlist_type("spdk_nvme_ctrlr_list")
         .allowlist_var("SPDK_PCI_.*")
         .allowlist_var("SPDK_NVME_TRANSPORT_.*")
         .derive_debug(true)

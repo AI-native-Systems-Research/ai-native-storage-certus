@@ -811,6 +811,209 @@ fn multi_client_independent_streams() {
 }
 
 // ---------------------------------------------------------------------------
+// Namespace partitioning test
+// ---------------------------------------------------------------------------
+
+/// Helper: send a namespace create command and return the new ns_id.
+fn create_namespace(channels: &interfaces::ClientChannels, size_sectors: u64) -> u32 {
+    channels
+        .command_tx
+        .send(block_device_spdk_nvme_v2::Command::NsCreate { size_sectors, sector_size: 4096 })
+        .expect("send NsCreate failed");
+
+    match wait_for_completion(channels) {
+        block_device_spdk_nvme_v2::Completion::NsCreated { ns_id } => ns_id,
+        block_device_spdk_nvme_v2::Completion::Error { error, .. } => {
+            panic!("NsCreate({size_sectors} sectors) failed: {error}");
+        }
+        other => panic!("expected NsCreated, got {other:?}"),
+    }
+}
+
+/// Helper: delete a namespace by id.
+fn delete_namespace(channels: &interfaces::ClientChannels, ns_id: u32) {
+    channels
+        .command_tx
+        .send(block_device_spdk_nvme_v2::Command::NsDelete { ns_id })
+        .expect("send NsDelete failed");
+
+    match wait_for_completion(channels) {
+        block_device_spdk_nvme_v2::Completion::NsDeleted { .. } => {}
+        block_device_spdk_nvme_v2::Completion::Error { error, .. } => {
+            panic!("NsDelete(ns_id={ns_id}) failed: {error}");
+        }
+        other => panic!("expected NsDeleted, got {other:?}"),
+    }
+}
+
+/// Create N equal-sized NVMe namespaces, perform a write-read roundtrip on each,
+/// then restore the device to a single namespace.
+///
+/// This test is destructive: it deletes all existing namespaces on the device
+/// and recreates them. Marked `#[ignore]` for manual execution only.
+#[test]
+#[ignore]
+fn create_n_namespaces_with_io() {
+    const NUM_NS: u32 = 4;
+
+    let ctx = match get_spdk_context() {
+        Some(c) => c,
+        None => {
+            eprintln!("skipping create_n_namespaces_with_io: no SPDK hardware");
+            return;
+        }
+    };
+
+    let ibd = query::<dyn IBlockDevice + Send + Sync>(&*ctx.block_dev).unwrap();
+    let channels = ibd.connect_client().expect("connect_client failed");
+
+    // --- Delete existing namespaces to start clean ---
+    let existing = probe_namespaces(&channels);
+    let original_total: u64 = existing.iter().map(|ns| ns.num_sectors).sum();
+    eprintln!(
+        "Device has {} namespace(s), {} total sectors",
+        existing.len(),
+        original_total
+    );
+    for ns in &existing {
+        delete_namespace(&channels, ns.ns_id);
+        eprintln!("Deleted namespace {}", ns.ns_id);
+    }
+
+    // --- Create N equal-sized namespaces ---
+    // Use 100,000 sectors per namespace (~400MB at 4K sectors, ~50MB at 512B).
+    let per_ns_sectors: u64 = 100_000;
+    eprintln!("Creating {NUM_NS} namespaces of {per_ns_sectors} sectors each");
+
+    let mut created_ns_ids = Vec::with_capacity(NUM_NS as usize);
+    for i in 0..NUM_NS {
+        let ns_id = create_namespace(&channels, per_ns_sectors);
+        eprintln!("Created namespace {ns_id} ({} of {NUM_NS})", i + 1);
+        created_ns_ids.push(ns_id);
+    }
+
+    // Verify all N namespaces exist with the expected size.
+    let partitions = probe_namespaces(&channels);
+    assert_eq!(
+        partitions.len(),
+        NUM_NS as usize,
+        "expected {NUM_NS} namespaces, got {}",
+        partitions.len()
+    );
+    let sector_size = partitions[0].sector_size;
+    for ns in &partitions {
+        assert_eq!(
+            ns.num_sectors, per_ns_sectors,
+            "namespace {} has {} sectors, expected {per_ns_sectors}",
+            ns.ns_id, ns.num_sectors
+        );
+    }
+
+    // --- Write-read roundtrip on each namespace ---
+    let ss = sector_size as usize;
+    for (idx, ns) in partitions.iter().enumerate() {
+        let tag = ((idx + 1) * 0x31) as u8;
+
+        // Write a unique pattern to LBA 0 of this namespace.
+        let mut wbuf = interfaces::DmaBuffer::new(ss, ss, None).expect("DMA alloc failed");
+        wbuf.as_mut_slice().fill(tag);
+        let wbuf = Arc::new(wbuf);
+
+        channels
+            .command_tx
+            .send(block_device_spdk_nvme_v2::Command::WriteSync {
+                ns_id: ns.ns_id,
+                lba: 0,
+                buf: wbuf,
+            })
+            .expect("send WriteSync failed");
+
+        match wait_for_completion(&channels) {
+            block_device_spdk_nvme_v2::Completion::WriteDone { result, .. } => {
+                result.unwrap_or_else(|e| panic!("write to ns {} failed: {e}", ns.ns_id));
+            }
+            other => panic!("ns {}: expected WriteDone, got {other:?}", ns.ns_id),
+        }
+
+        // Read back and verify.
+        let rbuf = interfaces::DmaBuffer::new(ss, ss, None).expect("DMA alloc failed");
+        let rbuf = Arc::new(Mutex::new(rbuf));
+
+        channels
+            .command_tx
+            .send(block_device_spdk_nvme_v2::Command::ReadSync {
+                ns_id: ns.ns_id,
+                lba: 0,
+                buf: Arc::clone(&rbuf),
+            })
+            .expect("send ReadSync failed");
+
+        match wait_for_completion(&channels) {
+            block_device_spdk_nvme_v2::Completion::ReadDone { result, .. } => {
+                result.unwrap_or_else(|e| panic!("read from ns {} failed: {e}", ns.ns_id));
+            }
+            other => panic!("ns {}: expected ReadDone, got {other:?}", ns.ns_id),
+        }
+
+        let guard = rbuf.lock().unwrap();
+        for (j, &byte) in guard.as_slice().iter().enumerate() {
+            assert_eq!(
+                byte, tag,
+                "ns {} byte {j}: expected {tag:#x}, got {byte:#x}",
+                ns.ns_id
+            );
+        }
+        eprintln!("Namespace {} (ns_id={}): write-read OK", idx + 1, ns.ns_id);
+    }
+
+    // --- Cross-namespace isolation: re-read each namespace to confirm no bleed ---
+    for (idx, ns) in partitions.iter().enumerate() {
+        let tag = ((idx + 1) * 0x31) as u8;
+
+        let rbuf = interfaces::DmaBuffer::new(ss, ss, None).expect("DMA alloc failed");
+        let rbuf = Arc::new(Mutex::new(rbuf));
+
+        channels
+            .command_tx
+            .send(block_device_spdk_nvme_v2::Command::ReadSync {
+                ns_id: ns.ns_id,
+                lba: 0,
+                buf: Arc::clone(&rbuf),
+            })
+            .expect("send ReadSync failed");
+
+        match wait_for_completion(&channels) {
+            block_device_spdk_nvme_v2::Completion::ReadDone { result, .. } => {
+                result.unwrap_or_else(|e| panic!("isolation read ns {} failed: {e}", ns.ns_id));
+            }
+            other => panic!("ns {}: expected ReadDone, got {other:?}", ns.ns_id),
+        }
+
+        let guard = rbuf.lock().unwrap();
+        for (j, &byte) in guard.as_slice().iter().enumerate() {
+            assert_eq!(
+                byte, tag,
+                "isolation check ns {} byte {j}: expected {tag:#x}, got {byte:#x} (data bled from another namespace)",
+                ns.ns_id
+            );
+        }
+    }
+    eprintln!("Cross-namespace isolation verified");
+
+    // --- Cleanup: delete created namespaces, restore a single namespace ---
+    for &ns_id in &created_ns_ids {
+        delete_namespace(&channels, ns_id);
+    }
+
+    if original_total > 0 {
+        let restored_id = create_namespace(&channels, original_total);
+        eprintln!("Restored single namespace {restored_id} with {original_total} sectors");
+    } else {
+        eprintln!("WARNING: original capacity unknown, device left with no namespaces");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Success criteria validation tests (SC-001, SC-002, SC-006)
 //
 // These are hardware-dependent and marked #[ignore] for CI since they require

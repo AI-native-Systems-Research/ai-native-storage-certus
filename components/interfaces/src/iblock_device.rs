@@ -248,6 +248,8 @@ pub enum Command {
     NsCreate {
         /// Size of the namespace in sectors.
         size_sectors: u64,
+        /// Sector size in bytes (e.g. 512, 4096).
+        sector_size: u32,
     },
     /// Format an existing namespace (erases all data).
     NsFormat {
