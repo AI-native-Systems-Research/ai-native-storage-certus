@@ -17,7 +17,7 @@ SPDK_REPO="https://github.com/spdk/spdk.git"
 if [ ! -d "${SRC_DIR}/.git" ]; then
     echo "Cloning SPDK..."
     git clone "${SPDK_REPO}" "${SRC_DIR}"
-    cd ai-native-storage-certus
+    cd spdk
     git checkout -b v26.01.x origin/v26.01.x
 fi
 
