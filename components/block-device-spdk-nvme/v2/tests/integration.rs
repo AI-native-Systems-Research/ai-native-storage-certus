@@ -62,7 +62,11 @@ unsafe impl Sync for SpdkHardwareContext {}
 /// necessary because SPDK is a process-global singleton and the
 /// component framework's Arc self-references prevent cleanup between
 /// tests.
-static SPDK_CONTEXT: OnceLock<Option<SpdkHardwareContext>> = OnceLock::new();
+///
+/// The context is intentionally leaked (`Box::leak`) so that SPDK
+/// resources are never dropped — dropping them at process exit causes
+/// a SIGSEGV in the SPDK teardown path.
+static SPDK_CONTEXT: OnceLock<Option<&'static SpdkHardwareContext>> = OnceLock::new();
 
 /// Get or initialize the shared SPDK hardware context.
 ///
@@ -75,64 +79,75 @@ static SPDK_CONTEXT: OnceLock<Option<SpdkHardwareContext>> = OnceLock::new();
 /// When hardware is available, returns a reference to the shared
 /// initialized component set ready for IO operations.
 fn get_spdk_context() -> Option<&'static SpdkHardwareContext> {
-    SPDK_CONTEXT
-        .get_or_init(|| {
-            // Pre-flight: check VFIO and hugepages without side effects.
-            if let Err(e) = spdk_env::checks::check_vfio_available() {
-                eprintln!("SPDK hardware not available (VFIO): {e}");
-                return None;
-            }
-            if let Err(e) = spdk_env::checks::check_hugepages() {
-                eprintln!("SPDK hardware not available (hugepages): {e}");
-                return None;
-            }
+    *SPDK_CONTEXT.get_or_init(|| {
+        // Register an atexit handler that terminates the process immediately,
+        // bypassing SPDK's own atexit teardown which segfaults when the SPDK
+        // environment outlives the test harness.
+        extern "C" {
+            fn atexit(cb: extern "C" fn()) -> i32;
+            fn _exit(status: i32) -> !;
+        }
+        extern "C" fn exit_before_spdk_teardown() {
+            unsafe { _exit(0) };
+        }
+        unsafe { atexit(exit_before_spdk_teardown) };
 
-            let (block_dev, spdk_env, logger) = wire_components();
+        // Pre-flight: check VFIO and hugepages without side effects.
+        if let Err(e) = spdk_env::checks::check_vfio_available() {
+            eprintln!("SPDK hardware not available (VFIO): {e}");
+            return None;
+        }
+        if let Err(e) = spdk_env::checks::check_hugepages() {
+            eprintln!("SPDK hardware not available (hugepages): {e}");
+            return None;
+        }
 
-            // Initialize the SPDK environment.
-            let ienv = query::<dyn spdk_env::ISPDKEnv + Send + Sync>(&*spdk_env)
-                .expect("ISPDKEnv interface not found");
-            if let Err(e) = ienv.init() {
-                eprintln!("SPDK init failed: {e}");
-                return None;
-            }
+        let (block_dev, spdk_env, logger) = wire_components();
 
-            // Check for discovered NVMe devices.
-            let devices = ienv.devices();
-            if devices.is_empty() {
-                eprintln!("SPDK initialized but no NVMe devices found");
-                return None;
-            }
+        // Initialize the SPDK environment.
+        let ienv = query::<dyn spdk_env::ISPDKEnv + Send + Sync>(&*spdk_env)
+            .expect("ISPDKEnv interface not found");
+        if let Err(e) = ienv.init() {
+            eprintln!("SPDK init failed: {e}");
+            return None;
+        }
 
-            // Configure the block device with the first discovered device address.
-            // Convert spdk_env::PciAddress → interfaces::PciAddress (same layout, different types).
-            let spdk_addr = devices[0].address;
-            let addr = interfaces::PciAddress {
-                domain: spdk_addr.domain,
-                bus: spdk_addr.bus,
-                dev: spdk_addr.dev,
-                func: spdk_addr.func,
-            };
+        // Check for discovered NVMe devices.
+        let devices = ienv.devices();
+        if devices.is_empty() {
+            eprintln!("SPDK initialized but no NVMe devices found");
+            return None;
+        }
 
-            let admin = query::<dyn interfaces::iblock_device::IBlockDeviceAdmin + Send + Sync>(
-                &*block_dev,
-            )
-            .expect("IBlockDeviceAdmin query");
-            admin.set_pci_address(addr);
+        // Configure the block device with the first discovered device address.
+        // Convert spdk_env::PciAddress → interfaces::PciAddress (same layout, different types).
+        let spdk_addr = devices[0].address;
+        let addr = interfaces::PciAddress {
+            domain: spdk_addr.domain,
+            bus: spdk_addr.bus,
+            dev: spdk_addr.dev,
+            func: spdk_addr.func,
+        };
 
-            // Initialize the block device (probe controller, start actor).
-            if let Err(e) = admin.initialize() {
-                eprintln!("Block device initialize failed: {e}");
-                return None;
-            }
+        let admin = query::<dyn interfaces::iblock_device::IBlockDeviceAdmin + Send + Sync>(
+            &*block_dev,
+        )
+        .expect("IBlockDeviceAdmin query");
+        admin.set_pci_address(addr);
 
-            Some(SpdkHardwareContext {
-                block_dev,
-                spdk_env,
-                logger,
-            })
-        })
-        .as_ref()
+        // Initialize the block device (probe controller, start actor).
+        if let Err(e) = admin.initialize() {
+            eprintln!("Block device initialize failed: {e}");
+            return None;
+        }
+
+        // Leak to prevent SPDK teardown SIGSEGV at process exit.
+        Some(Box::leak(Box::new(SpdkHardwareContext {
+            block_dev,
+            spdk_env,
+            logger,
+        })))
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -632,6 +647,169 @@ fn multi_thread_concurrent_io() {
     );
 }
 
+#[test]
+fn multi_client_independent_streams() {
+    let Some(ctx) = get_spdk_context() else {
+        eprintln!("skipping multi_client_independent_streams: no SPDK hardware");
+        return;
+    };
+
+    let ibd = query::<dyn IBlockDevice + Send + Sync>(&*ctx.block_dev).unwrap();
+
+    // Probe namespaces once.
+    let probe_ch = ibd.connect_client().expect("connect_client probe failed");
+    let namespaces = probe_namespaces(&probe_ch);
+    assert!(!namespaces.is_empty(), "no namespaces found");
+    let ns = namespaces[0].clone();
+    drop(probe_ch);
+
+    let num_clients = 3u32;
+    let ops_per_client = 8u32;
+    let sector_size = ns.sector_size as usize;
+    let block_dev = Arc::clone(&ctx.block_dev);
+
+    let handles: Vec<_> = (0..num_clients)
+        .map(|cid| {
+            let ibd = query::<dyn IBlockDevice + Send + Sync>(&*block_dev).unwrap();
+            let channels = ibd.connect_client().expect("connect_client failed");
+            let ns = ns.clone();
+
+            std::thread::spawn(move || {
+                let base_lba = 300 + (cid as u64) * (ops_per_client as u64);
+
+                for i in 0..ops_per_client {
+                    let lba = base_lba + i as u64;
+                    let sync_tag = ((cid * 100 + i) % 256) as u8;
+                    let async_tag = ((cid * 100 + i + 50) % 256) as u8;
+
+                    // --- Sync write ---
+                    let mut wbuf = interfaces::DmaBuffer::new(sector_size, sector_size, None)
+                        .expect("DMA alloc failed");
+                    wbuf.as_mut_slice().fill(sync_tag);
+                    let wbuf = Arc::new(wbuf);
+
+                    channels
+                        .command_tx
+                        .send(block_device_spdk_nvme_v2::Command::WriteSync {
+                            ns_id: ns.ns_id,
+                            lba,
+                            buf: wbuf,
+                        })
+                        .expect("send WriteSync failed");
+
+                    match channels.completion_rx.recv().expect("recv failed") {
+                        block_device_spdk_nvme_v2::Completion::WriteDone { result, .. } => {
+                            result.expect("sync write failed")
+                        }
+                        other => panic!("client {cid} op {i}: expected WriteDone, got {other:?}"),
+                    }
+
+                    // --- Sync read-back ---
+                    let rbuf = interfaces::DmaBuffer::new(sector_size, sector_size, None)
+                        .expect("DMA alloc failed");
+                    let rbuf = Arc::new(Mutex::new(rbuf));
+
+                    channels
+                        .command_tx
+                        .send(block_device_spdk_nvme_v2::Command::ReadSync {
+                            ns_id: ns.ns_id,
+                            lba,
+                            buf: Arc::clone(&rbuf),
+                        })
+                        .expect("send ReadSync failed");
+
+                    match channels.completion_rx.recv().expect("recv failed") {
+                        block_device_spdk_nvme_v2::Completion::ReadDone { result, .. } => {
+                            result.expect("sync read failed")
+                        }
+                        other => panic!("client {cid} op {i}: expected ReadDone, got {other:?}"),
+                    }
+
+                    {
+                        let guard = rbuf.lock().unwrap();
+                        for (j, &byte) in guard.as_slice().iter().enumerate() {
+                            assert_eq!(
+                                byte, sync_tag,
+                                "client {cid} op {i} sync read: byte {j} mismatch \
+                                 (expected {sync_tag:#x}, got {byte:#x})"
+                            );
+                        }
+                    }
+
+                    // --- Async write (overwrite same LBA with different pattern) ---
+                    let mut awbuf = interfaces::DmaBuffer::new(sector_size, sector_size, None)
+                        .expect("DMA alloc failed");
+                    awbuf.as_mut_slice().fill(async_tag);
+                    let awbuf = Arc::new(awbuf);
+
+                    channels
+                        .command_tx
+                        .send(block_device_spdk_nvme_v2::Command::WriteAsync {
+                            ns_id: ns.ns_id,
+                            lba,
+                            buf: awbuf,
+                            timeout_ms: 5000,
+                        })
+                        .expect("send WriteAsync failed");
+
+                    match channels.completion_rx.recv().expect("recv failed") {
+                        block_device_spdk_nvme_v2::Completion::WriteDone { result, .. } => {
+                            result.expect("async write failed")
+                        }
+                        other => panic!("client {cid} op {i}: expected WriteDone, got {other:?}"),
+                    }
+
+                    // --- Async read-back ---
+                    let arbuf = interfaces::DmaBuffer::new(sector_size, sector_size, None)
+                        .expect("DMA alloc failed");
+                    let arbuf = Arc::new(Mutex::new(arbuf));
+
+                    channels
+                        .command_tx
+                        .send(block_device_spdk_nvme_v2::Command::ReadAsync {
+                            ns_id: ns.ns_id,
+                            lba,
+                            buf: Arc::clone(&arbuf),
+                            timeout_ms: 5000,
+                        })
+                        .expect("send ReadAsync failed");
+
+                    match channels.completion_rx.recv().expect("recv failed") {
+                        block_device_spdk_nvme_v2::Completion::ReadDone { result, .. } => {
+                            result.expect("async read failed")
+                        }
+                        other => panic!("client {cid} op {i}: expected ReadDone, got {other:?}"),
+                    }
+
+                    {
+                        let guard = arbuf.lock().unwrap();
+                        for (j, &byte) in guard.as_slice().iter().enumerate() {
+                            assert_eq!(
+                                byte, async_tag,
+                                "client {cid} op {i} async read: byte {j} mismatch \
+                                 (expected {async_tag:#x}, got {byte:#x})"
+                            );
+                        }
+                    }
+                }
+
+                ops_per_client
+            })
+        })
+        .collect();
+
+    let mut total_ops = 0u32;
+    for h in handles {
+        total_ops += h.join().expect("worker thread panicked");
+    }
+
+    assert_eq!(
+        total_ops,
+        num_clients * ops_per_client,
+        "not all operations completed"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Success criteria validation tests (SC-001, SC-002, SC-006)
 //
@@ -663,8 +841,13 @@ fn sc001_sync_latency_envelope() {
 
     for i in 0..num_rounds {
         let pattern = (i & 0xFF) as u8;
-        let wbuf = Arc::new(interfaces::DmaBuffer::alloc(sector_size, pattern));
-        let rbuf = Arc::new(Mutex::new(interfaces::DmaBuffer::alloc(sector_size, 0)));
+        let mut wbuf =
+            interfaces::DmaBuffer::new(sector_size, sector_size, None).expect("DMA alloc");
+        wbuf.as_mut_slice().fill(pattern);
+        let wbuf = Arc::new(wbuf);
+        let rbuf = Arc::new(Mutex::new(
+            interfaces::DmaBuffer::new(sector_size, sector_size, None).expect("DMA alloc"),
+        ));
 
         let start = std::time::Instant::now();
 
@@ -733,7 +916,9 @@ fn sc002_timeout_accuracy() {
     let sector_size = ibd.block_size() as usize;
 
     let timeout_ms: u64 = 50;
-    let rbuf = Arc::new(Mutex::new(interfaces::DmaBuffer::alloc(sector_size, 0)));
+    let rbuf = Arc::new(Mutex::new(
+        interfaces::DmaBuffer::new(sector_size, sector_size, None).expect("DMA alloc"),
+    ));
 
     // Submit an async read with a short timeout. On most devices the IO will
     // complete well before 50ms, so we use an invalid LBA that will either
@@ -801,7 +986,10 @@ fn sc006_telemetry_accuracy() {
 
     for i in 0..num_ops {
         let pattern = (i & 0xFF) as u8;
-        let wbuf = Arc::new(interfaces::DmaBuffer::alloc(sector_size, pattern));
+        let mut wbuf =
+            interfaces::DmaBuffer::new(sector_size, sector_size, None).expect("DMA alloc");
+        wbuf.as_mut_slice().fill(pattern);
+        let wbuf = Arc::new(wbuf);
 
         let start = std::time::Instant::now();
         channels
