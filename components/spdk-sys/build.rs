@@ -32,27 +32,36 @@ fn main() {
     // Emit link search path.
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
 
-    // Link SPDK libraries we need (static).
-    println!("cargo:rustc-link-lib=static=spdk_env_dpdk");
-    println!("cargo:rustc-link-lib=static=spdk_log");
-    println!("cargo:rustc-link-lib=static=spdk_util");
+    // Link SPDK libraries we need (static, all +whole-archive).
+    //
+    // Rust only emits native library -l flags for symbols that Rust code
+    // references directly.  SPDK is a C library stack where spdk_nvme and
+    // spdk_sock_posix (both +whole-archive) pull in all their object files,
+    // creating C-level references to spdk_log, spdk_util, spdk_env_dpdk, etc.
+    // that no Rust code calls directly.  Rust therefore silently drops the
+    // -l flags for those support libs, leaving the whole-archive objects with
+    // unresolved symbols.  Using +whole-archive on every SPDK lib forces them
+    // all into the link unconditionally, so the C-level cross-references are
+    // always satisfied regardless of what Rust code calls.
+    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_env_dpdk");
+    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_log");
+    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_util");
 
-    // NVMe driver — linked with +whole-archive so the PCI driver constructor
+    // NVMe driver — +whole-archive so the PCI driver constructor
     // (SPDK_PCI_DRIVER_REGISTER) is included by the linker.  Without this,
     // spdk_pci_get_driver("nvme") returns NULL and no NVMe devices are enumerated.
     println!("cargo:rustc-link-lib=static:+whole-archive=spdk_nvme");
 
     // Transitive dependencies of spdk_nvme (from spdk_nvme.pc / spdk_sock.pc):
-    println!("cargo:rustc-link-lib=static=spdk_trace");
-    println!("cargo:rustc-link-lib=static=spdk_dma");
-    println!("cargo:rustc-link-lib=static=spdk_keyring");
-    println!("cargo:rustc-link-lib=static=spdk_json");
-    println!("cargo:rustc-link-lib=static=spdk_jsonrpc");
-    println!("cargo:rustc-link-lib=static=spdk_rpc");
-    println!("cargo:rustc-link-lib=static=spdk_sock");
-    // sock_posix needs +whole-archive for its socket module constructor.
+    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_trace");
+    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_dma");
+    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_keyring");
+    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_json");
+    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_jsonrpc");
+    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_rpc");
+    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_sock");
     println!("cargo:rustc-link-lib=static:+whole-archive=spdk_sock_posix");
-    println!("cargo:rustc-link-lib=static=spdk_thread");
+    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_thread");
 
     // Link DPDK libraries (static).
     // These are the libraries that spdk_env_dpdk depends on, discovered from
@@ -93,8 +102,12 @@ fn main() {
     ];
 
     for lib in &dpdk_libs {
-        println!("cargo:rustc-link-lib=static={lib}");
+        println!("cargo:rustc-link-lib=static:+whole-archive={lib}");
     }
+
+    // Intel ISA-L — provides CRC helpers (crc16_t10dif, crc32_iscsi, etc.)
+    // required by SPDK NVMe at the C level.
+    println!("cargo:rustc-link-lib=static:+whole-archive=isal");
 
     // Link system libraries that SPDK/DPDK depend on.
     println!("cargo:rustc-link-lib=dylib=pthread");
