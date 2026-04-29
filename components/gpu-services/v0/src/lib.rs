@@ -403,4 +403,63 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Not initialized"));
     }
+
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn test_dma_cpu_to_gpu_roundtrip() {
+        use std::ffi::c_void;
+
+        let component = GpuServicesComponentV0::new();
+        let gpu = query_interface!(component, IGpuServices).unwrap();
+        if gpu.initialize().is_err() {
+            return;
+        }
+
+        const SIZE: usize = 4096;
+
+        // Allocate GPU memory
+        let mut dev_ptr: *mut c_void = std::ptr::null_mut();
+        // SAFETY: dev_ptr is a valid pointer to a local variable.
+        let err = unsafe { cuda_ffi::cudaMalloc(&mut dev_ptr, SIZE) };
+        assert_eq!(err, cuda_ffi::CUDA_SUCCESS, "cudaMalloc failed");
+        assert!(!dev_ptr.is_null());
+
+        // Prepare CPU source buffer with a known pattern
+        let src: Vec<u8> = (0..SIZE).map(|i| (i % 251) as u8).collect();
+
+        // Copy CPU → GPU (Host to Device)
+        // SAFETY: dev_ptr is a valid device pointer of SIZE bytes; src is a valid host buffer.
+        let err = unsafe {
+            cuda_ffi::cudaMemcpy(
+                dev_ptr,
+                src.as_ptr() as *const c_void,
+                SIZE,
+                cuda_ffi::CUDA_MEMCPY_HOST_TO_DEVICE,
+            )
+        };
+        assert_eq!(err, cuda_ffi::CUDA_SUCCESS, "cudaMemcpy H2D failed");
+
+        // Copy GPU → CPU (Device to Host) into a fresh buffer
+        let mut dst: Vec<u8> = vec![0u8; SIZE];
+        // SAFETY: dst is a valid host buffer; dev_ptr is a valid device pointer of SIZE bytes.
+        let err = unsafe {
+            cuda_ffi::cudaMemcpy(
+                dst.as_mut_ptr() as *mut c_void,
+                dev_ptr as *const c_void,
+                SIZE,
+                cuda_ffi::CUDA_MEMCPY_DEVICE_TO_HOST,
+            )
+        };
+        assert_eq!(err, cuda_ffi::CUDA_SUCCESS, "cudaMemcpy D2H failed");
+
+        // Verify round-trip integrity
+        assert_eq!(src, dst, "CPU→GPU→CPU round-trip data mismatch");
+
+        // Free GPU memory
+        // SAFETY: dev_ptr was allocated by cudaMalloc and has not been freed.
+        let err = unsafe { cuda_ffi::cudaFree(dev_ptr) };
+        assert_eq!(err, cuda_ffi::CUDA_SUCCESS, "cudaFree failed");
+
+        let _ = gpu.shutdown();
+    }
 }

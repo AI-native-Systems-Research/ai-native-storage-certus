@@ -59,6 +59,10 @@ pub struct cudaPointerAttributes {
 /// Flags for cudaIpcOpenMemHandle.
 pub const CUDA_IPC_MEM_LAZY_ENABLE_PEER_ACCESS: c_int = 1;
 
+/// cudaMemcpy direction constants.
+pub const CUDA_MEMCPY_HOST_TO_DEVICE: c_int = 1;
+pub const CUDA_MEMCPY_DEVICE_TO_HOST: c_int = 2;
+
 extern "C" {
     pub fn cudaGetDeviceCount(count: *mut c_int) -> cudaError_t;
     pub fn cudaGetDeviceProperties(prop: *mut cudaDeviceProp, device: c_int) -> cudaError_t;
@@ -76,6 +80,13 @@ extern "C" {
     ) -> cudaError_t;
     pub fn cudaHostRegister(ptr: *mut c_void, size: usize, flags: c_int) -> cudaError_t;
     pub fn cudaHostUnregister(ptr: *mut c_void) -> cudaError_t;
+    pub fn cudaMalloc(devptr: *mut *mut c_void, size: usize) -> cudaError_t;
+    pub fn cudaMemcpy(
+        dst: *mut c_void,
+        src: *const c_void,
+        count: usize,
+        kind: c_int,
+    ) -> cudaError_t;
     pub fn cudaFree(devptr: *mut c_void) -> cudaError_t;
     pub fn cudaGetErrorString(error: cudaError_t) -> *const c_char;
     pub fn cudaDeviceGetPCIBusId(pci_bus_id: *mut c_char, len: c_int, device: c_int)
