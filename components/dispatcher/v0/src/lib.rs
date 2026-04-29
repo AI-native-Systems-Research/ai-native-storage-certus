@@ -234,6 +234,266 @@ impl IDispatcher for DispatcherComponentV0 {
 mod tests {
     use super::*;
     use component_core::query_interface;
+    use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
+    use std::thread;
+
+    use interfaces::{DispatchMapError, DmaAllocFn, DmaBuffer, LookupResult};
+
+    // -----------------------------------------------------------------------
+    // Mock infrastructure
+    // -----------------------------------------------------------------------
+
+    unsafe extern "C" fn mock_dma_free(ptr: *mut std::ffi::c_void) {
+        if !ptr.is_null() {
+            // SAFETY: ptr was allocated with alloc_zeroed in mock_dma_buffer.
+            unsafe {
+                std::alloc::dealloc(
+                    ptr as *mut u8,
+                    std::alloc::Layout::from_size_align_unchecked(1, 1),
+                );
+            }
+        }
+    }
+
+    fn mock_dma_buffer(size: usize) -> Arc<DmaBuffer> {
+        let sz = size.max(1);
+        let layout = std::alloc::Layout::from_size_align(sz, 4096).unwrap();
+        // SAFETY: Test-only allocation with valid layout.
+        let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
+        assert!(!ptr.is_null());
+        // SAFETY: ptr is valid heap memory with matching layout.
+        let buf = unsafe {
+            DmaBuffer::from_raw(
+                ptr as *mut std::ffi::c_void,
+                sz,
+                mock_dma_free as unsafe extern "C" fn(*mut std::ffi::c_void),
+                -1,
+            )
+        }
+        .unwrap();
+        Arc::new(buf)
+    }
+
+    struct MockEntry {
+        buffer: Arc<DmaBuffer>,
+        block_offset: Option<u64>,
+        write_ref: bool,
+        read_refs: u32,
+    }
+
+    struct MockDmInner {
+        entries: HashMap<CacheKey, MockEntry>,
+        fail_alloc: bool,
+        mismatch_keys: HashSet<CacheKey>,
+    }
+
+    struct MockDispatchMap {
+        inner: Mutex<MockDmInner>,
+    }
+
+    impl MockDispatchMap {
+        fn new() -> Self {
+            Self {
+                inner: Mutex::new(MockDmInner {
+                    entries: HashMap::new(),
+                    fail_alloc: false,
+                    mismatch_keys: HashSet::new(),
+                }),
+            }
+        }
+
+        fn with_fail_alloc() -> Self {
+            Self {
+                inner: Mutex::new(MockDmInner {
+                    entries: HashMap::new(),
+                    fail_alloc: true,
+                    mismatch_keys: HashSet::new(),
+                }),
+            }
+        }
+
+        fn entry_count(&self) -> usize {
+            self.inner.lock().unwrap().entries.len()
+        }
+
+        fn set_mismatch_key(&self, key: CacheKey) {
+            self.inner.lock().unwrap().mismatch_keys.insert(key);
+        }
+
+        fn convert_entry_to_block(&self, key: CacheKey, offset: u64) {
+            let mut inner = self.inner.lock().unwrap();
+            if let Some(entry) = inner.entries.get_mut(&key) {
+                entry.block_offset = Some(offset);
+            }
+        }
+    }
+
+    impl IDispatchMap for MockDispatchMap {
+        fn set_dma_alloc(&self, _alloc: DmaAllocFn) {}
+
+        fn initialize(&self) -> Result<(), DispatchMapError> {
+            Ok(())
+        }
+
+        fn create_staging(
+            &self,
+            key: CacheKey,
+            size: u32,
+        ) -> Result<Arc<DmaBuffer>, DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.fail_alloc {
+                return Err(DispatchMapError::AllocationFailed(
+                    "mock: out of memory".into(),
+                ));
+            }
+            if inner.entries.contains_key(&key) {
+                return Err(DispatchMapError::AlreadyExists(key));
+            }
+            let buffer = mock_dma_buffer(size as usize * 4096);
+            inner.entries.insert(
+                key,
+                MockEntry {
+                    buffer: Arc::clone(&buffer),
+                    block_offset: None,
+                    write_ref: true,
+                    read_refs: 0,
+                },
+            );
+            Ok(buffer)
+        }
+
+        fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {
+            let inner = self.inner.lock().unwrap();
+            if inner.mismatch_keys.contains(&key) {
+                return Ok(LookupResult::MismatchSize);
+            }
+            match inner.entries.get(&key) {
+                None => Ok(LookupResult::NotExist),
+                Some(entry) => match entry.block_offset {
+                    Some(offset) => Ok(LookupResult::BlockDevice { offset }),
+                    None => Ok(LookupResult::Staging {
+                        buffer: Arc::clone(&entry.buffer),
+                    }),
+                },
+            }
+        }
+
+        fn convert_to_storage(&self, key: CacheKey, offset: u64) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.entries.get_mut(&key) {
+                None => Err(DispatchMapError::KeyNotFound(key)),
+                Some(entry) => {
+                    entry.block_offset = Some(offset);
+                    Ok(())
+                }
+            }
+        }
+
+        fn take_read(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.entries.get_mut(&key) {
+                None => Err(DispatchMapError::KeyNotFound(key)),
+                Some(entry) => {
+                    entry.read_refs += 1;
+                    Ok(())
+                }
+            }
+        }
+
+        fn take_write(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.entries.get_mut(&key) {
+                None => Err(DispatchMapError::KeyNotFound(key)),
+                Some(entry) => {
+                    entry.write_ref = true;
+                    Ok(())
+                }
+            }
+        }
+
+        fn release_read(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.entries.get_mut(&key) {
+                None => Err(DispatchMapError::KeyNotFound(key)),
+                Some(entry) => {
+                    entry.read_refs = entry.read_refs.saturating_sub(1);
+                    Ok(())
+                }
+            }
+        }
+
+        fn release_write(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.entries.get_mut(&key) {
+                None => Err(DispatchMapError::KeyNotFound(key)),
+                Some(entry) => {
+                    entry.write_ref = false;
+                    Ok(())
+                }
+            }
+        }
+
+        fn downgrade_reference(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.entries.get_mut(&key) {
+                None => Err(DispatchMapError::NoWriteReference(key)),
+                Some(entry) => {
+                    entry.write_ref = false;
+                    entry.read_refs += 1;
+                    Ok(())
+                }
+            }
+        }
+
+        fn remove(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.entries.remove(&key).is_some() {
+                Ok(())
+            } else {
+                Err(DispatchMapError::KeyNotFound(key))
+            }
+        }
+    }
+
+    struct MockLogger;
+
+    impl ILogger for MockLogger {
+        fn error(&self, _msg: &str) {}
+        fn warn(&self, _msg: &str) {}
+        fn info(&self, _msg: &str) {}
+        fn debug(&self, _msg: &str) {}
+    }
+
+    fn setup_initialized() -> (Arc<DispatcherComponentV0>, Arc<MockDispatchMap>) {
+        let dm = Arc::new(MockDispatchMap::new());
+        let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None));
+        c.dispatch_map
+            .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
+            .unwrap();
+        c.logger.connect(logger).unwrap();
+
+        let d = query_interface!(c, IDispatcher).unwrap();
+        d.initialize(DispatcherConfig {
+            metadata_pci_addr: "0000:01:00.0".to_string(),
+            data_pci_addrs: vec!["0000:02:00.0".to_string()],
+        })
+        .unwrap();
+
+        (c, dm)
+    }
+
+    fn make_handle(buf: &mut [u8]) -> IpcHandle {
+        IpcHandle {
+            address: buf.as_mut_ptr(),
+            size: buf.len() as u32,
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Pre-initialization tests (existing)
+    // -----------------------------------------------------------------------
 
     #[test]
     fn component_creation() {
@@ -347,9 +607,6 @@ mod tests {
 
     #[test]
     fn concurrent_pre_init_calls_from_multiple_threads() {
-        use std::sync::Arc;
-        use std::thread;
-
         let c = Arc::new(DispatcherComponentV0::new(
             AtomicBool::new(false),
             Mutex::new(None),
@@ -375,5 +632,348 @@ mod tests {
         for h in handles {
             h.join().unwrap();
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Initialized dispatcher tests (with mock dispatch map)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn initialize_with_dispatch_map_succeeds() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        assert!(d.shutdown().is_ok());
+    }
+
+    #[test]
+    fn initialize_empty_addrs_with_dispatch_map() {
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None));
+        c.dispatch_map.connect(dm).unwrap();
+
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let config = DispatcherConfig {
+            metadata_pci_addr: "0000:01:00.0".to_string(),
+            data_pci_addrs: vec![],
+        };
+        let err = d.initialize(config);
+        assert!(matches!(err, Err(DispatcherError::InvalidParameter(_))));
+    }
+
+    #[test]
+    fn initialize_multiple_pci_addrs() {
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
+        let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None));
+        c.dispatch_map.connect(dm).unwrap();
+        c.logger.connect(logger).unwrap();
+
+        let d = query_interface!(c, IDispatcher).unwrap();
+        d.initialize(DispatcherConfig {
+            metadata_pci_addr: "0000:01:00.0".to_string(),
+            data_pci_addrs: vec![
+                "0000:02:00.0".to_string(),
+                "0000:03:00.0".to_string(),
+                "0000:04:00.0".to_string(),
+            ],
+        })
+        .unwrap();
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn populate_succeeds_after_init() {
+        let (c, dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let mut buf = vec![0u8; 4096];
+        assert!(d.populate(1, make_handle(&mut buf)).is_ok());
+        assert_eq!(dm.entry_count(), 1);
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn populate_zero_size_returns_invalid_parameter_after_init() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let mut buf = vec![0u8; 0];
+        let handle = IpcHandle {
+            address: buf.as_mut_ptr(),
+            size: 0,
+        };
+        let err = d.populate(1, handle);
+        assert!(matches!(err, Err(DispatcherError::InvalidParameter(_))));
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn populate_duplicate_key_returns_already_exists() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let mut buf1 = vec![0u8; 4096];
+        d.populate(1, make_handle(&mut buf1)).unwrap();
+
+        let mut buf2 = vec![0u8; 4096];
+        let err = d.populate(1, make_handle(&mut buf2));
+        assert!(matches!(err, Err(DispatcherError::AlreadyExists(1))));
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn populate_allocation_failure() {
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::with_fail_alloc());
+        let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None));
+        c.dispatch_map.connect(dm).unwrap();
+        c.logger.connect(logger).unwrap();
+
+        let d = query_interface!(c, IDispatcher).unwrap();
+        d.initialize(DispatcherConfig {
+            metadata_pci_addr: "0000:01:00.0".to_string(),
+            data_pci_addrs: vec!["0000:02:00.0".to_string()],
+        })
+        .unwrap();
+
+        let mut buf = vec![0u8; 4096];
+        let err = d.populate(1, make_handle(&mut buf));
+        assert!(matches!(err, Err(DispatcherError::AllocationFailed(_))));
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn populate_non_block_aligned_size() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let mut buf = vec![0u8; 5000];
+        let handle = IpcHandle {
+            address: buf.as_mut_ptr(),
+            size: 5000,
+        };
+        assert!(d.populate(1, handle).is_ok());
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn populate_enqueues_many_writes() {
+        let (c, dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+
+        for i in 0..100 {
+            let mut buf = vec![0u8; 4096];
+            d.populate(i, make_handle(&mut buf)).unwrap();
+        }
+        assert_eq!(dm.entry_count(), 100);
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn lookup_staging_hit() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+
+        let mut buf = vec![0u8; 4096];
+        d.populate(1, make_handle(&mut buf)).unwrap();
+
+        let mut buf2 = vec![0u8; 4096];
+        assert!(d.lookup(1, make_handle(&mut buf2)).is_ok());
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn lookup_block_device_hit() {
+        let (c, dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+
+        let mut buf = vec![0u8; 4096];
+        d.populate(1, make_handle(&mut buf)).unwrap();
+
+        dm.convert_entry_to_block(1, 0x1000);
+
+        let mut buf2 = vec![0u8; 4096];
+        assert!(d.lookup(1, make_handle(&mut buf2)).is_ok());
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn lookup_key_not_found() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let mut buf = vec![0u8; 4096];
+        let err = d.lookup(999, make_handle(&mut buf));
+        assert!(matches!(err, Err(DispatcherError::KeyNotFound(999))));
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn lookup_mismatch_size_returns_invalid_parameter() {
+        let (c, dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+
+        let mut buf = vec![0u8; 4096];
+        d.populate(1, make_handle(&mut buf)).unwrap();
+
+        dm.set_mismatch_key(1);
+
+        let mut buf2 = vec![0u8; 4096];
+        let err = d.lookup(1, make_handle(&mut buf2));
+        assert!(matches!(err, Err(DispatcherError::InvalidParameter(_))));
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn check_existing_returns_true() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let mut buf = vec![0u8; 4096];
+        d.populate(1, make_handle(&mut buf)).unwrap();
+        assert_eq!(d.check(1).unwrap(), true);
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn check_nonexistent_returns_false() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        assert_eq!(d.check(999).unwrap(), false);
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn remove_existing_succeeds() {
+        let (c, dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let mut buf = vec![0u8; 4096];
+        d.populate(1, make_handle(&mut buf)).unwrap();
+        assert_eq!(dm.entry_count(), 1);
+        assert!(d.remove(1).is_ok());
+        assert_eq!(dm.entry_count(), 0);
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn remove_nonexistent_returns_key_not_found() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let err = d.remove(999);
+        assert!(matches!(err, Err(DispatcherError::KeyNotFound(999))));
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn full_lifecycle_populate_check_lookup_remove() {
+        let (c, dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+
+        let mut buf = vec![0u8; 8192];
+        d.populate(42, make_handle(&mut buf)).unwrap();
+        assert_eq!(dm.entry_count(), 1);
+
+        assert_eq!(d.check(42).unwrap(), true);
+        assert_eq!(d.check(99).unwrap(), false);
+
+        let mut buf2 = vec![0u8; 8192];
+        assert!(d.lookup(42, make_handle(&mut buf2)).is_ok());
+
+        assert!(d.remove(42).is_ok());
+        assert_eq!(dm.entry_count(), 0);
+
+        assert_eq!(d.check(42).unwrap(), false);
+
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn operations_after_shutdown_fail() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        d.shutdown().unwrap();
+
+        let mut buf = vec![0u8; 4096];
+        assert!(matches!(
+            d.populate(1, make_handle(&mut buf)),
+            Err(DispatcherError::NotInitialized(_))
+        ));
+        assert!(matches!(
+            d.check(1),
+            Err(DispatcherError::NotInitialized(_))
+        ));
+        let mut buf2 = vec![0u8; 4096];
+        assert!(matches!(
+            d.lookup(1, make_handle(&mut buf2)),
+            Err(DispatcherError::NotInitialized(_))
+        ));
+        assert!(matches!(
+            d.remove(1),
+            Err(DispatcherError::NotInitialized(_))
+        ));
+    }
+
+    #[test]
+    fn reinitialize_after_shutdown() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        d.shutdown().unwrap();
+
+        d.initialize(DispatcherConfig {
+            metadata_pci_addr: "0000:01:00.0".to_string(),
+            data_pci_addrs: vec!["0000:02:00.0".to_string()],
+        })
+        .unwrap();
+
+        assert_eq!(d.check(1).unwrap(), false);
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn concurrent_checks_on_initialized_dispatcher() {
+        let (c, _dm) = setup_initialized();
+
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                let comp = Arc::clone(&c);
+                thread::spawn(move || {
+                    let d = query_interface!(comp, IDispatcher).unwrap();
+                    for k in 0..10 {
+                        let result = d.check(i * 100 + k);
+                        assert!(result.is_ok());
+                        assert_eq!(result.unwrap(), false);
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let d = query_interface!(c, IDispatcher).unwrap();
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn concurrent_populate_different_keys() {
+        let (c, dm) = setup_initialized();
+
+        let handles: Vec<_> = (0..4)
+            .map(|t| {
+                let comp = Arc::clone(&c);
+                thread::spawn(move || {
+                    let d = query_interface!(comp, IDispatcher).unwrap();
+                    for i in 0..5 {
+                        let key = t * 100 + i;
+                        let mut buf = vec![0u8; 4096];
+                        d.populate(key, make_handle(&mut buf)).unwrap();
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        assert_eq!(dm.entry_count(), 20);
+
+        let d = query_interface!(c, IDispatcher).unwrap();
+        d.shutdown().unwrap();
     }
 }
