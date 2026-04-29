@@ -23,7 +23,7 @@
 //! ```
 
 #[cfg(feature = "gpu")]
-mod cuda_ffi;
+pub mod cuda_ffi;
 #[cfg(feature = "gpu")]
 mod device;
 #[cfg(feature = "gpu")]

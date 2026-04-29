@@ -65,6 +65,25 @@ cupy.cuda.alloc()
                                    → DMA to/from NVMe via SPDK
 ```
 
+## DMA Transfer Benchmarks
+
+Criterion benchmarks measure `cudaMemcpy` throughput across transfer sizes (4 KiB – 64 MiB), both directions, all available GPUs, and pageable vs pinned host memory.
+
+```bash
+cargo bench -p gpu-services --features gpu --bench dma_transfer_benchmark
+```
+
+Example results on Tesla V100-PCIE-16GB:
+
+| Transfer | Memory | 4 KiB | 64 KiB | 1 MiB | 16 MiB | 64 MiB |
+|----------|--------|-------|--------|-------|--------|--------|
+| H→D | Pageable | 567 MiB/s | 1.68 GiB/s | 2.41 GiB/s | 2.98 GiB/s | 2.94 GiB/s |
+| D→H | Pageable | 426 MiB/s | 1.86 GiB/s | 2.22 GiB/s | 2.69 GiB/s | 2.67 GiB/s |
+| H→D | Pinned | 480 MiB/s | 4.75 GiB/s | 10.5 GiB/s | 11.4 GiB/s | 11.5 GiB/s |
+| D→H | Pinned | 577 MiB/s | 5.47 GiB/s | 11.3 GiB/s | 12.2 GiB/s | 12.2 GiB/s |
+
+Pinned (page-locked) host memory provides ~4x higher throughput than pageable memory for large transfers, saturating the PCIe Gen3 x16 link at ~12 GiB/s.
+
 ## Feature Gate
 
 All CUDA FFI calls are behind `#[cfg(feature = "gpu")]`. Without the feature, the crate compiles and links without `libcudart`; every operation returns a descriptive error. This allows the workspace to build on CI machines without GPU hardware.

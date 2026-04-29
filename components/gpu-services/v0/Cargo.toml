@@ -24,3 +24,8 @@ criterion = { version = "0.5", features = ["html_reports"] }
 name = "gpu_services_benchmark"
 harness = false
 required-features = ["gpu"]
+
+[[bench]]
+name = "dma_transfer_benchmark"
+harness = false
+required-features = ["gpu"]
