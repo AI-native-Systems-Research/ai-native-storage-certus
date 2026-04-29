@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(components/component-framework)",
+      "Read(components/dispatcher/v0/**)",
+      "Read(components/logger/**)",
+      "Read(components/block-device-spdk-nvme/**)",
+      "Read(components/dispatch-map/**)",
+      "Write(components/interfaces/**)",
+      "Write(components/dispatcher/v0/**)"
+    ],
+    "deny": [
+      "Read(components/example-helloworld/**)",
+      "Read(components/spdk-sys/**)",
+      "Read(components/spdk-env/**)",
+      "Read(components/extent-manager/**)"
+    ],
+    "additionalDirectories": [
+      "../../interfaces",
+      "../../component-framework",
+      "../../logger",
+      "../../block-device-spdk-nvme",
+      "../../dispatch-map"
+    ]
+  }
+}

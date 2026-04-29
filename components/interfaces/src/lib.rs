@@ -7,6 +7,7 @@
 //! SPDK-dependent interfaces and types are gated behind the `spdk` Cargo feature.
 
 mod idispatch_map;
+mod idispatcher;
 mod igreeter;
 mod ilogger;
 
@@ -16,6 +17,11 @@ pub use idispatch_map::DispatchMapError;
 pub use idispatch_map::LookupResult;
 #[cfg(feature = "spdk")]
 pub use idispatch_map::IDispatchMap;
+pub use idispatcher::DispatcherConfig;
+pub use idispatcher::DispatcherError;
+pub use idispatcher::IpcHandle;
+#[cfg(feature = "spdk")]
+pub use idispatcher::IDispatcher;
 pub use igreeter::IGreeter;
 pub use ilogger::ILogger;
 
