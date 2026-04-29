@@ -135,13 +135,6 @@ fn main() {
             std::process::exit(2);
         });
 
-    let numa_node = ibd.numa_node();
-    let dma_alloc: interfaces::DmaAllocFn = Arc::new(move |size, align, _numa| {
-        DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
-    });
-
-    iem.set_dma_alloc(dma_alloc);
-
     let total_size = config.total_size.unwrap_or_else(|| {
         let sectors = ibd.num_sectors(config.ns_id).unwrap_or_else(|e| {
             eprintln!("error: failed to get num_sectors: {e}");

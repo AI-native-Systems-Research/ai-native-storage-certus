@@ -1,6 +1,6 @@
 // DmaBuffer is Send but not Sync; Arc<DmaBuffer> is required by Command::WriteSync API.
 #![allow(clippy::arc_with_non_send_sync)]
-#![cfg(feature = "spdk-test")]
+#![cfg(feature = "spdk")]
 
 //! Integration tests for the SPDK NVMe block device component.
 //!

@@ -440,8 +440,6 @@ define_component! {
 }
 
 impl IExtentManager for MockExtentManagerComponent {
-    fn set_dma_alloc(&self, _alloc: DmaAllocFn) {}
-
     fn format(&self, _params: FormatParams) -> Result<(), ExtentManagerError> {
         Ok(())
     }
