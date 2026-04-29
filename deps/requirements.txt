@@ -2,3 +2,5 @@ meson
 pyelftools
 patchelf
 uv
+ninja
+
