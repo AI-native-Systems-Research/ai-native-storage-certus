@@ -23,7 +23,7 @@ use std::thread::JoinHandle;
 use parking_lot::RwLock;
 
 use interfaces::{
-    DmaAllocFn, Extent, ExtentKey, ExtentManagerError, FormatParams, IBlockDevice,
+    DmaAllocFn, DmaBuffer, Extent, ExtentKey, ExtentManagerError, FormatParams, IBlockDevice,
     IExtentManager, ILogger, WriteHandle,
 };
 
@@ -75,6 +75,10 @@ impl ExtentManagerV2 {
             .store(interval.as_millis() as u64, Ordering::Relaxed);
     }
 
+    pub fn set_dma_alloc(&self, alloc: DmaAllocFn) {
+        *self.dma_alloc.lock().unwrap() = Some(alloc);
+    }
+
     fn get_metadata_client(&self, ns_id: u32) -> Result<BlockDeviceClient, ExtentManagerError> {
         let bd = self
             .metadata_device
@@ -85,12 +89,11 @@ impl ExtentManagerV2 {
             .connect_client()
             .map_err(error::nvme_to_em)?;
 
-        let alloc = self
-            .dma_alloc
-            .lock()
-            .unwrap()
-            .clone()
-            .ok_or_else(|| error::not_initialized("DMA allocator not set"))?;
+        let alloc = self.dma_alloc.lock().unwrap().clone().unwrap_or_else(|| {
+            Arc::new(|size, align, numa| {
+                DmaBuffer::new(size, align, numa).map_err(|e| e.to_string())
+            })
+        });
 
         let sector_size = {
             let shared = self.shared.lock().unwrap();
@@ -211,10 +214,6 @@ impl Drop for ExtentManagerV2 {
 }
 
 impl IExtentManager for ExtentManagerV2 {
-    fn set_dma_alloc(&self, alloc: DmaAllocFn) {
-        *self.dma_alloc.lock().unwrap() = Some(alloc);
-    }
-
     fn format(&self, params: FormatParams) -> Result<(), ExtentManagerError> {
         if params.sector_size == 0 {
             return Err(error::corrupt_metadata("sector_size must be > 0"));

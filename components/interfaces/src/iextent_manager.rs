@@ -164,8 +164,6 @@ impl fmt::Debug for WriteHandle {
 #[cfg(feature = "spdk")]
 define_interface! {
     pub IExtentManager {
-        fn set_dma_alloc(&self, alloc: crate::spdk_types::DmaAllocFn);
-
         fn format(&self, params: FormatParams) -> Result<(), ExtentManagerError>;
 
         fn initialize(&self) -> Result<(), ExtentManagerError>;
