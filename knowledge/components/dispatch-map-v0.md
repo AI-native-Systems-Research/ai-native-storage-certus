@@ -47,6 +47,12 @@ DispatchMapComponentV0 {
 | `logger` | `ILogger` | No | Optional logging |
 | `extent_manager` | `IExtentManager` | Yes | Source of committed extents for recovery |
 
+## Key Types
+
+- `CacheKey = u64` -- extent identifier
+- `LookupResult` -- `NotExist`, `MismatchSize`, `Staging { buffer: Arc<DmaBuffer> }`, `BlockDevice { offset: u64 }`
+- `DispatchMapError` -- `KeyNotFound`, `AlreadyExists`, `ActiveReferences`, `Timeout`, `AllocationFailed`, `InvalidSize`, `NotInitialized`, `RefCountUnderflow`, `NoWriteReference`, `InvalidState`
+
 ## Internal Types
 
 - `DispatchEntry { location, size_blocks, read_ref, write_ref }`

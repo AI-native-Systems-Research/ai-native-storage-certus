@@ -14,12 +14,13 @@ Centralized repository for all component interface trait definitions. Allows com
 |-----------|---------|---------|
 | `IGreeter` | -- | `greeting_prefix(&self) -> &str` |
 | `ILogger` | -- | `error`, `warn`, `info`, `debug` (all `&self, msg: &str`) |
+| `IGpuServices` | -- | `initialize`, `shutdown`, `get_devices`, `deserialize_ipc_handle`, `verify_memory`, `pin_memory`, `unpin_memory`, `create_dma_buffer` |
 | `ISPDKEnv` | `spdk` | `init()`, `devices()`, `device_count()`, `is_initialized()` |
 | `IBlockDevice` | `spdk` | `connect_client()`, `sector_size(ns_id)`, `num_sectors(ns_id)`, `max_queue_depth()`, `num_io_queues()`, `max_transfer_size()`, `block_size()`, `numa_node()`, `nvme_version()`, `telemetry()` |
 | `IBlockDeviceAdmin` | `spdk` | `set_pci_address(addr)`, `set_actor_cpu(cpu)`, `initialize()`, `shutdown()` |
-| `IExtentManager` | `spdk` | `set_dma_alloc`, `format`, `initialize`, `reserve_extent`, `lookup_extent`, `get_extents`, `for_each_extent`, `remove_extent`, `checkpoint`, `get_instance_id` |
+| `IExtentManager` | `spdk` | `format(params)`, `initialize`, `reserve_extent(key, size)`, `lookup_extent(key)`, `get_extents`, `for_each_extent(cb)`, `remove_extent(key)`, `checkpoint`, `get_instance_id` |
 | `IDispatchMap` | `spdk` | `set_dma_alloc`, `initialize`, `create_staging`, `lookup`, `convert_to_storage`, `take_read`, `take_write`, `release_read`, `release_write`, `downgrade_reference`, `remove` |
-| `IDispatcher` | `spdk` | `initialize()`, `shutdown()` |
+| `IDispatcher` | `spdk` | `initialize(config)`, `shutdown()`, `lookup(key, ipc_handle)`, `check(key)`, `remove(key)`, `populate(key, ipc_handle)` |
 
 ## Key Shared Types
 
@@ -49,8 +50,18 @@ Centralized repository for all component interface trait definitions. Allows com
 
 ### Dispatch Map
 - `CacheKey = u64`
-- `LookupResult`
+- `LookupResult` -- `NotExist`, `MismatchSize`, `Staging { buffer }`, `BlockDevice { offset }`
 - `DispatchMapError`
+
+### Dispatcher
+- `DispatcherConfig { metadata_pci_addr, data_pci_addrs }`
+- `IpcHandle { address: *mut u8, size: u32 }` -- opaque GPU memory handle for DMA
+- `DispatcherError`
+
+### GPU Services
+- `GpuDeviceInfo { device_index, name, memory_bytes, compute_major, compute_minor, pci_bus_id }`
+- `GpuIpcHandle` -- opened CUDA IPC handle with verification/pinning state
+- `GpuDmaBuffer` -- owns GPU device pointer, calls `cudaIpcCloseMemHandle` on drop
 
 ## Receptacles
 

@@ -46,11 +46,10 @@ ExtentManagerV2 {
 
 | Interface | Key Methods |
 |-----------|------------|
-| `IExtentManager` | `set_dma_alloc(alloc)` -- set DMA allocator for I/O buffers |
-|                  | `format(params)` -- write superblock, initialize on-disk structures |
+| `IExtentManager` | `format(params)` -- write superblock, initialize on-disk structures |
 |                  | `initialize()` -- recover state from disk |
 |                  | `reserve_extent(key, size) -> Result<WriteHandle, _>` -- two-phase allocate |
-|                  | `lookup_extent(key) -> Option<Extent>` |
+|                  | `lookup_extent(key) -> Result<Extent, _>` |
 |                  | `get_extents() -> Vec<Extent>` |
 |                  | `for_each_extent(callback)` |
 |                  | `remove_extent(key)` |
@@ -64,6 +63,15 @@ ExtentManagerV2 {
 | `block_device` | `IBlockDevice` | Yes | Data device for extent storage |
 | `metadata_device` | `IBlockDevice` | Yes | Metadata device for superblock and checkpoints |
 | `logger` | `ILogger` | No | Optional logging |
+
+## Key Types
+
+- `ExtentKey = u64` -- opaque extent identifier
+- `Extent { key, size, offset }` -- a committed storage extent
+- `FormatParams { data_disk_size, slab_size, max_extent_size, sector_size, region_count, metadata_alignment, instance_id: Option<u64>, metadata_disk_ns_id }` -- format configuration
+- `FormatParams::new(data_disk_size, instance_id: Option<u64>)` -- constructor with defaults
+- `WriteHandle` -- two-phase commit handle: `publish()` commits, `abort()` or drop rolls back
+- `ExtentManagerError` -- `CorruptMetadata`, `DuplicateKey`, `IoError`, `KeyNotFound`, `NotInitialized`, `OutOfSpace`
 
 ## Internal Modules
 
