@@ -326,7 +326,9 @@ fn remove_then_checkpoint_frees_slot() {
     c.remove_extent(1).unwrap();
     c.checkpoint().unwrap();
 
-    let h2 = c.reserve_extent(2, SECTOR_SIZE).unwrap();
+    // key 5 maps to region 1 (5 & 3 == 1), same as key 1, so the freed slot
+    // in that region should be reused.
+    let h2 = c.reserve_extent(5, SECTOR_SIZE).unwrap();
     let ext2 = h2.publish().unwrap();
     assert_eq!(
         ext2.offset, original_offset,
