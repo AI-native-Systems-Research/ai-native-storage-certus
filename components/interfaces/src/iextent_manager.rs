@@ -1,5 +1,5 @@
 //! Interface for the extent-manager component and shared types.
-
+#[cfg(feature = "spdk")]
 use component_macros::define_interface;
 use std::fmt;
 
@@ -10,7 +10,7 @@ pub type ExtentKey = u64;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Extent {
     pub key: ExtentKey,
-    pub size: u32,
+    pub size: u32, // size in blocks
     pub offset: u64,
 }
 
@@ -64,9 +64,10 @@ pub struct FormatParams {
 }
 
 impl FormatParams {
-    pub fn new(data_disk_size: u64) -> Self {
+    pub fn new(data_disk_size: u64, instance_id: Option<u64>) -> Self {
         Self {
             data_disk_size,
+            instance_id,
             ..Default::default()
         }
     }
@@ -76,11 +77,11 @@ impl Default for FormatParams {
     fn default() -> Self {
         Self {
             data_disk_size: 0,
-            slab_size: 1024 * 1024 * 1024,         // 1 GiB
-            max_extent_size: 1024 * 1024 * 1024,    // 1 GiB
-            sector_size: 4096,                       // 4 KiB
+            slab_size: 1024 * 1024 * 1024,       // 1 GiB
+            max_extent_size: 1024 * 1024 * 1024, // 1 GiB
+            sector_size: 4096,                   // 4 KiB
             region_count: 16,
-            metadata_alignment: 128 * 1024,          // 128 KiB
+            metadata_alignment: 128 * 1024, // 128 KiB
             instance_id: None,
             metadata_disk_ns_id: 1,
         }

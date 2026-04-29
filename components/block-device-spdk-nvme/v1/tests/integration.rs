@@ -1,6 +1,6 @@
 // DmaBuffer is Send but not Sync; Arc<DmaBuffer> is required by Command::WriteSync API.
 #![allow(clippy::arc_with_non_send_sync)]
-#![cfg(feature = "spdk-test")]
+#![cfg(feature = "spdk")]
 
 //! Integration tests for the SPDK NVMe block device component.
 //!
@@ -62,7 +62,11 @@ unsafe impl Sync for SpdkHardwareContext {}
 /// necessary because SPDK is a process-global singleton and the
 /// component framework's Arc self-references prevent cleanup between
 /// tests.
-static SPDK_CONTEXT: OnceLock<Option<SpdkHardwareContext>> = OnceLock::new();
+///
+/// The context is intentionally leaked (`Box::leak`) so that SPDK
+/// resources are never dropped — dropping them at process exit causes
+/// a SIGSEGV in the SPDK teardown path.
+static SPDK_CONTEXT: OnceLock<Option<&'static SpdkHardwareContext>> = OnceLock::new();
 
 /// Get or initialize the shared SPDK hardware context.
 ///
@@ -75,64 +79,73 @@ static SPDK_CONTEXT: OnceLock<Option<SpdkHardwareContext>> = OnceLock::new();
 /// When hardware is available, returns a reference to the shared
 /// initialized component set ready for IO operations.
 fn get_spdk_context() -> Option<&'static SpdkHardwareContext> {
-    SPDK_CONTEXT
-        .get_or_init(|| {
-            // Pre-flight: check VFIO and hugepages without side effects.
-            if let Err(e) = spdk_env::checks::check_vfio_available() {
-                eprintln!("SPDK hardware not available (VFIO): {e}");
-                return None;
-            }
-            if let Err(e) = spdk_env::checks::check_hugepages() {
-                eprintln!("SPDK hardware not available (hugepages): {e}");
-                return None;
-            }
+    *SPDK_CONTEXT.get_or_init(|| {
+        // Register an atexit handler that terminates the process immediately,
+        // bypassing SPDK's own atexit teardown which segfaults when the SPDK
+        // environment outlives the test harness.
+        extern "C" {
+            fn atexit(cb: extern "C" fn()) -> i32;
+            fn _exit(status: i32) -> !;
+        }
+        extern "C" fn exit_before_spdk_teardown() {
+            unsafe { _exit(0) };
+        }
+        unsafe { atexit(exit_before_spdk_teardown) };
 
-            let (block_dev, spdk_env, logger) = wire_components();
+        // Pre-flight: check VFIO and hugepages without side effects.
+        if let Err(e) = spdk_env::checks::check_vfio_available() {
+            eprintln!("SPDK hardware not available (VFIO): {e}");
+            return None;
+        }
+        if let Err(e) = spdk_env::checks::check_hugepages() {
+            eprintln!("SPDK hardware not available (hugepages): {e}");
+            return None;
+        }
 
-            // Initialize the SPDK environment.
-            let ienv = query::<dyn spdk_env::ISPDKEnv + Send + Sync>(&*spdk_env)
-                .expect("ISPDKEnv interface not found");
-            if let Err(e) = ienv.init() {
-                eprintln!("SPDK init failed: {e}");
-                return None;
-            }
+        let (block_dev, spdk_env, logger) = wire_components();
 
-            // Check for discovered NVMe devices.
-            let devices = ienv.devices();
-            if devices.is_empty() {
-                eprintln!("SPDK initialized but no NVMe devices found");
-                return None;
-            }
+        // Initialize the SPDK environment.
+        let ienv = query::<dyn spdk_env::ISPDKEnv + Send + Sync>(&*spdk_env)
+            .expect("ISPDKEnv interface not found");
+        if let Err(e) = ienv.init() {
+            eprintln!("SPDK init failed: {e}");
+            return None;
+        }
 
-            // Configure the block device with the first discovered device address.
-            // Convert spdk_env::PciAddress → interfaces::PciAddress (same layout, different types).
-            let spdk_addr = devices[0].address;
-            let addr = interfaces::PciAddress {
-                domain: spdk_addr.domain,
-                bus: spdk_addr.bus,
-                dev: spdk_addr.dev,
-                func: spdk_addr.func,
-            };
+        // Check for discovered NVMe devices.
+        let devices = ienv.devices();
+        if devices.is_empty() {
+            eprintln!("SPDK initialized but no NVMe devices found");
+            return None;
+        }
 
-            let admin = query::<dyn interfaces::iblock_device::IBlockDeviceAdmin + Send + Sync>(
-                &*block_dev,
-            )
-            .expect("IBlockDeviceAdmin query");
-            admin.set_pci_address(addr);
+        // Configure the block device with the first discovered device address.
+        // Convert spdk_env::PciAddress → interfaces::PciAddress (same layout, different types).
+        let spdk_addr = devices[0].address;
+        let addr = interfaces::PciAddress {
+            domain: spdk_addr.domain,
+            bus: spdk_addr.bus,
+            dev: spdk_addr.dev,
+            func: spdk_addr.func,
+        };
 
-            // Initialize the block device (probe controller, start actor).
-            if let Err(e) = admin.initialize() {
-                eprintln!("Block device initialize failed: {e}");
-                return None;
-            }
+        let admin =
+            query::<dyn interfaces::iblock_device::IBlockDeviceAdmin + Send + Sync>(&*block_dev)
+                .expect("IBlockDeviceAdmin query");
+        admin.set_pci_address(addr);
 
-            Some(SpdkHardwareContext {
-                block_dev,
-                spdk_env,
-                logger,
-            })
-        })
-        .as_ref()
+        // Initialize the block device (probe controller, start actor).
+        if let Err(e) = admin.initialize() {
+            eprintln!("Block device initialize failed: {e}");
+            return None;
+        }
+
+        Some(Box::leak(Box::new(SpdkHardwareContext {
+            block_dev,
+            spdk_env,
+            logger,
+        })))
+    })
 }
 
 // ---------------------------------------------------------------------------

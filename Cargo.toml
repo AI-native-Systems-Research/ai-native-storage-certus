@@ -18,7 +18,10 @@ members = [
     "components/extent-manager/v2",
     "components/logger/v1",
     "components/dispatch-map/v0",
-    "components/dispatcher/v0"
+    "components/dispatcher/v0",
+    "components/gpu-services/v0",
+    "apps/gpu-handle-test-server",
+    "apps/gpu-show"
 ]
 
 # SPDK crates require pre-built native libraries at deps/spdk-build/.
@@ -31,7 +34,8 @@ default-members = [
     "components/component-framework/examples",
     "components/example-helloworld",
     "apps/helloworld-mainline",
-    "components/logger/v1"
+    "components/logger/v1",
+    "components/gpu-services/v0"
 ]
 
 resolver = "2"
@@ -54,5 +58,6 @@ block-device-spdk-nvme-v2 = { path = "components/block-device-spdk-nvme/v2" }
 logger = { path = "components/logger/v1" }
 dispatch-map = { path = "components/dispatch-map/v0" }
 dispatcher = { path = "components/dispatcher/v0" }
+gpu-services = { path = "components/gpu-services/v0" }
 
 

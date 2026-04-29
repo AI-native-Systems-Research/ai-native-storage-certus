@@ -13,3 +13,4 @@ spdk-sys = { workspace = true, optional = true }
 [features]
 default = []
 spdk = ["dep:spdk-sys"]
+gpu = []

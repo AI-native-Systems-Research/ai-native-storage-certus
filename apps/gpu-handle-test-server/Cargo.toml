@@ -1,0 +1,17 @@
+[package]
+name = "gpu-handle-test-server"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+gpu-services.workspace = true
+interfaces.workspace = true
+component-framework.workspace = true
+component-core.workspace = true
+logger.workspace = true
+
+[features]
+default = ["gpu"]
+gpu = ["gpu-services/gpu", "interfaces/gpu"]

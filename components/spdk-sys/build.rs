@@ -1,6 +1,7 @@
 //! Build script for spdk-sys: generates FFI bindings via bindgen and links SPDK/DPDK libraries.
 
 use std::env;
+use std::fs;
 use std::path::PathBuf;
 
 fn main() {
@@ -28,6 +29,17 @@ fn main() {
 
     let include_dir = spdk_build.join("include");
     let lib_dir = spdk_build.join("lib");
+    let config_header = include_dir.join("spdk/config.h");
+    let config_header = fs::read_to_string(&config_header).unwrap_or_else(|_| {
+        panic!(
+            "\n\nerror: SPDK config header not found at {}.\n\
+             Rebuild SPDK with: deps/build_spdk.sh\n\n",
+            config_header.display()
+        );
+    });
+    let is_isal_enabled = config_header
+        .lines()
+        .any(|line| line.trim() == "#define SPDK_CONFIG_ISAL 1");
 
     // Emit link search path.
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
@@ -105,9 +117,12 @@ fn main() {
         println!("cargo:rustc-link-lib=static:+whole-archive={lib}");
     }
 
-    // Intel ISA-L — provides CRC helpers (crc16_t10dif, crc32_iscsi, etc.)
-    // required by SPDK NVMe at the C level.
-    println!("cargo:rustc-link-lib=static:+whole-archive=isal");
+    // Intel ISA-L is only linked when the installed SPDK build enables it.
+    // Some repo setups build SPDK with CONFIG_ISAL=n, in which case libisal
+    // is neither installed nor required by the generated SPDK archives.
+    if is_isal_enabled {
+        println!("cargo:rustc-link-lib=static:+whole-archive=isal");
+    }
 
     // Link system libraries that SPDK/DPDK depend on.
     println!("cargo:rustc-link-lib=dylib=pthread");

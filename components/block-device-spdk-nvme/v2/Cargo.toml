@@ -9,7 +9,7 @@ description = "SPDK NVMe block device component with actor model, async IO, and 
 [features]
 default = []
 telemetry = []
-spdk-test = []
+spdk = []
 
 [dependencies]
 component-core.workspace = true

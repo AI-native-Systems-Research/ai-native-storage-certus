@@ -8,6 +8,7 @@
 
 mod idispatch_map;
 mod idispatcher;
+mod igpu_services;
 mod igreeter;
 mod ilogger;
 
@@ -22,6 +23,10 @@ pub use idispatcher::DispatcherError;
 pub use idispatcher::IpcHandle;
 #[cfg(feature = "spdk")]
 pub use idispatcher::IDispatcher;
+pub use igpu_services::GpuDeviceInfo;
+pub use igpu_services::GpuDmaBuffer;
+pub use igpu_services::GpuIpcHandle;
+pub use igpu_services::IGpuServices;
 pub use igreeter::IGreeter;
 pub use ilogger::ILogger;
 
