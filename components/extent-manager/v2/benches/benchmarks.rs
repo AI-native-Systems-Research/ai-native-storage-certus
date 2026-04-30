@@ -25,23 +25,24 @@ fn format_params() -> FormatParams {
 }
 
 fn bench_reserve_publish(c: &mut Criterion) {
-    let (component, _metadata_mock) = create_test_component(METADATA_DISK_SIZE);
-    component.format(format_params()).expect("format");
-
-    let mut key = 0u64;
     c.bench_function("reserve_publish", |b| {
-        b.iter(|| {
-            key += 1;
-            let h = component.reserve_extent(key, 4096).expect("reserve");
-            h.publish().expect("publish");
+        b.iter_custom(|iters| {
+            let (component, _metadata_mock) = create_test_component(METADATA_DISK_SIZE);
+            component.format(format_params()).expect("format");
+            let start = std::time::Instant::now();
+            for key in 1..=iters {
+                let h = component.reserve_extent(key, 4096).expect("reserve");
+                h.publish().expect("publish");
+            }
+            start.elapsed()
         });
     });
 }
 
-fn bench_lookup(c: &mut Criterion) {
-    let mut group = c.benchmark_group("lookup");
+fn bench_enumerate(c: &mut Criterion) {
+    let mut group = c.benchmark_group("enumerate");
 
-    for &count in &[1, 1_000, 100_000] {
+    for &count in &[1u64, 1_000, 100_000] {
         let (component, _metadata_mock) = create_test_component(METADATA_DISK_SIZE);
         component.format(format_params()).expect("format");
 
@@ -54,10 +55,10 @@ fn bench_lookup(c: &mut Criterion) {
             BenchmarkId::from_parameter(count),
             &count,
             |b, _| {
-                let mut key = 1u64;
                 b.iter(|| {
-                    component.lookup_extent(key).expect("lookup");
-                    key = key % count + 1;
+                    let mut n = 0usize;
+                    component.for_each_extent(&mut |_| { n += 1; });
+                    n
                 });
             },
         );
@@ -71,14 +72,16 @@ fn bench_remove(c: &mut Criterion) {
             let (component, _metadata_mock) = create_test_component(METADATA_DISK_SIZE);
             component.format(format_params()).expect("format");
 
-            for k in 1..=iters {
-                let h = component.reserve_extent(k, 4096).expect("reserve");
-                h.publish().expect("publish");
-            }
+            let offsets: Vec<u64> = (1..=iters)
+                .map(|k| {
+                    let h = component.reserve_extent(k, 4096).expect("reserve");
+                    h.publish().expect("publish").offset
+                })
+                .collect();
 
             let start = std::time::Instant::now();
-            for k in 1..=iters {
-                component.remove_extent(k).expect("remove");
+            for offset in offsets {
+                component.remove_extent(offset).expect("remove");
             }
             start.elapsed()
         });
@@ -88,7 +91,7 @@ fn bench_remove(c: &mut Criterion) {
 fn bench_checkpoint(c: &mut Criterion) {
     let mut group = c.benchmark_group("checkpoint");
 
-    for &count in &[100, 10_000] {
+    for &count in &[100u64, 10_000] {
         let (component, _metadata_mock) = create_test_component(METADATA_DISK_SIZE);
         component.format(format_params()).expect("format");
 
@@ -102,13 +105,10 @@ fn bench_checkpoint(c: &mut Criterion) {
             &count,
             |b, _| {
                 b.iter(|| {
-                    // Mark dirty before each checkpoint
-                    {
-                        let h = component.reserve_extent(count + 1, 4096).unwrap();
-                        h.publish().unwrap();
-                    }
+                    let ext = component.reserve_extent(count + 1, 4096).unwrap()
+                        .publish().unwrap();
                     component.checkpoint().expect("checkpoint");
-                    component.remove_extent(count + 1).unwrap();
+                    component.remove_extent(ext.offset).unwrap();
                 });
             },
         );
@@ -119,7 +119,7 @@ fn bench_checkpoint(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_reserve_publish,
-    bench_lookup,
+    bench_enumerate,
     bench_remove,
     bench_checkpoint,
 );

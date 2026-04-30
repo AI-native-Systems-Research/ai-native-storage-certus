@@ -1,11 +1,7 @@
-use interfaces::{ExtentKey, ExtentManagerError, NvmeBlockError};
+use interfaces::{ExtentManagerError, NvmeBlockError};
 
-pub(crate) fn duplicate_key(key: ExtentKey) -> ExtentManagerError {
-    ExtentManagerError::DuplicateKey(key)
-}
-
-pub(crate) fn key_not_found(key: ExtentKey) -> ExtentManagerError {
-    ExtentManagerError::KeyNotFound(key)
+pub(crate) fn offset_not_found(offset: u64) -> ExtentManagerError {
+    ExtentManagerError::OffsetNotFound(offset)
 }
 
 pub(crate) fn out_of_space() -> ExtentManagerError {

@@ -17,23 +17,24 @@ pub struct PhaseResult {
     pub per_thread: Vec<WorkerResult>,
 }
 
+/// Each entry is `(thread_id, actual_ops_completed, latency_samples)`.
+/// `latency_samples` may be a sub-sample of `actual_ops_completed`.
 pub fn aggregate_results(
     phase_name: &str,
-    mut worker_latencies: Vec<(usize, Vec<Duration>)>,
+    mut worker_data: Vec<(usize, u64, Vec<Duration>)>,
     elapsed: Duration,
 ) -> PhaseResult {
     let mut all_samples: Vec<Duration> = Vec::new();
     let mut per_thread = Vec::new();
     let mut total_ops: u64 = 0;
 
-    for (thread_id, ref mut latencies) in &mut worker_latencies {
-        let ops = latencies.len() as u64;
-        total_ops += ops;
+    for (thread_id, ops_completed, ref mut latencies) in &mut worker_data {
+        total_ops += *ops_completed;
         all_samples.extend(latencies.iter());
         let thread_stats = stats::compute_stats(latencies);
         per_thread.push(WorkerResult {
             thread_id: *thread_id,
-            ops_completed: ops,
+            ops_completed: *ops_completed,
             latency: thread_stats,
         });
     }

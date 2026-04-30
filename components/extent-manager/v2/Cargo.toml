@@ -21,6 +21,10 @@ extent-manager-v2 = { path = ".", features = ["testing"] }
 default = ["spdk"]
 spdk = []
 testing = []
+# Enable NVMe flush commands after writes.  Leave disabled when the drives are
+# enterprise NVMe with volatile write caching turned off (the common default),
+# because the flush round-trip adds latency for no durability benefit.
+volatile_write_cache = []
 
 [[bench]]
 name = "benchmarks"

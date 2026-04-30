@@ -2,36 +2,31 @@ use std::sync::{Arc, Mutex};
 
 use parking_lot::RwLock;
 
-use interfaces::{Extent, ExtentKey, ExtentManagerError};
+use interfaces::ExtentManagerError;
 
 use crate::block_io::BlockDeviceClient;
 use crate::error;
 use crate::region::{RegionState, SharedState};
-
 pub(crate) const CHECKPOINT_HEADER_SIZE: usize = 16; // u64 seq + u32 payload_len + u32 CRC
 
-const INDEX_ENTRY_SIZE: usize = 20; // u64 key + u64 offset + u32 size
-const SLAB_ENTRY_SIZE: usize = 20;  // u64 start_offset + u64 slab_size + u32 element_size
+// Per-slab fixed header: u64 start_offset + u64 slab_size + u32 element_size + u32 num_slots
+const SLAB_HEADER_SIZE: usize = 24;
 
 fn serialize_region(region: &RegionState) -> Vec<u8> {
     let mut data = Vec::new();
 
-    let num_entries = region.index.len() as u32;
-    data.extend_from_slice(&num_entries.to_le_bytes());
-
-    for (key, extent) in &region.index {
-        data.extend_from_slice(&key.to_le_bytes());
-        data.extend_from_slice(&extent.offset.to_le_bytes());
-        data.extend_from_slice(&extent.size.to_le_bytes());
-    }
-
     let num_slabs = region.slabs.len() as u32;
     data.extend_from_slice(&num_slabs.to_le_bytes());
 
-    for slab in &region.slabs {
+    for (_, slab) in &region.slabs {
+        let num_slots = slab.num_slots();
         data.extend_from_slice(&slab.start_offset.to_le_bytes());
         data.extend_from_slice(&slab.slab_size.to_le_bytes());
         data.extend_from_slice(&slab.element_size.to_le_bytes());
+        data.extend_from_slice(&num_slots.to_le_bytes());
+        for i in 0..num_slots as usize {
+            data.extend_from_slice(&slab.get_key(i).to_le_bytes());
+        }
     }
 
     data
@@ -79,23 +74,34 @@ pub(crate) fn write_checkpoint(
         )));
     }
 
-    // Build the header + payload blob
-    let mut blob = Vec::with_capacity(region_size as usize);
-    blob.extend_from_slice(&new_seq.to_le_bytes());           // 8 bytes
+    // Build the header + payload blob.
+    // Only allocate what the payload requires — region_size may be much larger
+    // than the actual data (e.g. the full half of a large NVMe disk).
+    let mut blob = Vec::with_capacity(total_needed);
+    blob.extend_from_slice(&new_seq.to_le_bytes());                // 8 bytes
     blob.extend_from_slice(&(payload.len() as u32).to_le_bytes()); // 4 bytes
-    blob.extend_from_slice(&0u32.to_le_bytes());               // 4 bytes CRC placeholder
+    blob.extend_from_slice(&0u32.to_le_bytes());                   // 4 bytes CRC placeholder
     blob.extend_from_slice(&payload);
 
     let crc = crc32fast::hash(&blob);
     blob[12..16].copy_from_slice(&crc.to_le_bytes());
 
-    // Pad to region size
-    blob.resize(region_size as usize, 0);
+    // Pad to sector boundary (not region_size) for the block device write.
+    let sector_size = metadata_client.sector_size();
+    let aligned_len = (blob.len() + sector_size as usize - 1)
+        / sector_size as usize
+        * sector_size as usize;
+    blob.resize(aligned_len, 0);
 
     // Phase 3: Write to metadata device
-    let sector_size = metadata_client.sector_size();
     let lba = region_offset / sector_size as u64;
     metadata_client.write_blocks(lba, &blob)?;
+
+    // When volatile_write_cache is enabled, flush checkpoint data before
+    // updating the superblock pointer so a crash between the two writes cannot
+    // leave a stale checkpoint under the new active_copy pointer.
+    #[cfg(feature = "volatile_write_cache")]
+    metadata_client.flush()?;
 
     // Phase 4: Update superblock
     {
@@ -115,17 +121,18 @@ pub(crate) fn read_checkpoint_region(
     region_size: u64,
     expected_seq: u64,
 ) -> Result<Vec<u8>, ExtentManagerError> {
-    let sector_size = metadata_client.sector_size();
+    let sector_size = metadata_client.sector_size() as usize;
     let lba = region_byte_offset / sector_size as u64;
-    let raw = metadata_client.read_blocks(lba, region_size as usize)?;
 
-    if raw.len() < CHECKPOINT_HEADER_SIZE {
+    // Phase 1: read one sector to get the header fields (seq, payload_len, CRC).
+    let header_sector = metadata_client.read_blocks(lba, sector_size)?;
+    if header_sector.len() < CHECKPOINT_HEADER_SIZE {
         return Err(error::corrupt_metadata("checkpoint region too short"));
     }
 
-    let seq = u64::from_le_bytes(raw[0..8].try_into().unwrap());
-    let payload_len = u32::from_le_bytes(raw[8..12].try_into().unwrap()) as usize;
-    let stored_crc = u32::from_le_bytes(raw[12..16].try_into().unwrap());
+    let seq = u64::from_le_bytes(header_sector[0..8].try_into().unwrap());
+    let payload_len = u32::from_le_bytes(header_sector[8..12].try_into().unwrap()) as usize;
+    let stored_crc = u32::from_le_bytes(header_sector[12..16].try_into().unwrap());
 
     if seq != expected_seq {
         return Err(error::corrupt_metadata(&format!(
@@ -134,7 +141,20 @@ pub(crate) fn read_checkpoint_region(
     }
 
     let total = CHECKPOINT_HEADER_SIZE + payload_len;
-    if total > raw.len() {
+    if total as u64 > region_size {
+        return Err(error::corrupt_metadata("checkpoint payload exceeds region size"));
+    }
+
+    // Phase 2: read exactly as many sectors as the full header + payload requires.
+    let aligned_len = (total + sector_size - 1) / sector_size * sector_size;
+    let raw = if aligned_len <= sector_size {
+        // Already have everything from the first read.
+        header_sector
+    } else {
+        metadata_client.read_blocks(lba, aligned_len)?
+    };
+
+    if raw.len() < total {
         return Err(error::corrupt_metadata("checkpoint payload truncated"));
     }
 
@@ -156,17 +176,12 @@ pub(crate) struct SlabDescriptor {
     pub start_offset: u64,
     pub slab_size: u64,
     pub element_size: u32,
+    pub keys: Vec<u64>,
 }
 
-pub(crate) fn deserialize_index_and_slabs(
+pub(crate) fn deserialize_slabs(
     data: &[u8],
-) -> Result<
-    Vec<(
-        std::collections::HashMap<ExtentKey, Extent>,
-        Vec<SlabDescriptor>,
-    )>,
-    ExtentManagerError,
-> {
+) -> Result<Vec<Vec<SlabDescriptor>>, ExtentManagerError> {
     if data.len() < 4 {
         return Err(error::corrupt_metadata("checkpoint data too short"));
     }
@@ -180,27 +195,6 @@ pub(crate) fn deserialize_index_and_slabs(
 
     for _ in 0..region_count {
         if pos + 4 > data.len() {
-            return Err(error::corrupt_metadata("truncated region index count"));
-        }
-        let num_entries = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
-        pos += 4;
-
-        let mut index = std::collections::HashMap::with_capacity(num_entries);
-        for _ in 0..num_entries {
-            if pos + INDEX_ENTRY_SIZE > data.len() {
-                return Err(error::corrupt_metadata("truncated index entry"));
-            }
-            let key = u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
-            pos += 8;
-            let offset = u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
-            pos += 8;
-            let size = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap());
-            pos += 4;
-
-            index.insert(key, Extent { key, offset, size });
-        }
-
-        if pos + 4 > data.len() {
             return Err(error::corrupt_metadata("truncated slab count"));
         }
         let num_slabs = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
@@ -208,8 +202,8 @@ pub(crate) fn deserialize_index_and_slabs(
 
         let mut slabs = Vec::with_capacity(num_slabs);
         for _ in 0..num_slabs {
-            if pos + SLAB_ENTRY_SIZE > data.len() {
-                return Err(error::corrupt_metadata("truncated slab entry"));
+            if pos + SLAB_HEADER_SIZE > data.len() {
+                return Err(error::corrupt_metadata("truncated slab header"));
             }
             let start_offset = u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
             pos += 8;
@@ -217,15 +211,29 @@ pub(crate) fn deserialize_index_and_slabs(
             pos += 8;
             let element_size = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap());
             pos += 4;
+            let num_slots = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
+            pos += 4;
+
+            let keys_bytes = num_slots * 8;
+            if pos + keys_bytes > data.len() {
+                return Err(error::corrupt_metadata("truncated slab key vector"));
+            }
+            let mut keys = Vec::with_capacity(num_slots);
+            for _ in 0..num_slots {
+                let k = u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
+                pos += 8;
+                keys.push(k);
+            }
 
             slabs.push(SlabDescriptor {
                 start_offset,
                 slab_size,
                 element_size,
+                keys,
             });
         }
 
-        result.push((index, slabs));
+        result.push(slabs);
     }
 
     Ok(result)
@@ -234,6 +242,7 @@ pub(crate) fn deserialize_index_and_slabs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::slab::FREE_KEY;
 
     #[test]
     fn checkpoint_header_round_trip() {
@@ -281,36 +290,35 @@ mod tests {
             metadata_disk_ns_id: 1,
         };
 
+        // Region 0: one slab with key 42 in slot 2
         let mut r0 = RegionState::new(0, BuddyAllocator::new(0, 1024 * 1024, 4096), fp.clone());
-        r0.index.insert(
-            42,
-            Extent {
-                key: 42,
-                offset: 8192,
-                size: 4096,
-            },
-        );
+        let (slab_start, slot_idx, _) = r0.alloc_extent(4096).unwrap();
+        let (_, slot_idx2, _) = r0.alloc_extent(4096).unwrap();
+        let (_, slot_idx3, _) = r0.alloc_extent(4096).unwrap();
+        r0.publish_slot(slab_start, slot_idx, 42);
+        r0.publish_slot(slab_start, slot_idx2, 99);
+        // slot_idx3 left as FREE_KEY (published but pretend abort happened)
+        drop(slot_idx3);
 
-        let mut r1 = RegionState::new(1, BuddyAllocator::new(1024 * 1024, 1024 * 1024, 4096), fp);
-        r1.index.insert(
-            99,
-            Extent {
-                key: 99,
-                offset: 12288,
-                size: 4096,
-            },
-        );
+        // Region 1: empty
+        let r1 = RegionState::new(1, BuddyAllocator::new(1024 * 1024, 1024 * 1024, 4096), fp);
 
         let mut all_data = Vec::new();
         all_data.extend_from_slice(&2u32.to_le_bytes());
         all_data.extend_from_slice(&serialize_region(&r0));
         all_data.extend_from_slice(&serialize_region(&r1));
 
-        let regions = deserialize_index_and_slabs(&all_data).unwrap();
+        let regions = deserialize_slabs(&all_data).unwrap();
         assert_eq!(regions.len(), 2);
-        assert_eq!(regions[0].0.len(), 1);
-        assert_eq!(regions[0].0[&42].offset, 8192);
-        assert_eq!(regions[1].0.len(), 1);
-        assert_eq!(regions[1].0[&99].offset, 12288);
+        assert_eq!(regions[0].len(), 1);
+
+        let slab = &regions[0][0];
+        // Two occupied slots with keys 42 and 99 (order depends on slot allocation)
+        let occupied: Vec<u64> = slab.keys.iter().copied().filter(|&k| k != FREE_KEY).collect();
+        assert_eq!(occupied.len(), 2);
+        assert!(occupied.contains(&42));
+        assert!(occupied.contains(&99));
+
+        assert_eq!(regions[1].len(), 0);
     }
 }
