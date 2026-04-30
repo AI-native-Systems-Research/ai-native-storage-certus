@@ -1,20 +1,21 @@
 pipeline {
   agent any
-  
+
   stages {
     stage('Build Server') {
       steps {
-      	sh 'pwd'
-	      sh 'whoami'
+          sh 'pwd'
+          sh 'whoami'
 
         script {
           def status = sh(script: '. ~/.cargo/env ; cd certus ; cargo b', returnStatus: true)
           echo "Server build exit status: ${status}"
 
           if (status != 0) {
-                  error("Server build failed with status ${status}")
+            error("Server build failed with status ${status}")
           }
         }
-     }
+      }
+    }
   }
 }
