@@ -15,6 +15,6 @@ pipeline {
                   error("Server build failed with status ${status}")
           }
         }
-    }
+     }
   }
 }
