@@ -2,6 +2,7 @@
 
 Certus is a generative domain-specific filesystem for inferencing workloads. The implementation is based on the integration of components that somewhat supports a paradigm of **independent extensibilty** - that is, components can be developed separately and later integrated into the final solution.  This approach also helps to reduce the required LLM context window by limiting it to the component being developed and other components it must bind to (note: components should have low coupling and only bind to a few other components).
 
+
 ## Claude and Spec-Kit
 
 Install Claude with:
