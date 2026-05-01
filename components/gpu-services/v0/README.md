@@ -2,7 +2,6 @@
 
 A Certus component that wraps the CUDA runtime API to provide safe GPU memory access for DMA operations. It receives CUDA IPC memory handles from remote processes (e.g., a Python inference framework), verifies and pins the memory, and produces DMA-ready buffers that can be used by the storage subsystem.
 
-
 ## Purpose
 
 In AI-native storage workloads, inference engines (PyTorch, TensorRT) hold model weights and activations in GPU memory. This component bridges that GPU memory into the Certus storage pipeline by:
