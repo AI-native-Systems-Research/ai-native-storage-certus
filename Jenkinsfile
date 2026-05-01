@@ -7,7 +7,7 @@ pipeline {
           sh 'whoami'
 
         script {
-          def status = sh(script: '. ~/.cargo/env ; cargo b', returnStatus: true)
+          def status = sh(script: '. ~/.cargo/env ; cargo build', returnStatus: true)
           echo "Server build exit status: ${status}"
 
           if (status != 0) {
