@@ -52,4 +52,3 @@ If you have questions about how to contribute, open an issue or contact the main
 
 Thank you for helping improve this project!
 
-
