@@ -210,6 +210,7 @@ fn main() {
         .allowlist_function("spdk_nvme_ns_cmd_read")
         .allowlist_function("spdk_nvme_ns_cmd_write")
         .allowlist_function("spdk_nvme_ns_cmd_write_zeroes")
+        .allowlist_function("spdk_nvme_ns_cmd_flush")
         .allowlist_function("spdk_nvme_qpair_process_completions")
         // DMA memory allocation
         .allowlist_function("spdk_dma_zmalloc")

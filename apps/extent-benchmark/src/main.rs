@@ -11,11 +11,16 @@ use clap::Parser;
 use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponentV1;
 use component_core::binding::bind;
 use component_core::iunknown::query;
+use extent_manager_v2::test_support::{heap_dma_alloc, MockBlockDevice, MockLogger};
 use extent_manager_v2::ExtentManagerV2;
-use interfaces::{DmaBuffer, FormatParams};
+use interfaces::{
+    DmaAllocFn, DmaBuffer, FormatParams, IBlockDevice, IExtentManager, ILogger,
+};
 use spdk_env::SPDKEnvComponent;
 
 use config::BenchmarkConfig;
+
+const METADATA_ALIGNMENT: u64 = 1_048_576; // 1 MiB
 
 fn main() {
     let config = BenchmarkConfig::parse();
@@ -25,25 +30,64 @@ fn main() {
         std::process::exit(1);
     }
 
-    let spdk_env_comp = SPDKEnvComponent::new_default();
+    let count = config.effective_count();
+    let params = make_format_params(&config, count);
 
-    // Data device
-    let data_block_dev = BlockDeviceSpdkNvmeComponentV1::new_default();
-    // Metadata device
+    report::print_header(&config, count, params.data_disk_size);
+
+    match config.metadata_device.clone() {
+        None => run_mock_mode(config, count, params),
+        Some(addr) => run_hardware_mode(config, count, params, addr),
+    }
+}
+
+// --- Mock mode ---------------------------------------------------------------
+
+fn run_mock_mode(config: BenchmarkConfig, count: u64, params: FormatParams) {
+    let metadata_disk_size =
+        compute_metadata_disk_size(count, config.size_class, config.slab_size, config.region_count);
+
+    let metadata_mock = Arc::new(MockBlockDevice::new(metadata_disk_size));
+    let shared_state = metadata_mock.shared_state();
+
+    let component = make_mock_component(metadata_mock);
+
+    let recover: Box<dyn Fn() -> Arc<ExtentManagerV2>> = Box::new(move || {
+        let new_mock = Arc::new(MockBlockDevice::reboot_from(&shared_state));
+        make_mock_component(new_mock)
+    });
+
+    run_phases(component, recover, params, &config, count);
+}
+
+fn make_mock_component(mock: Arc<MockBlockDevice>) -> Arc<ExtentManagerV2> {
+    let component = ExtentManagerV2::new_inner();
+    component
+        .metadata_device
+        .connect(mock as Arc<dyn IBlockDevice + Send + Sync>)
+        .unwrap_or_else(|e| {
+            eprintln!("error: connect mock metadata device: {e}");
+            std::process::exit(2);
+        });
+    component
+        .logger
+        .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
+        .unwrap_or_else(|e| {
+            eprintln!("error: connect logger: {e}");
+            std::process::exit(2);
+        });
+    component.set_dma_alloc(heap_dma_alloc());
+    component
+}
+
+// --- Hardware mode -----------------------------------------------------------
+
+fn run_hardware_mode(config: BenchmarkConfig, count: u64, params: FormatParams, pci_addr: String) {
+    let spdk_env_comp = SPDKEnvComponent::new_default();
     let metadata_block_dev = BlockDeviceSpdkNvmeComponentV1::new_default();
 
-    let extent_mgr = ExtentManagerV2::new_inner();
-
-    bind(&*spdk_env_comp, "ISPDKEnv", &*data_block_dev, "spdk_env").unwrap_or_else(|e| {
-        eprintln!("error: bind spdk_env→data_block_dev: {e}");
-        std::process::exit(2);
-    });
     bind(&*spdk_env_comp, "ISPDKEnv", &*metadata_block_dev, "spdk_env").unwrap_or_else(|e| {
         eprintln!("error: bind spdk_env→metadata_block_dev: {e}");
-        std::process::exit(2);
-    });
-    bind(&*metadata_block_dev, "IBlockDevice", &*extent_mgr, "metadata_device").unwrap_or_else(|e| {
-        eprintln!("error: bind metadata_block_dev→extent_mgr: {e}");
         std::process::exit(2);
     });
 
@@ -57,49 +101,17 @@ fn main() {
         std::process::exit(2);
     }
 
+    let metadata_target = parse_pci_addr(&pci_addr).unwrap_or_else(|| {
+        eprintln!("error: invalid metadata device PCI address: {pci_addr}");
+        std::process::exit(1);
+    });
+
     let devices = ienv.devices();
     if devices.is_empty() {
         eprintln!("error: no NVMe devices found");
         std::process::exit(2);
     }
-
-    // Initialize data device
-    let data_target = parse_pci_addr(&config.device).unwrap_or_else(|| {
-        eprintln!("error: invalid data device PCI address format: {}", config.device);
-        std::process::exit(1);
-    });
-
-    let _data_device = devices
-        .iter()
-        .find(|d| {
-            d.address.domain == data_target.domain
-                && d.address.bus == data_target.bus
-                && d.address.dev == data_target.dev
-                && d.address.func == data_target.func
-        })
-        .unwrap_or_else(|| {
-            eprintln!("error: no NVMe device found at {}", config.device);
-            std::process::exit(1);
-        });
-
-    let data_admin = query::<dyn interfaces::IBlockDeviceAdmin + Send + Sync>(&*data_block_dev)
-        .unwrap_or_else(|| {
-            eprintln!("error: failed to query IBlockDeviceAdmin for data device");
-            std::process::exit(2);
-        });
-    data_admin.set_pci_address(data_target);
-    if let Err(e) = data_admin.initialize() {
-        eprintln!("error: data block device init failed: {e}");
-        std::process::exit(2);
-    }
-
-    // Initialize metadata device
-    let metadata_target = parse_pci_addr(&config.metadata_device).unwrap_or_else(|| {
-        eprintln!("error: invalid metadata device PCI address format: {}", config.metadata_device);
-        std::process::exit(1);
-    });
-
-    let _metadata_device = devices
+    devices
         .iter()
         .find(|d| {
             d.address.domain == metadata_target.domain
@@ -108,271 +120,376 @@ fn main() {
                 && d.address.func == metadata_target.func
         })
         .unwrap_or_else(|| {
-            eprintln!("error: no NVMe device found at {}", config.metadata_device);
+            eprintln!("error: no NVMe device found at {pci_addr}");
             std::process::exit(1);
         });
 
-    let metadata_admin = query::<dyn interfaces::IBlockDeviceAdmin + Send + Sync>(&*metadata_block_dev)
-        .unwrap_or_else(|| {
-            eprintln!("error: failed to query IBlockDeviceAdmin for metadata device");
-            std::process::exit(2);
-        });
+    let metadata_admin =
+        query::<dyn interfaces::IBlockDeviceAdmin + Send + Sync>(&*metadata_block_dev)
+            .unwrap_or_else(|| {
+                eprintln!("error: failed to query IBlockDeviceAdmin for metadata device");
+                std::process::exit(2);
+            });
     metadata_admin.set_pci_address(metadata_target);
     if let Err(e) = metadata_admin.initialize() {
         eprintln!("error: metadata block device init failed: {e}");
         std::process::exit(2);
     }
 
-    let ibd =
-        query::<dyn interfaces::IBlockDevice + Send + Sync>(&*data_block_dev).unwrap_or_else(|| {
-            eprintln!("error: failed to query IBlockDevice");
+    let metadata_ibd = query::<dyn IBlockDevice + Send + Sync>(&*metadata_block_dev)
+        .unwrap_or_else(|| {
+            eprintln!("error: failed to query IBlockDevice for metadata device");
             std::process::exit(2);
         });
-
-    let iem =
-        query::<dyn interfaces::IExtentManager + Send + Sync>(&*extent_mgr).unwrap_or_else(|| {
-            eprintln!("error: failed to query IExtentManager");
-            std::process::exit(2);
-        });
-
-    let total_size = config.total_size.unwrap_or_else(|| {
-        let sectors = ibd.num_sectors(config.ns_id).unwrap_or_else(|e| {
-            eprintln!("error: failed to get num_sectors: {e}");
-            std::process::exit(2);
-        });
-        let sector_size = ibd.sector_size(config.ns_id).unwrap_or_else(|e| {
-            eprintln!("error: failed to get sector_size: {e}");
-            std::process::exit(2);
-        });
-        sectors * sector_size as u64
+    let numa_node = metadata_ibd.numa_node();
+    let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
+        DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
     });
 
-    let params = FormatParams {
-        data_disk_size: total_size,
-        slab_size: config.slab_size,
-        max_extent_size: config.size_class,
-        sector_size: 4096,
-        region_count: 32,
-        metadata_alignment: 1048576, // 1 MiB
-        instance_id: None,
-        metadata_disk_ns_id: 1,
-    };
+    let meta_ns_id = config.metadata_ns_id;
+    let component = make_hardware_component(&metadata_block_dev, Arc::clone(&dma_alloc), meta_ns_id);
+
+    let meta_dev_clone = Arc::clone(&metadata_block_dev);
+    let dma_alloc_clone = Arc::clone(&dma_alloc);
+    let recover: Box<dyn Fn() -> Arc<ExtentManagerV2>> = Box::new(move || {
+        make_hardware_component(&meta_dev_clone, Arc::clone(&dma_alloc_clone), meta_ns_id)
+    });
+
+    run_phases(component, recover, params, &config, count);
+}
+
+fn make_hardware_component(
+    metadata_block_dev: &Arc<BlockDeviceSpdkNvmeComponentV1>,
+    dma_alloc: DmaAllocFn,
+    metadata_ns_id: u32,
+) -> Arc<ExtentManagerV2> {
+    let component = ExtentManagerV2::new_inner();
+    component.set_dma_alloc(dma_alloc);
+    component.set_metadata_ns_id(metadata_ns_id);
+    component
+        .logger
+        .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
+        .unwrap_or_else(|e| {
+            eprintln!("error: connect logger: {e}");
+            std::process::exit(2);
+        });
+    bind(
+        &**metadata_block_dev,
+        "IBlockDevice",
+        &*component,
+        "metadata_device",
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("error: bind metadata_block_dev→extent_mgr: {e}");
+        std::process::exit(2);
+    });
+    component
+}
+
+// --- Shared phase runner -----------------------------------------------------
+
+fn run_phases(
+    component: Arc<ExtentManagerV2>,
+    recover: Box<dyn Fn() -> Arc<ExtentManagerV2>>,
+    params: FormatParams,
+    config: &BenchmarkConfig,
+    count: u64,
+) {
+    let iem = get_iem(&component);
+    iem.set_checkpoint_interval(None);
     if let Err(e) = iem.format(params) {
-        eprintln!("error: extent manager format failed: {e}");
+        eprintln!("error: format failed: {e}");
         std::process::exit(2);
     }
 
-    report::print_header(&config, total_size);
-
-    let count = config.count;
+    // Phase: Create
     let size_class = config.size_class;
-    let threads = config.threads;
+    let phase_start = Instant::now();
+    let create_worker_results = run_parallel(
+        Arc::clone(&iem),
+        config.threads,
+        move |iem, key_start, key_count| run_create(iem, key_start, key_count, size_class),
+        count,
+    );
+    let create_elapsed = phase_start.elapsed();
+    let create_result = worker::aggregate_results("Create", create_worker_results, create_elapsed);
+    report::print_phase(&create_result);
 
-    if threads == 1 {
-        run_single_threaded(&iem, count, size_class);
-    } else {
-        run_multi_threaded(&iem, count, size_class, threads);
+    // Phase: Checkpoint
+    let cp_start = Instant::now();
+    if let Err(e) = iem.checkpoint() {
+        eprintln!("error: checkpoint failed: {e}");
+        std::process::exit(2);
     }
+    let cp_elapsed = cp_start.elapsed();
+    report::print_single_op("Checkpoint", cp_elapsed);
 
-    report::print_summary(count);
+    // Phase: Recover — drop old component, reinitialize from storage
+    drop(iem);
+    drop(component);
+    let new_component = recover();
+    let new_iem = get_iem(&new_component);
+    new_iem.set_checkpoint_interval(None);
+
+    let recover_start = Instant::now();
+    if let Err(e) = new_iem.initialize() {
+        eprintln!("error: initialize (recover) failed: {e}");
+        std::process::exit(2);
+    }
+    let recover_elapsed = recover_start.elapsed();
+    report::print_single_op("Recover", recover_elapsed);
+
+    // Phase: Enumerate — collect offsets for the Remove phase
+    let enum_start = Instant::now();
+    let mut offsets: Vec<u64> = Vec::with_capacity(count as usize);
+    new_iem.for_each_extent(&mut |e| offsets.push(e.offset));
+    let enum_elapsed = enum_start.elapsed();
+    report::print_enumerate(offsets.len() as u64, count, enum_elapsed);
+
+    // Phase: Remove
+    let rm_start = Instant::now();
+    let remove_worker_results = run_parallel_remove(Arc::clone(&new_iem), config.threads, offsets);
+    let rm_elapsed = rm_start.elapsed();
+    let remove_result = worker::aggregate_results("Remove", remove_worker_results, rm_elapsed);
+    report::print_phase(&remove_result);
+
+    report::print_summary(count, &create_result, &remove_result);
 }
 
-fn run_single_threaded(
-    iem: &Arc<dyn interfaces::IExtentManager + Send + Sync>,
-    count: u64,
-    size_class: u32,
-) {
-    for (phase_name, phase_fn) in [
-        (
-            "Create",
-            run_create
-                as fn(&dyn interfaces::IExtentManager, interfaces::ExtentKey, u64, u32) -> Vec<std::time::Duration>,
-        ),
-        (
-            "Lookup",
-            run_lookup
-                as fn(&dyn interfaces::IExtentManager, interfaces::ExtentKey, u64, u32) -> Vec<std::time::Duration>,
-        ),
-        (
-            "Remove",
-            run_remove
-                as fn(&dyn interfaces::IExtentManager, interfaces::ExtentKey, u64, u32) -> Vec<std::time::Duration>,
-        ),
-    ] {
-        let start = Instant::now();
-        let latencies = phase_fn(&**iem, 0, count, size_class);
-        let elapsed = start.elapsed();
-        let result = worker::aggregate_results(phase_name, vec![(0, latencies)], elapsed);
-        report::print_phase(&result);
-    }
+fn get_iem(component: &Arc<ExtentManagerV2>) -> Arc<dyn IExtentManager + Send + Sync> {
+    query::<dyn IExtentManager + Send + Sync>(&**component).unwrap_or_else(|| {
+        eprintln!("error: failed to query IExtentManager");
+        std::process::exit(2);
+    })
 }
 
-fn run_multi_threaded(
-    iem: &Arc<dyn interfaces::IExtentManager + Send + Sync>,
-    count: u64,
-    size_class: u32,
-    threads: usize,
-) {
-    let key_ranges = compute_key_ranges(count, threads);
+// --- Phase implementations ---------------------------------------------------
 
-    for (phase_name, phase_id) in [("Create", 0u8), ("Lookup", 1), ("Remove", 2)] {
-        let barrier = Arc::new(Barrier::new(threads));
+// Cap stored latency samples per thread to avoid multi-GB allocations at 100M scale.
+// At 100M ops with 1 thread, we sample every 100th operation (1M samples × 16 B = 16 MB).
+const MAX_LATENCY_SAMPLES: u64 = 1_000_000;
 
-        let start = Instant::now();
-        let handles: Vec<_> = key_ranges
-            .iter()
-            .enumerate()
-            .map(|(tid, &(key_start, key_count))| {
-                let barrier = Arc::clone(&barrier);
-                let iem = Arc::clone(iem);
-                std::thread::spawn(move || {
-                    barrier.wait();
-                    let latencies = match phase_id {
-                        0 => run_create(&*iem, key_start, key_count, size_class),
-                        1 => run_lookup(&*iem, key_start, key_count, size_class),
-                        _ => run_remove(&*iem, key_start, key_count, size_class),
-                    };
-                    (tid, latencies)
-                })
-            })
-            .collect();
-
-        let mut worker_latencies = Vec::with_capacity(threads);
-        for h in handles {
-            match h.join() {
-                Ok(r) => worker_latencies.push(r),
-                Err(_) => {
-                    eprintln!("error: worker thread panicked in {phase_name} phase");
-                    std::process::exit(2);
-                }
-            }
-        }
-        let elapsed = start.elapsed();
-
-        worker_latencies.sort_by_key(|(tid, _)| *tid);
-        let result = worker::aggregate_results(phase_name, worker_latencies, elapsed);
-        report::print_phase(&result);
-    }
-}
-
-fn compute_key_ranges(total_count: u64, num_threads: usize) -> Vec<(u64, u64)> {
-    let per_thread = total_count / num_threads as u64;
-    let remainder = total_count % num_threads as u64;
-    let mut ranges = Vec::with_capacity(num_threads);
-    let mut offset = 0u64;
-    for i in 0..num_threads {
-        let count = per_thread + if (i as u64) < remainder { 1 } else { 0 };
-        ranges.push((offset, count));
-        offset += count;
-    }
-    ranges
-}
-
+// Returns (actual_ops_completed, latency_samples).
 fn run_create(
-    iem: &dyn interfaces::IExtentManager,
-    key_start: interfaces::ExtentKey,
+    iem: Arc<dyn IExtentManager + Send + Sync>,
+    key_start: u64,
     count: u64,
     size_class: u32,
-) -> Vec<std::time::Duration> {
-    let mut latencies = Vec::with_capacity(count as usize);
+) -> (u64, Vec<std::time::Duration>) {
+    let sample_every = (count / MAX_LATENCY_SAMPLES).max(1);
+    let capacity = (count / sample_every + 1) as usize;
+    let mut latencies = Vec::with_capacity(capacity);
     for i in 0..count {
         let key = key_start + i;
-        let start = Instant::now();
+        let t = Instant::now();
         match iem.reserve_extent(key, size_class) {
             Ok(handle) => {
                 if let Err(e) = handle.publish() {
                     eprintln!("  publish({key}) failed: {e}");
                 }
             }
-            Err(e) => {
-                eprintln!("  reserve_extent({key}) failed: {e}");
-            }
+            Err(e) => eprintln!("  reserve_extent({key}) failed: {e}"),
         }
-        latencies.push(start.elapsed());
+        if i % sample_every == 0 {
+            latencies.push(t.elapsed());
+        }
     }
-    latencies
+    (count, latencies)
 }
 
-fn run_lookup(
-    iem: &dyn interfaces::IExtentManager,
-    key_start: interfaces::ExtentKey,
-    count: u64,
-    _size_class: u32,
-) -> Vec<std::time::Duration> {
-    let mut latencies = Vec::with_capacity(count as usize);
-    for i in 0..count {
-        let key = key_start + i;
-        let start = Instant::now();
-        match iem.lookup_extent(key) {
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("  lookup_extent({key}) failed: {e}");
-            }
+// Returns (actual_ops_completed, latency_samples).
+fn run_remove_slice(
+    iem: Arc<dyn IExtentManager + Send + Sync>,
+    offsets: Vec<u64>,
+) -> (u64, Vec<std::time::Duration>) {
+    let count = offsets.len() as u64;
+    let sample_every = (count / MAX_LATENCY_SAMPLES).max(1);
+    let capacity = (count / sample_every + 1) as usize;
+    let mut latencies = Vec::with_capacity(capacity);
+    for (i, offset) in offsets.into_iter().enumerate() {
+        let t = Instant::now();
+        if let Err(e) = iem.remove_extent(offset) {
+            eprintln!("  remove_extent({offset:#x}) failed: {e}");
         }
-        latencies.push(start.elapsed());
+        if i as u64 % sample_every == 0 {
+            latencies.push(t.elapsed());
+        }
     }
-    latencies
+    (count, latencies)
 }
 
-fn run_remove(
-    iem: &dyn interfaces::IExtentManager,
-    key_start: interfaces::ExtentKey,
+// Run a key-range operation across `threads` threads with a barrier start.
+fn run_parallel<F>(
+    iem: Arc<dyn IExtentManager + Send + Sync>,
+    threads: usize,
+    op: F,
     count: u64,
-    _size_class: u32,
-) -> Vec<std::time::Duration> {
-    let mut latencies = Vec::with_capacity(count as usize);
-    for i in 0..count {
-        let key = key_start + i;
-        let start = Instant::now();
-        match iem.remove_extent(key) {
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("  remove_extent({key}) failed: {e}");
-            }
-        }
-        latencies.push(start.elapsed());
+) -> Vec<(usize, u64, Vec<std::time::Duration>)>
+where
+    F: Fn(Arc<dyn IExtentManager + Send + Sync>, u64, u64) -> (u64, Vec<std::time::Duration>)
+        + Send
+        + Sync
+        + 'static,
+{
+    let effective = threads.min(count as usize).max(1);
+    let ranges = compute_ranges(count, effective);
+    let barrier = Arc::new(Barrier::new(effective));
+    let op = Arc::new(op);
+
+    let handles: Vec<_> = ranges
+        .into_iter()
+        .enumerate()
+        .map(|(tid, (key_start, key_count))| {
+            let iem = Arc::clone(&iem);
+            let barrier = Arc::clone(&barrier);
+            let op = Arc::clone(&op);
+            std::thread::spawn(move || {
+                barrier.wait();
+                let (ops, latencies) = op(iem, key_start, key_count);
+                (tid, ops, latencies)
+            })
+        })
+        .collect();
+
+    handles
+        .into_iter()
+        .map(|h| {
+            h.join().unwrap_or_else(|_| {
+                eprintln!("error: worker thread panicked");
+                std::process::exit(2);
+            })
+        })
+        .collect()
+}
+
+fn run_parallel_remove(
+    iem: Arc<dyn IExtentManager + Send + Sync>,
+    threads: usize,
+    offsets: Vec<u64>,
+) -> Vec<(usize, u64, Vec<std::time::Duration>)> {
+    let effective = threads.min(offsets.len()).max(1);
+    let barrier = Arc::new(Barrier::new(effective));
+    let chunks = split_offsets(offsets, effective);
+
+    let handles: Vec<_> = chunks
+        .into_iter()
+        .enumerate()
+        .map(|(tid, chunk)| {
+            let iem = Arc::clone(&iem);
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                let (ops, latencies) = run_remove_slice(iem, chunk);
+                (tid, ops, latencies)
+            })
+        })
+        .collect();
+
+    handles
+        .into_iter()
+        .map(|h| {
+            h.join().unwrap_or_else(|_| {
+                eprintln!("error: worker thread panicked");
+                std::process::exit(2);
+            })
+        })
+        .collect()
+}
+
+// --- Utilities ---------------------------------------------------------------
+
+fn compute_ranges(total: u64, threads: usize) -> Vec<(u64, u64)> {
+    let per = total / threads as u64;
+    let rem = total % threads as u64;
+    let mut ranges = Vec::with_capacity(threads);
+    let mut offset = 0u64;
+    for i in 0..threads as u64 {
+        let count = per + if i < rem { 1 } else { 0 };
+        ranges.push((offset, count));
+        offset += count;
     }
-    latencies
+    ranges
+}
+
+fn split_offsets(offsets: Vec<u64>, threads: usize) -> Vec<Vec<u64>> {
+    let per = (offsets.len() + threads - 1) / threads;
+    offsets.chunks(per.max(1)).map(|c| c.to_vec()).collect()
+}
+
+/// Compute the minimum logical data-disk size to hold `count` extents.
+fn compute_data_disk_size(count: u64, size_class: u32, slab_size: u64, region_count: u32) -> u64 {
+    let slots_per_slab = slab_size / size_class as u64;
+    let total_slabs = count.div_ceil(slots_per_slab);
+    // Round up so each region gets the same number of slabs.
+    let aligned_slabs = total_slabs.div_ceil(region_count as u64) * region_count as u64;
+    aligned_slabs * slab_size
+}
+
+/// Compute the minimum metadata-disk size to hold two checkpoint copies for `count` extents.
+fn compute_metadata_disk_size(
+    count: u64,
+    size_class: u32,
+    slab_size: u64,
+    region_count: u32,
+) -> u64 {
+    let slots_per_slab = slab_size / size_class as u64;
+    let total_slabs = count.div_ceil(slots_per_slab);
+    let slabs_per_region = total_slabs.div_ceil(region_count as u64);
+    // Per slab in checkpoint: u64 start + u64 size + u32 element_size + u32 num_slots + keys
+    let bytes_per_slab = 24u64 + slots_per_slab * 8;
+    let bytes_per_region = 4 + slabs_per_region * bytes_per_slab;
+    let payload = region_count as u64 * bytes_per_region;
+    // Two copies + superblock + generous alignment and header headroom
+    let with_overhead = payload * 3 + METADATA_ALIGNMENT * 16;
+    // Round up to 4 MiB
+    with_overhead.div_ceil(4 * 1024 * 1024) * (4 * 1024 * 1024)
+}
+
+fn make_format_params(config: &BenchmarkConfig, count: u64) -> FormatParams {
+    let data_disk_size = config.total_size.unwrap_or_else(|| {
+        compute_data_disk_size(count, config.size_class, config.slab_size, config.region_count)
+    });
+    FormatParams {
+        data_disk_size,
+        slab_size: config.slab_size,
+        max_extent_size: config.size_class,
+        sector_size: 4096,
+        region_count: config.region_count,
+        metadata_alignment: METADATA_ALIGNMENT,
+        instance_id: None,
+        metadata_disk_ns_id: config.metadata_ns_id,
+    }
 }
 
 fn validate_config(config: &BenchmarkConfig) -> Result<(), String> {
-    if config.size_class < 131072 || config.size_class > 5 * 1024 * 1024 {
+    if config.size_class == 0 || config.size_class % 4096 != 0 {
         return Err(format!(
-            "size-class must be between 131072 (128 KiB) and 5242880 (5 MiB), got {}",
+            "size-class must be a non-zero multiple of 4096, got {}",
             config.size_class
         ));
     }
-    if config.size_class % 4096 != 0 {
+    if config.slab_size == 0
+        || config.slab_size % config.size_class as u64 != 0
+        || config.slab_size < config.size_class as u64
+    {
         return Err(format!(
-            "size-class must be a multiple of 4096, got {}",
-            config.size_class
+            "slab-size ({}) must be a non-zero multiple of size-class ({})",
+            config.slab_size, config.size_class
         ));
     }
-    if config.slab_size < 8192 {
+    if config.region_count == 0 || !config.region_count.is_power_of_two() {
         return Err(format!(
-            "slab-size must be at least 8192 (8 KiB), got {}",
-            config.slab_size
+            "region-count must be a power of two >= 1, got {}",
+            config.region_count
         ));
-    }
-    if config.slab_size % 4096 != 0 {
-        return Err(format!(
-            "slab-size must be a multiple of 4096, got {}",
-            config.slab_size
-        ));
-    }
-    if let Some(total) = config.total_size {
-        if total <= config.slab_size {
-            return Err(format!(
-                "total-size ({total}) must be greater than slab-size ({})",
-                config.slab_size
-            ));
-        }
     }
     if config.threads == 0 {
         return Err("threads must be >= 1".to_string());
     }
-    if config.count == 0 {
-        return Err("count must be >= 1".to_string());
+    if let Some(count) = config.count {
+        if count == 0 {
+            return Err("count must be >= 1".to_string());
+        }
     }
     Ok(())
 }

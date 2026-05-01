@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use interfaces::{ExtentManagerError, FormatParams, IBlockDevice, IExtentManager, ILogger};
@@ -42,8 +43,9 @@ fn checkpoint_persists_extents() {
 
     c.checkpoint().expect("checkpoint");
 
+    let keys: HashSet<u64> = c.get_extents().iter().map(|e| e.key).collect();
     for k in 1..=10u64 {
-        c.lookup_extent(k).expect("lookup after checkpoint");
+        assert!(keys.contains(&k), "key {k} missing after checkpoint");
     }
 }
 
@@ -69,8 +71,9 @@ fn two_sequential_checkpoints() {
     h.publish().expect("publish");
     c.checkpoint().expect("second checkpoint");
 
-    c.lookup_extent(1).expect("key 1 still present");
-    c.lookup_extent(2).expect("key 2 present");
+    let keys: HashSet<u64> = c.get_extents().iter().map(|e| e.key).collect();
+    assert!(keys.contains(&1), "key 1 still present");
+    assert!(keys.contains(&2), "key 2 present");
 }
 
 // ============================================================
@@ -143,9 +146,9 @@ fn recover_checkpointed_extents() {
 
     c2.initialize().expect("initialize");
 
+    let recovered_keys: HashSet<u64> = c2.get_extents().iter().map(|e| e.key).collect();
     for k in 1..=100u64 {
-        let ext = c2.lookup_extent(k).expect(&format!("lookup key {k}"));
-        assert_eq!(ext.key, k);
+        assert!(recovered_keys.contains(&k), "key {k} not recovered");
     }
 }
 
@@ -189,15 +192,13 @@ fn uncheckpointed_extents_lost_after_restart() {
     c2.set_dma_alloc(heap_dma_alloc());
     c2.initialize().expect("initialize");
 
+    let recovered_keys: HashSet<u64> = c2.get_extents().iter().map(|e| e.key).collect();
+    assert_eq!(recovered_keys.len(), 5, "only 5 checkpointed extents should survive");
     for k in 1..=5u64 {
-        c2.lookup_extent(k).expect(&format!("checkpointed key {k}"));
+        assert!(recovered_keys.contains(&k), "checkpointed key {k} missing");
     }
-
     for k in 6..=10u64 {
-        match c2.lookup_extent(k) {
-            Err(ExtentManagerError::KeyNotFound(_)) => {}
-            other => panic!("expected KeyNotFound for uncheckpointed key {k}, got: {other:?}"),
-        }
+        assert!(!recovered_keys.contains(&k), "uncheckpointed key {k} should be lost");
     }
 }
 
@@ -230,7 +231,7 @@ fn corrupt_active_falls_back_to_previous() {
         c.checkpoint().expect("second checkpoint");
     }
 
-    // Read superblock to find the active copy and corrupt it
+    // Corrupt the active checkpoint copy
     {
         let state = metadata_shared.lock().unwrap();
         let sb_data = state.blocks.get(&0).cloned().unwrap_or_default();
@@ -260,9 +261,9 @@ fn corrupt_active_falls_back_to_previous() {
 
     c2.initialize().expect("initialize with fallback");
 
+    let recovered_keys: HashSet<u64> = c2.get_extents().iter().map(|e| e.key).collect();
     for k in 1..=5u64 {
-        c2.lookup_extent(k)
-            .expect(&format!("key {k} from previous checkpoint"));
+        assert!(recovered_keys.contains(&k), "key {k} from previous checkpoint missing");
     }
 }
 
@@ -288,7 +289,7 @@ fn remove_realloc_crash_does_not_corrupt() {
         original_offset = ext.offset;
         c.checkpoint().unwrap();
 
-        c.remove_extent(1).unwrap();
+        c.remove_extent(ext.offset).unwrap();
 
         let h2 = c.reserve_extent(2, SECTOR_SIZE).unwrap();
         let ext2 = h2.publish().unwrap();
@@ -309,7 +310,12 @@ fn remove_realloc_crash_does_not_corrupt() {
     c2.set_dma_alloc(heap_dma_alloc());
     c2.initialize().unwrap();
 
-    let recovered = c2.lookup_extent(1).unwrap();
+    // After recovery the original extent (key=1) should still exist at the same offset.
+    let extents = c2.get_extents();
+    let recovered = extents
+        .iter()
+        .find(|e| e.key == 1)
+        .expect("key 1 should be recovered");
     assert_eq!(recovered.offset, original_offset);
 }
 
@@ -323,7 +329,7 @@ fn remove_then_checkpoint_frees_slot() {
     let original_offset = ext.offset;
     c.checkpoint().unwrap();
 
-    c.remove_extent(1).unwrap();
+    c.remove_extent(ext.offset).unwrap();
     c.checkpoint().unwrap();
 
     // key 5 maps to region 1 (5 & 3 == 1), same as key 1, so the freed slot
@@ -362,4 +368,96 @@ fn invalid_magic_returns_error() {
         }
         other => panic!("expected CorruptMetadata, got: {other:?}"),
     }
+}
+
+// ============================================================
+// Background checkpoint interval tests
+// ============================================================
+
+#[test]
+fn background_checkpoint_fires_automatically() {
+    use std::time::Duration;
+
+    let metadata_mock = Arc::new(MockBlockDevice::new(METADATA_DISK_SIZE));
+    let metadata_shared = metadata_mock.shared_state();
+
+    {
+        let c = extent_manager_v2::ExtentManagerV2::new_inner();
+        c.metadata_device
+            .connect(metadata_mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
+            .unwrap();
+        c.logger
+            .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
+            .unwrap();
+        c.set_dma_alloc(heap_dma_alloc());
+        c.format(format_params()).expect("format");
+
+        let h = c.reserve_extent(42, 4096).expect("reserve");
+        h.publish().expect("publish");
+
+        // Trigger automatic checkpointing quickly.
+        c.set_checkpoint_interval(Some(Duration::from_millis(50)));
+        std::thread::sleep(Duration::from_millis(300));
+        // c drops here; Drop signals the background thread and joins it.
+    }
+
+    // Recover on a fresh component — the background checkpoint must have run.
+    let metadata_mock2 = Arc::new(MockBlockDevice::reboot_from(&metadata_shared));
+    let c2 = extent_manager_v2::ExtentManagerV2::new_inner();
+    c2.metadata_device
+        .connect(metadata_mock2 as Arc<dyn IBlockDevice + Send + Sync>)
+        .unwrap();
+    c2.logger
+        .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
+        .unwrap();
+    c2.set_dma_alloc(heap_dma_alloc());
+    c2.initialize().expect("initialize");
+
+    let extents = c2.get_extents();
+    assert_eq!(extents.len(), 1);
+    assert_eq!(extents[0].key, 42);
+}
+
+#[test]
+fn set_checkpoint_interval_none_disables_background_checkpoints() {
+    use std::time::Duration;
+
+    let metadata_mock = Arc::new(MockBlockDevice::new(METADATA_DISK_SIZE));
+    let metadata_shared = metadata_mock.shared_state();
+
+    {
+        let c = extent_manager_v2::ExtentManagerV2::new_inner();
+        c.metadata_device
+            .connect(metadata_mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
+            .unwrap();
+        c.logger
+            .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
+            .unwrap();
+        c.set_dma_alloc(heap_dma_alloc());
+        c.format(format_params()).expect("format");
+
+        // Disable automatic checkpoints.
+        c.set_checkpoint_interval(None);
+
+        let h = c.reserve_extent(99, 4096).expect("reserve");
+        h.publish().expect("publish");
+
+        // Wait long enough that a 50ms background checkpoint would have fired.
+        std::thread::sleep(Duration::from_millis(200));
+        // No checkpoint should have run — extent will be lost after reboot.
+    }
+
+    let metadata_mock2 = Arc::new(MockBlockDevice::reboot_from(&metadata_shared));
+    let c2 = extent_manager_v2::ExtentManagerV2::new_inner();
+    c2.metadata_device
+        .connect(metadata_mock2 as Arc<dyn IBlockDevice + Send + Sync>)
+        .unwrap();
+    c2.logger
+        .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
+        .unwrap();
+    c2.set_dma_alloc(heap_dma_alloc());
+    c2.initialize().expect("initialize");
+
+    // Extent was not checkpointed, so it is lost after reboot.
+    assert!(c2.get_extents().is_empty());
 }
