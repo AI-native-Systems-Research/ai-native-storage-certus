@@ -12,4 +12,4 @@ creusot-std = "0.12.0-dev"
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(creusot)'] }
 
 [patch.crates-io]
-creusot-std = { path = "/home/dwaddington/creusot/creusot-std" }
+creusot-std = { path = "../creusot/creusot-std" }
