@@ -182,8 +182,7 @@ impl<M: Send + 'static> ActorHandle<M> {
 
     /// Deactivate the actor: close the channel and join the thread.
     ///
-    /// The actor finishes processing its current message, then stops.
-    /// Remaining messages in the channel are not drained.
+    /// The actor drains any remaining messages in the channel before stopping.
     ///
     /// # Errors
     ///
@@ -670,7 +669,19 @@ where
                             idle_count = 0;
                         }
                     }
-                    Err(ChannelError::Closed) => break,
+                    Err(ChannelError::Closed) => {
+                        // Drain any messages that were queued before the channel closed.
+                        while let Ok(msg) = receiver.try_recv() {
+                            let result =
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    handler.handle(msg);
+                                }));
+                            if let Err(panic_payload) = result {
+                                error_callback(panic_payload);
+                            }
+                        }
+                        break;
+                    }
                     Err(_) => break,
                 }
             }
