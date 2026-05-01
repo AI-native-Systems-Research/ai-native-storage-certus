@@ -43,17 +43,16 @@ If any prerequisite is missing, inform the user and stop.
    export PATH="$HOME/.local/share/creusot/bin:$PATH"
    ```
 
-6. Verify installation:
+6. Verify installation using the bundled test example:
    - Run `cargo creusot version` — should show version info for all components
-   - Create a test project, build, and prove:
+   - Build and prove the test example:
      ```
-     cargo creusot new /tmp/creusot-verify-test --creusot-std ~/creusot/creusot-std
-     cd /tmp/creusot-verify-test
-     cargo creusot build
-     why3find prove verif/<crate_name>_rlib/*.coma
+     cd certus/tools/creusot/creusot-test-example
+     cargo clean
+     cargo creusot
      ```
-   - Confirm output shows "Proved ... ✔"
-   - Clean up: `rm -rf /tmp/creusot-verify-test`
+   - Confirm output shows "Proved (4 files) ✔"
+   - Note: `cargo clean` is required before the first `cargo creusot` run if `cargo build` was previously executed (stale artifacts block the Creusot translation pass)
 
 ## Notes
 - Z3 4.16.0 (from pip) is newer than the recommended 4.15.3 — this produces a warning but works fine.
