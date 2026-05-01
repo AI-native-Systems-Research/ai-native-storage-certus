@@ -12,7 +12,6 @@ In AI-native storage workloads, inference engines (PyTorch, TensorRT) hold model
 4. Pinning the memory for DMA transfer
 5. Producing a `GpuDmaBuffer` that owns the IPC handle lifetime
 
-
 ## Interface: `IGpuServices`
 
 Defined in `components/interfaces/src/igpu_services.rs`. All methods return `Result<T, String>`.
