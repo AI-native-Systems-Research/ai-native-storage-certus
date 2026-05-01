@@ -34,7 +34,7 @@ pipeline {
     }
     stage('Benchmarks') {
       steps {
-        sh '. ~/.cargo/env ; cargo r -r -p iops-benchmark'
+        sh '. ~/.cargo/env ; sleep 3; cargo r -r -p iops-benchmark -- --pci-addr 0000:86:00.0'
       }
     }
   }
