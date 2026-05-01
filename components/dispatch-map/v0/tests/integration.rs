@@ -456,10 +456,6 @@ impl IExtentManager for MockExtentManagerComponent {
         Err(ExtentManagerError::OutOfSpace)
     }
 
-    fn lookup_extent(&self, _key: ExtentKey) -> Result<Extent, ExtentManagerError> {
-        Err(ExtentManagerError::KeyNotFound(0))
-    }
-
     fn get_extents(&self) -> Vec<Extent> {
         self.extents.clone()
     }
@@ -481,6 +477,8 @@ impl IExtentManager for MockExtentManagerComponent {
     fn get_instance_id(&self) -> Result<u64, ExtentManagerError> {
         Ok(1)
     }
+
+    fn set_checkpoint_interval(&self, _interval: Option<std::time::Duration>) {}
 }
 
 #[test]
