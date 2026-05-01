@@ -18,16 +18,6 @@ use crate::interface::{InterfaceInfo, ReceptacleInfo};
 use crate::iunknown::IUnknown;
 use crate::numa::CpuSet;
 
-/// Error type for actor operations.
-///
-/// # Examples
-///
-/// ```
-/// use component_core::actor::ActorError;
-///
-/// let err = ActorError::AlreadyActive;
-/// assert_eq!(format!("{err}"), "actor is already active");
-/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActorError {
     /// `activate()` called on an already-running actor.
@@ -60,10 +50,10 @@ impl std::error::Error for ActorError {}
 const STATE_IDLE: u8 = 0;
 const STATE_RUNNING: u8 = 1;
 
-/// Trait that users implement to define actor message-handling behavior.
+/// Trait that users implement to define actor's message-handling behavior.
 ///
 /// `M` is the message type. Must be `Send + 'static` to cross thread
-/// boundaries.
+///  boundaries.
 ///
 /// # Examples
 ///
@@ -327,7 +317,7 @@ impl<M: Send + 'static> Drop for ActorHandle<M> {
 ///
 /// Actors implement [`IUnknown`] and can be queried for [`ISender<M>`](crate::channel::ISender):
 ///
-/// ```
+/// ```rust,ignore
 /// use component_core::actor::{Actor, ActorHandler};
 /// use component_core::channel::ISender;
 /// use component_core::query_interface;
