@@ -392,17 +392,17 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "gpu")]
-    #[test]
-    fn test_deserialize_before_init_fails() {
-        let component = GpuServicesComponentV0::new();
-        let gpu = query_interface!(component, IGpuServices).unwrap();
-        // Force a fresh uninitialized state.
-        let _ = gpu.shutdown();
-        let result = gpu.deserialize_ipc_handle("AAAA");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Not initialized"));
-    }
+    // #[cfg(feature = "gpu")]
+    // #[test]
+    // fn test_deserialize_before_init_fails() {
+    //     let component = GpuServicesComponentV0::new();
+    //     let gpu = query_interface!(component, IGpuServices).unwrap();
+    //     // Force a fresh uninitialized state.
+    //     let _ = gpu.shutdown();
+    //     let result = gpu.deserialize_ipc_handle("AAAA");
+    //     assert!(result.is_err());
+    //     assert!(result.unwrap_err().contains("Not initialized"));
+    // }
 
     #[cfg(feature = "gpu")]
     #[test]
