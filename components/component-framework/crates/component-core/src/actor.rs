@@ -18,16 +18,6 @@ use crate::interface::{InterfaceInfo, ReceptacleInfo};
 use crate::iunknown::IUnknown;
 use crate::numa::CpuSet;
 
-/// Error type for actor operations.
-///
-/// # Examples
-///
-/// ```
-/// use component_core::actor::ActorError;
-///
-/// let err = ActorError::AlreadyActive;
-/// assert_eq!(format!("{err}"), "actor is already active");
-/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActorError {
     /// `activate()` called on an already-running actor.
