@@ -40,6 +40,9 @@ default-members = [
 
 resolver = "2"
 
+[patch.crates-io]
+creusot-std = { path = "../kani-exploration/creusot/creusot-std" }
+
 [workspace.package]
 edition = "2021"
 rust-version = "1.75"
@@ -59,5 +62,6 @@ logger = { path = "components/logger/v1" }
 dispatch-map = { path = "components/dispatch-map/v0" }
 dispatcher = { path = "components/dispatcher/v0" }
 gpu-services = { path = "components/gpu-services/v0" }
+creusot-std = "0.12.0-dev"
 
 
