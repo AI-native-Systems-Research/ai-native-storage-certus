@@ -18,7 +18,7 @@ pipeline {
     }
     stage('GPU Unit Tests') {
       steps {
-        sh '. ~/.cargo/env ; cargo test --features gpu'
+        sh '. ~/.cargo/env ; cargo t -p gpu-services --features gpu'
       }
     }
   }
