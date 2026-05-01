@@ -51,4 +51,3 @@ By contributing you agree that your contributions will be licensed under the pro
 If you have questions about how to contribute, open an issue or contact the maintainers.
 
 Thank you for helping improve this project!
-
