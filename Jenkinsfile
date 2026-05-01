@@ -17,12 +17,4 @@ pipeline {
       }
     }
   }
-  post {
-        success {
-      githubNotify context: 'Jenkins CI', status: 'SUCCESS', description: 'Build Passed!'
-        }
-        failure {
-      githubNotify context: 'Jenkins CI', status: 'FAILURE', description: 'Build Failed!'
-        }
-  }
 }
