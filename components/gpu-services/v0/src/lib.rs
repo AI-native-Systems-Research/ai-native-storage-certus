@@ -321,10 +321,10 @@ mod tests {
 
     #[test]
     fn test_get_devices_before_init_fails() {
-        let component = GpuServicesComponentV0::new();
-        let gpu = query_interface!(component, IGpuServices).unwrap();
         #[cfg(not(feature = "gpu"))]
         {
+            let component = GpuServicesComponentV0::new();
+            let gpu = query_interface!(component, IGpuServices).unwrap();
             let result = gpu.get_devices();
             assert!(result.is_err());
         }
