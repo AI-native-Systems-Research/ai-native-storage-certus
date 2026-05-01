@@ -19,4 +19,6 @@ spdk-build
 # Contains mutation testing data
 **/mutants.out*/
 
-
+# Creusot
+.why3find
+tools/creusot/creusot
