@@ -53,7 +53,7 @@ const STATE_RUNNING: u8 = 1;
 /// Trait that users implement to define actor's message-handling behavior.
 ///
 /// `M` is the message type. Must be `Send + 'static` to cross thread
-/// boundaries.
+///  boundaries.
 ///
 /// # Examples
 ///
