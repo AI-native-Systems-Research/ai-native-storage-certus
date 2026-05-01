@@ -25,11 +25,12 @@ If no argument is provided, show the hint and stop.
 
 3. Modify `Cargo.toml`:
    - Add `creusot-std = "0.12.0-dev"` under `[dependencies]` (if not already present)
-   - Add a `[patch.crates-io]` section pointing to the local creusot-std:
+   - Add a `[patch.crates-io]` section pointing to the local creusot-std (use a relative path from the project to the certus repo's `tools/creusot/creusot/creusot-std`, or use `~` notation for shell expansion):
      ```toml
      [patch.crates-io]
-     creusot-std = { path = "/home/dwaddington/creusot/creusot-std" }
+     creusot-std = { path = "<relative-path-to>/tools/creusot/creusot/creusot-std" }
      ```
+     Compute the correct relative path from the target project directory to `certus/tools/creusot/creusot/creusot-std`.
    - Add the `cfg(creusot)` lint configuration under `[lints.rust]`:
      ```toml
      [lints.rust]
@@ -76,5 +77,5 @@ If no argument is provided, show the hint and stop.
 
 ## Notes
 - Always run `cargo clean` before the first `cargo creusot` if the project was previously built with plain `cargo build`
-- The `[patch.crates-io]` section assumes Creusot was cloned to `~/creusot` per the install skill
+- The `[patch.crates-io]` section assumes Creusot was cloned to `certus/tools/creusot/creusot` per the install skill
 - If the project uses `edition = "2024"`, it works with Creusot's required nightly toolchain

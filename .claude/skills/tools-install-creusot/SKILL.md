@@ -20,14 +20,14 @@ If any prerequisite is missing, inform the user and stop.
    pip install z3-solver
    ```
 
-2. Clone the Creusot repo to ~/creusot (if not already cloned):
+2. Clone the Creusot repo into `certus/tools/creusot/creusot` (if not already cloned):
    ```
-   git clone https://github.com/creusot-rs/creusot ~/creusot
+   git clone https://github.com/creusot-rs/creusot certus/tools/creusot/creusot
    ```
 
 3. Run the install script with `--external z3` (uses the pip-installed z3):
    ```
-   cd ~/creusot && ./INSTALL --external z3
+   cd certus/tools/creusot/creusot && ./INSTALL --external z3
    ```
    This installs cargo-creusot, creusot-rustc, Why3, why3find, Alt-Ergo, CVC4, and CVC5.
 
