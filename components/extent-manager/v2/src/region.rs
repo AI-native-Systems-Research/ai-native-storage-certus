@@ -8,7 +8,6 @@ use crate::slab::{FREE_KEY, SizeClassManager, Slab};
 use crate::superblock::Superblock;
 
 pub(crate) struct RegionState {
-    pub region_index: usize,
     pub slabs: BTreeMap<u64, Slab>,
     pub size_classes: SizeClassManager,
     pub buddy: BuddyAllocator,
@@ -20,14 +19,12 @@ pub(crate) struct RegionState {
 pub(crate) struct SharedState {
     pub format_params: FormatParams,
     pub checkpoint_seq: u64,
-    pub disk_size: u64,
     pub superblock: Superblock,
 }
 
 impl RegionState {
-    pub fn new(region_index: usize, buddy: BuddyAllocator, format_params: FormatParams) -> Self {
+    pub fn new(buddy: BuddyAllocator, format_params: FormatParams) -> Self {
         Self {
-            region_index,
             slabs: BTreeMap::new(),
             size_classes: SizeClassManager::new(),
             buddy,

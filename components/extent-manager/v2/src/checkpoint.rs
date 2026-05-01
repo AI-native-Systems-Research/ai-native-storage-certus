@@ -291,17 +291,15 @@ mod tests {
         };
 
         // Region 0: one slab with key 42 in slot 2
-        let mut r0 = RegionState::new(0, BuddyAllocator::new(0, 1024 * 1024, 4096), fp.clone());
+        let mut r0 = RegionState::new(BuddyAllocator::new(0, 1024 * 1024, 4096), fp.clone());
         let (slab_start, slot_idx, _) = r0.alloc_extent(4096).unwrap();
         let (_, slot_idx2, _) = r0.alloc_extent(4096).unwrap();
-        let (_, slot_idx3, _) = r0.alloc_extent(4096).unwrap();
+        r0.alloc_extent(4096).unwrap(); // allocate without publishing → slot stays FREE_KEY
         r0.publish_slot(slab_start, slot_idx, 42);
         r0.publish_slot(slab_start, slot_idx2, 99);
-        // slot_idx3 left as FREE_KEY (published but pretend abort happened)
-        drop(slot_idx3);
 
         // Region 1: empty
-        let r1 = RegionState::new(1, BuddyAllocator::new(1024 * 1024, 1024 * 1024, 4096), fp);
+        let r1 = RegionState::new(BuddyAllocator::new(1024 * 1024, 1024 * 1024, 4096), fp);
 
         let mut all_data = Vec::new();
         all_data.extend_from_slice(&2u32.to_le_bytes());

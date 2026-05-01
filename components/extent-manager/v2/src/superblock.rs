@@ -20,7 +20,6 @@ pub struct Superblock {
     pub checkpoint_region_size: u64,
     pub instance_id: u64,
     pub metadata_disk_ns_id: u32,
-    pub checksum: u32,
 }
 
 impl Superblock {
@@ -49,7 +48,6 @@ impl Superblock {
             checkpoint_region_size,
             instance_id,
             metadata_disk_ns_id,
-            checksum: 0,
         }
     }
 
@@ -157,7 +155,6 @@ impl Superblock {
             checkpoint_region_size,
             instance_id,
             metadata_disk_ns_id,
-            checksum: stored_crc,
         })
     }
 }

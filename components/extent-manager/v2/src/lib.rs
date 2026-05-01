@@ -358,7 +358,7 @@ impl IExtentManager for ExtentManagerV2 {
                 data_disk_size - (region_count as u64 - 1) * region_bytes
             };
             let buddy = BuddyAllocator::new(base, size, params.sector_size);
-            let region = RegionState::new(i, buddy, params.clone());
+            let region = RegionState::new(buddy, params.clone());
             region_vec.push(Arc::new(RwLock::new(region)));
         }
 
@@ -394,7 +394,6 @@ impl IExtentManager for ExtentManagerV2 {
         let shared = SharedState {
             format_params: params,
             checkpoint_seq: 0,
-            disk_size: data_disk_size,
             superblock: sb,
         };
 
@@ -447,7 +446,7 @@ impl IExtentManager for ExtentManagerV2 {
                 buddy.mark_allocated(desc.start_offset, desc.slab_size);
             }
 
-            let mut region = RegionState::new(i, buddy, format_params.clone());
+            let mut region = RegionState::new(buddy, format_params.clone());
 
             for desc in &slab_descs {
                 let slab = recovery::slab_from_descriptor(desc);
@@ -463,7 +462,6 @@ impl IExtentManager for ExtentManagerV2 {
         let shared = SharedState {
             format_params,
             checkpoint_seq: sb.checkpoint_seq,
-            disk_size: data_disk_size,
             superblock: sb,
         };
 
