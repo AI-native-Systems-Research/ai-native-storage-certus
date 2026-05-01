@@ -1,0 +1,15 @@
+[package]
+name = "creusot-test-example"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+creusot-std = "0.12.0-dev"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(creusot)'] }
+
+[patch.crates-io]
+creusot-std = { path = "/home/dwaddington/creusot/creusot-std" }
