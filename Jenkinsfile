@@ -16,5 +16,10 @@ pipeline {
         }
       }
     }
+    stage('GPU Unit Tests') {
+      steps {
+        sh '. ~/.cargo/env ; cargo t -p gpu-services --features gpu'
+      }
+    }
   }
 }
