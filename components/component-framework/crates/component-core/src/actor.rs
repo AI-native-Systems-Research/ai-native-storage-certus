@@ -317,7 +317,7 @@ impl<M: Send + 'static> Drop for ActorHandle<M> {
 ///
 /// Actors implement [`IUnknown`] and can be queried for [`ISender<M>`](crate::channel::ISender):
 ///
-/// ```
+/// ```rust,ignore
 /// use component_core::actor::{Actor, ActorHandler};
 /// use component_core::channel::ISender;
 /// use component_core::query_interface;
