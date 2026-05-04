@@ -365,5 +365,33 @@ define_interface! {
         fn create_dma_buffer(
             &self, handle: GpuIpcHandle
         ) -> Result<GpuDmaBuffer, String>;
+
+        /// Copy data from GPU device memory to a DMA staging buffer.
+        ///
+        /// Performs a synchronous `cudaMemcpy` with `DeviceToHost` direction.
+        /// Copies exactly `size` bytes from the GPU source into `dst`.
+        ///
+        /// # Safety (caller contract)
+        ///
+        /// * `src` must be a valid GPU device pointer for at least `size` bytes.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if GPU support is not compiled in, the component
+        /// is not initialized, `size` exceeds the destination buffer length,
+        /// or the CUDA memcpy operation fails.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # use interfaces::{IGpuServices, DmaBuffer};
+        /// # fn example(gpu: &dyn IGpuServices, gpu_ptr: *const std::ffi::c_void, buf: &DmaBuffer) {
+        /// gpu.dma_copy_to_host(gpu_ptr, buf, 4096).unwrap();
+        /// # }
+        /// ```
+        #[cfg(feature = "spdk")]
+        fn dma_copy_to_host(
+            &self, src: *const std::ffi::c_void, dst: &crate::spdk_types::DmaBuffer, size: usize
+        ) -> Result<(), String>;
     }
 }
