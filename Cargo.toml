@@ -58,6 +58,7 @@ block-device-spdk-nvme-v2 = { path = "components/block-device-spdk-nvme/v2" }
 logger = { path = "components/logger/v1" }
 dispatch-map = { path = "components/dispatch-map/v0" }
 dispatcher = { path = "components/dispatcher/v0" }
+extent-manager-v2 = { path = "components/extent-manager/v2" }
 gpu-services = { path = "components/gpu-services/v0" }
 
 
