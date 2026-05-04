@@ -11,14 +11,29 @@ mod background;
 pub mod io_segmenter;
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use component_framework::define_component;
 use interfaces::{
-    CacheKey, DispatcherConfig, DispatcherError, IDispatchMap, IDispatcher, ILogger, IpcHandle,
+    CacheKey, DmaAllocFn, DmaBuffer, DispatcherConfig, DispatcherError, FormatParams,
+    IBlockDevice, IBlockDeviceAdmin, IDispatchMap, IDispatcher, IExtentManager, IGpuServices,
+    ILogger, IpcHandle, PciAddress,
 };
 
+use block_device_spdk_nvme_v2::BlockDeviceSpdkNvmeComponentV2;
+use component_core::binding::bind;
+use component_core::query_interface;
+use extent_manager_v2::ExtentManagerV2;
+use spdk_env::ISPDKEnv;
+
 use crate::background::{BackgroundWriter, WriteJob};
+
+/// Holds one (block-device, extent-manager) pair for a data drive.
+#[allow(dead_code)]
+struct DataDrive {
+    block_dev: Arc<BlockDeviceSpdkNvmeComponentV2>,
+    extent_mgr: Arc<ExtentManagerV2>,
+}
 
 define_component! {
     pub DispatcherComponentV0 {
@@ -27,10 +42,13 @@ define_component! {
         receptacles: {
             logger: ILogger,
             dispatch_map: IDispatchMap,
+            gpu_services: IGpuServices,
+            spdk_env: ISPDKEnv,
         },
         fields: {
             initialized: AtomicBool,
             bg_writer: Mutex<Option<BackgroundWriter>>,
+            data_drives: Mutex<Vec<DataDrive>>,
         },
     }
 }
@@ -59,12 +77,156 @@ impl DispatcherComponentV0 {
     }
 }
 
+impl DispatcherComponentV0 {
+    fn parse_pci_addr(s: &str) -> Result<PciAddress, DispatcherError> {
+        let parts: Vec<&str> = s.split(':').collect();
+        if parts.len() != 3 {
+            return Err(DispatcherError::InvalidParameter(format!(
+                "invalid PCI address format: {s}"
+            )));
+        }
+        let domain = u32::from_str_radix(parts[0], 16).map_err(|_| {
+            DispatcherError::InvalidParameter(format!("invalid PCI domain: {}", parts[0]))
+        })?;
+        let bus = u8::from_str_radix(parts[1], 16).map_err(|_| {
+            DispatcherError::InvalidParameter(format!("invalid PCI bus: {}", parts[1]))
+        })?;
+        let dev_func: Vec<&str> = parts[2].split('.').collect();
+        if dev_func.len() != 2 {
+            return Err(DispatcherError::InvalidParameter(format!(
+                "invalid PCI dev.func: {}",
+                parts[2]
+            )));
+        }
+        let dev = u8::from_str_radix(dev_func[0], 16).map_err(|_| {
+            DispatcherError::InvalidParameter(format!("invalid PCI dev: {}", dev_func[0]))
+        })?;
+        let func = u8::from_str_radix(dev_func[1], 16).map_err(|_| {
+            DispatcherError::InvalidParameter(format!("invalid PCI func: {}", dev_func[1]))
+        })?;
+        Ok(PciAddress {
+            domain,
+            bus,
+            dev,
+            func,
+        })
+    }
+
+    fn create_data_drives(&self, config: &DispatcherConfig) -> Result<Vec<DataDrive>, DispatcherError> {
+        let spdk_env = self
+            .spdk_env
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("spdk_env not bound".into()))?;
+
+        let logger = self
+            .logger
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("logger not bound".into()))?;
+
+        let mut drives = Vec::with_capacity(config.data_pci_addrs.len());
+
+        for (i, addr_str) in config.data_pci_addrs.iter().enumerate() {
+            let pci_addr = Self::parse_pci_addr(addr_str)?;
+
+            // Create and initialize block device component
+            let block_dev = BlockDeviceSpdkNvmeComponentV2::new_default();
+
+            block_dev
+                .spdk_env
+                .connect(Arc::clone(&spdk_env) as Arc<dyn ISPDKEnv + Send + Sync>)
+                .map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "failed to wire spdk_env for data drive {i}: {e}"
+                    ))
+                })?;
+
+            block_dev
+                .logger
+                .connect(Arc::clone(&logger) as Arc<dyn ILogger + Send + Sync>)
+                .map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "failed to wire logger for data drive {i}: {e}"
+                    ))
+                })?;
+
+            let admin = query_interface!(block_dev, IBlockDeviceAdmin).ok_or_else(|| {
+                DispatcherError::IoError(format!(
+                    "failed to query IBlockDeviceAdmin for data drive {i}"
+                ))
+            })?;
+            admin.set_pci_address(pci_addr);
+            admin.initialize().map_err(|e| {
+                DispatcherError::IoError(format!(
+                    "failed to initialize block device at {addr_str}: {e}"
+                ))
+            })?;
+
+            let ibd = query_interface!(block_dev, IBlockDevice).ok_or_else(|| {
+                DispatcherError::IoError(format!(
+                    "failed to query IBlockDevice for data drive {i}"
+                ))
+            })?;
+
+            // Create extent manager for this drive
+            let extent_mgr = ExtentManagerV2::new_inner();
+
+            let numa_node = ibd.numa_node();
+            let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
+                DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
+            });
+            extent_mgr.set_dma_alloc(dma_alloc);
+
+            extent_mgr
+                .logger
+                .connect(Arc::clone(&logger) as Arc<dyn ILogger + Send + Sync>)
+                .map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "failed to wire logger for extent manager {i}: {e}"
+                    ))
+                })?;
+
+            bind(
+                &*block_dev as &dyn component_core::IUnknown,
+                "IBlockDevice",
+                &*extent_mgr as &dyn component_core::IUnknown,
+                "metadata_device",
+            )
+            .map_err(|e| {
+                DispatcherError::IoError(format!(
+                    "failed to bind block device to extent manager {i}: {e}"
+                ))
+            })?;
+
+            let iem = query_interface!(extent_mgr, IExtentManager).ok_or_else(|| {
+                DispatcherError::IoError(format!(
+                    "failed to query IExtentManager for data drive {i}"
+                ))
+            })?;
+            iem.format(FormatParams::default()).map_err(|e| {
+                DispatcherError::IoError(format!(
+                    "failed to format extent manager for data drive {i}: {e}"
+                ))
+            })?;
+
+            self.log_info(&format!(
+                "dispatcher: data drive {i} initialized at {addr_str}"
+            ));
+
+            drives.push(DataDrive {
+                block_dev,
+                extent_mgr,
+            });
+        }
+
+        Ok(drives)
+    }
+}
+
 impl IDispatcher for DispatcherComponentV0 {
     fn initialize(&self, config: DispatcherConfig) -> Result<(), DispatcherError> {
         self.log_info("dispatcher: initializing");
 
-        let _dm = self
-            .dispatch_map
+        self.dispatch_map
             .get()
             .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
 
@@ -74,13 +236,24 @@ impl IDispatcher for DispatcherComponentV0 {
             ));
         }
 
-        // TODO: Create N block devices and N extent managers from config.
-        // This requires SPDK environment to be active and real hardware.
-        // For now, start the background writer with a placeholder processor.
+        // Create N block devices and N extent managers from config.
+        // If spdk_env is not connected, skip drive creation (staging-only mode).
+        if self.spdk_env.is_connected() {
+            let drives = self.create_data_drives(&config)?;
+            *self.data_drives.lock().unwrap() = drives;
+        }
+
+        let dm_for_writer = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
 
         let writer = BackgroundWriter::start(move |job: WriteJob| {
-            // TODO: Implement actual staging-to-SSD write with MDTS segmentation.
-            let _ = job;
+            // Lazy migration: write staging buffer to SSD, then update dispatch map.
+            // TODO: actual MDTS-segmented write to block device via IBlockDeviceAdmin.
+            // For now, simulate a successful write and convert the entry.
+            let block_offset = job.key * 4096;
+            let _ = dm_for_writer.convert_to_storage(job.key, block_offset);
         });
 
         *self.bg_writer.lock().unwrap() = Some(writer);
@@ -97,12 +270,24 @@ impl IDispatcher for DispatcherComponentV0 {
             writer.shutdown();
         }
 
+        // Shut down block devices in reverse order
+        let drives = std::mem::take(&mut *self.data_drives.lock().unwrap());
+        for (i, drive) in drives.iter().enumerate().rev() {
+            if let Some(admin) = query_interface!(drive.block_dev, IBlockDeviceAdmin) {
+                if let Err(e) = admin.shutdown() {
+                    self.log_error(&format!(
+                        "dispatcher: failed to shut down data drive {i}: {e}"
+                    ));
+                }
+            }
+        }
+
         self.initialized.store(false, Ordering::Release);
         self.log_info("dispatcher: shut down");
         Ok(())
     }
 
-    fn lookup(&self, key: CacheKey, _ipc_handle: IpcHandle) -> Result<(), DispatcherError> {
+    fn lookup(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
 
         let dm = self
@@ -118,6 +303,11 @@ impl IDispatcher for DispatcherComponentV0 {
         dm.release_read(key)
             .map_err(|_| DispatcherError::IoError("failed to release read lock".into()))?;
 
+        let gpu = self
+            .gpu_services
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
+
         match result {
             Ok(lookup_result) => {
                 use interfaces::LookupResult;
@@ -127,8 +317,14 @@ impl IDispatcher for DispatcherComponentV0 {
                         "size mismatch on lookup".into(),
                     )),
                     LookupResult::Staging { buffer } => {
-                        // TODO: DMA copy from staging buffer to ipc_handle
-                        let _ = buffer;
+                        gpu.dma_copy_to_device(
+                            &buffer,
+                            ipc_handle.address as *mut std::ffi::c_void,
+                            ipc_handle.size as usize,
+                        )
+                        .map_err(|e| {
+                            DispatcherError::IoError(format!("GPU DMA copy (staging→device) failed: {e}"))
+                        })?;
                         Ok(())
                     }
                     LookupResult::BlockDevice { offset } => {
@@ -211,8 +407,17 @@ impl IDispatcher for DispatcherComponentV0 {
             other => DispatcherError::IoError(other.to_string()),
         })?;
 
-        // TODO: DMA copy from ipc_handle to staging buffer
-        let _ = staging_buffer;
+        let gpu = self
+            .gpu_services
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
+
+        gpu.dma_copy_to_host(
+            ipc_handle.address as *const std::ffi::c_void,
+            &staging_buffer,
+            ipc_handle.size as usize,
+        )
+        .map_err(|e| DispatcherError::IoError(format!("GPU DMA copy failed: {e}")))?;
 
         dm.downgrade_reference(key)
             .map_err(|e| DispatcherError::IoError(e.to_string()))?;
@@ -238,40 +443,31 @@ mod tests {
     use std::sync::Arc;
     use std::thread;
 
-    use interfaces::{DispatchMapError, DmaAllocFn, DmaBuffer, LookupResult};
+    use interfaces::{
+        DispatchMapError, DmaAllocFn, DmaBuffer, GpuDeviceInfo, GpuDmaBuffer, GpuIpcHandle,
+        LookupResult,
+    };
 
     // -----------------------------------------------------------------------
-    // Mock infrastructure
+    // Test infrastructure
     // -----------------------------------------------------------------------
 
-    unsafe extern "C" fn mock_dma_free(ptr: *mut std::ffi::c_void) {
-        if !ptr.is_null() {
-            // SAFETY: ptr was allocated with alloc_zeroed in mock_dma_buffer.
-            unsafe {
-                std::alloc::dealloc(
-                    ptr as *mut u8,
-                    std::alloc::Layout::from_size_align_unchecked(1, 1),
-                );
-            }
-        }
+    unsafe extern "C" fn dma_free(ptr: *mut std::ffi::c_void) {
+        // SAFETY: ptr was allocated with libc::aligned_alloc in alloc_dma_buffer.
+        unsafe { libc::free(ptr) };
     }
 
-    fn mock_dma_buffer(size: usize) -> Arc<DmaBuffer> {
-        let sz = size.max(1);
-        let layout = std::alloc::Layout::from_size_align(sz, 4096).unwrap();
-        // SAFETY: Test-only allocation with valid layout.
-        let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
-        assert!(!ptr.is_null());
-        // SAFETY: ptr is valid heap memory with matching layout.
-        let buf = unsafe {
-            DmaBuffer::from_raw(
-                ptr as *mut std::ffi::c_void,
-                sz,
-                mock_dma_free as unsafe extern "C" fn(*mut std::ffi::c_void),
-                -1,
-            )
-        }
-        .unwrap();
+    fn alloc_dma_buffer(size: usize) -> Arc<DmaBuffer> {
+        let sz = size.max(4096);
+        // SAFETY: aligned_alloc requires alignment to be a power of 2 and size
+        // to be a multiple of alignment. We enforce both here.
+        let aligned_sz = sz.next_multiple_of(4096);
+        let ptr = unsafe { libc::aligned_alloc(4096, aligned_sz) };
+        assert!(!ptr.is_null(), "aligned_alloc failed for {aligned_sz} bytes");
+        // SAFETY: ptr is valid, 4096-aligned, and covers aligned_sz bytes.
+        // libc::free is the matching deallocator for aligned_alloc.
+        unsafe { std::ptr::write_bytes(ptr as *mut u8, 0, aligned_sz) };
+        let buf = unsafe { DmaBuffer::from_raw(ptr, aligned_sz, dma_free, -1) }.unwrap();
         Arc::new(buf)
     }
 
@@ -350,7 +546,7 @@ mod tests {
             if inner.entries.contains_key(&key) {
                 return Err(DispatchMapError::AlreadyExists(key));
             }
-            let buffer = mock_dma_buffer(size as usize * 4096);
+            let buffer = alloc_dma_buffer(size as usize * 4096);
             inner.entries.insert(
                 key,
                 MockEntry {
@@ -465,14 +661,69 @@ mod tests {
         fn debug(&self, _msg: &str) {}
     }
 
+    struct MockGpuServices;
+
+    impl IGpuServices for MockGpuServices {
+        fn initialize(&self) -> Result<(), String> {
+            Ok(())
+        }
+        fn shutdown(&self) -> Result<(), String> {
+            Ok(())
+        }
+        fn get_devices(&self) -> Result<Vec<GpuDeviceInfo>, String> {
+            Ok(vec![])
+        }
+        fn deserialize_ipc_handle(&self, _base64_payload: &str) -> Result<GpuIpcHandle, String> {
+            Err("mock: not implemented".into())
+        }
+        fn verify_memory(&self, _handle: &GpuIpcHandle) -> Result<(), String> {
+            Ok(())
+        }
+        fn pin_memory(&self, _handle: &GpuIpcHandle) -> Result<(), String> {
+            Ok(())
+        }
+        fn unpin_memory(&self, _handle: &GpuIpcHandle) -> Result<(), String> {
+            Ok(())
+        }
+        fn create_dma_buffer(&self, _handle: GpuIpcHandle) -> Result<GpuDmaBuffer, String> {
+            Err("mock: not implemented".into())
+        }
+        fn dma_copy_to_host(
+            &self,
+            src: *const std::ffi::c_void,
+            dst: &DmaBuffer,
+            size: usize,
+        ) -> Result<(), String> {
+            // SAFETY: src is a valid host pointer (from IpcHandle) and dst is a valid DmaBuffer.
+            unsafe {
+                std::ptr::copy_nonoverlapping(src as *const u8, dst.as_ptr() as *mut u8, size);
+            }
+            Ok(())
+        }
+        fn dma_copy_to_device(
+            &self,
+            src: &DmaBuffer,
+            dst: *mut std::ffi::c_void,
+            size: usize,
+        ) -> Result<(), String> {
+            // SAFETY: src is a valid DmaBuffer and dst is a valid host pointer (from IpcHandle).
+            unsafe {
+                std::ptr::copy_nonoverlapping(src.as_ptr() as *const u8, dst as *mut u8, size);
+            }
+            Ok(())
+        }
+    }
+
     fn setup_initialized() -> (Arc<DispatcherComponentV0>, Arc<MockDispatchMap>) {
         let dm = Arc::new(MockDispatchMap::new());
         let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None));
+        let gpu: Arc<dyn IGpuServices + Send + Sync> = Arc::new(MockGpuServices);
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()));
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
             .unwrap();
         c.logger.connect(logger).unwrap();
+        c.gpu_services.connect(gpu).unwrap();
 
         let d = query_interface!(c, IDispatcher).unwrap();
         d.initialize(DispatcherConfig {
@@ -497,19 +748,19 @@ mod tests {
 
     #[test]
     fn component_creation() {
-        let _c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None));
+        let _c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()));
     }
 
     #[test]
     fn query_idispatcher() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()));
         let d = query_interface!(c, IDispatcher);
         assert!(d.is_some());
     }
 
     #[test]
     fn initialize_without_receptacles_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()));
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
             metadata_pci_addr: "0000:01:00.0".to_string(),
@@ -521,7 +772,7 @@ mod tests {
 
     #[test]
     fn initialize_with_empty_pci_addrs_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()));
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
             metadata_pci_addr: "0000:01:00.0".to_string(),
@@ -534,7 +785,7 @@ mod tests {
 
     #[test]
     fn lookup_before_initialize_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()));
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
         let handle = IpcHandle {
@@ -547,7 +798,7 @@ mod tests {
 
     #[test]
     fn check_before_initialize_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()));
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.check(42);
         assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
@@ -555,7 +806,7 @@ mod tests {
 
     #[test]
     fn remove_before_initialize_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()));
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.remove(42);
         assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
@@ -563,7 +814,7 @@ mod tests {
 
     #[test]
     fn populate_before_initialize_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()));
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
         let handle = IpcHandle {
@@ -576,7 +827,7 @@ mod tests {
 
     #[test]
     fn populate_with_zero_size_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()));
         let d = query_interface!(c, IDispatcher).unwrap();
         // Even though not initialized, zero-size check comes after init check.
         // This test verifies the parameter validation exists in the code path.
@@ -592,14 +843,14 @@ mod tests {
 
     #[test]
     fn shutdown_without_initialize_succeeds() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()));
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
     }
 
     #[test]
     fn double_shutdown_succeeds() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()));
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
         assert!(d.shutdown().is_ok());
@@ -610,6 +861,7 @@ mod tests {
         let c = Arc::new(DispatcherComponentV0::new(
             AtomicBool::new(false),
             Mutex::new(None),
+            Mutex::new(Vec::new()),
         ));
 
         let handles: Vec<_> = (0..4)
@@ -648,7 +900,7 @@ mod tests {
     #[test]
     fn initialize_empty_addrs_with_dispatch_map() {
         let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()));
         c.dispatch_map.connect(dm).unwrap();
 
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -664,7 +916,7 @@ mod tests {
     fn initialize_multiple_pci_addrs() {
         let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
         let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()));
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
 
@@ -722,9 +974,11 @@ mod tests {
     fn populate_allocation_failure() {
         let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::with_fail_alloc());
         let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None));
+        let gpu: Arc<dyn IGpuServices + Send + Sync> = Arc::new(MockGpuServices);
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()));
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
+        c.gpu_services.connect(gpu).unwrap();
 
         let d = query_interface!(c, IDispatcher).unwrap();
         d.initialize(DispatcherConfig {
@@ -976,4 +1230,5 @@ mod tests {
         let d = query_interface!(c, IDispatcher).unwrap();
         d.shutdown().unwrap();
     }
+
 }

@@ -281,6 +281,108 @@ impl IGpuServices for GpuServicesComponentV0 {
             Ok(buf)
         }
     }
+
+    #[cfg(feature = "spdk")]
+    fn dma_copy_to_host(
+        &self,
+        src: *const std::ffi::c_void,
+        dst: &interfaces::DmaBuffer,
+        size: usize,
+    ) -> Result<(), String> {
+        if size > dst.len() {
+            return Err(format!(
+                "size ({size}) exceeds destination buffer length ({})",
+                dst.len()
+            ));
+        }
+
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = src;
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            let state = self.state().lock().map_err(|e| e.to_string())?;
+            if !state.initialized {
+                return Err("Not initialized: call initialize() first".to_string());
+            }
+            drop(state);
+
+            // SAFETY: Caller guarantees src is a valid GPU device pointer covering
+            // at least `size` bytes. dst.as_ptr() is a valid DMA host buffer and
+            // we verified size <= dst.len() above.
+            let err = unsafe {
+                cuda_ffi::cudaMemcpy(
+                    dst.as_ptr(),
+                    src,
+                    size,
+                    cuda_ffi::CUDA_MEMCPY_DEVICE_TO_HOST,
+                )
+            };
+
+            if err != cuda_ffi::CUDA_SUCCESS {
+                return Err(format!(
+                    "cudaMemcpy D2H failed: {}",
+                    cuda_ffi::cuda_error_string(err)
+                ));
+            }
+
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "spdk")]
+    fn dma_copy_to_device(
+        &self,
+        src: &interfaces::DmaBuffer,
+        dst: *mut std::ffi::c_void,
+        size: usize,
+    ) -> Result<(), String> {
+        if size > src.len() {
+            return Err(format!(
+                "size ({size}) exceeds source buffer length ({})",
+                src.len()
+            ));
+        }
+
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = dst;
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            let state = self.state().lock().map_err(|e| e.to_string())?;
+            if !state.initialized {
+                return Err("Not initialized: call initialize() first".to_string());
+            }
+            drop(state);
+
+            // SAFETY: Caller guarantees dst is a valid GPU device pointer covering
+            // at least `size` bytes. src.as_ptr() is a valid DMA host buffer and
+            // we verified size <= src.len() above.
+            let err = unsafe {
+                cuda_ffi::cudaMemcpy(
+                    dst,
+                    src.as_ptr() as *const std::ffi::c_void,
+                    size,
+                    cuda_ffi::CUDA_MEMCPY_HOST_TO_DEVICE,
+                )
+            };
+
+            if err != cuda_ffi::CUDA_SUCCESS {
+                return Err(format!(
+                    "cudaMemcpy H2D failed: {}",
+                    cuda_ffi::cuda_error_string(err)
+                ));
+            }
+
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]
