@@ -5,13 +5,10 @@
 //!
 //! Measures 4KB read/write latency at queue depths 1, 4, 16, 64 using
 //! crossbeam bounded channels (64 slots) as the SPSC transport.
-//!
 //! Hardware-dependent benchmarks use runtime detection via
-//! `spdk_env::checks` — they are silently skipped when no SPDK hardware
-#![cfg(feature = "spdk")]
-//! is available.
+//! `spdk_env::checks` and are skipped when no SPDK hardware is available.
 //!
-//! Run with: `cargo bench --bench latency`
+//! Run with: `cargo bench --bench latency --features spdk`
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 

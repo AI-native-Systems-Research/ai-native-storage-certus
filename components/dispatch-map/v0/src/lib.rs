@@ -28,7 +28,7 @@ use interfaces::{
     LookupResult,
 };
 
-use crate::entry::{DispatchEntry, Location};
+use crate::entry::{rdtsc, DispatchEntry, Location};
 
 define_component! {
     pub DispatchMapComponentV0 {
@@ -53,7 +53,14 @@ impl IDispatchMap for DispatchMapComponentV0 {
         }
     }
 
+    /// Recover dispatch map state from the extent manager's persisted extents.
+    /// Each extent is re-inserted as a BlockDevice location with zero reference
+    /// counts, restoring the map to a consistent view of committed storage.
     fn initialize(&self) -> Result<(), DispatchMapError> {
+        if let Ok(logger) = self.logger.get() {
+            logger.info("dispatch-map: beginning state recovery from extent manager");
+        }
+
         let em = self
             .extent_manager
             .get()
@@ -61,22 +68,27 @@ impl IDispatchMap for DispatchMapComponentV0 {
 
         let mut inner = self.state.inner.lock().unwrap();
         let mut count: u64 = 0;
+
+        // Walk all persisted extents and rebuild the in-memory dispatch entries.
+        // Staging buffers are not recovered — only committed block-device locations.
         em.for_each_extent(&mut |extent| {
             let entry = DispatchEntry {
                 location: Location::BlockDevice {
                     offset: extent.offset,
                 },
-
                 size_blocks: extent.size,
                 read_ref: 0,
                 write_ref: 0,
+                tsc: rdtsc(),
             };
             inner.entries.insert(extent.key, entry);
             count += 1;
         });
 
         if let Ok(logger) = self.logger.get() {
-            logger.info(&format!("dispatch-map: recovered {count} extents"));
+            logger.info(&format!(
+                "dispatch-map: state recovery complete — {count} extents restored"
+            ));
         }
         Ok(())
     }
@@ -108,6 +120,7 @@ impl IDispatchMap for DispatchMapComponentV0 {
             size_blocks: size,
             read_ref: 0,
             write_ref: 1,
+            tsc: rdtsc(),
         };
 
         inner.entries.insert(key, entry);
@@ -140,6 +153,7 @@ impl IDispatchMap for DispatchMapComponentV0 {
         }
 
         entry.read_ref += 1;
+        entry.tsc = rdtsc();
 
         let result = match &entry.location {
             Location::Staging { buffer } => LookupResult::Staging {
@@ -305,6 +319,17 @@ impl IDispatchMap for DispatchMapComponentV0 {
         }
 
         Ok(())
+    }
+
+    fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
+        let inner = self.state.inner.lock().unwrap();
+        let mut entries: Vec<(CacheKey, u64)> = inner
+            .entries
+            .iter()
+            .map(|(&key, entry)| (key, entry.tsc))
+            .collect();
+        entries.sort_unstable_by_key(|&(_, tsc)| tsc);
+        entries.into_iter().take(n).map(|(key, _)| key).collect()
     }
 }
 
@@ -550,5 +575,63 @@ mod tests {
         let dm = query_interface!(c, IDispatchMap).unwrap();
         let err = dm.remove(99);
         assert!(matches!(err, Err(DispatchMapError::KeyNotFound(99))));
+    }
+
+    // --- oldest_keys ---
+
+    #[test]
+    fn oldest_keys_empty_map() {
+        let c = setup_component();
+        let dm = query_interface!(c, IDispatchMap).unwrap();
+        assert!(dm.oldest_keys(5).is_empty());
+    }
+
+    #[test]
+    fn oldest_keys_fewer_than_n() {
+        let c = setup_component();
+        let dm = query_interface!(c, IDispatchMap).unwrap();
+        let _ = dm.create_staging(10, 1).unwrap();
+        let _ = dm.create_staging(20, 1).unwrap();
+        let keys = dm.oldest_keys(5);
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains(&10));
+        assert!(keys.contains(&20));
+    }
+
+    #[test]
+    fn oldest_keys_respects_creation_order() {
+        let c = setup_component();
+        let dm = query_interface!(c, IDispatchMap).unwrap();
+        let _ = dm.create_staging(1, 1).unwrap();
+        let _ = dm.create_staging(2, 1).unwrap();
+        let _ = dm.create_staging(3, 1).unwrap();
+        let keys = dm.oldest_keys(2);
+        assert_eq!(keys.len(), 2);
+        // Keys created first have lower TSC, so they should appear first.
+        assert_eq!(keys[0], 1);
+        assert_eq!(keys[1], 2);
+    }
+
+    #[test]
+    fn oldest_keys_lookup_updates_timestamp() {
+        let c = setup_component();
+        let dm = query_interface!(c, IDispatchMap).unwrap();
+        let _ = dm.create_staging(1, 1).unwrap();
+        dm.release_write(1).unwrap();
+        let _ = dm.create_staging(2, 1).unwrap();
+        dm.release_write(2).unwrap();
+        let _ = dm.create_staging(3, 1).unwrap();
+        dm.release_write(3).unwrap();
+
+        // Touch key 1 via lookup — its TSC should now be newest.
+        let _ = dm.lookup(1).unwrap();
+        dm.release_read(1).unwrap();
+
+        let keys = dm.oldest_keys(2);
+        assert_eq!(keys.len(), 2);
+        // Key 1 was refreshed, so 2 and 3 are the oldest.
+        assert!(keys.contains(&2));
+        assert!(keys.contains(&3));
+        assert!(!keys.contains(&1));
     }
 }

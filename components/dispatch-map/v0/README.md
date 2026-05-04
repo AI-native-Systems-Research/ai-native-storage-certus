@@ -33,6 +33,7 @@ Each entry in the dispatch map is keyed by a `CacheKey` (`u64`) and stores:
 | Size | Extent size in 4KiB blocks |
 | Read ref count | Atomic counter for concurrent readers |
 | Write ref count | Atomic counter for exclusive writer |
+| TSC timestamp | CPU timestamp counter value, set on creation and updated on lookup |
 
 Per-entry metadata is kept compact (target: ≤32 bytes beyond the key).
 
@@ -71,7 +72,7 @@ All methods are thread-safe and re-entrant.
 | Method | Description |
 |--------|-------------|
 | `create_staging(key, size)` | Allocate a DMA staging buffer, record entry with write_ref=1 |
-| `lookup(key, timeout)` | Return location (DmaBuffer, BlockDeviceLocation, NotExist, ErrorMismatchSize); increments read ref |
+| `lookup(key, timeout)` | Return location (DmaBuffer, BlockDeviceLocation, NotExist, ErrorMismatchSize); increments read ref and updates TSC |
 | `convert_to_storage(key, offset, block_device_id)` | Transition entry from staging to on-disk location |
 | `take_read(key, timeout)` | Wait for write_ref=0, then increment read_ref |
 | `take_write(key, timeout)` | Wait for read_ref=0 and write_ref=0, then increment write_ref |
@@ -79,6 +80,7 @@ All methods are thread-safe and re-entrant.
 | `release_write(key)` | Decrement write_ref (error if already 0) |
 | `downgrade_reference(key)` | Atomically convert write ref to read ref |
 | `remove(key)` | Delete entry (error if references active) |
+| `oldest_keys(n)` | Return up to `n` keys with the lowest TSC values (least recently created/accessed) |
 
 ### Recovery
 
