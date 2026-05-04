@@ -336,6 +336,7 @@ fn create_dispatcher(
     let config = DispatcherConfig {
         metadata_pci_addr: pci_addrs[0].clone(),
         data_pci_addrs: pci_addrs.to_vec(),
+        ..Default::default()
     };
     d.initialize(config).expect("dispatcher initialize failed");
 
@@ -835,6 +836,7 @@ fn hw_data_integrity() {
         d.initialize(DispatcherConfig {
             metadata_pci_addr: pci_addrs[0].clone(),
             data_pci_addrs: pci_addrs[..1].to_vec(),
+            ..Default::default()
         })
         .expect("re-initialize failed");
 

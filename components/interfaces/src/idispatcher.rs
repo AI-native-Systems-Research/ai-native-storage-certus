@@ -4,6 +4,24 @@ use std::fmt;
 
 use crate::idispatch_map::CacheKey;
 
+/// Block device component version used internally by the dispatcher.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BlockDeviceVersion {
+    /// block-device-spdk-nvme v1
+    V1,
+    /// block-device-spdk-nvme v2 (latest)
+    #[default]
+    V2,
+}
+
+/// Extent manager component version used internally by the dispatcher.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExtentManagerVersion {
+    /// extent-manager v2 (latest)
+    #[default]
+    V2,
+}
+
 /// Configuration for dispatcher initialization.
 ///
 /// # Examples
@@ -17,15 +35,20 @@ use crate::idispatch_map::CacheKey;
 ///         "0000:02:00.0".to_string(),
 ///         "0000:03:00.0".to_string(),
 ///     ],
+///     ..Default::default()
 /// };
 /// assert_eq!(config.data_pci_addrs.len(), 2);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DispatcherConfig {
     /// PCI address of the metadata block device.
     pub metadata_pci_addr: String,
     /// PCI addresses of N data block devices (one per extent manager).
     pub data_pci_addrs: Vec<String>,
+    /// Which block device component version to use.
+    pub block_device_version: BlockDeviceVersion,
+    /// Which extent manager component version to use.
+    pub extent_manager_version: ExtentManagerVersion,
 }
 
 /// Opaque handle to client GPU memory for DMA transfers.

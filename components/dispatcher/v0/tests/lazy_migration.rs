@@ -267,6 +267,7 @@ fn setup() -> (Arc<DispatcherComponentV0>, Arc<MockDispatchMap>) {
     d.initialize(DispatcherConfig {
         metadata_pci_addr: "0000:01:00.0".to_string(),
         data_pci_addrs: vec!["0000:02:00.0".to_string()],
+        ..Default::default()
     })
     .unwrap();
 
@@ -331,6 +332,7 @@ fn lookup_succeeds_after_migration() {
     d.initialize(DispatcherConfig {
         metadata_pci_addr: "0000:01:00.0".to_string(),
         data_pci_addrs: vec!["0000:02:00.0".to_string()],
+        ..Default::default()
     })
     .unwrap();
 
@@ -356,6 +358,7 @@ fn check_finds_migrated_entry() {
     d.initialize(DispatcherConfig {
         metadata_pci_addr: "0000:01:00.0".to_string(),
         data_pci_addrs: vec!["0000:02:00.0".to_string()],
+        ..Default::default()
     })
     .unwrap();
 

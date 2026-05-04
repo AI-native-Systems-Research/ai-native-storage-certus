@@ -12,6 +12,7 @@ component-macros.workspace = true
 interfaces = { workspace = true, features = ["spdk"] }
 gpu-services = { workspace = true, features = ["spdk"] }
 spdk-env.workspace = true
+block-device-spdk-nvme.workspace = true
 block-device-spdk-nvme-v2.workspace = true
 extent-manager-v2.workspace = true
 

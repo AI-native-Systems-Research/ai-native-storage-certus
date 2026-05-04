@@ -15,11 +15,12 @@ use std::sync::{Arc, Mutex};
 
 use component_framework::define_component;
 use interfaces::{
-    CacheKey, DmaAllocFn, DmaBuffer, DispatcherConfig, DispatcherError, FormatParams,
-    IBlockDevice, IBlockDeviceAdmin, IDispatchMap, IDispatcher, IExtentManager, IGpuServices,
-    ILogger, IpcHandle, PciAddress,
+    BlockDeviceVersion, CacheKey, DmaAllocFn, DmaBuffer, DispatcherConfig, DispatcherError,
+    ExtentManagerVersion, FormatParams, IBlockDevice, IBlockDeviceAdmin, IDispatchMap, IDispatcher,
+    IExtentManager, IGpuServices, ILogger, IpcHandle, PciAddress,
 };
 
+use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponentV1;
 use block_device_spdk_nvme_v2::BlockDeviceSpdkNvmeComponentV2;
 use component_core::binding::bind;
 use component_core::query_interface;
@@ -31,7 +32,8 @@ use crate::background::{BackgroundWriter, WriteJob};
 /// Holds one (block-device, extent-manager) pair for a data drive.
 #[allow(dead_code)]
 struct DataDrive {
-    block_dev: Arc<BlockDeviceSpdkNvmeComponentV2>,
+    _block_dev: Arc<dyn component_core::IUnknown + Send + Sync>,
+    block_dev_admin: Arc<dyn IBlockDeviceAdmin + Send + Sync>,
     extent_mgr: Arc<ExtentManagerV2>,
 }
 
@@ -112,6 +114,99 @@ impl DispatcherComponentV0 {
         })
     }
 
+    #[allow(clippy::type_complexity)]
+    fn create_block_device(
+        &self,
+        i: usize,
+        version: BlockDeviceVersion,
+        spdk_env: &Arc<dyn ISPDKEnv + Send + Sync>,
+        logger: &Arc<dyn ILogger + Send + Sync>,
+        pci_addr: PciAddress,
+        addr_str: &str,
+    ) -> Result<
+        (
+            Arc<dyn component_core::IUnknown + Send + Sync>,
+            Arc<dyn IBlockDeviceAdmin + Send + Sync>,
+            Arc<dyn IBlockDevice + Send + Sync>,
+        ),
+        DispatcherError,
+    > {
+        match version {
+            BlockDeviceVersion::V1 => {
+                let block_dev = BlockDeviceSpdkNvmeComponentV1::new_default();
+                block_dev
+                    .spdk_env
+                    .connect(Arc::clone(spdk_env))
+                    .map_err(|e| {
+                        DispatcherError::IoError(format!(
+                            "failed to wire spdk_env for data drive {i}: {e}"
+                        ))
+                    })?;
+                block_dev
+                    .logger
+                    .connect(Arc::clone(logger))
+                    .map_err(|e| {
+                        DispatcherError::IoError(format!(
+                            "failed to wire logger for data drive {i}: {e}"
+                        ))
+                    })?;
+                let admin = query_interface!(block_dev, IBlockDeviceAdmin).ok_or_else(|| {
+                    DispatcherError::IoError(format!(
+                        "failed to query IBlockDeviceAdmin for data drive {i}"
+                    ))
+                })?;
+                admin.set_pci_address(pci_addr);
+                admin.initialize().map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "failed to initialize block device at {addr_str}: {e}"
+                    ))
+                })?;
+                let ibd = query_interface!(block_dev, IBlockDevice).ok_or_else(|| {
+                    DispatcherError::IoError(format!(
+                        "failed to query IBlockDevice for data drive {i}"
+                    ))
+                })?;
+                Ok((block_dev as Arc<dyn component_core::IUnknown + Send + Sync>, admin, ibd))
+            }
+            BlockDeviceVersion::V2 => {
+                let block_dev = BlockDeviceSpdkNvmeComponentV2::new_default();
+                block_dev
+                    .spdk_env
+                    .connect(Arc::clone(spdk_env))
+                    .map_err(|e| {
+                        DispatcherError::IoError(format!(
+                            "failed to wire spdk_env for data drive {i}: {e}"
+                        ))
+                    })?;
+                block_dev
+                    .logger
+                    .connect(Arc::clone(logger))
+                    .map_err(|e| {
+                        DispatcherError::IoError(format!(
+                            "failed to wire logger for data drive {i}: {e}"
+                        ))
+                    })?;
+                let admin = query_interface!(block_dev, IBlockDeviceAdmin).ok_or_else(|| {
+                    DispatcherError::IoError(format!(
+                        "failed to query IBlockDeviceAdmin for data drive {i}"
+                    ))
+                })?;
+                admin.set_pci_address(pci_addr);
+                admin.initialize().map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "failed to initialize block device at {addr_str}: {e}"
+                    ))
+                })?;
+                let ibd = query_interface!(block_dev, IBlockDevice).ok_or_else(|| {
+                    DispatcherError::IoError(format!(
+                        "failed to query IBlockDevice for data drive {i}"
+                    ))
+                })?;
+                Ok((block_dev as Arc<dyn component_core::IUnknown + Send + Sync>, admin, ibd))
+            }
+        }
+    }
+
     fn create_data_drives(&self, config: &DispatcherConfig) -> Result<Vec<DataDrive>, DispatcherError> {
         let spdk_env = self
             .spdk_env
@@ -128,47 +223,19 @@ impl DispatcherComponentV0 {
         for (i, addr_str) in config.data_pci_addrs.iter().enumerate() {
             let pci_addr = Self::parse_pci_addr(addr_str)?;
 
-            // Create and initialize block device component
-            let block_dev = BlockDeviceSpdkNvmeComponentV2::new_default();
-
-            block_dev
-                .spdk_env
-                .connect(Arc::clone(&spdk_env) as Arc<dyn ISPDKEnv + Send + Sync>)
-                .map_err(|e| {
-                    DispatcherError::IoError(format!(
-                        "failed to wire spdk_env for data drive {i}: {e}"
-                    ))
-                })?;
-
-            block_dev
-                .logger
-                .connect(Arc::clone(&logger) as Arc<dyn ILogger + Send + Sync>)
-                .map_err(|e| {
-                    DispatcherError::IoError(format!(
-                        "failed to wire logger for data drive {i}: {e}"
-                    ))
-                })?;
-
-            let admin = query_interface!(block_dev, IBlockDeviceAdmin).ok_or_else(|| {
-                DispatcherError::IoError(format!(
-                    "failed to query IBlockDeviceAdmin for data drive {i}"
-                ))
-            })?;
-            admin.set_pci_address(pci_addr);
-            admin.initialize().map_err(|e| {
-                DispatcherError::IoError(format!(
-                    "failed to initialize block device at {addr_str}: {e}"
-                ))
-            })?;
-
-            let ibd = query_interface!(block_dev, IBlockDevice).ok_or_else(|| {
-                DispatcherError::IoError(format!(
-                    "failed to query IBlockDevice for data drive {i}"
-                ))
-            })?;
+            let (block_dev_component, admin, ibd) = self.create_block_device(
+                i,
+                config.block_device_version,
+                &spdk_env,
+                &logger,
+                pci_addr,
+                addr_str,
+            )?;
 
             // Create extent manager for this drive
-            let extent_mgr = ExtentManagerV2::new_inner();
+            let extent_mgr = match config.extent_manager_version {
+                ExtentManagerVersion::V2 => ExtentManagerV2::new_inner(),
+            };
 
             let numa_node = ibd.numa_node();
             let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
@@ -186,7 +253,7 @@ impl DispatcherComponentV0 {
                 })?;
 
             bind(
-                &*block_dev as &dyn component_core::IUnknown,
+                &*block_dev_component,
                 "IBlockDevice",
                 &*extent_mgr as &dyn component_core::IUnknown,
                 "metadata_device",
@@ -209,11 +276,13 @@ impl DispatcherComponentV0 {
             })?;
 
             self.log_info(&format!(
-                "dispatcher: data drive {i} initialized at {addr_str}"
+                "dispatcher: data drive {i} initialized at {addr_str} (block_device={:?})",
+                config.block_device_version
             ));
 
             drives.push(DataDrive {
-                block_dev,
+                _block_dev: block_dev_component,
+                block_dev_admin: admin,
                 extent_mgr,
             });
         }
@@ -273,12 +342,10 @@ impl IDispatcher for DispatcherComponentV0 {
         // Shut down block devices in reverse order
         let drives = std::mem::take(&mut *self.data_drives.lock().unwrap());
         for (i, drive) in drives.iter().enumerate().rev() {
-            if let Some(admin) = query_interface!(drive.block_dev, IBlockDeviceAdmin) {
-                if let Err(e) = admin.shutdown() {
-                    self.log_error(&format!(
-                        "dispatcher: failed to shut down data drive {i}: {e}"
-                    ));
-                }
+            if let Err(e) = drive.block_dev_admin.shutdown() {
+                self.log_error(&format!(
+                    "dispatcher: failed to shut down data drive {i}: {e}"
+                ));
             }
         }
 
@@ -729,6 +796,7 @@ mod tests {
         d.initialize(DispatcherConfig {
             metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
+            ..Default::default()
         })
         .unwrap();
 
@@ -765,6 +833,7 @@ mod tests {
         let config = DispatcherConfig {
             metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
+            ..Default::default()
         };
         let err = d.initialize(config);
         assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
@@ -777,6 +846,7 @@ mod tests {
         let config = DispatcherConfig {
             metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec![],
+            ..Default::default()
         };
         // This will fail with NotInitialized since dispatch_map isn't bound
         let err = d.initialize(config);
@@ -907,6 +977,7 @@ mod tests {
         let config = DispatcherConfig {
             metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec![],
+            ..Default::default()
         };
         let err = d.initialize(config);
         assert!(matches!(err, Err(DispatcherError::InvalidParameter(_))));
@@ -928,6 +999,7 @@ mod tests {
                 "0000:03:00.0".to_string(),
                 "0000:04:00.0".to_string(),
             ],
+            ..Default::default()
         })
         .unwrap();
         d.shutdown().unwrap();
@@ -984,6 +1056,7 @@ mod tests {
         d.initialize(DispatcherConfig {
             metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
+            ..Default::default()
         })
         .unwrap();
 
@@ -1170,6 +1243,7 @@ mod tests {
         d.initialize(DispatcherConfig {
             metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
+            ..Default::default()
         })
         .unwrap();
 
