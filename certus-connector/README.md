@@ -120,17 +120,72 @@ vLLM's `OffloadingConnectorScheduler` calls on the manager returned by
 
 ### Native Rust API mapping
 
-The `CertusEngine` (PyO3) exposes these methods which the native manager calls:
+There are three layers. Only the bottom one (Rust components) needs new work:
 
 ```
-OffloadingManager method    →  CertusEngine method       →  Rust component
-─────────────────────────────────────────────────────────────────────────────
-lookup(keys)                →  batch_check(keys)         →  dispatcher.check() per key
-prepare_store(keys)         →  prepare_store(keys)       →  dispatch-map LRU eviction + allocate
-complete_store(keys, ok)    →  complete_store(keys, ok)  →  dispatcher.remove() on failure
-prepare_load(keys)          →  (location lookup only)    →  dispatch-map.lookup()
-complete_load(keys)         →  (no-op currently)         →  dispatch-map ref release
-touch(keys)                 →  touch(keys)               →  dispatch-map LRU reorder
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Layer 1: Python shim (native_manager.py)                               │
+│  Converts OffloadKey bytes → u64, constructs PrepareStoreOutput.        │
+│  NO logic here — pure adapter. Stays as-is.                             │
+└───────────────────────────────────┬─────────────────────────────────────┘
+                                    │ calls via PyO3
+┌───────────────────────────────────▼─────────────────────────────────────┐
+│  Layer 2: CertusEngine (src/engine.rs)                                  │
+│  Wires components, translates between PyO3 types and Rust traits.       │
+│  Orchestrates calls to dispatcher + dispatch-map.                       │
+│  Needs updating once dispatch-map exposes eviction/ref-count APIs.      │
+└───────────────────────────────────┬─────────────────────────────────────┘
+                                    │ calls via component interfaces
+┌───────────────────────────────────▼─────────────────────────────────────┐
+│  Layer 3: Rust components (Daniel's work)                               │
+│  dispatch-map: threshold LRU, ref-counting, evict_lru(n, protected)     │
+│  dispatcher: integrate eviction into prepare_store path                 │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+Per-method breakdown:
+
+| `native_manager.py` calls | `CertusEngine` method | Rust component work | Status |
+|---|---|---|---|
+| `lookup(keys)` | `batch_check(keys)` | `dispatcher.check()` per key | **Done** |
+| `prepare_store(keys)` | `prepare_store(keys)` | Dispatch-map: `evict_lru(n, protected)` when full; dispatcher: remove evicted, allocate new | **Daniel: in progress** |
+| `complete_store(keys, ok)` | `complete_store(keys, ok)` | On failure: `dispatcher.remove()` per key. On success: mark ready in dispatch-map. | **Partially done** (remove works, readiness gating TBD) |
+| `touch(keys)` | `touch(keys)` | Dispatch-map: update threshold LRU ordering | **Daniel: in progress** |
+| `prepare_load(keys)` | (not wired yet) | Dispatch-map: increment `ref_cnt` (eviction protection only, no physical pin) | **Needs implementing** |
+| `complete_load(keys)` | (no-op) | Dispatch-map: decrement `ref_cnt` | **Needs implementing** |
+| `shutdown()` | `shutdown()` | `dispatcher.shutdown()` + `gpu.shutdown()` | **Done** |
+
+### What Daniel needs to add to dispatch-map
+
+```rust
+// New methods on IDispatchMap (or a new IEvictionPolicy trait):
+
+/// Update LRU ordering for key (threshold-based).
+fn touch(&self, key: CacheKey);
+
+/// Increment ref_cnt — block protected from eviction while ref > 0.
+fn pin(&self, key: CacheKey) -> Result<(), Error>;
+
+/// Decrement ref_cnt.
+fn unpin(&self, key: CacheKey) -> Result<(), Error>;
+
+/// Evict up to `count` LRU blocks, skipping pinned (ref_cnt > 0) and protected set.
+/// Returns evicted keys, or None if cannot satisfy `count` evictions (atomic).
+fn evict_lru(&self, count: usize, protected: &HashSet<CacheKey>) -> Option<Vec<CacheKey>>;
+
+/// Mark block as ready (loadable). Called after successful store.
+fn mark_ready(&self, key: CacheKey);
+```
+
+Once these exist, `engine.rs` orchestrates them in `prepare_store`:
+```
+1. Filter already-cached keys
+2. Check capacity: need = to_store.len() - free_space
+3. If need > 0: call dispatch_map.evict_lru(need, protected_set)
+   - If None → return None (cannot store)
+   - Else → dispatcher.remove() each evicted key
+4. Allocate via dispatcher.populate() for each new key
+5. Return (keys_to_store, evicted_keys)
 ```
 
 ### Eviction and tier management
@@ -161,6 +216,27 @@ for managing the DRAM tier and is invisible to vLLM.
 | 5 | **Atomic eviction** | Not yet implemented | If N evictions are requested but fewer than N unpinned blocks exist, evict nothing and return `None`. Must be all-or-nothing. |
 | 6 | **Protected set in eviction** | Not yet implemented | Keys in the current `prepare_store` input must not be evicted (they might already be cached and must remain). |
 | 7 | **Demotion (optional, v1)** | Deferred | DRAM tier management. Dispatcher already stages in DRAM and migrates to NVMe in background, but no explicit slot reclamation under DRAM pressure yet. Not required by vLLM contract. |
+
+### Native path differences from mock
+
+The mock Python manager models a generic cache. The native Rust path has hardware-specific
+nuances that simplify some operations:
+
+| Aspect | Mock (Python) | Native (Rust + SPDK) |
+|--------|---------------|----------------------|
+| **Host memory** | Allocated/freed per block | Pre-allocated SPDK DMA buffer pool — all pinned at init |
+| **Pin/unpin on load** | Conceptually pins memory for DMA | No-op physically — memory is always pinned. `ref_cnt` only prevents eviction. |
+| **GPU DMA registration** | Would need `cudaHostRegister` per buffer | DMA buffers are pre-registered. `dma_copy_to_host`/`dma_copy_to_device` use them directly. |
+| **Capacity** | Configurable slot counts | Fixed at init — extent manager knows total slabs from NVMe device size, DRAM pool from config. |
+| **Staging** | Explicit DRAM tier with promotion/demotion | Dispatcher stages ALL writes in DRAM first, background thread migrates to NVMe. DRAM is a write-through cache, not a separate tier to manage. |
+
+**Key implication for `prepare_load`/`complete_load`**: these are purely logical ref-count
+operations in the native path. No memory is allocated, pinned, or registered — only the
+eviction-protection semantics matter.
+
+**Key implication for capacity**: `prepare_store` returning `None` means the NVMe extent
+manager is full AND there are not enough unpinned blocks to evict. The DRAM staging pool
+cannot overflow because the dispatcher controls admission.
 
 ### gRPC handler equivalence
 
