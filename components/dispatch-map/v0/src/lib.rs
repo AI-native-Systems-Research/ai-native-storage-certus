@@ -53,7 +53,14 @@ impl IDispatchMap for DispatchMapComponentV0 {
         }
     }
 
+    /// Recover dispatch map state from the extent manager's persisted extents.
+    /// Each extent is re-inserted as a BlockDevice location with zero reference
+    /// counts, restoring the map to a consistent view of committed storage.
     fn initialize(&self) -> Result<(), DispatchMapError> {
+        if let Ok(logger) = self.logger.get() {
+            logger.info("dispatch-map: beginning state recovery from extent manager");
+        }
+
         let em = self
             .extent_manager
             .get()
@@ -61,12 +68,14 @@ impl IDispatchMap for DispatchMapComponentV0 {
 
         let mut inner = self.state.inner.lock().unwrap();
         let mut count: u64 = 0;
+
+        // Walk all persisted extents and rebuild the in-memory dispatch entries.
+        // Staging buffers are not recovered — only committed block-device locations.
         em.for_each_extent(&mut |extent| {
             let entry = DispatchEntry {
                 location: Location::BlockDevice {
                     offset: extent.offset,
                 },
-
                 size_blocks: extent.size,
                 read_ref: 0,
                 write_ref: 0,
@@ -76,7 +85,9 @@ impl IDispatchMap for DispatchMapComponentV0 {
         });
 
         if let Ok(logger) = self.logger.get() {
-            logger.info(&format!("dispatch-map: recovered {count} extents"));
+            logger.info(&format!(
+                "dispatch-map: state recovery complete — {count} extents restored"
+            ));
         }
         Ok(())
     }
