@@ -1008,3 +1008,104 @@ fn hw_ssd_readback_integrity() {
     d.shutdown().unwrap();
     eprintln!("\n=== SSD READBACK INTEGRITY TEST PASSED ===");
 }
+
+// ===========================================================================
+// prepare_store → commit_store → lookup integration test
+// ===========================================================================
+
+#[test]
+fn hw_prepare_commit_store() {
+    let pci_addrs = discover_devices();
+    let (comp, _dm) = create_dispatcher(&pci_addrs[..1]);
+    let d: Arc<dyn IDispatcher + Send + Sync> = query_interface!(comp, IDispatcher).unwrap();
+
+    // =======================================================================
+    // 1. prepare_store → write pattern → commit_store → lookup readback (4 KiB)
+    // =======================================================================
+    eprintln!("\n=== PrepareCommit 1: single 4 KiB block ===");
+    {
+        let src: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+        let buf = d.prepare_store(5000, 4096).unwrap();
+        unsafe {
+            std::ptr::copy_nonoverlapping(src.as_ptr(), buf.as_ptr() as *mut u8, 4096);
+        }
+        d.commit_store(5000).unwrap();
+        assert!(d.check(5000).unwrap());
+
+        let mut dst = vec![0u8; 4096];
+        d.lookup(5000, make_handle(&mut dst)).unwrap();
+        assert_eq!(src, dst, "4 KiB prepare/commit readback mismatch");
+    }
+
+    // =======================================================================
+    // 2. 12 KiB (multi-block)
+    // =======================================================================
+    eprintln!("=== PrepareCommit 2: multi-block 12 KiB ===");
+    {
+        let src: Vec<u8> = (0..12288).map(|i| ((i * 7 + 13) % 256) as u8).collect();
+        let buf = d.prepare_store(5001, 12288).unwrap();
+        unsafe {
+            std::ptr::copy_nonoverlapping(src.as_ptr(), buf.as_ptr() as *mut u8, 12288);
+        }
+        d.commit_store(5001).unwrap();
+
+        let mut dst = vec![0u8; 12288];
+        d.lookup(5001, make_handle(&mut dst)).unwrap();
+        assert_eq!(src, dst, "12 KiB prepare/commit readback mismatch");
+    }
+
+    // =======================================================================
+    // 3. 256 KiB (MDTS segmentation)
+    // =======================================================================
+    eprintln!("=== PrepareCommit 3: large 256 KiB buffer ===");
+    {
+        let size = 256 * 1024;
+        let src: Vec<u8> = (0..size).map(|i| ((i * 31 + 17) % 256) as u8).collect();
+        let buf = d.prepare_store(5002, size as u32).unwrap();
+        unsafe {
+            std::ptr::copy_nonoverlapping(src.as_ptr(), buf.as_ptr() as *mut u8, size);
+        }
+        d.commit_store(5002).unwrap();
+
+        let mut dst = vec![0u8; size];
+        d.lookup(5002, make_handle(&mut dst)).unwrap();
+        assert_eq!(src, dst, "256 KiB prepare/commit readback mismatch");
+    }
+
+    // =======================================================================
+    // 4. cancel_store — entry disappears
+    // =======================================================================
+    eprintln!("=== PrepareCommit 4: cancel_store ===");
+    {
+        let _buf = d.prepare_store(5003, 4096).unwrap();
+        d.cancel_store(5003).unwrap();
+        assert!(!d.check(5003).unwrap());
+    }
+
+    // =======================================================================
+    // 5. Duplicate key detection — prepare_store on existing key fails
+    // =======================================================================
+    eprintln!("=== PrepareCommit 5: duplicate key detection ===");
+    {
+        let err = d.prepare_store(5000, 4096);
+        assert!(
+            matches!(err, Err(DispatcherError::AlreadyExists(5000))),
+            "got: {err:?}"
+        );
+    }
+
+    // =======================================================================
+    // 6. commit_store on nonexistent key fails
+    // =======================================================================
+    eprintln!("=== PrepareCommit 6: commit nonexistent key ===");
+    {
+        let err = d.commit_store(99999);
+        assert!(
+            matches!(err, Err(DispatcherError::KeyNotFound(99999))),
+            "got: {err:?}"
+        );
+    }
+
+    d.shutdown().unwrap();
+    eprintln!("\n=== PREPARE/COMMIT STORE TEST PASSED ===");
+}

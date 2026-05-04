@@ -15,6 +15,7 @@ spdk-env.workspace = true
 block-device-spdk-nvme.workspace = true
 block-device-spdk-nvme-v2.workspace = true
 extent-manager-v2.workspace = true
+libc = "0.2"
 
 [features]
 hardware-test = []
