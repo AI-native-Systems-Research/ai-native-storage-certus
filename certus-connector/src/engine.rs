@@ -72,8 +72,8 @@ impl EngineInner {
             .extract()?;
 
         // --- Initialize SPDK environment ---
-        let spdk_env = spdk_env::SPDKEnvComponent::new_default();
-        let spdk_iface = query_interface!(spdk_env, spdk_env::ISPDKEnv)
+        let spdk_comp = spdk_env::SPDKEnvComponent::new_default();
+        let spdk_iface = query_interface!(spdk_comp, spdk_env::ISPDKEnv)
             .ok_or_else(|| PyRuntimeError::new_err("failed to query ISPDKEnv"))?;
         spdk_iface
             .init()
@@ -102,6 +102,14 @@ impl EngineInner {
             .dispatch_map
             .connect(Arc::clone(&dm))
             .map_err(|e| PyRuntimeError::new_err(format!("failed to bind dispatch_map: {e}")))?;
+        disp_comp
+            .gpu_services
+            .connect(Arc::clone(&gpu))
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to bind gpu_services: {e}")))?;
+        disp_comp
+            .spdk_env
+            .connect(Arc::clone(&spdk_iface))
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to bind spdk_env: {e}")))?;
 
         let dispatcher: Arc<dyn IDispatcher + Send + Sync> =
             query_interface!(disp_comp, IDispatcher)
