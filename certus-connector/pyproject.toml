@@ -1,0 +1,23 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "certus-connector"
+version = "0.1.0"
+description = "Certus storage connector for vLLM — native Rust engine + Python plugin"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "numpy",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "."
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

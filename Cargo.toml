@@ -21,7 +21,8 @@ members = [
     "components/dispatcher/v0",
     "components/gpu-services/v0",
     "apps/gpu-handle-test-server",
-    "apps/gpu-show"
+    "apps/gpu-show",
+    "certus-connector"
 ]
 
 # SPDK crates require pre-built native libraries at deps/spdk-build/.
@@ -60,5 +61,4 @@ dispatch-map = { path = "components/dispatch-map/v0" }
 dispatcher = { path = "components/dispatcher/v0" }
 extent-manager-v2 = { path = "components/extent-manager/v2" }
 gpu-services = { path = "components/gpu-services/v0" }
-
-
+certus-connector = { path = "certus-connector" }
