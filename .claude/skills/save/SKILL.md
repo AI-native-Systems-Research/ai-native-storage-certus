@@ -1,11 +1,11 @@
 ---
 name: save
-description: Save current session transcript to markdown with per-turn token counts and cost breakdown.
+description: Save current session transcript to markdown with per-turn token counts, cost breakdown, and context usage.
 allowed-tools: Bash(*)
 argument-hint: "[output_path]"
 ---
 
-Save the current Claude Code session transcript as a markdown file with token usage and cost stats.
+Save the current Claude Code session transcript as a markdown file with token usage, cost stats (/cost), and context window utilization (/context). Never overwrites existing files — appends -1, -2, etc. suffixes.
 
 The user may pass an optional output path as an argument. If provided, use it as OUT. Otherwise default to the current directory.
 
