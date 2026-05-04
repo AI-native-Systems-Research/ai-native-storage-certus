@@ -1,9 +1,11 @@
 //! IDispatcher interface and associated types for the dispatcher component.
 
 use std::fmt;
+#[cfg(feature = "spdk")]
 use std::sync::Arc;
 
 use crate::idispatch_map::CacheKey;
+#[cfg(feature = "spdk")]
 use crate::spdk_types::DmaBuffer;
 
 /// Block device component version used internally by the dispatcher.
