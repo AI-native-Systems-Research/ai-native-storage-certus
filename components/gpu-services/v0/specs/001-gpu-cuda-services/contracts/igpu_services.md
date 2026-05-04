@@ -40,6 +40,18 @@ define_interface! {
         /// The handle must have been verified and pinned prior to this call.
         fn create_dma_buffer(&self, handle: IpcHandle)
             -> Result<DmaBuffer, String>;
+
+        /// Copy data from GPU device memory to a DMA staging buffer.
+        /// Performs synchronous cudaMemcpy DeviceToHost.
+        #[cfg(feature = "spdk")]
+        fn dma_copy_to_host(&self, src: *const c_void, dst: &DmaBuffer, size: usize)
+            -> Result<(), String>;
+
+        /// Copy data from a DMA staging buffer to GPU device memory.
+        /// Performs synchronous cudaMemcpy HostToDevice.
+        #[cfg(feature = "spdk")]
+        fn dma_copy_to_device(&self, src: &DmaBuffer, dst: *mut c_void, size: usize)
+            -> Result<(), String>;
     }
 }
 ```
@@ -122,3 +134,25 @@ pub struct GpuDeviceInfo {
 - **Errors**: "Handle not verified", "Handle not pinned",
   "DmaBuffer creation failed: {detail}"
 - **Performance**: <50ms
+
+### dma_copy_to_host(src, dst, size)
+
+- **Feature gate**: `spdk`
+- **Preconditions**: `initialize()` called; `src` is a valid GPU device
+  pointer for at least `size` bytes; `dst` is a valid DmaBuffer with
+  `len() >= size`
+- **Postconditions**: `size` bytes copied from GPU to DMA buffer
+- **Errors**: "size exceeds destination buffer length",
+  "Not initialized", "cudaMemcpy D2H failed: {cuda_error}"
+- **Performance**: Depends on transfer size; <1ms for 4 KiB
+
+### dma_copy_to_device(src, dst, size)
+
+- **Feature gate**: `spdk`
+- **Preconditions**: `initialize()` called; `src` is a valid DmaBuffer
+  with `len() >= size`; `dst` is a valid GPU device pointer for at
+  least `size` bytes
+- **Postconditions**: `size` bytes copied from DMA buffer to GPU
+- **Errors**: "size exceeds source buffer length",
+  "Not initialized", "cudaMemcpy H2D failed: {cuda_error}"
+- **Performance**: Depends on transfer size; <1ms for 4 KiB

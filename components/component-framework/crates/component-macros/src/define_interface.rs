@@ -78,11 +78,18 @@ impl Parse for InterfaceInput {
 pub(crate) fn expand(input: InterfaceInput) -> TokenStream {
     let InterfaceInput { vis, name, methods } = input;
 
-    let method_sigs: Vec<_> = methods.iter().map(|m| &m.sig).collect();
+    let method_items: Vec<_> = methods
+        .iter()
+        .map(|m| {
+            let attrs = &m.attrs;
+            let sig = &m.sig;
+            quote! { #(#attrs)* #sig; }
+        })
+        .collect();
 
     quote! {
         #vis trait #name: ::std::marker::Send + ::std::marker::Sync + 'static {
-            #(#method_sigs;)*
+            #(#method_items)*
         }
 
         impl ::component_core::interface::Interface for dyn #name + Send + Sync {}

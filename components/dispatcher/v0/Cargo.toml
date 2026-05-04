@@ -10,9 +10,17 @@ component-framework.workspace = true
 component-core.workspace = true
 component-macros.workspace = true
 interfaces = { workspace = true, features = ["spdk"] }
+gpu-services = { workspace = true, features = ["spdk"] }
+spdk-env.workspace = true
+block-device-spdk-nvme-v2.workspace = true
+extent-manager-v2.workspace = true
+
+[features]
+hardware-test = []
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+libc = "0.2"
 
 [[bench]]
 name = "dispatcher_benchmark"
