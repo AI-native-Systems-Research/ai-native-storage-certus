@@ -13,10 +13,15 @@ fi
 SESSION_ID="$(basename "$JSONL" .jsonl)"
 DATE="$(date +%Y-%m-%d)"
 
+DEFAULT_NAME="transcript_${SESSION_ID}_${DATE}.md"
 if [[ -n "${2:-}" ]]; then
-    OUT="$2"
+    if [[ -d "$2" ]]; then
+        OUT="${2%/}/${DEFAULT_NAME}"
+    else
+        OUT="$2"
+    fi
 else
-    OUT="$(pwd)/transcript_${SESSION_ID}_${DATE}.md"
+    OUT="$(pwd)/${DEFAULT_NAME}"
 fi
 
 # Pricing per million tokens (claude-sonnet-4-6 defaults — edit as needed)

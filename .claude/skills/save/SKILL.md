@@ -26,15 +26,20 @@ fi
 echo "JSONL: $JSONL"
 ```
 
-2. Determine output path — use the argument if provided, otherwise save to current directory:
+2. Determine output path — use the argument if provided, otherwise save to current directory. If the argument is a directory, create the transcript file inside it:
 
 ```bash
 SESSION_ID=$(basename "$JSONL" .jsonl)
 DATE=$(date +%Y-%m-%d)
+DEFAULT_NAME="transcript_${SESSION_ID}_${DATE}.md"
 if [[ -n "$ARGUMENTS" ]]; then
-    OUT="$ARGUMENTS"
+    if [[ -d "$ARGUMENTS" ]]; then
+        OUT="${ARGUMENTS%/}/${DEFAULT_NAME}"
+    else
+        OUT="$ARGUMENTS"
+    fi
 else
-    OUT="$(pwd)/transcript_${SESSION_ID}_${DATE}.md"
+    OUT="$(pwd)/${DEFAULT_NAME}"
 fi
 ```
 
