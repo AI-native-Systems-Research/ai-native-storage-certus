@@ -112,5 +112,8 @@ component_macros::define_interface! {
 
         /// Remove an entry from the map.
         fn remove(&self, key: CacheKey) -> Result<(), DispatchMapError>;
+
+        /// Return up to `n` keys with the oldest timestamps (lowest TSC values).
+        fn oldest_keys(&self, n: usize) -> Vec<CacheKey>;
     }
 }

@@ -15,9 +15,10 @@ use std::sync::{Arc, Mutex};
 
 use component_framework::define_component;
 use interfaces::{
-    BlockDeviceVersion, CacheKey, DmaAllocFn, DmaBuffer, DispatcherConfig, DispatcherError,
-    ExtentManagerVersion, FormatParams, IBlockDevice, IBlockDeviceAdmin, IDispatchMap, IDispatcher,
-    IExtentManager, IGpuServices, ILogger, IpcHandle, PciAddress,
+    BlockDeviceVersion, CacheKey, Command, Completion, DmaAllocFn, DmaBuffer,
+    DispatcherConfig, DispatcherError, ExtentManagerVersion, FormatParams, IBlockDevice,
+    IBlockDeviceAdmin, IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger, IpcHandle,
+    LookupResult, PciAddress,
 };
 
 use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponentV1;
@@ -34,6 +35,7 @@ use crate::background::{BackgroundWriter, WriteJob};
 struct DataDrive {
     _block_dev: Arc<dyn component_core::IUnknown + Send + Sync>,
     block_dev_admin: Arc<dyn IBlockDeviceAdmin + Send + Sync>,
+    block_dev_iface: Arc<dyn IBlockDevice + Send + Sync>,
     extent_mgr: Arc<ExtentManagerV2>,
 }
 
@@ -76,6 +78,191 @@ impl DispatcherComponentV0 {
             ));
         }
         Ok(())
+    }
+
+    fn read_from_block_device(
+        &self,
+        offset: u64,
+        ipc_handle: &IpcHandle,
+        gpu: &Arc<dyn IGpuServices + Send + Sync>,
+    ) -> Result<(), DispatcherError> {
+        let drives = self.data_drives.lock().unwrap();
+        if drives.is_empty() {
+            return Err(DispatcherError::IoError(
+                "no data drives available for block device read".into(),
+            ));
+        }
+
+        let drive = &drives[0];
+        let block_size = drive.block_dev_iface.block_size();
+        let max_transfer = drive.block_dev_iface.max_transfer_size();
+        let numa_node = drive.block_dev_iface.numa_node();
+        let start_lba = offset / block_size as u64;
+        let total_bytes = ipc_handle.size as usize;
+        let aligned_bytes = total_bytes.next_multiple_of(block_size as usize);
+
+        let channels = drive.block_dev_iface.connect_client().map_err(|e| {
+            DispatcherError::IoError(format!("connect_client failed: {e}"))
+        })?;
+
+        // Drop the lock before doing I/O.
+        drop(drives);
+
+        let segments =
+            io_segmenter::segment_io(start_lba, aligned_bytes, max_transfer, block_size);
+
+        // Allocate a contiguous DMA buffer for the full read, then copy to GPU.
+        let read_buf = DmaBuffer::new(aligned_bytes, block_size as usize, Some(numa_node))
+            .map_err(|e| {
+                DispatcherError::AllocationFailed(format!("DMA read buffer: {e}"))
+            })?;
+
+        for seg in &segments {
+            let seg_buf =
+                DmaBuffer::new(seg.length, block_size as usize, Some(numa_node)).map_err(
+                    |e| DispatcherError::AllocationFailed(format!("DMA segment buffer: {e}")),
+                )?;
+            let seg_buf = Arc::new(Mutex::new(seg_buf));
+
+            channels
+                .command_tx
+                .send(Command::ReadSync {
+                    ns_id: 1,
+                    lba: seg.lba,
+                    buf: Arc::clone(&seg_buf),
+                })
+                .map_err(|_| {
+                    DispatcherError::IoError("send ReadSync failed".into())
+                })?;
+
+            match channels.completion_rx.recv() {
+                Ok(Completion::ReadDone { result, .. }) => {
+                    result.map_err(|e| {
+                        DispatcherError::IoError(format!("SSD read failed: {e}"))
+                    })?;
+                }
+                Ok(other) => {
+                    return Err(DispatcherError::IoError(format!(
+                        "unexpected completion: {other:?}"
+                    )));
+                }
+                Err(_) => {
+                    return Err(DispatcherError::IoError(
+                        "completion channel disconnected".into(),
+                    ));
+                }
+            }
+
+            // Copy segment data into the contiguous read buffer.
+            let guard = seg_buf.lock().unwrap();
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    guard.as_ptr() as *const u8,
+                    (read_buf.as_ptr() as *mut u8).add(seg.buffer_offset),
+                    seg.length,
+                );
+            }
+        }
+
+        // DMA copy the assembled data to the GPU/caller.
+        gpu.dma_copy_to_device(
+            &read_buf,
+            ipc_handle.address as *mut std::ffi::c_void,
+            total_bytes,
+        )
+        .map_err(|e| {
+            DispatcherError::IoError(format!("GPU DMA copy (SSD→device) failed: {e}"))
+        })?;
+
+        Ok(())
+    }
+
+    fn process_write_job(
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        drives: &[Arc<dyn IBlockDevice + Send + Sync>],
+        next_lba: &mut u64,
+        job: WriteJob,
+    ) {
+        if drives.is_empty() {
+            // Staging-only mode: no block devices, just mark as converted.
+            let block_offset = job.key * 4096;
+            let _ = dm.convert_to_storage(job.key, block_offset);
+            return;
+        }
+
+        let drive = &drives[job.device_index % drives.len()];
+        let block_size = drive.block_size() as usize;
+        let max_transfer = drive.max_transfer_size();
+
+        // Look up the staging buffer to get the data to write.
+        let staging_buf = match dm.lookup(job.key) {
+            Ok(LookupResult::Staging { buffer }) => buffer,
+            _ => {
+                // Entry may have been removed or already migrated; skip.
+                return;
+            }
+        };
+
+        let total_bytes = job.size as usize;
+        let aligned_bytes = total_bytes.next_multiple_of(block_size);
+        let num_blocks = (aligned_bytes / block_size) as u64;
+
+        // Sequential LBA allocation.
+        let start_lba = *next_lba;
+        *next_lba += num_blocks;
+        let block_offset = start_lba * block_size as u64;
+
+        let channels = match drive.connect_client() {
+            Ok(ch) => ch,
+            Err(_) => return,
+        };
+
+        let numa_node = drive.numa_node();
+        let segments =
+            io_segmenter::segment_io(start_lba, aligned_bytes, max_transfer, block_size as u32);
+
+        for seg in &segments {
+            let seg_buf = match DmaBuffer::new(seg.length, block_size, Some(numa_node)) {
+                Ok(buf) => buf,
+                Err(_) => return,
+            };
+
+            // Copy data from staging buffer into the write DMA buffer.
+            let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
+            if copy_len > 0 {
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        (staging_buf.as_ptr() as *const u8).add(seg.buffer_offset),
+                        seg_buf.as_ptr() as *mut u8,
+                        copy_len,
+                    );
+                }
+            }
+
+            let seg_buf = Arc::new(seg_buf);
+            if channels
+                .command_tx
+                .send(Command::WriteSync {
+                    ns_id: 1,
+                    lba: seg.lba,
+                    buf: seg_buf,
+                })
+                .is_err()
+            {
+                return;
+            }
+
+            match channels.completion_rx.recv() {
+                Ok(Completion::WriteDone { result, .. }) => {
+                    if result.is_err() {
+                        return;
+                    }
+                }
+                _ => return,
+            }
+        }
+
+        let _ = dm.convert_to_storage(job.key, block_offset);
     }
 }
 
@@ -283,6 +470,7 @@ impl DispatcherComponentV0 {
             drives.push(DataDrive {
                 _block_dev: block_dev_component,
                 block_dev_admin: admin,
+                block_dev_iface: ibd,
                 extent_mgr,
             });
         }
@@ -317,12 +505,19 @@ impl IDispatcher for DispatcherComponentV0 {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
 
+        // Collect block device interfaces for the background writer.
+        let bg_drives: Vec<Arc<dyn IBlockDevice + Send + Sync>> = self
+            .data_drives
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|d| Arc::clone(&d.block_dev_iface))
+            .collect();
+
+        // Reserve LBA 0 for metadata; start data at LBA 1024 (512 KiB offset).
+        let mut next_lba: u64 = 1024;
         let writer = BackgroundWriter::start(move |job: WriteJob| {
-            // Lazy migration: write staging buffer to SSD, then update dispatch map.
-            // TODO: actual MDTS-segmented write to block device via IBlockDeviceAdmin.
-            // For now, simulate a successful write and convert the entry.
-            let block_offset = job.key * 4096;
-            let _ = dm_for_writer.convert_to_storage(job.key, block_offset);
+            Self::process_write_job(&dm_for_writer, &bg_drives, &mut next_lba, job);
         });
 
         *self.bg_writer.lock().unwrap() = Some(writer);
@@ -376,31 +571,28 @@ impl IDispatcher for DispatcherComponentV0 {
             .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
 
         match result {
-            Ok(lookup_result) => {
-                use interfaces::LookupResult;
-                match lookup_result {
-                    LookupResult::NotExist => Err(DispatcherError::KeyNotFound(key)),
-                    LookupResult::MismatchSize => Err(DispatcherError::InvalidParameter(
-                        "size mismatch on lookup".into(),
-                    )),
-                    LookupResult::Staging { buffer } => {
-                        gpu.dma_copy_to_device(
-                            &buffer,
-                            ipc_handle.address as *mut std::ffi::c_void,
-                            ipc_handle.size as usize,
-                        )
-                        .map_err(|e| {
-                            DispatcherError::IoError(format!("GPU DMA copy (staging→device) failed: {e}"))
-                        })?;
-                        Ok(())
-                    }
-                    LookupResult::BlockDevice { offset } => {
-                        // TODO: MDTS-segmented read from SSD, DMA copy to ipc_handle
-                        let _ = offset;
-                        Ok(())
-                    }
+            Ok(lookup_result) => match lookup_result {
+                LookupResult::NotExist => Err(DispatcherError::KeyNotFound(key)),
+                LookupResult::MismatchSize => Err(DispatcherError::InvalidParameter(
+                    "size mismatch on lookup".into(),
+                )),
+                LookupResult::Staging { buffer } => {
+                    gpu.dma_copy_to_device(
+                        &buffer,
+                        ipc_handle.address as *mut std::ffi::c_void,
+                        ipc_handle.size as usize,
+                    )
+                    .map_err(|e| {
+                        DispatcherError::IoError(format!(
+                            "GPU DMA copy (staging→device) failed: {e}"
+                        ))
+                    })?;
+                    Ok(())
                 }
-            }
+                LookupResult::BlockDevice { offset } => {
+                    self.read_from_block_device(offset, &ipc_handle, &gpu)
+                }
+            },
             Err(_) => Err(DispatcherError::KeyNotFound(key)),
         }
     }
@@ -716,6 +908,11 @@ mod tests {
             } else {
                 Err(DispatchMapError::KeyNotFound(key))
             }
+        }
+
+        fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
+            let inner = self.inner.lock().unwrap();
+            inner.entries.keys().copied().take(n).collect()
         }
     }
 
@@ -1106,7 +1303,7 @@ mod tests {
     }
 
     #[test]
-    fn lookup_block_device_hit() {
+    fn lookup_block_device_hit_without_hardware_returns_error() {
         let (c, dm) = setup_initialized();
         let d = query_interface!(c, IDispatcher).unwrap();
 
@@ -1116,7 +1313,11 @@ mod tests {
         dm.convert_entry_to_block(1, 0x1000);
 
         let mut buf2 = vec![0u8; 4096];
-        assert!(d.lookup(1, make_handle(&mut buf2)).is_ok());
+        let err = d.lookup(1, make_handle(&mut buf2));
+        assert!(
+            matches!(err, Err(DispatcherError::IoError(_))),
+            "BlockDevice lookup without hardware should return IoError, got: {err:?}"
+        );
         d.shutdown().unwrap();
     }
 
