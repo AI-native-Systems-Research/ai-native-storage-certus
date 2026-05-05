@@ -1,11 +1,15 @@
-# Knowledgebase
+# Knowledge Base
 
-This is a placeholder for the knowledge base wiki.
+See **[README.md](README.md)** for the knowledge graph purpose, structure, and navigation.
 
-Inspired by Karpathy's blog: <https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f>
+## Quick Links
 
-[Software Component Architecture](component-architecture/WIKI.md)
+- [Component Index by Depth Level](_index.md)
+- [Status & Guard Rails](_status.md)
+- [Visual Dependency Graph](graph.html) — `python3 knowledge/build_graph.py` to regenerate
 
-[SPDK](spdk/WIKI.md)
+## Reference Material
 
-[Software Engineering at Google book](https://abseil.io/resources/swe-book/html/toc.html)
+- [Software Component Architecture](component-architecture/WIKI.md) — Szyperski, COM model
+- [SPDK](spdk/WIKI.md) — SPDK internals and usage
+- [Software Engineering at Google](https://abseil.io/resources/swe-book/html/toc.html)
