@@ -22,6 +22,7 @@ members = [
     "components/gpu-services/v0",
     "apps/gpu-handle-test-server",
     "apps/gpu-show",
+    "apps/certus-server",
     "certus-connector"
 ]
 
