@@ -165,6 +165,29 @@ git checkout -b unstable-kani --track origin/unstable
 
 ---
 
+## Automated Sync via GitHub Actions
+
+Two workflows in `.github/workflows/` handle the sync automatically:
+
+| Workflow | Trigger | Action on pass | Action on fail |
+|---|---|---|---|
+| `kani-sync-verify.yml` | push to `unstable` | merge + `cargo kani` + push `unstable-kani` | open GitHub issue |
+| `creusot-sync-verify.yml` | push to `unstable` | merge + Creusot verify + push `unstable-creusot` | open GitHub issue |
+
+**What this means in practice:**
+- Team members push to `unstable` as normal — no extra steps needed
+- The CI automatically keeps `unstable-kani` and `unstable-creusot` in sync
+- If a new `unstable` commit breaks a harness, a GitHub issue is opened
+  with a link to the failing run and instructions for resolution
+- If there is a merge conflict, the issue describes the manual resolution steps
+
+**The Creusot workflow currently exits 0** (placeholder) until the Creusot
+verification command is established in `tools/creusot/`. Update the
+`Run Creusot verification` step in `creusot-sync-verify.yml` when ready.
+
+**Kani version pinned to 0.67.0** with nightly-2025-11-21. Update both the
+`kani-cache` key and the `install` step when upgrading Kani.
+
 ## Quick Reference
 
 ```bash

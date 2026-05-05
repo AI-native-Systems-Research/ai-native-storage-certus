@@ -1,0 +1,115 @@
+# Triggered on every push to `unstable`.
+#
+# Merges the new unstable commit into `unstable-creusot`, runs Creusot
+# verification, and pushes the updated branch back if verification passes.
+# Opens a GitHub issue if either the merge or verification fails.
+#
+# NOTE: The Creusot verification command (marked TODO below) must be
+# filled in once the Creusot toolchain and proof targets are established
+# for this repository. See tools/creusot/ for current Creusot work.
+
+name: Creusot — sync and verify
+
+on:
+  push:
+    branches: [unstable]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync-and-verify:
+    name: Merge unstable → unstable-creusot and run Creusot
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout unstable-creusot
+        uses: actions/checkout@v4
+        with:
+          ref: unstable-creusot
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge origin/unstable into unstable-creusot
+        id: merge
+        run: |
+          git fetch origin unstable
+          if git merge origin/unstable --no-edit \
+               -m "chore: sync unstable → unstable-creusot [automated]"; then
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            echo "::error::Merge conflict between unstable and unstable-creusot — manual resolution required."
+            exit 1
+          fi
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      # TODO: replace this step with the real Creusot installation and
+      # verification command once the toolchain is pinned.
+      # Likely shape:
+      #   cargo creusot -- --why3-path <why3> <target-crate>
+      # See https://github.com/creusot-rs/creusot for installation docs.
+      - name: Run Creusot verification
+        run: |
+          echo "::warning::Creusot verification command not yet configured."
+          echo "Replace this step in .github/workflows/creusot-sync-verify.yml"
+          echo "once the Creusot toolchain and proof targets are established."
+          # Placeholder — exits 0 so the branch sync still works during setup.
+          exit 0
+
+      - name: Push updated unstable-creusot
+        if: success()
+        run: git push origin unstable-creusot
+
+      - name: Open issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha    = context.payload.after ?? context.sha;
+            const short  = sha.slice(0, 7);
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const merged = '${{ steps.merge.outputs.merged }}';
+
+            const title = merged === 'false'
+              ? `Merge conflict: unstable → unstable-creusot (${short})`
+              : `Creusot verification failure after unstable commit ${short}`;
+
+            const body = merged === 'false'
+              ? [
+                  `Automatic merge of \`unstable\` into \`unstable-creusot\` failed at commit \`${sha}\`.`,
+                  ``,
+                  `**Action required:** resolve the conflict manually:`,
+                  `\`\`\`bash`,
+                  `git fetch origin`,
+                  `git checkout unstable-creusot`,
+                  `git merge origin/unstable`,
+                  `# resolve conflicts, preserving Creusot specs and proofs`,
+                  `git push origin unstable-creusot`,
+                  `\`\`\``,
+                  `See [workflow run](${runUrl}) for details.`,
+                ].join('\n')
+              : [
+                  `Creusot verification failed on \`unstable-creusot\` after merging unstable commit \`${sha}\`.`,
+                  ``,
+                  `**Action required:** review the [failing run](${runUrl}) and either:`,
+                  `- Fix the issue introduced in \`unstable\`, or`,
+                  `- Update the Creusot proofs in \`unstable-creusot\` if the change is intentional.`,
+                ].join('\n');
+
+            await github.rest.issues.create({
+              owner:  context.repo.owner,
+              repo:   context.repo.repo,
+              title,
+              body,
+              labels: ['creusot', 'verification-failure'],
+            });
