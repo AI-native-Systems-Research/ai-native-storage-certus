@@ -55,3 +55,5 @@ bash "$SCRIPT" "$TARGET"
    - Breakdown by component/directory
    - Complexity indicators (files with highest function counts, deepest nesting)
    - Comparison of code vs tests vs comments ratios
+
+6. Write out the presented results to SUMMARY.md file. Interactively allow user to specify a different directory.
