@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use component_framework::define_component;
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_millis(100);
+const DEFAULT_TIMEOUT: Duration = Duration::from_millis(2000);
 use interfaces::{
     CacheKey, DispatchMapError, DmaAllocFn, DmaBuffer, IDispatchMap, IExtentManager, ILogger,
     LookupResult,
@@ -183,12 +183,18 @@ impl IDispatchMap for DispatchMapComponentV0 {
         }
 
         entry.location = Location::BlockDevice { offset };
+        if entry.read_ref > 0 {
+            entry.read_ref -= 1;
+        }
 
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!(
                 "dispatch-map: converted key {key} to storage at offset {offset}"
             ));
         }
+
+        drop(inner);
+        self.state.condvar.notify_all();
 
         Ok(())
     }

@@ -574,18 +574,20 @@ impl DispatcherComponentV0 {
                 defaults.slab_size
             };
             let max_extent_size = (slab_size.min(defaults.max_extent_size as u64)) as u32;
-            iem.format(FormatParams {
-                data_disk_size,
-                sector_size,
-                slab_size,
-                max_extent_size,
-                ..defaults
-            })
-            .map_err(|e| {
-                DispatcherError::IoError(format!(
-                    "failed to format extent manager for data drive {i}: {e}"
-                ))
-            })?;
+            if config.format_on_init {
+                iem.format(FormatParams {
+                    data_disk_size,
+                    sector_size,
+                    slab_size,
+                    max_extent_size,
+                    ..defaults
+                })
+                .map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "failed to format extent manager for data drive {i}: {e}"
+                    ))
+                })?;
+            }
 
             self.log_info(&format!(
                 "dispatcher: data drive {i} initialized at {addr_str} (block_device={:?})",
@@ -697,13 +699,7 @@ impl IDispatcher for DispatcherComponentV0 {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
 
-        dm.take_read(key)
-            .map_err(|_| DispatcherError::KeyNotFound(key))?;
-
         let result = dm.lookup(key);
-
-        dm.release_read(key)
-            .map_err(|_| DispatcherError::IoError("failed to release read lock".into()))?;
 
         let gpu = self
             .gpu_services
@@ -711,26 +707,33 @@ impl IDispatcher for DispatcherComponentV0 {
             .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
 
         match result {
-            Ok(lookup_result) => match lookup_result {
-                LookupResult::NotExist => Err(DispatcherError::KeyNotFound(key)),
-                LookupResult::MismatchSize => Err(DispatcherError::InvalidParameter(
-                    "size mismatch on lookup".into(),
-                )),
-                LookupResult::Staging { buffer } => {
-                    gpu.dma_copy_to_device(
-                        &buffer,
-                        ipc_handle.address as *mut std::ffi::c_void,
-                        ipc_handle.size as usize,
-                    )
-                    .map_err(|e| {
-                        DispatcherError::IoError(format!(
-                            "GPU DMA copy (staging→device) failed: {e}"
+            Ok(lookup_result) => {
+                use interfaces::LookupResult;
+                match lookup_result {
+                    LookupResult::NotExist => Err(DispatcherError::KeyNotFound(key)),
+                    LookupResult::MismatchSize => {
+                        let _ = dm.release_read(key);
+                        Err(DispatcherError::InvalidParameter(
+                            "size mismatch on lookup".into(),
                         ))
-                    })?;
-                    Ok(())
-                }
-                LookupResult::BlockDevice { offset } => {
-                    self.read_from_block_device(key, offset, &ipc_handle, &gpu)
+                    }
+                    LookupResult::Staging { buffer } => {
+                        let copy_result = gpu.dma_copy_to_device(
+                            &buffer,
+                            ipc_handle.address as *mut std::ffi::c_void,
+                            ipc_handle.size as usize,
+                        );
+                        let _ = dm.release_read(key);
+                        copy_result.map_err(|e| {
+                            DispatcherError::IoError(format!("GPU DMA copy (staging→device) failed: {e}"))
+                        })
+                    }
+                    LookupResult::BlockDevice { offset } => {
+                        let result =
+                            self.read_from_block_device(key, offset, &ipc_handle, &gpu);
+                        let _ = dm.release_read(key);
+                        result
+                    }
                 }
             },
             Err(_) => Err(DispatcherError::KeyNotFound(key)),
@@ -748,10 +751,11 @@ impl IDispatcher for DispatcherComponentV0 {
         match dm.lookup(key) {
             Ok(result) => {
                 use interfaces::LookupResult;
-                match result {
-                    LookupResult::NotExist => Ok(false),
-                    _ => Ok(true),
+                let exists = !matches!(result, LookupResult::NotExist);
+                if exists {
+                    let _ = dm.release_read(key);
                 }
+                Ok(exists)
             }
             Err(_) => Ok(false),
         }
