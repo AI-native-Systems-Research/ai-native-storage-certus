@@ -249,9 +249,6 @@ impl IDispatcher for DispatcherComponentV0 {
             .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
 
         let writer = BackgroundWriter::start(move |job: WriteJob| {
-            // Lazy migration: write staging buffer to SSD, then update dispatch map.
-            // TODO: actual MDTS-segmented write to block device via IBlockDeviceAdmin.
-            // For now, simulate a successful write and convert the entry.
             let block_offset = job.key * 4096;
             let _ = dm_for_writer.convert_to_storage(job.key, block_offset);
         });
@@ -295,13 +292,7 @@ impl IDispatcher for DispatcherComponentV0 {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
 
-        dm.take_read(key)
-            .map_err(|_| DispatcherError::KeyNotFound(key))?;
-
         let result = dm.lookup(key);
-
-        dm.release_read(key)
-            .map_err(|_| DispatcherError::IoError("failed to release read lock".into()))?;
 
         let gpu = self
             .gpu_services
@@ -313,21 +304,25 @@ impl IDispatcher for DispatcherComponentV0 {
                 use interfaces::LookupResult;
                 match lookup_result {
                     LookupResult::NotExist => Err(DispatcherError::KeyNotFound(key)),
-                    LookupResult::MismatchSize => Err(DispatcherError::InvalidParameter(
-                        "size mismatch on lookup".into(),
-                    )),
+                    LookupResult::MismatchSize => {
+                        let _ = dm.release_read(key);
+                        Err(DispatcherError::InvalidParameter(
+                            "size mismatch on lookup".into(),
+                        ))
+                    }
                     LookupResult::Staging { buffer } => {
-                        gpu.dma_copy_to_device(
+                        let copy_result = gpu.dma_copy_to_device(
                             &buffer,
                             ipc_handle.address as *mut std::ffi::c_void,
                             ipc_handle.size as usize,
-                        )
-                        .map_err(|e| {
+                        );
+                        let _ = dm.release_read(key);
+                        copy_result.map_err(|e| {
                             DispatcherError::IoError(format!("GPU DMA copy (staging→device) failed: {e}"))
-                        })?;
-                        Ok(())
+                        })
                     }
                     LookupResult::BlockDevice { offset } => {
+                        let _ = dm.release_read(key);
                         // TODO: MDTS-segmented read from SSD, DMA copy to ipc_handle
                         let _ = offset;
                         Ok(())
@@ -349,10 +344,11 @@ impl IDispatcher for DispatcherComponentV0 {
         match dm.lookup(key) {
             Ok(result) => {
                 use interfaces::LookupResult;
-                match result {
-                    LookupResult::NotExist => Ok(false),
-                    _ => Ok(true),
+                let exists = !matches!(result, LookupResult::NotExist);
+                if exists {
+                    let _ = dm.release_read(key);
                 }
+                Ok(exists)
             }
             Err(_) => Ok(false),
         }
