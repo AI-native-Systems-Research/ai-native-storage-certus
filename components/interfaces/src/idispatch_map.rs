@@ -44,6 +44,8 @@ pub enum DispatchMapError {
     NotInitialized(String),
     /// Reference count underflow (release when already zero).
     RefCountUnderflow(CacheKey),
+    /// Reference count overflow (acquire when already at u32::MAX).
+    RefCountOverflow(CacheKey),
     /// Downgrade requested but no write reference is held.
     NoWriteReference(CacheKey),
     /// Operation invalid for the current entry state.
@@ -61,6 +63,7 @@ impl fmt::Display for DispatchMapError {
             Self::InvalidSize => write!(f, "invalid size: must be > 0"),
             Self::NotInitialized(msg) => write!(f, "not initialized: {msg}"),
             Self::RefCountUnderflow(k) => write!(f, "ref count underflow on key: {k}"),
+            Self::RefCountOverflow(k) => write!(f, "ref count overflow on key: {k}"),
             Self::NoWriteReference(k) => write!(f, "no write reference held on key: {k}"),
             Self::InvalidState(msg) => write!(f, "invalid state: {msg}"),
         }

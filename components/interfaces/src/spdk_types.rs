@@ -187,6 +187,7 @@ pub struct VfioDevice {
 ///   [`DmaBuffer::from_raw`], with a caller-supplied deallocation function.
 ///
 /// On [`Drop`] the stored deallocator is called automatically.
+#[cfg(not(kani))]
 pub struct DmaBuffer {
     ptr: *mut std::ffi::c_void,
     len: usize,
@@ -195,6 +196,15 @@ pub struct DmaBuffer {
     /// NUMA node the memory was allocated from, or -1 if unknown.
     numa_node: i32,
     /// Optional key-value metadata (e.g. `"gpu_device" => "0"`).
+    metadata: BTreeMap<String, String>,
+}
+
+/// Kani stub: same public API as the production `DmaBuffer` but backed by a
+/// plain `Vec<u8>` so the verifier never sees raw pointers or SPDK FFI calls.
+#[cfg(kani)]
+pub struct DmaBuffer {
+    data: Vec<u8>,
+    numa_node: i32,
     metadata: BTreeMap<String, String>,
 }
 
@@ -223,9 +233,19 @@ pub type DmaAllocFn =
 // It is valid from any thread once allocated. Sync is required for
 // Arc<DmaBuffer> to be Send, and access is serialized by the dispatch
 // map's Mutex.
+#[cfg(not(kani))]
 unsafe impl Send for DmaBuffer {}
+#[cfg(not(kani))]
 unsafe impl Sync for DmaBuffer {}
 
+// Kani stub: Vec<u8> is already Send + Sync; the unsafe impls are still needed
+// because DmaBuffer is used inside Arc in component code.
+#[cfg(kani)]
+unsafe impl Send for DmaBuffer {}
+#[cfg(kani)]
+unsafe impl Sync for DmaBuffer {}
+
+#[cfg(not(kani))]
 impl DmaBuffer {
     /// Allocate a zero-initialized DMA buffer.
     ///
@@ -372,6 +392,7 @@ impl DmaBuffer {
     }
 }
 
+#[cfg(not(kani))]
 impl Drop for DmaBuffer {
     fn drop(&mut self) {
         // Only call the SPDK deallocator if the SPDK environment is still
@@ -389,6 +410,7 @@ impl Drop for DmaBuffer {
     }
 }
 
+#[cfg(not(kani))]
 impl Deref for DmaBuffer {
     type Target = [u8];
 
@@ -398,6 +420,7 @@ impl Deref for DmaBuffer {
     }
 }
 
+#[cfg(not(kani))]
 impl DerefMut for DmaBuffer {
     #[inline]
     fn deref_mut(&mut self) -> &mut [u8] {
@@ -405,6 +428,7 @@ impl DerefMut for DmaBuffer {
     }
 }
 
+#[cfg(not(kani))]
 impl fmt::Debug for DmaBuffer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut s = f.debug_struct("DmaBuffer");
@@ -415,5 +439,116 @@ impl fmt::Debug for DmaBuffer {
             s.field("metadata", &self.metadata);
         }
         s.finish()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Kani stub impls for DmaBuffer
+// ---------------------------------------------------------------------------
+
+#[cfg(kani)]
+impl DmaBuffer {
+    pub fn new(size: usize, _align: usize, numa_node: Option<i32>) -> Result<Self, SpdkEnvError> {
+        if size == 0 {
+            return Err(SpdkEnvError::DmaAllocationFailed(
+                "DmaBuffer size must be > 0".into(),
+            ));
+        }
+        Ok(Self {
+            data: vec![0u8; size],
+            numa_node: numa_node.unwrap_or(-1),
+            metadata: BTreeMap::new(),
+        })
+    }
+
+    pub unsafe fn from_raw(
+        _ptr: *mut std::ffi::c_void,
+        len: usize,
+        _free_fn: unsafe extern "C" fn(*mut std::ffi::c_void),
+        numa_node: i32,
+    ) -> Result<Self, SpdkEnvError> {
+        if len == 0 {
+            return Err(SpdkEnvError::DmaAllocationFailed(
+                "DmaBuffer size must be > 0".into(),
+            ));
+        }
+        Ok(Self {
+            data: vec![0u8; len],
+            numa_node,
+            metadata: BTreeMap::new(),
+        })
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
+    #[inline]
+    pub fn as_ptr(&self) -> *mut std::ffi::c_void {
+        self.data.as_ptr() as *mut std::ffi::c_void
+    }
+
+    #[inline]
+    pub fn as_slice(&self) -> &[u8] {
+        &self.data
+    }
+
+    #[inline]
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        &mut self.data
+    }
+
+    #[inline]
+    pub fn numa_node(&self) -> i32 {
+        self.numa_node
+    }
+
+    #[inline]
+    pub fn set_numa_node(&mut self, node: i32) {
+        self.numa_node = node;
+    }
+
+    #[inline]
+    pub fn metadata(&self) -> &BTreeMap<String, String> {
+        &self.metadata
+    }
+
+    #[inline]
+    pub fn metadata_mut(&mut self) -> &mut BTreeMap<String, String> {
+        &mut self.metadata
+    }
+}
+
+#[cfg(kani)]
+impl Deref for DmaBuffer {
+    type Target = [u8];
+
+    #[inline]
+    fn deref(&self) -> &[u8] {
+        &self.data
+    }
+}
+
+#[cfg(kani)]
+impl DerefMut for DmaBuffer {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut [u8] {
+        &mut self.data
+    }
+}
+
+#[cfg(kani)]
+impl fmt::Debug for DmaBuffer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DmaBuffer")
+            .field("len", &self.data.len())
+            .field("numa_node", &self.numa_node)
+            .finish()
     }
 }
