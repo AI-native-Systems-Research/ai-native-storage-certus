@@ -1,8 +1,30 @@
 //! IDispatcher interface and associated types for the dispatcher component.
 
 use std::fmt;
+#[cfg(feature = "spdk")]
+use std::sync::Arc;
 
 use crate::idispatch_map::CacheKey;
+#[cfg(feature = "spdk")]
+use crate::spdk_types::DmaBuffer;
+
+/// Block device component version used internally by the dispatcher.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BlockDeviceVersion {
+    /// block-device-spdk-nvme v1
+    V1,
+    /// block-device-spdk-nvme v2 (latest)
+    #[default]
+    V2,
+}
+
+/// Extent manager component version used internally by the dispatcher.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExtentManagerVersion {
+    /// extent-manager v2 (latest)
+    #[default]
+    V2,
+}
 
 /// Configuration for dispatcher initialization.
 ///
@@ -17,6 +39,7 @@ use crate::idispatch_map::CacheKey;
 ///         "0000:02:00.0".to_string(),
 ///         "0000:03:00.0".to_string(),
 ///     ],
+///     ..Default::default()
 /// };
 /// assert_eq!(config.data_pci_addrs.len(), 2);
 /// ```
@@ -26,6 +49,29 @@ pub struct DispatcherConfig {
     pub metadata_pci_addr: String,
     /// PCI addresses of N data block devices (one per extent manager).
     pub data_pci_addrs: Vec<String>,
+    /// Which block device component version to use.
+    pub block_device_version: BlockDeviceVersion,
+    /// Which extent manager component version to use.
+    pub extent_manager_version: ExtentManagerVersion,
+    /// Maximum number of cache entries before eviction begins.
+    /// Default: 10000. Set to 0 to disable eviction.
+    pub max_cache_entries: usize,
+    /// Fraction of max_cache_entries at which eviction triggers (0.0–1.0).
+    /// Default: 0.8 (eviction starts at 80% capacity).
+    pub eviction_threshold: f64,
+}
+
+impl Default for DispatcherConfig {
+    fn default() -> Self {
+        Self {
+            metadata_pci_addr: String::new(),
+            data_pci_addrs: Vec::new(),
+            block_device_version: BlockDeviceVersion::default(),
+            extent_manager_version: ExtentManagerVersion::default(),
+            max_cache_entries: 10000,
+            eviction_threshold: 0.8,
+        }
+    }
 }
 
 /// Opaque handle to client GPU memory for DMA transfers.
@@ -136,6 +182,27 @@ component_macros::define_interface! {
         /// and returns immediately. The staging-to-SSD write happens
         /// asynchronously in the background.
         fn populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>;
+
+        /// Prepare a store operation for the given cache key.
+        ///
+        /// Runs eviction if the cache is over capacity, allocates an extent
+        /// on the target data drive, and returns a DMA buffer the caller can
+        /// write into. The extent is committed when the caller subsequently
+        /// calls `commit_store`.
+        fn prepare_store(&self, key: CacheKey, size: u32) -> Result<Arc<DmaBuffer>, DispatcherError>;
+
+        /// Commit a previously prepared store, writing the DMA buffer to SSD.
+        ///
+        /// Retrieves the pending write for `key`, writes the buffer contents
+        /// to the reserved extent on SSD, publishes the extent metadata, and
+        /// registers the entry in the dispatch map as block-device-backed.
+        fn commit_store(&self, key: CacheKey) -> Result<(), DispatcherError>;
+
+        /// Cancel a previously prepared store, freeing the reserved extent.
+        ///
+        /// Removes and drops the pending write for `key`. The `WriteHandle`
+        /// destructor automatically aborts the extent reservation.
+        fn cancel_store(&self, key: CacheKey) -> Result<(), DispatcherError>;
     }
 }
 
@@ -190,6 +257,7 @@ mod tests {
         let config = DispatcherConfig {
             metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
+            ..Default::default()
         };
         let config2 = config.clone();
         assert_eq!(config2.data_pci_addrs.len(), 1);

@@ -1,11 +1,11 @@
 ---
 name: save
-description: Save current session transcript to markdown with per-turn token counts and cost breakdown.
+description: Save current session transcript to markdown with per-turn token counts, cost breakdown, and context usage.
 allowed-tools: Bash(*)
 argument-hint: "[output_path]"
 ---
 
-Save the current Claude Code session transcript as a markdown file with token usage and cost stats.
+Save the current Claude Code session transcript as a markdown file with token usage, cost stats (/cost), and context window utilization (/context). Never overwrites existing files — appends -1, -2, etc. suffixes.
 
 The user may pass an optional output path as an argument. If provided, use it as OUT. Otherwise default to the current directory.
 
@@ -26,15 +26,20 @@ fi
 echo "JSONL: $JSONL"
 ```
 
-2. Determine output path — use the argument if provided, otherwise save to current directory:
+2. Determine output path — use the argument if provided, otherwise save to current directory. If the argument is a directory, create the transcript file inside it:
 
 ```bash
 SESSION_ID=$(basename "$JSONL" .jsonl)
 DATE=$(date +%Y-%m-%d)
+DEFAULT_NAME="transcript_${SESSION_ID}_${DATE}.md"
 if [[ -n "$ARGUMENTS" ]]; then
-    OUT="$ARGUMENTS"
+    if [[ -d "$ARGUMENTS" ]]; then
+        OUT="${ARGUMENTS%/}/${DEFAULT_NAME}"
+    else
+        OUT="$ARGUMENTS"
+    fi
 else
-    OUT="$(pwd)/transcript_${SESSION_ID}_${DATE}.md"
+    OUT="$(pwd)/${DEFAULT_NAME}"
 fi
 ```
 

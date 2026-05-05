@@ -186,6 +186,11 @@ impl IDispatchMap for MockDispatchMap {
             Err(DispatchMapError::KeyNotFound(key))
         }
     }
+
+    fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
+        let inner = self.inner.lock().unwrap();
+        inner.entries.keys().copied().take(n).collect()
+    }
 }
 
 struct MockLogger;
@@ -267,6 +272,7 @@ fn setup() -> (Arc<DispatcherComponentV0>, Arc<MockDispatchMap>) {
     d.initialize(DispatcherConfig {
         metadata_pci_addr: "0000:01:00.0".to_string(),
         data_pci_addrs: vec!["0000:02:00.0".to_string()],
+        ..Default::default()
     })
     .unwrap();
 
@@ -317,27 +323,30 @@ fn multiple_entries_all_migrate() {
 }
 
 #[test]
-fn lookup_succeeds_after_migration() {
+fn lookup_after_migration_requires_hardware() {
     let (c, _dm) = setup();
     let d = query_interface!(c, IDispatcher).unwrap();
 
     let mut buf = vec![0u8; 4096];
     d.populate(42, make_handle(&mut buf)).unwrap();
 
-    // Drain bg writer
+    // Drain bg writer — entry is now marked as BlockDevice
     d.shutdown().unwrap();
 
     // Re-initialize to allow lookups
     d.initialize(DispatcherConfig {
         metadata_pci_addr: "0000:01:00.0".to_string(),
         data_pci_addrs: vec!["0000:02:00.0".to_string()],
+        ..Default::default()
     })
     .unwrap();
 
+    // Without real block devices, lookup on a migrated entry returns IoError
     let mut buf2 = vec![0u8; 4096];
+    let result = d.lookup(42, make_handle(&mut buf2));
     assert!(
-        d.lookup(42, make_handle(&mut buf2)).is_ok(),
-        "lookup should succeed on migrated entry"
+        result.is_err(),
+        "lookup on migrated entry without hardware should fail"
     );
 
     d.shutdown().unwrap();
@@ -356,6 +365,7 @@ fn check_finds_migrated_entry() {
     d.initialize(DispatcherConfig {
         metadata_pci_addr: "0000:01:00.0".to_string(),
         data_pci_addrs: vec!["0000:02:00.0".to_string()],
+        ..Default::default()
     })
     .unwrap();
 

@@ -13,10 +13,25 @@ fi
 SESSION_ID="$(basename "$JSONL" .jsonl)"
 DATE="$(date +%Y-%m-%d)"
 
+DEFAULT_NAME="transcript_${SESSION_ID}_${DATE}.md"
 if [[ -n "${2:-}" ]]; then
-    OUT="$2"
+    if [[ -d "$2" ]]; then
+        OUT="${2%/}/${DEFAULT_NAME}"
+    else
+        OUT="$2"
+    fi
 else
-    OUT="$(pwd)/transcript_${SESSION_ID}_${DATE}.md"
+    OUT="$(pwd)/${DEFAULT_NAME}"
+fi
+
+# Avoid overwriting existing files — append -1, -2, etc.
+if [[ -f "$OUT" ]]; then
+    BASE="${OUT%.md}"
+    SUFFIX=1
+    while [[ -f "${BASE}-${SUFFIX}.md" ]]; do
+        ((SUFFIX++))
+    done
+    OUT="${BASE}-${SUFFIX}.md"
 fi
 
 # Pricing per million tokens (claude-sonnet-4-6 defaults — edit as needed)
@@ -70,6 +85,7 @@ start_ts = turns[0].get('timestamp', '') if turns else ''
 end_ts   = turns[-1].get('timestamp', '') if turns else ''
 
 ti = to = tcw = tcr = 0
+last_input = 0
 for r in turns:
     if r.get('type') == 'assistant':
         u = r.get('message', {}).get('usage', {})
@@ -77,20 +93,35 @@ for r in turns:
         to  += u.get('output_tokens', 0)
         tcw += u.get('cache_creation_input_tokens', 0)
         tcr += u.get('cache_read_input_tokens', 0)
+        last_input = u.get('input_tokens', 0) + u.get('cache_creation_input_tokens', 0) + u.get('cache_read_input_tokens', 0)
 
 cost = ti*p_in/1e6 + to*p_out/1e6 + tcw*p_cw/1e6 + tcr*p_cr/1e6
 
+# Context window usage (last turn's input is the current context size)
+CONTEXT_LIMIT = 200000
+context_used = last_input
+context_pct = (context_used / CONTEXT_LIMIT * 100) if CONTEXT_LIMIT else 0
+
 lines = [
     f'# Transcript: {session_id}', '',
+    '## Session Info', '',
     '| Field | Value |', '|-------|-------|',
     f'| Model | {model} |',
     f'| Start | {fmt_ts(start_ts)} |',
     f'| End   | {fmt_ts(end_ts)} |',
+    f'| Turns | {len([r for r in turns if r.get("type") == "user"])} |',
+    '', '## Cost (/cost)', '',
+    '| Metric | Value |', '|--------|-------|',
     f'| Input tokens | {ti:,} |',
     f'| Output tokens | {to:,} |',
     f'| Cache write tokens | {tcw:,} |',
     f'| Cache read tokens | {tcr:,} |',
     f'| **Estimated cost** | **${cost:.4f}** |',
+    '', '## Context (/context)', '',
+    '| Metric | Value |', '|--------|-------|',
+    f'| Context used (last turn) | {context_used:,} tokens |',
+    f'| Context limit | {CONTEXT_LIMIT:,} tokens |',
+    f'| Context utilization | {context_pct:.1f}% |',
     '', '---', '',
 ]
 
@@ -118,6 +149,7 @@ for r in turns:
 
 open(out, 'w').write('\n'.join(lines))
 print(f'Saved: {out}')
-print(f'Cost:  ${cost:.4f}')
+print(f'Cost:  ${cost:.4f}  (in:{ti:,} out:{to:,} cw:{tcw:,} cr:{tcr:,})')
+print(f'Context: {context_used:,} / {CONTEXT_LIMIT:,} tokens ({context_pct:.1f}%)')
 print(f'Turns: {turn_num}')
 PYEOF

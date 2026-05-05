@@ -10,9 +10,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use component_core::query_interface;
-use interfaces::{
-    CacheKey, DispatcherConfig, IDispatchMap, IDispatcher, IGpuServices, IpcHandle,
-};
+use interfaces::{CacheKey, DispatcherConfig, IDispatchMap, IDispatcher, IGpuServices, IpcHandle};
 
 use crate::keys;
 
@@ -81,16 +79,14 @@ impl EngineInner {
 
         // --- Initialize GPU services ---
         let gpu_comp = gpu_services::GpuServicesComponentV0::new();
-        let gpu: Arc<dyn IGpuServices + Send + Sync> =
-            query_interface!(gpu_comp, IGpuServices)
-                .ok_or_else(|| PyRuntimeError::new_err("failed to query IGpuServices"))?;
+        let gpu: Arc<dyn IGpuServices + Send + Sync> = query_interface!(gpu_comp, IGpuServices)
+            .ok_or_else(|| PyRuntimeError::new_err("failed to query IGpuServices"))?;
         gpu.initialize()
             .map_err(|e| PyRuntimeError::new_err(format!("GPU init failed: {e}")))?;
 
         // --- Create dispatch map ---
-        let dm_comp = dispatch_map::DispatchMapComponentV0::new(
-            dispatch_map::DispatchMapState::default(),
-        );
+        let dm_comp =
+            dispatch_map::DispatchMapComponentV0::new(dispatch_map::DispatchMapState::default());
         let dm: Arc<dyn IDispatchMap + Send + Sync> = query_interface!(dm_comp, IDispatchMap)
             .ok_or_else(|| PyRuntimeError::new_err("failed to query IDispatchMap"))?;
         dm.initialize()
@@ -119,6 +115,10 @@ impl EngineInner {
             .initialize(DispatcherConfig {
                 metadata_pci_addr,
                 data_pci_addrs,
+                block_device_version: todo!(),
+                extent_manager_version: interfaces::ExtentManagerVersion::V2,
+                max_cache_entries: todo!(),
+                eviction_threshold: todo!(),
             })
             .map_err(|e| PyRuntimeError::new_err(format!("Dispatcher init failed: {e}")))?;
 
@@ -214,12 +214,7 @@ impl EngineInner {
     // ─── Handler-level operations ──────────────────────────────────────
 
     /// Submit async GPU→DRAM→NVMe transfer (store).
-    pub fn store_async(
-        &self,
-        job_id: u64,
-        gpu_block_ids: &[u64],
-        keys: &[u64],
-    ) -> PyResult<bool> {
+    pub fn store_async(&self, job_id: u64, gpu_block_ids: &[u64], keys: &[u64]) -> PyResult<bool> {
         self.ensure_init()?;
 
         if gpu_block_ids.len() != keys.len() {
@@ -270,12 +265,7 @@ impl EngineInner {
     }
 
     /// Submit async NVMe/DRAM→GPU transfer (load).
-    pub fn load_async(
-        &self,
-        job_id: u64,
-        gpu_block_ids: &[u64],
-        keys: &[u64],
-    ) -> PyResult<bool> {
+    pub fn load_async(&self, job_id: u64, gpu_block_ids: &[u64], keys: &[u64]) -> PyResult<bool> {
         self.ensure_init()?;
 
         if gpu_block_ids.len() != keys.len() {

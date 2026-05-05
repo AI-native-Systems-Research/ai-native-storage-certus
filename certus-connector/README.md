@@ -137,7 +137,7 @@ There are three layers. Only the bottom one (Rust components) needs new work:
 └───────────────────────────────────┬─────────────────────────────────────┘
                                     │ calls via component interfaces
 ┌───────────────────────────────────▼─────────────────────────────────────┐
-│  Layer 3: Rust components (Daniel's work)                               │
+│  Layer 3: Rust components                                               │
 │  dispatch-map: threshold LRU, ref-counting, evict_lru(n, protected)     │
 │  dispatcher: integrate eviction into prepare_store path                 │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -148,14 +148,14 @@ Per-method breakdown:
 | `native_manager.py` calls | `CertusEngine` method | Rust component work | Status |
 |---|---|---|---|
 | `lookup(keys)` | `batch_check(keys)` | `dispatcher.check()` per key | **Done** |
-| `prepare_store(keys)` | `prepare_store(keys)` | Dispatch-map: `evict_lru(n, protected)` when full; dispatcher: remove evicted, allocate new | **Daniel: in progress** |
+| `prepare_store(keys)` | `prepare_store(keys)` | Dispatch-map: `evict_lru(n, protected)` when full; dispatcher: remove evicted, allocate new | **In progress** |
 | `complete_store(keys, ok)` | `complete_store(keys, ok)` | On failure: `dispatcher.remove()` per key. On success: mark ready in dispatch-map. | **Partially done** (remove works, readiness gating TBD) |
-| `touch(keys)` | `touch(keys)` | Dispatch-map: update threshold LRU ordering | **Daniel: in progress** |
+| `touch(keys)` | `touch(keys)` | Dispatch-map: update threshold LRU ordering | **In progress** |
 | `prepare_load(keys)` | (not wired yet) | Dispatch-map: increment `ref_cnt` (eviction protection only, no physical pin) | **Needs implementing** |
 | `complete_load(keys)` | (no-op) | Dispatch-map: decrement `ref_cnt` | **Needs implementing** |
 | `shutdown()` | `shutdown()` | `dispatcher.shutdown()` + `gpu.shutdown()` | **Done** |
 
-### What Daniel needs to add to dispatch-map
+### What needs to be added to dispatch-map
 
 ```rust
 // New methods on IDispatchMap (or a new IEvictionPolicy trait):
@@ -209,8 +209,8 @@ for managing the DRAM tier and is invisible to vLLM.
 
 | # | Requirement | Status | Notes |
 |---|-------------|--------|-------|
-| 1 | **Eviction in `prepare_store`** | In progress (Daniel) | On-demand only: when extent manager is full, query dispatch-map for LRU victims with `ref_cnt == 0`, call `dispatcher.remove()`, retry allocation. No background eviction thread — `prepare_store` is the sole trigger. |
-| 2 | **LRU ordering in `touch`** | In progress (Daniel) | Threshold LRU — dispatch-map tracks access order so eviction picks the coldest block. Updated on `touch`, scanned on `prepare_store`. No background sweep needed. |
+| 1 | **Eviction in `prepare_store`** | In progress | On-demand only: when extent manager is full, query dispatch-map for LRU victims with `ref_cnt == 0`, call `dispatcher.remove()`, retry allocation. No background eviction thread — `prepare_store` is the sole trigger. |
+| 2 | **LRU ordering in `touch`** | In progress | Threshold LRU — dispatch-map tracks access order so eviction picks the coldest block. Updated on `touch`, scanned on `prepare_store`. No background sweep needed. |
 | 3 | **Ref-counting (`prepare_load` / `complete_load`)** | Not yet implemented | Pinned blocks (`ref_cnt > 0`) must be skipped during eviction. Currently `complete_load` is a no-op. |
 | 4 | **Readiness gating** | Partially implemented | Blocks must not be returned by `lookup` or `prepare_load` until `complete_store(success=True)`. Dispatcher's `check()` may already handle this if dispatch-map tracks readiness. |
 | 5 | **Atomic eviction** | Not yet implemented | If N evictions are requested but fewer than N unpinned blocks exist, evict nothing and return `None`. Must be all-or-nothing. |
@@ -237,6 +237,23 @@ eviction-protection semantics matter.
 **Key implication for capacity**: `prepare_store` returning `None` means the NVMe extent
 manager is full AND there are not enough unpinned blocks to evict. The DRAM staging pool
 cannot overflow because the dispatcher controls admission.
+
+### Possible bugs in current dispatcher implementation
+
+These were identified by code review. Both only manifest against the real
+`DispatchMapComponentV0` — the mock used in unit tests does not expose them.
+
+1. **`check()` leaks read references** — `dispatcher::check()` calls `dm.lookup()`, which
+   increments `read_ref` in the dispatch-map but is never followed by `release_read()`. Every
+   `check()` call permanently pins the entry, making it un-evictable. Fix: call `release_read`
+   after the lookup, or add a non-ref-counting existence check to `IDispatchMap`.
+
+2. **`run_eviction_cycle` always times out** — the cycle calls `dm.lookup(key)` (which
+   increments `read_ref`), then immediately calls `dm.take_write(key)` (which waits for
+   `read_ref == 0`). The write lock always times out, so no entries are ever evicted. The
+   mock's `take_write` doesn't check `read_refs`, which is why eviction tests pass.
+   Fix: obtain the block offset without incrementing `read_ref` (e.g. a separate
+   `block_offset(key)` query), or release the read reference before attempting the write lock.
 
 ### gRPC handler equivalence
 

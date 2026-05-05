@@ -281,6 +281,11 @@ impl IDispatchMap for HwDispatchMap {
             Err(DispatchMapError::KeyNotFound(key))
         }
     }
+
+    fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
+        let inner = self.inner.lock().unwrap();
+        inner.keys().copied().take(n).collect()
+    }
 }
 
 // ===========================================================================
@@ -336,6 +341,7 @@ fn create_dispatcher(
     let config = DispatcherConfig {
         metadata_pci_addr: pci_addrs[0].clone(),
         data_pci_addrs: pci_addrs.to_vec(),
+        ..Default::default()
     };
     d.initialize(config).expect("dispatcher initialize failed");
 
@@ -835,15 +841,271 @@ fn hw_data_integrity() {
         d.initialize(DispatcherConfig {
             metadata_pci_addr: pci_addrs[0].clone(),
             data_pci_addrs: pci_addrs[..1].to_vec(),
+            ..Default::default()
         })
         .expect("re-initialize failed");
 
-        // After migration, lookup hits BlockDevice path (offset-based).
-        // The current BlockDevice lookup path is a TODO (doesn't copy data),
-        // so we verify the entry still exists via check().
-        assert_eq!(d.check(900).unwrap(), true, "migrated entry should exist");
+        // After migration, lookup hits the BlockDevice path — read from SSD.
+        let mut dst = vec![0u8; 8192];
+        d.lookup(900, make_handle(&mut dst))
+            .expect("lookup on migrated entry should succeed");
+        assert_eq!(src, dst, "post-migration SSD readback data mismatch");
     }
 
     d.shutdown().unwrap();
     eprintln!("\n=== DATA INTEGRITY TEST PASSED ===");
+}
+
+// ===========================================================================
+// SSD read-back integrity test — full staging → SSD → read-back cycle
+// ===========================================================================
+
+#[test]
+fn hw_ssd_readback_integrity() {
+    let pci_addrs = discover_devices();
+    let (comp, dm) = create_dispatcher(&pci_addrs[..1]);
+    let d: Arc<dyn IDispatcher + Send + Sync> = query_interface!(comp, IDispatcher).unwrap();
+
+    // =======================================================================
+    // 1. Single 4 KiB block — deterministic pattern
+    // =======================================================================
+    eprintln!("\n=== SSD Readback 1: single 4 KiB block ===");
+    let src_4k: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+    {
+        let mut buf = src_4k.clone();
+        d.populate(1000, make_handle(&mut buf)).unwrap();
+    }
+
+    // =======================================================================
+    // 2. Multi-block — 12 KiB (3 blocks)
+    // =======================================================================
+    eprintln!("=== SSD Readback 2: multi-block 12 KiB ===");
+    let src_12k: Vec<u8> = (0..12288).map(|i| ((i * 7 + 13) % 256) as u8).collect();
+    {
+        let mut buf = src_12k.clone();
+        d.populate(1001, make_handle(&mut buf)).unwrap();
+    }
+
+    // =======================================================================
+    // 3. Large buffer — 256 KiB (MDTS segmentation)
+    // =======================================================================
+    eprintln!("=== SSD Readback 3: large 256 KiB buffer ===");
+    let src_256k: Vec<u8> = (0..256 * 1024)
+        .map(|i| ((i * 31 + 17) % 256) as u8)
+        .collect();
+    {
+        let mut buf = src_256k.clone();
+        d.populate(1002, make_handle(&mut buf)).unwrap();
+    }
+
+    // =======================================================================
+    // 4. Non-aligned size — 5000 bytes
+    // =======================================================================
+    eprintln!("=== SSD Readback 4: non-aligned 5000 bytes ===");
+    let src_5000: Vec<u8> = (0..5000).map(|i| ((i ^ 0xAB) % 256) as u8).collect();
+    {
+        let mut buf = src_5000.clone();
+        d.populate(1003, make_handle(&mut buf)).unwrap();
+    }
+
+    // =======================================================================
+    // 5. Multiple distinct patterns (cross-contamination check)
+    // =======================================================================
+    eprintln!("=== SSD Readback 5: 10 distinct keys ===");
+    let patterns: Vec<Vec<u8>> = (0..10u64)
+        .map(|k| {
+            (0..4096)
+                .map(|i| ((i + k as usize * 37) % 256) as u8)
+                .collect()
+        })
+        .collect();
+    for (k, pat) in patterns.iter().enumerate() {
+        let mut buf = pat.clone();
+        d.populate(2000 + k as u64, make_handle(&mut buf)).unwrap();
+    }
+
+    // =======================================================================
+    // Force migration: shutdown drains the background writer, writing to SSD
+    // =======================================================================
+    eprintln!("\n=== Forcing migration (shutdown) ===");
+    d.shutdown().unwrap();
+
+    let total = dm.entry_count();
+    let migrated = dm.migrated_count();
+    eprintln!("  {migrated}/{total} entries migrated to SSD");
+    assert_eq!(migrated, total, "all entries should be migrated");
+
+    // =======================================================================
+    // Re-initialize for read-back
+    // =======================================================================
+    eprintln!("=== Re-initializing for SSD read-back ===");
+    d.initialize(DispatcherConfig {
+        metadata_pci_addr: pci_addrs[0].clone(),
+        data_pci_addrs: pci_addrs[..1].to_vec(),
+        ..Default::default()
+    })
+    .expect("re-initialize failed");
+
+    // =======================================================================
+    // Verify 1: single 4 KiB block
+    // =======================================================================
+    eprintln!("=== Verify 1: 4 KiB readback ===");
+    {
+        let mut dst = vec![0u8; 4096];
+        d.lookup(1000, make_handle(&mut dst))
+            .expect("4KiB SSD readback failed");
+        assert_eq!(src_4k, dst, "4 KiB SSD readback data mismatch");
+    }
+
+    // =======================================================================
+    // Verify 2: multi-block 12 KiB
+    // =======================================================================
+    eprintln!("=== Verify 2: 12 KiB readback ===");
+    {
+        let mut dst = vec![0u8; 12288];
+        d.lookup(1001, make_handle(&mut dst))
+            .expect("12KiB SSD readback failed");
+        assert_eq!(src_12k, dst, "12 KiB SSD readback data mismatch");
+    }
+
+    // =======================================================================
+    // Verify 3: large 256 KiB
+    // =======================================================================
+    eprintln!("=== Verify 3: 256 KiB readback ===");
+    {
+        let mut dst = vec![0u8; 256 * 1024];
+        d.lookup(1002, make_handle(&mut dst))
+            .expect("256KiB SSD readback failed");
+        assert_eq!(src_256k, dst, "256 KiB SSD readback data mismatch");
+    }
+
+    // =======================================================================
+    // Verify 4: non-aligned 5000 bytes
+    // =======================================================================
+    eprintln!("=== Verify 4: 5000 bytes readback ===");
+    {
+        let mut dst = vec![0u8; 5000];
+        d.lookup(1003, make_handle(&mut dst))
+            .expect("5000B SSD readback failed");
+        assert_eq!(src_5000, dst, "5000 bytes SSD readback data mismatch");
+    }
+
+    // =======================================================================
+    // Verify 5: cross-contamination check
+    // =======================================================================
+    eprintln!("=== Verify 5: cross-contamination check ===");
+    for (k, pat) in patterns.iter().enumerate() {
+        let mut dst = vec![0u8; 4096];
+        d.lookup(2000 + k as u64, make_handle(&mut dst))
+            .unwrap_or_else(|e| panic!("SSD readback key {} failed: {e}", 2000 + k));
+        assert_eq!(
+            pat, &dst,
+            "cross-contamination: key {} SSD readback mismatch",
+            2000 + k
+        );
+    }
+
+    d.shutdown().unwrap();
+    eprintln!("\n=== SSD READBACK INTEGRITY TEST PASSED ===");
+}
+
+// ===========================================================================
+// prepare_store → commit_store → lookup integration test
+// ===========================================================================
+
+#[test]
+fn hw_prepare_commit_store() {
+    let pci_addrs = discover_devices();
+    let (comp, _dm) = create_dispatcher(&pci_addrs[..1]);
+    let d: Arc<dyn IDispatcher + Send + Sync> = query_interface!(comp, IDispatcher).unwrap();
+
+    // =======================================================================
+    // 1. prepare_store → write pattern → commit_store → lookup readback (4 KiB)
+    // =======================================================================
+    eprintln!("\n=== PrepareCommit 1: single 4 KiB block ===");
+    {
+        let src: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+        let buf = d.prepare_store(5000, 4096).unwrap();
+        unsafe {
+            std::ptr::copy_nonoverlapping(src.as_ptr(), buf.as_ptr() as *mut u8, 4096);
+        }
+        d.commit_store(5000).unwrap();
+        assert!(d.check(5000).unwrap());
+
+        let mut dst = vec![0u8; 4096];
+        d.lookup(5000, make_handle(&mut dst)).unwrap();
+        assert_eq!(src, dst, "4 KiB prepare/commit readback mismatch");
+    }
+
+    // =======================================================================
+    // 2. 12 KiB (multi-block)
+    // =======================================================================
+    eprintln!("=== PrepareCommit 2: multi-block 12 KiB ===");
+    {
+        let src: Vec<u8> = (0..12288).map(|i| ((i * 7 + 13) % 256) as u8).collect();
+        let buf = d.prepare_store(5001, 12288).unwrap();
+        unsafe {
+            std::ptr::copy_nonoverlapping(src.as_ptr(), buf.as_ptr() as *mut u8, 12288);
+        }
+        d.commit_store(5001).unwrap();
+
+        let mut dst = vec![0u8; 12288];
+        d.lookup(5001, make_handle(&mut dst)).unwrap();
+        assert_eq!(src, dst, "12 KiB prepare/commit readback mismatch");
+    }
+
+    // =======================================================================
+    // 3. 256 KiB (MDTS segmentation)
+    // =======================================================================
+    eprintln!("=== PrepareCommit 3: large 256 KiB buffer ===");
+    {
+        let size = 256 * 1024;
+        let src: Vec<u8> = (0..size).map(|i| ((i * 31 + 17) % 256) as u8).collect();
+        let buf = d.prepare_store(5002, size as u32).unwrap();
+        unsafe {
+            std::ptr::copy_nonoverlapping(src.as_ptr(), buf.as_ptr() as *mut u8, size);
+        }
+        d.commit_store(5002).unwrap();
+
+        let mut dst = vec![0u8; size];
+        d.lookup(5002, make_handle(&mut dst)).unwrap();
+        assert_eq!(src, dst, "256 KiB prepare/commit readback mismatch");
+    }
+
+    // =======================================================================
+    // 4. cancel_store — entry disappears
+    // =======================================================================
+    eprintln!("=== PrepareCommit 4: cancel_store ===");
+    {
+        let _buf = d.prepare_store(5003, 4096).unwrap();
+        d.cancel_store(5003).unwrap();
+        assert!(!d.check(5003).unwrap());
+    }
+
+    // =======================================================================
+    // 5. Duplicate key detection — prepare_store on existing key fails
+    // =======================================================================
+    eprintln!("=== PrepareCommit 5: duplicate key detection ===");
+    {
+        let err = d.prepare_store(5000, 4096);
+        assert!(
+            matches!(err, Err(DispatcherError::AlreadyExists(5000))),
+            "got: {err:?}"
+        );
+    }
+
+    // =======================================================================
+    // 6. commit_store on nonexistent key fails
+    // =======================================================================
+    eprintln!("=== PrepareCommit 6: commit nonexistent key ===");
+    {
+        let err = d.commit_store(99999);
+        assert!(
+            matches!(err, Err(DispatcherError::KeyNotFound(99999))),
+            "got: {err:?}"
+        );
+    }
+
+    d.shutdown().unwrap();
+    eprintln!("\n=== PREPARE/COMMIT STORE TEST PASSED ===");
 }

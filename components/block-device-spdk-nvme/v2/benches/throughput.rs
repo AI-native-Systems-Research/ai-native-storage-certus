@@ -5,13 +5,10 @@
 //!
 //! Measures throughput at batch sizes 1, 8, 32, 128 for 4KB blocks using
 //! crossbeam bounded channels (64 slots) as the SPSC transport.
-//!
 //! Hardware-dependent benchmarks use runtime detection via
-//! `spdk_env::checks` — they are silently skipped when no SPDK hardware
-#![cfg(feature = "spdk")]
-//! is available.
+//! `spdk_env::checks` and are skipped when no SPDK hardware is available.
 //!
-//! Run with: `cargo bench --bench throughput`
+//! Run with: `cargo bench --bench throughput --features spdk`
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
