@@ -837,10 +837,11 @@ fn hw_data_integrity() {
         let migrated = dm.migrated_count();
         eprintln!("  migrated {migrated} entries total");
 
-        // Re-initialize for lookup
+        // Re-initialize for lookup (skip format to preserve on-disk data)
         d.initialize(DispatcherConfig {
             metadata_pci_addr: pci_addrs[0].clone(),
             data_pci_addrs: pci_addrs[..1].to_vec(),
+            format_on_init: false,
             ..Default::default()
         })
         .expect("re-initialize failed");
@@ -942,6 +943,7 @@ fn hw_ssd_readback_integrity() {
     d.initialize(DispatcherConfig {
         metadata_pci_addr: pci_addrs[0].clone(),
         data_pci_addrs: pci_addrs[..1].to_vec(),
+        format_on_init: false,
         ..Default::default()
     })
     .expect("re-initialize failed");

@@ -192,6 +192,7 @@ fn initialize_component_stack(
         .initialize(DispatcherConfig {
             metadata_pci_addr: metadata_pci.to_string(),
             data_pci_addrs: data_pci_addrs.to_vec(),
+            ..Default::default()
         })
         .map_err(|e| format!("Dispatcher init failed: {e}"))?;
 

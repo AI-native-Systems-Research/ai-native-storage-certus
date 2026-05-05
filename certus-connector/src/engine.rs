@@ -119,6 +119,7 @@ impl EngineInner {
                 extent_manager_version: interfaces::ExtentManagerVersion::V2,
                 max_cache_entries: todo!(),
                 eviction_threshold: todo!(),
+                format_on_init: true,
             })
             .map_err(|e| PyRuntimeError::new_err(format!("Dispatcher init failed: {e}")))?;
 

@@ -59,6 +59,9 @@ pub struct DispatcherConfig {
     /// Fraction of max_cache_entries at which eviction triggers (0.0–1.0).
     /// Default: 0.8 (eviction starts at 80% capacity).
     pub eviction_threshold: f64,
+    /// Whether to format extent managers on initialization.
+    /// Default: true. Set to false when re-initializing to preserve on-disk data.
+    pub format_on_init: bool,
 }
 
 impl Default for DispatcherConfig {
@@ -70,6 +73,7 @@ impl Default for DispatcherConfig {
             extent_manager_version: ExtentManagerVersion::default(),
             max_cache_entries: 10000,
             eviction_threshold: 0.8,
+            format_on_init: true,
         }
     }
 }

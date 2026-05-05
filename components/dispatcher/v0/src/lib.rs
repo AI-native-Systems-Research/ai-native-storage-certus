@@ -574,18 +574,20 @@ impl DispatcherComponentV0 {
                 defaults.slab_size
             };
             let max_extent_size = (slab_size.min(defaults.max_extent_size as u64)) as u32;
-            iem.format(FormatParams {
-                data_disk_size,
-                sector_size,
-                slab_size,
-                max_extent_size,
-                ..defaults
-            })
-            .map_err(|e| {
-                DispatcherError::IoError(format!(
-                    "failed to format extent manager for data drive {i}: {e}"
-                ))
-            })?;
+            if config.format_on_init {
+                iem.format(FormatParams {
+                    data_disk_size,
+                    sector_size,
+                    slab_size,
+                    max_extent_size,
+                    ..defaults
+                })
+                .map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "failed to format extent manager for data drive {i}: {e}"
+                    ))
+                })?;
+            }
 
             self.log_info(&format!(
                 "dispatcher: data drive {i} initialized at {addr_str} (block_device={:?})",
@@ -647,8 +649,7 @@ impl IDispatcher for DispatcherComponentV0 {
             .collect();
 
         let writer = BackgroundWriter::start(move |job: WriteJob| {
-            let block_offset = job.key * 4096;
-            let _ = dm_for_writer.convert_to_storage(job.key, block_offset);
+            Self::process_write_job(&dm_for_writer, &bg_drives, &bg_extent_mgrs, job);
         });
 
         *self.bg_writer.lock().unwrap() = Some(writer);
@@ -728,14 +729,11 @@ impl IDispatcher for DispatcherComponentV0 {
                         })
                     }
                     LookupResult::BlockDevice { offset } => {
+                        let result =
+                            self.read_from_block_device(key, offset, &ipc_handle, &gpu);
                         let _ = dm.release_read(key);
-                        // TODO: MDTS-segmented read from SSD, DMA copy to ipc_handle
-                        let _ = offset;
-                        Ok(())
+                        result
                     }
-                }
-                LookupResult::BlockDevice { offset } => {
-                    self.read_from_block_device(key, offset, &ipc_handle, &gpu)
                 }
             },
             Err(_) => Err(DispatcherError::KeyNotFound(key)),
