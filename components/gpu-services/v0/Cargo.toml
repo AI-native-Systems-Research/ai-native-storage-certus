@@ -7,6 +7,7 @@ publish = false
 
 [features]
 gpu = ["interfaces/gpu", "base64", "libc"]
+spdk = ["interfaces/spdk"]
 
 [dependencies]
 component-framework.workspace = true

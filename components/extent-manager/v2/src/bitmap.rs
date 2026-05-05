@@ -1,6 +1,7 @@
 pub(crate) struct AllocationBitmap {
     words: Vec<u64>,
     num_slots: u32,
+    allocated_count: u32,
 }
 
 impl AllocationBitmap {
@@ -9,21 +10,26 @@ impl AllocationBitmap {
         Self {
             words: vec![0u64; num_words],
             num_slots,
+            allocated_count: 0,
         }
     }
 
     pub fn set(&mut self, idx: usize) {
         debug_assert!((idx as u32) < self.num_slots);
+        debug_assert!(!self.is_set(idx), "double-set on slot {idx}");
         let word = idx / 64;
         let bit = idx % 64;
         self.words[word] |= 1u64 << bit;
+        self.allocated_count += 1;
     }
 
     pub fn clear(&mut self, idx: usize) {
         debug_assert!((idx as u32) < self.num_slots);
+        debug_assert!(self.is_set(idx), "double-clear on slot {idx}");
         let word = idx / 64;
         let bit = idx % 64;
         self.words[word] &= !(1u64 << bit);
+        self.allocated_count -= 1;
     }
 
     pub fn is_set(&self, idx: usize) -> bool {
@@ -45,34 +51,11 @@ impl AllocationBitmap {
     }
 
     pub fn is_all_free(&self) -> bool {
-        let full_words = self.num_slots as usize / 64;
-        for w in &self.words[..full_words] {
-            if *w != 0 {
-                return false;
-            }
-        }
-        let remainder = self.num_slots as usize % 64;
-        if remainder > 0 {
-            let mask = (1u64 << remainder) - 1;
-            if self.words[full_words] & mask != 0 {
-                return false;
-            }
-        }
-        true
+        self.allocated_count == 0
     }
 
     pub fn count_set(&self) -> usize {
-        let full_words = self.num_slots as usize / 64;
-        let mut count: u32 = 0;
-        for w in &self.words[..full_words] {
-            count += w.count_ones();
-        }
-        let remainder = self.num_slots as usize % 64;
-        if remainder > 0 {
-            let mask = (1u64 << remainder) - 1;
-            count += (self.words[full_words] & mask).count_ones();
-        }
-        count as usize
+        self.allocated_count as usize
     }
 
     pub fn num_slots(&self) -> u32 {

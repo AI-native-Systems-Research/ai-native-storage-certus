@@ -1,0 +1,26 @@
+[package]
+name = "certus-server"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+interfaces = { workspace = true, features = ["spdk"] }
+component-framework.workspace = true
+component-core.workspace = true
+dispatcher.workspace = true
+dispatch-map.workspace = true
+block-device-spdk-nvme-v2.workspace = true
+extent-manager-v2.workspace = true
+spdk-env.workspace = true
+gpu-services = { workspace = true, features = ["gpu"] }
+logger.workspace = true
+
+tonic = { version = "0.12", features = ["tls"] }
+prost = "0.13"
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive"] }
+
+[build-dependencies]
+tonic-build = "0.12"

@@ -1,0 +1,130 @@
+@startuml certus-server-deployment
+!theme plain
+skinparam componentStyle rectangle
+skinparam defaultTextAlignment center
+skinparam padding 4
+
+title Certus Server — Component Deployment Diagram
+
+node "Client Host" as client_host {
+    component "Python Test Client" as pyclient {
+        [PyTorch CUDA] as pytorch
+        [cudaIpcGetMemHandle] as ipc_get
+    }
+    database "GPU Memory\n(client context)" as client_gpu
+}
+
+node "Server Host" as server_host {
+
+    component "certus-server\n(Rust / tokio)" as server {
+
+        component "gRPC Service Layer\n<<tonic>>" as grpc {
+            [Populate RPC] as rpc_pop
+            [Lookup RPC] as rpc_lkp
+            [Check RPC] as rpc_chk
+            [Remove RPC] as rpc_rm
+            [cudaIpcOpenMemHandle\n/ CloseMemHandle] as ipc_open
+        }
+
+        component "DispatcherComponentV0\n<<IDispatcher>>" as dispatcher {
+            portin "receptacle: dispatch_map" as r_dm
+            portin "receptacle: gpu_services" as r_gpu
+            portin "receptacle: spdk_env" as r_spdk
+            portin "receptacle: logger" as r_log_d
+
+            [BackgroundWriter] as bg_writer
+
+            component "DataDrive[0..N]\n(inner, per data PCI)" as data_drive {
+                component "BlockDeviceSpdkNvmeV2\n<<IBlockDevice, IBlockDeviceAdmin>>" as data_bd {
+                    portin "receptacle: spdk_env" as dbd_spdk
+                    portin "receptacle: logger" as dbd_log
+                }
+                component "ExtentManagerV2\n<<IExtentManager>>" as data_em {
+                    portin "receptacle: metadata_device" as dem_bd
+                    portin "receptacle: logger" as dem_log
+                }
+            }
+        }
+
+        component "DispatchMapComponentV0\n<<IDispatchMap>>" as dispatch_map {
+            portin "receptacle: extent_manager" as dm_em
+            portin "receptacle: logger" as dm_log
+            [Entry Table\n(key → Location)] as entry_table
+        }
+
+        component "GpuServicesComponentV0\n<<IGpuServices>>" as gpu_svc {
+            portin "receptacle: logger" as gpu_log
+            [CUDA DMA\n(cudaMemcpy)] as cuda_dma
+        }
+
+        component "SPDKEnvComponent\n<<ISPDKEnv>>" as spdk_env {
+            [VFIO Device\nDiscovery] as vfio
+        }
+
+        component "Metadata Block Device\nBlockDeviceSpdkNvmeV2\n<<IBlockDevice, IBlockDeviceAdmin>>" as meta_bd {
+            portin "receptacle: spdk_env" as mbd_spdk
+            portin "receptacle: logger" as mbd_log
+        }
+
+        component "Metadata Extent Manager\nExtentManagerV2\n<<IExtentManager>>" as meta_em {
+            portin "receptacle: metadata_device" as mem_bd
+            portin "receptacle: logger" as mem_log
+        }
+
+        component "LoggerComponentV1\n<<ILogger>>" as logger_comp
+    }
+
+    database "GPU Memory\n(server context)" as server_gpu
+    database "NVMe (metadata)\nvia VFIO/SPDK" as nvme_meta
+    database "NVMe (data) [0..N]\nvia VFIO/SPDK" as nvme_data
+}
+
+' --- External connections ---
+client_gpu -down-> pytorch
+pyclient -down-> client_host : "GPU alloc"
+pyclient -right[hidden]-> client_gpu
+
+client_host -down-> grpc : "gRPC\n(protobuf over TCP)"
+
+' --- gRPC to Dispatcher ---
+grpc -down-> ipc_open
+ipc_open -down-> dispatcher
+
+' --- Dispatcher receptacle bindings ---
+r_dm -down-> dispatch_map : "bind"
+r_gpu -down-> gpu_svc : "bind"
+r_spdk -down-> spdk_env : "bind"
+r_log_d -down-> logger_comp : "bind"
+
+' --- Dispatcher inner data drives ---
+bg_writer -right-> data_drive : "WriteJob"
+dem_bd --> data_bd : "bind"
+
+' --- DispatchMap bindings ---
+dm_em -down-> meta_em : "bind"
+dm_log -down-> logger_comp : "bind"
+
+' --- Metadata extent manager bindings ---
+mem_bd -down-> meta_bd : "bind"
+mem_log -down-> logger_comp : "bind"
+
+' --- Block device bindings ---
+mbd_spdk -down-> spdk_env : "bind"
+mbd_log -down-> logger_comp : "bind"
+dbd_spdk -down-> spdk_env : "bind"
+dbd_log -down-> logger_comp : "bind"
+
+' --- GPU services ---
+gpu_log -down-> logger_comp : "bind"
+cuda_dma -down-> server_gpu
+
+' --- Hardware ---
+spdk_env -down-> nvme_meta : "VFIO"
+spdk_env -down-> nvme_data : "VFIO"
+meta_bd -down-> nvme_meta : "NVMe I/O"
+data_bd -down-> nvme_data : "NVMe I/O"
+
+' --- CUDA IPC link ---
+client_gpu .right.> server_gpu : "CUDA IPC\n(shared handle)"
+
+@enduml

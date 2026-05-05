@@ -1,0 +1,27 @@
+[package]
+name = "certus-connector"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Certus storage connector for vLLM — native Rust engine + Python plugin"
+
+[lib]
+name = "certus_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+
+# Certus components (relative to certus-connector/)
+interfaces = { path = "../components/interfaces", features = ["spdk"] }
+component-framework = { path = "../components/component-framework/crates/component-framework" }
+component-core = { path = "../components/component-framework/crates/component-core" }
+dispatcher = { path = "../components/dispatcher/v0" }
+dispatch-map = { path = "../components/dispatch-map/v0" }
+block-device-spdk-nvme = { path = "../components/block-device-spdk-nvme/v1" }
+spdk-env = { path = "../components/spdk-env" }
+gpu-services = { path = "../components/gpu-services/v0", features = ["gpu"] }
+
+[build-dependencies]
+pyo3-build-config = "0.22"

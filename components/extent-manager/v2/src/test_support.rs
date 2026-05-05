@@ -1,6 +1,6 @@
 use component_core::channel::SpscChannel;
 use interfaces::{
-    ClientChannels, Command, Completion, DmaAllocFn, DmaBuffer, IBlockDevice, IExtentManager,
+    ClientChannels, Command, Completion, DmaAllocFn, DmaBuffer, IBlockDevice,
     ILogger, NvmeBlockError, OpHandle, TelemetrySnapshot,
 };
 use std::collections::HashMap;
@@ -219,6 +219,11 @@ fn process_command(cmd: Command, state: &Arc<Mutex<MockState>>, handle: OpHandle
                 result: Ok(()),
             }
         }
+        #[cfg(feature = "volatile_write_cache")]
+        Command::FlushSync { .. } => Completion::FlushDone {
+            handle,
+            result: Ok(()),
+        },
         _ => Completion::Error {
             handle: Some(handle),
             error: NvmeBlockError::NotSupported(

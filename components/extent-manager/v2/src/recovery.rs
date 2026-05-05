@@ -1,13 +1,12 @@
-use std::collections::HashMap;
-
-use interfaces::{Extent, ExtentKey, ExtentManagerError};
+use interfaces::ExtentManagerError;
 
 use crate::block_io::BlockDeviceClient;
 use crate::checkpoint::{self, SlabDescriptor};
 use crate::error;
+use crate::slab::{FREE_KEY, Slab};
 use crate::superblock::{Superblock, SUPERBLOCK_SIZE};
 
-pub(crate) type PerRegionData = Vec<(HashMap<ExtentKey, Extent>, Vec<SlabDescriptor>)>;
+pub(crate) type PerRegionData = Vec<Vec<SlabDescriptor>>;
 
 pub(crate) fn recover(
     metadata_client: &BlockDeviceClient,
@@ -18,7 +17,7 @@ pub(crate) fn recover(
 
     if sb.checkpoint_seq == 0 {
         let empty: PerRegionData = (0..sb.region_count as usize)
-            .map(|_| (HashMap::new(), Vec::new()))
+            .map(|_| Vec::new())
             .collect();
         return Ok((sb, empty));
     }
@@ -36,7 +35,7 @@ pub(crate) fn recover(
         sb.checkpoint_seq,
     ) {
         Ok(data) => {
-            let regions = checkpoint::deserialize_index_and_slabs(&data)?;
+            let regions = checkpoint::deserialize_slabs(&data)?;
             return Ok((sb, regions));
         }
         Err(e) => {
@@ -57,7 +56,7 @@ pub(crate) fn recover(
             prev_seq,
         ) {
             Ok(data) => {
-                let regions = checkpoint::deserialize_index_and_slabs(&data)?;
+                let regions = checkpoint::deserialize_slabs(&data)?;
                 return Ok((sb, regions));
             }
             Err(e) => {
@@ -71,4 +70,18 @@ pub(crate) fn recover(
     Err(error::corrupt_metadata(
         "both active and inactive checkpoint copies are corrupt",
     ))
+}
+
+/// Reconstruct a `Slab` from a `SlabDescriptor` read from disk.
+/// The allocation bitmap is derived from the key vector: any slot whose
+/// key is not `FREE_KEY` is marked as allocated.
+pub(crate) fn slab_from_descriptor(desc: &SlabDescriptor) -> Slab {
+    let mut slab = Slab::new(desc.start_offset, desc.slab_size, desc.element_size);
+    for (i, &key) in desc.keys.iter().enumerate() {
+        if key != FREE_KEY {
+            slab.mark_slot_allocated(i);
+            slab.set_key(i, key);
+        }
+    }
+    slab
 }

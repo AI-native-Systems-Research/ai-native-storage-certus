@@ -33,17 +33,18 @@ fn key_zero_valid() {
     let c = setup();
     let h = c.reserve_extent(0, 4096).expect("reserve key 0");
     h.publish().expect("publish key 0");
-    let ext = c.lookup_extent(0).expect("lookup key 0");
-    assert_eq!(ext.key, 0);
+    let extents = c.get_extents();
+    assert_eq!(extents.len(), 1);
+    assert_eq!(extents[0].key, 0);
 }
 
+/// FREE_KEY (u64::MAX) publish is a silent no-op: succeeds but adds nothing.
 #[test]
-fn key_max_valid() {
+fn key_max_is_silent_discard() {
     let c = setup();
     let h = c.reserve_extent(u64::MAX, 4096).expect("reserve key MAX");
-    h.publish().expect("publish key MAX");
-    let ext = c.lookup_extent(u64::MAX).expect("lookup key MAX");
-    assert_eq!(ext.key, u64::MAX);
+    h.publish().expect("publish key MAX returns Ok");
+    assert!(c.get_extents().is_empty(), "FREE_KEY extent must not be stored");
 }
 
 #[test]
@@ -78,18 +79,9 @@ fn out_of_space_returns_error() {
 fn dynamic_size_class_creation() {
     let c = setup();
 
-    let h1 = c.reserve_extent(1, 4096).expect("reserve 4K");
-    h1.publish().expect("publish 4K");
-
-    let h2 = c.reserve_extent(2, 8192).expect("reserve 8K");
-    h2.publish().expect("publish 8K");
-
-    let h3 = c.reserve_extent(3, 16384).expect("reserve 16K");
-    h3.publish().expect("publish 16K");
-
-    let e1 = c.lookup_extent(1).unwrap();
-    let e2 = c.lookup_extent(2).unwrap();
-    let e3 = c.lookup_extent(3).unwrap();
+    let e1 = c.reserve_extent(1, 4096).expect("reserve 4K").publish().expect("publish 4K");
+    let e2 = c.reserve_extent(2, 8192).expect("reserve 8K").publish().expect("publish 8K");
+    let e3 = c.reserve_extent(3, 16384).expect("reserve 16K").publish().expect("publish 16K");
 
     assert!(e1.size >= 4096);
     assert!(e2.size >= 8192);
@@ -122,9 +114,9 @@ fn multiple_sequential_checkpoints() {
         c.checkpoint().expect("checkpoint");
     }
 
+    let keys: std::collections::HashSet<u64> = c.get_extents().iter().map(|e| e.key).collect();
     for round in 0..5u64 {
         let key = round * 10;
-        c.lookup_extent(key)
-            .expect(&format!("lookup key {key}"));
+        assert!(keys.contains(&key), "key {key} missing after checkpoints");
     }
 }

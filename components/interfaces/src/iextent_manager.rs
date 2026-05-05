@@ -18,10 +18,9 @@ pub struct Extent {
 #[derive(Debug, Clone)]
 pub enum ExtentManagerError {
     CorruptMetadata(String),
-    DuplicateKey(ExtentKey),
     IoError(String),
-    KeyNotFound(ExtentKey),
     NotInitialized(String),
+    OffsetNotFound(u64),
     OutOfSpace,
 }
 
@@ -29,10 +28,9 @@ impl fmt::Display for ExtentManagerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::CorruptMetadata(msg) => write!(f, "corrupt metadata: {msg}"),
-            Self::DuplicateKey(k) => write!(f, "duplicate key: {k}"),
             Self::IoError(msg) => write!(f, "I/O error: {msg}"),
-            Self::KeyNotFound(k) => write!(f, "key not found: {k}"),
             Self::NotInitialized(msg) => write!(f, "not initialized: {msg}"),
+            Self::OffsetNotFound(off) => write!(f, "no extent at offset: {off}"),
             Self::OutOfSpace => write!(f, "out of space"),
         }
     }
@@ -175,16 +173,22 @@ define_interface! {
             size: u32,
         ) -> Result<WriteHandle, ExtentManagerError>;
 
-        fn lookup_extent(&self, key: ExtentKey) -> Result<Extent, ExtentManagerError>;
-
         fn get_extents(&self) -> Vec<Extent>;
 
         fn for_each_extent(&self, cb: &mut dyn FnMut(&Extent));
 
-        fn remove_extent(&self, key: ExtentKey) -> Result<(), ExtentManagerError>;
+        fn remove_extent(&self, offset: u64) -> Result<(), ExtentManagerError>;
 
         fn checkpoint(&self) -> Result<(), ExtentManagerError>;
 
         fn get_instance_id(&self) -> Result<u64, ExtentManagerError>;
+
+        /// Set the automatic checkpoint interval.
+        ///
+        /// `Some(duration)` enables the background checkpoint thread to fire
+        /// every `duration`. `None` disables automatic checkpoints entirely;
+        /// callers must then invoke `checkpoint()` manually. The default is
+        /// five minutes.
+        fn set_checkpoint_interval(&self, interval: Option<std::time::Duration>);
     }
 }

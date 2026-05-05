@@ -72,7 +72,7 @@ A client application wants to evict a cache entry. The client calls the dispatch
 
 ### User Story 5 - Dispatcher Initialization and Wiring (Priority: P1)
 
-A system integrator wires the dispatcher component to its dependencies: a logger, N+1 block devices (1 metadata + N data), and N extent managers. The integrator provides PCI addresses for the metadata and data block devices. The dispatcher initializes each extent manager with its corresponding metadata partition and data block device size. After initialization, the dispatcher is ready to serve cache operations.
+A system integrator wires the dispatcher component to its dependencies: a logger, dispatch map, GPU services, and SPDK environment. The integrator provides PCI BDF address strings for the metadata and data block devices via `DispatcherConfig`. The dispatcher internally creates N block device components and N extent managers, wiring them to the shared SPDK environment and logger. After initialization, the dispatcher is ready to serve cache operations. If the SPDK environment receptacle is not connected, the dispatcher operates in staging-only mode (no block devices or extent managers).
 
 **Why this priority**: Without correct initialization and wiring, no cache operations can proceed. This is the prerequisite for all other stories.
 
@@ -80,9 +80,9 @@ A system integrator wires the dispatcher component to its dependencies: a logger
 
 **Acceptance Scenarios**:
 
-1. **Given** the dispatcher component is created, **When** a logger, N+1 block devices, and N extent managers are bound to their receptacles, **Then** initialize succeeds and the dispatcher is ready for cache operations.
-2. **Given** the dispatcher component is created, **When** initialize is called without all required receptacles bound, **Then** an error is returned indicating which dependency is missing.
-3. **Given** initialization succeeds, **When** shutdown is called, **Then** all resources are released and background operations complete or are cancelled.
+1. **Given** the dispatcher component is created, **When** logger, dispatch_map, gpu_services, and spdk_env receptacles are bound, **Then** initialize succeeds, N block devices and N extent managers are created internally, and the dispatcher is ready for cache operations.
+2. **Given** the dispatcher component is created, **When** initialize is called without the dispatch_map receptacle bound, **Then** an error is returned indicating the missing dependency.
+3. **Given** initialization succeeds, **When** shutdown is called, **Then** all background writes complete, block devices are shut down in reverse order, and resources are released.
 
 ---
 
@@ -110,15 +110,15 @@ A system integrator wires the dispatcher component to its dependencies: a logger
 
 - **FR-001**: System MUST define an `IDispatcher` interface in the shared interfaces crate, providing `lookup`, `check`, `remove`, `populate`, `initialize`, and `shutdown` methods.
 - **FR-002**: System MUST define a `DispatcherError` error type in the shared interfaces crate, covering all failure modes (not initialized, key not found, duplicate key, I/O error, allocation failure, timeout).
-- **FR-003**: The `populate(key, ipc_handle)` method MUST register the element in the dispatch map, allocate a variable-size DMA staging buffer (bounded by the extent manager's max extent size), initiate DMA copy from the client's GPU memory into the staging buffer, and return confirmation to the caller.
+- **FR-003**: The `populate(key, ipc_handle)` method MUST register the element in the dispatch map, allocate a variable-size DMA staging buffer via the dispatch map's `create_staging` method, initiate DMA copy from the client's GPU memory into the staging buffer via `IGpuServices::dma_copy_to_host`, downgrade the write reference, and enqueue an asynchronous background write job.
 - **FR-004**: After a successful populate, the system MUST asynchronously write the staging buffer contents to the SSD via the block device and extent manager, transitioning the dispatch map entry from staging to block-device state.
 - **FR-005**: The staging buffer MUST be freed after the asynchronous SSD write completes successfully.
-- **FR-006**: The `lookup(key, ipc_handle)` method MUST query the dispatch map; if the data is in staging, perform DMA copy from staging buffer to the client's GPU memory; if on SSD, read from block device and DMA-copy to the client's GPU memory.
+- **FR-006**: The `lookup(key, ipc_handle)` method MUST query the dispatch map; if the data is in staging, perform DMA copy from staging buffer to the client's GPU memory via `IGpuServices::dma_copy_to_device`; if on SSD, read from block device and DMA-copy to the client's GPU memory.
 - **FR-007**: The `lookup` method MUST return a cache-miss indication if the key does not exist in the dispatch map.
 - **FR-008**: The `check(key)` method MUST return whether a cache entry exists for the given key without performing any data transfer.
 - **FR-009**: The `remove(key)` method MUST free the staging buffer (if data is in staging state) or free the extent on SSD (if data is in block-device state) and remove the dispatch map entry.
 - **FR-010**: The dispatcher component MUST use the component framework's `define_component!` macro and expose only the `IDispatcher` interface.
-- **FR-011**: The dispatcher MUST accept receptacles for `ILogger`, `IBlockDeviceAdmin`, and `IDispatchMap` components.
+- **FR-011**: The dispatcher MUST accept receptacles for `ILogger`, `IDispatchMap`, `IGpuServices`, and `ISPDKEnv` components. Block devices and extent managers are created internally during initialization.
 - **FR-012**: The `initialize` method MUST validate that all required receptacles are bound before proceeding.
 - **FR-013**: The dispatcher MUST use appropriate read/write locking on the dispatch map to ensure thread safety during concurrent operations.
 - **FR-014**: The `shutdown` method MUST ensure all in-flight background operations complete or are cancelled before returning.
@@ -153,10 +153,10 @@ A system integrator wires the dispatcher component to its dependencies: a logger
 ## Assumptions
 
 - Clients provide valid IPC handles referencing accessible GPU memory regions. The dispatcher does not validate GPU memory accessibility.
-- The SPDK environment is initialized and active before the dispatcher component is created.
-- DMA buffer allocation uses the SPDK DMA allocator (via `DmaBuffer::new`), not a custom allocator function.
+- The SPDK environment is initialized and active before the dispatcher's `initialize()` is called (via the ISPDKEnv receptacle).
+- DMA buffer allocation is delegated to the dispatch map via `create_staging()` and to the extent managers via a `DmaAllocFn` closure bound at initialization.
 - A fixed timeout of 100ms is used for blocking operations. Variable per-call timeouts are not supported.
-- The block device identifier for extent manager association is derived implicitly from the controller's PCI address; callers do not need to specify it explicitly.
-- The `IDispatcher` interface does not need to expose extent manager or block device admin configuration — these are wired via receptacles and initialized internally.
-- GPU-to-CPU and CPU-to-GPU DMA transfers are handled by the system's DMA engine; the dispatcher orchestrates but does not implement the transfer mechanism.
-- NVMe SSDs have a Maximum Data Transfer Size (MDTS) limit, typically 128 KiB. The dispatcher must query this from the block device and segment I/O accordingly.
+- Block devices and extent managers are created internally during `initialize()` — callers provide PCI BDF address strings, not pre-constructed components.
+- GPU-to-CPU DMA transfers use `IGpuServices::dma_copy_to_host` (populate direction). CPU-to-GPU DMA transfers use `IGpuServices::dma_copy_to_device` (lookup direction).
+- NVMe SSDs have a Maximum Data Transfer Size (MDTS) limit, typically 128 KiB. The `io_segmenter` module provides MDTS-aware I/O splitting.
+- When the ISPDKEnv receptacle is not connected, the dispatcher operates in staging-only mode (no persistent storage). This enables unit testing without hardware.

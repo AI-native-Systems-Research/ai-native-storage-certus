@@ -33,7 +33,7 @@ fn setup() -> std::sync::Arc<extent_manager_v2::ExtentManagerV2> {
 // ============================================================
 
 #[test]
-fn reserve_publish_lookup_round_trip() {
+fn reserve_publish_round_trip() {
     let c = setup();
     let handle = c.reserve_extent(42, 4096).expect("reserve");
     assert_eq!(handle.key(), 42);
@@ -42,43 +42,24 @@ fn reserve_publish_lookup_round_trip() {
     let extent = handle.publish().expect("publish");
     assert_eq!(extent.key, 42);
 
-    let looked_up = c.lookup_extent(42).expect("lookup");
-    assert_eq!(looked_up.key, 42);
-    assert_eq!(looked_up.offset, extent.offset);
-    assert_eq!(looked_up.size, extent.size);
+    let extents = c.get_extents();
+    assert_eq!(extents.len(), 1);
+    assert_eq!(extents[0].key, 42);
+    assert_eq!(extents[0].offset, extent.offset);
 }
 
 #[test]
 fn multiple_distinct_keys() {
     let c = setup();
 
-    for key in [1, 2, 3, 100, u64::MAX] {
+    for key in [1u64, 2, 3, 100] {
         let handle = c.reserve_extent(key, 4096).expect("reserve");
         handle.publish().expect("publish");
     }
 
-    for key in [1, 2, 3, 100, u64::MAX] {
-        let ext = c.lookup_extent(key).expect("lookup");
-        assert_eq!(ext.key, key);
-    }
-}
-
-#[test]
-fn duplicate_key_at_publish() {
-    let c = setup();
-
-    let h1 = c.reserve_extent(42, 4096).expect("reserve first");
-    let h2 = c.reserve_extent(42, 4096).expect("reserve second");
-
-    h1.publish().expect("first publish succeeds");
-
-    match h2.publish() {
-        Err(ExtentManagerError::DuplicateKey(k)) => assert_eq!(k, 42),
-        other => panic!("expected DuplicateKey, got: {other:?}"),
-    }
-
-    let ext = c.lookup_extent(42).expect("lookup");
-    assert_eq!(ext.key, 42);
+    let mut found_keys: Vec<u64> = c.get_extents().iter().map(|e| e.key).collect();
+    found_keys.sort();
+    assert_eq!(found_keys, vec![1, 2, 3, 100]);
 }
 
 #[test]
@@ -86,17 +67,24 @@ fn key_zero_is_valid() {
     let c = setup();
     let handle = c.reserve_extent(0, 4096).expect("reserve key 0");
     handle.publish().expect("publish key 0");
-    let ext = c.lookup_extent(0).expect("lookup key 0");
-    assert_eq!(ext.key, 0);
+    let extents = c.get_extents();
+    assert_eq!(extents.len(), 1);
+    assert_eq!(extents[0].key, 0);
 }
 
+/// Publishing with key u64::MAX (FREE_KEY) is a silent no-op.
 #[test]
-fn key_max_is_valid() {
+fn free_key_publish_is_silent_discard() {
     let c = setup();
-    let handle = c.reserve_extent(u64::MAX, 4096).expect("reserve key MAX");
-    handle.publish().expect("publish key MAX");
-    let ext = c.lookup_extent(u64::MAX).expect("lookup key MAX");
-    assert_eq!(ext.key, u64::MAX);
+    let handle = c.reserve_extent(u64::MAX, 4096).expect("reserve FREE_KEY");
+    let extent = handle.publish().expect("publish FREE_KEY returns Ok");
+    assert_eq!(extent.key, u64::MAX);
+    // The extent must not appear in enumeration.
+    assert!(c.get_extents().is_empty());
+    // The slot must be freed: a subsequent reserve should succeed.
+    let h2 = c.reserve_extent(1, 4096).expect("reserve after silent discard");
+    h2.publish().expect("publish after silent discard");
+    assert_eq!(c.get_extents().len(), 1);
 }
 
 // ============================================================
@@ -140,11 +128,7 @@ fn explicit_abort() {
     let c = setup();
     let handle = c.reserve_extent(99, 4096).expect("reserve");
     handle.abort();
-
-    match c.lookup_extent(99) {
-        Err(ExtentManagerError::KeyNotFound(k)) => assert_eq!(k, 99),
-        other => panic!("expected KeyNotFound, got: {other:?}"),
-    }
+    assert!(c.get_extents().is_empty());
 
     let h2 = c.reserve_extent(100, 4096).expect("reserve after abort");
     h2.publish().expect("publish after abort");
@@ -156,18 +140,14 @@ fn drop_as_abort() {
     {
         let _handle = c.reserve_extent(77, 4096).expect("reserve");
     }
-
-    match c.lookup_extent(77) {
-        Err(ExtentManagerError::KeyNotFound(k)) => assert_eq!(k, 77),
-        other => panic!("expected KeyNotFound, got: {other:?}"),
-    }
+    assert!(c.get_extents().is_empty());
 
     let h = c.reserve_extent(78, 4096).expect("reserve after drop");
     h.publish().expect("publish after drop");
 }
 
 // ============================================================
-// User Story 3: Remove a Published File (T019, T020)
+// User Story 3: Remove a Published Extent (T019, T020)
 // ============================================================
 
 #[test]
@@ -175,22 +155,19 @@ fn remove_published_extent() {
     let c = setup();
 
     let handle = c.reserve_extent(42, 4096).expect("reserve");
-    handle.publish().expect("publish");
+    let ext = handle.publish().expect("publish");
 
-    c.remove_extent(42).expect("remove");
+    c.remove_extent(ext.offset).expect("remove");
 
-    match c.lookup_extent(42) {
-        Err(ExtentManagerError::KeyNotFound(k)) => assert_eq!(k, 42),
-        other => panic!("expected KeyNotFound, got: {other:?}"),
-    }
+    assert!(c.get_extents().is_empty());
 }
 
 #[test]
-fn remove_nonexistent_key() {
+fn remove_nonexistent_offset() {
     let c = setup();
-    match c.remove_extent(999) {
-        Err(ExtentManagerError::KeyNotFound(k)) => assert_eq!(k, 999),
-        other => panic!("expected KeyNotFound, got: {other:?}"),
+    match c.remove_extent(0xDEAD_BEEF_0000) {
+        Err(ExtentManagerError::OffsetNotFound(_)) => {}
+        other => panic!("expected OffsetNotFound, got: {other:?}"),
     }
 }
 
@@ -201,20 +178,17 @@ fn full_lifecycle_round_trip() {
     let h = c.reserve_extent(42, 4096).expect("reserve");
     let ext = h.publish().expect("publish");
     assert_eq!(ext.key, 42);
+    assert_eq!(c.get_extents().len(), 1);
 
-    let looked = c.lookup_extent(42).expect("lookup");
-    assert_eq!(looked.offset, ext.offset);
-
-    c.remove_extent(42).expect("remove");
-
-    match c.lookup_extent(42) {
-        Err(ExtentManagerError::KeyNotFound(_)) => {}
-        other => panic!("expected KeyNotFound, got: {other:?}"),
-    }
+    c.remove_extent(ext.offset).expect("remove");
+    assert!(c.get_extents().is_empty());
 
     let h2 = c.reserve_extent(42, 4096).expect("re-reserve same key");
-    h2.publish().expect("re-publish same key");
-    c.lookup_extent(42).expect("lookup after re-publish");
+    let ext2 = h2.publish().expect("re-publish same key");
+    assert_eq!(c.get_extents().len(), 1);
+    assert_eq!(c.get_extents()[0].key, 42);
+    // Slot offset may be reused or not depending on internal state.
+    let _ = ext2;
 }
 
 // ============================================================

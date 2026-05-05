@@ -45,6 +45,7 @@ impl BuddyAllocator {
         }
     }
 
+    #[allow(dead_code)]
     pub fn base_offset(&self) -> u64 {
         self.base_offset
     }
@@ -156,6 +157,7 @@ impl BuddyAllocator {
         }
     }
 
+    #[allow(dead_code)]
     pub fn total_free(&self) -> u64 {
         let mut total = 0u64;
         for (order, list) in self.free_lists.iter().enumerate() {
@@ -163,14 +165,6 @@ impl BuddyAllocator {
                 list.len() as u64 * (1u64 << order) * self.sector_size as u64;
         }
         total
-    }
-
-    pub fn total_usable_size(&self) -> u64 {
-        self.total_usable_size
-    }
-
-    pub fn sector_size(&self) -> u32 {
-        self.sector_size
     }
 }
 
@@ -234,7 +228,7 @@ mod tests {
     fn exhaust_and_reclaim() {
         let mut buddy = BuddyAllocator::new(0,2 * 4096, 4096);
         let a = buddy.alloc(4096).unwrap();
-        let b = buddy.alloc(4096).unwrap();
+        let _b = buddy.alloc(4096).unwrap();
         assert!(buddy.alloc(4096).is_none());
         buddy.free(a, 4096);
         assert!(buddy.alloc(4096).is_some());

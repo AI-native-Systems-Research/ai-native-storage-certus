@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use interfaces::{FormatParams, IExtentManager};
@@ -26,7 +27,7 @@ fn format_params() -> FormatParams {
 }
 
 #[test]
-fn concurrent_reserve_publish_lookup() {
+fn concurrent_reserve_publish() {
     let (c, _metadata_mock) = create_test_component(METADATA_DISK_SIZE);
     c.format(format_params()).expect("format");
 
@@ -42,9 +43,6 @@ fn concurrent_reserve_publish_lookup() {
                 let key = (t * ops_per_thread + i) as u64;
                 let h = c.reserve_extent(key, 4096).expect("reserve");
                 h.publish().expect("publish");
-
-                let ext = c.lookup_extent(key).expect("lookup");
-                assert_eq!(ext.key, key);
             }
         }));
     }
@@ -95,9 +93,12 @@ fn concurrent_publish_remove() {
     let (c, _metadata_mock) = create_test_component(METADATA_DISK_SIZE);
     c.format(format_params()).expect("format");
 
+    // Publish 800 extents and record their offsets, keyed by extent key.
+    let offsets: Arc<Mutex<HashMap<u64, u64>>> = Arc::new(Mutex::new(HashMap::new()));
     for k in 0..800u64 {
         let h = c.reserve_extent(k, 4096).expect("reserve");
-        h.publish().expect("publish");
+        let ext = h.publish().expect("publish");
+        offsets.lock().unwrap().insert(k, ext.offset);
     }
 
     let c = Arc::new(c);
@@ -105,10 +106,12 @@ fn concurrent_publish_remove() {
 
     for t in 0..8u64 {
         let c = Arc::clone(&c);
+        let offsets = Arc::clone(&offsets);
         handles.push(thread::spawn(move || {
             for i in 0..100u64 {
                 let key = t * 100 + i;
-                c.remove_extent(key).expect("remove");
+                let offset = *offsets.lock().unwrap().get(&key).expect("offset for key");
+                c.remove_extent(offset).expect("remove");
             }
         }));
     }

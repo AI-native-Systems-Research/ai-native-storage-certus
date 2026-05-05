@@ -95,6 +95,7 @@ impl Drop for BackgroundWriter {
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2,11 +2,14 @@ use std::collections::HashMap;
 
 use crate::bitmap::AllocationBitmap;
 
+pub const FREE_KEY: u64 = u64::MAX;
+
 pub(crate) struct Slab {
     pub start_offset: u64,
     pub slab_size: u64,
     pub element_size: u32,
     pub bitmap: AllocationBitmap,
+    pub keys: Vec<u64>,
     rover: usize,
 }
 
@@ -18,6 +21,7 @@ impl Slab {
             slab_size,
             element_size,
             bitmap: AllocationBitmap::new(num_slots),
+            keys: vec![FREE_KEY; num_slots as usize],
             rover: 0,
         }
     }
@@ -32,10 +36,23 @@ impl Slab {
 
     pub fn free_slot(&mut self, slot_index: usize) {
         self.bitmap.clear(slot_index);
+        self.keys[slot_index] = FREE_KEY;
+    }
+
+    pub fn set_key(&mut self, slot_index: usize, key: u64) {
+        self.keys[slot_index] = key;
+    }
+
+    pub fn get_key(&self, slot_index: usize) -> u64 {
+        self.keys[slot_index]
     }
 
     pub fn is_empty(&self) -> bool {
         self.bitmap.is_all_free()
+    }
+
+    pub fn is_full(&self) -> bool {
+        self.bitmap.count_set() == self.bitmap.num_slots() as usize
     }
 
     pub fn slot_offset(&self, slot_index: usize) -> u64 {
@@ -73,7 +90,7 @@ impl Slab {
 }
 
 pub(crate) struct SizeClassManager {
-    map: HashMap<u32, Vec<usize>>,
+    map: HashMap<u32, Vec<u64>>,
 }
 
 impl SizeClassManager {
@@ -83,28 +100,20 @@ impl SizeClassManager {
         }
     }
 
-    pub fn add_slab(&mut self, element_size: u32, slab_index: usize) {
-        self.map.entry(element_size).or_default().push(slab_index);
+    pub fn add_slab(&mut self, element_size: u32, start_offset: u64) {
+        self.map.entry(element_size).or_default().push(start_offset);
     }
 
-    pub fn remove_slab(&mut self, element_size: u32, slab_index: usize) {
-        if let Some(indices) = self.map.get_mut(&element_size) {
-            indices.retain(|&i| i != slab_index);
-            if indices.is_empty() {
+    pub fn remove_slab(&mut self, element_size: u32, start_offset: u64) {
+        if let Some(offsets) = self.map.get_mut(&element_size) {
+            offsets.retain(|&o| o != start_offset);
+            if offsets.is_empty() {
                 self.map.remove(&element_size);
             }
         }
     }
 
-    pub fn update_slab_index(&mut self, element_size: u32, old_index: usize, new_index: usize) {
-        if let Some(indices) = self.map.get_mut(&element_size) {
-            if let Some(pos) = indices.iter().position(|&i| i == old_index) {
-                indices[pos] = new_index;
-            }
-        }
-    }
-
-    pub fn get_slabs(&self, element_size: u32) -> &[usize] {
+    pub fn get_slabs(&self, element_size: u32) -> &[u64] {
         self.map
             .get(&element_size)
             .map(|v| v.as_slice())
@@ -127,6 +136,24 @@ mod tests {
 
         slab.free_slot(idx);
         assert!(slab.is_empty());
+    }
+
+    #[test]
+    fn keys_start_free() {
+        let slab = Slab::new(0, 4096 * 4, 4096);
+        for i in 0..4 {
+            assert_eq!(slab.get_key(i), FREE_KEY);
+        }
+    }
+
+    #[test]
+    fn set_and_get_key() {
+        let mut slab = Slab::new(0, 4096 * 2, 4096);
+        let (idx, _) = slab.alloc_slot().unwrap();
+        slab.set_key(idx, 42);
+        assert_eq!(slab.get_key(idx), 42);
+        slab.free_slot(idx);
+        assert_eq!(slab.get_key(idx), FREE_KEY);
     }
 
     #[test]
@@ -172,14 +199,14 @@ mod tests {
     fn size_class_manager() {
         let mut scm = SizeClassManager::new();
         scm.add_slab(4096, 0);
-        scm.add_slab(4096, 1);
-        scm.add_slab(8192, 2);
+        scm.add_slab(4096, 4096);
+        scm.add_slab(8192, 8192);
 
-        assert_eq!(scm.get_slabs(4096), &[0, 1]);
-        assert_eq!(scm.get_slabs(8192), &[2]);
-        assert_eq!(scm.get_slabs(16384), &[] as &[usize]);
+        assert_eq!(scm.get_slabs(4096), &[0u64, 4096u64]);
+        assert_eq!(scm.get_slabs(8192), &[8192u64]);
+        assert_eq!(scm.get_slabs(16384), &[] as &[u64]);
 
         scm.remove_slab(4096, 0);
-        assert_eq!(scm.get_slabs(4096), &[1]);
+        assert_eq!(scm.get_slabs(4096), &[4096u64]);
     }
 }
