@@ -300,7 +300,7 @@ impl IDispatchMap for DispatchMapComponentV0 {
             .get(&key)
             .ok_or(DispatchMapError::KeyNotFound(key))?;
 
-        if entry.read_ref > 0 {
+        if entry.read_ref > 0 || entry.write_ref > 0 {
             return Err(DispatchMapError::ActiveReferences(key));
         }
 
