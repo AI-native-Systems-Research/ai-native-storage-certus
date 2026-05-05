@@ -19,6 +19,16 @@ else
     OUT="$(pwd)/transcript_${SESSION_ID}_${DATE}.md"
 fi
 
+# Avoid overwriting existing files — append -1, -2, etc.
+if [[ -f "$OUT" ]]; then
+    base="${OUT%.md}"
+    n=1
+    while [[ -f "${base}-${n}.md" ]]; do
+        ((n++))
+    done
+    OUT="${base}-${n}.md"
+fi
+
 # Pricing per million tokens (claude-sonnet-4-6 defaults — edit as needed)
 P_INPUT=3.00
 P_OUTPUT=15.00
