@@ -29,7 +29,7 @@ define_interface! {
         ///
         /// If the entry is in staging, copies from the staging buffer via
         /// IGpuServices::dma_copy_to_device. If the entry is on SSD, reads
-        /// from the block device and copies.
+        /// from the block device using MDTS-aware segmented I/O and copies.
         /// Blocks if a writer is active on the key (dispatch map semantics).
         ///
         /// # Errors
@@ -42,8 +42,9 @@ define_interface! {
 
         /// Remove a cache entry, freeing all associated resources.
         ///
-        /// If a background write is in progress, blocks until it completes
-        /// before removing. Frees staging buffer and/or SSD extent as applicable.
+        /// Acquires a write reference, then removes the dispatch map entry.
+        /// If the entry is on a block device, frees the SSD extent via the
+        /// extent manager.
         ///
         /// # Errors
         /// Returns `DispatcherError::KeyNotFound` if the key does not exist.
@@ -57,8 +58,51 @@ define_interface! {
         ///
         /// # Errors
         /// Returns `DispatcherError::AlreadyExists` if the key exists,
-        /// `DispatcherError::AllocationFailed` if staging buffer allocation fails.
+        /// `DispatcherError::AllocationFailed` if staging buffer allocation fails,
+        /// `DispatcherError::InvalidParameter` if ipc_handle.size is 0.
         fn populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>;
+
+        /// Prepare a store operation for the given cache key.
+        ///
+        /// Runs eviction if the cache is over capacity, allocates an extent on
+        /// the target data drive, registers the key in the dispatch map, and
+        /// returns a DMA buffer the caller can write into.
+        ///
+        /// # Errors
+        /// Returns `DispatcherError::AlreadyExists` if the key exists,
+        /// `DispatcherError::AllocationFailed` if extent reservation or DMA
+        /// buffer allocation fails, `DispatcherError::InvalidParameter` if size is 0.
+        fn prepare_store(&self, key: CacheKey, size: u32) -> Result<Arc<DmaBuffer>, DispatcherError>;
+
+        /// Commit a previously prepared store, writing the DMA buffer to SSD.
+        ///
+        /// Retrieves the pending write for `key`, writes the buffer contents
+        /// to the reserved extent using MDTS-aware segmented I/O, publishes
+        /// the extent metadata, and registers the entry as block-device-backed.
+        ///
+        /// # Errors
+        /// Returns `DispatcherError::KeyNotFound` if no pending write exists,
+        /// `DispatcherError::IoError` on SSD write failure.
+        fn commit_store(&self, key: CacheKey) -> Result<(), DispatcherError>;
+
+        /// Cancel a previously prepared store, freeing the reserved extent.
+        ///
+        /// Removes the pending write (WriteHandle::drop auto-aborts the
+        /// reservation) and removes the dispatch map entry.
+        ///
+        /// # Errors
+        /// Returns `DispatcherError::KeyNotFound` if no pending write exists.
+        fn cancel_store(&self, key: CacheKey) -> Result<(), DispatcherError>;
+
+        /// Update the timestamp for a cache entry without performing any DMA.
+        ///
+        /// Refreshes the eviction timestamp in the dispatch map, preventing the
+        /// entry from being selected as an eviction victim. Does not acquire any
+        /// read or write reference.
+        ///
+        /// # Errors
+        /// Returns `DispatcherError::KeyNotFound` if the key does not exist.
+        fn touch(&self, key: CacheKey) -> Result<(), DispatcherError>;
     }
 }
 ```
@@ -73,6 +117,19 @@ pub struct DispatcherConfig {
     pub metadata_pci_addr: String,
     /// PCI BDF address strings of N data block devices (one per extent manager).
     pub data_pci_addrs: Vec<String>,
+    /// Which block device component version to use (default: V2).
+    pub block_device_version: BlockDeviceVersion,
+    /// Which extent manager component version to use (default: V2).
+    pub extent_manager_version: ExtentManagerVersion,
+    /// Maximum number of cache entries before eviction begins (default: 10000).
+    /// Set to 0 to disable eviction.
+    pub max_cache_entries: usize,
+    /// Fraction of max_cache_entries at which eviction triggers (0.0–1.0).
+    /// Default: 0.8 (eviction starts at 80% capacity).
+    pub eviction_threshold: f64,
+    /// Whether to format extent managers on initialization (default: true).
+    /// Set to false when re-initializing to preserve on-disk data.
+    pub format_on_init: bool,
 }
 
 /// Opaque handle to client GPU memory for DMA transfers.
@@ -109,9 +166,18 @@ the SPDK environment for device initialization and DMA buffer allocation.
 - `spdk_env` receptacle must be bound for hardware mode (optional for staging-only).
 - `DispatcherConfig::data_pci_addrs` must be non-empty.
 - `IpcHandle::size` must be > 0.
+- `prepare_store` size must be > 0.
 
 ## Postconditions
 
 - `populate()` guarantees the entry is registered in the dispatch map before returning.
 - `shutdown()` guarantees no background threads are running when it returns.
 - `remove()` guarantees the dispatch map entry is removed when it returns.
+- `prepare_store()` guarantees the key is visible via `check()` after return.
+- `commit_store()` guarantees data is persisted to SSD when it returns.
+- `cancel_store()` guarantees no resources remain allocated for the key.
+- `touch()` guarantees the TSC is updated atomically; does not block on references.
+
+## Eviction
+
+When `max_cache_entries > 0` and the cache size exceeds `eviction_threshold × max_cache_entries`, `prepare_store` triggers a synchronous eviction cycle that removes the oldest entries (by TSC) until the count reaches the watermark. Eviction skips entries with active write references.

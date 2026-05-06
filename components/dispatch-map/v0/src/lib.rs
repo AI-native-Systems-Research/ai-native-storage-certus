@@ -327,6 +327,16 @@ impl IDispatchMap for DispatchMapComponentV0 {
         Ok(())
     }
 
+    fn touch(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+        let mut inner = self.state.inner.lock().unwrap();
+        let entry = inner
+            .entries
+            .get_mut(&key)
+            .ok_or(DispatchMapError::KeyNotFound(key))?;
+        entry.tsc = rdtsc();
+        Ok(())
+    }
+
     fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
         let inner = self.state.inner.lock().unwrap();
         let mut entries: Vec<(CacheKey, u64)> = inner
