@@ -94,7 +94,7 @@ A Python client submits a batch of cache keys to remove. The server calls the di
 - **FR-008**: The server MUST auto-initialize the dispatcher on startup using the PCI addresses provided via command-line arguments.
 - **FR-009**: The server MUST shut down the dispatcher when receiving SIGTERM/SIGINT, draining active requests and completing all in-flight operations before exiting.
 - **FR-010**: A Python test client MUST be provided that exercises all gRPC methods, demonstrating batch operations and error handling.
-- **FR-011**: The IPC handle in the gRPC protocol MUST be represented as a serializable structure containing a memory address (or opaque identifier) and a size field.
+- **FR-011**: The IPC handle in the gRPC protocol MUST be represented as a serializable structure containing a CUDA IPC memory handle (64-byte opaque blob from `cudaIpcGetMemHandle`) and a size field (`uint32`, data size in bytes). The server opens the IPC handle via `cudaIpcOpenMemHandle` to obtain a device pointer in its own CUDA context, performs the operation, then closes the handle via `cudaIpcCloseMemHandle`.
 - **FR-013**: The server MUST accept multiple client connections but serialize request processing (one request at a time). Concurrent requests are queued, not rejected.
 - **FR-015**: The server MUST pre-validate batch requests for duplicate keys. If a batch contains the same key more than once, the entire batch MUST be rejected with an error identifying the duplicate key(s).
 
@@ -102,7 +102,7 @@ A Python client submits a batch of cache keys to remove. The server calls the di
 
 - **DispatcherConfig**: Configuration containing metadata PCI address and a list of data PCI addresses.
 - **CacheKey**: A 64-bit unsigned integer identifying a cache entry.
-- **IpcHandle**: Opaque handle to client GPU memory containing an address and size.
+- **IpcHandle**: Opaque handle to client GPU memory containing a 64-byte CUDA IPC memory handle and a size (uint32).
 - **EntryResult**: Per-entry outcome containing the original key, success/failure status, and optional error information.
 - **BatchRequest**: A list of operation parameters (key + optional ipc_handle) sent in a single gRPC call.
 - **BatchResponse**: A list of per-entry results returned from a single gRPC call.
@@ -133,6 +133,6 @@ A Python client submits a batch of cache keys to remove. The server calls the di
 - The SPDK environment is pre-configured (hugepages, IOMMU, device unbinding) before the server starts.
 - A single dispatcher instance per server process is sufficient (no multi-tenancy required).
 - The gRPC listen port defaults to 50051 but is overridable via command-line argument.
-- The IPC handle's `address` field is transmitted as a 64-bit integer (pointer value) since client and server share the same address space for GPU DMA.
+- The IPC handle uses CUDA's cross-process memory sharing (`cudaIpcGetMemHandle`/`cudaIpcOpenMemHandle`). Client and server may be separate processes; they share GPU memory via the CUDA IPC mechanism rather than raw pointer values.
 - The Python test client uses the standard `grpcio` library.
 - Error codes in the gRPC protocol map directly to `DispatcherError` variants (NotInitialized, KeyNotFound, AlreadyExists, AllocationFailed, IoError, Timeout, InvalidParameter).

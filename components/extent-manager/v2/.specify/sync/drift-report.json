@@ -1,0 +1,50 @@
+{
+  "generated": "2026-05-05T00:00:00Z",
+  "project": "Extent Manager V2",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 25,
+    "aligned": 22,
+    "drifted": 3,
+    "not_implemented": 0,
+    "unspecced_features": 0
+  },
+  "specs": [
+    {
+      "id": "001-extent-manager-v2",
+      "title": "Extent Manager V2",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006",
+        "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-012",
+        "FR-013", "FR-014", "FR-015", "FR-017", "FR-018", "FR-019",
+        "FR-020", "FR-021", "FR-022", "FR-023", "FR-025"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-016",
+          "spec_text": "Default checkpoint interval is 5000 ms",
+          "actual": "Code uses Duration::from_secs(300) — 5 minutes, not 5 seconds",
+          "location": "src/lib.rs:94",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "Superblock Magic",
+          "spec_text": "Magic 0x4345_5254_5553_5635 (CERTUSV5)",
+          "actual": "Code uses 0x4345_5254_5553_5634 (CERTUSV4)",
+          "location": "src/superblock.rs:5",
+          "severity": "minor"
+        },
+        {
+          "requirement": "FR-024",
+          "spec_text": "Component MUST be Send + Sync",
+          "actual": "Auto-derived Send + Sync but no explicit compile-time assertion",
+          "location": "src/lib.rs",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [],
+  "conflicts": []
+}

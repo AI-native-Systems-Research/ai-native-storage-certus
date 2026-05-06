@@ -1,6 +1,6 @@
 # Spec Drift Report
 
-Generated: 2026-04-16
+Generated: 2026-05-05
 Project: block-device-spdk-nvme v1
 
 ## Summary
@@ -9,10 +9,10 @@ Project: block-device-spdk-nvme v1
 |----------|-------|
 | Specs Analyzed | 2 |
 | Requirements Checked | 41 |
-| Aligned | 35 (85%) |
-| Drifted | 3 (7%) |
+| Aligned | 36 (88%) |
+| Drifted | 2 (5%) |
 | Not Implemented | 3 (7%) |
-| Unspecced Code | 2 |
+| Unspecced Code | 5 |
 
 ## Detailed Findings
 
@@ -46,11 +46,6 @@ Project: block-device-spdk-nvme v1
   - Location: `interfaces/src/iblock_device.rs:187-203`
   - Severity: minor
   - Note: Sync ops block until SPDK completion callback; timeout only on async variants. Spec wording is ambiguous.
-
-- FR-009: Spec says "in-flight async operations" should be handled on reset, but code only cancels pending ops for the REQUESTING client, not all clients
-  - Location: `src/actor.rs:627-651`
-  - Severity: moderate
-  - Note: Other clients' in-flight ops may get SPDK errors post-reset but are not proactively cancelled with error completions.
 
 - SC-008: Spec requires "Criterion benchmarks for performance-sensitive paths" — qpair selection benchmarks were removed when modules were made `pub(crate)`
   - Location: `benches/latency.rs`, `benches/throughput.rs`
@@ -109,6 +104,9 @@ Project: block-device-spdk-nvme v1
 |---------|----------|-------|----------------|
 | `--io-mode sync\|async` flag | `apps/iops-benchmark/src/config.rs:28-43` | 16 | 002-iops-benchmark |
 | `IBlockDeviceAdmin` interface | `src/lib.rs:77`, `interfaces/src/iblock_device.rs:431-439` | 10 | 001-spdk-nvme-block-device |
+| `--driver v1\|v2` flag | `apps/iops-benchmark/src/config.rs` | 15 | 002-iops-benchmark |
+| `--batch-size` flag | `apps/iops-benchmark/src/config.rs` | 15 | 002-iops-benchmark |
+| Multi-size `--block-size` | `apps/iops-benchmark/src/config.rs` | 20 | 002-iops-benchmark FR-002 |
 
 **IoMode**: The benchmark has a `--io-mode sync|async` flag (default: async) not covered in spec 002. This extends beyond FR-010 which only mentions async commands. Useful feature but unspecced.
 
@@ -116,13 +114,12 @@ Project: block-device-spdk-nvme v1
 
 ## Inter-Spec Conflicts
 
-- **WriteAsync buffer lifetime bug**: `tests/integration.rs:634-638` documents a known bug where `WriteAsync` drops the `Arc<DmaBuffer>` after SPDK submission but before NVMe DMA completes (use-after-free). Spec FR-004 requires async write to work correctly. Not a spec conflict but a critical implementation gap.
+- **Stale WriteAsync bug comment**: `tests/integration.rs:648` claims a WriteAsync buffer lifetime bug, but current code at `src/actor.rs:546-575` correctly stores `write_buf = Some(buf.clone())`. The comment appears stale.
 
 ## Recommendations
 
-1. **Fix FR-009 controller reset scope** (moderate): Cancel pending ops for ALL clients on reset, not just the requesting client.
-2. **Fix WriteAsync buffer lifetime** (critical): Pin the write buffer `Arc<DmaBuffer>` in `PendingOp` until the SPDK completion callback fires.
-3. **Clarify FR-003 timeout** (minor): Update spec to state timeout applies only to async operations, or add optional timeout to sync commands.
-4. **Add IBlockDeviceAdmin to spec 001**: Document the admin lifecycle interface as a formal requirement (FR-021).
-5. **Add `--io-mode` to spec 002**: Add FR-022 covering the sync/async IO submission mode flag.
-6. **Add SC validation tests**: Create tests for SC-001 (latency envelope), SC-002 (timeout accuracy), SC-006 (telemetry accuracy).
+1. **Backfill FR-003 timeout** (minor): Update spec to clarify timeout applies only to async operations. Sync ops block until SPDK completion by design.
+2. **Remove stale test comment**: The WriteAsync bug comment in integration tests is outdated — the fix is already in place.
+3. **Add IBlockDeviceAdmin to spec 001**: Document the admin lifecycle interface as a formal requirement (FR-021).
+4. **Add `--io-mode` to spec 002**: Add FR-022 covering the sync/async IO submission mode flag.
+5. **SC-001/002/006**: Hardware-dependent success criteria — consider marking as "verified during hardware integration" rather than requiring automated tests.
