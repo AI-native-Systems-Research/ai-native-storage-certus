@@ -16,7 +16,7 @@ use proto::dispatcher_server::{Dispatcher, DispatcherServer};
 use proto::{
     BatchCheckRequest, BatchCheckResponse, BatchLookupRequest, BatchLookupResponse,
     BatchPopulateRequest, BatchPopulateResponse, BatchRemoveRequest, BatchRemoveResponse,
-    CheckResult, EntryResult, ErrorCode,
+    BatchTouchRequest, BatchTouchResponse, CheckResult, EntryResult, ErrorCode,
 };
 
 pub fn dispatcher_server(svc: DispatcherService) -> DispatcherServer<DispatcherService> {
@@ -272,5 +272,29 @@ impl Dispatcher for DispatcherService {
         .map_err(|e| Status::internal(format!("task join error: {e}")))?;
 
         Ok(Response::new(BatchRemoveResponse { results }))
+    }
+
+    async fn touch(
+        &self,
+        request: Request<BatchTouchRequest>,
+    ) -> Result<Response<BatchTouchResponse>, Status> {
+        let req = request.into_inner();
+        check_duplicate_keys(&req.keys)?;
+
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let results = tokio::task::spawn_blocking(move || {
+            let disp = dispatcher.lock().unwrap();
+            req.keys
+                .iter()
+                .map(|&key| match disp.touch(key) {
+                    Ok(()) => success_result(key),
+                    Err(e) => error_result(key, &e),
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        Ok(Response::new(BatchTouchResponse { results }))
     }
 }

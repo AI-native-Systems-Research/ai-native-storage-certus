@@ -29,13 +29,13 @@ pub enum DispatcherError {
 
 | Variant | Raised by | Condition |
 |---------|-----------|-----------|
-| `NotInitialized` | `initialize`, `lookup`, `check`, `remove`, `populate` | Receptacles not bound or `initialize()` not called |
-| `KeyNotFound` | `lookup`, `remove`, `check` | Key does not exist in dispatch map |
-| `AlreadyExists` | `populate` | Key already exists in dispatch map |
-| `AllocationFailed` | `populate` | DMA staging buffer allocation fails |
-| `IoError` | `lookup`, `initialize` | Block device read/write error, device init failure |
-| `Timeout` | `lookup`, `remove` | Dispatch map blocking operation exceeds 100ms |
-| `InvalidParameter` | `initialize`, `populate` | Zero-size IPC handle, empty PCI address list |
+| `NotInitialized` | all methods except `shutdown` | Receptacles not bound or `initialize()` not called |
+| `KeyNotFound` | `lookup`, `remove`, `check`, `commit_store`, `cancel_store`, `touch` | Key does not exist in dispatch map or no pending write |
+| `AlreadyExists` | `populate`, `prepare_store` | Key already exists in dispatch map |
+| `AllocationFailed` | `populate`, `prepare_store` | DMA staging buffer or extent allocation fails |
+| `IoError` | `lookup`, `initialize`, `commit_store` | Block device read/write error, device init failure |
+| `Timeout` | `lookup`, `remove` | Dispatch map blocking operation exceeds timeout |
+| `InvalidParameter` | `initialize`, `populate`, `prepare_store` | Zero-size IPC handle/size, empty PCI address list |
 
 ## Trait Implementations
 

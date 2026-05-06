@@ -207,6 +207,12 @@ component_macros::define_interface! {
         /// Removes and drops the pending write for `key`. The `WriteHandle`
         /// destructor automatically aborts the extent reservation.
         fn cancel_store(&self, key: CacheKey) -> Result<(), DispatcherError>;
+
+        /// Update the timestamp for a cache entry without performing any DMA.
+        ///
+        /// Used to refresh the eviction timestamp in the dispatch map,
+        /// preventing the entry from being evicted without transferring data.
+        fn touch(&self, key: CacheKey) -> Result<(), DispatcherError>;
     }
 }
 

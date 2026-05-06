@@ -162,6 +162,15 @@ impl IDispatchMap for BenchDispatchMap {
         }
     }
 
+    fn touch(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+        let inner = self.inner.lock().unwrap();
+        if inner.contains_key(&key) {
+            Ok(())
+        } else {
+            Err(DispatchMapError::KeyNotFound(key))
+        }
+    }
+
     fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
         let inner = self.inner.lock().unwrap();
         inner.keys().copied().take(n).collect()

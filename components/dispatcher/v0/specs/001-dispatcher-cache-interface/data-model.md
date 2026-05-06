@@ -21,10 +21,15 @@
 
 ### DispatcherConfig
 
-- **Type**: New struct in interfaces crate
+- **Type**: Struct in interfaces crate
 - **Fields**:
-  - `metadata_pci_addr: PciAddress` — PCI address of the metadata block device
-  - `data_pci_addrs: Vec<PciAddress>` — PCI addresses of N data block devices
+  - `metadata_pci_addr: String` — PCI BDF address of the metadata block device
+  - `data_pci_addrs: Vec<String>` — PCI BDF addresses of N data block devices
+  - `block_device_version: BlockDeviceVersion` — which block device version to use (default V2)
+  - `extent_manager_version: ExtentManagerVersion` — which extent manager version to use (default V2)
+  - `max_cache_entries: usize` — maximum entries before eviction (default 10000; 0 disables eviction)
+  - `eviction_threshold: f64` — fraction of max at which eviction triggers (default 0.8)
+  - `format_on_init: bool` — whether to format extent managers on init (default true)
 - **Constraints**: `data_pci_addrs` must be non-empty; each address must be unique
 - **Relationships**: N = `data_pci_addrs.len()` determines the number of data devices and extent managers
 
@@ -33,21 +38,38 @@
 - **Type**: Internal struct (not in interfaces)
 - **Fields**:
   - `key: CacheKey` — cache entry to write
-  - `buffer: Arc<DmaBuffer>` — staging buffer contents
   - `size: u32` — data size in bytes
   - `device_index: usize` — which data device to target
 - **Lifecycle**: Created by populate after staging copy completes; consumed by background writer; discarded on success or failure
+
+### PendingWrite
+
+- **Type**: Internal struct (not in interfaces)
+- **Fields**:
+  - `write_handle: WriteHandle` — extent reservation (publish commits, drop aborts)
+  - `buffer: Arc<DmaBuffer>` — DMA buffer the caller writes into
+  - `size: u32` — original data size in bytes
+  - `drive_idx: usize` — index into data_drives for the target SSD
+- **Lifecycle**: Created by `prepare_store`; consumed by `commit_store` (writes to SSD) or `cancel_store` (drops handle, aborting reservation)
 
 ## State Transitions
 
 ### Cache Entry Lifecycle
 
 ```
-[Not Exists] --populate()--> [Staging] --background write--> [BlockDevice] --remove()--> [Not Exists]
-                                |                                  |
-                                +--write failure--> [Not Exists]   |
-                                |                                  |
-                                +--remove()--> [Not Exists]        +--remove()--> [Not Exists]
+                             populate()                    background write
+[Not Exists] ─────────────────────────> [Staging] ──────────────────────> [BlockDevice]
+     ^                                      |                                  |
+     |                                      +── write failure ──> [Not Exists] |
+     |                                      |                                  |
+     |                                      +── remove() ───────> [Not Exists] |
+     |                                                                         |
+     +─────────────────────── remove() ────────────────────────────────────────+
+
+                          prepare_store()               commit_store()
+[Not Exists] ─────────────────────────> [Pending] ──────────────────────> [BlockDevice]
+                                            |
+                                            +── cancel_store() ──> [Not Exists]
 ```
 
 ### Dispatcher Lifecycle
@@ -55,7 +77,8 @@
 ```
 [Created] --bind receptacles--> [Configured] --initialize()--> [Operational] --shutdown()--> [Stopped]
                                                                      |
-                                                               [serve lookup/check/remove/populate]
+                                                               [serve lookup/check/remove/populate/
+                                                                prepare_store/commit_store/cancel_store/touch]
 ```
 
 ## Relationships

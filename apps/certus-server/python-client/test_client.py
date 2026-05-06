@@ -224,6 +224,40 @@ def test_duplicate_key_rejection(stub, results):
             )
 
 
+def test_batch_touch(stub, results, base_key):
+    """Touch populated entries to refresh their eviction timestamps."""
+    keys = [base_key + i for i in range(10)]
+    req = dispatcher_pb2.BatchTouchRequest(keys=keys)
+    resp = stub.Touch(req)
+
+    if len(resp.results) != 10:
+        results.fail("Batch touch: 10 entries", f"got {len(resp.results)} results")
+        return
+
+    all_ok = all(r.success for r in resp.results)
+    if all_ok:
+        results.ok("Batch touch: 10 entries")
+    else:
+        failed = [r for r in resp.results if not r.success]
+        results.fail(
+            "Batch touch: 10 entries",
+            f"{len(failed)} entries failed: {failed[0].error_message}",
+        )
+
+
+def test_touch_nonexistent(stub, results):
+    """Touch on non-existent key returns KeyNotFound."""
+    req = dispatcher_pb2.BatchTouchRequest(keys=[9998])
+    resp = stub.Touch(req)
+
+    if len(resp.results) == 1 and not resp.results[0].success:
+        if resp.results[0].error_code == dispatcher_pb2.ERROR_CODE_KEY_NOT_FOUND:
+            results.ok("Touch non-existent key handling")
+            return
+
+    results.fail("Touch non-existent key handling", "expected KeyNotFound error")
+
+
 def test_nonexistent_key_handling(stub, results):
     """Edge case: operations on keys that don't exist."""
     # Remove non-existent key
@@ -297,6 +331,7 @@ def main():
     # Core lifecycle tests
     test_batch_populate(stub, results, base_key)
     test_batch_check(stub, results, base_key)
+    test_batch_touch(stub, results, base_key)
     test_batch_lookup(stub, results, base_key)
     test_batch_remove(stub, results, base_key)
     test_check_after_remove(stub, results, base_key)
@@ -304,6 +339,7 @@ def main():
     # Error handling tests
     test_duplicate_key_rejection(stub, results)
     test_nonexistent_key_handling(stub, results)
+    test_touch_nonexistent(stub, results)
 
     # Scale test
     if not args.skip_large_batch:
