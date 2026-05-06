@@ -25,7 +25,7 @@ DOMAIN_COLORS = {
     "Foundation": {"color": "#a78bfa", "bg": "rgba(167,139,250,0.08)"},
     "SPDK":       {"color": "#fb923c", "bg": "rgba(251,146,60,0.08)"},
     "Storage":    {"color": "#f472b6", "bg": "rgba(244,114,182,0.08)"},
-    "Cache":      {"color": "#5eead4", "bg": "rgba(94,234,212,0.08)"},
+    "Dispatch":      {"color": "#5eead4", "bg": "rgba(94,234,212,0.08)"},
     "GPU":        {"color": "#60a5fa", "bg": "rgba(96,165,250,0.08)"},
     "Connector":  {"color": "#4ade80", "bg": "rgba(74,222,128,0.08)"},
 }
@@ -39,8 +39,8 @@ COMPONENTS = [
     {"name": "block-device-spdk-nvme","path": "components/block-device-spdk-nvme/v2","level": 2, "domain": "SPDK",      "status": "done"},
     {"name": "gpu-services",          "path": "components/gpu-services/v0",         "level": 2, "domain": "GPU",        "status": "done"},
     {"name": "extent-manager",        "path": "components/extent-manager/v2",       "level": 3, "domain": "Storage",    "status": "done"},
-    {"name": "dispatch-map",          "path": "components/dispatch-map/v0",         "level": 4, "domain": "Cache",      "status": "done"},
-    {"name": "dispatcher",            "path": "components/dispatcher/v0",           "level": 5, "domain": "Cache",      "status": "needs-work"},
+    {"name": "dispatch-map",          "path": "components/dispatch-map/v0",         "level": 4, "domain": "Dispatch",      "status": "done"},
+    {"name": "dispatcher",            "path": "components/dispatcher/v0",           "level": 5, "domain": "Dispatch",      "status": "needs-work"},
     {"name": "certus-connector",      "path": "certus-connector",                   "level": 6, "domain": "Connector",  "status": "in-progress"},
 ]
 
@@ -198,8 +198,62 @@ def domain_tag(domain):
     return f'<span class="domain-tag" style="color:{c["color"]};background:{c["bg"]}">{domain}</span>'
 
 
+def build_vis_nodes(drift_warnings, missing_fns):
+    """Build vis-network node and edge JSON."""
+    import json
+
+    status_colors = {"done": "#4ade80", "in-progress": "#facc15", "needs-work": "#f87171"}
+    domain_node_colors = {
+        "Foundation": "#a78bfa", "SPDK": "#fb923c", "Storage": "#f472b6",
+        "Dispatch": "#5eead4", "GPU": "#60a5fa", "Connector": "#4ade80",
+    }
+
+    nodes = []
+    for comp in COMPONENTS:
+        color = domain_node_colors.get(comp["domain"], "#9ca3b4")
+        border_color = status_colors.get(comp["status"], "#5c6478")
+        has_drift = any(d["component"] == comp["name"] for d in drift_warnings)
+        has_missing = comp["name"] in missing_fns
+        label = comp["name"]
+        if has_drift:
+            label += " ⚠"
+        if has_missing:
+            label += " ✦"
+
+        title_parts = [f"<b>{comp['name']}</b>", f"Level {comp['level']} | {comp['domain']} | {comp['status']}"]
+        desc = read_readme(comp["path"])
+        if desc:
+            title_parts.append(desc[:120])
+        if has_drift:
+            d = [x for x in drift_warnings if x["component"] == comp["name"]][0]
+            title_parts.append(f"<b>Drift:</b> {', '.join(d['methods'])}")
+        if has_missing:
+            title_parts.append(f"<b>Missing:</b> {', '.join(missing_fns[comp['name']])}")
+        title = "<br>".join(title_parts)
+
+        nodes.append({
+            "id": comp["name"],
+            "label": label,
+            "level": comp["level"],
+            "color": {"background": color, "border": border_color, "highlight": {"background": color, "border": "#fff"}},
+            "borderWidth": 3 if comp["status"] != "done" else 1,
+            "font": {"color": "#000000", "size": 14, "face": "monospace"},
+            "title": title,
+            "shape": "box",
+            "margin": 10,
+        })
+
+    edges = []
+    for name, deps in DEPENDENCIES.items():
+        for dep in deps:
+            edges.append({"from": name, "to": dep, "arrows": "to", "color": {"color": "rgba(255,255,255,0.25)", "highlight": "#5eead4"}})
+
+    return json.dumps(nodes), json.dumps(edges)
+
+
 def build_html(drift_warnings, missing_fns):
     rdeps = compute_rdeps()
+    nodes_json, edges_json = build_vis_nodes(drift_warnings, missing_fns)
 
     # Group components by level
     levels = {}
@@ -297,11 +351,19 @@ def build_html(drift_warnings, missing_fns):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Certus Dependency Graph</title>
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 <style>
 :root{{--bg:#0c0e14;--card:#13161f;--border:rgba(255,255,255,0.06);--text-1:#e8eaf0;--text-2:#9ca3b4;--text-3:#5c6478}}
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text-1);line-height:1.6;padding:24px}}
-.container{{max-width:1000px;margin:0 auto}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text-1);line-height:1.6;padding:0}}
+.tabs{{display:flex;border-bottom:1px solid var(--border);background:var(--card)}}
+.tab{{padding:12px 24px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text-3);border-bottom:2px solid transparent}}
+.tab.active{{color:var(--text-1);border-bottom-color:#5eead4}}
+.tab:hover{{color:var(--text-2)}}
+.tab-content{{display:none}}
+.tab-content.active{{display:block}}
+#graph-view{{width:100%;height:calc(100vh - 44px)}}
+#card-view{{padding:24px;max-width:1000px;margin:0 auto;max-height:calc(100vh - 44px);overflow-y:auto}}
 h1{{font-size:24px;font-weight:700;margin:0 0 4px}}
 h1 .hl{{background:linear-gradient(135deg,#5eead4,#818cf8);-webkit-background-clip:text;-webkit-text-fill-color:transparent}}
 .subtitle{{color:var(--text-3);font-size:13px;margin:0 0 6px}}
@@ -340,35 +402,139 @@ h1 .hl{{background:linear-gradient(135deg,#5eead4,#818cf8);-webkit-background-cl
 .drift-section li,.missing-section li{{margin:3px 0}}
 footer{{padding:16px 0;text-align:center;font-size:11px;color:var(--text-3);margin-top:20px;border-top:1px solid var(--border)}}
 footer code{{font-family:monospace;font-size:10px;background:rgba(255,255,255,0.06);padding:2px 5px;border-radius:3px}}
+#sidebar{{position:fixed;right:0;top:44px;width:280px;height:calc(100vh - 44px);background:#1a1a2e;border-left:1px solid #2a2a4e;padding:16px;overflow-y:auto;display:none;z-index:10}}
+#sidebar.open{{display:block}}
+#sidebar h3{{font-size:12px;color:#aaa;text-transform:uppercase;letter-spacing:0.05em;margin:0 0 10px}}
+#sidebar .field{{margin:6px 0;font-size:12px;color:#ccc}}
+#sidebar .field b{{color:#e8eaf0}}
+#sidebar .close-btn{{position:absolute;top:10px;right:14px;cursor:pointer;color:#666;font-size:18px}}
+#sidebar .close-btn:hover{{color:#fff}}
+#legend{{position:fixed;left:16px;bottom:16px;background:#1a1a2e;border:1px solid #2a2a4e;border-radius:8px;padding:12px 16px;z-index:10;font-size:11px}}
+#legend h4{{color:#aaa;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin:0 0 8px}}
+.legend-row{{display:flex;align-items:center;gap:8px;margin:4px 0}}
+.legend-dot{{width:12px;height:12px;border-radius:3px;flex-shrink:0}}
+.legend-label{{color:#ccc}}
 </style>
 </head>
 <body>
-<div class="container">
 
-<h1><span class="hl">Certus</span> Dependency Graph</h1>
-<p class="subtitle">Organized by dependency depth &mdash; level N depends only on levels &lt; N</p>
-<p class="purpose">
-  <strong>Where am I?</strong> Level N in the DAG &nbsp;|&nbsp;
-  <strong>What can I touch?</strong> Levels below = your deps; above = depend on you &nbsp;|&nbsp;
-  <strong>What's broken?</strong> Red badges + drift &nbsp;|&nbsp;
-  <strong>What's missing?</strong> Pink cards
-</p>
-
-<div class="stats">
-  <div class="stat"><strong>{total}</strong>components</div>
-  <div class="stat"><strong style="color:#4ade80">{done}</strong>done</div>
-  <div class="stat"><strong style="color:#facc15">{in_prog}</strong>in progress</div>
-  <div class="stat"><strong style="color:#f87171">{needs}</strong>needs work</div>
-  <div class="stat"><strong>{max_level + 1}</strong>depth levels</div>
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('graph')">Graph</div>
+  <div class="tab" onclick="switchTab('cards')">Cards</div>
 </div>
 
-{drift_html}
-{missing_html}
-
-  {levels_section}
-
-<footer>Generated from component tree &middot; <code>python3 knowledge/build_graph.py</code></footer>
+<div id="graph-tab" class="tab-content active">
+  <div id="graph-view"></div>
+  <div id="legend">
+    <h4>Domains</h4>
+    <div class="legend-row"><div class="legend-dot" style="background:#a78bfa"></div><span class="legend-label">Foundation</span></div>
+    <div class="legend-row"><div class="legend-dot" style="background:#fb923c"></div><span class="legend-label">SPDK</span></div>
+    <div class="legend-row"><div class="legend-dot" style="background:#f472b6"></div><span class="legend-label">Storage</span></div>
+    <div class="legend-row"><div class="legend-dot" style="background:#5eead4"></div><span class="legend-label">Dispatch</span></div>
+    <div class="legend-row"><div class="legend-dot" style="background:#60a5fa"></div><span class="legend-label">GPU</span></div>
+    <div class="legend-row"><div class="legend-dot" style="background:#4ade80"></div><span class="legend-label">Connector</span></div>
+    <h4 style="margin-top:10px">Status (border)</h4>
+    <div class="legend-row"><div class="legend-dot" style="background:transparent;border:2px solid #4ade80"></div><span class="legend-label">done</span></div>
+    <div class="legend-row"><div class="legend-dot" style="background:transparent;border:2px solid #facc15"></div><span class="legend-label">in progress</span></div>
+    <div class="legend-row"><div class="legend-dot" style="background:transparent;border:2px solid #f87171"></div><span class="legend-label">needs work</span></div>
+  </div>
 </div>
+
+<div id="sidebar">
+  <span class="close-btn" onclick="this.parentElement.classList.remove('open')">&times;</span>
+  <h3>Component Info</h3>
+  <div id="sidebar-content"></div>
+</div>
+
+<div id="cards-tab" class="tab-content">
+  <div id="card-view">
+    <h1><span class="hl">Certus</span> Dependency Graph</h1>
+    <p class="subtitle">Organized by dependency depth &mdash; level N depends only on levels &lt; N</p>
+    <p class="purpose">
+      <strong>Where am I?</strong> Level N in the DAG &nbsp;|&nbsp;
+      <strong>What can I touch?</strong> Levels below = your deps; above = depend on you &nbsp;|&nbsp;
+      <strong>What's broken?</strong> Red badges + drift &nbsp;|&nbsp;
+      <strong>What's missing?</strong> Pink cards
+    </p>
+
+    <div class="stats">
+      <div class="stat"><strong>{total}</strong>components</div>
+      <div class="stat"><strong style="color:#4ade80">{done}</strong>done</div>
+      <div class="stat"><strong style="color:#facc15">{in_prog}</strong>in progress</div>
+      <div class="stat"><strong style="color:#f87171">{needs}</strong>needs work</div>
+      <div class="stat"><strong>{max_level + 1}</strong>depth levels</div>
+    </div>
+
+    {drift_html}
+    {missing_html}
+
+    {levels_section}
+
+    <footer>Generated from component tree &middot; <code>python3 knowledge/build_graph.py</code></footer>
+  </div>
+</div>
+
+<script>
+function switchTab(name) {{
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  if (name === 'graph') {{
+    document.querySelectorAll('.tab')[0].classList.add('active');
+    document.getElementById('graph-tab').classList.add('active');
+  }} else {{
+    document.querySelectorAll('.tab')[1].classList.add('active');
+    document.getElementById('cards-tab').classList.add('active');
+  }}
+}}
+
+var nodes = new vis.DataSet({nodes_json});
+var edges = new vis.DataSet({edges_json});
+
+var container = document.getElementById('graph-view');
+var data = {{ nodes: nodes, edges: edges }};
+var options = {{
+  layout: {{
+    hierarchical: {{
+      direction: 'DU',
+      sortMethod: 'directed',
+      levelSeparation: 120,
+      nodeSpacing: 180,
+      blockShifting: true,
+      edgeMinimization: true
+    }}
+  }},
+  physics: false,
+  interaction: {{
+    hover: true,
+    tooltipDelay: 100,
+    zoomView: true,
+    dragView: true
+  }},
+  edges: {{
+    smooth: {{ type: 'cubicBezier', forceDirection: 'vertical' }},
+    width: 1.5,
+    selectionWidth: 3
+  }},
+  nodes: {{
+    borderWidth: 1,
+    borderWidthSelected: 3,
+    shadow: {{ enabled: true, size: 8, color: 'rgba(0,0,0,0.3)' }}
+  }}
+}};
+
+var network = new vis.Network(container, data, options);
+
+network.on('click', function(params) {{
+  if (params.nodes.length > 0) {{
+    var nodeId = params.nodes[0];
+    var node = nodes.get(nodeId);
+    var sidebar = document.getElementById('sidebar');
+    var content = document.getElementById('sidebar-content');
+    content.innerHTML = node.title || nodeId;
+    sidebar.classList.add('open');
+  }}
+}});
+</script>
 </body>
 </html>"""
 
