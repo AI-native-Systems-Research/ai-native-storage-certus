@@ -1,0 +1,81 @@
+{
+  "generated": "2026-05-05T00:00:00Z",
+  "project": "dispatch-map v0",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 21,
+    "aligned": 17,
+    "drifted": 4,
+    "not_implemented": 0,
+    "unspecced_features": 4
+  },
+  "specs": [
+    {
+      "id": "001-dispatch-map",
+      "title": "Dispatch Map",
+      "aligned": [
+        "FR-001", "FR-003", "FR-005", "FR-008", "FR-009", "FR-010",
+        "FR-011", "FR-012", "FR-013", "FR-014", "FR-015",
+        "SC-001", "SC-002", "SC-003", "SC-005", "SC-006"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-002",
+          "spec_text": "Per-entry metadata must include extent_manager_id and block_device_id fields",
+          "actual": "Missing these fields; has unspecced tsc field for LRU ordering instead",
+          "location": "src/lib.rs (DispatchEntry)",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "FR-004",
+          "spec_text": "lookup(key, timeout) with caller-supplied timeout parameter",
+          "actual": "Hardcoded DEFAULT_TIMEOUT (2000ms), no caller-supplied timeout in interface",
+          "location": "src/lib.rs (lookup)",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "FR-006",
+          "spec_text": "take_read(key, timeout) with caller-supplied timeout parameter",
+          "actual": "Same hardcoded timeout, no parameter in interface",
+          "location": "src/lib.rs (take_read)",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "SC-004",
+          "spec_text": "Entry size <= 32 bytes",
+          "actual": "Entry is ~36+ bytes due to tsc field (8 bytes) and enum padding",
+          "location": "src/lib.rs (DispatchEntry)",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "oldest_keys method (LRU key retrieval for eviction)",
+      "location": "src/lib.rs",
+      "lines": 20,
+      "suggested_spec": "Add to 001-dispatch-map"
+    },
+    {
+      "feature": "tsc field in DispatchEntry (timestamp for LRU ordering)",
+      "location": "src/lib.rs",
+      "lines": 5,
+      "suggested_spec": "Add to 001-dispatch-map"
+    },
+    {
+      "feature": "set_dma_alloc as separate interface method",
+      "location": "src/lib.rs",
+      "lines": 10,
+      "suggested_spec": "Add to 001-dispatch-map"
+    },
+    {
+      "feature": "DEFAULT_TIMEOUT = 2000ms",
+      "location": "src/lib.rs",
+      "lines": 3,
+      "suggested_spec": "Update 001-dispatch-map assumptions"
+    }
+  ],
+  "conflicts": []
+}

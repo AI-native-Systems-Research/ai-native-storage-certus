@@ -1,0 +1,58 @@
+{
+  "generated": "2026-05-05T00:00:00Z",
+  "project": "certus-server",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 14,
+    "aligned": 12,
+    "drifted": 2,
+    "not_implemented": 0,
+    "unspecced_features": 1
+  },
+  "specs": [
+    {
+      "id": "001-grpc-dispatcher-server",
+      "title": "gRPC Dispatcher Server",
+      "aligned": [
+        "FR-001",
+        "FR-002",
+        "FR-003",
+        "FR-004",
+        "FR-005",
+        "FR-006",
+        "FR-007",
+        "FR-008",
+        "FR-010",
+        "FR-013",
+        "FR-014",
+        "FR-015"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-009",
+          "spec_text": "Server MUST shut down the dispatcher when receiving SIGTERM/SIGINT, draining active requests and completing all in-flight operations before exiting",
+          "actual": "Only SIGINT handled via tokio::signal::ctrl_c(); SIGTERM not caught, so 'kill <pid>' does not trigger graceful shutdown",
+          "location": "src/main.rs:244",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "FR-011",
+          "spec_text": "IPC handle contains a memory address (or opaque identifier) and a size field, address transmitted as a 64-bit integer (pointer value)",
+          "actual": "IPC handle uses a 64-byte CUDA IPC memory handle (bytes field) plus uint32 size, which is superior for cross-process GPU sharing but diverges from spec assumption",
+          "location": "proto/dispatcher.proto:22-27",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "CUDA IPC handle open/close helpers",
+      "location": "src/service.rs:65-99",
+      "lines": 35,
+      "suggested_spec": "Update 001-grpc-dispatcher-server FR-011 assumptions"
+    }
+  ],
+  "conflicts": []
+}
