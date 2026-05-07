@@ -333,3 +333,17 @@ Issues encountered on first build and how they were resolved:
 - Cause: `engine.rs` never created or connected a logger. The dispatcher (and metadata block device, extent manager, dispatch map) all have optional `logger` receptacles that produce this error when the dispatcher tries to log during `initialize()`.
 - Fix: added `LoggerComponentV1` creation in `engine.rs` and connected it to all four components (metadata block device, extent manager, dispatch map, dispatcher). Added `logger` to `Cargo.toml` dependencies.
 - Also added `parse_pci_addr()` helper to `engine.rs` since `PciAddress` does not implement `FromStr`.
+
+**PyTorch CUDA version mismatch (GPU roundtrip test skipped)**
+- Symptom: `torch.cuda.is_available()` returns False with warning `NVIDIA driver too old (found version 12080)`
+- Cause: default `pip install torch` or `torch==2.11.0+cu130` is built against CUDA 13.x, but the driver (570.x) only supports CUDA 12.8
+- Fix: install torch built for cu128 from the PyTorch wheel index:
+  ```bash
+  pip install torch==2.7.0 --index-url https://download.pytorch.org/whl/cu128
+  ```
+  Verify with:
+  ```bash
+  python3 -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.version.cuda)"
+  # Expected: 2.7.0+cu128 True 12.8
+  ```
+- Note: `sudo dnf install -y cuda-toolkit` installs CUDA 13.x by default. The toolkit version does not need to match — only the PyTorch wheel needs to match the driver's maximum supported CUDA version.
