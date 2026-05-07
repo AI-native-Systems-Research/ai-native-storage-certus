@@ -13,7 +13,7 @@ use component_core::query_interface;
 use interfaces::{
     CacheKey, DispatcherConfig, DmaAllocFn, DmaBuffer, FormatParams, IBlockDevice,
     IBlockDeviceAdmin, IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger, IpcHandle,
-    PciAddress,
+    LookupResult, PciAddress,
 };
 
 use crate::keys;
@@ -475,6 +475,68 @@ impl EngineInner {
             }
         }
         Ok(())
+    }
+
+    /// Store bytes from a host buffer directly (no GPU DMA). For testing only.
+    /// Uses dispatcher.prepare_store()+commit_store() to write directly into
+    /// the DMA buffer and flush to NVMe without going through CUDA.
+    pub fn store_host_bytes(&self, key: u64, data: &[u8]) -> PyResult<()> {
+        self.ensure_init()?;
+        let dma_buf = self.dispatcher
+            .prepare_store(key, data.len() as u32)
+            .map_err(|e| PyRuntimeError::new_err(format!("store_host_bytes prepare failed: {e}")))?;
+
+        // Copy data into the DMA buffer directly.
+        // SAFETY: dma_buf is a valid DMA allocation covering at least data.len() bytes.
+        unsafe {
+            std::ptr::copy_nonoverlapping(data.as_ptr(), dma_buf.as_ptr() as *mut u8, data.len());
+        }
+
+        self.dispatcher
+            .commit_store(key)
+            .map_err(|e| PyRuntimeError::new_err(format!("store_host_bytes commit failed: {e}")))
+    }
+
+    /// Read bytes from the dispatch map's staging buffer for a key (no GPU DMA).
+    /// For testing only — verifies data was written correctly before background
+    /// NVMe migration moves it off the staging buffer.
+    pub fn load_host_bytes(&self, key: u64, size: usize) -> PyResult<Vec<u8>> {
+        self.ensure_init()?;
+        // Read directly from the dispatch map staging buffer, bypassing GPU DMA.
+        let result = self.dispatch_map
+            .lookup(key)
+            .map_err(|e| PyRuntimeError::new_err(format!("load_host_bytes lookup failed: {e}")))?;
+
+        use interfaces::LookupResult;
+        match result {
+            LookupResult::Staging { buffer } => {
+                let copy_len = size.min(buffer.len());
+                let mut out = vec![0u8; size];
+                // SAFETY: buffer is a valid DMA allocation; out is a valid heap allocation.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        buffer.as_ptr() as *const u8,
+                        out.as_mut_ptr(),
+                        copy_len,
+                    );
+                }
+                let _ = self.dispatch_map.release_read(key);
+                Ok(out)
+            }
+            LookupResult::BlockDevice { .. } => {
+                let _ = self.dispatch_map.release_read(key);
+                Err(PyRuntimeError::new_err(
+                    "key already migrated to NVMe — use load_async for block device reads",
+                ))
+            }
+            LookupResult::NotExist => Err(PyRuntimeError::new_err(
+                format!("key {key} not found in dispatch map"),
+            )),
+            LookupResult::MismatchSize => {
+                let _ = self.dispatch_map.release_read(key);
+                Err(PyRuntimeError::new_err("size mismatch on lookup"))
+            }
+        }
     }
 
     /// Shut down the engine, releasing all resources.
