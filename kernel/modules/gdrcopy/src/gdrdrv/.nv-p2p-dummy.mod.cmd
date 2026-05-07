@@ -1,1 +1,1 @@
-cmd_/home/dwaddington/gdrcopy/src/gdrdrv/nv-p2p-dummy.mod := printf '%s\n'   nv-p2p-dummy.o | awk '!x[$$0]++ { print("/home/dwaddington/gdrcopy/src/gdrdrv/"$$0) }' > /home/dwaddington/gdrcopy/src/gdrdrv/nv-p2p-dummy.mod
+cmd_/home/dwaddington/certus/kernel/modules/gdrcopy/src/gdrdrv/nv-p2p-dummy.mod := printf '%s\n'   nv-p2p-dummy.o | awk '!x[$$0]++ { print("/home/dwaddington/certus/kernel/modules/gdrcopy/src/gdrdrv/"$$0) }' > /home/dwaddington/certus/kernel/modules/gdrcopy/src/gdrdrv/nv-p2p-dummy.mod

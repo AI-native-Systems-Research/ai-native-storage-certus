@@ -1,4 +1,5 @@
-nv-p2p-dummy.o: /home/dwaddington/gdrcopy/src/gdrdrv/nv-p2p-dummy.c \
+nv-p2p-dummy.o: \
+ /home/dwaddington/certus/kernel/modules/gdrcopy/src/gdrdrv/nv-p2p-dummy.c \
  include/linux/compiler-version.h include/linux/kconfig.h \
  include/generated/autoconf.h include/linux/compiler_types.h \
  include/linux/compiler_attributes.h include/linux/compiler-gcc.h \
