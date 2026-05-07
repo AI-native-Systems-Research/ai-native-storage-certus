@@ -69,6 +69,27 @@ impl EngineInner {
             .ok_or_else(|| PyRuntimeError::new_err("missing 'gpu_block_size'"))?
             .extract()?;
 
+        let slab_size_bytes: u64 = config
+            .get_item("slab_size_bytes")?
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(131072);
+
+        let dram_cache_bytes: u64 = config
+            .get_item("dram_cache_bytes")?
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(0);
+
+        let eviction_threshold: f64 = config
+            .get_item("eviction_threshold")?
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(0.8);
+
+        let max_cache_entries: usize = if slab_size_bytes > 0 && dram_cache_bytes > 0 {
+            (dram_cache_bytes / slab_size_bytes) as usize
+        } else {
+            10000
+        };
+
         // --- Initialize SPDK environment ---
         let spdk_comp = spdk_env::SPDKEnvComponent::new_default();
         let spdk_iface = query_interface!(spdk_comp, spdk_env::ISPDKEnv)
@@ -115,10 +136,10 @@ impl EngineInner {
             .initialize(DispatcherConfig {
                 metadata_pci_addr,
                 data_pci_addrs,
-                block_device_version: todo!(),
+                block_device_version: interfaces::BlockDeviceVersion::V2,
                 extent_manager_version: interfaces::ExtentManagerVersion::V2,
-                max_cache_entries: todo!(),
-                eviction_threshold: todo!(),
+                max_cache_entries,
+                eviction_threshold,
                 format_on_init: true,
             })
             .map_err(|e| PyRuntimeError::new_err(format!("Dispatcher init failed: {e}")))?;
