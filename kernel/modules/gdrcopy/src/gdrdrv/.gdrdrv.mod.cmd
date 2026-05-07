@@ -1,0 +1,1 @@
+cmd_/home/dwaddington/gdrcopy/src/gdrdrv/gdrdrv.mod := printf '%s\n'   gdrdrv.o | awk '!x[$$0]++ { print("/home/dwaddington/gdrcopy/src/gdrdrv/"$$0) }' > /home/dwaddington/gdrcopy/src/gdrdrv/gdrdrv.mod
