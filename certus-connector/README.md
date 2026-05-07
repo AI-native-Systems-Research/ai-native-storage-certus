@@ -300,3 +300,36 @@ Issues encountered on first build and how they were resolved:
 - Symptom: `CertusEngine(...)` would panic immediately on construction
 - Fields: `block_device_version`, `max_cache_entries`, `eviction_threshold` in `DispatcherConfig`
 - Fix: `block_device_version = BlockDeviceVersion::V2` (latest); `max_cache_entries` derived from `dram_cache_bytes / slab_size_bytes` (default 10000); `eviction_threshold` read from config (default 0.8). Both new config fields parsed from the Python dict with sensible defaults.
+
+**`certus_native` module imported but `CertusEngine` not found**
+- Symptom: `AttributeError: module 'certus_native' has no attribute 'CertusEngine'`
+- Cause: the `certus_native/__init__.py` we created for maturin was empty, so Python imported the package directory instead of the compiled `.so`
+- Fix: added `from .certus_native import *` and explicit `CertusEngine, CertusConfig` imports to `certus_native/__init__.py`
+
+**DMA remapping failed (ENOMEM) on engine init**
+- Symptom: `EAL: 0000:XX:00.0 DMA remapping failed, error 12 (Cannot allocate memory)` — all devices unusable
+- Cause: `memlock` limit was 8MB (default), DPDK needs unlimited to pin hugepage memory for DMA
+- Fix: add to `/etc/security/limits.conf`:
+  ```
+  * soft memlock unlimited
+  * hard memlock unlimited
+  ```
+  Also fixed `scripts/spdk-scripts/cfg_user_spdk.sh` which had these lines as a comment but never applied them.
+  For the current shell session: `ulimit -l unlimited`
+
+**CUDA driver version insufficient**
+- Symptom: `RuntimeError: GPU init failed: cudaGetDeviceCount failed: CUDA driver version is insufficient for CUDA runtime version`
+- Cause: `sudo dnf install -y cuda-toolkit` installed CUDA 13.x, but the NVIDIA driver (570.x) only supports CUDA 12.8
+- Fix: install the matching version: `sudo dnf install -y cuda-toolkit-12-8`
+- Also: the `.so` is compiled against whichever CUDA is active at build time. If mismatched at runtime, prepend the right lib path: `LD_LIBRARY_PATH=/usr/local/cuda-12.8/targets/x86_64-linux/lib:$LD_LIBRARY_PATH` and rebuild with `sudo ln -sfn /usr/local/cuda-12.8 /usr/local/cuda && pip install -e .`
+
+**`DispatchMap init failed: extent_manager not bound`**
+- Symptom: `RuntimeError: DispatchMap init failed: not initialized: extent_manager not bound`
+- Cause: `engine.rs` called `dm.initialize()` without connecting an `IExtentManager` receptacle. `DispatchMapComponentV0.initialize()` walks the extent manager to recover persisted extents — it requires the receptacle even on a fresh (empty) device.
+- Fix: added creation of a metadata block device (`BlockDeviceSpdkNvmeComponentV2`) and extent manager (`ExtentManagerV2`) in `engine.rs`, formatted them on init, and connected them to the dispatch map before calling `initialize()`. Also added `block-device-spdk-nvme-v2` and `extent-manager-v2` to `Cargo.toml` dependencies.
+
+**`Dispatcher init failed: logger not bound`**
+- Symptom: `RuntimeError: Dispatcher init failed: not initialized: logger not bound`
+- Cause: `engine.rs` never created or connected a logger. The dispatcher (and metadata block device, extent manager, dispatch map) all have optional `logger` receptacles that produce this error when the dispatcher tries to log during `initialize()`.
+- Fix: added `LoggerComponentV1` creation in `engine.rs` and connected it to all four components (metadata block device, extent manager, dispatch map, dispatcher). Added `logger` to `Cargo.toml` dependencies.
+- Also added `parse_pci_addr()` helper to `engine.rs` since `PciAddress` does not implement `FromStr`.

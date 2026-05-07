@@ -10,7 +10,11 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use component_core::query_interface;
-use interfaces::{CacheKey, DispatcherConfig, IDispatchMap, IDispatcher, IGpuServices, IpcHandle};
+use interfaces::{
+    CacheKey, DispatcherConfig, DmaAllocFn, DmaBuffer, FormatParams, IBlockDevice,
+    IBlockDeviceAdmin, IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger, IpcHandle,
+    PciAddress,
+};
 
 use crate::keys;
 
@@ -30,6 +34,22 @@ struct TransferJob {
     gpu_block_ids: Vec<u64>,
     completed: AtomicBool,
     success: AtomicBool,
+}
+
+fn parse_pci_addr(s: &str) -> Result<PciAddress, String> {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() != 3 {
+        return Err(format!("expected domain:bus:dev.func, got '{s}'"));
+    }
+    let domain = u32::from_str_radix(parts[0], 16).map_err(|_| format!("invalid domain '{}'", parts[0]))?;
+    let bus = u8::from_str_radix(parts[1], 16).map_err(|_| format!("invalid bus '{}'", parts[1]))?;
+    let dev_func: Vec<&str> = parts[2].split('.').collect();
+    if dev_func.len() != 2 {
+        return Err(format!("invalid dev.func '{}'", parts[2]));
+    }
+    let dev = u8::from_str_radix(dev_func[0], 16).map_err(|_| format!("invalid dev '{}'", dev_func[0]))?;
+    let func = u8::from_str_radix(dev_func[1], 16).map_err(|_| format!("invalid func '{}'", dev_func[1]))?;
+    Ok(PciAddress { domain, bus, dev, func })
 }
 
 // ─── EngineInner ───────────────────────────────────────────────────────────
@@ -98,6 +118,11 @@ impl EngineInner {
             .init()
             .map_err(|e| PyRuntimeError::new_err(format!("SPDK init failed: {e}")))?;
 
+        // --- Create logger ---
+        let log_comp = logger::LoggerComponentV1::new_default();
+        let log: Arc<dyn ILogger + Send + Sync> = query_interface!(log_comp, ILogger)
+            .ok_or_else(|| PyRuntimeError::new_err("failed to query ILogger"))?;
+
         // --- Initialize GPU services ---
         let gpu_comp = gpu_services::GpuServicesComponentV0::new();
         let gpu: Arc<dyn IGpuServices + Send + Sync> = query_interface!(gpu_comp, IGpuServices)
@@ -105,9 +130,74 @@ impl EngineInner {
         gpu.initialize()
             .map_err(|e| PyRuntimeError::new_err(format!("GPU init failed: {e}")))?;
 
-        // --- Create dispatch map ---
+        // --- Create metadata block device ---
+        let meta_dev = block_device_spdk_nvme_v2::BlockDeviceSpdkNvmeComponentV2::new_default();
+        meta_dev
+            .logger
+            .connect(Arc::clone(&log))
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire logger for metadata device: {e}")))?;
+        meta_dev
+            .spdk_env
+            .connect(Arc::clone(&spdk_iface))
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire spdk_env for metadata device: {e}")))?;
+        let meta_admin: Arc<dyn IBlockDeviceAdmin + Send + Sync> =
+            query_interface!(meta_dev, IBlockDeviceAdmin)
+                .ok_or_else(|| PyRuntimeError::new_err("failed to query IBlockDeviceAdmin for metadata device"))?;
+        let pci = parse_pci_addr(&metadata_pci_addr)
+            .map_err(|e| PyRuntimeError::new_err(format!("invalid metadata PCI address '{metadata_pci_addr}': {e}")))?;
+        meta_admin.set_pci_address(pci);
+        meta_admin
+            .initialize()
+            .map_err(|e| PyRuntimeError::new_err(format!("metadata block device init failed: {e}")))?;
+        let meta_ibd: Arc<dyn IBlockDevice + Send + Sync> =
+            query_interface!(meta_dev, IBlockDevice)
+                .ok_or_else(|| PyRuntimeError::new_err("failed to query IBlockDevice for metadata device"))?;
+
+        // --- Create extent manager for metadata device ---
+        let meta_em = extent_manager_v2::ExtentManagerV2::new_inner();
+        let numa_node = meta_ibd.numa_node();
+        let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
+            DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
+        });
+        meta_em.set_dma_alloc(dma_alloc);
+        meta_em
+            .logger
+            .connect(Arc::clone(&log) as Arc<dyn ILogger + Send + Sync>)
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire logger for metadata extent manager: {e}")))?;
+        use component_core::binding::bind;
+        bind(
+            &*meta_dev,
+            "IBlockDevice",
+            &*meta_em as &dyn component_core::IUnknown,
+            "metadata_device",
+        )
+        .map_err(|e| PyRuntimeError::new_err(format!("failed to bind metadata block device to extent manager: {e}")))?;
+        let meta_iem: Arc<dyn IExtentManager + Send + Sync> =
+            query_interface!(meta_em, IExtentManager)
+                .ok_or_else(|| PyRuntimeError::new_err("failed to query IExtentManager for metadata device"))?;
+        let sector_size = meta_ibd.block_size();
+        let num_sectors = meta_ibd.num_sectors(1).unwrap_or(0);
+        let data_disk_size = num_sectors * sector_size as u64;
+        let defaults = FormatParams::default();
+        meta_iem
+            .format(FormatParams {
+                data_disk_size,
+                sector_size,
+                ..defaults
+            })
+            .map_err(|e| PyRuntimeError::new_err(format!("metadata extent manager format failed: {e}")))?;
+
+        // --- Create dispatch map, wire extent manager, initialize ---
         let dm_comp =
             dispatch_map::DispatchMapComponentV0::new(dispatch_map::DispatchMapState::default());
+        dm_comp
+            .logger
+            .connect(Arc::clone(&log) as Arc<dyn ILogger + Send + Sync>)
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire logger for dispatch map: {e}")))?;
+        dm_comp
+            .extent_manager
+            .connect(Arc::clone(&meta_iem))
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire extent_manager to dispatch map: {e}")))?;
         let dm: Arc<dyn IDispatchMap + Send + Sync> = query_interface!(dm_comp, IDispatchMap)
             .ok_or_else(|| PyRuntimeError::new_err("failed to query IDispatchMap"))?;
         dm.initialize()
@@ -115,6 +205,10 @@ impl EngineInner {
 
         // --- Create dispatcher ---
         let disp_comp = dispatcher::DispatcherComponentV0::new_default();
+        disp_comp
+            .logger
+            .connect(Arc::clone(&log) as Arc<dyn ILogger + Send + Sync>)
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire logger for dispatcher: {e}")))?;
         disp_comp
             .dispatch_map
             .connect(Arc::clone(&dm))
