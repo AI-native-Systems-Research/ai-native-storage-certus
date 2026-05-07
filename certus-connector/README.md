@@ -265,3 +265,38 @@ the handlers must preserve these same semantics — particularly:
 - Atomic eviction: either free enough space or reject entirely (`None`)
 - Protected set: don't evict keys that are in the current store request
 - Readiness: blocks not loadable until `complete_store(success=True)`
+
+## Build troubleshooting (RHEL 9)
+
+Issues encountered on first build and how they were resolved:
+
+**`certus_native` Python module directory missing**
+- Symptom: `maturin failed — python module at certus_native does not exist`
+- Fix: `mkdir certus_native && touch certus_native/__init__.py` — maturin requires the package directory to exist even for a pure-Rust module
+
+**SPDK submodule not cloned**
+- Symptom: `error: SPDK source not found at deps/spdk/`
+- Fix: `deps/build_spdk.sh` clones it automatically, but had a bug (`cd spdk` instead of `cd "${SRC_DIR}"`). Fixed in the script.
+
+**Missing system packages not in default RHEL repos**
+- `meson`, `ninja`, `pyelftools`, `jinja2`, `tabulate`, `uv` — not in dnf, install via `pip install`
+- `CUnit-devel` — requires CRB repo: `sudo dnf config-manager --set-enabled crb`
+- `numactl-devel` — must be installed before DPDK configures, or meson fails with "No NUMA library found"
+- `fuse3-devel` — required for `--with-nvme-cuse`; added to `deps/install_deps.sh`
+- `patchelf` — required by SPDK's Python install step
+- All missing packages are now included in `deps/install_deps.sh`
+
+**`meson`/`ninja` not on PATH for build**
+- Symptom: `meson: command not found` / `Could not detect Ninja v1.8.2 or newer`
+- Cause: pip installs to `/usr/local/bin` which may not be in PATH when running as different users
+- Fix: `deps/install_deps.sh` now symlinks both to `/usr/bin/` using `python3 -c 'import shutil; print(shutil.which(...))'` to find the actual install location dynamically
+
+**CUDA toolkit missing**
+- Symptom: `rust-lld: error: unable to find library -lcudart`
+- Cause: `gpu-services` component links `libcudart` when built with `features = ["gpu"]`
+- Fix: `sudo dnf install -y cuda-toolkit` (CUDA repo was already configured on this machine via NVIDIA driver install)
+
+**Three `todo!()` panics in `engine.rs`**
+- Symptom: `CertusEngine(...)` would panic immediately on construction
+- Fields: `block_device_version`, `max_cache_entries`, `eviction_threshold` in `DispatcherConfig`
+- Fix: `block_device_version = BlockDeviceVersion::V2` (latest); `max_cache_entries` derived from `dram_cache_bytes / slab_size_bytes` (default 10000); `eviction_threshold` read from config (default 0.8). Both new config fields parsed from the Python dict with sensible defaults.
