@@ -158,6 +158,64 @@ impl<T: ?Sized + Send + Sync + 'static> Default for Receptacle<T> {
 unsafe impl<T: ?Sized + Send + Sync + 'static> Send for Receptacle<T> {}
 unsafe impl<T: ?Sized + Send + Sync + 'static> Sync for Receptacle<T> {}
 
+#[cfg(kani)]
+mod verification {
+    use super::*;
+    use std::sync::Arc;
+
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn verify_receptacle_new_is_disconnected() {
+        let r: Receptacle<u32> = Receptacle::new();
+        kani::assert(!r.is_connected(), "new receptacle must be disconnected");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn verify_receptacle_connect_sets_connected() {
+        let r: Receptacle<u32> = Receptacle::new();
+        let provider = Arc::new(kani::any::<u32>());
+        r.connect(provider).unwrap();
+        kani::assert(r.is_connected(), "receptacle must be connected after connect()");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn verify_receptacle_double_connect_returns_error() {
+        let r: Receptacle<u32> = Receptacle::new();
+        let p1 = Arc::new(kani::any::<u32>());
+        let p2 = Arc::new(kani::any::<u32>());
+        r.connect(p1).unwrap();
+        let result = r.connect(p2);
+        kani::assert(
+            matches!(result, Err(ReceptacleError::AlreadyConnected)),
+            "double connect must return AlreadyConnected",
+        );
+    }
+
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn verify_receptacle_disconnect_when_empty_returns_error() {
+        let r: Receptacle<u32> = Receptacle::new();
+        let result = r.disconnect();
+        kani::assert(
+            matches!(result, Err(ReceptacleError::NotConnected)),
+            "disconnect on empty receptacle must return NotConnected",
+        );
+    }
+
+    #[kani::proof]
+    #[kani::unwind(5)]
+    fn verify_receptacle_connect_disconnect_roundtrip() {
+        let r: Receptacle<u32> = Receptacle::new();
+        let provider = Arc::new(kani::any::<u32>());
+        r.connect(provider).unwrap();
+        kani::assert(r.is_connected(), "must be connected after connect");
+        r.disconnect().unwrap();
+        kani::assert(!r.is_connected(), "must be disconnected after disconnect");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

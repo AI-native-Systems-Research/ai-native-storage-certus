@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "Core traits and types for the COM-style component framework"
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
 [dependencies]
 crossbeam-channel = "0.5"
 kanal = "0.1"

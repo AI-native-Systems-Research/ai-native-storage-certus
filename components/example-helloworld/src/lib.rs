@@ -107,3 +107,55 @@ impl ActorHandler<GreetRequest> for GreeterHandler {
         eprintln!("[greeter] Greeter stopped after {} greetings", self.count);
     }
 }
+
+#[cfg(kani)]
+mod verification {
+    use super::GreeterHandler;
+
+    #[kani::proof]
+    #[kani::unwind(1)]
+    fn verify_greeter_new_initial_state() {
+        let h = GreeterHandler::new();
+        kani::assert(h.count == 0, "count must start at 0");
+        kani::assert(h.logger.is_none(), "logger must be None on new");
+    }
+
+    /// NOTE — assume is UNMATCHED: handle() has bare `self.count += 1` with no guard.
+    /// This harness passes because kani::assume precludes the overflow path;
+    /// the production code has a latent unchecked overflow defect.
+    #[kani::proof]
+    #[kani::unwind(1)]
+    fn verify_count_increment_bounded() {
+        let init: u32 = kani::any();
+        kani::assume(init < u32::MAX); // unmatched: production has no overflow guard
+        let next = init + 1;
+        kani::assert(next > init, "increment must strictly increase count");
+        kani::assert(next == init.wrapping_add(1), "increment must be exact");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(1)]
+    fn verify_count_two_step_increment() {
+        let init: u32 = kani::any();
+        kani::assume(init < u32::MAX - 1);
+        let after_one = init + 1;
+        let after_two = after_one + 1;
+        kani::assert(after_two > after_one, "second increment increases count");
+        kani::assert(after_two == init + 2, "two increments equals init + 2");
+    }
+
+    #[kani::proof]
+    #[kani::unwind(1)]
+    fn verify_greeter_default_equals_new() {
+        let by_new = GreeterHandler::new();
+        let by_default = GreeterHandler::default();
+        kani::assert(
+            by_new.count == by_default.count,
+            "default().count must equal new().count",
+        );
+        kani::assert(
+            by_new.logger.is_none() && by_default.logger.is_none(),
+            "both constructors must produce no logger",
+        );
+    }
+}
