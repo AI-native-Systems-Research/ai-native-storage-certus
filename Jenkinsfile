@@ -5,8 +5,8 @@ pipeline {
       steps {
           sh 'pwd'
           sh 'whoami'
-          sh '[ -L "link_name" ] || ln -s "/opt/spdk-build/" "./deps/spdk-build"'
-          sh '[ -L "link_name" ] || ln -s "/opt/spdk/" "./deps/spdk"'
+          sh '[ -L "./deps/spdk" ] || ln -s "/opt/spdk/" "./deps/spdk"'
+          sh '[ -L "./deps/spdk-build" ] || ln -s "/opt/spdk-build/" "./deps/spdk-build"'
 
         script {
           def status = sh(script: '. ~/.cargo/env ; cargo build', returnStatus: true)
