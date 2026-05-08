@@ -10,7 +10,11 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use component_core::query_interface;
-use interfaces::{CacheKey, DispatcherConfig, IDispatchMap, IDispatcher, IGpuServices, IpcHandle};
+use interfaces::{
+    CacheKey, DispatcherConfig, DmaAllocFn, DmaBuffer, FormatParams, IBlockDevice,
+    IBlockDeviceAdmin, IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger, IpcHandle,
+    LookupResult, PciAddress,
+};
 
 use crate::keys;
 
@@ -30,6 +34,22 @@ struct TransferJob {
     gpu_block_ids: Vec<u64>,
     completed: AtomicBool,
     success: AtomicBool,
+}
+
+fn parse_pci_addr(s: &str) -> Result<PciAddress, String> {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() != 3 {
+        return Err(format!("expected domain:bus:dev.func, got '{s}'"));
+    }
+    let domain = u32::from_str_radix(parts[0], 16).map_err(|_| format!("invalid domain '{}'", parts[0]))?;
+    let bus = u8::from_str_radix(parts[1], 16).map_err(|_| format!("invalid bus '{}'", parts[1]))?;
+    let dev_func: Vec<&str> = parts[2].split('.').collect();
+    if dev_func.len() != 2 {
+        return Err(format!("invalid dev.func '{}'", parts[2]));
+    }
+    let dev = u8::from_str_radix(dev_func[0], 16).map_err(|_| format!("invalid dev '{}'", dev_func[0]))?;
+    let func = u8::from_str_radix(dev_func[1], 16).map_err(|_| format!("invalid func '{}'", dev_func[1]))?;
+    Ok(PciAddress { domain, bus, dev, func })
 }
 
 // ─── EngineInner ───────────────────────────────────────────────────────────
@@ -69,6 +89,27 @@ impl EngineInner {
             .ok_or_else(|| PyRuntimeError::new_err("missing 'gpu_block_size'"))?
             .extract()?;
 
+        let slab_size_bytes: u64 = config
+            .get_item("slab_size_bytes")?
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(131072);
+
+        let dram_cache_bytes: u64 = config
+            .get_item("dram_cache_bytes")?
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(0);
+
+        let eviction_threshold: f64 = config
+            .get_item("eviction_threshold")?
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(0.8);
+
+        let max_cache_entries: usize = if slab_size_bytes > 0 && dram_cache_bytes > 0 {
+            (dram_cache_bytes / slab_size_bytes) as usize
+        } else {
+            10000
+        };
+
         // --- Initialize SPDK environment ---
         let spdk_comp = spdk_env::SPDKEnvComponent::new_default();
         let spdk_iface = query_interface!(spdk_comp, spdk_env::ISPDKEnv)
@@ -77,6 +118,11 @@ impl EngineInner {
             .init()
             .map_err(|e| PyRuntimeError::new_err(format!("SPDK init failed: {e}")))?;
 
+        // --- Create logger ---
+        let log_comp = logger::LoggerComponentV1::new_default();
+        let log: Arc<dyn ILogger + Send + Sync> = query_interface!(log_comp, ILogger)
+            .ok_or_else(|| PyRuntimeError::new_err("failed to query ILogger"))?;
+
         // --- Initialize GPU services ---
         let gpu_comp = gpu_services::GpuServicesComponentV0::new_default();
         let gpu: Arc<dyn IGpuServices + Send + Sync> = query_interface!(gpu_comp, IGpuServices)
@@ -84,9 +130,74 @@ impl EngineInner {
         gpu.initialize()
             .map_err(|e| PyRuntimeError::new_err(format!("GPU init failed: {e}")))?;
 
-        // --- Create dispatch map ---
+        // --- Create metadata block device ---
+        let meta_dev = block_device_spdk_nvme_v2::BlockDeviceSpdkNvmeComponentV2::new_default();
+        meta_dev
+            .logger
+            .connect(Arc::clone(&log))
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire logger for metadata device: {e}")))?;
+        meta_dev
+            .spdk_env
+            .connect(Arc::clone(&spdk_iface))
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire spdk_env for metadata device: {e}")))?;
+        let meta_admin: Arc<dyn IBlockDeviceAdmin + Send + Sync> =
+            query_interface!(meta_dev, IBlockDeviceAdmin)
+                .ok_or_else(|| PyRuntimeError::new_err("failed to query IBlockDeviceAdmin for metadata device"))?;
+        let pci = parse_pci_addr(&metadata_pci_addr)
+            .map_err(|e| PyRuntimeError::new_err(format!("invalid metadata PCI address '{metadata_pci_addr}': {e}")))?;
+        meta_admin.set_pci_address(pci);
+        meta_admin
+            .initialize()
+            .map_err(|e| PyRuntimeError::new_err(format!("metadata block device init failed: {e}")))?;
+        let meta_ibd: Arc<dyn IBlockDevice + Send + Sync> =
+            query_interface!(meta_dev, IBlockDevice)
+                .ok_or_else(|| PyRuntimeError::new_err("failed to query IBlockDevice for metadata device"))?;
+
+        // --- Create extent manager for metadata device ---
+        let meta_em = extent_manager_v2::ExtentManagerV2::new_inner();
+        let numa_node = meta_ibd.numa_node();
+        let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
+            DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
+        });
+        meta_em.set_dma_alloc(dma_alloc);
+        meta_em
+            .logger
+            .connect(Arc::clone(&log) as Arc<dyn ILogger + Send + Sync>)
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire logger for metadata extent manager: {e}")))?;
+        use component_core::binding::bind;
+        bind(
+            &*meta_dev,
+            "IBlockDevice",
+            &*meta_em as &dyn component_core::IUnknown,
+            "metadata_device",
+        )
+        .map_err(|e| PyRuntimeError::new_err(format!("failed to bind metadata block device to extent manager: {e}")))?;
+        let meta_iem: Arc<dyn IExtentManager + Send + Sync> =
+            query_interface!(meta_em, IExtentManager)
+                .ok_or_else(|| PyRuntimeError::new_err("failed to query IExtentManager for metadata device"))?;
+        let sector_size = meta_ibd.block_size();
+        let num_sectors = meta_ibd.num_sectors(1).unwrap_or(0);
+        let data_disk_size = num_sectors * sector_size as u64;
+        let defaults = FormatParams::default();
+        meta_iem
+            .format(FormatParams {
+                data_disk_size,
+                sector_size,
+                ..defaults
+            })
+            .map_err(|e| PyRuntimeError::new_err(format!("metadata extent manager format failed: {e}")))?;
+
+        // --- Create dispatch map, wire extent manager, initialize ---
         let dm_comp =
             dispatch_map::DispatchMapComponentV0::new(dispatch_map::DispatchMapState::default());
+        dm_comp
+            .logger
+            .connect(Arc::clone(&log) as Arc<dyn ILogger + Send + Sync>)
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire logger for dispatch map: {e}")))?;
+        dm_comp
+            .extent_manager
+            .connect(Arc::clone(&meta_iem))
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire extent_manager to dispatch map: {e}")))?;
         let dm: Arc<dyn IDispatchMap + Send + Sync> = query_interface!(dm_comp, IDispatchMap)
             .ok_or_else(|| PyRuntimeError::new_err("failed to query IDispatchMap"))?;
         dm.initialize()
@@ -94,6 +205,10 @@ impl EngineInner {
 
         // --- Create dispatcher ---
         let disp_comp = dispatcher::DispatcherComponentV0::new_default();
+        disp_comp
+            .logger
+            .connect(Arc::clone(&log) as Arc<dyn ILogger + Send + Sync>)
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire logger for dispatcher: {e}")))?;
         disp_comp
             .dispatch_map
             .connect(Arc::clone(&dm))
@@ -115,10 +230,10 @@ impl EngineInner {
             .initialize(DispatcherConfig {
                 metadata_pci_addr,
                 data_pci_addrs,
-                block_device_version: todo!(),
+                block_device_version: interfaces::BlockDeviceVersion::V2,
                 extent_manager_version: interfaces::ExtentManagerVersion::V2,
-                max_cache_entries: todo!(),
-                eviction_threshold: todo!(),
+                max_cache_entries,
+                eviction_threshold,
                 format_on_init: true,
             })
             .map_err(|e| PyRuntimeError::new_err(format!("Dispatcher init failed: {e}")))?;
@@ -360,6 +475,68 @@ impl EngineInner {
             }
         }
         Ok(())
+    }
+
+    /// Store bytes from a host buffer directly (no GPU DMA). For testing only.
+    /// Uses dispatcher.prepare_store()+commit_store() to write directly into
+    /// the DMA buffer and flush to NVMe without going through CUDA.
+    pub fn store_host_bytes(&self, key: u64, data: &[u8]) -> PyResult<()> {
+        self.ensure_init()?;
+        let dma_buf = self.dispatcher
+            .prepare_store(key, data.len() as u32)
+            .map_err(|e| PyRuntimeError::new_err(format!("store_host_bytes prepare failed: {e}")))?;
+
+        // Copy data into the DMA buffer directly.
+        // SAFETY: dma_buf is a valid DMA allocation covering at least data.len() bytes.
+        unsafe {
+            std::ptr::copy_nonoverlapping(data.as_ptr(), dma_buf.as_ptr() as *mut u8, data.len());
+        }
+
+        self.dispatcher
+            .commit_store(key)
+            .map_err(|e| PyRuntimeError::new_err(format!("store_host_bytes commit failed: {e}")))
+    }
+
+    /// Read bytes from the dispatch map's staging buffer for a key (no GPU DMA).
+    /// For testing only — verifies data was written correctly before background
+    /// NVMe migration moves it off the staging buffer.
+    pub fn load_host_bytes(&self, key: u64, size: usize) -> PyResult<Vec<u8>> {
+        self.ensure_init()?;
+        // Read directly from the dispatch map staging buffer, bypassing GPU DMA.
+        let result = self.dispatch_map
+            .lookup(key)
+            .map_err(|e| PyRuntimeError::new_err(format!("load_host_bytes lookup failed: {e}")))?;
+
+        use interfaces::LookupResult;
+        match result {
+            LookupResult::Staging { buffer } => {
+                let copy_len = size.min(buffer.len());
+                let mut out = vec![0u8; size];
+                // SAFETY: buffer is a valid DMA allocation; out is a valid heap allocation.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        buffer.as_ptr() as *const u8,
+                        out.as_mut_ptr(),
+                        copy_len,
+                    );
+                }
+                let _ = self.dispatch_map.release_read(key);
+                Ok(out)
+            }
+            LookupResult::BlockDevice { .. } => {
+                let _ = self.dispatch_map.release_read(key);
+                Err(PyRuntimeError::new_err(
+                    "key already migrated to NVMe — use load_async for block device reads",
+                ))
+            }
+            LookupResult::NotExist => Err(PyRuntimeError::new_err(
+                format!("key {key} not found in dispatch map"),
+            )),
+            LookupResult::MismatchSize => {
+                let _ = self.dispatch_map.release_read(key);
+                Err(PyRuntimeError::new_err("size mismatch on lookup"))
+            }
+        }
     }
 
     /// Shut down the engine, releasing all resources.
