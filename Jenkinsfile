@@ -5,8 +5,9 @@ pipeline {
       steps {
           sh 'pwd'
           sh 'whoami'
-          sh 'unlink ./deps/spdk-build ; ln -sf /opt/spdk-build/ ./deps/spdk-build'
-          sh 'unlink ./deps/spdk ; ln -sf /opt/spdk/ ./deps/spdk'
+          sh '[ -L "link_name" ] || ln -s "/opt/spdk-build/" "./deps/spdk-build"'
+          sh '[ -L "link_name" ] || ln -s "/opt/spdk/" "./deps/spdk"'
+
         script {
           def status = sh(script: '. ~/.cargo/env ; cargo build', returnStatus: true)
           echo "Server build exit status:-> ${status}"
