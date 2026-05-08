@@ -133,7 +133,7 @@ fn initialize_stack(pci: Option<&str>) -> Result<ServerContext, String> {
     let spdk_env_comp = SPDKEnvComponent::new_default();
     let block_dev = BlockDeviceSpdkNvmeComponentV1::new_default();
     let logger = LoggerComponentV1::new_default();
-    let gpu_component = GpuServicesComponentV0::new();
+    let gpu_component = GpuServicesComponentV0::new_default();
 
     bind(&*spdk_env_comp, "ISPDKEnv", &*block_dev, "spdk_env")
         .map_err(|e| format!("bind spdk_env: {e}"))?;

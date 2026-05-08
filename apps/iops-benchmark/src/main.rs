@@ -331,7 +331,11 @@ fn main() {
     let report = FinalReport::from_results(&results, actual_duration);
     report::print_final(&report, config.op, &results);
 
-    std::process::exit(0);
+    // Shutdown the block device actor thread before process exit.
+    // The component uses a self-referential Arc cycle (InterfaceMap holds
+    // Arc<Self>), so Drop will never fire. We must explicitly join the actor
+    // to prevent it from executing SPDK FFI calls during process teardown.
+    let _ = admin.shutdown();
 }
 
 /// Parse a PCI BDF address string like "0000:03:00.0" into components.

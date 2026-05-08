@@ -27,7 +27,7 @@ fn format_memory(bytes: u64) -> String {
 }
 
 fn main() {
-    let component = GpuServicesComponentV0::new();
+    let component = GpuServicesComponentV0::new_default();
     let gpu = query_interface!(component, IGpuServices).expect("IGpuServices not available");
 
     if let Err(e) = gpu.initialize() {

@@ -15,7 +15,7 @@
 //! use interfaces::IGpuServices;
 //! use component_core::query_interface;
 //!
-//! let component = GpuServicesComponentV0::new();
+//! let component = GpuServicesComponentV0::new_default();
 //! let gpu = query_interface!(component, IGpuServices).unwrap();
 //! gpu.initialize().unwrap();
 //! let devices = gpu.get_devices().unwrap();
@@ -38,11 +38,11 @@ mod memory;
 use component_framework::define_component;
 use interfaces::{GpuDeviceInfo, GpuDmaBuffer, GpuIpcHandle, IGpuServices, ILogger};
 
-#[cfg(feature = "gpu")]
 use std::sync::Mutex;
 
 /// Internal component state tracking initialization and handles.
 #[cfg(feature = "gpu")]
+#[derive(Default)]
 struct GpuState {
     initialized: bool,
     devices: Vec<GpuDeviceInfo>,
@@ -52,6 +52,10 @@ struct GpuState {
     pinned: std::collections::HashSet<usize>,
 }
 
+#[cfg(not(feature = "gpu"))]
+#[derive(Default)]
+struct GpuState;
+
 define_component! {
     pub GpuServicesComponentV0 {
         version: "0.1.0",
@@ -59,30 +63,16 @@ define_component! {
         receptacles: {
             logger: ILogger,
         },
+        fields: {
+            gpu_state: Mutex<GpuState>,
+        },
     }
 }
 
 #[cfg(feature = "gpu")]
 impl GpuServicesComponentV0 {
     fn state(&self) -> &Mutex<GpuState> {
-        // Lazy initialization of state via a static-like pattern.
-        // We use a thread_local or just accept the limitation that state
-        // is stored elsewhere. For simplicity, we'll use an approach
-        // that stores state in a global associated with this component instance.
-        //
-        // Since define_component! generates the struct, we need to use
-        // an external state holder. We'll use a global Mutex for now.
-        // In a production component, this would be stored in the component
-        // struct itself if define_component! supports custom fields.
-        static STATE: std::sync::OnceLock<Mutex<GpuState>> = std::sync::OnceLock::new();
-        STATE.get_or_init(|| {
-            Mutex::new(GpuState {
-                initialized: false,
-                devices: Vec::new(),
-                verified: std::collections::HashSet::new(),
-                pinned: std::collections::HashSet::new(),
-            })
-        })
+        &self.gpu_state
     }
 }
 
@@ -554,14 +544,14 @@ mod tests {
 
     #[test]
     fn test_provides_igpu_services() {
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices);
         assert!(gpu.is_some());
     }
 
     #[test]
     fn test_initialize_without_logger() {
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         // Without GPU feature or hardware, this will return an error.
         // With the feature but no hardware, CUDA init will fail gracefully.
@@ -578,7 +568,7 @@ mod tests {
 
     #[test]
     fn test_shutdown_without_logger() {
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         assert!(gpu.shutdown().is_ok());
     }
@@ -587,7 +577,7 @@ mod tests {
     fn test_get_devices_before_init_fails() {
         #[cfg(not(feature = "gpu"))]
         {
-            let component = GpuServicesComponentV0::new();
+            let component = GpuServicesComponentV0::new_default();
             let gpu = query_interface!(component, IGpuServices).unwrap();
             let result = gpu.get_devices();
             assert!(result.is_err());
@@ -597,7 +587,7 @@ mod tests {
     #[test]
     fn test_initialize_with_logger() {
         use std::sync::Arc;
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponentV1::new_default();
         component.logger.connect(logger).unwrap();
         let gpu = query_interface!(component, IGpuServices).unwrap();
@@ -607,7 +597,7 @@ mod tests {
     #[cfg(feature = "gpu")]
     #[test]
     fn test_initialize_idempotent() {
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         // First call may succeed or fail depending on hardware.
         let r1 = gpu.initialize();
@@ -620,7 +610,7 @@ mod tests {
     #[cfg(feature = "gpu")]
     #[test]
     fn test_shutdown_releases_state() {
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         if gpu.initialize().is_ok() {
             assert!(gpu.shutdown().is_ok());
@@ -632,7 +622,7 @@ mod tests {
     #[cfg(feature = "gpu")]
     #[test]
     fn test_deserialize_invalid_base64() {
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         if gpu.initialize().is_ok() {
             let result = gpu.deserialize_ipc_handle("not-valid-base64!!!");
@@ -645,7 +635,7 @@ mod tests {
     #[test]
     fn test_deserialize_wrong_payload_size() {
         use base64::Engine;
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         if gpu.initialize().is_ok() {
             // 50 bytes instead of 72
@@ -659,7 +649,7 @@ mod tests {
     // #[cfg(feature = "gpu")]
     // #[test]
     // fn test_deserialize_before_init_fails() {
-    //     let component = GpuServicesComponentV0::new();
+    //     let component = GpuServicesComponentV0::new_default();
     //     let gpu = query_interface!(component, IGpuServices).unwrap();
     //     // Force a fresh uninitialized state.
     //     let _ = gpu.shutdown();
@@ -673,7 +663,7 @@ mod tests {
     fn test_dma_cpu_to_gpu_roundtrip() {
         use std::ffi::c_void;
 
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         if gpu.initialize().is_err() {
             return;
@@ -730,7 +720,7 @@ mod tests {
     #[cfg(all(feature = "gpu", feature = "spdk"))]
     #[test]
     fn test_prepare_memory_not_initialized() {
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         let _ = gpu.shutdown();
         let result = gpu.prepare_memory_for_spdk("AAAA", None);
@@ -744,7 +734,7 @@ mod tests {
     #[cfg(all(feature = "gpu", feature = "spdk"))]
     #[test]
     fn test_prepare_memory_invalid_base64() {
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         if gpu.initialize().is_ok() {
             let result = gpu.prepare_memory_for_spdk("not-valid-base64!!!", None);
@@ -757,20 +747,21 @@ mod tests {
     #[test]
     fn test_prepare_memory_wrong_payload_size() {
         use base64::Engine;
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         if gpu.initialize().is_ok() {
             let payload = base64::engine::general_purpose::STANDARD.encode([0u8; 50]);
             let result = gpu.prepare_memory_for_spdk(&payload, None);
-            assert!(result.is_err());
-            assert!(result.unwrap_err().contains("72 bytes"));
+            assert!(result.is_err(), "expected Err, got Ok");
+            let err = result.unwrap_err();
+            assert!(err.contains("72 bytes"), "expected '72 bytes' in error, got: {err:?}");
         }
     }
 
     #[cfg(all(feature = "gpu", feature = "spdk"))]
     #[test]
     fn test_prepare_memory_succeeds_without_logger() {
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         if gpu.initialize().is_ok() {
             // With no logger connected, invalid payload should still return
@@ -784,7 +775,7 @@ mod tests {
     #[test]
     fn test_prepare_memory_logs_with_logger() {
         use std::sync::Arc;
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let logger_comp: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponentV1::new_default();
         component.logger.connect(logger_comp).unwrap();
         let gpu = query_interface!(component, IGpuServices).unwrap();
