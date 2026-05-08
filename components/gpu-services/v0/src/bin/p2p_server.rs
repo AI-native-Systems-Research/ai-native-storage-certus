@@ -51,8 +51,12 @@ struct Cli {
     mode: TransferMode,
 
     /// Pre-allocated staging buffer size (for p2p mode)
-    #[arg(long, default_value = "131072")]
+    #[arg(long, default_value = "4194304")]
     staging_size: usize,
+
+    /// NVMe I/O chunk size in bytes (must not exceed MDTS, typically 128KB)
+    #[arg(long, default_value = "131072")]
+    chunk_size: usize,
 
     /// Serve one client then exit
     #[arg(long)]
@@ -80,6 +84,12 @@ struct GpuStagingBuffer {
 // SAFETY: The GPU staging buffer is only accessed from the main thread.
 unsafe impl Send for GpuStagingBuffer {}
 unsafe impl Sync for GpuStagingBuffer {}
+
+/// Pool of chunk-sized GPU staging buffers for concurrent NVMe reads.
+struct ChunkPool {
+    buffers: Vec<GpuStagingBuffer>,
+    chunk_size: usize,
+}
 
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
@@ -237,6 +247,81 @@ fn create_gpu_staging(size: usize) -> Result<GpuStagingBuffer, String> {
     })
 }
 
+fn create_chunk_pool(total_size: usize, chunk_size: usize) -> Result<ChunkPool, String> {
+    let num_chunks = (total_size + chunk_size - 1) / chunk_size;
+    let mut buffers = Vec::with_capacity(num_chunks);
+    for i in 0..num_chunks {
+        match create_gpu_staging(chunk_size) {
+            Ok(buf) => buffers.push(buf),
+            Err(e) => {
+                // Clean up already-allocated buffers.
+                for b in buffers {
+                    unsafe { cuda_ffi::cudaFree(b.dev_ptr) };
+                }
+                return Err(format!("chunk pool alloc #{i}: {e}"));
+            }
+        }
+    }
+    Ok(ChunkPool {
+        buffers,
+        chunk_size,
+    })
+}
+
+/// Issue concurrent async NVMe reads via BatchSubmit for all chunks.
+fn do_chunked_read(
+    ctx: &ServerContext,
+    dma_bufs: &[Arc<Mutex<interfaces::DmaBuffer>>],
+    base_lba: u64,
+    chunk_size: usize,
+) -> Result<(), String> {
+    let sectors_per_chunk = chunk_size / ctx.sector_size;
+
+    let ibd = query::<dyn IBlockDevice + Send + Sync>(&*ctx.block_dev)
+        .ok_or("IBlockDevice query failed".to_string())?;
+    let channels = ibd
+        .connect_client()
+        .map_err(|e| format!("connect_client: {e}"))?;
+
+    let ops: Vec<interfaces::Command> = dma_bufs
+        .iter()
+        .enumerate()
+        .map(|(i, buf)| interfaces::Command::ReadAsync {
+            ns_id: ctx.ns_id,
+            lba: base_lba + (i as u64 * sectors_per_chunk as u64),
+            buf: Arc::clone(buf),
+            timeout_ms: 5000,
+        })
+        .collect();
+
+    let num_ops = ops.len();
+
+    channels
+        .command_tx
+        .send(interfaces::Command::BatchSubmit { ops })
+        .map_err(|e| format!("BatchSubmit send: {e}"))?;
+
+    // Receive all completions.
+    for _ in 0..num_ops {
+        match channels.completion_rx.recv() {
+            Ok(interfaces::Completion::ReadDone { result, .. }) => {
+                result.map_err(|e| format!("NVMe async read: {e}"))?;
+            }
+            Ok(interfaces::Completion::Timeout { handle }) => {
+                return Err(format!("NVMe read timeout (handle {:?})", handle));
+            }
+            Ok(other) => {
+                return Err(format!("unexpected completion: {other:?}"));
+            }
+            Err(e) => {
+                return Err(format!("recv: {e}"));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn parse_client_payload(stream: &mut UnixStream) -> Result<([u8; 64], usize), String> {
     let mut reader = std::io::BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
     let mut line = String::new();
@@ -285,242 +370,200 @@ fn open_ipc_handle(ipc_handle_bytes: &[u8; 64]) -> Result<*mut c_void, String> {
     Ok(dev_ptr)
 }
 
-/// Bounce mode: NVMe → host DMA buffer → cudaMemcpy H2D → client GPU.
+/// Bounce mode: NVMe → host DMA buffers (chunked) → cudaMemcpy H2D → client GPU.
 fn handle_bounce(
     stream: &mut UnixStream,
     ctx: &ServerContext,
+    chunk_size: usize,
 ) -> Result<String, String> {
     let (ipc_handle_bytes, size) = parse_client_payload(stream)?;
     let client_dev_ptr = open_ipc_handle(&ipc_handle_bytes)?;
 
-    // Allocate host DMA buffer from SPDK hugepages.
-    let host_buf = interfaces::DmaBuffer::new(size, ctx.sector_size, None)
-        .map_err(|e| {
-            unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
-            format!("DMA alloc: {e}")
-        })?;
+    let num_chunks = (size + chunk_size - 1) / chunk_size;
 
-    // NVMe read into host buffer.
-    let ibd = query::<dyn IBlockDevice + Send + Sync>(&*ctx.block_dev)
-        .ok_or("IBlockDevice query failed".to_string())?;
-    let channels = ibd
-        .connect_client()
-        .map_err(|e| format!("connect_client: {e}"))?;
-
-    let host_buf = Arc::new(Mutex::new(host_buf));
-    channels
-        .command_tx
-        .send(interfaces::Command::ReadSync {
-            ns_id: ctx.ns_id,
-            lba: 0,
-            buf: Arc::clone(&host_buf),
-        })
-        .map_err(|e| format!("ReadSync send: {e}"))?;
-
-    match channels.completion_rx.recv() {
-        Ok(interfaces::Completion::ReadDone { result, .. }) => {
-            result.map_err(|e| format!("NVMe read: {e}"))?;
-        }
-        Ok(other) => {
-            drop(host_buf);
-            unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
-            return Err(format!("unexpected completion: {other:?}"));
-        }
-        Err(e) => {
-            drop(host_buf);
-            unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
-            return Err(format!("recv: {e}"));
+    // Allocate one host DMA buffer per chunk from SPDK hugepages.
+    let mut host_bufs: Vec<Arc<Mutex<interfaces::DmaBuffer>>> = Vec::with_capacity(num_chunks);
+    for i in 0..num_chunks {
+        let this_chunk = std::cmp::min(chunk_size, size - i * chunk_size);
+        match interfaces::DmaBuffer::new(this_chunk, ctx.sector_size, None) {
+            Ok(buf) => host_bufs.push(Arc::new(Mutex::new(buf))),
+            Err(e) => {
+                drop(host_bufs);
+                unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
+                return Err(format!("DMA alloc chunk #{i}: {e}"));
+            }
         }
     }
 
-    // cudaMemcpy H2D: host buffer → client GPU buffer.
-    let buf_guard = host_buf.lock().unwrap();
-    let err = unsafe {
-        cuda_ffi::cudaMemcpy(
-            client_dev_ptr,
-            buf_guard.as_ptr() as *const c_void,
-            size,
-            cuda_ffi::CUDA_MEMCPY_HOST_TO_DEVICE,
-        )
-    };
-    drop(buf_guard);
-    drop(host_buf);
+    // Concurrent NVMe reads into all chunks.
+    if let Err(e) = do_chunked_read(ctx, &host_bufs, 0, chunk_size) {
+        drop(host_bufs);
+        unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
+        return Err(e);
+    }
 
+    // cudaMemcpy H2D per chunk at correct offset.
+    for (i, buf) in host_bufs.iter().enumerate() {
+        let offset = i * chunk_size;
+        let this_chunk = std::cmp::min(chunk_size, size - offset);
+        let buf_guard = buf.lock().unwrap();
+        let err = unsafe {
+            cuda_ffi::cudaMemcpy(
+                (client_dev_ptr as *mut u8).add(offset) as *mut c_void,
+                buf_guard.as_ptr() as *const c_void,
+                this_chunk,
+                cuda_ffi::CUDA_MEMCPY_HOST_TO_DEVICE,
+            )
+        };
+        drop(buf_guard);
+        if err != cuda_ffi::CUDA_SUCCESS {
+            drop(host_bufs);
+            unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
+            return Err(format!(
+                "cudaMemcpy H2D chunk #{i}: {}",
+                cuda_ffi::cuda_error_string(err)
+            ));
+        }
+    }
+
+    drop(host_bufs);
     unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
 
-    if err != cuda_ffi::CUDA_SUCCESS {
-        return Err(format!(
-            "cudaMemcpy H2D: {}",
-            cuda_ffi::cuda_error_string(err)
-        ));
-    }
-
-    Ok(format!("OK {} bytes (bounce)", size))
+    Ok(format!("OK {} bytes (bounce, {} chunks)", size, num_chunks))
 }
 
-/// P2P mode with pre-pinned staging: NVMe → GPU staging → D2D → client.
+/// P2P mode with pre-pinned chunk pool: NVMe → GPU staging chunks → D2D → client.
 fn handle_p2p(
     stream: &mut UnixStream,
     ctx: &ServerContext,
-    staging: &GpuStagingBuffer,
+    pool: &ChunkPool,
 ) -> Result<String, String> {
     let (ipc_handle_bytes, size) = parse_client_payload(stream)?;
 
-    if size > staging.capacity {
+    let total_capacity: usize = pool.buffers.iter().map(|b| b.capacity).sum();
+    if size > total_capacity {
         return Err(format!(
-            "requested {} exceeds staging capacity {}",
-            size, staging.capacity
+            "requested {} exceeds pool capacity {}",
+            size, total_capacity
         ));
     }
 
+    let num_chunks = (size + pool.chunk_size - 1) / pool.chunk_size;
     let client_dev_ptr = open_ipc_handle(&ipc_handle_bytes)?;
 
-    // NVMe read into pre-pinned GPU staging buffer.
-    let ibd = query::<dyn IBlockDevice + Send + Sync>(&*ctx.block_dev)
-        .ok_or("IBlockDevice query failed".to_string())?;
-    let channels = ibd
-        .connect_client()
-        .map_err(|e| format!("connect_client: {e}"))?;
+    // Collect DMA buffer refs for the chunks we need.
+    let dma_bufs: Vec<Arc<Mutex<interfaces::DmaBuffer>>> = pool.buffers[..num_chunks]
+        .iter()
+        .map(|b| Arc::clone(&b.dma_buf))
+        .collect();
 
-    channels
-        .command_tx
-        .send(interfaces::Command::ReadSync {
-            ns_id: ctx.ns_id,
-            lba: 0,
-            buf: Arc::clone(&staging.dma_buf),
-        })
-        .map_err(|e| format!("ReadSync send: {e}"))?;
-
-    match channels.completion_rx.recv() {
-        Ok(interfaces::Completion::ReadDone { result, .. }) => {
-            result.map_err(|e| format!("NVMe read: {e}"))?;
-        }
-        Ok(other) => {
-            unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
-            return Err(format!("unexpected completion: {other:?}"));
-        }
-        Err(e) => {
-            unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
-            return Err(format!("recv: {e}"));
-        }
+    // Concurrent NVMe reads into pre-pinned GPU staging chunks.
+    if let Err(e) = do_chunked_read(ctx, &dma_bufs, 0, pool.chunk_size) {
+        unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
+        return Err(e);
     }
 
-    // D2D copy: staging → client.
-    let err = unsafe {
-        cuda_ffi::cudaMemcpy(
-            client_dev_ptr,
-            staging.dev_ptr as *const c_void,
-            size,
-            cuda_ffi::CUDA_MEMCPY_DEVICE_TO_DEVICE,
-        )
-    };
+    // D2D copy per chunk: staging chunk → client at correct offset.
+    for (i, staging_buf) in pool.buffers[..num_chunks].iter().enumerate() {
+        let offset = i * pool.chunk_size;
+        let this_chunk = std::cmp::min(pool.chunk_size, size - offset);
+        let err = unsafe {
+            cuda_ffi::cudaMemcpy(
+                (client_dev_ptr as *mut u8).add(offset) as *mut c_void,
+                staging_buf.dev_ptr as *const c_void,
+                this_chunk,
+                cuda_ffi::CUDA_MEMCPY_DEVICE_TO_DEVICE,
+            )
+        };
+        if err != cuda_ffi::CUDA_SUCCESS {
+            unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
+            return Err(format!(
+                "cudaMemcpy D2D chunk #{i}: {}",
+                cuda_ffi::cuda_error_string(err)
+            ));
+        }
+    }
 
     unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
 
-    if err != cuda_ffi::CUDA_SUCCESS {
-        return Err(format!(
-            "cudaMemcpy D2D: {}",
-            cuda_ffi::cuda_error_string(err)
-        ));
-    }
-
-    Ok(format!("OK {} bytes (p2p)", size))
+    Ok(format!("OK {} bytes (p2p, {} chunks)", size, num_chunks))
 }
 
 /// P2P cold mode: per-request GDRCopy pin/unpin (baseline, measures setup overhead).
 fn handle_p2p_cold(
     stream: &mut UnixStream,
     ctx: &ServerContext,
+    chunk_size: usize,
 ) -> Result<String, String> {
     let (ipc_handle_bytes, size) = parse_client_payload(stream)?;
     let client_dev_ptr = open_ipc_handle(&ipc_handle_bytes)?;
 
-    // Allocate + pin a fresh GPU staging buffer per request.
-    let alloc_size = std::cmp::max(size, gpu_services::gdrcopy_ffi::GPU_PAGE_SIZE);
-    let mut staging_ptr: *mut c_void = std::ptr::null_mut();
-    let err = unsafe { cuda_ffi::cudaMalloc(&mut staging_ptr, alloc_size) };
-    if err != cuda_ffi::CUDA_SUCCESS {
+    let num_chunks = (size + chunk_size - 1) / chunk_size;
+
+    // Allocate + pin fresh GPU staging buffers per request (one per chunk).
+    let mut staging_bufs: Vec<GpuStagingBuffer> = Vec::with_capacity(num_chunks);
+    for i in 0..num_chunks {
+        let this_chunk = std::cmp::min(chunk_size, size - i * chunk_size);
+        match create_gpu_staging(this_chunk) {
+            Ok(buf) => staging_bufs.push(buf),
+            Err(e) => {
+                for b in &staging_bufs {
+                    unsafe { cuda_ffi::cudaFree(b.dev_ptr) };
+                }
+                unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
+                return Err(format!("cold staging alloc #{i}: {e}"));
+            }
+        }
+    }
+
+    // Collect DMA buffer refs.
+    let dma_bufs: Vec<Arc<Mutex<interfaces::DmaBuffer>>> =
+        staging_bufs.iter().map(|b| Arc::clone(&b.dma_buf)).collect();
+
+    // Concurrent NVMe reads into per-request staging chunks.
+    if let Err(e) = do_chunked_read(ctx, &dma_bufs, 0, chunk_size) {
+        for b in &staging_bufs {
+            unsafe { cuda_ffi::cudaFree(b.dev_ptr) };
+        }
         unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
-        return Err(format!(
-            "cudaMalloc staging: {}",
-            cuda_ffi::cuda_error_string(err)
-        ));
+        return Err(e);
     }
 
-    let dma_buf = match create_spdk_dma_buffer_from_gpu_bar(staging_ptr, size) {
-        Ok(buf) => buf,
-        Err(e) => {
-            unsafe {
-                cuda_ffi::cudaFree(staging_ptr);
-                cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr);
+    // D2D copy per chunk: staging → client at correct offset.
+    for (i, buf) in staging_bufs.iter().enumerate() {
+        let offset = i * chunk_size;
+        let this_chunk = std::cmp::min(chunk_size, size - offset);
+        let err = unsafe {
+            cuda_ffi::cudaMemcpy(
+                (client_dev_ptr as *mut u8).add(offset) as *mut c_void,
+                buf.dev_ptr as *const c_void,
+                this_chunk,
+                cuda_ffi::CUDA_MEMCPY_DEVICE_TO_DEVICE,
+            )
+        };
+        if err != cuda_ffi::CUDA_SUCCESS {
+            for b in &staging_bufs {
+                unsafe { cuda_ffi::cudaFree(b.dev_ptr) };
             }
-            return Err(format!("GDRCopy/SPDK setup: {e}"));
-        }
-    };
-
-    // NVMe read into per-request staging.
-    let ibd = query::<dyn IBlockDevice + Send + Sync>(&*ctx.block_dev)
-        .ok_or("IBlockDevice query failed".to_string())?;
-    let channels = ibd
-        .connect_client()
-        .map_err(|e| format!("connect_client: {e}"))?;
-
-    let dma_buf = Arc::new(Mutex::new(dma_buf));
-    channels
-        .command_tx
-        .send(interfaces::Command::ReadSync {
-            ns_id: ctx.ns_id,
-            lba: 0,
-            buf: Arc::clone(&dma_buf),
-        })
-        .map_err(|e| format!("ReadSync send: {e}"))?;
-
-    match channels.completion_rx.recv() {
-        Ok(interfaces::Completion::ReadDone { result, .. }) => {
-            result.map_err(|e| format!("NVMe read: {e}"))?;
-        }
-        Ok(other) => {
-            drop(dma_buf);
-            unsafe {
-                cuda_ffi::cudaFree(staging_ptr);
-                cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr);
-            }
-            return Err(format!("unexpected completion: {other:?}"));
-        }
-        Err(e) => {
-            drop(dma_buf);
-            unsafe {
-                cuda_ffi::cudaFree(staging_ptr);
-                cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr);
-            }
-            return Err(format!("recv: {e}"));
+            unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
+            return Err(format!(
+                "cudaMemcpy D2D chunk #{i}: {}",
+                cuda_ffi::cuda_error_string(err)
+            ));
         }
     }
 
-    // D2D copy: staging → client.
-    let err = unsafe {
-        cuda_ffi::cudaMemcpy(
-            client_dev_ptr,
-            staging_ptr as *const c_void,
-            size,
-            cuda_ffi::CUDA_MEMCPY_DEVICE_TO_DEVICE,
-        )
-    };
-
-    drop(dma_buf);
-    unsafe {
-        cuda_ffi::cudaFree(staging_ptr);
-        cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr);
+    // Cleanup: drop DMA bufs (unpins GDRCopy), free staging GPU memory.
+    drop(dma_bufs);
+    for b in staging_bufs {
+        unsafe { cuda_ffi::cudaFree(b.dev_ptr) };
     }
+    unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
 
-    if err != cuda_ffi::CUDA_SUCCESS {
-        return Err(format!(
-            "cudaMemcpy D2D: {}",
-            cuda_ffi::cuda_error_string(err)
-        ));
-    }
-
-    Ok(format!("OK {} bytes (p2p-cold)", size))
+    Ok(format!(
+        "OK {} bytes (p2p-cold, {} chunks)",
+        size, num_chunks
+    ))
 }
 
 fn main() {
@@ -535,20 +578,24 @@ fn main() {
         }
     };
 
-    // Pre-allocate GPU staging buffer for p2p mode.
-    let staging = match cli.mode {
+    // Pre-allocate chunk pool for p2p mode.
+    let chunk_pool = match cli.mode {
         TransferMode::P2p => {
+            let num_chunks = (cli.staging_size + cli.chunk_size - 1) / cli.chunk_size;
             eprintln!(
-                "Pre-allocating {} byte GPU staging buffer...",
-                cli.staging_size
+                "Pre-allocating chunk pool: {} x {} byte GPU staging buffers...",
+                num_chunks, cli.chunk_size
             );
-            match create_gpu_staging(cli.staging_size) {
-                Ok(s) => {
-                    eprintln!("GPU staging ready (GDRCopy pinned, SPDK registered)");
-                    Some(s)
+            match create_chunk_pool(cli.staging_size, cli.chunk_size) {
+                Ok(pool) => {
+                    eprintln!(
+                        "Chunk pool ready: {} buffers (GDRCopy pinned, SPDK registered)",
+                        pool.buffers.len()
+                    );
+                    Some(pool)
                 }
                 Err(e) => {
-                    eprintln!("FATAL: staging setup: {e}");
+                    eprintln!("FATAL: chunk pool setup: {e}");
                     std::process::exit(1);
                 }
             }
@@ -579,7 +626,10 @@ fn main() {
     };
     listener.set_nonblocking(true).ok();
 
-    eprintln!("Listening on {} (mode={})", cli.socket, mode_str);
+    eprintln!(
+        "Listening on {} (mode={}, chunk_size={})",
+        cli.socket, mode_str, cli.chunk_size
+    );
 
     loop {
         if SHUTDOWN.load(Ordering::Relaxed) {
@@ -590,11 +640,15 @@ fn main() {
         match listener.accept() {
             Ok((mut stream, _)) => {
                 let result = match cli.mode {
-                    TransferMode::Bounce => handle_bounce(&mut stream, &ctx),
-                    TransferMode::P2p => {
-                        handle_p2p(&mut stream, &ctx, staging.as_ref().unwrap())
+                    TransferMode::Bounce => {
+                        handle_bounce(&mut stream, &ctx, cli.chunk_size)
                     }
-                    TransferMode::P2pCold => handle_p2p_cold(&mut stream, &ctx),
+                    TransferMode::P2p => {
+                        handle_p2p(&mut stream, &ctx, chunk_pool.as_ref().unwrap())
+                    }
+                    TransferMode::P2pCold => {
+                        handle_p2p_cold(&mut stream, &ctx, cli.chunk_size)
+                    }
                 };
                 match result {
                     Ok(msg) => {
@@ -619,6 +673,6 @@ fn main() {
         }
     }
 
-    drop(staging);
+    drop(chunk_pool);
     let _ = std::fs::remove_file(&cli.socket);
 }
