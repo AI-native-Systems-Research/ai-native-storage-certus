@@ -11,7 +11,20 @@ pub(crate) enum Location {
     Staging { buffer: Arc<DmaBuffer> },
     /// Data has been committed to a block device.
     BlockDevice { offset: u64 },
+    /// Data is in the DRAM memory-tier pool.
+    MemoryTier {
+        pointer: *mut u8,
+        size: u32,
+        /// Set when write-through to SSD completes; enables eviction.
+        ssd_offset: Option<u64>,
+    },
 }
+
+// SAFETY: The pointer in MemoryTier refers to memory in the memory-tier pool,
+// which is accessible from any thread. All access is serialized through the
+// dispatch-map's Mutex.
+unsafe impl Send for Location {}
+unsafe impl Sync for Location {}
 
 /// Read the CPU timestamp counter via RDTSC.
 #[inline(always)]

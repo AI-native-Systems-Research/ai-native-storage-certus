@@ -18,6 +18,7 @@ members = [
     "components/extent-manager/v2",
     "components/logger/v1",
     "components/dispatch-map/v0",
+    "components/memory-tier/v0",
     "components/dispatcher/v0",
     "components/gpu-services/v0",
     "apps/gpu-handle-test-server",
@@ -59,6 +60,7 @@ block-device-spdk-nvme = { path = "components/block-device-spdk-nvme/v1" }
 block-device-spdk-nvme-v2 = { path = "components/block-device-spdk-nvme/v2" }
 logger = { path = "components/logger/v1" }
 dispatch-map = { path = "components/dispatch-map/v0" }
+memory-tier = { path = "components/memory-tier/v0" }
 dispatcher = { path = "components/dispatcher/v0" }
 extent-manager-v2 = { path = "components/extent-manager/v2" }
 gpu-services = { path = "components/gpu-services/v0" }

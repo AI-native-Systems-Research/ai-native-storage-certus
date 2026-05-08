@@ -11,6 +11,7 @@ component-framework.workspace = true
 component-core.workspace = true
 dispatcher.workspace = true
 dispatch-map.workspace = true
+memory-tier.workspace = true
 block-device-spdk-nvme-v2.workspace = true
 extent-manager-v2.workspace = true
 spdk-env.workspace = true

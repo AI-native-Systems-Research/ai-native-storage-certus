@@ -13,7 +13,7 @@ use component_core::query_interface;
 use interfaces::{
     CacheKey, DispatcherConfig, DmaAllocFn, DmaBuffer, FormatParams, IBlockDevice,
     IBlockDeviceAdmin, IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger, IpcHandle,
-    LookupResult, PciAddress,
+    PciAddress,
 };
 
 use crate::keys;
@@ -519,6 +519,16 @@ impl EngineInner {
                         out.as_mut_ptr(),
                         copy_len,
                     );
+                }
+                let _ = self.dispatch_map.release_read(key);
+                Ok(out)
+            }
+            LookupResult::MemoryTier { pointer, size: entry_size } => {
+                let copy_len = size.min(entry_size as usize);
+                let mut out = vec![0u8; size];
+                // SAFETY: pointer is a valid memory-tier slot for entry_size bytes.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(pointer, out.as_mut_ptr(), copy_len);
                 }
                 let _ = self.dispatch_map.release_read(key);
                 Ok(out)

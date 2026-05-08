@@ -16,7 +16,7 @@ use component_core::binding::bind;
 use component_core::query_interface;
 use interfaces::{
     DmaAllocFn, DmaBuffer, DispatcherConfig, FormatParams, IBlockDevice, IBlockDeviceAdmin,
-    IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger, PciAddress,
+    IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger, IMemoryTier, PciAddress,
 };
 
 use service::DispatcherService;
@@ -165,6 +165,18 @@ fn initialize_component_stack(
     dm.initialize()
         .map_err(|e| format!("DispatchMap init failed: {e}"))?;
 
+    // --- Create memory-tier ---
+    eprintln!("certus-server: initializing memory-tier...");
+    let mt_comp = memory_tier::MemoryTierComponentV0::new_default();
+    mt_comp
+        .logger
+        .connect(Arc::clone(&logger))
+        .map_err(|e| format!("memory-tier logger bind: {e}"))?;
+    let mt: Arc<dyn IMemoryTier + Send + Sync> =
+        query_interface!(mt_comp, IMemoryTier).ok_or("failed to query IMemoryTier")?;
+    mt.initialize(memory_tier::DEFAULT_POOL_SIZE)
+        .map_err(|e| format!("MemoryTier init failed: {e}"))?;
+
     // --- Create dispatcher ---
     eprintln!("certus-server: initializing dispatcher...");
     let disp_comp = dispatcher::DispatcherComponentV0::new_default();
@@ -172,6 +184,10 @@ fn initialize_component_stack(
         .dispatch_map
         .connect(Arc::clone(&dm))
         .map_err(|e| format!("failed to bind dispatch_map: {e}"))?;
+    disp_comp
+        .memory_tier
+        .connect(Arc::clone(&mt))
+        .map_err(|e| format!("failed to bind memory_tier: {e}"))?;
     disp_comp
         .gpu_services
         .connect(Arc::clone(&gpu))
