@@ -265,3 +265,85 @@ the handlers must preserve these same semantics — particularly:
 - Atomic eviction: either free enough space or reject entirely (`None`)
 - Protected set: don't evict keys that are in the current store request
 - Readiness: blocks not loadable until `complete_store(success=True)`
+
+## Build troubleshooting (RHEL 9)
+
+Issues encountered on first build and how they were resolved:
+
+**`certus_native` Python module directory missing**
+- Symptom: `maturin failed — python module at certus_native does not exist`
+- Fix: `mkdir certus_native && touch certus_native/__init__.py` — maturin requires the package directory to exist even for a pure-Rust module
+
+**SPDK submodule not cloned**
+- Symptom: `error: SPDK source not found at deps/spdk/`
+- Fix: `deps/build_spdk.sh` clones it automatically, but had a bug (`cd spdk` instead of `cd "${SRC_DIR}"`). Fixed in the script.
+
+**Missing system packages not in default RHEL repos**
+- `meson`, `ninja`, `pyelftools`, `jinja2`, `tabulate`, `uv` — not in dnf, install via `pip install`
+- `CUnit-devel` — requires CRB repo: `sudo dnf config-manager --set-enabled crb`
+- `numactl-devel` — must be installed before DPDK configures, or meson fails with "No NUMA library found"
+- `fuse3-devel` — required for `--with-nvme-cuse`; added to `deps/install_deps.sh`
+- `patchelf` — required by SPDK's Python install step
+- All missing packages are now included in `deps/install_deps.sh`
+
+**`meson`/`ninja` not on PATH for build**
+- Symptom: `meson: command not found` / `Could not detect Ninja v1.8.2 or newer`
+- Cause: pip installs to `/usr/local/bin` which may not be in PATH when running as different users
+- Fix: `deps/install_deps.sh` now symlinks both to `/usr/bin/` using `python3 -c 'import shutil; print(shutil.which(...))'` to find the actual install location dynamically
+
+**CUDA toolkit missing**
+- Symptom: `rust-lld: error: unable to find library -lcudart`
+- Cause: `gpu-services` component links `libcudart` when built with `features = ["gpu"]`
+- Fix: `sudo dnf install -y cuda-toolkit` (CUDA repo was already configured on this machine via NVIDIA driver install)
+
+**Three `todo!()` panics in `engine.rs`**
+- Symptom: `CertusEngine(...)` would panic immediately on construction
+- Fields: `block_device_version`, `max_cache_entries`, `eviction_threshold` in `DispatcherConfig`
+- Fix: `block_device_version = BlockDeviceVersion::V2` (latest); `max_cache_entries` derived from `dram_cache_bytes / slab_size_bytes` (default 10000); `eviction_threshold` read from config (default 0.8). Both new config fields parsed from the Python dict with sensible defaults.
+
+**`certus_native` module imported but `CertusEngine` not found**
+- Symptom: `AttributeError: module 'certus_native' has no attribute 'CertusEngine'`
+- Cause: the `certus_native/__init__.py` we created for maturin was empty, so Python imported the package directory instead of the compiled `.so`
+- Fix: added `from .certus_native import *` and explicit `CertusEngine, CertusConfig` imports to `certus_native/__init__.py`
+
+**DMA remapping failed (ENOMEM) on engine init**
+- Symptom: `EAL: 0000:XX:00.0 DMA remapping failed, error 12 (Cannot allocate memory)` — all devices unusable
+- Cause: `memlock` limit was 8MB (default), DPDK needs unlimited to pin hugepage memory for DMA
+- Fix: add to `/etc/security/limits.conf`:
+  ```
+  * soft memlock unlimited
+  * hard memlock unlimited
+  ```
+  Also fixed `scripts/spdk-scripts/cfg_user_spdk.sh` which had these lines as a comment but never applied them.
+  For the current shell session: `ulimit -l unlimited`
+
+**CUDA driver version insufficient**
+- Symptom: `RuntimeError: GPU init failed: cudaGetDeviceCount failed: CUDA driver version is insufficient for CUDA runtime version`
+- Cause: `sudo dnf install -y cuda-toolkit` installed CUDA 13.x, but the NVIDIA driver (570.x) only supports CUDA 12.8
+- Fix: install the matching version: `sudo dnf install -y cuda-toolkit-12-8`
+- Also: the `.so` is compiled against whichever CUDA is active at build time. If mismatched at runtime, prepend the right lib path: `LD_LIBRARY_PATH=/usr/local/cuda-12.8/targets/x86_64-linux/lib:$LD_LIBRARY_PATH` and rebuild with `sudo ln -sfn /usr/local/cuda-12.8 /usr/local/cuda && pip install -e .`
+
+**`DispatchMap init failed: extent_manager not bound`**
+- Symptom: `RuntimeError: DispatchMap init failed: not initialized: extent_manager not bound`
+- Cause: `engine.rs` called `dm.initialize()` without connecting an `IExtentManager` receptacle. `DispatchMapComponentV0.initialize()` walks the extent manager to recover persisted extents — it requires the receptacle even on a fresh (empty) device.
+- Fix: added creation of a metadata block device (`BlockDeviceSpdkNvmeComponentV2`) and extent manager (`ExtentManagerV2`) in `engine.rs`, formatted them on init, and connected them to the dispatch map before calling `initialize()`. Also added `block-device-spdk-nvme-v2` and `extent-manager-v2` to `Cargo.toml` dependencies.
+
+**`Dispatcher init failed: logger not bound`**
+- Symptom: `RuntimeError: Dispatcher init failed: not initialized: logger not bound`
+- Cause: `engine.rs` never created or connected a logger. The dispatcher (and metadata block device, extent manager, dispatch map) all have optional `logger` receptacles that produce this error when the dispatcher tries to log during `initialize()`.
+- Fix: added `LoggerComponentV1` creation in `engine.rs` and connected it to all four components (metadata block device, extent manager, dispatch map, dispatcher). Added `logger` to `Cargo.toml` dependencies.
+- Also added `parse_pci_addr()` helper to `engine.rs` since `PciAddress` does not implement `FromStr`.
+
+**PyTorch CUDA version mismatch (GPU roundtrip test skipped)**
+- Symptom: `torch.cuda.is_available()` returns False with warning `NVIDIA driver too old (found version 12080)`
+- Cause: default `pip install torch` or `torch==2.11.0+cu130` is built against CUDA 13.x, but the driver (570.x) only supports CUDA 12.8
+- Fix: install torch built for cu128 from the PyTorch wheel index:
+  ```bash
+  pip install torch==2.7.0 --index-url https://download.pytorch.org/whl/cu128
+  ```
+  Verify with:
+  ```bash
+  python3 -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.version.cuda)"
+  # Expected: 2.7.0+cu128 True 12.8
+  ```
+- Note: `sudo dnf install -y cuda-toolkit` installs CUDA 13.x by default. The toolkit version does not need to match — only the PyTorch wheel needs to match the driver's maximum supported CUDA version.

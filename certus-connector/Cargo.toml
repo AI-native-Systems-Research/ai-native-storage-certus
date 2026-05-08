@@ -18,8 +18,11 @@ interfaces = { path = "../components/interfaces", features = ["spdk"] }
 component-framework = { path = "../components/component-framework/crates/component-framework" }
 component-core = { path = "../components/component-framework/crates/component-core" }
 dispatcher = { path = "../components/dispatcher/v0" }
+logger = { path = "../components/logger/v1" }
 dispatch-map = { path = "../components/dispatch-map/v0" }
 block-device-spdk-nvme = { path = "../components/block-device-spdk-nvme/v1" }
+block-device-spdk-nvme-v2 = { path = "../components/block-device-spdk-nvme/v2" }
+extent-manager-v2 = { path = "../components/extent-manager/v2" }
 spdk-env = { path = "../components/spdk-env" }
 gpu-services = { path = "../components/gpu-services/v0", features = ["gpu"] }
 

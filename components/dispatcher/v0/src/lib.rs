@@ -1335,6 +1335,13 @@ mod tests {
             }
             Ok(())
         }
+        fn prepare_memory_for_spdk(
+            &self,
+            _base64_payload: &str,
+            _device_index: Option<u32>,
+        ) -> Result<DmaBuffer, String> {
+            Err("mock: not implemented".into())
+        }
     }
 
     fn setup_initialized() -> (Arc<DispatcherComponentV0>, Arc<MockDispatchMap>) {
