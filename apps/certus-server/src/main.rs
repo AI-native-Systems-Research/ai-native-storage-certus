@@ -84,7 +84,7 @@ fn initialize_component_stack(
     let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponentV1::new_default();
 
     eprintln!("certus-server: initializing GPU services...");
-    let gpu_comp = gpu_services::GpuServicesComponentV0::new();
+    let gpu_comp = gpu_services::GpuServicesComponentV0::new_default();
     gpu_comp
         .logger
         .connect(Arc::clone(&logger))

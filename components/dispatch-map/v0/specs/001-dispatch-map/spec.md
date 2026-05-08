@@ -108,6 +108,37 @@ A caller removes an extent key from the dispatch map. The entry is deleted and s
 
 ---
 
+### User Story 7 - Touching an Entry to Refresh Eviction Priority (Priority: P3)
+
+A caller wants to indicate that a cache entry is still in active use without performing any data transfer. The caller calls `touch(key)` to update the entry's timestamp counter, preventing it from being selected as an eviction victim.
+
+**Why this priority**: Touch is needed for efficient eviction policies — without it, entries can only refresh their priority via a full lookup (which takes a read reference and may involve DMA).
+
+**Independent Test**: Can be tested by staging entries, touching one, then calling `oldest_keys` and verifying the touched entry has a newer timestamp than untouched entries.
+
+**Acceptance Scenarios**:
+
+1. **Given** key 42 exists in the map, **When** `touch(key=42)` is called, **Then** the entry's TSC timestamp is updated and the call returns success. No reference counts are modified.
+2. **Given** key 99 does not exist, **When** `touch(key=99)` is called, **Then** a `KeyNotFound` error is returned.
+
+---
+
+### User Story 8 - Querying Oldest Entries for Eviction (Priority: P3)
+
+The dispatcher's eviction logic needs to identify the least-recently-used entries. It calls `oldest_keys(n)` to retrieve up to `n` keys sorted by ascending TSC (oldest first), then selects victims for removal.
+
+**Why this priority**: Eviction is needed for bounded cache capacity but is a background management function, not on the hot data path.
+
+**Independent Test**: Can be tested by staging entries in sequence, verifying order matches creation order, then touching one entry and verifying it moves to the newest position.
+
+**Acceptance Scenarios**:
+
+1. **Given** keys [1, 2, 3] were created in order, **When** `oldest_keys(2)` is called, **Then** keys [1, 2] are returned (oldest TSC first).
+2. **Given** key 1 was subsequently looked up (refreshing its TSC), **When** `oldest_keys(2)` is called, **Then** keys [2, 3] are returned.
+3. **Given** the map is empty, **When** `oldest_keys(5)` is called, **Then** an empty list is returned.
+
+---
+
 ### Edge Cases
 
 - `create_staging` with size=0 returns an error.
@@ -136,6 +167,8 @@ A caller removes an extent key from the dispatch map. The entry is deleted and s
 - **FR-013**: All `IDispatchMap` methods MUST be thread-safe and re-entrant, allowing concurrent calls from multiple threads.
 - **FR-014**: System MUST use the `ILogger` receptacle for info, debug, and error logging throughout the component.
 - **FR-015**: System MUST be implemented as a component using `define_component!` with `IDispatchMap` as a provided interface and `ILogger` and `IExtentManager` as receptacles.
+- **FR-016**: System MUST provide `touch(key)` that updates the entry's TSC timestamp without acquiring any reference. MUST return `KeyNotFound` if the key does not exist. MUST NOT block or modify reference counts.
+- **FR-017**: System MUST provide `oldest_keys(n)` that returns up to `n` keys sorted by ascending TSC value (oldest first). Used by the dispatcher's eviction logic to identify victim entries. MUST be thread-safe.
 
 ### Key Entities
 

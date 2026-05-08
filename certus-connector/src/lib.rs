@@ -128,6 +128,20 @@ impl CertusEngine {
     fn shutdown(&self) -> PyResult<()> {
         self.inner.shutdown()
     }
+
+    // ─── Test helpers (host memory, no GPU DMA) ─────────────────────────────
+
+    /// Store raw bytes from a host buffer under the given key. No GPU DMA.
+    /// Use for testing NVMe write path without a real GPU KV cache.
+    fn store_host_bytes(&self, key: u64, data: &[u8]) -> PyResult<()> {
+        self.inner.store_host_bytes(key, data)
+    }
+
+    /// Load bytes stored under the given key into a host buffer. No GPU DMA.
+    /// Returns the data as bytes. Use for testing NVMe read path without a real GPU.
+    fn load_host_bytes(&self, key: u64, size: usize) -> PyResult<Vec<u8>> {
+        self.inner.load_host_bytes(key, size)
+    }
 }
 
 /// Python module definition.

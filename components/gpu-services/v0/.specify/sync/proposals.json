@@ -1,0 +1,41 @@
+{
+  "generated": "2026-05-05T00:00:00Z",
+  "based_on": "drift-report from 2026-05-05",
+  "summary": {
+    "backfill": 1,
+    "align": 1,
+    "human_decision": 0,
+    "new_specs": 0,
+    "remove_from_spec": 0
+  },
+  "proposals": [
+    {
+      "id": 1,
+      "spec_id": "001-gpu-cuda-services",
+      "requirement": "FR-005",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "spec_text": "Provide pin and unpin operations for GPU memory regions",
+      "actual_behavior": "Tracks state in HashSet without CUDA pinning APIs; correct for IPC device memory",
+      "proposed_change": "Update spec to clarify pin means verify device-residency + track state for IPC memory",
+      "location": "src/lib.rs",
+      "rationale": "cudaHostRegister is for host memory; IPC device memory is inherently pinned",
+      "confidence": "HIGH",
+      "status": "pending"
+    },
+    {
+      "id": 2,
+      "spec_id": "001-gpu-cuda-services",
+      "requirement": "FR-010",
+      "direction": "ALIGN",
+      "severity": "low",
+      "spec_text": "Criterion benchmarks available when gpu feature enabled",
+      "actual_behavior": "Cargo.toml declares benchmarks but source files missing",
+      "proposed_change": "Create benches/gpu_services_benchmark.rs and benches/dma_transfer_benchmark.rs",
+      "location": "benches/",
+      "rationale": "Spec requirement is valid; Cargo.toml already expects these files",
+      "confidence": "HIGH",
+      "status": "pending"
+    }
+  ]
+}

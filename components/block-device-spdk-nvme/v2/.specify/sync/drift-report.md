@@ -1,6 +1,6 @@
 # Spec Drift Report
 
-Generated: 2026-04-23
+Generated: 2026-05-05
 Project: block-device-spdk-nvme v2
 
 ## Summary

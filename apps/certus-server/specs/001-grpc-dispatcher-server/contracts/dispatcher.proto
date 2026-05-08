@@ -18,6 +18,10 @@ service Dispatcher {
   // Remove cache entries, freeing associated resources.
   // Each entry is processed independently; per-entry results returned.
   rpc Remove(BatchRemoveRequest) returns (BatchRemoveResponse);
+
+  // Touch cache entries, updating eviction timestamps without DMA.
+  // Each entry is processed independently; per-entry results returned.
+  rpc Touch(BatchTouchRequest) returns (BatchTouchResponse);
 }
 
 // --- Common types ---
@@ -99,5 +103,15 @@ message BatchRemoveRequest {
 }
 
 message BatchRemoveResponse {
+  repeated EntryResult results = 1;
+}
+
+// --- Touch ---
+
+message BatchTouchRequest {
+  repeated uint64 keys = 1;
+}
+
+message BatchTouchResponse {
   repeated EntryResult results = 1;
 }

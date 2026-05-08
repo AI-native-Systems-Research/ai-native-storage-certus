@@ -86,6 +86,55 @@ A system integrator wires the dispatcher component to its dependencies: a logger
 
 ---
 
+### User Story 6 - Direct Store Workflow (prepare/commit/cancel) (Priority: P2)
+
+A caller wants to write data directly to SSD without going through the GPU DMA staging path. The caller calls `prepare_store(key, size)` which runs eviction if needed, reserves an SSD extent, and returns a DMA buffer. The caller writes data into the buffer, then calls `commit_store(key)` to write the buffer to SSD and publish the extent, or `cancel_store(key)` to abort.
+
+**Why this priority**: Enables alternative ingestion paths (e.g., host-to-SSD) that bypass the GPU DMA requirement, broadening the use cases for the cache.
+
+**Independent Test**: Can be tested by calling prepare_store, writing data into the returned buffer, calling commit_store, and verifying the entry is accessible via check/lookup.
+
+**Acceptance Scenarios**:
+
+1. **Given** the dispatcher is initialized, **When** `prepare_store(key, size)` is called with a new key, **Then** an extent is reserved on the target drive and a DMA buffer of at least `size` bytes (block-aligned) is returned. The key is visible via `check()`.
+2. **Given** a pending write exists for key, **When** `commit_store(key)` is called, **Then** the buffer contents are written to SSD, the extent is published, the dispatch map entry transitions to block-device state, and the write reference is released.
+3. **Given** a pending write exists for key, **When** `cancel_store(key)` is called, **Then** the extent reservation is aborted (WriteHandle dropped), the dispatch map entry is removed, and no SSD write occurs.
+4. **Given** `prepare_store` is called with a key that already exists, **Then** `AlreadyExists` error is returned.
+5. **Given** `commit_store` or `cancel_store` is called with a key that has no pending write, **Then** `KeyNotFound` error is returned.
+
+---
+
+### User Story 7 - Cache Eviction (Priority: P2)
+
+When the cache exceeds its configured capacity, the dispatcher must evict old entries to make room for new ones. Eviction is triggered by `prepare_store` and removes the least-recently-used entries (by TSC timestamp) until the count drops to the configured watermark.
+
+**Why this priority**: Without eviction, the cache fills up and no new entries can be stored. Required for long-running workloads.
+
+**Independent Test**: Can be tested by configuring a low max_cache_entries, populating past the threshold, calling prepare_store, and verifying that old entries are removed.
+
+**Acceptance Scenarios**:
+
+1. **Given** `max_cache_entries=10` and `eviction_threshold=0.5` (watermark=5), **When** 8 entries exist and `prepare_store` is called, **Then** entries are evicted down to 5 before the new entry is created.
+2. **Given** entries with active write references, **When** eviction runs, **Then** those entries are skipped (not evicted).
+3. **Given** `max_cache_entries=0`, **When** entries accumulate, **Then** no eviction occurs (eviction is disabled).
+
+---
+
+### User Story 8 - Touch (Refresh Eviction Priority) (Priority: P3)
+
+A client wants to indicate that a cache entry is still in use without performing any data transfer. The client calls `touch(key)` to refresh the entry's eviction timestamp, preventing it from being selected as a victim.
+
+**Why this priority**: Touch enables efficient LRU-style eviction policies without the overhead of a full lookup (which involves DMA or reference management).
+
+**Independent Test**: Can be tested by populating entries, touching one, triggering eviction, and verifying the touched entry survives.
+
+**Acceptance Scenarios**:
+
+1. **Given** a cache entry exists for the key, **When** `touch(key)` is called, **Then** the entry's TSC timestamp is refreshed and the call returns success. No DMA or reference management occurs.
+2. **Given** no cache entry exists for the key, **When** `touch(key)` is called, **Then** `KeyNotFound` error is returned.
+
+---
+
 ### Edge Cases
 
 - When DMA buffer allocation fails during populate (out of memory), populate returns an allocation failure error to the caller and no dispatch map entry is created.
@@ -94,6 +143,7 @@ A system integrator wires the dispatcher component to its dependencies: a logger
 - When remove is called while a background SSD write is in progress, the remove blocks until the write completes (or fails), then removes the entry and frees all resources (staging buffer and/or SSD extent).
 - Multiple concurrent lookups for the same key are permitted (multiple read references allowed by dispatch map locking semantics).
 - When the block device reports an I/O error during a background write, an error is raised, the entry is removed from the dispatch map, and the staging buffer is freed (same handling as SSD-full).
+- When `prepare_store` fails after registering in the dispatch map (e.g., extent allocation failure), the dispatch map entry is cleaned up before returning the error.
 
 ## Clarifications
 
@@ -108,7 +158,7 @@ A system integrator wires the dispatcher component to its dependencies: a logger
 
 ### Functional Requirements
 
-- **FR-001**: System MUST define an `IDispatcher` interface in the shared interfaces crate, providing `lookup`, `check`, `remove`, `populate`, `initialize`, and `shutdown` methods.
+- **FR-001**: System MUST define an `IDispatcher` interface in the shared interfaces crate, providing `initialize`, `shutdown`, `lookup`, `check`, `remove`, `populate`, `prepare_store`, `commit_store`, `cancel_store`, and `touch` methods.
 - **FR-002**: System MUST define a `DispatcherError` error type in the shared interfaces crate, covering all failure modes (not initialized, key not found, duplicate key, I/O error, allocation failure, timeout).
 - **FR-003**: The `populate(key, ipc_handle)` method MUST register the element in the dispatch map, allocate a variable-size DMA staging buffer via the dispatch map's `create_staging` method, initiate DMA copy from the client's GPU memory into the staging buffer via `IGpuServices::dma_copy_to_host`, downgrade the write reference, and enqueue an asynchronous background write job.
 - **FR-004**: After a successful populate, the system MUST asynchronously write the staging buffer contents to the SSD via the block device and extent manager, transitioning the dispatch map entry from staging to block-device state.
@@ -127,6 +177,12 @@ A system integrator wires the dispatcher component to its dependencies: a logger
 - **FR-017**: When the asynchronous background write fails (extent allocation failure or block device I/O error), the dispatcher MUST raise an error, remove the entry from the dispatch map, and free the staging buffer.
 - **FR-018**: When `remove(key)` is called while a background write is in progress for that key, the remove MUST block until the background write completes (or fails), then remove the entry and free all associated resources.
 - **FR-019**: All block device I/O operations MUST be segmented to respect the device's Maximum Data Transfer Size (MDTS, typically 128 KiB). Reads and writes larger than MDTS MUST be split into multiple sequential or batched I/O operations.
+- **FR-020**: The `prepare_store(key, size)` method MUST run eviction if the cache is over capacity, reserve an extent on the target data drive, register the key in the dispatch map, and return a DMA buffer for the caller to write into. MUST return `AlreadyExists` if the key exists, `AllocationFailed` if extent reservation fails, `InvalidParameter` if size is 0.
+- **FR-021**: The `commit_store(key)` method MUST write the pending DMA buffer contents to SSD using MDTS-aware segmented I/O, publish the extent metadata, and transition the dispatch map entry to block-device state. MUST return `KeyNotFound` if no pending write exists.
+- **FR-022**: The `cancel_store(key)` method MUST drop the pending write (aborting the extent reservation via WriteHandle destructor) and remove the dispatch map entry. MUST return `KeyNotFound` if no pending write exists.
+- **FR-023**: The `touch(key)` method MUST update the entry's eviction timestamp in the dispatch map without performing any DMA transfer or acquiring any reference. MUST return `KeyNotFound` if the key does not exist.
+- **FR-024**: The dispatcher MUST support configurable eviction via `DispatcherConfig::max_cache_entries` and `eviction_threshold`. When the cache exceeds the watermark (`max_cache_entries × eviction_threshold`), `prepare_store` MUST synchronously evict the oldest entries (by TSC) until the count drops to the watermark. Entries with active write references MUST be skipped during eviction.
+- **FR-025**: The `DispatcherConfig` MUST support a `format_on_init` flag (default true). When false, extent managers are not reformatted on initialization, preserving on-disk data from previous sessions.
 
 ### Key Entities
 
@@ -149,6 +205,9 @@ A system integrator wires the dispatcher component to its dependencies: a logger
 - **SC-005**: Initialization fails gracefully with a descriptive error when required dependencies are not bound.
 - **SC-006**: Shutdown completes all in-flight background writes before returning, ensuring no data loss.
 - **SC-007**: The dispatcher supports N independent data block devices and extent managers operating in parallel.
+- **SC-008**: The prepare_store/commit_store workflow successfully persists data to SSD and makes it retrievable via lookup.
+- **SC-009**: Eviction correctly removes the oldest entries when the cache exceeds its configured capacity, and entries with active references are not evicted.
+- **SC-010**: The touch operation refreshes an entry's eviction timestamp without performing DMA or modifying reference counts.
 
 ## Assumptions
 

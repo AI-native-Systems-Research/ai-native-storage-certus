@@ -1,0 +1,42 @@
+{
+  "generated": "2026-05-05T00:00:00Z",
+  "based_on": "drift-report from 2026-05-05",
+  "summary": {
+    "backfill": 0,
+    "align": 1,
+    "human_decision": 1,
+    "new_specs": 0,
+    "remove_from_spec": 0
+  },
+  "proposals": [
+    {
+      "id": 1,
+      "spec_id": "002-spdk-env-vfio-init",
+      "requirement": "FR-007",
+      "direction": "HUMAN_DECISION",
+      "severity": "high",
+      "spec_text": "MUST use framework logging actor via receptacle; init() MUST fail if not connected",
+      "actual_behavior": "No logger receptacle; uses eprintln! for all diagnostics",
+      "proposed_change": "Add optional logger receptacle; use if connected, fall back to eprintln!. Remove MUST-fail requirement.",
+      "location": "src/lib.rs",
+      "rationale": "SPDK/DPDK C output goes to stderr regardless; optional logger captures Rust-side messages when available",
+      "confidence": "HIGH",
+      "status": "pending"
+    },
+    {
+      "id": 2,
+      "spec_id": "002-spdk-env-vfio-init",
+      "requirement": "FR-010",
+      "direction": "ALIGN",
+      "severity": "low",
+      "spec_text": "Test example must wire logger before calling init()",
+      "actual_behavior": "Example has no logger to wire",
+      "proposed_change": "After logger receptacle added, update example to wire ConsoleLogger",
+      "location": "examples/spdk-env-example.rs",
+      "rationale": "Blocked by Proposal 1 resolution",
+      "confidence": "HIGH",
+      "status": "pending",
+      "blocked_by": 1
+    }
+  ]
+}

@@ -30,6 +30,7 @@ cargo doc -p gpu-services --no-deps
 ## Active Technologies
 - Rust stable, edition 2021, MSRV 1.75 + CUDA runtime API (libcudart via FFI), (001-gpu-cuda-services)
 - N/A (operates on GPU device memory) (001-gpu-cuda-services)
+- Rust stable, edition 2021, MSRV 1.75 + CUDA runtime API (libcudart via FFI), SPDK (via `interfaces::DmaBuffer`), base64 crate (002-gpu-ssd-dma-prepare)
 
 ## Recent Changes
 - 001-gpu-cuda-services: Added Rust stable, edition 2021, MSRV 1.75 + CUDA runtime API (libcudart via FFI),

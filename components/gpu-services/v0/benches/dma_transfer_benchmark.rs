@@ -16,13 +16,13 @@ use std::os::raw::c_int;
 use gpu_services::cuda_ffi;
 
 const TRANSFER_SIZES: &[usize] = &[
-    4 * 1024,            // 4 KiB
-    64 * 1024,           // 64 KiB
-    256 * 1024,          // 256 KiB
-    1024 * 1024,         // 1 MiB
-    4 * 1024 * 1024,     // 4 MiB
-    16 * 1024 * 1024,    // 16 MiB
-    64 * 1024 * 1024,    // 64 MiB
+    4 * 1024,         // 4 KiB
+    64 * 1024,        // 64 KiB
+    256 * 1024,       // 256 KiB
+    1024 * 1024,      // 1 MiB
+    4 * 1024 * 1024,  // 4 MiB
+    16 * 1024 * 1024, // 16 MiB
+    64 * 1024 * 1024, // 64 MiB
 ];
 
 fn size_label(bytes: usize) -> String {
@@ -210,8 +210,7 @@ fn bench_host_to_device_pinned(c: &mut Criterion) {
 
             // Pin the host memory for DMA
             // SAFETY: host_ptr is a valid, aligned allocation of `size` bytes.
-            let err =
-                unsafe { cuda_ffi::cudaHostRegister(host_ptr as *mut c_void, size, 0) };
+            let err = unsafe { cuda_ffi::cudaHostRegister(host_ptr as *mut c_void, size, 0) };
             if err != cuda_ffi::CUDA_SUCCESS {
                 unsafe {
                     std::alloc::dealloc(host_ptr, layout);
@@ -284,8 +283,7 @@ fn bench_device_to_host_pinned(c: &mut Criterion) {
             }
 
             // SAFETY: host_ptr is a valid, aligned allocation of `size` bytes.
-            let err =
-                unsafe { cuda_ffi::cudaHostRegister(host_ptr as *mut c_void, size, 0) };
+            let err = unsafe { cuda_ffi::cudaHostRegister(host_ptr as *mut c_void, size, 0) };
             if err != cuda_ffi::CUDA_SUCCESS {
                 unsafe {
                     std::alloc::dealloc(host_ptr, layout);

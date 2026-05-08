@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use component_core::query_interface;
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use dispatcher::io_segmenter::segment_io;
 use dispatcher::DispatcherComponentV0;
 use interfaces::{
@@ -162,6 +162,15 @@ impl IDispatchMap for BenchDispatchMap {
         }
     }
 
+    fn touch(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+        let inner = self.inner.lock().unwrap();
+        if inner.contains_key(&key) {
+            Ok(())
+        } else {
+            Err(DispatchMapError::KeyNotFound(key))
+        }
+    }
+
     fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
         let inner = self.inner.lock().unwrap();
         inner.keys().copied().take(n).collect()
@@ -178,15 +187,27 @@ impl ILogger for BenchLogger {
 
 struct BenchGpuServices;
 impl IGpuServices for BenchGpuServices {
-    fn initialize(&self) -> Result<(), String> { Ok(()) }
-    fn shutdown(&self) -> Result<(), String> { Ok(()) }
-    fn get_devices(&self) -> Result<Vec<GpuDeviceInfo>, String> { Ok(vec![]) }
-    fn deserialize_ipc_handle(&self, _: &str) -> Result<GpuIpcHandle, String> {
-        Err("bench mock".into())
+    fn initialize(&self) -> Result<(), String> {
+        Ok(())
     }
-    fn verify_memory(&self, _: &GpuIpcHandle) -> Result<(), String> { Ok(()) }
-    fn pin_memory(&self, _: &GpuIpcHandle) -> Result<(), String> { Ok(()) }
-    fn unpin_memory(&self, _: &GpuIpcHandle) -> Result<(), String> { Ok(()) }
+    fn shutdown(&self) -> Result<(), String> {
+        Ok(())
+    }
+    fn get_devices(&self) -> Result<Vec<GpuDeviceInfo>, String> {
+        Ok(vec![])
+    }
+    fn deserialize_ipc_handle(&self, _: &str) -> Result<GpuIpcHandle, String> {
+        Err("bench  mock".into())
+    }
+    fn verify_memory(&self, _: &GpuIpcHandle) -> Result<(), String> {
+        Ok(())
+    }
+    fn pin_memory(&self, _: &GpuIpcHandle) -> Result<(), String> {
+        Ok(())
+    }
+    fn unpin_memory(&self, _: &GpuIpcHandle) -> Result<(), String> {
+        Ok(())
+    }
     fn create_dma_buffer(&self, _: GpuIpcHandle) -> Result<GpuDmaBuffer, String> {
         Err("bench mock".into())
     }
@@ -283,17 +304,21 @@ fn bench_populate(c: &mut Criterion) {
 
     for &(_id, size) in sizes {
         group.throughput(Throughput::Bytes(size as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(format!("{size}")), &size, |b, &sz| {
-            let (d, _dm) = setup_dispatcher();
-            let mut key_counter: u64 = 0;
-            let mut buf = vec![0xA5u8; sz];
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{size}")),
+            &size,
+            |b, &sz| {
+                let (d, _dm) = setup_dispatcher();
+                let mut key_counter: u64 = 0;
+                let mut buf = vec![0xA5u8; sz];
 
-            b.iter(|| {
-                let key = key_counter;
-                key_counter += 1;
-                d.populate(black_box(key), make_handle(&mut buf)).unwrap();
-            });
-        });
+                b.iter(|| {
+                    let key = key_counter;
+                    key_counter += 1;
+                    d.populate(black_box(key), make_handle(&mut buf)).unwrap();
+                });
+            },
+        );
     }
     group.finish();
 }
@@ -315,25 +340,29 @@ fn bench_lookup_staging(c: &mut Criterion) {
 
     for &(_id, size) in sizes {
         group.throughput(Throughput::Bytes(size as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(format!("{size}")), &size, |b, &sz| {
-            let (d, _dm) = setup_dispatcher();
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{size}")),
+            &size,
+            |b, &sz| {
+                let (d, _dm) = setup_dispatcher();
 
-            // Pre-populate entries for lookup
-            let num_entries = 100u64;
-            let mut src = vec![0xBBu8; sz];
-            for key in 0..num_entries {
-                d.populate(key, make_handle(&mut src)).unwrap();
-            }
+                // Pre-populate entries for lookup
+                let num_entries = 100u64;
+                let mut src = vec![0xBBu8; sz];
+                for key in 0..num_entries {
+                    d.populate(key, make_handle(&mut src)).unwrap();
+                }
 
-            let mut key_idx: u64 = 0;
-            let mut dst = vec![0u8; sz];
+                let mut key_idx: u64 = 0;
+                let mut dst = vec![0u8; sz];
 
-            b.iter(|| {
-                let key = key_idx % num_entries;
-                key_idx += 1;
-                d.lookup(black_box(key), make_handle(&mut dst)).unwrap();
-            });
-        });
+                b.iter(|| {
+                    let key = key_idx % num_entries;
+                    key_idx += 1;
+                    d.lookup(black_box(key), make_handle(&mut dst)).unwrap();
+                });
+            },
+        );
     }
     group.finish();
 }
@@ -384,17 +413,21 @@ fn bench_prepare_cancel(c: &mut Criterion) {
 
     for &size in sizes {
         group.throughput(Throughput::Bytes(size as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(format!("{size}")), &size, |b, &sz| {
-            let (d, _dm) = setup_dispatcher();
-            let mut key_counter: u64 = 0;
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{size}")),
+            &size,
+            |b, &sz| {
+                let (d, _dm) = setup_dispatcher();
+                let mut key_counter: u64 = 0;
 
-            b.iter(|| {
-                let key = key_counter;
-                key_counter += 1;
-                let _buf = d.prepare_store(black_box(key), sz as u32).unwrap();
-                d.cancel_store(black_box(key)).unwrap();
-            });
-        });
+                b.iter(|| {
+                    let key = key_counter;
+                    key_counter += 1;
+                    let _buf = d.prepare_store(black_box(key), sz as u32).unwrap();
+                    d.cancel_store(black_box(key)).unwrap();
+                });
+            },
+        );
     }
     group.finish();
 }
