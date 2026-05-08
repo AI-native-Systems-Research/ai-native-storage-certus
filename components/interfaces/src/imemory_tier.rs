@@ -75,6 +75,9 @@ component_macros::define_interface! {
 
         /// Return the number of bytes currently allocated.
         fn used(&self) -> usize;
+
+        /// Return the base pointer and size of the pool for CUDA host registration.
+        fn pool_info(&self) -> Option<(*mut u8, usize)>;
     }
 }
 

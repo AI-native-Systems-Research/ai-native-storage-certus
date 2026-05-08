@@ -234,6 +234,15 @@ impl IMemoryTier for MemoryTierComponentV0 {
         let state = self.state.lock().unwrap();
         state.allocator.used()
     }
+
+    fn pool_info(&self) -> Option<(*mut u8, usize)> {
+        let state = self.state.lock().unwrap();
+        if state.initialized && !state.pool_ptr.is_null() {
+            Some((state.pool_ptr, state.pool_size))
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]

@@ -184,6 +184,30 @@ fn initialize_component_stack(
             mt.initialize(memory_tier::DEFAULT_POOL_SIZE)
                 .map_err(|e| format!("MemoryTier init failed: {e}"))?;
 
+            // Register the memory-tier pool with CUDA for pinned DMA transfers.
+            // Without this, cudaMemcpy from mmap'd memory uses a staged internal
+            // buffer, cutting H2D bandwidth roughly in half.
+            if let Some((pool_ptr, pool_size)) = mt.pool_info() {
+                let err = unsafe {
+                    gpu_services::cuda_ffi::cudaHostRegister(
+                        pool_ptr as *mut std::ffi::c_void,
+                        pool_size,
+                        0,
+                    )
+                };
+                if err != gpu_services::cuda_ffi::CUDA_SUCCESS {
+                    eprintln!(
+                        "certus-server: WARNING: cudaHostRegister failed (err={err}), \
+                         memory-tier transfers will use staged path"
+                    );
+                } else {
+                    eprintln!(
+                        "certus-server: memory-tier pool registered with CUDA ({} MiB pinned)",
+                        pool_size / (1024 * 1024)
+                    );
+                }
+            }
+
             eprintln!("certus-server: initializing dispatcher v1 (memory-tier)...");
             let disp_comp = dispatcher_v1::DispatcherComponentV0::new_default();
             disp_comp

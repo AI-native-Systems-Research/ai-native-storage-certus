@@ -389,6 +389,11 @@ impl IMemoryTier for MockMemoryTier {
     fn used(&self) -> usize {
         self.inner.lock().unwrap().next_offset
     }
+
+    fn pool_info(&self) -> Option<(*mut u8, usize)> {
+        let inner = self.inner.lock().unwrap();
+        Some((inner.pool.as_ptr() as *mut u8, inner.capacity))
+    }
 }
 
 // ---------------------------------------------------------------------------

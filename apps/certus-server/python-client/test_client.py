@@ -307,6 +307,138 @@ def test_large_batch(stub, results, base_key, count=1000):
         )
 
 
+def bench_lookup_latency(stub, object_size=65536, num_objects=100, iterations=10):
+    """Benchmark lookup latency for memory-tier vs SSD-tier objects.
+
+    Strategy:
+    - The memory-tier pool is 256 MiB. With `object_size` bytes per object,
+      pool_capacity = 256 MiB / object_size objects can fit in DRAM.
+    - We populate `pool_capacity + num_objects` objects so that the first
+      `num_objects` are evicted to SSD (write-through completes, then evicted
+      by LRU pressure from subsequent inserts).
+    - We then measure lookup latency for:
+      (a) "hot" objects still in memory-tier (the last `num_objects` populated)
+      (b) "cold" objects evicted to SSD (the first `num_objects` populated)
+
+    To avoid cudaIpcOpenMemHandle/Close overhead dominating measurements,
+    we pre-allocate a single GPU buffer and reuse its IPC handle for all lookups.
+    """
+    import time
+
+    pool_size = 256 * 1024 * 1024  # 256 MiB
+    pool_capacity = pool_size // object_size
+    total_objects = pool_capacity + num_objects
+    base_key = random.randint(1_000_000, 8_000_000)
+
+    print(f"\n{'='*60}")
+    print(f"Lookup Latency Benchmark")
+    print(f"{'='*60}")
+    print(f"  Object size:      {object_size // 1024} KiB")
+    print(f"  Pool capacity:    {pool_capacity} objects ({pool_size // (1024*1024)} MiB)")
+    print(f"  Total to populate: {total_objects} (to force {num_objects} evictions)")
+    print(f"  Lookup iterations: {iterations}")
+    print()
+
+    # Pre-allocate a single reusable GPU buffer for lookup targets.
+    # This avoids per-entry cudaIpcOpenMemHandle/Close overhead on the server.
+    lookup_tensor = torch.zeros(object_size // 4, dtype=torch.float32, device="cuda:0")
+    _gpu_buffers["_bench_lookup"] = lookup_tensor
+    lookup_handle_bytes = _get_cuda_ipc_handle(lookup_tensor.data_ptr())
+    lookup_ipc = dispatcher_pb2.IpcHandle(cuda_ipc_handle=lookup_handle_bytes, size=object_size)
+
+    # Phase 1: Populate all objects (first `num_objects` will be evicted by LRU)
+    print(f"  Populating {total_objects} objects...", end="", flush=True)
+    batch_size = 50
+    t0 = time.perf_counter()
+    for batch_start in range(0, total_objects, batch_size):
+        batch_end = min(batch_start + batch_size, total_objects)
+        keys = [base_key + i for i in range(batch_start, batch_end)]
+        entries = [
+            dispatcher_pb2.PopulateEntry(key=k, ipc_handle=make_ipc_handle(k, object_size))
+            for k in keys
+        ]
+        resp = stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=entries))
+        failed = [r for r in resp.results if not r.success]
+        if failed:
+            print(f"\n  ERROR: populate failed for {len(failed)} entries: {failed[0].error_message}")
+            return
+    populate_time = time.perf_counter() - t0
+    print(f" done ({populate_time:.2f}s, {total_objects/populate_time:.0f} obj/s)")
+
+    # Wait for background write-through to complete for evicted objects
+    print("  Waiting for write-through to complete...", end="", flush=True)
+    time.sleep(3.0)
+    print(" done")
+
+    # Phase 2: Measure memory-tier (hot) lookups — last `num_objects` populated
+    hot_keys = [base_key + total_objects - num_objects + i for i in range(num_objects)]
+    hot_latencies = []
+
+    print(f"  Benchmarking memory-tier lookups ({num_objects} objects x {iterations} iters)...", end="", flush=True)
+    for _ in range(iterations):
+        entries = [
+            dispatcher_pb2.LookupEntry(key=k, ipc_handle=lookup_ipc)
+            for k in hot_keys
+        ]
+        t_start = time.perf_counter()
+        resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=entries))
+        t_end = time.perf_counter()
+        failed = [r for r in resp.results if not r.success]
+        if failed:
+            print(f"\n  WARNING: {len(failed)} hot lookups failed: {failed[0].error_message}")
+        hot_latencies.append((t_end - t_start) / num_objects)
+    print(" done")
+
+    # Phase 3: Measure SSD-tier (cold) lookups — first `num_objects` populated (evicted)
+    cold_keys = [base_key + i for i in range(num_objects)]
+    cold_latencies = []
+
+    print(f"  Benchmarking SSD-tier lookups ({num_objects} objects x {iterations} iters)...", end="", flush=True)
+    for _ in range(iterations):
+        entries = [
+            dispatcher_pb2.LookupEntry(key=k, ipc_handle=lookup_ipc)
+            for k in cold_keys
+        ]
+        t_start = time.perf_counter()
+        resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=entries))
+        t_end = time.perf_counter()
+        failed = [r for r in resp.results if not r.success]
+        if failed:
+            print(f"\n  WARNING: {len(failed)} cold lookups failed: {failed[0].error_message}")
+        cold_latencies.append((t_end - t_start) / num_objects)
+    print(" done")
+
+    # Results
+    hot_avg = sum(hot_latencies) / len(hot_latencies)
+    hot_min = min(hot_latencies)
+    hot_max = max(hot_latencies)
+    cold_avg = sum(cold_latencies) / len(cold_latencies)
+    cold_min = min(cold_latencies)
+    cold_max = max(cold_latencies)
+
+    # Throughput: GB/s = object_size / latency_per_object
+    hot_tp_avg = (object_size / hot_avg) / 1e9 if hot_avg > 0 else 0
+    hot_tp_max = (object_size / hot_min) / 1e9 if hot_min > 0 else 0
+    cold_tp_avg = (object_size / cold_avg) / 1e9 if cold_avg > 0 else 0
+    cold_tp_max = (object_size / cold_min) / 1e9 if cold_min > 0 else 0
+
+    print(f"\n  {'Tier':<15} {'Avg (us/obj)':<14} {'Min (us/obj)':<14} {'Max (us/obj)':<14} {'Avg (GB/s)':<12} {'Peak (GB/s)':<12}")
+    print(f"  {'-'*80}")
+    print(f"  {'Memory-tier':<15} {hot_avg*1e6:<14.1f} {hot_min*1e6:<14.1f} {hot_max*1e6:<14.1f} {hot_tp_avg:<12.2f} {hot_tp_max:<12.2f}")
+    print(f"  {'SSD-tier':<15} {cold_avg*1e6:<14.1f} {cold_min*1e6:<14.1f} {cold_max*1e6:<14.1f} {cold_tp_avg:<12.2f} {cold_tp_max:<12.2f}")
+    if hot_avg > 0:
+        print(f"\n  SSD/Memory-tier ratio: {cold_avg/hot_avg:.1f}x latency, {hot_tp_avg/cold_tp_avg:.1f}x throughput")
+    print()
+
+    # Cleanup
+    print("  Cleaning up...", end="", flush=True)
+    for batch_start in range(0, total_objects, batch_size):
+        batch_end = min(batch_start + batch_size, total_objects)
+        keys = [base_key + i for i in range(batch_start, batch_end)]
+        stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    print(" done")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Certus gRPC dispatcher test client")
     parser.add_argument(
@@ -314,6 +446,21 @@ def main():
     )
     parser.add_argument(
         "--skip-large-batch", action="store_true", help="Skip the 1000-entry large batch test"
+    )
+    parser.add_argument(
+        "--bench", action="store_true", help="Run lookup latency benchmark (memory-tier vs SSD)"
+    )
+    parser.add_argument(
+        "--bench-object-size", type=int, default=65536,
+        help="Object size in bytes for benchmark (default: 65536 = 64 KiB)"
+    )
+    parser.add_argument(
+        "--bench-num-objects", type=int, default=100,
+        help="Number of objects per tier to benchmark (default: 100)"
+    )
+    parser.add_argument(
+        "--bench-iterations", type=int, default=10,
+        help="Number of lookup iterations per tier (default: 10)"
     )
     args = parser.parse_args()
 
@@ -345,11 +492,20 @@ def main():
     if not args.skip_large_batch:
         test_large_batch(stub, results, large_base_key)
 
-    if results.summary():
-        print("All tests passed.")
-        sys.exit(0)
-    else:
+    if not results.summary():
         sys.exit(1)
+
+    # Benchmark (only if correctness tests pass)
+    if args.bench:
+        bench_lookup_latency(
+            stub,
+            object_size=args.bench_object_size,
+            num_objects=args.bench_num_objects,
+            iterations=args.bench_iterations,
+        )
+
+    print("All tests passed.")
+    sys.exit(0)
 
 
 if __name__ == "__main__":
