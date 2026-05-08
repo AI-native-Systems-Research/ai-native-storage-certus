@@ -44,6 +44,10 @@ struct Cli {
     /// Path to TLS private key file (enables TLS when provided with --tls-cert)
     #[arg(long = "tls-key")]
     tls_key: Option<String>,
+
+    /// Dispatcher version to use: "v0" (staging-based) or "v1" (memory-tier, default)
+    #[arg(long = "dispatcher-version", default_value = "v1")]
+    dispatcher_version: String,
 }
 
 fn validate_pci_address(addr: &str) -> Result<(), String> {
@@ -74,6 +78,7 @@ fn parse_pci_address(addr: &str) -> Result<PciAddress, String> {
 fn initialize_component_stack(
     metadata_pci: &str,
     data_pci_addrs: &[String],
+    dispatcher_version: &str,
 ) -> Result<Arc<dyn IDispatcher + Send + Sync>, String> {
     eprintln!("certus-server: initializing SPDK environment...");
     let spdk_comp = spdk_env::SPDKEnvComponent::new_default();
@@ -165,44 +170,69 @@ fn initialize_component_stack(
     dm.initialize()
         .map_err(|e| format!("DispatchMap init failed: {e}"))?;
 
-    // --- Create memory-tier ---
-    eprintln!("certus-server: initializing memory-tier...");
-    let mt_comp = memory_tier::MemoryTierComponentV0::new_default();
-    mt_comp
-        .logger
-        .connect(Arc::clone(&logger))
-        .map_err(|e| format!("memory-tier logger bind: {e}"))?;
-    let mt: Arc<dyn IMemoryTier + Send + Sync> =
-        query_interface!(mt_comp, IMemoryTier).ok_or("failed to query IMemoryTier")?;
-    mt.initialize(memory_tier::DEFAULT_POOL_SIZE)
-        .map_err(|e| format!("MemoryTier init failed: {e}"))?;
+    // --- Create dispatcher (version-dependent) ---
+    let dispatcher: Arc<dyn IDispatcher + Send + Sync> = match dispatcher_version {
+        "v1" => {
+            eprintln!("certus-server: initializing memory-tier...");
+            let mt_comp = memory_tier::MemoryTierComponentV0::new_default();
+            mt_comp
+                .logger
+                .connect(Arc::clone(&logger))
+                .map_err(|e| format!("memory-tier logger bind: {e}"))?;
+            let mt: Arc<dyn IMemoryTier + Send + Sync> =
+                query_interface!(mt_comp, IMemoryTier).ok_or("failed to query IMemoryTier")?;
+            mt.initialize(memory_tier::DEFAULT_POOL_SIZE)
+                .map_err(|e| format!("MemoryTier init failed: {e}"))?;
 
-    // --- Create dispatcher ---
-    eprintln!("certus-server: initializing dispatcher...");
-    let disp_comp = dispatcher::DispatcherComponentV0::new_default();
-    disp_comp
-        .dispatch_map
-        .connect(Arc::clone(&dm))
-        .map_err(|e| format!("failed to bind dispatch_map: {e}"))?;
-    disp_comp
-        .memory_tier
-        .connect(Arc::clone(&mt))
-        .map_err(|e| format!("failed to bind memory_tier: {e}"))?;
-    disp_comp
-        .gpu_services
-        .connect(Arc::clone(&gpu))
-        .map_err(|e| format!("failed to bind gpu_services: {e}"))?;
-    disp_comp
-        .spdk_env
-        .connect(Arc::clone(&spdk_iface))
-        .map_err(|e| format!("failed to bind spdk_env: {e}"))?;
-    disp_comp
-        .logger
-        .connect(Arc::clone(&logger))
-        .map_err(|e| format!("failed to bind logger: {e}"))?;
+            eprintln!("certus-server: initializing dispatcher v1 (memory-tier)...");
+            let disp_comp = dispatcher_v1::DispatcherComponentV0::new_default();
+            disp_comp
+                .dispatch_map
+                .connect(Arc::clone(&dm))
+                .map_err(|e| format!("failed to bind dispatch_map: {e}"))?;
+            disp_comp
+                .memory_tier
+                .connect(Arc::clone(&mt))
+                .map_err(|e| format!("failed to bind memory_tier: {e}"))?;
+            disp_comp
+                .gpu_services
+                .connect(Arc::clone(&gpu))
+                .map_err(|e| format!("failed to bind gpu_services: {e}"))?;
+            disp_comp
+                .spdk_env
+                .connect(Arc::clone(&spdk_iface))
+                .map_err(|e| format!("failed to bind spdk_env: {e}"))?;
+            disp_comp
+                .logger
+                .connect(Arc::clone(&logger))
+                .map_err(|e| format!("failed to bind logger: {e}"))?;
 
-    let dispatcher: Arc<dyn IDispatcher + Send + Sync> =
-        query_interface!(disp_comp, IDispatcher).ok_or("failed to query IDispatcher")?;
+            query_interface!(disp_comp, IDispatcher).ok_or("failed to query IDispatcher")?
+        }
+        "v0" => {
+            eprintln!("certus-server: initializing dispatcher v0 (staging)...");
+            let disp_comp = dispatcher::DispatcherComponentV0::new_default();
+            disp_comp
+                .dispatch_map
+                .connect(Arc::clone(&dm))
+                .map_err(|e| format!("failed to bind dispatch_map: {e}"))?;
+            disp_comp
+                .gpu_services
+                .connect(Arc::clone(&gpu))
+                .map_err(|e| format!("failed to bind gpu_services: {e}"))?;
+            disp_comp
+                .spdk_env
+                .connect(Arc::clone(&spdk_iface))
+                .map_err(|e| format!("failed to bind spdk_env: {e}"))?;
+            disp_comp
+                .logger
+                .connect(Arc::clone(&logger))
+                .map_err(|e| format!("failed to bind logger: {e}"))?;
+
+            query_interface!(disp_comp, IDispatcher).ok_or("failed to query IDispatcher")?
+        }
+        other => return Err(format!("unknown dispatcher version: {other} (use 'v0' or 'v1')")),
+    };
 
     dispatcher
         .initialize(DispatcherConfig {
@@ -227,12 +257,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     eprintln!(
-        "certus-server: metadata={}, data={:?}",
-        cli.metadata_pci, cli.data_pci
+        "certus-server: metadata={}, data={:?}, dispatcher={}",
+        cli.metadata_pci, cli.data_pci, cli.dispatcher_version
     );
 
     // Initialize Certus component stack
-    let dispatcher = initialize_component_stack(&cli.metadata_pci, &cli.data_pci)?;
+    let dispatcher =
+        initialize_component_stack(&cli.metadata_pci, &cli.data_pci, &cli.dispatcher_version)?;
     let dispatcher_mutex = Arc::new(Mutex::new(dispatcher));
 
     let svc = DispatcherService::new(Arc::clone(&dispatcher_mutex));

@@ -20,6 +20,7 @@ members = [
     "components/dispatch-map/v0",
     "components/memory-tier/v0",
     "components/dispatcher/v0",
+    "components/dispatcher/v1",
     "components/gpu-services/v0",
     "apps/gpu-handle-test-server",
     "apps/gpu-show",
@@ -62,6 +63,7 @@ logger = { path = "components/logger/v1" }
 dispatch-map = { path = "components/dispatch-map/v0" }
 memory-tier = { path = "components/memory-tier/v0" }
 dispatcher = { path = "components/dispatcher/v0" }
+dispatcher-v1 = { path = "components/dispatcher/v1" }
 extent-manager-v2 = { path = "components/extent-manager/v2" }
 gpu-services = { path = "components/gpu-services/v0" }
 certus-connector = { path = "certus-connector" }

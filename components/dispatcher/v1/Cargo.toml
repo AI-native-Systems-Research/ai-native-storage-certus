@@ -1,6 +1,6 @@
 [package]
-name = "dispatcher"
-version = "0.1.0"
+name = "dispatcher-v1"
+version = "1.0.0"
 edition.workspace = true
 rust-version.workspace = true
 publish = false
@@ -15,6 +15,7 @@ spdk-env.workspace = true
 block-device-spdk-nvme.workspace = true
 block-device-spdk-nvme-v2.workspace = true
 extent-manager-v2.workspace = true
+memory-tier.workspace = true
 libc = "0.2"
 
 [features]

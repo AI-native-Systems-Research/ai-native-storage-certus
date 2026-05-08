@@ -9,11 +9,11 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use component_core::query_interface;
-use dispatcher::DispatcherComponentV0;
+use dispatcher_v1::DispatcherComponentV0;
 use interfaces::{
     CacheKey, DispatchMapError, DispatcherConfig, DmaAllocFn, DmaBuffer, GpuDeviceInfo,
-    GpuDmaBuffer, GpuIpcHandle, IDispatchMap, IDispatcher, IGpuServices, ILogger, IpcHandle,
-    LookupResult,
+    GpuDmaBuffer, GpuIpcHandle, IDispatchMap, IDispatcher, IGpuServices, ILogger, IMemoryTier,
+    IpcHandle, LookupResult, MemoryTierError,
 };
 
 // ---------------------------------------------------------------------------
@@ -203,15 +203,33 @@ impl IDispatchMap for MockDispatchMap {
 
     fn create_memory_tier_entry(
         &self,
-        _key: CacheKey,
+        key: CacheKey,
         _pointer: *mut u8,
         _size: u32,
     ) -> Result<(), DispatchMapError> {
-        Err(DispatchMapError::NotInitialized("not supported in v0".into()))
+        let mut inner = self.inner.lock().unwrap();
+        if inner.entries.contains_key(&key) {
+            return Err(DispatchMapError::AlreadyExists(key));
+        }
+        inner.entries.insert(
+            key,
+            MockEntry {
+                buffer: alloc_dma_buffer(4096),
+                block_offset: None,
+                write_ref: true,
+                read_refs: 0,
+            },
+        );
+        Ok(())
     }
 
-    fn convert_memory_tier_to_block(&self, _key: CacheKey) -> Result<(), DispatchMapError> {
-        Err(DispatchMapError::NotInitialized("not supported in v0".into()))
+    fn convert_memory_tier_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+        let inner = self.inner.lock().unwrap();
+        if inner.entries.contains_key(&key) {
+            Ok(())
+        } else {
+            Err(DispatchMapError::KeyNotFound(key))
+        }
     }
 }
 
@@ -282,6 +300,97 @@ impl IGpuServices for MockGpuServices {
     }
 }
 
+// --- MockMemoryTier ---
+
+struct MockMtSlot {
+    offset: usize,
+    size: u32,
+}
+
+struct MockMemoryTier {
+    inner: Mutex<MockMtInner>,
+}
+
+struct MockMtInner {
+    pool: Vec<u8>,
+    slots: HashMap<CacheKey, MockMtSlot>,
+    next_offset: usize,
+    capacity: usize,
+}
+
+impl MockMemoryTier {
+    fn new(capacity: usize) -> Self {
+        Self {
+            inner: Mutex::new(MockMtInner {
+                pool: vec![0u8; capacity],
+                slots: HashMap::new(),
+                next_offset: 0,
+                capacity,
+            }),
+        }
+    }
+}
+
+impl IMemoryTier for MockMemoryTier {
+    fn initialize(&self, _pool_size: usize) -> Result<(), MemoryTierError> {
+        Ok(())
+    }
+
+    fn insert(&self, key: CacheKey, size: u32) -> Result<*mut u8, MemoryTierError> {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.slots.contains_key(&key) {
+            return Err(MemoryTierError::AlreadyExists(key));
+        }
+        let aligned = (size as usize).next_multiple_of(4096);
+        if inner.next_offset + aligned > inner.capacity {
+            return Err(MemoryTierError::PoolFull);
+        }
+        let offset = inner.next_offset;
+        inner.next_offset += aligned;
+        inner.slots.insert(key, MockMtSlot { offset, size });
+        let ptr = unsafe { inner.pool.as_mut_ptr().add(offset) };
+        Ok(ptr)
+    }
+
+    fn get(&self, key: CacheKey) -> Option<(*mut u8, u32)> {
+        let inner = self.inner.lock().unwrap();
+        inner.slots.get(&key).map(|slot| {
+            let ptr = unsafe { (inner.pool.as_ptr() as *mut u8).add(slot.offset) };
+            (ptr, slot.size)
+        })
+    }
+
+    fn evict_lru(&self) -> Option<CacheKey> {
+        let mut inner = self.inner.lock().unwrap();
+        let key = inner.slots.keys().next().copied()?;
+        inner.slots.remove(&key);
+        Some(key)
+    }
+
+    fn remove(&self, key: CacheKey) -> Result<(), MemoryTierError> {
+        let mut inner = self.inner.lock().unwrap();
+        inner
+            .slots
+            .remove(&key)
+            .map(|_| ())
+            .ok_or(MemoryTierError::KeyNotFound(key))
+    }
+
+    fn touch(&self, _key: CacheKey) {}
+
+    fn contains(&self, key: CacheKey) -> bool {
+        self.inner.lock().unwrap().slots.contains_key(&key)
+    }
+
+    fn capacity(&self) -> usize {
+        self.inner.lock().unwrap().capacity
+    }
+
+    fn used(&self) -> usize {
+        self.inner.lock().unwrap().next_offset
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -290,12 +399,14 @@ fn setup() -> (Arc<DispatcherComponentV0>, Arc<MockDispatchMap>) {
     let dm = Arc::new(MockDispatchMap::new());
     let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
     let gpu: Arc<dyn IGpuServices + Send + Sync> = Arc::new(MockGpuServices);
+    let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
     let c = DispatcherComponentV0::new_default();
     c.dispatch_map
         .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
         .unwrap();
     c.logger.connect(logger).unwrap();
     c.gpu_services.connect(gpu).unwrap();
+    c.memory_tier.connect(mt).unwrap();
 
     let d = query_interface!(c, IDispatcher).unwrap();
     d.initialize(DispatcherConfig {
@@ -398,7 +509,7 @@ fn check_finds_migrated_entry() {
     })
     .unwrap();
 
-    assert_eq!(d.check(7).unwrap(), true, "migrated entry should be discoverable");
+    assert!(d.check(7).unwrap(), "migrated entry should be discoverable");
     d.shutdown().unwrap();
 }
 
