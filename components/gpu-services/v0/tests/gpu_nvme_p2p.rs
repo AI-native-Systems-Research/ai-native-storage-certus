@@ -111,7 +111,7 @@ fn get_context() -> Option<&'static HardwareContext> {
         let spdk_env_comp = SPDKEnvComponent::new_default();
         let block_dev = BlockDeviceSpdkNvmeComponentV1::new_default();
         let logger = LoggerComponentV1::new_default();
-        let gpu_component = GpuServicesComponentV0::new();
+        let gpu_component = GpuServicesComponentV0::new_default();
 
         bind(&*spdk_env_comp, "ISPDKEnv", &*block_dev, "spdk_env")
             .expect("bind spdk_env to block_dev");

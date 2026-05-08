@@ -124,7 +124,7 @@ impl EngineInner {
             .ok_or_else(|| PyRuntimeError::new_err("failed to query ILogger"))?;
 
         // --- Initialize GPU services ---
-        let gpu_comp = gpu_services::GpuServicesComponentV0::new();
+        let gpu_comp = gpu_services::GpuServicesComponentV0::new_default();
         let gpu: Arc<dyn IGpuServices + Send + Sync> = query_interface!(gpu_comp, IGpuServices)
             .ok_or_else(|| PyRuntimeError::new_err("failed to query IGpuServices"))?;
         gpu.initialize()
