@@ -160,6 +160,10 @@ impl IDispatchMap for DispatchMapComponentV0 {
                 buffer: Arc::clone(buffer),
             },
             Location::BlockDevice { offset } => LookupResult::BlockDevice { offset: *offset },
+            Location::MemoryTier { pointer, size, .. } => LookupResult::MemoryTier {
+                pointer: *pointer,
+                size: *size,
+            },
         };
 
         if let Ok(logger) = self.logger.get() {
@@ -176,13 +180,20 @@ impl IDispatchMap for DispatchMapComponentV0 {
             .get_mut(&key)
             .ok_or(DispatchMapError::KeyNotFound(key))?;
 
-        if !matches!(entry.location, Location::Staging { .. }) {
-            return Err(DispatchMapError::InvalidState(
-                "entry is not in staging state".into(),
-            ));
+        match &mut entry.location {
+            Location::Staging { .. } => {
+                entry.location = Location::BlockDevice { offset };
+            }
+            Location::MemoryTier { ssd_offset, .. } => {
+                *ssd_offset = Some(offset);
+            }
+            Location::BlockDevice { .. } => {
+                return Err(DispatchMapError::InvalidState(
+                    "entry is already in block-device state".into(),
+                ));
+            }
         }
 
-        entry.location = Location::BlockDevice { offset };
         if entry.read_ref > 0 {
             entry.read_ref -= 1;
         }
@@ -346,6 +357,85 @@ impl IDispatchMap for DispatchMapComponentV0 {
             .collect();
         entries.sort_unstable_by_key(|&(_, tsc)| tsc);
         entries.into_iter().take(n).map(|(key, _)| key).collect()
+    }
+
+    fn create_memory_tier_entry(
+        &self,
+        key: CacheKey,
+        pointer: *mut u8,
+        size: u32,
+    ) -> Result<(), DispatchMapError> {
+        if size == 0 {
+            return Err(DispatchMapError::InvalidSize);
+        }
+
+        let mut inner = self.state.inner.lock().unwrap();
+        if inner.entries.contains_key(&key) {
+            return Err(DispatchMapError::AlreadyExists(key));
+        }
+
+        let entry = DispatchEntry {
+            location: Location::MemoryTier {
+                pointer,
+                size,
+                ssd_offset: None,
+            },
+            size_blocks: size.div_ceil(4096) as u32,
+            read_ref: 0,
+            write_ref: 1,
+            tsc: rdtsc(),
+        };
+
+        inner.entries.insert(key, entry);
+
+        if let Ok(logger) = self.logger.get() {
+            logger.debug(&format!(
+                "dispatch-map: created memory-tier entry for key {key}, size {size}"
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn convert_memory_tier_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+        let mut inner = self.state.inner.lock().unwrap();
+        let entry = inner
+            .entries
+            .get_mut(&key)
+            .ok_or(DispatchMapError::KeyNotFound(key))?;
+
+        match &entry.location {
+            Location::MemoryTier {
+                ssd_offset: Some(offset),
+                ..
+            } => {
+                let offset = *offset;
+                entry.location = Location::BlockDevice { offset };
+            }
+            Location::MemoryTier {
+                ssd_offset: None, ..
+            } => {
+                return Err(DispatchMapError::InvalidState(
+                    "memory-tier entry has no SSD offset (write-through not complete)".into(),
+                ));
+            }
+            _ => {
+                return Err(DispatchMapError::InvalidState(
+                    "entry is not in memory-tier state".into(),
+                ));
+            }
+        }
+
+        if let Ok(logger) = self.logger.get() {
+            logger.debug(&format!(
+                "dispatch-map: converted memory-tier key {key} to block device"
+            ));
+        }
+
+        drop(inner);
+        self.state.condvar.notify_all();
+
+        Ok(())
     }
 }
 
@@ -649,5 +739,87 @@ mod tests {
         assert!(keys.contains(&2));
         assert!(keys.contains(&3));
         assert!(!keys.contains(&1));
+    }
+
+    // --- Memory-tier entry methods ---
+
+    #[test]
+    fn create_memory_tier_entry_happy_path() {
+        let c = setup_component();
+        let dm = query_interface!(c, IDispatchMap).unwrap();
+        let mut buf = [0u8; 4096];
+        dm.create_memory_tier_entry(1, buf.as_mut_ptr(), 4096)
+            .unwrap();
+        // Should be visible via lookup (blocks until write ref released).
+        dm.release_write(1).unwrap();
+        let result = dm.lookup(1).unwrap();
+        match result {
+            LookupResult::MemoryTier { pointer, size } => {
+                assert_eq!(pointer, buf.as_mut_ptr());
+                assert_eq!(size, 4096);
+            }
+            _ => panic!("expected MemoryTier"),
+        }
+        dm.release_read(1).unwrap();
+    }
+
+    #[test]
+    fn create_memory_tier_entry_duplicate() {
+        let c = setup_component();
+        let dm = query_interface!(c, IDispatchMap).unwrap();
+        let mut buf = [0u8; 4096];
+        dm.create_memory_tier_entry(1, buf.as_mut_ptr(), 4096)
+            .unwrap();
+        let err = dm.create_memory_tier_entry(1, buf.as_mut_ptr(), 4096);
+        assert!(matches!(err, Err(DispatchMapError::AlreadyExists(1))));
+    }
+
+    #[test]
+    fn convert_to_storage_on_memory_tier_sets_ssd_offset() {
+        let c = setup_component();
+        let dm = query_interface!(c, IDispatchMap).unwrap();
+        let mut buf = [0u8; 4096];
+        dm.create_memory_tier_entry(1, buf.as_mut_ptr(), 4096)
+            .unwrap();
+        // convert_to_storage sets ssd_offset but keeps it as MemoryTier.
+        dm.convert_to_storage(1, 8192).unwrap();
+        // Still shows as MemoryTier on lookup (not BlockDevice).
+        dm.release_write(1).unwrap();
+        let result = dm.lookup(1).unwrap();
+        assert!(matches!(result, LookupResult::MemoryTier { .. }));
+        dm.release_read(1).unwrap();
+    }
+
+    #[test]
+    fn convert_memory_tier_to_block_happy_path() {
+        let c = setup_component();
+        let dm = query_interface!(c, IDispatchMap).unwrap();
+        let mut buf = [0u8; 4096];
+        dm.create_memory_tier_entry(1, buf.as_mut_ptr(), 4096)
+            .unwrap();
+        dm.convert_to_storage(1, 8192).unwrap();
+        dm.release_write(1).unwrap();
+        dm.take_write(1).unwrap();
+        dm.convert_memory_tier_to_block(1).unwrap();
+        dm.release_write(1).unwrap();
+        let result = dm.lookup(1).unwrap();
+        match result {
+            LookupResult::BlockDevice { offset } => assert_eq!(offset, 8192),
+            _ => panic!("expected BlockDevice after convert_memory_tier_to_block"),
+        }
+        dm.release_read(1).unwrap();
+    }
+
+    #[test]
+    fn convert_memory_tier_to_block_without_ssd_offset_fails() {
+        let c = setup_component();
+        let dm = query_interface!(c, IDispatchMap).unwrap();
+        let mut buf = [0u8; 4096];
+        dm.create_memory_tier_entry(1, buf.as_mut_ptr(), 4096)
+            .unwrap();
+        dm.release_write(1).unwrap();
+        dm.take_write(1).unwrap();
+        let err = dm.convert_memory_tier_to_block(1);
+        assert!(matches!(err, Err(DispatchMapError::InvalidState(_))));
     }
 }

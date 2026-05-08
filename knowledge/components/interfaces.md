@@ -14,12 +14,13 @@ Centralized repository for all component interface trait definitions. Allows com
 |-----------|---------|---------|
 | `IGreeter` | -- | `greeting_prefix(&self) -> &str` |
 | `ILogger` | -- | `error`, `warn`, `info`, `debug` (all `&self, msg: &str`) |
-| `IGpuServices` | -- | `initialize`, `shutdown`, `get_devices`, `deserialize_ipc_handle`, `verify_memory`, `pin_memory`, `unpin_memory`, `create_dma_buffer` |
+| `IGpuServices` | -- | `initialize`, `shutdown`, `get_devices`, `deserialize_ipc_handle`, `verify_memory`, `pin_memory`, `unpin_memory`, `create_dma_buffer`; *(spdk)*: `dma_copy_to_host`, `dma_copy_to_device`, `prepare_memory_for_spdk` |
+| `IMemoryTier` | `spdk` | `initialize(pool_size)`, `insert(key, size)`, `get(key)`, `evict_lru()`, `remove(key)`, `touch(key)`, `contains(key)`, `capacity()`, `used()`, `pool_info()` |
 | `ISPDKEnv` | `spdk` | `init()`, `devices()`, `device_count()`, `is_initialized()` |
 | `IBlockDevice` | `spdk` | `connect_client()`, `sector_size(ns_id)`, `num_sectors(ns_id)`, `max_queue_depth()`, `num_io_queues()`, `max_transfer_size()`, `block_size()`, `numa_node()`, `nvme_version()`, `telemetry()` |
 | `IBlockDeviceAdmin` | `spdk` | `set_pci_address(addr)`, `set_actor_cpu(cpu)`, `initialize()`, `shutdown()` |
 | `IExtentManager` | `spdk` | `format(params)`, `initialize`, `reserve_extent(key, size)`, `lookup_extent(key)`, `get_extents`, `for_each_extent(cb)`, `remove_extent(key)`, `checkpoint`, `get_instance_id` |
-| `IDispatchMap` | `spdk` | `set_dma_alloc`, `initialize`, `create_staging`, `lookup`, `convert_to_storage`, `take_read`, `take_write`, `release_read`, `release_write`, `downgrade_reference`, `remove` |
+| `IDispatchMap` | `spdk` | `set_dma_alloc`, `initialize`, `create_staging`, `create_memory_tier_entry`, `lookup`, `convert_to_storage`, `convert_memory_tier_to_block`, `take_read`, `take_write`, `release_read`, `release_write`, `downgrade_reference`, `remove`, `touch`, `oldest_keys` |
 | `IDispatcher` | `spdk` | `initialize(config)`, `shutdown()`, `lookup(key, ipc_handle)`, `check(key)`, `remove(key)`, `populate(key, ipc_handle)` |
 
 ## Key Shared Types
@@ -50,8 +51,11 @@ Centralized repository for all component interface trait definitions. Allows com
 
 ### Dispatch Map
 - `CacheKey = u64`
-- `LookupResult` -- `NotExist`, `MismatchSize`, `Staging { buffer }`, `BlockDevice { offset }`
+- `LookupResult` -- `NotExist`, `MismatchSize`, `Staging { buffer }`, `BlockDevice { offset }`, `MemoryTier { pointer, size }`
 - `DispatchMapError`
+
+### Memory Tier
+- `MemoryTierError` -- `PoolFull`, `KeyNotFound`, `AlreadyExists`, `AllocationFailed`, `InvalidSize`, `NotEvictable`, `NotInitialized`
 
 ### Dispatcher
 - `DispatcherConfig { metadata_pci_addr, data_pci_addrs }`

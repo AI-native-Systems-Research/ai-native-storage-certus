@@ -12,13 +12,15 @@ Multi-threaded NVMe IOPS/throughput/latency benchmark. Each worker thread gets i
 
 - `--pci-addr <BDF>` -- target NVMe controller
 - `--driver <v1|v2>` -- block device driver version
-- `--op <read|write>` -- operation type
-- `--queue-depth <N>` -- async queue depth
-- `--transfer-size <bytes>` -- I/O transfer size
-- `--threads <N>` -- number of worker threads
-- `--duration <secs>` -- benchmark duration
-- `--random` -- random LBA access (vs sequential)
-- `--quiet` -- suppress per-thread output
+- `--op <read|write|rw>` -- operation type
+- `--io-mode <sync|async>` -- IO submission mode (default: async)
+- `--queue-depth <N>` -- async queue depth (default: 32)
+- `--block-size <bytes>` -- I/O block size (default: 4096)
+- `--threads <N>` -- number of worker threads (default: 1)
+- `--duration <secs>` -- benchmark duration (default: 10)
+- `--pattern <random|sequential>` -- LBA access pattern (default: random)
+- `--ns-id <N>` -- target NVMe namespace (default: 1)
+- `--quiet` -- suppress per-second progress output
 
 ## Component Wiring
 

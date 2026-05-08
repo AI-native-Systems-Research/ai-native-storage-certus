@@ -200,6 +200,19 @@ impl IDispatchMap for MockDispatchMap {
         let inner = self.inner.lock().unwrap();
         inner.entries.keys().copied().take(n).collect()
     }
+
+    fn create_memory_tier_entry(
+        &self,
+        _key: CacheKey,
+        _pointer: *mut u8,
+        _size: u32,
+    ) -> Result<(), DispatchMapError> {
+        Err(DispatchMapError::NotInitialized("not supported in v0".into()))
+    }
+
+    fn convert_memory_tier_to_block(&self, _key: CacheKey) -> Result<(), DispatchMapError> {
+        Err(DispatchMapError::NotInitialized("not supported in v0".into()))
+    }
 }
 
 struct MockLogger;

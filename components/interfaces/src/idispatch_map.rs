@@ -23,7 +23,22 @@ pub enum LookupResult {
         /// Byte offset on the block device.
         offset: u64,
     },
+    /// Data is in the DRAM memory-tier.
+    MemoryTier {
+        /// Pointer to the data in the memory-tier pool.
+        pointer: *mut u8,
+        /// Size of the data in bytes.
+        size: u32,
+    },
 }
+
+// SAFETY: The pointer in MemoryTier refers to memory in the memory-tier pool,
+// which is thread-safe (mmap'd region protected by dispatch-map mutex). The
+// Arc<DmaBuffer> in Staging is already Send+Sync via its own impls.
+#[cfg(feature = "spdk")]
+unsafe impl Send for LookupResult {}
+#[cfg(feature = "spdk")]
+unsafe impl Sync for LookupResult {}
 
 /// Errors returned by `IDispatchMap` operations.
 #[derive(Debug, Clone)]
@@ -118,5 +133,22 @@ component_macros::define_interface! {
 
         /// Return up to `n` keys with the oldest timestamps (lowest TSC values).
         fn oldest_keys(&self, n: usize) -> Vec<CacheKey>;
+
+        /// Create an entry for a key with a memory-tier location.
+        ///
+        /// Acquires a write reference (same semantics as `create_staging`).
+        fn create_memory_tier_entry(
+            &self,
+            key: CacheKey,
+            pointer: *mut u8,
+            size: u32,
+        ) -> Result<(), DispatchMapError>;
+
+        /// Convert a memory-tier entry to a block-device location.
+        ///
+        /// Transitions `MemoryTier { ssd_offset: Some(off) }` to
+        /// `BlockDevice { offset: off }`. Fails if the entry has no
+        /// recorded SSD offset (write-through not yet complete).
+        fn convert_memory_tier_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError>;
     }
 }

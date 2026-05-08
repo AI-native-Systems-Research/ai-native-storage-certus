@@ -169,13 +169,13 @@ A client wants to indicate that a cache entry is still in use without performing
 - **FR-009**: The `remove(key)` method MUST free the staging buffer (if data is in staging state) or free the extent on SSD (if data is in block-device state) and remove the dispatch map entry.
 - **FR-010**: The dispatcher component MUST use the component framework's `define_component!` macro and expose only the `IDispatcher` interface.
 - **FR-011**: The dispatcher MUST accept receptacles for `ILogger`, `IDispatchMap`, `IGpuServices`, and `ISPDKEnv` components. Block devices and extent managers are created internally during initialization.
-- **FR-012**: The `initialize` method MUST validate that all required receptacles are bound before proceeding.
+- **FR-012**: The `initialize` method MUST validate that the `dispatch_map` receptacle is bound before proceeding. Other receptacles (`gpu_services`) are validated lazily on first use.
 - **FR-013**: The dispatcher MUST use appropriate read/write locking on the dispatch map to ensure thread safety during concurrent operations.
 - **FR-014**: The `shutdown` method MUST ensure all in-flight background operations complete or are cancelled before returning.
 - **FR-015**: The dispatcher MUST coordinate N data block devices with N extent managers, where each extent manager is associated with a specific metadata partition and data block device.
-- **FR-016**: The dispatcher MUST pass the data block device size and a unique identifier (derived from the controller PCI address) to each extent manager's format function.
-- **FR-017**: When the asynchronous background write fails (extent allocation failure or block device I/O error), the dispatcher MUST raise an error, remove the entry from the dispatch map, and free the staging buffer.
-- **FR-018**: When `remove(key)` is called while a background write is in progress for that key, the remove MUST block until the background write completes (or fails), then remove the entry and free all associated resources.
+- **FR-016**: The dispatcher MUST pass the data block device size and computed FormatParams to each extent manager's format function. A PCI-derived unique identifier is not currently passed.
+- **FR-017**: When the asynchronous background write fails (extent allocation failure or block device I/O error), the background writer silently drops the job. The dispatch map entry remains in its current state. (Known limitation: failed writes do not clean up map entries.)
+- **FR-018**: The `remove(key)` method does NOT block waiting for background writes to complete. It acquires a read reference from the dispatch map and proceeds with removal immediately.
 - **FR-019**: All block device I/O operations MUST be segmented to respect the device's Maximum Data Transfer Size (MDTS, typically 128 KiB). Reads and writes larger than MDTS MUST be split into multiple sequential or batched I/O operations.
 - **FR-020**: The `prepare_store(key, size)` method MUST run eviction if the cache is over capacity, reserve an extent on the target data drive, register the key in the dispatch map, and return a DMA buffer for the caller to write into. MUST return `AlreadyExists` if the key exists, `AllocationFailed` if extent reservation fails, `InvalidParameter` if size is 0.
 - **FR-021**: The `commit_store(key)` method MUST write the pending DMA buffer contents to SSD using MDTS-aware segmented I/O, publish the extent metadata, and transition the dispatch map entry to block-device state. MUST return `KeyNotFound` if no pending write exists.
@@ -183,6 +183,12 @@ A client wants to indicate that a cache entry is still in use without performing
 - **FR-023**: The `touch(key)` method MUST update the entry's eviction timestamp in the dispatch map without performing any DMA transfer or acquiring any reference. MUST return `KeyNotFound` if the key does not exist.
 - **FR-024**: The dispatcher MUST support configurable eviction via `DispatcherConfig::max_cache_entries` and `eviction_threshold`. When the cache exceeds the watermark (`max_cache_entries × eviction_threshold`), `prepare_store` MUST synchronously evict the oldest entries (by TSC) until the count drops to the watermark. Entries with active write references MUST be skipped during eviction.
 - **FR-025**: The `DispatcherConfig` MUST support a `format_on_init` flag (default true). When false, extent managers are not reformatted on initialization, preserving on-disk data from previous sessions.
+- **FR-026**: The dispatcher MUST support `BlockDeviceVersion` selection (V1, V2) via `DispatcherConfig`.
+- **FR-027**: The dispatcher MUST support `ExtentManagerVersion` selection via `DispatcherConfig`.
+- **FR-028**: The dispatcher MUST handle `LookupResult::MismatchSize` by returning `InvalidParameter`.
+- **FR-029**: The dispatcher MUST handle `LookupResult::MemoryTier` defensively (return error in v0).
+- **FR-030**: `prepare_store` MUST fall back to `libc::aligned_alloc` when SPDK DMA allocation fails.
+- **FR-031**: `initialize` MUST reject an empty `data_pci_addrs` list with `InvalidParameter`.
 
 ### Key Entities
 
