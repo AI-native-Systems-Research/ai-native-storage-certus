@@ -26,3 +26,5 @@ established good engineering practice, maintainability and meeting performance r
 /speckit-implement
 
 + Define in interfaces/src/cuda_types.rs the IpcHandle type based on the CUDA C type "struct cudaIpcMemHandle_t { char reserved[64]; };".  Include a function to deserialize the type from Python.
+
+/speckit-specify Add to the component interface IGpuServices a function, called `prepare_memory_for_spdk` that takes a GPU memory IPC handle and creates a DmaBuffer that can be used to perform peer-to-peer DMA from the SSD to the GPU.  The code should use cudaIpcMemLazyEnablePeerAccess and expect the memory to come from PyTorch (passed over gRPC and deserialized).  The GPU memory should be pinned if not already pinned (use cudaPointerGetAttributes).  The free function on the DmaBuffer should unpin the memory if it was originally pinned; i.e. use different free functions depending on the pinned state from the IPC handle.  Pinning actions should be logged to the logger.

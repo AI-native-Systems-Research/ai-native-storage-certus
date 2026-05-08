@@ -78,7 +78,7 @@ impl EngineInner {
             .map_err(|e| PyRuntimeError::new_err(format!("SPDK init failed: {e}")))?;
 
         // --- Initialize GPU services ---
-        let gpu_comp = gpu_services::GpuServicesComponentV0::new();
+        let gpu_comp = gpu_services::GpuServicesComponentV0::new_default();
         let gpu: Arc<dyn IGpuServices + Send + Sync> = query_interface!(gpu_comp, IGpuServices)
             .ok_or_else(|| PyRuntimeError::new_err("failed to query IGpuServices"))?;
         gpu.initialize()
