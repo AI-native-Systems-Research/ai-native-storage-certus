@@ -180,6 +180,30 @@ fn bench_create_dma_buffer(c: &mut Criterion) {
     let _ = gpu.shutdown();
 }
 
+#[cfg(feature = "spdk")]
+fn bench_prepare_memory_for_spdk(c: &mut Criterion) {
+    use base64::Engine;
+
+    let component = GpuServicesComponentV0::new();
+    let gpu = query_interface!(component, IGpuServices).unwrap();
+    if gpu.initialize().is_err() {
+        eprintln!("Skipping bench_prepare_memory_for_spdk: CUDA init failed");
+        return;
+    }
+
+    let mut payload_bytes = [0u8; 72];
+    payload_bytes[64..72].copy_from_slice(&4096u64.to_le_bytes());
+    let payload = base64::engine::general_purpose::STANDARD.encode(payload_bytes);
+
+    c.bench_function("gpu_prepare_memory_for_spdk", |b| {
+        b.iter(|| {
+            let _ = gpu.prepare_memory_for_spdk(&payload, None);
+        });
+    });
+
+    let _ = gpu.shutdown();
+}
+
 criterion_group!(
     benches,
     bench_initialize,
@@ -189,4 +213,12 @@ criterion_group!(
     bench_pin_unpin,
     bench_create_dma_buffer
 );
+
+#[cfg(feature = "spdk")]
+criterion_group!(spdk_benches, bench_prepare_memory_for_spdk);
+
+#[cfg(not(feature = "spdk"))]
 criterion_main!(benches);
+
+#[cfg(feature = "spdk")]
+criterion_main!(benches, spdk_benches);

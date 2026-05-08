@@ -5,8 +5,9 @@ pipeline {
       steps {
           sh 'pwd'
           sh 'whoami'
-          sh 'ln -sf /opt/spdk-build/ ./deps/spdk-build'
-          sh 'ln -sf /opt/spdk/ ./deps/spdk'
+          sh '[ -L "./deps/spdk" ] || ln -s "/opt/spdk/" "./deps/spdk"'
+          sh '[ -L "./deps/spdk-build" ] || ln -s "/opt/spdk-build/" "./deps/spdk-build"'
+          sh 'cd ./kernel/modules/gdrcopy/; make'
         script {
           def status = sh(script: '. ~/.cargo/env ; cargo build', returnStatus: true)
           echo "Server build exit status:-> ${status}"
