@@ -7,7 +7,13 @@
 
 ## Description
 
-Version 2 of the NVMe block device component. Architecture is identical to v1 -- one actor thread per controller, SPSC client channels, same interface and messaging API. Both v1 and v2 can be used concurrently in applications with a runtime `--driver v1|v2` flag.
+Version 2 of the NVMe block device component. Same architecture as v1 (one actor thread per controller, SPSC client channels, same interface and messaging API) with hot-path optimizations:
+
+- **TSC-based timeout**: Uses hardware Time Stamp Counter (`rdtscp`) for low-overhead deadline checking (~20 cycles vs ~200 for `clock_gettime`). Timeout checks throttled to ~1ms intervals.
+- **ContextPool slab allocator**: Eliminates per-IO heap allocation for async completion contexts. Contexts are acquired from a slab at submission and returned in the callback.
+- **Scratch buffers**: Pre-allocated vectors for draining completions and collecting timed-out handles, avoiding allocation in the hot path.
+
+Both v1 and v2 can be used concurrently in applications with a runtime `--driver v1|v2` flag.
 
 ## Component Definition
 

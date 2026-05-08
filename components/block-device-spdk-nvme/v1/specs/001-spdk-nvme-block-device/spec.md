@@ -192,7 +192,7 @@ confirm functionality is restored.
 
 - **FR-001**: System MUST provide an IBlockDevice interface for creating and connecting client channels.
 - **FR-002**: Each connected client MUST have two shared-memory channels: one for ingress command messages, one for asynchronous completion callbacks.
-- **FR-003**: System MUST support synchronous read and write operations with parameters for NVMe namespace id, DmaBuffer, LBA offset, and timeout.
+- **FR-003**: System MUST support synchronous read and write operations with parameters for NVMe namespace id, DmaBuffer, and LBA offset (no timeout — sync ops block until completion).
 - **FR-004**: System MUST support asynchronous read and write operations with a timeout value; operations exceeding timeout MUST return an error. The component MUST assign a unique operation handle on submission and return it to the client. Completion callbacks MUST include the corresponding operation handle.
 - **FR-005**: System MUST support aborting an in-flight asynchronous operation identified by its component-assigned operation handle.
 - **FR-006**: System MUST support a write-zeros operation.
@@ -201,7 +201,7 @@ confirm functionality is restored.
 - **FR-009**: System MUST support controller hardware reset with graceful handling of in-flight operations.
 - **FR-010**: System MUST expose device information (capacity, max queue depth, IO queue count, max transfer size, block/sector size, NUMA id, NVMe version) via the IBlockDevice interface.
 - **FR-011**: When compiled with the `telemetry` feature, system MUST collect and expose min/max/mean IO latencies, total operation count, and mean throughput. When compiled without the feature, the telemetry API MUST return an error.
-- **FR-012**: Each component instance MUST be associated with a single NVMe controller device, attached and initialized at instantiation.
+- **FR-012**: Each component instance MUST be associated with a single NVMe controller device, configured via `IBlockDeviceAdmin::set_pci_address` and attached via `IBlockDeviceAdmin::initialize` (see FR-021).
 - **FR-013**: The actor service thread MUST be pinned to a core in the same NUMA zone as the NVMe controller device.
 - **FR-014**: The actor thread MUST poll all attached client channels.
 - **FR-015**: The component MUST exploit different NVMe IO queues with varying queue depths to minimize latency for a given batch size.
@@ -210,6 +210,7 @@ confirm functionality is restored.
 - **FR-018**: Client-provided DmaBuffer structs MUST be accepted for read/write memory. Arc references MUST be usable in messages since clients are in-process.
 - **FR-019**: When a client disconnects (drops its channel pair), the component MUST cancel all in-flight operations for that client and silently discard any pending completions. The actor MUST release all resources associated with the disconnected client.
 - **FR-020**: All namespace management operations (probe, create, format, delete) MUST be serialized through the actor thread. No additional locking is required; the actor processes namespace commands in the order they are received from polled channels.
+- **FR-021**: The component MUST provide an `IBlockDeviceAdmin` interface (defined via `define_interface!` in the interfaces crate) with methods: `set_pci_address(addr: PciAddress)` to configure the target NVMe controller, `set_actor_cpu(cpu: usize)` to pin the actor thread to a specific CPU core, `initialize() -> Result<(), NvmeBlockError>` to attach to the controller and start the actor thread, and `shutdown() -> Result<(), NvmeBlockError>` to stop the actor and join its thread. `set_pci_address` MUST be called before `initialize`.
 
 ### Key Entities
 

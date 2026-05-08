@@ -3,7 +3,7 @@
 **Crate**: `gpu-services`
 **Path**: `components/gpu-services/v0/`
 **Version**: 0.1.0
-**Features**: `gpu` (CUDA runtime FFI)
+**Features**: `gpu` (CUDA runtime FFI), `spdk` (DMA copy methods and `prepare_memory_for_spdk`)
 
 ## Description
 
@@ -40,7 +40,10 @@ GpuServicesComponentV0 {
 |                | `verify_memory(handle) -> Result<(), String>` -- confirm pointer refers to device memory via `cudaPointerGetAttributes` |
 |                | `pin_memory(handle) -> Result<(), String>` -- pin for DMA (idempotent, auto-verifies) |
 |                | `unpin_memory(handle) -> Result<(), String>` -- unpin previously pinned memory |
-|                | `create_dma_buffer(handle) -> Result<GpuDmaBuffer, String>` -- consume verified+pinned handle, return DMA buffer |
+|                | `create_dma_buffer(handle) -> Result<GpuDmaBuffer, String>` -- consume verified+pinned handle, return GPU DMA buffer |
+|                | `dma_copy_to_host(src, dst, size)` *(spdk)* -- cudaMemcpy D2H from GPU ptr to SPDK DmaBuffer |
+|                | `dma_copy_to_device(src, dst, size)` *(spdk)* -- cudaMemcpy H2D from SPDK DmaBuffer to GPU ptr |
+|                | `prepare_memory_for_spdk(base64, device_index)` *(spdk)* -- full pipeline: open IPC, check/pin, spdk_mem_register, return SPDK DmaBuffer |
 
 ## Receptacles
 

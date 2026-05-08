@@ -1,31 +1,36 @@
-# Feature Specification: Dispatcher Cache Interface
+# Feature Specification: Dispatcher Cache Interface (Memory-Tier Architecture)
 
 **Feature Branch**: `001-dispatcher-cache-interface`  
-**Created**: 2026-04-28  
-**Status**: Draft  
-**Input**: User description: "Dispatcher component providing IDispatcher interface with cache management methods for GPU-to-SSD data flows"
+**Created**: 2026-05-08  
+**Status**: Complete  
+**Input**: Dispatcher component providing IDispatcher interface with DRAM memory-tier caching and write-through to SSD for GPU data flows
 
 ## User Scenarios & Testing *(mandatory)*
 
-### User Story 1 - Cache Population (GPU to SSD) (Priority: P1)
+### User Story 1 - Cache Population (GPU to Memory-Tier with Write-Through) (Priority: P1)
 
-A client application holds data in GPU memory and wants to cache it for future use. The client calls the dispatcher's populate method, providing a cache key and an IPC handle referencing the GPU memory region. The dispatcher registers the element in the dispatch map, allocates a CPU staging buffer, initiates a DMA copy from GPU memory into the staging buffer, and returns confirmation to the client. In the background, the dispatcher asynchronously writes the staging buffer contents to the SSD via the block device and extent manager, then frees the staging buffer.
+A client application holds data in GPU memory and wants to cache it for future use. The client calls the dispatcher's populate method, providing a cache key and an IPC handle referencing the GPU memory region. The dispatcher evicts entries from the memory-tier if capacity is insufficient, allocates a slot in the DRAM memory-tier via `IMemoryTier::insert()`, initiates a DMA copy from GPU memory into the memory-tier slot, registers the entry in the dispatch map as a `MemoryTier` entry (via `create_memory_tier_entry`), and returns confirmation to the client. In the background, the dispatcher reads from the memory-tier pointer and asynchronously writes the data to the SSD via the block device and extent manager (write-through).
 
 **Why this priority**: This is the primary write path — without the ability to populate the cache, no data enters the system. Every other operation depends on cached data existing.
 
-**Independent Test**: Can be fully tested by populating a cache entry with a known key and verifying that the dispatch map contains the entry and that the data eventually reaches the block device. Delivers the core caching capability.
+**Independent Test**: Can be fully tested by populating a cache entry with a known key and verifying that the dispatch map contains a MemoryTier entry and that the data eventually reaches the block device (write-through completes). Delivers the core caching capability.
 
 **Acceptance Scenarios**:
 
-1. **Given** the dispatcher is initialized with all receptacles bound, **When** populate(key, ipc_handle) is called with a new key, **Then** a staging buffer is allocated, DMA copy from GPU is initiated, and the call returns success before the SSD write completes.
-2. **Given** a populate call returned successfully, **When** the background SSD write completes, **Then** the dispatch map entry transitions from staging to block-device state and the staging buffer is freed.
-3. **Given** the dispatcher is initialized, **When** populate(key, ipc_handle) is called with a key that already exists, **Then** an appropriate error is returned indicating duplicate key.
+1. **Given** the dispatcher is initialized with all receptacles bound (including IMemoryTier), **When** populate(key, ipc_handle) is called with a new key, **Then** a memory-tier slot is allocated, DMA copy from GPU is performed into the slot, the entry is registered in the dispatch map as MemoryTier, and the call returns success before the SSD write-through completes.
+2. **Given** a populate call returned successfully, **When** the background write-through completes, **Then** the dispatch map entry has its `ssd_offset` set (via `convert_to_storage`) and the entry remains in the memory-tier for fast future access.
+3. **Given** the dispatcher is initialized, **When** populate(key, ipc_handle) is called with a key that already exists in the memory-tier, **Then** an `AlreadyExists` error is returned.
+4. **Given** the memory-tier pool is at capacity, **When** populate(key, ipc_handle) is called, **Then** `evict_for_space` evicts LRU entries (transitioning them to BlockDevice state) until enough space is available, then the populate proceeds normally.
 
 ---
 
 ### User Story 2 - Cache Lookup with DMA Transfer (Priority: P1)
 
-A client application needs to retrieve previously cached data into GPU memory. The client calls the dispatcher's lookup method, providing the cache key and an IPC handle for the destination GPU memory. The dispatcher queries the dispatch map; if the data is in a staging buffer, it initiates a DMA copy from the staging buffer to GPU memory. If the data is on SSD, it reads from the block device and transfers to GPU memory. The client receives the data.
+A client application needs to retrieve previously cached data into GPU memory. The client calls the dispatcher's lookup method, providing the cache key and an IPC handle for the destination GPU memory. The dispatcher queries the dispatch map:
+
+- **MemoryTier hit**: DMA-copies directly from the memory-tier pointer to the client's GPU memory. This is the fast path.
+- **BlockDevice (evicted from memory-tier)**: Promotes the entry back to the memory-tier using a pipelined SSD-to-DRAM-to-GPU reader, then re-registers it as a MemoryTier entry.
+- **Staging (legacy)**: DMA-copies from the staging buffer to GPU. This path exists for backward compatibility but should not occur in normal memory-tier operation.
 
 **Why this priority**: This is the primary read path. The cache is only useful if data can be retrieved. Lookup is the most latency-sensitive operation.
 
@@ -33,15 +38,16 @@ A client application needs to retrieve previously cached data into GPU memory. T
 
 **Acceptance Scenarios**:
 
-1. **Given** a cache entry exists in staging state, **When** lookup(key, ipc_handle) is called, **Then** a DMA copy from the staging buffer to the GPU memory region is performed and success is returned.
-2. **Given** a cache entry exists in block-device state (SSD), **When** lookup(key, ipc_handle) is called, **Then** data is read from the SSD at the recorded offset and DMA-copied to the GPU memory region.
-3. **Given** no cache entry exists for the key, **When** lookup(key, ipc_handle) is called, **Then** a cache-miss indication is returned.
+1. **Given** a cache entry exists in MemoryTier state, **When** lookup(key, ipc_handle) is called, **Then** a DMA copy from the memory-tier pointer to the GPU memory region is performed, the memory-tier LRU is touched, and success is returned.
+2. **Given** a cache entry exists in BlockDevice state (evicted from memory-tier but on SSD), **When** lookup(key, ipc_handle) is called, **Then** the pipelined reader reads data from SSD into a new memory-tier slot while streaming chunks to GPU, the entry is re-registered as MemoryTier in the dispatch map, and success is returned.
+3. **Given** no cache entry exists for the key, **When** lookup(key, ipc_handle) is called, **Then** a `KeyNotFound` error is returned.
+4. **Given** a cache entry exists but with size mismatch, **When** lookup(key, ipc_handle) is called, **Then** an `InvalidParameter` error is returned.
 
 ---
 
 ### User Story 3 - Cache Presence Check (Priority: P2)
 
-A client application wants to check whether a cache entry exists without transferring any data. The client calls the dispatcher's check method with a cache key. The dispatcher queries the dispatch map and returns whether the key is present.
+A client application wants to check whether a cache entry exists without transferring any data. The client calls the dispatcher's check method with a cache key. The dispatcher queries the dispatch map and returns whether the key is present (in any state: MemoryTier, BlockDevice, or Staging).
 
 **Why this priority**: Enables clients to make decisions about whether to populate or look up data without incurring DMA transfer costs. Important for efficiency but not required for basic functionality.
 
@@ -49,14 +55,14 @@ A client application wants to check whether a cache entry exists without transfe
 
 **Acceptance Scenarios**:
 
-1. **Given** a cache entry exists for the key, **When** check(key) is called, **Then** the result indicates the entry is present.
+1. **Given** a cache entry exists for the key (in any state), **When** check(key) is called, **Then** the result indicates the entry is present.
 2. **Given** no cache entry exists for the key, **When** check(key) is called, **Then** the result indicates the entry is not present.
 
 ---
 
 ### User Story 4 - Cache Entry Removal (Priority: P2)
 
-A client application wants to evict a cache entry. The client calls the dispatcher's remove method with a cache key. The dispatcher frees the associated staging buffer (if data has not yet been written to SSD) or frees the extent on the SSD (if data has been committed). The dispatch map entry is removed.
+A client application wants to evict a cache entry. The client calls the dispatcher's remove method with a cache key. The dispatcher removes the entry from the memory-tier (if present), removes the dispatch map entry, and frees the SSD extent (if the entry was in BlockDevice state).
 
 **Why this priority**: Cache eviction is necessary for cache management and preventing resource exhaustion. Required for long-running workloads but not for basic single-use caching.
 
@@ -64,15 +70,15 @@ A client application wants to evict a cache entry. The client calls the dispatch
 
 **Acceptance Scenarios**:
 
-1. **Given** a cache entry exists in staging state, **When** remove(key) is called, **Then** the staging buffer is freed and the dispatch map entry is removed.
-2. **Given** a cache entry exists in block-device state, **When** remove(key) is called, **Then** the extent is freed via the extent manager and the dispatch map entry is removed.
-3. **Given** no cache entry exists for the key, **When** remove(key) is called, **Then** an appropriate error is returned.
+1. **Given** a cache entry exists in MemoryTier state, **When** remove(key) is called, **Then** the memory-tier slot is freed, the dispatch map entry is removed, and success is returned.
+2. **Given** a cache entry exists in BlockDevice state, **When** remove(key) is called, **Then** the extent is freed via the extent manager, the dispatch map entry is removed, and success is returned.
+3. **Given** no cache entry exists for the key, **When** remove(key) is called, **Then** a `KeyNotFound` error is returned.
 
 ---
 
 ### User Story 5 - Dispatcher Initialization and Wiring (Priority: P1)
 
-A system integrator wires the dispatcher component to its dependencies: a logger, dispatch map, GPU services, and SPDK environment. The integrator provides PCI BDF address strings for the metadata and data block devices via `DispatcherConfig`. The dispatcher internally creates N block device components and N extent managers, wiring them to the shared SPDK environment and logger. After initialization, the dispatcher is ready to serve cache operations. If the SPDK environment receptacle is not connected, the dispatcher operates in staging-only mode (no block devices or extent managers).
+A system integrator wires the dispatcher component to its dependencies: a logger, dispatch map, GPU services, SPDK environment, and memory-tier. The integrator provides PCI BDF address strings for data block devices via `DispatcherConfig`. The dispatcher internally creates N block device components and N extent managers, wiring them to the shared SPDK environment and logger. After initialization, the dispatcher starts the background write-through worker and is ready to serve cache operations. If the SPDK environment receptacle is not connected, the dispatcher operates in memory-tier-only mode (no write-through to SSD).
 
 **Why this priority**: Without correct initialization and wiring, no cache operations can proceed. This is the prerequisite for all other stories.
 
@@ -80,15 +86,16 @@ A system integrator wires the dispatcher component to its dependencies: a logger
 
 **Acceptance Scenarios**:
 
-1. **Given** the dispatcher component is created, **When** logger, dispatch_map, gpu_services, and spdk_env receptacles are bound, **Then** initialize succeeds, N block devices and N extent managers are created internally, and the dispatcher is ready for cache operations.
-2. **Given** the dispatcher component is created, **When** initialize is called without the dispatch_map receptacle bound, **Then** an error is returned indicating the missing dependency.
-3. **Given** initialization succeeds, **When** shutdown is called, **Then** all background writes complete, block devices are shut down in reverse order, and resources are released.
+1. **Given** the dispatcher component is created, **When** logger, dispatch_map, gpu_services, spdk_env, and memory_tier receptacles are bound, **Then** initialize succeeds, N block devices and N extent managers are created internally, the background writer is started, and the dispatcher is ready for cache operations.
+2. **Given** the dispatcher component is created, **When** initialize is called without the dispatch_map or memory_tier receptacle bound, **Then** an error is returned indicating the missing dependency.
+3. **Given** initialization succeeds, **When** shutdown is called, **Then** the background writer drains all pending write-through jobs, block devices are shut down in reverse order, and resources are released.
+4. **Given** the spdk_env receptacle is not connected, **When** initialize is called, **Then** the dispatcher operates in memory-tier-only mode (no block devices created, no SSD persistence, write-through assigns synthetic offsets).
 
 ---
 
 ### User Story 6 - Direct Store Workflow (prepare/commit/cancel) (Priority: P2)
 
-A caller wants to write data directly to SSD without going through the GPU DMA staging path. The caller calls `prepare_store(key, size)` which runs eviction if needed, reserves an SSD extent, and returns a DMA buffer. The caller writes data into the buffer, then calls `commit_store(key)` to write the buffer to SSD and publish the extent, or `cancel_store(key)` to abort.
+A caller wants to write data directly to SSD without going through the GPU DMA memory-tier path. The caller calls `prepare_store(key, size)` which reserves an SSD extent and returns a DMA buffer. The caller writes data into the buffer, then calls `commit_store(key)` to write the buffer to SSD and publish the extent, or `cancel_store(key)` to abort.
 
 **Why this priority**: Enables alternative ingestion paths (e.g., host-to-SSD) that bypass the GPU DMA requirement, broadening the use cases for the cache.
 
@@ -96,126 +103,154 @@ A caller wants to write data directly to SSD without going through the GPU DMA s
 
 **Acceptance Scenarios**:
 
-1. **Given** the dispatcher is initialized, **When** `prepare_store(key, size)` is called with a new key, **Then** an extent is reserved on the target drive and a DMA buffer of at least `size` bytes (block-aligned) is returned. The key is visible via `check()`.
-2. **Given** a pending write exists for key, **When** `commit_store(key)` is called, **Then** the buffer contents are written to SSD, the extent is published, the dispatch map entry transitions to block-device state, and the write reference is released.
+1. **Given** the dispatcher is initialized, **When** `prepare_store(key, size)` is called with a new key, **Then** the key is registered in the dispatch map, an extent is reserved on the target drive, and a DMA buffer of at least `size` bytes (block-aligned) is returned. The key is visible via `check()`.
+2. **Given** a pending write exists for key, **When** `commit_store(key)` is called, **Then** the buffer contents are written to SSD using MDTS-aware segmented I/O, the extent is published, the dispatch map entry transitions to block-device state, and the write reference is released.
 3. **Given** a pending write exists for key, **When** `cancel_store(key)` is called, **Then** the extent reservation is aborted (WriteHandle dropped), the dispatch map entry is removed, and no SSD write occurs.
 4. **Given** `prepare_store` is called with a key that already exists, **Then** `AlreadyExists` error is returned.
 5. **Given** `commit_store` or `cancel_store` is called with a key that has no pending write, **Then** `KeyNotFound` error is returned.
 
 ---
 
-### User Story 7 - Cache Eviction (Priority: P2)
+### User Story 7 - Memory-Tier Capacity Eviction (Priority: P2)
 
-When the cache exceeds its configured capacity, the dispatcher must evict old entries to make room for new ones. Eviction is triggered by `prepare_store` and removes the least-recently-used entries (by TSC timestamp) until the count drops to the configured watermark.
+When the memory-tier pool does not have enough space for a new entry, the dispatcher must evict old entries to make room. Eviction is triggered by `populate` and `promote_and_serve` (the promotion path). The `evict_for_space` function evicts LRU entries from the memory-tier (via `IMemoryTier::evict_lru()`) until `used + needed <= capacity`. Each evicted entry is transitioned from MemoryTier to BlockDevice state in the dispatch map (via `convert_memory_tier_to_block`), provided its write-through has completed (ssd_offset is set).
 
 **Why this priority**: Without eviction, the cache fills up and no new entries can be stored. Required for long-running workloads.
 
-**Independent Test**: Can be tested by configuring a low max_cache_entries, populating past the threshold, calling prepare_store, and verifying that old entries are removed.
+**Independent Test**: Can be tested by configuring a small memory-tier pool, populating past capacity, and verifying that old entries are evicted and transitioned to BlockDevice state.
 
 **Acceptance Scenarios**:
 
-1. **Given** `max_cache_entries=10` and `eviction_threshold=0.5` (watermark=5), **When** 8 entries exist and `prepare_store` is called, **Then** entries are evicted down to 5 before the new entry is created.
-2. **Given** entries with active write references, **When** eviction runs, **Then** those entries are skipped (not evicted).
-3. **Given** `max_cache_entries=0`, **When** entries accumulate, **Then** no eviction occurs (eviction is disabled).
+1. **Given** memory-tier pool has 16 KiB capacity and 4 x 4 KiB entries exist, **When** a new 4 KiB entry is populated, **Then** `evict_for_space` evicts entries via `evict_lru()` until `used + 4096 <= 16384`, and the evicted entries' dispatch-map records are converted to BlockDevice.
+2. **Given** entries that have completed write-through (ssd_offset set), **When** eviction runs, **Then** those entries are eligible for eviction and can be re-read from SSD later.
+3. **Given** entries whose write-through has not yet completed (no ssd_offset), **When** eviction runs, **Then** those entries may be evicted from the memory-tier (the data is effectively lost from fast access but the dispatch-map transition to BlockDevice will fail gracefully).
+4. **Given** the memory-tier has sufficient space for the requested allocation, **When** `evict_for_space` is called, **Then** no eviction occurs.
 
 ---
 
 ### User Story 8 - Touch (Refresh Eviction Priority) (Priority: P3)
 
-A client wants to indicate that a cache entry is still in use without performing any data transfer. The client calls `touch(key)` to refresh the entry's eviction timestamp, preventing it from being selected as a victim.
+A client wants to indicate that a cache entry is still in use without performing any data transfer. The client calls `touch(key)` to refresh the entry's eviction timestamp via the dispatch map, preventing it from being selected as a victim.
 
-**Why this priority**: Touch enables efficient LRU-style eviction policies without the overhead of a full lookup (which involves DMA or reference management).
+**Why this priority**: Touch enables efficient LRU-style eviction policies without the overhead of a full lookup (which involves DMA).
 
 **Independent Test**: Can be tested by populating entries, touching one, triggering eviction, and verifying the touched entry survives.
 
 **Acceptance Scenarios**:
 
-1. **Given** a cache entry exists for the key, **When** `touch(key)` is called, **Then** the entry's TSC timestamp is refreshed and the call returns success. No DMA or reference management occurs.
+1. **Given** a cache entry exists for the key, **When** `touch(key)` is called, **Then** the entry's timestamp is refreshed in the dispatch map and the call returns success. No DMA or memory-tier operations occur.
 2. **Given** no cache entry exists for the key, **When** `touch(key)` is called, **Then** `KeyNotFound` error is returned.
+
+---
+
+### User Story 9 - Pipelined Promotion (SSD to Memory-Tier to GPU) (Priority: P2)
+
+When a lookup hits an entry in BlockDevice state (evicted from memory-tier but persisted on SSD), the dispatcher promotes it back to the memory-tier and serves it to the GPU. The `promote_and_serve` function: (1) evicts memory-tier entries if needed, (2) allocates a new memory-tier slot, (3) uses the pipelined ring-buffer reader (`pipeline::pipelined_ssd_to_gpu`) to read from SSD in MDTS-sized chunks -- each chunk is copied to both the memory-tier slot and streamed to the GPU destination, (4) re-registers the entry as MemoryTier in the dispatch map with the original ssd_offset preserved.
+
+**Why this priority**: Essential for handling the working-set churn case where frequently accessed entries get re-promoted after eviction. Without this, evicted entries cannot be served.
+
+**Independent Test**: Can be tested by populating an entry, manually evicting it to BlockDevice state, then calling lookup and verifying the data arrives at the GPU and the entry is back in MemoryTier state.
+
+**Acceptance Scenarios**:
+
+1. **Given** an entry is in BlockDevice state at a known SSD offset, **When** lookup is called for that key, **Then** the pipelined reader reads from SSD using a ring of DMA buffers (4 slots), copying each chunk to the memory-tier slot and DMA-copying to the GPU, and the entry is re-registered as MemoryTier.
+2. **Given** the memory-tier is full when promotion is attempted, **When** lookup triggers promote_and_serve, **Then** `evict_for_space` is called first to free room before the new memory-tier slot is allocated.
+3. **Given** no hardware is available (memory-tier-only mode), **When** promote_and_serve runs, **Then** it creates a memory-tier slot with zero-copied data, performs a direct GPU DMA from the slot, and re-registers the entry.
 
 ---
 
 ### Edge Cases
 
-- When DMA buffer allocation fails during populate (out of memory), populate returns an allocation failure error to the caller and no dispatch map entry is created.
-- When a populate is in progress (staging phase) and a lookup is called for the same key, the lookup blocks until the populate releases its write reference (per dispatch map read/write locking semantics), then serves from the staging buffer or SSD depending on current state.
-- When the SSD is full and a background write cannot allocate an extent, an error is raised, the entry is removed from the dispatch map, and the staging buffer is freed.
-- When remove is called while a background SSD write is in progress, the remove blocks until the write completes (or fails), then removes the entry and frees all resources (staging buffer and/or SSD extent).
+- When memory-tier insertion fails during populate (pool full after eviction attempt), populate returns an `AllocationFailed` error to the caller and no dispatch map entry is created.
+- When a populate is in progress (write reference held) and a lookup is called for the same key, the lookup can proceed if the write reference has been downgraded to a read reference (which happens immediately after the DMA copy completes and before background write-through begins).
+- When the SSD is full and a background write-through cannot allocate an extent, the write-through silently fails (the entry remains in memory-tier but without SSD backing, making it vulnerable to permanent loss on eviction).
+- When remove is called for a key, the memory-tier slot is freed first, then the dispatch-map entry is removed, then the SSD extent (if any) is freed.
 - Multiple concurrent lookups for the same key are permitted (multiple read references allowed by dispatch map locking semantics).
-- When the block device reports an I/O error during a background write, an error is raised, the entry is removed from the dispatch map, and the staging buffer is freed (same handling as SSD-full).
+- When the block device reports an I/O error during background write-through, the write-through is abandoned (the entry remains in memory-tier without SSD backing).
 - When `prepare_store` fails after registering in the dispatch map (e.g., extent allocation failure), the dispatch map entry is cleaned up before returning the error.
+- When eviction is triggered but all memory-tier entries have no completed write-through, eviction may leave entries in an inconsistent state (lost from memory-tier but not retrievable from SSD). This is an acceptable trade-off for preventing complete stalls.
 
 ## Clarifications
 
-### Session 2026-04-28
+### Session 2026-05-08 (Memory-Tier Rewrite)
 
-- Q: Are cache entries fixed-size or variable-size, and what bounds apply? → A: Variable-size entries, bounded by the extent manager's configured max extent size (default 1 GiB).
-- Q: What happens when the SSD is full during a background write from staging? → A: An error is raised. The entry is removed from the dispatch map and the staging buffer is freed.
-- Q: What happens when the block device reports an I/O error during a background write? → A: Same as SSD-full — raise error, remove entry from dispatch map, free staging buffer.
-- Q: What happens when remove is called during an in-flight background write? → A: Remove blocks until the background write completes (or fails), then removes the entry and frees all resources.
+- Q: How is the memory-tier pool managed? -> A: The `IMemoryTier` interface provides `insert()`, `get()`, `remove()`, `evict_lru()`, `touch()`, `capacity()`, and `used()`. The pool is pre-allocated DRAM. Eviction is capacity-based: `used + needed > capacity` triggers LRU eviction.
+- Q: What happens when an evicted entry is looked up? -> A: The dispatch-map returns `LookupResult::BlockDevice { offset }`. The dispatcher calls `promote_and_serve` which reads from SSD, inserts into memory-tier, DMA-copies to GPU, and re-registers in the dispatch-map.
+- Q: What happens if write-through hasn't completed when eviction occurs? -> A: The `convert_memory_tier_to_block` call fails (no ssd_offset set). The entry is removed from the memory-tier anyway (by `evict_lru`). Effectively the data is lost. This is accepted as unlikely in practice.
+- Q: Does lookup update the LRU order? -> A: Yes, `mt.touch(key)` is called after a successful MemoryTier lookup to refresh the entry's position in the LRU.
+- Q: How does the pipelined reader work? -> A: It allocates a ring of 4 DMA buffers (MDTS-sized). For each I/O segment, it issues an SSD read into the next ring slot, waits for completion, copies the chunk to the memory-tier slot, then DMA-copies the same chunk to the GPU. This pipelines sequential SSD reads with memory copies.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
 - **FR-001**: System MUST define an `IDispatcher` interface in the shared interfaces crate, providing `initialize`, `shutdown`, `lookup`, `check`, `remove`, `populate`, `prepare_store`, `commit_store`, `cancel_store`, and `touch` methods.
-- **FR-002**: System MUST define a `DispatcherError` error type in the shared interfaces crate, covering all failure modes (not initialized, key not found, duplicate key, I/O error, allocation failure, timeout).
-- **FR-003**: The `populate(key, ipc_handle)` method MUST register the element in the dispatch map, allocate a variable-size DMA staging buffer via the dispatch map's `create_staging` method, initiate DMA copy from the client's GPU memory into the staging buffer via `IGpuServices::dma_copy_to_host`, downgrade the write reference, and enqueue an asynchronous background write job.
-- **FR-004**: After a successful populate, the system MUST asynchronously write the staging buffer contents to the SSD via the block device and extent manager, transitioning the dispatch map entry from staging to block-device state.
-- **FR-005**: The staging buffer MUST be freed after the asynchronous SSD write completes successfully.
-- **FR-006**: The `lookup(key, ipc_handle)` method MUST query the dispatch map; if the data is in staging, perform DMA copy from staging buffer to the client's GPU memory via `IGpuServices::dma_copy_to_device`; if on SSD, read from block device and DMA-copy to the client's GPU memory.
+- **FR-002**: System MUST define a `DispatcherError` error type in the shared interfaces crate, covering all failure modes (not initialized, key not found, duplicate key, I/O error, allocation failure, invalid parameter).
+- **FR-003**: The `populate(key, ipc_handle)` method MUST allocate a slot in the DRAM memory-tier via `IMemoryTier::insert()`, initiate DMA copy from the client's GPU memory into the memory-tier slot via `IGpuServices::dma_copy_to_host`, register the entry in the dispatch map as a MemoryTier entry (via `create_memory_tier_entry`), and enqueue an asynchronous background write-through job. MUST run `evict_for_space` if the memory-tier pool lacks capacity.
+- **FR-004**: After a successful populate, the system MUST asynchronously read from the memory-tier pointer and write the data to the SSD via the block device and extent manager (write-through), calling `convert_to_storage` on completion to record the SSD offset.
+- **FR-005**: The memory-tier entry MUST remain accessible for fast lookups even after the background SSD write-through completes. The memory-tier slot is NOT freed on write-through completion.
+- **FR-006**: The `lookup(key, ipc_handle)` method MUST query the dispatch map: if MemoryTier, DMA from memory-tier pointer to GPU and touch LRU; if BlockDevice (evicted), promote back to memory-tier via pipelined SSD-to-DRAM-to-GPU reader and re-register as MemoryTier; if Staging (legacy), DMA from staging buffer to GPU.
 - **FR-007**: The `lookup` method MUST return a cache-miss indication if the key does not exist in the dispatch map.
 - **FR-008**: The `check(key)` method MUST return whether a cache entry exists for the given key without performing any data transfer.
-- **FR-009**: The `remove(key)` method MUST free the staging buffer (if data is in staging state) or free the extent on SSD (if data is in block-device state) and remove the dispatch map entry.
+- **FR-009**: The `remove(key)` method MUST free the memory-tier slot (if present via `mt.remove()`), free the extent on SSD (if in BlockDevice state), and remove the dispatch map entry.
 - **FR-010**: The dispatcher component MUST use the component framework's `define_component!` macro and expose only the `IDispatcher` interface.
-- **FR-011**: The dispatcher MUST accept receptacles for `ILogger`, `IDispatchMap`, `IGpuServices`, and `ISPDKEnv` components. Block devices and extent managers are created internally during initialization.
-- **FR-012**: The `initialize` method MUST validate that all required receptacles are bound before proceeding.
+- **FR-011**: The dispatcher MUST accept receptacles for `ILogger`, `IDispatchMap`, `IGpuServices`, `ISPDKEnv`, and `IMemoryTier` components. Block devices and extent managers are created internally during initialization.
+- **FR-012**: The `initialize` method MUST validate that the `dispatch_map` and `memory_tier` receptacles are bound before proceeding. Other receptacles are validated lazily on first use.
 - **FR-013**: The dispatcher MUST use appropriate read/write locking on the dispatch map to ensure thread safety during concurrent operations.
 - **FR-014**: The `shutdown` method MUST ensure all in-flight background operations complete or are cancelled before returning.
 - **FR-015**: The dispatcher MUST coordinate N data block devices with N extent managers, where each extent manager is associated with a specific metadata partition and data block device.
-- **FR-016**: The dispatcher MUST pass the data block device size and a unique identifier (derived from the controller PCI address) to each extent manager's format function.
-- **FR-017**: When the asynchronous background write fails (extent allocation failure or block device I/O error), the dispatcher MUST raise an error, remove the entry from the dispatch map, and free the staging buffer.
-- **FR-018**: When `remove(key)` is called while a background write is in progress for that key, the remove MUST block until the background write completes (or fails), then remove the entry and free all associated resources.
-- **FR-019**: All block device I/O operations MUST be segmented to respect the device's Maximum Data Transfer Size (MDTS, typically 128 KiB). Reads and writes larger than MDTS MUST be split into multiple sequential or batched I/O operations.
+- **FR-016**: The dispatcher MUST pass the data block device size and computed FormatParams to each extent manager's format function.
+- **FR-017**: When the asynchronous background write-through fails (extent allocation failure or block device I/O error), the background writer silently drops the job. The dispatch map entry remains in MemoryTier state. (Known limitation.)
+- **FR-018**: The `remove(key)` method does NOT block waiting for background write-through to complete. It proceeds immediately with removal.
+- **FR-019**: All block device I/O operations MUST be segmented to respect MDTS (typically 128 KiB). The pipelined reader uses a ring-buffer for SSD-to-DRAM-to-GPU streaming during promotion.
 - **FR-020**: The `prepare_store(key, size)` method MUST run eviction if the cache is over capacity, reserve an extent on the target data drive, register the key in the dispatch map, and return a DMA buffer for the caller to write into. MUST return `AlreadyExists` if the key exists, `AllocationFailed` if extent reservation fails, `InvalidParameter` if size is 0.
 - **FR-021**: The `commit_store(key)` method MUST write the pending DMA buffer contents to SSD using MDTS-aware segmented I/O, publish the extent metadata, and transition the dispatch map entry to block-device state. MUST return `KeyNotFound` if no pending write exists.
 - **FR-022**: The `cancel_store(key)` method MUST drop the pending write (aborting the extent reservation via WriteHandle destructor) and remove the dispatch map entry. MUST return `KeyNotFound` if no pending write exists.
 - **FR-023**: The `touch(key)` method MUST update the entry's eviction timestamp in the dispatch map without performing any DMA transfer or acquiring any reference. MUST return `KeyNotFound` if the key does not exist.
-- **FR-024**: The dispatcher MUST support configurable eviction via `DispatcherConfig::max_cache_entries` and `eviction_threshold`. When the cache exceeds the watermark (`max_cache_entries × eviction_threshold`), `prepare_store` MUST synchronously evict the oldest entries (by TSC) until the count drops to the watermark. Entries with active write references MUST be skipped during eviction.
+- **FR-024**: Eviction in v1 is purely capacity-based within the memory-tier pool. When the pool is full, `evict_for_space` writes LRU memory-tier entries to SSD (via `convert_memory_tier_to_block`) and releases their memory-tier slots. Count-based TSC eviction (from v0) is NOT used in v1.
 - **FR-025**: The `DispatcherConfig` MUST support a `format_on_init` flag (default true). When false, extent managers are not reformatted on initialization, preserving on-disk data from previous sessions.
+- **FR-026**: The dispatcher MUST support `BlockDeviceVersion` selection (V1, V2) via `DispatcherConfig`.
+- **FR-027**: The dispatcher MUST support `ExtentManagerVersion` selection via `DispatcherConfig`.
+- **FR-028**: On BlockDevice lookup (promotion), the pipelined reader MUST re-insert the entry into the memory-tier and re-register it as a MemoryTier entry in the dispatch map.
 
 ### Key Entities
 
-- **CacheKey**: A 64-bit identifier for cached data elements. Used to address entries in the dispatch map.
-- **IPC Handle**: An opaque reference to a GPU memory region provided by the client for DMA transfers.
-- **Staging Buffer**: A CPU-accessible DMA buffer used as an intermediate store between GPU memory and SSD storage. Variable-size, bounded by the extent manager's max extent size.
-- **Dispatch Map Entry**: A record tracking the state of a cached element — whether it is in staging (CPU buffer) or committed to a block device (SSD offset).
-- **Extent**: A contiguous region on a data block device, managed by the extent manager, used to store committed cache data.
-- **Data Block Device**: An NVMe SSD that holds cached data. There are N data block devices in the system.
-- **Metadata Block Device**: An NVMe SSD with partitions (namespaces) that holds metadata for the extent managers.
+- **CacheKey**: A 64-bit identifier for cached data elements. Used to address entries in the dispatch map and memory-tier.
+- **IPC Handle**: Contains a pointer to a GPU memory region and a size. Used for DMA transfers between GPU and host memory.
+- **Memory-Tier Slot**: A region in the pre-allocated DRAM pool managed by `IMemoryTier`. Holds cached data for fast access. Eviction is capacity-based (bytes used vs pool size).
+- **Dispatch Map Entry**: A record tracking the state of a cached element -- MemoryTier (pointer + size + optional ssd_offset), BlockDevice (ssd_offset only), or Staging (legacy DMA buffer).
+- **Extent**: A contiguous region on a data block device, managed by the extent manager, used to store write-through cache data.
+- **Data Block Device**: An NVMe SSD that holds persisted cache data. There are N data block devices in the system.
+- **Background Writer**: A dedicated thread that processes write-through jobs, reading from memory-tier pointers and writing to SSD via extent managers.
+- **Pipelined Reader**: A ring-buffer-based reader (`pipeline.rs`) that reads SSD data in MDTS-sized chunks into a ring of DMA buffers, copying each to both memory-tier and GPU destinations.
+- **PendingWrite**: A temporary structure holding a WriteHandle (extent reservation), DMA buffer, size, and drive index for the prepare_store/commit_store/cancel_store workflow.
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
-- **SC-001**: A client can populate a cache entry and subsequently retrieve it via lookup, receiving the correct data, within a single session.
+- **SC-001**: A client can populate a cache entry and subsequently retrieve it via lookup (memory-tier hit path), receiving the correct data, within a single session.
 - **SC-002**: Cache check operations return accurate presence information for both existing and non-existing keys.
-- **SC-003**: Cache removal frees all associated resources (staging buffers and SSD extents) so that they can be reused.
+- **SC-003**: Cache removal frees all associated resources (memory-tier slots and SSD extents) so that they can be reused.
 - **SC-004**: The dispatcher correctly handles concurrent populate and lookup operations on different keys without data corruption or deadlock.
-- **SC-005**: Initialization fails gracefully with a descriptive error when required dependencies are not bound.
-- **SC-006**: Shutdown completes all in-flight background writes before returning, ensuring no data loss.
-- **SC-007**: The dispatcher supports N independent data block devices and extent managers operating in parallel.
+- **SC-005**: Initialization fails gracefully with a descriptive error when required dependencies (dispatch_map, memory_tier) are not bound.
+- **SC-006**: Shutdown drains all pending background write-through jobs before returning, ensuring data consistency.
+- **SC-007**: The dispatcher supports N independent data block devices and extent managers operating in parallel, with key-based drive selection.
 - **SC-008**: The prepare_store/commit_store workflow successfully persists data to SSD and makes it retrievable via lookup.
-- **SC-009**: Eviction correctly removes the oldest entries when the cache exceeds its configured capacity, and entries with active references are not evicted.
-- **SC-010**: The touch operation refreshes an entry's eviction timestamp without performing DMA or modifying reference counts.
+- **SC-009**: Capacity-based eviction correctly removes LRU entries from the memory-tier when the pool is full, transitioning them to BlockDevice state.
+- **SC-010**: The touch operation refreshes an entry's dispatch-map timestamp without performing DMA.
+- **SC-011**: Entries evicted from memory-tier but present on SSD can be promoted back via the pipelined reader on subsequent lookup.
+- **SC-012**: The pipelined reader correctly streams MDTS-sized chunks from SSD to both memory-tier and GPU in a single pass.
 
 ## Assumptions
 
 - Clients provide valid IPC handles referencing accessible GPU memory regions. The dispatcher does not validate GPU memory accessibility.
-- The SPDK environment is initialized and active before the dispatcher's `initialize()` is called (via the ISPDKEnv receptacle).
-- DMA buffer allocation is delegated to the dispatch map via `create_staging()` and to the extent managers via a `DmaAllocFn` closure bound at initialization.
-- A fixed timeout of 100ms is used for blocking operations. Variable per-call timeouts are not supported.
-- Block devices and extent managers are created internally during `initialize()` — callers provide PCI BDF address strings, not pre-constructed components.
-- GPU-to-CPU DMA transfers use `IGpuServices::dma_copy_to_host` (populate direction). CPU-to-GPU DMA transfers use `IGpuServices::dma_copy_to_device` (lookup direction).
-- NVMe SSDs have a Maximum Data Transfer Size (MDTS) limit, typically 128 KiB. The `io_segmenter` module provides MDTS-aware I/O splitting.
-- When the ISPDKEnv receptacle is not connected, the dispatcher operates in staging-only mode (no persistent storage). This enables unit testing without hardware.
+- The SPDK environment is initialized and active before the dispatcher's `initialize()` is called (via the ISPDKEnv receptacle). When ISPDKEnv is not connected, the dispatcher operates in memory-tier-only mode.
+- The memory-tier pool is pre-allocated before initialization. The dispatcher does not manage the pool lifecycle (only calls insert/get/remove/evict_lru).
+- DMA buffer allocation for the pipelined reader and prepare_store uses SPDK DMA allocation (falls back to libc `aligned_alloc` without SPDK).
+- GPU-to-host DMA transfers use `IGpuServices::dma_copy_to_host` (populate direction). Host-to-GPU DMA transfers use `IGpuServices::dma_copy_to_device` (lookup direction).
+- NVMe SSDs have a Maximum Data Transfer Size (MDTS) limit. The `io_segmenter` module provides MDTS-aware I/O splitting.
+- Memory-tier pointers are wrapped in DmaBuffer with a `noop_free` function -- the memory-tier component owns the memory; the DmaBuffer wrapper must not free it.
+- Write-through is best-effort: failure does not propagate to the caller. Data remains accessible from the memory-tier until eviction.
+- The background writer holds a read reference on each entry while write-through is in progress. The reference is released after write completes or fails.
+- Block devices and extent managers are created internally during `initialize()` -- callers provide PCI BDF address strings, not pre-constructed components.

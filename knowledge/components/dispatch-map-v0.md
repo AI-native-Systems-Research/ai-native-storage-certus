@@ -33,12 +33,16 @@ DispatchMapComponentV0 {
 | `IDispatchMap` | `set_dma_alloc(alloc)` -- set DMA allocator |
 |               | `initialize()` -- recover committed extents from extent manager |
 |               | `create_staging(key, size)` -- allocate DMA staging buffer for a key |
+|               | `create_memory_tier_entry(key, ptr, size)` -- register a memory-tier pointer for a key |
 |               | `lookup(key) -> Result<LookupResult, _>` -- find where data lives |
 |               | `convert_to_storage(key, offset)` -- promote staging to block device location |
+|               | `convert_memory_tier_to_block(key)` -- transition memory-tier entry to block-device state |
 |               | `take_read(key)` / `release_read(key)` -- reader reference counting |
 |               | `take_write(key)` / `release_write(key)` -- writer reference counting |
 |               | `downgrade_reference(key)` -- convert write lock to read lock |
 |               | `remove(key)` -- remove entry from map |
+|               | `touch(key)` -- refresh LRU timestamp without data transfer |
+|               | `oldest_keys(n)` -- return N least-recently-used keys |
 
 ## Receptacles
 
@@ -50,7 +54,7 @@ DispatchMapComponentV0 {
 ## Key Types
 
 - `CacheKey = u64` -- extent identifier
-- `LookupResult` -- `NotExist`, `MismatchSize`, `Staging { buffer: Arc<DmaBuffer> }`, `BlockDevice { offset: u64 }`
+- `LookupResult` -- `NotExist`, `MismatchSize`, `Staging { buffer: Arc<DmaBuffer> }`, `BlockDevice { offset: u64 }`, `MemoryTier { pointer: *mut u8, size: u32 }`
 - `DispatchMapError` -- `KeyNotFound`, `AlreadyExists`, `ActiveReferences`, `Timeout`, `AllocationFailed`, `InvalidSize`, `NotInitialized`, `RefCountUnderflow`, `NoWriteReference`, `InvalidState`
 
 ## Internal Types
@@ -58,3 +62,4 @@ DispatchMapComponentV0 {
 - `DispatchEntry { location, size_blocks, read_ref, write_ref }`
 - `Location::Staging { buffer: Arc<DmaBuffer> }` -- data in DMA staging buffer
 - `Location::BlockDevice { offset: u64 }` -- data committed to block device
+- `Location::MemoryTier { pointer: *mut u8 }` -- data in DRAM memory-tier pool

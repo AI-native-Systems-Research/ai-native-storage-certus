@@ -47,7 +47,7 @@ A developer instantiates the component and calls `init()` on a system where VFIO
 1. **Given** a system where /dev/vfio does not exist or the vfio-pci kernel module is not loaded, **When** `init()` is called, **Then** it returns an error indicating VFIO is not available with guidance on how to enable it.
 2. **Given** a system where /dev/vfio exists but the current user lacks read/write permissions, **When** `init()` is called, **Then** it returns an error indicating insufficient permissions with the specific path that is inaccessible.
 3. **Given** a system where /dev/vfio/vfio (the VFIO container device) is not user-accessible, **When** `init()` is called, **Then** it reports the specific permission issue and does not proceed with initialization.
-4. **Given** the logging receptacle has not been connected, **When** `init()` is called, **Then** it returns an error indicating the logger must be connected before initialization.
+4. ~~(Removed: no logger receptacle exists in the implementation.)~~
 5. **Given** an SPDKEnv instance already exists in the process, **When** a second instance calls `init()`, **Then** it returns an error indicating only one SPDK environment may be active per process.
 
 ---
@@ -78,7 +78,7 @@ A developer integrates the SPDKEnv component with other Certus components via th
 **Acceptance Scenarios**:
 
 1. **Given** the component is constructed using `define_component!` conventions, **When** a caller uses `query_interface!` for ISPDKEnv, **Then** it receives a valid interface reference.
-2. **Given** a logging actor is connected via receptacle and `init()` is called, **When** the component performs initialization, **Then** all diagnostic and error messages are sent through the framework's logging API.
+2. **Given** `init()` is called, **When** the component performs initialization, **Then** diagnostic messages are emitted via `eprintln!` (no framework logging receptacle).
 3. **Given** the component is a plain procedural (non-actor) component, **When** it is used, **Then** it does not spawn threads or use message queues for its core operation.
 
 ---
@@ -89,7 +89,7 @@ A developer integrates the SPDKEnv component with other Certus components via th
 - What happens when a device is bound to VFIO but is in use by another SPDK process? — The device is skipped with a logged warning; only successfully probed devices are returned.
 - What happens when /dev/vfio exists but contains no IOMMU group directories? — Initialization succeeds; device list is empty.
 - What happens when the SPDK/DPDK initialization fails mid-way (partial initialization cleanup)? — The component cleans up any partially initialized state and returns an error from `init()`.
-- What happens if the logging receptacle is not connected when the component initializes? — `init()` returns an error requiring the logger to be connected first.
+- ~~(Removed: no logger receptacle exists — component uses eprintln! for diagnostics.)~~
 - What happens if a second SPDKEnv instance is created in the same process? — `init()` returns an error; only one SPDK environment per process is allowed.
 
 ## Requirements *(mandatory)*
@@ -101,20 +101,23 @@ A developer integrates the SPDKEnv component with other Certus components via th
 - **FR-003**: System MUST initialize the SPDK and DPDK environments when `init()` is called, not during construction. The caller follows a construct-wire-init lifecycle.
 - **FR-004**: System MUST verify the presence of /dev/vfio and the vfio-pci kernel module before attempting initialization.
 - **FR-005**: System MUST check read/write permissions on /dev/vfio, /dev/vfio/vfio, and IOMMU group device files, and report specific permission errors identifying the inaccessible path.
-- **FR-006**: System MUST enumerate all SPDK-supported device types (NVMe, virtio-blk, etc.) bound to VFIO after successful initialization, providing at minimum the PCI BDF address for each device.
-- **FR-007**: System MUST use the framework's logging actor (via receptacle) for all diagnostic output, including initialization progress, warnings, and errors. The logging receptacle MUST be connected before `init()` is called; `init()` MUST fail with an error if it is not.
+- **FR-006**: System MUST enumerate NVMe devices bound to VFIO via `spdk_pci_enumerate` with the NVMe PCI driver after successful initialization, providing PCI BDF address, vendor/device IDs, class ID, NUMA node, and device type string for each. Devices are NOT attached during enumeration (callback returns non-zero), preserving them for later `spdk_nvme_probe`.
+- **FR-007**: System uses `eprintln!` for diagnostic output (initialization progress, warnings). There is no logger receptacle; the component has no receptacles.
 - **FR-008**: System MUST operate without root permissions when /dev/vfio directories have appropriate user-level access configured.
 - **FR-009**: System MUST return an empty device list (not an error) when VFIO is properly configured but no devices are bound.
 - **FR-010**: System MUST include a test example (main.rs binary) that instantiates the component, wires the logger, calls `init()`, queries ISPDKEnv, and prints discovered devices.
 - **FR-011**: System MUST be a plain procedural component (not an actor) that does not spawn its own threads or manage message queues.
 - **FR-012**: System MUST properly clean up SPDK/DPDK resources when the component is dropped.
 - **FR-013**: System MUST check for hugepage availability (required by DPDK) and report a clear error if hugepages are not configured.
-- **FR-014**: System MUST enforce singleton semantics — only one SPDK environment instance may be active per process. A second call to `init()` on a new instance MUST return an error.
+- **FR-014**: System MUST enforce singleton semantics via a process-global `AtomicBool` — only one SPDK environment instance may be active per process. A second call to `init()` on a new instance MUST return an error. The flag is cleared on failure (allowing retry) and on Drop.
 - **FR-015**: System MUST skip devices that cannot be probed (e.g., in use by another process), log a warning for each skipped device, and return only successfully probed devices.
+- **FR-016**: The `ISPDKEnv` interface MUST provide `is_initialized() -> bool` to check whether the environment has been successfully initialized.
+- **FR-017**: The `ISPDKEnv` interface MUST provide `device_count() -> usize` to query the number of discovered devices without cloning the device vector.
+- **FR-018**: The `ISPDKEnv` interface is defined in BOTH the `spdk-env` crate (locally via `define_interface!`) AND the shared `interfaces` crate — both definitions must stay in sync.
 
 ### Key Entities
 
-- **VfioDevice**: Represents a discovered VFIO-attached device. Key attributes: PCI BDF address (bus:device.function), vendor ID, device ID, device type, IOMMU group.
+- **VfioDevice**: Represents a discovered VFIO-attached device. Key attributes: `address: PciAddress` (domain:bus:dev.func), `id: PciId` (class_id, vendor_id, device_id, subvendor_id, subdevice_id), `numa_node: i32` (-1 = unknown), `device_type: String` (e.g., "nvme").
 - **ISPDKEnv**: The component interface providing device iteration, environment status queries, and an explicit `init()` method.
 - **SPDKEnvComponent**: The concrete component implementing ISPDKEnv, managing SPDK/DPDK lifecycle with singleton enforcement.
 

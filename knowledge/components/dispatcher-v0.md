@@ -18,8 +18,9 @@ DispatcherComponentV0 {
     provides: [IDispatcher],
     receptacles: {
         logger: ILogger,
-        block_device_admin: IBlockDeviceAdmin,
         dispatch_map: IDispatchMap,
+        gpu_services: IGpuServices,
+        spdk_env: ISPDKEnv,
     },
 }
 ```
@@ -40,8 +41,9 @@ DispatcherComponentV0 {
 | Name | Interface | Required | Purpose |
 |------|-----------|----------|---------|
 | `logger` | `ILogger` | No | Optional logging |
-| `block_device_admin` | `IBlockDeviceAdmin` | Yes | Block device lifecycle management |
-| `dispatch_map` | `IDispatchMap` | Yes | Extent-to-location dispatch and staging buffer management |
+| `dispatch_map` | `IDispatchMap` | Yes | Extent-to-location tracking and staging buffer management |
+| `gpu_services` | `IGpuServices` | Yes | GPU DMA copy operations (`dma_copy_to_host`, `dma_copy_to_device`) |
+| `spdk_env` | `ISPDKEnv` | No | SPDK environment; if unconnected, operates in staging-only mode |
 
 ## Key Types
 

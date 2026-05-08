@@ -162,6 +162,7 @@ the application exits with a non-zero status code.
 - **FR-019**: The application MUST exit with status code 0 on success and non-zero on validation failure or fatal errors.
 - **FR-020**: The application MUST accept a `--quiet` flag that suppresses per-second progress output.
 - **FR-021**: The application MUST accept a `--help` flag that prints usage information and exits.
+- **FR-022**: The application MUST accept a command-line flag `--io-mode` with values `sync` and `async` to select the IO submission mode. Default: `async`. In `sync` mode, each IO operation blocks until completion before the next is submitted (effective queue depth 1 per thread regardless of `--queue-depth`). In `async` mode, operations are submitted asynchronously and the pipeline is kept full to `--queue-depth`. The active IO mode MUST be included in the configuration summary output (FR-012).
 
 ### Key Entities
 
