@@ -62,12 +62,22 @@ pub const CUDA_IPC_MEM_LAZY_ENABLE_PEER_ACCESS: c_int = 1;
 /// cudaMemcpy direction constants.
 pub const CUDA_MEMCPY_HOST_TO_DEVICE: c_int = 1;
 pub const CUDA_MEMCPY_DEVICE_TO_HOST: c_int = 2;
+pub const CUDA_MEMCPY_DEVICE_TO_DEVICE: c_int = 3;
+
+/// cudaHostAlloc flags.
+pub const CUDA_HOST_ALLOC_DEFAULT: c_int = 0;
+pub const CUDA_HOST_ALLOC_MAPPED: c_int = 2;
 
 extern "C" {
     pub fn cudaGetDeviceCount(count: *mut c_int) -> cudaError_t;
     pub fn cudaGetDeviceProperties(prop: *mut cudaDeviceProp, device: c_int) -> cudaError_t;
+    pub fn cudaGetDevice(device: *mut c_int) -> cudaError_t;
     pub fn cudaSetDevice(device: c_int) -> cudaError_t;
     pub fn cudaDeviceSynchronize() -> cudaError_t;
+    pub fn cudaIpcGetMemHandle(
+        handle: *mut cudaIpcMemHandle_t,
+        devptr: *mut c_void,
+    ) -> cudaError_t;
     pub fn cudaIpcOpenMemHandle(
         devptr: *mut *mut c_void,
         handle: cudaIpcMemHandle_t,
@@ -81,6 +91,8 @@ extern "C" {
     pub fn cudaHostRegister(ptr: *mut c_void, size: usize, flags: c_int) -> cudaError_t;
     pub fn cudaHostUnregister(ptr: *mut c_void) -> cudaError_t;
     pub fn cudaMalloc(devptr: *mut *mut c_void, size: usize) -> cudaError_t;
+    pub fn cudaHostAlloc(phost: *mut *mut c_void, size: usize, flags: c_int) -> cudaError_t;
+    pub fn cudaFreeHost(ptr: *mut c_void) -> cudaError_t;
     pub fn cudaMemcpy(
         dst: *mut c_void,
         src: *const c_void,
@@ -88,6 +100,11 @@ extern "C" {
         kind: c_int,
     ) -> cudaError_t;
     pub fn cudaFree(devptr: *mut c_void) -> cudaError_t;
+    pub fn cudaHostGetDevicePointer(
+        pdevice: *mut *mut c_void,
+        phost: *mut c_void,
+        flags: c_int,
+    ) -> cudaError_t;
     pub fn cudaGetErrorString(error: cudaError_t) -> *const c_char;
     pub fn cudaDeviceGetPCIBusId(pci_bus_id: *mut c_char, len: c_int, device: c_int)
         -> cudaError_t;

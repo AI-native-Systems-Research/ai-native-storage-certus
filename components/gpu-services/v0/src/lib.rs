@@ -15,7 +15,7 @@
 //! use interfaces::IGpuServices;
 //! use component_core::query_interface;
 //!
-//! let component = GpuServicesComponentV0::new();
+//! let component = GpuServicesComponentV0::new_default();
 //! let gpu = query_interface!(component, IGpuServices).unwrap();
 //! gpu.initialize().unwrap();
 //! let devices = gpu.get_devices().unwrap();
@@ -27,7 +27,9 @@ pub mod cuda_ffi;
 #[cfg(feature = "gpu")]
 mod device;
 #[cfg(feature = "gpu")]
-mod dma;
+pub mod dma;
+#[cfg(feature = "p2p")]
+pub mod gdrcopy_ffi;
 #[cfg(feature = "gpu")]
 mod ipc;
 #[cfg(feature = "gpu")]
@@ -36,11 +38,11 @@ mod memory;
 use component_framework::define_component;
 use interfaces::{GpuDeviceInfo, GpuDmaBuffer, GpuIpcHandle, IGpuServices, ILogger};
 
-#[cfg(feature = "gpu")]
 use std::sync::Mutex;
 
 /// Internal component state tracking initialization and handles.
 #[cfg(feature = "gpu")]
+#[derive(Default)]
 struct GpuState {
     initialized: bool,
     devices: Vec<GpuDeviceInfo>,
@@ -50,6 +52,10 @@ struct GpuState {
     pinned: std::collections::HashSet<usize>,
 }
 
+#[cfg(not(feature = "gpu"))]
+#[derive(Default)]
+struct GpuState;
+
 define_component! {
     pub GpuServicesComponentV0 {
         version: "0.1.0",
@@ -57,30 +63,16 @@ define_component! {
         receptacles: {
             logger: ILogger,
         },
+        fields: {
+            gpu_state: Mutex<GpuState>,
+        },
     }
 }
 
 #[cfg(feature = "gpu")]
 impl GpuServicesComponentV0 {
     fn state(&self) -> &Mutex<GpuState> {
-        // Lazy initialization of state via a static-like pattern.
-        // We use a thread_local or just accept the limitation that state
-        // is stored elsewhere. For simplicity, we'll use an approach
-        // that stores state in a global associated with this component instance.
-        //
-        // Since define_component! generates the struct, we need to use
-        // an external state holder. We'll use a global Mutex for now.
-        // In a production component, this would be stored in the component
-        // struct itself if define_component! supports custom fields.
-        static STATE: std::sync::OnceLock<Mutex<GpuState>> = std::sync::OnceLock::new();
-        STATE.get_or_init(|| {
-            Mutex::new(GpuState {
-                initialized: false,
-                devices: Vec::new(),
-                verified: std::collections::HashSet::new(),
-                pinned: std::collections::HashSet::new(),
-            })
-        })
+        &self.gpu_state
     }
 }
 
@@ -283,6 +275,7 @@ impl IGpuServices for GpuServicesComponentV0 {
     }
 
     #[cfg(feature = "spdk")]
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     fn dma_copy_to_host(
         &self,
         src: *const std::ffi::c_void,
@@ -334,6 +327,165 @@ impl IGpuServices for GpuServicesComponentV0 {
     }
 
     #[cfg(feature = "spdk")]
+    fn prepare_memory_for_spdk(
+        &self,
+        base64_payload: &str,
+        device_index: Option<u32>,
+    ) -> Result<interfaces::DmaBuffer, String> {
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = (base64_payload, device_index);
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            let state = self.state().lock().map_err(|e| e.to_string())?;
+            if !state.initialized {
+                return Err("Not initialized: call initialize() first".to_string());
+            }
+            drop(state);
+
+            // Optionally set CUDA device context for multi-GPU systems.
+            let original_device: Option<std::os::raw::c_int> = if let Some(idx) = device_index {
+                let mut current: std::os::raw::c_int = 0;
+                // SAFETY: current is a valid pointer to a local c_int.
+                let err = unsafe { cuda_ffi::cudaGetDevice(&mut current) };
+                if err != cuda_ffi::CUDA_SUCCESS {
+                    return Err(format!(
+                        "cudaGetDevice failed: {}",
+                        cuda_ffi::cuda_error_string(err)
+                    ));
+                }
+                // SAFETY: idx is a valid device ordinal provided by the caller.
+                let err = unsafe { cuda_ffi::cudaSetDevice(idx as std::os::raw::c_int) };
+                if err != cuda_ffi::CUDA_SUCCESS {
+                    return Err(format!(
+                        "cudaSetDevice({}) failed: {}",
+                        idx,
+                        cuda_ffi::cuda_error_string(err)
+                    ));
+                }
+                Some(current)
+            } else {
+                None
+            };
+
+            // Helper to restore device context on error or success.
+            let restore_device = |orig: Option<std::os::raw::c_int>| {
+                if let Some(dev) = orig {
+                    // SAFETY: dev was a valid device ordinal returned by cudaGetDevice.
+                    unsafe {
+                        cuda_ffi::cudaSetDevice(dev);
+                    }
+                }
+            };
+
+            // Decode and open the IPC handle.
+            let (handle_bytes, size) = match ipc::decode_ipc_payload(base64_payload) {
+                Ok(v) => v,
+                Err(e) => {
+                    restore_device(original_device);
+                    return Err(e);
+                }
+            };
+
+            let handle = match ipc::open_ipc_handle(handle_bytes, size) {
+                Ok(h) => h,
+                Err(e) => {
+                    restore_device(original_device);
+                    return Err(e);
+                }
+            };
+
+            let ptr = handle.as_ptr();
+            let buf_size = handle.size();
+
+            // Check pin state: is this pointer already tracked as pinned?
+            let was_already_pinned = {
+                let state = self.state().lock().map_err(|e| {
+                    // Rollback: close IPC handle on lock failure.
+                    // SAFETY: ptr was obtained from cudaIpcOpenMemHandle.
+                    unsafe {
+                        cuda_ffi::cudaIpcCloseMemHandle(ptr);
+                    }
+                    restore_device(original_device);
+                    e.to_string()
+                })?;
+                state.pinned.contains(&(ptr as usize))
+            };
+
+            // Conditionally pin and log the decision.
+            if !was_already_pinned {
+                // Verify memory is device type before pinning.
+                if let Err(e) = memory::check_memory_attributes(ptr) {
+                    // SAFETY: ptr was obtained from cudaIpcOpenMemHandle.
+                    unsafe {
+                        cuda_ffi::cudaIpcCloseMemHandle(ptr);
+                    }
+                    restore_device(original_device);
+                    return Err(format!("Failed to pin memory: {}", e));
+                }
+
+                // Mark as pinned in component state.
+                let mut state = self.state().lock().map_err(|e| {
+                    // SAFETY: ptr was obtained from cudaIpcOpenMemHandle.
+                    unsafe {
+                        cuda_ffi::cudaIpcCloseMemHandle(ptr);
+                    }
+                    restore_device(original_device);
+                    e.to_string()
+                })?;
+                state.verified.insert(ptr as usize);
+                state.pinned.insert(ptr as usize);
+                drop(state);
+
+                if let Ok(log) = self.logger.get() {
+                    log.info("prepare_memory_for_spdk: pinning GPU memory for DMA");
+                }
+            } else if let Ok(log) = self.logger.get() {
+                log.info("prepare_memory_for_spdk: memory already pinned — skipping");
+            }
+
+            // Create the SPDK DmaBuffer with the pin-state-aware free function.
+            let dma_buf =
+                match dma::create_spdk_dma_buffer_from_gpu(ptr, buf_size, was_already_pinned) {
+                    Ok(buf) => buf,
+                    Err(e) => {
+                        // Rollback: unpin if we pinned it, then close IPC handle.
+                        if !was_already_pinned {
+                            let mut state = self.state().lock().unwrap_or_else(|e| e.into_inner());
+                            state.pinned.remove(&(ptr as usize));
+                            state.verified.remove(&(ptr as usize));
+                        }
+                        // SAFETY: ptr was obtained from cudaIpcOpenMemHandle.
+                        unsafe {
+                            cuda_ffi::cudaIpcCloseMemHandle(ptr);
+                        }
+                        restore_device(original_device);
+                        return Err(e);
+                    }
+                };
+
+            // GpuIpcHandle has no Drop impl, so letting it go out of scope
+            // does not close the IPC handle. Ownership of the pointer is now
+            // held by DmaBuffer's free_fn.
+
+            restore_device(original_device);
+
+            if let Ok(log) = self.logger.get() {
+                log.info(&format!(
+                    "prepare_memory_for_spdk: DmaBuffer created ({} bytes)",
+                    buf_size
+                ));
+            }
+
+            Ok(dma_buf)
+        }
+    }
+
+    #[cfg(feature = "spdk")]
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     fn dma_copy_to_device(
         &self,
         src: &interfaces::DmaBuffer,
@@ -392,14 +544,14 @@ mod tests {
 
     #[test]
     fn test_provides_igpu_services() {
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices);
         assert!(gpu.is_some());
     }
 
     #[test]
     fn test_initialize_without_logger() {
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         // Without GPU feature or hardware, this will return an error.
         // With the feature but no hardware, CUDA init will fail gracefully.
@@ -416,7 +568,7 @@ mod tests {
 
     #[test]
     fn test_shutdown_without_logger() {
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         assert!(gpu.shutdown().is_ok());
     }
@@ -425,7 +577,7 @@ mod tests {
     fn test_get_devices_before_init_fails() {
         #[cfg(not(feature = "gpu"))]
         {
-            let component = GpuServicesComponentV0::new();
+            let component = GpuServicesComponentV0::new_default();
             let gpu = query_interface!(component, IGpuServices).unwrap();
             let result = gpu.get_devices();
             assert!(result.is_err());
@@ -435,7 +587,7 @@ mod tests {
     #[test]
     fn test_initialize_with_logger() {
         use std::sync::Arc;
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponentV1::new_default();
         component.logger.connect(logger).unwrap();
         let gpu = query_interface!(component, IGpuServices).unwrap();
@@ -445,7 +597,7 @@ mod tests {
     #[cfg(feature = "gpu")]
     #[test]
     fn test_initialize_idempotent() {
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         // First call may succeed or fail depending on hardware.
         let r1 = gpu.initialize();
@@ -458,7 +610,7 @@ mod tests {
     #[cfg(feature = "gpu")]
     #[test]
     fn test_shutdown_releases_state() {
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         if gpu.initialize().is_ok() {
             assert!(gpu.shutdown().is_ok());
@@ -470,7 +622,7 @@ mod tests {
     #[cfg(feature = "gpu")]
     #[test]
     fn test_deserialize_invalid_base64() {
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         if gpu.initialize().is_ok() {
             let result = gpu.deserialize_ipc_handle("not-valid-base64!!!");
@@ -483,11 +635,11 @@ mod tests {
     #[test]
     fn test_deserialize_wrong_payload_size() {
         use base64::Engine;
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         if gpu.initialize().is_ok() {
             // 50 bytes instead of 72
-            let payload = base64::engine::general_purpose::STANDARD.encode(&[0u8; 50]);
+            let payload = base64::engine::general_purpose::STANDARD.encode([0u8; 50]);
             let result = gpu.deserialize_ipc_handle(&payload);
             assert!(result.is_err());
             assert!(result.unwrap_err().contains("72 bytes"));
@@ -497,7 +649,7 @@ mod tests {
     // #[cfg(feature = "gpu")]
     // #[test]
     // fn test_deserialize_before_init_fails() {
-    //     let component = GpuServicesComponentV0::new();
+    //     let component = GpuServicesComponentV0::new_default();
     //     let gpu = query_interface!(component, IGpuServices).unwrap();
     //     // Force a fresh uninitialized state.
     //     let _ = gpu.shutdown();
@@ -511,7 +663,7 @@ mod tests {
     fn test_dma_cpu_to_gpu_roundtrip() {
         use std::ffi::c_void;
 
-        let component = GpuServicesComponentV0::new();
+        let component = GpuServicesComponentV0::new_default();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         if gpu.initialize().is_err() {
             return;
@@ -563,5 +715,75 @@ mod tests {
         assert_eq!(err, cuda_ffi::CUDA_SUCCESS, "cudaFree failed");
 
         let _ = gpu.shutdown();
+    }
+
+    #[cfg(all(feature = "gpu", feature = "spdk"))]
+    #[test]
+    fn test_prepare_memory_not_initialized() {
+        let component = GpuServicesComponentV0::new_default();
+        let gpu = query_interface!(component, IGpuServices).unwrap();
+        let _ = gpu.shutdown();
+        let result = gpu.prepare_memory_for_spdk("AAAA", None);
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("Not initialized"),
+            "Expected 'Not initialized' error"
+        );
+    }
+
+    #[cfg(all(feature = "gpu", feature = "spdk"))]
+    #[test]
+    fn test_prepare_memory_invalid_base64() {
+        let component = GpuServicesComponentV0::new_default();
+        let gpu = query_interface!(component, IGpuServices).unwrap();
+        if gpu.initialize().is_ok() {
+            let result = gpu.prepare_memory_for_spdk("not-valid-base64!!!", None);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("base64"));
+        }
+    }
+
+    #[cfg(all(feature = "gpu", feature = "spdk"))]
+    #[test]
+    fn test_prepare_memory_wrong_payload_size() {
+        use base64::Engine;
+        let component = GpuServicesComponentV0::new_default();
+        let gpu = query_interface!(component, IGpuServices).unwrap();
+        if gpu.initialize().is_ok() {
+            let payload = base64::engine::general_purpose::STANDARD.encode([0u8; 50]);
+            let result = gpu.prepare_memory_for_spdk(&payload, None);
+            assert!(result.is_err(), "expected Err, got Ok");
+            let err = result.unwrap_err();
+            assert!(err.contains("72 bytes"), "expected '72 bytes' in error, got: {err:?}");
+        }
+    }
+
+    #[cfg(all(feature = "gpu", feature = "spdk"))]
+    #[test]
+    fn test_prepare_memory_succeeds_without_logger() {
+        let component = GpuServicesComponentV0::new_default();
+        let gpu = query_interface!(component, IGpuServices).unwrap();
+        if gpu.initialize().is_ok() {
+            // With no logger connected, invalid payload should still return
+            // a clear error (not panic due to missing logger).
+            let result = gpu.prepare_memory_for_spdk("AAAA", None);
+            assert!(result.is_err());
+        }
+    }
+
+    #[cfg(all(feature = "gpu", feature = "spdk"))]
+    #[test]
+    fn test_prepare_memory_logs_with_logger() {
+        use std::sync::Arc;
+        let component = GpuServicesComponentV0::new_default();
+        let logger_comp: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponentV1::new_default();
+        component.logger.connect(logger_comp).unwrap();
+        let gpu = query_interface!(component, IGpuServices).unwrap();
+        if gpu.initialize().is_ok() {
+            // With logger connected, invalid payload still returns error
+            // (the logger path doesn't interfere with error handling).
+            let result = gpu.prepare_memory_for_spdk("AAAA", None);
+            assert!(result.is_err());
+        }
     }
 }

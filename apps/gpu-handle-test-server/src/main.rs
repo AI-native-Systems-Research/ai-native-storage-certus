@@ -15,7 +15,7 @@ use interfaces::{IGpuServices, ILogger};
 const SOCKET_PATH: &str = "/tmp/gpu-services-ipc.sock";
 
 fn main() {
-    let component = GpuServicesComponentV0::new();
+    let component = GpuServicesComponentV0::new_default();
 
     let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponentV1::new_default();
     component.logger.connect(logger).unwrap();

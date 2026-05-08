@@ -421,5 +421,45 @@ define_interface! {
         fn dma_copy_to_device(
             &self, src: &crate::spdk_types::DmaBuffer, dst: *mut std::ffi::c_void, size: usize
         ) -> Result<(), String>;
+
+        /// Prepare GPU IPC memory for peer-to-peer SSD DMA in one call.
+        ///
+        /// Accepts a base64-encoded CUDA IPC handle payload (64-byte handle +
+        /// 8-byte LE size = 72 bytes), opens it with lazy peer access, checks
+        /// whether the memory is already pinned, conditionally pins it, and
+        /// returns an SPDK [`DmaBuffer`](crate::spdk_types::DmaBuffer) suitable
+        /// for direct NVMe peer-to-peer transfers.
+        ///
+        /// The returned buffer's drop behavior depends on the original pin state:
+        /// - If this function pinned the memory, drop unpins then closes the IPC handle.
+        /// - If the memory was already pinned, drop only closes the IPC handle.
+        ///
+        /// # Parameters
+        ///
+        /// * `base64_payload` — base64-encoded 72-byte IPC handle from PyTorch (via gRPC).
+        /// * `device_index` — optional CUDA device ordinal; if `Some`, sets the
+        ///   device context before opening the handle. If `None`, uses the current
+        ///   CUDA device.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if not initialized, the payload is invalid, the IPC
+        /// handle cannot be opened, pinning fails, or buffer creation fails. No
+        /// GPU resources are leaked on error.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # use interfaces::IGpuServices;
+        /// # fn example(gpu: &dyn IGpuServices, payload: &str) {
+        /// gpu.initialize().unwrap();
+        /// let dma_buf = gpu.prepare_memory_for_spdk(payload, None).unwrap();
+        /// assert!(dma_buf.len() > 0);
+        /// # }
+        /// ```
+        #[cfg(feature = "spdk")]
+        fn prepare_memory_for_spdk(
+            &self, base64_payload: &str, device_index: Option<u32>
+        ) -> Result<crate::spdk_types::DmaBuffer, String>;
     }
 }

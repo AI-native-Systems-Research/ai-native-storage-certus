@@ -22,3 +22,4 @@ spdk-build
 # Creusot
 .why3find
 tools/creusot/creusot
+certus-connector/certus_native/*.so
