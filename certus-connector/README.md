@@ -151,13 +151,15 @@ Per-method breakdown:
 | `prepare_store(keys)` | `prepare_store(keys)` | Dispatch-map: `evict_lru(n, protected)` when full; dispatcher: remove evicted, allocate new | **Wired** (filters cached keys, but eviction not triggered — see "Remaining engine.rs work") |
 | `complete_store(keys, ok)` | `complete_store(keys, ok)` | On failure: `dispatcher.remove()` per key. On success: mark ready in dispatch-map. | **Partially done** (remove works, readiness gating TBD) |
 | `touch(keys)` | `touch(keys)` | Dispatch-map: update threshold LRU ordering | **Done** |
-| `prepare_load(keys)` | `prepare_load(keys)` | Dispatch-map: `lookup()` (increments `read_ref`, blocks eviction, returns storage offset) | **Done** (see note on double-increment below) |
+| `prepare_load(keys)` | `prepare_load(keys)` | Dispatch-map: `lookup()` (increments `read_ref`, blocks eviction, returns storage offset) | **Done** (see double-increment note in "Remaining engine.rs work") |
 | `complete_load(keys)` | `complete_load(keys)` | Dispatch-map: `release_read()` (decrements `read_ref`) | **Done** |
 | `shutdown()` | `shutdown()` | `dispatcher.shutdown()` + `gpu.shutdown()` | **Done** |
 
 ### Remaining engine.rs work
 
 - **`prepare_store` eviction** — eviction is not triggered in the current engine path. The engine calls `dispatcher.check()` (existence check) and `dispatcher.populate()` (stage into DRAM + enqueue background NVMe write), neither of which evicts. The dispatcher has `run_eviction_cycle` but it's only called from `dispatcher.prepare_store()`, which the engine never uses. The background writer silently drops writes if NVMe extent allocation fails — no backpressure to Python. When DRAM staging fills up, `create_staging` returns `AllocationFailed` and `store_async` fails after `prepare_store` already said "go ahead." Fix: engine's `prepare_store` must proactively evict (free DRAM staging slots or NVMe extents) and return evicted keys, or return `None` if it can't free enough space.
+
+- **`prepare_load` double `read_ref` increment** — `prepare_load` calls `dispatch_map.lookup()` which increments `read_ref` and returns the offset. Later, `load_async` calls `dispatcher.lookup()` which internally calls `dm.lookup()` again, incrementing `read_ref` a second time. The dispatcher releases its ref after DMA, and `complete_load` releases the outer ref — so refs balance correctly (2 increments, 2 decrements). But it's one redundant atomic op per block per load. Fix: add a non-ref-counting `get_location(key)` method to `IDispatchMap` and use `take_read()` + `get_location()` in `prepare_load` instead of `lookup()`. Same underlying issue as the `run_eviction_cycle` bug — `lookup()` combines ref-counting with location retrieval and there's no way to do one without the other.
 
 ### Eviction and tier management
 
@@ -182,7 +184,7 @@ for managing the DRAM tier and is invisible to vLLM.
 |---|-------------|--------|-------|
 | 1 | **Eviction in `prepare_store`** | Not wired | Dispatcher has `run_eviction_cycle` but engine never calls it. Engine uses `check()` + `populate()`, neither of which evicts. |
 | 2 | **LRU ordering in `touch`** | **Done** | Engine calls `dispatcher.touch()` per key. |
-| 3 | **Ref-counting (`prepare_load` / `complete_load`)** | **Done** | `prepare_load` calls `dispatch_map.lookup()` (increments `read_ref` + returns location), `complete_load` calls `release_read()`. Blocks with `read_ref > 0` are skipped during eviction (`remove` fails with `ActiveReferences`). **Note**: causes double `read_ref` increment — see "Known issues" below. |
+| 3 | **Ref-counting (`prepare_load` / `complete_load`)** | **Done** | `prepare_load` calls `dispatch_map.lookup()` (increments `read_ref` + returns location), `complete_load` calls `release_read()`. Blocks with `read_ref > 0` are skipped during eviction (`remove` fails with `ActiveReferences`). Note: causes double `read_ref` increment — see "Remaining engine.rs work". |
 | 4 | **Readiness gating** | Partially implemented | Blocks must not be returned by `lookup` or `prepare_load` until `complete_store(success=True)`. Dispatcher's `check()` may already handle this if dispatch-map tracks readiness. |
 | 5 | **Atomic eviction** | Not yet implemented | If N evictions are requested but fewer than N unpinned blocks exist, evict nothing and return `None`. Must be all-or-nothing. |
 | 6 | **Protected set in eviction** | Not yet implemented | Keys in the current `prepare_store` input must not be evicted (they might already be cached and must remain). |
@@ -224,18 +226,6 @@ and doesn't hit this pattern.
 Fix: insert `let _ = dm.release_read(key)` between the lookup and `take_write()`, or add
 a non-ref-counting `block_offset(key)` method to `IDispatchMap`.
 
-### Known issues
-
-1. **`prepare_load` causes double `read_ref` increment** — `prepare_load` calls
-   `dispatch_map.lookup()` which increments `read_ref` and returns the offset. Later,
-   `load_async` calls `dispatcher.lookup()` which internally calls `dm.lookup()` again,
-   incrementing `read_ref` a second time. The dispatcher releases its ref after DMA, and
-   `complete_load` releases the outer ref — so **refs balance correctly** (2 increments,
-   2 decrements). But it's one redundant atomic op per block per load.
-   Fix: add a non-ref-counting `get_location(key)` method to `IDispatchMap` and use
-   `take_read()` + `get_location()` in `prepare_load` instead of `lookup()`. This is
-   the same underlying issue as bugs #1 and #2 below — `lookup()` combines ref-counting
-   with location retrieval and there's no way to do one without the other.
 
 ### gRPC handler equivalence
 
