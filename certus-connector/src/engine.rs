@@ -13,7 +13,7 @@ use component_core::query_interface;
 use interfaces::{
     CacheKey, DispatcherConfig, DmaAllocFn, DmaBuffer, FormatParams, IBlockDevice,
     IBlockDeviceAdmin, IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger, IpcHandle,
-    PciAddress,
+    LookupResult, PciAddress,
 };
 
 use crate::keys;
@@ -324,6 +324,78 @@ impl EngineInner {
         self.ensure_init()?;
         let _cache_keys = keys::to_cache_keys(keys);
         // TODO: Update LRU ordering in dispatch-map
+        Ok(())
+    }
+
+    /// Pin blocks for reading (protect from eviction) and return their
+    /// storage offsets. Assumes all keys are already stored and ready.
+    ///
+    /// Uses `dispatch_map.lookup()` which atomically increments `read_ref`
+    /// and returns the block location. Blocks with `read_ref > 0` cannot
+    /// be evicted or removed.
+    /// Caller MUST call `complete_load` when DMA is done.
+    pub fn prepare_load(&self, keys: &[u64]) -> PyResult<Vec<u64>> {
+        self.ensure_init()?;
+        let cache_keys = keys::to_cache_keys(keys);
+        let mut offsets = Vec::with_capacity(cache_keys.len());
+
+        for (i, key) in cache_keys.iter().enumerate() {
+            match self.dispatch_map.lookup(*key) {
+                Ok(LookupResult::BlockDevice { offset }) => {
+                    offsets.push(offset);
+                }
+                Ok(LookupResult::MemoryTier { .. }) => {
+                    offsets.push(*key);
+                }
+                Ok(LookupResult::Staging { .. }) => {
+                    offsets.push(*key);
+                }
+                Ok(LookupResult::NotExist) => {
+                    // Rollback: release reads we already took
+                    for prev_key in &cache_keys[..i] {
+                        let _ = self.dispatch_map.release_read(*prev_key);
+                    }
+                    return Err(PyRuntimeError::new_err(format!(
+                        "prepare_load: key {key} not found"
+                    )));
+                }
+                Ok(LookupResult::MismatchSize) => {
+                    for prev_key in &cache_keys[..i] {
+                        let _ = self.dispatch_map.release_read(*prev_key);
+                    }
+                    return Err(PyRuntimeError::new_err(format!(
+                        "prepare_load: key {key} size mismatch"
+                    )));
+                }
+                Err(e) => {
+                    // Rollback: release reads we already took
+                    for prev_key in &cache_keys[..i] {
+                        let _ = self.dispatch_map.release_read(*prev_key);
+                    }
+                    return Err(PyRuntimeError::new_err(format!(
+                        "prepare_load: lookup failed for key {key}: {e:?}"
+                    )));
+                }
+            }
+        }
+
+        Ok(offsets)
+    }
+
+    /// Unpin blocks after load DMA completes. Decrements `read_ref` so
+    /// blocks become eligible for eviction again.
+    pub fn complete_load(&self, keys: &[u64]) -> PyResult<()> {
+        self.ensure_init()?;
+        let cache_keys = keys::to_cache_keys(keys);
+
+        for key in &cache_keys {
+            self.dispatch_map.release_read(*key).map_err(|e| {
+                PyRuntimeError::new_err(format!(
+                    "complete_load: release_read failed for key {key}: {e:?}"
+                ))
+            })?;
+        }
+
         Ok(())
     }
 
