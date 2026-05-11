@@ -317,13 +317,12 @@ impl EngineInner {
     }
 
     /// Update LRU ordering for the given keys.
-    ///
-    /// Currently a no-op — dispatch-map doesn't track access order yet.
-    /// When LRU eviction is implemented, this will bump the keys.
     pub fn touch(&self, keys: &[u64]) -> PyResult<()> {
         self.ensure_init()?;
-        let _cache_keys = keys::to_cache_keys(keys);
-        // TODO: Update LRU ordering in dispatch-map
+        let cache_keys = keys::to_cache_keys(keys);
+        for key in &cache_keys {
+            let _ = self.dispatcher.touch(*key);
+        }
         Ok(())
     }
 

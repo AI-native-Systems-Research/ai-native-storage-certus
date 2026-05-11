@@ -148,45 +148,16 @@ Per-method breakdown:
 | `native_manager.py` calls | `CertusEngine` method | Rust component work | Status |
 |---|---|---|---|
 | `lookup(keys)` | `batch_check(keys)` | `dispatcher.check()` per key | **Done** |
-| `prepare_store(keys)` | `prepare_store(keys)` | Dispatch-map: `evict_lru(n, protected)` when full; dispatcher: remove evicted, allocate new | **In progress** |
+| `prepare_store(keys)` | `prepare_store(keys)` | Dispatch-map: `evict_lru(n, protected)` when full; dispatcher: remove evicted, allocate new | **Wired** (filters cached keys, but eviction not triggered — see "Remaining engine.rs work") |
 | `complete_store(keys, ok)` | `complete_store(keys, ok)` | On failure: `dispatcher.remove()` per key. On success: mark ready in dispatch-map. | **Partially done** (remove works, readiness gating TBD) |
-| `touch(keys)` | `touch(keys)` | Dispatch-map: update threshold LRU ordering | **In progress** |
+| `touch(keys)` | `touch(keys)` | Dispatch-map: update threshold LRU ordering | **Done** |
 | `prepare_load(keys)` | `prepare_load(keys)` | Dispatch-map: `lookup()` (increments `read_ref`, blocks eviction, returns storage offset) | **Done** (see note on double-increment below) |
 | `complete_load(keys)` | `complete_load(keys)` | Dispatch-map: `release_read()` (decrements `read_ref`) | **Done** |
 | `shutdown()` | `shutdown()` | `dispatcher.shutdown()` + `gpu.shutdown()` | **Done** |
 
-### What needs to be added to dispatch-map
+### Remaining engine.rs work
 
-```rust
-// New methods on IDispatchMap (or a new IEvictionPolicy trait):
-
-/// Update LRU ordering for key (threshold-based).
-fn touch(&self, key: CacheKey);
-
-/// Increment ref_cnt — block protected from eviction while ref > 0.
-fn pin(&self, key: CacheKey) -> Result<(), Error>;
-
-/// Decrement ref_cnt.
-fn unpin(&self, key: CacheKey) -> Result<(), Error>;
-
-/// Evict up to `count` LRU blocks, skipping pinned (ref_cnt > 0) and protected set.
-/// Returns evicted keys, or None if cannot satisfy `count` evictions (atomic).
-fn evict_lru(&self, count: usize, protected: &HashSet<CacheKey>) -> Option<Vec<CacheKey>>;
-
-/// Mark block as ready (loadable). Called after successful store.
-fn mark_ready(&self, key: CacheKey);
-```
-
-Once these exist, `engine.rs` orchestrates them in `prepare_store`:
-```
-1. Filter already-cached keys
-2. Check capacity: need = to_store.len() - free_space
-3. If need > 0: call dispatch_map.evict_lru(need, protected_set)
-   - If None → return None (cannot store)
-   - Else → dispatcher.remove() each evicted key
-4. Allocate via dispatcher.populate() for each new key
-5. Return (keys_to_store, evicted_keys)
-```
+- **`prepare_store` eviction** — eviction is not triggered in the current engine path. The engine calls `dispatcher.check()` (existence check) and `dispatcher.populate()` (stage into DRAM + enqueue background NVMe write), neither of which evicts. The dispatcher has `run_eviction_cycle` but it's only called from `dispatcher.prepare_store()`, which the engine never uses. The background writer silently drops writes if NVMe extent allocation fails — no backpressure to Python. When DRAM staging fills up, `create_staging` returns `AllocationFailed` and `store_async` fails after `prepare_store` already said "go ahead." Fix: engine's `prepare_store` must proactively evict (free DRAM staging slots or NVMe extents) and return evicted keys, or return `None` if it can't free enough space.
 
 ### Eviction and tier management
 
@@ -209,8 +180,8 @@ for managing the DRAM tier and is invisible to vLLM.
 
 | # | Requirement | Status | Notes |
 |---|-------------|--------|-------|
-| 1 | **Eviction in `prepare_store`** | In progress | On-demand only: when extent manager is full, query dispatch-map for LRU victims with `ref_cnt == 0`, call `dispatcher.remove()`, retry allocation. No background eviction thread — `prepare_store` is the sole trigger. |
-| 2 | **LRU ordering in `touch`** | In progress | Threshold LRU — dispatch-map tracks access order so eviction picks the coldest block. Updated on `touch`, scanned on `prepare_store`. No background sweep needed. |
+| 1 | **Eviction in `prepare_store`** | Not wired | Dispatcher has `run_eviction_cycle` but engine never calls it. Engine uses `check()` + `populate()`, neither of which evicts. |
+| 2 | **LRU ordering in `touch`** | **Done** | Engine calls `dispatcher.touch()` per key. |
 | 3 | **Ref-counting (`prepare_load` / `complete_load`)** | **Done** | `prepare_load` calls `dispatch_map.lookup()` (increments `read_ref` + returns location), `complete_load` calls `release_read()`. Blocks with `read_ref > 0` are skipped during eviction (`remove` fails with `ActiveReferences`). **Note**: causes double `read_ref` increment — see "Known issues" below. |
 | 4 | **Readiness gating** | Partially implemented | Blocks must not be returned by `lookup` or `prepare_load` until `complete_store(success=True)`. Dispatcher's `check()` may already handle this if dispatch-map tracks readiness. |
 | 5 | **Atomic eviction** | Not yet implemented | If N evictions are requested but fewer than N unpinned blocks exist, evict nothing and return `None`. Must be all-or-nothing. |
@@ -238,22 +209,20 @@ eviction-protection semantics matter.
 manager is full AND there are not enough unpinned blocks to evict. The DRAM staging pool
 cannot overflow because the dispatcher controls admission.
 
-### Possible bugs in current dispatcher implementation
+### Open bug in dispatcher v0
 
-These were identified by code review. Both only manifest against the real
-`DispatchMapComponentV0` — the mock used in unit tests does not expose them.
+Identified by code review. Only manifests against the real `DispatchMapComponentV0` —
+the mock used in unit tests does not expose it.
 
-1. **`check()` leaks read references** — `dispatcher::check()` calls `dm.lookup()`, which
-   increments `read_ref` in the dispatch-map but is never followed by `release_read()`. Every
-   `check()` call permanently pins the entry, making it un-evictable. Fix: call `release_read`
-   after the lookup, or add a non-ref-counting existence check to `IDispatchMap`.
-
-2. **`run_eviction_cycle` always times out** — the cycle calls `dm.lookup(key)` (which
-   increments `read_ref`), then immediately calls `dm.take_write(key)` (which waits for
-   `read_ref == 0`). The write lock always times out, so no entries are ever evicted. The
-   mock's `take_write` doesn't check `read_refs`, which is why eviction tests pass.
-   Fix: obtain the block offset without incrementing `read_ref` (e.g. a separate
-   `block_offset(key)` query), or release the read reference before attempting the write lock.
+**`run_eviction_cycle` always times out (v0 only)** — the cycle calls `dm.lookup(key)`
+(which increments `read_ref`), then immediately calls `dm.take_write(key)` (which waits
+for `read_ref == 0`). Since the read ref from `lookup()` is never released between those
+two calls, `take_write` always times out — no entries are ever evicted. The mock's
+`take_write` doesn't check `read_refs`, which is why eviction tests pass.
+V1 is unaffected — it uses `evict_for_space()` which delegates to `mt.evict_lru()`
+and doesn't hit this pattern.
+Fix: insert `let _ = dm.release_read(key)` between the lookup and `take_write()`, or add
+a non-ref-counting `block_offset(key)` method to `IDispatchMap`.
 
 ### Known issues
 
@@ -279,11 +248,3 @@ the handlers must preserve these same semantics — particularly:
 - Protected set: don't evict keys that are in the current store request
 - Readiness: blocks not loadable until `complete_store(success=True)`
 
-## Build prerequisites (RHEL 9)
-
-Requires SPDK, CUDA toolkit 12.8, and PyTorch with matching CUDA version. See `deps/install_deps.sh` for system packages. Key requirements:
-
-- `memlock` must be unlimited in `/etc/security/limits.conf` (DPDK/SPDK needs it for hugepage DMA)
-- CUDA toolkit version must match the NVIDIA driver's supported version (e.g. driver 570.x → CUDA 12.8)
-- PyTorch wheel must match CUDA version: `pip install torch==2.7.0 --index-url https://download.pytorch.org/whl/cu128`
-- CRB repo enabled for `CUnit-devel`: `sudo dnf config-manager --set-enabled crb`
