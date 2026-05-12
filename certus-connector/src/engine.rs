@@ -60,6 +60,9 @@ pub struct EngineInner {
     dispatch_map: Arc<dyn IDispatchMap + Send + Sync>,
     gpu_services: Arc<dyn IGpuServices + Send + Sync>,
     gpu_block_size: u64,
+    max_cache_entries: usize,
+    eviction_watermark: usize,
+    entry_count: AtomicU64,
     jobs: Mutex<HashMap<u64, Arc<TransferJob>>>,
     next_internal_id: AtomicU64,
     initialized: AtomicBool,
@@ -239,11 +242,17 @@ impl EngineInner {
             })
             .map_err(|e| PyRuntimeError::new_err(format!("Dispatcher init failed: {e}")))?;
 
+        let eviction_watermark =
+            (max_cache_entries as f64 * eviction_threshold) as usize;
+
         Ok(Self {
             dispatcher,
             dispatch_map: dm,
             gpu_services: gpu,
             gpu_block_size,
+            max_cache_entries,
+            eviction_watermark,
+            entry_count: AtomicU64::new(0),
             jobs: Mutex::new(HashMap::new()),
             next_internal_id: AtomicU64::new(0),
             initialized: AtomicBool::new(true),
@@ -274,35 +283,59 @@ impl EngineInner {
         Ok(count)
     }
 
-    /// Allocate space for new keys, evicting if necessary.
-    /// Returns (keys_to_store, evicted_keys).
-    ///
-    /// Current implementation: all keys that don't already exist need storing.
-    /// Eviction is handled internally by the extent manager when out of space.
-    pub fn prepare_store(&self, keys: &[u64]) -> PyResult<(Vec<u64>, Vec<u64>)> {
+    /// Allocate space for new keys, evicting LRU entries if necessary.
+    /// Returns (keys_to_store, evicted_keys), or None if eviction cannot
+    /// free enough space.
+    pub fn prepare_store(&self, keys: &[u64]) -> PyResult<Option<(Vec<u64>, Vec<u64>)>> {
         self.ensure_init()?;
         let cache_keys = keys::to_cache_keys(keys);
         let mut to_store = Vec::new();
-        let mut evicted = Vec::new();
+        let protected: std::collections::HashSet<CacheKey> =
+            cache_keys.iter().copied().collect();
 
         for (i, key) in cache_keys.iter().enumerate() {
             match self.dispatcher.check(*key) {
-                Ok(true) => {
-                    // Already cached, skip
-                }
+                Ok(true) => {}
                 Ok(false) | Err(_) => {
                     to_store.push(keys[i]);
                 }
             }
         }
 
-        // TODO: When extent manager signals OutOfSpace during actual store,
-        // implement LRU eviction by removing oldest entries from dispatch_map.
-        // For now, evicted is always empty — the dispatcher handles allocation
-        // failures at populate time.
-        let _ = &mut evicted;
+        if to_store.is_empty() {
+            return Ok(Some((vec![], vec![])));
+        }
 
-        Ok((to_store, evicted))
+        let current_count = self.entry_count.load(Ordering::Acquire) as usize;
+        let after_store = current_count + to_store.len();
+        let evicted = if after_store > self.eviction_watermark {
+            let needed = after_store - self.eviction_watermark;
+            let candidates = self.dispatch_map.oldest_keys(usize::MAX);
+            let mut evicted_keys: Vec<u64> = Vec::new();
+            for candidate in candidates {
+                if evicted_keys.len() >= needed {
+                    break;
+                }
+                if protected.contains(&candidate) {
+                    continue;
+                }
+                match self.dispatcher.remove(candidate) {
+                    Ok(()) => {
+                        self.entry_count.fetch_sub(1, Ordering::Release);
+                        evicted_keys.push(candidate);
+                    }
+                    Err(_) => continue,
+                }
+            }
+            if evicted_keys.len() < needed {
+                return Ok(None);
+            }
+            evicted_keys
+        } else {
+            vec![]
+        };
+
+        Ok(Some((to_store, evicted)))
     }
 
     /// Finalize or abort a store operation.
@@ -311,7 +344,9 @@ impl EngineInner {
         if !success {
             let cache_keys = keys::to_cache_keys(keys);
             for key in &cache_keys {
-                let _ = self.dispatcher.remove(*key);
+                if self.dispatcher.remove(*key).is_ok() {
+                    self.entry_count.fetch_sub(1, Ordering::Release);
+                }
             }
         }
         Ok(())
@@ -444,6 +479,7 @@ impl EngineInner {
                 all_ok = false;
                 break;
             }
+            self.entry_count.fetch_add(1, Ordering::Release);
         }
 
         job.completed.store(true, Ordering::Release);
@@ -566,7 +602,10 @@ impl EngineInner {
 
         self.dispatcher
             .commit_store(key)
-            .map_err(|e| PyRuntimeError::new_err(format!("store_host_bytes commit failed: {e}")))
+            .map_err(|e| PyRuntimeError::new_err(format!("store_host_bytes commit failed: {e}")))?;
+
+        self.entry_count.fetch_add(1, Ordering::Release);
+        Ok(())
     }
 
     /// Read bytes from the dispatch map's staging buffer for a key (no GPU DMA).
