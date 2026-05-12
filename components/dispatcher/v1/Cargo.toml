@@ -28,3 +28,7 @@ libc = "0.2"
 [[bench]]
 name = "dispatcher_benchmark"
 harness = false
+
+[[bench]]
+name = "ssd_evictor_benchmark"
+harness = false
