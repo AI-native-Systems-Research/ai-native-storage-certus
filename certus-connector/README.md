@@ -40,7 +40,7 @@ certus_native.CertusEngine                 ← PyO3 class (assembler, not a comp
   │
   │  instantiates & connects:
   │
-  ├─ dispatcher        components/dispatcher/v0/       orchestrates cache ops
+  ├─ dispatcher        components/dispatcher/v1/       orchestrates cache ops
   ├─ dispatch-map      components/dispatch-map/v0/     key → location index
   ├─ gpu-services      components/gpu-services/v0/     CUDA DMA transfers
   └─ spdk-env          components/spdk-env/            SPDK environment init
@@ -106,10 +106,10 @@ vLLM's `OffloadingConnectorScheduler` calls on the manager returned by
 |--------|---------|-----------|
 | `lookup(keys)` | `int \| None` | Count of **consecutive** keys (from start) that are cached and ready. Stops at first miss. Return `None` to signal "retry later" (delays vLLM scheduler). |
 | `prepare_store(keys)` | `PrepareStoreOutput \| None` | Reserve space for new keys. Evict LRU if capacity exceeded. Returns which keys need storing, their locations, and which keys were evicted. Returns `None` if storage is impossible (cannot free enough space). Allocated blocks are **pinned** (protected from eviction) until `complete_store`. |
-| `complete_store(keys, success)` | `()` | If `success=True`: mark blocks as ready (now loadable) and unpin. If `success=False`: remove the blocks entirely (rollback allocation). |
+| `complete_store(keys, success)` | `()` | If `success=True`: no-op (blocks already readable after `populate`). If `success=False`: remove the blocks entirely (rollback allocation). |
 | `prepare_load(keys)` | `LoadStoreSpec` | Pin blocks for reading (protected from eviction). Returns location info for the handler to perform DMA. Assumes all given keys are already stored and ready. |
 | `complete_load(keys)` | `()` | Unpin blocks (allow eviction again). Must be called after load DMA completes. |
-| `touch(keys)` | `()` | Update LRU ordering — marks blocks as recently used. May trigger promotion to faster tier. Called even for GPU-cached blocks that don't need loading. |
+| `touch(keys)` | `()` | Update LRU ordering — marks blocks as recently used. Called even for GPU-cached blocks that don't need loading. |
 | `take_events()` | `Iterable[OffloadingEvent]` | Yield new events (stored/evicted) since last call. Consumed by vLLM for accounting. |
 | `shutdown()` | `()` | Release all resources. |
 
@@ -124,26 +124,25 @@ vLLM's `OffloadingConnectorScheduler` calls on the manager returned by
 
 ### Native Rust API mapping
 
-There are three layers. Only the bottom one (Rust components) needs new work:
+Three layers:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  Layer 1: Python shim (native_manager.py)                               │
 │  Converts OffloadKey bytes → u64, constructs PrepareStoreOutput.        │
-│  NO logic here — pure adapter. Stays as-is.                             │
+│  Pure adapter — no logic.                                               │
 └───────────────────────────────────┬─────────────────────────────────────┘
                                     │ calls via PyO3
 ┌───────────────────────────────────▼─────────────────────────────────────┐
 │  Layer 2: CertusEngine (src/engine.rs)                                  │
 │  Wires components, translates between PyO3 types and Rust traits.       │
-│  Orchestrates calls to dispatcher + dispatch-map.                       │
-│  Needs updating once dispatch-map exposes eviction/ref-count APIs.      │
+│  Orchestrates eviction, ref-counting, entry tracking.                   │
 └───────────────────────────────────┬─────────────────────────────────────┘
                                     │ calls via component interfaces
 ┌───────────────────────────────────▼─────────────────────────────────────┐
 │  Layer 3: Rust components                                               │
-│  dispatch-map: threshold LRU, ref-counting, evict_lru(n, protected)     │
-│  dispatcher: integrate eviction into prepare_store path                 │
+│  dispatch-map: LRU ordering, ref-counting, oldest_keys()                │
+│  dispatcher: populate, lookup, remove, touch, evict_for_space           │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -188,16 +187,14 @@ Manager and handler share one `CertusEngine` instance (one dispatch-map). The fl
 This matches vLLM's own CPU offloading manager — there is no background eviction, timer-based
 eviction, or memory-pressure eviction in the contract. It is purely demand-driven.
 
-There are three distinct space-management operations:
+There are two distinct space-management operations in the native path:
 
 | Operation | Trigger | Effect | Block still accessible? |
 |-----------|---------|--------|------------------------|
 | **Eviction** | `prepare_store` (entry count > watermark) | Entry removed from dispatch-map, memory-tier, and NVMe extent freed | No — gone entirely |
-| **Demotion** | `touch` → promotion needs a DRAM slot | Coldest DRAM slot freed, data remains on NVMe | Yes — loadable from NVMe |
-| **Idle demotion** | Background timer (optional) | Idle DRAM slots freed after timeout | Yes — loadable from NVMe |
+| **DRAM demotion** | `dispatcher.populate()` when DRAM staging is full | Coldest DRAM slot freed via `evict_for_space()`, data remains on NVMe | Yes — loadable from NVMe |
 
-Only **eviction** is required by the vLLM contract. Demotion is an internal optimization
-for managing the DRAM tier and is invisible to vLLM.
+Eviction is the vLLM contract requirement. DRAM demotion is internal to the dispatcher — it happens automatically during `populate()` to make room for incoming data, invisible to vLLM.
 
 ### What the native Rust path must support
 
@@ -209,30 +206,14 @@ for managing the DRAM tier and is invisible to vLLM.
 | 4 | **Readiness gating** | **N/A** | Non-issue: `populate()` writes data to DRAM and registers in dispatch-map immediately — block is readable before `complete_store`. `commit_store()` only persists to NVMe. |
 | 5 | **Atomic eviction** | **Done** | If N evictions are requested but fewer than N unpinned blocks exist, returns `None`. All-or-nothing semantics. |
 | 6 | **Protected set in eviction** | **Done** | Keys in the current `prepare_store` input are in a `protected` HashSet and skipped during eviction. |
-| 7 | **Demotion (optional, v1)** | Deferred | DRAM tier management. Dispatcher already stages in DRAM and migrates to NVMe in background, but no explicit slot reclamation under DRAM pressure yet. Not required by vLLM contract. |
+| 7 | **DRAM demotion** | **Done** | Handled internally by dispatcher's `evict_for_space()` during `populate()` — evicts LRU DRAM slots and transitions entries to BlockDevice when DRAM is full. Not part of vLLM contract. |
 
-### Native path differences from mock
+### Native path characteristics
 
-The mock Python manager models a generic cache. The native Rust path has hardware-specific
-nuances that simplify some operations:
-
-| Aspect | Mock (Python) | Native (Rust + SPDK) |
-|--------|---------------|----------------------|
-| **Host memory** | Allocated/freed per block | Pre-allocated SPDK DMA buffer pool — all pinned at init |
-| **Pin/unpin on load** | Conceptually pins memory for DMA | No-op physically — memory is always pinned. `ref_cnt` only prevents eviction. |
-| **GPU DMA registration** | Would need `cudaHostRegister` per buffer | DMA buffers are pre-registered. `dma_copy_to_host`/`dma_copy_to_device` use them directly. |
-| **Capacity** | Configurable slot counts | Fixed at init — extent manager knows total slabs from NVMe device size, DRAM pool from config. |
-| **Staging** | Explicit DRAM tier with promotion/demotion | Dispatcher stages ALL writes in DRAM first, background thread migrates to NVMe. DRAM is a write-through cache, not a separate tier to manage. |
-
-**Key implication for `prepare_load`/`complete_load`**: these are purely logical ref-count
-operations in the native path. No memory is allocated, pinned, or registered — only the
-eviction-protection semantics matter.
-
-**Key implication for capacity**: `prepare_store` returning `None` means the entry count
-exceeds the watermark AND there are not enough unpinned blocks to evict (all LRU entries
-have active read refs from the background writer). This is a hard rejection — vLLM's
-scheduler skips the store. The alternative (letting `store_async` fail) is not safe because
-vLLM's worker asserts `transfer_result.success` and would crash.
+- **Host memory**: pre-allocated SPDK DMA buffer pool — all pinned at init. No per-block allocation.
+- **`prepare_load`/`complete_load`**: purely logical ref-count operations. No memory allocated or registered — only eviction-protection semantics matter.
+- **Capacity**: fixed at init — extent manager knows total slabs from NVMe device size, DRAM pool from config.
+- **Staging**: dispatcher stages ALL writes in DRAM first, background thread migrates to NVMe. DRAM is a write-through cache.
 
 ### gRPC handler equivalence
 
@@ -243,5 +224,4 @@ the handlers must preserve these same semantics — particularly:
 - Pinning bracket: blocks between `prepare_*` and `complete_*` cannot be evicted
 - Atomic eviction: either free enough space or reject entirely (`None`)
 - Protected set: don't evict keys that are in the current store request
-- Readiness: blocks not loadable until `complete_store(success=True)`
 
