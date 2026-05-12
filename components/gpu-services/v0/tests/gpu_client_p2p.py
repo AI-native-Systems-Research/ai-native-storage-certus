@@ -7,7 +7,7 @@ Usage:
 This script simulates a PyTorch/CUDA application that:
 1. Allocates GPU device memory (cudaMalloc)
 2. Exports the CUDA IPC handle
-3. Sends handle + size to the P2P server which performs GDRCopy + NVMe DMA
+3. Sends handle + size to the P2P server which performs NVMe DMA
 
 Modes:
   - Without socket_path: writes base64 payload to stdout, blocks on stdin (subprocess mode)

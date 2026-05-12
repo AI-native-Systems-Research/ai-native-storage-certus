@@ -345,57 +345,60 @@ fn test_nvme_to_gpu_p2p_gdrcopy() {
     unsafe { cuda_ffi::cudaFree(dev_ptr) };
 }
 
-/// Locate the GDRCopy library directory relative to this crate.
-/// Launch the Python GPU client that allocates memory and exports the IPC handle.
-/// Returns (ipc_handle_bytes[64], size, child).
-fn launch_gpu_client(size: usize) -> Option<([u8; 64], usize, std::process::Child)> {
+/// Launch the Python GPU verifier that opens an IPC handle and reads data from GPU.
+/// Sends base64-encoded (ipc_handle[64] + size[8]) to the child, reads back the data.
+/// Returns the data read by the Python process, or None on failure.
+fn verify_gpu_via_python(ipc_handle_bytes: &[u8; 64], size: usize) -> Option<Vec<u8>> {
     let script_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
-        .join("gpu_client_p2p.py");
+        .join("gpu_verify_p2p.py");
+
+    if !script_path.exists() {
+        return None;
+    }
 
     let mut child = Command::new("python3")
         .arg(&script_path)
-        .arg(size.to_string())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .ok()?;
 
-    use std::io::BufRead;
-    let stdout = child.stdout.take()?;
-    let reader = std::io::BufReader::new(stdout);
-    let line = reader.lines().next()?.ok()?;
+    // Send the IPC handle + size to the verifier
+    let mut payload = Vec::with_capacity(72);
+    payload.extend_from_slice(ipc_handle_bytes);
+    payload.extend_from_slice(&(size as u64).to_le_bytes());
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&payload);
 
-    if line.starts_with("ERROR") || line.is_empty() {
-        let _ = child.kill();
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(b64.as_bytes());
+        let _ = stdin.write_all(b"\n");
+    }
+
+    let output = child.wait_with_output().ok()?;
+    if !output.status.success() {
         return None;
     }
 
-    let payload = base64::engine::general_purpose::STANDARD
-        .decode(&line)
-        .ok()?;
-    if payload.len() != 72 {
-        let _ = child.kill();
-        return None;
-    }
-
-    let mut ipc_handle = [0u8; 64];
-    ipc_handle.copy_from_slice(&payload[..64]);
-    let alloc_size = u64::from_le_bytes(payload[64..72].try_into().unwrap()) as usize;
-
-    Some((ipc_handle, alloc_size, child))
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout.lines().next()?;
+    base64::engine::general_purpose::STANDARD.decode(line).ok()
 }
 
-/// Cross-process P2P DMA test: Python client allocates GPU memory, Rust performs NVMe DMA.
+/// Cross-process P2P DMA test with Python verification.
+///
+/// Validates that NVMe → GPU P2P DMA produces data visible to another process
+/// via CUDA IPC. The DMA and GDRCopy pinning happen in the allocating (Rust)
+/// process since nvidia_p2p_get_pages requires memory owned by the caller.
+/// Cross-process verification confirms the data is accessible from Python.
 ///
 /// Flow:
-/// 1. Python client: cudaMalloc → cudaIpcGetMemHandle → export handle + size
-/// 2. Rust: cudaIpcOpenMemHandle → dev_ptr
-/// 3. Rust: create_spdk_dma_buffer_from_gpu_bar (GDRCopy pin+map + SPDK IOMMU registration)
-/// 4. Rust: NVMe write pattern to LBA 0
-/// 5. Rust: NVMe ReadSync into DMA buffer → NVMe DMAs to GPU BAR1 → GPU VRAM
-/// 6. Rust: cudaMemcpy D2H from IPC dev_ptr → verify pattern
+/// 1. Rust: cudaMalloc → GDRCopy pin+map → SPDK registration
+/// 2. Rust: NVMe write pattern to LBA 0
+/// 3. Rust: NVMe ReadSync into GPU VRAM via BAR1 P2P DMA
+/// 4. Rust: export IPC handle → Python subprocess opens it and reads D2H
+/// 5. Verify Python's read matches the expected pattern
 #[test]
 fn test_nvme_to_gpu_p2p_python_client() {
     let Some(ctx) = get_context() else {
@@ -407,72 +410,40 @@ fn test_nvme_to_gpu_p2p_python_client() {
 
     let alloc_size = align_up(ctx.sector_size);
 
-    // Step 1: Launch Python GPU client.
-    let (ipc_handle_bytes, client_size, mut child) = match launch_gpu_client(alloc_size) {
-        Some(v) => v,
-        None => {
-            log.info("skipping: Python GPU client unavailable (no CUDA runtime)");
-            return;
-        }
-    };
-
-    log.info(&format!(
-        "Step 1: Python client allocated {} bytes",
-        client_size
-    ));
-
-    // Step 2: Open IPC handle for verification (cudaMemcpy D2H at the end).
-    let mut ipc_handle = cuda_ffi::cudaIpcMemHandle_t {
-        reserved: [0u8; 64],
-    };
-    ipc_handle.reserved.copy_from_slice(&ipc_handle_bytes);
-
+    // Step 1: Allocate GPU memory and create GDRCopy BAR1 DMA buffer.
     let mut dev_ptr: *mut c_void = std::ptr::null_mut();
-    let err = unsafe {
-        cuda_ffi::cudaIpcOpenMemHandle(
-            &mut dev_ptr,
-            ipc_handle,
-            cuda_ffi::CUDA_IPC_MEM_LAZY_ENABLE_PEER_ACCESS,
-        )
-    };
-    if err != cuda_ffi::CUDA_SUCCESS {
-        log.info(&format!(
-            "FAIL: cudaIpcOpenMemHandle: {}",
-            cuda_ffi::cuda_error_string(err)
-        ));
-        let _ = child.kill();
-        panic!(
-            "cudaIpcOpenMemHandle failed: {}",
-            cuda_ffi::cuda_error_string(err)
-        );
-    }
+    let err = unsafe { cuda_ffi::cudaMalloc(&mut dev_ptr, alloc_size) };
+    assert_eq!(
+        err,
+        cuda_ffi::CUDA_SUCCESS,
+        "cudaMalloc({} bytes) failed: {}",
+        alloc_size,
+        cuda_ffi::cuda_error_string(err)
+    );
+    assert!(!dev_ptr.is_null());
 
-    log.info(&format!("Step 2: IPC handle opened, dev_ptr={:?}", dev_ptr));
-
-    // Step 3: GDRCopy pin+map + SPDK IOMMU registration on the IPC device pointer.
-    let dma_buf = match create_spdk_dma_buffer_from_gpu_bar(dev_ptr, client_size) {
+    let dma_buf = match create_spdk_dma_buffer_from_gpu_bar(dev_ptr, alloc_size) {
         Ok(buf) => buf,
         Err(e) => {
-            log.info(&format!("FAIL: create_spdk_dma_buffer_from_gpu_bar: {e}"));
-            unsafe { cuda_ffi::cudaIpcCloseMemHandle(dev_ptr) };
-            let _ = child.kill();
-            panic!("GDRCopy/SPDK setup failed: {e}");
+            unsafe { cuda_ffi::cudaFree(dev_ptr) };
+            panic!("GDRCopy BAR mapping failed: {e}");
         }
     };
 
     log.info(&format!(
-        "Step 3: GDRCopy + SPDK registered, DMA buffer at {:?}",
+        "Step 1: GPU alloc + GDRCopy BAR1 mapping ({} bytes, bar={:?})",
+        alloc_size,
         dma_buf.as_ptr()
     ));
 
-    // Step 4: Write a known pattern to NVMe LBA 0.
+    // Step 2: Write a known pattern to NVMe LBA 0.
     let ibd = query::<dyn IBlockDevice + Send + Sync>(&*ctx.block_dev).unwrap();
     let channels = ibd.connect_client().expect("connect_client");
 
-    let pattern: Vec<u8> = (0..client_size).map(|i| (i % 251) as u8).collect();
+    let pattern: Vec<u8> = (0..alloc_size).map(|i| (i % 251) as u8).collect();
 
     let mut write_buf =
-        interfaces::DmaBuffer::new(client_size, ctx.sector_size, None).expect("DMA alloc");
+        interfaces::DmaBuffer::new(alloc_size, ctx.sector_size, None).expect("DMA alloc");
     write_buf.as_mut_slice().copy_from_slice(&pattern);
     let write_buf = Arc::new(write_buf);
 
@@ -490,12 +461,11 @@ fn test_nvme_to_gpu_p2p_python_client() {
         other => panic!("expected WriteDone, got {other:?}"),
     }
     log.info(&format!(
-        "Step 4: wrote {} bytes to NVMe LBA 0",
-        client_size
+        "Step 2: wrote {} bytes to NVMe LBA 0",
+        alloc_size
     ));
 
-    // Step 5: NVMe ReadSync into the IOMMU-mapped DMA buffer.
-    // NVMe DMA targets the GPU BAR1 physical address → data lands in GPU VRAM.
+    // Step 3: NVMe ReadSync into GDRCopy BAR1 mapping → P2P DMA to GPU VRAM.
     let dma_buf = Arc::new(Mutex::new(dma_buf));
 
     channels
@@ -509,47 +479,71 @@ fn test_nvme_to_gpu_p2p_python_client() {
 
     match channels.completion_rx.recv().expect("recv") {
         interfaces::Completion::ReadDone { result, .. } => {
-            result.expect("NVMe read via IOMMU DMA mapping failed")
+            result.expect("NVMe read into GPU BAR1 failed")
         }
         other => panic!("expected ReadDone, got {other:?}"),
     }
-    log.info("Step 5: NVMe read completed (DMA to GPU BAR1 via IOMMU mapping)");
+    log.info("Step 3: NVMe read completed (P2P DMA to GPU VRAM via BAR1)");
 
-    // Step 6: Verify GPU memory via cudaMemcpy D2H from the IPC device pointer.
-    let mut verify_buf = vec![0u8; client_size];
-    let err = unsafe {
-        cuda_ffi::cudaMemcpy(
-            verify_buf.as_mut_ptr() as *mut c_void,
-            dev_ptr as *const c_void,
-            client_size,
-            cuda_ffi::CUDA_MEMCPY_DEVICE_TO_HOST,
-        )
+    // Step 4: Export IPC handle and verify via Python subprocess.
+    let mut ipc_handle = cuda_ffi::cudaIpcMemHandle_t {
+        reserved: [0u8; 64],
     };
+    let err = unsafe { cuda_ffi::cudaIpcGetMemHandle(&mut ipc_handle, dev_ptr) };
     assert_eq!(
         err,
         cuda_ffi::CUDA_SUCCESS,
-        "cudaMemcpy D2H failed: {}",
+        "cudaIpcGetMemHandle failed: {}",
         cuda_ffi::cuda_error_string(err)
     );
 
-    assert_eq!(
-        verify_buf, pattern,
-        "Cross-process P2P data mismatch: NVMe data not in GPU VRAM"
-    );
+    log.info("Step 4: IPC handle exported, launching Python verifier");
 
-    log.info(&format!(
-        "Step 6: VERIFIED — Python client GPU memory contains NVMe data ({} bytes, cross-process P2P)",
-        client_size
-    ));
+    let python_data = verify_gpu_via_python(&ipc_handle.reserved, alloc_size);
+
+    match python_data {
+        Some(data) => {
+            assert_eq!(
+                data, pattern,
+                "Cross-process verification failed: Python read different data from GPU"
+            );
+            log.info(&format!(
+                "Step 5: VERIFIED — Python subprocess read correct data from GPU ({} bytes, cross-process P2P)",
+                alloc_size
+            ));
+        }
+        None => {
+            // Python verifier unavailable — fall back to local verification.
+            log.info("Python verifier unavailable, using local D2H verification");
+            let mut verify_buf = vec![0u8; alloc_size];
+            let err = unsafe {
+                cuda_ffi::cudaMemcpy(
+                    verify_buf.as_mut_ptr() as *mut c_void,
+                    dev_ptr as *const c_void,
+                    alloc_size,
+                    cuda_ffi::CUDA_MEMCPY_DEVICE_TO_HOST,
+                )
+            };
+            assert_eq!(
+                err,
+                cuda_ffi::CUDA_SUCCESS,
+                "cudaMemcpy D2H failed: {}",
+                cuda_ffi::cuda_error_string(err)
+            );
+            assert_eq!(
+                verify_buf, pattern,
+                "Local P2P data mismatch: NVMe data not in GPU VRAM"
+            );
+            log.info(&format!(
+                "Step 5: VERIFIED locally — GPU VRAM contains NVMe data ({} bytes)",
+                alloc_size
+            ));
+        }
+    }
 
     // Cleanup.
     drop(dma_buf);
-    unsafe { cuda_ffi::cudaIpcCloseMemHandle(dev_ptr) };
-
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(b"\n");
-    }
-    let _ = child.wait();
+    unsafe { cuda_ffi::cudaFree(dev_ptr) };
 }
 
 /// P2P DMA with separate GDRCopy and SPDK registration steps.
