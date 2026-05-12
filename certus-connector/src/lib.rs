@@ -57,8 +57,10 @@ pub struct CertusConfig {
 ///
 /// # Manager-level operations
 /// hit_count = engine.batch_check([1, 2, 3])
-/// to_store, evicted = engine.prepare_store([4, 5, 6])
-/// engine.complete_store([4, 5, 6], True)
+/// result = engine.prepare_store([4, 5, 6])  # None if can't free space
+/// if result is not None:
+///     to_store, evicted = result
+///     engine.complete_store([4, 5, 6], True)
 ///
 /// # Handler-level operations
 /// engine.store_async(job_id=1, gpu_block_ids=[0, 1], keys=[4, 5])
@@ -88,8 +90,8 @@ impl CertusEngine {
     }
 
     /// Allocate space for new keys, evicting if necessary.
-    /// Returns (keys_to_store, evicted_keys).
-    fn prepare_store(&self, keys: Vec<u64>) -> PyResult<(Vec<u64>, Vec<u64>)> {
+    /// Returns (keys_to_store, evicted_keys), or None if cannot free enough space.
+    fn prepare_store(&self, keys: Vec<u64>) -> PyResult<Option<(Vec<u64>, Vec<u64>)>> {
         self.inner.prepare_store(&keys)
     }
 

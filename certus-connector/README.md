@@ -1,6 +1,6 @@
 # certus-connector
 
-vLLM **OffloadingSpec** plugin for the Certus storage system. Implements vLLM's `OffloadingSpec` ABC so that `OffloadingConnectorScheduler` can offload KV cache blocks to tiered DRAM + raw NVMe storage via SPDK.
+vLLM **OffloadingSpec** plugin for the Certus storage system. Implements vLLM's `OffloadingSpec` ABC so that `OffloadingConnectorScheduler` can offload KV cache blocks to tiered DRAM + raw NVMe storage via SPDK. Works with llm-d (which uses vLLM as its runtime).
 
 Single installable package providing both the native Rust engine (PyO3) and the Python vLLM adapter.
 
@@ -16,20 +16,24 @@ vLLM OffloadingConnectorScheduler          ← vLLM's internal scheduler
   ▼
 CertusOffloadingSpec (OffloadingSpec)       ← OUR plugin entry point
   │
+  │  creates ONE shared CertusEngine instance:
+  │
   ├─ get_manager() → OffloadingManager     ← allocation / eviction decisions
-  │     ├─ NativeCertusOffloadingManager       (production, backed by Rust)
+  │     ├─ NativeCertusOffloadingManager       (production, wraps CertusEngine)
   │     └─ CertusOffloadingManager             (mock, pure Python for testing)
   │
   └─ get_handlers() → OffloadingHandler    ← actual GPU ↔ storage DMA
-        ├─ GpuToCertusHandler                  (store: GPU → DRAM staging → NVMe)
-        └─ CertusToGpuHandler                  (load:  NVMe/DRAM → GPU)
+        ├─ GpuToCertusHandler(engine)          (store: GPU → DRAM staging → NVMe)
+        └─ CertusToGpuHandler(engine)          (load:  NVMe/DRAM → GPU)
+                                  ↑
+                    same CertusEngine instance as manager
 ```
 
 This is the same plugin contract that llm-d's `SharedStorageOffloadingSpec` uses. The difference: llm-d uses POSIX files on shared storage, we use raw NVMe via SPDK with no filesystem.
 
 ## Rust engine (certus_native)
 
-The Python handlers delegate to a Rust PyO3 extension module (`certus_native`) which assembles and wires the Certus component stack:
+A single `CertusEngine` instance is shared between the manager (index/allocation/eviction) and the handlers (GPU DMA transfers). This ensures the handler can find data that the manager stored. The engine is a Rust PyO3 extension module (`certus_native`) which assembles and wires the Certus component stack:
 
 ```
 certus_native.CertusEngine                 ← PyO3 class (assembler, not a component)
@@ -113,7 +117,7 @@ vLLM's `OffloadingConnectorScheduler` calls on the manager returned by
 
 1. **Eviction only from `prepare_store`** — the only trigger for freeing capacity.
 2. **Pinning protects from eviction** — blocks between `prepare_*` and `complete_*` cannot be evicted.
-3. **Blocks not loadable until `complete_store(success=True)`** — prevents reading partially-written data.
+3. **Blocks readable immediately after `populate()`** — GPU→DRAM copy completes atomically during store, no gating needed.
 4. **`None` return from `prepare_store` = hard rejection** — vLLM will not retry automatically.
 5. **`None` return from `lookup` = soft delay** — vLLM scheduler retries the request later.
 6. **Consecutive prefix semantics** — `lookup` returns the longest prefix of hits, not total hit count.
@@ -148,18 +152,35 @@ Per-method breakdown:
 | `native_manager.py` calls | `CertusEngine` method | Rust component work | Status |
 |---|---|---|---|
 | `lookup(keys)` | `batch_check(keys)` | `dispatcher.check()` per key | **Done** |
-| `prepare_store(keys)` | `prepare_store(keys)` | Dispatch-map: `evict_lru(n, protected)` when full; dispatcher: remove evicted, allocate new | **Wired** (filters cached keys, but eviction not triggered — see "Remaining engine.rs work") |
-| `complete_store(keys, ok)` | `complete_store(keys, ok)` | On failure: `dispatcher.remove()` per key. On success: mark ready in dispatch-map. | **Partially done** (remove works, readiness gating TBD) |
+| `prepare_store(keys)` | `prepare_store(keys)` | Filters cached keys, evicts LRU via `dispatcher.remove()` when over watermark, returns `None` if can't free enough | **Done** |
+| `complete_store(keys, ok)` | `complete_store(keys, ok)` | On failure: `dispatcher.remove()` per key. On success: no-op (entry already readable after `populate`). | **Done** |
 | `touch(keys)` | `touch(keys)` | Dispatch-map: update threshold LRU ordering | **Done** |
-| `prepare_load(keys)` | `prepare_load(keys)` | Dispatch-map: `lookup()` (increments `read_ref`, blocks eviction, returns storage offset) | **Done** (see double-increment note in "Remaining engine.rs work") |
+| `prepare_load(keys)` | `prepare_load(keys)` | Dispatch-map: `lookup()` (increments `read_ref`, blocks eviction, returns storage offset) | **Done** |
 | `complete_load(keys)` | `complete_load(keys)` | Dispatch-map: `release_read()` (decrements `read_ref`) | **Done** |
 | `shutdown()` | `shutdown()` | `dispatcher.shutdown()` + `gpu.shutdown()` | **Done** |
 
-### Remaining engine.rs work
+### How eviction works
 
-- **`prepare_store` eviction** — eviction is not triggered in the current engine path. The engine calls `dispatcher.check()` (existence check) and `dispatcher.populate()` (stage into DRAM + enqueue background NVMe write), neither of which evicts. The dispatcher has `run_eviction_cycle` but it's only called from `dispatcher.prepare_store()`, which the engine never uses. The background writer silently drops writes if NVMe extent allocation fails — no backpressure to Python. When DRAM staging fills up, `create_staging` returns `AllocationFailed` and `store_async` fails after `prepare_store` already said "go ahead." This matches llm-d's `SharedStorageOffloadingManager` which also never evicts and always returns empty `evicted` — but llm-d targets unbounded shared filesystem storage. For finite DRAM + NVMe, the engine must eventually evict proactively and return evicted keys (or `None` if it can't free enough space).
+The engine tracks total cached entries via an atomic `entry_count`:
+- Incremented after successful `dispatcher.populate()` (in `store_async`) and `dispatcher.commit_store()` (in `store_host_bytes`)
+- Decremented after successful `dispatcher.remove()` (in `prepare_store` eviction and `complete_store` rollback)
 
-- **`prepare_load` double `read_ref` increment** — `prepare_load` calls `dispatch_map.lookup()` which increments `read_ref` and returns the offset. Later, `load_async` calls `dispatcher.lookup()` which internally calls `dm.lookup()` again, incrementing `read_ref` a second time. The dispatcher releases its ref after DMA, and `complete_load` releases the outer ref — so refs balance correctly (2 increments, 2 decrements). But it's one redundant atomic op per block per load. Fix: add a non-ref-counting `get_location(key)` method to `IDispatchMap` and use `take_read()` + `get_location()` in `prepare_load` instead of `lookup()`. Same underlying issue as the `run_eviction_cycle` bug — `lookup()` combines ref-counting with location retrieval and there's no way to do one without the other.
+When `prepare_store` is called and `entry_count + to_store.len() > eviction_watermark`:
+1. Scan `dispatch_map.oldest_keys(MAX)` for LRU-ordered candidates
+2. Skip keys in the protected set (keys in the current store request)
+3. Call `dispatcher.remove(candidate)` — fails silently for pinned entries (active `read_ref > 0`)
+4. If enough entries freed → return `(to_store, evicted)`. If not → return `None`
+
+`eviction_watermark = max_cache_entries * eviction_threshold` (both from config).
+
+Returning `None` is **required** because vLLM's worker asserts `transfer_result.success` (worker.py:348) — store failures crash the process. The only safe capacity signal is rejecting at `prepare_store` before the handler is called.
+
+**Why llm-d FS backend doesn't need this:** its handler writes to a POSIX shared filesystem (Lustre, CephFS) — no fixed DRAM pool, no allocation failure. `write()` doesn't fail due to capacity. **Why we do:** our `dispatcher.populate()` allocates from a fixed-size DRAM staging pool. When full and nothing is evictable (all entries mid-background-write), `populate()` returns `AllocationFailed`, `store_async` returns `false`, and the worker assert crashes the process. Proactive eviction prevents this by ensuring capacity exists before the handler is called.
+
+### Notes on `prepare_load` ref-counting
+
+Manager and handler share one `CertusEngine` instance (one dispatch-map). The flow:
+`prepare_load` → `dm.lookup()` (ref=1), `load_async` → `dispatcher.lookup()` → `dm.lookup()` (ref=2) → DMA → `dm.release_read()` (ref=1), `complete_load` → `dm.release_read()` (ref=0). The transient double-ref during DMA is harmless — it gives extra eviction protection while the transfer is in flight. One redundant atomic op per block per load, but correct.
 
 ### Eviction and tier management
 
@@ -171,7 +192,7 @@ There are three distinct space-management operations:
 
 | Operation | Trigger | Effect | Block still accessible? |
 |-----------|---------|--------|------------------------|
-| **Eviction** | `prepare_store` (NVMe full) | NVMe slab freed, DRAM slot freed, key removed from index | No — gone entirely |
+| **Eviction** | `prepare_store` (entry count > watermark) | Entry removed from dispatch-map, memory-tier, and NVMe extent freed | No — gone entirely |
 | **Demotion** | `touch` → promotion needs a DRAM slot | Coldest DRAM slot freed, data remains on NVMe | Yes — loadable from NVMe |
 | **Idle demotion** | Background timer (optional) | Idle DRAM slots freed after timeout | Yes — loadable from NVMe |
 
@@ -182,12 +203,12 @@ for managing the DRAM tier and is invisible to vLLM.
 
 | # | Requirement | Status | Notes |
 |---|-------------|--------|-------|
-| 1 | **Eviction in `prepare_store`** | Not wired | Dispatcher has `run_eviction_cycle` but engine never calls it. Engine uses `check()` + `populate()`, neither of which evicts. |
+| 1 | **Eviction in `prepare_store`** | **Done** | Engine tracks `entry_count` atomically, evicts LRU via `dispatcher.remove()` when over watermark, returns `None` if can't free enough. |
 | 2 | **LRU ordering in `touch`** | **Done** | Engine calls `dispatcher.touch()` per key. |
-| 3 | **Ref-counting (`prepare_load` / `complete_load`)** | **Done** | `prepare_load` calls `dispatch_map.lookup()` (increments `read_ref` + returns location), `complete_load` calls `release_read()`. Blocks with `read_ref > 0` are skipped during eviction (`remove` fails with `ActiveReferences`). Note: causes double `read_ref` increment — see "Remaining engine.rs work". |
-| 4 | **Readiness gating** | Partially implemented | Blocks must not be returned by `lookup` or `prepare_load` until `complete_store(success=True)`. Dispatcher's `check()` may already handle this if dispatch-map tracks readiness. |
-| 5 | **Atomic eviction** | Not yet implemented | If N evictions are requested but fewer than N unpinned blocks exist, evict nothing and return `None`. Must be all-or-nothing. |
-| 6 | **Protected set in eviction** | Not yet implemented | Keys in the current `prepare_store` input must not be evicted (they might already be cached and must remain). |
+| 3 | **Ref-counting (`prepare_load` / `complete_load`)** | **Done** | `prepare_load` calls `dispatch_map.lookup()` (increments `read_ref` + returns location), `complete_load` calls `release_read()`. Manager and handler share one engine instance — transient double-ref during DMA is balanced (dispatcher releases its ref after DMA completes). Blocks with `read_ref > 0` are skipped during eviction (`remove` fails with `ActiveReferences`). |
+| 4 | **Readiness gating** | **N/A** | Non-issue: `populate()` writes data to DRAM and registers in dispatch-map immediately — block is readable before `complete_store`. `commit_store()` only persists to NVMe. |
+| 5 | **Atomic eviction** | **Done** | If N evictions are requested but fewer than N unpinned blocks exist, returns `None`. All-or-nothing semantics. |
+| 6 | **Protected set in eviction** | **Done** | Keys in the current `prepare_store` input are in a `protected` HashSet and skipped during eviction. |
 | 7 | **Demotion (optional, v1)** | Deferred | DRAM tier management. Dispatcher already stages in DRAM and migrates to NVMe in background, but no explicit slot reclamation under DRAM pressure yet. Not required by vLLM contract. |
 
 ### Native path differences from mock
@@ -207,25 +228,11 @@ nuances that simplify some operations:
 operations in the native path. No memory is allocated, pinned, or registered — only the
 eviction-protection semantics matter.
 
-**Key implication for capacity**: `prepare_store` returning `None` means the NVMe extent
-manager is full AND there are not enough unpinned blocks to evict. The DRAM staging pool
-cannot overflow because the dispatcher controls admission.
-
-### Open bug in dispatcher v0
-
-Identified by code review. Only manifests against the real `DispatchMapComponentV0` —
-the mock used in unit tests does not expose it.
-
-**`run_eviction_cycle` always times out (v0 only)** — the cycle calls `dm.lookup(key)`
-(which increments `read_ref`), then immediately calls `dm.take_write(key)` (which waits
-for `read_ref == 0`). Since the read ref from `lookup()` is never released between those
-two calls, `take_write` always times out — no entries are ever evicted. The mock's
-`take_write` doesn't check `read_refs`, which is why eviction tests pass.
-V1 is unaffected — it uses `evict_for_space()` which delegates to `mt.evict_lru()`
-and doesn't hit this pattern.
-Fix: insert `let _ = dm.release_read(key)` between the lookup and `take_write()`, or add
-a non-ref-counting `block_offset(key)` method to `IDispatchMap`.
-
+**Key implication for capacity**: `prepare_store` returning `None` means the entry count
+exceeds the watermark AND there are not enough unpinned blocks to evict (all LRU entries
+have active read refs from the background writer). This is a hard rejection — vLLM's
+scheduler skips the store. The alternative (letting `store_async` fail) is not safe because
+vLLM's worker asserts `transfer_result.success` and would crash.
 
 ### gRPC handler equivalence
 

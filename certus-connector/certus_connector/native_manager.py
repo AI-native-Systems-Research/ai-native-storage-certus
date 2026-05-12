@@ -60,12 +60,11 @@ class NativeCertusOffloadingManager(OffloadingManager):
 
     def prepare_load(self, keys: Iterable[OffloadKey]) -> LoadStoreSpec:
         int_keys = _keys_to_u64s(keys)
-        offsets = self._engine.prepare_load(int_keys)
-        locations = [BlockLocation(nvme_slab=o, dram_slot=None) for o in offsets]
-        # Note: the dispatcher's lookup() re-discovers the block location
-        # internally (DRAM vs NVMe) and handles the DMA path accordingly.
-        # These offsets are used by the handler for addressing but the
-        # dispatcher doesn't rely on them.
+        self._engine.prepare_load(int_keys)
+        # Store the original keys (not offsets) — the handler passes these to
+        # load_async(), which calls dispatcher.lookup(key) to re-discover the
+        # block location internally (DRAM vs NVMe) and perform the DMA.
+        locations = [BlockLocation(nvme_slab=k, dram_slot=None) for k in int_keys]
         return CertusLoadStoreSpec(locations)
 
     def touch(self, keys: Iterable[OffloadKey]) -> None:
@@ -80,7 +79,11 @@ class NativeCertusOffloadingManager(OffloadingManager):
         keys_list = list(keys)
         int_keys = _keys_to_u64s(keys_list)
 
-        to_store_ints, evicted_ints = self._engine.prepare_store(int_keys)
+        result = self._engine.prepare_store(int_keys)
+        if result is None:
+            return None
+
+        to_store_ints, evicted_ints = result
 
         to_store_keys = [keys_list[int_keys.index(k)] for k in to_store_ints]
         evicted_keys = [
