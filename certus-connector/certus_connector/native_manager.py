@@ -79,7 +79,11 @@ class NativeCertusOffloadingManager(OffloadingManager):
         keys_list = list(keys)
         int_keys = _keys_to_u64s(keys_list)
 
-        to_store_ints, evicted_ints = self._engine.prepare_store(int_keys)
+        result = self._engine.prepare_store(int_keys)
+        if result is None:
+            return None
+
+        to_store_ints, evicted_ints = result
 
         to_store_keys = [keys_list[int_keys.index(k)] for k in to_store_ints]
         evicted_keys = [
