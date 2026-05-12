@@ -1,8 +1,6 @@
 # certus-connector
 
-vLLM **OffloadingSpec** plugin for the Certus storage system. Implements vLLM's `OffloadingSpec` ABC so that `OffloadingConnectorScheduler` can offload KV cache blocks to tiered DRAM + raw NVMe storage via SPDK.
-
-When deployed with llm-d, vLLM is still the runtime — llm-d is an orchestration layer that deploys and configures vLLM instances. The KV cache connector is loaded by vLLM's `OffloadingConnectorScheduler` via `kv_connector_extra_config`, whether it's llm-d's FS backend or our Certus connector. The difference: llm-d's FS backend targets unbounded shared POSIX storage (Lustre, CephFS) and never evicts. We target finite local NVMe with tiered DRAM caching and proactive LRU eviction.
+vLLM **OffloadingSpec** plugin for the Certus storage system. Implements vLLM's `OffloadingSpec` ABC so that `OffloadingConnectorScheduler` can offload KV cache blocks to tiered DRAM + raw NVMe storage via SPDK. Works with llm-d (which uses vLLM as its runtime).
 
 Single installable package providing both the native Rust engine (PyO3) and the Python vLLM adapter.
 
