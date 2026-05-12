@@ -1,118 +1,78 @@
 # Drift Resolution Proposals
 
-Generated: 2026-05-05
-Based on: drift-report from 2026-05-05
+Generated: 2026-05-12
+Based on: drift-report from 2026-05-12
 
 ## Summary
 
 | Resolution Type | Count |
 |-----------------|-------|
-| Backfill (Code -> Spec) | 3 |
-| Align (Spec -> Code) | 1 |
-| Human Decision | 2 |
+| Backfill (Code -> Spec) | 1 |
+| Align (Code -> Spec) | 1 |
+| Human Decision | 0 |
 | New Specs | 0 |
 | Remove from Spec | 0 |
 
 ## Proposals
 
-### Proposal 1: 001-dispatcher-cache-interface/FR-017
+### Proposal 1: Unspecced - Background SSD Evictor
 
-**Direction**: ALIGN (Spec -> Code)
+**Direction**: BACKFILL (Code -> Spec)
+
+**Feature**: BackgroundEvictor thread that evicts oldest BlockDevice entries from SSD when utilization exceeds a threshold.
+**Location**: `src/background.rs:108-282`, `src/lib.rs:658-695`
+
+**Proposed Addition to Spec** (User Story 10 + FR-029..FR-033):
+
+#### User Story 10 - SSD Capacity Eviction (Priority: P3)
+
+When the SSD data drives approach capacity, a background evictor removes the oldest (LRU by TSC timestamp) BlockDevice entries to prevent extent allocation failures. The evictor periodically checks combined SSD utilization across all data drives. When utilization exceeds the high-water mark, it evicts entries in batches until utilization drops below the low-water mark.
+
+**Acceptance Scenarios**:
+
+1. **Given** SSD utilization is above `ssd_eviction_threshold` (default 0.9), **When** the evictor wakes, **Then** it calls `oldest_keys(batch_size)` and evicts entries in BlockDevice state until utilization drops below `ssd_eviction_low_watermark` (default 0.8).
+2. **Given** an entry is in MemoryTier state, **When** the evictor evaluates it, **Then** it is skipped (still hot in DRAM).
+3. **Given** an entry has active read/write references, **When** the evictor attempts to remove it, **Then** the removal fails and the entry is skipped.
+4. **Given** `ssd_eviction_threshold` is set to 0.0, **When** the dispatcher initializes, **Then** the evictor is NOT started.
+5. **Given** shutdown is called, **When** the evictor is running, **Then** it finishes the current batch (if any) and exits cleanly.
+
+#### Functional Requirements:
+
+- **FR-029**: The dispatcher MUST start a background SSD evictor thread during `initialize()` if `ssd_eviction_threshold > 0.0` and at least one data drive is configured. The evictor MUST be shut down during `shutdown()`.
+- **FR-030**: The evictor MUST periodically check combined SSD utilization (sum of `used_bytes()` / sum of `capacity_bytes()` across all extent managers). The check interval MUST be configurable via `ssd_eviction_interval_secs` (default: 5).
+- **FR-031**: When utilization exceeds `ssd_eviction_threshold` (default: 0.9), the evictor MUST evict BlockDevice-only entries using `oldest_keys(batch_size)` for LRU ordering, stopping when utilization drops below `ssd_eviction_low_watermark` (default: 0.8) or the batch is exhausted.
+- **FR-032**: The evictor MUST skip entries in MemoryTier state (non-null pointer in dispatch map, indicating the entry is still hot in DRAM). Entries with active read or write references MUST be skipped (dm.remove fails gracefully).
+- **FR-033**: The `DispatcherConfig` MUST include `ssd_eviction_threshold`, `ssd_eviction_low_watermark`, `ssd_eviction_batch_size`, and `ssd_eviction_interval_secs` fields with the specified defaults.
+
+**Rationale**: Without SSD eviction, the SSD fills up and all background write-throughs fail silently — new entries have no SSD backing and are permanently lost on memory-tier eviction. This is a critical data-path issue for long-running workloads.
+
+**Confidence**: HIGH
+
+---
+
+### Proposal 2: 001-dispatcher-cache-interface/FR-024
+
+**Direction**: ALIGN (Spec + Code update)
 
 **Current State**:
-- Spec says: "Background write failure must clean up dispatch map entry and release read reference"
-- Code does: "Error path in process_write_job returns without cleanup, leaking the dispatch map entry and read reference"
+- Spec says: "Count-based TSC eviction (from v0) is NOT used in v1"
+- Code has: `max_cache_entries` (default: 10000) and `eviction_threshold` (default: 0.8) in DispatcherConfig, unused by v1 eviction logic
 
 **Proposed Resolution**:
 
-In the background writer error path, add:
-1. Call `dispatch_map.release_read(key)` to drop the read reference
-2. Call `dispatch_map.remove(key)` to clean up the leaked entry
+Mark the fields as deprecated in the code documentation:
 
-**Rationale**: This is a resource leak bug. The spec correctly identifies the required cleanup. Without it, failed background writes permanently leak dispatch map entries, eventually exhausting capacity.
+```rust
+/// **Deprecated in v1**: Memory-tier eviction is capacity-based.
+/// Retained for backward compatibility with v0 config consumers.
+pub max_cache_entries: usize,
+/// **Deprecated in v1**: Unused. See `ssd_eviction_threshold` for SSD eviction.
+pub eviction_threshold: f64,
+```
 
-**Confidence**: HIGH
+Add a note to the spec clarification section:
+> The `max_cache_entries` and `eviction_threshold` fields in `DispatcherConfig` are retained for API compatibility but unused by the v1 eviction logic.
 
----
-
-### Proposal 2: 001-dispatcher-cache-interface/FR-012
-
-**Direction**: HUMAN_DECISION
-
-**Current State**:
-- Spec says: "Validate all receptacles are connected at initialize() time"
-- Code does: "Only validates dispatch_map at init; gpu_services is checked lazily at first use"
-
-**Options**:
-- A) **ALIGN**: Add gpu_services validation to initialize() — fail fast if not connected
-- B) **BACKFILL**: Update spec to say "critical receptacles (dispatch_map) validated at init; optional receptacles may be validated lazily"
-
-**Questions**: Is there a scenario where the dispatcher should start without gpu_services connected (e.g., testing without GPU hardware)?
-
-**Confidence**: MEDIUM
-
----
-
-### Proposal 3: 001-dispatcher-cache-interface/FR-016
-
-**Direction**: HUMAN_DECISION
-
-**Current State**:
-- Spec says: "Pass a unique PCI-derived identifier to each extent manager"
-- Code does: "Passes data_disk_size but no PCI-derived unique identifier"
-
-**Options**:
-- A) **ALIGN**: Pass the PCI address string as a unique ID to each extent manager
-- B) **BACKFILL**: Update spec — drive index or size is sufficient since the dispatcher owns the drive list
-
-**Questions**: Is the unique ID needed for crash recovery (to identify which physical drive an extent belongs to)?
-
-**Confidence**: MEDIUM
-
----
-
-### Proposal 4: Unspecced - Two-phase Store API
-
-**Direction**: BACKFILL (Code -> Spec)
-
-**Feature**: prepare_store/commit_store/cancel_store methods
-**Location**: src/lib.rs
-
-**Proposed Addition to Spec**:
-- FR-020: The dispatcher MUST support a two-phase store protocol: `prepare_store(key, size)` allocates staging and returns an IPC handle; `commit_store(key)` finalizes the entry and enqueues background write; `cancel_store(key)` aborts and frees staging.
-
-**Rationale**: This API allows clients to write directly into staging buffers without an intermediate copy, which is critical for performance with large entries.
-
-**Confidence**: HIGH
-
----
-
-### Proposal 5: Unspecced - Eviction Mechanism
-
-**Direction**: BACKFILL (Code -> Spec)
-
-**Feature**: run_eviction_cycle with watermark-based LRU eviction
-**Location**: src/lib.rs
-
-**Proposed Addition to Spec**:
-- FR-021: The dispatcher MUST support capacity-based eviction. When staging or storage utilization exceeds a configurable high-watermark, the dispatcher evicts least-recently-used entries until utilization drops below the low-watermark. Entries with active references MUST NOT be evicted.
-
-**Rationale**: Eviction is essential for bounded-memory operation. The implementation is functional and tested.
-
-**Confidence**: HIGH
-
----
-
-### Proposal 6: Unspecced - Version Enums and format_on_init
-
-**Direction**: BACKFILL (Code -> Spec)
-
-**Feature**: BlockDeviceVersion/ExtentManagerVersion enums, format_on_init config
-**Location**: src/lib.rs
-
-**Proposed Addition to Spec**:
-- FR-022: DispatcherConfig MUST include a `format_on_init` flag. When true, the dispatcher formats all extent managers during initialization (destructive). When false, existing data is preserved and recovered.
-
-**Rationale**: This is a required operational parameter for first-run vs. restart scenarios.
+**Rationale**: Removing the fields would be a breaking change for existing consumers using struct literals. Deprecation with documentation is the minimal-risk approach.
 
 **Confidence**: HIGH

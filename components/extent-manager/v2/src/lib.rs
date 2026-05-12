@@ -577,6 +577,25 @@ impl IExtentManager for ExtentManagerV2 {
         self.checkpoint_timer_state.set_interval(interval);
     }
 
+    fn used_bytes(&self) -> u64 {
+        let regions = self.regions.read();
+        regions.as_ref().map_or(0, |rs| {
+            rs.iter()
+                .map(|r| {
+                    let r = r.read();
+                    r.buddy.total_usable_size() - r.buddy.total_free()
+                })
+                .sum()
+        })
+    }
+
+    fn capacity_bytes(&self) -> u64 {
+        let regions = self.regions.read();
+        regions.as_ref().map_or(0, |rs| {
+            rs.iter().map(|r| r.read().buddy.total_usable_size()).sum()
+        })
+    }
+
     fn checkpoint(&self) -> Result<(), ExtentManagerError> {
         let mut state = self.checkpoint_coalesce.lock().unwrap();
         let needed = if state.in_progress {

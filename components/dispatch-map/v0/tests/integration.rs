@@ -479,6 +479,14 @@ impl IExtentManager for MockExtentManagerComponent {
     }
 
     fn set_checkpoint_interval(&self, _interval: Option<std::time::Duration>) {}
+
+    fn used_bytes(&self) -> u64 {
+        0
+    }
+
+    fn capacity_bytes(&self) -> u64 {
+        0
+    }
 }
 
 #[test]

@@ -235,6 +235,7 @@ impl EngineInner {
                 max_cache_entries,
                 eviction_threshold,
                 format_on_init: true,
+                ..Default::default()
             })
             .map_err(|e| PyRuntimeError::new_err(format!("Dispatcher init failed: {e}")))?;
 

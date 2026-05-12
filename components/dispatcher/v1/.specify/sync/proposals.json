@@ -1,10 +1,10 @@
 {
-  "generated": "2026-05-05T00:00:00Z",
-  "based_on": "drift-report from 2026-05-05",
+  "generated": "2026-05-12T00:00:00Z",
+  "based_on": "drift-report from 2026-05-12",
   "summary": {
-    "backfill": 3,
+    "backfill": 1,
     "align": 1,
-    "human_decision": 2,
+    "human_decision": 0,
     "new_specs": 0,
     "remove_from_spec": 0
   },
@@ -12,80 +12,28 @@
     {
       "id": 1,
       "spec_id": "001-dispatcher-cache-interface",
-      "requirement": "FR-017",
-      "direction": "ALIGN",
-      "severity": "moderate",
-      "spec_text": "Background write failure must clean up dispatch map entry and release read reference",
-      "actual_behavior": "Error path returns without cleanup, leaking entry and reference",
-      "proposed_change": "Add release_read(key) and remove(key) calls in process_write_job error path",
-      "location": "src/background_writer.rs",
-      "rationale": "Resource leak bug — failed writes permanently consume dispatch map capacity",
+      "requirement": "unspecced",
+      "direction": "BACKFILL",
+      "feature": "Background SSD Evictor",
+      "proposed_change": "Add User Story 10 (SSD Capacity Eviction) + FR-029..FR-033 covering trigger condition, LRU eviction, entry filtering, low-watermark stop, shutdown, and config fields",
+      "location": "src/background.rs:108-282, src/lib.rs:658-695",
+      "rationale": "Without SSD eviction, drives fill up and write-throughs fail silently, causing permanent data loss on memory-tier eviction",
       "confidence": "HIGH",
-      "status": "pending"
+      "status": "applied"
     },
     {
       "id": 2,
       "spec_id": "001-dispatcher-cache-interface",
-      "requirement": "FR-012",
-      "direction": "HUMAN_DECISION",
+      "requirement": "FR-024",
+      "direction": "ALIGN",
       "severity": "minor",
-      "spec_text": "Validate all receptacles are connected at initialize() time",
-      "actual_behavior": "Only dispatch_map validated at init; gpu_services checked lazily",
-      "proposed_change": "Either add gpu_services validation to init, or update spec for lazy validation of optional receptacles",
-      "location": "src/lib.rs",
-      "rationale": "Depends on whether GPU-less testing scenarios are needed",
-      "confidence": "MEDIUM",
-      "status": "pending"
-    },
-    {
-      "id": 3,
-      "spec_id": "001-dispatcher-cache-interface",
-      "requirement": "FR-016",
-      "direction": "HUMAN_DECISION",
-      "severity": "minor",
-      "spec_text": "Pass a unique PCI-derived identifier to each extent manager",
-      "actual_behavior": "Passes data_disk_size instead of PCI-derived unique ID",
-      "proposed_change": "Either pass PCI address as unique ID, or update spec to accept size-based identification",
-      "location": "src/lib.rs",
-      "rationale": "Depends on whether unique ID is needed for crash recovery across drives",
-      "confidence": "MEDIUM",
-      "status": "pending"
-    },
-    {
-      "id": 4,
-      "spec_id": "001-dispatcher-cache-interface",
-      "requirement": "unspecced",
-      "direction": "BACKFILL",
-      "feature": "Two-phase store API (prepare_store/commit_store/cancel_store)",
-      "proposed_change": "Add FR-020 specifying two-phase store protocol for zero-copy writes",
-      "location": "src/lib.rs",
-      "rationale": "Critical performance API for large entries — avoids intermediate copy",
+      "spec_text": "Count-based TSC eviction (from v0) is NOT used in v1",
+      "actual_behavior": "DispatcherConfig still includes max_cache_entries and eviction_threshold fields, unused by v1 logic",
+      "proposed_change": "Add deprecation doc comments to the fields and a clarification note in the spec",
+      "location": "interfaces/src/idispatcher.rs:58-61",
+      "rationale": "Removing fields is breaking; deprecation with documentation is minimal-risk",
       "confidence": "HIGH",
-      "status": "pending"
-    },
-    {
-      "id": 5,
-      "spec_id": "001-dispatcher-cache-interface",
-      "requirement": "unspecced",
-      "direction": "BACKFILL",
-      "feature": "Eviction mechanism (run_eviction_cycle, watermark)",
-      "proposed_change": "Add FR-021 specifying LRU eviction with configurable watermarks",
-      "location": "src/lib.rs",
-      "rationale": "Essential for bounded-memory operation in production",
-      "confidence": "HIGH",
-      "status": "pending"
-    },
-    {
-      "id": 6,
-      "spec_id": "001-dispatcher-cache-interface",
-      "requirement": "unspecced",
-      "direction": "BACKFILL",
-      "feature": "format_on_init config flag and version enums",
-      "proposed_change": "Add FR-022 specifying format_on_init for first-run vs restart scenarios",
-      "location": "src/lib.rs",
-      "rationale": "Required operational parameter distinguishing fresh format from recovery",
-      "confidence": "HIGH",
-      "status": "pending"
+      "status": "applied"
     }
   ]
 }

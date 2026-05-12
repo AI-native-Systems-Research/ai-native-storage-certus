@@ -30,7 +30,7 @@ use component_core::query_interface;
 use extent_manager_v2::ExtentManagerV2;
 use spdk_env::ISPDKEnv;
 
-use crate::background::{BackgroundWriter, WriteJob};
+use crate::background::{BackgroundEvictor, BackgroundWriter, EvictorConfig, WriteJob};
 
 /// A pending store awaiting commit or cancel.
 ///
@@ -71,6 +71,7 @@ define_component! {
         fields: {
             initialized: AtomicBool,
             bg_writer: Mutex<Option<BackgroundWriter>>,
+            bg_evictor: Mutex<Option<BackgroundEvictor>>,
             data_drives: Mutex<Vec<DataDrive>>,
             pending_writes: Mutex<HashMap<CacheKey, PendingWrite>>,
         },
@@ -654,6 +655,42 @@ impl IDispatcher for DispatcherComponentV0 {
 
         *self.bg_writer.lock().unwrap() = Some(writer);
 
+        // Start background SSD evictor if drives exist and threshold is configured.
+        if config.ssd_eviction_threshold > 0.0 {
+            let dm_for_evictor = self
+                .dispatch_map
+                .get()
+                .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+            let mt_for_evictor = self
+                .memory_tier
+                .get()
+                .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+            let evictor_extent_mgrs: Vec<Arc<ExtentManagerV2>> = self
+                .data_drives
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|d| Arc::clone(&d.extent_mgr))
+                .collect();
+            let evictor_logger = self.logger.get().ok();
+
+            if !evictor_extent_mgrs.is_empty() {
+                let evictor = BackgroundEvictor::start(
+                    dm_for_evictor,
+                    mt_for_evictor,
+                    evictor_extent_mgrs,
+                    EvictorConfig {
+                        threshold: config.ssd_eviction_threshold,
+                        low_watermark: config.ssd_eviction_low_watermark,
+                        batch_size: config.ssd_eviction_batch_size,
+                        interval: std::time::Duration::from_secs(config.ssd_eviction_interval_secs),
+                    },
+                    evictor_logger,
+                );
+                *self.bg_evictor.lock().unwrap() = Some(evictor);
+            }
+        }
+
         self.initialized.store(true, Ordering::Release);
 
         self.log_info("dispatcher: initialized");
@@ -662,6 +699,10 @@ impl IDispatcher for DispatcherComponentV0 {
 
     fn shutdown(&self) -> Result<(), DispatcherError> {
         self.log_info("dispatcher: shutting down");
+
+        if let Some(mut evictor) = self.bg_evictor.lock().unwrap().take() {
+            evictor.shutdown();
+        }
 
         if let Some(mut writer) = self.bg_writer.lock().unwrap().take() {
             writer.shutdown();
@@ -1458,10 +1499,15 @@ mod tests {
 
         fn remove(&self, key: CacheKey) -> Result<(), DispatchMapError> {
             let mut inner = self.inner.lock().unwrap();
-            if inner.entries.remove(&key).is_some() {
-                Ok(())
-            } else {
-                Err(DispatchMapError::KeyNotFound(key))
+            match inner.entries.get(&key) {
+                None => Err(DispatchMapError::KeyNotFound(key)),
+                Some(entry) => {
+                    if entry.read_refs > 0 || entry.write_ref {
+                        return Err(DispatchMapError::ActiveReferences(key));
+                    }
+                    inner.entries.remove(&key);
+                    Ok(())
+                }
             }
         }
 
@@ -1603,6 +1649,7 @@ mod tests {
         let c = DispatcherComponentV0::new(
             AtomicBool::new(false),
             Mutex::new(None),
+            Mutex::new(None),
             Mutex::new(Vec::new()),
             Mutex::new(HashMap::new()),
         );
@@ -1637,19 +1684,19 @@ mod tests {
 
     #[test]
     fn component_creation() {
-        let _c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let _c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
     }
 
     #[test]
     fn query_idispatcher() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
         let d = query_interface!(c, IDispatcher);
         assert!(d.is_some());
     }
 
     #[test]
     fn initialize_without_receptacles_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
             metadata_pci_addr: "0000:01:00.0".to_string(),
@@ -1662,7 +1709,7 @@ mod tests {
 
     #[test]
     fn initialize_with_empty_pci_addrs_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
             metadata_pci_addr: "0000:01:00.0".to_string(),
@@ -1676,7 +1723,7 @@ mod tests {
 
     #[test]
     fn lookup_before_initialize_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
         let handle = IpcHandle {
@@ -1689,7 +1736,7 @@ mod tests {
 
     #[test]
     fn check_before_initialize_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.check(42);
         assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
@@ -1697,7 +1744,7 @@ mod tests {
 
     #[test]
     fn remove_before_initialize_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.remove(42);
         assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
@@ -1705,7 +1752,7 @@ mod tests {
 
     #[test]
     fn populate_before_initialize_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
         let handle = IpcHandle {
@@ -1718,7 +1765,7 @@ mod tests {
 
     #[test]
     fn populate_with_zero_size_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
         let d = query_interface!(c, IDispatcher).unwrap();
         // Even though not initialized, zero-size check comes after init check.
         // This test verifies the parameter validation exists in the code path.
@@ -1734,14 +1781,14 @@ mod tests {
 
     #[test]
     fn shutdown_without_initialize_succeeds() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
     }
 
     #[test]
     fn double_shutdown_succeeds() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
         assert!(d.shutdown().is_ok());
@@ -1751,6 +1798,7 @@ mod tests {
     fn concurrent_pre_init_calls_from_multiple_threads() {
         let c = Arc::new(DispatcherComponentV0::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(Vec::new()),
             Mutex::new(HashMap::new()),
@@ -1793,7 +1841,7 @@ mod tests {
     fn initialize_empty_addrs_with_dispatch_map() {
         let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
         c.dispatch_map.connect(dm).unwrap();
         c.memory_tier.connect(mt).unwrap();
 
@@ -1812,7 +1860,7 @@ mod tests {
         let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
         let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
         c.memory_tier.connect(mt).unwrap();
@@ -1875,7 +1923,7 @@ mod tests {
         let gpu: Arc<dyn IGpuServices + Send + Sync> = Arc::new(MockGpuServices);
         let mt: Arc<dyn IMemoryTier + Send + Sync> =
             Arc::new(MockMemoryTier::with_fail_insert(1024 * 1024));
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
         c.gpu_services.connect(gpu).unwrap();
@@ -2191,6 +2239,7 @@ mod tests {
         let c = DispatcherComponentV0::new(
             AtomicBool::new(false),
             Mutex::new(None),
+            Mutex::new(None),
             Mutex::new(Vec::new()),
             Mutex::new(HashMap::new()),
         );
@@ -2241,5 +2290,174 @@ mod tests {
         assert!(matches!(err, Err(DispatcherError::AlreadyExists(99))));
 
         d.shutdown().unwrap();
+    }
+
+    // -----------------------------------------------------------------------
+    // Background SSD Evictor tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn evictor_get_evictable_offset_block_device() {
+        let dm = Arc::new(MockDispatchMap::new());
+        let dm_iface: Arc<dyn IDispatchMap + Send + Sync> = Arc::clone(&dm) as _;
+
+        // Insert an entry that looks like BlockDevice (null pointer + ssd_offset).
+        dm.inner.lock().unwrap().entries.insert(
+            1,
+            MockEntry {
+                location: MockEntryLocation::MemoryTier {
+                    pointer: std::ptr::null_mut(),
+                    size: 4096,
+                    ssd_offset: Some(8192),
+                },
+                write_ref: false,
+                read_refs: 0,
+            },
+        );
+
+        let offset = crate::background::BackgroundEvictor::get_evictable_offset(&dm_iface, 1);
+        assert_eq!(offset, Some(8192));
+    }
+
+    #[test]
+    fn evictor_get_evictable_offset_skips_memory_tier() {
+        let dm = Arc::new(MockDispatchMap::new());
+        let dm_iface: Arc<dyn IDispatchMap + Send + Sync> = Arc::clone(&dm) as _;
+
+        // Insert a MemoryTier entry (non-null pointer = still hot in DRAM).
+        let mut buf = vec![0u8; 4096];
+        dm.inner.lock().unwrap().entries.insert(
+            2,
+            MockEntry {
+                location: MockEntryLocation::MemoryTier {
+                    pointer: buf.as_mut_ptr(),
+                    size: 4096,
+                    ssd_offset: Some(16384),
+                },
+                write_ref: false,
+                read_refs: 0,
+            },
+        );
+
+        let offset = crate::background::BackgroundEvictor::get_evictable_offset(&dm_iface, 2);
+        assert_eq!(offset, None, "memory-tier entries should not be evictable");
+        std::mem::forget(buf);
+    }
+
+    #[test]
+    fn evictor_get_evictable_offset_skips_nonexistent() {
+        let dm = Arc::new(MockDispatchMap::new());
+        let dm_iface: Arc<dyn IDispatchMap + Send + Sync> = Arc::clone(&dm) as _;
+
+        let offset = crate::background::BackgroundEvictor::get_evictable_offset(&dm_iface, 99);
+        assert_eq!(offset, None);
+    }
+
+    #[test]
+    fn evictor_full_eviction_cycle() {
+        let dm = Arc::new(MockDispatchMap::new());
+        let dm_iface: Arc<dyn IDispatchMap + Send + Sync> = Arc::clone(&dm) as _;
+        let mt = Arc::new(MockMemoryTier::new(1024 * 1024));
+        let mt_iface: Arc<dyn IMemoryTier + Send + Sync> = Arc::clone(&mt) as _;
+
+        // Insert 10 entries all in BlockDevice state (null pointer + ssd_offset).
+        for key in 0..10u64 {
+            dm.inner.lock().unwrap().entries.insert(
+                key,
+                MockEntry {
+                    location: MockEntryLocation::MemoryTier {
+                        pointer: std::ptr::null_mut(),
+                        size: 4096,
+                        ssd_offset: Some(key * 4096),
+                    },
+                    write_ref: false,
+                    read_refs: 0,
+                },
+            );
+        }
+
+        assert_eq!(dm.entry_count(), 10);
+
+        // Simulate evictor logic: get oldest keys, filter, remove.
+        let candidates = dm_iface.oldest_keys(5);
+        assert_eq!(candidates.len(), 5);
+
+        for key in &candidates {
+            let offset =
+                crate::background::BackgroundEvictor::get_evictable_offset(&dm_iface, *key);
+            assert!(offset.is_some(), "key {key} should be evictable");
+
+            let _ = mt_iface.remove(*key);
+            dm_iface.remove(*key).unwrap();
+        }
+
+        assert_eq!(dm.entry_count(), 5, "5 entries should remain after evicting 5");
+    }
+
+    #[test]
+    fn evictor_skips_entries_with_active_references() {
+        let dm = Arc::new(MockDispatchMap::new());
+        let dm_iface: Arc<dyn IDispatchMap + Send + Sync> = Arc::clone(&dm) as _;
+
+        // Insert a BlockDevice entry.
+        dm.inner.lock().unwrap().entries.insert(
+            1,
+            MockEntry {
+                location: MockEntryLocation::MemoryTier {
+                    pointer: std::ptr::null_mut(),
+                    size: 4096,
+                    ssd_offset: Some(4096),
+                },
+                write_ref: false,
+                read_refs: 0,
+            },
+        );
+
+        // Take two read references — one simulates a concurrent reader,
+        // the other will be consumed by get_evictable_offset's release_read.
+        dm_iface.take_read(1).unwrap();
+        dm_iface.take_read(1).unwrap();
+
+        // get_evictable_offset sees BlockDevice and returns Some(offset),
+        // releasing one read ref internally.
+        let offset = crate::background::BackgroundEvictor::get_evictable_offset(&dm_iface, 1);
+        assert_eq!(offset, Some(4096));
+
+        // Remove fails because one read ref remains (the concurrent reader).
+        let remove_result = dm_iface.remove(1);
+        assert!(
+            remove_result.is_err(),
+            "remove should fail with active references"
+        );
+
+        // Entry still exists.
+        assert!(dm.inner.lock().unwrap().entries.contains_key(&1));
+
+        // Release the concurrent reader's ref and retry.
+        dm_iface.release_read(1).unwrap();
+        dm_iface.remove(1).unwrap();
+        assert!(!dm.inner.lock().unwrap().entries.contains_key(&1));
+    }
+
+    #[test]
+    fn evictor_start_and_shutdown() {
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
+
+        let mut evictor = crate::background::BackgroundEvictor::start(
+            dm,
+            mt,
+            vec![],
+            crate::background::EvictorConfig {
+                threshold: 0.9,
+                low_watermark: 0.8,
+                batch_size: 10,
+                interval: std::time::Duration::from_millis(50),
+            },
+            None,
+        );
+
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        evictor.shutdown();
     }
 }

@@ -159,6 +159,24 @@ When a lookup hits an entry in BlockDevice state (evicted from memory-tier but p
 
 ---
 
+### User Story 10 - SSD Capacity Eviction (Priority: P3)
+
+When the SSD data drives approach capacity, a background evictor removes the oldest (LRU by TSC timestamp) BlockDevice entries to prevent extent allocation failures during write-through. The evictor periodically checks combined SSD utilization (`used_bytes() / capacity_bytes()`) across all data drives. When utilization exceeds the high-water mark (`ssd_eviction_threshold`), it evicts entries in batches until utilization drops below the low-water mark (`ssd_eviction_low_watermark`). Entries in MemoryTier state are skipped (still hot in DRAM). Entries with active read/write references are skipped.
+
+**Why this priority**: Without SSD eviction, drives fill up and all background write-throughs fail silently. New entries remain in memory-tier without SSD backing and are permanently lost on memory-tier eviction. This is critical for long-running workloads but operates transparently without client interaction.
+
+**Independent Test**: Can be tested by configuring a low SSD eviction threshold, populating entries past the threshold, and verifying that old entries are removed from the dispatch map and their extents freed.
+
+**Acceptance Scenarios**:
+
+1. **Given** combined SSD utilization exceeds `ssd_eviction_threshold` (default 0.9), **When** the evictor wakes, **Then** it calls `oldest_keys(batch_size)` and evicts BlockDevice entries until utilization drops below `ssd_eviction_low_watermark` (default 0.8) or the batch is exhausted.
+2. **Given** an entry is in MemoryTier state (still hot in DRAM), **When** the evictor evaluates it, **Then** it is skipped.
+3. **Given** an entry has active read or write references, **When** the evictor attempts removal, **Then** `dm.remove()` fails and the entry is skipped without error.
+4. **Given** `ssd_eviction_threshold` is set to 0.0 in DispatcherConfig, **When** the dispatcher initializes, **Then** the background evictor is NOT started.
+5. **Given** shutdown is called while the evictor is running, **When** the evictor is mid-sweep, **Then** it finishes the current entry, exits the loop, and the thread joins cleanly.
+
+---
+
 ### Edge Cases
 
 - When memory-tier insertion fails during populate (pool full after eviction attempt), populate returns an `AllocationFailed` error to the caller and no dispatch map entry is created.
@@ -169,8 +187,15 @@ When a lookup hits an entry in BlockDevice state (evicted from memory-tier but p
 - When the block device reports an I/O error during background write-through, the write-through is abandoned (the entry remains in memory-tier without SSD backing).
 - When `prepare_store` fails after registering in the dispatch map (e.g., extent allocation failure), the dispatch map entry is cleaned up before returning the error.
 - When eviction is triggered but all memory-tier entries have no completed write-through, eviction may leave entries in an inconsistent state (lost from memory-tier but not retrievable from SSD). This is an acceptable trade-off for preventing complete stalls.
+- When the SSD evictor runs but all candidate entries have active references, no entries are evicted in that sweep. The evictor re-checks on its next interval.
+- When the SSD evictor removes an entry, it frees the extent via the extent manager and removes the dispatch-map entry. No memory-tier operation is needed (the entry was already evicted from DRAM).
 
 ## Clarifications
+
+### Session 2026-05-12 (SSD Eviction)
+
+- Q: What about `max_cache_entries` and `eviction_threshold` in DispatcherConfig? -> A: These are vestigial from the v0 count-based eviction and are unused in v1. Memory-tier eviction is purely capacity-based (FR-024). They are retained in the struct for API backward compatibility but should be considered deprecated.
+- Q: How does the SSD evictor determine drive ownership for extent removal? -> A: Uses `key % num_drives` to identify the target drive, matching the write-through path's drive selection.
 
 ### Session 2026-05-08 (Memory-Tier Rewrite)
 
@@ -212,6 +237,11 @@ When a lookup hits an entry in BlockDevice state (evicted from memory-tier but p
 - **FR-026**: The dispatcher MUST support `BlockDeviceVersion` selection (V1, V2) via `DispatcherConfig`.
 - **FR-027**: The dispatcher MUST support `ExtentManagerVersion` selection via `DispatcherConfig`.
 - **FR-028**: On BlockDevice lookup (promotion), the pipelined reader MUST re-insert the entry into the memory-tier and re-register it as a MemoryTier entry in the dispatch map.
+- **FR-029**: The dispatcher MUST start a background SSD evictor thread during `initialize()` if `ssd_eviction_threshold > 0.0` and at least one data drive is configured. The evictor MUST be shut down (thread joined) during `shutdown()`.
+- **FR-030**: The SSD evictor MUST periodically check combined SSD utilization (sum of `IExtentManager::used_bytes()` / sum of `IExtentManager::capacity_bytes()` across all extent managers). The check interval MUST be configurable via `ssd_eviction_interval_secs` (default: 5 seconds).
+- **FR-031**: When SSD utilization exceeds `ssd_eviction_threshold` (default: 0.9), the evictor MUST evict BlockDevice-only entries using `IDispatchMap::oldest_keys(batch_size)` for LRU ordering, stopping when utilization drops below `ssd_eviction_low_watermark` (default: 0.8) or the batch is exhausted.
+- **FR-032**: The SSD evictor MUST skip entries in MemoryTier state (still hot in DRAM). Entries with active read or write references MUST be skipped gracefully (dm.remove fails without panic).
+- **FR-033**: The `DispatcherConfig` MUST include `ssd_eviction_threshold` (f64, default 0.9), `ssd_eviction_low_watermark` (f64, default 0.8), `ssd_eviction_batch_size` (usize, default 64), and `ssd_eviction_interval_secs` (u64, default 5). Setting `ssd_eviction_threshold` to 0.0 disables the evictor.
 
 ### Key Entities
 
@@ -224,6 +254,7 @@ When a lookup hits an entry in BlockDevice state (evicted from memory-tier but p
 - **Background Writer**: A dedicated thread that processes write-through jobs, reading from memory-tier pointers and writing to SSD via extent managers.
 - **Pipelined Reader**: A ring-buffer-based reader (`pipeline.rs`) that reads SSD data in MDTS-sized chunks into a ring of DMA buffers, copying each to both memory-tier and GPU destinations.
 - **PendingWrite**: A temporary structure holding a WriteHandle (extent reservation), DMA buffer, size, and drive index for the prepare_store/commit_store/cancel_store workflow.
+- **Background SSD Evictor**: A dedicated thread that periodically checks SSD utilization and evicts the oldest BlockDevice entries when capacity exceeds a threshold.
 
 ## Success Criteria *(mandatory)*
 
@@ -241,6 +272,7 @@ When a lookup hits an entry in BlockDevice state (evicted from memory-tier but p
 - **SC-010**: The touch operation refreshes an entry's dispatch-map timestamp without performing DMA.
 - **SC-011**: Entries evicted from memory-tier but present on SSD can be promoted back via the pipelined reader on subsequent lookup.
 - **SC-012**: The pipelined reader correctly streams MDTS-sized chunks from SSD to both memory-tier and GPU in a single pass.
+- **SC-013**: The background SSD evictor removes the oldest BlockDevice entries when SSD utilization exceeds the configured threshold, freeing extents until utilization drops below the low-water mark.
 
 ## Assumptions
 
