@@ -117,7 +117,7 @@ vLLM's `OffloadingConnectorScheduler` calls on the manager returned by
 
 1. **Eviction only from `prepare_store`** — the only trigger for freeing capacity.
 2. **Pinning protects from eviction** — blocks between `prepare_*` and `complete_*` cannot be evicted.
-3. **Blocks not loadable until `complete_store(success=True)`** — prevents reading partially-written data.
+3. **Blocks readable immediately after `populate()`** — GPU→DRAM copy completes atomically during store, no gating needed.
 4. **`None` return from `prepare_store` = hard rejection** — vLLM will not retry automatically.
 5. **`None` return from `lookup` = soft delay** — vLLM scheduler retries the request later.
 6. **Consecutive prefix semantics** — `lookup` returns the longest prefix of hits, not total hit count.
@@ -153,7 +153,7 @@ Per-method breakdown:
 |---|---|---|---|
 | `lookup(keys)` | `batch_check(keys)` | `dispatcher.check()` per key | **Done** |
 | `prepare_store(keys)` | `prepare_store(keys)` | Filters cached keys, evicts LRU via `dispatcher.remove()` when over watermark, returns `None` if can't free enough | **Done** |
-| `complete_store(keys, ok)` | `complete_store(keys, ok)` | On failure: `dispatcher.remove()` per key. On success: mark ready in dispatch-map. | **Partially done** (remove works, readiness gating TBD) |
+| `complete_store(keys, ok)` | `complete_store(keys, ok)` | On failure: `dispatcher.remove()` per key. On success: no-op (entry already readable after `populate`). | **Done** |
 | `touch(keys)` | `touch(keys)` | Dispatch-map: update threshold LRU ordering | **Done** |
 | `prepare_load(keys)` | `prepare_load(keys)` | Dispatch-map: `lookup()` (increments `read_ref`, blocks eviction, returns storage offset) | **Done** |
 | `complete_load(keys)` | `complete_load(keys)` | Dispatch-map: `release_read()` (decrements `read_ref`) | **Done** |
@@ -176,10 +176,6 @@ When `prepare_store` is called and `entry_count + to_store.len() > eviction_wate
 Returning `None` is **required** because vLLM's worker asserts `transfer_result.success` (worker.py:348) — store failures crash the process. The only safe capacity signal is rejecting at `prepare_store` before the handler is called.
 
 **Why llm-d FS backend doesn't need this:** its handler writes to a POSIX shared filesystem (Lustre, CephFS) — no fixed DRAM pool, no allocation failure. `write()` doesn't fail due to capacity. **Why we do:** our `dispatcher.populate()` allocates from a fixed-size DRAM staging pool. When full and nothing is evictable (all entries mid-background-write), `populate()` returns `AllocationFailed`, `store_async` returns `false`, and the worker assert crashes the process. Proactive eviction prevents this by ensuring capacity exists before the handler is called.
-
-### Remaining engine.rs work
-
-None. All required semantics are implemented. Readiness gating is a non-issue: `populate()` copies GPU data into DRAM and registers the entry in the dispatch-map immediately — the block is fully readable from memory-tier before `complete_store` is ever called. `commit_store()` only persists to NVMe for durability, it doesn't affect read correctness.
 
 ### Notes on `prepare_load` ref-counting
 
