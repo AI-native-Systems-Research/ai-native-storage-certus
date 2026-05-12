@@ -7,6 +7,7 @@
 //! The Python `certus_connector` package calls into this module for:
 //! - Index operations (batch_check, touch)
 //! - Allocation and eviction (prepare_store, complete_store)
+//! - Load pinning (prepare_load, complete_load)
 //! - Async I/O (store_async, load_async, poll_completions)
 
 mod engine;
@@ -95,6 +96,17 @@ impl CertusEngine {
     /// Finalize or abort a store operation.
     fn complete_store(&self, keys: Vec<u64>, success: bool) -> PyResult<()> {
         self.inner.complete_store(&keys, success)
+    }
+
+    /// Pin blocks for reading (protect from eviction) and return their
+    /// storage offsets. Call complete_load when DMA finishes.
+    fn prepare_load(&self, keys: Vec<u64>) -> PyResult<Vec<u64>> {
+        self.inner.prepare_load(&keys)
+    }
+
+    /// Unpin blocks after load DMA completes.
+    fn complete_load(&self, keys: Vec<u64>) -> PyResult<()> {
+        self.inner.complete_load(&keys)
     }
 
     /// Update LRU ordering for the given keys.

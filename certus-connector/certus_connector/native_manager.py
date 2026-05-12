@@ -60,7 +60,12 @@ class NativeCertusOffloadingManager(OffloadingManager):
 
     def prepare_load(self, keys: Iterable[OffloadKey]) -> LoadStoreSpec:
         int_keys = _keys_to_u64s(keys)
-        locations = [BlockLocation(nvme_slab=k, dram_slot=None) for k in int_keys]
+        offsets = self._engine.prepare_load(int_keys)
+        locations = [BlockLocation(nvme_slab=o, dram_slot=None) for o in offsets]
+        # Note: the dispatcher's lookup() re-discovers the block location
+        # internally (DRAM vs NVMe) and handles the DMA path accordingly.
+        # These offsets are used by the handler for addressing but the
+        # dispatcher doesn't rely on them.
         return CertusLoadStoreSpec(locations)
 
     def touch(self, keys: Iterable[OffloadKey]) -> None:
@@ -68,7 +73,8 @@ class NativeCertusOffloadingManager(OffloadingManager):
         self._engine.touch(int_keys)
 
     def complete_load(self, keys: Iterable[OffloadKey]) -> None:
-        pass
+        int_keys = _keys_to_u64s(keys)
+        self._engine.complete_load(int_keys)
 
     def prepare_store(self, keys: Iterable[OffloadKey]) -> PrepareStoreOutput | None:
         keys_list = list(keys)
