@@ -1,0 +1,335 @@
+{"ts": 5.223338579991832, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 0, "src": {"medium": "GPU", "block_ids": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], "group_sizes": [12]}, "dst": {"medium": "CPU", "block_ids": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]}}
+{"ts": 5.2244417370529845, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 1, "src": {"medium": "GPU", "block_ids": [16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60], "group_sizes": [45]}, "dst": {"medium": "CPU", "block_ids": [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56]}}
+{"ts": 5.224945351015776, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 2, "src": {"medium": "GPU", "block_ids": [61], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [57]}}
+{"ts": 5.225092584965751, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 3, "src": {"medium": "GPU", "block_ids": [63, 64, 65, 66, 67, 68, 69], "group_sizes": [7]}, "dst": {"medium": "CPU", "block_ids": [58, 59, 60, 61, 62, 63, 64]}}
+{"ts": 5.225261277984828, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 4, "src": {"medium": "GPU", "block_ids": [71, 72, 73, 74], "group_sizes": [4]}, "dst": {"medium": "CPU", "block_ids": [65, 66, 67, 68]}}
+{"ts": 5.225400054943748, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 5, "src": {"medium": "GPU", "block_ids": [76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92], "group_sizes": [17]}, "dst": {"medium": "CPU", "block_ids": [69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85]}}
+{"ts": 5.225642965990119, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 6, "src": {"medium": "GPU", "block_ids": [95], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [86]}}
+{"ts": 5.225760424043983, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 7, "src": {"medium": "GPU", "block_ids": [96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112], "group_sizes": [17]}, "dst": {"medium": "CPU", "block_ids": [87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103]}}
+{"ts": 5.2259842089843005, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 8, "src": {"medium": "GPU", "block_ids": [114], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [104]}}
+{"ts": 5.2260941429995, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 9, "src": {"medium": "GPU", "block_ids": [116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129], "group_sizes": [14]}, "dst": {"medium": "CPU", "block_ids": [105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118]}}
+{"ts": 5.226299533969723, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 10, "src": {"medium": "GPU", "block_ids": [131], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [119]}}
+{"ts": 5.226412874995731, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 11, "src": {"medium": "GPU", "block_ids": [133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175], "group_sizes": [43]}, "dst": {"medium": "CPU", "block_ids": [120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162]}}
+{"ts": 5.226844244985841, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 12, "src": {"medium": "GPU", "block_ids": [177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191], "group_sizes": [15]}, "dst": {"medium": "CPU", "block_ids": [163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177]}}
+{"ts": 5.227060756995343, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 13, "src": {"medium": "GPU", "block_ids": [193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224], "group_sizes": [32]}, "dst": {"medium": "CPU", "block_ids": [178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209]}}
+{"ts": 5.227388464962132, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 14, "src": {"medium": "GPU", "block_ids": [226], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [210]}}
+{"ts": 5.227499461034313, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 15, "src": {"medium": "GPU", "block_ids": [228], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [211]}}
+{"ts": 5.227623049984686, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 16, "src": {"medium": "GPU", "block_ids": [230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277], "group_sizes": [48]}, "dst": {"medium": "CPU", "block_ids": [212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259]}}
+{"ts": 5.344766721944325, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]}
+{"ts": 5.4392076230142266, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 17, "src": {"medium": "GPU", "block_ids": [1], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [260]}}
+{"ts": 5.439484506030567, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 18, "src": {"medium": "GPU", "block_ids": [94], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [261]}}
+{"ts": 5.531802947982214, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [17, 18]}
+{"ts": 5.814046627026983, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 19, "src": {"medium": "GPU", "block_ids": [93], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [262]}}
+{"ts": 5.814334722002968, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 20, "src": {"medium": "GPU", "block_ids": [176], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [263]}}
+{"ts": 5.905684274970554, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [19, 20]}
+{"ts": 5.907202181988396, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 21, "src": {"medium": "GPU", "block_ids": [62], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [264]}}
+{"ts": 5.907475359039381, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 22, "src": {"medium": "GPU", "block_ids": [75], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [265]}}
+{"ts": 5.998845461057499, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [21, 22]}
+{"ts": 6.000568749033846, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 23, "src": {"medium": "GPU", "block_ids": [70], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [266]}}
+{"ts": 6.000767457997426, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 24, "src": {"medium": "GPU", "block_ids": [113], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [267]}}
+{"ts": 6.09200589498505, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [23, 24]}
+{"ts": 6.093496992951259, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 25, "src": {"medium": "GPU", "block_ids": [2], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [268]}}
+{"ts": 6.093782662996091, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 26, "src": {"medium": "GPU", "block_ids": [132], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [269]}}
+{"ts": 6.093917793012224, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 27, "src": {"medium": "GPU", "block_ids": [278], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [270]}}
+{"ts": 6.18525579595007, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [25, 26, 27]}
+{"ts": 6.186293961945921, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 28, "src": {"medium": "GPU", "block_ids": [15], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [271]}}
+{"ts": 6.1865752439480275, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 29, "src": {"medium": "GPU", "block_ids": [229], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [272]}}
+{"ts": 6.2784178929869086, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [28, 29]}
+{"ts": 6.363383749965578, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 30, "src": {"medium": "GPU", "block_ids": [115], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [273]}}
+{"ts": 6.444304200005718, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [30]}
+{"ts": 6.445357935037464, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 31, "src": {"medium": "GPU", "block_ids": [227], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [274]}}
+{"ts": 6.526904916972853, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [31]}
+{"ts": 6.692717537982389, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 32, "src": {"medium": "GPU", "block_ids": [192], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [275]}}
+{"ts": 6.77308187505696, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [32]}
+{"ts": 6.774413065053523, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 33, "src": {"medium": "GPU", "block_ids": [280], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [276]}}
+{"ts": 6.854516178020276, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [33]}
+{"ts": 6.855565755977295, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 34, "src": {"medium": "GPU", "block_ids": [281], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [277]}}
+{"ts": 6.855878607020713, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 35, "src": {"medium": "GPU", "block_ids": [282], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [278]}}
+{"ts": 6.9361808790126815, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [34, 35]}
+{"ts": 7.259577548946254, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 36, "src": {"medium": "GPU", "block_ids": [286], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [279]}}
+{"ts": 7.338574778987095, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [36]}
+{"ts": 7.3400966939516366, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 37, "src": {"medium": "GPU", "block_ids": [287], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [280]}}
+{"ts": 7.418634901987389, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [37]}
+{"ts": 7.419962596031837, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 38, "src": {"medium": "GPU", "block_ids": [289], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [281]}}
+{"ts": 7.42015059501864, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 39, "src": {"medium": "GPU", "block_ids": [290], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [282]}}
+{"ts": 7.420269786030985, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 40, "src": {"medium": "GPU", "block_ids": [291], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [283]}}
+{"ts": 7.498731874045916, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [38, 39, 40]}
+{"ts": 7.499812138965353, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 41, "src": {"medium": "GPU", "block_ids": [293], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [284]}}
+{"ts": 7.578132253023796, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [41]}
+{"ts": 7.65874222596176, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 42, "src": {"medium": "GPU", "block_ids": [294], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [285]}}
+{"ts": 7.737007669056766, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [42]}
+{"ts": 7.737888684030622, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 43, "src": {"medium": "GPU", "block_ids": [295], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [286]}}
+{"ts": 7.81643131095916, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [43]}
+{"ts": 8.055111065041274, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 44, "src": {"medium": "GPU", "block_ids": [297], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [287]}}
+{"ts": 8.132501072948799, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [44]}
+{"ts": 8.133390833972953, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 45, "src": {"medium": "GPU", "block_ids": [298], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [288]}}
+{"ts": 8.133662007981911, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 46, "src": {"medium": "GPU", "block_ids": [299], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [289]}}
+{"ts": 8.211207153042778, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [45, 46]}
+{"ts": 8.526100363000296, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 47, "src": {"medium": "GPU", "block_ids": [300], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [290]}}
+{"ts": 8.603517169947736, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [47]}
+{"ts": 8.604983831988648, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 48, "src": {"medium": "GPU", "block_ids": [301], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [291]}}
+{"ts": 8.681945355026983, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [48]}
+{"ts": 8.683231472037733, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 49, "src": {"medium": "GPU", "block_ids": [302], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [292]}}
+{"ts": 8.683415894047357, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 50, "src": {"medium": "GPU", "block_ids": [303], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [293]}}
+{"ts": 8.76259903900791, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [49, 50]}
+{"ts": 8.763986925012432, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 51, "src": {"medium": "GPU", "block_ids": [305], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [294]}}
+{"ts": 8.841120216995478, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [51]}
+{"ts": 8.920579715049826, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 52, "src": {"medium": "GPU", "block_ids": [306], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [295]}}
+{"ts": 8.997978830011562, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [52]}
+{"ts": 8.998823186964728, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 53, "src": {"medium": "GPU", "block_ids": [307], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [296]}}
+{"ts": 9.076450404943898, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [53]}
+{"ts": 9.312970380997285, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 54, "src": {"medium": "GPU", "block_ids": [308], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [297]}}
+{"ts": 9.390351283014752, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [54]}
+{"ts": 9.391241654986516, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 55, "src": {"medium": "GPU", "block_ids": [309], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [298]}}
+{"ts": 9.391502358950675, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 56, "src": {"medium": "GPU", "block_ids": [310], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [299]}}
+{"ts": 9.468877939973027, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [55, 56]}
+{"ts": 9.783810592023656, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 57, "src": {"medium": "GPU", "block_ids": [311], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [300]}}
+{"ts": 9.860991362016648, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [57]}
+{"ts": 9.862270956044085, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 58, "src": {"medium": "GPU", "block_ids": [312], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [301]}}
+{"ts": 9.939567200024612, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [58]}
+{"ts": 9.940455798991024, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 59, "src": {"medium": "GPU", "block_ids": [313], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [302]}}
+{"ts": 9.940757308970205, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 60, "src": {"medium": "GPU", "block_ids": [314], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [303]}}
+{"ts": 10.018141585984267, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [59, 60]}
+{"ts": 10.176038425997831, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 61, "src": {"medium": "GPU", "block_ids": [316], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [304]}}
+{"ts": 10.253497431986034, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [61]}
+{"ts": 10.254372737021185, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 62, "src": {"medium": "GPU", "block_ids": [317], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [305]}}
+{"ts": 10.331932649947703, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [62]}
+{"ts": 10.568103568977676, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 63, "src": {"medium": "GPU", "block_ids": [318], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [306]}}
+{"ts": 10.645529733970761, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [63]}
+{"ts": 10.64636834000703, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 64, "src": {"medium": "GPU", "block_ids": [319], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [307]}}
+{"ts": 10.646636366960593, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 65, "src": {"medium": "GPU", "block_ids": [320], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [308]}}
+{"ts": 10.724105432047509, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [64, 65]}
+{"ts": 11.038460092036985, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 66, "src": {"medium": "GPU", "block_ids": [321], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [309]}}
+{"ts": 11.115940858027898, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [66]}
+{"ts": 11.117345795035362, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 67, "src": {"medium": "GPU", "block_ids": [322], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [310]}}
+{"ts": 11.194473776966333, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [67]}
+{"ts": 11.195371923968196, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 68, "src": {"medium": "GPU", "block_ids": [323], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [311]}}
+{"ts": 11.195649239001796, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 69, "src": {"medium": "GPU", "block_ids": [324], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [312]}}
+{"ts": 11.273011034005322, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [68, 69]}
+{"ts": 11.430969818960875, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 70, "src": {"medium": "GPU", "block_ids": [325], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [313]}}
+{"ts": 11.508150649024174, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [70]}
+{"ts": 11.509037113981321, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 71, "src": {"medium": "GPU", "block_ids": [326], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [314]}}
+{"ts": 11.586591626983136, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [71]}
+{"ts": 11.82288835896179, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 72, "src": {"medium": "GPU", "block_ids": [327], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [315]}}
+{"ts": 11.900005931966007, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [72]}
+{"ts": 11.900883971014991, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 73, "src": {"medium": "GPU", "block_ids": [328], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [316]}}
+{"ts": 11.901185331051238, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 74, "src": {"medium": "GPU", "block_ids": [329], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [317]}}
+{"ts": 11.978761584032327, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [73, 74]}
+{"ts": 12.29413774900604, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 75, "src": {"medium": "GPU", "block_ids": [330], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [318]}}
+{"ts": 12.371269798954017, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [75]}
+{"ts": 12.372530058026314, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 76, "src": {"medium": "GPU", "block_ids": [331], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [319]}}
+{"ts": 12.439237270969898, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [76]}
+{"ts": 12.440257193055004, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 77, "src": {"medium": "GPU", "block_ids": [332], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [320]}}
+{"ts": 12.440486739040352, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 78, "src": {"medium": "GPU", "block_ids": [333], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [321]}}
+{"ts": 12.506252415012568, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [77, 78]}
+{"ts": 12.641857155947946, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 79, "src": {"medium": "GPU", "block_ids": [334], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [322]}}
+{"ts": 12.708051398047246, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [79]}
+{"ts": 12.708873854018748, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 80, "src": {"medium": "GPU", "block_ids": [335], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [323]}}
+{"ts": 12.77522908395622, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [80]}
+{"ts": 13.044855889049359, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 81, "src": {"medium": "GPU", "block_ids": [337], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [324]}}
+{"ts": 13.045110360952094, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 82, "src": {"medium": "GPU", "block_ids": [338], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [325]}}
+{"ts": 13.111507890047505, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [81, 82]}
+{"ts": 13.381392883951776, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 83, "src": {"medium": "GPU", "block_ids": [339], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [326]}}
+{"ts": 13.447433019056916, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [83]}
+{"ts": 13.448717953986488, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 84, "src": {"medium": "GPU", "block_ids": [340], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [327]}}
+{"ts": 13.514648195006885, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [84]}
+{"ts": 13.515487232012674, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 85, "src": {"medium": "GPU", "block_ids": [341], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [328]}}
+{"ts": 13.515782480011694, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 86, "src": {"medium": "GPU", "block_ids": [342], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [329]}}
+{"ts": 13.582103917025961, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [85, 86]}
+{"ts": 13.717610295978375, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 87, "src": {"medium": "GPU", "block_ids": [343], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [330]}}
+{"ts": 13.783922616043128, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [87]}
+{"ts": 13.784762323950417, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 88, "src": {"medium": "GPU", "block_ids": [344], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [331]}}
+{"ts": 13.851105001056567, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [88]}
+{"ts": 14.12059991096612, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 89, "src": {"medium": "GPU", "block_ids": [345], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [332]}}
+{"ts": 14.120899638044648, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 90, "src": {"medium": "GPU", "block_ids": [346], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [333]}}
+{"ts": 14.18733380397316, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [89, 90]}
+{"ts": 14.458129878970794, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 91, "src": {"medium": "GPU", "block_ids": [347], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [334]}}
+{"ts": 14.5245244220132, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [91]}
+{"ts": 14.525917917955667, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 92, "src": {"medium": "GPU", "block_ids": [348], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [335]}}
+{"ts": 14.592026008991525, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [92]}
+{"ts": 14.592936669010669, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 93, "src": {"medium": "GPU", "block_ids": [349], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [336]}}
+{"ts": 14.593209745944478, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 94, "src": {"medium": "GPU", "block_ids": [350], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [337]}}
+{"ts": 14.659569544019178, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [93, 94]}
+{"ts": 14.795366793056019, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 95, "src": {"medium": "GPU", "block_ids": [351], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [338]}}
+{"ts": 14.861578986980021, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [95]}
+{"ts": 14.862430847948417, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 96, "src": {"medium": "GPU", "block_ids": [352], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [339]}}
+{"ts": 14.928951184963807, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [96]}
+{"ts": 15.199183993972838, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 97, "src": {"medium": "GPU", "block_ids": [353], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [340]}}
+{"ts": 15.1994454190135, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 98, "src": {"medium": "GPU", "block_ids": [354], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [341]}}
+{"ts": 15.265893290983513, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [97, 98]}
+{"ts": 15.536047235014848, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 99, "src": {"medium": "GPU", "block_ids": [355], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [342]}}
+{"ts": 15.602688865968958, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [99]}
+{"ts": 15.603942713001743, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 100, "src": {"medium": "GPU", "block_ids": [356], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [343]}}
+{"ts": 15.670338678057306, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [100]}
+{"ts": 15.671230964013375, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 101, "src": {"medium": "GPU", "block_ids": [357], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [344]}}
+{"ts": 15.67146020999644, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 102, "src": {"medium": "GPU", "block_ids": [358], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [345]}}
+{"ts": 15.738290491048247, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [101, 102]}
+{"ts": 15.874216818949208, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 103, "src": {"medium": "GPU", "block_ids": [359], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [346]}}
+{"ts": 15.941115517984144, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [103]}
+{"ts": 16.279335035011172, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 104, "src": {"medium": "GPU", "block_ids": [361], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [347]}}
+{"ts": 16.279646232025698, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 105, "src": {"medium": "GPU", "block_ids": [362], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [348]}}
+{"ts": 16.34607034001965, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [104, 105]}
+{"ts": 16.616857207962312, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 106, "src": {"medium": "GPU", "block_ids": [363], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [349]}}
+{"ts": 16.68340558698401, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [106]}
+{"ts": 16.684760821983218, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 107, "src": {"medium": "GPU", "block_ids": [364], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [350]}}
+{"ts": 16.751178647973575, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [107]}
+{"ts": 16.752064220956527, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 108, "src": {"medium": "GPU", "block_ids": [365], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [351]}}
+{"ts": 16.752322199987248, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 109, "src": {"medium": "GPU", "block_ids": [366], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [352]}}
+{"ts": 16.81887779198587, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [108, 109]}
+{"ts": 16.954481199965812, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 110, "src": {"medium": "GPU", "block_ids": [367], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [353]}}
+{"ts": 17.021176451002248, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [110]}
+{"ts": 17.360116826021113, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 111, "src": {"medium": "GPU", "block_ids": [368], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [354]}}
+{"ts": 17.36035383597482, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 112, "src": {"medium": "GPU", "block_ids": [369], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [355]}}
+{"ts": 17.427037526038475, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [111, 112]}
+{"ts": 17.698232981958427, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 113, "src": {"medium": "GPU", "block_ids": [370], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [356]}}
+{"ts": 17.764773324946873, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [113]}
+{"ts": 17.76613677595742, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 114, "src": {"medium": "GPU", "block_ids": [371], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [357]}}
+{"ts": 17.832344130962156, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [114]}
+{"ts": 17.83322751102969, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 115, "src": {"medium": "GPU", "block_ids": [372], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [358]}}
+{"ts": 17.833452056976967, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 116, "src": {"medium": "GPU", "block_ids": [373], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [359]}}
+{"ts": 17.89980813895818, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [115, 116]}
+{"ts": 18.036084405961446, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 117, "src": {"medium": "GPU", "block_ids": [374], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [360]}}
+{"ts": 18.103136128978804, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [117]}
+{"ts": 18.442386999959126, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 118, "src": {"medium": "GPU", "block_ids": [375], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [361]}}
+{"ts": 18.442662109970115, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 119, "src": {"medium": "GPU", "block_ids": [376], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [362]}}
+{"ts": 18.509450203971937, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [118, 119]}
+{"ts": 18.781442968989722, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 120, "src": {"medium": "GPU", "block_ids": [377], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [363]}}
+{"ts": 18.848120957962237, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [120]}
+{"ts": 18.84938388201408, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 121, "src": {"medium": "GPU", "block_ids": [378], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [364]}}
+{"ts": 18.91601470299065, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [121]}
+{"ts": 18.916912349057384, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 122, "src": {"medium": "GPU", "block_ids": [379], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [365]}}
+{"ts": 18.9171718909638, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 123, "src": {"medium": "GPU", "block_ids": [380], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [366]}}
+{"ts": 18.983858917024918, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [122, 123]}
+{"ts": 19.120064352056943, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 124, "src": {"medium": "GPU", "block_ids": [381], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [367]}}
+{"ts": 19.18711095501203, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [124]}
+{"ts": 19.52657426102087, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 125, "src": {"medium": "GPU", "block_ids": [382], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [368]}}
+{"ts": 19.526874408009462, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 126, "src": {"medium": "GPU", "block_ids": [383], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [369]}}
+{"ts": 19.593768537975848, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [125, 126]}
+{"ts": 19.86588470300194, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 127, "src": {"medium": "GPU", "block_ids": [384], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [370]}}
+{"ts": 19.932530791964382, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [127]}
+{"ts": 19.933974561979994, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 128, "src": {"medium": "GPU", "block_ids": [385], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [371]}}
+{"ts": 20.000446288031526, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [128]}
+{"ts": 20.001333183958195, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 129, "src": {"medium": "GPU", "block_ids": [386], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [372]}}
+{"ts": 20.001614014967345, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 130, "src": {"medium": "GPU", "block_ids": [387], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [373]}}
+{"ts": 20.068381870980375, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [129, 130]}
+{"ts": 20.204805040964857, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 131, "src": {"medium": "GPU", "block_ids": [388], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [374]}}
+{"ts": 20.271921764011495, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [131]}
+{"ts": 20.611544886021875, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 132, "src": {"medium": "GPU", "block_ids": [389], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [375]}}
+{"ts": 20.611851574969478, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 133, "src": {"medium": "GPU", "block_ids": [390], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [376]}}
+{"ts": 20.67874793894589, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [132, 133]}
+{"ts": 21.018904190976173, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 134, "src": {"medium": "GPU", "block_ids": [392], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [377]}}
+{"ts": 21.085534972022288, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [134]}
+{"ts": 21.08652544999495, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 135, "src": {"medium": "GPU", "block_ids": [393], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [378]}}
+{"ts": 21.086794067989103, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 136, "src": {"medium": "GPU", "block_ids": [394], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [379]}}
+{"ts": 21.15343839500565, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [135, 136]}
+{"ts": 21.28957571403589, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 137, "src": {"medium": "GPU", "block_ids": [395], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [380]}}
+{"ts": 21.356522492016666, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [137]}
+{"ts": 21.656265154946595, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 138, "src": {"medium": "GPU", "block_ids": [396], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [381]}}
+{"ts": 21.709915727959014, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [138]}
+{"ts": 21.98209179402329, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 139, "src": {"medium": "GPU", "block_ids": [398], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [382]}}
+{"ts": 22.03516587696504, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [139]}
+{"ts": 22.0359875819413, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 140, "src": {"medium": "GPU", "block_ids": [399], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [383]}}
+{"ts": 22.036208593053743, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 141, "src": {"medium": "GPU", "block_ids": [400], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [384]}}
+{"ts": 22.08943366596941, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [140, 141]}
+{"ts": 22.527221729047596, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 142, "src": {"medium": "GPU", "block_ids": [402], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [385]}}
+{"ts": 22.580634291050956, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [142]}
+{"ts": 22.852388654020615, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 143, "src": {"medium": "GPU", "block_ids": [403], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [386]}}
+{"ts": 22.90538126602769, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [143]}
+{"ts": 22.906202640966512, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 144, "src": {"medium": "GPU", "block_ids": [404], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [387]}}
+{"ts": 22.90645144204609, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 145, "src": {"medium": "GPU", "block_ids": [405], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [388]}}
+{"ts": 22.95968480105512, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [144, 145]}
+{"ts": 23.39333167904988, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 146, "src": {"medium": "GPU", "block_ids": [406], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [389]}}
+{"ts": 23.44679981400259, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [146]}
+{"ts": 23.71869914594572, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 147, "src": {"medium": "GPU", "block_ids": [407], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [390]}}
+{"ts": 23.77170926099643, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [147]}
+{"ts": 23.772480902960524, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 148, "src": {"medium": "GPU", "block_ids": [408], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [391]}}
+{"ts": 23.7727747480385, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 149, "src": {"medium": "GPU", "block_ids": [409], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [392]}}
+{"ts": 23.826132236979902, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [148, 149]}
+{"ts": 24.260444479994476, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 150, "src": {"medium": "GPU", "block_ids": [410], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [393]}}
+{"ts": 24.313988144975156, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [150]}
+{"ts": 24.586406289949082, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 151, "src": {"medium": "GPU", "block_ids": [411], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [394]}}
+{"ts": 24.639414140954614, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [151]}
+{"ts": 24.640282531967387, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 152, "src": {"medium": "GPU", "block_ids": [412], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [395]}}
+{"ts": 24.64053743495606, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 153, "src": {"medium": "GPU", "block_ids": [413], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [396]}}
+{"ts": 24.693779419991188, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [152, 153]}
+{"ts": 25.45373251696583, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 154, "src": {"medium": "GPU", "block_ids": [415], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [397]}}
+{"ts": 25.506822981056757, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [154]}
+{"ts": 25.507589863962494, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 155, "src": {"medium": "GPU", "block_ids": [416], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [398]}}
+{"ts": 25.5078813850414, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 156, "src": {"medium": "GPU", "block_ids": [417], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [399]}}
+{"ts": 25.561177931027487, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [155, 156]}
+{"ts": 26.32206077396404, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 157, "src": {"medium": "GPU", "block_ids": [418], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [400]}}
+{"ts": 26.37522879196331, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [157]}
+{"ts": 26.376040308037773, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 158, "src": {"medium": "GPU", "block_ids": [419], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [401]}}
+{"ts": 26.376297153998166, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 159, "src": {"medium": "GPU", "block_ids": [420], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [402]}}
+{"ts": 26.42954290600028, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [158, 159]}
+{"ts": 27.18950285599567, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 160, "src": {"medium": "GPU", "block_ids": [421], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [403]}}
+{"ts": 27.242858160985634, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [160]}
+{"ts": 27.243753131944686, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 161, "src": {"medium": "GPU", "block_ids": [422], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [404]}}
+{"ts": 27.243938216008246, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 162, "src": {"medium": "GPU", "block_ids": [423], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [405]}}
+{"ts": 27.2972542779753, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [161, 162]}
+{"ts": 28.057888649986126, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 163, "src": {"medium": "GPU", "block_ids": [424], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [406]}}
+{"ts": 28.110885338974185, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [163]}
+{"ts": 28.111762115964666, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 164, "src": {"medium": "GPU", "block_ids": [425], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [407]}}
+{"ts": 28.111940608010627, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 165, "src": {"medium": "GPU", "block_ids": [426], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [408]}}
+{"ts": 28.1652022190392, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [164, 165]}
+{"ts": 28.925796605995856, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 166, "src": {"medium": "GPU", "block_ids": [427], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [409]}}
+{"ts": 28.97878154402133, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [166]}
+{"ts": 28.97955250495579, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 167, "src": {"medium": "GPU", "block_ids": [428], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [410]}}
+{"ts": 28.979836501996033, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 168, "src": {"medium": "GPU", "block_ids": [429], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [411]}}
+{"ts": 29.033183661988005, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [167, 168]}
+{"ts": 29.793440702953376, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 169, "src": {"medium": "GPU", "block_ids": [430], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [412]}}
+{"ts": 29.84653016505763, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [169]}
+{"ts": 29.847309021046385, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 170, "src": {"medium": "GPU", "block_ids": [431], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [413]}}
+{"ts": 29.847581636044197, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 171, "src": {"medium": "GPU", "block_ids": [432], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [414]}}
+{"ts": 29.900919529027306, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [170, 171]}
+{"ts": 31.516109589021653, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 172, "src": {"medium": "GPU", "block_ids": [434], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [415]}}
+{"ts": 31.516497008036822, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 173, "src": {"medium": "GPU", "block_ids": [435], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [416]}}
+{"ts": 31.724452935974114, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [172, 173]}
+{"ts": 35.22093667194713, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 174, "src": {"medium": "GPU", "block_ids": [436], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [417]}}
+{"ts": 35.22133303794544, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 175, "src": {"medium": "GPU", "block_ids": [437], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [418]}}
+{"ts": 35.44848808494862, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [174, 175]}
+{"ts": 38.99599951703567, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 176, "src": {"medium": "GPU", "block_ids": [438], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [419]}}
+{"ts": 38.996276931953616, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 177, "src": {"medium": "GPU", "block_ids": [439], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [420]}}
+{"ts": 39.22330064501148, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [176, 177]}
+{"ts": 42.05827813805081, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 178, "src": {"medium": "GPU", "block_ids": [441], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [421]}}
+{"ts": 42.18946277699433, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [178]}
+{"ts": 44.20850776694715, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 179, "src": {"medium": "GPU", "block_ids": [442], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [422]}}
+{"ts": 44.33948538196273, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [179]}
+{"ts": 46.35370310395956, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 180, "src": {"medium": "GPU", "block_ids": [443], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [423]}}
+{"ts": 46.48433869401924, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [180]}
+{"ts": 48.49576584796887, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 181, "src": {"medium": "GPU", "block_ids": [444], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [424]}}
+{"ts": 48.62658077001106, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [181]}
+{"ts": 50.64090791600756, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 182, "src": {"medium": "GPU", "block_ids": [445], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [425]}}
+{"ts": 50.77165407105349, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [182]}
+{"ts": 52.7841063470114, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 183, "src": {"medium": "GPU", "block_ids": [446], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [426]}}
+{"ts": 52.91491574898828, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [183]}
+{"ts": 54.92781258095056, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 184, "src": {"medium": "GPU", "block_ids": [447], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [427]}}
+{"ts": 55.058218825026415, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [184]}
+{"ts": 57.07222389301751, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 185, "src": {"medium": "GPU", "block_ids": [448], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [428]}}
+{"ts": 57.20337342598941, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [185]}
+{"ts": 59.21947952301707, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 186, "src": {"medium": "GPU", "block_ids": [449], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [429]}}
+{"ts": 59.35022546804976, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [186]}
+{"ts": 61.363612208049744, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 187, "src": {"medium": "GPU", "block_ids": [450], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [430]}}
+{"ts": 61.494640756980516, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [187]}
+{"ts": 63.51430002797861, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 188, "src": {"medium": "GPU", "block_ids": [451], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [431]}}
+{"ts": 63.6446726199938, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [188]}
+{"ts": 65.66056662297342, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 189, "src": {"medium": "GPU", "block_ids": [452], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [432]}}
+{"ts": 65.79147137200925, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [189]}
+{"ts": 67.80457425594795, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 190, "src": {"medium": "GPU", "block_ids": [453], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [433]}}
+{"ts": 67.93549057596829, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [190]}
+{"ts": 69.94973340595607, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 191, "src": {"medium": "GPU", "block_ids": [454], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [434]}}
+{"ts": 70.08053321996704, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [191]}
+{"ts": 72.09178320597857, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 192, "src": {"medium": "GPU", "block_ids": [455], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [435]}}
+{"ts": 72.22192893596366, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [192]}
+{"ts": 74.23419530701358, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 193, "src": {"medium": "GPU", "block_ids": [456], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [436]}}
+{"ts": 74.36637589405291, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [193]}
+{"ts": 76.37789047101978, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 194, "src": {"medium": "GPU", "block_ids": [457], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [437]}}
+{"ts": 76.50864942895714, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [194]}
+{"ts": 78.52193915995304, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 195, "src": {"medium": "GPU", "block_ids": [458], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [438]}}
+{"ts": 78.65260077698622, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [195]}
+{"ts": 80.66412795695942, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 196, "src": {"medium": "GPU", "block_ids": [459], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [439]}}
+{"ts": 80.7951599219814, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [196]}
+{"ts": 82.81437895598356, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 197, "src": {"medium": "GPU", "block_ids": [460], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [440]}}
+{"ts": 82.94534168299288, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [197]}
+{"ts": 84.96093005896546, "method": "transfer_async", "transfer_type": "GPU->CPU", "job_id": 198, "src": {"medium": "GPU", "block_ids": [461], "group_sizes": [1]}, "dst": {"medium": "CPU", "block_ids": [441]}}
+{"ts": 85.09167322900612, "method": "get_finished", "transfer_type": "GPU->CPU", "job_ids": [198]}

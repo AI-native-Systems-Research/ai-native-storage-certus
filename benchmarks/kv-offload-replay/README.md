@@ -47,6 +47,16 @@ offloading_handler_<pid>.jsonl   # handler-level  (GPU↔CPU transfer jobs)
 
 The manager trace is the canonical input for `replay_offloading_traces.py`.
 
+## Reference traces
+
+Pre-generated traces live under `traces/` so you can replay without a GPU.
+
+| Path | Workload | Model | GPU | Wall | Transfers | Notes |
+|---|---|---|---|---|---|---|
+| `traces/sharegpt/199-prompts.{mgr,handler}.jsonl` | ShareGPT v3, 199 prompts | Meta-Llama-3-8B | A30 24 GB | 86 s | 199 GPU→CPU, 0 CPU→GPU | vLLM 0.19.1, `max-model-len 4096`, `gpu-mem-util 0.90`, block size 16. Write-path only — no cache hits landed, so load latency / bandwidth is not exercised. |
+
+Substitute the paths above for the `offloading_mgr_*.jsonl` / `offloading_handler_*.jsonl` globs in any example below.
+
 ## Replaying traces
 
 ### Default (pure Python, no vLLM)
