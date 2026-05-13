@@ -53,7 +53,7 @@ Pre-generated traces live under `traces/` so you can replay without a GPU.
 
 | Path | Workload | Model | GPU | Wall | Transfers | Notes |
 |---|---|---|---|---|---|---|
-| `traces/sharegpt/199-prompts.{mgr,handler}.jsonl` | ShareGPT v3, 199 prompts | Meta-Llama-3-8B | A30 24 GB | 86 s | 199 GPU→CPU, 0 CPU→GPU | vLLM 0.19.1, `max-model-len 4096`, `gpu-mem-util 0.90`, block size 16. Write-path only — no cache hits landed, so load latency / bandwidth is not exercised. |
+| `traces/sharegpt/199-prompts.{mgr,handler}.jsonl` | ShareGPT v3, 199 prompts | Meta-Llama-3-8B | A30 24 GB | 86 s | 199 GPU→CPU, 0 CPU→GPU | vLLM 0.19.1, `max-model-len 4096`, `gpu-mem-util 0.90`, block size 16. Write-path only — no cache hits landed, so load latency / bandwidth is not exercised. Replay results: [`traces/sharegpt/199-prompts.results.md`](traces/sharegpt/199-prompts.results.md). |
 
 Substitute the paths above for the `offloading_mgr_*.jsonl` / `offloading_handler_*.jsonl` globs in any example below.
 
