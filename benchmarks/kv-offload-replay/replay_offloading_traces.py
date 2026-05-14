@@ -51,12 +51,17 @@ from __future__ import annotations
 
 import argparse
 import glob
+import gzip
 import importlib
 import json
 import sys
 from collections import Counter, OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
+
+
+def _open_trace(path):
+    return gzip.open(path, "rt") if str(path).endswith(".gz") else open(path)
 
 
 # ── Target protocol + built-in implementations ─────────────────────────────
@@ -846,7 +851,7 @@ def replay_manager(trace_path: Path, target, target_desc: str) -> dict:
     }
 
     t_start = _time.perf_counter()
-    for line in open(trace_path):
+    for line in _open_trace(trace_path):
         if not line.strip():
             continue
         r = json.loads(line)
@@ -986,7 +991,7 @@ def replay_handler_real(trace_path: Path, handler_target,
             _time.sleep(0.0002)
 
     t0 = _time.perf_counter()
-    for line in open(trace_path):
+    for line in _open_trace(trace_path):
         if not line.strip():
             continue
         r = json.loads(line)
@@ -1073,7 +1078,7 @@ def replay_handler(trace_path: Path, per_block_ms: float) -> dict:
     reaps: list[dict] = []
 
     counts: Counter = Counter()
-    for line in open(trace_path):
+    for line in _open_trace(trace_path):
         if not line.strip():
             continue
         r = json.loads(line)
