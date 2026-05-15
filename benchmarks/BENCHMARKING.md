@@ -2,6 +2,18 @@
 
 Two benchmark tiers serve different purposes: **trace replay** validates the storage policy layer in isolation (fast, no GPU needed), while **live serving** measures end-to-end user-facing latency under real scheduling (closed-loop, requires GPU + model).
 
+## Replay vs Live Serving
+
+| | Trace Replay (Tier 1) | Live Serving (Tier 2) |
+|---|---|---|
+| **Loop type** | Open-loop (fixed call sequence) | Closed-loop (scheduler reacts to cache state) |
+| **What runs** | Just the policy layer | Full vLLM stack (model + scheduler + cache + IO) |
+| **GPU needed?** | No (policy-only) / Yes (native IO) | Yes (running the model) |
+| **Time to run** | Seconds (policy-only) to minutes (native IO) | Minutes to hours |
+| **Answers** | "Given same keys, which policy wins?" | "What's the TTFT/throughput improvement for users?" |
+| **Closed-loop feedback** | No — different decisions don't change future keys | Yes — faster loads → different scheduling → different eviction pressure |
+| **Primary use** | Development, regression testing, evolution evaluator | Customer-facing benchmark |
+
 ---
 
 ## Tier 1: Trace Replay (Policy-Layer Benchmark)
@@ -56,14 +68,6 @@ It does NOT answer:
 > "What would end-to-end serving throughput have been with manager X?"
 
 For the second question, use Tier 2 (live serving).
-
-### Current trace status
-
-| Trace | Workload | Model | Result |
-|---|---|---|---|
-| `traces/sharegpt/199-prompts` | ShareGPT v3, 199 first-turn prompts | Llama-3-8B | Store-only. 0% hit rate. Exercises write path only. |
-
-The existing trace has **no cache hits** because it captured only first turns of 199 independent conversations — no shared prefixes, no multi-turn reuse. A trace with loads requires either shared-prefix workloads or multi-turn replay (see Datasets below).
 
 ### Role in the system
 
@@ -182,21 +186,6 @@ Agentic workloads are Certus's killer use case: 10-50 LLM calls per task, each a
 - Bursty arrivals (parallel tool calls within one agent step)
 
 No published KV-level traces exist yet. To produce them: run SWE-bench tasks through vLLM with TracingOffloadingConnector attached, or instrument a live agentic system.
-
----
-
-## Comparison: Replay vs Live Serving
-
-| | Trace Replay (Tier 1) | Live Serving (Tier 2) |
-|---|---|---|
-| **Loop type** | Open-loop (fixed call sequence) | Closed-loop (scheduler reacts to cache state) |
-| **What runs** | Just the policy layer | Full vLLM stack (model + scheduler + cache + IO) |
-| **GPU needed?** | No (policy-only) / Yes (native IO) | Yes (running the model) |
-| **Time to run** | Seconds (policy-only) to minutes (native IO) | Minutes to hours |
-| **Answers** | "Given same keys, which policy wins?" | "What's the TTFT/throughput improvement for users?" |
-| **Closed-loop feedback** | No — different decisions don't change future keys | Yes — faster loads → different scheduling → different eviction pressure |
-| **Primary use** | Development, regression testing, evolution evaluator | Customer-facing benchmark, pitch-deck numbers |
-| **Accuracy for production claims** | Directionally correct but not quotable | Quotable end-to-end numbers |
 
 ---
 
