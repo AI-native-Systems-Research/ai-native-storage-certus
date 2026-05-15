@@ -127,7 +127,7 @@ These systems use their own `KVConnectorBase_V1` implementations with different 
 
 | System | vLLM Connector | Architecture | Notes |
 |---|---|---|---|
-| **Mooncake** | `MooncakeConnector` | RDMA-based multi-level caching (DRAM/SSD), GPUDirect, disaggregated P/D | Closest competitor at storage tier; requires RDMA fabric |
+| **Mooncake** | `MooncakeConnector` | Disaggregated P/D with RDMA KV transfer; Mooncake Transfer Engine supports local DRAM/SSD caching | Requires RDMA fabric; competes on reload latency when KV is remote |
 | **LMCache** | `LMCacheConnectorV1` | CPU offload + cross-instance KV sharing | Shares KV blocks across vLLM instances; used in llm-d |
 | **3FS (HF3FS)** | `HF3FSKVConnector` | Distributed filesystem for KV sharing | High-throughput distributed FS (Fire-Flyer File System); multi-node KV persistence |
 | **llm-d FS connector** | via `OffloadingConnector` | POSIX shared filesystem (NFS/Lustre/local) | Already in primary table; included here as it's the current llm-d default |
