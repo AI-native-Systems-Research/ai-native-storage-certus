@@ -97,7 +97,7 @@ vllm serve (OpenAI-compatible API)
   │  scheduler makes its own lookup/store/evict decisions
   │  prefix matching → offload/reload → prefill → decode
   ▼
-Offloading Backend (Certus / CPUOffloadingSpec / fs-backend)
+Offloading Backend (Certus / CPUOffloadingSpec)
 ```
 
 ### What it measures
@@ -112,11 +112,27 @@ Offloading Backend (Certus / CPUOffloadingSpec / fs-backend)
 
 ### Backends to compare
 
+#### Primary (same OffloadingConnector code path — apples-to-apples)
+
 | Backend | Configuration | What it proves |
 |---|---|---|
 | **Certus native** | OffloadingConnector + CertusOffloadingSpec (DRAM hot cache + NVMe cold tier) | Full Certus value: larger effective cache means fewer misses |
 | **CPUOffloadingSpec** (vLLM built-in) | OffloadingConnector + CPUOffloadingSpec (DRAM-only offload tier) | Fair baseline — same scheduler code path, different storage tier |
+| **llm-d FS backend** | OffloadingConnector + SharedStorageOffloadingSpec (POSIX filesystem, e.g. XFS on NVMe) | Proves SPDK advantage over kernel filesystem path |
 | **No offloading** (GPU-only) | No kv_transfer_config — vLLM recomputes on eviction | Worst-case baseline: what happens without any offload tier |
+
+#### Extended (different connector architectures — competitive comparisons)
+
+These systems use their own `KVConnectorBase_V1` implementations with different architectures (disaggregated prefill/decode, cross-instance sharing). The scheduler code path differs, so results aren't strictly apples-to-apples — but they are the systems Certus competes against in multi-node k8s deployments.
+
+| System | vLLM Connector | Architecture | Notes |
+|---|---|---|---|
+| **Mooncake** | `MooncakeConnector` | RDMA-based multi-level caching (DRAM/SSD), GPUDirect, disaggregated P/D | Closest competitor at storage tier; requires RDMA fabric |
+| **LMCache** | `LMCacheConnectorV1` | CPU offload + cross-instance KV sharing | Shares KV blocks across vLLM instances; used in llm-d |
+| **3FS (HF3FS)** | `HF3FSKVConnector` | Distributed filesystem for KV sharing | High-throughput distributed FS (Fire-Flyer File System); multi-node KV persistence |
+| **llm-d FS connector** | via `OffloadingConnector` | POSIX shared filesystem (NFS/Lustre/local) | Already in primary table; included here as it's the current llm-d default |
+
+**Phasing:** Start with single-node primary comparisons (prove the storage tier wins). Once Certus runs in k8s with multi-node KV sharing (cross-node lookup/store via the llm-d routing layer), benchmark head-to-head against Mooncake and LMCache on the same cluster with the same workload. The question shifts from "which local storage is faster" to "which system delivers lower TTFT at fleet scale with N nodes sharing KV state."
 
 ### Existing tooling
 
