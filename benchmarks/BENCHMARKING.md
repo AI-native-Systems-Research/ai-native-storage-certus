@@ -112,11 +112,11 @@ Offloading Backend (Certus / CPUOffloadingSpec / fs-backend)
 
 ### Backends to compare
 
-| Backend | Configuration |
-|---|---|
-| **Certus native** | `kv_connector_extra_config: {spec_name: CertusOffloadingSpec, spec_module_path: certus_connector.spec, use_native: true, data_pci_addrs: [...], metadata_pci_addr: ...}` |
-| **CPUOffloadingSpec** (vLLM built-in) | `--num-cpu-blocks N` (DRAM-only offload tier) |
-| **No offloading** (GPU-only) | No kv_transfer_config — baseline, shows what happens when GPU fills |
+| Backend | Configuration | What it proves |
+|---|---|---|
+| **Certus native** | OffloadingConnector + CertusOffloadingSpec (DRAM hot cache + NVMe cold tier) | Full Certus value: larger effective cache means fewer misses |
+| **CPUOffloadingSpec** (vLLM built-in) | OffloadingConnector + CPUOffloadingSpec (DRAM-only offload tier) | Fair baseline — same scheduler code path, different storage tier |
+| **No offloading** (GPU-only) | No kv_transfer_config — vLLM recomputes on eviction | Worst-case baseline: what happens without any offload tier |
 
 ### Existing tooling
 
@@ -246,16 +246,18 @@ python production-trace-replay-qwen.py \
     --trace-file qwen_traceA_blksz_16.jsonl \
     --limit 1000
 
-# 3. Repeat with baseline (CPU offloading only)
-# Restart vllm with: --num-cpu-blocks 2000 (no kv_connector_extra_config)
+# 3. Repeat with baseline (CPUOffloadingSpec — DRAM-only offload tier)
+vllm serve NousResearch/Meta-Llama-3-8B \
+    --max-model-len 4096 \
+    --gpu-memory-utilization 0.85 \
+    --kv-transfer-config '{
+        "kv_connector": "OffloadingConnector",
+        "kv_role": "kv_both",
+        "kv_connector_extra_config": {
+            "cpu_bytes_to_use": 8589934592
+        }
+    }'
 
-# 4. Compare TTFT by turn bucket between runs
+# 4. Run same benchmark against baseline, compare TTFT by turn bucket
 ```
 
-### Expected outcome
-
-If Certus is working correctly, Turn 2+ TTFT should be significantly lower than the CPU-offloading baseline because:
-- NVMe reload is faster (SPDK DMA vs memcpy from CPU RAM for blocks evicted from DRAM)
-- Larger effective cache (DRAM + NVMe vs DRAM-only) means fewer cache misses → fewer full prefills
-
-The magnitude depends on workload: longer shared prefixes = more benefit. For agentic workloads with 2K+ token prefixes, expect 2-5× TTFT improvement on cache-hit turns.
