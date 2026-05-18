@@ -27,19 +27,21 @@ The cross-layer layout (PR #27743, vLLM 0.12.0) consolidated per-layer fragments
 
 One offloaded block = `block_size_factor` GPU blocks bundled together for storage.
 
-| Parameter | Typical Value |
-|-----------|---------------|
-| GPU block size | 16 tokens |
-| Offloaded block size | 256 tokens (configurable) |
-| block_size_factor | 16 (= 256 / 16) |
-| File size (llm-d) | gpu_page × 16 |
+| Parameter | Default | Configurable |
+|-----------|---------|--------------|
+| GPU block size | 16 tokens | Yes (`block_size` in vLLM config) |
+| block_size_factor | **1** | Yes (set `block_size` in `kv_connector_extra_config`) |
+| Offloaded block size | 16 tokens (= 1 GPU block) | e.g. 256 tokens if factor=16 |
+| File size (llm-d) | gpu_page × block_size_factor | Scales with factor |
 
-| Model | File / offloaded block size |
-|-------|----------------------------|
-| Llama-8B TP=1 | 32 MB |
-| Llama-70B TP=1 | 80 MB |
-| Llama-70B TP=8 | 10 MB |
-| Llama-8B TP=8 | 4 MB |
+**Note**: `block_size_factor` defaults to 1. The value 16 (256 tokens) is a deployment choice, not a built-in default. Examples below assume factor=16 for illustration of large-blob scenarios:
+
+| Model | File size (factor=16) | File size (factor=1) |
+|-------|----------------------|---------------------|
+| Llama-8B TP=1 | 32 MB | 2 MB |
+| Llama-70B TP=1 | 80 MB | 5 MB |
+| Llama-70B TP=8 | 10 MB | 0.625 MB |
+| Llama-8B TP=8 | 4 MB | 0.25 MB |
 
 ---
 
@@ -55,14 +57,16 @@ One offloaded block = `block_size_factor` GPU blocks bundled together for storag
 | Dedup | Skip write if block already exists (checked by hash) |
 | Atomicity | Write to temp file + rename (llm-d fs backend) |
 
-### Write data flow
+### Write data flow (vLLM CPU offload)
 
 ```
-GPU blocks (scattered)
-  → cuMemcpyBatchAsync (16 entries × ~2 MB each, contiguous src per entry)
-  → CPU staging buffer (pinned, contiguous per offloaded block)
-  → Storage write (one blob per content-hash)
+GPU blocks (block_size_factor blocks per offloaded group)
+  → cuMemcpyBatchAsync (factor entries × ~2 MB each; 1 entry if factor=1)
+  → CPU pinned tensor rows (one row per GPU block, stride-based addressing)
+  → Storage write (llm-d: one file per content-hash per offloaded block)
 ```
+
+Note: CPU-side rows use `tensor.stride(0)` for addressing — contiguous with standard pinned allocation, potentially strided with mmap-backed SharedOffloadRegion.
 
 ---
 
@@ -73,17 +77,26 @@ GPU blocks (scattered)
 | Trigger | Scheduler detects prefix hit in offloaded cache |
 | Granularity | One offloaded block per storage read |
 | Access pattern | Prefix-sequential (always longest contiguous prefix from a start offset) |
-| Concurrency | Up to ~48 concurrent reader threads (64 threads × 75% read ratio) |
+| Concurrency | Up to ~48 read-preferring workers (64 threads × 0.75 ratio; can also serve writes) |
 | Fan-out | N independent reads in parallel (one per offloaded block / file) |
 | Latency sensitivity | Blocks token generation start; on critical path |
 
-### Read data flow
+### Read data flow (vLLM CPU offload)
 
 ```
-Storage (N parallel reads of independent blobs, ~4–80 MB each)
-  → CPU staging buffer (thread-local pinned memory)
-  → cuMemcpyBatchAsync (16 entries × ~2 MB each)
+Storage (N parallel reads, one per offloaded block)
+  → CPU pinned tensor rows (factor rows per offloaded block, stride-based)
+  → cuMemcpyBatchAsync (factor entries × ~2 MB each)
   → GPU blocks (scattered destination block IDs)
+```
+
+### Read data flow (llm-d fs_backend)
+
+```
+Storage (N parallel file reads via thread pool, one file per offloaded block)
+  → Thread-local read buffer (contiguous per file)
+  → cudaMemcpyAsync loop (1 call per block for cross-layer; num_layers calls for per-layer)
+  → GPU KV cache tensor (contiguous cross-layer block)
 ```
 
 ---
@@ -95,10 +108,10 @@ Storage (N parallel reads of independent blobs, ~4–80 MB each)
 | Property | Value |
 |----------|-------|
 | API | `cuMemcpyBatchAsync` (CUDA 12.8+), fallback loop of `cudaMemcpyAsync` |
-| Entries per batch | block_size_factor (16) × num_groups × blocks_in_job |
+| Entries per batch | block_size_factor × num_groups × blocks_in_job |
 | Per-entry size | `data_ref.page_size_bytes` = gpu_page_size (~0.5–5 MB) |
 | Submission | Single driver call for all entries |
-| Source (load) | Contiguous sub-blocks within CPU pinned buffer |
+| Source (load) | CPU pinned tensor rows (contiguous with standard pinned; stride-based with mmap regions) |
 | Destination (load) | Scattered GPU block indices (non-contiguous) |
 | Ordering | Each job's CUDA stream waits on the previous job's end_event |
 
@@ -107,13 +120,14 @@ Storage (N parallel reads of independent blobs, ~4–80 MB each)
 | Property | Cross-layer layout (new) | Per-layer layout (old) |
 |----------|-------------------------|----------------------|
 | API | `cudaMemcpyAsync` in loop | `cudaMemcpyAsync` in loop |
-| Calls per offloaded block | 16 (= gpu_blocks_per_file) | 16 × num_layers |
-| Per-call size | `m_tensor_block_size` (~2 MB) | `m_tensor_block_size` (~32 KB) |
-| Total per offloaded block | ~32 MB | ~32 MB (same data, more calls) |
-| Source (load) | Contiguous CPU staging buffer | Contiguous CPU staging buffer |
+| Calls per GPU block | 1 (single tensor covers all layers) | num_layers (one call per layer tensor) |
+| Per-call size | `m_tensor_block_size` (~2 MB, all layers packed) | `m_tensor_block_size` (~32 KB, one layer) |
+| Calls per offloaded block (factor=16) | 16 × 1 = 16 | 16 × num_layers |
+| Calls per offloaded block (factor=1) | 1 | num_layers |
+| Source (load) | Contiguous read buffer (one file read into memory) | Same |
 | Destination (load) | Single GPU tensor (cross-layer) | Per-layer GPU tensors (scattered) |
 
-**Key difference**: vLLM uses `cuMemcpyBatchAsync` (one driver call, N entries). llm-d uses a `cudaMemcpyAsync` loop (N driver calls, one entry each). Both achieve the same transfer but vLLM amortizes driver overhead better.
+**Key difference**: vLLM uses `cuMemcpyBatchAsync` (one driver call, N entries). llm-d uses a `cudaMemcpyAsync` loop (one call per tensor per block). With cross-layer layout the loop is trivial (1 tensor), so the overhead difference is minimal for factor=1.
 
 ---
 
@@ -129,8 +143,8 @@ Storage (N parallel reads of independent blobs, ~4–80 MB each)
 ### Block identification
 
 - Content-addressed by hash (`BlockHash = uint64`)
-- llm-d file layout: `<base>/<hhh>/<hh>/<hash_hex>.bin` (2-level fanout)
-- Existence check: `os.path.exists()` per block (llm-d shared storage)
+- llm-d file layout: `<base>_r<rank>/<hhh>/<hh>_g<group_idx>/<hash_hex>.bin` (2-level fanout with rank and group)
+- Existence check: `os.path.exists()` per block (llm-d shared storage); C++ side uses `std::ifstream(path).good()`
 
 ---
 
@@ -159,11 +173,11 @@ Scheduler uses longest-prefix-match scoring weighted by tier to route requests t
 
 1. **Storage read unit is large** (~4–80 MB per blob) — NVMe sequential read is efficient here
 2. **Reads are scattered across blobs** — N independent reads to N different content-hash locations, in parallel
-3. **GPU scatter is handled by CUDA DMA** — Certus only needs to deliver contiguous blobs to CPU staging
+3. **GPU↔DRAM handled by Certus directly** — Certus owns its own DMA buffers and calls `dma_copy_to_host`/`dma_copy_to_device` (does not use vLLM's CPU staging tensors)
 4. **Write-once semantics** — no overwrites, no partial updates, enables aggressive caching/dedup
 5. **Existence check already solved** — DispatchMap HashMap (u64 key, ~50ns, 0 I/O) handles per-block per-step lookups
 6. **GDS opportunity** — llm-d supports `gds_mode` for direct GPU↔Storage (bypasses CPU staging)
-7. **Concurrency is high** — 48+ reader threads hitting storage simultaneously per GPU
+7. **Concurrency is high** — up to 48 read-preferring workers per GPU (64 total threads, 0.75 read ratio)
 
 ---
 

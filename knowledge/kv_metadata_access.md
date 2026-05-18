@@ -228,7 +228,7 @@ Background (flush):                 Staging DRAM → Data NVMe (async)
 | Metadata (check) | 8B key → in-memory | 100-10000/step | YES | DispatchMap HashMap |
 | Metadata (persist) | 4KB extent record | Per store/evict | NO (async) | metadata NVMe |
 | Metadata (events) | 100-500B per event | 1000s/sec cluster | NO | Not yet implemented |
-| **Data (read)** | **4-80 MB per blob** | **1-48 concurrent** | **YES** | Data NVMe → GPU (P2P) |
+| **Data (read)** | **4-80 MB per blob** | **up to 48 workers** | **YES** | Data NVMe → DRAM → GPU |
 | **Data (write)** | **4-80 MB per blob** | **1-16 concurrent** | **NO (deferred)** | GPU → DRAM staging → NVMe |
 
 **Key insight**: Certus eliminates the metadata latency problem entirely for local operations. The remaining metadata challenge is cluster-wide coordination (event propagation, multi-node routing) which is a different problem from per-I/O existence checks.
