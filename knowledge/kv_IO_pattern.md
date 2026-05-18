@@ -8,14 +8,14 @@ Summary of access patterns Certus must support, derived from vLLM (v0.12+) and l
 
 The cross-layer layout (PR #27743, vLLM 0.12.0) consolidated per-layer fragments into one contiguous block.
 
-| Model | Old (per-layer, K or V) | New (cross-layer, all layers) | Improvement |
-|-------|------------------------|-------------------------------|-------------|
-| Llama-3.1-8B (TP=1) | 32 KB | 2.0 MB | 64× |
-| Llama-3.1-70B (TP=1) | 32 KB | 5.0 MB | 160× |
-| Llama-3.1-70B (TP=8) | 8 KB | 0.625 MB | 80× |
-| DeepSeek-V3 MLA (TP=1) | 18 KB | 2.14 MB | 122× |
-| Qwen2.5-7B (TP=1) | 16 KB | 0.88 MB | 56× |
-| Gemma-2-27B (TP=1) | 64 KB | 5.75 MB | 92× |
+| Model | Old (per-layer, K or V) | New (cross-layer, all layers) |
+|-------|------------------------|-------------------------------|
+| Llama-3.1-8B (TP=1) | 32 KB | 2.0 MB |
+| Llama-3.1-70B (TP=1) | 32 KB | 5.0 MB |
+| Llama-3.1-70B (TP=8) | 8 KB | 0.625 MB |
+| DeepSeek-V3 MLA (TP=1) | 18 KB | 2.14 MB |
+| Qwen2.5-7B (TP=1) | 16 KB | 0.88 MB |
+| Gemma-2-27B (TP=1) | 64 KB | 5.75 MB |
 
 **Formula (new):** `gpu_page = 2 × block_size(16) × num_kv_heads × head_dim × dtype_bytes × num_layers`
 
@@ -57,13 +57,21 @@ One offloaded block = `block_size_factor` GPU blocks bundled together for storag
 | Dedup | Skip write if block already exists (checked by hash) |
 | Atomicity | Write to temp file + rename (llm-d fs backend) |
 
-### Write data flow (vLLM CPU offload)
+### Write data flow (vLLM CPU offload — no persistent storage)
 
 ```
 GPU blocks (block_size_factor blocks per offloaded group)
   → cuMemcpyBatchAsync (factor entries × ~2 MB each; 1 entry if factor=1)
   → CPU pinned tensor rows (one row per GPU block, stride-based addressing)
-  → Storage write (llm-d: one file per content-hash per offloaded block)
+```
+
+Data stays in CPU pinned memory (no disk write). This is a pure GPU↔CPU swap.
+
+### Write data flow (llm-d fs_backend — persistent storage)
+
+```
+GPU blocks → CPU buffer (same DMA as above)
+  → file write: temp file + atomic rename (one file per content-hash per offloaded block)
 ```
 
 Note: CPU-side rows use `tensor.stride(0)` for addressing — contiguous with standard pinned allocation, potentially strided with mmap-backed SharedOffloadRegion.
