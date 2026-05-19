@@ -41,6 +41,8 @@ Path B: Direct P2P DMA
 | h8-dispatcher-p2p | *(base hypothesis, campaign description explicitly pointed to dispatcher v1)* | Added sequential ReadSync variants to isolate path vs submission strategy | **Hypothesis not tested on actual system**; P2P-seq 1.47x faster in test binary | $10.41 |
 | h8-v0-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v0 | P2P read path in dispatcher v0 (per-request GPU memory pinning) | **Correctly tested on actual system**; P2P 1.33x slower — cold pinning kills advantage. Hit budget limit before writing findings.json. | $7.66 |
 | h8-v1-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v1 | P2P read path in dispatcher v1 (per-request GPU memory pinning) | **Correctly tested on actual system**; P2P 1.18x slower — same cold pinning issue as v0. First attempt (120 turns, $7.32) failed with no data; succeeded at 200 turns ($9.14). | ~$16.46 |
+| h8-v0-pinned | + "even with pre-pinned GPU memory" --dispatcher-version v0 | *(running)* | *(pending)* | — |
+| h8-v1-pinned | + "even with pre-pinned GPU memory" --dispatcher-version v1 | *(queued)* | *(pending)* | — |
 | **Total** | | | | **~$59.59** |
 
 All runs used Opus for design, Sonnet for execute_analyze.
@@ -48,6 +50,8 @@ All runs used Opus for design, Sonnet for execute_analyze.
 The first 4 runs (h8-transfer-path, h8-pipelined, h8-evolve-v0, h8-dispatcher-p2p) all used `gpu-p2p-server` — a standalone test binary that exists in the repo for validating P2P DMA in isolation. It talks directly to NVMe + GPU, bypassing the entire dispatcher stack (gRPC, extent-manager, memory-tier, dispatch-map). Nous found this binary on its own while exploring the codebase and decided to use it instead of certus-server because it's simpler to instrument and doesn't require understanding the full system.
 
 Only after adding explicit constraints to the campaign description ("Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server.") did the last 2 runs (h8-v0-vs-p2p, h8-v1-vs-p2p) test through the actual system. This revealed that isolated results were misleading — P2P goes from 1.47x faster in the test binary to 1.33x slower through the dispatcher.
+
+The pinned campaigns (h8-v0-pinned, h8-v1-pinned) add only "even with pre-pinned GPU memory" to the research question — no implementation hints about persistent pools or amortized pinning. The Opus designer autonomously discovered prior experiment data in `.nous/h8-v0-vs-p2p/` and `.nous/h8-v1-vs-p2p/`, read their findings (1.33x slower due to cold pinning overhead), and designed the new experiment specifically to amortize the pin cost: one-time GPU buffer preparation at init, reused across all lookups. This demonstrates that Nous can compound knowledge across campaigns when prior results are accessible in the repository.
 
 ---
 
