@@ -34,14 +34,14 @@ Path B: Direct P2P DMA
 - **`gpu-p2p-server`:** Standalone test binary for validating P2P DMA in isolation. Talks directly to NVMe + GPU, bypasses entire dispatcher stack. Has bounce/P2P/P2P-cold modes but no pipelining.
 - **Neither dispatcher has P2P or true pipelining.** We want to see whether Nous can discover this gap and implement what's missing to properly test the hypothesis.
 
-| Run | Additional constraints | What Nous implemented | Key Result | Cost | Status |
-|-----|----------------------|----------------------|------------|------|--------|
-| h8-transfer-path | *(none — base hypothesis only)* | Nothing — found `gpu-p2p-server` (standalone test binary) and used it to compare existing modes, not the actual system | **Hypothesis not tested** (no pipelining exists, wrong binary); P2P 2x faster | $9.57 | DONE |
-| h8-pipelined | + "Must use pipelined implementation, implement if not present" | Implemented pipelining in `gpu-p2p-server` (not in dispatcher): overlapping NVMe reads with async GPU copies | **Hypothesis not tested on actual system**; pipelining shows 17% gain but in wrong binary, buggy impl (`connect_client` per chunk) | $5.28 | DONE |
-| h8-dispatcher-p2p | *(base hypothesis, campaign description explicitly pointed to dispatcher v1)* | Added sequential ReadSync variants to isolate path vs submission strategy | **Hypothesis not tested on actual system**; P2P-seq 1.47x faster in test binary | $10.41 | DONE |
-| h8-v0-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v0 | P2P read path in dispatcher v0 (per-request GPU memory pinning) | **Correctly tested on actual system**; P2P 1.33x slower — cold pinning kills advantage | $7.66 | PARTIAL |
-| h8-v1-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v1 | P2P read path in dispatcher v1 (per-request GPU memory pinning) | **Correctly tested on actual system**; P2P 1.18x slower — same cold pinning issue as v0. First attempt (120 turns, $7.32) failed with no data; succeeded at 200 turns ($9.14). | ~$16.46 | DONE |
-| **Total** | | | | **~$49.38** | |
+| Run | Additional constraints | What Nous implemented | Key Result | Cost |
+|-----|----------------------|----------------------|------------|------|
+| h8-transfer-path | *(none — base hypothesis only)* | Nothing — found `gpu-p2p-server` (standalone test binary) and used it to compare existing modes, not the actual system | **Hypothesis not tested** (no pipelining exists, wrong binary); P2P 2x faster | $9.57 |
+| h8-pipelined | + "Must use pipelined implementation, implement if not present" | Implemented pipelining in `gpu-p2p-server` (not in dispatcher): overlapping NVMe reads with async GPU copies | **Hypothesis not tested on actual system**; iter-1: 17% gain (buggy `connect_client` per chunk); iter-2: 2.4-3x faster than sequential bounce with cudaHostAlloc fix, but still slower than P2P warm | $15.49 |
+| h8-dispatcher-p2p | *(base hypothesis, campaign description explicitly pointed to dispatcher v1)* | Added sequential ReadSync variants to isolate path vs submission strategy | **Hypothesis not tested on actual system**; P2P-seq 1.47x faster in test binary | $10.41 |
+| h8-v0-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v0 | P2P read path in dispatcher v0 (per-request GPU memory pinning) | **Correctly tested on actual system**; P2P 1.33x slower — cold pinning kills advantage. Hit budget limit before writing findings.json. | $7.66 |
+| h8-v1-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v1 | P2P read path in dispatcher v1 (per-request GPU memory pinning) | **Correctly tested on actual system**; P2P 1.18x slower — same cold pinning issue as v0. First attempt (120 turns, $7.32) failed with no data; succeeded at 200 turns ($9.14). | ~$16.46 |
+| **Total** | | | | **~$59.59** |
 
 All runs used Opus for design, Sonnet for execute_analyze.
 
@@ -91,9 +91,11 @@ Iter-2 decomposed latency into NVMe read phase vs GPU copy phase:
 
 The copy phase is 7x slower in bounce (H2D at ~4.9 GB/s vs D2D at ~35 GB/s). NVMe read time is nearly identical regardless of DMA target. The 2x end-to-end gap exists because NVMe read time (~750μs) dilutes the 7x copy difference.
 
-### 2. h8-pipelined (1 iteration)
+### 2. h8-pipelined (2 iterations)
 
 Implemented true pipelining (concurrent NVMe reads + cudaMemcpyAsync) in `gpu-p2p-server`:
+
+**Iter-1:** 17% gain, limited by per-chunk `connect_client()` bug (32×17μs = 544μs overhead).
 
 | Condition | Throughput | Avg Latency |
 |-----------|-----------|-------------|
@@ -101,7 +103,20 @@ Implemented true pipelining (concurrent NVMe reads + cudaMemcpyAsync) in `gpu-p2
 | Pipelined bounce (new) | 1764 MB/s | 2.27 ms |
 | P2P warm (reference) | 3082 MB/s | 1.30 ms |
 
-Only 17% gain instead of predicted ~50%. Root cause: `connect_client()` called per chunk (32×17μs = 544μs overhead) became the new bottleneck. However, the async cudaMemcpy overlap IS working — copy dispatch drops from 826μs synchronous → 112μs async, confirming SPDK hugepages satisfy CUDA's pinned-memory requirement.
+**Iter-2:** Fixed with cudaHostAlloc + SPDK registration (pre-allocated at startup). 2.4-3x faster than sequential bounce.
+
+| Condition | Avg Latency | Throughput |
+|-----------|-------------|-----------|
+| Pipeline-v2 (seed-1, device c3:00.0) | 4.96 ms | 806 MB/s |
+| Pipeline-v2 (seed-2, device 64:00.0) | 4.97 ms | 805 MB/s |
+| Sequential bounce (seed-1) | 15.10 ms | 265 MB/s |
+| Sequential bounce (seed-2) | 12.03 ms | 333 MB/s |
+| P2P warm (seed-1) | 5.04 ms | 794 MB/s |
+| P2P warm (seed-2) | 1.93 ms | 2076 MB/s |
+
+Pipeline-v2 is 2.4-3x faster than sequential bounce, confirming pipelining works. However, **P2P warm still wins** — on the clean seed (1.93ms vs 4.97ms, 2.6x faster). The congested seed shows near-parity (5.04ms vs 4.96ms) due to GDRCopy setup overhead under PCIe contention.
+
+**Nous alignment failure:** Nous marked h-main CONFIRMED by comparing pipeline vs bounce (correct direction), but the hypothesis asks whether pipelined bounce beats P2P — which it doesn't. Absolute latencies are higher than iter-1 due to system state (hugepage exhaustion; SPDK using slower DMA fallback path).
 
 ### 3. h8-dispatcher-p2p (2 iterations)
 
@@ -153,9 +168,9 @@ Notable: v1 bounce (12.97ms) is slightly faster than v0 bounce (13.76ms) for the
 1. **Harness results don't predict system behavior** — P2P is 1.47x faster in isolation but 1.33x slower through the dispatcher due to integration overhead (cold pinning)
 2. **Pre-pinned staging is mandatory** — cold P2P (per-request pin/unpin) is 2.74x slower than bounce; every harness run confirmed this but the first dispatcher implementation still got it wrong
 3. **System overhead dominates** — dispatcher SSD lookup is 13.7ms vs harness 2.3ms; the DMA path optimization (saving ~0.7ms) is only 5% of total latency
-4. **Pipelining is viable** — async cudaMemcpy overlap confirmed working; SPDK hugepages satisfy CUDA pinned-memory requirement; 17% gain limited by per-chunk channel allocation bug
+4. **Pipelining works but doesn't beat P2P** — iter-2 confirms 2.4-3x gain over sequential bounce with proper cudaHostAlloc buffers, but P2P warm (1.93ms) still beats pipelined bounce (4.97ms) by 2.6x on a clean system
 5. **Sequential submission is safer for bounce** — BatchSubmit causes tail amplification on bounce path; P2P is immune
-6. **The hypothesis remains untested properly** — both dispatcher runs show P2P slower, but because Nous implemented per-request GPU memory pinning (`prepare_memory_for_spdk()` on every lookup) instead of a persistent pre-pinned staging pool. Cold pin/unpin adds ~5-9ms per request, negating the P2P advantage. No run has tested pipelined bounce against P2P with pre-pinned staging.
+6. **The hypothesis remains untested properly** — harness results (h8-pipelined iter-2) show pipelined bounce still loses to P2P warm (4.97ms vs 1.93ms). Dispatcher runs show P2P slower, but only because of cold pinning. No run has tested pipelined bounce against P2P with pre-pinned staging through the actual dispatcher.
 
 ---
 
@@ -174,6 +189,8 @@ Nous never tested the hypothesis. The research question says "with pipelined tra
 
 But conditioned implementing pipelining on "if bounce wins" — circular logic since bounce can't win without pipelining. When bounce lost, it pivoted to diagnostics. Iter-2's own data shows NVMe read (790μs) ≈ H2D copy (819μs) — the ideal scenario for pipelining — and Nous measured this evidence without recognizing it.
 
+The alignment failure repeated in h8-pipelined iter-2: Nous marked h-main CONFIRMED because pipeline-v2 beats sequential bounce (2.4-3x), but the hypothesis asks whether pipelined bounce beats *P2P* — which the same experiment's robustness arm shows it doesn't (4.97ms vs 1.93ms).
+
 **Failure modes observed:**
 1. No hypothesis-to-experiment alignment check (tested a different question than asked)
 2. Path of least resistance (used standalone harness until explicitly constrained to use the full system)
@@ -191,5 +208,5 @@ But conditioned implementing pipelining on "if bounce wins" — circular logic s
 
 1. **Where is the 11ms non-DMA overhead?** Dispatcher bounce is 13.7ms vs harness 2.3ms — profiling needed to identify the bottleneck (gRPC? extent-manager? per-segment allocation?)
 2. **Will pre-pinned P2P win through the dispatcher?** Current P2P implementation does cold pinning; a persistent staging pool should recover the 1.47x advantage seen in harness
-3. **Can pipelined bounce match P2P?** Iter-2 data predicts ~820μs with true pipelining vs P2P's 824μs — nearly identical. But system overhead may dominate either way
+3. **Can pipelined bounce match P2P?** h8-pipelined iter-2 shows no — P2P warm (1.93ms) still 2.6x faster than pipelined bounce (4.97ms) in harness. The iter-1 prediction of near-parity (~820μs) was wrong; needs testing through the dispatcher where system overhead may equalize both paths
 4. **Is the optimization worth pursuing?** If DMA path is only 5% of total dispatcher latency, the system overhead is the real target
