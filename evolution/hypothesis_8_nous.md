@@ -202,34 +202,98 @@ After the initial 2 iterations above, two additional Nous campaigns ran on 2026-
 
 ---
 
+---
+
+### h8-v0-vs-p2p — First End-to-End Dispatcher Test (2026-05-19)
+
+**Goal:** Test P2P vs bounce through the actual `certus-server` with `--dispatcher-version v0` — the first run to exercise the full system (gRPC → dispatcher → NVMe → GPU).
+
+**Status:** EXECUTE_ANALYZE hit max turns (120). Results collected but no findings/analysis generated. Cost: $4.92.
+
+**Campaign constraints (embedded in description):** Do NOT use gpu-p2p-server. All benchmarks through certus-server. P2P implementation in components/dispatcher/v0/. These constraints worked — Nous correctly designed and ran through the actual system.
+
+**h-main (4 MiB objects, SSD-tier lookups):**
+
+| Condition | SSD Avg Latency | SSD Min Latency | Throughput |
+|-----------|----------------|----------------|-----------|
+| Bounce (baseline) | 13,764 μs | 12,024 μs | 0.30 GB/s |
+| P2P (treatment) | 18,372 μs | 16,580 μs | 0.23 GB/s |
+
+**P2P is 1.33x SLOWER than bounce through the dispatcher.**
+
+**h-robustness (1 MiB objects):**
+
+| Condition | SSD Avg Latency | Throughput |
+|-----------|----------------|-----------|
+| Bounce | 5,228 μs | 0.20 GB/s |
+| P2P | 5,665 μs | 0.19 GB/s |
+
+P2P ~8% slower.
+
+**h-control-negative (staging-only, no SSD):**
+
+Both paths show ~19-20ms for memory-tier lookups — no meaningful difference when NVMe is not involved, confirming the mechanism is in the SSD read path.
+
+**Analysis:** The harness predicted P2P should be 1.47x faster, but through the dispatcher it's slower. The most likely cause is **cold pinning per request** — the P2P implementation is calling `prepare_memory_for_spdk()` on every lookup instead of maintaining a persistent staging pool. Per the prior results, cold P2P (per-request GDRCopy pin/unpin) is 2.74x slower than bounce. The implementation needs a pre-pinned staging pool that persists across lookups to realize the P2P advantage.
+
+Also notable: the end-to-end latency through the dispatcher (13.7ms bounce for 4 MiB) is 6x slower than the harness (2.3ms). The overhead comes from gRPC serialization, dispatch-map lookup, extent-manager offset resolution, per-segment DMA buffer allocation, and memory-tier management.
+
+**Key insight:** The harness results were misleading about real-world performance. The 1.47x P2P advantage measured in isolation gets swamped by system overhead in the full stack — and without pre-pinned staging, P2P is actually worse.
+
+---
+
 ## Combined Assessment
 
 ### What the original hypothesis got wrong
 
-The original hypothesis ("pipelined bounce is faster than direct P2P") is **refuted** even under the most favorable conditions:
+The original hypothesis ("pipelined bounce is faster than direct P2P") cannot be conclusively evaluated yet:
 
-- Best-case pipelined bounce (with channel reuse, iter-2 of h8-evolve-v0) is predicted at ~820μs server-side
-- P2P warm with BatchSubmit achieves ~1.10ms end-to-end (including socket IPC)
-- P2P sequential achieves ~1.58ms end-to-end
+- Harness results (isolated DMA path) show P2P wins by 1.47-2.5x
+- End-to-end results (through dispatcher) show P2P **loses** by 1.33x — but this is due to implementation issues (cold pinning), not the hypothesis being correct
 
-Even if pipelined bounce reaches its theoretical floor of max(read_us, copy_us) ≈ 820μs server-side, P2P-batch is already at ~650μs server-side. The fundamental limit is that bounce uses 2x PCIe bandwidth.
+The hypothesis may actually be correct for the dispatcher in practice if P2P integration overhead (staging pool management, BAR1 constraints) makes the bounce path simpler and competitive once the system overhead dominates.
 
-### What Nous actually proved (across all 4 iterations)
+### What Nous proved across all runs
 
-1. **P2P path advantage is real and sufficient for the dispatcher** — 1.47x with sequential submission (matching `pipeline.rs`) means P2P integration is justified without a BatchSubmit refactor
-2. **Pre-pinned staging is mandatory** — cold P2P is 2.74x worse than bounce; the staging pool must persist across requests
-3. **Sequential submission is safer for the bounce path** — BatchSubmit causes tail amplification that P2P is immune to
-4. **Pipelining helps bounce but can't close the gap** — even perfect overlap gives ~820μs vs P2P's ~650μs
+1. **Harness results don't predict system behavior** — P2P is 1.47x faster in isolation but 1.33x slower through the dispatcher due to integration overhead
+2. **Pre-pinned staging is mandatory** — cold P2P (per-request pin) is catastrophically slow; every prior run confirmed this but the first dispatcher implementation still got it wrong
+3. **System overhead dominates** — dispatcher SSD lookup is 13.7ms vs harness 2.3ms; the DMA path optimization (saving ~0.7ms) is only 5% of total latency
+4. **Pipelining helps bounce modestly** — 17% improvement in harness (with connect_client bug); theoretical max ~50%
+5. **Sequential submission is safer for bounce** — BatchSubmit causes tail amplification
 
-### Recommended action
+### h8-v1-vs-p2p — First Attempt Failed (2026-05-19)
 
-Integrate P2P into the dispatcher's `pipeline.rs` using its existing sequential ReadSync pattern. Call `prepare_memory_for_spdk` via the `IGpuServices` receptacle to get BAR1-backed DMA buffers, then use them as read targets. Expected improvement: 1.47x latency reduction with minimal code change. No BatchSubmit refactor needed (and it would actually hurt the bounce fallback path via tail amplification).
+**Goal:** Test P2P vs pipelined bounce through `certus-server --dispatcher-version v1`.
 
-### What remains untested
+**Status:** EXECUTE_ANALYZE hit max turns (120). Cost: $4.32. No benchmark data collected.
 
-Neither run exercised the dispatcher end-to-end. All measurements are from the `gpu-p2p-server` benchmark harness. The 1.47x prediction for the dispatcher assumes:
-- `prepare_memory_for_spdk` IPC overhead is negligible (amortized across the staging pool lifetime)
-- The dispatcher's `connect_client()` + sequential ReadSync path behaves identically to the harness's replication of it
-- No contention from the dispatcher's eviction/promotion logic during the transfer phase
+**What happened:** Design phase completed successfully — correct problem framing, validated baseline (v1 bounce SSD-tier avg 3567μs for 4 MiB), identified all code change targets. But the executor spent all 120 turns trying to implement P2P in v1's more complex pipeline (ring buffers, io_segmenter, memory-tier promotion) and never reached the benchmarking stage.
 
-A validation run through the actual dispatcher (`promote_and_serve` with P2P staging) is the logical next step.
+**Design quality was good:** Correctly identified that v1's "pipelining" is sequential per-chunk (not overlapped), that P2P eliminates 32 cudaMemcpy calls, and that DmaBuffer sub-views at GPU BAR1 offsets are the implementation approach. The v1 codebase is simply more complex than v0, requiring more implementation turns.
+
+**Re-running with higher turn limit.**
+
+---
+
+### Nous Run Costs
+
+| Run | Iterations | Design | Execute | Total | Outcome |
+|-----|-----------|--------|---------|-------|---------|
+| h8-transfer-path | 2 | $5.37 | $4.20 | $9.57 | DONE — P2P 2x faster (harness) |
+| h8-pipelined | 1 | $1.50 | $3.79 | $5.28 | DONE — 17% pipelining gain |
+| h8-evolve-v0 | 1.5 | $4.34 | $3.58 | $7.93 | STUCK — iter-2 never ran |
+| h8-dispatcher-p2p | 2 | $5.99 | $4.43 | $10.41 | DONE — P2P-seq 1.47x (harness) |
+| h8-v0-vs-p2p | 1 | $2.74 | $4.92 | $7.66 | PARTIAL — P2P 1.33x slower (dispatcher) |
+| h8-v1-vs-p2p (attempt 1) | 0 | ~$3.00 | $4.32 | ~$7.32 | FAILED — no data collected |
+| **Total** | | | | **~$48.17** | |
+
+All runs used Opus for design, Sonnet for execute_analyze. Most cost comes from cache read tokens (large codebase context). Runs that hit max turns (120) still incur full cost with no results — the v1 re-run uses 200 turns.
+
+---
+
+### What remains to be done
+
+1. **Fix the P2P implementation** — add persistent staging pool to dispatcher v0, re-run
+2. **Reduce dispatcher overhead** — 13.7ms for 4 MiB suggests per-segment DMA buffer allocation, dispatch-map lookup, or gRPC serialization is the real bottleneck, not the transfer path
+3. **Run h8-v1-vs-p2p** — re-running with higher max turns to allow executor to complete implementation + benchmarking
+4. **Profile the dispatcher** — where is the 11ms of non-DMA overhead coming from?
