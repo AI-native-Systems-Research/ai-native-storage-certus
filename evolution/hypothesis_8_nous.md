@@ -13,7 +13,7 @@ Evaluate Nous's autonomous experiment capability on a GPU storage transfer optim
 
 | Run | Additional constraints | What Nous implemented | Key Result | Cost | Status |
 |-----|----------------------|----------------------|------------|------|--------|
-| h8-transfer-path | *(none — base hypothesis only)* | Nothing — compared existing bounce vs P2P modes as-is | P2P 2x faster; hypothesis not tested (no pipelining exists) | $9.57 | DONE |
+| h8-transfer-path | *(none — base hypothesis only)* | Nothing — found `gpu-p2p-server` (standalone test binary) and used it to compare existing modes | P2P 2x faster; hypothesis not tested (no pipelining exists, wrong binary) | $9.57 | DONE |
 | h8-pipelined | + "Must use pipelined implementation, implement if not present" | Pipelining in `gpu-p2p-server`: overlapping NVMe reads with async GPU copies | 17% gain; partially confirms but buggy (`connect_client` per chunk). Needs more iterations to self-correct. | $5.28 | DONE |
 | h8-dispatcher-p2p | *(base hypothesis, campaign description pointed to dispatcher v1)* | Added sequential ReadSync variants to isolate path vs submission strategy | P2P-seq 1.47x faster; confirms P2P advantage even without batching | $10.41 | DONE |
 | h8-v0-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v0 | P2P read path in dispatcher v0 (per-request GPU memory pinning) | P2P 1.33x **slower**; contradicts harness — cold pinning kills advantage | $7.66 | PARTIAL |
