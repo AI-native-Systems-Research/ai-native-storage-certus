@@ -40,7 +40,7 @@ Path B: Direct P2P DMA
 | h8-pipelined | + "Must use pipelined implementation, implement if not present" | Implemented pipelining in `gpu-p2p-server` (not in dispatcher): overlapping NVMe reads with async GPU copies | **Hypothesis not tested on actual system**; pipelining shows 17% gain but in wrong binary, buggy impl (`connect_client` per chunk) | $5.28 | DONE |
 | h8-dispatcher-p2p | *(base hypothesis, campaign description pointed to dispatcher v1)* | Added sequential ReadSync variants to isolate path vs submission strategy | **Hypothesis not tested on actual system**; P2P-seq 1.47x faster in test binary | $10.41 | DONE |
 | h8-v0-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v0 | P2P read path in dispatcher v0 (per-request GPU memory pinning) | **Correctly tested on actual system**; P2P 1.33x slower — cold pinning kills advantage | $7.66 | PARTIAL |
-| h8-v1-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v1 | P2P read path in dispatcher v1 (per-request GPU memory pinning) | **Correctly tested on actual system**; P2P 1.18x slower — same cold pinning issue as v0 | ~$16.46 | DONE |
+| h8-v1-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v1 | P2P read path in dispatcher v1 (per-request GPU memory pinning) | **Correctly tested on actual system**; P2P 1.18x slower — same cold pinning issue as v0. First attempt (120 turns, $7.32) failed with no data; succeeded at 200 turns ($9.14). | ~$16.46 | DONE |
 | **Total** | | | | **~$49.38** | |
 
 All runs used Opus for design, Sonnet for execute_analyze.
@@ -155,7 +155,7 @@ Notable: v1 bounce (12.97ms) is slightly faster than v0 bounce (13.76ms) for the
 3. **System overhead dominates** — dispatcher SSD lookup is 13.7ms vs harness 2.3ms; the DMA path optimization (saving ~0.7ms) is only 5% of total latency
 4. **Pipelining is viable** — async cudaMemcpy overlap confirmed working; SPDK hugepages satisfy CUDA pinned-memory requirement; 17% gain limited by per-chunk channel allocation bug
 5. **Sequential submission is safer for bounce** — BatchSubmit causes tail amplification on bounce path; P2P is immune
-6. **The hypothesis remains untested properly** — both dispatcher runs show P2P slower, but due to cold pinning (implementation bug), not because bounce is genuinely faster. No run has tested pipelined bounce against P2P with a pre-pinned staging pool.
+6. **The hypothesis remains untested properly** — both dispatcher runs show P2P slower, but because Nous implemented per-request GPU memory pinning (`prepare_memory_for_spdk()` on every lookup) instead of a persistent pre-pinned staging pool. Cold pin/unpin adds ~5-9ms per request, negating the P2P advantage. No run has tested pipelined bounce against P2P with pre-pinned staging.
 
 ---
 
