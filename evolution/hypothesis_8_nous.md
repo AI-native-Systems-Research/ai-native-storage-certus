@@ -14,15 +14,15 @@ Evaluate Nous's autonomous experiment capability on a GPU storage transfer optim
 
 **What Nous should have done:** Implement pipelining (concurrent NVMe reads + GPU copies) in the bounce path, then compare against P2P — through the actual dispatcher (`certus-server`).
 
-| Run | What Nous decided to do | System used | Key Result | Cost | Status |
-|-----|------------------------|-------------|------------|------|--------|
-| h8-transfer-path | Compare existing (non-pipelined) bounce vs P2P | `gpu-p2p-server` (test binary) | P2P 2x faster | $9.57 | DONE |
-| h8-pipelined | Implement pipelining in bounce, compare vs P2P | `gpu-p2p-server` (test binary) | 17% gain (buggy impl) | $5.28 | DONE |
-| h8-evolve-v0 | Fix pipelining bug (channel reuse) | `gpu-p2p-server` (test binary) | Stuck at iter-2 | $7.93 | STUCK |
-| h8-dispatcher-p2p | Decompose path effect vs submission strategy | `gpu-p2p-server` (test binary) | P2P-seq 1.47x faster | $10.41 | DONE |
-| h8-v0-vs-p2p | Compare bounce vs P2P (constrained to dispatcher) | `certus-server` (full system) | P2P 1.33x **slower** | $7.66 | PARTIAL |
-| h8-v1-vs-p2p | Compare pipelined bounce vs P2P (constrained) | `certus-server` (full system) | No data (budget exhausted) | ~$7.32 | FAILED |
-| **Total** | | | | **~$48.17** | |
+| Run | Hypothesis tested | What Nous decided to do | What Nous implemented | Key Result | Cost | Status |
+|-----|------------------|------------------------|-----------------------|------------|------|--------|
+| h8-transfer-path | Bounce vs P2P | Compare existing (non-pipelined) bounce vs P2P | No code changes — used existing modes | P2P 2x faster | $9.57 | DONE |
+| h8-pipelined | **Pipelined** bounce vs P2P | Implement pipelining, compare vs P2P | cudaMemcpyAsync overlap in bounce path | 17% gain (buggy impl) | $5.28 | DONE |
+| h8-evolve-v0 | Pipelined bounce vs P2P, **channel reuse fix** | Fix `connect_client()` per-chunk bug | Designed channel reuse; never executed | Stuck at iter-2 | $7.93 | STUCK |
+| h8-dispatcher-p2p | P2P path effect vs **submission strategy** | Decompose sequential vs batch | Sequential ReadSync variants for both paths | P2P-seq 1.47x faster | $10.41 | DONE |
+| h8-v0-vs-p2p | Bounce vs P2P, **through dispatcher v0** | Implement P2P in dispatcher v0 | P2P path in `lib.rs` (cold pinning per request) | P2P 1.33x **slower** | $7.66 | PARTIAL |
+| h8-v1-vs-p2p | **Pipelined** bounce vs P2P, **through dispatcher v1** | Implement P2P in v1 pipeline | Designed P2P with DmaBuffer sub-views; never ran | No data (budget exhausted) | ~$7.32 | FAILED |
+| **Total** | | | | | **~$48.17** | |
 
 All runs used Opus for design, Sonnet for execute_analyze.
 
@@ -53,11 +53,9 @@ Minimal campaign: research question, the full repository (all source code), targ
 
 ## Results
 
-### 1. Isolated DMA Path Characterization
+### 1. h8-transfer-path (2 iterations)
 
-**h8-transfer-path** (2 iterations, harness):
-
-Iter-1 tested existing bounce vs P2P with no code changes.
+Tested existing (non-pipelined) bounce vs P2P with no code changes.
 
 | Mode | Throughput | Avg Latency |
 |------|-----------|-------------|
@@ -74,7 +72,23 @@ Iter-2 decomposed latency into NVMe read phase vs GPU copy phase:
 
 The copy phase is 7x slower in bounce (H2D at ~4.9 GB/s vs D2D at ~35 GB/s). NVMe read time is nearly identical regardless of DMA target. The 2x end-to-end gap exists because NVMe read time (~750μs) dilutes the 7x copy difference.
 
-**h8-dispatcher-p2p** (2 iterations, harness):
+### 2. h8-pipelined (1 iteration)
+
+Implemented true pipelining (concurrent NVMe reads + cudaMemcpyAsync) in `gpu-p2p-server`:
+
+| Condition | Throughput | Avg Latency |
+|-----------|-----------|-------------|
+| Sequential bounce (baseline) | 1440 MB/s | 2.78 ms |
+| Pipelined bounce (new) | 1764 MB/s | 2.27 ms |
+| P2P warm (reference) | 3082 MB/s | 1.30 ms |
+
+Only 17% gain instead of predicted ~50%. Root cause: `connect_client()` called per chunk (32×17μs = 544μs overhead) became the new bottleneck. However, the async cudaMemcpy overlap IS working — copy dispatch drops from 826μs synchronous → 112μs async, confirming SPDK hugepages satisfy CUDA's pinned-memory requirement.
+
+### 3. h8-evolve-v0 (1.5 iterations)
+
+Follow-up to fix the `connect_client()` bug by reusing a single channel across all chunks. Iter-1 reproduced the same results as h8-pipelined. Iter-2 (channel reuse fix) was designed but never executed — campaign stuck at EXECUTE_ANALYZE.
+
+### 4. h8-dispatcher-p2p (2 iterations)
 
 Isolated the P2P path advantage from the submission strategy (sequential ReadSync vs BatchSubmit):
 
@@ -87,29 +101,9 @@ Isolated the P2P path advantage from the submission strategy (sequential ReadSyn
 
 P2P-seq is 1.47x faster than bounce-seq. Surprise: bounce-batch avg (2.73ms) is WORSE than bounce-seq (2.32ms) due to NVMe queue saturation causing 10-11ms tail spikes. P2P-batch has no such problem (max-min spread <0.03ms).
 
-### 2. Pipelining Implementation
+### 5. h8-v0-vs-p2p (1 iteration)
 
-**h8-pipelined** (1 iteration, test binary):
-
-Nous implemented true pipelining (concurrent NVMe reads + cudaMemcpyAsync) in `gpu-p2p-server`:
-
-| Condition | Throughput | Avg Latency |
-|-----------|-----------|-------------|
-| Sequential bounce (baseline) | 1440 MB/s | 2.78 ms |
-| Pipelined bounce (new) | 1764 MB/s | 2.27 ms |
-| P2P warm (reference) | 3082 MB/s | 1.30 ms |
-
-Only 17% gain instead of predicted ~50%. Root cause: `connect_client()` called per chunk (32×17μs = 544μs overhead) became the new bottleneck. However, the async cudaMemcpy overlap IS working — copy dispatch drops from 826μs synchronous → 112μs async, confirming SPDK hugepages satisfy CUDA's pinned-memory requirement.
-
-**h8-evolve-v0** (1.5 iterations, test binary):
-
-Follow-up to fix the `connect_client()` bug by reusing a single channel across all chunks. Iter-1 reproduced the same results as h8-pipelined. Iter-2 (channel reuse fix) was designed but never executed — campaign stuck at EXECUTE_ANALYZE.
-
-### 3. End-to-End Dispatcher Validation
-
-**h8-v0-vs-p2p** (dispatcher v0, certus-server):
-
-First run through the actual system (gRPC → dispatcher → NVMe → GPU). Campaign constraints forced Nous to use certus-server instead of the harness.
+First run through the actual system (gRPC → dispatcher → NVMe → GPU). Campaign constraints forced Nous to use `certus-server`.
 
 | Condition | SSD Avg Latency | Throughput |
 |-----------|----------------|-----------|
@@ -120,9 +114,9 @@ First run through the actual system (gRPC → dispatcher → NVMe → GPU). Camp
 
 **P2P is 1.33x SLOWER than bounce through the dispatcher.** Root cause: cold pinning per request — the P2P implementation calls `prepare_memory_for_spdk()` on every lookup instead of maintaining a persistent staging pool. Per prior results, cold P2P is 2.74x slower than bounce.
 
-Also notable: dispatcher bounce (13.7ms) is 6x slower than harness bounce (2.3ms). The overhead comes from gRPC serialization, dispatch-map lookup, extent-manager resolution, per-segment DMA buffer allocation, and memory-tier management.
+Also notable: dispatcher bounce (13.7ms) is 6x slower than test binary bounce (2.3ms). The overhead comes from gRPC serialization, dispatch-map lookup, extent-manager resolution, per-segment DMA buffer allocation, and memory-tier management.
 
-**h8-v1-vs-p2p** (dispatcher v1, certus-server):
+### 6. h8-v1-vs-p2p (0 iterations completed)
 
 Design phase completed: correct problem framing, validated v1 baseline (SSD-tier avg 3567μs for 4 MiB), identified all code change targets. Executor spent 120 turns implementing P2P in v1's complex pipeline and never reached benchmarking. Re-running with 200-turn limit.
 
