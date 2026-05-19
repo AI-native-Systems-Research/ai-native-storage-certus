@@ -32,6 +32,9 @@ Path B: Direct P2P DMA
   - **v0:** Sequential bounce — reads all 128 KiB chunks to host DRAM via ReadSync, then single `dma_copy_to_device` to GPU. No pipelining, no P2P.
   - **v1:** "Pipelined" bounce — ring of 4 DMA buffers, per-chunk ReadSync + GPU copy. Despite the name, it's sequential per-chunk (no overlap between read and copy stages). No P2P.
 - **`gpu-p2p-server`:** Standalone test binary for validating P2P DMA in isolation. Talks directly to NVMe + GPU, bypasses entire dispatcher stack. Has bounce/P2P/P2P-cold modes but no pipelining.
+- **Test clients (pre-existing):**
+  - `apps/certus-server/python-client/test_client.py` — gRPC benchmark client for `certus-server`. Populates objects, forces eviction to SSD, then measures per-object lookup latency (`time.perf_counter()` around `stub.Lookup`) and throughput (`object_size / latency`). Reports avg/min/max latency (μs) and GB/s for both memory-tier and SSD-tier lookups.
+  - `components/gpu-services/v0/tests/gpu_client_p2p.py` — Unix socket client for `gpu-p2p-server`. Sends transfer requests, measures per-transfer latency and throughput (MB/s). Reports avg/min/max latency (ms).
 - **Neither dispatcher has P2P or true pipelining.** We want to see whether Nous can discover this gap and implement what's missing to properly test the hypothesis.
 
 | Run | Additional constraints | What Nous implemented | Key Result | Cost |
