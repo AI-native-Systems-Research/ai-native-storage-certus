@@ -16,15 +16,19 @@ Evaluate Nous's autonomous experiment capability on a GPU storage transfer optim
 
 | Run | What Nous decided to do | System used | Key Result | Cost | Status |
 |-----|------------------------|-------------|------------|------|--------|
-| h8-transfer-path | Compare existing (non-pipelined) bounce vs P2P | harness | P2P 2x faster | $9.57 | DONE |
-| h8-pipelined | Implement pipelining in bounce, compare vs P2P | harness | 17% gain (buggy impl) | $5.28 | DONE |
-| h8-evolve-v0 | Fix pipelining bug (channel reuse) | harness | Stuck at iter-2 | $7.93 | STUCK |
-| h8-dispatcher-p2p | Decompose path effect vs submission strategy | harness | P2P-seq 1.47x faster | $10.41 | DONE |
-| h8-v0-vs-p2p | Compare bounce vs P2P (constrained to dispatcher) | dispatcher v0 | P2P 1.33x **slower** | $7.66 | PARTIAL |
-| h8-v1-vs-p2p | Compare pipelined bounce vs P2P (constrained) | dispatcher v1 | No data (budget exhausted) | ~$7.32 | FAILED |
+| h8-transfer-path | Compare existing (non-pipelined) bounce vs P2P | `gpu-p2p-server` (test binary) | P2P 2x faster | $9.57 | DONE |
+| h8-pipelined | Implement pipelining in bounce, compare vs P2P | `gpu-p2p-server` (test binary) | 17% gain (buggy impl) | $5.28 | DONE |
+| h8-evolve-v0 | Fix pipelining bug (channel reuse) | `gpu-p2p-server` (test binary) | Stuck at iter-2 | $7.93 | STUCK |
+| h8-dispatcher-p2p | Decompose path effect vs submission strategy | `gpu-p2p-server` (test binary) | P2P-seq 1.47x faster | $10.41 | DONE |
+| h8-v0-vs-p2p | Compare bounce vs P2P (constrained to dispatcher) | `certus-server` (full system) | P2P 1.33x **slower** | $7.66 | PARTIAL |
+| h8-v1-vs-p2p | Compare pipelined bounce vs P2P (constrained) | `certus-server` (full system) | No data (budget exhausted) | ~$7.32 | FAILED |
 | **Total** | | | | **~$48.17** | |
 
 All runs used Opus for design, Sonnet for execute_analyze.
+
+The first 4 runs (h8-transfer-path, h8-pipelined, h8-evolve-v0, h8-dispatcher-p2p) all used `gpu-p2p-server` — a standalone test binary that exists in the repo for validating P2P DMA in isolation. It talks directly to NVMe + GPU, bypassing the entire dispatcher stack (gRPC, extent-manager, memory-tier, dispatch-map). Nous found this binary on its own while exploring the codebase and decided to use it instead of certus-server because it's simpler to instrument and doesn't require understanding the full system.
+
+Only after adding explicit constraints to the campaign description ("Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server.") did the last 2 runs (h8-v0-vs-p2p, h8-v1-vs-p2p) test through the actual system. This revealed that isolated results were misleading — P2P goes from 1.47x faster in the test binary to 1.33x slower through the dispatcher.
 
 ---
 
@@ -44,12 +48,6 @@ Each experiment is a bundle with up to 4 arms:
 ### What Nous Was Given
 
 Minimal campaign: research question, the full repository (all source code), target binary path (`certus-server`), observable metrics (throughput, latency), controllable knobs (transfer mode, chunk size). No prior findings, no handoff, no implementation hints. The intent was always to test through the full dispatcher stack.
-
-### What Actually Happened
-
-The first 4 runs (h8-transfer-path, h8-pipelined, h8-evolve-v0, h8-dispatcher-p2p) all used `gpu-p2p-server` — a standalone test binary that exists in the repo for validating P2P DMA in isolation. It talks directly to NVMe + GPU, bypassing the entire dispatcher stack (gRPC, extent-manager, memory-tier, dispatch-map). Nous found this binary on its own while exploring the codebase and decided to use it instead of certus-server because it's simpler to instrument and doesn't require understanding the full system.
-
-Only after adding explicit constraints to the campaign description ("Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server.") did the last 2 runs (h8-v0-vs-p2p, h8-v1-vs-p2p) test through the actual system. This revealed that isolated results were misleading — P2P goes from 1.47x faster in the test binary to 1.33x slower through the dispatcher.
 
 ---
 
