@@ -36,9 +36,9 @@ Path B: Direct P2P DMA
 
 | Run | Additional constraints | What Nous implemented | Key Result | Cost | Status |
 |-----|----------------------|----------------------|------------|------|--------|
-| h8-transfer-path | *(none — base hypothesis only)* | Nothing — found `gpu-p2p-server` (standalone test binary) and used it to compare existing modes, not the actual data path | **Hypothesis not tested** (no pipelining exists, wrong binary); P2P 2x faster | $9.57 | DONE |
+| h8-transfer-path | *(none — base hypothesis only)* | Nothing — found `gpu-p2p-server` (standalone test binary) and used it to compare existing modes, not the actual system | **Hypothesis not tested** (no pipelining exists, wrong binary); P2P 2x faster | $9.57 | DONE |
 | h8-pipelined | + "Must use pipelined implementation, implement if not present" | Implemented pipelining in `gpu-p2p-server` (not in dispatcher): overlapping NVMe reads with async GPU copies | **Hypothesis not tested on actual system**; pipelining shows 17% gain but in wrong binary, buggy impl (`connect_client` per chunk) | $5.28 | DONE |
-| h8-dispatcher-p2p | *(base hypothesis, campaign description pointed to dispatcher v1)* | Added sequential ReadSync variants to isolate path vs submission strategy | **Hypothesis not tested on actual system**; P2P-seq 1.47x faster in test binary | $10.41 | DONE |
+| h8-dispatcher-p2p | *(base hypothesis, campaign description explicitly pointed to dispatcher v1)* | Added sequential ReadSync variants to isolate path vs submission strategy | **Hypothesis not tested on actual system**; P2P-seq 1.47x faster in test binary | $10.41 | DONE |
 | h8-v0-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v0 | P2P read path in dispatcher v0 (per-request GPU memory pinning) | **Correctly tested on actual system**; P2P 1.33x slower — cold pinning kills advantage | $7.66 | PARTIAL |
 | h8-v1-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v1 | P2P read path in dispatcher v1 (per-request GPU memory pinning) | **Correctly tested on actual system**; P2P 1.18x slower — same cold pinning issue as v0. First attempt (120 turns, $7.32) failed with no data; succeeded at 200 turns ($9.14). | ~$16.46 | DONE |
 | **Total** | | | | **~$49.38** | |
