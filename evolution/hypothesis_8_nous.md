@@ -40,8 +40,8 @@ Path B: Direct P2P DMA
 | h8-pipelined | + "Must use pipelined implementation, implement if not present" | Implemented pipelining in `gpu-p2p-server` (not in dispatcher): overlapping NVMe reads with async GPU copies | **Hypothesis not tested on actual system**; pipelining shows 17% gain but in wrong binary, buggy impl (`connect_client` per chunk) | $5.28 | DONE |
 | h8-dispatcher-p2p | *(base hypothesis, campaign description pointed to dispatcher v1)* | Added sequential ReadSync variants to isolate path vs submission strategy | **Hypothesis not tested on actual system**; P2P-seq 1.47x faster in test binary | $10.41 | DONE |
 | h8-v0-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v0 | P2P read path in dispatcher v0 (per-request GPU memory pinning) | **Correctly tested on actual system**; P2P 1.33x slower — cold pinning kills advantage | $7.66 | PARTIAL |
-| h8-v1-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v1 | Designed P2P in v1 pipeline; never reached benchmarking | **Correctly targeted actual system**; no data (budget exhausted at 120 turns) | ~$7.32 | FAILED |
-| **Total** | | | | **~$40.24** | |
+| h8-v1-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v1 | P2P read path in dispatcher v1 (per-request GPU memory pinning) | **Correctly tested on actual system**; P2P 1.18x slower — same cold pinning issue as v0 | ~$16.46 | DONE |
+| **Total** | | | | **~$49.38** | |
 
 All runs used Opus for design, Sonnet for execute_analyze.
 
@@ -131,9 +131,20 @@ First run through the actual system (gRPC → dispatcher → NVMe → GPU). Camp
 
 Also notable: dispatcher bounce (13.7ms) is 6x slower than test binary bounce (2.3ms). The overhead comes from gRPC serialization, dispatch-map lookup, extent-manager resolution, per-segment DMA buffer allocation, and memory-tier management.
 
-### 5. h8-v1-vs-p2p (0 iterations completed)
+### 5. h8-v1-vs-p2p (1 iteration)
 
-Design phase completed: correct problem framing, validated v1 baseline (SSD-tier avg 3567μs for 4 MiB), identified all code change targets. Executor spent 120 turns implementing P2P in v1's complex pipeline and never reached benchmarking. Re-running with 200-turn limit.
+Tested P2P vs pipelined bounce through `certus-server --dispatcher-version v1`. Required 200 turns ($9.14 executor cost alone; first attempt at 120 turns failed without data).
+
+| Condition | SSD Avg Latency | SSD Min Latency | Throughput |
+|-----------|----------------|----------------|-----------|
+| Bounce v1 (4 MiB) | 12,969 μs | 11,424 μs | 0.32 GB/s |
+| P2P (4 MiB) | 15,239 μs | 13,919 μs | 0.28 GB/s |
+| Bounce v1 (4 KiB) | 460 μs | 244 μs | 0.01 GB/s |
+| P2P (4 KiB) | 496 μs | 233 μs | 0.01 GB/s |
+
+**P2P is 1.18x slower than bounce v1** — same direction as v0 (1.33x), slightly less severe. Same root cause: cold pinning per request via `prepare_memory_for_spdk()`. At 4 KiB (control-negative), difference is negligible (~8%), confirming the mechanism is in the bulk transfer path.
+
+Notable: v1 bounce (12.97ms) is slightly faster than v0 bounce (13.76ms) for the same 4 MiB — the ring-buffer per-chunk approach has marginal benefit over v0's read-all-then-copy.
 
 ---
 
@@ -144,7 +155,7 @@ Design phase completed: correct problem framing, validated v1 baseline (SSD-tier
 3. **System overhead dominates** — dispatcher SSD lookup is 13.7ms vs harness 2.3ms; the DMA path optimization (saving ~0.7ms) is only 5% of total latency
 4. **Pipelining is viable** — async cudaMemcpy overlap confirmed working; SPDK hugepages satisfy CUDA pinned-memory requirement; 17% gain limited by per-chunk channel allocation bug
 5. **Sequential submission is safer for bounce** — BatchSubmit causes tail amplification on bounce path; P2P is immune
-6. **The hypothesis remains untested end-to-end** — no run has tested pipelined bounce (with pre-pinned staging pool) against P2P through the actual dispatcher
+6. **The hypothesis remains untested properly** — both dispatcher runs show P2P slower, but due to cold pinning (implementation bug), not because bounce is genuinely faster. No run has tested pipelined bounce against P2P with a pre-pinned staging pool.
 
 ---
 
