@@ -34,7 +34,7 @@ One offloaded block = `block_size_factor` GPU blocks bundled together for storag
 | Offloaded block size | 16 tokens (= 1 GPU block) | e.g. 256 tokens if factor=16 |
 | File size (llm-d) | gpu_page × block_size_factor | Scales with factor |
 
-**Note**: `block_size_factor` defaults to 1. The value 16 (256 tokens) is a deployment choice, not a built-in default. Examples below assume factor=16 for illustration of large-blob scenarios:
+**Note**: `block_size_factor` (number of GPU blocks bundled into one offloaded block / one storage file) defaults to 1. The value 16 (= 256 tokens = 16 GPU blocks per file) is a deployment choice, not a built-in default. Examples below show both:
 
 | Model | File size (factor=16) | File size (factor=1) |
 |-------|----------------------|---------------------|
@@ -89,11 +89,10 @@ Note: CPU-side rows use `tensor.stride(0)` for addressing — contiguous with st
 | Fan-out | N independent reads in parallel (one per offloaded block / file) |
 | Latency sensitivity | Blocks token generation start; on critical path |
 
-### Read data flow (vLLM CPU offload)
+### Read data flow (vLLM CPU offload — no storage I/O)
 
 ```
-Storage (N parallel reads, one per offloaded block)
-  → CPU pinned tensor rows (factor rows per offloaded block, stride-based)
+CPU pinned tensor rows (data already in memory from prior GPU→CPU swap)
   → cuMemcpyBatchAsync (factor entries × ~2 MB each)
   → GPU blocks (scattered destination block IDs)
 ```
