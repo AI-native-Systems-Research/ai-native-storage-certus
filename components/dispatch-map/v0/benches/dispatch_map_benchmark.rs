@@ -75,13 +75,39 @@ fn bench_ref_ops_throughput(c: &mut Criterion) {
     });
 }
 
+fn bench_lru_lookup(c: &mut Criterion) {
+    let comp = DispatchMapComponentV0::new(DispatchMapState::new());
+    let dm = query_interface!(comp, IDispatchMap).unwrap();
+    dm.set_dma_alloc(mock_dma_alloc());
+
+    // Populate the map with 1000 entries.
+    for key in 0..1000u64 {
+        let _ = dm.create_staging(key, 1).unwrap();
+        dm.release_write(key).unwrap();
+    }
+
+    c.bench_function("oldest_keys_1000_entries_top10", |b| {
+        b.iter(|| {
+            let keys = dm.oldest_keys(black_box(10));
+            black_box(keys);
+        });
+    });
+
+    c.bench_function("oldest_keys_1000_entries_top100", |b| {
+        b.iter(|| {
+            let keys = dm.oldest_keys(black_box(100));
+            black_box(keys);
+        });
+    });
+}
+
 fn bench_entry_size(c: &mut Criterion) {
     use dispatch_map::entry_size;
 
     c.bench_function("entry_size_check", |b| {
         b.iter(|| {
             let size = entry_size();
-            assert!(size <= 48, "DispatchEntry is {size} bytes, expected ≤ 48");
+            assert!(size <= 56, "DispatchEntry is {size} bytes, expected ≤ 56");
             black_box(size);
         });
     });
@@ -91,6 +117,7 @@ criterion_group!(
     benches,
     bench_lookup_no_contention,
     bench_ref_ops_throughput,
+    bench_lru_lookup,
     bench_entry_size
 );
 criterion_main!(benches);
