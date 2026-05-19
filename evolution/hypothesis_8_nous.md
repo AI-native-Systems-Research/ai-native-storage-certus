@@ -8,14 +8,14 @@ Evaluate Nous's autonomous experiment capability on a GPU storage transfer optim
 Path A: Pipelined Bounce (hypothesis predicts this wins)
 
   ┌─────┐     NVMe DMA      ┌──────────┐   cudaMemcpyAsync   ┌─────┐
-  │ SSD │ ──────────────────>│ Host RAM │ ───────────────────> │ GPU │
-  └─────┘   (128 KiB chunks) └──────────┘   (overlapped)      └─────┘
+  │ SSD │ ─────────────────>│ Host RAM │ ──────────────────> │ GPU │
+  └─────┘   (128 KiB chunks)└──────────┘   (overlapped)      └─────┘
                  ↕ pipelined: next chunk reads while previous copies
 
 Path B: Direct P2P DMA
 
   ┌─────┐     NVMe DMA to GPU BAR1      ┌─────┐
-  │ SSD │ ──────────────────────────────>│ GPU │
+  │ SSD │ ─────────────────────────────>│ GPU │
   └─────┘   (128 KiB chunks, no host)   └─────┘
                  ↕ no intermediate copy, but limited by BAR1 bandwidth
 ```
