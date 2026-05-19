@@ -10,14 +10,18 @@ Evaluate Nous's autonomous experiment capability on a GPU storage transfer optim
 
 ## Experiment Overview
 
-| Run | Research Focus | System | Key Result | Cost | Status |
-|-----|---------------|--------|------------|------|--------|
-| h8-transfer-path | Bounce vs P2P (existing code) | harness | P2P 2x faster | $9.57 | DONE |
-| h8-pipelined | Implement pipelining in bounce | harness | 17% gain (buggy) | $5.28 | DONE |
-| h8-evolve-v0 | Fix pipelining (channel reuse) | harness | Stuck at iter-2 | $7.93 | STUCK |
-| h8-dispatcher-p2p | Path vs submission strategy decomposition | harness | P2P-seq 1.47x faster | $10.41 | DONE |
-| h8-v0-vs-p2p | Bounce vs P2P end-to-end | dispatcher v0 | P2P 1.33x **slower** | $7.66 | PARTIAL |
-| h8-v1-vs-p2p | Pipelined bounce vs P2P end-to-end | dispatcher v1 | No data (budget exhausted) | ~$7.32 | FAILED |
+**Hypothesis given to Nous:** Pipelined bounce-buffer SSD→CPU→GPU is faster than direct SSD→GPU P2P for 4 MiB at 128 KiB chunks.
+
+**What Nous should have done:** Implement pipelining (concurrent NVMe reads + GPU copies) in the bounce path, then compare against P2P — through the actual dispatcher (`certus-server`).
+
+| Run | What Nous decided to do | System used | Key Result | Cost | Status |
+|-----|------------------------|-------------|------------|------|--------|
+| h8-transfer-path | Compare existing (non-pipelined) bounce vs P2P | harness | P2P 2x faster | $9.57 | DONE |
+| h8-pipelined | Implement pipelining in bounce, compare vs P2P | harness | 17% gain (buggy impl) | $5.28 | DONE |
+| h8-evolve-v0 | Fix pipelining bug (channel reuse) | harness | Stuck at iter-2 | $7.93 | STUCK |
+| h8-dispatcher-p2p | Decompose path effect vs submission strategy | harness | P2P-seq 1.47x faster | $10.41 | DONE |
+| h8-v0-vs-p2p | Compare bounce vs P2P (constrained to dispatcher) | dispatcher v0 | P2P 1.33x **slower** | $7.66 | PARTIAL |
+| h8-v1-vs-p2p | Compare pipelined bounce vs P2P (constrained) | dispatcher v1 | No data (budget exhausted) | ~$7.32 | FAILED |
 | **Total** | | | | **~$48.17** | |
 
 All runs used Opus for design, Sonnet for execute_analyze.
@@ -39,13 +43,13 @@ Each experiment is a bundle with up to 4 arms:
 
 ### What Nous Was Given
 
-Minimal campaign: research question, target binary path (`certus-server`), observable metrics (throughput, latency), controllable knobs (transfer mode, chunk size). No prior findings, no handoff, no implementation hints. The intent was always to test through the full dispatcher stack.
+Minimal campaign: research question, the full repository (all source code), target binary path (`certus-server`), observable metrics (throughput, latency), controllable knobs (transfer mode, chunk size). No prior findings, no handoff, no implementation hints. The intent was always to test through the full dispatcher stack.
 
 ### What Actually Happened
 
-The first 4 runs (h8-transfer-path, h8-pipelined, h8-evolve-v0, h8-dispatcher-p2p) all used `gpu-p2p-server` — a standalone benchmark binary that talks directly to NVMe + GPU, bypassing gRPC, dispatcher, extent-manager, and memory-tier management. Nous chose this path on its own because it's simpler to instrument and doesn't require understanding the full dispatcher architecture.
+The first 4 runs (h8-transfer-path, h8-pipelined, h8-evolve-v0, h8-dispatcher-p2p) all used `gpu-p2p-server` — a standalone test binary that exists in the repo for validating P2P DMA in isolation. It talks directly to NVMe + GPU, bypassing the entire dispatcher stack (gRPC, extent-manager, memory-tier, dispatch-map). Nous found this binary on its own while exploring the codebase and decided to use it instead of certus-server because it's simpler to instrument and doesn't require understanding the full system.
 
-Only after adding explicit constraints to the campaign description ("Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server.") did the last 2 runs (h8-v0-vs-p2p, h8-v1-vs-p2p) test through the actual system. This revealed that harness results were misleading — P2P goes from 1.47x faster in isolation to 1.33x slower through the dispatcher.
+Only after adding explicit constraints to the campaign description ("Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server.") did the last 2 runs (h8-v0-vs-p2p, h8-v1-vs-p2p) test through the actual system. This revealed that isolated results were misleading — P2P goes from 1.47x faster in the test binary to 1.33x slower through the dispatcher.
 
 ---
 
@@ -87,9 +91,9 @@ P2P-seq is 1.47x faster than bounce-seq. Surprise: bounce-batch avg (2.73ms) is 
 
 ### 2. Pipelining Implementation
 
-**h8-pipelined** + **h8-evolve-v0** (harness):
+**h8-pipelined** (1 iteration, test binary):
 
-Nous implemented true pipelining (concurrent NVMe reads + cudaMemcpyAsync):
+Nous implemented true pipelining (concurrent NVMe reads + cudaMemcpyAsync) in `gpu-p2p-server`:
 
 | Condition | Throughput | Avg Latency |
 |-----------|-----------|-------------|
@@ -99,7 +103,9 @@ Nous implemented true pipelining (concurrent NVMe reads + cudaMemcpyAsync):
 
 Only 17% gain instead of predicted ~50%. Root cause: `connect_client()` called per chunk (32×17μs = 544μs overhead) became the new bottleneck. However, the async cudaMemcpy overlap IS working — copy dispatch drops from 826μs synchronous → 112μs async, confirming SPDK hugepages satisfy CUDA's pinned-memory requirement.
 
-Iter-2 (channel reuse fix) was designed but never executed — campaign stuck at EXECUTE_ANALYZE.
+**h8-evolve-v0** (1.5 iterations, test binary):
+
+Follow-up to fix the `connect_client()` bug by reusing a single channel across all chunks. Iter-1 reproduced the same results as h8-pipelined. Iter-2 (channel reuse fix) was designed but never executed — campaign stuck at EXECUTE_ANALYZE.
 
 ### 3. End-to-End Dispatcher Validation
 
@@ -160,22 +166,6 @@ But conditioned implementing pipelining on "if bounce wins" — circular logic s
 1. Add `constraints` field to campaign schema (hard rules validated before execution)
 2. Weight keywords in hypothesis — flag if experiment doesn't address them
 3. Hypothesis-to-experiment alignment gate (reject bundle if it doesn't test what's stated)
-
----
-
-## Costs
-
-| Run | Iterations | Design | Execute | Total | Outcome |
-|-----|-----------|--------|---------|-------|---------|
-| h8-transfer-path | 2 | $5.37 | $4.20 | $9.57 | DONE — P2P 2x faster (harness) |
-| h8-pipelined | 1 | $1.50 | $3.79 | $5.28 | DONE — 17% pipelining gain |
-| h8-evolve-v0 | 1.5 | $4.34 | $3.58 | $7.93 | STUCK — iter-2 never ran |
-| h8-dispatcher-p2p | 2 | $5.99 | $4.43 | $10.41 | DONE — P2P-seq 1.47x (harness) |
-| h8-v0-vs-p2p | 1 | $2.74 | $4.92 | $7.66 | PARTIAL — P2P 1.33x slower (dispatcher) |
-| h8-v1-vs-p2p (attempt 1) | 0 | ~$3.00 | $4.32 | ~$7.32 | FAILED — no data collected |
-| **Total** | | | | **~$48.17** | |
-
-Runs that hit max turns (120) still incur full cost with no results. The v1 re-run uses 200 turns to avoid this.
 
 ---
 
