@@ -11,10 +11,17 @@ Evaluate Nous's autonomous experiment capability on a GPU storage transfer optim
 **Base hypothesis (given to all runs):**
 > Using a bounce buffer SSD→CPU→GPU with pipelined transfers is faster than direct SSD→GPU for transfer of 4 MiB broken into a stream of 128 KiB transfers.
 
+**What exists in the codebase (Nous must discover this):**
+- **Dispatcher** (`certus-server`): The core component handling SSD→GPU data movement in the full system. Receives gRPC lookup requests, resolves extents, reads from NVMe, promotes to memory-tier, and copies to GPU. This is where the hypothesis should be tested.
+  - **v0:** Sequential bounce — reads all 128 KiB chunks to host DRAM via ReadSync, then single `dma_copy_to_device` to GPU. No pipelining, no P2P.
+  - **v1:** "Pipelined" bounce — ring of 4 DMA buffers, per-chunk ReadSync + GPU copy. Despite the name, it's sequential per-chunk (no overlap between read and copy stages). No P2P.
+- **`gpu-p2p-server`:** Standalone test binary for validating P2P DMA in isolation. Talks directly to NVMe + GPU, bypasses entire dispatcher stack. Has bounce/P2P/P2P-cold modes but no pipelining.
+- **Neither dispatcher has P2P or true pipelining.** Nous must implement what's missing in the dispatcher to properly test the hypothesis.
+
 | Run | Additional constraints | What Nous implemented | Key Result | Cost | Status |
 |-----|----------------------|----------------------|------------|------|--------|
 | h8-transfer-path | *(none — base hypothesis only)* | Nothing — found `gpu-p2p-server` (standalone test binary) and used it to compare existing modes | P2P 2x faster; hypothesis not tested (no pipelining exists, wrong binary) | $9.57 | DONE |
-| h8-pipelined | + "Must use pipelined implementation, implement if not present" | Pipelining in `gpu-p2p-server`: overlapping NVMe reads with async GPU copies | 17% gain; partially confirms but buggy (`connect_client` per chunk). Needs more iterations to self-correct. | $5.28 | DONE |
+| h8-pipelined | + "Must use pipelined implementation, implement if not present" | Implemented pipelining in `gpu-p2p-server` (not in dispatcher): overlapping NVMe reads with async GPU copies | 17% gain; partially confirms pipelining works, but wrong binary and buggy (`connect_client` per chunk) | $5.28 | DONE |
 | h8-dispatcher-p2p | *(base hypothesis, campaign description pointed to dispatcher v1)* | Added sequential ReadSync variants to isolate path vs submission strategy | P2P-seq 1.47x faster; confirms P2P advantage even without batching | $10.41 | DONE |
 | h8-v0-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v0 | P2P read path in dispatcher v0 (per-request GPU memory pinning) | P2P 1.33x **slower**; contradicts harness — cold pinning kills advantage | $7.66 | PARTIAL |
 | h8-v1-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v1 | Designed P2P in v1 pipeline; never reached benchmarking | No data (budget exhausted at 120 turns) | ~$7.32 | FAILED |
