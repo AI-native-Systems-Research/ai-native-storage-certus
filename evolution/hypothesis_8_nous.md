@@ -39,13 +39,13 @@ Path B: Direct P2P DMA
 
 | Run | Additional constraints | What Nous implemented | Key Result | Key Insight | Cost |
 |-----|----------------------|----------------------|------------|-------------|------|
-| h8-transfer-path | *(none — base hypothesis only)* | Nothing — found `gpu-p2p-server` and used it to compare existing modes | **Hypothesis not tested**; P2P 2x faster | Copy phase is the bottleneck (H2D 7x slower than D2D), not NVMe targeting | $9.57 |
-| h8-pipelined | + "Must use pipelined implementation, implement if not present" | Pipelining in `gpu-p2p-server`: overlapping NVMe reads with async GPU copies | iter-2: 2.4-3x over sequential bounce, still slower than P2P warm | `cudaHostAlloc` + SPDK registration required for true async — SPDK hugepages don't work with CUDA DMA engine | $15.49 |
-| h8-dispatcher-p2p | *(base hypothesis, pointed to dispatcher v1)* | Sequential ReadSync variants to isolate path vs submission strategy | P2P-seq 1.47x faster in test binary | BatchSubmit causes tail amplification for bounce (10ms spikes) but not P2P | $10.41 |
-| h8-v0-vs-p2p | + **"MUST run through certus-server"** --dispatcher-version v0 | P2P read path in dispatcher v0 (per-request GPU pinning) | P2P 1.33x **slower** — cold pinning kills advantage | Harness ≠ system (1.47x faster → 1.33x slower); 6x overhead in dispatcher stack | $7.66 |
-| h8-v1-vs-p2p | + **"MUST run through certus-server"** --dispatcher-version v1 | P2P read path in dispatcher v1 (per-request GPU pinning) | P2P 1.18x **slower** — same cold pinning issue | 20-iteration benchmark conflates DRAM promotion with DMA path comparison | ~$16.46 |
+| h8-transfer-path | *(none — base hypothesis only)* | Nothing — found `gpu-p2p-server` and used it to compare existing modes | **Hypothesis not tested** (no pipelining exists, wrong binary); P2P 2x faster | P2P wins by eliminating 32 H2D copies (819μs), not by faster NVMe reads (equal both paths) | $9.57 |
+| h8-pipelined | + "Must use pipelined implementation, implement if not present" | Pipelining in `gpu-p2p-server`: overlapping NVMe reads with async GPU copies | **Hypothesis not tested on actual system**; iter-2: 2.4-3x over sequential bounce, still slower than P2P warm | `cudaHostAlloc` + SPDK registration required for true async — SPDK hugepages don't work with CUDA DMA engine | $15.49 |
+| h8-dispatcher-p2p | *(base hypothesis, pointed to dispatcher v1)* | Sequential ReadSync variants to isolate path vs submission strategy | **Hypothesis not tested on actual system**; P2P-seq 1.47x faster in test binary | BatchSubmit causes tail amplification for bounce (10ms spikes) but not P2P | $10.41 |
+| h8-v0-vs-p2p | + **"MUST run through certus-server"** --dispatcher-version v0 | P2P read path in dispatcher v0 (per-request GPU pinning) | **Tested on actual system**; P2P 1.33x **slower** — cold pinning kills advantage | Harness pre-pins at startup (hides 5-9ms cost); naive dispatcher implementation pins per-request, reversing the advantage | $7.66 |
+| h8-v1-vs-p2p | + **"MUST run through certus-server"** --dispatcher-version v1 | P2P read path in dispatcher v1 (per-request GPU pinning) | **Tested on actual system**; P2P 1.18x **slower** — same cold pinning issue | 20-iteration benchmark conflates DRAM promotion with DMA path comparison | ~$16.46 |
 | h8-v0-pinned | + "even with pre-pinned GPU memory" --dispatcher-version v0 | Changed IDispatcher interface → 12-file cascade, 597-line patch | **Budget exhausted** (240 turns), no data | Cross-cutting interface changes exceed Nous budget; keep implementations local | $14.10 |
-| h8-v1-pinned | + "even with pre-pinned GPU memory" --dispatcher-version v1 | P2P with persistent GPU DMA cache (keyed by IPC handle, one-time pin) | **P2P 2.02x faster** (9.3ms vs 18.8ms) | Pre-pinned P2P recovers advantage through full system; Nous compounds knowledge across campaigns | ~$5+ (running) |
+| h8-v1-pinned | + "even with pre-pinned GPU memory" --dispatcher-version v1 | P2P with persistent GPU DMA cache (keyed by IPC handle, one-time pin); iter-2 added BatchSubmit QD=32 | **Tested on actual system**; iter-1: P2P 2.02x **faster** (9.3ms vs 18.8ms); iter-2: P2P+Batch 778μs (likely NVMe cache artifact) | One-time GPU buffer registration eliminates cold pinning; Python client + server-side IPC caching works (non-Python client unnecessary); bounce can't support high QD (ENOMEM at QD=32) | ~$12 |
 | **Total** | | | | | **~$73.69** |
 
 All runs used Opus for design, Sonnet for execute_analyze.
@@ -253,12 +253,26 @@ Same hypothesis as h8-v0-pinned but targeting dispatcher v1. Where h8-v0-pinned 
 - Correctly rejected h-main as "regime error" in findings — shows Nous can self-diagnose invalid measurements
 - Cached `prepare_memory_for_spdk` result keyed by 64-byte CUDA IPC handle — exactly the fix needed for cold pinning
 
-**What Nous did wrong (iter-2 design):**
+**What Nous did wrong:**
 - After confirming P2P is 2x faster, designed iter-2 to make P2P *even faster* with BatchSubmit (parallel NVMe reads at QD=32) instead of strengthening bounce (true pipelining) to see if the hypothesis could be saved. This is failure mode #6 — exploring the winning path deeper rather than testing the losing path's best case.
+- Used `test_client.py`'s overfill-and-evict approach (populate 69 objects into 64-slot pool, forcing 5 evictions to SSD) to measure "cold" SSD reads. But this only evicts from certus's memory-tier — data remains hot in the NVMe controller's internal DRAM cache. With only 5 evictions and QD=32 parallel reads, the controller serves from its write-back cache, not flash. This produced the impossible 778μs "SSD" read — faster than memory-tier (2,289μs).
 
-**Iter-2 status:** Currently running. Research question: "Can P2P + BatchSubmit (QD=32) amplify the 2.02x advantage by overlapping all 32 NVMe reads?" Also tests whether BatchSubmit helps bounce (Condition D), which partially addresses the gap.
+**Iter-2 results:**
 
-**Cost so far:** Design $2.56 + executor (iter-1 completed, iter-2 in progress)
+| Condition | SSD-tier (μs) | GB/s | Notes |
+|-----------|--------------|------|-------|
+| A: Bounce sequential | 21,247 | 0.20 | Baseline |
+| B: P2P sequential | 15,160 | 0.28 | 1.4x faster (down from iter-1's 2.02x — system state variance) |
+| C: P2P + BatchSubmit QD=32 | **778** | **5.39** | **Likely invalid** — SSD faster than memory-tier (physically impossible for true cold reads); NVMe controller cache artifact |
+| D: Bounce + BatchSubmit | 6,878 | 0.61 | 4/5 runs failed with ENOMEM (rc=-12); bounce buffer pool exhaustion |
+
+**Iter-2 analysis:**
+- The headline 27x speedup (condition C) is almost certainly a measurement artifact. SSD-tier latency (778μs) being lower than memory-tier (2,289μs) violates the storage hierarchy — this means the "SSD reads" were served from NVMe controller DRAM, not flash media.
+- Condition D confirms that bounce can't support high QD: the DMA ring buffer pool (4 buffers) exhausts at QD=32, causing `spdk_nvme_ns_cmd_read` to return ENOMEM. P2P avoids this because it writes directly to a single pre-pinned GPU buffer without needing host-side DMA buffers per outstanding read.
+- Condition B (1.4x) is lower than iter-1's 2.02x — likely system state variance (different eviction count: 5 vs 10, potentially warmer NVMe cache from condition A running first).
+- Nous reported "CONFIRMED with extreme margin" without flagging that SSD < memory-tier is physically impossible. This is failure mode #5 (uncritical) — accepts measurement results at face value.
+
+**Cost:** ~$12 (design $2.56 + executor ~$9.50)
 
 ---
 

@@ -20,6 +20,8 @@ target_system:
     - All benchmarks MUST run through certus-server (apps/certus-server/) with --dispatcher-version v1.
     - Implementation changes go in components/dispatcher/v1/.
     - Use --bench-iterations 1 for fair first-hit comparison.
+    - Restart the server between each condition (fresh process, fresh NVMe state).
+    - Evict enough objects to exceed NVMe controller cache (~4GB): populate at least 1100 objects into a 64-slot pool so the oldest objects are flushed from controller DRAM by subsequent writes.
   observable_metrics:
     - "end-to-end lookup latency (ms) for a single 4 MiB key"
     - "sustained lookup throughput (MB/s) over N sequential lookups"
