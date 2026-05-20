@@ -2,7 +2,7 @@
 
 ## Objective
 
-Certus needs to move KV-cache data from NVMe SSDs to GPU memory as fast as possible. There are two paths: bounce through host RAM (with the option to pipeline/overlap stages) or direct P2P DMA from SSD to GPU. We used Nous to find out which is faster.
+Certus needs to move KV-cache data from NVMe SSDs to GPU memory as fast as possible. There are two paths: bounce through host RAM (with the option to pipeline/overlap stages) or direct P2P DMA from SSD to GPU. We used Nous to find out which is faster and whether it can design and implement what's missing to test this hypothesis.
 
 **Hypothesis:** Pipelined bounce-buffer (SSD→CPU→GPU) transfers outperform direct SSD→GPU P2P DMA for 4 MiB objects at 128 KiB NVMe chunk size.
 
@@ -104,7 +104,7 @@ Minimal campaign: research question, the full repository (all source code), targ
 1. **Isolated test results don't predict system behavior** — P2P is 1.47x faster in isolation but 1.33x slower through the dispatcher due to integration overhead (cold pinning)
 2. **Pre-pinned staging is mandatory** — cold P2P (per-request pin/unpin) is 2.74x slower than bounce; every test confirmed this but the first dispatcher implementation still got it wrong
 3. **System overhead dominates** — dispatcher SSD lookup is 13.7ms vs isolated test binary 2.3ms; the DMA path optimization (saving ~0.7ms) is only 5% of total latency
-4. **True pipelining matches P2P** — evolved v0 with double-buffered `cudaHostAlloc` + `cudaMemcpyAsync`: 9,659μs vs P2P pre-pinned 9,310μs (essentially tied). Our existing v1 "pipeline" (no real overlap) is 1.35x slower at 13,029μs
+4. **True pipelining matches but doesn't beat P2P** — evolved v0 with double-buffered `cudaHostAlloc` + `cudaMemcpyAsync`: 9,659μs vs P2P pre-pinned 9,310μs (P2P still 4% faster). Hypothesis not confirmed. Our existing v1 "pipeline" (no real overlap) is 1.35x slower at 13,029μs
 5. **Sequential NVMe submission is safer for bounce** — submitting all 32 reads in parallel causes 10ms tail spikes on bounce path (buffer pool exhaustion); P2P is immune
 6. **Pre-pinned P2P confirmed faster through the dispatcher** — h8-v1-pinned resolved the cold-pinning issue; P2P with persistent staging is 2.02x faster than sequential bounce through certus-server (9.3ms vs 18.8ms)
 7. **gRPC + connect_client overhead dominates** — iter-2 of h8-evolve-v0-pipelined shows BatchSubmit QD=32 provides zero improvement because gRPC round-trip + channel setup (~15-25ms) swamps NVMe read time (~0.8ms). DMA path optimizations are invisible at the end-to-end benchmark level
@@ -396,13 +396,17 @@ Told to "overlap NVMe reads with GPU copies (true pipelining)" in dispatcher v0,
 - The iter-1 findings about `DmaBuffer::new` overhead were re-evaluated: iter-2 suggests the 2x was partly system state variance, not just buffer allocation. But iter-1 used `--bench-iterations 1` with fresh server restarts — warm-cache shouldn't apply.
 - Failure mode #7: abandoned working approach without understanding why it worked.
 
+**Did Nous answer the hypothesis?** Partially. Nous declared h-main "CONFIRMED" — but it only proved pipelining beats sequential bounce (2.02x) and cold P2P (2.08x). It never tested pipelined bounce vs *pre-pinned* P2P in the same run. Comparing across runs: pipelined bounce (9,659μs) vs pre-pinned P2P (9,310μs from h8-v1-pinned) — they're tied, with P2P 4% faster. The hypothesis ("pipelined bounce outperforms P2P") is **not confirmed** — pipelined bounce matches P2P but doesn't beat it. Nous missed this because its P2P robustness arm used cold pinning (the wrong comparison).
+
 **Cost:** $15.59
 
 ---
 
 ## Conclusion: What Should Certus Use?
 
-**Answer to the original hypothesis:** True pipelined bounce (9.7ms) matches pre-pinned P2P (9.3ms) — they're essentially tied. The hypothesis is partially confirmed: pipelined bounce with proper async overlap is competitive with P2P, though it doesn't clearly *outperform* it. Sequential bounce (19.5ms) is definitively slower than both.
+**Answer to the original hypothesis:** Not confirmed. True pipelined bounce (9.7ms) matches pre-pinned P2P (9.3ms) — P2P is still 4% faster. Pipelined bounce is competitive but does not outperform P2P as hypothesized. Sequential bounce (19.5ms) is definitively slower than both.
+
+**Did Nous answer correctly?** No. Nous declared the hypothesis "CONFIRMED" in iter-1 findings, but it compared pipelined bounce against cold P2P (which is unfairly slow due to per-request pinning). It never set up the fair comparison: pipelined bounce vs pre-pinned P2P in the same run. This is another instance of failure mode #5 — accepting results without questioning whether the comparison is fair.
 
 **What Certus should implement:**
 - **True pipelined bounce** as the primary path — double-buffered `cudaHostAlloc` + `cudaMemcpyAsync`, overlapping NVMe reads with GPU copies. Matches P2P performance without requiring GPU BAR1/GDRCopy infrastructure.
