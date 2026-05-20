@@ -1,5 +1,8 @@
 pipeline {
   agent any
+  environment {
+    LD_LIBRARY_PATH = '${LD_LIBRARYPATH}:/usr/local/lib'
+  }
   stages {
     stage('Build Server') {
       steps {
@@ -20,22 +23,22 @@ pipeline {
     }
     stage('Hardware-Agnostic Unit Tests') {
       steps {
-        sh '. ~/.cargo/env ; LD_LIBRARY_PATH=/usr/local/lib cargo t --workspace'
+        sh '. ~/.cargo/env ; cargo t --workspace'
       }
     }
     stage('GPU Unit Tests') {
       steps {
-        sh '. ~/.cargo/env ; LD_LIBRARY_PATH=/usr/local/lib cargo t --workspace --features gpu'
+        sh '. ~/.cargo/env ; cargo t --workspace --features gpu'
       }
     }
     stage('SPDK Unit Tests') {
       steps {
-        sh '. ~/.cargo/env ; LD_LIBRARY_PATH=/usr/local/lib cargo t --workspace --features spdk'
+        sh '. ~/.cargo/env ; cargo t --workspace --features spdk'
       }
     }
     stage('Benchmarks') {
       steps {
-        sh '. ~/.cargo/env ; sleep 3; LD_LIBRARY_PATH=/usr/local/lib cargo r -r -p iops-benchmark -- --pci-addr 0000:86:00.0'
+        sh '. ~/.cargo/env ; sleep 3; cargo r -r -p iops-benchmark -- --pci-addr 0000:86:00.0'
       }
     }
   }
