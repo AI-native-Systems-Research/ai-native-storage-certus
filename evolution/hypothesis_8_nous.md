@@ -30,7 +30,7 @@ Path B: Direct P2P DMA
 
 ## Key Result
 
-**Hypothesis partially confirmed after 9 campaigns.** Pipelined bounce with pre-allocated buffers (9.7ms) outperforms cold P2P (20.1ms) by 2.08x — cold pinning per request kills P2P. But when P2P is pre-pinned (one-time registration), performance converges: pre-pinned P2P (~9.3ms) reaches near-parity with pipelined bounce (~9.7ms). System overhead (gRPC + dispatcher, 15-25ms) dwarfs both paths and is the actual bottleneck.
+**Hypothesis partially confirmed after 9 progressively directed campaigns.** Pipelined bounce with pre-allocated buffers (9.7ms) outperforms cold P2P (20.1ms) by 2.08x — cold pinning per request kills P2P. But when P2P is pre-pinned (one-time registration), performance converges: pre-pinned P2P (~9.3ms) reaches near-parity with pipelined bounce (~9.7ms, measured in separate runs). System overhead (gRPC + dispatcher, 15-25ms) dwarfs both paths and is the actual bottleneck.
 
 Nous couldn't identify what was missing on its own — it never recognized that v1's "pipelining" has no actual overlap, and never attempted true async pipelining until explicitly told to. But with enough guidance and constraints, it evolved dispatcher v0 from sequential bounce to a double-buffered overlapped pipeline that beats our current v1 implementation.
 
