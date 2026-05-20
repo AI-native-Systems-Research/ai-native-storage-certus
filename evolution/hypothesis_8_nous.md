@@ -50,7 +50,8 @@ Path B: Direct P2P DMA
 | h8-v1-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v1 | P2P read path in `dispatcher/v1/src/pipeline.rs`: same approach as v0 — per-request `prepare_memory_for_spdk()`, reads into GPU buffer, skips memory-tier promotion (6 files including pipeline.rs) | **Tested on actual system**; P2P 1.18x **slower** — same cold pinning issue | v1's "pipelined" bounce barely faster than v0 sequential (13.0ms vs 13.8ms) — no actual overlap between read and copy stages | ~$16.46 |
 | h8-v0-pinned | + "even with pre-pinned GPU memory" --dispatcher-version v0 | Attempted: added `cuda_ipc_handle_bytes: Option<Vec<u8>>` to shared `IpcHandle` in `idispatcher.rs` + P2P staging pool in v0 — cascaded to 12 files (597-line patch), never compiled | **Budget exhausted** (240 turns), no data | Cross-cutting interface changes exceed Nous budget; keep implementations local | $14.10 |
 | h8-v1-pinned | + "even with pre-pinned GPU memory" --dispatcher-version v1 | Iter-1: GPU DMA buffer cache in dispatcher v1 — registers GPU memory with NVMe once per client, reuses across all lookups. Iter-2: added parallel NVMe reads (32 concurrent) into the pre-pinned GPU buffer | **Tested on actual system**; iter-1: P2P 2.02x **faster** (9.3ms vs 18.8ms); iter-2: 778μs (likely NVMe controller cache artifact) | Python client works fine for P2P; server-side GPU buffer caching handles all registration — no native client needed | ~$12 |
-| **Total** | | | | | **~$85.69** |
+| h8-evolve-v0-pipelined | + **"Do NOT use gpu-p2p-server. Overlap NVMe reads with GPU copies (true pipelining). Do NOT reference v1."** --dispatcher-version v0 | Iter-1: double-buffered `cudaHostAlloc` + `cudaMemcpyAsync` on CUDA streams — reads chunk N+1 while copying chunk N to GPU. Iter-2: tried BatchSubmit QD=32 (all chunks in parallel) — no improvement due to gRPC/connect_client overhead | **Tested on actual system**; iter-1: pipelined 2.02x faster (9.7ms vs 19.5ms), P2P cold 3% slower; iter-2: BatchSubmit no gain (gRPC overhead dominates) | True overlap works and matches pre-pinned P2P; but iter-2 shows gRPC round-trip (~15-25ms) swamps NVMe-level optimizations — the bottleneck is infrastructure, not DMA | in progress |
+| **Total** | | | | | **~$85.69+** |
 
 All runs used Opus for design, Sonnet for execute_analyze.
 
@@ -92,7 +93,7 @@ Minimal campaign: research question, the full repository (all source code), targ
 | Research question only | "Is pipelined bounce faster than P2P?" | Tests wrong binary, never reaches dispatcher | h8-transfer-path, h8-pipelined, h8-dispatcher-p2p (~$35) |
 | System constraint | + "Use certus-server, not gpu-p2p-server" | Correct system, but naive implementation (cold pinning makes P2P slower) | h8-v0-vs-p2p, h8-v1-vs-p2p (~$24) |
 | Design hint | + "Pre-pinned GPU memory" | Solves integration issue, produces valid comparison | h8-v1-pinned (~$12) |
-| Implementation strategy | + "Overlap NVMe reads with GPU copies" | Builds true pipeline better than our existing v1 | h8-evolve-v0-pipelined (in progress) |
+| Implementation strategy | + "Overlap NVMe reads with GPU copies" | Builds true pipeline better than our existing v1; iter-2 discovers gRPC is the real bottleneck | h8-evolve-v0-pipelined |
 
 **Answer:** Nous needs the system constraint (where to test) and a design hint (what approach to take). It cannot make architectural decisions autonomously but executes well once pointed in a direction. Implementation details — buffer management, CUDA stream setup, memory registration — it figures out on its own.
 
@@ -104,6 +105,7 @@ Minimal campaign: research question, the full repository (all source code), targ
 4. **True pipelining matches P2P** — evolved v0 with double-buffered `cudaHostAlloc` + `cudaMemcpyAsync`: 9,659μs vs P2P pre-pinned 9,310μs (essentially tied). Our existing v1 "pipeline" (no real overlap) is 1.35x slower at 13,029μs
 5. **Sequential NVMe submission is safer for bounce** — submitting all 32 reads in parallel causes 10ms tail spikes on bounce path (buffer pool exhaustion); P2P is immune
 6. **Pre-pinned P2P confirmed faster through the dispatcher** — h8-v1-pinned resolved the cold-pinning issue; P2P with persistent staging is 2.02x faster than sequential bounce through certus-server (9.3ms vs 18.8ms)
+7. **gRPC + connect_client overhead dominates** — iter-2 of h8-evolve-v0-pipelined shows BatchSubmit QD=32 provides zero improvement because gRPC round-trip + channel setup (~15-25ms) swamps NVMe read time (~0.8ms). DMA path optimizations are invisible at the end-to-end benchmark level
 
 ---
 
@@ -147,6 +149,7 @@ Minimal campaign: research question, the full repository (all source code), targ
 4. Budget exhaustion on complex implementations (v1 P2P: 120 turns, no data; v0-pinned: 240 turns, interface change cascaded to 12 files)
 5. Uncritical code discovery — finds existing tools and uses them without evaluating appropriateness (used `gpu-p2p-server` in 4 runs, used `--bench-iterations 20` without considering caching effects, accepted impossible 778μs SSD result at face value)
 6. Explores the winning path deeper rather than strengthening the losing path — once P2P won, Nous kept optimizing P2P instead of giving bounce its best shot (true pipelining)
+7. Iter-2 abandons working iter-1 approach — h8-evolve-v0-pipelined iter-1 achieved 2.02x with double-buffering, but iter-2 switched to BatchSubmit QD=32 (completely different strategy) and got no improvement. Never investigated why iter-1 worked or tried to refine it
 
 **Recommendations for Nous development:**
 1. Add `constraints` field to campaign schema (hard rules validated before execution)
