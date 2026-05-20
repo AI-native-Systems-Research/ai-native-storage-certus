@@ -60,6 +60,8 @@ Only after adding explicit constraints to the campaign description ("Do NOT use 
 
 The pinned campaigns (h8-v0-pinned, h8-v1-pinned) add only "even with pre-pinned GPU memory" to the research question — no implementation hints about persistent pools or amortized pinning. The Opus designer autonomously discovered prior experiment data in `.nous/h8-v0-vs-p2p/` and `.nous/h8-v1-vs-p2p/`, read their findings (1.33x slower due to cold pinning overhead), and designed the new experiment specifically to amortize the pin cost: one-time GPU buffer preparation at init, reused across all lookups. This demonstrates that Nous can compound knowledge across campaigns when prior results are accessible in the repository.
 
+The evolve campaigns (h8-evolve-v0-pipelined, h8-v1-true-pipeline) go one step further: the research question explicitly states "overlap NVMe reads with GPU copies (true pipelining)." This is the most direction given to any run — naming the implementation strategy, not just the goal. With this level of guidance, Nous built a double-buffered async pipeline (`cudaHostAlloc` + `cudaMemcpyAsync` on separate CUDA streams) that achieved 2.02x over sequential v0 and 1.35x over our existing v1 "pipeline" — a better implementation than what was already in the codebase. This confirms: once Nous knows *what* to build, it builds it well.
+
 ---
 
 ## Methodology
@@ -150,7 +152,9 @@ Minimal campaign: research question, the full repository (all source code), targ
 1. Add `constraints` field to campaign schema (hard rules validated before execution)
 2. Weight keywords in hypothesis — flag if experiment doesn't address them
 3. Hypothesis-to-experiment alignment gate (reject bundle if it doesn't test what's stated)
-4. Sanity-check gate on results (flag if measurements violate physical constraints, e.g. SSD faster than DRAM)
+
+**Recommendations for the test evaluator:**
+1. Sanity-check gate on results (flag if measurements violate physical constraints, e.g. SSD faster than DRAM)
 
 ---
 
