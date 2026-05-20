@@ -32,7 +32,7 @@ Path B: Direct P2P DMA
 
 **Hypothesis partially confirmed after 9 progressively directed campaigns.** Pipelined bounce with pre-allocated buffers (9.7ms) outperforms cold P2P (20.1ms) by 2.08x — cold pinning per request kills P2P. But when P2P is pre-pinned (one-time registration), performance converges: pre-pinned P2P (~9.3ms) reaches near-parity with pipelined bounce (~9.7ms, measured in separate runs). System overhead (gRPC + dispatcher, 15-25ms) dwarfs both paths and is the actual bottleneck.
 
-Nous couldn't identify what was missing on its own — it never recognized that v1's "pipelining" has no actual overlap, and never attempted true async pipelining until explicitly told to. But with enough guidance and constraints, it evolved dispatcher v0 from sequential bounce to a double-buffered pipeline that outperforms cold P2P (9.7ms vs 20.1ms).
+Nous couldn't identify what was missing on its own — it never recognized that v1's "pipelining" has no actual overlap, and never attempted true async pipelining until explicitly told to. But with enough guidance and constraints, it evolved dispatcher v0 from sequential bounce to a double-buffered pipeline that outperforms cold P2P (9.7ms vs 20.1ms). Note: this v0 optimization skips memory-tier promotion — repeat lookups still hit SSD. v1 promotes data so subsequent reads are served from DRAM. The two serve different purposes and were never compared head-to-head.
 
 ---
 
@@ -44,7 +44,7 @@ Nous couldn't identify what was missing on its own — it never recognized that 
 **What exists in the codebase:**
 - **Dispatcher:** The component inside `certus-server` responsible for SSD→GPU data movement. Handles NVMe reads, memory-tier promotion, and GPU copies. `certus-server` is the full system (gRPC + dispatcher + extent-manager + memory-tier). The hypothesis should be tested through `certus-server` to exercise the dispatcher in context.
   - **v0:** Reads all 128 KiB chunks from SSD into a contiguous host DRAM buffer (bounce), then does a single `dma_copy_to_device` to GPU. No memory-tier — data goes SSD→DRAM→GPU and that's it. No pipelining, no P2P.
-  - **v1:** Reads each chunk into a ring of 4 DMA buffers, copies to memory-tier slot (DRAM cache for future lookups) AND to GPU. The memory-tier is the whole point of v1 — repeat lookups are served from DRAM at 11 GB/s. Despite the name "pipelined," it's sequential per-chunk (no overlap between read and copy stages). No P2P.
+  - **v1:** Reads each chunk into a ring of 4 DMA buffers, copies to memory-tier slot (DRAM cache for future lookups) AND to GPU. The memory-tier is the whole point of v1 — repeat lookups are served from DRAM. Despite the name "pipelined," it's sequential per-chunk (no overlap between read and copy stages). No P2P.
 - **`gpu-p2p-server`:** Standalone test binary for validating P2P DMA in isolation. Talks directly to NVMe + GPU, bypasses entire dispatcher stack. Has bounce/P2P/P2P-cold modes but no pipelining.
 - **Test clients (pre-existing):**
   - `apps/certus-server/python-client/test_client.py` — gRPC benchmark client for `certus-server`. Populates objects, forces eviction to SSD, then measures per-object lookup latency (`time.perf_counter()` around `stub.Lookup`) and throughput (`object_size / latency`). Reports avg/min/max latency (μs) and GB/s for both memory-tier and SSD-tier lookups.
