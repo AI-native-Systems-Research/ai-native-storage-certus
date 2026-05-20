@@ -44,9 +44,9 @@ Path B: Direct P2P DMA
 | h8-dispatcher-p2p | *(base hypothesis, campaign description explicitly pointed to dispatcher v1)* | Added sequential ReadSync variants to isolate path vs submission strategy | **Hypothesis not tested on actual system**; P2P-seq 1.47x faster in test binary | $10.41 |
 | h8-v0-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v0 | P2P read path in dispatcher v0 (per-request GPU memory pinning) | **Correctly tested on actual system**; P2P 1.33x slower — cold pinning kills advantage. Hit budget limit before writing findings.json. | $7.66 |
 | h8-v1-vs-p2p | + **"Do NOT use gpu-p2p-server. All benchmarks MUST run through certus-server"** --dispatcher-version v1 | P2P read path in dispatcher v1 (per-request GPU memory pinning) | **Correctly tested on actual system**; P2P 1.18x slower — same cold pinning issue as v0. First attempt (120 turns, $7.32) failed with no data; succeeded at 200 turns ($9.14). | ~$16.46 |
-| h8-v0-pinned | + "even with pre-pinned GPU memory" --dispatcher-version v0 | *(running)* | *(pending)* | — |
+| h8-v0-pinned | + "even with pre-pinned GPU memory" --dispatcher-version v0 | P2P with persistent staging in dispatcher v0 (changed IDispatcher interface, 12 files, 597-line patch) | **Budget exhausted** (240 turns); implementation too complex — interface change cascaded to all dispatchers, benchmarks, tests. No benchmark data produced. | $14.10 |
 | h8-v1-pinned | + "even with pre-pinned GPU memory" --dispatcher-version v1 | *(queued)* | *(pending)* | — |
-| **Total** | | | | **~$59.59** |
+| **Total** | | | | **~$73.69** |
 
 All runs used Opus for design, Sonnet for execute_analyze.
 
@@ -83,6 +83,15 @@ Minimal campaign: research question, the full repository (all source code), targ
 
 Tested existing (non-pipelined) bounce vs P2P with no code changes.
 
+| Arm | Prediction |
+|-----|-----------|
+| h-main | Bounce will achieve lower latency than P2P warm (H2D copy cheaper than GDRCopy overhead) |
+| h-control-negative | P2P cold will be slower than P2P warm (per-request GDRCopy pin/unpin overhead) |
+| *iter-2 adds:* | |
+| h-main | Copy phase in bounce will account for >60% of total latency; bounce copy >1.5x longer than P2P |
+| h-ablation | Copy-only (--skip-nvme): bounce H2D will be >1.5x longer than P2P D2D |
+| h-control-negative | NVMe read phase will be equal between bounce and P2P (within 20%) |
+
 | Mode | Throughput | Avg Latency |
 |------|-----------|-------------|
 | Bounce (sequential) | 1510 MB/s | 2.65 ms |
@@ -98,9 +107,21 @@ Iter-2 decomposed latency into NVMe read phase vs GPU copy phase:
 
 The copy phase is 7x slower in bounce (H2D at ~4.9 GB/s vs D2D at ~35 GB/s). NVMe read time is nearly identical regardless of DMA target. The 2x end-to-end gap exists because NVMe read time (~750μs) dilutes the 7x copy difference.
 
+**Nous findings:** Iter-1 predicted bounce would win (wrong) — diagnosed that 32 sequential H2D copies of 128 KiB are the bottleneck, not NVMe DMA target selection. P2P warm eliminates H2D entirely. Cold P2P overhead (~187μs per chunk for GDRCopy setup) was larger than expected. Iter-2 confirmed copy ratio of 7.2x (much larger than predicted >1.5x), and proved NVMe read phase is equal regardless of DMA target — the difference is entirely in the copy stage.
+
 ### 2. h8-pipelined (2 iterations)
 
-Implemented true pipelining (concurrent NVMe reads + cudaMemcpyAsync) in `gpu-p2p-server`:
+Implemented true pipelining (concurrent NVMe reads + cudaMemcpyAsync) in `gpu-p2p-server`.
+
+| Arm | Prediction |
+|-----|-----------|
+| h-main (iter-1) | Pipelined bounce will reduce latency by 40-50% vs non-pipelined, approaching P2P warm |
+| h-control-negative | Non-pipelined bounce baseline unchanged (~2.5-2.7ms) |
+| h-robustness | P2P warm remains ~1.2-1.5ms; pipelined bounce within 30% of P2P |
+| *iter-2 revises:* | |
+| h-main | cudaHostAlloc + SPDK registration will achieve lower latency than non-pipelined bounce (20-40% gain) |
+| h-control-negative | Non-pipelined bounce will be consistently slower than pipeline-v2 |
+| h-robustness | P2P warm will outperform bounce and serve as lower bound; pipeline-v2 should approach it |
 
 **Iter-1:** 17% gain, limited by per-chunk `connect_client()` bug (32×17μs = 544μs overhead).
 
@@ -123,11 +144,19 @@ Implemented true pipelining (concurrent NVMe reads + cudaMemcpyAsync) in `gpu-p2
 
 Pipeline-v2 is 2.4-3x faster than sequential bounce, confirming pipelining works. However, **P2P warm still wins** — on the clean seed (1.93ms vs 4.97ms, 2.6x faster). The congested seed shows near-parity (5.04ms vs 4.96ms) due to GDRCopy setup overhead under PCIe contention.
 
+**Nous findings:** Iter-1 predicted 40-50% gain from pipelining — got 0% (small regression). Diagnosed that `cudaMemcpyAsync` was falling back to synchronous behavior because SPDK hugepage buffers aren't recognized as CUDA-pinned memory. Iter-2 switched to `cudaHostAlloc` + SPDK registration, predicted 20-40% gain — actually achieved 140-200% (2.4-3x). Speedup exceeded prediction because system was in degraded state (no hugepages for SPDK, slower baseline). P2P warm showed high cross-seed variance (5.04ms vs 1.93ms) — Nous attributed this to device/state variation.
+
 **Nous alignment failure:** Nous marked h-main CONFIRMED by comparing pipeline vs bounce (correct direction), but the hypothesis asks whether pipelined bounce beats P2P — which it doesn't. Absolute latencies are higher than iter-1 due to system state (hugepage exhaustion; SPDK using slower DMA fallback path).
 
 ### 3. h8-dispatcher-p2p (2 iterations)
 
-Isolated the P2P path advantage from the submission strategy (sequential ReadSync vs BatchSubmit):
+Isolated the P2P path advantage from the submission strategy (sequential ReadSync vs BatchSubmit).
+
+| Arm | Prediction |
+|-----|-----------|
+| h-main | P2P warm (pre-pinned BAR1) will achieve lower latency and higher throughput than bounce |
+| h-control-negative | P2P cold (per-request pin/unpin) will approach or exceed bounce latency |
+| h-robustness | At 64 KiB chunks (64 commands), P2P still outperforms bounce but advantage narrows |
 
 | Condition | Avg Latency | Throughput |
 |-----------|-------------|-----------|
@@ -138,9 +167,17 @@ Isolated the P2P path advantage from the submission strategy (sequential ReadSyn
 
 P2P-seq is 1.47x faster than bounce-seq. Surprise: bounce-batch avg (2.73ms) is WORSE than bounce-seq (2.32ms) due to NVMe queue saturation causing 10-11ms tail spikes. P2P-batch has no such problem (max-min spread <0.03ms).
 
+**Nous findings:** Predicted P2P warm would have lower latency than bounce — confirmed (1.47x). Also confirmed P2P cold exceeds bounce (2.74x slower). Robustness arm at 64 KiB chunks showed P2P advantage narrows (2.47x→2.04x) as per-chunk command overhead increases — correctly predicted this narrowing.
+
 ### 4. h8-v0-vs-p2p (1 iteration)
 
 First run through the actual system (gRPC → dispatcher → NVMe → GPU). Campaign constraints forced Nous to use `certus-server`.
+
+| Arm | Prediction |
+|-----|-----------|
+| h-main | P2P sequential will achieve lower latency than bounce sequential for 4 MiB objects |
+| h-control-negative | Staging-tier lookups (not evicted to SSD) will show identical latency for both paths |
+| h-robustness | P2P will also be faster at 1 MiB, but relative advantage may be smaller |
 
 | Condition | SSD Avg Latency | Throughput |
 |-----------|----------------|-----------|
@@ -153,9 +190,16 @@ First run through the actual system (gRPC → dispatcher → NVMe → GPU). Camp
 
 Also notable: dispatcher bounce (13.7ms) is 6x slower than test binary bounce (2.3ms). The overhead comes from gRPC serialization, dispatch-map lookup, extent-manager resolution, per-segment DMA buffer allocation, and memory-tier management.
 
+**Nous findings:** Predicted P2P would be faster — refuted. Diagnosed that sub-view DmaBuffers (`DmaBuffer::from_raw` at GPU base + chunk_offset) share the parent `spdk_mem_register`'d region but still incur per-request overhead. Control arm confirmed staging-tier lookups are identical (bypass `read_from_block_device`). Robustness arm at 1 MiB showed P2P disadvantage shrinks (1.33x→1.08x) — pinning overhead is proportionally larger for bigger objects.
+
 ### 5. h8-v1-vs-p2p (1 iteration)
 
 Tested P2P vs pipelined bounce through `certus-server --dispatcher-version v1`. Required 200 turns ($9.14 executor cost alone; first attempt at 120 turns failed without data).
+
+| Arm | Prediction |
+|-----|-----------|
+| h-main | P2P direct will achieve lower SSD-tier latency than pipelined bounce for 4 MiB objects |
+| h-control-negative | At 4 KiB (1 chunk), P2P will NOT outperform bounce (setup overhead exceeds single cudaMemcpy savings) |
 
 | Condition | SSD Avg Latency | SSD Min Latency | Throughput |
 |-----------|----------------|----------------|-----------|
@@ -167,6 +211,26 @@ Tested P2P vs pipelined bounce through `certus-server --dispatcher-version v1`. 
 **P2P is 1.18x slower than bounce v1** — same direction as v0 (1.33x), slightly less severe. Same root cause: cold pinning per request via `prepare_memory_for_spdk()`. At 4 KiB (control-negative), difference is negligible (~8%), confirming the mechanism is in the bulk transfer path.
 
 Notable: v1 bounce (12.97ms) is slightly faster than v0 bounce (13.76ms) for the same 4 MiB — the ring-buffer per-chunk approach has marginal benefit over v0's read-all-then-copy.
+
+**Nous findings:** Predicted P2P would be faster — refuted. Diagnosed that per-lookup `prepare_memory_for_spdk` cost (`cudaIpcOpenMemHandle` + `spdk_mem_register`) exceeds the eliminated `cudaMemcpy` savings. Control arm at 4 KiB correctly predicted P2P wouldn't win at small sizes (setup overhead dominates), but got the magnitude ordering wrong — overhead fraction is actually larger at 4 MiB (17.5%) than 4 KiB (7.7%), opposite to prediction. Also discovered P2P path skips memory-tier promotion, making the benchmark comparison unfair (bounce: 1 SSD + 19 DRAM reads vs P2P: 20 SSD reads).
+
+**Benchmark methodology flaw (affects both h8-v0-vs-p2p and h8-v1-vs-p2p):** The benchmark uses `--bench-iterations 20`, re-reading the same keys. Bounce promotes data to DRAM on first read, so iterations 2-20 are served from memory-tier (~328μs). P2P skips promotion, so all 20 iterations hit SSD (~13-15ms). Nous identified this accounts for ~75% of the measured slowdown — the "1.18x slower" result is mostly a caching artifact, not a DMA path comparison. A fair test requires `--bench-iterations 1` (first-access only). The h8-v1-pinned run (in progress) corrects this: Nous autonomously identified the flaw from prior findings, found the `--bench-only` flag, and designed its benchmark to use `--bench-iterations 1` for first-hit measurement.
+
+### 6. h8-v0-pinned (budget exhausted — no data)
+
+**GPU memory pinning flow (context for this and next run):** In the normal lookup path, the client allocates GPU memory via PyTorch (`torch.zeros(..., device="cuda:0")`), obtains a CUDA IPC handle, and sends it to the server over gRPC. The server calls `cudaIpcOpenMemHandle` to access that GPU memory, then calls `prepare_memory_for_spdk()` to register the buffer with SPDK for BAR1/DMA visibility (via GDRCopy `nvidia-peermem` mapping). All pinning and SPDK registration happens server-side — the Python client only provides a destination GPU buffer address. The "cold pinning" overhead (5-9ms per request) comes from `prepare_memory_for_spdk()` being called on every lookup. The pre-pinned approach moves this to server init: the server allocates its own GPU staging buffer, registers it once with SPDK, and reuses it across all lookups — then does a device-to-device copy from staging to the client's buffer.
+
+**What Nous designed:** The Opus designer autonomously read prior findings from `.nous/h8-v0-vs-p2p/` (1.33x slower due to cold pinning), identified the root cause, and designed an experiment with three arms: (A) existing bounce path as baseline, (B) P2P with persistent staging (pre-pinned at init), (C) P2P without DRAM promotion (ablation to isolate raw transfer time). Implementation: add `p2p_staging: Mutex<Option<Arc<DmaBuffer>>>` field, call `prepare_memory_for_spdk()` once during `initialize()`, reuse across all lookups.
+
+**What happened:** Nous chose to add fields to the shared `IpcHandle` struct in `idispatcher.rs`, which cascaded to both dispatcher versions, all benchmarks, integration tests, and the connector — 12 files changed in a 597-line patch. The executor spent 240 turns (the maximum) trying to fix build errors from this cross-cutting interface change and never produced a running benchmark. Cost: $14.10 ($2.56 design + $11.54 executor).
+
+**Failure mode:** Implementation approach too invasive. A local change (P2P path only in v0, no shared interface modifications) would have been achievable within budget, but Nous chose to thread new fields through the entire interface layer.
+
+### 7. h8-v1-pinned (queued)
+
+Same as h8-v0-pinned but targeting dispatcher v1. Queued to run after h8-v0-pinned completes.
+
+*(Results pending)*
 
 ---
 

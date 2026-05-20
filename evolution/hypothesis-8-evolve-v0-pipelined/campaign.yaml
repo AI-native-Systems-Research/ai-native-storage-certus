@@ -1,0 +1,37 @@
+research_question: >
+  Evolving dispatcher v0 (sequential bounce: read-all-then-copy) to overlap
+  NVMe reads with GPU copies (pipelining) will achieve lower lookup latency
+  for 4 MiB objects (32x128 KiB chunks) through certus-server.
+
+run_id: h8-evolve-v0-pipelined
+
+max_iterations: 2
+
+target_system:
+  name: "Certus Storage Engine — Dispatcher v0 evolution to pipelined"
+  description: >
+    AI-native KV-cache storage system. Dispatcher v0 at components/dispatcher/v0/
+    reads all 128 KiB chunks sequentially to host DRAM via ReadSync, then does a
+    single dma_copy_to_device to GPU. There is no overlap between NVMe reads and
+    GPU copies. Evolve v0 to overlap these stages and measure the improvement.
+    CONSTRAINTS:
+    - Do NOT use or modify gpu-p2p-server.
+    - Do NOT create standalone benchmark binaries.
+    - All benchmarks MUST run through certus-server (apps/certus-server/) with --dispatcher-version v0.
+    - Implementation changes go in components/dispatcher/v0/.
+  observable_metrics:
+    - "end-to-end lookup latency (ms) for a single 4 MiB key"
+    - "sustained lookup throughput (MB/s) over N sequential lookups"
+  controllable_knobs:
+    - "dispatcher implementation: sequential (existing) | pipelined (to implement)"
+    - "value size (4 MiB)"
+    - "chunk size (128 KiB, NVMe MDTS limited)"
+  repo_path: /home/nara/certus/ai-native-storage-certus
+
+models:
+  design: "claude-opus-4-6"
+  execute_analyze: "claude-sonnet-4-6"
+
+prompts:
+  methodology_layer: "prompts/methodology"
+  domain_adapter_layer: null
