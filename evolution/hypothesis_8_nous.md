@@ -28,6 +28,12 @@ Path B: Direct P2P DMA
 
 ---
 
+## Key Result
+
+**Hypothesis refuted — but the real finding is about buffer management, not path selection.** With explicit implementation guidance, Nous proved that pre-pinned P2P and bounce-with-pre-allocated-buffers reach near-parity (~9.3ms vs ~9.7ms for 4 MiB). The 19-23% P2P advantage only exists against naive sequential bounce (32× per-chunk `DmaBuffer::new`). Cold P2P (per-request pinning) is 1.3-2.7x slower than bounce — persistent staging is mandatory. At small sizes (4 KiB), the path difference is negligible (~8%); setup overhead dominates. System overhead (gRPC + dispatcher, 15-25ms) dwarfs both paths.
+
+---
+
 ## Experiment Overview
 
 **Base hypothesis (given to all runs):**
@@ -107,7 +113,7 @@ Minimal campaign: research question, the full repository (all source code), targ
 3. **System overhead dominates** — dispatcher SSD lookup is 13.7ms vs isolated test binary 2.3ms; the DMA path optimization (saving ~0.7ms) is only 5% of total latency
 4. **Pipelining gains are from buffer reuse, not overlap** — h8-evolve-v0-pipelined iter-1 showed 2.02x gain (19.5ms→9.7ms), but h8-v1-true-pipeline proves GPU copy overlap saves <5% (NVMe read is 10-100x longer than GPU copy at 128 KiB chunks). The v0 gain was from eliminating 32× `DmaBuffer::new` allocations per lookup, not from async overlap. Pre-pinned P2P remains 19-23% faster than any bounce variant
 5. **Sequential NVMe submission is safer for bounce** — submitting all 32 reads in parallel causes 10ms tail spikes on bounce path (buffer pool exhaustion); P2P is immune
-6. **Pre-pinned P2P confirmed faster through the dispatcher** — h8-v1-pinned resolved the cold-pinning issue; P2P with persistent staging is 2.02x faster than sequential bounce through certus-server (9.3ms vs 18.8ms)
+6. **Pre-pinned P2P is faster than sequential bounce, tied with pipelined bounce** — P2P with persistent staging is 2.02x faster than sequential bounce (9.3ms vs 18.8ms). But pipelined bounce with pre-allocated buffers achieves ~9.7ms — essentially tied with P2P. Cold P2P (per-request pinning) is slower than both bounce variants (20.1ms)
 7. **gRPC + connect_client overhead dominates** — iter-2 of h8-evolve-v0-pipelined shows BatchSubmit QD=32 provides zero improvement because gRPC round-trip + channel setup (~15-25ms) swamps NVMe read time (~0.8ms). DMA path optimizations are invisible at the end-to-end benchmark level
 
 ---
@@ -447,13 +453,13 @@ Told to "fix v1 to truly overlap reads and copies" — same directive as h8-evol
 
 ## Conclusion: What Should Certus Use?
 
-**Answer to the original hypothesis:** Refuted. Pipelined bounce does NOT outperform P2P. The async overlap (hiding GPU copy behind NVMe read) saves <5% because NVMe read dominates by 10-100x at 128 KiB chunks. h8-evolve-v0-pipelined's 2.02x gain was from eliminating `DmaBuffer::new` allocations, not from overlap — confirmed by h8-v1-true-pipeline iter-2 which showed zero improvement from `cudaHostAlloc` async pipeline. Pre-pinned P2P is consistently 19-23% faster than any bounce variant.
+**Answer to the original hypothesis:** Refuted — but nuanced. Async overlap (hiding GPU copy behind NVMe read) saves <5% because NVMe read dominates by 10-100x at 128 KiB chunks. However, bounce with pre-allocated buffers (eliminating 32× `DmaBuffer::new`) reaches parity with pre-pinned P2P (~9.7ms vs ~9.3ms). Pre-pinned P2P is 19-23% faster than sequential bounce without buffer optimization, but against optimized bounce the advantage disappears. Cold P2P (per-request pinning) is slower than both.
 
 **Did Nous answer correctly?** Mixed. h8-evolve-v0-pipelined correctly identified a 2x gain but misattributed it to overlap (it was buffer allocation elimination). h8-v1-true-pipeline correctly diagnosed the root cause in iter-2: NVMe read dominates, GPU copy overlap is irrelevant at this chunk size.
 
 **What Certus should implement:**
-- **P2P with persistent GPU staging** as the primary SSD→GPU path. Pre-register GPU buffer once per client, reuse across all lookups. Consistently 19-23% faster than bounce.
-- **Eliminate per-lookup DmaBuffer allocations** in bounce path — pre-allocate and reuse (`cudaHostAlloc` buffers or a DmaBuffer pool). This is where the real bounce improvement comes from, not async overlap.
+- **Either path works with proper buffer management.** Pre-pinned P2P and bounce-with-pre-allocated-buffers achieve near-parity (~9.3ms vs ~9.7ms). P2P is simpler (one staging buffer, no per-chunk allocs) but requires GPU BAR1 visibility + SPDK registration. Bounce is more portable but needs a DmaBuffer pool to avoid the 32× allocation overhead that makes sequential bounce 2x slower.
+- **Whichever path: pre-allocate buffers at connection time.** The dominant bounce improvement (2x) comes from eliminating per-lookup `DmaBuffer::new`, not from async overlap. P2P requires one-time `prepare_memory_for_spdk()` — without it, cold P2P is 1.3-2.7x slower than bounce.
 - **Reduce system overhead first** — gRPC/connect_client/extent-manager overhead (~15-25ms) is the dominant cost. Both P2P (15.9ms) and bounce (19.6ms) are far from the isolated test binary results (2.3ms / 9.3ms). Fixing infrastructure yields larger gains than any DMA path optimization.
 
 **What remains unproven:**
