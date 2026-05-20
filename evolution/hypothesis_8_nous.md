@@ -43,8 +43,8 @@ Nous couldn't identify what was missing on its own — it never recognized that 
 
 **What exists in the codebase:**
 - **Dispatcher:** The component inside `certus-server` responsible for SSD→GPU data movement. Handles NVMe reads, memory-tier promotion, and GPU copies. `certus-server` is the full system (gRPC + dispatcher + extent-manager + memory-tier). The hypothesis should be tested through `certus-server` to exercise the dispatcher in context.
-  - **v0:** Sequential bounce — reads all 128 KiB chunks to host DRAM via ReadSync, then single `dma_copy_to_device` to GPU. No pipelining, no P2P.
-  - **v1:** "Pipelined" bounce — ring of 4 DMA buffers, per-chunk ReadSync + GPU copy. Despite the name, it's sequential per-chunk (no overlap between read and copy stages). No P2P.
+  - **v0:** Reads all 128 KiB chunks from SSD into a contiguous host DRAM buffer (bounce), then does a single `dma_copy_to_device` to GPU. No memory-tier — data goes SSD→DRAM→GPU and that's it. No pipelining, no P2P.
+  - **v1:** Reads each chunk into a ring of 4 DMA buffers, copies to memory-tier slot (DRAM cache for future lookups) AND to GPU. The memory-tier is the whole point of v1 — repeat lookups are served from DRAM at 11 GB/s. Despite the name "pipelined," it's sequential per-chunk (no overlap between read and copy stages). No P2P.
 - **`gpu-p2p-server`:** Standalone test binary for validating P2P DMA in isolation. Talks directly to NVMe + GPU, bypasses entire dispatcher stack. Has bounce/P2P/P2P-cold modes but no pipelining.
 - **Test clients (pre-existing):**
   - `apps/certus-server/python-client/test_client.py` — gRPC benchmark client for `certus-server`. Populates objects, forces eviction to SSD, then measures per-object lookup latency (`time.perf_counter()` around `stub.Lookup`) and throughput (`object_size / latency`). Reports avg/min/max latency (μs) and GB/s for both memory-tier and SSD-tier lookups.
