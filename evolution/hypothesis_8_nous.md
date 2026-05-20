@@ -53,7 +53,8 @@ Path B: Direct P2P DMA
 | h8-v0-pinned | + "even with pre-pinned GPU memory" --dispatcher-version v0 | Attempted: added `cuda_ipc_handle_bytes: Option<Vec<u8>>` to shared `IpcHandle` in `idispatcher.rs` + P2P staging pool in v0 — cascaded to 12 files (597-line patch), never compiled | **No data** — budget exhausted (240 turns) | Cross-cutting interface changes exceed Nous budget; keep implementations local | $14.10 |
 | h8-v1-pinned | + "even with pre-pinned GPU memory" --dispatcher-version v1 | Iter-1: GPU DMA buffer cache in dispatcher v1 — registers GPU memory with NVMe once per client, reuses across all lookups. Iter-2: added parallel NVMe reads (32 concurrent) into the pre-pinned GPU buffer | **Hypothesis not aligned** — no pipelining. Sequential bounce refuted: pre-pinned P2P 2.02x faster (9.3ms vs 18.8ms) | Python client works fine for P2P; server-side GPU buffer caching handles all registration — no native client needed | ~$12 |
 | h8-evolve-v0-pipelined | + **"Do NOT use gpu-p2p-server. Overlap NVMe reads with GPU copies (true pipelining). Do NOT reference v1."** --dispatcher-version v0 | Iter-1: double-buffered `cudaHostAlloc` + `cudaMemcpyAsync` on CUDA streams — reads chunk N+1 while copying chunk N to GPU. Iter-2: tried BatchSubmit QD=32 (all chunks in parallel) — no improvement due to gRPC/connect_client overhead | **Confirmed** — pipelined bounce (9.7ms) 2.08x faster than P2P (20.1ms). Note: P2P here uses cold pinning; vs pre-pinned P2P (9.3ms from h8-v1-pinned) they're tied | True overlap works but only ties P2P; gRPC round-trip (~15-25ms) swamps NVMe-level optimizations — the bottleneck is infrastructure, not DMA | $15.59 |
-| **Total** | | | | | **~$101.28** |
+| h8-v1-true-pipeline | + **"Do NOT use gpu-p2p-server. Fix v1 to truly overlap reads and copies."** --dispatcher-version v1 | In progress — baseline collected (v1 sequential: 19.2ms, 10 objects) | *Running* | Autonomously chose 10 objects for better statistics (learned from prior variance) | in progress |
+| **Total** | | | | | **~$101.28+** |
 
 All runs used Opus for design, Sonnet for execute_analyze.
 
@@ -142,7 +143,7 @@ Minimal campaign: research question, the full repository (all source code), targ
 - The NVMe controller cache invalidation problem — accepted "SSD reads" at face value without questioning whether data was truly cold
 - Questioning `test_client.py`'s benchmark methodology — when results were suspicious (SSD faster than memory, multi-iteration promotion), Nous tweaked parameters rather than recognizing the measurement design itself was flawed
 - Questioning whether the hypothesis could be saved (true pipelining) after showing sequential bounce loses — pivoted to making P2P faster instead
-- Sustained throughput testing — every campaign lists "sustained lookup throughput over N sequential lookups" as a metric, but all runs only benchmarked 1 key × 1 iteration
+- Sustained throughput testing — every campaign lists "sustained lookup throughput over N sequential lookups" as a metric, but most runs only benchmarked 1 key × 1 iteration (h8-v1-true-pipeline autonomously chose 10 objects — likely learned from prior run variance)
 
 **Failure modes:**
 1. No hypothesis-to-experiment alignment check (tested a different question than asked)
