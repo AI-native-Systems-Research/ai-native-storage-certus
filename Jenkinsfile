@@ -25,7 +25,7 @@ pipeline {
     }
     stage('GPU Unit Tests') {
       steps {
-        sh '. ~/.cargo/env ; cargo t --workspace --features gpu'
+        sh '. ~/.cargo/env ; LD_LIBRARY_PATH=/usr/local/lib cargo t --workspace --features gpu'
       }
     }
     stage('SPDK Unit Tests') {
