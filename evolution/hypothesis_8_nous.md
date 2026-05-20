@@ -465,8 +465,11 @@ Told to "fix v1 to truly overlap reads and copies" — same directive as h8-evol
 
 ## Next Hypotheses
 
-1. **System overhead is the real bottleneck** — all dispatcher measurements show 15-20ms for operations that take 2-9ms in isolated test binary. The gap (gRPC, connect_client, extent-manager, DmaBuffer allocation) is 3-10x larger than the DMA path savings. Profile and reduce.
-2. **DmaBuffer allocation is the hidden cost** — h8-evolve-v0-pipelined's 2x gain came from pre-allocating buffers, not from async overlap. Quantify: how much of the 19ms sequential bounce is DmaBuffer::new vs actual NVMe I/O?
-3. **Parallel NVMe + P2P at scale** — QD=32 parallel reads into pre-pinned GPU buffer without gRPC overhead (direct actor-level benchmark). Need cold NVMe controller state for valid measurement.
-4. **Sustained throughput** — multi-key sequential lookups to test buffer reuse patterns and whether P2P advantage holds under sustained load.
+**Why pipelining was the wrong question:** The hypothesis assumed NVMe read (~600μs/chunk) and GPU copy (~5-50μs/chunk) are balanced enough that overlapping them matters. They're not — GPU copy is 10-100x faster than NVMe read at 128 KiB chunks. There's almost nothing to hide. The actual performance wins found were from buffer allocation elimination (2x) and P2P path selection (19-23%), not from overlap.
+
+1. **System overhead profiling** — the dispatcher adds 15-25ms over the isolated test binary for the same operation. Where does it go? (gRPC serialization, `connect_client` channel setup, extent-manager lookup, DmaBuffer allocation, memory-tier promotion logic). This is 3-10x larger than any DMA path difference and affects both P2P and bounce equally.
+2. **Buffer pool pre-allocation** — h8-evolve-v0-pipelined's 2x gain came from eliminating 32× `DmaBuffer::new` per lookup. Implement a per-connection buffer pool (pre-allocate N × 128 KiB DmaBuffers at connection time, reuse across lookups). Measure: how much of the 19ms is allocation vs actual I/O?
+3. **Larger effective chunk sizes** — at 128 KiB, 32 sequential NVMe reads dominate latency. Can we coalesce into fewer, larger operations? (NVMe MDTS limits individual reads, but can we submit adjacent LBAs as one larger read if MDTS allows?)
+4. **Direct actor-level benchmarking** — bypass gRPC entirely to measure true NVMe + DMA performance through the dispatcher's actor. This isolates whether the overhead is in gRPC/networking or in the dispatcher logic itself.
+5. **Sustained multi-key throughput** — all experiments measured single-key (or 10-key) latency. Under sustained load, buffer reuse, NVMe queue depth, and GPU stream scheduling may behave differently.
 
