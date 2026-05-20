@@ -3,12 +3,12 @@ use std::sync::{Arc, Mutex};
 
 use component_core::query_interface;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use dispatcher::io_segmenter::segment_io;
-use dispatcher::DispatcherComponentV0;
+use dispatcher_v1::io_segmenter::segment_io;
+use dispatcher_v1::DispatcherComponentV0;
 use interfaces::{
     CacheKey, DispatchMapError, DispatcherConfig, DmaAllocFn, DmaBuffer, GpuDeviceInfo,
-    GpuDmaBuffer, GpuIpcHandle, IDispatchMap, IDispatcher, IGpuServices, ILogger, IpcHandle,
-    LookupResult,
+    GpuDmaBuffer, GpuIpcHandle, IDispatchMap, IDispatcher, IGpuServices, ILogger, IMemoryTier,
+    IpcHandle, LookupResult, MemoryTierError,
 };
 
 // ===========================================================================
@@ -175,6 +175,38 @@ impl IDispatchMap for BenchDispatchMap {
         let inner = self.inner.lock().unwrap();
         inner.keys().copied().take(n).collect()
     }
+
+    fn create_memory_tier_entry(
+        &self,
+        key: CacheKey,
+        _pointer: *mut u8,
+        size: u32,
+    ) -> Result<(), DispatchMapError> {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.contains_key(&key) {
+            return Err(DispatchMapError::AlreadyExists(key));
+        }
+        let buffer = alloc_dma_buffer(size as usize * 4096);
+        inner.insert(
+            key,
+            BenchEntry {
+                buffer,
+                block_offset: None,
+                write_ref: true,
+                read_refs: 0,
+            },
+        );
+        Ok(())
+    }
+
+    fn convert_memory_tier_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+        let inner = self.inner.lock().unwrap();
+        if inner.contains_key(&key) {
+            Ok(())
+        } else {
+            Err(DispatchMapError::KeyNotFound(key))
+        }
+    }
 }
 
 struct BenchLogger;
@@ -233,6 +265,59 @@ impl IGpuServices for BenchGpuServices {
         }
         Ok(())
     }
+    fn prepare_memory_for_spdk(
+        &self,
+        _base64_payload: &str,
+        _device_index: Option<u32>,
+    ) -> Result<DmaBuffer, String> {
+        Err("bench mock".into())
+    }
+}
+
+struct BenchMemoryTier {
+    pool: Mutex<Vec<u8>>,
+}
+
+impl BenchMemoryTier {
+    fn new(size: usize) -> Self {
+        Self {
+            pool: Mutex::new(vec![0u8; size]),
+        }
+    }
+}
+
+impl IMemoryTier for BenchMemoryTier {
+    fn initialize(&self, _pool_size: usize) -> Result<(), MemoryTierError> {
+        Ok(())
+    }
+    fn insert(&self, _key: CacheKey, _size: u32) -> Result<*mut u8, MemoryTierError> {
+        let pool = self.pool.lock().unwrap();
+        Ok(pool.as_ptr() as *mut u8)
+    }
+    fn get(&self, _key: CacheKey) -> Option<(*mut u8, u32)> {
+        let pool = self.pool.lock().unwrap();
+        Some((pool.as_ptr() as *mut u8, pool.len() as u32))
+    }
+    fn evict_lru(&self) -> Option<CacheKey> {
+        None
+    }
+    fn remove(&self, _key: CacheKey) -> Result<(), MemoryTierError> {
+        Ok(())
+    }
+    fn touch(&self, _key: CacheKey) {}
+    fn contains(&self, _key: CacheKey) -> bool {
+        false
+    }
+    fn capacity(&self) -> usize {
+        self.pool.lock().unwrap().len()
+    }
+    fn used(&self) -> usize {
+        0
+    }
+    fn pool_info(&self) -> Option<(*mut u8, usize)> {
+        let pool = self.pool.lock().unwrap();
+        Some((pool.as_ptr() as *mut u8, pool.len()))
+    }
 }
 
 // ===========================================================================
@@ -250,6 +335,9 @@ fn setup_dispatcher() -> (Arc<dyn IDispatcher + Send + Sync>, Arc<BenchDispatchM
         .unwrap();
     c.gpu_services
         .connect(Arc::new(BenchGpuServices) as Arc<dyn IGpuServices + Send + Sync>)
+        .unwrap();
+    c.memory_tier
+        .connect(Arc::new(BenchMemoryTier::new(64 * 1024 * 1024)) as Arc<dyn IMemoryTier + Send + Sync>)
         .unwrap();
 
     let d: Arc<dyn IDispatcher + Send + Sync> = query_interface!(c, IDispatcher).unwrap();
