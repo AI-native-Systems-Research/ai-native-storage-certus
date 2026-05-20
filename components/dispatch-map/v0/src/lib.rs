@@ -152,7 +152,10 @@ impl IDispatchMap for DispatchMapComponentV0 {
             return Err(DispatchMapError::Timeout(key));
         }
 
-        entry.read_ref += 1;
+        entry.read_ref = entry
+            .read_ref
+            .checked_add(1)
+            .ok_or(DispatchMapError::RefCountOverflow(key))?;
         entry.tsc = rdtsc();
 
         let result = match &entry.location {
@@ -225,7 +228,10 @@ impl IDispatchMap for DispatchMapComponentV0 {
             return Err(DispatchMapError::Timeout(key));
         }
 
-        entry.read_ref += 1;
+        entry.read_ref = entry
+            .read_ref
+            .checked_add(1)
+            .ok_or(DispatchMapError::RefCountOverflow(key))?;
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: take_read key {key}"));
         }
@@ -309,7 +315,10 @@ impl IDispatchMap for DispatchMapComponentV0 {
         }
 
         entry.write_ref = 0;
-        entry.read_ref += 1;
+        entry.read_ref = entry
+            .read_ref
+            .checked_add(1)
+            .ok_or(DispatchMapError::RefCountOverflow(key))?;
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: downgrade_reference key {key}"));
         }
