@@ -119,6 +119,7 @@ Minimal campaign: research question, the full repository (all source code), targ
 - The NVMe controller cache invalidation problem — accepted "SSD reads" at face value without questioning whether data was truly cold
 - Questioning `test_client.py`'s benchmark methodology — when results were suspicious (SSD faster than memory, multi-iteration promotion), Nous tweaked parameters rather than recognizing the measurement design itself was flawed
 - Questioning whether the hypothesis could be saved (true pipelining) after showing sequential bounce loses — pivoted to making P2P faster instead
+- Sustained throughput testing — every campaign lists "sustained lookup throughput over N sequential lookups" as a metric, but all runs only benchmarked 1 key × 1 iteration
 
 **Failure modes:**
 1. No hypothesis-to-experiment alignment check (tested a different question than asked)
