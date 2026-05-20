@@ -2,7 +2,11 @@
 
 ## Objective
 
-Evaluate Nous's autonomous experiment capability on a GPU storage transfer optimization hypothesis, and determine whether pipelined bounce-buffer (SSD→CPU→GPU) transfers outperform direct SSD→GPU P2P DMA for 4 MiB objects at 128 KiB NVMe chunk size.
+**Meta-question:** With minimal direction, can Nous autonomously answer a systems-performance hypothesis? If not, how explicit do we need to be — and at what point does it produce useful implementations?
+
+**Domain hypothesis:** Pipelined bounce-buffer (SSD→CPU→GPU) transfers outperform direct SSD→GPU P2P DMA for 4 MiB objects at 128 KiB NVMe chunk size.
+
+The 8 campaigns below progressively increase the level of direction given to Nous, from "just the research question" to "specific implementation strategy." This reveals what Nous can figure out on its own vs what it needs to be told.
 
 ```
 Path A: Pipelined Bounce (hypothesis predicts this wins)
@@ -79,12 +83,25 @@ Minimal campaign: research question, the full repository (all source code), targ
 
 ## Key Findings
 
-1. **Harness results don't predict system behavior** — P2P is 1.47x faster in isolation but 1.33x slower through the dispatcher due to integration overhead (cold pinning)
+### How much direction does Nous need?
+
+| Direction level | What was given | Result | Runs |
+|----------------|---------------|--------|------|
+| Research question only | "Is pipelined bounce faster than P2P?" | Tests wrong binary, never reaches dispatcher | h8-transfer-path, h8-pipelined, h8-dispatcher-p2p (~$35) |
+| System constraint | + "Use certus-server, not gpu-p2p-server" | Correct system, but naive implementation (cold pinning makes P2P slower) | h8-v0-vs-p2p, h8-v1-vs-p2p (~$24) |
+| Design hint | + "Pre-pinned GPU memory" | Solves integration issue, produces valid comparison | h8-v1-pinned (~$12) |
+| Implementation strategy | + "Overlap NVMe reads with GPU copies" | Builds true pipeline better than our existing v1 | h8-evolve-v0-pipelined (in progress) |
+
+**Answer:** Nous needs the system constraint (where to test) and a design hint (what approach to take). It cannot make architectural decisions autonomously but executes well once pointed in a direction. Implementation details — buffer management, CUDA stream setup, memory registration — it figures out on its own.
+
+### Domain findings
+
+1. **Isolated test results don't predict system behavior** — P2P is 1.47x faster in isolation but 1.33x slower through the dispatcher due to integration overhead (cold pinning)
 2. **Pre-pinned staging is mandatory** — cold P2P (per-request pin/unpin) is 2.74x slower than bounce; every test confirmed this but the first dispatcher implementation still got it wrong
 3. **System overhead dominates** — dispatcher SSD lookup is 13.7ms vs isolated test binary 2.3ms; the DMA path optimization (saving ~0.7ms) is only 5% of total latency
-4. **Pipelining works but doesn't beat P2P** — iter-2 confirms 2.4-3x gain over sequential bounce with proper cudaHostAlloc buffers, but P2P warm (1.93ms) still beats pipelined bounce (4.97ms) by 2.6x on a clean system
+4. **True pipelining matches P2P** — evolved v0 with double-buffered `cudaHostAlloc` + `cudaMemcpyAsync`: 9,659μs vs P2P pre-pinned 9,310μs (essentially tied). Our existing v1 "pipeline" (no real overlap) is 1.35x slower at 13,029μs
 5. **Sequential NVMe submission is safer for bounce** — submitting all 32 reads in parallel causes 10ms tail spikes on bounce path (buffer pool exhaustion); P2P is immune
-6. **Pre-pinned P2P confirmed faster through the dispatcher** — h8-v1-pinned resolved the cold-pinning issue; P2P with persistent staging is 2.02x faster than sequential bounce through certus-server (9.3ms vs 18.8ms). The hypothesis (bounce wins) is refuted for sequential bounce. Remaining question: can *true pipelined* bounce (overlapped NVMe read + GPU copy) close the gap? No run has tested this yet — campaigns `h8-evolve-v0-pipelined` and `h8-v1-true-pipeline` are queued for this.
+6. **Pre-pinned P2P confirmed faster through the dispatcher** — h8-v1-pinned resolved the cold-pinning issue; P2P with persistent staging is 2.02x faster than sequential bounce through certus-server (9.3ms vs 18.8ms)
 
 ---
 
