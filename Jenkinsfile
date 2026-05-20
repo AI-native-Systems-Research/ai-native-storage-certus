@@ -20,7 +20,7 @@ pipeline {
     }
     stage('Hardware-Agnostic Unit Tests') {
       steps {
-        sh '. ~/.cargo/env ; cargo t --workspace'
+        sh '. ~/.cargo/env ; LD_LIBRARY_PATH=/usr/local/lib cargo t --workspace'
       }
     }
     stage('GPU Unit Tests') {
