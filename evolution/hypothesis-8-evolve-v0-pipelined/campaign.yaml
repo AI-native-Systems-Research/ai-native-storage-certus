@@ -19,9 +19,9 @@ target_system:
     - Do NOT create standalone benchmark binaries.
     - All benchmarks MUST run through certus-server (apps/certus-server/) with --dispatcher-version v0.
     - Implementation changes go in components/dispatcher/v0/.
+    - Do NOT read or reference components/dispatcher/v1/ — design the pipelining approach independently.
     - Use --bench-iterations 1 for fair first-hit comparison.
-    - Restart the server between each condition (fresh process, fresh NVMe state).
-    - Evict enough objects to exceed NVMe controller cache (~4GB): populate at least 1100 objects into a 64-slot pool so the oldest objects are flushed from controller DRAM by subsequent writes.
+    - Restart the server between each condition (fresh process, fresh populate cycle).
   observable_metrics:
     - "end-to-end lookup latency (ms) for a single 4 MiB key"
     - "sustained lookup throughput (MB/s) over N sequential lookups"
