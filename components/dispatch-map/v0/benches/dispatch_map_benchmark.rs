@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use component_core::query_interface;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, measurement::WallTime};
 use dispatch_map::{DispatchMapComponentV0, DispatchMapState};
 use interfaces::{DmaAllocFn, DmaBuffer, IDispatchMap};
 
@@ -75,7 +75,7 @@ fn bench_ref_ops_throughput(c: &mut Criterion) {
     });
 }
 
-fn bench_lru_lookup(c: &mut Criterion) {
+fn bench_lru_lookup(c: &mut Criterion<WallTime>) {
     let comp = DispatchMapComponentV0::new(DispatchMapState::new());
     let dm = query_interface!(comp, IDispatchMap).unwrap();
     dm.set_dma_alloc(mock_dma_alloc());
@@ -86,19 +86,24 @@ fn bench_lru_lookup(c: &mut Criterion) {
         dm.release_write(key).unwrap();
     }
 
-    c.bench_function("oldest_keys_1000_entries_top10", |b| {
+    let mut group = c.benchmark_group("lru_mean_latency");
+    group.significance_level(0.01).sample_size(200);
+
+    group.bench_function("oldest_keys_1000_entries_top10", |b| {
         b.iter(|| {
             let keys = dm.oldest_keys(black_box(10));
             black_box(keys);
         });
     });
 
-    c.bench_function("oldest_keys_1000_entries_top100", |b| {
+    group.bench_function("oldest_keys_1000_entries_top100", |b| {
         b.iter(|| {
             let keys = dm.oldest_keys(black_box(100));
             black_box(keys);
         });
     });
+
+    group.finish();
 }
 
 fn bench_entry_size(c: &mut Criterion) {
