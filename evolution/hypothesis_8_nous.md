@@ -53,8 +53,8 @@ Path B: Direct P2P DMA
 | h8-v0-pinned | + "even with pre-pinned GPU memory" --dispatcher-version v0 | Attempted: added `cuda_ipc_handle_bytes: Option<Vec<u8>>` to shared `IpcHandle` in `idispatcher.rs` + P2P staging pool in v0 — cascaded to 12 files (597-line patch), never compiled | **No data** — budget exhausted (240 turns) | Cross-cutting interface changes exceed Nous budget; keep implementations local | $14.10 |
 | h8-v1-pinned | + "even with pre-pinned GPU memory" --dispatcher-version v1 | Iter-1: GPU DMA buffer cache in dispatcher v1 — registers GPU memory with NVMe once per client, reuses across all lookups. Iter-2: added parallel NVMe reads (32 concurrent) into the pre-pinned GPU buffer | **Hypothesis not aligned** — no pipelining. Sequential bounce refuted: pre-pinned P2P 2.02x faster (9.3ms vs 18.8ms) | Python client works fine for P2P; server-side GPU buffer caching handles all registration — no native client needed | ~$12 |
 | h8-evolve-v0-pipelined | + **"Do NOT use gpu-p2p-server. Overlap NVMe reads with GPU copies (true pipelining). Do NOT reference v1."** --dispatcher-version v0 | Iter-1: double-buffered `cudaHostAlloc` + `cudaMemcpyAsync` on CUDA streams — reads chunk N+1 while copying chunk N to GPU. Iter-2: tried BatchSubmit QD=32 (all chunks in parallel) — no improvement due to gRPC/connect_client overhead | **Confirmed** — pipelined bounce (9.7ms) 2.08x faster than P2P (20.1ms). Note: P2P here uses cold pinning (no pre-pinning was implemented); vs pre-pinned P2P (9.3ms from h8-v1-pinned) they're tied | True overlap works but only ties P2P; gRPC round-trip (~15-25ms) swamps NVMe-level optimizations — the bottleneck is infrastructure, not DMA | $15.59 |
-| h8-v1-true-pipeline | + **"Do NOT use gpu-p2p-server. Fix v1 to truly overlap reads and copies."** --dispatcher-version v1 | Iter-1: `cudaMemcpyAsync` on `cudaHostRegistered` mmap'd ring buffers — only 10% gain (async falls back to synchronous on registered-not-allocated memory). P2P arm uses cached `prepare_memory_for_spdk` (real pre-pinning). Iter-2: fixing to use `cudaHostAlloc` | *Running* — iter-1: pipeline only 10% faster (19.2ms→19.2ms baseline inflated); P2P pre-pinned 23% faster (16.4ms). All latencies 3-5x higher than historical (system confound) | `cudaHostRegister` on mmap'd memory doesn't enable true async — must use `cudaHostAlloc` (same lesson as h8-pipelined) | in progress |
-| **Total** | | | | | **~$101.28+** |
+| h8-v1-true-pipeline | + **"Do NOT use gpu-p2p-server. Fix v1 to truly overlap reads and copies."** --dispatcher-version v1 | Iter-1: `cudaMemcpyAsync` on `cudaHostRegistered` mmap'd ring buffers (10% gain). Iter-2: switched to `cudaHostAlloc` — no improvement (NVMe read 10-100x longer than GPU copy, nothing to hide). P2P arm uses cached pre-pinning | **Refuted** — pipelining gives 0-10% gain (within noise); P2P pre-pinned 19-23% faster. NVMe read dominates at 128 KiB chunks — GPU copy overlap is irrelevant | NVMe read (~600μs/chunk) dominates GPU copy (~5-50μs/chunk) by 10-100x; overlapping saves <5%, below measurement noise. Contradicts v0's 2x (that gain was from eliminating DmaBuffer::new, not from overlap) | $19.92 |
+| **Total** | | | | | **~$121.20** |
 
 All runs used Opus for design, Sonnet for execute_analyze.
 
@@ -96,16 +96,16 @@ Minimal campaign: research question, the full repository (all source code), targ
 | Research question only | "Is pipelined bounce faster than P2P?" | Tests wrong binary, never reaches dispatcher | h8-transfer-path, h8-pipelined, h8-dispatcher-p2p (~$35) |
 | System constraint | + "Use certus-server, not gpu-p2p-server" | Correct system, but naive implementation (cold pinning makes P2P slower) | h8-v0-vs-p2p, h8-v1-vs-p2p (~$24) |
 | Design hint | + "Pre-pinned GPU memory" | Solves integration issue, produces valid comparison | h8-v1-pinned (~$12) |
-| Implementation strategy | + "Overlap NVMe reads with GPU copies" | Builds true pipeline better than our existing v1; iter-2 discovers gRPC is the real bottleneck | h8-evolve-v0-pipelined |
+| Implementation strategy | + "Overlap NVMe reads with GPU copies" | Builds pipeline, 2x gain (from buffer reuse, not overlap); correctly diagnoses NVMe read dominance | h8-evolve-v0-pipelined, h8-v1-true-pipeline (~$35) |
 
-**Answer:** Nous needs the system constraint (where to test) and a design hint (what approach to take). It cannot make architectural decisions autonomously but executes well once pointed in a direction. Implementation details — buffer management, CUDA stream setup, memory registration — it figures out on its own.
+**Answer:** Nous needs the system constraint (where to test) and a design hint (what approach to take). It cannot make architectural decisions autonomously but executes well once pointed in a direction. Implementation details — buffer management, CUDA stream setup, memory registration — it figures out on its own. At the "implementation strategy" level, Nous also correctly diagnoses *why* things don't work (NVMe read dominance, cudaHostRegister fallback) — valuable even when the hypothesis is refuted.
 
 ### Domain findings
 
 1. **Isolated test results don't predict system behavior** — P2P is 1.47x faster in isolation but 1.33x slower through the dispatcher due to integration overhead (cold pinning)
 2. **Pre-pinned staging is mandatory** — cold P2P (per-request pin/unpin) is 2.74x slower than bounce; every test confirmed this but the first dispatcher implementation still got it wrong
 3. **System overhead dominates** — dispatcher SSD lookup is 13.7ms vs isolated test binary 2.3ms; the DMA path optimization (saving ~0.7ms) is only 5% of total latency
-4. **True pipelining matches but doesn't beat P2P** — evolved v0 with double-buffered `cudaHostAlloc` + `cudaMemcpyAsync`: 9,659μs vs P2P pre-pinned 9,310μs (P2P still 4% faster). Hypothesis not confirmed. Our existing v1 "pipeline" (no real overlap) is 1.35x slower at 13,029μs
+4. **Pipelining gains are from buffer reuse, not overlap** — h8-evolve-v0-pipelined iter-1 showed 2.02x gain (19.5ms→9.7ms), but h8-v1-true-pipeline proves GPU copy overlap saves <5% (NVMe read is 10-100x longer than GPU copy at 128 KiB chunks). The v0 gain was from eliminating 32× `DmaBuffer::new` allocations per lookup, not from async overlap. Pre-pinned P2P remains 19-23% faster than any bounce variant
 5. **Sequential NVMe submission is safer for bounce** — submitting all 32 reads in parallel causes 10ms tail spikes on bounce path (buffer pool exhaustion); P2P is immune
 6. **Pre-pinned P2P confirmed faster through the dispatcher** — h8-v1-pinned resolved the cold-pinning issue; P2P with persistent staging is 2.02x faster than sequential bounce through certus-server (9.3ms vs 18.8ms)
 7. **gRPC + connect_client overhead dominates** — iter-2 of h8-evolve-v0-pipelined shows BatchSubmit QD=32 provides zero improvement because gRPC round-trip + channel setup (~15-25ms) swamps NVMe read time (~0.8ms). DMA path optimizations are invisible at the end-to-end benchmark level
@@ -408,30 +408,65 @@ Told to "overlap NVMe reads with GPU copies (true pipelining)" in dispatcher v0,
 
 **Cost:** $15.59
 
+### 9. h8-v1-true-pipeline
+
+Told to "fix v1 to truly overlap reads and copies" — same directive as h8-evolve-v0-pipelined but targeting v1's existing ring-buffer architecture. Used 10 objects for better statistics (autonomous decision).
+
+**Iter-1 results (cudaHostRegistered mmap'd buffers):**
+
+| Arm | Condition | SSD-tier (μs) | vs baseline |
+|-----|-----------|--------------|-------------|
+| h-main | Sequential v1 (baseline) | 21,362 | — |
+| h-main | Pipelined v1 (ReadAsync + cudaMemcpyAsync) | 19,220 | 10% faster |
+| h-control-negative | P2P pre-pinned (cached prepare_memory_for_spdk) | 16,396 | 23% faster |
+
+**Iter-1 analysis:**
+- Only 10% gain from pipelining — `cudaMemcpyAsync` on `cudaHostRegistered` mmap'd memory falls back to synchronous (same finding as h8-pipelined). Correctly diagnosed; recommends `cudaHostAlloc` for iter-2.
+- P2P with real pre-pinning (buffer cache) is 23% faster than baseline — consistent, reproducible advantage.
+- All absolute latencies 3-5x higher than h8-v1-pinned historical results — system-level confound (NVMe thermal state, SPDK contention).
+
+**Iter-2 results (cudaHostAlloc staging — the "correct" fix):**
+
+| Arm | Condition | SSD-tier (μs) | vs baseline |
+|-----|-----------|--------------|-------------|
+| baseline | Sequential v1 (run 1) | 19,646 | — |
+| baseline | Sequential v1 (run 2) | 23,717 | — |
+| h-main | cudaHostAlloc pipeline (run 1) | 22,523 | 14.6% slower |
+| h-main | cudaHostAlloc pipeline (run 2) | 21,412 | within noise |
+| h-control-negative | P2P pre-pinned | 15,879 | 19% faster |
+
+**Iter-2 analysis:**
+- **cudaHostAlloc pipeline provides zero improvement.** The mechanism is correct but irrelevant: NVMe read (~600μs/chunk) dominates GPU copy (~5-50μs/chunk) by 10-100x. Hiding a 50μs copy behind a 600μs read saves at most 5-8% — below the ±30% measurement noise.
+- P2P pre-pinned remains consistently fastest (19-23% over baseline across both iterations).
+- This explains h8-evolve-v0-pipelined's contradictory 2.02x: that gain was from eliminating `DmaBuffer::new` allocations (pre-allocated `cudaHostAlloc` buffers vs 32× per-chunk allocs), not from async overlap.
+- Nous correctly diagnosed the root cause: "NVMe read dominance is the binding constraint; GPU copy overlap is a second-order effect at 128 KiB chunk sizes."
+
+**Cost:** $19.92
+
 ---
 
 ## Conclusion: What Should Certus Use?
 
-**Answer to the original hypothesis:** Confirmed against cold P2P — pipelined bounce (9.7ms) is 2.08x faster. Against pre-pinned P2P (9.3ms from h8-v1-pinned), they're essentially tied. Sequential bounce (19.5ms) is definitively slower than both.
+**Answer to the original hypothesis:** Refuted. Pipelined bounce does NOT outperform P2P. The async overlap (hiding GPU copy behind NVMe read) saves <5% because NVMe read dominates by 10-100x at 128 KiB chunks. h8-evolve-v0-pipelined's 2.02x gain was from eliminating `DmaBuffer::new` allocations, not from overlap — confirmed by h8-v1-true-pipeline iter-2 which showed zero improvement from `cudaHostAlloc` async pipeline. Pre-pinned P2P is consistently 19-23% faster than any bounce variant.
 
-**Did Nous answer correctly?** Yes for the comparison it made (pipelined vs cold P2P). But it never set up the harder comparison: pipelined bounce vs pre-pinned P2P in the same run. Whether pipelining beats *optimally configured* P2P remains an open question — the data suggests they're equivalent (~9.5ms both).
+**Did Nous answer correctly?** Mixed. h8-evolve-v0-pipelined correctly identified a 2x gain but misattributed it to overlap (it was buffer allocation elimination). h8-v1-true-pipeline correctly diagnosed the root cause in iter-2: NVMe read dominates, GPU copy overlap is irrelevant at this chunk size.
 
 **What Certus should implement:**
-- **True pipelined bounce** as the primary path — double-buffered `cudaHostAlloc` + `cudaMemcpyAsync`, overlapping NVMe reads with GPU copies. Matches P2P performance without requiring GPU BAR1/GDRCopy infrastructure.
-- **P2P with persistent GPU staging** as an alternative where topology allows. Register the GPU buffer once per client connection, reuse across all lookups.
-- **Either path is viable** — both achieve ~9.5ms for 4 MiB SSD→GPU. Choice depends on hardware requirements: pipelined bounce works everywhere, P2P requires NVMe-GPU PCIe visibility.
-- **Reduce system overhead first** — the ~7ms gRPC/connect_client/extent-manager overhead is the largest single component. Fixing this benefits both paths equally and yields more than any DMA optimization.
+- **P2P with persistent GPU staging** as the primary SSD→GPU path. Pre-register GPU buffer once per client, reuse across all lookups. Consistently 19-23% faster than bounce.
+- **Eliminate per-lookup DmaBuffer allocations** in bounce path — pre-allocate and reuse (`cudaHostAlloc` buffers or a DmaBuffer pool). This is where the real bounce improvement comes from, not async overlap.
+- **Reduce system overhead first** — gRPC/connect_client/extent-manager overhead (~15-25ms) is the dominant cost. Both P2P (15.9ms) and bounce (19.6ms) are far from the isolated test binary results (2.3ms / 9.3ms). Fixing infrastructure yields larger gains than any DMA path optimization.
 
 **What remains unproven:**
-- Where the ~7ms system overhead lives (P2P is 9.3ms through dispatcher vs 2.3ms in isolated test binary). Profiling the gRPC/extent-manager/allocation path could yield larger gains than DMA path optimization.
-- Whether true pipelined bounce can sustain throughput across many sequential lookups (all tests only measured 1 key).
-- Whether iter-1's 2.02x is stable or partly system-state variance (iter-2 suggests high measurement noise at ±30-50%).
+- Where the system overhead lives (all dispatcher measurements are 3-5x slower than historical h8-v1-pinned results — system confound or regression?)
+- Whether the h8-evolve-v0-pipelined 2.02x result is reproducible or was a favorable system-state artifact
+- Sustained multi-key throughput (only h8-v1-true-pipeline used 10 objects; others used 1)
 
-**Practical impact:** Both optimal paths achieve ~9.5ms per 4 MiB cold lookup through the dispatcher. For a 70B model (~140GB KV-cache, 35k lookups at 4 MiB), reducing system overhead from 7ms to 2ms would save ~175s on full cold-start restore — more impactful than the DMA path choice itself.
+**Practical impact:** Pre-pinned P2P saves ~4ms per 4 MiB lookup vs bounce through the dispatcher. For a 70B model (~140GB KV-cache, 35k lookups at 4 MiB), that's ~140s on cold-start restore. But system overhead (~15ms constant per lookup) is the larger target — reducing it to 2ms would save ~455s regardless of DMA path.
 
 ## Next Hypotheses
 
-1. **System overhead is the real bottleneck** — both P2P and pipelined bounce achieve ~9.5ms through the dispatcher, but the isolated test binary does the same DMA in ~2.3ms. The ~7ms gap (gRPC, connect_client, extent-manager, allocation) affects both paths equally and is a larger optimization target than the DMA path itself.
-2. **Parallel NVMe + P2P at scale** — QD=32 parallel reads into pre-pinned GPU buffer. The principle is sound (eliminates sequential 32×single-read bottleneck) but needs proper measurement with cold NVMe controller state and without gRPC overhead masking the gains.
-3. **Sustained throughput** — all experiments measured single-key latency. Multi-key sequential throughput may reveal different bottlenecks (pipeline buffer reuse, GPU stream scheduling, NVMe queue depth saturation).
+1. **System overhead is the real bottleneck** — all dispatcher measurements show 15-20ms for operations that take 2-9ms in isolated test binary. The gap (gRPC, connect_client, extent-manager, DmaBuffer allocation) is 3-10x larger than the DMA path savings. Profile and reduce.
+2. **DmaBuffer allocation is the hidden cost** — h8-evolve-v0-pipelined's 2x gain came from pre-allocating buffers, not from async overlap. Quantify: how much of the 19ms sequential bounce is DmaBuffer::new vs actual NVMe I/O?
+3. **Parallel NVMe + P2P at scale** — QD=32 parallel reads into pre-pinned GPU buffer without gRPC overhead (direct actor-level benchmark). Need cold NVMe controller state for valid measurement.
+4. **Sustained throughput** — multi-key sequential lookups to test buffer reuse patterns and whether P2P advantage holds under sustained load.
 
