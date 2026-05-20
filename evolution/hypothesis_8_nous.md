@@ -128,18 +128,25 @@ Minimal campaign: research question, the full repository (all source code), targ
 - The DRAM promotion confound in multi-iteration benchmarks (discovered after seeing prior run failures)
 - `cudaHostAlloc` + `spdk_mem_register` as the correct combination for async DMA (after iter-1 failure with `cudaHostRegister`)
 
-**What Nous successfully implemented (no code hints given):**
+**What Nous successfully implemented:**
+
+*No guidance (figured out on its own):*
 - P2P read path in dispatcher v0 and v1 — NVMe reads directly into GPU-registered buffer
-- GPU DMA buffer cache — one-time registration at init, reused across all lookups (solved cold pinning)
-- Double-buffered async pipeline (`cudaHostAlloc` + CUDA streams) for overlapped NVMe read + GPU copy
 - Sequential vs parallel NVMe submission modes for controlled comparison
 - `--skip-nvme` flag to isolate the copy-phase bottleneck
 - Server-side IPC handle caching — figured out Python client works fine, no native client needed
+- `cudaHostAlloc` + `spdk_mem_register` as the correct memory combination (after iter-1 failure with `cudaHostRegister`)
+
+*With design hint ("pre-pinned GPU memory"):*
+- GPU DMA buffer cache — one-time registration at init, reused across all lookups (solved cold pinning)
+
+*With explicit implementation strategy ("overlap NVMe reads with GPU copies"):*
+- Double-buffered async pipeline (`cudaHostAlloc` + CUDA streams) for overlapped NVMe read + GPU copy — 2.02x faster than sequential, better than our existing v1 "pipeline"
 
 **What Nous never found or attempted:**
 - v1's pipelining is fake (sequential per-chunk, no overlap) — never identified across 7 runs despite reading `pipeline.rs` multiple times
 - True pipelining as the key to testing the hypothesis — never attempted overlapping NVMe reads with GPU copies through the dispatcher
-- That `--bench-iterations 20` creates an unfair comparison for paths with different promotion behavior — only discovered after 4 runs used it
+- That `--bench-iterations 20` creates an unfair comparison for paths with different promotion behavior
 - The NVMe controller cache invalidation problem — accepted "SSD reads" at face value without questioning whether data was truly cold
 - Questioning `test_client.py`'s benchmark methodology — when results were suspicious (SSD faster than memory, multi-iteration promotion), Nous tweaked parameters rather than recognizing the measurement design itself was flawed
 - Questioning whether the hypothesis could be saved (true pipelining) after showing sequential bounce loses — pivoted to making P2P faster instead
