@@ -80,8 +80,8 @@ Minimal campaign: research question, the full repository (all source code), targ
 ## Key Findings
 
 1. **Harness results don't predict system behavior** — P2P is 1.47x faster in isolation but 1.33x slower through the dispatcher due to integration overhead (cold pinning)
-2. **Pre-pinned staging is mandatory** — cold P2P (per-request pin/unpin) is 2.74x slower than bounce; every harness run confirmed this but the first dispatcher implementation still got it wrong
-3. **System overhead dominates** — dispatcher SSD lookup is 13.7ms vs harness 2.3ms; the DMA path optimization (saving ~0.7ms) is only 5% of total latency
+2. **Pre-pinned staging is mandatory** — cold P2P (per-request pin/unpin) is 2.74x slower than bounce; every test confirmed this but the first dispatcher implementation still got it wrong
+3. **System overhead dominates** — dispatcher SSD lookup is 13.7ms vs isolated test binary 2.3ms; the DMA path optimization (saving ~0.7ms) is only 5% of total latency
 4. **Pipelining works but doesn't beat P2P** — iter-2 confirms 2.4-3x gain over sequential bounce with proper cudaHostAlloc buffers, but P2P warm (1.93ms) still beats pipelined bounce (4.97ms) by 2.6x on a clean system
 5. **Sequential NVMe submission is safer for bounce** — submitting all 32 reads in parallel causes 10ms tail spikes on bounce path (buffer pool exhaustion); P2P is immune
 6. **Pre-pinned P2P confirmed faster through the dispatcher** — h8-v1-pinned resolved the cold-pinning issue; P2P with persistent staging is 2.02x faster than sequential bounce through certus-server (9.3ms vs 18.8ms). The hypothesis (bounce wins) is refuted for sequential bounce. Remaining question: can *true pipelined* bounce (overlapped NVMe read + GPU copy) close the gap? No run has tested this yet — campaigns `h8-evolve-v0-pipelined` and `h8-v1-true-pipeline` are queued for this.
@@ -104,17 +104,25 @@ Minimal campaign: research question, the full repository (all source code), targ
 - The DRAM promotion confound in multi-iteration benchmarks (discovered after seeing prior run failures)
 - `cudaHostAlloc` + `spdk_mem_register` as the correct combination for async DMA (after iter-1 failure with `cudaHostRegister`)
 
+**What Nous successfully implemented (no code hints given):**
+- P2P read path in dispatcher v0 and v1 — NVMe reads directly into GPU-registered buffer
+- GPU DMA buffer cache — one-time registration at init, reused across all lookups (solved cold pinning)
+- Double-buffered async pipeline (`cudaHostAlloc` + CUDA streams) for overlapped NVMe read + GPU copy
+- Sequential vs parallel NVMe submission modes for controlled comparison
+- `--skip-nvme` flag to isolate the copy-phase bottleneck
+- Server-side IPC handle caching — figured out Python client works fine, no native client needed
+
 **What Nous never found or attempted:**
 - v1's pipelining is fake (sequential per-chunk, no overlap) — never identified across 7 runs despite reading `pipeline.rs` multiple times
 - True pipelining as the key to testing the hypothesis — never attempted overlapping NVMe reads with GPU copies through the dispatcher
 - That `--bench-iterations 20` creates an unfair comparison for paths with different promotion behavior — only discovered after 4 runs used it
 - The NVMe controller cache invalidation problem — accepted "SSD reads" at face value without questioning whether data was truly cold
-- Writing a custom benchmark when the existing one had methodology flaws — always patched around `test_client.py`
+- Questioning `test_client.py`'s benchmark methodology — when results were suspicious (SSD faster than memory, multi-iteration promotion), Nous tweaked parameters rather than recognizing the measurement design itself was flawed
 - Questioning whether the hypothesis could be saved (true pipelining) after showing sequential bounce loses — pivoted to making P2P faster instead
 
 **Failure modes:**
 1. No hypothesis-to-experiment alignment check (tested a different question than asked)
-2. Path of least resistance (used standalone harness until explicitly constrained to use the full system)
+2. Path of least resistance (used isolated test binary until explicitly constrained to use the full system)
 3. Implementation bugs become blockers (`connect_client()` per chunk, cold pinning)
 4. Budget exhaustion on complex implementations (v1 P2P: 120 turns, no data; v0-pinned: 240 turns, interface change cascaded to 12 files)
 5. Uncritical code discovery — finds existing tools and uses them without evaluating appropriateness (used `gpu-p2p-server` in 4 runs, used `--bench-iterations 20` without considering caching effects, accepted impossible 778μs SSD result at face value)
@@ -340,7 +348,7 @@ Same hypothesis as h8-v0-pinned but targeting dispatcher v1. Where h8-v0-pinned 
 
 **What remains unproven:**
 - Whether true pipelined bounce (overlapped NVMe read + GPU copy with async streams) can compete with P2P through the dispatcher. The `h8-evolve-v0-pipelined` and `h8-v1-true-pipeline` campaigns are testing this now. If pipelining closes the gap, it may be preferable since it doesn't require GPU BAR1/GDRCopy setup.
-- Where the ~7ms system overhead lives (P2P is 9.3ms through dispatcher vs 2.3ms in harness). Profiling the gRPC/extent-manager/allocation path could yield larger gains than DMA path optimization.
+- Where the ~7ms system overhead lives (P2P is 9.3ms through dispatcher vs 2.3ms in isolated test binary). Profiling the gRPC/extent-manager/allocation path could yield larger gains than DMA path optimization.
 
 **Practical impact:** P2P saves 9.5ms per 4MiB cold lookup. For a 70B model (~140GB KV-cache, 35k lookups at 4MiB), that's ~330s saved on a full cold-start restore. The system overhead (~7ms constant per lookup regardless of path) is the larger target — reducing it would benefit both P2P and bounce paths equally.
 
