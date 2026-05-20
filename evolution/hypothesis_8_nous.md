@@ -64,7 +64,7 @@ Only after adding explicit constraints to the campaign description ("Do NOT use 
 
 The pinned campaigns (h8-v0-pinned, h8-v1-pinned) add only "even with pre-pinned GPU memory" to the research question — no implementation hints about persistent pools or amortized pinning. The Opus designer autonomously discovered prior experiment data in `.nous/h8-v0-vs-p2p/` and `.nous/h8-v1-vs-p2p/`, read their findings (1.33x slower due to cold pinning overhead), and designed the new experiment specifically to amortize the pin cost: one-time GPU buffer preparation at init, reused across all lookups. This demonstrates that Nous can compound knowledge across campaigns when prior results are accessible in the repository.
 
-The evolve campaigns (h8-evolve-v0-pipelined, h8-v1-true-pipeline) go one step further: the research question explicitly states "overlap NVMe reads with GPU copies (true pipelining)." This is the most direction given to any run — naming the implementation strategy, not just the goal. With this level of guidance, Nous built a double-buffered async pipeline (`cudaHostAlloc` + `cudaMemcpyAsync` on separate CUDA streams) that achieved 2.02x over sequential v0 and 1.35x over our existing v1 "pipeline" — a better implementation than what was already in the codebase. This confirms: once Nous knows *what* to build, it builds it well.
+The evolve campaigns (h8-evolve-v0-pipelined, h8-v1-true-pipeline) go one step further: the research question explicitly states "overlap NVMe reads with GPU copies (true pipelining)." This is the most direction given to any run — naming the implementation strategy, not just the goal. With this level of guidance, Nous built working implementations in both dispatchers and correctly diagnosed why the hypothesis fails: NVMe read (~600μs/chunk) dominates GPU copy (~5-50μs/chunk) by 10-100x, making overlap irrelevant at 128 KiB chunks. The h8-evolve-v0-pipelined 2.02x gain turned out to be from eliminating `DmaBuffer::new` allocations, not from async overlap — confirmed when h8-v1-true-pipeline's `cudaHostAlloc` pipeline showed zero improvement. This demonstrates: even when the hypothesis is wrong, Nous at this direction level produces correct diagnostics.
 
 ---
 
@@ -141,7 +141,7 @@ Minimal campaign: research question, the full repository (all source code), targ
 - GPU DMA buffer cache — one-time registration at init, reused across all lookups (solved cold pinning)
 
 *With explicit implementation strategy ("overlap NVMe reads with GPU copies"):*
-- Double-buffered async pipeline (`cudaHostAlloc` + CUDA streams) for overlapped NVMe read + GPU copy — 2.02x faster than sequential, better than our existing v1 "pipeline"
+- Double-buffered async pipeline (`cudaHostAlloc` + CUDA streams) for overlapped NVMe read + GPU copy — correctly implemented, but 2.02x gain was from buffer pre-allocation, not overlap (h8-v1-true-pipeline confirmed overlap saves <5%)
 
 **What Nous never found or attempted:**
 - v1's pipelining is fake (sequential per-chunk, no overlap) — never identified across 7 runs despite reading `pipeline.rs` multiple times
@@ -439,7 +439,7 @@ Told to "fix v1 to truly overlap reads and copies" — same directive as h8-evol
 - **cudaHostAlloc pipeline provides zero improvement.** The mechanism is correct but irrelevant: NVMe read (~600μs/chunk) dominates GPU copy (~5-50μs/chunk) by 10-100x. Hiding a 50μs copy behind a 600μs read saves at most 5-8% — below the ±30% measurement noise.
 - P2P pre-pinned remains consistently fastest (19-23% over baseline across both iterations).
 - This explains h8-evolve-v0-pipelined's contradictory 2.02x: that gain was from eliminating `DmaBuffer::new` allocations (pre-allocated `cudaHostAlloc` buffers vs 32× per-chunk allocs), not from async overlap.
-- Nous correctly diagnosed the root cause: "NVMe read dominance is the binding constraint; GPU copy overlap is a second-order effect at 128 KiB chunk sizes."
+- Nous correctly diagnosed the root cause: "NVMe read dominance is the binding constraint; GPU copy overlap is a second-order effect at 128 KiB chunk sizes." It also noted BatchSubmit QD=32 could parallelize reads — but didn't connect the dots that the pipeline's fundamental problem is sequential reads (one chunk at a time), not the lack of GPU copy overlap. The real fix isn't better pipelining, it's parallel NVMe submission — which the dispatcher's actor model doesn't easily support.
 
 **Cost:** $19.92
 
@@ -465,7 +465,7 @@ Told to "fix v1 to truly overlap reads and copies" — same directive as h8-evol
 
 ## Next Hypotheses
 
-**Why pipelining was the wrong question:** The hypothesis assumed NVMe read (~600μs/chunk) and GPU copy (~5-50μs/chunk) are balanced enough that overlapping them matters. They're not — GPU copy is 10-100x faster than NVMe read at 128 KiB chunks. There's almost nothing to hide. The actual performance wins found were from buffer allocation elimination (2x) and P2P path selection (19-23%), not from overlap.
+**Why pipelining was the wrong question:** The hypothesis assumed NVMe read and GPU copy are balanced enough that overlapping them matters. They're not — at 128 KiB sequential reads through the dispatcher, NVMe read is ~600μs/chunk while GPU copy is ~5-50μs/chunk (10-100x imbalance). The "pipeline" overlaps GPU copy of chunk N with NVMe read of chunk N+1, but the overlap window (~50-100μs of memcpy + GPU copy) barely dents the 600μs NVMe wait. What would actually help is issuing all 32 reads in parallel (QD=32 to the NVMe controller, collapsing 32×600μs to ~800μs total) — but the dispatcher's actor model issues reads sequentially, and when BatchSubmit was tried, gRPC overhead masked the NVMe parallelism anyway. The actual performance wins found were from buffer allocation elimination (2x) and P2P path selection (19-23%), not from overlap.
 
 1. **System overhead profiling** — the dispatcher adds 15-25ms over the isolated test binary for the same operation. Where does it go? (gRPC serialization, `connect_client` channel setup, extent-manager lookup, DmaBuffer allocation, memory-tier promotion logic). This is 3-10x larger than any DMA path difference and affects both P2P and bounce equally.
 2. **Buffer pool pre-allocation** — h8-evolve-v0-pipelined's 2x gain came from eliminating 32× `DmaBuffer::new` per lookup. Implement a per-connection buffer pool (pre-allocate N × 128 KiB DmaBuffers at connection time, reuse across lookups). Measure: how much of the 19ms is allocation vs actual I/O?
