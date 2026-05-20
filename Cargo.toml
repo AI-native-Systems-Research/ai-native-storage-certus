@@ -25,6 +25,7 @@ members = [
     "apps/gpu-handle-test-server",
     "apps/gpu-show",
     "apps/certus-server",
+    "apps/gpu-bb-vs-p2p",
     "certus-connector"
 ]
 
