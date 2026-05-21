@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use component_framework::define_component;
 use interfaces::{
     BlockDeviceVersion, CacheKey, Command, Completion, DmaAllocFn, DmaBuffer,
-    DispatcherConfig, DispatcherError, ExtentManagerVersion, FormatParams, IBlockDevice,
+    DispatcherConfig, DispatcherError, ExtentManagerVersion, FormatParams, GpuStream, IBlockDevice,
     IBlockDeviceAdmin, IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger, IpcHandle,
     LookupResult, PciAddress, WriteHandle,
 };
@@ -746,6 +746,11 @@ impl IDispatcher for DispatcherComponentV0 {
         }
     }
 
+    fn lookup_async(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<GpuStream, DispatcherError> {
+        self.lookup(key, ipc_handle)?;
+        Ok(GpuStream(std::ptr::null_mut()))
+    }
+
     fn check(&self, key: CacheKey) -> Result<bool, DispatcherError> {
         self.ensure_initialized()?;
 
@@ -1376,6 +1381,18 @@ mod tests {
         ) -> Result<(), String> {
             unsafe {
                 std::ptr::copy_nonoverlapping(src.as_ptr() as *const u8, dst as *mut u8, size);
+            }
+            Ok(())
+        }
+        fn memcpy_h2d_async(
+            &self,
+            src: *const std::ffi::c_void,
+            dst: *mut std::ffi::c_void,
+            size: usize,
+            _stream: GpuStream,
+        ) -> Result<(), String> {
+            unsafe {
+                std::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, size);
             }
             Ok(())
         }

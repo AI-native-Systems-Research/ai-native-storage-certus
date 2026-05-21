@@ -660,6 +660,50 @@ impl IGpuServices for GpuServicesComponentV0 {
     }
 
     #[cfg(feature = "spdk")]
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    fn memcpy_h2d_async(
+        &self,
+        src: *const std::ffi::c_void,
+        dst: *mut std::ffi::c_void,
+        size: usize,
+        stream: interfaces::GpuStream,
+    ) -> Result<(), String> {
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = (src, dst, size, stream);
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            let state = self.state().lock().map_err(|e| e.to_string())?;
+            if !state.initialized {
+                return Err("Not initialized: call initialize() first".to_string());
+            }
+            drop(state);
+
+            let err = unsafe {
+                cuda_ffi::cudaMemcpyAsync(
+                    dst,
+                    src,
+                    size,
+                    cuda_ffi::CUDA_MEMCPY_HOST_TO_DEVICE,
+                    stream.0,
+                )
+            };
+
+            if err != cuda_ffi::CUDA_SUCCESS {
+                return Err(format!(
+                    "cudaMemcpyAsync H2D failed: {}",
+                    cuda_ffi::cuda_error_string(err)
+                ));
+            }
+
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "spdk")]
     fn allocate_pinned_dma_buffer(&self, size: usize) -> Result<interfaces::DmaBuffer, String> {
         #[cfg(not(feature = "gpu"))]
         {

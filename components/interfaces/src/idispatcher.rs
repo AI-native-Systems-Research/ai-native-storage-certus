@@ -6,6 +6,8 @@ use std::sync::Arc;
 
 use crate::idispatch_map::CacheKey;
 #[cfg(feature = "spdk")]
+use crate::igpu_services::GpuStream;
+#[cfg(feature = "spdk")]
 use crate::spdk_types::DmaBuffer;
 
 /// Block device component version used internally by the dispatcher.
@@ -187,6 +189,14 @@ component_macros::define_interface! {
         /// If the entry is on SSD, reads from the block device and copies.
         /// Blocks if a writer is active on the key (dispatch map semantics).
         fn lookup(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>;
+
+        /// Async variant of [`lookup`] — issues the H2D DMA copy without blocking.
+        ///
+        /// Returns the CUDA stream the copy was issued on. The caller must call
+        /// `stream_synchronize` on the returned stream before accessing the GPU
+        /// destination memory. For non-memory-tier paths (staging, SSD) the copy
+        /// completes synchronously and a null stream is returned.
+        fn lookup_async(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<GpuStream, DispatcherError>;
 
         /// Check whether a cache entry exists without transferring data.
         fn check(&self, key: CacheKey) -> Result<bool, DispatcherError>;

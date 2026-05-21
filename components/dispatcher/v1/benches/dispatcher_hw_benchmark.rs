@@ -20,8 +20,8 @@ use dispatcher_v1::DispatcherComponentV0;
 use gpu_services::cuda_ffi;
 use gpu_services::GpuServicesComponentV0;
 use interfaces::{
-    CacheKey, DispatchMapError, DispatcherConfig, DmaAllocFn, DmaBuffer, IDispatchMap, IDispatcher,
-    IGpuServices, ILogger, IMemoryTier, IpcHandle, LookupResult,
+    CacheKey, DispatchMapError, DispatcherConfig, DmaAllocFn, DmaBuffer, IDispatchMap,
+    IDispatcher, IGpuServices, ILogger, IMemoryTier, IpcHandle, LookupResult,
 };
 use memory_tier::MemoryTierComponentV0;
 use spdk_env::{ISPDKEnv, SPDKEnvComponent};
@@ -350,6 +350,7 @@ fn setup_dispatcher(
         Arc<HwDispatchMap>,
         Arc<dyn IMemoryTier + Send + Sync>,
         Arc<DispatcherComponentV0>,
+        Arc<dyn IGpuServices + Send + Sync>,
     ),
     String,
 > {
@@ -439,7 +440,7 @@ fn setup_dispatcher(
     d.initialize(config)
         .map_err(|e| format!("dispatcher init: {e:?}"))?;
 
-    Ok((d, dm, imt, dispatcher))
+    Ok((d, dm, imt, dispatcher, igpu))
 }
 
 // ===========================================================================
@@ -449,6 +450,7 @@ fn setup_dispatcher(
 fn bench_warm_lookup(
     d: &Arc<dyn IDispatcher + Send + Sync>,
     dm: &Arc<HwDispatchMap>,
+    gpu: &Arc<dyn IGpuServices + Send + Sync>,
     size: usize,
 ) -> Result<BenchResult, String> {
     let label = format!("warm_{}KiB", size / 1024);
@@ -484,16 +486,18 @@ fn bench_warm_lookup(
     // Warmup
     for _ in 0..WARMUP_ITERS {
         let h = IpcHandle { address: dst_ptr, size: dst_size };
-        d.lookup(key, h).map_err(|e| format!("warmup lookup: {e:?}"))?;
+        d.lookup_async(key, h).map_err(|e| format!("warmup lookup: {e:?}"))?;
     }
 
-    // Measured iterations
+    // Measured iterations: use lookup_async + targeted stream_synchronize.
     let mut times_us = Vec::with_capacity(MEASURED_ITERS);
     for _ in 0..MEASURED_ITERS {
         let h = IpcHandle { address: dst_ptr, size: dst_size };
         let start = Instant::now();
-        d.lookup(key, h).map_err(|e| format!("lookup: {e:?}"))?;
-        unsafe { cuda_ffi::cudaDeviceSynchronize() };
+        let stream = d.lookup_async(key, h).map_err(|e| format!("lookup: {e:?}"))?;
+        if !stream.0.is_null() {
+            gpu.stream_synchronize(stream).map_err(|e| format!("sync: {e}"))?;
+        }
         times_us.push(start.elapsed().as_secs_f64() * 1_000_000.0);
     }
 
@@ -623,7 +627,7 @@ fn main() {
     }
 
     eprintln!("Initializing hardware stack...");
-    let (d, dm, mt, _comp) = match setup_dispatcher(&[]) {
+    let (d, dm, mt, _comp, igpu) = match setup_dispatcher(&[]) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("FATAL: {e}");
@@ -665,7 +669,7 @@ fn main() {
 
         // --- Warm lookup ---
         eprint!("  benchmarking {} KiB (warm) ... ", size / 1024);
-        match bench_warm_lookup(&d, &dm, size) {
+        match bench_warm_lookup(&d, &dm, &igpu, size) {
             Ok(r) => {
                 eprintln!("done");
                 results.push(r);
