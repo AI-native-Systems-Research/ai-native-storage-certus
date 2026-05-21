@@ -1,6 +1,6 @@
 # certus-connector
 
-vLLM **OffloadingSpec** plugin for the Certus storage system. Implements vLLM's `OffloadingSpec` ABC so that `OffloadingConnectorScheduler` can offload KV cache blocks to tiered DRAM + raw NVMe storage via SPDK.
+vLLM **OffloadingSpec** plugin for the Certus storage system. Implements vLLM's `OffloadingSpec` ABC so that `OffloadingConnectorScheduler` can offload KV cache blocks to tiered DRAM + raw NVMe storage via SPDK. Works with llm-d (which uses vLLM as its runtime).
 
 Single installable package providing both the native Rust engine (PyO3) and the Python vLLM adapter.
 
@@ -16,27 +16,31 @@ vLLM OffloadingConnectorScheduler          ← vLLM's internal scheduler
   ▼
 CertusOffloadingSpec (OffloadingSpec)       ← OUR plugin entry point
   │
+  │  creates ONE shared CertusEngine instance:
+  │
   ├─ get_manager() → OffloadingManager     ← allocation / eviction decisions
-  │     ├─ NativeCertusOffloadingManager       (production, backed by Rust)
+  │     ├─ NativeCertusOffloadingManager       (production, wraps CertusEngine)
   │     └─ CertusOffloadingManager             (mock, pure Python for testing)
   │
   └─ get_handlers() → OffloadingHandler    ← actual GPU ↔ storage DMA
-        ├─ GpuToCertusHandler                  (store: GPU → DRAM staging → NVMe)
-        └─ CertusToGpuHandler                  (load:  NVMe/DRAM → GPU)
+        ├─ GpuToCertusHandler(engine)          (store: GPU → DRAM staging → NVMe)
+        └─ CertusToGpuHandler(engine)          (load:  NVMe/DRAM → GPU)
+                                  ↑
+                    same CertusEngine instance as manager
 ```
 
 This is the same plugin contract that llm-d's `SharedStorageOffloadingSpec` uses. The difference: llm-d uses POSIX files on shared storage, we use raw NVMe via SPDK with no filesystem.
 
 ## Rust engine (certus_native)
 
-The Python handlers delegate to a Rust PyO3 extension module (`certus_native`) which assembles and wires the Certus component stack:
+A single `CertusEngine` instance is shared between the manager (index/allocation/eviction) and the handlers (GPU DMA transfers). This ensures the handler can find data that the manager stored. The engine is a Rust PyO3 extension module (`certus_native`) which assembles and wires the Certus component stack:
 
 ```
 certus_native.CertusEngine                 ← PyO3 class (assembler, not a component)
   │
   │  instantiates & connects:
   │
-  ├─ dispatcher        components/dispatcher/v0/       orchestrates cache ops
+  ├─ dispatcher        components/dispatcher/v1/       orchestrates cache ops
   ├─ dispatch-map      components/dispatch-map/v0/     key → location index
   ├─ gpu-services      components/gpu-services/v0/     CUDA DMA transfers
   └─ spdk-env          components/spdk-env/            SPDK environment init
@@ -102,10 +106,10 @@ vLLM's `OffloadingConnectorScheduler` calls on the manager returned by
 |--------|---------|-----------|
 | `lookup(keys)` | `int \| None` | Count of **consecutive** keys (from start) that are cached and ready. Stops at first miss. Return `None` to signal "retry later" (delays vLLM scheduler). |
 | `prepare_store(keys)` | `PrepareStoreOutput \| None` | Reserve space for new keys. Evict LRU if capacity exceeded. Returns which keys need storing, their locations, and which keys were evicted. Returns `None` if storage is impossible (cannot free enough space). Allocated blocks are **pinned** (protected from eviction) until `complete_store`. |
-| `complete_store(keys, success)` | `()` | If `success=True`: mark blocks as ready (now loadable) and unpin. If `success=False`: remove the blocks entirely (rollback allocation). |
+| `complete_store(keys, success)` | `()` | If `success=True`: no-op (blocks already readable after `populate`). If `success=False`: remove the blocks entirely (rollback allocation). |
 | `prepare_load(keys)` | `LoadStoreSpec` | Pin blocks for reading (protected from eviction). Returns location info for the handler to perform DMA. Assumes all given keys are already stored and ready. |
 | `complete_load(keys)` | `()` | Unpin blocks (allow eviction again). Must be called after load DMA completes. |
-| `touch(keys)` | `()` | Update LRU ordering — marks blocks as recently used. May trigger promotion to faster tier. Called even for GPU-cached blocks that don't need loading. |
+| `touch(keys)` | `()` | Update LRU ordering — marks blocks as recently used. Called even for GPU-cached blocks that don't need loading. |
 | `take_events()` | `Iterable[OffloadingEvent]` | Yield new events (stored/evicted) since last call. Consumed by vLLM for accounting. |
 | `shutdown()` | `()` | Release all resources. |
 
@@ -113,33 +117,32 @@ vLLM's `OffloadingConnectorScheduler` calls on the manager returned by
 
 1. **Eviction only from `prepare_store`** — the only trigger for freeing capacity.
 2. **Pinning protects from eviction** — blocks between `prepare_*` and `complete_*` cannot be evicted.
-3. **Blocks not loadable until `complete_store(success=True)`** — prevents reading partially-written data.
+3. **Blocks readable immediately after `populate()`** — GPU→DRAM copy completes atomically during store, no gating needed.
 4. **`None` return from `prepare_store` = hard rejection** — vLLM will not retry automatically.
 5. **`None` return from `lookup` = soft delay** — vLLM scheduler retries the request later.
 6. **Consecutive prefix semantics** — `lookup` returns the longest prefix of hits, not total hit count.
 
 ### Native Rust API mapping
 
-There are three layers. Only the bottom one (Rust components) needs new work:
+Three layers:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  Layer 1: Python shim (native_manager.py)                               │
 │  Converts OffloadKey bytes → u64, constructs PrepareStoreOutput.        │
-│  NO logic here — pure adapter. Stays as-is.                             │
+│  Pure adapter — no logic.                                               │
 └───────────────────────────────────┬─────────────────────────────────────┘
                                     │ calls via PyO3
 ┌───────────────────────────────────▼─────────────────────────────────────┐
 │  Layer 2: CertusEngine (src/engine.rs)                                  │
 │  Wires components, translates between PyO3 types and Rust traits.       │
-│  Orchestrates calls to dispatcher + dispatch-map.                       │
-│  Needs updating once dispatch-map exposes eviction/ref-count APIs.      │
+│  Orchestrates eviction, ref-counting, entry tracking.                   │
 └───────────────────────────────────┬─────────────────────────────────────┘
                                     │ calls via component interfaces
 ┌───────────────────────────────────▼─────────────────────────────────────┐
 │  Layer 3: Rust components                                               │
-│  dispatch-map: threshold LRU, ref-counting, evict_lru(n, protected)     │
-│  dispatcher: integrate eviction into prepare_store path                 │
+│  dispatch-map: LRU ordering, ref-counting, oldest_keys()                │
+│  dispatcher: populate, lookup, remove, touch, evict_for_space           │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -148,45 +151,35 @@ Per-method breakdown:
 | `native_manager.py` calls | `CertusEngine` method | Rust component work | Status |
 |---|---|---|---|
 | `lookup(keys)` | `batch_check(keys)` | `dispatcher.check()` per key | **Done** |
-| `prepare_store(keys)` | `prepare_store(keys)` | Dispatch-map: `evict_lru(n, protected)` when full; dispatcher: remove evicted, allocate new | **In progress** |
-| `complete_store(keys, ok)` | `complete_store(keys, ok)` | On failure: `dispatcher.remove()` per key. On success: mark ready in dispatch-map. | **Partially done** (remove works, readiness gating TBD) |
-| `touch(keys)` | `touch(keys)` | Dispatch-map: update threshold LRU ordering | **In progress** |
-| `prepare_load(keys)` | (not wired yet) | Dispatch-map: increment `ref_cnt` (eviction protection only, no physical pin) | **Needs implementing** |
-| `complete_load(keys)` | (no-op) | Dispatch-map: decrement `ref_cnt` | **Needs implementing** |
+| `prepare_store(keys)` | `prepare_store(keys)` | Filters cached keys, evicts LRU via `dispatcher.remove()` when over watermark, returns `None` if can't free enough | **Done** |
+| `complete_store(keys, ok)` | `complete_store(keys, ok)` | On failure: `dispatcher.remove()` per key. On success: no-op (entry already readable after `populate`). | **Done** |
+| `touch(keys)` | `touch(keys)` | Dispatch-map: update threshold LRU ordering | **Done** |
+| `prepare_load(keys)` | `prepare_load(keys)` | Dispatch-map: `lookup()` (increments `read_ref`, blocks eviction, returns storage offset) | **Done** |
+| `complete_load(keys)` | `complete_load(keys)` | Dispatch-map: `release_read()` (decrements `read_ref`) | **Done** |
 | `shutdown()` | `shutdown()` | `dispatcher.shutdown()` + `gpu.shutdown()` | **Done** |
 
-### What needs to be added to dispatch-map
+### How eviction works
 
-```rust
-// New methods on IDispatchMap (or a new IEvictionPolicy trait):
+The engine tracks total cached entries via an atomic `entry_count`:
+- Incremented after successful `dispatcher.populate()` (in `store_async`) and `dispatcher.commit_store()` (in `store_host_bytes`)
+- Decremented after successful `dispatcher.remove()` (in `prepare_store` eviction and `complete_store` rollback)
 
-/// Update LRU ordering for key (threshold-based).
-fn touch(&self, key: CacheKey);
+When `prepare_store` is called and `entry_count + to_store.len() > eviction_watermark`:
+1. Scan `dispatch_map.oldest_keys(MAX)` for LRU-ordered candidates
+2. Skip keys in the protected set (keys in the current store request)
+3. Call `dispatcher.remove(candidate)` — fails silently for pinned entries (active `read_ref > 0`)
+4. If enough entries freed → return `(to_store, evicted)`. If not → return `None`
 
-/// Increment ref_cnt — block protected from eviction while ref > 0.
-fn pin(&self, key: CacheKey) -> Result<(), Error>;
+`eviction_watermark = max_cache_entries * eviction_threshold` (both from config).
 
-/// Decrement ref_cnt.
-fn unpin(&self, key: CacheKey) -> Result<(), Error>;
+Returning `None` is **required** because vLLM's worker asserts `transfer_result.success` (worker.py:348) — store failures crash the process. The only safe capacity signal is rejecting at `prepare_store` before the handler is called.
 
-/// Evict up to `count` LRU blocks, skipping pinned (ref_cnt > 0) and protected set.
-/// Returns evicted keys, or None if cannot satisfy `count` evictions (atomic).
-fn evict_lru(&self, count: usize, protected: &HashSet<CacheKey>) -> Option<Vec<CacheKey>>;
+**Why llm-d FS backend doesn't need this:** its handler writes to a POSIX shared filesystem (Lustre, CephFS) — no fixed DRAM pool, no allocation failure. `write()` doesn't fail due to capacity. **Why we do:** our `dispatcher.populate()` allocates from a fixed-size DRAM staging pool. When full and nothing is evictable (all entries mid-background-write), `populate()` returns `AllocationFailed`, `store_async` returns `false`, and the worker assert crashes the process. Proactive eviction prevents this by ensuring capacity exists before the handler is called.
 
-/// Mark block as ready (loadable). Called after successful store.
-fn mark_ready(&self, key: CacheKey);
-```
+### Notes on `prepare_load` ref-counting
 
-Once these exist, `engine.rs` orchestrates them in `prepare_store`:
-```
-1. Filter already-cached keys
-2. Check capacity: need = to_store.len() - free_space
-3. If need > 0: call dispatch_map.evict_lru(need, protected_set)
-   - If None → return None (cannot store)
-   - Else → dispatcher.remove() each evicted key
-4. Allocate via dispatcher.populate() for each new key
-5. Return (keys_to_store, evicted_keys)
-```
+Manager and handler share one `CertusEngine` instance (one dispatch-map). The flow:
+`prepare_load` → `dm.lookup()` (ref=1), `load_async` → `dispatcher.lookup()` → `dm.lookup()` (ref=2) → DMA → `dm.release_read()` (ref=1), `complete_load` → `dm.release_read()` (ref=0). The transient double-ref during DMA is harmless — it gives extra eviction protection while the transfer is in flight. One redundant atomic op per block per load, but correct.
 
 ### Eviction and tier management
 
@@ -194,66 +187,33 @@ Once these exist, `engine.rs` orchestrates them in `prepare_store`:
 This matches vLLM's own CPU offloading manager — there is no background eviction, timer-based
 eviction, or memory-pressure eviction in the contract. It is purely demand-driven.
 
-There are three distinct space-management operations:
+There are two distinct space-management operations in the native path:
 
 | Operation | Trigger | Effect | Block still accessible? |
 |-----------|---------|--------|------------------------|
-| **Eviction** | `prepare_store` (NVMe full) | NVMe slab freed, DRAM slot freed, key removed from index | No — gone entirely |
-| **Demotion** | `touch` → promotion needs a DRAM slot | Coldest DRAM slot freed, data remains on NVMe | Yes — loadable from NVMe |
-| **Idle demotion** | Background timer (optional) | Idle DRAM slots freed after timeout | Yes — loadable from NVMe |
+| **Eviction** | `prepare_store` (entry count > watermark) | Entry removed from dispatch-map, memory-tier, and NVMe extent freed | No — gone entirely |
+| **DRAM demotion** | `dispatcher.populate()` when DRAM staging is full | Coldest DRAM slot freed via `evict_for_space()`, data remains on NVMe | Yes — loadable from NVMe |
 
-Only **eviction** is required by the vLLM contract. Demotion is an internal optimization
-for managing the DRAM tier and is invisible to vLLM.
+Eviction is the vLLM contract requirement. DRAM demotion is internal to the dispatcher — it happens automatically during `populate()` to make room for incoming data, invisible to vLLM.
 
 ### What the native Rust path must support
 
 | # | Requirement | Status | Notes |
 |---|-------------|--------|-------|
-| 1 | **Eviction in `prepare_store`** | In progress | On-demand only: when extent manager is full, query dispatch-map for LRU victims with `ref_cnt == 0`, call `dispatcher.remove()`, retry allocation. No background eviction thread — `prepare_store` is the sole trigger. |
-| 2 | **LRU ordering in `touch`** | In progress | Threshold LRU — dispatch-map tracks access order so eviction picks the coldest block. Updated on `touch`, scanned on `prepare_store`. No background sweep needed. |
-| 3 | **Ref-counting (`prepare_load` / `complete_load`)** | Not yet implemented | Pinned blocks (`ref_cnt > 0`) must be skipped during eviction. Currently `complete_load` is a no-op. |
-| 4 | **Readiness gating** | Partially implemented | Blocks must not be returned by `lookup` or `prepare_load` until `complete_store(success=True)`. Dispatcher's `check()` may already handle this if dispatch-map tracks readiness. |
-| 5 | **Atomic eviction** | Not yet implemented | If N evictions are requested but fewer than N unpinned blocks exist, evict nothing and return `None`. Must be all-or-nothing. |
-| 6 | **Protected set in eviction** | Not yet implemented | Keys in the current `prepare_store` input must not be evicted (they might already be cached and must remain). |
-| 7 | **Demotion (optional, v1)** | Deferred | DRAM tier management. Dispatcher already stages in DRAM and migrates to NVMe in background, but no explicit slot reclamation under DRAM pressure yet. Not required by vLLM contract. |
+| 1 | **Eviction in `prepare_store`** | **Done** | Engine tracks `entry_count` atomically, evicts LRU via `dispatcher.remove()` when over watermark, returns `None` if can't free enough. |
+| 2 | **LRU ordering in `touch`** | **Done** | Engine calls `dispatcher.touch()` per key. |
+| 3 | **Ref-counting (`prepare_load` / `complete_load`)** | **Done** | `prepare_load` calls `dispatch_map.lookup()` (increments `read_ref` + returns location), `complete_load` calls `release_read()`. Manager and handler share one engine instance — transient double-ref during DMA is balanced (dispatcher releases its ref after DMA completes). Blocks with `read_ref > 0` are skipped during eviction (`remove` fails with `ActiveReferences`). |
+| 4 | **Readiness gating** | **N/A** | Non-issue: `populate()` writes data to DRAM and registers in dispatch-map immediately — block is readable before `complete_store`. `commit_store()` only persists to NVMe. |
+| 5 | **Atomic eviction** | **Done** | If N evictions are requested but fewer than N unpinned blocks exist, returns `None`. All-or-nothing semantics. |
+| 6 | **Protected set in eviction** | **Done** | Keys in the current `prepare_store` input are in a `protected` HashSet and skipped during eviction. |
+| 7 | **DRAM demotion** | **Done** | Handled internally by dispatcher's `evict_for_space()` during `populate()` — evicts LRU DRAM slots and transitions entries to BlockDevice when DRAM is full. Not part of vLLM contract. |
 
-### Native path differences from mock
+### Native path characteristics
 
-The mock Python manager models a generic cache. The native Rust path has hardware-specific
-nuances that simplify some operations:
-
-| Aspect | Mock (Python) | Native (Rust + SPDK) |
-|--------|---------------|----------------------|
-| **Host memory** | Allocated/freed per block | Pre-allocated SPDK DMA buffer pool — all pinned at init |
-| **Pin/unpin on load** | Conceptually pins memory for DMA | No-op physically — memory is always pinned. `ref_cnt` only prevents eviction. |
-| **GPU DMA registration** | Would need `cudaHostRegister` per buffer | DMA buffers are pre-registered. `dma_copy_to_host`/`dma_copy_to_device` use them directly. |
-| **Capacity** | Configurable slot counts | Fixed at init — extent manager knows total slabs from NVMe device size, DRAM pool from config. |
-| **Staging** | Explicit DRAM tier with promotion/demotion | Dispatcher stages ALL writes in DRAM first, background thread migrates to NVMe. DRAM is a write-through cache, not a separate tier to manage. |
-
-**Key implication for `prepare_load`/`complete_load`**: these are purely logical ref-count
-operations in the native path. No memory is allocated, pinned, or registered — only the
-eviction-protection semantics matter.
-
-**Key implication for capacity**: `prepare_store` returning `None` means the NVMe extent
-manager is full AND there are not enough unpinned blocks to evict. The DRAM staging pool
-cannot overflow because the dispatcher controls admission.
-
-### Possible bugs in current dispatcher implementation
-
-These were identified by code review. Both only manifest against the real
-`DispatchMapComponentV0` — the mock used in unit tests does not expose them.
-
-1. **`check()` leaks read references** — `dispatcher::check()` calls `dm.lookup()`, which
-   increments `read_ref` in the dispatch-map but is never followed by `release_read()`. Every
-   `check()` call permanently pins the entry, making it un-evictable. Fix: call `release_read`
-   after the lookup, or add a non-ref-counting existence check to `IDispatchMap`.
-
-2. **`run_eviction_cycle` always times out** — the cycle calls `dm.lookup(key)` (which
-   increments `read_ref`), then immediately calls `dm.take_write(key)` (which waits for
-   `read_ref == 0`). The write lock always times out, so no entries are ever evicted. The
-   mock's `take_write` doesn't check `read_refs`, which is why eviction tests pass.
-   Fix: obtain the block offset without incrementing `read_ref` (e.g. a separate
-   `block_offset(key)` query), or release the read reference before attempting the write lock.
+- **Host memory**: pre-allocated SPDK DMA buffer pool — all pinned at init. No per-block allocation.
+- **`prepare_load`/`complete_load`**: purely logical ref-count operations. No memory allocated or registered — only eviction-protection semantics matter.
+- **Capacity**: fixed at init — extent manager knows total slabs from NVMe device size, DRAM pool from config.
+- **Staging**: dispatcher stages ALL writes in DRAM first, background thread migrates to NVMe. DRAM is a write-through cache.
 
 ### gRPC handler equivalence
 
@@ -264,86 +224,4 @@ the handlers must preserve these same semantics — particularly:
 - Pinning bracket: blocks between `prepare_*` and `complete_*` cannot be evicted
 - Atomic eviction: either free enough space or reject entirely (`None`)
 - Protected set: don't evict keys that are in the current store request
-- Readiness: blocks not loadable until `complete_store(success=True)`
 
-## Build troubleshooting (RHEL 9)
-
-Issues encountered on first build and how they were resolved:
-
-**`certus_native` Python module directory missing**
-- Symptom: `maturin failed — python module at certus_native does not exist`
-- Fix: `mkdir certus_native && touch certus_native/__init__.py` — maturin requires the package directory to exist even for a pure-Rust module
-
-**SPDK submodule not cloned**
-- Symptom: `error: SPDK source not found at deps/spdk/`
-- Fix: `deps/build_spdk.sh` clones it automatically, but had a bug (`cd spdk` instead of `cd "${SRC_DIR}"`). Fixed in the script.
-
-**Missing system packages not in default RHEL repos**
-- `meson`, `ninja`, `pyelftools`, `jinja2`, `tabulate`, `uv` — not in dnf, install via `pip install`
-- `CUnit-devel` — requires CRB repo: `sudo dnf config-manager --set-enabled crb`
-- `numactl-devel` — must be installed before DPDK configures, or meson fails with "No NUMA library found"
-- `fuse3-devel` — required for `--with-nvme-cuse`; added to `deps/install_deps.sh`
-- `patchelf` — required by SPDK's Python install step
-- All missing packages are now included in `deps/install_deps.sh`
-
-**`meson`/`ninja` not on PATH for build**
-- Symptom: `meson: command not found` / `Could not detect Ninja v1.8.2 or newer`
-- Cause: pip installs to `/usr/local/bin` which may not be in PATH when running as different users
-- Fix: `deps/install_deps.sh` now symlinks both to `/usr/bin/` using `python3 -c 'import shutil; print(shutil.which(...))'` to find the actual install location dynamically
-
-**CUDA toolkit missing**
-- Symptom: `rust-lld: error: unable to find library -lcudart`
-- Cause: `gpu-services` component links `libcudart` when built with `features = ["gpu"]`
-- Fix: `sudo dnf install -y cuda-toolkit` (CUDA repo was already configured on this machine via NVIDIA driver install)
-
-**Three `todo!()` panics in `engine.rs`**
-- Symptom: `CertusEngine(...)` would panic immediately on construction
-- Fields: `block_device_version`, `max_cache_entries`, `eviction_threshold` in `DispatcherConfig`
-- Fix: `block_device_version = BlockDeviceVersion::V2` (latest); `max_cache_entries` derived from `dram_cache_bytes / slab_size_bytes` (default 10000); `eviction_threshold` read from config (default 0.8). Both new config fields parsed from the Python dict with sensible defaults.
-
-**`certus_native` module imported but `CertusEngine` not found**
-- Symptom: `AttributeError: module 'certus_native' has no attribute 'CertusEngine'`
-- Cause: the `certus_native/__init__.py` we created for maturin was empty, so Python imported the package directory instead of the compiled `.so`
-- Fix: added `from .certus_native import *` and explicit `CertusEngine, CertusConfig` imports to `certus_native/__init__.py`
-
-**DMA remapping failed (ENOMEM) on engine init**
-- Symptom: `EAL: 0000:XX:00.0 DMA remapping failed, error 12 (Cannot allocate memory)` — all devices unusable
-- Cause: `memlock` limit was 8MB (default), DPDK needs unlimited to pin hugepage memory for DMA
-- Fix: add to `/etc/security/limits.conf`:
-  ```
-  * soft memlock unlimited
-  * hard memlock unlimited
-  ```
-  Also fixed `scripts/spdk-scripts/cfg_user_spdk.sh` which had these lines as a comment but never applied them.
-  For the current shell session: `ulimit -l unlimited`
-
-**CUDA driver version insufficient**
-- Symptom: `RuntimeError: GPU init failed: cudaGetDeviceCount failed: CUDA driver version is insufficient for CUDA runtime version`
-- Cause: `sudo dnf install -y cuda-toolkit` installed CUDA 13.x, but the NVIDIA driver (570.x) only supports CUDA 12.8
-- Fix: install the matching version: `sudo dnf install -y cuda-toolkit-12-8`
-- Also: the `.so` is compiled against whichever CUDA is active at build time. If mismatched at runtime, prepend the right lib path: `LD_LIBRARY_PATH=/usr/local/cuda-12.8/targets/x86_64-linux/lib:$LD_LIBRARY_PATH` and rebuild with `sudo ln -sfn /usr/local/cuda-12.8 /usr/local/cuda && pip install -e .`
-
-**`DispatchMap init failed: extent_manager not bound`**
-- Symptom: `RuntimeError: DispatchMap init failed: not initialized: extent_manager not bound`
-- Cause: `engine.rs` called `dm.initialize()` without connecting an `IExtentManager` receptacle. `DispatchMapComponentV0.initialize()` walks the extent manager to recover persisted extents — it requires the receptacle even on a fresh (empty) device.
-- Fix: added creation of a metadata block device (`BlockDeviceSpdkNvmeComponentV2`) and extent manager (`ExtentManagerV2`) in `engine.rs`, formatted them on init, and connected them to the dispatch map before calling `initialize()`. Also added `block-device-spdk-nvme-v2` and `extent-manager-v2` to `Cargo.toml` dependencies.
-
-**`Dispatcher init failed: logger not bound`**
-- Symptom: `RuntimeError: Dispatcher init failed: not initialized: logger not bound`
-- Cause: `engine.rs` never created or connected a logger. The dispatcher (and metadata block device, extent manager, dispatch map) all have optional `logger` receptacles that produce this error when the dispatcher tries to log during `initialize()`.
-- Fix: added `LoggerComponentV1` creation in `engine.rs` and connected it to all four components (metadata block device, extent manager, dispatch map, dispatcher). Added `logger` to `Cargo.toml` dependencies.
-- Also added `parse_pci_addr()` helper to `engine.rs` since `PciAddress` does not implement `FromStr`.
-
-**PyTorch CUDA version mismatch (GPU roundtrip test skipped)**
-- Symptom: `torch.cuda.is_available()` returns False with warning `NVIDIA driver too old (found version 12080)`
-- Cause: default `pip install torch` or `torch==2.11.0+cu130` is built against CUDA 13.x, but the driver (570.x) only supports CUDA 12.8
-- Fix: install torch built for cu128 from the PyTorch wheel index:
-  ```bash
-  pip install torch==2.7.0 --index-url https://download.pytorch.org/whl/cu128
-  ```
-  Verify with:
-  ```bash
-  python3 -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.version.cuda)"
-  # Expected: 2.7.0+cu128 True 12.8
-  ```
-- Note: `sudo dnf install -y cuda-toolkit` installs CUDA 13.x by default. The toolkit version does not need to match — only the PyTorch wheel needs to match the driver's maximum supported CUDA version.

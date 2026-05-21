@@ -192,7 +192,7 @@ confirm functionality is restored.
 
 - **FR-001**: System MUST provide an IBlockDevice interface for creating and connecting client channels.
 - **FR-002**: Each connected client MUST have two shared-memory channels: one for ingress command messages, one for asynchronous completion callbacks.
-- **FR-003**: System MUST support synchronous read and write operations with parameters for NVMe namespace id, DmaBuffer, LBA offset, and timeout.
+- **FR-003**: System MUST support synchronous read and write operations with parameters for NVMe namespace id, DmaBuffer, and LBA offset (no timeout — sync ops block until completion).
 - **FR-004**: System MUST support asynchronous read and write operations with a timeout value; operations exceeding timeout MUST return an error. The component MUST assign a unique operation handle on submission and return it to the client. Completion callbacks MUST include the corresponding operation handle.
 - **FR-005**: System MUST support aborting an in-flight asynchronous operation identified by its component-assigned operation handle.
 - **FR-006**: System MUST support a write-zeros operation.
@@ -210,7 +210,10 @@ confirm functionality is restored.
 - **FR-018**: Client-provided DmaBuffer structs MUST be accepted for read/write memory. Arc references MUST be usable in messages since clients are in-process.
 - **FR-019**: When a client disconnects (drops its channel pair), the component MUST cancel all in-flight operations for that client and silently discard any pending completions. The actor MUST release all resources associated with the disconnected client.
 - **FR-020**: All namespace management operations (probe, create, format, delete) MUST be serialized through the actor thread. No additional locking is required; the actor processes namespace commands in the order they are received from polled channels.
-- **FR-021**: The component MUST provide an `IBlockDeviceAdmin` interface (defined via `define_interface!`) with three methods: `set_pci_address(addr: PciAddress)` to configure the target NVMe controller, `set_actor_cpu(cpu: usize)` to pin the actor thread to a specific CPU core, and `initialize() -> Result<(), NvmeBlockError>` to attach to the controller and start the actor thread. `set_pci_address` MUST be called before `initialize`. The admin interface MUST be queryable via the component framework's `query::<IBlockDeviceAdmin>()`.
+- **FR-021**: The component MUST provide an `IBlockDeviceAdmin` interface (defined via `define_interface!` in the interfaces crate) with methods: `set_pci_address(addr: PciAddress)` to configure the target NVMe controller, `set_actor_cpu(cpu: usize)` to pin the actor thread to a specific CPU core, `initialize() -> Result<(), NvmeBlockError>` to attach and start the actor, and `shutdown() -> Result<(), NvmeBlockError>` to stop the actor and join its thread. `set_pci_address` MUST be called before `initialize`.
+- **FR-022**: The actor MUST use a hardware TSC (Time Stamp Counter) clock (`TscClock`) for async operation timeout checking, calibrated once at construction against `clock_gettime`. Timeout checks are throttled to approximately once per millisecond using TSC comparison.
+- **FR-023**: The actor MUST use a `ContextPool` slab allocator for async IO context objects, eliminating per-IO heap allocation. Contexts are acquired at submission and returned to the pool in the SPDK completion callback.
+- **FR-024**: The actor MUST use pre-allocated scratch buffers (`completion_scratch`, `timeout_scratch`) for draining completions and collecting timed-out handles, avoiding allocation in the hot path.
 
 ### Key Entities
 

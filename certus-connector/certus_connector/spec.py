@@ -5,14 +5,10 @@ Plugs into vLLM's OffloadingConnector via kv_connector_extra_config:
 {
     "spec_name": "CertusOffloadingSpec",
     "spec_module_path": "certus_connector.spec",
-    "nvme_device": "/dev/nvme0n1",
-    "nvme_namespace_id": 1,
+    "data_pci_addrs": ["0000:02:00.0"],
+    "metadata_pci_addr": "0000:01:00.0",
     "slab_size_bytes": 131072,
     "dram_cache_bytes": 8589934592,
-    "promotion_touch_threshold": 3,
-    "promotion_window_seconds": 10.0,
-    "demotion_idle_seconds": 30.0,
-    "spdk_json_config": "/etc/certus/spdk.json",
     "io_queue_depth": 128
 }
 """
@@ -29,10 +25,9 @@ from vllm.v1.kv_offload.spec import OffloadingSpec
 from vllm.v1.kv_offload.worker.worker import OffloadingHandler
 
 from certus_connector.handler import (
-    CertusTransferEngine,
     CertusToGpuHandler,
     GpuToCertusHandler,
-    MockCertusTransferEngine,
+    MockCertusEngine,
 )
 from certus_connector.manager import CertusOffloadingManager, TieringConfig
 from certus_connector.mediums import CertusLoadStoreSpec
@@ -52,30 +47,16 @@ def _try_native_engine(extra_config: dict):
         return None
 
 
-def _load_engine(extra_config: dict) -> CertusTransferEngine:
-    """Load the mock transfer engine (for handler-based I/O path)."""
-    use_mock = extra_config.get("use_mock_engine", False)
-    if use_mock:
-        return MockCertusTransferEngine()
-    try:
-        from certus_native import CertusTransferEngine as NativeEngine
-        return NativeEngine(
-            nvme_device=extra_config.get("nvme_device", "/dev/nvme0n1"),
-            namespace_id=int(extra_config.get("nvme_namespace_id", 1)),
-            spdk_config=extra_config.get("spdk_json_config", ""),
-            io_queue_depth=int(extra_config.get("io_queue_depth", 128)),
-            dram_bytes=int(extra_config.get("dram_cache_bytes", 0)),
-        )
-    except ImportError:
-        return MockCertusTransferEngine()
-
-
 class CertusOffloadingSpec(OffloadingSpec):
     """OffloadingSpec for tiered DRAM + raw NVMe storage via SPDK.
 
     Blocks are content-addressable (hash-indexed). Storage uses a slab
     allocator on raw NVMe (no filesystem). Hot blocks are cached in
     pinned DRAM with policy-driven promotion/demotion.
+
+    A single CertusEngine instance is shared between the manager (index/
+    allocation/eviction) and the handlers (GPU DMA transfers). This ensures
+    the handler can find data that the manager stored.
     """
 
     def __init__(self, vllm_config: VllmConfig, kv_cache_config: KVCacheConfig):
@@ -110,24 +91,26 @@ class CertusOffloadingSpec(OffloadingSpec):
         )
 
         self._slab_size_bytes = slab_size_bytes
-        self._engine: CertusTransferEngine | None = None
+        self._native_engine = None
         self._manager: CertusOffloadingManager | None = None
         self._gpu_to_certus: GpuToCertusHandler | None = None
         self._certus_to_gpu: CertusToGpuHandler | None = None
 
-    def _get_engine(self) -> CertusTransferEngine:
-        if self._engine is None:
-            self._engine = _load_engine(self.extra_config)
-        return self._engine
+    def _get_engine(self):
+        """Get the engine for handlers — same instance used by the manager."""
+        if self._native_engine is None:
+            self._native_engine = _try_native_engine(self.extra_config)
+        if self._native_engine is None:
+            self._native_engine = MockCertusEngine()
+        return self._native_engine
 
     def get_manager(self) -> OffloadingManager:
         if self._manager is None:
             use_native = self.extra_config.get("use_native", True)
             if use_native:
-                native_engine = _try_native_engine(self.extra_config)
-                if native_engine is not None:
-                    self._native_engine = native_engine
-                    self._manager = NativeCertusOffloadingManager(native_engine)
+                engine = self._get_engine()
+                if not isinstance(engine, MockCertusEngine):
+                    self._manager = NativeCertusOffloadingManager(engine)
                     return self._manager
 
             kv_events_config = self.vllm_config.kv_events_config

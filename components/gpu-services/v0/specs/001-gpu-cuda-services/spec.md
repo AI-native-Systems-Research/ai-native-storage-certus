@@ -218,14 +218,21 @@ by a verification read-back.
   handle and size originating from a Python process into native Rust
   data structures.
 - **FR-004**: Component MUST verify that GPU memory referenced by an
-  IPC handle is physically contiguous and pinned before allowing DMA
-  buffer creation. The target GPU device MUST be determined implicitly
-  from the IPC handle's device context.
+  IPC handle is CUDA device memory via `cudaPointerGetAttributes`
+  before allowing DMA buffer creation. Verified pointers are tracked
+  in an internal set.
 - **FR-005**: Component MUST provide pin and unpin operations for GPU
-  memory regions.
-- **FR-006**: Component MUST create a DmaBuffer (as defined in
-  `spdk_types.rs`) from a valid IPC handle, suitable for DMA from SSD
-  via block-device-spdk-nvme or from CPU-memory DmaBuffers.
+  memory regions. For IPC-opened device memory (which is inherently
+  pinned by the CUDA runtime), pin verifies device-residency and
+  tracks state in an internal `HashSet<usize>`; unpin releases
+  tracking. `pin_memory` is idempotent (no-op if already pinned), and
+  `unpin_memory` returns an error if the pointer is not in the pinned
+  set.
+- **FR-006**: Component MUST create a `GpuDmaBuffer` (as defined in
+  `interfaces`) from a valid, verified, and pinned IPC handle. The
+  `GpuDmaBuffer` wraps the GPU device pointer with custom free
+  semantics. A separate `prepare_memory_for_spdk` path returns an
+  SPDK `DmaBuffer` instead (see spec 002).
 - **FR-007**: All operations MUST return descriptive errors on failure
   without panicking or leaking GPU/system resources.
 - **FR-008**: Component MUST expose all functionality exclusively
@@ -235,17 +242,46 @@ by a verification read-back.
   feature flag.
 - **FR-010**: Component MUST include unit tests and Criterion benchmarks
   available when the `gpu` feature is enabled.
+- **FR-011**: Component MUST provide `dma_copy_to_host` to copy from a
+  GPU device pointer to an SPDK `DmaBuffer` using `cudaMemcpy`
+  device-to-host. Gated behind `spdk` feature.
+- **FR-012**: Component MUST provide `dma_copy_to_device` to copy from
+  an SPDK `DmaBuffer` to a GPU device pointer using `cudaMemcpy`
+  host-to-device. Gated behind `spdk` feature.
+- **FR-013**: Component MUST provide `prepare_memory_for_spdk` that
+  accepts a base64 IPC payload and optional device index, performs
+  the full open/verify/pin/DmaBuffer-creation pipeline, and returns
+  an SPDK `DmaBuffer` with pin-state-aware cleanup. Gated behind
+  `spdk` feature. (See spec 002 for full requirements.)
+- **FR-014**: When the `gpu` feature is disabled, all interface methods
+  MUST return an error indicating GPU support is not compiled, without
+  panicking.
+- **FR-015**: Component MUST provide a `register_host_memory(ptr, size)`
+  method (gated behind `spdk` feature) that page-locks the specified
+  host memory region via `cudaHostRegister` (enabling async GPU DMA)
+  and registers it with SPDK via `spdk_mem_register` (enabling NVMe
+  DMA). If `cudaHostRegister` succeeds but `spdk_mem_register` fails,
+  the method MUST roll back by calling `cudaHostUnregister` before
+  returning the error.
+- **FR-016**: Component MUST provide an `unregister_host_memory(ptr,
+  size)` method (gated behind `spdk` feature) that unregisters memory
+  from SPDK via `spdk_mem_unregister` then removes page-locking via
+  `cudaHostUnregister`. MUST be called before freeing the underlying
+  allocation.
 
 ### Key Entities
 
-- **GpuDevice**: Represents a discovered GPU — model name, memory
-  capacity, compute architecture level, device index.
-- **CudaIpcHandle**: Deserialized CUDA IPC memory handle enabling
-  cross-process GPU memory sharing.
-- **DmaBuffer**: Buffer object (defined in `spdk_types.rs`) backed by
-  GPU memory, usable for SSD or CPU-memory DMA transfers.
-- **PinnedRegion**: Represents a page-locked GPU memory region with
-  lifecycle management (pin/unpin).
+- **GpuDeviceInfo**: Represents a discovered GPU — model name, memory
+  capacity (bytes), compute architecture level, device index, and
+  `pci_bus_id` string.
+- **GpuIpcHandle**: Deserialized CUDA IPC memory handle enabling
+  cross-process GPU memory sharing. Contains a raw pointer and size.
+- **GpuDmaBuffer**: Buffer object (defined in `interfaces`) wrapping a
+  GPU device pointer with custom free semantics, usable for
+  GPU-memory-backed DMA transfers.
+- **GpuState**: Internal state holding initialization flag, discovered
+  devices, and `HashSet<usize>` sets for verified/pinned pointer
+  tracking.
 
 ## Success Criteria *(mandatory)*
 
@@ -257,8 +293,8 @@ by a verification read-back.
   all installed GPUs within 1 second of initialization.
 - **SC-003**: IPC handle deserialization from base64 completes in under
   1 millisecond per handle.
-- **SC-004**: Memory contiguity and pin verification completes in under
-  10 milliseconds per handle.
+- **SC-004**: Memory type verification via `cudaPointerGetAttributes`
+  completes in under 10 milliseconds per handle.
 - **SC-005**: DMA buffer creation from a valid IPC handle completes in
   under 50 milliseconds.
 - **SC-006**: All unit tests pass with `cargo test -p gpu-services
@@ -276,13 +312,15 @@ by a verification read-back.
   allocate GPU memory and serialize IPC handles using Python's
   `base64` module. The Python-to-Rust handoff uses a Unix domain
   socket for IPC transport.
-- The `DmaBuffer` type is defined in `spdk_types.rs` within the
-  workspace and provides the necessary interface for SPDK DMA
-  operations.
+- The `GpuDmaBuffer` type is defined in `interfaces` and wraps GPU
+  device pointers. The SPDK `DmaBuffer` type (from `interfaces` with
+  `spdk` feature) wraps host/device pointers for SPDK NVMe DMA.
 - The `block-device-spdk-nvme` component is available for integration
   testing of SSD-to-GPU DMA paths.
-- The `--features gpu` gate ensures the component does not introduce
-  build dependencies on systems without CUDA toolkits.
+- Two feature flags control compilation: `--features gpu` gates all
+  CUDA-dependent code; `--features spdk` additionally gates
+  `dma_copy_to_host`, `dma_copy_to_device`, and
+  `prepare_memory_for_spdk` methods.
 - IPC handle serialization format from Python uses standard base64
   encoding of the raw CUDA IPC handle bytes concatenated with the
   buffer size as a little-endian 64-bit integer.

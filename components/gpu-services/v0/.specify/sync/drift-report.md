@@ -1,18 +1,18 @@
 # Spec Drift Report
 
-Generated: 2026-05-05
+Generated: 2026-05-20
 Project: GPU Services V0
-Spec: 001-gpu-cuda-services
+Specs: 001-gpu-cuda-services, 002-gpu-ssd-dma-prepare
 
 ## Summary
 
 | Category | Count |
 |----------|-------|
-| Specs Analyzed | 1 |
-| Requirements Checked | 10 |
-| Aligned | 8 (80%) |
-| Drifted | 1 (10%) |
-| Not Implemented | 1 (10%) |
+| Specs Analyzed | 2 |
+| Requirements Checked | 34 |
+| Aligned | 30 (88%) |
+| Drifted | 1 (3%) |
+| Not Implemented | 1 (3%) |
 | Unspecced Code | 0 |
 
 ## Detailed Findings
@@ -52,7 +52,12 @@ Spec: 001-gpu-cuda-services
 - SC-006/SC-007: Not verifiable (benchmark files missing)
 - SC-008: Aligned (integration structure in place)
 
+### Unspecced Code
+
+(none — `register_host_memory`/`unregister_host_memory` specced as FR-015/016 in 001-gpu-cuda-services and FR-019/020 in 002-gpu-ssd-dma-prepare as of 2026-05-20)
+
 ## Recommendations
 
 1. **Backfill FR-005**: Update spec to clarify that "pinning" for IPC device memory means verifying device-residency (already pinned by definition), not calling cudaHostRegister.
 2. **Implement FR-010**: Create benchmark source files in benches/ directory.
+3. **Spec register/unregister_host_memory**: Add FR-011 and FR-012 to 002-gpu-ssd-dma-prepare covering host memory registration for zero-copy DMA paths.

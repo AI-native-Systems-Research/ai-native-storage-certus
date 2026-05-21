@@ -190,5 +190,11 @@ define_interface! {
         /// callers must then invoke `checkpoint()` manually. The default is
         /// five minutes.
         fn set_checkpoint_interval(&self, interval: Option<std::time::Duration>);
+
+        /// Return the number of bytes currently allocated across all regions.
+        fn used_bytes(&self) -> u64;
+
+        /// Return the total usable capacity in bytes across all regions.
+        fn capacity_bytes(&self) -> u64;
     }
 }

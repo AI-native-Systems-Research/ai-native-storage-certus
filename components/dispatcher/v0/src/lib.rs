@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use component_framework::define_component;
 use interfaces::{
     BlockDeviceVersion, CacheKey, Command, Completion, DmaAllocFn, DmaBuffer,
-    DispatcherConfig, DispatcherError, ExtentManagerVersion, FormatParams, IBlockDevice,
+    DispatcherConfig, DispatcherError, ExtentManagerVersion, FormatParams, GpuStream, IBlockDevice,
     IBlockDeviceAdmin, IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger, IpcHandle,
     LookupResult, PciAddress, WriteHandle,
 };
@@ -734,10 +734,21 @@ impl IDispatcher for DispatcherComponentV0 {
                         let _ = dm.release_read(key);
                         result
                     }
+                    LookupResult::MemoryTier { .. } => {
+                        let _ = dm.release_read(key);
+                        Err(DispatcherError::IoError(
+                            "unexpected MemoryTier entry in v0 dispatcher".into(),
+                        ))
+                    }
                 }
             },
             Err(_) => Err(DispatcherError::KeyNotFound(key)),
         }
+    }
+
+    fn lookup_async(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<GpuStream, DispatcherError> {
+        self.lookup(key, ipc_handle)?;
+        Ok(GpuStream(std::ptr::null_mut()))
     }
 
     fn check(&self, key: CacheKey) -> Result<bool, DispatcherError> {
@@ -769,35 +780,32 @@ impl IDispatcher for DispatcherComponentV0 {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
 
-        dm.take_write(key)
-            .map_err(|_| DispatcherError::KeyNotFound(key))?;
-
-        // Check if entry is on block device before removing (need the offset to free the extent).
+        // Lookup the entry to determine its location (waits for any active writer).
         let block_offset = match dm.lookup(key) {
-            Ok(LookupResult::BlockDevice { offset }) => Some(offset),
-            _ => None,
+            Ok(LookupResult::BlockDevice { offset }) => {
+                let _ = dm.release_read(key);
+                Some(offset)
+            }
+            Ok(_) => {
+                let _ = dm.release_read(key);
+                None
+            }
+            Err(_) => return Err(DispatcherError::KeyNotFound(key)),
         };
 
-        let result = dm.remove(key);
+        dm.remove(key)
+            .map_err(|_| DispatcherError::KeyNotFound(key))?;
 
-        match result {
-            Ok(()) => {
-                if let Some(offset) = block_offset {
-                    let drives = self.data_drives.lock().unwrap();
-                    let idx = Self::drive_index(key, drives.len().max(1));
-                    if let Some(drive) = drives.get(idx) {
-                        if let Some(iem) = query_interface!(drive.extent_mgr, IExtentManager) {
-                            let _ = iem.remove_extent(offset);
-                        }
-                    }
+        if let Some(offset) = block_offset {
+            let drives = self.data_drives.lock().unwrap();
+            let idx = Self::drive_index(key, drives.len().max(1));
+            if let Some(drive) = drives.get(idx) {
+                if let Some(iem) = query_interface!(drive.extent_mgr, IExtentManager) {
+                    let _ = iem.remove_extent(offset);
                 }
-                Ok(())
-            }
-            Err(_) => {
-                let _ = dm.release_write(key);
-                Err(DispatcherError::KeyNotFound(key))
             }
         }
+        Ok(())
     }
 
     fn populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError> {
@@ -1051,7 +1059,7 @@ mod tests {
 
     use interfaces::{
         DispatchMapError, DmaAllocFn, DmaBuffer, GpuDeviceInfo, GpuDmaBuffer, GpuIpcHandle,
-        LookupResult,
+        GpuStream, LookupResult,
     };
 
     // -----------------------------------------------------------------------
@@ -1273,6 +1281,19 @@ mod tests {
             let inner = self.inner.lock().unwrap();
             inner.entries.keys().copied().take(n).collect()
         }
+
+        fn create_memory_tier_entry(
+            &self,
+            _key: CacheKey,
+            _pointer: *mut u8,
+            _size: u32,
+        ) -> Result<(), DispatchMapError> {
+            Err(DispatchMapError::NotInitialized("not supported in v0".into()))
+        }
+
+        fn convert_memory_tier_to_block(&self, _key: CacheKey) -> Result<(), DispatchMapError> {
+            Err(DispatchMapError::NotInitialized("not supported in v0".into()))
+        }
     }
 
     struct MockLogger;
@@ -1341,6 +1362,56 @@ mod tests {
             _device_index: Option<u32>,
         ) -> Result<DmaBuffer, String> {
             Err("mock: not implemented".into())
+        }
+        fn create_stream(&self) -> Result<GpuStream, String> {
+            Ok(GpuStream(0x1 as *mut std::ffi::c_void))
+        }
+        fn destroy_stream(&self, _stream: GpuStream) -> Result<(), String> {
+            Ok(())
+        }
+        fn stream_synchronize(&self, _stream: GpuStream) -> Result<(), String> {
+            Ok(())
+        }
+        fn dma_copy_to_device_async(
+            &self,
+            src: &DmaBuffer,
+            dst: *mut std::ffi::c_void,
+            size: usize,
+            _stream: GpuStream,
+        ) -> Result<(), String> {
+            unsafe {
+                std::ptr::copy_nonoverlapping(src.as_ptr() as *const u8, dst as *mut u8, size);
+            }
+            Ok(())
+        }
+        fn memcpy_h2d_async(
+            &self,
+            src: *const std::ffi::c_void,
+            dst: *mut std::ffi::c_void,
+            size: usize,
+            _stream: GpuStream,
+        ) -> Result<(), String> {
+            unsafe {
+                std::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, size);
+            }
+            Ok(())
+        }
+        fn allocate_pinned_dma_buffer(&self, size: usize) -> Result<DmaBuffer, String> {
+            DmaBuffer::new(size, 4096, None).map_err(|e| e.to_string())
+        }
+        fn register_host_memory(
+            &self,
+            _ptr: *mut std::ffi::c_void,
+            _size: usize,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+        fn unregister_host_memory(
+            &self,
+            _ptr: *mut std::ffi::c_void,
+            _size: usize,
+        ) -> Result<(), String> {
+            Ok(())
         }
     }
 

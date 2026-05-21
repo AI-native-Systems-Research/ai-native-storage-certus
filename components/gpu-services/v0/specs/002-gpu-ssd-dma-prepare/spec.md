@@ -76,7 +76,7 @@ All pinning and non-pinning decisions made during `prepare_memory_for_spdk` are 
 
 - **FR-001**: The system MUST provide a `prepare_memory_for_spdk` function on the `IGpuServices` interface that accepts a base64-encoded CUDA IPC memory handle payload (`&str`) and an optional device index (`Option<u32>`), and returns an SPDK `DmaBuffer` directly usable for peer-to-peer SSD-to-GPU DMA operations.
 - **FR-002**: The function MUST open the IPC memory handle using `cudaIpcMemLazyEnablePeerAccess` flag to enable lazy peer-to-peer access.
-- **FR-003**: The function MUST query the pin state of the GPU memory using `cudaPointerGetAttributes` before attempting to pin.
+- **FR-003**: The function MUST check pin state by querying the component's internal pinned-pointer `HashSet` (not `cudaPointerGetAttributes`) before deciding whether to pin.
 - **FR-004**: The function MUST pin the GPU memory if it is not already pinned, and skip pinning if the memory is already pinned.
 - **FR-005**: The function MUST log pinning actions (pin performed, or already pinned) to the logger receptacle when connected.
 - **FR-006**: The returned DmaBuffer MUST use a free function that unpins the memory on drop ONLY if the function itself performed the pinning (i.e., memory was not originally pinned).
@@ -84,17 +84,22 @@ All pinning and non-pinning decisions made during `prepare_memory_for_spdk` are 
 - **FR-008**: Both free function variants MUST close the CUDA IPC memory handle on drop.
 - **FR-009**: The function MUST return an error if the component has not been initialized.
 - **FR-010**: The function MUST return an error if the IPC handle cannot be opened (invalid payload, originating process gone, etc.).
-- **FR-011**: The function MUST return an error if peer access cannot be enabled.
+- **FR-011**: Peer access is enabled lazily via the `cudaIpcMemLazyEnablePeerAccess` flag passed to `cudaIpcOpenMemHandle`. A peer access failure manifests as an IPC open error (covered by FR-010).
 - **FR-012**: The function MUST not leak GPU resources on any error path (partial operations must be rolled back).
 - **FR-013**: The function MUST be gated behind the `spdk` feature flag, consistent with other DMA-related methods on the interface.
 - **FR-014**: When a device index is provided, the function MUST set the CUDA device context to the specified GPU before opening the IPC handle and enabling peer access. When no device index is provided, the function MUST use the current CUDA device context.
 - **FR-015**: The function MUST return an SPDK `DmaBuffer` (not `GpuDmaBuffer`), directly usable by the SPDK NVMe driver for DMA operations without requiring type conversion by the caller.
+- **FR-016**: The function MUST call `spdk_mem_register` on the GPU device pointer so that SPDK's vtophys translation resolves it for DMA. Requires the `nvidia-peermem` kernel module to be loaded.
+- **FR-017**: On error after `spdk_mem_register` succeeds, the function MUST call `spdk_mem_unregister` to roll back the registration.
+- **FR-018**: When a device index is provided, the function MUST restore the original CUDA device context (via `cudaSetDevice`) on both success and error paths.
+- **FR-019**: The interface MUST provide a `register_host_memory(ptr, size)` method (gated behind `spdk` feature) that page-locks an existing host allocation via `cudaHostRegister` (enabling async GPU H2D/D2H DMA from the GPU's DMA engine) and registers it with SPDK via `spdk_mem_register` (enabling NVMe controllers to DMA directly to/from it). On partial failure (CUDA succeeds, SPDK fails), MUST roll back `cudaHostRegister` before returning error.
+- **FR-020**: The interface MUST provide an `unregister_host_memory(ptr, size)` method (gated behind `spdk` feature) that reverses FR-019: calls `spdk_mem_unregister` then `cudaHostUnregister`. MUST be called before the underlying allocation is freed.
 
 ### Key Entities
 
 - **CUDA IPC Handle Payload**: A base64-encoded binary blob containing a 64-byte `cudaIpcMemHandle_t` plus an 8-byte little-endian size field (72 bytes total), originating from a PyTorch process and transmitted via gRPC.
-- **DmaBuffer**: The SPDK `DmaBuffer` type (from `spdk_types`) that wraps a GPU device pointer with custom allocation/free semantics, enabling the SPDK NVMe driver to perform peer-to-peer DMA transfers directly to/from GPU memory without intermediate conversion.
-- **Pin State**: Whether the GPU memory backing the IPC handle was already registered for DMA by the originating process, determined via `cudaPointerGetAttributes`.
+- **DmaBuffer**: The SPDK `DmaBuffer` type (from `interfaces` with `spdk` feature) created via `DmaBuffer::from_raw` with a custom free function. The free function unregisters from SPDK (`spdk_mem_unregister`), optionally unpins (based on `was_already_pinned`), and closes the IPC handle (`cudaIpcCloseMemHandle`). NUMA node is set to -1 (GPU memory has no CPU NUMA affinity).
+- **Pin State**: Whether the GPU memory backing the IPC handle is already tracked as pinned in the component's internal `HashSet<usize>`. Checked by pointer-as-key lookup, not `cudaPointerGetAttributes`.
 
 ## Success Criteria *(mandatory)*
 
