@@ -307,6 +307,18 @@ impl IGpuServices for BenchGpuServices {
         }
         Ok(())
     }
+    fn memcpy_h2d_async(
+        &self,
+        src: *const std::ffi::c_void,
+        dst: *mut std::ffi::c_void,
+        size: usize,
+        _stream: GpuStream,
+    ) -> Result<(), String> {
+        unsafe {
+            std::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, size);
+        }
+        Ok(())
+    }
     fn allocate_pinned_dma_buffer(&self, size: usize) -> Result<DmaBuffer, String> {
         DmaBuffer::new(size, 4096, None).map_err(|e| e.to_string())
     }
