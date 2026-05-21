@@ -422,9 +422,17 @@ fn setup_dispatcher(
     let d: Arc<dyn IDispatcher + Send + Sync> =
         query_interface!(dispatcher, IDispatcher).ok_or("IDispatcher query failed")?;
 
+    // Use first device for metadata only; remaining device(s) for data.
+    // This avoids using a small metadata NVMe as a data drive (its slab_size
+    // may be too small for large extents).
+    let (metadata_addr, data_addrs) = if actual_addrs.len() > 1 {
+        (actual_addrs[0].clone(), actual_addrs[1..].to_vec())
+    } else {
+        (actual_addrs[0].clone(), actual_addrs.clone())
+    };
     let config = DispatcherConfig {
-        metadata_pci_addr: actual_addrs[0].clone(),
-        data_pci_addrs: actual_addrs,
+        metadata_pci_addr: metadata_addr,
+        data_pci_addrs: data_addrs,
         max_cache_entries: 0,
         ..Default::default()
     };
@@ -460,10 +468,10 @@ fn bench_warm_lookup(
         .map_err(|e| format!("populate: {e:?}"))?;
 
     // Wait for background write to complete (so entry has block_offset and is stable).
-    let deadline = Instant::now() + std::time::Duration::from_secs(30);
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
     while !dm.has_block_offset(key) {
         if Instant::now() > deadline {
-            eprintln!("    warning: background write did not complete in 30s, proceeding anyway");
+            eprintln!("    warning: background write did not complete in 5s, proceeding anyway");
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(5));
@@ -528,13 +536,13 @@ fn bench_cold_lookup(
     d.populate(key, src_handle)
         .map_err(|e| format!("populate key={key}: {e:?}"))?;
 
-    // Wait for background write to complete.
-    let deadline = Instant::now() + std::time::Duration::from_secs(30);
+    // Wait for background write to complete (5s is ample for NVMe write-through).
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
     while !dm.has_block_offset(key) {
         if Instant::now() > deadline {
             let _ = d.remove(key);
             unsafe { gpu_free(gpu_src); gpu_free(gpu_dst); }
-            return Err("background write did not complete in 30s".into());
+            return Err("background write did not complete (extent too large for slab?)".into());
         }
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
