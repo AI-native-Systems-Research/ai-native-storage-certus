@@ -67,15 +67,24 @@ impl RegionState {
         }
 
         let slab_size = self.format_params.slab_size;
+
+        if element_size as u64 > slab_size {
+            return Err(error::out_of_space());
+        }
+
         let disk_offset = self
             .buddy
             .alloc(slab_size)
             .ok_or_else(error::out_of_space)?;
 
         let mut slab = Slab::new(disk_offset, slab_size, element_size);
-        let (slot_idx, offset) = slab
-            .alloc_slot()
-            .expect("freshly created slab must have free slot");
+        let (slot_idx, offset) = match slab.alloc_slot() {
+            Some(result) => result,
+            None => {
+                self.buddy.free(disk_offset, slab_size);
+                return Err(error::out_of_space());
+            }
+        };
         // Only add to the non-full list if the slab still has capacity after this first alloc.
         if !slab.is_full() {
             self.size_classes.add_slab(element_size, disk_offset);
