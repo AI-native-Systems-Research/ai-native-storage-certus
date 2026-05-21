@@ -222,10 +222,12 @@ by a verification read-back.
   before allowing DMA buffer creation. Verified pointers are tracked
   in an internal set.
 - **FR-005**: Component MUST provide pin and unpin operations for GPU
-  memory regions. Pin state is tracked logically in an internal
-  `HashSet<usize>`; `pin_memory` is idempotent (no-op if already
-  pinned), and `unpin_memory` returns an error if the pointer is not
-  in the pinned set.
+  memory regions. For IPC-opened device memory (which is inherently
+  pinned by the CUDA runtime), pin verifies device-residency and
+  tracks state in an internal `HashSet<usize>`; unpin releases
+  tracking. `pin_memory` is idempotent (no-op if already pinned), and
+  `unpin_memory` returns an error if the pointer is not in the pinned
+  set.
 - **FR-006**: Component MUST create a `GpuDmaBuffer` (as defined in
   `interfaces`) from a valid, verified, and pinned IPC handle. The
   `GpuDmaBuffer` wraps the GPU device pointer with custom free
@@ -254,6 +256,18 @@ by a verification read-back.
 - **FR-014**: When the `gpu` feature is disabled, all interface methods
   MUST return an error indicating GPU support is not compiled, without
   panicking.
+- **FR-015**: Component MUST provide a `register_host_memory(ptr, size)`
+  method (gated behind `spdk` feature) that page-locks the specified
+  host memory region via `cudaHostRegister` (enabling async GPU DMA)
+  and registers it with SPDK via `spdk_mem_register` (enabling NVMe
+  DMA). If `cudaHostRegister` succeeds but `spdk_mem_register` fails,
+  the method MUST roll back by calling `cudaHostUnregister` before
+  returning the error.
+- **FR-016**: Component MUST provide an `unregister_host_memory(ptr,
+  size)` method (gated behind `spdk` feature) that unregisters memory
+  from SPDK via `spdk_mem_unregister` then removes page-locking via
+  `cudaHostUnregister`. MUST be called before freeing the underlying
+  allocation.
 
 ### Key Entities
 

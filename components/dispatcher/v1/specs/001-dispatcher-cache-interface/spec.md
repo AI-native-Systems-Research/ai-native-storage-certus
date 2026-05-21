@@ -153,7 +153,7 @@ When a lookup hits an entry in BlockDevice state (evicted from memory-tier but p
 
 **Acceptance Scenarios**:
 
-1. **Given** an entry is in BlockDevice state at a known SSD offset, **When** lookup is called for that key, **Then** the pipelined reader reads from SSD using a ring of DMA buffers (4 slots), copying each chunk to the memory-tier slot and DMA-copying to the GPU, and the entry is re-registered as MemoryTier.
+1. **Given** an entry is in BlockDevice state at a known SSD offset, **When** lookup is called for that key, **Then** the pipelined reader reads from SSD directly into a new memory-tier slot (zero-copy path) or via intermediate ring buffers (fallback), streaming each chunk to the GPU via async DMA, and the entry is re-registered as MemoryTier.
 2. **Given** the memory-tier is full when promotion is attempted, **When** lookup triggers promote_and_serve, **Then** `evict_for_space` is called first to free room before the new memory-tier slot is allocated.
 3. **Given** no hardware is available (memory-tier-only mode), **When** promote_and_serve runs, **Then** it creates a memory-tier slot with zero-copied data, performs a direct GPU DMA from the slot, and re-registers the entry.
 
@@ -203,7 +203,7 @@ When the SSD data drives approach capacity, a background evictor removes the old
 - Q: What happens when an evicted entry is looked up? -> A: The dispatch-map returns `LookupResult::BlockDevice { offset }`. The dispatcher calls `promote_and_serve` which reads from SSD, inserts into memory-tier, DMA-copies to GPU, and re-registers in the dispatch-map.
 - Q: What happens if write-through hasn't completed when eviction occurs? -> A: The `convert_memory_tier_to_block` call fails (no ssd_offset set). The entry is removed from the memory-tier anyway (by `evict_lru`). Effectively the data is lost. This is accepted as unlikely in practice.
 - Q: Does lookup update the LRU order? -> A: Yes, `mt.touch(key)` is called after a successful MemoryTier lookup to refresh the entry's position in the LRU.
-- Q: How does the pipelined reader work? -> A: It allocates a ring of 4 DMA buffers (MDTS-sized). For each I/O segment, it issues an SSD read into the next ring slot, waits for completion, copies the chunk to the memory-tier slot, then DMA-copies the same chunk to the GPU. This pipelines sequential SSD reads with memory copies.
+- Q: How does the pipelined reader work? -> A: The primary path (`pipelined_ssd_to_gpu_zero_copy`) reads NVMe directly into the memory-tier slot (CUDA-pinned + SPDK-registered), then issues `cudaMemcpyAsync` H2D from the same memory on alternating CUDA streams, with up to 16 NVMe reads in flight. The fallback path (`pipelined_ssd_to_gpu`) allocates a ring of 8 DMA buffers and copies each chunk from ring → memory-tier slot + GPU.
 
 ## Requirements *(mandatory)*
 
@@ -214,7 +214,7 @@ When the SSD data drives approach capacity, a background evictor removes the old
 - **FR-003**: The `populate(key, ipc_handle)` method MUST allocate a slot in the DRAM memory-tier via `IMemoryTier::insert()`, initiate DMA copy from the client's GPU memory into the memory-tier slot via `IGpuServices::dma_copy_to_host`, register the entry in the dispatch map as a MemoryTier entry (via `create_memory_tier_entry`), and enqueue an asynchronous background write-through job. MUST run `evict_for_space` if the memory-tier pool lacks capacity.
 - **FR-004**: After a successful populate, the system MUST asynchronously read from the memory-tier pointer and write the data to the SSD via the block device and extent manager (write-through), calling `convert_to_storage` on completion to record the SSD offset.
 - **FR-005**: The memory-tier entry MUST remain accessible for fast lookups even after the background SSD write-through completes. The memory-tier slot is NOT freed on write-through completion.
-- **FR-006**: The `lookup(key, ipc_handle)` method MUST query the dispatch map: if MemoryTier, DMA from memory-tier pointer to GPU and touch LRU; if BlockDevice (evicted), promote back to memory-tier via pipelined SSD-to-DRAM-to-GPU reader and re-register as MemoryTier; if Staging (legacy), DMA from staging buffer to GPU.
+- **FR-006**: The `lookup(key, ipc_handle)` method MUST query the dispatch map: if MemoryTier, DMA from memory-tier pointer to GPU and touch LRU; if BlockDevice (evicted), promote back to memory-tier via pipelined SSD-to-DRAM-to-GPU reader and re-register as MemoryTier; if Staging (legacy), DMA from staging buffer to GPU. When the memory-tier pool is CUDA-pinned (registered via FR-035), the MemoryTier path SHOULD use `IGpuServices::dma_copy_to_device_async` with a CUDA stream followed by `stream_synchronize` for the H2D transfer. Falls back to synchronous `dma_copy_to_device` when no CUDA streams are available.
 - **FR-007**: The `lookup` method MUST return a cache-miss indication if the key does not exist in the dispatch map.
 - **FR-008**: The `check(key)` method MUST return whether a cache entry exists for the given key without performing any data transfer.
 - **FR-009**: The `remove(key)` method MUST free the memory-tier slot (if present via `mt.remove()`), free the extent on SSD (if in BlockDevice state), and remove the dispatch map entry.
@@ -227,7 +227,7 @@ When the SSD data drives approach capacity, a background evictor removes the old
 - **FR-016**: The dispatcher MUST pass the data block device size and computed FormatParams to each extent manager's format function.
 - **FR-017**: When the asynchronous background write-through fails (extent allocation failure or block device I/O error), the background writer silently drops the job. The dispatch map entry remains in MemoryTier state. (Known limitation.)
 - **FR-018**: The `remove(key)` method does NOT block waiting for background write-through to complete. It proceeds immediately with removal.
-- **FR-019**: All block device I/O operations MUST be segmented to respect MDTS (typically 128 KiB). The pipelined reader uses a ring-buffer for SSD-to-DRAM-to-GPU streaming during promotion.
+- **FR-019**: All block device I/O operations MUST be segmented to respect MDTS (typically 128 KiB). The primary promotion path uses a zero-copy pipeline: NVMe reads directly into the memory-tier slot (which is CUDA-pinned + SPDK-registered via FR-035), then issues async H2D DMA from the same memory to GPU, with pipeline depth up to 16 concurrent NVMe reads. A ring-buffer fallback path (`pipelined_ssd_to_gpu`) exists for when the memory-tier pool is not registered for DMA.
 - **FR-020**: The `prepare_store(key, size)` method MUST run eviction if the cache is over capacity, reserve an extent on the target data drive, register the key in the dispatch map, and return a DMA buffer for the caller to write into. MUST return `AlreadyExists` if the key exists, `AllocationFailed` if extent reservation fails, `InvalidParameter` if size is 0.
 - **FR-021**: The `commit_store(key)` method MUST write the pending DMA buffer contents to SSD using MDTS-aware segmented I/O, publish the extent metadata, and transition the dispatch map entry to block-device state. MUST return `KeyNotFound` if no pending write exists.
 - **FR-022**: The `cancel_store(key)` method MUST drop the pending write (aborting the extent reservation via WriteHandle destructor) and remove the dispatch map entry. MUST return `KeyNotFound` if no pending write exists.
@@ -242,6 +242,8 @@ When the SSD data drives approach capacity, a background evictor removes the old
 - **FR-031**: When SSD utilization exceeds `ssd_eviction_threshold` (default: 0.9), the evictor MUST evict BlockDevice-only entries using `IDispatchMap::oldest_keys(batch_size)` for LRU ordering, stopping when utilization drops below `ssd_eviction_low_watermark` (default: 0.8) or the batch is exhausted.
 - **FR-032**: The SSD evictor MUST skip entries in MemoryTier state (still hot in DRAM). Entries with active read or write references MUST be skipped gracefully (dm.remove fails without panic).
 - **FR-033**: The `DispatcherConfig` MUST include `ssd_eviction_threshold` (f64, default 0.9), `ssd_eviction_low_watermark` (f64, default 0.8), `ssd_eviction_batch_size` (usize, default 64), and `ssd_eviction_interval_secs` (u64, default 5). Setting `ssd_eviction_threshold` to 0.0 disables the evictor.
+- **FR-034**: During `initialize()`, after GPU and memory-tier are ready, the dispatcher MUST call `IGpuServices::register_host_memory` on the memory-tier pool to CUDA-pin and SPDK-register it for zero-copy NVMe and GPU DMA. Registration failure MUST be logged but MUST NOT be fatal (the system falls back to the ring-buffer pipeline path). The dispatcher SHOULD also cache block-device `ClientChannels` per data drive at init time to avoid per-operation connection overhead.
+- **FR-035**: During `shutdown()`, before memory-tier teardown, the dispatcher MUST call `IGpuServices::unregister_host_memory` to release CUDA page-locking and SPDK registration on the memory-tier pool.
 
 ### Key Entities
 
@@ -252,7 +254,7 @@ When the SSD data drives approach capacity, a background evictor removes the old
 - **Extent**: A contiguous region on a data block device, managed by the extent manager, used to store write-through cache data.
 - **Data Block Device**: An NVMe SSD that holds persisted cache data. There are N data block devices in the system.
 - **Background Writer**: A dedicated thread that processes write-through jobs, reading from memory-tier pointers and writing to SSD via extent managers.
-- **Pipelined Reader**: A ring-buffer-based reader (`pipeline.rs`) that reads SSD data in MDTS-sized chunks into a ring of DMA buffers, copying each to both memory-tier and GPU destinations.
+- **Pipelined Reader**: A zero-copy pipeline (`pipeline.rs`) that reads SSD data in MDTS-sized chunks directly into the memory-tier slot (which is CUDA-pinned + SPDK-registered), then issues async H2D GPU DMA from the same memory. Falls back to a ring-buffer approach (`pipelined_ssd_to_gpu`) when the memory-tier pool is not registered for DMA.
 - **PendingWrite**: A temporary structure holding a WriteHandle (extent reservation), DMA buffer, size, and drive index for the prepare_store/commit_store/cancel_store workflow.
 - **Background SSD Evictor**: A dedicated thread that periodically checks SSD utilization and evicts the oldest BlockDevice entries when capacity exceeds a threshold.
 
@@ -280,7 +282,7 @@ When the SSD data drives approach capacity, a background evictor removes the old
 - The SPDK environment is initialized and active before the dispatcher's `initialize()` is called (via the ISPDKEnv receptacle). When ISPDKEnv is not connected, the dispatcher operates in memory-tier-only mode.
 - The memory-tier pool is pre-allocated before initialization. The dispatcher does not manage the pool lifecycle (only calls insert/get/remove/evict_lru).
 - DMA buffer allocation for the pipelined reader and prepare_store uses SPDK DMA allocation (falls back to libc `aligned_alloc` without SPDK).
-- GPU-to-host DMA transfers use `IGpuServices::dma_copy_to_host` (populate direction). Host-to-GPU DMA transfers use `IGpuServices::dma_copy_to_device` (lookup direction).
+- GPU-to-host DMA transfers use `IGpuServices::dma_copy_to_host` (populate direction). Host-to-GPU DMA transfers use `IGpuServices::dma_copy_to_device_async` with stream synchronization when the pool is CUDA-pinned, falling back to synchronous `dma_copy_to_device` (lookup direction).
 - NVMe SSDs have a Maximum Data Transfer Size (MDTS) limit. The `io_segmenter` module provides MDTS-aware I/O splitting.
 - Memory-tier pointers are wrapped in DmaBuffer with a `noop_free` function -- the memory-tier component owns the memory; the DmaBuffer wrapper must not free it.
 - Write-through is best-effort: failure does not propagate to the caller. Data remains accessible from the memory-tier until eviction.
