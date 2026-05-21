@@ -1,0 +1,37 @@
+/context                                                                                                                                      
+  ?  Context Usage                                                                                                                              
+     ? ? ? ? ? ? ? ? ? ?   Opus 4.6                                                                                                             
+     ? ? ? ? ? ? ? ? ? ?   aws/claude-opus-4-6                                                                                                  
+     ? ? ? ? ? ? ? ? ? ?   160.1k/200k tokens (80%)                                                                                             
+     ? ? ? ? ? ? ? ? ? ?                                                                                                                        
+     ? ? ? ? ? ? ? ? ? ?   Estimated usage by category                                                                                      
+     ? ? ? ? ? ? ? ? ? ?   ? System prompt: 6.6k tokens (3.3%)                                                                                  
+     ? ? ? ? ? ? ? ? ? ?   ? Memory files: 2.4k tokens (1.2%)                                                                               
+     ? ? ? ? ? ? ? ? ? ?   ? Skills: 689 tokens (0.3%)                                  
+     ? ? ? ? ? ? ? ? ? ?   ? Messages: 150.5k tokens (75.2%)                                                                  
+     ? ? ? ? ? ? ? ? ? ?   ? Free space: 6.9k (3.4%)                                                                                        
+                           ? Autocompact buffer: 33k tokens (16.5%)                                                             
+                                                        
+     Memory files · /memory
+     ? CLAUDE.md: 1.3k tokens
+     ? components/logger/v1/CLAUDE.md: 1.1k tokens
+
+     Skills · /skills
+
+      Suggestions
+      ? Context is 80% full
+        Autocompact will trigger soon, which discards older messages. Use /compact now to control what gets kept.
+
+      ? Read results using 33.3k tokens (17%) ? save ~10k
+        Use offset and limit parameters to read only the sections you need. Avoid re-reading entire files when you only need a few lines.
+
+? /cost                                                                                                                                         
+  ?  Total cost:            $7.88
+     Total duration (API):  17m 34s                                                                                                             
+     Total duration (wall): 39m 40s                                                                                                      
+     Total code changes:    1776 lines added, 196 lines removed                                                                             
+     Usage by model:                                                                                                                        
+          claude-opus-4-6:  314 input, 47.8k output, 9.7m cache read, 249.8k cache write ($7.63)                                            
+        claude-sonnet-4-6:  2.4k input, 3.4k output, 170.3k cache read, 36.4k cache write ($0.2457)  
+
+        

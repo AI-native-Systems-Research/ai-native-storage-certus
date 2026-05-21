@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash *)",
+      "Read(//home/dwaddington/ai-native-storage-certus/components/block-device-spdk-nvme/v2/**)",
+      "Read(//home/dwaddington/ai-native-storage-certus/components/component-framework/**)",
+      "Read(//home/dwaddington/ai-native-storage-certus/components/interfaces/**)",
+      "Read(//home/dwaddington/ai-native-storage-certus/components/spdk-sys/**)",
+      "Read(//home/dwaddington/ai-native-storage-certus/components/spdk-env/**)",
+      "Read(//home/dwaddington/ai-native-storage-certus/components/logger/**)",
+      "Bash(cargo build *)",
+      "Bash(cargo test *)",
+      "Bash(cargo fmt *)",
+      "Bash(cargo bench *)",
+      "Bash(cargo clippy *)",
+      "Bash(cargo doc *)",
+      "Bash(cargo check *)",
+      "Bash(cargo metadata *)",
+      "Bash(cargo run *)"
+    ]
+  }
+}

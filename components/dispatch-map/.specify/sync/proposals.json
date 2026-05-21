@@ -1,0 +1,55 @@
+{
+  "generated": "2026-05-21T00:00:00Z",
+  "based_on": "drift-report from 2026-05-21",
+  "summary": {
+    "backfill": 2,
+    "align": 0,
+    "human_decision": 1,
+    "new_specs": 0,
+    "remove_from_spec": 0
+  },
+  "proposals": [
+    {
+      "id": 1,
+      "spec_id": "001-dispatch-map",
+      "requirement": "FR-004",
+      "direction": "HUMAN_DECISION",
+      "severity": "minor",
+      "spec_text": "lookup returns BlockDevice(offset, size)",
+      "actual_behavior": "LookupResult::BlockDevice only has offset field, no size. The size is stored internally in the entry but not exposed in the lookup result enum variant.",
+      "proposed_change": "Either (A) add size field to LookupResult::BlockDevice to match spec, or (B) backfill spec to document offset-only return since callers already know size from their initial staging request.",
+      "location": "components/interfaces/src/idispatch_map.rs (LookupResult::BlockDevice)",
+      "rationale": "Interface design decision — adding size changes the trait signature and all pattern matches on LookupResult. Omitting it means callers must track size separately.",
+      "confidence": "MEDIUM",
+      "status": "pending"
+    },
+    {
+      "id": 2,
+      "spec_id": "001-dispatch-map",
+      "requirement": "naming",
+      "direction": "BACKFILL",
+      "severity": "informational",
+      "spec_text": "Component named DispatchMapComponentV0",
+      "actual_behavior": "Component is named DispatchMapComponent (no V0 suffix)",
+      "proposed_change": "Update all spec/doc references from DispatchMapComponentV0 to DispatchMapComponent",
+      "location": "specs/001-dispatch-map/quickstart.md, specs/001-dispatch-map/data-model.md, CLAUDE.md",
+      "rationale": "The component was renamed to drop the V0 suffix; specs should reflect current naming.",
+      "confidence": "HIGH",
+      "status": "applied"
+    },
+    {
+      "id": 3,
+      "spec_id": "001-dispatch-map",
+      "requirement": "FR-018",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "spec_text": "MemoryTier with pointer: u64, size: usize",
+      "actual_behavior": "MemoryTier uses pointer: *mut u8, size: u32. create_memory_tier_entry takes (*mut u8, u32).",
+      "proposed_change": "Update spec FR-018 and Key Entities to use pointer: *mut u8, size: u32 matching the implementation (more idiomatic Rust types — raw pointer instead of integer, u32 for block count consistency)",
+      "location": "specs/001-dispatch-map/spec.md (FR-018, Key Entities)",
+      "rationale": "*mut u8 is the idiomatic Rust pointer type for raw memory; u32 for size is consistent with size_blocks in BlockDevice variant and DispatchEntry.",
+      "confidence": "HIGH",
+      "status": "applied"
+    }
+  ]
+}

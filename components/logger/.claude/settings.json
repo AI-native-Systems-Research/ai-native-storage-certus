@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(components/component-framework)",
+      "Read(components/logger/v1/**)",
+      "Write(components/interfaces/**)",
+      "Write(components/logger/v1/**)"
+    ],
+    "deny": [
+      "Read(components/example-helloworld/**)"
+    ],
+    "additionalDirectories": [
+      "../../interfaces",
+      "../../component-framework"
+    ]
+  }
+}
