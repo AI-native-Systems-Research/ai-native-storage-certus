@@ -68,6 +68,9 @@ pub const CUDA_MEMCPY_DEVICE_TO_DEVICE: c_int = 3;
 pub const CUDA_HOST_ALLOC_DEFAULT: c_int = 0;
 pub const CUDA_HOST_ALLOC_MAPPED: c_int = 2;
 
+/// Opaque CUDA stream handle.
+pub type CudaStream = *mut c_void;
+
 extern "C" {
     pub fn cudaGetDeviceCount(count: *mut c_int) -> cudaError_t;
     pub fn cudaGetDeviceProperties(prop: *mut cudaDeviceProp, device: c_int) -> cudaError_t;
@@ -108,6 +111,16 @@ extern "C" {
     pub fn cudaGetErrorString(error: cudaError_t) -> *const c_char;
     pub fn cudaDeviceGetPCIBusId(pci_bus_id: *mut c_char, len: c_int, device: c_int)
         -> cudaError_t;
+    pub fn cudaStreamCreate(stream: *mut CudaStream) -> cudaError_t;
+    pub fn cudaStreamSynchronize(stream: CudaStream) -> cudaError_t;
+    pub fn cudaStreamDestroy(stream: CudaStream) -> cudaError_t;
+    pub fn cudaMemcpyAsync(
+        dst: *mut c_void,
+        src: *const c_void,
+        count: usize,
+        kind: c_int,
+        stream: CudaStream,
+    ) -> cudaError_t;
 }
 
 /// Translate a CUDA error code to a descriptive Rust String.

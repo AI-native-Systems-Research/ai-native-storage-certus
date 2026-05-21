@@ -1,65 +1,53 @@
 # example-helloworld
 
-A reference component demonstrating the Certus component framework. Shows how to define an interface, implement a component, and use the actor model for message-driven concurrency.
+A demo component showing the Certus component framework patterns. Demonstrates interface definition, component implementation, receptacle wiring, and the actor model for message-driven concurrency.
 
-## What It Demonstrates
+## Summary
 
-- **Interface definition** with `define_interface!` — the `IGreeter` trait
-- **Component definition** with `define_component!` — `HelloWorldComponent` providing `IGreeter`
-- **Receptacle wiring** — optional `ILogger` receptacle for structured logging
-- **Actor model** — `GreeterHandler` processes `GreetRequest` messages on a dedicated thread, counting greetings and printing them to stdout
+This component serves as a reference implementation for new Certus components. It provides the `IGreeter` interface and includes a `GreeterHandler` actor that processes greeting messages on a dedicated thread.
 
-## Public API
+### What It Demonstrates
 
-### IGreeter Interface
+- **Interface definition** with `define_interface!` -- the `IGreeter` trait
+- **Component definition** with `define_component!` -- `HelloWorldComponent` providing `IGreeter`
+- **Receptacle wiring** -- optional `ILogger` receptacle for structured logging
+- **Actor model** -- `GreeterHandler` processes `GreetRequest` messages on a dedicated thread
 
-```rust
-define_interface! {
-    pub IGreeter {
-        fn greeting_prefix(&self) -> &str;
-    }
-}
+### Public API
+
+- `HelloWorldComponent` -- provides `IGreeter`, version `"0.1.0"`, receptacle: `logger` (ILogger, optional)
+- `IGreeter::greeting_prefix()` -- returns `"Hello"`
+- `GreeterHandler::new()` -- create actor handler without logging
+- `GreeterHandler::with_logger(logger)` -- create actor handler with an `ILogger`
+- `GreetRequest { name: String }` -- message type for the actor
+
+## Structure
+
+```
+src/
+  lib.rs    Component definition, IGreeter impl, GreeterHandler actor, GreetRequest message
 ```
 
-### HelloWorldComponent
+## Build & Test
 
-- Provides: `IGreeter`
-- Receptacles: `logger` (`ILogger`, optional)
-- Version: `"0.1.0"`
-- `greeting_prefix()` returns `"Hello"`
-
-### GreeterHandler (Actor)
-
-Handles `GreetRequest { name: String }` messages. Each message prints a greeting to stdout with a running count.
-
-- `GreeterHandler::new()` — create without logging
-- `GreeterHandler::with_logger(logger)` — create with an `Arc<dyn ILogger + Send + Sync>` for structured logging
-
-## Build
+### Build
 
 ```bash
 cargo build -p example-helloworld
 ```
 
-## Test
+### Test
 
 ```bash
 cargo test -p example-helloworld
 ```
 
-To see `println!`/`eprintln!` output and log messages during tests:
+To see output during tests:
 
 ```bash
 RUST_LOG=debug cargo test -p example-helloworld -- --nocapture
 ```
 
-## Usage
+### Usage Example
 
-See `apps/helloworld-mainline/` for a full example that instantiates this component, queries its interface, wires up the actor, and sends messages.
-
-## Source Layout
-
-```
-src/
-  lib.rs    Component definition, IGreeter impl, GreeterHandler actor
-```
+See `apps/helloworld-mainline/` for a full application that instantiates this component, queries its interface, wires up the actor, and sends messages.

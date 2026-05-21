@@ -28,8 +28,8 @@ use component_core::query_interface;
 use dispatcher::DispatcherComponentV0;
 use interfaces::{
     CacheKey, DispatchMapError, DispatcherConfig, DispatcherError, DmaAllocFn, DmaBuffer,
-    GpuDeviceInfo, GpuDmaBuffer, GpuIpcHandle, IDispatchMap, IDispatcher, IGpuServices, ILogger,
-    IpcHandle, LookupResult,
+    GpuDeviceInfo, GpuDmaBuffer, GpuIpcHandle, GpuStream, IDispatchMap, IDispatcher, IGpuServices,
+    ILogger, IpcHandle, LookupResult,
 };
 use spdk_env::{ISPDKEnv, SPDKEnvComponent};
 
@@ -118,6 +118,51 @@ impl IGpuServices for MockGpuServices {
         unsafe {
             std::ptr::copy_nonoverlapping(src.as_ptr() as *const u8, dst as *mut u8, size);
         }
+        Ok(())
+    }
+    fn prepare_memory_for_spdk(
+        &self,
+        _base64_payload: &str,
+        _device_index: Option<u32>,
+    ) -> Result<DmaBuffer, String> {
+        Err("mock: not implemented".into())
+    }
+    fn create_stream(&self) -> Result<GpuStream, String> {
+        Ok(GpuStream(0x1 as *mut std::ffi::c_void))
+    }
+    fn destroy_stream(&self, _stream: GpuStream) -> Result<(), String> {
+        Ok(())
+    }
+    fn stream_synchronize(&self, _stream: GpuStream) -> Result<(), String> {
+        Ok(())
+    }
+    fn dma_copy_to_device_async(
+        &self,
+        src: &DmaBuffer,
+        dst: *mut std::ffi::c_void,
+        size: usize,
+        _stream: GpuStream,
+    ) -> Result<(), String> {
+        unsafe {
+            std::ptr::copy_nonoverlapping(src.as_ptr() as *const u8, dst as *mut u8, size);
+        }
+        Ok(())
+    }
+    fn allocate_pinned_dma_buffer(&self, size: usize) -> Result<DmaBuffer, String> {
+        DmaBuffer::new(size, 4096, None).map_err(|e| e.to_string())
+    }
+    fn register_host_memory(
+        &self,
+        _ptr: *mut std::ffi::c_void,
+        _size: usize,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+    fn unregister_host_memory(
+        &self,
+        _ptr: *mut std::ffi::c_void,
+        _size: usize,
+    ) -> Result<(), String> {
         Ok(())
     }
 }
