@@ -570,6 +570,27 @@ define_interface! {
             size: usize, stream: GpuStream
         ) -> Result<(), String>;
 
+        /// Asynchronously copy from a raw host pointer to GPU device memory.
+        ///
+        /// Like [`dma_copy_to_device_async`] but takes a raw `src` pointer,
+        /// avoiding the need to wrap pre-existing pinned memory in a `DmaBuffer`.
+        ///
+        /// # Safety (caller contract)
+        ///
+        /// * `src` must be a valid, CUDA-pinned host pointer for at least `size` bytes.
+        /// * `dst` must be a valid GPU device pointer for at least `size` bytes.
+        /// * Both pointers must remain valid until the stream is synchronized.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if GPU support is not compiled in, the component
+        /// is not initialized, or the CUDA async memcpy operation fails.
+        #[cfg(feature = "spdk")]
+        fn memcpy_h2d_async(
+            &self, src: *const std::ffi::c_void, dst: *mut std::ffi::c_void,
+            size: usize, stream: GpuStream
+        ) -> Result<(), String>;
+
         /// Allocate a CUDA-pinned host buffer registered with SPDK for DMA.
         ///
         /// The returned buffer is:
