@@ -72,8 +72,8 @@ None.
 
 ## Recommendations
 
-1. **Update FR-019 for zero-copy pipeline** (priority: high): The spec describes a ring-buffer-based pipelined reader. The implementation now uses a zero-copy path that reads NVMe directly into the memory-tier slot and streams to GPU from the same memory. Update the spec to describe the zero-copy algorithm as the primary path, with the ring-buffer path as fallback for unregistered memory.
+1. ~~**Update FR-019 for zero-copy pipeline**~~: DONE (2026-05-20). Spec updated to describe zero-copy as primary path.
 
-2. **Add FR-034/035/036 for pool registration and async DMA** (priority: medium): The memory-tier pool CUDA+SPDK registration at init and the async warm-path DMA are significant performance features (~4x warm-path improvement, ~3.5x cold-path improvement) that should be specified.
+2. ~~**Add FR-034/035 for pool registration and async DMA**~~: DONE (2026-05-20). FR-034/035 added to spec.
 
 3. **Remove or document legacy config fields** (priority: low): `max_cache_entries` and `eviction_threshold` are unused in v1. Either remove them (breaking change for callers using `..Default::default()`) or mark them as deprecated in the doc comment.

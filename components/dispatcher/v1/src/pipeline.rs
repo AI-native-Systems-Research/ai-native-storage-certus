@@ -186,10 +186,15 @@ pub unsafe fn pipelined_ssd_to_gpu(
             DispatcherError::IoError(format!("GPU async DMA copy #{completed} failed: {e}"))
         })?;
 
-        // Sync the OTHER stream (previous copy) — ensures that ring slot is free.
-        let prev_stream = streams[(completed + 1) % 2];
-        gpu.stream_synchronize(prev_stream)
-            .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+        // Batch-sync both streams once per ring cycle. NVMe read latency (~50+ μs)
+        // always exceeds GPU async copy time (~5 μs at 128 KiB), so ring slots are
+        // safe to reuse well before the next NVMe completion arrives.
+        if (completed + 1) % ring_size == 0 {
+            gpu.stream_synchronize(streams[0])
+                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+            gpu.stream_synchronize(streams[1])
+                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+        }
 
         drop(guard);
 
@@ -345,10 +350,15 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
         })?;
         drop(guard);
 
-        // Sync the OTHER stream to ensure the previous H2D is complete.
-        let prev_stream = streams[(completed + 1) % 2];
-        gpu.stream_synchronize(prev_stream)
-            .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+        // Batch-sync both streams periodically. No buffer reuse in zero-copy
+        // (each chunk is a unique memory-tier offset), so sync only throttles
+        // the GPU command queue depth.
+        if (completed + 1) % 16 == 0 {
+            gpu.stream_synchronize(streams[0])
+                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+            gpu.stream_synchronize(streams[1])
+                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+        }
 
         // Submit next NVMe read (into the next memory-tier chunk).
         if next_to_submit < num_chunks {
