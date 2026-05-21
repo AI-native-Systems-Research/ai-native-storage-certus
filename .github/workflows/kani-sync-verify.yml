@@ -9,6 +9,8 @@
 #                 merge into unstable-kani
 #                       │
 #                 cargo kani (dispatch-map)
+#                 cargo kani (example-helloworld)
+#                 cargo kani (component-core)
 #                       │
 #              ┌────────┴────────┐
 #            PASS              FAIL
@@ -85,6 +87,14 @@ jobs:
       - name: Run Kani harnesses — dispatch-map
         run: |
           cargo kani --manifest-path components/dispatch-map/v0/Cargo.toml
+
+      - name: Run Kani harnesses — example-helloworld
+        run: |
+          cargo kani --package example-helloworld
+
+      - name: Run Kani harnesses — component-core
+        run: |
+          cargo kani --package component-core
 
       # Only push if the merge happened AND all harnesses passed.
       - name: Push updated unstable-kani

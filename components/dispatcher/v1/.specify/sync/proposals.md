@@ -1,13 +1,13 @@
 # Drift Resolution Proposals
 
-Generated: 2026-05-12
-Based on: drift-report from 2026-05-12
+Generated: 2026-05-20
+Based on: drift-report from 2026-05-20
 
 ## Summary
 
 | Resolution Type | Count |
 |-----------------|-------|
-| Backfill (Code -> Spec) | 1 |
+| Backfill (Code -> Spec) | 4 |
 | Align (Code -> Spec) | 1 |
 | Human Decision | 0 |
 | New Specs | 0 |
@@ -74,5 +74,61 @@ Add a note to the spec clarification section:
 > The `max_cache_entries` and `eviction_threshold` fields in `DispatcherConfig` are retained for API compatibility but unused by the v1 eviction logic.
 
 **Rationale**: Removing the fields would be a breaking change for existing consumers using struct literals. Deprecation with documentation is the minimal-risk approach.
+
+**Confidence**: HIGH
+
+---
+
+### Proposal 3: Drifted - FR-019 (Zero-copy pipeline)
+
+**Direction**: BACKFILL (Code -> Spec)
+
+**Current State**:
+- Spec says: "The pipelined reader uses a ring-buffer for SSD-to-DRAM-to-GPU streaming during promotion."
+- Code does: Uses `pipelined_ssd_to_gpu_zero_copy()` which reads NVMe directly into the memory-tier slot (no ring buffer intermediary) then async-DMAs to GPU from the same memory. The ring-buffer path still exists as fallback.
+
+**Proposed Resolution**: Update FR-019 to:
+
+> FR-019: All block device I/O operations MUST be segmented to respect MDTS (typically 128 KiB). The primary promotion path uses a zero-copy pipeline: NVMe reads directly into the memory-tier slot (which is CUDA-pinned + SPDK-registered), then issues async H2D DMA from the same memory to GPU, with pipeline depth up to 16 concurrent NVMe reads. A ring-buffer fallback path (`pipelined_ssd_to_gpu`) exists for when the memory-tier pool is not registered for DMA.
+
+Also update Key Entities → Pipelined Reader:
+> **Pipelined Reader**: A zero-copy pipeline (`pipeline.rs`) that reads SSD data in MDTS-sized chunks directly into the memory-tier slot (which must be CUDA-pinned + SPDK-registered), then issues async H2D GPU DMA from the same memory. Falls back to a ring-buffer approach for unregistered memory.
+
+**Rationale**: The zero-copy path eliminates a CPU memcpy per chunk (~10 μs each at 128 KiB), resulting in ~3.5x cold-path throughput improvement in hardware benchmarks. The ring-buffer path remains for backward compatibility.
+
+**Confidence**: HIGH
+
+---
+
+### Proposal 4: Unspecced - Memory-tier pool registration
+
+**Direction**: BACKFILL (Code -> Spec)
+
+**Feature**: At `initialize()`, calls `gpu.register_host_memory(pool_ptr, pool_size)` to CUDA-pin + SPDK-register the entire memory-tier DRAM pool. At `shutdown()`, calls `gpu.unregister_host_memory()`. Also caches `ClientChannels` per data drive.
+**Location**: `src/lib.rs` (initialize, shutdown, DataDrive struct)
+
+**Proposed Addition** (FR-035):
+
+- **FR-035**: During `initialize()`, after GPU and memory-tier are ready, the dispatcher MUST call `IGpuServices::register_host_memory` on the memory-tier pool pointer to enable zero-copy NVMe and GPU DMA operations. During `shutdown()`, the dispatcher MUST call `unregister_host_memory` before memory-tier teardown. Registration failure MUST be logged but not fatal (falls back to ring-buffer pipeline). The dispatcher SHOULD also cache block-device `ClientChannels` at init time to avoid per-operation connection overhead.
+
+**Rationale**: Pool registration is the prerequisite for the zero-copy pipeline and async warm-path DMA. Without it, the system falls back to ring-buffer copies, losing ~3.5x cold-path and ~4x warm-path performance.
+
+**Confidence**: HIGH
+
+---
+
+### Proposal 5: Unspecced - Async warm-path DMA
+
+**Direction**: BACKFILL (Code -> Spec)
+
+**Feature**: The `LookupResult::MemoryTier` branch uses `dma_copy_to_device_async` + `stream_synchronize` instead of synchronous `dma_copy_to_device` for GPU transfers from memory-tier.
+**Location**: `src/lib.rs` (lookup, MemoryTier branch)
+
+**Proposed Update to FR-006**:
+
+Add to FR-006:
+> When the memory-tier pool is CUDA-pinned (registered via FR-035), the MemoryTier lookup path SHOULD use `IGpuServices::dma_copy_to_device_async` with a CUDA stream followed by `stream_synchronize` for the H2D transfer, leveraging the GPU's DMA engine directly. When no pipeline ring (CUDA streams) is available, it MUST fall back to synchronous `dma_copy_to_device`.
+
+**Rationale**: Async DMA from CUDA-pinned memory uses the GPU's dedicated DMA engine, achieving ~10.4 GB/s vs ~2.4 GB/s for the synchronous path (which internally stages through a temporary pinned buffer). This is a ~4x improvement on the hot path.
 
 **Confidence**: HIGH

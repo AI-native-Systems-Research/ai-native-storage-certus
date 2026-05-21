@@ -12,13 +12,13 @@ pub mod io_segmenter;
 pub mod pipeline;
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use component_framework::define_component;
 use interfaces::{
-    BlockDeviceVersion, CacheKey, Command, Completion, DmaAllocFn, DmaBuffer,
-    DispatcherConfig, DispatcherError, ExtentManagerVersion, FormatParams, IBlockDevice,
+    BlockDeviceVersion, CacheKey, ClientChannels, Command, Completion, DmaAllocFn, DmaBuffer,
+    DispatcherConfig, DispatcherError, ExtentManagerVersion, FormatParams, GpuStream, IBlockDevice,
     IBlockDeviceAdmin, IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger,
     IMemoryTier, IpcHandle, LookupResult, PciAddress, WriteHandle,
 };
@@ -55,6 +55,7 @@ struct DataDrive {
     block_dev_admin: Arc<dyn IBlockDeviceAdmin + Send + Sync>,
     block_dev_iface: Arc<dyn IBlockDevice + Send + Sync>,
     extent_mgr: Arc<ExtentManagerV2>,
+    cached_channels: Option<ClientChannels>,
 }
 
 define_component! {
@@ -74,6 +75,8 @@ define_component! {
             bg_evictor: Mutex<Option<BackgroundEvictor>>,
             data_drives: Mutex<Vec<DataDrive>>,
             pending_writes: Mutex<HashMap<CacheKey, PendingWrite>>,
+            pipeline_ring: Mutex<Option<pipeline::PipelineRing>>,
+            warm_stream: AtomicU64,
         },
     }
 }
@@ -232,25 +235,42 @@ impl DispatcherComponentV0 {
         let idx = Self::drive_index(key, drives.len());
         let drive = &drives[idx];
         let block_size = drive.block_dev_iface.block_size();
-        let numa_node = drive.block_dev_iface.numa_node();
         let start_lba = offset / block_size as u64;
         let block_dev = Arc::clone(&drive.block_dev_iface);
-        drop(drives);
 
-        // Use pipelined reader: SSD → memory-tier → GPU.
-        // SAFETY: mem_ptr is a valid memory-tier slot for total_bytes.
+        // Use cached channels if available, otherwise create new ones.
+        let channels = match &drive.cached_channels {
+            Some(ch) => ch,
+            None => {
+                drop(drives);
+                return Err(DispatcherError::IoError(
+                    "no cached channels for drive".into(),
+                ));
+            }
+        };
+
+        // Zero-copy pipelined reader: NVMe → memory-tier slot → GPU (no intermediate ring copy).
+        // SAFETY: mem_ptr is a valid, CUDA-pinned, SPDK-registered memory-tier slot.
         // ipc_handle.address is a valid GPU destination pointer.
+        let ring_guard = self.pipeline_ring.lock().unwrap();
+        let ring_ref = ring_guard.as_ref().ok_or_else(|| {
+            DispatcherError::NotInitialized("pipeline ring not allocated".into())
+        })?;
         unsafe {
-            pipeline::pipelined_ssd_to_gpu(
+            pipeline::pipelined_ssd_to_gpu_zero_copy(
                 &*block_dev,
                 &**gpu,
+                &ring_ref.streams,
+                channels,
                 mem_ptr,
                 ipc_handle.address as *mut std::ffi::c_void,
                 start_lba,
                 total_bytes,
-                numa_node,
+                ring_ref.chunk_size,
             )?;
         }
+        drop(ring_guard);
+        drop(drives);
 
         // Update dispatch-map: remove old BlockDevice entry and create fresh MemoryTier.
         // Since we released the read ref before calling this method, we can remove
@@ -586,11 +606,14 @@ impl DispatcherComponentV0 {
                 config.block_device_version
             ));
 
+            let cached_channels = ibd.connect_client().ok();
+
             drives.push(DataDrive {
                 _block_dev: block_dev_component,
                 block_dev_admin: admin,
                 block_dev_iface: ibd,
                 extent_mgr,
+                cached_channels,
             });
         }
 
@@ -621,6 +644,62 @@ impl IDispatcher for DispatcherComponentV0 {
         if self.spdk_env.is_connected() {
             let drives = self.create_data_drives(&config)?;
             *self.data_drives.lock().unwrap() = drives;
+
+            // Pre-allocate pipeline ring for promote_and_serve (CUDA-pinned + SPDK-registered).
+            if let Ok(gpu) = self.gpu_services.get() {
+                let chunk_size = self
+                    .data_drives
+                    .lock()
+                    .unwrap()
+                    .first()
+                    .map(|d| d.block_dev_iface.max_transfer_size() as usize)
+                    .unwrap_or(131072);
+                match pipeline::PipelineRing::new(&*gpu, chunk_size) {
+                    Ok(ring) => {
+                        *self.pipeline_ring.lock().unwrap() = Some(ring);
+                    }
+                    Err(e) => {
+                        self.log_info(&format!(
+                            "pipeline ring allocation failed (non-fatal): {e:?}"
+                        ));
+                    }
+                }
+
+                // Dedicated CUDA stream for warm-path DMA (avoids pipeline_ring lock).
+                match gpu.create_stream() {
+                    Ok(stream) => {
+                        self.warm_stream.store(stream.0 as u64, Ordering::Release);
+                    }
+                    Err(e) => {
+                        self.log_info(&format!(
+                            "warm stream allocation failed (non-fatal): {e}"
+                        ));
+                    }
+                }
+
+                // Register memory-tier pool as CUDA-pinned + SPDK DMA-capable
+                // for zero-copy NVMe reads and async GPU transfers.
+                if let Ok(mt) = self.memory_tier.get() {
+                    if let Some((pool_ptr, pool_size)) = mt.pool_info() {
+                        match gpu.register_host_memory(
+                            pool_ptr as *mut std::ffi::c_void,
+                            pool_size,
+                        ) {
+                            Ok(()) => {
+                                self.log_info(&format!(
+                                    "dispatcher: registered memory-tier pool ({} MiB) for zero-copy DMA",
+                                    pool_size / (1024 * 1024)
+                                ));
+                            }
+                            Err(e) => {
+                                self.log_info(&format!(
+                                    "memory-tier pool registration failed (non-fatal): {e}"
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         let dm_for_writer = self
@@ -710,6 +789,27 @@ impl IDispatcher for DispatcherComponentV0 {
 
         self.pending_writes.lock().unwrap().clear();
 
+        // Unregister memory-tier pool from CUDA/SPDK before tearing down.
+        if let (Ok(gpu), Ok(mt)) = (self.gpu_services.get(), self.memory_tier.get()) {
+            if let Some((pool_ptr, pool_size)) = mt.pool_info() {
+                let _ = gpu.unregister_host_memory(
+                    pool_ptr as *mut std::ffi::c_void,
+                    pool_size,
+                );
+            }
+        }
+
+        // Destroy warm stream and pipeline ring.
+        if let Ok(gpu) = self.gpu_services.get() {
+            let raw = self.warm_stream.swap(0, Ordering::AcqRel);
+            if raw != 0 {
+                let _ = gpu.destroy_stream(GpuStream(raw as *mut std::ffi::c_void));
+            }
+            if let Some(ring) = self.pipeline_ring.lock().unwrap().take() {
+                ring.destroy(&*gpu);
+            }
+        }
+
         // Shut down block devices in reverse order
         let drives = std::mem::take(&mut *self.data_drives.lock().unwrap());
         for (i, drive) in drives.iter().enumerate().rev() {
@@ -726,6 +826,20 @@ impl IDispatcher for DispatcherComponentV0 {
     }
 
     fn lookup(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError> {
+        let stream = self.lookup_async(key, ipc_handle)?;
+        if !stream.0.is_null() {
+            let gpu = self
+                .gpu_services
+                .get()
+                .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
+            gpu.stream_synchronize(stream).map_err(|e| {
+                DispatcherError::IoError(format!("stream_synchronize failed: {e}"))
+            })?;
+        }
+        Ok(())
+    }
+
+    fn lookup_async(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<GpuStream, DispatcherError> {
         self.ensure_initialized()?;
 
         let dm = self
@@ -745,6 +859,8 @@ impl IDispatcher for DispatcherComponentV0 {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
 
+        let null_stream = GpuStream(std::ptr::null_mut());
+
         match result {
             Ok(lookup_result) => {
                 use interfaces::LookupResult;
@@ -757,39 +873,59 @@ impl IDispatcher for DispatcherComponentV0 {
                         ))
                     }
                     LookupResult::MemoryTier { pointer, size } => {
-                        // Serve directly from memory-tier.
                         let copy_size = (ipc_handle.size as usize).min(size as usize);
-                        let aligned = copy_size.next_multiple_of(4096).max(4096);
-                        // SAFETY: pointer is valid memory-tier slot, aligned is within allocation.
-                        let temp_buf = unsafe {
-                            DmaBuffer::from_raw(
-                                pointer as *mut std::ffi::c_void,
-                                aligned,
-                                noop_free,
-                                -1,
-                            )
-                        }
-                        .map_err(|e| {
-                            let _ = dm.release_read(key);
-                            DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}"))
-                        })?;
 
-                        let copy_result = gpu.dma_copy_to_device(
-                            &temp_buf,
-                            ipc_handle.address as *mut std::ffi::c_void,
-                            copy_size,
-                        );
-                        std::mem::forget(temp_buf);
-                        let _ = dm.release_read(key);
-                        mt.touch(key);
-                        copy_result.map_err(|e| {
-                            DispatcherError::IoError(format!(
-                                "GPU DMA copy (memory-tier→device) failed: {e}"
-                            ))
-                        })
+                        // Use dedicated warm stream (lock-free AtomicU64 load).
+                        let raw = self.warm_stream.load(Ordering::Acquire);
+                        if raw != 0 {
+                            let s = GpuStream(raw as *mut std::ffi::c_void);
+                            gpu.memcpy_h2d_async(
+                                pointer as *const std::ffi::c_void,
+                                ipc_handle.address as *mut std::ffi::c_void,
+                                copy_size,
+                                s,
+                            )
+                            .map_err(|e| {
+                                let _ = dm.release_read(key);
+                                DispatcherError::IoError(format!(
+                                    "GPU DMA copy (memory-tier→device) failed: {e}"
+                                ))
+                            })?;
+                            let _ = dm.release_read(key);
+                            mt.touch(key);
+                            Ok(s)
+                        } else {
+                            // Fallback: sync copy via DmaBuffer wrapper.
+                            let aligned = copy_size.next_multiple_of(4096).max(4096);
+                            let temp_buf = unsafe {
+                                DmaBuffer::from_raw(
+                                    pointer as *mut std::ffi::c_void,
+                                    aligned,
+                                    noop_free,
+                                    -1,
+                                )
+                            }
+                            .map_err(|e| {
+                                let _ = dm.release_read(key);
+                                DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}"))
+                            })?;
+                            let copy_result = gpu.dma_copy_to_device(
+                                &temp_buf,
+                                ipc_handle.address as *mut std::ffi::c_void,
+                                copy_size,
+                            );
+                            std::mem::forget(temp_buf);
+                            let _ = dm.release_read(key);
+                            mt.touch(key);
+                            copy_result.map_err(|e| {
+                                DispatcherError::IoError(format!(
+                                    "GPU DMA copy (memory-tier→device) failed: {e}"
+                                ))
+                            })?;
+                            Ok(null_stream)
+                        }
                     }
                     LookupResult::Staging { buffer } => {
-                        // Legacy path (kept for backward compatibility).
                         let copy_result = gpu.dma_copy_to_device(
                             &buffer,
                             ipc_handle.address as *mut std::ffi::c_void,
@@ -800,13 +936,13 @@ impl IDispatcher for DispatcherComponentV0 {
                             DispatcherError::IoError(format!(
                                 "GPU DMA copy (staging→device) failed: {e}"
                             ))
-                        })
+                        })?;
+                        Ok(null_stream)
                     }
                     LookupResult::BlockDevice { offset } => {
-                        // Entry was evicted from memory-tier but is on SSD.
-                        // Read from SSD back into memory-tier, then serve from there.
                         let _ = dm.release_read(key);
-                        self.promote_and_serve(key, offset, &ipc_handle, &gpu, &dm, &mt)
+                        self.promote_and_serve(key, offset, &ipc_handle, &gpu, &dm, &mt)?;
+                        Ok(null_stream)
                     }
                 }
             }
@@ -1164,7 +1300,7 @@ mod tests {
 
     use interfaces::{
         CacheKey, DispatchMapError, DmaAllocFn, DmaBuffer, GpuDeviceInfo, GpuDmaBuffer,
-        GpuIpcHandle, IMemoryTier, LookupResult, MemoryTierError,
+        GpuIpcHandle, GpuStream, IMemoryTier, LookupResult, MemoryTierError,
     };
 
     // -----------------------------------------------------------------------
@@ -1639,6 +1775,57 @@ mod tests {
         ) -> Result<DmaBuffer, String> {
             Err("mock: not implemented".into())
         }
+        fn create_stream(&self) -> Result<GpuStream, String> {
+            Ok(GpuStream(0x1 as *mut std::ffi::c_void))
+        }
+        fn destroy_stream(&self, _stream: GpuStream) -> Result<(), String> {
+            Ok(())
+        }
+        fn stream_synchronize(&self, _stream: GpuStream) -> Result<(), String> {
+            Ok(())
+        }
+        fn dma_copy_to_device_async(
+            &self,
+            src: &DmaBuffer,
+            dst: *mut std::ffi::c_void,
+            size: usize,
+            _stream: GpuStream,
+        ) -> Result<(), String> {
+            // SAFETY: In tests, both src and dst are valid host pointers.
+            unsafe {
+                std::ptr::copy_nonoverlapping(src.as_ptr() as *const u8, dst as *mut u8, size);
+            }
+            Ok(())
+        }
+        fn memcpy_h2d_async(
+            &self,
+            src: *const std::ffi::c_void,
+            dst: *mut std::ffi::c_void,
+            size: usize,
+            _stream: GpuStream,
+        ) -> Result<(), String> {
+            unsafe {
+                std::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, size);
+            }
+            Ok(())
+        }
+        fn allocate_pinned_dma_buffer(&self, size: usize) -> Result<DmaBuffer, String> {
+            DmaBuffer::new(size, 4096, None).map_err(|e| e.to_string())
+        }
+        fn register_host_memory(
+            &self,
+            _ptr: *mut std::ffi::c_void,
+            _size: usize,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+        fn unregister_host_memory(
+            &self,
+            _ptr: *mut std::ffi::c_void,
+            _size: usize,
+        ) -> Result<(), String> {
+            Ok(())
+        }
     }
 
     fn setup_initialized() -> (Arc<DispatcherComponentV0>, Arc<MockDispatchMap>) {
@@ -1652,6 +1839,8 @@ mod tests {
             Mutex::new(None),
             Mutex::new(Vec::new()),
             Mutex::new(HashMap::new()),
+            Mutex::new(None),
+            AtomicU64::new(0),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -1684,19 +1873,19 @@ mod tests {
 
     #[test]
     fn component_creation() {
-        let _c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let _c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
     }
 
     #[test]
     fn query_idispatcher() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
         let d = query_interface!(c, IDispatcher);
         assert!(d.is_some());
     }
 
     #[test]
     fn initialize_without_receptacles_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
             metadata_pci_addr: "0000:01:00.0".to_string(),
@@ -1709,7 +1898,7 @@ mod tests {
 
     #[test]
     fn initialize_with_empty_pci_addrs_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
             metadata_pci_addr: "0000:01:00.0".to_string(),
@@ -1723,7 +1912,7 @@ mod tests {
 
     #[test]
     fn lookup_before_initialize_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
         let handle = IpcHandle {
@@ -1736,7 +1925,7 @@ mod tests {
 
     #[test]
     fn check_before_initialize_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.check(42);
         assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
@@ -1744,7 +1933,7 @@ mod tests {
 
     #[test]
     fn remove_before_initialize_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.remove(42);
         assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
@@ -1752,7 +1941,7 @@ mod tests {
 
     #[test]
     fn populate_before_initialize_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
         let handle = IpcHandle {
@@ -1765,7 +1954,7 @@ mod tests {
 
     #[test]
     fn populate_with_zero_size_fails() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
         let d = query_interface!(c, IDispatcher).unwrap();
         // Even though not initialized, zero-size check comes after init check.
         // This test verifies the parameter validation exists in the code path.
@@ -1781,14 +1970,14 @@ mod tests {
 
     #[test]
     fn shutdown_without_initialize_succeeds() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
     }
 
     #[test]
     fn double_shutdown_succeeds() {
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
         assert!(d.shutdown().is_ok());
@@ -1802,6 +1991,8 @@ mod tests {
             Mutex::new(None),
             Mutex::new(Vec::new()),
             Mutex::new(HashMap::new()),
+            Mutex::new(None),
+            AtomicU64::new(0),
         ));
 
         let handles: Vec<_> = (0..4)
@@ -1841,7 +2032,7 @@ mod tests {
     fn initialize_empty_addrs_with_dispatch_map() {
         let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
         c.dispatch_map.connect(dm).unwrap();
         c.memory_tier.connect(mt).unwrap();
 
@@ -1860,7 +2051,7 @@ mod tests {
         let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
         let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
         c.memory_tier.connect(mt).unwrap();
@@ -1923,7 +2114,7 @@ mod tests {
         let gpu: Arc<dyn IGpuServices + Send + Sync> = Arc::new(MockGpuServices);
         let mt: Arc<dyn IMemoryTier + Send + Sync> =
             Arc::new(MockMemoryTier::with_fail_insert(1024 * 1024));
-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
+        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
         c.gpu_services.connect(gpu).unwrap();
@@ -2242,6 +2433,8 @@ mod tests {
             Mutex::new(None),
             Mutex::new(Vec::new()),
             Mutex::new(HashMap::new()),
+            Mutex::new(None),
+            AtomicU64::new(0),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)

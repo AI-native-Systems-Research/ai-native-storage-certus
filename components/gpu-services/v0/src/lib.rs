@@ -535,6 +535,295 @@ impl IGpuServices for GpuServicesComponentV0 {
             Ok(())
         }
     }
+
+    fn create_stream(&self) -> Result<interfaces::GpuStream, String> {
+        #[cfg(not(feature = "gpu"))]
+        {
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            let state = self.state().lock().map_err(|e| e.to_string())?;
+            if !state.initialized {
+                return Err("Not initialized: call initialize() first".to_string());
+            }
+            drop(state);
+
+            let mut stream: cuda_ffi::CudaStream = std::ptr::null_mut();
+            // SAFETY: stream is a valid pointer to a local CudaStream.
+            let err = unsafe { cuda_ffi::cudaStreamCreate(&mut stream) };
+            if err != cuda_ffi::CUDA_SUCCESS {
+                return Err(format!(
+                    "cudaStreamCreate failed: {}",
+                    cuda_ffi::cuda_error_string(err)
+                ));
+            }
+            Ok(interfaces::GpuStream(stream))
+        }
+    }
+
+    fn destroy_stream(&self, stream: interfaces::GpuStream) -> Result<(), String> {
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = stream;
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            // SAFETY: stream.0 was obtained from cudaStreamCreate.
+            let err = unsafe { cuda_ffi::cudaStreamDestroy(stream.0) };
+            if err != cuda_ffi::CUDA_SUCCESS {
+                return Err(format!(
+                    "cudaStreamDestroy failed: {}",
+                    cuda_ffi::cuda_error_string(err)
+                ));
+            }
+            Ok(())
+        }
+    }
+
+    fn stream_synchronize(&self, stream: interfaces::GpuStream) -> Result<(), String> {
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = stream;
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            // SAFETY: stream.0 was obtained from cudaStreamCreate.
+            let err = unsafe { cuda_ffi::cudaStreamSynchronize(stream.0) };
+            if err != cuda_ffi::CUDA_SUCCESS {
+                return Err(format!(
+                    "cudaStreamSynchronize failed: {}",
+                    cuda_ffi::cuda_error_string(err)
+                ));
+            }
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "spdk")]
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    fn dma_copy_to_device_async(
+        &self,
+        src: &interfaces::DmaBuffer,
+        dst: *mut std::ffi::c_void,
+        size: usize,
+        stream: interfaces::GpuStream,
+    ) -> Result<(), String> {
+        if size > src.len() {
+            return Err(format!(
+                "size ({size}) exceeds source buffer length ({})",
+                src.len()
+            ));
+        }
+
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = (dst, stream);
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            let state = self.state().lock().map_err(|e| e.to_string())?;
+            if !state.initialized {
+                return Err("Not initialized: call initialize() first".to_string());
+            }
+            drop(state);
+
+            // SAFETY: Caller guarantees dst is a valid GPU device pointer covering
+            // at least `size` bytes. src.as_ptr() is a valid DMA host buffer,
+            // size <= src.len(), and stream.0 is a valid CUDA stream.
+            let err = unsafe {
+                cuda_ffi::cudaMemcpyAsync(
+                    dst,
+                    src.as_ptr() as *const std::ffi::c_void,
+                    size,
+                    cuda_ffi::CUDA_MEMCPY_HOST_TO_DEVICE,
+                    stream.0,
+                )
+            };
+
+            if err != cuda_ffi::CUDA_SUCCESS {
+                return Err(format!(
+                    "cudaMemcpyAsync H2D failed: {}",
+                    cuda_ffi::cuda_error_string(err)
+                ));
+            }
+
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "spdk")]
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    fn memcpy_h2d_async(
+        &self,
+        src: *const std::ffi::c_void,
+        dst: *mut std::ffi::c_void,
+        size: usize,
+        stream: interfaces::GpuStream,
+    ) -> Result<(), String> {
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = (src, dst, size, stream);
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            let state = self.state().lock().map_err(|e| e.to_string())?;
+            if !state.initialized {
+                return Err("Not initialized: call initialize() first".to_string());
+            }
+            drop(state);
+
+            let err = unsafe {
+                cuda_ffi::cudaMemcpyAsync(
+                    dst,
+                    src,
+                    size,
+                    cuda_ffi::CUDA_MEMCPY_HOST_TO_DEVICE,
+                    stream.0,
+                )
+            };
+
+            if err != cuda_ffi::CUDA_SUCCESS {
+                return Err(format!(
+                    "cudaMemcpyAsync H2D failed: {}",
+                    cuda_ffi::cuda_error_string(err)
+                ));
+            }
+
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "spdk")]
+    fn allocate_pinned_dma_buffer(&self, size: usize) -> Result<interfaces::DmaBuffer, String> {
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = size;
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            let state = self.state().lock().map_err(|e| e.to_string())?;
+            if !state.initialized {
+                return Err("Not initialized: call initialize() first".to_string());
+            }
+            drop(state);
+
+            // SAFETY: cudaHostAlloc allocates page-locked host memory.
+            let mut host_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+            let err = unsafe {
+                cuda_ffi::cudaHostAlloc(&mut host_ptr, size, cuda_ffi::CUDA_HOST_ALLOC_DEFAULT)
+            };
+            if err != cuda_ffi::CUDA_SUCCESS {
+                return Err(format!(
+                    "cudaHostAlloc({} bytes) failed: {}",
+                    size,
+                    cuda_ffi::cuda_error_string(err)
+                ));
+            }
+
+            match dma::create_spdk_dma_buffer_from_cuda_host_alloc(host_ptr, size) {
+                Ok(buf) => Ok(buf),
+                Err(e) => {
+                    // SAFETY: host_ptr was allocated by cudaHostAlloc.
+                    unsafe { cuda_ffi::cudaFreeHost(host_ptr) };
+                    Err(format!("SPDK register for pinned buffer: {e}"))
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "spdk")]
+    fn register_host_memory(&self, ptr: *mut std::ffi::c_void, size: usize) -> Result<(), String> {
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = (ptr, size);
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            let state = self.state().lock().map_err(|e| e.to_string())?;
+            if !state.initialized {
+                return Err("Not initialized: call initialize() first".to_string());
+            }
+            drop(state);
+
+            // SAFETY: ptr is valid for `size` bytes and page-aligned (caller contract).
+            let err = unsafe { cuda_ffi::cudaHostRegister(ptr, size, 0) };
+            if err != cuda_ffi::CUDA_SUCCESS {
+                return Err(format!(
+                    "cudaHostRegister({} bytes) failed: {}",
+                    size,
+                    cuda_ffi::cuda_error_string(err)
+                ));
+            }
+
+            extern "C" {
+                fn spdk_mem_register(
+                    vaddr: *mut std::ffi::c_void,
+                    len: usize,
+                ) -> std::os::raw::c_int;
+            }
+
+            let rc = unsafe { spdk_mem_register(ptr, size) };
+            if rc != 0 {
+                unsafe { cuda_ffi::cudaHostUnregister(ptr) };
+                return Err(format!("spdk_mem_register failed (rc={})", rc));
+            }
+
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "spdk")]
+    fn unregister_host_memory(
+        &self,
+        ptr: *mut std::ffi::c_void,
+        size: usize,
+    ) -> Result<(), String> {
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = (ptr, size);
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            extern "C" {
+                fn spdk_mem_unregister(
+                    vaddr: *mut std::ffi::c_void,
+                    len: usize,
+                ) -> std::os::raw::c_int;
+            }
+
+            let rc = unsafe { spdk_mem_unregister(ptr, size) };
+            if rc != 0 {
+                return Err(format!("spdk_mem_unregister failed (rc={})", rc));
+            }
+
+            // SAFETY: ptr was previously registered with cudaHostRegister.
+            let err = unsafe { cuda_ffi::cudaHostUnregister(ptr) };
+            if err != cuda_ffi::CUDA_SUCCESS {
+                return Err(format!(
+                    "cudaHostUnregister failed: {}",
+                    cuda_ffi::cuda_error_string(err)
+                ));
+            }
+
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]

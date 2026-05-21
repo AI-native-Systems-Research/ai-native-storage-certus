@@ -451,6 +451,9 @@ def main():
         "--bench", action="store_true", help="Run lookup latency benchmark (memory-tier vs SSD)"
     )
     parser.add_argument(
+        "--bench-only", action="store_true", help="Skip functional tests, run only the benchmark"
+    )
+    parser.add_argument(
         "--bench-object-size", type=int, default=65536,
         help="Object size in bytes for benchmark (default: 65536 = 64 KiB)"
     )
@@ -468,6 +471,15 @@ def main():
 
     channel = grpc.insecure_channel(args.server)
     stub = dispatcher_pb2_grpc.DispatcherStub(channel)
+
+    if args.bench_only:
+        bench_lookup_latency(
+            stub,
+            object_size=args.bench_object_size,
+            num_objects=args.bench_num_objects,
+            iterations=args.bench_iterations,
+        )
+        sys.exit(0)
 
     results = TestResult()
 
