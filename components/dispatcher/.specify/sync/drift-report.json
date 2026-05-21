@@ -1,0 +1,284 @@
+{
+  "report_date": "2026-05-21",
+  "spec": "components/dispatcher/specs/001-dispatcher-cache-interface/spec.md",
+  "implementation": [
+    "components/dispatcher/src/lib.rs",
+    "components/dispatcher/src/pipeline.rs",
+    "components/dispatcher/src/io_segmenter.rs",
+    "components/dispatcher/src/background.rs"
+  ],
+  "interface": "components/interfaces/src/idispatcher.rs",
+  "summary": {
+    "aligned": 28,
+    "drifted": 4,
+    "not_implemented": 2,
+    "unspecced": 1
+  },
+  "requirements": [
+    {
+      "id": "FR-001",
+      "title": "IDispatcher Interface Definition",
+      "status": "drifted",
+      "severity": "low",
+      "detail": "Interface includes extra method `lookup_async` not listed in spec. All spec-required methods are present."
+    },
+    {
+      "id": "FR-002",
+      "title": "DispatcherError Type",
+      "status": "aligned",
+      "detail": "All failure modes covered: NotInitialized, KeyNotFound, AlreadyExists, AllocationFailed, IoError, Timeout, InvalidParameter."
+    },
+    {
+      "id": "FR-003",
+      "title": "populate(key, ipc_handle)",
+      "status": "aligned",
+      "detail": "Implementation calls evict_for_space, mt.insert, gpu.dma_copy_to_host, dm.create_memory_tier_entry, enqueues background write."
+    },
+    {
+      "id": "FR-004",
+      "title": "Background Write-Through",
+      "status": "aligned",
+      "detail": "process_write_job reads from memory-tier pointer, writes to SSD, calls dm.convert_to_storage on success."
+    },
+    {
+      "id": "FR-005",
+      "title": "Memory-Tier Retention After Write-Through",
+      "status": "aligned",
+      "detail": "Write-through does not free the memory-tier slot. Entry remains for fast lookups."
+    },
+    {
+      "id": "FR-006",
+      "title": "lookup Dispatch Logic",
+      "status": "aligned",
+      "detail": "Handles MemoryTier (async DMA + LRU touch), BlockDevice (promote_and_serve), Staging (sync DMA). Uses warm_stream for async path."
+    },
+    {
+      "id": "FR-007",
+      "title": "Lookup Cache Miss",
+      "status": "aligned",
+      "detail": "Returns DispatcherError::KeyNotFound when LookupResult::NotExist."
+    },
+    {
+      "id": "FR-008",
+      "title": "check(key)",
+      "status": "aligned",
+      "detail": "Queries dispatch map, returns boolean without data transfer."
+    },
+    {
+      "id": "FR-009",
+      "title": "remove(key)",
+      "status": "aligned",
+      "detail": "Frees memory-tier slot, removes dispatch-map entry, frees SSD extent if BlockDevice."
+    },
+    {
+      "id": "FR-010",
+      "title": "define_component! Usage",
+      "status": "aligned",
+      "detail": "Uses define_component! macro, exposes only IDispatcher interface."
+    },
+    {
+      "id": "FR-011",
+      "title": "Receptacles",
+      "status": "aligned",
+      "detail": "Declares ILogger, IDispatchMap, IGpuServices, ISPDKEnv, IMemoryTier receptacles."
+    },
+    {
+      "id": "FR-012",
+      "title": "initialize Validation",
+      "status": "aligned",
+      "detail": "Validates dispatch_map and memory_tier are bound before proceeding. spdk_env checked conditionally."
+    },
+    {
+      "id": "FR-013",
+      "title": "Thread Safety",
+      "status": "aligned",
+      "detail": "Dispatch map via Arc with read/write ref semantics. Internal state protected by Mutex."
+    },
+    {
+      "id": "FR-014",
+      "title": "shutdown Drains Background Operations",
+      "status": "aligned",
+      "detail": "Stops evictor, drains background writer, shuts down block devices in reverse order."
+    },
+    {
+      "id": "FR-015",
+      "title": "N Block Devices with N Extent Managers",
+      "status": "aligned",
+      "detail": "create_data_drives creates one DataDrive per PCI address with paired block device and extent manager."
+    },
+    {
+      "id": "FR-016",
+      "title": "FormatParams from Device Size",
+      "status": "aligned",
+      "detail": "Computes data_disk_size, region_size, slab_size, max_extent_size from block device metadata."
+    },
+    {
+      "id": "FR-017",
+      "title": "Silent Write-Through Failure",
+      "status": "aligned",
+      "detail": "process_write_job silently returns on extent allocation or I/O failure."
+    },
+    {
+      "id": "FR-018",
+      "title": "remove Does Not Block on Write-Through",
+      "status": "aligned",
+      "detail": "remove() proceeds immediately without waiting for write-through."
+    },
+    {
+      "id": "FR-019",
+      "title": "MDTS-Aware I/O Segmentation",
+      "status": "aligned",
+      "detail": "io_segmenter splits I/O at MDTS boundaries. Zero-copy pipeline uses 16 concurrent NVMe reads. Fallback ring uses 8 buffers."
+    },
+    {
+      "id": "FR-020",
+      "title": "prepare_store",
+      "status": "aligned",
+      "detail": "Validates size > 0, rejects duplicates, reserves extent, returns DMA buffer. Cleans up on failure."
+    },
+    {
+      "id": "FR-021",
+      "title": "commit_store",
+      "status": "aligned",
+      "detail": "Writes buffer to SSD with MDTS segmentation, publishes extent, transitions dispatch-map entry."
+    },
+    {
+      "id": "FR-022",
+      "title": "cancel_store",
+      "status": "aligned",
+      "detail": "Drops pending write (abort via WriteHandle destructor), removes dispatch-map entry."
+    },
+    {
+      "id": "FR-023",
+      "title": "touch(key)",
+      "status": "aligned",
+      "detail": "Calls dm.touch(key), returns KeyNotFound if absent. No DMA, no reference acquisition."
+    },
+    {
+      "id": "FR-024",
+      "title": "Capacity-Based Eviction",
+      "status": "aligned",
+      "detail": "Purely capacity-based: loops while used + needed > capacity, evicts LRU via mt.evict_lru."
+    },
+    {
+      "id": "FR-025",
+      "title": "format_on_init Flag",
+      "status": "aligned",
+      "detail": "Config field defaults true. When false, iem.format() is skipped."
+    },
+    {
+      "id": "FR-026",
+      "title": "BlockDeviceVersion Selection",
+      "status": "not_implemented",
+      "severity": "medium",
+      "detail": "No block_device_version field in DispatcherConfig. Implementation hardcodes a single block device component."
+    },
+    {
+      "id": "FR-027",
+      "title": "ExtentManagerVersion Selection",
+      "status": "not_implemented",
+      "severity": "medium",
+      "detail": "No extent_manager_version field in DispatcherConfig. Implementation hardcodes a single extent manager."
+    },
+    {
+      "id": "FR-028",
+      "title": "Promotion Re-Registers as MemoryTier",
+      "status": "aligned",
+      "detail": "promote_and_serve removes old entry, creates fresh MemoryTier entry, preserves ssd_offset."
+    },
+    {
+      "id": "FR-029",
+      "title": "Background SSD Evictor Thread",
+      "status": "aligned",
+      "detail": "Started during initialize when threshold > 0.0 and drives exist. Joined during shutdown."
+    },
+    {
+      "id": "FR-030",
+      "title": "SSD Utilization Monitoring",
+      "status": "aligned",
+      "detail": "compute_utilization sums used_bytes/capacity_bytes across extent managers. Interval configurable."
+    },
+    {
+      "id": "FR-031",
+      "title": "SSD Eviction Logic",
+      "status": "aligned",
+      "detail": "Evicts oldest BlockDevice entries until below low_watermark or batch exhausted."
+    },
+    {
+      "id": "FR-032",
+      "title": "SSD Evictor Skips MemoryTier",
+      "status": "aligned",
+      "detail": "get_evictable_offset returns None for MemoryTier entries. Failed dm.remove handled gracefully."
+    },
+    {
+      "id": "FR-033",
+      "title": "SSD Eviction Config Fields",
+      "status": "aligned",
+      "detail": "All four config fields present with correct defaults. Threshold 0.0 disables evictor."
+    },
+    {
+      "id": "FR-034",
+      "title": "Memory-Tier Pool Registration",
+      "status": "aligned",
+      "detail": "Calls gpu.register_host_memory on pool during init. Non-fatal on failure. Caches ClientChannels per drive."
+    },
+    {
+      "id": "FR-035",
+      "title": "Memory-Tier Pool Unregistration",
+      "status": "aligned",
+      "detail": "Calls gpu.unregister_host_memory during shutdown before teardown."
+    }
+  ],
+  "success_criteria": [
+    { "id": "SC-001", "status": "aligned", "detail": "Tested via populate + lookup integration tests." },
+    { "id": "SC-002", "status": "aligned", "detail": "Tested via check_existing_returns_true, check_nonexistent_returns_false." },
+    { "id": "SC-003", "status": "aligned", "detail": "Tested via remove_existing_succeeds." },
+    { "id": "SC-004", "status": "aligned", "detail": "Tested via concurrent_populate_different_keys, concurrent_checks." },
+    { "id": "SC-005", "status": "aligned", "detail": "Tested via initialize_without_receptacles_fails." },
+    { "id": "SC-006", "status": "aligned", "detail": "Tested via drain_on_shutdown in background.rs." },
+    { "id": "SC-007", "status": "aligned", "detail": "Tested via initialize_multiple_pci_addrs." },
+    { "id": "SC-008", "status": "aligned", "detail": "Tested via prepare_store_returns_dma_buffer." },
+    { "id": "SC-009", "status": "aligned", "detail": "Tested via evict_for_space_evicts_when_pool_full, populate_triggers_eviction_on_full_pool." },
+    { "id": "SC-010", "status": "aligned", "detail": "touch called implicitly in lookup MemoryTier path via mt.touch(key)." },
+    { "id": "SC-011", "status": "aligned", "detail": "Tested via lookup_block_device_promote_without_hardware." },
+    { "id": "SC-012", "status": "aligned", "detail": "Pipeline functions tested via hardware integration tests." },
+    { "id": "SC-013", "status": "aligned", "detail": "Tested via evictor_full_eviction_cycle, evictor_start_and_shutdown." }
+  ],
+  "unspecced_code": [
+    {
+      "feature": "lookup_async",
+      "location": "idispatcher.rs:172, lib.rs:795-903",
+      "description": "Async variant of lookup that returns a GpuStream for non-blocking H2D DMA. Synchronous lookup delegates to it internally. Performance optimization not covered by spec."
+    }
+  ],
+  "drift_details": [
+    {
+      "id": "drift-1",
+      "requirement": "FR-001",
+      "severity": "low",
+      "description": "Interface includes lookup_async method not listed in spec FR-001.",
+      "recommendation": "Add lookup_async to spec FR-001 or create FR-036."
+    },
+    {
+      "id": "drift-2",
+      "requirement": "FR-026",
+      "severity": "medium",
+      "description": "No BlockDeviceVersion field in DispatcherConfig. Single block device implementation hardcoded.",
+      "recommendation": "Add config field and selection logic, or remove FR-026 if only V2 is supported."
+    },
+    {
+      "id": "drift-3",
+      "requirement": "FR-027",
+      "severity": "medium",
+      "description": "No ExtentManagerVersion field in DispatcherConfig. Single extent manager hardcoded.",
+      "recommendation": "Add config field and selection logic, or remove FR-027 if only one version is supported."
+    },
+    {
+      "id": "drift-4",
+      "requirement": "User Story 5, Acceptance Scenario 4",
+      "severity": "low",
+      "description": "initialize() rejects empty data_pci_addrs before checking spdk_env connectivity. Memory-tier-only mode requires dummy PCI addresses.",
+      "recommendation": "Move empty PCI address check inside spdk_env.is_connected() block to properly support memory-tier-only mode."
+    }
+  ]
+}

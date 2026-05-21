@@ -65,8 +65,8 @@ Requires kernel boot params for IOMMU and hugepages, and `memlock` set to unlimi
 
 - **`components/component-framework/`** — Core framework: `component-core` (traits, actor, channels, NUMA), `component-macros` (proc macros for `define_interface!`/`define_component!`), `component-framework` (facade re-export). Has its own CLAUDE.md.
 - **`components/interfaces/`** — Shared interface trait definitions (`IBlockDevice`, `IExtentManager`, `ILogger`, `IGreeter`, `ISPDKEnv`). SPDK-dependent interfaces gated behind `features = ["spdk"]`.
-- **`components/block-device-spdk-nvme/v1/`** — NVMe block device driver via SPDK userspace. Actor-per-controller model with shared-memory client channels. Has its own CLAUDE.md.
-- **`components/extent-manager/v0/`** — Fixed-size extent allocator with crash-consistent on-disk layout (superblock + bitmap + records, 4KiB atomic writes). Has its own CLAUDE.md.
+- **`components/block-device-spdk-nvme/`** — NVMe block device driver via SPDK userspace. Actor-per-controller model with shared-memory client channels. Has its own CLAUDE.md.
+- **`components/extent-manager/`** — Fixed-size extent allocator with crash-consistent on-disk layout (superblock + bitmap + records, 4KiB atomic writes). Has its own CLAUDE.md.
 - **`components/spdk-sys/`** — Raw FFI bindings to SPDK C libraries (bindgen-generated).
 - **`components/spdk-env/`** — Safe Rust wrapper around SPDK environment init. Has its own CLAUDE.md.
 - **`components/example-helloworld/`, `components/console-logger/`** — Example components.

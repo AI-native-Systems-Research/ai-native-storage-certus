@@ -17,14 +17,13 @@ pyo3 = { version = "0.22", features = ["extension-module"] }
 interfaces = { path = "../components/interfaces", features = ["spdk"] }
 component-framework = { path = "../components/component-framework/crates/component-framework" }
 component-core = { path = "../components/component-framework/crates/component-core" }
-dispatcher = { path = "../components/dispatcher/v0" }
-logger = { path = "../components/logger/v1" }
-dispatch-map = { path = "../components/dispatch-map/v0" }
-block-device-spdk-nvme = { path = "../components/block-device-spdk-nvme/v1" }
-block-device-spdk-nvme-v2 = { path = "../components/block-device-spdk-nvme/v2" }
-extent-manager-v2 = { path = "../components/extent-manager/v2" }
+dispatcher = { path = "../components/dispatcher" }
+logger = { path = "../components/logger" }
+dispatch-map = { path = "../components/dispatch-map" }
+block-device-spdk-nvme = { path = "../components/block-device-spdk-nvme" }
+extent-manager = { path = "../components/extent-manager" }
 spdk-env = { path = "../components/spdk-env" }
-gpu-services = { path = "../components/gpu-services/v0", features = ["gpu"] }
+gpu-services = { path = "../components/gpu-services", features = ["gpu"] }
 
 [build-dependencies]
 pyo3-build-config = "0.22"

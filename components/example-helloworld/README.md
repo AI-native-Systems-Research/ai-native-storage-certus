@@ -1,53 +1,27 @@
 # example-helloworld
 
-A demo component showing the Certus component framework patterns. Demonstrates interface definition, component implementation, receptacle wiring, and the actor model for message-driven concurrency.
-
 ## Summary
 
-This component serves as a reference implementation for new Certus components. It provides the `IGreeter` interface and includes a `GreeterHandler` actor that processes greeting messages on a dedicated thread.
+A demo component illustrating core Certus component framework patterns. It defines an `IGreeter` interface via `define_interface!`, implements it in `HelloWorldComponent` via `define_component!`, and provides a `GreeterHandler` actor that processes `GreetRequest` messages on a dedicated thread. An optional `ILogger` receptacle demonstrates component wiring for structured logging.
 
-### What It Demonstrates
+## Architecture
 
-- **Interface definition** with `define_interface!` -- the `IGreeter` trait
-- **Component definition** with `define_component!` -- `HelloWorldComponent` providing `IGreeter`
-- **Receptacle wiring** -- optional `ILogger` receptacle for structured logging
-- **Actor model** -- `GreeterHandler` processes `GreetRequest` messages on a dedicated thread
+The component uses the actor model for message-driven concurrency:
 
-### Public API
+- `HelloWorldComponent` provides the `IGreeter` interface and declares an `ILogger` receptacle.
+- `GreeterHandler` implements `ActorHandler<GreetRequest>`, running on its own thread. It prints greetings and optionally logs via the wired `ILogger`.
+- Messages are sent to the actor through a channel handle obtained from `Actor::simple(...).activate()`.
 
-- `HelloWorldComponent` -- provides `IGreeter`, version `"0.1.0"`, receptacle: `logger` (ILogger, optional)
-- `IGreeter::greeting_prefix()` -- returns `"Hello"`
-- `GreeterHandler::new()` -- create actor handler without logging
-- `GreeterHandler::with_logger(logger)` -- create actor handler with an `ILogger`
-- `GreetRequest { name: String }` -- message type for the actor
+See `apps/helloworld-mainline/` for a full application that wires up and drives this component.
 
-## Structure
-
-```
-src/
-  lib.rs    Component definition, IGreeter impl, GreeterHandler actor, GreetRequest message
-```
-
-## Build & Test
-
-### Build
+## Build
 
 ```bash
 cargo build -p example-helloworld
 ```
 
-### Test
+## Test
 
 ```bash
 cargo test -p example-helloworld
 ```
-
-To see output during tests:
-
-```bash
-RUST_LOG=debug cargo test -p example-helloworld -- --nocapture
-```
-
-### Usage Example
-
-See `apps/helloworld-mainline/` for a full application that instantiates this component, queries its interface, wires up the actor, and sends messages.

@@ -8,11 +8,11 @@ use std::time::Instant;
 
 use clap::Parser;
 
-use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponentV1;
+use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent;
 use component_core::binding::bind;
 use component_core::iunknown::query;
-use extent_manager_v2::test_support::{heap_dma_alloc, MockBlockDevice, MockLogger};
-use extent_manager_v2::ExtentManagerV2;
+use extent_manager::test_support::{heap_dma_alloc, MockBlockDevice, MockLogger};
+use extent_manager::ExtentManager;
 use interfaces::{
     DmaAllocFn, DmaBuffer, FormatParams, IBlockDevice, IExtentManager, ILogger,
 };
@@ -52,7 +52,7 @@ fn run_mock_mode(config: BenchmarkConfig, count: u64, params: FormatParams) {
 
     let component = make_mock_component(metadata_mock);
 
-    let recover: Box<dyn Fn() -> Arc<ExtentManagerV2>> = Box::new(move || {
+    let recover: Box<dyn Fn() -> Arc<ExtentManager>> = Box::new(move || {
         let new_mock = Arc::new(MockBlockDevice::reboot_from(&shared_state));
         make_mock_component(new_mock)
     });
@@ -60,8 +60,8 @@ fn run_mock_mode(config: BenchmarkConfig, count: u64, params: FormatParams) {
     run_phases(component, recover, params, &config, count);
 }
 
-fn make_mock_component(mock: Arc<MockBlockDevice>) -> Arc<ExtentManagerV2> {
-    let component = ExtentManagerV2::new_inner();
+fn make_mock_component(mock: Arc<MockBlockDevice>) -> Arc<ExtentManager> {
+    let component = ExtentManager::new_inner();
     component
         .metadata_device
         .connect(mock as Arc<dyn IBlockDevice + Send + Sync>)
@@ -84,7 +84,7 @@ fn make_mock_component(mock: Arc<MockBlockDevice>) -> Arc<ExtentManagerV2> {
 
 fn run_hardware_mode(config: BenchmarkConfig, count: u64, params: FormatParams, pci_addr: String) {
     let spdk_env_comp = SPDKEnvComponent::new_default();
-    let metadata_block_dev = BlockDeviceSpdkNvmeComponentV1::new_default();
+    let metadata_block_dev = BlockDeviceSpdkNvmeComponent::new_default();
 
     bind(&*spdk_env_comp, "ISPDKEnv", &*metadata_block_dev, "spdk_env").unwrap_or_else(|e| {
         eprintln!("error: bind spdk_env→metadata_block_dev: {e}");
@@ -151,7 +151,7 @@ fn run_hardware_mode(config: BenchmarkConfig, count: u64, params: FormatParams, 
 
     let meta_dev_clone = Arc::clone(&metadata_block_dev);
     let dma_alloc_clone = Arc::clone(&dma_alloc);
-    let recover: Box<dyn Fn() -> Arc<ExtentManagerV2>> = Box::new(move || {
+    let recover: Box<dyn Fn() -> Arc<ExtentManager>> = Box::new(move || {
         make_hardware_component(&meta_dev_clone, Arc::clone(&dma_alloc_clone), meta_ns_id)
     });
 
@@ -159,11 +159,11 @@ fn run_hardware_mode(config: BenchmarkConfig, count: u64, params: FormatParams, 
 }
 
 fn make_hardware_component(
-    metadata_block_dev: &Arc<BlockDeviceSpdkNvmeComponentV1>,
+    metadata_block_dev: &Arc<BlockDeviceSpdkNvmeComponent>,
     dma_alloc: DmaAllocFn,
     metadata_ns_id: u32,
-) -> Arc<ExtentManagerV2> {
-    let component = ExtentManagerV2::new_inner();
+) -> Arc<ExtentManager> {
+    let component = ExtentManager::new_inner();
     component.set_dma_alloc(dma_alloc);
     component.set_metadata_ns_id(metadata_ns_id);
     component
@@ -189,8 +189,8 @@ fn make_hardware_component(
 // --- Shared phase runner -----------------------------------------------------
 
 fn run_phases(
-    component: Arc<ExtentManagerV2>,
-    recover: Box<dyn Fn() -> Arc<ExtentManagerV2>>,
+    component: Arc<ExtentManager>,
+    recover: Box<dyn Fn() -> Arc<ExtentManager>>,
     params: FormatParams,
     config: &BenchmarkConfig,
     count: u64,
@@ -256,7 +256,7 @@ fn run_phases(
     report::print_summary(count, &create_result, &remove_result);
 }
 
-fn get_iem(component: &Arc<ExtentManagerV2>) -> Arc<dyn IExtentManager + Send + Sync> {
+fn get_iem(component: &Arc<ExtentManager>) -> Arc<dyn IExtentManager + Send + Sync> {
     query::<dyn IExtentManager + Send + Sync>(&**component).unwrap_or_else(|| {
         eprintln!("error: failed to query IExtentManager");
         std::process::exit(2);

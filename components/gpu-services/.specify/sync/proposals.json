@@ -1,0 +1,73 @@
+{
+  "generated": "2026-05-21T00:00:00Z",
+  "based_on": "drift-report from 2026-05-21",
+  "summary": {
+    "backfill": 2,
+    "align": 0,
+    "human_decision": 5,
+    "new_specs": 0,
+    "remove_from_spec": 0
+  },
+  "proposals": [
+    {
+      "id": 1,
+      "spec_id": "001-gpu-cuda-services",
+      "requirement": "naming",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "spec_text": "Quickstart references GpuServicesComponentV0",
+      "actual_behavior": "Component is named GpuServicesComponent with new_default() constructor",
+      "proposed_change": "Rename GpuServicesComponentV0 to GpuServicesComponent in all spec files",
+      "location": "specs/001-gpu-cuda-services/quickstart.md, specs/002-gpu-ssd-dma-prepare/quickstart.md",
+      "rationale": "Component renamed during development; specs must match public API",
+      "confidence": "HIGH",
+      "status": "applied"
+    },
+    {
+      "id": 2,
+      "spec_id": "001-gpu-cuda-services",
+      "requirement": "FR-005",
+      "direction": "BACKFILL",
+      "severity": "minor",
+      "spec_text": "pin verifies device-residency and tracks state in internal HashSet",
+      "actual_behavior": "pin_memory skips re-verification for pointers already in verified set (optimization)",
+      "proposed_change": "Add MAY clause to FR-005 noting verification caching optimization",
+      "location": "src/lib.rs:193-225",
+      "rationale": "Performance optimization; verification is always a prerequisite in standard workflow",
+      "confidence": "HIGH",
+      "status": "applied"
+    }
+  ],
+  "unspecced_awaiting_decision": [
+    {
+      "feature": "CUDA Stream API",
+      "description": "create_stream, destroy_stream, stream_synchronize methods for async GPU operations",
+      "location": "src/lib.rs:539-605, interfaces/src/igpu_services.rs:486-537",
+      "suggested_spec": "003-gpu-async-stream-ops"
+    },
+    {
+      "feature": "Async DMA copy (dma_copy_to_device_async)",
+      "description": "cudaMemcpyAsync H2D with CUDA stream for concurrent GPU/CPU work",
+      "location": "src/lib.rs:608-660",
+      "suggested_spec": "003-gpu-async-stream-ops"
+    },
+    {
+      "feature": "Raw pointer async copy (memcpy_h2d_async)",
+      "description": "Raw *const c_void to *mut c_void async memcpy without DmaBuffer wrapper",
+      "location": "src/lib.rs:662-704",
+      "suggested_spec": "003-gpu-async-stream-ops"
+    },
+    {
+      "feature": "Pinned DMA buffer allocation (allocate_pinned_dma_buffer)",
+      "description": "cudaHostAlloc + spdk_mem_register for page-locked host buffers usable by both NVMe and GPU DMA",
+      "location": "src/lib.rs:706-744",
+      "suggested_spec": "003-gpu-async-stream-ops"
+    },
+    {
+      "feature": "GDRCopy P2P DMA path",
+      "description": "Full GDRCopy BAR1 mapping for true NVMe-to-GPU P2P DMA via gdr_pin_buffer/gdr_map, DPDK IOMMU programming, and cross-process physical address DMA",
+      "location": "src/dma.rs:353-720, src/bin/p2p_server.rs, tests/gpu_nvme_p2p.rs, src/gdrcopy_ffi.rs",
+      "suggested_spec": "003-gpu-p2p-dma"
+    }
+  ]
+}

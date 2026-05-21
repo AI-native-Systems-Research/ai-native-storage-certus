@@ -1,0 +1,342 @@
+{
+  "spec": "components/extent-manager/specs/001-extent-manager-v2/spec.md",
+  "generated": "2026-05-21",
+  "summary": {
+    "aligned": 28,
+    "drifted": 2,
+    "not_implemented": 0,
+    "unspecified_code": 4
+  },
+  "requirements": [
+    {
+      "id": "FR-001",
+      "title": "Component naming and definition",
+      "status": "drifted",
+      "spec_says": "Component MUST be named ExtentManagerV2",
+      "code_does": "Component is named ExtentManager",
+      "impact": "low",
+      "files": ["components/extent-manager/src/lib.rs"]
+    },
+    {
+      "id": "FR-002",
+      "title": "FormatParams validation",
+      "status": "aligned",
+      "spec_says": "format() MUST validate all FormatParams",
+      "code_does": "Validates sector_size > 0, slab_size multiple of sector_size, max_extent_size <= slab_size, region_count positive power of two, metadata device large enough",
+      "files": ["components/extent-manager/src/lib.rs"]
+    },
+    {
+      "id": "FR-003",
+      "title": "Superblock write at LBA 0",
+      "status": "aligned",
+      "spec_says": "format() MUST write a superblock at LBA 0 with CRC32",
+      "code_does": "Superblock written at LBA 0 with CRC32 checksum over bytes 0-83",
+      "files": ["components/extent-manager/src/superblock.rs", "components/extent-manager/src/lib.rs"]
+    },
+    {
+      "id": "FR-004",
+      "title": "Initialize reads and validates superblock",
+      "status": "aligned",
+      "spec_says": "initialize() MUST read superblock, validate magic and CRC, recover from active checkpoint",
+      "code_does": "Recovery reads superblock, validates magic and CRC, rebuilds from checkpoint key vectors",
+      "files": ["components/extent-manager/src/recovery.rs", "components/extent-manager/src/superblock.rs"]
+    },
+    {
+      "id": "FR-005",
+      "title": "reserve_extent returns WriteHandle",
+      "status": "aligned",
+      "spec_says": "reserve_extent MUST allocate sector-aligned slot, return WriteHandle with offset, not visible until publish",
+      "code_does": "Allocates sector-aligned slot via bitmap, returns WriteHandle with offset; not in get_extents until publish",
+      "files": ["components/extent-manager/src/lib.rs", "components/extent-manager/src/region.rs"]
+    },
+    {
+      "id": "FR-006",
+      "title": "FREE_KEY publish is silent discard",
+      "status": "aligned",
+      "spec_says": "If key equals FREE_KEY, slot MUST be freed and call returns Ok without visibility",
+      "code_does": "publish_fn checks key == FREE_KEY, calls free_slot, returns Ok(Extent) but slot is freed",
+      "files": ["components/extent-manager/src/lib.rs"]
+    },
+    {
+      "id": "FR-007",
+      "title": "Abort/drop releases slot",
+      "status": "aligned",
+      "spec_says": "abort() or drop MUST release slot without writing key",
+      "code_does": "abort_fn calls free_slot; Drop trait on WriteHandle calls abort_fn if not consumed",
+      "files": ["components/interfaces/src/iextent_manager.rs"]
+    },
+    {
+      "id": "FR-008",
+      "title": "remove_extent with deferred free",
+      "status": "aligned",
+      "spec_says": "remove_extent sets key to FREE_KEY, hidden from enumeration, slot freed after checkpoint",
+      "code_does": "Sets key to FREE_KEY, adds to pending_frees, freed in flush_pending_frees after checkpoint",
+      "files": ["components/extent-manager/src/region.rs", "components/extent-manager/src/lib.rs"]
+    },
+    {
+      "id": "FR-009",
+      "title": "Enumeration filters FREE_KEY",
+      "status": "aligned",
+      "spec_says": "get_extents returns all non-FREE_KEY; for_each_extent invokes callback for each",
+      "code_does": "Both methods iterate slabs, skip FREE_KEY entries",
+      "files": ["components/extent-manager/src/lib.rs"]
+    },
+    {
+      "id": "FR-010",
+      "title": "Per-slab key vectors",
+      "status": "aligned",
+      "spec_says": "Each Slab MUST maintain dense Vec<u64> parallel to bitmap",
+      "code_does": "Slab struct has keys: Vec<u64> initialized to FREE_KEY, parallel to bitmap",
+      "files": ["components/extent-manager/src/slab.rs"]
+    },
+    {
+      "id": "FR-011",
+      "title": "FREE_KEY sentinel",
+      "status": "aligned",
+      "spec_says": "FREE_KEY = u64::MAX marks unoccupied slots",
+      "code_does": "pub const FREE_KEY: u64 = u64::MAX",
+      "files": ["components/extent-manager/src/slab.rs"]
+    },
+    {
+      "id": "FR-012",
+      "title": "BTreeMap keyed by start_offset",
+      "status": "aligned",
+      "spec_says": "Slabs MUST be in BTreeMap<u64, Slab> keyed by start_offset for O(log n) lookup",
+      "code_does": "RegionState has slabs: BTreeMap<u64, Slab>; remove uses range(..=offset).next_back()",
+      "files": ["components/extent-manager/src/region.rs"]
+    },
+    {
+      "id": "FR-013",
+      "title": "Checkpoint serialization with CRC32",
+      "status": "aligned",
+      "spec_says": "checkpoint MUST serialize regions with CRC32, write to inactive copy, switch active",
+      "code_does": "write_checkpoint serializes all regions, computes CRC32, writes to inactive, updates superblock",
+      "files": ["components/extent-manager/src/checkpoint.rs"]
+    },
+    {
+      "id": "FR-014",
+      "title": "Skip checkpoint when clean",
+      "status": "aligned",
+      "spec_says": "checkpoint MUST skip I/O if no region modified",
+      "code_does": "run_checkpoint checks any_dirty flag across all regions, returns Ok(()) if all clean",
+      "files": ["components/extent-manager/src/lib.rs"]
+    },
+    {
+      "id": "FR-015",
+      "title": "Checkpoint coalescing",
+      "status": "aligned",
+      "spec_says": "Concurrent checkpoint calls MUST be coalesced, at most two active operations",
+      "code_does": "CheckpointCoalesce struct with completed_seq/in_progress; waiters blocked on Condvar",
+      "files": ["components/extent-manager/src/lib.rs"]
+    },
+    {
+      "id": "FR-016",
+      "title": "Background checkpoint thread",
+      "status": "aligned",
+      "spec_says": "Background thread MUST call checkpoint at configurable interval (default 300s)",
+      "code_does": "new_inner spawns thread with 300s default; uses Condvar wait_timeout",
+      "files": ["components/extent-manager/src/lib.rs"]
+    },
+    {
+      "id": "FR-017",
+      "title": "Dual-copy fallback recovery",
+      "status": "aligned",
+      "spec_says": "Recovery MUST try active copy first, fall back to inactive on failure",
+      "code_does": "recover() tries active_offset, on error tries inactive_offset with prev_seq",
+      "files": ["components/extent-manager/src/recovery.rs"]
+    },
+    {
+      "id": "FR-018",
+      "title": "Recovery rebuilds from key vectors",
+      "status": "aligned",
+      "spec_says": "initialize MUST restore extents by reading key vectors and marking non-FREE slots",
+      "code_does": "slab_from_descriptor iterates keys, marks allocated in bitmap for non-FREE entries",
+      "files": ["components/extent-manager/src/recovery.rs"]
+    },
+    {
+      "id": "FR-019",
+      "title": "Buddy allocator per region",
+      "status": "aligned",
+      "spec_says": "Each region MUST use buddy allocator for slab-sized chunks",
+      "code_does": "BuddyAllocator struct per region with alloc/free/mark_allocated",
+      "files": ["components/extent-manager/src/buddy.rs", "components/extent-manager/src/region.rs"]
+    },
+    {
+      "id": "FR-020",
+      "title": "Bitmap allocator with rover",
+      "status": "aligned",
+      "spec_says": "Each slab MUST use bitmap allocator with rover for even distribution",
+      "code_does": "AllocationBitmap with find_free_from(rover); rover advances on each alloc",
+      "files": ["components/extent-manager/src/slab.rs", "components/extent-manager/src/bitmap.rs"]
+    },
+    {
+      "id": "FR-021",
+      "title": "Size-class manager",
+      "status": "aligned",
+      "spec_says": "Size-class manager MUST index slabs by element size for O(1) lookup",
+      "code_does": "SizeClassManager with HashMap<u32, Vec<u64>> for element_size -> slab offsets",
+      "files": ["components/extent-manager/src/slab.rs"]
+    },
+    {
+      "id": "FR-022",
+      "title": "Key sharding",
+      "status": "aligned",
+      "spec_says": "Keys sharded by key & (region_count - 1)",
+      "code_does": "region_for_key uses key as usize & (regions.len() - 1)",
+      "files": ["components/extent-manager/src/lib.rs"]
+    },
+    {
+      "id": "FR-023",
+      "title": "Independent region locking",
+      "status": "aligned",
+      "spec_says": "Each region MUST be independently locked with parking_lot::RwLock",
+      "code_does": "Vec<Arc<RwLock<RegionState>>> where RwLock is parking_lot::RwLock",
+      "files": ["components/extent-manager/src/lib.rs"]
+    },
+    {
+      "id": "FR-024",
+      "title": "Send + Sync",
+      "status": "aligned",
+      "spec_says": "Component MUST be Send + Sync",
+      "code_does": "All fields are Arc/Mutex/RwLock wrapped; concurrent tests validate safety",
+      "files": ["components/extent-manager/src/lib.rs", "components/extent-manager/tests/concurrent.rs"]
+    },
+    {
+      "id": "FR-025",
+      "title": "Deferred free crash safety",
+      "status": "aligned",
+      "spec_says": "Freed slot MUST NOT be reallocated until removal persisted by checkpoint",
+      "code_does": "pending_frees accumulates removals; flush_pending_frees called only after checkpoint",
+      "files": ["components/extent-manager/src/region.rs", "components/extent-manager/src/lib.rs"]
+    },
+    {
+      "id": "FR-026",
+      "title": "get_instance_id",
+      "status": "aligned",
+      "spec_says": "MUST provide get_instance_id() returning superblock instance_id",
+      "code_does": "Implemented in IExtentManager impl, reads from shared.superblock.instance_id",
+      "files": ["components/extent-manager/src/lib.rs"]
+    },
+    {
+      "id": "FR-027",
+      "title": "set_checkpoint_interval",
+      "status": "aligned",
+      "spec_says": "MUST provide set_checkpoint_interval(duration)",
+      "code_does": "Implemented; delegates to CheckpointTimerState, accepts Option<Duration>",
+      "files": ["components/extent-manager/src/lib.rs"]
+    },
+    {
+      "id": "FR-028",
+      "title": "set_metadata_ns_id",
+      "status": "aligned",
+      "spec_says": "MUST provide set_metadata_ns_id(ns_id: u32)",
+      "code_does": "pub fn set_metadata_ns_id(&self, ns_id: u32) stores in Mutex<Option<u32>>",
+      "files": ["components/extent-manager/src/lib.rs"]
+    },
+    {
+      "id": "FR-029",
+      "title": "set_dma_alloc",
+      "status": "aligned",
+      "spec_says": "MUST provide set_dma_alloc(alloc)",
+      "code_does": "pub fn set_dma_alloc(&self, alloc: DmaAllocFn) stores in Mutex",
+      "files": ["components/extent-manager/src/lib.rs"]
+    },
+    {
+      "id": "FR-030",
+      "title": "volatile_write_cache feature",
+      "status": "aligned",
+      "spec_says": "MAY support volatile_write_cache feature gate for flush",
+      "code_does": "Feature defined in Cargo.toml; #[cfg(feature = \"volatile_write_cache\")] guards flush calls",
+      "files": ["components/extent-manager/Cargo.toml", "components/extent-manager/src/lib.rs", "components/extent-manager/src/checkpoint.rs"]
+    },
+    {
+      "id": "SC-001",
+      "title": "Lifecycle operations verified by tests",
+      "status": "aligned",
+      "spec_says": "All lifecycle operations produce correct results verified by tests",
+      "code_does": "tests/lifecycle.rs covers reserve, publish, enumerate, remove, abort",
+      "files": ["components/extent-manager/tests/lifecycle.rs"]
+    },
+    {
+      "id": "SC-002",
+      "title": "Checkpoint recovery round-trip",
+      "status": "aligned",
+      "spec_says": "Checkpoint + recovery preserves 100% of published extents",
+      "code_does": "recover_checkpointed_extents test verifies 100 extents survive reboot",
+      "files": ["components/extent-manager/tests/checkpoint.rs"]
+    },
+    {
+      "id": "SC-003",
+      "title": "Dual-copy fallback",
+      "status": "aligned",
+      "spec_says": "Dual-copy fallback recovers from single-copy corruption",
+      "code_does": "corrupt_active_falls_back_to_previous test corrupts active copy, verifies recovery",
+      "files": ["components/extent-manager/tests/checkpoint.rs"]
+    },
+    {
+      "id": "SC-004",
+      "title": "Concurrent correctness",
+      "status": "aligned",
+      "spec_says": "8+ threads produce no data races, lost updates, or panics",
+      "code_does": "tests/concurrent.rs uses 8 threads x 100 ops for publish, abort, and remove",
+      "files": ["components/extent-manager/tests/concurrent.rs"]
+    },
+    {
+      "id": "SC-005",
+      "title": "100M extent scale",
+      "status": "drifted",
+      "spec_says": "Component supports ~100 million extents on 10 TB data device",
+      "code_does": "No test validates this scale; largest test uses 800 extents on 256 MiB",
+      "impact": "medium",
+      "files": ["components/extent-manager/tests/concurrent.rs", "components/extent-manager/benches/benchmarks.rs"]
+    },
+    {
+      "id": "SC-006",
+      "title": "Checkpoint coalescing limit",
+      "status": "aligned",
+      "spec_says": "At most two active checkpoint I/O operations regardless of caller count",
+      "code_does": "CheckpointCoalesce tracks in_progress and completed_seq; waiters get needed = seq+2 max",
+      "files": ["components/extent-manager/src/lib.rs"]
+    }
+  ],
+  "unspecified_code": [
+    {
+      "feature": "used_bytes() and capacity_bytes()",
+      "description": "IExtentManager interface methods reporting allocation statistics not in spec",
+      "files": ["components/extent-manager/src/lib.rs", "components/interfaces/src/iextent_manager.rs"]
+    },
+    {
+      "feature": "FORMAT_VERSION = 5",
+      "description": "Superblock version field is 5, spec documents version 4",
+      "files": ["components/extent-manager/src/superblock.rs"]
+    },
+    {
+      "feature": "FaultConfig / fault injection test infrastructure",
+      "description": "MockBlockDevice supports configurable I/O fault injection for robustness testing",
+      "files": ["components/extent-manager/src/test_support.rs"]
+    },
+    {
+      "feature": "WriteHandle defined in interfaces crate",
+      "description": "WriteHandle lives in interfaces::iextent_manager rather than in the component crate",
+      "files": ["components/interfaces/src/iextent_manager.rs"]
+    }
+  ],
+  "recommendations": [
+    {
+      "priority": "low",
+      "action": "Resolve FR-001 naming drift by updating spec to use 'ExtentManager' or renaming component to 'ExtentManagerV2'"
+    },
+    {
+      "priority": "medium",
+      "action": "Add large-scale benchmark for SC-005 validating memory and performance at 100M extent count"
+    },
+    {
+      "priority": "low",
+      "action": "Update spec on-disk format section to reflect FORMAT_VERSION = 5"
+    },
+    {
+      "priority": "low",
+      "action": "Add used_bytes() and capacity_bytes() to spec as monitoring/informational requirements"
+    }
+  ]
+}

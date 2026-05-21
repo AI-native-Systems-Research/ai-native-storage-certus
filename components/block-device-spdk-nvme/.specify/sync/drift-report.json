@@ -1,0 +1,96 @@
+{
+  "generated": "2026-05-21T00:00:00Z",
+  "project": "block-device-spdk-nvme v2",
+  "previous_report": "2026-05-05",
+  "summary": {
+    "specs_analyzed": 2,
+    "requirements_checked": 48,
+    "aligned": 44,
+    "drifted": 1,
+    "not_implemented": 0,
+    "unspecced_features": 3
+  },
+  "specs": [
+    {
+      "id": "001-spdk-nvme-block-device",
+      "title": "SPDK NVMe Block Device Component",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
+        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
+        "FR-015", "FR-016", "FR-017", "FR-018", "FR-019", "FR-020", "FR-021",
+        "FR-022", "FR-023", "FR-024",
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006", "SC-007"
+      ],
+      "drifted": [
+        {
+          "requirement": "SC-008",
+          "spec_text": "Performance-sensitive paths (IO submission, batch processing, qpair selection) MUST have benchmarks — either Criterion benchmarks for public interface paths or unit-level benchmarks for internal algorithms",
+          "actual": "No benches/ directory exists in the block-device-spdk-nvme crate. QueuePairPool is pub and has unit tests but no Criterion benchmarks. The apps/iops-benchmark application measures aggregate performance but is not a per-function microbenchmark.",
+          "location": "components/block-device-spdk-nvme/ (missing benches/ directory)",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": []
+    },
+    {
+      "id": "002-iops-benchmark",
+      "title": "IOPS Benchmark Example Application",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006",
+        "FR-006a", "FR-006b", "FR-007", "FR-008", "FR-009", "FR-010",
+        "FR-011", "FR-012", "FR-013", "FR-014", "FR-015", "FR-016",
+        "FR-017", "FR-018", "FR-019", "FR-020", "FR-021", "FR-022",
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006", "SC-007"
+      ],
+      "drifted": [],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "Mixed block sizes (comma-separated --block-size for random mixed-size workloads)",
+      "location": "apps/iops-benchmark/src/config.rs:74-75",
+      "lines": 5,
+      "suggested_spec": "002-iops-benchmark"
+    },
+    {
+      "feature": "--batch-size flag (groups commands into BatchSubmit messages)",
+      "location": "apps/iops-benchmark/src/config.rs:80-82",
+      "lines": 4,
+      "suggested_spec": "002-iops-benchmark"
+    },
+    {
+      "feature": "NUMA worker thread pinning (round-robin on controller NUMA node, skipping actor core)",
+      "location": "apps/iops-benchmark/src/main.rs:176-206",
+      "lines": 30,
+      "suggested_spec": "002-iops-benchmark"
+    }
+  ],
+  "conflicts": [],
+  "resolved_since_last": [
+    {
+      "requirement": "SC-001",
+      "resolution": "Integration test sc001_sync_latency_envelope added at tests/integration.rs:1028"
+    },
+    {
+      "requirement": "SC-002",
+      "resolution": "Integration test sc002_timeout_accuracy added at tests/integration.rs:1106"
+    },
+    {
+      "requirement": "SC-006",
+      "resolution": "Integration test sc006_telemetry_accuracy added at tests/integration.rs:1171"
+    },
+    {
+      "requirement": "IBlockDeviceAdmin (was unspecced)",
+      "resolution": "Now specified as FR-021 in spec 001"
+    },
+    {
+      "requirement": "TscClock (was unspecced)",
+      "resolution": "Now specified as FR-022 in spec 001"
+    },
+    {
+      "requirement": "--io-mode (was unspecced)",
+      "resolution": "Now specified as FR-022 in spec 002"
+    }
+  ]
+}

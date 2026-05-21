@@ -1,0 +1,46 @@
+{
+  "spec": "components/extent-manager/specs/001-extent-manager-v2/spec.md",
+  "generated": "2026-05-21",
+  "proposals": [
+    {
+      "id": "BACKFILL-FR-001",
+      "type": "backfill",
+      "status": "applied",
+      "requirement": "FR-001",
+      "title": "Rename ExtentManagerV2 to ExtentManager in spec",
+      "rationale": "The V2 suffix was intentionally removed from the component name during development. The spec lagged behind this deliberate naming decision.",
+      "change": "Replace all occurrences of 'ExtentManagerV2' with 'ExtentManager' throughout the spec.",
+      "files_modified": ["components/extent-manager/specs/001-extent-manager-v2/spec.md"]
+    },
+    {
+      "id": "BACKFILL-FORMAT-VERSION",
+      "type": "backfill",
+      "status": "applied",
+      "requirement": "On-Disk Format Reference / Key Entities (Superblock)",
+      "title": "Update on-disk format version from 4 to 5 in spec",
+      "rationale": "Code uses FORMAT_VERSION=5 with magic 'CERTUSV5'. The spec documented the previous version 4. This is a code-correct backfill.",
+      "change": "Update magic constant from 0x4345_5254_5553_5634 ('CERTUSV4') to 0x4345_5254_5553_5635 ('CERTUSV5') and version field from 4 to 5 in both the Key Entities section and the Superblock table.",
+      "files_modified": ["components/extent-manager/specs/001-extent-manager-v2/spec.md"]
+    },
+    {
+      "id": "DEFERRED-SC-005",
+      "type": "deferred",
+      "status": "pending_human_decision",
+      "requirement": "SC-005",
+      "title": "100M extent scalability claim has no test verification",
+      "rationale": "The spec claims ~100M extent support but no test exercises this scale. Options: (a) add a large-scale benchmark, (b) relax the claim to 'design supports' without a hard test, (c) accept the claim as an architectural statement. Requires human decision.",
+      "change": null,
+      "files_modified": []
+    },
+    {
+      "id": "DEFERRED-UNSPECCED-METHODS",
+      "type": "deferred",
+      "status": "pending_human_decision",
+      "requirement": null,
+      "title": "Unspecified code: used_bytes(), capacity_bytes(), FaultConfig, WriteHandle location",
+      "rationale": "Several implemented features are not captured in the spec: used_bytes()/capacity_bytes() monitoring methods, FORMAT_VERSION=5 (now resolved), fault injection test infrastructure, and WriteHandle defined in the interfaces crate. Human decision needed on whether to add spec requirements for these.",
+      "change": null,
+      "files_modified": []
+    }
+  ]
+}
