@@ -1,0 +1,37 @@
+research_question: >
+  Optimized v1 pipeline achieves lower SSD-tier latency than current v1
+  sequential pipeline for 4 MiB objects.
+
+run_id: h8-v1-optimized-pipeline
+
+max_iterations: 2
+
+target_system:
+  name: "Certus Storage Engine — Dispatcher v1 pipeline optimization"
+  description: >
+    AI-native KV-cache storage system. Dispatcher v1 at components/dispatcher/v1/
+    uses a ring of DMA buffers for SSD reads with per-chunk GPU copies.
+    Reference apps/gpu-bb-vs-p2p/ for an example of a fully optimized NVMe→GPU
+    pipeline that achieves ~3.2 GB/s throughput.
+    CONSTRAINTS:
+    - Implementation changes go in components/dispatcher/v1/.
+    - Use apps/gpu-bb-vs-p2p/ as the reference for benchmarking and as an example
+      of a properly optimized pipeline (pre-allocated buffers, parallel NVMe reads,
+      async GPU copies with alternating CUDA streams).
+    - You may create standalone benchmark binaries if needed.
+    - Restart the server between each condition (fresh process, fresh populate cycle).
+  observable_metrics:
+    - "SSD-tier lookup latency (us) for 4 MiB objects"
+    - "SSD-tier throughput (GB/s)"
+  controllable_knobs:
+    - "pipeline implementation: current v1 sequential | optimized (to implement)"
+    - "value size (4 MiB)"
+  repo_path: /home/nara/certus/ai-native-storage-certus
+
+models:
+  design: "claude-opus-4-6"
+  execute_analyze: "claude-sonnet-4-6"
+
+prompts:
+  methodology_layer: "prompts/methodology"
+  domain_adapter_layer: null
