@@ -92,6 +92,8 @@ All pinning and non-pinning decisions made during `prepare_memory_for_spdk` are 
 - **FR-016**: The function MUST call `spdk_mem_register` on the GPU device pointer so that SPDK's vtophys translation resolves it for DMA. Requires the `nvidia-peermem` kernel module to be loaded.
 - **FR-017**: On error after `spdk_mem_register` succeeds, the function MUST call `spdk_mem_unregister` to roll back the registration.
 - **FR-018**: When a device index is provided, the function MUST restore the original CUDA device context (via `cudaSetDevice`) on both success and error paths.
+- **FR-019**: The interface MUST provide a `register_host_memory(ptr, size)` method (gated behind `spdk` feature) that page-locks an existing host allocation via `cudaHostRegister` (enabling async GPU H2D/D2H DMA from the GPU's DMA engine) and registers it with SPDK via `spdk_mem_register` (enabling NVMe controllers to DMA directly to/from it). On partial failure (CUDA succeeds, SPDK fails), MUST roll back `cudaHostRegister` before returning error.
+- **FR-020**: The interface MUST provide an `unregister_host_memory(ptr, size)` method (gated behind `spdk` feature) that reverses FR-019: calls `spdk_mem_unregister` then `cudaHostUnregister`. MUST be called before the underlying allocation is freed.
 
 ### Key Entities
 

@@ -10,7 +10,7 @@ component-framework.workspace = true
 component-core.workspace = true
 component-macros.workspace = true
 interfaces = { workspace = true, features = ["spdk"] }
-gpu-services = { workspace = true, features = ["spdk"] }
+gpu-services = { workspace = true, features = ["spdk", "gpu"] }
 spdk-env.workspace = true
 block-device-spdk-nvme.workspace = true
 block-device-spdk-nvme-v2.workspace = true
@@ -23,6 +23,7 @@ hardware-test = []
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+logger.workspace = true
 libc = "0.2"
 
 [[bench]]
@@ -32,3 +33,13 @@ harness = false
 [[bench]]
 name = "ssd_evictor_benchmark"
 harness = false
+
+[[bench]]
+name = "pipeline_hw_benchmark"
+harness = false
+required-features = ["hardware-test"]
+
+[[bench]]
+name = "dispatcher_hw_benchmark"
+harness = false
+required-features = ["hardware-test"]

@@ -1,6 +1,6 @@
 # Spec Drift Report
 
-Generated: 2026-05-12
+Generated: 2026-05-20
 Project: dispatcher-v1
 Spec: 001-dispatcher-cache-interface (Memory-Tier Architecture)
 
@@ -9,11 +9,11 @@ Spec: 001-dispatcher-cache-interface (Memory-Tier Architecture)
 | Category | Count |
 |----------|-------|
 | Specs Analyzed | 1 |
-| Requirements Checked | 28 |
-| Aligned | 27 (96%) |
-| Drifted | 1 (4%) |
+| Requirements Checked | 35 |
+| Aligned | 34 (97%) |
+| Drifted | 1 (3%) |
 | Not Implemented | 0 (0%) |
-| Unspecced Code | 1 |
+| Unspecced Code | 0 |
 
 ## Detailed Findings
 
@@ -39,7 +39,7 @@ Spec: 001-dispatcher-cache-interface (Memory-Tier Architecture)
 - FR-016: FormatParams passed to extent managers -> `src/lib.rs:580-600`
 - FR-017: Background write-through silently drops on failure (entry remains in MemoryTier) -> confirmed in bg_writer closure
 - FR-018: remove does NOT block on write-through -> confirmed (no condvar wait)
-- FR-019: MDTS-aware segmentation + pipelined ring-buffer reader -> `src/io_segmenter.rs`, `src/pipeline.rs`
+- FR-019: MDTS-aware segmentation + zero-copy pipeline (primary) / ring-buffer fallback -> `src/io_segmenter.rs`, `src/pipeline.rs`
 - FR-020: prepare_store with eviction + extent + dispatch-map + DMA buffer -> `src/lib.rs` (prepare_store)
 - FR-021: commit_store with segmented write + publish + convert -> `src/lib.rs` (commit_store)
 - FR-022: cancel_store drops WriteHandle + removes dispatch-map entry -> `src/lib.rs` (cancel_store)
@@ -52,6 +52,8 @@ Spec: 001-dispatcher-cache-interface (Memory-Tier Architecture)
 
 #### Drifted
 
+- FR-019: **RESOLVED** (spec updated 2026-05-20). Spec now describes zero-copy pipeline as primary path with ring-buffer fallback.
+
 - FR-024: Spec says "Count-based TSC eviction (from v0) is NOT used in v1" but `DispatcherConfig` still includes `max_cache_entries` (default: 10000) and `eviction_threshold` (default: 0.8) fields. These are vestigial from v0; the v1 memory-tier eviction is purely capacity-based via `IMemoryTier::used()/capacity()`. The fields are not referenced in the eviction logic.
   - Location: `interfaces/src/idispatcher.rs:58-61`
   - Severity: minor
@@ -62,11 +64,7 @@ Spec: 001-dispatcher-cache-interface (Memory-Tier Architecture)
 
 ### Unspecced Code
 
-| Feature | Location | Lines | Suggested Spec |
-|---------|----------|-------|----------------|
-| Background SSD Evictor | `src/background.rs:108-282`, `src/lib.rs:658-695` | ~175 | Add User Story 10 + FR-029..FR-033 |
-
-**Details**: A periodic background thread (`BackgroundEvictor`) checks SSD utilization via `IExtentManager::used_bytes()/capacity_bytes()`. When utilization exceeds `ssd_eviction_threshold` (default 0.9), it evicts the oldest BlockDevice entries (via `IDispatchMap::oldest_keys()`) until utilization drops below `ssd_eviction_low_watermark` (default 0.8). Entries in MemoryTier state are skipped (still hot). Entries with active references are skipped. Configured via `ssd_eviction_threshold`, `ssd_eviction_low_watermark`, `ssd_eviction_batch_size`, and `ssd_eviction_interval_secs` in `DispatcherConfig`.
+(none — all features specced as of 2026-05-20 via FR-006 update, FR-019 update, FR-034, FR-035)
 
 ## Inter-Spec Conflicts
 
@@ -74,6 +72,8 @@ None.
 
 ## Recommendations
 
-1. **Add spec coverage for SSD eviction** (priority: high): The BackgroundEvictor is ~175 lines with its own config, lifecycle, and eviction algorithm. Propose a new User Story 10 and FR-029 through FR-033 covering: trigger condition, LRU selection via oldest_keys, entry filtering (skip MemoryTier/active), low-watermark stop, shutdown behavior, and config fields.
+1. ~~**Update FR-019 for zero-copy pipeline**~~: DONE (2026-05-20). Spec updated to describe zero-copy as primary path.
 
-2. **Remove or document legacy config fields** (priority: low): `max_cache_entries` and `eviction_threshold` are unused in v1. Either remove them (breaking change for callers using `..Default::default()`) or mark them as deprecated in the doc comment.
+2. ~~**Add FR-034/035 for pool registration and async DMA**~~: DONE (2026-05-20). FR-034/035 added to spec.
+
+3. **Remove or document legacy config fields** (priority: low): `max_cache_entries` and `eviction_threshold` are unused in v1. Either remove them (breaking change for callers using `..Default::default()`) or mark them as deprecated in the doc comment.
