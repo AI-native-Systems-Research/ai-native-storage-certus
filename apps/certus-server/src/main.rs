@@ -86,10 +86,10 @@ fn initialize_component_stack(
         .ok_or("failed to query ISPDKEnv")?;
     spdk_iface.init().map_err(|e| format!("SPDK init failed: {e}"))?;
 
-    let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponentV1::new_default();
+    let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponent::new_default();
 
     eprintln!("certus-server: initializing GPU services...");
-    let gpu_comp = gpu_services::GpuServicesComponentV0::new_default();
+    let gpu_comp = gpu_services::GpuServicesComponent::new_default();
     gpu_comp
         .logger
         .connect(Arc::clone(&logger))
@@ -103,7 +103,7 @@ fn initialize_component_stack(
     let meta_pci = parse_pci_address(metadata_pci)
         .map_err(|e| format!("metadata PCI parse: {e}"))?;
 
-    let meta_bd = block_device_spdk_nvme_v2::BlockDeviceSpdkNvmeComponentV2::new_default();
+    let meta_bd = block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent::new_default();
     meta_bd
         .spdk_env
         .connect(Arc::clone(&spdk_iface) as Arc<dyn spdk_env::ISPDKEnv + Send + Sync>)
@@ -124,7 +124,7 @@ fn initialize_component_stack(
         .ok_or("failed to query IBlockDevice for metadata device")?;
 
     eprintln!("certus-server: initializing metadata extent manager...");
-    let meta_em = extent_manager_v2::ExtentManagerV2::new_inner();
+    let meta_em = extent_manager::ExtentManager::new_inner();
 
     let numa_node = meta_ibd.numa_node();
     let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
@@ -152,7 +152,7 @@ fn initialize_component_stack(
 
     // --- Create dispatch map wired to the metadata extent manager ---
     eprintln!("certus-server: initializing dispatch map...");
-    let dm_comp = dispatch_map::DispatchMapComponentV0::new(
+    let dm_comp = dispatch_map::DispatchMapComponent::new(
         dispatch_map::DispatchMapState::default(),
     );
     dm_comp
@@ -174,7 +174,7 @@ fn initialize_component_stack(
     let dispatcher: Arc<dyn IDispatcher + Send + Sync> = match dispatcher_version {
         "v1" => {
             eprintln!("certus-server: initializing memory-tier...");
-            let mt_comp = memory_tier::MemoryTierComponentV0::new_default();
+            let mt_comp = memory_tier::MemoryTierComponent::new_default();
             mt_comp
                 .logger
                 .connect(Arc::clone(&logger))
@@ -209,7 +209,7 @@ fn initialize_component_stack(
             }
 
             eprintln!("certus-server: initializing dispatcher v1 (memory-tier)...");
-            let disp_comp = dispatcher_v1::DispatcherComponentV0::new_default();
+            let disp_comp = dispatcher::DispatcherComponent::new_default();
             disp_comp
                 .dispatch_map
                 .connect(Arc::clone(&dm))
@@ -235,7 +235,7 @@ fn initialize_component_stack(
         }
         "v0" => {
             eprintln!("certus-server: initializing dispatcher v0 (staging)...");
-            let disp_comp = dispatcher::DispatcherComponentV0::new_default();
+            let disp_comp = dispatcher::DispatcherComponent::new_default();
             disp_comp
                 .dispatch_map
                 .connect(Arc::clone(&dm))

@@ -73,9 +73,9 @@ impl EngineInner {
     ///
     /// Instantiates and wires all Certus components:
     /// - SPDKEnvComponent (environment init)
-    /// - GpuServicesComponentV0 (CUDA init)
-    /// - DispatchMapComponentV0 (key→location index)
-    /// - DispatcherComponentV0 (orchestration)
+    /// - GpuServicesComponent (CUDA init)
+    /// - DispatchMapComponent (key→location index)
+    /// - DispatcherComponent (orchestration)
     pub fn from_config(config: &Bound<'_, PyDict>) -> PyResult<Self> {
         let data_pci_addrs: Vec<String> = config
             .get_item("data_pci_addrs")?
@@ -122,19 +122,19 @@ impl EngineInner {
             .map_err(|e| PyRuntimeError::new_err(format!("SPDK init failed: {e}")))?;
 
         // --- Create logger ---
-        let log_comp = logger::LoggerComponentV1::new_default();
+        let log_comp = logger::LoggerComponent::new_default();
         let log: Arc<dyn ILogger + Send + Sync> = query_interface!(log_comp, ILogger)
             .ok_or_else(|| PyRuntimeError::new_err("failed to query ILogger"))?;
 
         // --- Initialize GPU services ---
-        let gpu_comp = gpu_services::GpuServicesComponentV0::new_default();
+        let gpu_comp = gpu_services::GpuServicesComponent::new_default();
         let gpu: Arc<dyn IGpuServices + Send + Sync> = query_interface!(gpu_comp, IGpuServices)
             .ok_or_else(|| PyRuntimeError::new_err("failed to query IGpuServices"))?;
         gpu.initialize()
             .map_err(|e| PyRuntimeError::new_err(format!("GPU init failed: {e}")))?;
 
         // --- Create metadata block device ---
-        let meta_dev = block_device_spdk_nvme_v2::BlockDeviceSpdkNvmeComponentV2::new_default();
+        let meta_dev = block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent::new_default();
         meta_dev
             .logger
             .connect(Arc::clone(&log))
@@ -157,7 +157,7 @@ impl EngineInner {
                 .ok_or_else(|| PyRuntimeError::new_err("failed to query IBlockDevice for metadata device"))?;
 
         // --- Create extent manager for metadata device ---
-        let meta_em = extent_manager_v2::ExtentManagerV2::new_inner();
+        let meta_em = extent_manager::ExtentManager::new_inner();
         let numa_node = meta_ibd.numa_node();
         let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
             DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
@@ -192,7 +192,7 @@ impl EngineInner {
 
         // --- Create dispatch map, wire extent manager, initialize ---
         let dm_comp =
-            dispatch_map::DispatchMapComponentV0::new(dispatch_map::DispatchMapState::default());
+            dispatch_map::DispatchMapComponent::new(dispatch_map::DispatchMapState::default());
         dm_comp
             .logger
             .connect(Arc::clone(&log) as Arc<dyn ILogger + Send + Sync>)
@@ -207,7 +207,7 @@ impl EngineInner {
             .map_err(|e| PyRuntimeError::new_err(format!("DispatchMap init failed: {e}")))?;
 
         // --- Create dispatcher ---
-        let disp_comp = dispatcher::DispatcherComponentV0::new_default();
+        let disp_comp = dispatcher::DispatcherComponent::new_default();
         disp_comp
             .logger
             .connect(Arc::clone(&log) as Arc<dyn ILogger + Send + Sync>)
@@ -233,8 +233,6 @@ impl EngineInner {
             .initialize(DispatcherConfig {
                 metadata_pci_addr,
                 data_pci_addrs,
-                block_device_version: interfaces::BlockDeviceVersion::V2,
-                extent_manager_version: interfaces::ExtentManagerVersion::V2,
                 max_cache_entries,
                 eviction_threshold,
                 format_on_init: true,

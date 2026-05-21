@@ -10,24 +10,6 @@ use crate::igpu_services::GpuStream;
 #[cfg(feature = "spdk")]
 use crate::spdk_types::DmaBuffer;
 
-/// Block device component version used internally by the dispatcher.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum BlockDeviceVersion {
-    /// block-device-spdk-nvme v1
-    V1,
-    /// block-device-spdk-nvme v2 (latest)
-    #[default]
-    V2,
-}
-
-/// Extent manager component version used internally by the dispatcher.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ExtentManagerVersion {
-    /// extent-manager v2 (latest)
-    #[default]
-    V2,
-}
-
 /// Configuration for dispatcher initialization.
 ///
 /// # Examples
@@ -51,16 +33,9 @@ pub struct DispatcherConfig {
     pub metadata_pci_addr: String,
     /// PCI addresses of N data block devices (one per extent manager).
     pub data_pci_addrs: Vec<String>,
-    /// Which block device component version to use.
-    pub block_device_version: BlockDeviceVersion,
-    /// Which extent manager component version to use.
-    pub extent_manager_version: ExtentManagerVersion,
-    /// **Deprecated in v1**: Memory-tier eviction is purely capacity-based.
-    /// Retained for backward compatibility with v0 config consumers.
-    /// Default: 10000.
+    /// Maximum entries in the in-memory cache. Default: 10000.
     pub max_cache_entries: usize,
-    /// **Deprecated in v1**: Unused. See `ssd_eviction_threshold` for SSD eviction.
-    /// Retained for backward compatibility. Default: 0.8.
+    /// Eviction threshold (unused, retained for config compatibility). Default: 0.8.
     pub eviction_threshold: f64,
     /// Whether to format extent managers on initialization.
     /// Default: true. Set to false when re-initializing to preserve on-disk data.
@@ -84,8 +59,6 @@ impl Default for DispatcherConfig {
         Self {
             metadata_pci_addr: String::new(),
             data_pci_addrs: Vec::new(),
-            block_device_version: BlockDeviceVersion::default(),
-            extent_manager_version: ExtentManagerVersion::default(),
             max_cache_entries: 10000,
             eviction_threshold: 0.8,
             format_on_init: true,

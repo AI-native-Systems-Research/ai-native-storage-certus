@@ -14,14 +14,13 @@ members = [
     "apps/iops-benchmark-md",
     "apps/nvme-ns-manager",
     "apps/extent-benchmark",
-    "components/block-device-spdk-nvme/v1",
-    "components/extent-manager/v2",
-    "components/logger/v1",
-    "components/dispatch-map/v0",
-    "components/memory-tier/v0",
-    "components/dispatcher/v0",
-    "components/dispatcher/v1",
-    "components/gpu-services/v0",
+    "components/block-device-spdk-nvme",
+    "components/extent-manager",
+    "components/logger",
+    "components/dispatch-map",
+    "components/memory-tier",
+    "components/dispatcher",
+    "components/gpu-services",
     "apps/gpu-handle-test-server",
     "apps/gpu-show",
     "apps/certus-server",
@@ -39,8 +38,8 @@ default-members = [
     "components/component-framework/examples",
     "components/example-helloworld",
     "apps/helloworld-mainline",
-    "components/logger/v1",
-    "components/gpu-services/v0"
+    "components/logger",
+    "components/gpu-services"
 ]
 
 resolver = "2"
@@ -58,13 +57,11 @@ example-helloworld = { path = "components/example-helloworld" }
 interfaces = { path = "components/interfaces" }
 spdk-sys = { path = "components/spdk-sys" }
 spdk-env = { path = "components/spdk-env" }
-block-device-spdk-nvme = { path = "components/block-device-spdk-nvme/v1" }
-block-device-spdk-nvme-v2 = { path = "components/block-device-spdk-nvme/v2" }
-logger = { path = "components/logger/v1" }
-dispatch-map = { path = "components/dispatch-map/v0" }
-memory-tier = { path = "components/memory-tier/v0" }
-dispatcher = { path = "components/dispatcher/v0" }
-dispatcher-v1 = { path = "components/dispatcher/v1" }
-extent-manager-v2 = { path = "components/extent-manager/v2" }
-gpu-services = { path = "components/gpu-services/v0" }
+block-device-spdk-nvme = { path = "components/block-device-spdk-nvme" }
+logger = { path = "components/logger" }
+dispatch-map = { path = "components/dispatch-map" }
+memory-tier = { path = "components/memory-tier" }
+dispatcher = { path = "components/dispatcher" }
+extent-manager = { path = "components/extent-manager" }
+gpu-services = { path = "components/gpu-services" }
 certus-connector = { path = "certus-connector" }

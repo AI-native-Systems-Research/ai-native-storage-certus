@@ -19,10 +19,8 @@ pub use idispatch_map::DispatchMapError;
 pub use idispatch_map::LookupResult;
 #[cfg(feature = "spdk")]
 pub use idispatch_map::IDispatchMap;
-pub use idispatcher::BlockDeviceVersion;
 pub use idispatcher::DispatcherConfig;
 pub use idispatcher::DispatcherError;
-pub use idispatcher::ExtentManagerVersion;
 pub use idispatcher::IpcHandle;
 #[cfg(feature = "spdk")]
 pub use idispatcher::IDispatcher;

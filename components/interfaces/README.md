@@ -31,7 +31,7 @@ src/
 | `ILogger` | Structured logging (error, warn, info, debug) |
 | `IGpuServices` | GPU initialization, IPC handles, DMA copies, streams |
 | `GpuDeviceInfo`, `GpuIpcHandle`, `GpuDmaBuffer`, `GpuStream` | GPU-related types |
-| `DispatcherConfig`, `DispatcherError` | Dispatcher configuration and errors |
+| `DispatcherConfig`, `DispatcherError`, `IpcHandle` | Dispatcher configuration, errors, and IPC handle |
 | `CacheKey`, `DispatchMapError` | Dispatch map key and error types |
 | `MemoryTierError` | Memory-tier error type |
 | `Extent`, `ExtentKey`, `ExtentManagerError`, `FormatParams`, `WriteHandle` | Extent manager types |
@@ -45,6 +45,7 @@ src/
 | `IBlockDeviceAdmin` | NVMe controller configuration |
 | `IExtentManager` | Extent allocation and lifecycle |
 | `IDispatchMap` | Cache key-to-location mapping with reference locking |
+| `LookupResult` | Result type for dispatch map lookups |
 | `IDispatcher` | Cache orchestration (populate, lookup, check, remove) |
 | `IMemoryTier` | DRAM pool allocation with LRU eviction |
 
