@@ -7,8 +7,8 @@ use dispatcher_v1::io_segmenter::segment_io;
 use dispatcher_v1::DispatcherComponentV0;
 use interfaces::{
     CacheKey, DispatchMapError, DispatcherConfig, DmaAllocFn, DmaBuffer, GpuDeviceInfo,
-    GpuDmaBuffer, GpuIpcHandle, IDispatchMap, IDispatcher, IGpuServices, ILogger, IMemoryTier,
-    IpcHandle, LookupResult, MemoryTierError,
+    GpuDmaBuffer, GpuIpcHandle, GpuStream, IDispatchMap, IDispatcher, IGpuServices, ILogger,
+    IMemoryTier, IpcHandle, LookupResult, MemoryTierError,
 };
 
 // ===========================================================================
@@ -32,6 +32,7 @@ fn alloc_dma_buffer(size: usize) -> Arc<DmaBuffer> {
 struct BenchEntry {
     buffer: Arc<DmaBuffer>,
     block_offset: Option<u64>,
+    mem_pointer: Option<(usize, u32)>,
     write_ref: bool,
     read_refs: u32,
 }
@@ -66,6 +67,7 @@ impl IDispatchMap for BenchDispatchMap {
             BenchEntry {
                 buffer: Arc::clone(&buffer),
                 block_offset: None,
+                mem_pointer: None,
                 write_ref: true,
                 read_refs: 0,
             },
@@ -77,12 +79,20 @@ impl IDispatchMap for BenchDispatchMap {
         let inner = self.inner.lock().unwrap();
         match inner.get(&key) {
             None => Ok(LookupResult::NotExist),
-            Some(e) => match e.block_offset {
-                Some(offset) => Ok(LookupResult::BlockDevice { offset }),
-                None => Ok(LookupResult::Staging {
-                    buffer: Arc::clone(&e.buffer),
-                }),
-            },
+            Some(e) => {
+                if let Some((addr, size)) = e.mem_pointer {
+                    Ok(LookupResult::MemoryTier {
+                        pointer: addr as *mut u8,
+                        size,
+                    })
+                } else if let Some(offset) = e.block_offset {
+                    Ok(LookupResult::BlockDevice { offset })
+                } else {
+                    Ok(LookupResult::Staging {
+                        buffer: Arc::clone(&e.buffer),
+                    })
+                }
+            }
         }
     }
 
@@ -179,19 +189,20 @@ impl IDispatchMap for BenchDispatchMap {
     fn create_memory_tier_entry(
         &self,
         key: CacheKey,
-        _pointer: *mut u8,
+        pointer: *mut u8,
         size: u32,
     ) -> Result<(), DispatchMapError> {
         let mut inner = self.inner.lock().unwrap();
         if inner.contains_key(&key) {
             return Err(DispatchMapError::AlreadyExists(key));
         }
-        let buffer = alloc_dma_buffer(size as usize * 4096);
+        let buffer = alloc_dma_buffer(size as usize);
         inner.insert(
             key,
             BenchEntry {
                 buffer,
                 block_offset: None,
+                mem_pointer: Some((pointer as usize, size)),
                 write_ref: true,
                 read_refs: 0,
             },
@@ -200,11 +211,14 @@ impl IDispatchMap for BenchDispatchMap {
     }
 
     fn convert_memory_tier_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        let inner = self.inner.lock().unwrap();
-        if inner.contains_key(&key) {
-            Ok(())
-        } else {
-            Err(DispatchMapError::KeyNotFound(key))
+        let mut inner = self.inner.lock().unwrap();
+        match inner.get_mut(&key) {
+            Some(e) => {
+                e.block_offset = Some(0);
+                e.mem_pointer = None;
+                Ok(())
+            }
+            None => Err(DispatchMapError::KeyNotFound(key)),
         }
     }
 }
@@ -271,6 +285,44 @@ impl IGpuServices for BenchGpuServices {
         _device_index: Option<u32>,
     ) -> Result<DmaBuffer, String> {
         Err("bench mock".into())
+    }
+    fn create_stream(&self) -> Result<GpuStream, String> {
+        Ok(GpuStream(0x1 as *mut std::ffi::c_void))
+    }
+    fn destroy_stream(&self, _stream: GpuStream) -> Result<(), String> {
+        Ok(())
+    }
+    fn stream_synchronize(&self, _stream: GpuStream) -> Result<(), String> {
+        Ok(())
+    }
+    fn dma_copy_to_device_async(
+        &self,
+        src: &DmaBuffer,
+        dst: *mut std::ffi::c_void,
+        size: usize,
+        _stream: GpuStream,
+    ) -> Result<(), String> {
+        unsafe {
+            std::ptr::copy_nonoverlapping(src.as_ptr() as *const u8, dst as *mut u8, size);
+        }
+        Ok(())
+    }
+    fn allocate_pinned_dma_buffer(&self, size: usize) -> Result<DmaBuffer, String> {
+        DmaBuffer::new(size, 4096, None).map_err(|e| e.to_string())
+    }
+    fn register_host_memory(
+        &self,
+        _ptr: *mut std::ffi::c_void,
+        _size: usize,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+    fn unregister_host_memory(
+        &self,
+        _ptr: *mut std::ffi::c_void,
+        _size: usize,
+    ) -> Result<(), String> {
+        Ok(())
     }
 }
 
@@ -412,21 +464,15 @@ fn bench_populate(c: &mut Criterion) {
 }
 
 // ===========================================================================
-// lookup benchmarks (staging -> client)
+// lookup benchmarks — warm (memory-tier hit) and cold (SSD promote)
 // ===========================================================================
 
-fn bench_lookup_staging(c: &mut Criterion) {
-    let mut group = c.benchmark_group("lookup_staging");
+fn bench_lookup_warm(c: &mut Criterion) {
+    let mut group = c.benchmark_group("lookup_warm");
 
-    let sizes: &[(u64, usize)] = &[
-        (4096, 4096),
-        (16384, 16 * 1024),
-        (65536, 64 * 1024),
-        (262144, 256 * 1024),
-        (1048576, 1024 * 1024),
-    ];
+    let sizes: &[usize] = &[4096, 16 * 1024, 64 * 1024, 256 * 1024, 1024 * 1024];
 
-    for &(_id, size) in sizes {
+    for &size in sizes {
         group.throughput(Throughput::Bytes(size as u64));
         group.bench_with_input(
             BenchmarkId::from_parameter(format!("{size}")),
@@ -434,11 +480,47 @@ fn bench_lookup_staging(c: &mut Criterion) {
             |b, &sz| {
                 let (d, _dm) = setup_dispatcher();
 
-                // Pre-populate entries for lookup
                 let num_entries = 100u64;
-                let mut src = vec![0xBBu8; sz];
+                let mut src = vec![0xA5u8; sz];
                 for key in 0..num_entries {
                     d.populate(key, make_handle(&mut src)).unwrap();
+                }
+
+                let mut key_idx: u64 = 0;
+                let mut dst = vec![0u8; sz];
+
+                b.iter(|| {
+                    let key = key_idx % num_entries;
+                    key_idx += 1;
+                    d.lookup(black_box(key), make_handle(&mut dst)).unwrap();
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
+fn bench_lookup_cold(c: &mut Criterion) {
+    let mut group = c.benchmark_group("lookup_cold");
+
+    let sizes: &[usize] = &[4096, 16 * 1024, 64 * 1024, 256 * 1024, 1024 * 1024];
+
+    for &size in sizes {
+        group.throughput(Throughput::Bytes(size as u64));
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{size}")),
+            &size,
+            |b, &sz| {
+                let (d, dm) = setup_dispatcher();
+
+                let num_entries = 100u64;
+                let mut src = vec![0xA5u8; sz];
+                for key in 0..num_entries {
+                    d.populate(key, make_handle(&mut src)).unwrap();
+                }
+                // Transition all entries to BlockDevice state (simulates SSD eviction).
+                for key in 0..num_entries {
+                    dm.convert_memory_tier_to_block(key).unwrap();
                 }
 
                 let mut key_idx: u64 = 0;
@@ -525,7 +607,8 @@ criterion_group!(
     bench_segment_io_small,
     bench_segment_io_1m,
     bench_populate,
-    bench_lookup_staging,
+    bench_lookup_warm,
+    bench_lookup_cold,
     bench_check,
     bench_prepare_cancel,
 );
