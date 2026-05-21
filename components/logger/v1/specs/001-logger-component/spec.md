@@ -139,6 +139,16 @@ methods through the receptacle and verify output.
   concurrent logging from multiple threads without message interleaving.
 - **FR-011**: When RUST_LOG is not set, the logger MUST default to a
   reasonable log level (info).
+- **FR-012**: The component MUST provide `new_with_writer` for custom
+  output targets (accepts `Box<dyn Write + Send>`, explicit `LogLevel`,
+  and `use_color` flag). Primarily used for testing.
+- **FR-013**: Console color output MUST be auto-detected via
+  `libc::isatty(STDERR_FILENO)` — enabled when stderr is a TTY,
+  disabled otherwise. File loggers always disable color.
+- **FR-014**: The `LogLevel` enum MUST be public with `from_env_str`
+  for programmatic parsing and `Display` for formatted output.
+  `LoggerState` is a public implementation detail wrapping
+  writer, level, and color mode.
 
 ### Key Entities
 

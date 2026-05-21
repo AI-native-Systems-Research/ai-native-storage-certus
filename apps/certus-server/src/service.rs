@@ -1,6 +1,6 @@
 //! gRPC service implementation for the Certus Dispatcher.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use tonic::{Request, Response, Status};
@@ -16,7 +16,7 @@ use proto::dispatcher_server::{Dispatcher, DispatcherServer};
 use proto::{
     BatchCheckRequest, BatchCheckResponse, BatchLookupRequest, BatchLookupResponse,
     BatchPopulateRequest, BatchPopulateResponse, BatchRemoveRequest, BatchRemoveResponse,
-    CheckResult, EntryResult, ErrorCode,
+    BatchTouchRequest, BatchTouchResponse, CheckResult, EntryResult, ErrorCode,
 };
 
 pub fn dispatcher_server(svc: DispatcherService) -> DispatcherServer<DispatcherService> {
@@ -184,7 +184,11 @@ impl Dispatcher for DispatcherService {
         let dispatcher = Arc::clone(&self.dispatcher);
         let results = tokio::task::spawn_blocking(move || {
             let disp = dispatcher.lock().unwrap();
-            req.entries
+            // Cache opened IPC handles within the batch to avoid repeated
+            // cudaIpcOpenMemHandle/Close for entries sharing the same handle.
+            let mut ipc_cache: HashMap<[u8; 64], *mut std::ffi::c_void> = HashMap::new();
+
+            let results: Vec<_> = req.entries
                 .iter()
                 .map(|entry| {
                     let handle = match entry.ipc_handle.as_ref() {
@@ -198,27 +202,51 @@ impl Dispatcher for DispatcherService {
                             );
                         }
                     };
-                    let dev_ptr = match open_cuda_ipc(&handle.cuda_ipc_handle) {
-                        Ok(ptr) => ptr,
-                        Err(e) => {
+                    let handle_key: [u8; 64] = match handle.cuda_ipc_handle.as_slice().try_into() {
+                        Ok(k) => k,
+                        Err(_) => {
                             return error_result(
                                 entry.key,
-                                &DispatcherError::IoError(format!("IPC open failed: {e}")),
+                                &DispatcherError::InvalidParameter(
+                                    format!("cuda_ipc_handle must be 64 bytes, got {}", handle.cuda_ipc_handle.len()),
+                                ),
                             );
+                        }
+                    };
+                    let dev_ptr = match ipc_cache.get(&handle_key) {
+                        Some(&ptr) => ptr,
+                        None => {
+                            match open_cuda_ipc(&handle.cuda_ipc_handle) {
+                                Ok(ptr) => {
+                                    ipc_cache.insert(handle_key, ptr);
+                                    ptr
+                                }
+                                Err(e) => {
+                                    return error_result(
+                                        entry.key,
+                                        &DispatcherError::IoError(format!("IPC open failed: {e}")),
+                                    );
+                                }
+                            }
                         }
                     };
                     let ipc = IpcHandle {
                         address: dev_ptr as *mut u8,
                         size: handle.size,
                     };
-                    let result = match disp.lookup(entry.key, ipc) {
+                    match disp.lookup(entry.key, ipc) {
                         Ok(()) => success_result(entry.key),
                         Err(e) => error_result(entry.key, &e),
-                    };
-                    close_cuda_ipc(dev_ptr);
-                    result
+                    }
                 })
-                .collect::<Vec<_>>()
+                .collect();
+
+            // Close all cached IPC handles once at the end of the batch.
+            for &ptr in ipc_cache.values() {
+                close_cuda_ipc(ptr);
+            }
+
+            results
         })
         .await
         .map_err(|e| Status::internal(format!("task join error: {e}")))?;
@@ -272,5 +300,29 @@ impl Dispatcher for DispatcherService {
         .map_err(|e| Status::internal(format!("task join error: {e}")))?;
 
         Ok(Response::new(BatchRemoveResponse { results }))
+    }
+
+    async fn touch(
+        &self,
+        request: Request<BatchTouchRequest>,
+    ) -> Result<Response<BatchTouchResponse>, Status> {
+        let req = request.into_inner();
+        check_duplicate_keys(&req.keys)?;
+
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let results = tokio::task::spawn_blocking(move || {
+            let disp = dispatcher.lock().unwrap();
+            req.keys
+                .iter()
+                .map(|&key| match disp.touch(key) {
+                    Ok(()) => success_result(key),
+                    Err(e) => error_result(key, &e),
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        Ok(Response::new(BatchTouchResponse { results }))
     }
 }

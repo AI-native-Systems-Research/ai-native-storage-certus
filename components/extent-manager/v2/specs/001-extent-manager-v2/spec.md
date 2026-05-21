@@ -258,7 +258,8 @@ again to verify the old slot is now reusable.
 
 - **FR-001**: The component MUST be named ExtentManagerV2 and defined
   using the `define_component!` macro, providing the IExtentManager
-  interface with one IBlockDevice receptacle: `metadata_device`.
+  interface with two receptacles: `metadata_device: IBlockDevice` and
+  `logger: ILogger`.
 - **FR-002**: `format()` MUST validate all FormatParams: `sector_size
   > 0`, `slab_size` is a multiple of `sector_size`, `max_extent_size
   <= slab_size`, `region_count` is a positive power of two, metadata
@@ -323,7 +324,7 @@ again to verify the old slot is now reusable.
   most two actual checkpoint I/O operations execute regardless of
   how many callers request one.
 - **FR-016**: A background thread MUST call `checkpoint()` at a
-  configurable interval (default 5000 ms).
+  configurable interval (default 300 seconds / 5 minutes).
 - **FR-017**: Recovery MUST attempt the active checkpoint copy first;
   if it is unreadable (CRC failure, media error), recovery MUST fall
   back to the inactive copy.
@@ -362,6 +363,19 @@ again to verify the old slot is now reusable.
   checkpoint. This prevents a crash-after-reallocation scenario where
   recovery would restore the old extent pointing at overwritten data.
 
+#### Instance & Configuration
+
+- **FR-026**: The component MUST provide a `get_instance_id()` method
+  returning the instance ID stored in the superblock.
+- **FR-027**: The component MUST provide a `set_checkpoint_interval(duration)`
+  method to dynamically configure the background checkpoint interval.
+- **FR-028**: The component MUST provide a `set_metadata_ns_id(ns_id: u32)`
+  method to configure which NVMe namespace is used for metadata.
+- **FR-029**: The component MUST provide a `set_dma_alloc(alloc)` method
+  for overriding the DMA memory allocator.
+- **FR-030**: The component MAY support a `volatile_write_cache` feature
+  gate that controls whether flush calls are issued to the metadata device.
+
 ### Key Entities
 
 - **ExtentKey** (`u64`): Caller-chosen logical identifier. Expected
@@ -378,11 +392,12 @@ again to verify the old slot is now reusable.
 - **FormatParams**: Configuration for `format()`. All size fields
   are in bytes: `data_disk_size` (u64), `slab_size` (u64),
   `max_extent_size` (u32), `sector_size` (u32),
-  `metadata_alignment` (u64), plus `region_count` (u32).
+  `metadata_alignment` (u64), `region_count` (u32),
+  `instance_id` (Option<u64>), and `metadata_disk_ns_id` (u32).
 - **Superblock**: On-disk header at LBA 0 of the metadata device
   (4096 bytes). Contains format parameters, active checkpoint
   indicator, checkpoint region layout, sequence number, and CRC32.
-  Magic: `0x4345_5254_5553_5635` ("CERTUSV5"), version 5.
+  Magic: `0x4345_5254_5553_5634` ("CERTUSV4"), version 4.
 - **Checkpoint Region**: Contiguous CRC32-protected blob on the
   metadata device. Two copies alternate; the superblock records which
   is active. Encodes the slab table and key vectors for all regions.
@@ -432,8 +447,8 @@ Where:
 
 | Offset | Size | Field |
 |--------|------|-------|
-| 0 | 8 | magic (`0x4345_5254_5553_5635` = "CERTUSV5") |
-| 8 | 4 | version (5) |
+| 0 | 8 | magic (`0x4345_5254_5553_5634` = "CERTUSV4") |
+| 8 | 4 | version (4) |
 | 12 | 8 | data_disk_size |
 | 20 | 4 | sector_size |
 | 24 | 8 | slab_size |
@@ -445,8 +460,9 @@ Where:
 | 56 | 8 | checkpoint_region_offset |
 | 64 | 8 | checkpoint_region_size |
 | 72 | 8 | instance_id |
-| 80 | 4 | CRC32 of bytes 0-79 |
-| 84 | 4012 | zero padding |
+| 80 | 4 | metadata_disk_ns_id |
+| 84 | 4 | CRC32 of bytes 0-83 |
+| 88 | 4008 | zero padding |
 
 ### Checkpoint Region Header (16 bytes)
 

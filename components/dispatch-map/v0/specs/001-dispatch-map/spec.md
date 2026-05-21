@@ -2,7 +2,7 @@
 
 **Feature Branch**: `dispatch-map`  
 **Created**: 2026-04-27  
-**Status**: Draft  
+**Status**: Complete  
 **Input**: User description: "FUNCTIONAL-DESIGN.md — dispatch map component for the Certus storage system"
 
 ## User Scenarios & Testing *(mandatory)*
@@ -47,12 +47,12 @@ After data has been written to a staging buffer and flushed to the block device,
 
 **Why this priority**: Persistence is essential for crash recovery, but it follows the write path established by staging.
 
-**Independent Test**: Can be tested by staging a key, then calling `convert_to_storage(key, offset, block_device_id)` and verifying that subsequent lookups return `BlockDeviceLocation`.
+**Independent Test**: Can be tested by staging a key, then calling `convert_to_storage(key, offset)` and verifying that subsequent lookups return `BlockDevice` location.
 
 **Acceptance Scenarios**:
 
-1. **Given** key 42 is staged, **When** `convert_to_storage(key=42, offset=8192, block_device_id=1)` is called, **Then** the entry location changes to `BlockDeviceLocation(offset=8192)` and the staging buffer can be freed.
-2. **Given** key 42 does not exist, **When** `convert_to_storage(key=42, ...)` is called, **Then** an error is returned.
+1. **Given** key 42 is staged, **When** `convert_to_storage(key=42, offset=8192)` is called, **Then** the entry location changes to `BlockDevice(offset=8192)`, the read reference count is decremented by 1, and the staging buffer can be freed.
+2. **Given** key 42 does not exist, **When** `convert_to_storage(key=42, offset=8192)` is called, **Then** an error is returned.
 
 ---
 
@@ -108,6 +108,37 @@ A caller removes an extent key from the dispatch map. The entry is deleted and s
 
 ---
 
+### User Story 7 - Touching an Entry to Refresh Eviction Priority (Priority: P3)
+
+A caller wants to indicate that a cache entry is still in active use without performing any data transfer. The caller calls `touch(key)` to update the entry's timestamp counter, preventing it from being selected as an eviction victim.
+
+**Why this priority**: Touch is needed for efficient eviction policies — without it, entries can only refresh their priority via a full lookup (which takes a read reference and may involve DMA).
+
+**Independent Test**: Can be tested by staging entries, touching one, then calling `oldest_keys` and verifying the touched entry has a newer timestamp than untouched entries.
+
+**Acceptance Scenarios**:
+
+1. **Given** key 42 exists in the map, **When** `touch(key=42)` is called, **Then** the entry's TSC timestamp is updated and the call returns success. No reference counts are modified.
+2. **Given** key 99 does not exist, **When** `touch(key=99)` is called, **Then** a `KeyNotFound` error is returned.
+
+---
+
+### User Story 8 - Querying Oldest Entries for Eviction (Priority: P3)
+
+The dispatcher's eviction logic needs to identify the least-recently-used entries. It calls `oldest_keys(n)` to retrieve up to `n` keys sorted by ascending TSC (oldest first), then selects victims for removal.
+
+**Why this priority**: Eviction is needed for bounded cache capacity but is a background management function, not on the hot data path.
+
+**Independent Test**: Can be tested by staging entries in sequence, verifying order matches creation order, then touching one entry and verifying it moves to the newest position.
+
+**Acceptance Scenarios**:
+
+1. **Given** keys [1, 2, 3] were created in order, **When** `oldest_keys(2)` is called, **Then** keys [1, 2] are returned (oldest TSC first).
+2. **Given** key 1 was subsequently looked up (refreshing its TSC), **When** `oldest_keys(2)` is called, **Then** keys [2, 3] are returned.
+3. **Given** the map is empty, **When** `oldest_keys(5)` is called, **Then** an empty list is returned.
+
+---
+
 ### Edge Cases
 
 - `create_staging` with size=0 returns an error.
@@ -122,12 +153,12 @@ A caller removes an extent key from the dispatch map. The entry is deleted and s
 ### Functional Requirements
 
 - **FR-001**: System MUST define a `CacheKey` type as `u64` for identifying extents in the dispatch map.
-- **FR-002**: System MUST store per-entry metadata consisting of: location (either a DMA staging buffer or a block-device offset), extent manager identifier, size in 4KiB blocks, an atomic read reference count, and an atomic write reference count. The per-entry metadata MUST be kept as compact as possible.
+- **FR-002**: System MUST store per-entry metadata consisting of: location (a `Location` enum with variants `Staging`, `BlockDevice`, and `MemoryTier`), size in 4KiB blocks, a read reference count (`u32`), a write reference count (`u32`), and a TSC timestamp (`u64`). Reference counts are protected by a `Mutex`/`Condvar` pair for blocking semantics.
 - **FR-003**: System MUST provide `create_staging(key, size)` that allocates a DMA-safe staging buffer, records the entry in the map with a write reference of 1, and returns the buffer. MUST return an error if size is 0 or if DMA buffer allocation fails.
-- **FR-004**: System MUST provide `lookup(key, timeout)` that returns one of: `NotExist`, `ErrorMismatchSize`, `DmaBuffer(ptr)`, or `BlockDeviceLocation(offset)`. On success, the read reference count MUST be atomically incremented. The call MUST block if a write reference is active until write_ref reaches 0, up to the specified timeout. MUST return a timeout error if the condition is not met within the deadline.
-- **FR-005**: System MUST provide `convert_to_storage(key, offset, block_device_id)` that transitions an entry's location from a staging buffer to a block-device offset. This is a one-way transition; to re-stage an entry, the caller must first remove it and then call `create_staging` again.
-- **FR-006**: System MUST provide `take_read(key, timeout)` that waits until write_ref=0 (up to the specified timeout), then atomically increments read_ref. MUST return a timeout error if the condition is not met within the deadline.
-- **FR-007**: System MUST provide `take_write(key, timeout)` that waits until both read_ref=0 and write_ref=0 (up to the specified timeout), then atomically increments write_ref. MUST return a timeout error if the condition is not met within the deadline.
+- **FR-004**: System MUST provide `lookup(key)` that returns one of: `NotExist`, `Staging(DmaBuffer)`, `BlockDevice(offset, size)`, or `MemoryTier(pointer, size)`. On success, the read reference count MUST be incremented. The call MUST block if a write reference is active until write_ref reaches 0, using a hardcoded default timeout (2000ms). The `MismatchSize` variant exists in the return enum for future use but is not currently triggered. The entry's TSC timestamp is refreshed on each successful lookup.
+- **FR-005**: System MUST provide `convert_to_storage(key, offset)` that transitions an entry's location from a staging buffer to a block-device offset. As a side effect, the read reference count is decremented by 1 (the caller's staging read reference is implicitly released). When called on a `MemoryTier` entry, it sets the `ssd_offset` field rather than fully transitioning to `BlockDevice`.
+- **FR-006**: System MUST provide `take_read(key)` that waits until write_ref=0 (using a hardcoded default timeout of 2000ms), then increments read_ref. MUST return a timeout error if the condition is not met within the deadline.
+- **FR-007**: System MUST provide `take_write(key)` that waits until both read_ref=0 and write_ref=0 (using a hardcoded default timeout of 2000ms), then increments write_ref. MUST return a timeout error if the condition is not met within the deadline.
 - **FR-008**: System MUST provide `release_read(key)` that atomically decrements read_ref. MUST return an error if read_ref is already 0.
 - **FR-009**: System MUST provide `release_write(key)` that atomically decrements write_ref. MUST return an error if write_ref is already 0.
 - **FR-010**: System MUST provide `downgrade_reference(key)` that atomically transitions from a write reference to a read reference (write_ref decremented and read_ref incremented in a single atomic step). MUST return an error if no write reference is held.
@@ -136,12 +167,18 @@ A caller removes an extent key from the dispatch map. The entry is deleted and s
 - **FR-013**: All `IDispatchMap` methods MUST be thread-safe and re-entrant, allowing concurrent calls from multiple threads.
 - **FR-014**: System MUST use the `ILogger` receptacle for info, debug, and error logging throughout the component.
 - **FR-015**: System MUST be implemented as a component using `define_component!` with `IDispatchMap` as a provided interface and `ILogger` and `IExtentManager` as receptacles.
+- **FR-016**: System MUST provide `touch(key)` that updates the entry's TSC timestamp without acquiring any reference. MUST return `KeyNotFound` if the key does not exist. MUST NOT block or modify reference counts.
+- **FR-017**: System MUST provide `oldest_keys(n)` that returns up to `n` keys sorted by ascending TSC value (oldest first). Used by the dispatcher's eviction logic to identify victim entries. MUST be thread-safe.
+- **FR-018**: The dispatch map MUST support a `MemoryTier` location variant with fields: `pointer: u64`, `size: usize`, `ssd_offset: Option<u64>`. Two additional methods MUST be provided: `create_memory_tier_entry(key, pointer, size)` creates an entry with MemoryTier location; `convert_memory_tier_to_block(key, offset)` sets the `ssd_offset` field on a MemoryTier entry.
+- **FR-019**: The dispatch map MUST provide a `set_dma_alloc(alloc)` method for injecting the DMA allocator used by `create_staging`.
+- **FR-020**: The `initialize()` method MUST be an explicit public API call (not implicitly called during construction). It rebuilds the map from extent manager state via `IExtentManager::for_each_extent`.
+- **FR-021**: When `convert_to_storage` is called on a `MemoryTier` entry, it MUST set the `ssd_offset` field rather than transitioning to `BlockDevice` location.
 
 ### Key Entities
 
 - **CacheKey**: A `u64` value uniquely identifying an extent in the dispatch map.
-- **Dispatch Entry**: Holds the location (staging buffer or block-device offset), extent manager ID, size in 4KiB blocks, atomic read reference count, and atomic write reference count.
-- **Location**: An enum representing where the data resides — either an in-memory DMA staging buffer or a block-device offset with device ID. Transitions are one-way: Staging → Storage.
+- **Dispatch Entry**: Holds the location (`Location` enum), size in 4KiB blocks, read reference count (`u32`), write reference count (`u32`), and TSC timestamp (`u64`). Protected by `Mutex`/`Condvar`.
+- **Location**: An enum with three variants: `Staging(Arc<DmaBuffer>)` for in-memory DMA buffers, `BlockDevice { offset: u64, size_blocks: u32 }` for committed data on SSD, and `MemoryTier { pointer: u64, size: usize, ssd_offset: Option<u64> }` for DRAM-cached entries.
 
 ## Success Criteria *(mandatory)*
 
@@ -150,7 +187,7 @@ A caller removes an extent key from the dispatch map. The entry is deleted and s
 - **SC-001**: All committed extents are recoverable from persistent storage on component initialization — 100% of extents reported by the extent manager appear in the map after startup.
 - **SC-002**: Concurrent readers accessing the same key experience no data corruption and no deadlocks under sustained multi-threaded access.
 - **SC-003**: Write-to-read downgrade completes atomically with no window where the entry is unprotected (neither read-locked nor write-locked).
-- **SC-004**: Per-entry metadata size is minimized — no more than 32 bytes per hash-map entry beyond the key.
+- **SC-004**: Per-entry metadata is kept compact. The `DispatchEntry` struct size varies by `Location` variant (the `Staging` variant includes an `Arc<DmaBuffer>`).
 - **SC-005**: Lookup of a cached key completes without blocking when no writer is active.
 - **SC-006**: All reference count operations (take_read, take_write, release_read, release_write, downgrade) maintain consistent counts under concurrent access — no reference leaks or underflows.
 
@@ -161,7 +198,7 @@ A caller removes an extent key from the dispatch map. The entry is deleted and s
 - Q: Is the entry lifecycle one-way (Staging → Storage) or can entries transition back to staging? → A: One-way. Staging → Storage only. To re-stage, caller must remove and re-create.
 - Q: What happens when `remove()` is called on an entry with active read or write references? → A: Returns an error. Caller must drain all references before calling remove.
 - Q: What is the error behavior for invalid reference operations (underflow, no-write downgrade, size=0)? → A: Return error for all invalid operations. No panics or silent no-ops.
-- Q: Should `take_read`/`take_write` block indefinitely or support a timeout? → A: Configurable timeout. Methods accept a timeout parameter and return a timeout error if exceeded.
+- Q: Should `take_read`/`take_write` block indefinitely or support a timeout? → A: Hardcoded default timeout of 2000ms (`DEFAULT_TIMEOUT`). Methods do not accept a per-call timeout parameter; the constant is used for all blocking operations.
 
 ## Assumptions
 
@@ -170,6 +207,7 @@ A caller removes an extent key from the dispatch map. The entry is deleted and s
 - The `ILogger` receptacle is bound before any logging calls are made.
 - DMA buffer allocation is provided by the SPDK environment (via `DmaAllocFn`); the dispatch map delegates allocation but does not manage SPDK initialization.
 - A single dispatch map instance serves one storage namespace; multi-namespace support is out of scope for v0.
-- The `block_device_id` in `convert_to_storage` is a `u16` identifying which block device holds the extent.
-- The `extent_manager_id` embedded in staging buffer metadata comes from the extent manager that allocated the underlying extent.
+- `convert_to_storage` takes only `(key, offset)` — no `block_device_id` parameter. The component does not track which block device holds an extent.
 - Size parameter in `create_staging` is measured in 4KiB blocks, consistent with the extent manager's granularity.
+- The `MemoryTier` location variant supports a DRAM caching tier where data resides in host memory before being written through to SSD.
+- `convert_to_storage` on a MemoryTier entry sets the `ssd_offset` field rather than transitioning to BlockDevice; `convert_memory_tier_to_block` is the explicit transition method.

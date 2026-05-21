@@ -6,8 +6,9 @@ rust-version.workspace = true
 publish = false
 
 [features]
-gpu = ["interfaces/gpu", "base64", "libc"]
-spdk = ["interfaces/spdk"]
+gpu = ["interfaces/gpu", "base64", "libc", "clap"]
+spdk = ["interfaces/spdk", "spdk-sys", "dep:block-device-spdk-nvme", "dep:spdk-env"]
+p2p = ["gpu", "spdk"]
 
 [dependencies]
 component-framework.workspace = true
@@ -17,9 +18,14 @@ interfaces.workspace = true
 logger.workspace = true
 base64 = { version = "0.22", optional = true }
 libc = { version = "0.2", optional = true }
+clap = { version = "4", features = ["derive"], optional = true }
+spdk-sys = { workspace = true, optional = true }
+block-device-spdk-nvme = { workspace = true, optional = true }
+spdk-env = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+base64 = "0.22"
 
 [[bench]]
 name = "gpu_services_benchmark"
@@ -30,3 +36,12 @@ required-features = ["gpu"]
 name = "dma_transfer_benchmark"
 harness = false
 required-features = ["gpu"]
+
+[[bin]]
+name = "gpu-p2p-server"
+path = "src/bin/p2p_server.rs"
+required-features = ["p2p"]
+
+[[test]]
+name = "gpu_nvme_p2p"
+required-features = ["p2p"]

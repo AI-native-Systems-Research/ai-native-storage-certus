@@ -14,8 +14,8 @@ Enum representing where extent data resides.
 
 | Variant | Fields | Size | Description |
 |---------|--------|------|-------------|
-| Staging | ptr: `*mut c_void`, len: `usize` | 16 bytes | In-memory DMA buffer pointer and length |
-| BlockDevice | offset: `u64`, device_id: `u16` | 10 bytes + pad | On-disk location on a specific block device |
+| Staging | buffer: `Arc<DmaBuffer>` | 8 bytes | Shared reference to DMA staging buffer |
+| BlockDevice | offset: `u64` | 8 bytes | Byte offset on the block device |
 
 Transitions: Staging → BlockDevice (one-way via `convert_to_storage`). No reverse transition.
 
@@ -25,12 +25,14 @@ Per-key metadata stored in the hash map.
 
 | Field | Type | Size | Description |
 |-------|------|------|-------------|
-| location | Location | 16 bytes | Where the data resides |
-| extent_manager_id | u16 | 2 bytes | Which extent manager owns this extent |
+| location | Location | 16 bytes | Where the data resides (enum with Arc or u64) |
 | size_blocks | u32 | 4 bytes | Extent size in 4KiB blocks |
 | read_ref | u32 | 4 bytes | Active reader count |
 | write_ref | u32 | 4 bytes | Active writer count (0 or 1) |
-| **Total** | | **30 bytes** | + padding ≈ 32 bytes |
+| tsc | u64 | 8 bytes | RDTSC timestamp — set on creation, updated on lookup/touch |
+| **Total** | | **~40 bytes** | + padding |
+
+The `tsc` field enables LRU-style eviction: `oldest_keys()` sorts entries by ascending TSC, and `touch()`/`lookup()` refresh it via `rdtsc()`.
 
 ### DispatchMapState
 
@@ -38,12 +40,11 @@ Internal synchronization wrapper (not exposed via interface).
 
 | Field | Type | Description |
 |-------|------|-------------|
-| entries | `Mutex<HashMap<CacheKey, DispatchEntry>>` | Protected map of all entries |
-| buffers | `Mutex<HashMap<CacheKey, DmaBuffer>>` | Owned DMA buffers for staging entries |
+| inner | `Mutex<DispatchMapInner>` | Protected struct containing the entries HashMap |
 | condvar | `Condvar` | Wakes threads blocked on ref count conditions |
-| dma_alloc | `Option<DmaAllocFn>` | DMA buffer allocator, set during setup |
+| dma_alloc | `Mutex<Option<DmaAllocFn>>` | DMA buffer allocator, set via `set_dma_alloc` |
 
-Note: `entries` and `buffers` could share a single Mutex to ensure atomicity of operations that touch both (e.g., `convert_to_storage` removes from buffers and updates entry location). Implementation will determine whether a single Mutex or paired locking (always acquire in same order) is simpler.
+The implementation uses a single Mutex protecting both the entries map and the staging buffers (buffers are stored inside the `Location::Staging` variant as `Arc<DmaBuffer>`).
 
 ### LookupResult
 
@@ -53,8 +54,8 @@ Return type for `lookup()`.
 |---------|--------|-------------|
 | NotExist | — | Key not found in map |
 | MismatchSize | — | Key found but caller-expected size differs |
-| Staging | ptr: `*mut c_void`, len: `usize` | DMA buffer pointer for direct I/O |
-| BlockDevice | offset: `u64`, device_id: `u16` | On-disk location |
+| Staging | buffer: `Arc<DmaBuffer>` | Shared reference to DMA staging buffer |
+| BlockDevice | offset: `u64` | Byte offset on the block device |
 
 ### DispatchMapError
 
@@ -106,7 +107,7 @@ DispatchMapComponentV0
     ├── receptacle: ILogger (logging)
     ├── receptacle: IExtentManager (recovery via for_each_extent)
     └── internal: DispatchMapState
-                    ├── entries: HashMap<CacheKey, DispatchEntry>
-                    ├── buffers: HashMap<CacheKey, DmaBuffer>
-                    └── condvar: Condvar
+                    ├── inner: Mutex<{ entries: HashMap<CacheKey, DispatchEntry> }>
+                    ├── condvar: Condvar
+                    └── dma_alloc: Mutex<Option<DmaAllocFn>>
 ```

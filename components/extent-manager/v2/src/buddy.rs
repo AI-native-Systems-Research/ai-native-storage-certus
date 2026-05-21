@@ -50,6 +50,10 @@ impl BuddyAllocator {
         self.base_offset
     }
 
+    pub fn total_usable_size(&self) -> u64 {
+        self.total_usable_size
+    }
+
     pub fn alloc(&mut self, size: u64) -> Option<u64> {
         let blocks_needed =
             (size + self.sector_size as u64 - 1) / self.sector_size as u64;

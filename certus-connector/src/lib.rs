@@ -7,6 +7,7 @@
 //! The Python `certus_connector` package calls into this module for:
 //! - Index operations (batch_check, touch)
 //! - Allocation and eviction (prepare_store, complete_store)
+//! - Load pinning (prepare_load, complete_load)
 //! - Async I/O (store_async, load_async, poll_completions)
 
 mod engine;
@@ -56,8 +57,10 @@ pub struct CertusConfig {
 ///
 /// # Manager-level operations
 /// hit_count = engine.batch_check([1, 2, 3])
-/// to_store, evicted = engine.prepare_store([4, 5, 6])
-/// engine.complete_store([4, 5, 6], True)
+/// result = engine.prepare_store([4, 5, 6])  # None if can't free space
+/// if result is not None:
+///     to_store, evicted = result
+///     engine.complete_store([4, 5, 6], True)
 ///
 /// # Handler-level operations
 /// engine.store_async(job_id=1, gpu_block_ids=[0, 1], keys=[4, 5])
@@ -87,14 +90,25 @@ impl CertusEngine {
     }
 
     /// Allocate space for new keys, evicting if necessary.
-    /// Returns (keys_to_store, evicted_keys).
-    fn prepare_store(&self, keys: Vec<u64>) -> PyResult<(Vec<u64>, Vec<u64>)> {
+    /// Returns (keys_to_store, evicted_keys), or None if cannot free enough space.
+    fn prepare_store(&self, keys: Vec<u64>) -> PyResult<Option<(Vec<u64>, Vec<u64>)>> {
         self.inner.prepare_store(&keys)
     }
 
     /// Finalize or abort a store operation.
     fn complete_store(&self, keys: Vec<u64>, success: bool) -> PyResult<()> {
         self.inner.complete_store(&keys, success)
+    }
+
+    /// Pin blocks for reading (protect from eviction) and return their
+    /// storage offsets. Call complete_load when DMA finishes.
+    fn prepare_load(&self, keys: Vec<u64>) -> PyResult<Vec<u64>> {
+        self.inner.prepare_load(&keys)
+    }
+
+    /// Unpin blocks after load DMA completes.
+    fn complete_load(&self, keys: Vec<u64>) -> PyResult<()> {
+        self.inner.complete_load(&keys)
     }
 
     /// Update LRU ordering for the given keys.
@@ -127,6 +141,20 @@ impl CertusEngine {
     /// Shut down the engine, releasing all resources.
     fn shutdown(&self) -> PyResult<()> {
         self.inner.shutdown()
+    }
+
+    // ─── Test helpers (host memory, no GPU DMA) ─────────────────────────────
+
+    /// Store raw bytes from a host buffer under the given key. No GPU DMA.
+    /// Use for testing NVMe write path without a real GPU KV cache.
+    fn store_host_bytes(&self, key: u64, data: &[u8]) -> PyResult<()> {
+        self.inner.store_host_bytes(key, data)
+    }
+
+    /// Load bytes stored under the given key into a host buffer. No GPU DMA.
+    /// Returns the data as bytes. Use for testing NVMe read path without a real GPU.
+    fn load_host_bytes(&self, key: u64, size: usize) -> PyResult<Vec<u8>> {
+        self.inner.load_host_bytes(key, size)
     }
 }
 

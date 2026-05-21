@@ -22,3 +22,7 @@ spdk-build
 # Creusot
 .why3find
 tools/creusot/creusot
+certus-connector/certus_native/*.so
+
+# Python bytecode cache (used by benchmarks/kv-offload-replay/)
+**/__pycache__/

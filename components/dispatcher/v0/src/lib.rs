@@ -734,6 +734,12 @@ impl IDispatcher for DispatcherComponentV0 {
                         let _ = dm.release_read(key);
                         result
                     }
+                    LookupResult::MemoryTier { .. } => {
+                        let _ = dm.release_read(key);
+                        Err(DispatcherError::IoError(
+                            "unexpected MemoryTier entry in v0 dispatcher".into(),
+                        ))
+                    }
                 }
             },
             Err(_) => Err(DispatcherError::KeyNotFound(key)),
@@ -769,35 +775,32 @@ impl IDispatcher for DispatcherComponentV0 {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
 
-        dm.take_write(key)
-            .map_err(|_| DispatcherError::KeyNotFound(key))?;
-
-        // Check if entry is on block device before removing (need the offset to free the extent).
+        // Lookup the entry to determine its location (waits for any active writer).
         let block_offset = match dm.lookup(key) {
-            Ok(LookupResult::BlockDevice { offset }) => Some(offset),
-            _ => None,
+            Ok(LookupResult::BlockDevice { offset }) => {
+                let _ = dm.release_read(key);
+                Some(offset)
+            }
+            Ok(_) => {
+                let _ = dm.release_read(key);
+                None
+            }
+            Err(_) => return Err(DispatcherError::KeyNotFound(key)),
         };
 
-        let result = dm.remove(key);
+        dm.remove(key)
+            .map_err(|_| DispatcherError::KeyNotFound(key))?;
 
-        match result {
-            Ok(()) => {
-                if let Some(offset) = block_offset {
-                    let drives = self.data_drives.lock().unwrap();
-                    let idx = Self::drive_index(key, drives.len().max(1));
-                    if let Some(drive) = drives.get(idx) {
-                        if let Some(iem) = query_interface!(drive.extent_mgr, IExtentManager) {
-                            let _ = iem.remove_extent(offset);
-                        }
-                    }
+        if let Some(offset) = block_offset {
+            let drives = self.data_drives.lock().unwrap();
+            let idx = Self::drive_index(key, drives.len().max(1));
+            if let Some(drive) = drives.get(idx) {
+                if let Some(iem) = query_interface!(drive.extent_mgr, IExtentManager) {
+                    let _ = iem.remove_extent(offset);
                 }
-                Ok(())
-            }
-            Err(_) => {
-                let _ = dm.release_write(key);
-                Err(DispatcherError::KeyNotFound(key))
             }
         }
+        Ok(())
     }
 
     fn populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError> {
@@ -1027,6 +1030,18 @@ impl IDispatcher for DispatcherComponentV0 {
 
         Ok(())
     }
+
+    fn touch(&self, key: CacheKey) -> Result<(), DispatcherError> {
+        self.ensure_initialized()?;
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        dm.touch(key)
+            .map_err(|_| DispatcherError::KeyNotFound(key))
+    }
 }
 
 #[cfg(test)]
@@ -1248,9 +1263,31 @@ mod tests {
             }
         }
 
+        fn touch(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            let inner = self.inner.lock().unwrap();
+            if inner.entries.contains_key(&key) {
+                Ok(())
+            } else {
+                Err(DispatchMapError::KeyNotFound(key))
+            }
+        }
+
         fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
             let inner = self.inner.lock().unwrap();
             inner.entries.keys().copied().take(n).collect()
+        }
+
+        fn create_memory_tier_entry(
+            &self,
+            _key: CacheKey,
+            _pointer: *mut u8,
+            _size: u32,
+        ) -> Result<(), DispatchMapError> {
+            Err(DispatchMapError::NotInitialized("not supported in v0".into()))
+        }
+
+        fn convert_memory_tier_to_block(&self, _key: CacheKey) -> Result<(), DispatchMapError> {
+            Err(DispatchMapError::NotInitialized("not supported in v0".into()))
         }
     }
 
@@ -1313,6 +1350,13 @@ mod tests {
                 std::ptr::copy_nonoverlapping(src.as_ptr() as *const u8, dst as *mut u8, size);
             }
             Ok(())
+        }
+        fn prepare_memory_for_spdk(
+            &self,
+            _base64_payload: &str,
+            _device_index: Option<u32>,
+        ) -> Result<DmaBuffer, String> {
+            Err("mock: not implemented".into())
         }
     }
 

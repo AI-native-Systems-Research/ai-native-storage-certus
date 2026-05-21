@@ -1,6 +1,6 @@
 # Spec Drift Report
 
-Generated: 2026-04-17
+Generated: 2026-05-05
 Project: Logger Component (components/logger/v1)
 
 ## Summary
