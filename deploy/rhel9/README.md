@@ -27,3 +27,6 @@ Prevent kernel upgrades, open /etc/dnf/dnf.conf and append the following instruc
 ```
 exclude=kernel*5.14.0-687* kernel*5.14.0-7*
 ```
+
+To check OFED is loaded and working do `modinfo ib_core` and check that it is pointing to extra not to drivers/infiniband.
+
