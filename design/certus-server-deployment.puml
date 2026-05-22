@@ -1,152 +1,83 @@
 @startuml certus-server-deployment
-!theme plain
-skinparam componentStyle rectangle
 skinparam defaultTextAlignment center
-skinparam padding 4
+skinparam padding 3
+skinparam nodesep 25
+skinparam ranksep 25
 
 title Certus Server — Component Deployment Diagram
 
-node "Client Host" as client_host {
-    component "Python Test Client" as pyclient {
-        [PyTorch CUDA] as pytorch
-        [cudaIpcGetMemHandle] as ipc_get
-    }
-    database "GPU Memory\n(client context)" as client_gpu
+' ============================================================
+' CLIENT
+' ============================================================
+node "Client Host" {
+    component "Python Test Client\n<<gRPC client>>" as pyclient
+    database "GPU Memory\n(client ctx)" as client_gpu
+    pyclient -right[hidden]- client_gpu
 }
 
-node "Server Host" as server_host {
+' ============================================================
+' SERVER
+' ============================================================
+node "Server Host" {
 
-    component "certus-server\n(Rust / tokio)" as server {
+    node "certus-server (Rust / tokio)" {
 
-        component "gRPC Service Layer\n<<tonic>>" as grpc {
-            [Populate RPC] as rpc_pop
-            [Lookup RPC] as rpc_lkp
-            [Check RPC] as rpc_chk
-            [Remove RPC] as rpc_rm
-            [Touch RPC] as rpc_touch
-            [cudaIpcOpenMemHandle\n/ CloseMemHandle\n(cached per batch)] as ipc_open
+        component "gRPC Service <<tonic>>\nPopulate | Lookup | Check | Remove | Touch" as grpc
+
+        component "DispatcherComponent <<IDispatcher>>" as dispatcher {
+            component "BackgroundWriter | BackgroundEvictor\nPipelineRing | warm_stream" as disp_bg
+            component "DataDrive [0..N]\n(BlockDeviceSpdkNvme + ExtentManager)" as data_drive
         }
 
-        component "DispatcherComponent\n<<IDispatcher>>" as dispatcher {
-            portin "receptacle: dispatch_map" as r_dm
-            portin "receptacle: memory_tier" as r_mt
-            portin "receptacle: gpu_services" as r_gpu
-            portin "receptacle: spdk_env" as r_spdk
-            portin "receptacle: logger" as r_log_d
+        component "DispatchMapComponent\n<<IDispatchMap>>" as dispatch_map
+        component "MemoryTierComponent\n<<IMemoryTier>>" as memory_tier
+        component "GpuServicesComponent\n<<IGpuServices>>" as gpu_svc
+        component "LoggerComponent\n<<ILogger>>" as logger
 
-            [BackgroundWriter] as bg_writer
-            [BackgroundEvictor] as bg_evictor
-            [PipelineRing\n(8x CUDA-pinned bufs)] as pipeline_ring
-            [warm_stream\n(async H2D)] as warm_stream
-
-            component "DataDrive[0..N]\n(inner, per data PCI)" as data_drive {
-                component "BlockDeviceSpdkNvme\n<<IBlockDevice, IBlockDeviceAdmin>>" as data_bd {
-                    portin "receptacle: spdk_env" as dbd_spdk
-                    portin "receptacle: logger" as dbd_log
-                }
-                component "ExtentManager\n<<IExtentManager>>" as data_em {
-                    portin "receptacle: metadata_device" as dem_bd
-                    portin "receptacle: logger" as dem_log
-                }
-            }
-        }
-
-        component "MemoryTierComponent\n<<IMemoryTier>>" as memory_tier {
-            portin "receptacle: logger" as mt_log
-            [mmap Pool\n(DRAM, CUDA-pinned)] as mt_pool
-            [LRU Tracker] as mt_lru
-            [FreeList Allocator] as mt_alloc
-        }
-
-        component "DispatchMapComponent\n<<IDispatchMap>>" as dispatch_map {
-            portin "receptacle: extent_manager" as dm_em
-            portin "receptacle: logger" as dm_log
-            [Entry Table\n(key → Location:\nMemoryTier|BlockDevice|Staging)] as entry_table
-        }
-
-        component "GpuServicesComponent\n<<IGpuServices>>" as gpu_svc {
-            portin "receptacle: logger" as gpu_log
-            [CUDA DMA\n(sync + async streams)] as cuda_dma
-            [cudaHostRegister\n(memory-tier pinning)] as cuda_pin
-        }
-
-        component "SPDKEnvComponent\n<<ISPDKEnv>>" as spdk_env {
-            [VFIO Device\nDiscovery] as vfio
-        }
-
-        component "Metadata Block Device\nBlockDeviceSpdkNvme\n<<IBlockDevice, IBlockDeviceAdmin>>" as meta_bd {
-            portin "receptacle: spdk_env" as mbd_spdk
-            portin "receptacle: logger" as mbd_log
-        }
-
-        component "Metadata Extent Manager\nExtentManager\n<<IExtentManager>>" as meta_em {
-            portin "receptacle: metadata_device" as mem_bd
-            portin "receptacle: logger" as mem_log
-        }
-
-        component "LoggerComponent\n<<ILogger>>" as logger_comp
+        component "Metadata ExtentManager\n<<IExtentManager>>" as meta_em
+        component "Metadata BlockDeviceSpdkNvme\n<<IBlockDevice>>" as meta_bd
+        component "SPDKEnvComponent\n<<ISPDKEnv>>" as spdk_env
     }
 
-    database "GPU Memory\n(server context)" as server_gpu
-    database "NVMe (metadata)\nvia VFIO/SPDK" as nvme_meta
-    database "NVMe (data) [0..N]\nvia VFIO/SPDK" as nvme_data
+    database "GPU Memory\n(server ctx)" as server_gpu
+    database "NVMe (metadata)" as nvme_meta
+    database "NVMe (data) [0..N]" as nvme_data
 }
 
-' --- External connections ---
-client_gpu -down-> pytorch
-pyclient -down-> client_host : "GPU alloc"
-pyclient -right[hidden]-> client_gpu
+' ============================================================
+' CONNECTIONS
+' ============================================================
 
-client_host -down-> grpc : "gRPC\n(protobuf over TCP\n+ optional TLS)"
+' Client → Server
+pyclient -down-> grpc : "gRPC/TCP (+TLS)"
+client_gpu .down.> server_gpu : "CUDA IPC"
 
-' --- gRPC to Dispatcher ---
-grpc -down-> ipc_open
-ipc_open -down-> dispatcher
+' gRPC → Dispatcher
+grpc -down-> dispatcher
 
-' --- Dispatcher receptacle bindings ---
-r_dm -down-> dispatch_map : "bind"
-r_mt -down-> memory_tier : "bind"
-r_gpu -down-> gpu_svc : "bind"
-r_spdk -down-> spdk_env : "bind"
-r_log_d -down-> logger_comp : "bind"
+' Dispatcher bindings (receptacles)
+dispatcher -down-> dispatch_map
+dispatcher -down-> memory_tier
+dispatcher -down-> gpu_svc
+dispatcher ..> logger
+data_drive -down-> spdk_env
 
-' --- Dispatcher inner data drives ---
-bg_writer -right-> data_drive : "WriteJob\n(DRAM→SSD)"
-pipeline_ring -right-> data_drive : "Pipelined\nreads"
-dem_bd --> data_bd : "bind"
+' Dispatcher internal
+disp_bg -down-> data_drive
 
-' --- DispatchMap bindings ---
-dm_em -down-> meta_em : "bind"
-dm_log -down-> logger_comp : "bind"
+' DispatchMap metadata chain
+dispatch_map -down-> meta_em
+meta_em -right-> meta_bd
+meta_bd -down-> spdk_env
 
-' --- Memory-tier bindings ---
-mt_log -down-> logger_comp : "bind"
+' GPU
+gpu_svc -right-> server_gpu : "DMA"
+gpu_svc .down.> memory_tier : "cudaHostRegister"
 
-' --- Metadata extent manager bindings ---
-mem_bd -down-> meta_bd : "bind"
-mem_log -down-> logger_comp : "bind"
-
-' --- Block device bindings ---
-mbd_spdk -down-> spdk_env : "bind"
-mbd_log -down-> logger_comp : "bind"
-dbd_spdk -down-> spdk_env : "bind"
-dbd_log -down-> logger_comp : "bind"
-
-' --- GPU services ---
-gpu_log -down-> logger_comp : "bind"
-cuda_dma -down-> server_gpu
-cuda_pin -down-> memory_tier : "cudaHostRegister\n(zero-copy)"
-
-' --- Memory-tier to GPU (warm path) ---
-warm_stream -down-> gpu_svc : "async H2D"
-
-' --- Hardware ---
+' SPDK → hardware
 spdk_env -down-> nvme_meta : "VFIO"
 spdk_env -down-> nvme_data : "VFIO"
-meta_bd -down-> nvme_meta : "NVMe I/O"
-data_bd -down-> nvme_data : "NVMe I/O"
-
-' --- CUDA IPC link ---
-client_gpu .right.> server_gpu : "CUDA IPC\n(shared handle)"
+data_drive ..> nvme_data : "NVMe I/O"
+meta_bd ..> nvme_meta : "NVMe I/O"
 
 @enduml
