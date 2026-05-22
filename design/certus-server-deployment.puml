@@ -1,89 +1,83 @@
 @startuml certus-server-deployment
-!theme plain
-skinparam componentStyle rectangle
 skinparam defaultTextAlignment center
 skinparam padding 3
-skinparam nodesep 30
-skinparam ranksep 30
+skinparam nodesep 25
+skinparam ranksep 25
 
 title Certus Server — Component Deployment Diagram
 
 ' ============================================================
-' CLIENT (top)
+' CLIENT
 ' ============================================================
-rectangle "Client Host" {
-    [Python Test Client\n(PyTorch, cudaIpcGetMemHandle, batch gRPC)] as pyclient
-    database "GPU Memory\n(client)" as client_gpu
+node "Client Host" {
+    component "Python Test Client\n<<gRPC client>>" as pyclient
+    database "GPU Memory\n(client ctx)" as client_gpu
     pyclient -right[hidden]- client_gpu
 }
 
 ' ============================================================
 ' SERVER
 ' ============================================================
-rectangle "certus-server (Rust / tokio)" {
+node "Server Host" {
 
-    ' --- Layer 1: gRPC ---
-    [gRPC <<tonic>>: Populate | Lookup | Check | Remove | Touch] as grpc
+    node "certus-server (Rust / tokio)" {
 
-    ' --- Layer 2: Dispatcher ---
-    rectangle "DispatcherComponent <<IDispatcher>>" as dispatcher {
-        [BackgroundWriter | BackgroundEvictor | PipelineRing | warm_stream] as disp_core
-        rectangle "DataDrive [0..N]" {
-            [data BlockDeviceSpdkNvme] as data_bd
-            [data ExtentManager] as data_em
-            data_em -right-> data_bd
+        component "gRPC Service <<tonic>>\nPopulate | Lookup | Check | Remove | Touch" as grpc
+
+        component "DispatcherComponent <<IDispatcher>>" as dispatcher {
+            component "BackgroundWriter | BackgroundEvictor\nPipelineRing | warm_stream" as disp_bg
+            component "DataDrive [0..N]\n(BlockDeviceSpdkNvme + ExtentManager)" as data_drive
         }
-        disp_core -down-> data_em
+
+        component "DispatchMapComponent\n<<IDispatchMap>>" as dispatch_map
+        component "MemoryTierComponent\n<<IMemoryTier>>" as memory_tier
+        component "GpuServicesComponent\n<<IGpuServices>>" as gpu_svc
+        component "LoggerComponent\n<<ILogger>>" as logger
+
+        component "Metadata ExtentManager\n<<IExtentManager>>" as meta_em
+        component "Metadata BlockDeviceSpdkNvme\n<<IBlockDevice>>" as meta_bd
+        component "SPDKEnvComponent\n<<ISPDKEnv>>" as spdk_env
     }
 
-    ' --- Layer 3: Peer components ---
-    [DispatchMapComponent\n<<IDispatchMap>>] as dispatch_map
-    [MemoryTierComponent\n<<IMemoryTier>>] as memory_tier
-    [GpuServicesComponent\n<<IGpuServices>>] as gpu_svc
-
-    ' --- Layer 4: Infrastructure ---
-    [meta ExtentManager\n<<IExtentManager>>] as meta_em
-    [meta BlockDeviceSpdkNvme\n<<IBlockDevice>>] as meta_bd
-    [SPDKEnvComponent\n<<ISPDKEnv>>] as spdk_env
-    [LoggerComponent\n<<ILogger>>] as logger
-
-    database "GPU Memory\n(server)" as server_gpu
+    database "GPU Memory\n(server ctx)" as server_gpu
+    database "NVMe (metadata)" as nvme_meta
+    database "NVMe (data) [0..N]" as nvme_data
 }
-
-' --- Hardware ---
-database "NVMe (metadata)" as nvme_meta
-database "NVMe (data) [0..N]" as nvme_data
 
 ' ============================================================
 ' CONNECTIONS
 ' ============================================================
 
 ' Client → Server
-pyclient -down-> grpc : gRPC (+TLS)
-client_gpu .down.> server_gpu : CUDA IPC
+pyclient -down-> grpc : "gRPC/TCP (+TLS)"
+client_gpu .down.> server_gpu : "CUDA IPC"
 
-' Vertical flow
+' gRPC → Dispatcher
 grpc -down-> dispatcher
+
+' Dispatcher bindings (receptacles)
 dispatcher -down-> dispatch_map
 dispatcher -down-> memory_tier
 dispatcher -down-> gpu_svc
-dispatcher -down-> spdk_env
+dispatcher ..> logger
+data_drive -down-> spdk_env
 
-' Metadata chain (horizontal)
+' Dispatcher internal
+disp_bg -down-> data_drive
+
+' DispatchMap metadata chain
 dispatch_map -down-> meta_em
 meta_em -right-> meta_bd
 meta_bd -down-> spdk_env
 
-' Data drives to SPDK
-data_bd -down-> spdk_env
-
 ' GPU
-gpu_svc -right-> server_gpu
+gpu_svc -right-> server_gpu : "DMA"
+gpu_svc .down.> memory_tier : "cudaHostRegister"
 
-' Hardware
-spdk_env -down-> nvme_meta
-spdk_env -down-> nvme_data
-data_bd ..> nvme_data
-meta_bd ..> nvme_meta
+' SPDK → hardware
+spdk_env -down-> nvme_meta : "VFIO"
+spdk_env -down-> nvme_data : "VFIO"
+data_drive ..> nvme_data : "NVMe I/O"
+meta_bd ..> nvme_meta : "NVMe I/O"
 
 @enduml
