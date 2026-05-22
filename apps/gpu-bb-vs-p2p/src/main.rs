@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use clap::Parser;
 
-use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponentV1;
+use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent;
 use component_core::binding::bind;
 use component_core::iunknown::query;
 use gpu_services::cuda_ffi;
@@ -83,7 +83,7 @@ struct Cli {
 // ---------------------------------------------------------------------------
 
 struct BenchContext {
-    block_dev: Arc<BlockDeviceSpdkNvmeComponentV1>,
+    block_dev: Arc<BlockDeviceSpdkNvmeComponent>,
     #[allow(dead_code)]
     spdk_env: Arc<SPDKEnvComponent>,
     sector_size: usize,
@@ -117,8 +117,8 @@ fn initialize_stack(pci: Option<&str>) -> Result<BenchContext, String> {
     spdk_env::checks::check_hugepages().map_err(|e| format!("hugepages: {e}"))?;
 
     let spdk_env_comp = SPDKEnvComponent::new_default();
-    let block_dev = BlockDeviceSpdkNvmeComponentV1::new_default();
-    let logger = logger::LoggerComponentV1::new_default();
+    let block_dev = BlockDeviceSpdkNvmeComponent::new_default();
+    let logger = logger::LoggerComponent::new_default();
 
     bind(&*spdk_env_comp, "ISPDKEnv", &*block_dev, "spdk_env")
         .map_err(|e| format!("bind spdk_env: {e}"))?;

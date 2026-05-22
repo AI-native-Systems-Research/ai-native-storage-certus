@@ -12,3 +12,21 @@
 3.  Install NVIDIA drivers
 4.  Install CUDA drivers
 5.  Configure SPDK
+
+## Kernel requirements
+
+doca-ofed does not build with some kernels (e.g., 5.14.0-687.10.1).
+Known working kernels with DOCA 3.3.0 are 5.14.0-611.30.1
+
+Lock in kernel:
+```
+sudo grubby --set-default=/boot/vmlinuz-5.14.0-611.30.1.el9_7.x86_64
+```
+
+Prevent kernel upgrades, open /etc/dnf/dnf.conf and append the following instruction line:
+```
+exclude=kernel*5.14.0-687* kernel*5.14.0-7*
+```
+
+To check OFED is loaded and working do `modinfo ib_core` and check that it is pointing to extra not to drivers/infiniband. Make sure to install 'kernel-headers' package before trying to install OFED.
+
