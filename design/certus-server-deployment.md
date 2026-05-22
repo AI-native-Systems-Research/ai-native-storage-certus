@@ -41,7 +41,7 @@
 │  │  │ Inner: DataDrive[0..N] │  │(one per│--data-pci address)         │   │  │
 │  │  │            │   │       │  │       │                             │   │  │
 │  │  │  ┌─────────┼───┼───────┼──┼─┐  ┌─────┼─────────────────────────┐   │  │
-│  │  │  │ BlockDeviceSpdkNvmeV2   │ │  │ ExtentManagerV2               │   │  │
+│  │  │  │ BlockDeviceSpdkNvme   │ │  │ ExtentManager               │   │  │
 │  │  │  │ «IBlockDevice»         │ │  │ «IExtentManager»              │   │  │
 │  │  │  │ «IBlockDeviceAdmin»    │ │  │  receptacles:                 │   │  │
 │  │  │  │  receptacles:          │ │  │    ├─ metadata_device ──▶[BD] │   │  │
@@ -71,7 +71,7 @@
 │                      │  │         │                           │              │
 │                      │  │ recepts:│                           ▼              │
 │                      │  │  └logger│  ┌────────────────────────────────────┐  │
-│                      │  └─────────┘  │ Metadata ExtentManagerV2           │  │
+│                      │  └─────────┘  │ Metadata ExtentManager           │  │
 │                      │               │ «IExtentManager»                   │  │
 │                      │               │  receptacles:                      │  │
 │                      │               │    ├─ metadata_device ─┐           │  │
@@ -80,7 +80,7 @@
 │                      │                                        │              │
 │                      │                                        ▼              │
 │                      │               ┌────────────────────────────────────┐  │
-│                      │               │ Metadata BlockDeviceSpdkNvmeV2     │  │
+│                      │               │ Metadata BlockDeviceSpdkNvme     │  │
 │                      │               │ «IBlockDevice, IBlockDeviceAdmin»  │  │
 │                      │               │  receptacles:                      │  │
 │                      │               │    ├─ spdk_env ────┐               │  │
@@ -120,8 +120,8 @@
 | LoggerComponentV1 | — | ILogger | — |
 | GpuServicesComponentV0 | 0.1.0 | IGpuServices | logger |
 | MemoryTierComponent | 0.1.0 | IMemoryTier | logger |
-| BlockDeviceSpdkNvmeV2 | 0.2.0 | IBlockDevice, IBlockDeviceAdmin | spdk_env, logger |
-| ExtentManagerV2 | 0.1.0 | IExtentManager | metadata_device, logger |
+| BlockDeviceSpdkNvme | 0.2.0 | IBlockDevice, IBlockDeviceAdmin | spdk_env, logger |
+| ExtentManager | 0.1.0 | IExtentManager | metadata_device, logger |
 | DispatchMapComponentV0 | 0.1.0 | IDispatchMap | extent_manager, logger |
 | DispatcherComponent | 1.0.0 | IDispatcher | dispatch_map, memory_tier, gpu_services, spdk_env, logger |
 
@@ -130,12 +130,12 @@
 1. **SPDKEnvComponent** — DPDK/EAL init, VFIO device discovery
 2. **LoggerComponentV1** — console/file logging
 3. **GpuServicesComponentV0** — CUDA device init
-4. **Metadata BlockDeviceSpdkNvmeV2** — NVMe controller for metadata (bound to spdk_env)
-5. **Metadata ExtentManagerV2** — block allocator over metadata device
+4. **Metadata BlockDeviceSpdkNvme** — NVMe controller for metadata (bound to spdk_env)
+5. **Metadata ExtentManager** — block allocator over metadata device
 6. **DispatchMapComponentV0** — key→location table (bound to metadata extent manager)
 7. **MemoryTierComponent** — mmap DRAM pool, CUDA-pinned via `cudaHostRegister`
 8. **DispatcherComponent** — top-level orchestrator (bound to dispatch_map, memory_tier, gpu, spdk_env)
-   - Internally creates **DataDrive[0..N]**: one (BlockDeviceSpdkNvmeV2 + ExtentManagerV2) pair per `--data-pci` address
+   - Internally creates **DataDrive[0..N]**: one (BlockDeviceSpdkNvme + ExtentManager) pair per `--data-pci` address
    - Allocates **PipelineRing** (CUDA-pinned + SPDK-registered ring buffers) for pipelined reads
    - Creates dedicated **warm_stream** (CUDA stream) for async memory-tier→GPU DMA
    - Starts **BackgroundWriter** thread for async DRAM→SSD write-through

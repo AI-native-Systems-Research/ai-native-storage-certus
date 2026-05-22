@@ -40,11 +40,11 @@ node "Server Host" as server_host {
             [warm_stream\n(async H2D)] as warm_stream
 
             component "DataDrive[0..N]\n(inner, per data PCI)" as data_drive {
-                component "BlockDeviceSpdkNvmeV2\n<<IBlockDevice, IBlockDeviceAdmin>>" as data_bd {
+                component "BlockDeviceSpdkNvme\n<<IBlockDevice, IBlockDeviceAdmin>>" as data_bd {
                     portin "receptacle: spdk_env" as dbd_spdk
                     portin "receptacle: logger" as dbd_log
                 }
-                component "ExtentManagerV2\n<<IExtentManager>>" as data_em {
+                component "ExtentManager\n<<IExtentManager>>" as data_em {
                     portin "receptacle: metadata_device" as dem_bd
                     portin "receptacle: logger" as dem_log
                 }
@@ -74,12 +74,12 @@ node "Server Host" as server_host {
             [VFIO Device\nDiscovery] as vfio
         }
 
-        component "Metadata Block Device\nBlockDeviceSpdkNvmeV2\n<<IBlockDevice, IBlockDeviceAdmin>>" as meta_bd {
+        component "Metadata Block Device\nBlockDeviceSpdkNvme\n<<IBlockDevice, IBlockDeviceAdmin>>" as meta_bd {
             portin "receptacle: spdk_env" as mbd_spdk
             portin "receptacle: logger" as mbd_log
         }
 
-        component "Metadata Extent Manager\nExtentManagerV2\n<<IExtentManager>>" as meta_em {
+        component "Metadata Extent Manager\nExtentManager\n<<IExtentManager>>" as meta_em {
             portin "receptacle: metadata_device" as mem_bd
             portin "receptacle: logger" as mem_log
         }
