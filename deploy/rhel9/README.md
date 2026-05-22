@@ -41,4 +41,9 @@ Check with:
 ls -l /lib/modules/$(uname -r)/build
 ```
 
-Do not install/upgrade kernel headers during DOCA ofed install.
+Do not install/upgrade kernel headers during DOCA ofed install. Some times need..
+```
+depmod -a
+dracut -f --regenerate-all
+```
+
