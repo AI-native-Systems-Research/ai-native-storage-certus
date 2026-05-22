@@ -1,0 +1,53 @@
+{
+  "iteration": 1,
+  "bundle_ref": "runs/iter-1/bundle.yaml",
+  "experiment_valid": true,
+  "arms": [
+    {
+      "arm_type": "h-main",
+      "predicted": "P2P direct path will achieve lower SSD-tier lookup latency (us/obj) and higher throughput (GB/s) than pipelined bounce for 4 MiB objects, because it eliminates 32 sequential cudaMemcpy(128KiB, H2D) calls from the critical path.",
+      "observed": "Bounce baseline: SSD-tier avg 12969.1 us/obj, 0.32 GB/s. P2P treatment: SSD-tier avg 15239.4 us/obj, 0.28 GB/s. P2P is 17.5% SLOWER (ratio 1.175x). Memory-tier latency also degraded from 327.8 to 371.3 us/obj, likely due to per-lookup prepare_memory_for_spdk overhead affecting benchmark pipeline.",
+      "status": "REFUTED",
+      "error_type": "direction",
+      "diagnostic_note": "The per-lookup prepare_memory_for_spdk cost (cudaIpcOpenMemHandle + spdk_mem_register, estimated 50us+ warm) exceeds the eliminated cudaMemcpy savings (~128us for 32x4KiB chunks) when called on every lookup rather than once per connection. The P2P path also skips memory-tier promotion, which means subsequent iterations of the same object continue hitting SSD rather than the warm DRAM tier — this compounds the overhead across the 20-iteration benchmark loop. The h-main.diagnostic predicted this case: 'Measure prepare_memory_for_spdk latency — if cold-start overhead is included in every lookup, it may exceed the cudaMemcpy savings.'",
+      "metadata": {
+        "bounce_avg_us": 12969.1,
+        "bounce_min_us": 11423.7,
+        "bounce_max_us": 13965.0,
+        "bounce_avg_gbps": 0.32,
+        "p2p_avg_us": 15239.4,
+        "p2p_min_us": 13919.2,
+        "p2p_max_us": 16283.4,
+        "p2p_avg_gbps": 0.28,
+        "slowdown_ratio": 1.175,
+        "object_size_bytes": 4194304,
+        "num_objects": 10,
+        "iterations": 20
+      }
+    },
+    {
+      "arm_type": "h-control-negative",
+      "predicted": "At 4 KiB object size (1 NVMe chunk), P2P will NOT outperform bounce because the one-time prepare_memory_for_spdk overhead (~50us warm) exceeds the single eliminated cudaMemcpy(4KiB) which takes <1us.",
+      "observed": "Bounce baseline: SSD-tier avg 460.2 us/obj, 0.01 GB/s. P2P treatment: SSD-tier avg 495.6 us/obj, 0.01 GB/s. P2P is 7.7% SLOWER (ratio 1.077x). Direction of prediction confirmed (P2P not faster). However, the predicted relative overhead gap is inverted: the slowdown is SMALLER at 4 KiB (1.077x) than at 4 MiB (1.175x), contrary to the mechanism prediction that setup overhead would be MORE dominant at small sizes.",
+      "status": "PARTIALLY_CONFIRMED",
+      "error_type": "magnitude",
+      "diagnostic_note": "The direction was correct (P2P slower at 4 KiB), but the predicted magnitude ordering is wrong. At 4 MiB the P2P overhead fraction is larger (17.5%) than at 4 KiB (7.7%), opposite to the 'setup overhead dominates small sizes' mechanism. This suggests the dominant cost at 4 MiB is not prepare_memory_for_spdk alone but rather the loss of memory-tier caching: the 4 MiB bounce path warms the memory tier over 20 iterations, while the P2P path reads from SSD every iteration, paying full ~13ms NVMe latency each time. At 4 KiB the SSD latency is only ~460us so the caching benefit is proportionally smaller.",
+      "metadata": {
+        "bounce_avg_us": 460.2,
+        "bounce_min_us": 243.5,
+        "bounce_max_us": 1856.4,
+        "bounce_avg_gbps": 0.01,
+        "p2p_avg_us": 495.6,
+        "p2p_min_us": 233.3,
+        "p2p_max_us": 1562.9,
+        "p2p_avg_gbps": 0.01,
+        "slowdown_ratio": 1.077,
+        "object_size_bytes": 4096,
+        "num_objects": 10,
+        "iterations": 20
+      }
+    }
+  ],
+  "discrepancy_analysis": "Both arms show P2P slower than bounce, the opposite of the h-main prediction and consistent with the control-negative direction. Two compounding factors explain the result:\n\n1. Memory-tier promotion bypass: The P2P implementation deliberately skips memory-tier insertion (mt.remove + dispatch-map left as BlockDevice) so each of the 20 benchmark iterations reads from SSD. The bounce path inserts into memory-tier on first lookup; subsequent iterations serve from DRAM at ~328us. For 4 MiB objects, the bounce path effectively benchmarks 1 SSD read + 19 DRAM reads (~12969us average), while P2P benchmarks 20 SSD reads (~15239us average). This alone accounts for most of the gap.\n\n2. Per-lookup prepare_memory_for_spdk overhead: Even ignoring caching, registering the GPU IPC handle with SPDK on every lookup adds measurable latency. This cost is proportionally worse at large object sizes where the NVMe read time is longer and any fixed overhead matters more — which contradicts the original prediction that large objects would benefit most from eliminating cudaMemcpy.\n\nThe h-control-negative magnitude ordering anomaly (smaller slowdown at 4 KiB than 4 MiB) is explained by the same caching effect: at 4 KiB the SSD tier is only ~2.7x slower than memory-tier (460 vs 172us), so missing the cache hurts less in absolute terms. At 4 MiB the SSD tier is ~39.6x slower than memory-tier (12969 vs 328us), making cache promotion much more valuable.",
+  "dominant_component_pct": 75
+}

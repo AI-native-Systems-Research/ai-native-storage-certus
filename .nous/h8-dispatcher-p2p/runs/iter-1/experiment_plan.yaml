@@ -1,0 +1,92 @@
+metadata:
+  iteration: 1
+  bundle_ref: "runs/iter-1/bundle.yaml"
+  description: "Measure NVMe->GPU transfer latency and throughput for bounce, P2P warm, P2P cold modes at 128K and 64K chunk sizes. No code changes needed — all modes are supported by the existing gpu-p2p-server binary."
+
+setup:
+  - cmd: "RUSTFLAGS='-L /usr/local/lib' cargo build -p gpu-services --features p2p --bin gpu-p2p-server"
+    description: "Build gpu-p2p-server with GDRCopy P2P support (run from main repo root)"
+  - cmd: "rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /tmp/gpu_p2p_bench.sock"
+    description: "Clear stale SPDK locks and socket"
+
+arms:
+  - arm_id: "h-main"
+    conditions:
+      - name: "bounce-seed1"
+        cmd: "rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /tmp/gpu_p2p_bench.sock && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/target/debug/gpu-p2p-server --socket /tmp/gpu_p2p_bench.sock --pci 0000:63:00.0 --mode bounce --chunk-size 131072 --staging-size 4194304 & sleep 7 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_bench.sock --iterations 20 2>&1 | tee /tmp/bounce_s1_raw.txt; kill %1 2>/dev/null; python3 -c \"import re,json,sys; t=open('/tmp/bounce_s1_raw.txt').read(); d={'mode':'bounce','chunk_size':131072,'iterations':20,'transfer_size':4194304,'pci':'0000:63:00.0','throughput_mbs':float(re.search(r'Throughput:\\\\s+([\\\\d.]+)',t).group(1)),'avg_latency_ms':float(re.search(r'Avg latency:\\\\s+([\\\\d.]+)',t).group(1)),'min_latency_ms':float(re.search(r'Min latency:\\\\s+([\\\\d.]+)',t).group(1)),'max_latency_ms':float(re.search(r'Max latency:\\\\s+([\\\\d.]+)',t).group(1)),'raw_output':t}; json.dump(d,open('/home/nara/certus/ai-native-storage-certus/.nous/h8-dispatcher-p2p/runs/iter-1/results/h-main/bounce-s1.json','w'))\""
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-dispatcher-p2p/runs/iter-1/results/h-main/bounce-s1.json"
+        description: "Bounce mode 128K chunks seed 1"
+
+      - name: "p2p-warm-seed1"
+        cmd: "rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /tmp/gpu_p2p_bench.sock && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/target/debug/gpu-p2p-server --socket /tmp/gpu_p2p_bench.sock --pci 0000:63:00.0 --mode p2p --chunk-size 131072 --staging-size 4194304 & sleep 7 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_bench.sock --iterations 20 2>&1 | tee /tmp/p2p_warm_s1_raw.txt; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-dispatcher-p2p/runs/iter-1/results/h-main/p2p-warm-s1.json"
+        description: "P2P warm mode 128K chunks seed 1"
+
+      - name: "bounce-seed2"
+        cmd: "rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /tmp/gpu_p2p_bench.sock && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/target/debug/gpu-p2p-server --socket /tmp/gpu_p2p_bench.sock --pci 0000:63:00.0 --mode bounce --chunk-size 131072 --staging-size 4194304 & sleep 7 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_bench.sock --iterations 20 2>&1; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-dispatcher-p2p/runs/iter-1/results/h-main/bounce-s2.json"
+        description: "Bounce mode 128K chunks seed 2"
+
+      - name: "p2p-warm-seed2"
+        cmd: "rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /tmp/gpu_p2p_bench.sock && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/target/debug/gpu-p2p-server --socket /tmp/gpu_p2p_bench.sock --pci 0000:63:00.0 --mode p2p --chunk-size 131072 --staging-size 4194304 & sleep 7 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_bench.sock --iterations 20 2>&1; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-dispatcher-p2p/runs/iter-1/results/h-main/p2p-warm-s2.json"
+        description: "P2P warm mode 128K chunks seed 2"
+
+      - name: "bounce-seed3"
+        cmd: "rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /tmp/gpu_p2p_bench.sock && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/target/debug/gpu-p2p-server --socket /tmp/gpu_p2p_bench.sock --pci 0000:63:00.0 --mode bounce --chunk-size 131072 --staging-size 4194304 & sleep 7 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_bench.sock --iterations 20 2>&1; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-dispatcher-p2p/runs/iter-1/results/h-main/bounce-s3.json"
+        description: "Bounce mode 128K chunks seed 3"
+
+      - name: "p2p-warm-seed3"
+        cmd: "rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /tmp/gpu_p2p_bench.sock && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/target/debug/gpu-p2p-server --socket /tmp/gpu_p2p_bench.sock --pci 0000:63:00.0 --mode p2p --chunk-size 131072 --staging-size 4194304 & sleep 7 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_bench.sock --iterations 20 2>&1; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-dispatcher-p2p/runs/iter-1/results/h-main/p2p-warm-s3.json"
+        description: "P2P warm mode 128K chunks seed 3"
+
+  - arm_id: "h-control-negative"
+    conditions:
+      - name: "p2p-cold-seed1"
+        cmd: "rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /tmp/gpu_p2p_bench.sock && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/target/debug/gpu-p2p-server --socket /tmp/gpu_p2p_bench.sock --pci 0000:63:00.0 --mode p2p-cold --chunk-size 131072 --staging-size 4194304 & sleep 7 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_bench.sock --iterations 20 2>&1; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-dispatcher-p2p/runs/iter-1/results/h-control-negative/p2p-cold-s1.json"
+        description: "P2P cold mode 128K chunks seed 1 - per-request GDRCopy pin/unpin"
+
+      - name: "p2p-cold-seed2"
+        cmd: "rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /tmp/gpu_p2p_bench.sock && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/target/debug/gpu-p2p-server --socket /tmp/gpu_p2p_bench.sock --pci 0000:63:00.0 --mode p2p-cold --chunk-size 131072 --staging-size 4194304 & sleep 7 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_bench.sock --iterations 20 2>&1; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-dispatcher-p2p/runs/iter-1/results/h-control-negative/p2p-cold-s2.json"
+        description: "P2P cold mode 128K chunks seed 2"
+
+      - name: "p2p-cold-seed3"
+        cmd: "rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /tmp/gpu_p2p_bench.sock && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/target/debug/gpu-p2p-server --socket /tmp/gpu_p2p_bench.sock --pci 0000:63:00.0 --mode p2p-cold --chunk-size 131072 --staging-size 4194304 & sleep 7 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_bench.sock --iterations 20 2>&1; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-dispatcher-p2p/runs/iter-1/results/h-control-negative/p2p-cold-s3.json"
+        description: "P2P cold mode 128K chunks seed 3"
+
+  - arm_id: "h-robustness"
+    conditions:
+      - name: "bounce-64k-seed1"
+        cmd: "rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /tmp/gpu_p2p_bench.sock && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/target/debug/gpu-p2p-server --socket /tmp/gpu_p2p_bench.sock --pci 0000:63:00.0 --mode bounce --chunk-size 65536 --staging-size 4194304 & sleep 7 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_bench.sock --iterations 20 2>&1; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-dispatcher-p2p/runs/iter-1/results/h-robustness/bounce-64k-s1.json"
+        description: "Bounce mode 64K chunks seed 1"
+
+      - name: "p2p-warm-64k-seed1"
+        cmd: "rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /tmp/gpu_p2p_bench.sock && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/target/debug/gpu-p2p-server --socket /tmp/gpu_p2p_bench.sock --pci 0000:63:00.0 --mode p2p --chunk-size 65536 --staging-size 4194304 & sleep 7 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_bench.sock --iterations 20 2>&1; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-dispatcher-p2p/runs/iter-1/results/h-robustness/p2p-warm-64k-s1.json"
+        description: "P2P warm mode 64K chunks seed 1"
+
+      - name: "bounce-64k-seed2"
+        cmd: "rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /tmp/gpu_p2p_bench.sock && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/target/debug/gpu-p2p-server --socket /tmp/gpu_p2p_bench.sock --pci 0000:63:00.0 --mode bounce --chunk-size 65536 --staging-size 4194304 & sleep 7 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_bench.sock --iterations 20 2>&1; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-dispatcher-p2p/runs/iter-1/results/h-robustness/bounce-64k-s2.json"
+        description: "Bounce mode 64K chunks seed 2"
+
+      - name: "p2p-warm-64k-seed2"
+        cmd: "rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /tmp/gpu_p2p_bench.sock && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/target/debug/gpu-p2p-server --socket /tmp/gpu_p2p_bench.sock --pci 0000:63:00.0 --mode p2p --chunk-size 65536 --staging-size 4194304 & sleep 7 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_bench.sock --iterations 20 2>&1; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-dispatcher-p2p/runs/iter-1/results/h-robustness/p2p-warm-64k-s2.json"
+        description: "P2P warm mode 64K chunks seed 2"
+
+      - name: "bounce-64k-seed3"
+        cmd: "rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /tmp/gpu_p2p_bench.sock && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/target/debug/gpu-p2p-server --socket /tmp/gpu_p2p_bench.sock --pci 0000:63:00.0 --mode bounce --chunk-size 65536 --staging-size 4194304 & sleep 7 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_bench.sock --iterations 20 2>&1; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-dispatcher-p2p/runs/iter-1/results/h-robustness/bounce-64k-s3.json"
+        description: "Bounce mode 64K chunks seed 3"
+
+      - name: "p2p-warm-64k-seed3"
+        cmd: "rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /tmp/gpu_p2p_bench.sock && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/target/debug/gpu-p2p-server --socket /tmp/gpu_p2p_bench.sock --pci 0000:63:00.0 --mode p2p --chunk-size 65536 --staging-size 4194304 & sleep 7 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_bench.sock --iterations 20 2>&1; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-dispatcher-p2p/runs/iter-1/results/h-robustness/p2p-warm-64k-s3.json"
+        description: "P2P warm mode 64K chunks seed 3"

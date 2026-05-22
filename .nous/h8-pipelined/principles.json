@@ -1,0 +1,89 @@
+{
+  "principles": [
+    {
+      "id": "RP-1",
+      "statement": "cudaMemcpyAsync does not reliably achieve true async execution when the source buffer is SPDK hugepage memory registered post-hoc via cudaHostRegister; the overhead of registration and stream management (~200 microseconds per transfer) can exceed any overlap benefit for 4 MiB / 32-chunk workloads. In contrast, cudaHostAlloc-allocated memory with SPDK registration (create_spdk_dma_buffer_from_cuda_host_alloc) enables true async execution.",
+      "confidence": "high",
+      "regime": "4 MiB / 32-chunk NVMe-to-GPU transfers via bounce buffer. The synchronous fallback behavior is specific to SPDK hugepage memory registered via cudaHostRegister. cudaHostAlloc memory does not exhibit this fallback.",
+      "evidence": [
+        "iteration-1-h-main-refuted",
+        "iteration-2-h-main-confirmed"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 2,
+      "mechanism": "CUDA's async DMA path requires memory that CUDA's memory manager tracks from allocation time (cudaHostAlloc). SPDK hugepages allocated via spdk_dma_zmalloc are physically pinned but not in CUDA's memory map. cudaHostRegister attempts to add them retroactively, but CUDA may fall back to synchronous copies when the memory was not originally allocated through CUDA. cudaHostAlloc memory is CUDA-native pinned from birth, enabling the GPU DMA engine to use it directly for async copies.",
+      "applicability_bounds": "Confirmed on NVIDIA GPU with CUDA 13.x. The behavior difference between cudaHostRegister and cudaHostAlloc for async copies may vary by GPU architecture and CUDA version, but the principle (native pinned > post-registered) should hold broadly.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-2",
+      "statement": "Non-pipelined bounce-buffer latency for 4 MiB NVMe-to-GPU transfers is highly dependent on system state, particularly hugepage availability for SPDK DMA. When 1 GiB hugepages are exhausted (SPDK uses software fallback), bounce latency increases from ~1.87ms to ~12-15ms. Experiments must control for hugepage state, or use within-experiment relative comparisons.",
+      "confidence": "high",
+      "regime": "4 MiB NVMe-to-GPU bounce transfers via SPDK. Applies when hugepage memory is contended by concurrent SPDK processes (e.g., certus-server).",
+      "evidence": [
+        "iteration-1-h-control-negative",
+        "iteration-2-h-control-negative"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 2,
+      "mechanism": "SPDK uses 1 GiB hugepages (DPDK EAL) for DMA-safe memory pools. When hugepages are unavailable (EAL: No free 1048576 kB hugepages), DPDK falls back to smaller allocation granularity with higher overhead. NVMe reads into non-hugepage buffers require more IOMMU translations and cache misses, increasing latency significantly.",
+      "applicability_bounds": "Applies when multiple SPDK-based processes are running concurrently. On systems with sufficient hugepages (e.g., 16 GiB allocated), contention is unlikely. On this hardware with 4 GiB total (4 x 1 GiB), certus-server consumes 2, leaving only 2 for experiment servers.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-3",
+      "statement": "P2P warm mode (pre-pinned GDRCopy BAR1 staging, 32 x 128 KiB chunks) shows high cross-run variance (1.07-10.58ms per individual transfer) and cross-seed variance (1.93ms vs 5.04ms avg). The median latency approaches 1-2ms when system is uncongested, matching prior observations. Its advantage over pipelined bounce depends on system state.",
+      "confidence": "medium",
+      "regime": "4 MiB NVMe-to-GPU P2P warm transfers. High variance is intrinsic to GDRCopy BAR1 path and PCIe topology.",
+      "evidence": [
+        "iteration-1-h-robustness",
+        "iteration-2-h-robustness"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 2,
+      "mechanism": "GDRCopy BAR1 staging requires GPU memory pinned through nvidia_p2p_get_pages kernel API. The staging chunks are pre-pinned (32 buffers pre-allocated at server startup). Per-request overhead is just NVMe DMA into BAR1 + D2D copy, both of which are fast when uncongested. High variance likely comes from NUMA effects, PCIe bandwidth sharing with other DMA traffic, and GPU internal scheduling.",
+      "applicability_bounds": "Applies when both nvidia-peermem and gdrdrv kernel modules are loaded. P2P warm performance degrades on systems where NVMe and GPU share the same PCIe root complex due to bandwidth contention. The 1.27-1.34ms observed in iter-1 and 1.93ms in iter-2 seed-2 represent uncongested performance.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-4",
+      "statement": "Pipelined bounce using cudaHostAlloc-allocated buffers (CUDA-native pinned, registered with SPDK via spdk_mem_register) achieves true async cudaMemcpyAsync execution, enabling double-buffered overlap of NVMe DMA and H2D copy. This yields 2.4-3x lower latency than non-pipelined bounce and approaches P2P warm performance for 4 MiB / 32-chunk workloads.",
+      "confidence": "high",
+      "regime": "4 MiB transfers with 128 KiB chunks on NVMe + GPU systems where NVMe and GPU use independent PCIe controllers. Requires cudaHostAlloc (not cudaHostRegister on SPDK hugepages, which falls back to synchronous). Buffers must be pre-allocated at startup to eliminate per-request overhead.",
+      "evidence": [
+        "iteration-2-h-main",
+        "iteration-1-h-main-refuted"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 2,
+      "mechanism": "cudaHostAlloc allocates pinned host memory natively managed by CUDA's DMA engine. When spdk_mem_register is called on this memory (via create_spdk_dma_buffer_from_cuda_host_alloc in dma.rs:253), SPDK can DMA NVMe data into it. cudaMemcpyAsync with this memory is guaranteed to execute truly asynchronously on the GPU DMA engine \u2014 no CPU involvement or internal staging. Double-buffering with 2 such buffers allows chunk[i] H2D copy to overlap with chunk[i+1] NVMe read, as both use independent PCIe hardware. Stream and buffers pre-allocated once at startup eliminate per-request overhead that dominated iter-1's failed approach.",
+      "applicability_bounds": "Requires CUDA device with independent PCIe lanes from NVMe. If NVMe and GPU share a PCIe root complex, DMA and H2D would contend for the same bus \u2014 in that topology, pipeline benefit would be reduced. SPDK must successfully call spdk_mem_register on the cudaHostAlloc pointer (requires nvidia-peermem). Does not apply when using cudaHostRegister on SPDK hugepages (iter-1's failed approach).",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-5",
+      "statement": "Pipelined bounce-v2 (cudaHostAlloc + SPDK + double-buffer) achieves 2.4-3x lower latency than non-pipelined bounce on the same hardware under the same system state. This speedup corresponds to near-complete overlap of the NVMe read and H2D copy phases, consistent with the two phases using independent PCIe hardware engines.",
+      "confidence": "high",
+      "regime": "4 MiB / 32 x 128 KiB chunk transfers, bounce-buffer path, same system state within a single experiment run.",
+      "evidence": [
+        "iteration-2-h-main",
+        "iteration-2-h-control-negative"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 2,
+      "mechanism": "With 32 chunks and double-buffering, the pipeline achieves steady-state overlap: for N chunks, total time \u2248 T_read_one_chunk + (N-1) * max(T_read, T_copy) + T_copy_last. Since T_read \u2248 T_copy (both ~0.3ms per chunk under hugepage fallback), the speedup approaches 2x in ideal conditions. The observed 2.4-3x speedup suggests T_copy > T_read slightly (GPU H2D is the bottleneck), enabling better than 2x overlap. The pre-allocated buffers and reused stream eliminate the ~200 us per-transfer overhead that dominated iter-1.",
+      "applicability_bounds": "Valid when NVMe and GPU PCIe engines are independent. For 4 MiB transfers with 128 KiB chunks, the pipeline has 32 iterations \u2014 long enough for steady-state overlap to dominate startup cost. For very small transfers (< 4 chunks), pipeline overhead may not be amortized.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    }
+  ]
+}

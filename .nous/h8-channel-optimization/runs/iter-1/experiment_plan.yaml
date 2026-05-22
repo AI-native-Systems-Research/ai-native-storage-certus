@@ -1,0 +1,55 @@
+metadata:
+  iteration: 1
+  bundle_ref: "runs/iter-1/bundle.yaml"
+  description: >
+    Dispatcher v1 cold lookup optimization: test combined overhead reduction
+    (AtomicBool GPU state check + batched stream sync at QD=32 + pre-allocated
+    DmaBuffer wrappers) against the 3250 MB/s reference ceiling.
+
+setup:
+  - cmd: "ln -sf /home/nara/certus/ai-native-storage-certus/deps/spdk-build deps/spdk-build && ln -sf /home/nara/certus/ai-native-storage-certus/deps/spdk deps/spdk"
+    description: "Symlink SPDK deps into worktree"
+  - cmd: "cargo build -p dispatcher-v1"
+    description: "Build baseline (verifies compilation)"
+
+arms:
+  - arm_id: "h-main"
+    conditions:
+      - name: "baseline-seed1"
+        cmd: "git checkout -- . && RUSTFLAGS='-L /usr/local/lib' cargo bench -p dispatcher-v1 --features hardware-test --bench dispatcher_hw_benchmark 2>&1 | tee /home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/results/h-main/baseline-s1.txt"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/results/h-main/baseline-s1.txt"
+        inputs: []
+      - name: "treatment-seed1"
+        cmd: "git checkout -- . && git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/patches/h-main.patch && RUSTFLAGS='-L /usr/local/lib' cargo bench -p dispatcher-v1 --features hardware-test --bench dispatcher_hw_benchmark 2>&1 | tee /home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/results/h-main/treatment-s1.txt"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/results/h-main/treatment-s1.txt"
+        inputs: []
+      - name: "baseline-seed2"
+        cmd: "git checkout -- . && RUSTFLAGS='-L /usr/local/lib' cargo bench -p dispatcher-v1 --features hardware-test --bench dispatcher_hw_benchmark 2>&1 | tee /home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/results/h-main/baseline-s2.txt"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/results/h-main/baseline-s2.txt"
+        inputs: []
+      - name: "treatment-seed2"
+        cmd: "git checkout -- . && git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/patches/h-main.patch && RUSTFLAGS='-L /usr/local/lib' cargo bench -p dispatcher-v1 --features hardware-test --bench dispatcher_hw_benchmark 2>&1 | tee /home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/results/h-main/treatment-s2.txt"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/results/h-main/treatment-s2.txt"
+        inputs: []
+
+  - arm_id: "h-ablation"
+    conditions:
+      - name: "baseline-seed1"
+        cmd: "git checkout -- . && RUSTFLAGS='-L /usr/local/lib' cargo bench -p dispatcher-v1 --features hardware-test --bench dispatcher_hw_benchmark 2>&1 | tee /home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/results/h-ablation/baseline-s1.txt"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/results/h-ablation/baseline-s1.txt"
+        inputs: []
+      - name: "treatment-seed1"
+        cmd: "git checkout -- . && git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/patches/h-ablation.patch && RUSTFLAGS='-L /usr/local/lib' cargo bench -p dispatcher-v1 --features hardware-test --bench dispatcher_hw_benchmark 2>&1 | tee /home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/results/h-ablation/treatment-s1.txt"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/results/h-ablation/treatment-s1.txt"
+        inputs: []
+
+  - arm_id: "h-control-negative"
+    conditions:
+      - name: "baseline-seed1"
+        cmd: "git checkout -- . && RUSTFLAGS='-L /usr/local/lib' cargo bench -p dispatcher-v1 --features hardware-test --bench dispatcher_hw_benchmark 2>&1 | tee /home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/results/h-control-negative/baseline-s1.txt"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/results/h-control-negative/baseline-s1.txt"
+        inputs: []
+      - name: "treatment-seed1"
+        cmd: "git checkout -- . && git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/patches/h-control-negative.patch && RUSTFLAGS='-L /usr/local/lib' cargo bench -p dispatcher-v1 --features hardware-test --bench dispatcher_hw_benchmark 2>&1 | tee /home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/results/h-control-negative/treatment-s1.txt"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-channel-optimization/runs/iter-1/results/h-control-negative/treatment-s1.txt"
+        inputs: []

@@ -1,0 +1,84 @@
+{
+  "principles": [
+    {
+      "id": "RP-5",
+      "action": "update",
+      "field": "statement",
+      "new_statement": "P2P direct SSD\u2192GPU reads with persistently pre-pinned GPU memory achieve 1.4x lower first-hit SSD latency (sequential, QD=1) and up to 27.3x lower latency (batch QD=32) than bounce-buffer transfers for 4 MiB objects. Sequential P2P alone is a modest improvement; the major gain requires combining P2P with NVMe parallelism.",
+      "reason": "iter-2 data shows sequential P2P is only 1.4x (not 2x) over bounce-seq at this object size; the 27.3x result from RP-8 covers the combined P2P+batch regime. RP-5 remains authoritative for sequential-only P2P.",
+      "superseded_by_partial": "RP-8 for batch+P2P regime"
+    },
+    {
+      "id": "RP-6",
+      "statement": "Multi-iteration SSD-tier benchmarks that compare paths with different memory-tier promotion policies produce invalid comparisons: the bounce path's lower multi-iteration average reflects DRAM caching (not faster SSD transfer), while the P2P no-promotion path's higher multi-iteration average reflects repeated cold SSD reads (by design).",
+      "confidence": "high",
+      "regime": "Any multi-iteration benchmark where one path promotes to memory-tier and another does not",
+      "evidence": [
+        "iteration-1-h-main",
+        "iteration-1-h-robustness"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 1,
+      "mechanism": "In dispatcher v1's bench_lookup_latency, the benchmark populates objects to force eviction, then measures N iterations of cold lookups. The bounce path calls mt.insert() and dm.create_memory_tier_entry() after SSD read, so iteration 2-N find the entry in memory-tier (~343 us). The P2P path leaves dispatch-map as BlockDevice, so all N iterations hit SSD (~9272 us). With N=20, bounce averages ~1299 us (dominated by 19 DRAM hits) while P2P averages ~7984 us (all SSD). This 6.1x apparent regression is an artifact of the measurement regime, not a true performance difference on the SSD read task.",
+      "applicability_bounds": "Applies whenever comparing storage paths with different caching side-effects in the same benchmark. The solution is to use N=1 (first-hit only) for fair SSD path comparison, or ensure both paths have identical caching behavior before comparing multi-iteration averages.",
+      "superseded_by": null,
+      "category": "methodology",
+      "status": "active"
+    },
+    {
+      "id": "RP-7",
+      "statement": "Caching prepare_memory_for_spdk results (keyed by 64-byte CUDA IPC handle) successfully eliminates per-lookup P2P overhead. The DmaBuffer cache works correctly: prepare_memory_for_spdk is called once per unique handle and subsequent lookups reuse the cached registration. However, eliminating this overhead does not make P2P competitive when PCIe topology causes P2P DMA to be inherently slower than bounce.",
+      "confidence": "high",
+      "regime": "4 MiB GPU buffers; single lookup_tensor reused across all benchmark iterations; certus-server with dispatcher v1",
+      "evidence": [
+        "iteration-1-h-main"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 1,
+      "mechanism": "The gpu_dma_cache HashMap (keyed by [u8; 64] CUDA IPC handle) correctly caches the SPDK-registered DmaBuffer. Server log confirmed prepare_memory_for_spdk was called exactly once (4194304 bytes pinned). Cache hit rate was 100% for subsequent lookups. The ~50 \u03bcs per-lookup overhead from prior h8-v1-vs-p2p experiment was eliminated. But even with overhead eliminated, PCIe topology dominates.",
+      "applicability_bounds": "Caching eliminates software overhead but cannot overcome hardware topology constraints. Use RP-5 to first verify PCIe co-location before pursuing P2P optimization.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-8",
+      "action": "add",
+      "statement": "P2P direct SSD\u2192GPU DMA combined with QD=32 parallel NVMe reads (BatchSubmit+ReadAsync) achieves 27.3x lower SSD-tier latency than the bounce-seq baseline for 4 MiB objects \u2014 777 \u00b5s vs 21,247 \u00b5s \u2014 reducing SSD-tier latency below memory-tier gRPC path latency.",
+      "confidence": "high",
+      "regime": "4 MiB objects, 32\u00d7128KiB reads submitted simultaneously via BatchSubmit+ReadAsync (QD=32), SPDK-registered GPU BAR1 DmaBuffer, single NVMe controller, debug build",
+      "evidence": [
+        "iter-2-h8-v1-pinned"
+      ],
+      "category": "domain",
+      "mechanism": "Combining two independent speedups: (1) P2P eliminates 32\u00d7cudaMemcpy(128KiB, H2D) per lookup (~100-130us total) by writing directly into GPU BAR1 via NVMe DMA; (2) QD=32 parallelism submits all 32 NVMe read commands before the SPDK reactor processes them, enabling full NVMe pipeline utilization. The compound effect exceeds the sum of parts: bounce-seq=21ms, P2P-seq=15ms (1.4x), P2P-batch=0.78ms (27.3x over baseline, 19.5x over P2P-seq). The batch parallelism dominates \u2014 from 15ms to 0.78ms is a 19.5x gain from QD=32 alone.",
+      "applicability_bounds": "Applies when: NVMe controller supports sufficient outstanding commands; ClientChannels pre-allocated (batch_channels stored in DataDrive, connected once during initialize); P2P hardware path available. Does NOT apply when: NVMe DMA queue exhaustion (rc=-12 ENOMEM) \u2014 bounce+batch fails 80% of the time; object size fits in a single NVMe read (sub-128KiB); no P2P registration."
+    },
+    {
+      "id": "RP-9",
+      "action": "add",
+      "statement": "For 4 MiB objects, P2P+Batch (QD=32) SSD-tier latency (777 \u00b5s) is lower than memory-tier gRPC path latency (2289 \u00b5s), inverting the expected memory>SSD hierarchy \u2014 at large object sizes the gRPC transport + DMA setup overhead for the memory-tier path can exceed fully-pipelined NVMe read time.",
+      "confidence": "medium",
+      "regime": "4 MiB objects, certus-server v1 with memory-tier enabled, gRPC transport, P2P batch path active",
+      "evidence": [
+        "iter-2-h8-v1-pinned"
+      ],
+      "category": "domain",
+      "mechanism": "Memory-tier latency inflated (2289 \u00b5s) vs conditions A/B (~850 \u00b5s) when P2P batch path is active. Likely causes: (1) prepare_memory_for_spdk registering GPU memory into SPDK memory registrar affects DPDK allocator pressure, slowing DRAM DMA path; OR (2) CPU time managing GDRCopy mappings contends with batch NVMe submission path. The SSD path at 777 \u00b5s bypasses memory-tier entirely, revealing that at 4 MiB scale gRPC transport + DMA setup for DRAM can exceed NVMe read time when NVMe reads are fully pipelined.",
+      "applicability_bounds": "This inversion likely only holds at large object sizes (>=4 MiB) with QD>=32 NVMe parallelism. At 4 KiB, SSD is still 2.6x slower than memory (control-negative confirms). The memory-tier latency inflation may be specific to the gRPC frame handling for 4 MiB payloads."
+    },
+    {
+      "id": "RP-10",
+      "action": "add",
+      "statement": "Bounce+Batch (QD=4, ring buffer) is unreliable \u2014 80% of 4 MiB batch reads fail with ENOMEM (rc=-12) because the NVMe DMA command queue is exhausted by 4 concurrent ReadAsync commands using discontiguous bounce-buffer memory requiring multiple SGL entries.",
+      "confidence": "high",
+      "regime": "4 MiB objects, 4 concurrent ReadAsync(128KiB) to same NVMe controller via bounce ring buffers",
+      "evidence": [
+        "iter-2-h8-v1-pinned"
+      ],
+      "category": "domain",
+      "mechanism": "rc=-12 (ENOMEM) from spdk_nvme_ns_cmd_read indicates the NVMe submission queue is full at command submission. P2P-batch (QD=32) does NOT fail: GPU BAR1 DmaBuffer sub-views are contiguous physical addresses requiring 1 SGL entry per 128KiB read. Bounce ring buffers use hugepage-allocated memory that may be physically discontiguous, requiring more SGL entries per command and exhausting the queue at lower QD.",
+      "applicability_bounds": "Failure rate is 80% at QD=4. Fix options: use P2P path (no ring buffers), reduce QD to 1 (defeats purpose), or pre-allocate physically contiguous DMA bounce buffers."
+    }
+  ]
+}

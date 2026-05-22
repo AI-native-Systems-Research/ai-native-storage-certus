@@ -1,0 +1,54 @@
+   Compiling gpu-services v0.1.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/gpu-services/v0)
+   Compiling interfaces v0.1.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/interfaces)
+   Compiling logger v0.1.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/logger/v1)
+   Compiling spdk-env v0.1.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/spdk-env)
+   Compiling extent-manager-v2 v0.1.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/extent-manager/v2)
+   Compiling memory-tier v0.1.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/memory-tier/v0)
+   Compiling block-device-spdk-nvme v0.1.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/block-device-spdk-nvme/v1)
+   Compiling block-device-spdk-nvme-v2 v0.2.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/block-device-spdk-nvme/v2)
+   Compiling dispatcher-v1 v1.0.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/dispatcher/v1)
+    Finished `bench` profile [optimized] target(s) in 3.73s
+     Running benches/dispatcher_hw_benchmark.rs (/tmp/certus-target/release/deps/dispatcher_hw_benchmark-6ae13d41ac1db2e0)
+Initializing hardware stack...
+[spdk-env] Pre-flight checks passed. Initializing SPDK/DPDK environment...
+[spdk-env] SPDK/DPDK environment initialized. Enumerating devices...
+[spdk-env] Device enumeration complete. Found 7 device(s).
+  NVMe devices: ["0000:61:00.0", "0000:62:00.0", "0000:63:00.0", "0000:64:00.0", "0000:c1:00.0", "0000:c2:00.0", "0000:c3:00.0"]
+  GPU: 2 device(s)
+    [0] NVIDIA A30 (24164 MiB)
+  Memory-tier: 512 MiB pool
+block-device-spdk-nvme v2: controller ptr = 0x20007fffb140, numa = 0
+block-device-spdk-nvme v2: controller ptr = 0x20007fccf440, numa = 0
+block-device-spdk-nvme v2: controller ptr = 0x20007f9a4240, numa = 0
+block-device-spdk-nvme v2: controller ptr = 0x20007f679440, numa = 0
+block-device-spdk-nvme v2: controller ptr = 0x20007f355440, numa = 0
+block-device-spdk-nvme v2: controller ptr = 0x20007f031440, numa = 0
+
+=== Dispatcher HW Benchmark: Warm & Cold Lookup ===
+  warmup:   5 iterations
+  measured: 50 iterations
+  pool:     512 MiB
+
+  benchmarking 128 KiB (cold) ... done
+  benchmarking 128 KiB (warm) ... done
+  benchmarking 512 KiB (cold) ... done
+  benchmarking 512 KiB (warm) ... done
+  benchmarking 1024 KiB (cold) ... done
+  benchmarking 1024 KiB (warm) ... done
+  benchmarking 4096 KiB (cold) ... done
+  benchmarking 4096 KiB (warm) ... done
+  benchmarking 16384 KiB (cold) ... done
+  benchmarking 16384 KiB (warm) ... done
+
+--- Results Summary ---
+               cold_128KiB |      128 KiB | mean    1065.1 us | min     166.9 us | p50     174.7 us | p99    9991.8 us | max    9991.8 us |    117.4 MB/s
+               warm_128KiB |      128 KiB | mean      19.7 us | min      19.4 us | p50      19.6 us | p99      21.4 us | max      21.4 us |   6350.1 MB/s
+               cold_512KiB |      512 KiB | mean    2469.6 us | min     510.2 us | p50     513.5 us | p99    9974.5 us | max    9974.5 us |    202.5 MB/s
+               warm_512KiB |      512 KiB | mean      50.6 us | min      50.2 us | p50      50.4 us | p99      52.5 us | max      52.5 us |   9882.5 MB/s
+              cold_1024KiB |     1024 KiB | mean    3425.4 us | min     661.1 us | p50    3304.9 us | p99   10246.6 us | max   10246.6 us |    291.9 MB/s
+              warm_1024KiB |     1024 KiB | mean      92.5 us | min      92.1 us | p50      92.4 us | p99      94.7 us | max      94.7 us |  10814.3 MB/s
+              cold_4096KiB |     4096 KiB | mean    4116.0 us | min    1006.4 us | p50    4979.9 us | p99   15999.1 us | max   15999.1 us |    971.8 MB/s
+              warm_4096KiB |     4096 KiB | mean    1202.7 us | min     239.9 us | p50     338.8 us | p99   24283.9 us | max   24283.9 us |   3325.9 MB/s
+             cold_16384KiB |    16384 KiB | mean   11756.0 us | min    2730.5 us | p50   11832.8 us | p99   24019.1 us | max   24019.1 us |   1361.0 MB/s
+             warm_16384KiB |    16384 KiB | mean    4529.9 us | min     750.9 us | p50    1106.0 us | p99   28472.2 us | max   28472.2 us |   3532.1 MB/s
+

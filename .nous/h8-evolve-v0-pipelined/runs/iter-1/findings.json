@@ -1,0 +1,33 @@
+{
+  "iteration": 1,
+  "bundle_ref": "runs/iter-1/bundle.yaml",
+  "arms": [
+    {
+      "arm_type": "h-main",
+      "predicted": "True pipelined v0 (cudaMemcpyAsync + double-buffered cudaHostAlloc) will reduce SSD-tier lookup latency compared to sequential v0. GPU copy time (~200 us) is fully hidden behind NVMe reads, yielding ~194 us savings.",
+      "observed": "Baseline sequential: 19,501.8 us/obj (0.22 GB/s). Pipelined treatment: 9,659.3 us/obj (0.43 GB/s). Speedup: 2.02x. Latency reduction: 9,842.5 us. The improvement far exceeds the predicted ~194 us from hiding the synchronous cudaMemcpy alone — the speedup is dominated by eliminating per-chunk DmaBuffer allocation (32x DmaBuffer::new calls) and replacing a single large synchronous cudaMemcpy (~200 us) with concurrent async copies distributed across the read timeline.",
+      "status": "CONFIRMED",
+      "error_type": "magnitude",
+      "diagnostic_note": "Speedup is larger than predicted (~10 ms vs ~194 us expected). The mechanism is confirmed but the dominant savings come from two sources: (1) elimination of large synchronous cudaMemcpy (~200 us) via per-chunk async copies that run concurrently with NVMe reads, and (2) elimination of the per-chunk large SPDK DmaBuffer::new allocation (32x 131072-byte allocs per lookup in sequential path). The cudaHostAlloc ping-pong buffers are allocated once and reused. Total observed saving ~9,842 us suggests the per-allocation overhead of DmaBuffer::new is ~300 us/call × 32 = ~9,600 us, dwarfing the GPU copy hiding benefit."
+    },
+    {
+      "arm_type": "h-control-negative",
+      "predicted": "For a 4 KiB object (1 segment), pipelined v0 will show no improvement over sequential — identical within noise, since there is no opportunity to overlap read N with copy N-1.",
+      "observed": "Baseline sequential 4 KiB: 1,749.0 us/obj. Pipelined treatment 4 KiB: 1,466.4 us/obj. Speedup: 1.19x (16% faster). Prediction of no improvement is REFUTED — there IS a small but consistent improvement even for single-chunk objects.",
+      "status": "REFUTED",
+      "error_type": "direction",
+      "diagnostic_note": "The unexpected improvement for single-chunk case reveals that the pipelined path provides overhead reduction even without overlap: (1) Pre-allocated cudaHostAlloc buffer avoids per-call DmaBuffer::new allocation overhead, (2) cudaMemcpyAsync is potentially faster than cudaMemcpy even for single copies when the GPU copy engine is available (no CPU synchronization point). The savings (~283 us) are proportionally smaller than the 4 MiB case confirming overlap is the primary mechanism for large objects, but the allocation path difference affects even single-chunk paths."
+    },
+    {
+      "arm_type": "h-robustness",
+      "predicted": "P2P direct DMA (NVMe → GPU BAR1, no host bounce) will show lower SSD-tier lookup latency than sequential v0 for 4 MiB values. NODE-level PCIe topology should provide meaningful advantage by eliminating H2D copy.",
+      "observed": "Sequential v0 baseline: 19,501.8 us/obj. P2P treatment: 20,135.7 us/obj. P2P is 3% SLOWER than sequential baseline, not faster. The predicted advantage from eliminating the H2D copy was not realized.",
+      "status": "REFUTED",
+      "error_type": "direction",
+      "diagnostic_note": "P2P via GPU BAR1 (NVMe → GPU BAR1 direct DMA, managed by nvidia-peermem/gdrdrv) does not improve latency for NODE-level topology (0000:64:00.0 and GPU0 both on NUMA node 0). The BAR1 write overhead for 32 × 128 KiB PCIe writes to GPU memory is comparable to or slightly exceeds the cost of system-DRAM writes + H2D cudaMemcpy. This aligns with h8-v0-pinned experiment which also found P2P slower. The NVMe read latency (not the H2D copy) is the dominant component, and BAR1 DMA targets are slower than system DRAM for sequential write patterns. vtophys resolution for GPU BAR1 sub-buffer views appears to have worked correctly (no I/O errors)."
+    }
+  ],
+  "experiment_valid": true,
+  "discrepancy_analysis": "h-main CONFIRMED with larger-than-expected speedup (2x vs ~1.06x predicted). The dominant mechanism is elimination of 32x per-chunk SPDK DmaBuffer::new allocations (reuse of pre-allocated cudaHostAlloc buffers), compounding with GPU copy hiding. h-control-negative REFUTED: single-chunk case shows ~16% improvement from buffer pre-allocation alone. h-robustness REFUTED: P2P BAR1 DMA is not faster than host-bounce for NVMe-to-GPU at NODE level — BAR1 write bandwidth is the bottleneck.",
+  "dominant_component_pct": null
+}

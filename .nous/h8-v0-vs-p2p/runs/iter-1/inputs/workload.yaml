@@ -1,0 +1,7 @@
+bench_object_size: 4194304    # 4 MiB
+bench_num_objects: 10
+bench_iterations: 20
+bench_object_size_small: 1048576  # 1 MiB for h-robustness arm
+server_addr: "localhost:50051"
+pci_addr: "0000:63:00.0"
+dispatcher_version: "v0"

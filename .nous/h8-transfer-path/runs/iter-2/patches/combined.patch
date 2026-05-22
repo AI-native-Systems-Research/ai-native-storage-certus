@@ -1,0 +1,193 @@
+diff --git a/components/gpu-services/v0/src/bin/p2p_server.rs b/components/gpu-services/v0/src/bin/p2p_server.rs
+index a54c740..1f8e972 100644
+--- a/components/gpu-services/v0/src/bin/p2p_server.rs
++++ b/components/gpu-services/v0/src/bin/p2p_server.rs
+@@ -61,6 +61,10 @@ struct Cli {
+     /// Serve one client then exit
+     #[arg(long)]
+     once: bool,
++
++    /// Skip NVMe read phase (for copy-only ablation; buffers contain stale/zero data)
++    #[arg(long)]
++    skip_nvme: bool,
+ }
+ 
+ struct ServerContext {
+@@ -375,6 +379,7 @@ fn handle_bounce(
+     stream: &mut UnixStream,
+     ctx: &ServerContext,
+     chunk_size: usize,
++    skip_nvme: bool,
+ ) -> Result<String, String> {
+     let (ipc_handle_bytes, size) = parse_client_payload(stream)?;
+     let client_dev_ptr = open_ipc_handle(&ipc_handle_bytes)?;
+@@ -395,14 +400,19 @@ fn handle_bounce(
+         }
+     }
+ 
+-    // Concurrent NVMe reads into all chunks.
+-    if let Err(e) = do_chunked_read(ctx, &host_bufs, 0, chunk_size) {
+-        drop(host_bufs);
+-        unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
+-        return Err(e);
++    // Concurrent NVMe reads into all chunks (skipped in ablation mode).
++    let read_start = std::time::Instant::now();
++    if !skip_nvme {
++        if let Err(e) = do_chunked_read(ctx, &host_bufs, 0, chunk_size) {
++            drop(host_bufs);
++            unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
++            return Err(e);
++        }
+     }
++    let read_us = if skip_nvme { 0u128 } else { read_start.elapsed().as_micros() };
+ 
+     // cudaMemcpy H2D per chunk at correct offset.
++    let copy_start = std::time::Instant::now();
+     for (i, buf) in host_bufs.iter().enumerate() {
+         let offset = i * chunk_size;
+         let this_chunk = std::cmp::min(chunk_size, size - offset);
+@@ -425,11 +435,15 @@ fn handle_bounce(
+             ));
+         }
+     }
++    let copy_us = copy_start.elapsed().as_micros();
+ 
+     drop(host_bufs);
+     unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
+ 
+-    Ok(format!("OK {} bytes (bounce, {} chunks)", size, num_chunks))
++    Ok(format!(
++        "OK {} bytes (bounce, {} chunks) read_us={} copy_us={}",
++        size, num_chunks, read_us, copy_us
++    ))
+ }
+ 
+ /// P2P mode with pre-pinned chunk pool: NVMe → GPU staging chunks → D2D → client.
+@@ -437,6 +451,7 @@ fn handle_p2p(
+     stream: &mut UnixStream,
+     ctx: &ServerContext,
+     pool: &ChunkPool,
++    skip_nvme: bool,
+ ) -> Result<String, String> {
+     let (ipc_handle_bytes, size) = parse_client_payload(stream)?;
+ 
+@@ -457,13 +472,18 @@ fn handle_p2p(
+         .map(|b| Arc::clone(&b.dma_buf))
+         .collect();
+ 
+-    // Concurrent NVMe reads into pre-pinned GPU staging chunks.
+-    if let Err(e) = do_chunked_read(ctx, &dma_bufs, 0, pool.chunk_size) {
+-        unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
+-        return Err(e);
++    // Concurrent NVMe reads into pre-pinned GPU staging chunks (skipped in ablation mode).
++    let read_start = std::time::Instant::now();
++    if !skip_nvme {
++        if let Err(e) = do_chunked_read(ctx, &dma_bufs, 0, pool.chunk_size) {
++            unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
++            return Err(e);
++        }
+     }
++    let read_us = if skip_nvme { 0u128 } else { read_start.elapsed().as_micros() };
+ 
+     // D2D copy per chunk: staging chunk → client at correct offset.
++    let copy_start = std::time::Instant::now();
+     for (i, staging_buf) in pool.buffers[..num_chunks].iter().enumerate() {
+         let offset = i * pool.chunk_size;
+         let this_chunk = std::cmp::min(pool.chunk_size, size - offset);
+@@ -483,10 +503,14 @@ fn handle_p2p(
+             ));
+         }
+     }
++    let copy_us = copy_start.elapsed().as_micros();
+ 
+     unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
+ 
+-    Ok(format!("OK {} bytes (p2p, {} chunks)", size, num_chunks))
++    Ok(format!(
++        "OK {} bytes (p2p, {} chunks) read_us={} copy_us={}",
++        size, num_chunks, read_us, copy_us
++    ))
+ }
+ 
+ /// P2P cold mode: per-request GDRCopy pin/unpin (baseline, measures setup overhead).
+@@ -641,10 +665,10 @@ fn main() {
+             Ok((mut stream, _)) => {
+                 let result = match cli.mode {
+                     TransferMode::Bounce => {
+-                        handle_bounce(&mut stream, &ctx, cli.chunk_size)
++                        handle_bounce(&mut stream, &ctx, cli.chunk_size, cli.skip_nvme)
+                     }
+                     TransferMode::P2p => {
+-                        handle_p2p(&mut stream, &ctx, chunk_pool.as_ref().unwrap())
++                        handle_p2p(&mut stream, &ctx, chunk_pool.as_ref().unwrap(), cli.skip_nvme)
+                     }
+                     TransferMode::P2pCold => {
+                         handle_p2p_cold(&mut stream, &ctx, cli.chunk_size)
+diff --git a/components/gpu-services/v0/tests/gpu_client_p2p.py b/components/gpu-services/v0/tests/gpu_client_p2p.py
+index c55f920..e92bfbd 100755
+--- a/components/gpu-services/v0/tests/gpu_client_p2p.py
++++ b/components/gpu-services/v0/tests/gpu_client_p2p.py
+@@ -20,6 +20,7 @@ Payload format (single line, base64-encoded):
+     cuda_ipc_handle[64] + size_le[8] = 72 bytes
+ """
+ 
++import re
+ import sys
+ import time
+ import base64
+@@ -41,6 +42,15 @@ def load_cudart():
+     return None
+ 
+ 
++def parse_phase_us(response):
++    """Extract read_us and copy_us from server response string. Returns (read_us, copy_us) or (None, None)."""
++    m_read = re.search(r'read_us=(\d+)', response)
++    m_copy = re.search(r'copy_us=(\d+)', response)
++    if m_read and m_copy:
++        return int(m_read.group(1)), int(m_copy.group(1))
++    return None, None
++
++
+ def do_transfer(socket_path, b64):
+     """Connect, send payload, receive response. Returns (response_str, elapsed_sec)."""
+     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+@@ -124,6 +134,8 @@ def main():
+                 sys.exit(1)
+ 
+             latencies = []
++            read_us_list = []
++            copy_us_list = []
+             for i in range(iterations):
+                 resp, elapsed = do_transfer(socket_path, b64)
+                 if not resp.startswith("OK"):
+@@ -131,6 +143,10 @@ def main():
+                     cuda.cudaFree(dev_ptr)
+                     sys.exit(1)
+                 latencies.append(elapsed)
++                r_us, c_us = parse_phase_us(resp)
++                if r_us is not None:
++                    read_us_list.append(r_us)
++                    copy_us_list.append(c_us)
+ 
+             size_mb = size / (1024 * 1024)
+             total_time = sum(latencies)
+@@ -148,6 +164,19 @@ def main():
+             print(f"  Min latency:   {min_lat*1000:.2f} ms", file=sys.stderr)
+             print(f"  Max latency:   {max_lat*1000:.2f} ms", file=sys.stderr)
+             print(f"  Total data:    {total_mb:.1f} MB in {total_time:.3f} s", file=sys.stderr)
++            if read_us_list:
++                avg_read = sum(read_us_list) / len(read_us_list)
++                avg_copy = sum(copy_us_list) / len(copy_us_list)
++                min_read = min(read_us_list)
++                max_read = max(read_us_list)
++                min_copy = min(copy_us_list)
++                max_copy = max(copy_us_list)
++                print(f"  --- Phase breakdown (server-side) ---", file=sys.stderr)
++                print(f"  Avg read_us:   {avg_read:.0f} us (min={min_read} max={max_read})", file=sys.stderr)
++                print(f"  Avg copy_us:   {avg_copy:.0f} us (min={min_copy} max={max_copy})", file=sys.stderr)
++                total_phase_us = avg_read + avg_copy
++                total_us = avg_lat * 1e6
++                print(f"  Phase coverage: {total_phase_us/total_us*100:.1f}% of client latency", file=sys.stderr)
+             print(f"{'='*60}\n", file=sys.stderr)
+     else:
+         # Subprocess mode: write to stdout, block on stdin.

@@ -1,0 +1,50 @@
+metadata:
+  iteration: 1
+  bundle_ref: "runs/iter-1/bundle.yaml"
+
+setup:
+  - cmd: "ln -sf /home/nara/certus/ai-native-storage-certus/deps/spdk deps/spdk && ln -sf /home/nara/certus/ai-native-storage-certus/deps/spdk-build deps/spdk-build && RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server"
+    description: "Create SPDK symlinks and build certus-server (baseline, no patch)"
+
+arms:
+  - arm_id: "h-main"
+    conditions:
+      - name: "baseline-seed42"
+        description: "Sequential v0, 4 MiB, 1 iteration — no code changes"
+        cmd: "rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /var/tmp/spdk_pci_lock_0000:64:00.0 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH ./target/debug/certus-server --metadata-pci 0000:63:00.0 --data-pci 0000:64:00.0 --dispatcher-version v0 --listen 0.0.0.0:50051 & sleep 10 && cd apps/certus-server/python-client && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 test_client.py --server localhost:50051 --bench-only --bench-object-size 4194304 --bench-num-objects 1 --bench-iterations 1"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0-pipelined/runs/iter-1/results/h-main/baseline-s42.json"
+        inputs: []
+
+      - name: "treatment-seed42"
+        description: "Pipelined v0 (double-buffered cudaHostAlloc + cudaMemcpyAsync), 4 MiB, 1 iteration"
+        cmd: "git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0-pipelined/runs/iter-1/patches/h-main.patch && RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server && rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /var/tmp/spdk_pci_lock_0000:64:00.0 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH ./target/debug/certus-server --metadata-pci 0000:63:00.0 --data-pci 0000:64:00.0 --dispatcher-version v0 --listen 0.0.0.0:50051 & sleep 10 && cd apps/certus-server/python-client && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 test_client.py --server localhost:50051 --bench-only --bench-object-size 4194304 --bench-num-objects 1 --bench-iterations 1"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0-pipelined/runs/iter-1/results/h-main/treatment-s42.json"
+        inputs: []
+
+  - arm_id: "h-control-negative"
+    conditions:
+      - name: "baseline-seed42"
+        description: "Sequential v0, 4 KiB single-chunk, 1 iteration"
+        cmd: "rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /var/tmp/spdk_pci_lock_0000:64:00.0 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH ./target/debug/certus-server --metadata-pci 0000:63:00.0 --data-pci 0000:64:00.0 --dispatcher-version v0 --listen 0.0.0.0:50051 & sleep 10 && cd apps/certus-server/python-client && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 test_client.py --server localhost:50051 --bench-only --bench-object-size 4096 --bench-num-objects 1 --bench-iterations 1"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0-pipelined/runs/iter-1/results/h-control-negative/baseline-s42.json"
+        inputs: []
+
+      - name: "treatment-seed42"
+        description: "Pipelined v0, 4 KiB single-chunk, 1 iteration (no pipeline overlap expected)"
+        cmd: "git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0-pipelined/runs/iter-1/patches/h-control-negative.patch && RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server && rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /var/tmp/spdk_pci_lock_0000:64:00.0 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH ./target/debug/certus-server --metadata-pci 0000:63:00.0 --data-pci 0000:64:00.0 --dispatcher-version v0 --listen 0.0.0.0:50051 & sleep 10 && cd apps/certus-server/python-client && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 test_client.py --server localhost:50051 --bench-only --bench-object-size 4096 --bench-num-objects 1 --bench-iterations 1"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0-pipelined/runs/iter-1/results/h-control-negative/treatment-s42.json"
+        inputs: []
+
+  - arm_id: "h-robustness"
+    conditions:
+      - name: "baseline-seed42"
+        description: "Sequential v0, 4 MiB, 1 iteration (shared with h-main baseline)"
+        cmd: "rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /var/tmp/spdk_pci_lock_0000:64:00.0 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH ./target/debug/certus-server --metadata-pci 0000:63:00.0 --data-pci 0000:64:00.0 --dispatcher-version v0 --listen 0.0.0.0:50051 & sleep 10 && cd apps/certus-server/python-client && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 test_client.py --server localhost:50051 --bench-only --bench-object-size 4194304 --bench-num-objects 1 --bench-iterations 1"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0-pipelined/runs/iter-1/results/h-robustness/baseline-s42.json"
+        inputs: []
+
+      - name: "treatment-seed42"
+        description: "P2P direct DMA (NVMe → GPU BAR1), 4 MiB, 1 iteration"
+        cmd: "git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0-pipelined/runs/iter-1/patches/h-robustness.patch && RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server && rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /var/tmp/spdk_pci_lock_0000:64:00.0 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH ./target/debug/certus-server --metadata-pci 0000:63:00.0 --data-pci 0000:64:00.0 --dispatcher-version v0 --listen 0.0.0.0:50051 & sleep 10 && cd apps/certus-server/python-client && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 test_client.py --server localhost:50051 --bench-only --bench-object-size 4194304 --bench-num-objects 1 --bench-iterations 1"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0-pipelined/runs/iter-1/results/h-robustness/treatment-s42.json"
+        inputs: []

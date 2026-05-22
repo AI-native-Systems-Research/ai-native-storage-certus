@@ -1,0 +1,25 @@
+{
+  "iteration": 2,
+  "bundle_ref": "runs/iter-2/bundle.yaml",
+  "arms": [
+    {
+      "arm_type": "h-main",
+      "predicted": "cudaHostAlloc staging pipeline will reduce SSD-tier latency by >25% (from ~21,361 us to ~16,000 us), because cudaHostAlloc buffers enable true asynchronous cudaMemcpyAsync DMA, fully hiding GPU copy latency behind NVMe reads.",
+      "observed": "Run 1: 22,522.8 us/obj. Run 2: 21,411.9 us/obj. Average: ~21,967 us. Compared to baseline: Run 1 19,646.1 us, Run 2: 23,716.9 us, average ~21,681 us. h-main result is within the system variance band — NO improvement detected. cudaHostAlloc staging did not reduce latency.",
+      "status": "REFUTED",
+      "error_type": "magnitude",
+      "diagnostic_note": "Root cause: NVMe read time dominates completely. With 32 chunks of 128 KiB each, NVMe read latency per chunk ~600 us, GPU H2D copy ~5-50 us per chunk. Even with true async GPU DMA (savings = 32 × min(nvme_read, gpu_copy) ≈ 32 × 50 us = 1,600 us), the improvement is only ~8% of total time, below the measurement noise floor. The cudaHostAlloc mechanism may enable true async, but when NVMe read is 10-100x longer than GPU copy, the pipeline speedup is negligible. Additionally, per-call cudaHostAlloc + spdk_mem_register overhead for 2 buffers (~50-100 us total) partially offsets any gain. The prediction was incorrect because it assumed NVMe read and GPU copy are balanced; in reality NVMe read is the overwhelming bottleneck."
+    },
+    {
+      "arm_type": "h-control-negative",
+      "predicted": "P2P direct SSD→GPU DMA will be faster than cudaHostAlloc staging pipeline and maintain >20% advantage over sequential baseline.",
+      "observed": "15,878.7 us/obj. vs baseline run 1 of 19,646 us = 19.2% faster. vs baseline run 2 of 23,717 us = 33.1% faster. P2P consistently fastest across all conditions.",
+      "status": "CONFIRMED",
+      "error_type": null,
+      "diagnostic_note": "P2P direct DMA eliminates all CPU memcpy stages and staging buffers entirely. The relative advantage is confirmed (~19-33% faster than baseline depending on run). Absolute magnitude 15,879 us vs historical 3,451 us (h8-v1-pinned) is the system-level confound noted in iter-1 (3-5x inflation). Relative ordering: P2P < baseline and P2P < h-main confirmed. h-main is not faster than baseline, so the expected P2P < pipeline ordering is reversed: P2P < baseline ≈ h-main."
+    }
+  ],
+  "experiment_valid": true,
+  "discrepancy_analysis": "The central hypothesis (h-main) was refuted due to an incorrect assumption about the relative magnitude of NVMe read vs GPU copy time. The prediction of >25% improvement assumed GPU copy latency was non-trivial relative to NVMe read — but with 128 KiB chunks, NVMe sequential read latency (~600 us/chunk) dominates H2D copy latency (~5-50 us/chunk) by 10-100x. In this regime, hiding GPU copy behind NVMe reads saves at most 5-8% of total latency, below the noise floor of this single-sample benchmark. The cudaHostAlloc mechanism itself may work correctly (we cannot distinguish 'true async DMA running but saving <1%' from 'fallback to sync'), but the mechanism is irrelevant when the savings are smaller than system jitter. The iter-1 result of ~10% improvement from ReadAsync overlap (overlapping NVMe read with CPU memcpy, not GPU copy) may in fact have been the larger gain. High system variance (±4,000 us between runs) makes it impossible to detect the <5% effect size expected from cudaHostAlloc async savings. RP-16 extracted: NVMe read dominance is the binding constraint on SSD-tier pipeline latency; GPU copy overlap is a second-order effect at 128 KiB chunk sizes.",
+  "dominant_component_pct": 95
+}

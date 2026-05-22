@@ -1,0 +1,58 @@
+[
+  {
+    "id": "RP-9",
+    "statement": "In dispatcher v0's sequential read path, the dominant latency component for 4 MiB lookups is the 32x per-chunk SPDK DmaBuffer::new allocation (not the GPU H2D copy). Replacing per-chunk allocations with pre-allocated cudaHostAlloc ping-pong buffers yields ~2x speedup.",
+    "confidence": "high",
+    "regime": "4 MiB objects (32x 128 KiB chunks), certus-server with dispatcher v0, NVMe 0000:64:00.0, debug build",
+    "evidence": ["iteration-1-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "Sequential v0 calls DmaBuffer::new() 32 times per lookup (once per 128 KiB segment at lib.rs:220-222), each allocating SPDK hugepage memory. These allocations are slow (~300 us each estimated from 19,502 - 9,659 = 9,843 us savings / 32 chunks). The pipelined path uses 2 pre-allocated cudaHostAlloc buffers for the lifetime of the component (lazy-initialized in ensure_pipeline_state), eliminating all per-lookup alloc overhead.",
+    "applicability_bounds": "Applies when chunk count is high (>=32 for 4 MiB). For small objects (4 KiB, 1 chunk), the effect is smaller (~16% improvement) but still present. Effect may differ in release build (optimized allocator).",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-10",
+    "statement": "GPU P2P direct DMA (NVMe → GPU BAR1 via nvidia-peermem/gdrdrv) does not improve lookup latency vs host-bounce for 4 MiB objects even at NODE-level PCIe topology. BAR1 write overhead per-chunk matches or exceeds system-DRAM write + H2D cudaMemcpy cost.",
+    "confidence": "high",
+    "regime": "4 MiB objects, NVMe 0000:64:00.0 and GPU0 both NUMA node 0 (NODE-level), certus-server dispatcher v0, sequential ReadSync per 128 KiB chunk",
+    "evidence": ["iteration-1-h-robustness"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "P2P path issues 32 ReadSync operations each DMAing 128 KiB directly to GPU BAR1 memory (via SPDK vtophys of GPU-backed DmaBuffer from prepare_memory_for_spdk). Result: 20,136 us vs 19,502 us baseline — no improvement. GPU BAR1 has lower per-byte write bandwidth than system DRAM for sequential 128 KiB writes, negating the elimination of the H2D cudaMemcpy (only ~200 us of 19,502 us total).",
+    "applicability_bounds": "Tested at NODE-level PCIe topology (same NUMA socket, different root complex). SYS-level (h8-v0-pinned) showed 65% slower. NODE-level is better but still not faster. May differ with larger BAR1 windows or GPU architectures with higher BAR1 bandwidth.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-11",
+    "statement": "cudaMemcpyAsync provides latency benefit over synchronous cudaMemcpy even for single-chunk (4 KiB) transfers (~16% improvement), independent of pipeline overlap. The async path avoids CPU synchronization overhead on the critical path.",
+    "confidence": "medium",
+    "regime": "Single 4 KiB object (1 segment), certus-server dispatcher v0, debug build, no hardware pipelining opportunity",
+    "evidence": ["iteration-1-h-control-negative"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "Pipelined path calls cudaMemcpyAsync + cudaStreamSynchronize instead of cudaMemcpy. For single chunk, no read/copy overlap occurs — but cudaMemcpyAsync returns immediately, allowing cudaStreamSynchronize to observe the copy as already complete when the CUDA copy engine processes it independently. The CPU-side path is shorter (no blocking memcpy call). Combined with buffer pre-allocation (no DmaBuffer::new), total savings are ~283 us (1,749 - 1,466 us).",
+    "applicability_bounds": "Small transfers (4 KiB) where copy time is negligible. Effect may vary with CUDA driver version and stream overhead. The buffer pre-allocation component likely dominates for small objects.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-4",
+    "statement": "CUDA async copy (cudaMemcpyAsync) requires memory born from cudaHostAlloc for true asynchronous execution. cudaHostRegister on SPDK hugepage buffers falls back to synchronous copy. cudaHostAlloc + spdk_mem_register via create_spdk_dma_buffer_from_cuda_host_alloc provides both CUDA async capability and SPDK DMA registration.",
+    "confidence": "high",
+    "regime": "Any CUDA async copy operation in Certus with SPDK NVMe DMA",
+    "evidence": ["h8-pipelined-iter-1", "iteration-1-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "CUDA requires page-locked memory with specific allocation provenance for true DMA engine offload. SPDK hugepages (spdk_dma_malloc) are not recognized as CUDA-manageable memory; cudaHostRegister works at the CPU level but the CUDA driver uses a synchronous fallback path. cudaHostAlloc allocates directly in CUDA-managed page-locked memory that the copy engine can DMA without CPU intervention.",
+    "applicability_bounds": "Applies to all CUDA async memcpy operations in this codebase. Already validated in h8-pipelined-iter-1; further confirmed by successful 2x speedup in this iteration.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  }
+]

@@ -1,0 +1,87 @@
+diff --git a/components/dispatcher/v1/src/pipeline.rs b/components/dispatcher/v1/src/pipeline.rs
+index f7f77d0..2809ae2 100644
+--- a/components/dispatcher/v1/src/pipeline.rs
++++ b/components/dispatcher/v1/src/pipeline.rs
+@@ -286,28 +286,25 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+         })
+         .collect::<Result<Vec<_>, DispatcherError>>()?;
+ 
+-    // Prime: submit initial async reads directly into memory-tier chunk offsets.
+-    // Each chunk targets a unique offset in the memory-tier slot, so we can have
+-    // many NVMe reads in flight simultaneously to saturate SSD parallelism.
+-    // Use a high depth (16) since there's no buffer reuse — each chunk is unique.
+-    const ZERO_COPY_DEPTH: usize = 16;
+-    let max_inflight = ZERO_COPY_DEPTH.min(num_chunks);
+-    for i in 0..max_inflight {
+-        channels
+-            .command_tx
+-            .send(Command::ReadAsync {
+-                ns_id: 1,
+-                lba: segments[i].lba,
+-                buf: Arc::clone(&chunk_bufs[i]),
+-                timeout_ms: READ_TIMEOUT_MS,
+-            })
+-            .map_err(|e| DispatcherError::IoError(format!("ReadAsync send #{i}: {e}")))?;
+-    }
+-
+-    let mut next_to_submit = max_inflight;
+-
+-    // Process completions: after each NVMe read completes into memory-tier,
+-    // issue async H2D from the same memory-tier offset to GPU.
++    // BatchSubmit all chunks at once onto a single deep qpair (depth-256).
++    // Eliminates per-completion resubmission and concentrates all reads on
++    // one qpair for SSD-internal read coalescing.
++    let ops: Vec<Command> = (0..num_chunks)
++        .map(|i| Command::ReadAsync {
++            ns_id: 1,
++            lba: segments[i].lba,
++            buf: Arc::clone(&chunk_bufs[i]),
++            timeout_ms: READ_TIMEOUT_MS,
++        })
++        .collect();
++    channels
++        .command_tx
++        .send(Command::BatchSubmit { ops })
++        .map_err(|e| DispatcherError::IoError(format!("BatchSubmit send: {e}")))?;
++
++    // Process completions one at a time: as each NVMe read completes, immediately
++    // issue async H2D GPU DMA (interleaved, same as current per-chunk pattern).
++    // No resubmission needed — all commands already submitted via BatchSubmit.
+     for completed in 0..num_chunks {
+         match channels.completion_rx.recv() {
+             Ok(Completion::ReadDone { result, .. }) => {
+@@ -350,33 +347,13 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+         })?;
+         drop(guard);
+ 
+-        // Batch-sync both streams periodically. No buffer reuse in zero-copy
+-        // (each chunk is a unique memory-tier offset), so sync only throttles
+-        // the GPU command queue depth.
++        // Batch-sync both streams periodically.
+         if (completed + 1) % 16 == 0 {
+             gpu.stream_synchronize(streams[0])
+                 .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+             gpu.stream_synchronize(streams[1])
+                 .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+         }
+-
+-        // Submit next NVMe read (into the next memory-tier chunk).
+-        if next_to_submit < num_chunks {
+-            channels
+-                .command_tx
+-                .send(Command::ReadAsync {
+-                    ns_id: 1,
+-                    lba: segments[next_to_submit].lba,
+-                    buf: Arc::clone(&chunk_bufs[next_to_submit]),
+-                    timeout_ms: READ_TIMEOUT_MS,
+-                })
+-                .map_err(|e| {
+-                    DispatcherError::IoError(format!(
+-                        "ReadAsync resubmit #{next_to_submit}: {e}"
+-                    ))
+-                })?;
+-            next_to_submit += 1;
+-        }
+     }
+ 
+     // Sync both streams to ensure all GPU copies are complete.

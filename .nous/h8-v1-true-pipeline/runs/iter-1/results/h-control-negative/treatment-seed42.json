@@ -1,0 +1,18 @@
+{
+  "condition": "treatment",
+  "arm": "h-control-negative",
+  "dispatcher_version": "v1",
+  "patch": "patches/h-control-negative.patch",
+  "description": "P2P direct SSD→GPU DMA via prepare_memory_for_spdk + ReadSync into BAR1",
+  "object_size_bytes": 4194304,
+  "num_objects": 10,
+  "bench_iterations": 1,
+  "memory_tier_avg_us": 624.0,
+  "ssd_tier_avg_us": 16396.1,
+  "ssd_tier_min_us": 16396.1,
+  "ssd_tier_max_us": 16396.1,
+  "ssd_tier_avg_gbs": 0.26,
+  "ssd_tier_peak_gbs": 0.26,
+  "ssd_memory_ratio": 26.3,
+  "raw_output": "Memory-tier 624.0 us/obj, SSD-tier 16396.1 us/obj, ratio 26.3x"
+}

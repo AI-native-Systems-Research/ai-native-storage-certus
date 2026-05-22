@@ -1,0 +1,58 @@
+[
+  {
+    "id": "RP-13",
+    "statement": "cudaMemcpyAsync from cudaHostRegistered mmap'd memory provides only partial async benefit (~10%). True async requires cudaHostAlloc-allocated memory.",
+    "confidence": "medium",
+    "regime": "NVMe-to-GPU pipeline with 128 KiB chunk transfers, SPDK block device, certus-server",
+    "evidence": ["iteration-1-h-main", "iteration-2-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "CUDA DMA engine requires natively-pinned (cudaHostAlloc) memory for truly asynchronous H2D transfers. cudaHostRegister-registered mmap memory falls back to synchronous execution. Confirmed in iter-1.",
+    "applicability_bounds": "Applies to cudaMemcpyAsync specifically. For synchronous cudaMemcpy, source memory type does not affect blocking behavior.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-14",
+    "statement": "P2P direct SSD→GPU DMA (prepare_memory_for_spdk + ReadSync into BAR1) is consistently faster than memory-tier pipeline path.",
+    "confidence": "high",
+    "regime": "NVMe 63:00.0 (NODE-level to GPU), 4 MiB objects, 128 KiB chunks, certus-server",
+    "evidence": ["iteration-1-h-control-negative", "iteration-2-h-control-negative"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "P2P eliminates all CPU-side copies (NVMe→DMA buffer, DMA→mem-tier, mem-tier→GPU). DMA engine routes directly NVMe→GPU BAR1 via PCIe fabric. NODE-level topology means no cross-NUMA penalties.",
+    "applicability_bounds": "Confirmed at NODE topology. May differ at CROSS_NUMA (see h8-v1-pinned iter-2 for c-bus topology). Requires GDRCopy / nvidia-peermem. Absolute latencies inflated 3-5x vs historical baselines due to system confound.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-15",
+    "statement": "P2P direct DMA is consistently faster than all pipeline variants (sequential and async). Ordering: P2P < sequential ≈ async_pipeline in NVMe-read-dominated regime.",
+    "confidence": "high",
+    "regime": "4 MiB SSD lookups, 32 chunks of 128 KiB, certus-server",
+    "evidence": ["iteration-1-h-control-negative", "iteration-1-h-main", "iteration-2-h-control-negative", "iteration-2-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 2,
+    "mechanism": "P2P wins because it eliminates all memcpy stages. Pipeline (sequential or async) must read into host memory before GPU copy. When NVMe read dominates total time, async pipeline and sequential pipeline perform equivalently.",
+    "applicability_bounds": "Holds in NVMe-read-dominated regime (chunk NVMe read >> chunk GPU copy). If GPU copy time equals or exceeds NVMe read time (e.g., at large chunk sizes or fast NVMe), async pipeline may approach P2P.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-16",
+    "statement": "At 128 KiB chunk size on NVMe, NVMe read latency (~600 us/chunk) dominates GPU H2D copy latency (~5-50 us/chunk) by 10-100x, making pipeline overlap of GPU copy a second-order optimization with <5% impact.",
+    "confidence": "medium",
+    "regime": "SPDK NVMe sequential reads, 128 KiB chunks, PCIe 4.0 x16 GPU H2D copy",
+    "evidence": ["iteration-2-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 2,
+    "mechanism": "NVMe random read latency at 128 KiB is ~600 us (dominated by access time + transfer). GPU H2D PCIe copy at 128 KiB on PCIe 4.0 x16 (~25 GB/s) takes ~5 us transfer + ~50 us overhead. Pipeline speedup from async = 32 × min(nvme, gpu_copy) ≈ 32 × 50 us = 1,600 us out of ~19,000 us total = 8% theoretical maximum, below measurement noise floor.",
+    "applicability_bounds": "Applies to 128 KiB chunks. At larger chunks (1-4 MiB), GPU copy time increases proportionally while NVMe read time may not (MDTS limits chunk size, more chunks needed). At smaller NVMe transfer sizes or higher PCIe bandwidth, the ratio changes. BatchSubmit with QD=32 (RP-12) can parallelize multiple NVMe reads and may achieve larger speedups.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  }
+]

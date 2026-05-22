@@ -1,0 +1,969 @@
+diff --git a/apps/certus-server/python-client/__pycache__/dispatcher_pb2.cpython-39.pyc b/apps/certus-server/python-client/__pycache__/dispatcher_pb2.cpython-39.pyc
+index 413c9a2..1b79dd0 100644
+Binary files a/apps/certus-server/python-client/__pycache__/dispatcher_pb2.cpython-39.pyc and b/apps/certus-server/python-client/__pycache__/dispatcher_pb2.cpython-39.pyc differ
+diff --git a/apps/certus-server/python-client/__pycache__/dispatcher_pb2_grpc.cpython-39.pyc b/apps/certus-server/python-client/__pycache__/dispatcher_pb2_grpc.cpython-39.pyc
+index efc55cb..3481bca 100644
+Binary files a/apps/certus-server/python-client/__pycache__/dispatcher_pb2_grpc.cpython-39.pyc and b/apps/certus-server/python-client/__pycache__/dispatcher_pb2_grpc.cpython-39.pyc differ
+diff --git a/apps/certus-server/src/main.rs b/apps/certus-server/src/main.rs
+index 511b030..337639e 100644
+--- a/apps/certus-server/src/main.rs
++++ b/apps/certus-server/src/main.rs
+@@ -16,7 +16,8 @@ use component_core::binding::bind;
+ use component_core::query_interface;
+ use interfaces::{
+     DmaAllocFn, DmaBuffer, DispatcherConfig, FormatParams, IBlockDevice, IBlockDeviceAdmin,
+-    IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger, IMemoryTier, PciAddress,
++    IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger, IMemoryTier, LookupPath,
++    PciAddress,
+ };
+ 
+ use service::DispatcherService;
+@@ -48,6 +49,10 @@ struct Cli {
+     /// Dispatcher version to use: "v0" (staging-based) or "v1" (memory-tier, default)
+     #[arg(long = "dispatcher-version", default_value = "v1")]
+     dispatcher_version: String,
++
++    /// SSD-to-GPU lookup path: "bounce-seq" | "p2p-seq" | "p2p-batch" | "bounce-batch"
++    #[arg(long = "lookup-path", default_value = "bounce-seq")]
++    lookup_path: String,
+ }
+ 
+ fn validate_pci_address(addr: &str) -> Result<(), String> {
+@@ -75,10 +80,21 @@ fn parse_pci_address(addr: &str) -> Result<PciAddress, String> {
+     Ok(PciAddress { domain, bus, dev, func })
+ }
+ 
++fn parse_lookup_path(s: &str) -> Result<LookupPath, String> {
++    match s {
++        "bounce-seq" => Ok(LookupPath::BounceSeq),
++        "p2p-seq" => Ok(LookupPath::P2pSeq),
++        "p2p-batch" => Ok(LookupPath::P2pBatch),
++        "bounce-batch" => Ok(LookupPath::BounceBatch),
++        other => Err(format!("unknown lookup-path: {other} (use bounce-seq|p2p-seq|p2p-batch|bounce-batch)")),
++    }
++}
++
+ fn initialize_component_stack(
+     metadata_pci: &str,
+     data_pci_addrs: &[String],
+     dispatcher_version: &str,
++    lookup_path: LookupPath,
+ ) -> Result<Arc<dyn IDispatcher + Send + Sync>, String> {
+     eprintln!("certus-server: initializing SPDK environment...");
+     let spdk_comp = spdk_env::SPDKEnvComponent::new_default();
+@@ -262,6 +278,7 @@ fn initialize_component_stack(
+         .initialize(DispatcherConfig {
+             metadata_pci_addr: metadata_pci.to_string(),
+             data_pci_addrs: data_pci_addrs.to_vec(),
++            lookup_path,
+             ..Default::default()
+         })
+         .map_err(|e| format!("Dispatcher init failed: {e}"))?;
+@@ -280,14 +297,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+         validate_pci_address(addr)?;
+     }
+ 
++    let lookup_path = parse_lookup_path(&cli.lookup_path)?;
++
+     eprintln!(
+-        "certus-server: metadata={}, data={:?}, dispatcher={}",
+-        cli.metadata_pci, cli.data_pci, cli.dispatcher_version
++        "certus-server: metadata={}, data={:?}, dispatcher={}, lookup_path={}",
++        cli.metadata_pci, cli.data_pci, cli.dispatcher_version, cli.lookup_path
+     );
+ 
+     // Initialize Certus component stack
+     let dispatcher =
+-        initialize_component_stack(&cli.metadata_pci, &cli.data_pci, &cli.dispatcher_version)?;
++        initialize_component_stack(&cli.metadata_pci, &cli.data_pci, &cli.dispatcher_version, lookup_path)?;
+     let dispatcher_mutex = Arc::new(Mutex::new(dispatcher));
+ 
+     let svc = DispatcherService::new(Arc::clone(&dispatcher_mutex));
+diff --git a/apps/certus-server/src/service.rs b/apps/certus-server/src/service.rs
+index f6bd2d2..76b4782 100644
+--- a/apps/certus-server/src/service.rs
++++ b/apps/certus-server/src/service.rs
+@@ -157,6 +157,7 @@ impl Dispatcher for DispatcherService {
+                     let ipc = IpcHandle {
+                         address: dev_ptr as *mut u8,
+                         size: handle.size,
++                        cuda_ipc_handle_bytes: None,
+                     };
+                     let result = match disp.populate(entry.key, ipc) {
+                         Ok(()) => success_result(entry.key),
+@@ -233,6 +234,7 @@ impl Dispatcher for DispatcherService {
+                     let ipc = IpcHandle {
+                         address: dev_ptr as *mut u8,
+                         size: handle.size,
++                        cuda_ipc_handle_bytes: Some(handle.cuda_ipc_handle.clone()),
+                     };
+                     match disp.lookup(entry.key, ipc) {
+                         Ok(()) => success_result(entry.key),
+diff --git a/certus-connector/src/engine.rs b/certus-connector/src/engine.rs
+index e7bec4a..5d3b88a 100644
+--- a/certus-connector/src/engine.rs
++++ b/certus-connector/src/engine.rs
+@@ -473,6 +473,7 @@ impl EngineInner {
+             let handle = IpcHandle {
+                 address: offset as *mut u8,
+                 size: self.gpu_block_size as u32,
++                cuda_ipc_handle_bytes: None,
+             };
+ 
+             if let Err(_e) = self.dispatcher.populate(*key, handle) {
+@@ -523,6 +524,7 @@ impl EngineInner {
+             let handle = IpcHandle {
+                 address: offset as *mut u8,
+                 size: self.gpu_block_size as u32,
++                cuda_ipc_handle_bytes: None,
+             };
+ 
+             if let Err(_e) = self.dispatcher.lookup(*key, handle) {
+diff --git a/components/dispatcher/v1/Cargo.toml b/components/dispatcher/v1/Cargo.toml
+index 8dd7b9f..2e132c7 100644
+--- a/components/dispatcher/v1/Cargo.toml
++++ b/components/dispatcher/v1/Cargo.toml
+@@ -17,6 +17,7 @@ block-device-spdk-nvme-v2.workspace = true
+ extent-manager-v2.workspace = true
+ memory-tier.workspace = true
+ libc = "0.2"
++base64 = "0.22"
+ 
+ [features]
+ hardware-test = []
+diff --git a/components/dispatcher/v1/benches/dispatcher_benchmark.rs b/components/dispatcher/v1/benches/dispatcher_benchmark.rs
+index 9448c1f..b860c3e 100644
+--- a/components/dispatcher/v1/benches/dispatcher_benchmark.rs
++++ b/components/dispatcher/v1/benches/dispatcher_benchmark.rs
+@@ -268,6 +268,7 @@ fn make_handle(buf: &mut [u8]) -> IpcHandle {
+     IpcHandle {
+         address: buf.as_mut_ptr(),
+         size: buf.len() as u32,
++        cuda_ipc_handle_bytes: None,
+     }
+ }
+ 
+diff --git a/components/dispatcher/v1/src/lib.rs b/components/dispatcher/v1/src/lib.rs
+index dc4ead6..b184154 100644
+--- a/components/dispatcher/v1/src/lib.rs
++++ b/components/dispatcher/v1/src/lib.rs
+@@ -15,12 +15,14 @@ use std::collections::HashMap;
+ use std::sync::atomic::{AtomicBool, Ordering};
+ use std::sync::{Arc, Mutex};
+ 
++use base64::Engine as _;
++
+ use component_framework::define_component;
+ use interfaces::{
+-    BlockDeviceVersion, CacheKey, Command, Completion, DmaAllocFn, DmaBuffer,
++    BlockDeviceVersion, CacheKey, ClientChannels, Command, Completion, DmaAllocFn, DmaBuffer,
+     DispatcherConfig, DispatcherError, ExtentManagerVersion, FormatParams, IBlockDevice,
+     IBlockDeviceAdmin, IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger,
+-    IMemoryTier, IpcHandle, LookupResult, PciAddress, WriteHandle,
++    IMemoryTier, IpcHandle, LookupPath, LookupResult, PciAddress, WriteHandle,
+ };
+ 
+ use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponentV1;
+@@ -55,6 +57,8 @@ struct DataDrive {
+     block_dev_admin: Arc<dyn IBlockDeviceAdmin + Send + Sync>,
+     block_dev_iface: Arc<dyn IBlockDevice + Send + Sync>,
+     extent_mgr: Arc<ExtentManagerV2>,
++    /// Persistent ClientChannels for BatchSubmit+ReadAsync P2P path (avoids per-lookup connect).
++    batch_channels: Option<ClientChannels>,
+ }
+ 
+ define_component! {
+@@ -74,6 +78,8 @@ define_component! {
+             bg_evictor: Mutex<Option<BackgroundEvictor>>,
+             data_drives: Mutex<Vec<DataDrive>>,
+             pending_writes: Mutex<HashMap<CacheKey, PendingWrite>>,
++            gpu_dma_cache: Mutex<HashMap<[u8; 64], Arc<Mutex<DmaBuffer>>>>,
++            lookup_path: Mutex<LookupPath>,
+         },
+     }
+ }
+@@ -113,6 +119,42 @@ impl DispatcherComponentV0 {
+         Ok(())
+     }
+ 
++    /// Return (or create) a cached GPU DmaBuffer registered with SPDK for P2P DMA.
++    ///
++    /// On cache miss, calls `prepare_memory_for_spdk` with a base64 payload encoding
++    /// the 64-byte CUDA IPC handle and the 8-byte LE total size. The result is wrapped
++    /// in `Arc<Mutex<DmaBuffer>>` and stored in `gpu_dma_cache` keyed by the 64-byte handle.
++    fn get_or_create_gpu_dma(
++        &self,
++        handle_bytes: &[u8],
++        total_size: usize,
++        gpu: &dyn IGpuServices,
++    ) -> Result<Arc<Mutex<DmaBuffer>>, DispatcherError> {
++        let key: [u8; 64] = handle_bytes
++            .try_into()
++            .map_err(|_| DispatcherError::InvalidParameter(
++                format!("cuda_ipc_handle_bytes must be 64 bytes, got {}", handle_bytes.len()),
++            ))?;
++
++        let mut cache = self.gpu_dma_cache.lock().unwrap();
++        if let Some(cached) = cache.get(&key) {
++            return Ok(Arc::clone(cached));
++        }
++
++        // Build the 72-byte payload: 64-byte handle + 8-byte LE size.
++        let mut payload = Vec::with_capacity(72);
++        payload.extend_from_slice(handle_bytes);
++        payload.extend_from_slice(&(total_size as u64).to_le_bytes());
++        let encoded = base64::engine::general_purpose::STANDARD.encode(&payload);
++
++        let dma_buf = gpu.prepare_memory_for_spdk(&encoded, None)
++            .map_err(|e| DispatcherError::IoError(format!("prepare_memory_for_spdk failed: {e}")))?;
++
++        let entry = Arc::new(Mutex::new(dma_buf));
++        cache.insert(key, Arc::clone(&entry));
++        Ok(entry)
++    }
++
+     /// Write `buffer` contents to SSD using MDTS-aware segmented I/O.
+     ///
+     /// Splits the write into segments that respect the drive's maximum transfer
+@@ -197,7 +239,112 @@ impl DispatcherComponentV0 {
+         mt: &Arc<dyn IMemoryTier + Send + Sync>,
+     ) -> Result<(), DispatcherError> {
+         let total_bytes = ipc_handle.size as usize;
++        let path = *self.lookup_path.lock().unwrap();
++
++        match path {
++            LookupPath::P2pSeq | LookupPath::P2pBatch => {
++                // P2P persistent path: read NVMe directly into pre-registered GPU DmaBuffer.
++                // Skips memory-tier to keep dispatch-map as BlockDevice for repeated cold reads.
++                if let Some(ref handle_bytes) = ipc_handle.cuda_ipc_handle_bytes {
++                    let drives = self.data_drives.lock().unwrap();
++                    if !drives.is_empty() {
++                        let idx = Self::drive_index(key, drives.len());
++                        let drive = &drives[idx];
++                        let block_size = drive.block_dev_iface.block_size();
++                        let chunk_size = drive.block_dev_iface.max_transfer_size();
++                        let numa_node = drive.block_dev_iface.numa_node();
++                        let start_lba = offset / block_size as u64;
++                        let block_dev = Arc::clone(&drive.block_dev_iface);
++                        let batch_ch: Option<&ClientChannels> = drive.batch_channels.as_ref();
++                        let batch_ch_ptr = batch_ch.map(|c| c as *const ClientChannels);
++                        drop(drives);
++
++                        let gpu_buf_arc = self.get_or_create_gpu_dma(handle_bytes, total_bytes, &**gpu)?;
++                        let gpu_buf = gpu_buf_arc.lock().unwrap();
++
++                        match path {
++                            LookupPath::P2pSeq => {
++                                // SAFETY: gpu_buf is SPDK-registered via prepare_memory_for_spdk.
++                                unsafe {
++                                    pipeline::p2p_ssd_to_gpu_persistent(
++                                        &*block_dev,
++                                        &*gpu_buf,
++                                        start_lba,
++                                        total_bytes,
++                                        numa_node,
++                                    )?;
++                                }
++                            }
++                            LookupPath::P2pBatch => {
++                                // SAFETY: channels pointer is valid for lifetime of drives lock scope.
++                                // batch_ch_ptr is derived from DataDrive which lives in self.data_drives.
++                                let channels = batch_ch_ptr
++                                    .map(|p| unsafe { &*p })
++                                    .ok_or_else(|| DispatcherError::IoError("batch_channels not available".into()))?;
++                                unsafe {
++                                    pipeline::p2p_batch_ssd_to_gpu(
++                                        channels,
++                                        &*gpu_buf,
++                                        start_lba,
++                                        total_bytes,
++                                        block_size,
++                                        chunk_size,
++                                        numa_node,
++                                    )?;
++                                }
++                            }
++                            _ => unreachable!(),
++                        }
++
++                        // Leave dispatch-map as BlockDevice: do not promote to memory-tier.
++                        let _ = dm.release_write(key);
++                        return Ok(());
++                    }
++                    drop(drives);
++                }
++                // Fall through to bounce path if no handle bytes or no drives.
++            }
++            LookupPath::BounceBatch => {
++                // Bounce + parallel reads: BatchSubmit(ReadAsync × RING_SIZE) + cudaMemcpy.
++                // Evict and insert into memory-tier like the sequential bounce path.
++                Self::evict_for_space(dm, mt, ipc_handle.size)?;
++                let mem_ptr = mt.insert(key, ipc_handle.size).map_err(|e| {
++                    DispatcherError::AllocationFailed(format!("bounce-batch insert failed: {e}"))
++                })?;
++                let drives = self.data_drives.lock().unwrap();
++                if !drives.is_empty() {
++                    let idx = Self::drive_index(key, drives.len());
++                    let drive = &drives[idx];
++                    let numa_node = drive.block_dev_iface.numa_node();
++                    let block_dev = Arc::clone(&drive.block_dev_iface);
++                    let block_size_usize = drive.block_dev_iface.block_size() as usize;
++                    let start_lba = offset / block_size_usize as u64;
++                    drop(drives);
++                    unsafe {
++                        pipeline::pipelined_batch_ssd_to_gpu(
++                            &*block_dev,
++                            &**gpu,
++                            mem_ptr,
++                            ipc_handle.address as *mut std::ffi::c_void,
++                            start_lba,
++                            total_bytes,
++                            numa_node,
++                        )?;
++                    }
++                } else {
++                    drop(drives);
++                }
++                let _ = dm.remove(key);
++                dm.create_memory_tier_entry(key, mem_ptr, ipc_handle.size)
++                    .map_err(|e| DispatcherError::IoError(format!("bounce-batch re-register failed: {e}")))?;
++                let _ = dm.convert_to_storage(key, offset);
++                let _ = dm.release_write(key);
++                return Ok(());
++            }
++            LookupPath::BounceSeq => {} // fall through to sequential bounce below
++        }
+ 
++        // Sequential bounce path (Condition A: BounceSeq, or P2P fallback without handle).
+         // Evict if needed to make space.
+         Self::evict_for_space(dm, mt, ipc_handle.size)?;
+ 
+@@ -586,11 +733,15 @@ impl DispatcherComponentV0 {
+                 config.block_device_version
+             ));
+ 
++            // Pre-connect a ClientChannels for the batch async path.
++            let batch_channels = ibd.connect_client().ok();
++
+             drives.push(DataDrive {
+                 _block_dev: block_dev_component,
+                 block_dev_admin: admin,
+                 block_dev_iface: ibd,
+                 extent_mgr,
++                batch_channels,
+             });
+         }
+ 
+@@ -691,9 +842,11 @@ impl IDispatcher for DispatcherComponentV0 {
+             }
+         }
+ 
++        *self.lookup_path.lock().unwrap() = config.lookup_path;
++
+         self.initialized.store(true, Ordering::Release);
+ 
+-        self.log_info("dispatcher: initialized");
++        self.log_info(&format!("dispatcher: initialized (lookup_path={:?})", config.lookup_path));
+         Ok(())
+     }
+ 
+@@ -1652,6 +1805,8 @@ mod tests {
+             Mutex::new(None),
+             Mutex::new(Vec::new()),
+             Mutex::new(HashMap::new()),
++            Mutex::new(HashMap::new()),
++            Mutex::new(LookupPath::default()),
+         );
+         c.dispatch_map
+             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
+@@ -1675,6 +1830,7 @@ mod tests {
+         IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: buf.len() as u32,
++            cuda_ipc_handle_bytes: None,
+         }
+     }
+ 
+@@ -1684,19 +1840,19 @@ mod tests {
+ 
+     #[test]
+     fn component_creation() {
+-        let _c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let _c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()), Mutex::new(LookupPath::default()));
+     }
+ 
+     #[test]
+     fn query_idispatcher() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()), Mutex::new(LookupPath::default()));
+         let d = query_interface!(c, IDispatcher);
+         assert!(d.is_some());
+     }
+ 
+     #[test]
+     fn initialize_without_receptacles_fails() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()), Mutex::new(LookupPath::default()));
+         let d = query_interface!(c, IDispatcher).unwrap();
+         let config = DispatcherConfig {
+             metadata_pci_addr: "0000:01:00.0".to_string(),
+@@ -1709,7 +1865,7 @@ mod tests {
+ 
+     #[test]
+     fn initialize_with_empty_pci_addrs_fails() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()), Mutex::new(LookupPath::default()));
+         let d = query_interface!(c, IDispatcher).unwrap();
+         let config = DispatcherConfig {
+             metadata_pci_addr: "0000:01:00.0".to_string(),
+@@ -1723,12 +1879,13 @@ mod tests {
+ 
+     #[test]
+     fn lookup_before_initialize_fails() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()), Mutex::new(LookupPath::default()));
+         let d = query_interface!(c, IDispatcher).unwrap();
+         let mut buf = vec![0u8; 4096];
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 4096,
++            cuda_ipc_handle_bytes: None,
+         };
+         let err = d.lookup(42, handle);
+         assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
+@@ -1736,7 +1893,7 @@ mod tests {
+ 
+     #[test]
+     fn check_before_initialize_fails() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()), Mutex::new(LookupPath::default()));
+         let d = query_interface!(c, IDispatcher).unwrap();
+         let err = d.check(42);
+         assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
+@@ -1744,7 +1901,7 @@ mod tests {
+ 
+     #[test]
+     fn remove_before_initialize_fails() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()), Mutex::new(LookupPath::default()));
+         let d = query_interface!(c, IDispatcher).unwrap();
+         let err = d.remove(42);
+         assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
+@@ -1752,12 +1909,13 @@ mod tests {
+ 
+     #[test]
+     fn populate_before_initialize_fails() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()), Mutex::new(LookupPath::default()));
+         let d = query_interface!(c, IDispatcher).unwrap();
+         let mut buf = vec![0u8; 4096];
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 4096,
++            cuda_ipc_handle_bytes: None,
+         };
+         let err = d.populate(42, handle);
+         assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
+@@ -1765,7 +1923,7 @@ mod tests {
+ 
+     #[test]
+     fn populate_with_zero_size_fails() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()), Mutex::new(LookupPath::default()));
+         let d = query_interface!(c, IDispatcher).unwrap();
+         // Even though not initialized, zero-size check comes after init check.
+         // This test verifies the parameter validation exists in the code path.
+@@ -1773,6 +1931,7 @@ mod tests {
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 0,
++            cuda_ipc_handle_bytes: None,
+         };
+         let err = d.populate(42, handle);
+         // Will fail with NotInitialized since that check comes first
+@@ -1781,14 +1940,14 @@ mod tests {
+ 
+     #[test]
+     fn shutdown_without_initialize_succeeds() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()), Mutex::new(LookupPath::default()));
+         let d = query_interface!(c, IDispatcher).unwrap();
+         assert!(d.shutdown().is_ok());
+     }
+ 
+     #[test]
+     fn double_shutdown_succeeds() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()), Mutex::new(LookupPath::default()));
+         let d = query_interface!(c, IDispatcher).unwrap();
+         assert!(d.shutdown().is_ok());
+         assert!(d.shutdown().is_ok());
+@@ -1802,6 +1961,8 @@ mod tests {
+             Mutex::new(None),
+             Mutex::new(Vec::new()),
+             Mutex::new(HashMap::new()),
++            Mutex::new(HashMap::new()),
++            Mutex::new(LookupPath::default()),
+         ));
+ 
+         let handles: Vec<_> = (0..4)
+@@ -1841,7 +2002,7 @@ mod tests {
+     fn initialize_empty_addrs_with_dispatch_map() {
+         let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
+         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()), Mutex::new(LookupPath::default()));
+         c.dispatch_map.connect(dm).unwrap();
+         c.memory_tier.connect(mt).unwrap();
+ 
+@@ -1860,7 +2021,7 @@ mod tests {
+         let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
+         let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
+         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()), Mutex::new(LookupPath::default()));
+         c.dispatch_map.connect(dm).unwrap();
+         c.logger.connect(logger).unwrap();
+         c.memory_tier.connect(mt).unwrap();
+@@ -1897,6 +2058,7 @@ mod tests {
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 0,
++            cuda_ipc_handle_bytes: None,
+         };
+         let err = d.populate(1, handle);
+         assert!(matches!(err, Err(DispatcherError::InvalidParameter(_))));
+@@ -1923,7 +2085,7 @@ mod tests {
+         let gpu: Arc<dyn IGpuServices + Send + Sync> = Arc::new(MockGpuServices);
+         let mt: Arc<dyn IMemoryTier + Send + Sync> =
+             Arc::new(MockMemoryTier::with_fail_insert(1024 * 1024));
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()), Mutex::new(LookupPath::default()));
+         c.dispatch_map.connect(dm).unwrap();
+         c.logger.connect(logger).unwrap();
+         c.gpu_services.connect(gpu).unwrap();
+@@ -1951,6 +2113,7 @@ mod tests {
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 5000,
++            cuda_ipc_handle_bytes: None,
+         };
+         assert!(d.populate(1, handle).is_ok());
+         d.shutdown().unwrap();
+@@ -2242,6 +2405,8 @@ mod tests {
+             Mutex::new(None),
+             Mutex::new(Vec::new()),
+             Mutex::new(HashMap::new()),
++            Mutex::new(HashMap::new()),
++            Mutex::new(LookupPath::default()),
+         );
+         c.dispatch_map
+             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
+diff --git a/components/dispatcher/v1/src/pipeline.rs b/components/dispatcher/v1/src/pipeline.rs
+index 4462243..3a99178 100644
+--- a/components/dispatcher/v1/src/pipeline.rs
++++ b/components/dispatcher/v1/src/pipeline.rs
+@@ -122,6 +122,291 @@ pub unsafe fn pipelined_ssd_to_gpu(
+     Ok(())
+ }
+ 
++/// No-op free for P2P sub-buffer views — the parent GPU DmaBuffer owns the memory.
++unsafe extern "C" fn noop_free_pipeline(_ptr: *mut std::ffi::c_void) {}
++
++/// Read from SSD directly into a pre-registered GPU DmaBuffer using sequential ReadSync (P2P path).
++///
++/// Unlike `pipelined_ssd_to_gpu`, this does not copy to memory-tier and does not
++/// insert into the dispatch-map. The GPU DmaBuffer is a persistent SPDK-registered
++/// buffer cached across lookups via `IGpuServices::prepare_memory_for_spdk`.
++///
++/// Per-chunk sub-buffer views are created with `noop_free_pipeline` to avoid
++/// unregistering the parent buffer's SPDK IOMMU mapping.
++///
++/// # Safety
++///
++/// - `gpu_dma_buf` must be a DmaBuffer registered with SPDK via `prepare_memory_for_spdk`.
++/// - `gpu_dma_buf.len()` must be at least `total_bytes` (aligned up to block size).
++pub unsafe fn p2p_ssd_to_gpu_persistent(
++    drive: &dyn IBlockDevice,
++    gpu_dma_buf: &DmaBuffer,
++    start_lba: u64,
++    total_bytes: usize,
++    numa_node: i32,
++) -> Result<(), DispatcherError> {
++    let block_size = drive.block_size() as usize;
++    let chunk_size = drive.max_transfer_size() as usize;
++    let aligned_bytes = total_bytes.next_multiple_of(block_size);
++
++    let channels: ClientChannels = drive.connect_client().map_err(|e| {
++        DispatcherError::IoError(format!("connect_client failed: {e}"))
++    })?;
++
++    let segments = io_segmenter::segment_io(start_lba, aligned_bytes, chunk_size as u32, block_size as u32);
++
++    let base_ptr = gpu_dma_buf.as_ptr() as *mut u8;
++
++    for seg in &segments {
++        // Create a sub-buffer view into the GPU DmaBuffer at the segment offset.
++        // noop_free_pipeline prevents unregistering the parent buffer's SPDK IOMMU mapping.
++        // SAFETY: base_ptr + seg.buffer_offset is within the SPDK-registered GPU region.
++        let sub_ptr = unsafe { base_ptr.add(seg.buffer_offset) } as *mut std::ffi::c_void;
++        let sub_buf = unsafe {
++            DmaBuffer::from_raw(sub_ptr, seg.length, noop_free_pipeline, numa_node)
++        }
++        .map_err(|e| DispatcherError::AllocationFailed(format!("P2P sub-buffer view: {e}")))?;
++
++        let sub_buf = Arc::new(Mutex::new(sub_buf));
++
++        channels
++            .command_tx
++            .send(Command::ReadSync {
++                ns_id: 1,
++                lba: seg.lba,
++                buf: Arc::clone(&sub_buf),
++            })
++            .map_err(|_| DispatcherError::IoError("send ReadSync (P2P) failed".into()))?;
++
++        match channels.completion_rx.recv() {
++            Ok(Completion::ReadDone { result, .. }) => {
++                result.map_err(|e| {
++                    DispatcherError::IoError(format!("SSD P2P read failed: {e}"))
++                })?;
++            }
++            Ok(other) => {
++                return Err(DispatcherError::IoError(format!(
++                    "unexpected P2P completion: {other:?}"
++                )));
++            }
++            Err(_) => {
++                return Err(DispatcherError::IoError(
++                    "P2P completion channel disconnected".into(),
++                ));
++            }
++        }
++
++        drop(sub_buf);
++    }
++
++    Ok(())
++}
++
++/// Read from SSD directly into a pre-registered GPU DmaBuffer using BatchSubmit + ReadAsync (P2P+parallel path).
++///
++/// Submits all NVMe read commands simultaneously via BatchSubmit, allowing the NVMe
++/// controller to exploit internal flash parallelism at QD=32 for a 4 MiB object.
++/// Then collects all 32 ReadDone completions.
++///
++/// # Safety
++///
++/// - `channels` must be a valid ClientChannels for the NVMe block device.
++/// - `gpu_dma_buf` must be a DmaBuffer registered with SPDK via `prepare_memory_for_spdk`.
++/// - `gpu_dma_buf.len()` must be at least `total_bytes` (aligned up to block size).
++pub unsafe fn p2p_batch_ssd_to_gpu(
++    channels: &ClientChannels,
++    gpu_dma_buf: &DmaBuffer,
++    start_lba: u64,
++    total_bytes: usize,
++    block_size: u32,
++    chunk_size: u32,
++    numa_node: i32,
++) -> Result<(), DispatcherError> {
++    let block_size_usize = block_size as usize;
++    let aligned_bytes = total_bytes.next_multiple_of(block_size_usize);
++
++    let segments = io_segmenter::segment_io(start_lba, aligned_bytes, chunk_size, block_size);
++
++    let base_ptr = gpu_dma_buf.as_ptr() as *mut u8;
++    let n = segments.len();
++
++    // Create sub-buffer views for each segment — one per 128 KiB chunk offset.
++    let mut sub_bufs: Vec<Arc<Mutex<DmaBuffer>>> = Vec::with_capacity(n);
++    for seg in &segments {
++        // SAFETY: base_ptr + seg.buffer_offset is within the SPDK-registered GPU region.
++        let sub_ptr = unsafe { base_ptr.add(seg.buffer_offset) } as *mut std::ffi::c_void;
++        let sub_buf = unsafe {
++            DmaBuffer::from_raw(sub_ptr, seg.length, noop_free_pipeline, numa_node)
++        }
++        .map_err(|e| DispatcherError::AllocationFailed(format!("P2P batch sub-buffer: {e}")))?;
++        sub_bufs.push(Arc::new(Mutex::new(sub_buf)));
++    }
++
++    // Build BatchSubmit with one ReadAsync per segment.
++    let ops: Vec<Command> = segments.iter().zip(sub_bufs.iter()).map(|(seg, buf)| {
++        Command::ReadAsync {
++            ns_id: 1,
++            lba: seg.lba,
++            buf: Arc::clone(buf),
++            timeout_ms: 5000,
++        }
++    }).collect();
++
++    channels
++        .command_tx
++        .send(Command::BatchSubmit { ops })
++        .map_err(|_| DispatcherError::IoError("send BatchSubmit (P2P) failed".into()))?;
++
++    // Collect all N completions.
++    for _ in 0..n {
++        match channels.completion_rx.recv() {
++            Ok(Completion::ReadDone { result, .. }) => {
++                result.map_err(|e| {
++                    DispatcherError::IoError(format!("SSD P2P batch read failed: {e}"))
++                })?;
++            }
++            Ok(other) => {
++                return Err(DispatcherError::IoError(format!(
++                    "unexpected P2P batch completion: {other:?}"
++                )));
++            }
++            Err(_) => {
++                return Err(DispatcherError::IoError(
++                    "P2P batch completion channel disconnected".into(),
++                ));
++            }
++        }
++    }
++
++    // noop_free_pipeline means drop is safe, but forget avoids any drop overhead.
++    for sub_buf in sub_bufs {
++        std::mem::forget(sub_buf);
++    }
++
++    Ok(())
++}
++
++/// Read from SSD into ring buffers using BatchSubmit + ReadAsync, then copy to memory-tier and GPU.
++///
++/// Uses up to PIPELINE_RING_SIZE outstanding reads at a time (QD=4), giving NVMe
++/// some parallelism while reusing the existing ring buffer infrastructure.
++///
++/// # Safety
++///
++/// - `mem_tier_ptr` must be valid for writes of at least `total_bytes`.
++/// - `gpu_dst` must be a valid GPU destination pointer for `total_bytes`.
++pub unsafe fn pipelined_batch_ssd_to_gpu(
++    drive: &dyn IBlockDevice,
++    gpu: &dyn IGpuServices,
++    mem_tier_ptr: *mut u8,
++    gpu_dst: *mut std::ffi::c_void,
++    start_lba: u64,
++    total_bytes: usize,
++    numa_node: i32,
++) -> Result<(), DispatcherError> {
++    let block_size = drive.block_size() as usize;
++    let chunk_size = drive.max_transfer_size() as usize;
++    let aligned_bytes = total_bytes.next_multiple_of(block_size);
++
++    let channels: ClientChannels = drive.connect_client().map_err(|e| {
++        DispatcherError::IoError(format!("connect_client failed: {e}"))
++    })?;
++
++    let segments = io_segmenter::segment_io(start_lba, aligned_bytes, chunk_size as u32, block_size as u32);
++
++    // Allocate ring of DMA buffers (same as pipelined_ssd_to_gpu).
++    let ring: Vec<Arc<Mutex<DmaBuffer>>> = (0..PIPELINE_RING_SIZE.min(segments.len()))
++        .map(|_| {
++            DmaBuffer::new(chunk_size, block_size, Some(numa_node))
++                .map(|b| Arc::new(Mutex::new(b)))
++                .map_err(|e| {
++                    DispatcherError::AllocationFailed(format!("batch pipeline ring buffer: {e}"))
++                })
++        })
++        .collect::<Result<Vec<_>, _>>()?;
++
++    let batch_size = ring.len(); // QD = PIPELINE_RING_SIZE (4)
++
++    let mut seg_idx = 0;
++    while seg_idx < segments.len() {
++        let batch_end = (seg_idx + batch_size).min(segments.len());
++        let batch_segs = &segments[seg_idx..batch_end];
++
++        // Submit this batch of reads.
++        let ops: Vec<Command> = batch_segs.iter().enumerate().map(|(i, seg)| {
++            let ring_idx = (seg_idx + i) % ring.len();
++            Command::ReadAsync {
++                ns_id: 1,
++                lba: seg.lba,
++                buf: Arc::clone(&ring[ring_idx]),
++                timeout_ms: 5000,
++            }
++        }).collect();
++
++        channels
++            .command_tx
++            .send(Command::BatchSubmit { ops })
++            .map_err(|_| DispatcherError::IoError("send BatchSubmit (bounce) failed".into()))?;
++
++        // Collect completions and copy each chunk.
++        let mut completed = vec![false; batch_segs.len()];
++        for _ in 0..batch_segs.len() {
++            match channels.completion_rx.recv() {
++                Ok(Completion::ReadDone { result, .. }) => {
++                    result.map_err(|e| {
++                        DispatcherError::IoError(format!("SSD batch read failed: {e}"))
++                    })?;
++                    // Find the next uncompleted slot (completions may arrive out of order,
++                    // but we process them in submission order for copy correctness).
++                    for j in 0..batch_segs.len() {
++                        if !completed[j] {
++                            completed[j] = true;
++                            let seg = &batch_segs[j];
++                            let ring_idx = (seg_idx + j) % ring.len();
++                            let ring_buf = &ring[ring_idx];
++                            let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
++                            let guard = ring_buf.lock().unwrap();
++                            if copy_len > 0 {
++                                unsafe {
++                                    std::ptr::copy_nonoverlapping(
++                                        guard.as_ptr() as *const u8,
++                                        mem_tier_ptr.add(seg.buffer_offset),
++                                        copy_len,
++                                    );
++                                }
++                            }
++                            let gpu_offset = seg.buffer_offset;
++                            gpu.dma_copy_to_device(
++                                &guard,
++                                unsafe { (gpu_dst as *mut u8).add(gpu_offset) as *mut std::ffi::c_void },
++                                copy_len,
++                            ).map_err(|e| {
++                                DispatcherError::IoError(format!("GPU DMA copy (batch bounce) failed: {e}"))
++                            })?;
++                            drop(guard);
++                            break;
++                        }
++                    }
++                }
++                Ok(other) => {
++                    return Err(DispatcherError::IoError(format!(
++                        "unexpected batch bounce completion: {other:?}"
++                    )));
++                }
++                Err(_) => {
++                    return Err(DispatcherError::IoError(
++                        "batch bounce completion channel disconnected".into(),
++                    ));
++                }
++            }
++        }
++
++        seg_idx = batch_end;
++    }
++
++    Ok(())
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git a/components/dispatcher/v1/tests/integration.rs b/components/dispatcher/v1/tests/integration.rs
+index 7084f11..d504e0c 100644
+--- a/components/dispatcher/v1/tests/integration.rs
++++ b/components/dispatcher/v1/tests/integration.rs
+@@ -361,6 +361,7 @@ fn make_handle(buf: &mut [u8]) -> IpcHandle {
+     IpcHandle {
+         address: buf.as_mut_ptr(),
+         size: buf.len() as u32,
++        cuda_ipc_handle_bytes: None,
+     }
+ }
+ 
+@@ -430,6 +431,7 @@ fn hw_idispatcher_full_integration() {
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 0,
++            cuda_ipc_handle_bytes: None,
+         };
+         let err = d.populate(999, handle);
+         assert!(
+diff --git a/components/dispatcher/v1/tests/lazy_migration.rs b/components/dispatcher/v1/tests/lazy_migration.rs
+index 230c11a..1e60538 100644
+--- a/components/dispatcher/v1/tests/lazy_migration.rs
++++ b/components/dispatcher/v1/tests/lazy_migration.rs
+@@ -428,6 +428,7 @@ fn make_handle(buf: &mut [u8]) -> IpcHandle {
+     IpcHandle {
+         address: buf.as_mut_ptr(),
+         size: buf.len() as u32,
++        cuda_ipc_handle_bytes: None,
+     }
+ }
+ 
+diff --git a/components/interfaces/src/idispatcher.rs b/components/interfaces/src/idispatcher.rs
+index 060f4ea..d31103d 100644
+--- a/components/interfaces/src/idispatcher.rs
++++ b/components/interfaces/src/idispatcher.rs
+@@ -26,6 +26,20 @@ pub enum ExtentManagerVersion {
+     V2,
+ }
+ 
++/// SSD-to-GPU lookup path selection.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
++pub enum LookupPath {
++    /// Pipelined bounce: sequential ReadSync into ring buffers, then cudaMemcpy.
++    #[default]
++    BounceSeq,
++    /// P2P sequential: sequential ReadSync directly into pre-registered GPU DmaBuffer.
++    P2pSeq,
++    /// P2P batch: BatchSubmit(ReadAsync × N) into pre-registered GPU DmaBuffer.
++    P2pBatch,
++    /// Bounce batch: BatchSubmit(ReadAsync × RING_SIZE) into ring buffers, then cudaMemcpy.
++    BounceBatch,
++}
++
+ /// Configuration for dispatcher initialization.
+ ///
+ /// # Examples
+@@ -49,6 +63,8 @@ pub struct DispatcherConfig {
+     pub metadata_pci_addr: String,
+     /// PCI addresses of N data block devices (one per extent manager).
+     pub data_pci_addrs: Vec<String>,
++    /// Which SSD-to-GPU lookup path to use.
++    pub lookup_path: LookupPath,
+     /// Which block device component version to use.
+     pub block_device_version: BlockDeviceVersion,
+     /// Which extent manager component version to use.
+@@ -82,6 +98,7 @@ impl Default for DispatcherConfig {
+         Self {
+             metadata_pci_addr: String::new(),
+             data_pci_addrs: Vec::new(),
++            lookup_path: LookupPath::default(),
+             block_device_version: BlockDeviceVersion::default(),
+             extent_manager_version: ExtentManagerVersion::default(),
+             max_cache_entries: 10000,
+@@ -106,6 +123,7 @@ impl Default for DispatcherConfig {
+ /// let handle = IpcHandle {
+ ///     address: buf.as_mut_ptr(),
+ ///     size: 4096,
++///     cuda_ipc_handle_bytes: None,
+ /// };
+ /// assert_eq!(handle.size, 4096);
+ /// ```
+@@ -115,6 +133,9 @@ pub struct IpcHandle {
+     pub address: *mut u8,
+     /// Size of the data in bytes.
+     pub size: u32,
++    /// Raw 64-byte CUDA IPC memory handle. When present, the dispatcher
++    /// uses this to call `prepare_memory_for_spdk` for P2P direct SSD→GPU transfers.
++    pub cuda_ipc_handle_bytes: Option<Vec<u8>>,
+ }
+ 
+ // SAFETY: GPU memory is accessible cross-thread via DMA engine.
+@@ -296,6 +317,7 @@ mod tests {
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 4096,
++            cuda_ipc_handle_bytes: None,
+         };
+         assert_eq!(handle.size, 4096);
+     }
+diff --git a/components/interfaces/src/lib.rs b/components/interfaces/src/lib.rs
+index 1e17680..8e53913 100644
+--- a/components/interfaces/src/lib.rs
++++ b/components/interfaces/src/lib.rs
+@@ -24,6 +24,7 @@ pub use idispatcher::DispatcherConfig;
+ pub use idispatcher::DispatcherError;
+ pub use idispatcher::ExtentManagerVersion;
+ pub use idispatcher::IpcHandle;
++pub use idispatcher::LookupPath;
+ #[cfg(feature = "spdk")]
+ pub use idispatcher::IDispatcher;
+ pub use igpu_services::GpuDeviceInfo;

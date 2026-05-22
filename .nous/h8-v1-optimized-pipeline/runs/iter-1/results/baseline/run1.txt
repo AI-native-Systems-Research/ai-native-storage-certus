@@ -1,0 +1,23 @@
+Testing certus-server gRPC dispatcher at localhost:50051...
+
+============================================================
+Lookup Latency Benchmark
+============================================================
+  Object size:      4096 KiB
+  Pool capacity:    64 objects (256 MiB)
+  Total to populate: 84 (to force 20 evictions)
+  Lookup iterations: 1
+
+  Populating 84 objects... done (0.06s, 1309 obj/s)
+  Waiting for write-through to complete... done
+  Benchmarking memory-tier lookups (20 objects x 1 iters)... done
+  Benchmarking SSD-tier lookups (20 objects x 1 iters)... done
+
+  Tier            Avg (us/obj)   Min (us/obj)   Max (us/obj)   Avg (GB/s)   Peak (GB/s) 
+  --------------------------------------------------------------------------------
+  Memory-tier     371.6          371.6          371.6          11.29        11.29       
+  SSD-tier        13459.8        13459.8        13459.8        0.31         0.31        
+
+  SSD/Memory-tier ratio: 36.2x latency, 36.2x throughput
+
+  Cleaning up... done

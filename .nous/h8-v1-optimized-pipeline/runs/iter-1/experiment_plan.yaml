@@ -1,0 +1,86 @@
+metadata:
+  iteration: 1
+  bundle_ref: "runs/iter-1/bundle.yaml"
+  worktree: "/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-fb60350b"
+
+setup:
+  - cmd: "RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server -p dispatcher-v1"
+    description: "Build certus-server and dispatcher-v1 with SPDK dependencies"
+    env:
+      RUSTFLAGS: "-L /usr/local/lib"
+
+server_start_cmd: "LD_LIBRARY_PATH='/usr/local/lib:/usr/local/cuda/lib64' /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-fb60350b/target/debug/certus-server --metadata-pci 0000:63:00.0 --data-pci 0000:64:00.0 --dispatcher-version v1"
+
+bench_cmd: "python3 /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-fb60350b/apps/certus-server/python-client/test_client.py --bench-only --bench-object-size 4194304 --bench-num-objects 20 --bench-iterations 1"
+
+arms:
+  - arm_id: "baseline"
+    description: "Sequential pipeline (ReadSync, no parallelism)"
+    code_changes: []
+    conditions:
+      - name: "baseline-run1"
+        cmd: "git checkout -- . && RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server -p dispatcher-v1 && <start server> && python3 /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-fb60350b/apps/certus-server/python-client/test_client.py --bench-only --bench-object-size 4194304 --bench-num-objects 20 --bench-iterations 1"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/results/baseline/run1.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/inputs/workload.yaml"
+      - name: "baseline-run2"
+        cmd: "Same as run1 (fresh server restart)"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/results/baseline/run2.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/inputs/workload.yaml"
+      - name: "baseline-run3"
+        cmd: "Same as run1 (fresh server restart)"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/results/baseline/run3.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/inputs/workload.yaml"
+
+  - arm_id: "h-main"
+    description: "Parallel NVMe ReadAsync (ring_size=2) + async GPU copies on alternating CUDA streams"
+    code_changes:
+      - "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/patches/h-main.patch"
+    conditions:
+      - name: "h-main-run1"
+        cmd: "git checkout -- . && git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/patches/h-main.patch && RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server -p dispatcher-v1 && <start server> && python3 /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-fb60350b/apps/certus-server/python-client/test_client.py --bench-only --bench-object-size 4194304 --bench-num-objects 20 --bench-iterations 1"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/results/h-main/run1.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/inputs/workload.yaml"
+      - name: "h-main-run2"
+        cmd: "Same as run1 (fresh server restart)"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/results/h-main/run2.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/inputs/workload.yaml"
+      - name: "h-main-run3"
+        cmd: "Same as run1 (fresh server restart)"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/results/h-main/run3.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/inputs/workload.yaml"
+
+  - arm_id: "h-ablation"
+    description: "Parallel NVMe ReadAsync (ring_size=2) + synchronous GPU copies (no CUDA streams)"
+    code_changes:
+      - "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/patches/h-ablation.patch"
+    conditions:
+      - name: "h-ablation-run1"
+        cmd: "git checkout -- . && git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/patches/h-ablation.patch && RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server -p dispatcher-v1 && <start server> && python3 /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-fb60350b/apps/certus-server/python-client/test_client.py --bench-only --bench-object-size 4194304 --bench-num-objects 20 --bench-iterations 1"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/results/h-ablation/run1.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/inputs/workload.yaml"
+      - name: "h-ablation-run2"
+        cmd: "Same as run1 (fresh server restart)"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/results/h-ablation/run2.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/inputs/workload.yaml"
+      - name: "h-ablation-run3"
+        cmd: "Same as run1 (fresh server restart)"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/results/h-ablation/run3.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-optimized-pipeline/runs/iter-1/inputs/workload.yaml"
+
+notes: |
+  Implementation constraint: SPDK qpair submission fails with rc=-12 (ENOMEM) for
+  ring_size >= 3. Ring size is capped at 2 which provides QD=2 parallelism.
+  This is a hardware/configuration constraint — the effective queue depth per pipeline
+  call is limited to 2 concurrent ReadAsync operations.
+
+  Benchmark note: use --bench-iterations 1 to measure pure SSD-tier latency.
+  With iterations > 1, promoted objects re-enter memory-tier, averaging down the result.

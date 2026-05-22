@@ -1,0 +1,16 @@
+{
+  "condition": "treatment",
+  "arm": "h-control-negative",
+  "seed": 42,
+  "patch": "patches/h-control-negative.patch",
+  "metrics": {
+    "memory_tier_avg_us": 593.5,
+    "ssd_tier_avg_us": 15878.7,
+    "ssd_tier_min_us": 15878.7,
+    "ssd_tier_max_us": 15878.7,
+    "ssd_tier_avg_gbs": 0.26,
+    "ssd_memory_ratio": 26.8
+  },
+  "raw_output": "Memory-tier: 593.5 us/obj, 7.07 GB/s | SSD-tier: 15878.7 us/obj, 0.26 GB/s",
+  "notes": "P2P direct SSD->GPU DMA via prepare_memory_for_spdk + p2p_ssd_to_gpu_persistent. 19.2% faster than baseline (19646 us). Consistent with iter-1 P2P result (23% faster in iter-1)."
+}

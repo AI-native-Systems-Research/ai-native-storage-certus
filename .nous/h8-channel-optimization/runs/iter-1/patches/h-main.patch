@@ -1,0 +1,321 @@
+diff --git a/components/dispatcher/v1/benches/pipeline_hw_benchmark.rs b/components/dispatcher/v1/benches/pipeline_hw_benchmark.rs
+index 87d49bc..2e1278e 100644
+--- a/components/dispatcher/v1/benches/pipeline_hw_benchmark.rs
++++ b/components/dispatcher/v1/benches/pipeline_hw_benchmark.rs
+@@ -16,10 +16,14 @@ use component_core::binding::bind;
+ use component_core::query_interface;
+ use gpu_services::cuda_ffi;
+ use gpu_services::GpuServicesComponentV0;
+-use interfaces::{ClientChannels, GpuStream, IBlockDevice, IBlockDeviceAdmin, IGpuServices, PciAddress};
++use interfaces::{ClientChannels, DmaBuffer, GpuStream, IBlockDevice, IBlockDeviceAdmin, IGpuServices, PciAddress};
++use std::sync::Mutex;
+ use logger::LoggerComponentV1;
+ use spdk_env::SPDKEnvComponent;
+ 
++// No-op free for placeholder DmaBuffer wrappers.
++unsafe extern "C" fn noop_free(_ptr: *mut std::ffi::c_void) {}
++
+ // ---------------------------------------------------------------------------
+ // Hardware context
+ // ---------------------------------------------------------------------------
+@@ -282,6 +286,18 @@ fn run_zero_copy_bench(
+     let label = format!("zero_copy_{}KiB", total_bytes / 1024);
+     let chunk_size = ctx.max_transfer;
+ 
++    // Pre-allocate noop-free DmaBuffer wrappers for zero-copy reuse.
++    let zero_copy_bufs: Vec<Arc<Mutex<DmaBuffer>>> = (0..dispatcher_v1::pipeline::ZERO_COPY_DEPTH)
++        .map(|_| {
++            // SAFETY: placeholder pointer updated before use via update_ptr_and_len.
++            let buf = unsafe {
++                DmaBuffer::from_raw(0x1 as *mut std::ffi::c_void, chunk_size, noop_free, -1)
++            }
++            .expect("placeholder DmaBuffer");
++            Arc::new(Mutex::new(buf))
++        })
++        .collect();
++
+     // Warmup
+     for _ in 0..WARMUP_ITERS {
+         unsafe {
+@@ -290,6 +306,7 @@ fn run_zero_copy_bench(
+                 &*igpu,
+                 streams,
+                 channels,
++                &zero_copy_bufs,
+                 mem_tier_ptr as *mut u8,
+                 gpu_dst,
+                 0,
+@@ -310,6 +327,7 @@ fn run_zero_copy_bench(
+                 &*igpu,
+                 streams,
+                 channels,
++                &zero_copy_bufs,
+                 mem_tier_ptr as *mut u8,
+                 gpu_dst,
+                 0,
+diff --git a/components/dispatcher/v1/src/lib.rs b/components/dispatcher/v1/src/lib.rs
+index 280d12c..1b59d76 100644
+--- a/components/dispatcher/v1/src/lib.rs
++++ b/components/dispatcher/v1/src/lib.rs
+@@ -261,6 +261,7 @@ impl DispatcherComponentV0 {
+                 &**gpu,
+                 &ring_ref.streams,
+                 channels,
++                &ring_ref.zero_copy_bufs,
+                 mem_ptr,
+                 ipc_handle.address as *mut std::ffi::c_void,
+                 start_lba,
+diff --git a/components/dispatcher/v1/src/pipeline.rs b/components/dispatcher/v1/src/pipeline.rs
+index f7f77d0..9f672d4 100644
+--- a/components/dispatcher/v1/src/pipeline.rs
++++ b/components/dispatcher/v1/src/pipeline.rs
+@@ -20,6 +20,9 @@ pub const PIPELINE_RING_SIZE: usize = 8;
+ /// Timeout for async NVMe read operations (ms).
+ const READ_TIMEOUT_MS: u64 = 5000;
+ 
++/// Max in-flight NVMe reads in the zero-copy pipeline.
++pub const ZERO_COPY_DEPTH: usize = 32;
++
+ /// Pre-allocated ring of CUDA-pinned + SPDK-registered DMA buffers and CUDA streams.
+ ///
+ /// Constructed once and reused across multiple `pipelined_ssd_to_gpu` calls
+@@ -28,6 +31,9 @@ pub struct PipelineRing {
+     pub buffers: Vec<Arc<Mutex<DmaBuffer>>>,
+     pub streams: [GpuStream; 2],
+     pub chunk_size: usize,
++    /// Pre-allocated noop-free DmaBuffer wrappers reused across zero-copy calls.
++    /// Internal pointers are updated per-call to point at memory-tier offsets.
++    pub zero_copy_bufs: Vec<Arc<Mutex<DmaBuffer>>>,
+ }
+ 
+ impl PipelineRing {
+@@ -51,10 +57,33 @@ impl PipelineRing {
+             DispatcherError::IoError(format!("create_stream failed: {e}"))
+         })?;
+ 
++        // Pre-allocate ZERO_COPY_DEPTH noop-free DmaBuffer wrappers for zero-copy reuse.
++        // Initialized with a placeholder pointer (updated per-call before use).
++        let zero_copy_bufs: Vec<Arc<Mutex<DmaBuffer>>> = (0..ZERO_COPY_DEPTH)
++            .map(|_| {
++                // SAFETY: placeholder ptr (0x1) is never dereferenced — it is updated
++                // via update_ptr_and_len() before any SPDK/CUDA operation. noop_free
++                // never touches the pointer. These wrappers are only used in the
++                // pipelined_ssd_to_gpu_zero_copy function, which sets the real pointer
++                // from the memory-tier before submitting NVMe reads.
++                let buf = unsafe {
++                    DmaBuffer::from_raw(
++                        0x1 as *mut std::ffi::c_void,
++                        chunk_size,
++                        noop_free,
++                        -1,
++                    )
++                }
++                .expect("placeholder DmaBuffer alloc");
++                Arc::new(Mutex::new(buf))
++            })
++            .collect();
++
+         Ok(Self {
+             buffers,
+             streams: [stream_a, stream_b],
+             chunk_size,
++            zero_copy_bufs,
+         })
+     }
+ 
+@@ -62,6 +91,7 @@ impl PipelineRing {
+     pub fn destroy(self, gpu: &dyn IGpuServices) {
+         let _ = gpu.destroy_stream(self.streams[0]);
+         let _ = gpu.destroy_stream(self.streams[1]);
++        // zero_copy_bufs' DmaBuffers use noop_free, so no SPDK memory is freed on drop.
+     }
+ }
+ 
+@@ -244,11 +274,13 @@ unsafe extern "C" fn noop_free(_ptr: *mut std::ffi::c_void) {}
+ ///
+ /// - `mem_tier_ptr` must be a valid, SPDK-registered, CUDA-pinned pointer for `total_bytes`.
+ /// - `gpu_dst` must be a valid GPU destination pointer for `total_bytes`.
++/// - `zero_copy_bufs` must have at least `ZERO_COPY_DEPTH` entries with noop-free DmaBuffers.
+ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+     drive: &dyn IBlockDevice,
+     gpu: &dyn IGpuServices,
+     streams: &[GpuStream; 2],
+     channels: &ClientChannels,
++    zero_copy_bufs: &[Arc<Mutex<DmaBuffer>>],
+     mem_tier_ptr: *mut u8,
+     gpu_dst: *mut std::ffi::c_void,
+     start_lba: u64,
+@@ -271,26 +303,20 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+ 
+     let num_chunks = segments.len();
+ 
+-    // Create DmaBuffer wrappers for each chunk of the memory-tier slot.
+-    // These are noop-free since the memory-tier owns the allocation.
+-    let chunk_bufs: Vec<Arc<Mutex<DmaBuffer>>> = segments
+-        .iter()
+-        .map(|seg| {
+-            let ptr = unsafe { mem_tier_ptr.add(seg.buffer_offset) as *mut std::ffi::c_void };
+-            let buf_size = seg.length.next_multiple_of(block_size);
+-            let buf = unsafe { DmaBuffer::from_raw(ptr, buf_size, noop_free, -1) }
+-                .map_err(|e| {
+-                    DispatcherError::AllocationFailed(format!("DmaBuffer wrap chunk: {e}"))
+-                })?;
+-            Ok(Arc::new(Mutex::new(buf)))
+-        })
+-        .collect::<Result<Vec<_>, DispatcherError>>()?;
++    // Update pre-allocated DmaBuffer wrapper pointers to point at memory-tier offsets.
++    // Reuses existing Arc<Mutex<DmaBuffer>> objects to avoid per-call heap allocation.
++    for (i, seg) in segments.iter().enumerate() {
++        let slot = i % ZERO_COPY_DEPTH;
++        let ptr = unsafe { mem_tier_ptr.add(seg.buffer_offset) as *mut std::ffi::c_void };
++        let buf_size = seg.length.next_multiple_of(block_size);
++        let mut guard = zero_copy_bufs[slot].lock().unwrap();
++        // SAFETY: ptr is a valid SPDK-registered, CUDA-pinned memory-tier offset.
++        // buf_size matches the segment length. noop_free ensures no deallocation.
++        unsafe { guard.update_ptr_and_len(ptr, buf_size) };
++        drop(guard);
++    }
+ 
+     // Prime: submit initial async reads directly into memory-tier chunk offsets.
+-    // Each chunk targets a unique offset in the memory-tier slot, so we can have
+-    // many NVMe reads in flight simultaneously to saturate SSD parallelism.
+-    // Use a high depth (16) since there's no buffer reuse — each chunk is unique.
+-    const ZERO_COPY_DEPTH: usize = 16;
+     let max_inflight = ZERO_COPY_DEPTH.min(num_chunks);
+     for i in 0..max_inflight {
+         channels
+@@ -298,7 +324,7 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+             .send(Command::ReadAsync {
+                 ns_id: 1,
+                 lba: segments[i].lba,
+-                buf: Arc::clone(&chunk_bufs[i]),
++                buf: Arc::clone(&zero_copy_bufs[i % ZERO_COPY_DEPTH]),
+                 timeout_ms: READ_TIMEOUT_MS,
+             })
+             .map_err(|e| DispatcherError::IoError(format!("ReadAsync send #{i}: {e}")))?;
+@@ -338,7 +364,7 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+         let current_stream = streams[completed % 2];
+ 
+         // Async H2D: memory-tier chunk → GPU (same memory NVMe just wrote into).
+-        let guard = chunk_bufs[completed].lock().unwrap();
++        let guard = zero_copy_bufs[completed % ZERO_COPY_DEPTH].lock().unwrap();
+         gpu.dma_copy_to_device_async(
+             &guard,
+             unsafe { (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void },
+@@ -350,10 +376,10 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+         })?;
+         drop(guard);
+ 
+-        // Batch-sync both streams periodically. No buffer reuse in zero-copy
+-        // (each chunk is a unique memory-tier offset), so sync only throttles
++        // Batch-sync both streams every ZERO_COPY_DEPTH completions. No buffer reuse in
++        // zero-copy (each chunk is a unique memory-tier offset), so sync only throttles
+         // the GPU command queue depth.
+-        if (completed + 1) % 16 == 0 {
++        if (completed + 1) % ZERO_COPY_DEPTH == 0 {
+             gpu.stream_synchronize(streams[0])
+                 .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+             gpu.stream_synchronize(streams[1])
+@@ -362,12 +388,13 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+ 
+         // Submit next NVMe read (into the next memory-tier chunk).
+         if next_to_submit < num_chunks {
++            let slot = next_to_submit % ZERO_COPY_DEPTH;
+             channels
+                 .command_tx
+                 .send(Command::ReadAsync {
+                     ns_id: 1,
+                     lba: segments[next_to_submit].lba,
+-                    buf: Arc::clone(&chunk_bufs[next_to_submit]),
++                    buf: Arc::clone(&zero_copy_bufs[slot]),
+                     timeout_ms: READ_TIMEOUT_MS,
+                 })
+                 .map_err(|e| {
+@@ -385,11 +412,6 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+             .map_err(|e| DispatcherError::IoError(format!("final stream_synchronize: {e}")))?;
+     }
+ 
+-    // Forget all DmaBuffer wrappers (noop_free, but avoid double-free logic).
+-    for buf in chunk_bufs {
+-        std::mem::forget(Arc::try_unwrap(buf).ok());
+-    }
+-
+     Ok(())
+ }
+ 
+diff --git a/components/gpu-services/v0/src/lib.rs b/components/gpu-services/v0/src/lib.rs
+index d7bb448..38eefa6 100644
+--- a/components/gpu-services/v0/src/lib.rs
++++ b/components/gpu-services/v0/src/lib.rs
+@@ -39,6 +39,7 @@ use component_framework::define_component;
+ use interfaces::{GpuDeviceInfo, GpuDmaBuffer, GpuIpcHandle, IGpuServices, ILogger};
+ 
+ use std::sync::Mutex;
++use std::sync::atomic::{AtomicBool, Ordering};
+ 
+ /// Internal component state tracking initialization and handles.
+ #[cfg(feature = "gpu")]
+@@ -65,6 +66,7 @@ define_component! {
+         },
+         fields: {
+             gpu_state: Mutex<GpuState>,
++            initialized_fast: AtomicBool,
+         },
+     }
+ }
+@@ -102,6 +104,8 @@ impl IGpuServices for GpuServicesComponentV0 {
+ 
+             state.devices = devices;
+             state.initialized = true;
++            drop(state);
++            self.initialized_fast.store(true, Ordering::Release);
+             Ok(())
+         }
+     }
+@@ -114,6 +118,7 @@ impl IGpuServices for GpuServicesComponentV0 {
+ 
+         #[cfg(feature = "gpu")]
+         {
++            self.initialized_fast.store(false, Ordering::Release);
+             let mut state = self.state().lock().map_err(|e| e.to_string())?;
+             state.devices.clear();
+             state.initialized = false;
+@@ -629,11 +634,9 @@ impl IGpuServices for GpuServicesComponentV0 {
+ 
+         #[cfg(feature = "gpu")]
+         {
+-            let state = self.state().lock().map_err(|e| e.to_string())?;
+-            if !state.initialized {
++            if !self.initialized_fast.load(Ordering::Acquire) {
+                 return Err("Not initialized: call initialize() first".to_string());
+             }
+-            drop(state);
+ 
+             // SAFETY: Caller guarantees dst is a valid GPU device pointer covering
+             // at least `size` bytes. src.as_ptr() is a valid DMA host buffer,
+diff --git a/components/interfaces/src/spdk_types.rs b/components/interfaces/src/spdk_types.rs
+index 52b9e12..d92584e 100644
+--- a/components/interfaces/src/spdk_types.rs
++++ b/components/interfaces/src/spdk_types.rs
+@@ -370,6 +370,21 @@ impl DmaBuffer {
+     pub fn metadata_mut(&mut self) -> &mut BTreeMap<String, String> {
+         &mut self.metadata
+     }
++
++    /// Update the internal pointer and length for zero-copy reuse.
++    ///
++    /// # Safety
++    ///
++    /// - `ptr` must be valid for reads and writes of `len` bytes for the lifetime of this buffer.
++    /// - `ptr` must be SPDK-registered and CUDA-pinned (same requirements as `from_raw`).
++    /// - The caller is responsible for ensuring the previous `ptr` is NOT freed — this
++    ///   buffer's `free_fn` is noop (noop_free) when used for zero-copy wrappers.
++    /// - No concurrent access to this buffer is permitted during the update.
++    #[inline]
++    pub unsafe fn update_ptr_and_len(&mut self, ptr: *mut std::ffi::c_void, len: usize) {
++        self.ptr = ptr;
++        self.len = len;
++    }
+ }
+ 
+ impl Drop for DmaBuffer {

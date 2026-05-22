@@ -1,0 +1,16 @@
+{
+  "condition": "baseline",
+  "arm": "baseline",
+  "seed": 42,
+  "patch": null,
+  "metrics": {
+    "memory_tier_avg_us": 552.7,
+    "ssd_tier_avg_us": 19646.1,
+    "ssd_tier_min_us": 19646.1,
+    "ssd_tier_max_us": 19646.1,
+    "ssd_tier_avg_gbs": 0.21,
+    "ssd_memory_ratio": 35.5
+  },
+  "raw_output": "Memory-tier: 552.7 us/obj, 7.59 GB/s | SSD-tier: 19646.1 us/obj, 0.21 GB/s",
+  "notes": "Sequential v1 pipeline: ReadSync per chunk + synchronous dma_copy_to_device. Iter-2 baseline."
+}

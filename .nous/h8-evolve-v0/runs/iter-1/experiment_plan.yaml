@@ -1,0 +1,41 @@
+metadata:
+  iteration: 1
+  bundle_ref: "runs/iter-1/bundle.yaml"
+
+setup:
+  - cmd: "cd /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-91d3f04e && RUSTFLAGS='-L /usr/local/lib' cargo build -p gpu-services --features p2p --bin gpu-p2p-server"
+    description: "Build gpu-p2p-server from worktree"
+
+arms:
+  - arm_id: "h-main"
+    conditions:
+      - name: "pipelined-bounce"
+        cmd: "cd /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-91d3f04e && git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/patches/h-main.patch && RUSTFLAGS='-L /usr/local/lib' cargo build -p gpu-services --features p2p --bin gpu-p2p-server && bash /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/inputs/run_condition.sh bounce-pipelined /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/results/h-main/pipelined-bounce.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/results/h-main/pipelined-bounce.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/inputs/run_condition.sh"
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/patches/h-main.patch"
+
+  - arm_id: "h-control-negative"
+    conditions:
+      - name: "sequential-bounce"
+        cmd: "cd /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-91d3f04e && git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/patches/h-main.patch && RUSTFLAGS='-L /usr/local/lib' cargo build -p gpu-services --features p2p --bin gpu-p2p-server && bash /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/inputs/run_condition.sh bounce /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/results/h-control-negative/sequential-bounce.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/results/h-control-negative/sequential-bounce.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/inputs/run_condition.sh"
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/patches/h-main.patch"
+      - name: "p2p-warm-reference"
+        cmd: "cd /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-91d3f04e && git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/patches/h-main.patch && RUSTFLAGS='-L /usr/local/lib' cargo build -p gpu-services --features p2p --bin gpu-p2p-server && bash /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/inputs/run_condition.sh p2p /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/results/h-control-negative/p2p-warm.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/results/h-control-negative/p2p-warm.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/inputs/run_condition.sh"
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/patches/h-main.patch"
+
+  - arm_id: "h-robustness"
+    conditions:
+      - name: "pipelined-2stream"
+        cmd: "cd /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-91d3f04e && git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/patches/h-robustness.patch && RUSTFLAGS='-L /usr/local/lib' cargo build -p gpu-services --features p2p --bin gpu-p2p-server && bash /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/inputs/run_condition.sh bounce-pipelined2stream /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/results/h-robustness/pipelined-2stream.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/results/h-robustness/pipelined-2stream.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/inputs/run_condition.sh"
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-1/patches/h-robustness.patch"

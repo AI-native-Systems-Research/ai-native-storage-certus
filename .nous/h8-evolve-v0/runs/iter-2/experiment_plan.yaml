@@ -1,0 +1,61 @@
+metadata:
+  iteration: 2
+  bundle_ref: "runs/iter-2/bundle.yaml"
+  worktree: "/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-071136f1"
+  patch: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/patches/combined.patch"
+
+setup:
+  - cmd: "cd /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-071136f1 && git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/patches/combined.patch && RUSTFLAGS='-L /usr/local/lib' cargo build -p gpu-services --features p2p --bin gpu-p2p-server"
+    description: "Apply patch and build gpu-p2p-server with pipelined modes"
+
+arms:
+  - arm_id: "h-main"
+    description: "Pipelined bounce with single channel reuse + cudaMemcpyAsync"
+    conditions:
+      - name: "treatment-s1"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/inputs/run_condition.sh bounce-pipelined /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/results/h-main/treatment-s1.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/results/h-main/treatment-s1.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/inputs/run_condition.sh"
+      - name: "treatment-s2"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/inputs/run_condition.sh bounce-pipelined /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/results/h-main/treatment-s2.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/results/h-main/treatment-s2.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/inputs/run_condition.sh"
+
+  - arm_id: "h-ablation"
+    description: "Pipelined bounce with single channel reuse + synchronous cudaMemcpy"
+    conditions:
+      - name: "treatment-s1"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/inputs/run_condition.sh bounce-pipelined-sync /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/results/h-ablation/treatment-s1.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/results/h-ablation/treatment-s1.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/inputs/run_condition.sh"
+      - name: "treatment-s2"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/inputs/run_condition.sh bounce-pipelined-sync /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/results/h-ablation/treatment-s2.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/results/h-ablation/treatment-s2.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/inputs/run_condition.sh"
+
+  - arm_id: "h-control-negative"
+    description: "Sequential bounce (no code change, baseline stability check)"
+    conditions:
+      - name: "baseline-s1"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/inputs/run_condition.sh bounce /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/results/h-control-negative/baseline-s1.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/results/h-control-negative/baseline-s1.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/inputs/run_condition.sh"
+      - name: "baseline-s2"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/inputs/run_condition.sh bounce /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/results/h-control-negative/baseline-s2.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/results/h-control-negative/baseline-s2.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/inputs/run_condition.sh"
+
+  - arm_id: "h-robustness"
+    description: "P2P warm reference (no code change)"
+    conditions:
+      - name: "baseline-s1"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/inputs/run_condition.sh p2p /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/results/h-robustness/baseline-s1.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/results/h-robustness/baseline-s1.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0/runs/iter-2/inputs/run_condition.sh"

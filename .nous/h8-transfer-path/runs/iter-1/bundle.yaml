@@ -1,0 +1,70 @@
+metadata:
+  iteration: 1
+  family: "bounce-vs-p2p-transfer-path"
+  research_question: >
+    Using a bounce buffer SSD->CPU->GPU with pipelined transfers is faster
+    than direct SSD->GPU for transfer of 4MiB broken into a stream of 128KiB
+    transfers.
+
+arm_selection_rationale: >
+  h-main tests the core research question (bounce faster than P2P warm?).
+  h-control-negative uses P2P cold to validate that the P2P DMA mechanism itself
+  is not inherently slow — only per-request GDRCopy setup overhead makes the cold
+  path slow. This confirms the measurement framework detects real differences and
+  isolates the DMA-target mechanism from the allocation mechanism. h-robustness
+  and h-ablation are omitted because the three modes are already the complete
+  experimental space and there are no removable sub-components to ablate.
+
+arms:
+  - type: h-main
+    prediction: >
+      Bounce mode (NVMe -> host DMA -> cudaMemcpy H2D) will achieve consistently
+      lower average end-to-end transfer latency and higher sustained throughput
+      than P2P warm mode (NVMe -> GDRCopy BAR1 GPU staging -> cudaMemcpy D2D)
+      for 4 MiB transfers at 128 KiB chunk size across all seeds.
+    mechanism: >
+      NVMe DMA to host memory follows the native PCIe root-complex-to-DRAM path.
+      SPDK hugepage DMA buffers have straightforward IOMMU mappings and the NVMe
+      controller's DMA engine is optimized for host memory writes. NVMe DMA to GPU
+      BAR1 (P2P path) requires each TLP to traverse the PCIe switch/fabric to the
+      GPU, where the GPU memory controller must schedule BAR1 aperture writes — a
+      path with higher per-TLP latency. Although bounce pays a second copy
+      (cudaMemcpy H2D from pinned host memory), this uses the GPU's optimized H2D
+      DMA engine. The hypothesis is that faster NVMe completion in bounce mode more
+      than compensates for the extra H2D copy. Code: handle_bounce at
+      p2p_server.rs:374 does BatchSubmit into host hugepage buffers then 32
+      sequential cudaMemcpy H2D. handle_p2p at p2p_server.rs:436 does BatchSubmit
+      into GDRCopy BAR1 buffers then 32 sequential cudaMemcpy D2D.
+    diagnostic: >
+      If bounce is NOT faster (P2P warm wins): (1) The extra H2D copy in bounce
+      is the dominant cost and is not offset by faster NVMe reads — measure NVMe
+      read phase separately to confirm. (2) D2D copies (intra-GPU, no PCIe
+      traversal) are substantially faster than H2D copies (cross PCIe bus) at
+      128 KiB granularity. (3) The PCIe topology may place GPU and NVMe on the
+      same switch, making BAR1 writes as fast as host writes. Next iteration
+      should add per-phase instrumentation to decompose latency into NVMe-read
+      vs copy phases.
+
+  - type: h-control-negative
+    prediction: >
+      P2P cold mode will exhibit consistently higher average latency than P2P warm
+      mode across all seeds. The per-request GDRCopy pin/map/unmap/unpin overhead
+      (32 kernel round-trips per 4 MiB request) will produce a clear, substantial
+      latency delta, confirming that the P2P DMA mechanism itself is fast when
+      setup is amortized.
+    mechanism: >
+      P2P cold (handle_p2p_cold at p2p_server.rs:493) performs per-request
+      cudaMalloc + create_spdk_dma_buffer_from_gpu_bar (which calls gdr_open +
+      gdr_pin_buffer + gdr_map + spdk_mem_register) for each of 32 chunks, does
+      the same NVMe reads and D2D copies as warm, then tears down with gdr_unmap +
+      gdr_unpin_buffer + gdr_close + cudaFree per chunk. Each gdr_pin_buffer
+      triggers nvidia_p2p_get_pages, a kernel transition that locks GPU pages. The
+      32 round-trips dominate over actual transfer time. P2P warm
+      (handle_p2p at p2p_server.rs:436) reuses a ChunkPool created at startup
+      (create_chunk_pool at p2p_server.rs:250), amortizing all setup.
+    diagnostic: >
+      If P2P cold is NOT substantially slower than P2P warm: GDRCopy setup may be
+      cached by the driver or fast-pathed on this kernel version. Check dmesg for
+      nvidia_p2p activity, verify cudaMalloc addresses differ across iterations
+      (not hitting CUDA allocator cache), and time the create_gpu_staging calls
+      individually.

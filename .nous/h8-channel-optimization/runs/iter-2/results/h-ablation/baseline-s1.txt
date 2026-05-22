@@ -1,0 +1,43 @@
+Initializing hardware stack...
+[spdk-env] Pre-flight checks passed. Initializing SPDK/DPDK environment...
+[spdk-env] SPDK/DPDK environment initialized. Enumerating devices...
+[spdk-env] Device enumeration complete. Found 7 device(s).
+  NVMe devices: ["0000:61:00.0", "0000:62:00.0", "0000:63:00.0", "0000:64:00.0", "0000:c1:00.0", "0000:c2:00.0", "0000:c3:00.0"]
+  GPU: 2 device(s)
+    [0] NVIDIA A30 (24164 MiB)
+  Memory-tier: 512 MiB pool
+block-device-spdk-nvme v2: controller ptr = 0x20007fffb140, numa = 0
+block-device-spdk-nvme v2: controller ptr = 0x20007fccf440, numa = 0
+block-device-spdk-nvme v2: controller ptr = 0x20007f9a4240, numa = 0
+block-device-spdk-nvme v2: controller ptr = 0x20007f679440, numa = 0
+block-device-spdk-nvme v2: controller ptr = 0x20007f355440, numa = 0
+block-device-spdk-nvme v2: controller ptr = 0x20007f031440, numa = 0
+
+=== Dispatcher HW Benchmark: Warm & Cold Lookup ===
+  warmup:   5 iterations
+  measured: 50 iterations
+  pool:     512 MiB
+
+  benchmarking 128 KiB (cold) ... done
+  benchmarking 128 KiB (warm) ... done
+  benchmarking 512 KiB (cold) ... done
+  benchmarking 512 KiB (warm) ... done
+  benchmarking 1024 KiB (cold) ... done
+  benchmarking 1024 KiB (warm) ... done
+  benchmarking 4096 KiB (cold) ... done
+  benchmarking 4096 KiB (warm) ... done
+  benchmarking 16384 KiB (cold) ... done
+  benchmarking 16384 KiB (warm) ... done
+
+--- Results Summary ---
+               cold_128KiB |      128 KiB | mean    2816.6 us | min     510.0 us | p50     517.8 us | p99   15001.5 us | max   15001.5 us |     44.4 MB/s
+               warm_128KiB |      128 KiB | mean      22.9 us | min      22.1 us | p50      22.8 us | p99      24.5 us | max      24.5 us |   5465.2 MB/s
+               cold_512KiB |      512 KiB | mean    3805.9 us | min     798.0 us | p50    2064.4 us | p99   14532.5 us | max   14532.5 us |    131.4 MB/s
+               warm_512KiB |      512 KiB | mean      53.9 us | min      53.0 us | p50      53.7 us | p99      56.5 us | max      56.5 us |   9276.5 MB/s
+              cold_1024KiB |     1024 KiB | mean    2807.0 us | min     577.5 us | p50     607.4 us | p99   14416.6 us | max   14416.6 us |    356.2 MB/s
+              warm_1024KiB |     1024 KiB | mean      95.8 us | min      94.8 us | p50      95.7 us | p99      97.9 us | max      97.9 us |  10443.0 MB/s
+              cold_4096KiB |     4096 KiB | mean    3858.5 us | min     974.4 us | p50    2340.1 us | p99   15022.6 us | max   15022.6 us |   1036.7 MB/s
+              warm_4096KiB |     4096 KiB | mean     288.2 us | min     208.3 us | p50     208.7 us | p99    4179.9 us | max    4179.9 us |  13878.0 MB/s
+             cold_16384KiB |    16384 KiB | mean   10228.6 us | min    2786.8 us | p50    8210.9 us | p99   31397.3 us | max   31397.3 us |   1564.2 MB/s
+             warm_16384KiB |    16384 KiB | mean    5663.9 us | min     735.0 us | p50     888.6 us | p99   28667.8 us | max   28667.8 us |   2824.9 MB/s
+

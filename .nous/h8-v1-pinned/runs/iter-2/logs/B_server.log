@@ -1,0 +1,35 @@
+certus-server: metadata=0000:62:00.0, data=["0000:63:00.0"], dispatcher=v1, lookup_path=p2p-seq
+certus-server: initializing SPDK environment...
+[spdk-env] Pre-flight checks passed. Initializing SPDK/DPDK environment...
+[spdk-env] SPDK/DPDK environment initialized. Enumerating devices...
+[spdk-env] Device enumeration complete. Found 7 device(s).
+certus-server: initializing GPU services...
+2026-05-20T02:18:58.727Z INFO  Initializing CUDA environment
+2026-05-20T02:18:58.921Z INFO  Found 2 qualifying GPU(s)
+certus-server: initializing metadata block device at 0000:62:00.0...
+2026-05-20T02:18:58.921Z INFO  initializing block device for PCI address 0000:62:00.0
+block-device-spdk-nvme v2: controller ptr = 0x20007fffb140, numa = 0
+2026-05-20T02:18:59.182Z INFO  block device initialized, actor started
+certus-server: initializing metadata extent manager...
+2026-05-20T02:18:59.182Z INFO  actor started on NUMA-local core
+2026-05-20T02:18:59.182Z INFO  format complete
+certus-server: initializing dispatch map...
+2026-05-20T02:18:59.183Z INFO  dispatch-map: DMA allocator set
+2026-05-20T02:18:59.183Z INFO  dispatch-map: beginning state recovery from extent manager
+2026-05-20T02:18:59.183Z INFO  dispatch-map: state recovery complete — 0 extents restored
+certus-server: initializing memory-tier...
+2026-05-20T02:18:59.183Z INFO  memory-tier: initialized with 256 MiB pool
+certus-server: memory-tier pool registered with CUDA (256 MiB pinned)
+certus-server: initializing dispatcher v1 (memory-tier)...
+2026-05-20T02:18:59.693Z INFO  dispatcher: initializing
+2026-05-20T02:18:59.693Z INFO  initializing block device for PCI address 0000:63:00.0
+block-device-spdk-nvme v2: controller ptr = 0x20007fccf440, numa = 0
+2026-05-20T02:19:00.008Z INFO  block device initialized, actor started
+2026-05-20T02:19:00.009Z INFO  actor started on NUMA-local core
+2026-05-20T02:19:00.009Z INFO  format complete
+2026-05-20T02:19:00.009Z INFO  dispatcher: data drive 0 initialized at 0000:63:00.0 (block_device=V2)
+2026-05-20T02:19:00.009Z INFO  dispatcher: initialized (lookup_path=P2pSeq)
+certus-server: component stack initialized
+certus-server: listening on 0.0.0.0:50051
+2026-05-20T02:19:05.593Z INFO  prepare_memory_for_spdk: pinning GPU memory for DMA
+2026-05-20T02:19:05.593Z INFO  prepare_memory_for_spdk: DmaBuffer created (4194304 bytes)

@@ -1,0 +1,25 @@
+{
+  "iteration": 1,
+  "bundle_ref": "runs/iter-1/bundle.yaml",
+  "arms": [
+    {
+      "arm_type": "h-main",
+      "predicted": "Bounce mode (NVMe -> host DMA -> cudaMemcpy H2D) will achieve consistently lower average end-to-end transfer latency than P2P warm mode (NVMe -> GDRCopy BAR1 GPU staging -> cudaMemcpy D2D). Bounce throughput will be consistently higher than P2P warm.",
+      "observed": "P2P warm is consistently FASTER than bounce across both seeds. bounce-s1: 1544.0 MB/s avg 2.59ms; bounce-s2: 1477.4 MB/s avg 2.71ms. p2p-warm-s1: 3064.0 MB/s avg 1.31ms; p2p-warm-s2: 2998.4 MB/s avg 1.33ms. P2P warm is ~2x higher throughput and ~2x lower latency than bounce, consistent across both seeds.",
+      "status": "REFUTED",
+      "error_type": "direction",
+      "diagnostic_note": "The mechanism was wrong: the extra cudaMemcpy H2D step in bounce mode (32 sequential H2D copies of 128 KiB each) is the bottleneck, not NVMe DMA target selection. P2P warm eliminates the H2D copy entirely — NVMe DMA goes directly to GPU staging memory (BAR1-mapped), then a D2D copy moves it to the client GPU buffer. D2D copies are dramatically faster than H2D copies for 128 KiB chunks on the A30, because D2D does not traverse the PCIe bus (it stays within GPU memory). The assumption that NVMe DMA to GPU BAR1 incurs higher per-TLP latency sufficient to offset the extra H2D copy was incorrect on this hardware — the A30's BAR1 aperture write latency is not the bottleneck at 128 KiB chunk sizes."
+    },
+    {
+      "arm_type": "h-control-negative",
+      "predicted": "P2P cold mode will exhibit consistently higher average latency than P2P warm mode. GDRCopy pin/map/unmap/unpin overhead (O(32) kernel round-trips for 32 chunks) should be substantial and clearly visible.",
+      "observed": "P2P cold is dramatically slower than P2P warm across both seeds. p2p-cold-s1: 541.4 MB/s avg 7.39ms; p2p-cold-s2: 527.9 MB/s avg 7.58ms. Compared to p2p-warm avg 1.32ms, cold adds ~6.1ms per request — a ~5.6x latency penalty. This confirms GDRCopy per-request pin/unpin overhead is substantial.",
+      "status": "CONFIRMED",
+      "error_type": null,
+      "diagnostic_note": "The cold overhead is even larger than expected. The ~6ms overhead for 32 chunks suggests ~187 microseconds per chunk for GDRCopy setup (cudaMalloc + gdr_open + gdr_pin_buffer + gdr_map + spdk_mem_register + teardown), dominated by nvidia_p2p_get_pages/put_pages kernel transitions. This validates that the warm pool amortization is critical for P2P performance."
+    }
+  ],
+  "experiment_valid": true,
+  "discrepancy_analysis": "h-main was REFUTED: the direction was wrong. P2P warm (direct NVMe->GPU-BAR1 DMA + D2D copy) is ~2x faster than bounce (NVMe->host-DMA + H2D copy). The mechanism error was assuming NVMe DMA to GPU BAR1 incurs extra PCIe latency sufficient to overcome bounce's extra copy step. In reality, the D2D copy in P2P warm is ~2x faster than the H2D copy in bounce for 128 KiB chunks on NVIDIA A30, because D2D stays within GPU memory without traversing the PCIe bus. h-control-negative was CONFIRMED: GDRCopy per-request setup adds ~6ms overhead for a 32-chunk 4 MiB transfer, confirming that pre-allocation amortization is essential.",
+  "dominant_component_pct": null
+}

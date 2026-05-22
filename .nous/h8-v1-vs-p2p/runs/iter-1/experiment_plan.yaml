@@ -1,0 +1,105 @@
+metadata:
+  iteration: 1
+  bundle_ref: "runs/iter-1/bundle.yaml"
+  description: "Dispatcher v1 pipelined bounce vs P2P direct — 4 MiB (h-main) and 4 KiB control-negative (h-control-negative)"
+
+setup:
+  - cmd: "cd /home/nara/certus/ai-native-storage-certus && RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server"
+    description: "Build certus-server (baseline, no patch)"
+
+arms:
+  - arm_id: "h-main"
+    conditions:
+      - name: "bounce-baseline"
+        description: "Bounce baseline at 4 MiB — no patch applied"
+        cmd: |
+          rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /var/tmp/spdk_pci_lock_0000:62:00.0 && \
+          LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH \
+          /home/nara/certus/ai-native-storage-certus/target/debug/certus-server \
+            --metadata-pci 0000:62:00.0 \
+            --data-pci 0000:63:00.0 \
+            --dispatcher-version v1 \
+            --listen 0.0.0.0:50051 & \
+          sleep 5 && \
+          cd /home/nara/certus/ai-native-storage-certus/apps/certus-server/python-client && \
+          LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH \
+          python3 test_client.py \
+            --server localhost:50051 \
+            --bench \
+            --bench-object-size 4194304 \
+            --bench-num-objects 10 \
+            --bench-iterations 20
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-vs-p2p/runs/iter-1/results/h-main/bounce-baseline.txt"
+
+      - name: "p2p-treatment"
+        description: "P2P treatment at 4 MiB — h-main.patch applied"
+        cmd: |
+          cd /home/nara/certus/ai-native-storage-certus && \
+          git apply --exclude=evolution/hypothesis_8_nous.md \
+            /home/nara/certus/ai-native-storage-certus/.nous/h8-v1-vs-p2p/runs/iter-1/patches/h-main.patch && \
+          RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server && \
+          rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /var/tmp/spdk_pci_lock_0000:62:00.0 && \
+          LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH \
+          /home/nara/certus/ai-native-storage-certus/target/debug/certus-server \
+            --metadata-pci 0000:62:00.0 \
+            --data-pci 0000:63:00.0 \
+            --dispatcher-version v1 \
+            --listen 0.0.0.0:50051 & \
+          sleep 5 && \
+          cd /home/nara/certus/ai-native-storage-certus/apps/certus-server/python-client && \
+          LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH \
+          python3 test_client.py \
+            --server localhost:50051 \
+            --bench \
+            --bench-object-size 4194304 \
+            --bench-num-objects 10 \
+            --bench-iterations 20
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-vs-p2p/runs/iter-1/results/h-main/p2p-treatment.txt"
+
+  - arm_id: "h-control-negative"
+    conditions:
+      - name: "bounce-4k-baseline"
+        description: "Bounce baseline at 4 KiB — no patch applied"
+        cmd: |
+          rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /var/tmp/spdk_pci_lock_0000:62:00.0 && \
+          LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH \
+          /home/nara/certus/ai-native-storage-certus/target/debug/certus-server \
+            --metadata-pci 0000:62:00.0 \
+            --data-pci 0000:63:00.0 \
+            --dispatcher-version v1 \
+            --listen 0.0.0.0:50051 & \
+          sleep 5 && \
+          cd /home/nara/certus/ai-native-storage-certus/apps/certus-server/python-client && \
+          LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH \
+          python3 test_client.py \
+            --server localhost:50051 \
+            --bench \
+            --bench-object-size 4096 \
+            --bench-num-objects 10 \
+            --bench-iterations 20
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-vs-p2p/runs/iter-1/results/h-control-negative/bounce-4k-baseline.txt"
+
+      - name: "p2p-4k-treatment"
+        description: "P2P treatment at 4 KiB — h-control-negative.patch applied"
+        cmd: |
+          cd /home/nara/certus/ai-native-storage-certus && \
+          git apply --exclude=evolution/hypothesis_8_nous.md \
+            /home/nara/certus/ai-native-storage-certus/.nous/h8-v1-vs-p2p/runs/iter-1/patches/h-control-negative.patch && \
+          RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server && \
+          rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /var/tmp/spdk_pci_lock_0000:62:00.0 && \
+          LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH \
+          /home/nara/certus/ai-native-storage-certus/target/debug/certus-server \
+            --metadata-pci 0000:62:00.0 \
+            --data-pci 0000:63:00.0 \
+            --dispatcher-version v1 \
+            --listen 0.0.0.0:50051 & \
+          sleep 5 && \
+          cd /home/nara/certus/ai-native-storage-certus/apps/certus-server/python-client && \
+          LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH \
+          python3 test_client.py \
+            --server localhost:50051 \
+            --bench \
+            --bench-object-size 4096 \
+            --bench-num-objects 10 \
+            --bench-iterations 20
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-vs-p2p/runs/iter-1/results/h-control-negative/p2p-4k-treatment.txt"

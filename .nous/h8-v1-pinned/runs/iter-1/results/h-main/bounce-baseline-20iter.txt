@@ -1,0 +1,36 @@
+Testing certus-server gRPC dispatcher at localhost:50051...
+[PASS] Batch populate: 10 entries
+[PASS] Batch check: all 10 exist
+[PASS] Batch touch: 10 entries
+[PASS] Batch lookup: 10 entries retrieved
+[PASS] Batch remove: 10 entries removed
+[PASS] Check after remove: 0 exist
+[PASS] Duplicate key rejection
+[PASS] Non-existent key handling
+[PASS] Touch non-existent key handling
+[PASS] Large batch (1000 entries): populate/check/remove
+
+10/10 tests passed.
+
+============================================================
+Lookup Latency Benchmark
+============================================================
+  Object size:      4096 KiB
+  Pool capacity:    64 objects (256 MiB)
+  Total to populate: 74 (to force 10 evictions)
+  Lookup iterations: 20
+
+  Populating 74 objects... done (0.05s, 1440 obj/s)
+  Waiting for write-through to complete... done
+  Benchmarking memory-tier lookups (10 objects x 20 iters)... done
+  Benchmarking SSD-tier lookups (10 objects x 20 iters)... done
+
+  Tier            Avg (us/obj)   Min (us/obj)   Max (us/obj)   Avg (GB/s)   Peak (GB/s) 
+  --------------------------------------------------------------------------------
+  Memory-tier     332.9          314.3          534.1          12.60        13.34       
+  SSD-tier        1299.0         373.5          18741.0        3.23         11.23       
+
+  SSD/Memory-tier ratio: 3.9x latency, 3.9x throughput
+
+  Cleaning up... done
+All tests passed.

@@ -1,0 +1,47 @@
+metadata:
+  iteration: 2
+  family: "h8-v1-pinned"
+  research_question: "Does P2P SSD→GPU DMA latency improve when using a same-NUMA NVMe device (NODE-level PCIe) compared to the cross-NUMA NVMe (SYS-level) tested in iter-1? Can NODE-level P2P match the bounce baseline?"
+
+arms:
+  - type: h-main
+    prediction: "P2P with NODE-level NVMe (63:00.0, same NUMA as GPU0) will show a smaller latency penalty relative to bounce than the 65% penalty observed at SYS level in iter-1. Specifically, the P2P/bounce ratio at NODE level (Condition B latency / Condition A latency) will be lower than the SYS-level ratio (Condition D / Condition C ≈ 1.66). The NODE path eliminates the AMD Infinity Fabric NUMA interconnect traversal, reducing per-chunk DMA overhead for 32 × 128 KiB sequential reads."
+    mechanism: "At SYS level (iter-1), P2P DMA from NVMe c2:00.0 (NUMA 1) to GPU0 BAR1 (NUMA 0) traverses: NVMe controller → root complex 0000:c0 → AMD Infinity Fabric (inter-socket link) → root complex 0000:40 → GPU0 PCIe endpoint. The Infinity Fabric adds ~100-200ns per cache line (64B) of DMA data, which for 128 KiB chunks (2048 cache lines) adds 200-400µs per chunk × 32 chunks = 6.4-12.8ms total overhead. At NODE level, NVMe 63:00.0 (NUMA 0, root complex 0000:60) to GPU0 (root complex 0000:40) only crosses root-complex boundaries within the same CPU socket — the path is: NVMe → root complex 0000:60 → internal CPU PCIe fabric → root complex 0000:40 → GPU0. No Infinity Fabric traversal, so per-chunk overhead should be significantly lower."
+    diagnostic: "If NODE-level P2P is still 65%+ slower than bounce (same ratio as SYS): the dominant overhead is NOT the NUMA interconnect but rather any cross-root-complex hop. This would mean P2P only works when NVMe and GPU share the SAME root complex (which no configuration on this system provides). Next step would be to measure raw PCIe bandwidth between root complexes 0000:60 and 0000:40 using a microbenchmark, or accept that P2P is not viable on this hardware topology and pivot to parallelism (BatchSubmit) as the sole optimization lever."
+    code_changes:
+      - file: "components/interfaces/src/idispatcher.rs"
+        intent: "Add pub cuda_ipc_handle_bytes: Option<Vec<u8>> field to IpcHandle struct after the size field. Update all IpcHandle construction sites across the workspace to include cuda_ipc_handle_bytes: None (except the lookup path in service.rs which passes Some)."
+        rationale: "Allows the service layer to pass raw CUDA IPC handle bytes through to the dispatcher for GPU DMA cache lookup."
+      - file: "components/dispatcher/v1/src/lib.rs"
+        intent: "Add a gpu_dma_cache field (Mutex<HashMap<[u8; 64], Arc<Mutex<DmaBuffer>>>>) to the component's fields block in define_component!. Implement a get_or_create_gpu_dma() method that checks the cache by 64-byte key, and on miss constructs the 72-byte payload (64 handle + 8 LE size), base64 encodes it, calls gpu.prepare_memory_for_spdk(), caches the result wrapped in Arc<Mutex<>>, and returns it."
+        rationale: "Persistent GPU staging eliminates per-lookup prepare_memory_for_spdk overhead (~50us) that caused regression in prior non-cached experiment."
+      - file: "components/dispatcher/v1/src/pipeline.rs"
+        intent: "Add a new function p2p_ssd_to_gpu_persistent() after line 123. This function: (1) connects a client channel via drive.connect_client(), (2) segments the I/O via segment_io(), (3) for each segment creates a sub-DmaBuffer view via from_raw(gpu_base + offset, chunk_size, noop_free, -1), wraps in Arc<Mutex<>>, issues ReadSync, waits for ReadDone, then forgets the sub-buffer. Sequential reads, same as the bounce path but targeting GPU DMA buffer directly."
+        rationale: "Implements P2P direct SSD→GPU path using sequential ReadSync for fair comparison against the sequential bounce baseline. Same read pattern, different DMA destination."
+      - file: "components/dispatcher/v1/src/lib.rs"
+        intent: "In promote_and_serve, add a P2P routing branch before the existing pipelined_ssd_to_gpu call (before line 240): if ipc_handle.cuda_ipc_handle_bytes is Some, call get_or_create_gpu_dma() to get/create the cached GPU DMA buffer, lock it to get the base pointer, call p2p_ssd_to_gpu_persistent() with the drive, the GPU DMA buffer, start_lba, total_bytes, and numa_node. Do NOT insert into memory-tier, do NOT update dispatch-map (leave as BlockDevice for repeated cold measurement). Release write ref and return Ok(())."
+        rationale: "Routes P2P lookups through the new direct-read path while keeping the bounce path unchanged for baseline measurement."
+      - file: "apps/certus-server/src/service.rs"
+        intent: "In the batch_lookup handler's IpcHandle construction (around line 233), add cuda_ipc_handle_bytes: Some(handle.cuda_ipc_handle.clone()) to pass the raw handle bytes through to the dispatcher. In the populate handler's IpcHandle (around line 157), set cuda_ipc_handle_bytes: None."
+        rationale: "Completes the data flow: gRPC client → service → dispatcher → GPU DMA cache."
+      - file: "components/dispatcher/v1/Cargo.toml"
+        intent: "Add base64 = \"0.22\" to [dependencies]."
+        rationale: "Required for encoding the IPC handle payload for prepare_memory_for_spdk."
+
+  - type: h-control-negative
+    prediction: "Conditions C and D (SYS-level NVMe c2:00.0) will reproduce iter-1 measurements within ±30%: bounce baseline (C) around 6336 us/obj and P2P (D) around 10498 us/obj. The P2P/bounce ratio will remain approximately 1.66 (65% penalty), confirming the measurement is repeatable and the SYS-level penalty is stable."
+    mechanism: "Same hardware configuration as iter-1 (NVMe c2:00.0 → GPU0 crossing NUMA boundary). No code changes between iterations that would affect the bounce path. P2P code changes are identical to iter-1's approach. Temperature, background load, and NVMe wear should not cause >30% variation in DMA transfer latency."
+    diagnostic: "If C or D deviate by more than 30% from iter-1: check for background processes (other SPDK users, GPU workloads), NVMe thermal throttling (check dmesg for warnings), or metadata NVMe interference (iter-1 used c1:00.0 for metadata with c2:00.0 for data — ensure same split)."
+
+  - type: h-robustness
+    prediction: "The P2P penalty ratio (P2P_lat / bounce_lat) at NODE level will be measurably and consistently lower than at SYS level across all 10 objects in the benchmark. This is not a one-off measurement artifact but a systematic topology effect. Specifically, the NODE penalty ratio should be below 1.5 (less than 50% slower) given that the Infinity Fabric traversal adds substantial per-transfer overhead that NODE eliminates."
+    mechanism: "The AMD EPYC Infinity Fabric adds fixed per-transfer latency for cross-NUMA DMA. For 128 KiB bulk DMA, the Infinity Fabric hop adds bandwidth-dependent overhead (Infinity Fabric has ~50 GB/s cross-socket bandwidth shared with all NUMA-crossing traffic). At NODE level, the PCIe fabric within a single CPU socket provides higher bandwidth and lower latency for cross-root-complex transfers. The effect should be consistent across all 10 objects because each lookup follows the same PCIe path."
+    diagnostic: "If the NODE penalty ratio is above 1.5 (similar to SYS): the Infinity Fabric is not the bottleneck — the root-complex crossing itself dominates. If the NODE ratio is below 1.0 (P2P faster than bounce at NODE): the bounce path has an inherent overhead (ring-buffer allocation, memory-tier copy, cudaMemcpy) that exceeds the NODE-level PCIe routing penalty."
+
+# Arm selection rationale:
+# - h-main: Tests the primary hypothesis — PCIe topology (NODE vs SYS) as the determining
+#   factor for P2P viability. Uses same P2P code at two topologies.
+# - h-control-negative: Reproduces iter-1's SYS-level measurement to confirm repeatability
+#   and validate that the experimental apparatus is consistent.
+# - h-robustness: Tests whether the topology effect is systematic (all objects) vs one-off.
+#   If NODE consistently reduces the penalty, topology is confirmed as the key variable.

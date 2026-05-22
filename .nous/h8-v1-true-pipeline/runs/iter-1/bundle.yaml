@@ -1,0 +1,93 @@
+metadata:
+  iteration: 1
+  family: "v1-true-pipeline-vs-p2p"
+  research_question: "Dispatcher v1 with true overlapped pipelining (NVMe reads overlapped with GPU copies using async CUDA streams) is faster than sequential per-chunk transfer for 4 MiB lookups through certus-server, and approaches P2P direct DMA performance."
+
+arms:
+  # Arms included:
+  # - h-main: True overlapped pipeline (the core hypothesis)
+  # - h-control-negative: P2P direct DMA (the comparison target)
+  # No ablation needed because h-main IS the change from baseline. The baseline run (sequential)
+  # already serves as the ablation (pipeline without async = sequential). A separate h-robustness
+  # arm is omitted because the first iteration should validate the mechanism before varying conditions.
+
+  - type: h-main
+    prediction: "True overlapped pipeline will reduce SSD-tier lookup latency compared to the sequential baseline. With 32 chunks where NVMe read and GPU copy overlap, the theoretical speedup is up to 2x (eliminating the GPU copy from the critical path). We expect at least a measurable reduction (>15%) given the async overlap mechanism."
+    mechanism: >
+      The current pipeline (pipeline.rs:60-119) serializes NVMe read + GPU copy per chunk:
+      total_time = N * (read_time + copy_time). With double-buffered async overlap, while chunk N
+      copies to GPU via cudaMemcpyAsync, chunk N+1 reads from NVMe simultaneously:
+      total_time ≈ N * max(read_time, copy_time) + one_copy_drain. Since the memory-tier pool is
+      cudaHostRegistered (main.rs:191-209), the DMA engine can use it as a source for async
+      transfers. ReadAsync returns immediately and completes concurrently with the CUDA stream copy.
+    diagnostic: >
+      If no improvement: (1) Check whether cudaMemcpyAsync from cudaHostRegistered mmap'd memory
+      actually runs asynchronously (it may fall back to sync — h8-pipelined iter-1 showed this
+      with SPDK hugepages). If so, the memory-tier pool behaves like SPDK hugepages despite not
+      being hugepages. (2) Verify ReadAsync completions arrive in time (not queued behind other
+      work). (3) Measure per-chunk timing to identify which stage dominates.
+    code_changes:
+      - file: "components/gpu-services/v0/src/cuda_ffi.rs"
+        intent: >
+          Add CUDA stream FFI declarations: cudaStream_t type alias (as *mut c_void),
+          cudaStreamCreate, cudaStreamDestroy, cudaStreamSynchronize, and cudaMemcpyAsync
+          (same signature as cudaMemcpy but with an additional cudaStream_t parameter).
+          Add these inside the existing extern "C" block.
+        rationale: "These CUDA runtime APIs are required to issue non-blocking H2D copies that overlap with NVMe reads. They exist in libcudart.so but have no FFI bindings in the codebase."
+
+      - file: "components/dispatcher/v1/src/pipeline.rs"
+        intent: >
+          Rewrite pipelined_ssd_to_gpu to implement true double-buffered async overlap:
+          (1) Create a CUDA stream at function entry.
+          (2) Allocate 2 ring buffers (instead of 4) — only need double-buffering for overlap.
+          (3) Issue ReadAsync for chunk 0 into buffer 0.
+          (4) Loop over remaining chunks: wait for previous ReadDone on buffer[current],
+              memcpy completed chunk to memory-tier slot, launch cudaMemcpyAsync H2D from
+              memory-tier to GPU destination (using the CUDA stream), then issue ReadAsync
+              for next chunk into buffer[1-current], swap current.
+          (5) After last ReadDone: memcpy to mem-tier, launch final cudaMemcpyAsync,
+              call cudaStreamSynchronize.
+          (6) Destroy the stream.
+          Keep the existing function signature unchanged. Import cuda_ffi from gpu_services.
+        rationale: >
+          This is the minimal change to achieve true overlap. Double-buffering ensures one
+          buffer is always available for NVMe read while the other's data is being GPU-copied.
+          The CUDA stream serializes GPU copies but allows them to overlap with CPU/NVMe work.
+          Memory-tier copy happens inline (cheap memcpy) before launching the async GPU copy.
+
+      - file: "components/dispatcher/v1/Cargo.toml"
+        intent: "Add gpu-services as a dependency (needed to access cuda_ffi module for stream APIs)."
+        rationale: "The pipeline module needs access to cudaStreamCreate etc. which are declared in gpu_services::cuda_ffi."
+
+  - type: h-control-negative
+    prediction: "P2P direct SSD→GPU DMA will be faster than both baseline and true pipeline, achieving approximately 3,400 us/obj (matching the 3,451 us observed in h8-v1-pinned iter-2). P2P eliminates the memory-tier intermediary entirely — there is no DRAM copy step and no GPU copy step, just direct NVMe→GPU BAR1 DMA."
+    mechanism: >
+      P2P uses prepare_memory_for_spdk to register GPU device memory with SPDK, then issues
+      NVMe ReadSync directly into GPU BAR1 address space. The PCIe root complex routes the
+      DMA without any host DRAM involvement. At NODE-level topology (NVMe 63:00.0 and GPU0
+      on same NUMA node), the PCIe path is direct through the same root complex.
+    diagnostic: >
+      If P2P is NOT faster than true pipeline: The true pipeline may be achieving near-zero
+      GPU copy overhead (fully hidden), making the DRAM intermediary free. Or PCIe contention
+      from dual DMA streams (NVMe read + GPU copy) in the pipeline case may be lower than
+      expected due to different PCIe links. Check PCIe topology with lspci -tv.
+    code_changes:
+      - file: "components/interfaces/src/idispatcher.rs"
+        intent: "Add cuda_ipc_handle_bytes: Option<Vec<u8>> field to IpcHandle struct. This carries the raw 64-byte CUDA IPC handle for P2P path selection."
+        rationale: "The dispatcher needs the raw CUDA IPC handle bytes to call prepare_memory_for_spdk for P2P DMA registration."
+
+      - file: "components/dispatcher/v1/src/pipeline.rs"
+        intent: "Add p2p_ssd_to_gpu_persistent function that reads NVMe chunks directly into a pre-registered GPU DMA buffer via ReadSync with sub-buffer views (noop_free wrappers)."
+        rationale: "Direct DMA into GPU BAR1 memory — the comparison target for the pipeline approach."
+
+      - file: "components/dispatcher/v1/src/lib.rs"
+        intent: "Add get_or_create_gpu_dma cache method and P2P path in promote_and_serve that checks cuda_ipc_handle_bytes and routes to p2p_ssd_to_gpu_persistent when present."
+        rationale: "The dispatcher must route to P2P when CUDA IPC handle bytes are available, otherwise fall through to the pipeline path."
+
+      - file: "apps/certus-server/src/service.rs"
+        intent: "Pass cuda_ipc_handle_bytes: Some(handle.cuda_ipc_handle.clone()) in the lookup path's IpcHandle construction (line ~233)."
+        rationale: "The gRPC service has the raw CUDA IPC handle bytes from the client — passing them to the dispatcher enables the P2P path."
+
+      - file: "components/dispatcher/v1/Cargo.toml"
+        intent: "Add base64 = \"0.22\" dependency for encoding CUDA IPC payloads."
+        rationale: "The get_or_create_gpu_dma method encodes the 72-byte payload as base64 for prepare_memory_for_spdk."

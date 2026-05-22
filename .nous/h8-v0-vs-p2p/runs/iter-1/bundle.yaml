@@ -1,0 +1,134 @@
+metadata:
+  iteration: 1
+  family: "v0-bounce-vs-p2p-sequential"
+  research_question: >
+    Using a bounce buffer SSD→CPU→GPU with sequential transfers (dispatcher v0)
+    is faster than direct SSD→GPU P2P DMA for transfer of 4 MiB broken into a
+    stream of 128 KiB transfers, even with pre-pinned GPU memory.
+
+# Arms rationale:
+# - h-main: Tests the core claim that P2P sequential beats bounce sequential
+# - h-control-negative: Tests that without SSD (staging-only), the P2P path
+#   shows no advantage (validating that the mechanism is NVMe DMA path, not
+#   something else like reduced memcpy)
+# - h-robustness: Tests whether the advantage holds for smaller objects (1 MiB)
+#   where setup overhead is proportionally larger
+
+arms:
+  - type: h-main
+    prediction: >
+      P2P sequential lookup (NVMe→GPU BAR1 direct) will achieve lower
+      per-object latency than bounce sequential lookup (NVMe→host DRAM→GPU
+      cudaMemcpy) for 4 MiB objects on the SSD tier, with the P2P path
+      being consistently faster across all 20 measurement iterations.
+    mechanism: >
+      The bounce path performs 32 sequential 128 KiB NVMe reads into host DRAM
+      (PCIe Gen4 x4 ≈ 7 GB/s read BW), then a single 4 MiB cudaMemcpy
+      HostToDevice (PCIe Gen4 x16 ≈ 25 GB/s but limited by pinning and
+      synchronous copy). The P2P path reads 32 x 128 KiB directly into GPU BAR1
+      memory registered with SPDK, eliminating the host DRAM hop and the
+      cudaMemcpy. Even though GPU BAR1 writes are uncacheable, the NVMe
+      controller's DMA engine writes at wire rate regardless of destination
+      cacheability. The savings come from eliminating the 4 MiB cudaMemcpy
+      transfer entirely. Source: read_from_block_device at
+      components/dispatcher/v0/src/lib.rs:179-276 performs the sequential
+      ReadSync loop (lines 218-263) then dma_copy_to_device (line 266).
+    diagnostic: >
+      If bounce is faster than P2P: (1) Check nvidia-peermem is loaded — without
+      it spdk_mem_register on GPU memory fails silently and falls back. (2) Check
+      whether BAR1 aperture size limits throughput (nvidia-smi -q shows BAR1 size).
+      (3) Check if per-chunk spdk_mem_register/unregister overhead dominates for
+      sequential submission — each 128 KiB read into GPU memory requires the NVMe
+      controller to traverse a different IOMMU mapping. (4) Measure time breakdown:
+      is the cudaMemcpy cost (which P2P eliminates) actually small relative to
+      NVMe read latency?
+    code_changes:
+      - file: "components/interfaces/src/idispatcher.rs"
+        intent: >
+          Add an optional `cuda_ipc_handle_bytes: Option<Vec<u8>>` field to the
+          IpcHandle struct to carry the raw 64-byte CUDA IPC handle through to
+          the dispatcher. This allows the dispatcher to call prepare_memory_for_spdk
+          without re-opening the handle.
+        rationale: >
+          prepare_memory_for_spdk requires the base64-encoded 72-byte payload
+          (64-byte CUDA handle + 8-byte LE size). The dispatcher only receives
+          IpcHandle today which contains the already-opened device pointer. To use
+          P2P, we need the raw handle bytes to construct the payload.
+      - file: "apps/certus-server/src/service.rs"
+        intent: >
+          In the lookup handler, when constructing IpcHandle for each entry, also
+          include the raw cuda_ipc_handle bytes from the protobuf message in the
+          new cuda_ipc_handle_bytes field. Do NOT call open_cuda_ipc for P2P — let
+          the dispatcher handle it via prepare_memory_for_spdk.
+        rationale: >
+          The server is the boundary where protobuf bytes are available. Passing
+          them through avoids double-opening the IPC handle.
+      - file: "components/dispatcher/v0/src/lib.rs"
+        intent: >
+          Add a new method `read_from_block_device_p2p` that: (1) constructs a
+          base64 payload from ipc_handle.cuda_ipc_handle_bytes + size, (2) calls
+          gpu.prepare_memory_for_spdk(payload, None) to get a GPU-backed DmaBuffer,
+          (3) performs the same sequential ReadSync loop but reads each 128 KiB
+          chunk directly into the GPU DmaBuffer at the appropriate offset (using
+          Arc<Mutex<DmaBuffer>> sub-slices or reading into small SPDK buffers and
+          copying to the GPU buffer), (4) does NOT call dma_copy_to_device at the
+          end. Modify the `lookup` method to choose P2P path when
+          cuda_ipc_handle_bytes is present.
+        rationale: >
+          The P2P path eliminates the host-DRAM intermediate buffer and the final
+          cudaMemcpy, replacing them with direct NVMe→GPU DMA. The sequential
+          ReadSync pattern is preserved to isolate the path effect from the
+          submission strategy.
+      - file: "components/dispatcher/v0/Cargo.toml"
+        intent: >
+          Add `base64 = "0.22"` dependency for encoding the IPC handle payload.
+        rationale: >
+          prepare_memory_for_spdk accepts a base64-encoded string. The dispatcher
+          needs to encode the 72-byte payload.
+
+  - type: h-control-negative
+    prediction: >
+      For objects still in the staging tier (not yet written to SSD), P2P and
+      bounce paths will show identical latency because staging lookups bypass
+      read_from_block_device entirely — they go through dma_copy_to_device
+      from the staging buffer regardless of which path is configured.
+    mechanism: >
+      When LookupResult::Staging is returned by the dispatch map, the dispatcher
+      calls gpu.dma_copy_to_device(staging_buffer, ipc_handle.address, size)
+      directly (lib.rs:721-729). The P2P code path is only triggered for
+      LookupResult::BlockDevice. Staging lookup latency therefore cannot differ
+      between conditions — it validates that the mechanism is NVMe-path-specific.
+    diagnostic: >
+      If staging latencies DO differ between conditions: (1) Check that the code
+      change didn't accidentally modify the Staging match arm. (2) Check for
+      measurement contamination — are some "staging" keys actually on SSD due
+      to background write-through completing before measurement?
+
+  - type: h-robustness
+    prediction: >
+      P2P sequential will also achieve lower per-object latency than bounce
+      sequential for 1 MiB objects (8 x 128 KiB chunks), though the relative
+      advantage may be smaller because the fixed overhead of prepare_memory_for_spdk
+      (GDRCopy pin + spdk_mem_register ≈ 50-100 us) is amortized over fewer
+      chunks.
+    mechanism: >
+      For 1 MiB objects, the bounce path reads 8 chunks (8 x 128 KiB = 1 MiB)
+      then does a 1 MiB cudaMemcpy. The eliminated cudaMemcpy is smaller (1 MiB
+      vs 4 MiB), so absolute savings are smaller. But the 8 NVMe reads still
+      benefit from eliminating the host DRAM hop. The P2P setup cost
+      (prepare_memory_for_spdk) is fixed per lookup, so relative overhead grows
+      for smaller objects.
+    diagnostic: >
+      If P2P is slower for 1 MiB but faster for 4 MiB: The setup cost of
+      prepare_memory_for_spdk dominates for small transfers. This identifies a
+      crossover size below which bounce is preferred — useful for adaptive
+      dispatch.
+    code_changes:
+      - file: "apps/certus-server/python-client/test_client.py"
+        intent: >
+          Run the benchmark with --bench-object-size 1048576 (1 MiB) in addition
+          to the 4 MiB run. No code change needed — just a different CLI flag
+          value for this condition.
+        rationale: >
+          Tests whether the P2P advantage holds at smaller object sizes where
+          setup overhead is proportionally larger.

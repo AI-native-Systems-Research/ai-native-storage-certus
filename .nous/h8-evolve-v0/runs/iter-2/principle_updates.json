@@ -1,0 +1,72 @@
+[
+  {
+    "id": "RP-1",
+    "statement": "SPDK hugepage DMA buffers satisfy CUDA's pinned-memory requirement for cudaMemcpyAsync: async H2D dispatch reduces copy-phase time from ~880μs (synchronous) to ~119μs (async dispatch) for 32×128KiB chunks, confirming true non-blocking operation.",
+    "confidence": "high",
+    "regime": "32×128KiB H2D transfers on a single CUDA stream using SPDK DMA hugepage buffers registered with cudaHostRegister",
+    "evidence": ["iteration-1-h-main", "iteration-2-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 2,
+    "mechanism": "cudaHostRegister succeeds on SPDK DMA buffers, enabling async DMA engine transfer. The 119μs dispatch time reflects queue submission latency only; actual transfer proceeds concurrently on the GPU DMA engine while CPU continues to the next read submission.",
+    "applicability_bounds": "Applies to host-to-device copies from SPDK hugepage DMA buffers. May differ for non-SPDK host allocations. Single CUDA stream sufficient for 128KiB chunk size (RP-4 still holds).",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-2",
+    "statement": "Per-chunk connect_client() overhead (13-17μs × N chunks) is not the dominant bottleneck in pipelined NVMe reads. Sending individual ReadAsync commands on a shared channel still incurs ~20μs per chunk in actor dispatch overhead, resulting in read_us≈1350μs for 32 chunks regardless of whether connect_client() is called per-chunk or once.",
+    "confidence": "high",
+    "regime": "32 sequential ReadAsync sends on a single ClientChannels instance vs BatchSubmit with a single send",
+    "evidence": ["iteration-2-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 2,
+    "mechanism": "Individual ReadAsync dispatches use actor.rs select_index(pending_ops.len()+1) for queue pair selection per-op. BatchSubmit pre-selects based on batch_size once and dispatches all ops in a tight loop. The per-op queue selection, combined with the interleaved recv()-then-send() pipeline structure, serializes actor processing between each completion and next submission. Total read_us for 32 individual sends: ~1350μs vs BatchSubmit's ~688μs (1.96x slower). The overhead is ~20.7μs per chunk beyond BatchSubmit's baseline.",
+    "applicability_bounds": "Applies to pipelined patterns where sends and receives are interleaved one-by-one. If all 32 ReadAsync are sent before receiving any completions (like BatchSubmit), latency may approach BatchSubmit levels. Bottleneck is in actor queue pair selection and polling state, not in channel send latency itself.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-3",
+    "statement": "Pipelined bounce with channel reuse and cudaMemcpyAsync achieves ~2038 MB/s throughput (vs sequential 1530 MB/s, +33%; vs iter-1 pipelined 1764 MB/s, +16%), but cannot approach P2P warm (3054 MB/s) due to the read phase bottleneck from per-chunk ReadAsync dispatch overhead in the actor.",
+    "confidence": "high",
+    "regime": "4MiB transfers at 128KiB chunk size using pipelined double-buffer structure with single channel reuse",
+    "evidence": ["iteration-1-h-main", "iteration-2-h-main", "iteration-2-h-control-negative", "iteration-2-h-robustness"],
+    "contradicts": [],
+    "extraction_iteration": 2,
+    "mechanism": "The pipeline structure (recv + async copy + send next) reduces effective serialization to max(read_phase, copy_phase). With read_us≈1350μs and async copy_us≈119μs, the read phase dominates. The read phase overhead comes from per-chunk actor dispatch: each completion receipt and next read submission pair adds ~20μs vs BatchSubmit's single batch dispatch. Achieving P2P warm parity would require eliminating this per-chunk overhead, which requires either using BatchSubmit (requires all buffers upfront) or redesigning the actor's dispatch path for pipelined individual sends.",
+    "applicability_bounds": "Holds for the current actor implementation in block-device-spdk-nvme/v1. A BatchSubmit-then-pipeline approach (send all 32 reads, recv completions one-by-one and copy asynchronously) might achieve closer to BatchSubmit read_us while keeping double-buffer structure.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-4",
+    "statement": "A single CUDA stream is not a bottleneck for pipelined H2D copies at 128KiB chunk size. Async copy dispatch costs ~119μs for all 32 chunks (3.7μs/chunk), well below the NVMe read rate of ~1350μs for 32 chunks (42μs/chunk).",
+    "confidence": "high",
+    "regime": "32×128KiB H2D async copies on a single CUDA stream, NVMe reads on SPDK NVMe controller",
+    "evidence": ["iteration-1-h-robustness", "iteration-2-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 2,
+    "mechanism": "GPU H2D copy engine processes 128KiB chunks at >11GB/s effective dispatch rate. NVMe read rate is ~780MB/s (4MiB/1350μs×32chunks). GPU copy engine capacity exceeds NVMe supply by 14x, so additional CUDA streams provide zero benefit.",
+    "applicability_bounds": "Applies at 128KiB chunk size. At larger chunk sizes where NVMe reads are faster (or with faster SSDs), GPU copy engine might become a bottleneck. Does not apply to D2D (device-to-device) copies which use different hardware.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-5",
+    "statement": "Pipelined bounce with double-buffer structure provides substantial read-ahead even with synchronous cudaMemcpy: observed overlap of ~475μs (total_us 1960μs vs serial estimate 2435μs) because the next NVMe read is submitted BEFORE the blocking copy begins in each pipeline iteration.",
+    "confidence": "medium",
+    "regime": "32 chunks, double-buffer, per-chunk ReadAsync on shared channel, synchronous H2D copy after each completion",
+    "evidence": ["iteration-2-h-ablation"],
+    "contradicts": [],
+    "extraction_iteration": 2,
+    "mechanism": "In handle_bounce_pipelined_sync, the next ReadAsync is sent immediately after receiving the previous completion but before starting the synchronous copy. This means the NVMe read for chunk[i+1] proceeds concurrently with the CPU's blocking cudaMemcpy for chunk[i]. The overlap equals the time the NVMe read spends in flight while the CPU is blocked on copy — roughly min(read_time_per_chunk, copy_time_per_chunk).",
+    "applicability_bounds": "This overlap benefit only exists in the double-buffer pipeline structure where sends precede copies. It would be absent in a sequential fetch-then-copy pattern. The 475μs overlap is smaller than the async benefit because the NVMe read for the next chunk is blocked until the actor processes the previous completion (which requires the server thread to call recv(), which happens after the blocking copy).",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  }
+]

@@ -1,0 +1,103 @@
+metadata:
+  iteration: 2
+  family: "pipelined-bounce-channel-reuse"
+  research_question: "Can pipelined bounce with single-channel reuse (eliminating per-chunk connect_client overhead) close the throughput gap with P2P warm transfers for 4MiB/128KiB-chunk NVMe-to-GPU transfers?"
+
+arm_selection_rationale: |
+  h-main tests the core fix (channel reuse). h-ablation isolates whether the speedup comes from
+  async overlap vs mere connection-overhead elimination. h-control-negative validates baseline
+  stability. h-robustness confirms P2P warm reference hasn't drifted. All four arms are needed
+  because iter-1 showed the pipeline direction works but the magnitude was wrong — we need to
+  confirm the root cause (connect_client overhead) is indeed responsible.
+
+arms:
+  - type: h-main
+    prediction: >
+      Pipelined bounce with channel reuse will achieve server-side total_us < 900μs and throughput
+      > 2500 MB/s (vs iter-1 pipelined: total_us=1627μs, 1764 MB/s). The read_us phase will drop
+      to < 780μs (within 20% of BatchSubmit's 649μs), confirming that per-chunk connect_client()
+      overhead was the dominant bottleneck in iter-1's pipeline.
+    mechanism: >
+      Iter-1's pipelined read_us=1204μs vs BatchSubmit read_us=649μs. The difference (555μs / 32
+      chunks = 17.3μs/chunk) matches measured connect_client() overhead of 13-17μs. By calling
+      connect_client() once and sending individual ReadAsync commands on the same SPSC channel
+      (capacity=64, sufficient for 32 chunks), per-chunk send cost drops to channel push overhead
+      (~tens of nanoseconds). With read_us≈660-700μs and cudaMemcpyAsync overlap confirmed working
+      (copy dispatch=112μs for all 32 chunks), total pipeline time becomes max(read_phase, copy_phase)
+      plus pipeline drain, predicting ~700-800μs total.
+    diagnostic: >
+      If read_us does NOT drop (still ~1200μs): check whether the actor processes individually-sent
+      ReadAsync commands differently than BatchSubmit-dispatched ones. Look at actor.rs queue pair
+      selection — BatchSubmit pre-selects based on batch_size (line 638), individual sends don't get
+      this optimization. If read_us drops but total_us doesn't: measure time between send and first
+      recv — may indicate actor polling latency between separately-sent commands vs batch-dispatched.
+      If throughput < 2500 MB/s despite low total_us: check client-side IPC overhead in the benchmark
+      loop (socket roundtrip dominates at sub-ms server times).
+    code_changes:
+      - file: "components/gpu-services/v0/src/bin/p2p_server.rs"
+        intent: >
+          Rewrite handle_bounce_pipelined to call connect_client() once before the pipeline loop.
+          Replace issue_single_read() calls with direct command_tx.send(Command::ReadAsync{...})
+          on the shared channel. Keep the double-buffer structure and cudaMemcpyAsync overlap logic
+          unchanged. Pipeline: send ReadAsync[0], then for each subsequent chunk: recv completion,
+          launch cudaMemcpyAsync on completed buffer, send next ReadAsync on same channel. After
+          last completion, launch final copy, cudaStreamSynchronize.
+        rationale: >
+          Eliminates the per-chunk connect_client() overhead (13-17μs × 32 = 416-544μs) that
+          inflated iter-1's pipelined read phase from 649μs to 1204μs. The SPSC channel supports
+          64 slots, so sending 32 individual commands sequentially will not block.
+
+  - type: h-ablation
+    component: "async-cuda-overlap"
+    prediction: >
+      Pipelined bounce with channel reuse but using synchronous cudaMemcpy (instead of
+      cudaMemcpyAsync) will show total_us ≈ read_us + copy_us (no overlap), with total_us
+      in the range 1400-1600μs — similar to sequential bounce despite having per-chunk
+      interleaving. This confirms that the speedup in h-main comes from true GPU async
+      overlap, not merely from avoiding connect_client() cost.
+    mechanism: >
+      With synchronous cudaMemcpy, each copy blocks the CPU thread for ~25μs (826μs/32 chunks).
+      The pipeline structure becomes: recv_completion → blocking_copy → send_next_read, serializing
+      the operations. Total time = sum(all reads) + sum(all copies) with minimal overlap, because
+      the CPU cannot issue the next NVMe read while blocked in cudaMemcpy.
+    diagnostic: >
+      If total_us is significantly less than read_us + copy_us despite synchronous copies: the
+      pipeline structure itself provides some overlap benefit because the NVMe read for chunk[i+1]
+      was already submitted before we started copying chunk[i]. This would mean even a small
+      "head start" on the next read provides benefit. Measure the overlap by comparing (total_us)
+      vs (read_us + copy_us) — any difference is the overlap from read-ahead.
+    code_changes:
+      - file: "components/gpu-services/v0/src/bin/p2p_server.rs"
+        intent: >
+          Add a new mode variant BouncePipelinedSync. Implement handle_bounce_pipelined_sync
+          identical to the channel-reuse pipelined version but using cudaMemcpy (synchronous)
+          instead of cudaMemcpyAsync. No CUDA stream needed. Still uses double-buffer and
+          per-chunk ReadAsync on shared channel, but blocks on each H2D copy.
+        rationale: >
+          Isolates the contribution of GPU async overlap by removing it while keeping all other
+          pipeline structure (channel reuse, double-buffer, per-chunk reads) identical.
+
+  - type: h-control-negative
+    prediction: >
+      Sequential bounce will produce read_us within 10% of iter-1's 649μs, copy_us within 10%
+      of 826μs, and total_us within 10% of 1475μs. End-to-end client latency will be 2.5-3.1ms.
+      This confirms baseline stability and that system state has not changed between iterations.
+    mechanism: >
+      Sequential bounce uses BatchSubmit (all 32 reads dispatched at once via single send) then
+      sequential synchronous cudaMemcpy per chunk. No code changes, no new overhead sources.
+      Any drift would indicate hardware state change (thermal throttling, PCIe renegotiation, etc.).
+    diagnostic: >
+      If results deviate >10% from iter-1: check NVMe device temperature (nvme smart-log), SPDK
+      memory allocation, CUDA driver version. If read_us specifically deviates, check if another
+      process is accessing the NVMe device. If copy_us deviates, check GPU utilization (nvidia-smi).
+
+  - type: h-robustness
+    prediction: >
+      P2P warm mode will achieve throughput within 10% of iter-1's 3082 MB/s and latency within
+      10% of 1.30ms. This validates that the system reference point is stable.
+    mechanism: >
+      P2P warm uses pre-pinned GDRCopy staging buffers with amortized setup. NVMe reads go
+      directly to GPU-mapped SPDK buffers, then D2D copy to client. No code changes.
+    diagnostic: >
+      If P2P warm drifts >10%: GDRCopy module may not be loaded (check nvidia-peermem), or GPU
+      PCIe link may have renegotiated to a lower speed. Run nvidia-smi -q to check link state.

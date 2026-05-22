@@ -1,0 +1,23 @@
+diff --git a/components/dispatcher/v1/src/pipeline.rs b/components/dispatcher/v1/src/pipeline.rs
+index f7f77d0..3469cd6 100644
+--- a/components/dispatcher/v1/src/pipeline.rs
++++ b/components/dispatcher/v1/src/pipeline.rs
+@@ -289,8 +289,7 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+     // Prime: submit initial async reads directly into memory-tier chunk offsets.
+     // Each chunk targets a unique offset in the memory-tier slot, so we can have
+     // many NVMe reads in flight simultaneously to saturate SSD parallelism.
+-    // Use a high depth (16) since there's no buffer reuse — each chunk is unique.
+-    const ZERO_COPY_DEPTH: usize = 16;
++    const ZERO_COPY_DEPTH: usize = 32;
+     let max_inflight = ZERO_COPY_DEPTH.min(num_chunks);
+     for i in 0..max_inflight {
+         channels
+@@ -353,7 +352,7 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+         // Batch-sync both streams periodically. No buffer reuse in zero-copy
+         // (each chunk is a unique memory-tier offset), so sync only throttles
+         // the GPU command queue depth.
+-        if (completed + 1) % 16 == 0 {
++        if (completed + 1) % ZERO_COPY_DEPTH == 0 {
+             gpu.stream_synchronize(streams[0])
+                 .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+             gpu.stream_synchronize(streams[1])

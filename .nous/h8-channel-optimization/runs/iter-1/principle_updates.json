@@ -1,0 +1,58 @@
+[
+  {
+    "id": "RP-17",
+    "statement": "The dispatcher_hw_benchmark cold lookup latency is dominated by SPDK memory-tier pool management (eviction + reallocation), not pipeline overhead. Run-to-run variance is 2-5x (min 2700 us, mean 10,000-18,000 us for 16 MiB), making sub-millisecond optimizations unmeasurable.",
+    "confidence": "high",
+    "regime": "dispatcher_hw_benchmark cold lookup at 16 MiB with 512 MiB pool, 50-iteration measurement",
+    "evidence": ["iteration-1-h-main", "iteration-1-h-ablation", "iteration-1-h-control-negative"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "Each cold lookup must evict an LRU entry, write it back to NVMe (asynchronously via background worker), allocate a new memory-tier slot, then read 16 MiB from NVMe. The eviction+write-through path is non-deterministic and can add 5-15ms of overhead. This shows up as bimodal latency distribution: ~2700 us minimum (no eviction overhead needed) vs 10,000-18,000 us mean (eviction path hits). The 50-iteration benchmark catches many eviction-path iterations, swamping pipeline-level optimizations.",
+    "applicability_bounds": "Applies when the benchmark pool is small relative to working set size, causing frequent evictions. Would not apply if pool is sized to hold all benchmark data (no evictions needed). The pipeline overhead optimizations (~600 us from stream sync batching) are real but invisible under this regime.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-18",
+    "statement": "The best-case (minimum) cold_16384KiB latency is 2700-4200 us and stable across all conditions. This represents the theoretical floor: ~1750 us for 16 MiB NVMe read at SSD peak bandwidth + ~200 us GPU DMA. Further optimization of pipeline overhead yields diminishing returns at this scale.",
+    "confidence": "medium",
+    "regime": "16 MiB cold lookup with direct memory-tier zero-copy path, SPDK NVMe at 128 KiB MDTS",
+    "evidence": ["iteration-1-h-main", "iteration-1-h-ablation"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "Min latency across all conditions: 2745 us (baseline S1), 3758 us (h-main S1), 9579 us (baseline S2, anomalous), 2730 us (h-main S2), 3822 us (ablation baseline), 2835 us (ablation treatment). The 2700-2835 us cluster represents the fast path where no pool eviction occurs. This corresponds to 16 MiB / 2730 us ≈ 5900 MB/s NVMe read rate, which is near the SSD's sequential read bandwidth limit. The gpu-bb-vs-p2p reference ceiling (~3250 MB/s, ~5100 us) is slower than the dispatcher min (2730 us), suggesting the dispatcher zero-copy path is actually FASTER than the reference when the pool is warm.",
+    "applicability_bounds": "The min latency floor is a more reliable indicator of optimization progress than the mean for this benchmark. Future iterations should target mean latency improvement by addressing pool eviction scheduling, not pipeline overhead.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-19",
+    "statement": "Pipeline overhead optimizations (stream sync batching, per-call allocation elimination, atomic state checks) do not produce measurable throughput improvement in the dispatcher cold lookup path at the current variance level. The optimizations are correct in direction but their magnitude (~600 us) is below measurement noise (~5000 us variance).",
+    "confidence": "medium",
+    "regime": "dispatcher_hw_benchmark with 50 iterations, cold 16 MiB lookup with pool evictions",
+    "evidence": ["iteration-1-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "The h-main combined optimization reduced three sources of overhead: (1) Mutex→AtomicBool for GPU state check (~0 us, uncontested mutex already near-zero latency), (2) stream sync from 8 calls to 4 calls (~4 us savings), (3) 128 Arc<Mutex<DmaBuffer>> allocations eliminated per call (~50-100 us). Total estimated savings: ~100-150 us out of 9500 us mean (1.5%). This is below the 4.4x run-to-run variance floor.",
+    "applicability_bounds": "This principle may not hold if the benchmark is modified to control for pool eviction (e.g., pre-warm all slots before measuring cold reads). Under a controlled benchmark without eviction, the optimization could produce measurable improvement.",
+    "superseded_by": null,
+    "category": "measurement",
+    "status": "active"
+  },
+  {
+    "id": "RP-20",
+    "statement": "The ZERO_COPY_DEPTH parameter (max in-flight NVMe reads) affects latency floor even when the optimization is nominally for a different purpose. Increasing from 16 to 32 shows consistent min latency improvement (3822 us → 2835 us, -25%) suggesting deeper pipelining helps NVMe throughput.",
+    "confidence": "low",
+    "regime": "h-ablation single seed, cold 16 MiB lookup",
+    "evidence": ["iteration-1-h-ablation"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "With ZERO_COPY_DEPTH=16, only 16 NVMe reads are submitted before waiting for completions. With 128 total chunks for 16 MiB, deeper pipelining (32 in-flight) allows the SSD to process more requests in parallel. The NVMe controller (with SPDK QD=32) can dispatch more I/Os per time unit when the software pipeline depth matches or exceeds the hardware queue depth.",
+    "applicability_bounds": "Single-seed evidence — needs replication. May not hold if SSD is already bottlenecked at 16 concurrent reads. CLIENT_CHANNEL_CAPACITY=64 ensures channel is never the bottleneck at QD=32.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  }
+]

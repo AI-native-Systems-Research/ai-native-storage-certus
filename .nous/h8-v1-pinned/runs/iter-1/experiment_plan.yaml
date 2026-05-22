@@ -1,0 +1,26 @@
+metadata:
+  iteration: 1
+  bundle_ref: "runs/iter-1/bundle.yaml"
+
+setup:
+  - cmd: "ln -sf /home/nara/certus/ai-native-storage-certus/deps/spdk /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-d5cdac49/deps/spdk && ln -sf /home/nara/certus/ai-native-storage-certus/deps/spdk-build /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-d5cdac49/deps/spdk-build"
+    description: "Create SPDK symlinks in worktree (required for build)"
+  - cmd: "RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server"
+    description: "Build certus-server (baseline)"
+
+arms:
+  - arm_id: "h-main"
+    conditions:
+      - name: "baseline-seed42"
+        cmd: "rm -f /var/tmp/spdk_pci_lock_0000:c1:00.0 /var/tmp/spdk_pci_lock_0000:c2:00.0 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH ./target/debug/certus-server --metadata-pci 0000:c1:00.0 --data-pci 0000:c2:00.0 --dispatcher-version v1 --listen 0.0.0.0:50052 & sleep 20 && cd apps/certus-server/python-client && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 test_client.py --server localhost:50052 --bench-only --bench-object-size 4194304 --bench-num-objects 10 --bench-iterations 1"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-pinned/runs/iter-1/results/h-main/baseline-s42.json"
+
+      - name: "treatment-seed42"
+        cmd: "git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-v1-pinned/runs/iter-1/patches/h-main.patch && RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server && rm -f /var/tmp/spdk_pci_lock_0000:c1:00.0 /var/tmp/spdk_pci_lock_0000:c2:00.0 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH ./target/debug/certus-server --metadata-pci 0000:c1:00.0 --data-pci 0000:c2:00.0 --dispatcher-version v1 --listen 0.0.0.0:50052 & sleep 20 && cd apps/certus-server/python-client && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 test_client.py --server localhost:50052 --bench-only --bench-object-size 4194304 --bench-num-objects 10 --bench-iterations 1"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-pinned/runs/iter-1/results/h-main/treatment-s42.json"
+
+  - arm_id: "h-robustness"
+    conditions:
+      - name: "treatment-20iter"
+        cmd: "git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-v1-pinned/runs/iter-1/patches/h-main.patch && RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server && rm -f /var/tmp/spdk_pci_lock_0000:c1:00.0 /var/tmp/spdk_pci_lock_0000:c2:00.0 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH ./target/debug/certus-server --metadata-pci 0000:c1:00.0 --data-pci 0000:c2:00.0 --dispatcher-version v1 --listen 0.0.0.0:50052 & sleep 20 && cd apps/certus-server/python-client && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 test_client.py --server localhost:50052 --bench-only --bench-object-size 4194304 --bench-num-objects 10 --bench-iterations 20"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-pinned/runs/iter-1/results/h-robustness/treatment-20iter.json"

@@ -1,0 +1,500 @@
+diff --git a/components/gpu-services/v0/src/bin/p2p_server.rs b/components/gpu-services/v0/src/bin/p2p_server.rs
+index a54c740..9fb44ec 100644
+--- a/components/gpu-services/v0/src/bin/p2p_server.rs
++++ b/components/gpu-services/v0/src/bin/p2p_server.rs
+@@ -33,6 +33,10 @@ enum TransferMode {
+     P2p,
+     /// NVMe → per-request GDRCopy pin/unpin → D2D → client GPU (cold baseline)
+     P2pCold,
++    /// NVMe → host bounce (double-buffered, pipelined reads + cudaMemcpyAsync H2D) → client GPU
++    BouncePipelined,
++    /// Same as bounce-pipelined but uses 2 CUDA streams for H2D copies
++    BouncePipelined2stream,
+ }
+ 
+ #[derive(Parser)]
+@@ -395,14 +399,19 @@ fn handle_bounce(
+         }
+     }
+ 
++    let t_total = std::time::Instant::now();
++
+     // Concurrent NVMe reads into all chunks.
++    let t_read = std::time::Instant::now();
+     if let Err(e) = do_chunked_read(ctx, &host_bufs, 0, chunk_size) {
+         drop(host_bufs);
+         unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
+         return Err(e);
+     }
++    let read_us = t_read.elapsed().as_micros();
+ 
+     // cudaMemcpy H2D per chunk at correct offset.
++    let t_copy = std::time::Instant::now();
+     for (i, buf) in host_bufs.iter().enumerate() {
+         let offset = i * chunk_size;
+         let this_chunk = std::cmp::min(chunk_size, size - offset);
+@@ -425,11 +434,16 @@ fn handle_bounce(
+             ));
+         }
+     }
++    let copy_us = t_copy.elapsed().as_micros();
++    let total_us = t_total.elapsed().as_micros();
+ 
+     drop(host_bufs);
+     unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
+ 
+-    Ok(format!("OK {} bytes (bounce, {} chunks)", size, num_chunks))
++    Ok(format!(
++        "OK {} bytes (bounce, {} chunks) read_us={} copy_us={} total_us={}",
++        size, num_chunks, read_us, copy_us, total_us
++    ))
+ }
+ 
+ /// P2P mode with pre-pinned chunk pool: NVMe → GPU staging chunks → D2D → client.
+@@ -457,13 +471,18 @@ fn handle_p2p(
+         .map(|b| Arc::clone(&b.dma_buf))
+         .collect();
+ 
++    let t_total = std::time::Instant::now();
++
+     // Concurrent NVMe reads into pre-pinned GPU staging chunks.
++    let t_read = std::time::Instant::now();
+     if let Err(e) = do_chunked_read(ctx, &dma_bufs, 0, pool.chunk_size) {
+         unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
+         return Err(e);
+     }
++    let read_us = t_read.elapsed().as_micros();
+ 
+     // D2D copy per chunk: staging chunk → client at correct offset.
++    let t_copy = std::time::Instant::now();
+     for (i, staging_buf) in pool.buffers[..num_chunks].iter().enumerate() {
+         let offset = i * pool.chunk_size;
+         let this_chunk = std::cmp::min(pool.chunk_size, size - offset);
+@@ -483,10 +502,15 @@ fn handle_p2p(
+             ));
+         }
+     }
++    let copy_us = t_copy.elapsed().as_micros();
++    let total_us = t_total.elapsed().as_micros();
+ 
+     unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
+ 
+-    Ok(format!("OK {} bytes (p2p, {} chunks)", size, num_chunks))
++    Ok(format!(
++        "OK {} bytes (p2p, {} chunks) read_us={} copy_us={} total_us={}",
++        size, num_chunks, read_us, copy_us, total_us
++    ))
+ }
+ 
+ /// P2P cold mode: per-request GDRCopy pin/unpin (baseline, measures setup overhead).
+@@ -566,6 +590,357 @@ fn handle_p2p_cold(
+     ))
+ }
+ 
++/// Issue a single async NVMe read, returning per-chunk channels.
++fn issue_single_read(
++    ctx: &ServerContext,
++    buf: Arc<Mutex<interfaces::DmaBuffer>>,
++    lba: u64,
++    chunk_size: usize,
++) -> Result<interfaces::ClientChannels, String> {
++    let sectors_per_chunk = chunk_size / ctx.sector_size;
++    let ibd = query::<dyn IBlockDevice + Send + Sync>(&*ctx.block_dev)
++        .ok_or("IBlockDevice query failed".to_string())?;
++    let channels = ibd
++        .connect_client()
++        .map_err(|e| format!("connect_client: {e}"))?;
++    channels
++        .command_tx
++        .send(interfaces::Command::ReadAsync {
++            ns_id: ctx.ns_id,
++            lba,
++            buf,
++            timeout_ms: 5000,
++        })
++        .map_err(|e| format!("ReadAsync send: {e}"))?;
++    let _ = sectors_per_chunk;
++    Ok(channels)
++}
++
++/// Wait for one ReadAsync completion on the given channels.
++fn wait_read_completion(channels: &interfaces::ClientChannels) -> Result<(), String> {
++    match channels.completion_rx.recv() {
++        Ok(interfaces::Completion::ReadDone { result, .. }) => {
++            result.map_err(|e| format!("NVMe async read: {e}"))
++        }
++        Ok(interfaces::Completion::Timeout { handle }) => {
++            Err(format!("NVMe read timeout (handle {:?})", handle))
++        }
++        Ok(other) => Err(format!("unexpected completion: {other:?}")),
++        Err(e) => Err(format!("recv: {e}")),
++    }
++}
++
++/// Pipelined bounce: double-buffer NVMe reads with overlapping cudaMemcpyAsync H2D on 1 CUDA stream.
++fn handle_bounce_pipelined(
++    stream: &mut UnixStream,
++    ctx: &ServerContext,
++    chunk_size: usize,
++) -> Result<String, String> {
++    let (ipc_handle_bytes, size) = parse_client_payload(stream)?;
++    let client_dev_ptr = open_ipc_handle(&ipc_handle_bytes)?;
++
++    let num_chunks = (size + chunk_size - 1) / chunk_size;
++
++    // Double-buffer: 2 host DMA buffers, alternated between NVMe reads and H2D copies.
++    let buf_a = Arc::new(Mutex::new(
++        interfaces::DmaBuffer::new(chunk_size, ctx.sector_size, None)
++            .map_err(|e| format!("DMA alloc buf_a: {e}"))?,
++    ));
++    let buf_b = Arc::new(Mutex::new(
++        interfaces::DmaBuffer::new(chunk_size, ctx.sector_size, None)
++            .map_err(|e| format!("DMA alloc buf_b: {e}"))?,
++    ));
++
++    // Register host buffers with CUDA for truly async transfers (SPDK hugepages may need this).
++    let (ptr_a, ptr_b) = {
++        let ga = buf_a.lock().unwrap();
++        let gb = buf_b.lock().unwrap();
++        (ga.as_ptr() as *mut c_void, gb.as_ptr() as *mut c_void)
++    };
++    // Attempt host registration; ignore error if already pinned (returns cudaSuccess or
++    // cudaErrorHostMemoryAlreadyRegistered).
++    let reg_a = unsafe { cuda_ffi::cudaHostRegister(ptr_a, chunk_size, 0) };
++    let reg_b = unsafe { cuda_ffi::cudaHostRegister(ptr_b, chunk_size, 0) };
++    let registered_a = reg_a == cuda_ffi::CUDA_SUCCESS;
++    let registered_b = reg_b == cuda_ffi::CUDA_SUCCESS;
++
++    // Create CUDA stream for async H2D copies.
++    let mut cuda_stream: cuda_ffi::cudaStream_t = std::ptr::null_mut();
++    let err = unsafe { cuda_ffi::cudaStreamCreate(&mut cuda_stream) };
++    if err != cuda_ffi::CUDA_SUCCESS {
++        if registered_a { unsafe { cuda_ffi::cudaHostUnregister(ptr_a) }; }
++        if registered_b { unsafe { cuda_ffi::cudaHostUnregister(ptr_b) }; }
++        unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
++        return Err(format!("cudaStreamCreate: {}", cuda_ffi::cuda_error_string(err)));
++    }
++
++    let sectors_per_chunk = chunk_size / ctx.sector_size;
++    let bufs = [Arc::clone(&buf_a), Arc::clone(&buf_b)];
++
++    let t_total = std::time::Instant::now();
++    let mut total_read_us: u128 = 0;
++    let mut total_copy_us: u128 = 0;
++
++    // Pipeline: issue chunk[0] read, then for each subsequent chunk:
++    //   wait for previous read, launch async H2D copy, issue next read.
++    let channels0 = match issue_single_read(
++        ctx,
++        Arc::clone(&bufs[0]),
++        0,
++        chunk_size,
++    ) {
++        Ok(ch) => ch,
++        Err(e) => {
++            unsafe { cuda_ffi::cudaStreamDestroy(cuda_stream) };
++            if registered_a { unsafe { cuda_ffi::cudaHostUnregister(ptr_a) }; }
++            if registered_b { unsafe { cuda_ffi::cudaHostUnregister(ptr_b) }; }
++            unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
++            return Err(e);
++        }
++    };
++
++    // In-flight channels for the current read.
++    let mut in_flight_channels = channels0;
++    let mut pending_chunk_idx: usize = 0; // chunk index whose read is in flight
++
++    for chunk_i in 1..=num_chunks {
++        // Wait for the completion of the in-flight read (chunk pending_chunk_idx).
++        let t_wait = std::time::Instant::now();
++        if let Err(e) = wait_read_completion(&in_flight_channels) {
++            unsafe { cuda_ffi::cudaStreamDestroy(cuda_stream) };
++            if registered_a { unsafe { cuda_ffi::cudaHostUnregister(ptr_a) }; }
++            if registered_b { unsafe { cuda_ffi::cudaHostUnregister(ptr_b) }; }
++            unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
++            return Err(e);
++        }
++        total_read_us += t_wait.elapsed().as_micros();
++
++        // Launch async H2D copy for the just-completed buffer.
++        let completed_buf_idx = pending_chunk_idx % 2;
++        let completed_buf = bufs[completed_buf_idx].lock().unwrap();
++        let offset = pending_chunk_idx * chunk_size;
++        let this_chunk = std::cmp::min(chunk_size, size - offset);
++        let t_c = std::time::Instant::now();
++        let err = unsafe {
++            cuda_ffi::cudaMemcpyAsync(
++                (client_dev_ptr as *mut u8).add(offset) as *mut c_void,
++                completed_buf.as_ptr() as *const c_void,
++                this_chunk,
++                cuda_ffi::CUDA_MEMCPY_HOST_TO_DEVICE,
++                cuda_stream,
++            )
++        };
++        total_copy_us += t_c.elapsed().as_micros();
++        drop(completed_buf);
++        if err != cuda_ffi::CUDA_SUCCESS {
++            unsafe { cuda_ffi::cudaStreamDestroy(cuda_stream) };
++            if registered_a { unsafe { cuda_ffi::cudaHostUnregister(ptr_a) }; }
++            if registered_b { unsafe { cuda_ffi::cudaHostUnregister(ptr_b) }; }
++            unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
++            return Err(format!(
++                "cudaMemcpyAsync H2D chunk #{}: {}",
++                pending_chunk_idx, cuda_ffi::cuda_error_string(err)
++            ));
++        }
++
++        // Issue next read (if there are more chunks) into the other buffer.
++        if chunk_i < num_chunks {
++            let next_buf_idx = chunk_i % 2;
++            let next_lba = (chunk_i as u64) * (sectors_per_chunk as u64);
++            match issue_single_read(
++                ctx,
++                Arc::clone(&bufs[next_buf_idx]),
++                next_lba,
++                chunk_size,
++            ) {
++                Ok(ch) => {
++                    in_flight_channels = ch;
++                    pending_chunk_idx = chunk_i;
++                }
++                Err(e) => {
++                    unsafe { cuda_ffi::cudaStreamDestroy(cuda_stream) };
++                    if registered_a { unsafe { cuda_ffi::cudaHostUnregister(ptr_a) }; }
++                    if registered_b { unsafe { cuda_ffi::cudaHostUnregister(ptr_b) }; }
++                    unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
++                    return Err(e);
++                }
++            }
++        }
++    }
++
++    // Wait for all async H2D copies to complete.
++    let err = unsafe { cuda_ffi::cudaStreamSynchronize(cuda_stream) };
++    if err != cuda_ffi::CUDA_SUCCESS {
++        unsafe { cuda_ffi::cudaStreamDestroy(cuda_stream) };
++        if registered_a { unsafe { cuda_ffi::cudaHostUnregister(ptr_a) }; }
++        if registered_b { unsafe { cuda_ffi::cudaHostUnregister(ptr_b) }; }
++        unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
++        return Err(format!("cudaStreamSynchronize: {}", cuda_ffi::cuda_error_string(err)));
++    }
++
++    let total_us = t_total.elapsed().as_micros();
++
++    unsafe { cuda_ffi::cudaStreamDestroy(cuda_stream) };
++    if registered_a { unsafe { cuda_ffi::cudaHostUnregister(ptr_a) }; }
++    if registered_b { unsafe { cuda_ffi::cudaHostUnregister(ptr_b) }; }
++    unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
++
++    Ok(format!(
++        "OK {} bytes (bounce-pipelined, {} chunks) read_us={} copy_us={} total_us={}",
++        size, num_chunks, total_read_us, total_copy_us, total_us
++    ))
++}
++
++/// Pipelined bounce with 2 CUDA streams: round-robins H2D copies across 2 streams.
++fn handle_bounce_pipelined_2stream(
++    stream: &mut UnixStream,
++    ctx: &ServerContext,
++    chunk_size: usize,
++) -> Result<String, String> {
++    let (ipc_handle_bytes, size) = parse_client_payload(stream)?;
++    let client_dev_ptr = open_ipc_handle(&ipc_handle_bytes)?;
++
++    let num_chunks = (size + chunk_size - 1) / chunk_size;
++
++    // Double-buffer for NVMe reads.
++    let buf_a = Arc::new(Mutex::new(
++        interfaces::DmaBuffer::new(chunk_size, ctx.sector_size, None)
++            .map_err(|e| format!("DMA alloc buf_a: {e}"))?,
++    ));
++    let buf_b = Arc::new(Mutex::new(
++        interfaces::DmaBuffer::new(chunk_size, ctx.sector_size, None)
++            .map_err(|e| format!("DMA alloc buf_b: {e}"))?,
++    ));
++
++    let (ptr_a, ptr_b) = {
++        let ga = buf_a.lock().unwrap();
++        let gb = buf_b.lock().unwrap();
++        (ga.as_ptr() as *mut c_void, gb.as_ptr() as *mut c_void)
++    };
++    let reg_a = unsafe { cuda_ffi::cudaHostRegister(ptr_a, chunk_size, 0) };
++    let reg_b = unsafe { cuda_ffi::cudaHostRegister(ptr_b, chunk_size, 0) };
++    let registered_a = reg_a == cuda_ffi::CUDA_SUCCESS;
++    let registered_b = reg_b == cuda_ffi::CUDA_SUCCESS;
++
++    let cleanup = |registered_a: bool, registered_b: bool| {
++        if registered_a { unsafe { cuda_ffi::cudaHostUnregister(ptr_a) }; }
++        if registered_b { unsafe { cuda_ffi::cudaHostUnregister(ptr_b) }; }
++        unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
++    };
++
++    // Create 2 CUDA streams.
++    let mut stream_a: cuda_ffi::cudaStream_t = std::ptr::null_mut();
++    let mut stream_b: cuda_ffi::cudaStream_t = std::ptr::null_mut();
++    let err = unsafe { cuda_ffi::cudaStreamCreate(&mut stream_a) };
++    if err != cuda_ffi::CUDA_SUCCESS {
++        cleanup(registered_a, registered_b);
++        return Err(format!("cudaStreamCreate A: {}", cuda_ffi::cuda_error_string(err)));
++    }
++    let err = unsafe { cuda_ffi::cudaStreamCreate(&mut stream_b) };
++    if err != cuda_ffi::CUDA_SUCCESS {
++        unsafe { cuda_ffi::cudaStreamDestroy(stream_a) };
++        cleanup(registered_a, registered_b);
++        return Err(format!("cudaStreamCreate B: {}", cuda_ffi::cuda_error_string(err)));
++    }
++
++    let sectors_per_chunk = chunk_size / ctx.sector_size;
++    let bufs = [Arc::clone(&buf_a), Arc::clone(&buf_b)];
++    let streams = [stream_a, stream_b];
++
++    let t_total = std::time::Instant::now();
++    let mut total_read_us: u128 = 0;
++    let mut total_copy_us: u128 = 0;
++
++    let channels0 = match issue_single_read(ctx, Arc::clone(&bufs[0]), 0, chunk_size) {
++        Ok(ch) => ch,
++        Err(e) => {
++            unsafe { cuda_ffi::cudaStreamDestroy(stream_a) };
++            unsafe { cuda_ffi::cudaStreamDestroy(stream_b) };
++            cleanup(registered_a, registered_b);
++            return Err(e);
++        }
++    };
++
++    let mut in_flight_channels = channels0;
++    let mut pending_chunk_idx: usize = 0;
++
++    for chunk_i in 1..=num_chunks {
++        let t_wait = std::time::Instant::now();
++        if let Err(e) = wait_read_completion(&in_flight_channels) {
++            unsafe { cuda_ffi::cudaStreamDestroy(stream_a) };
++            unsafe { cuda_ffi::cudaStreamDestroy(stream_b) };
++            cleanup(registered_a, registered_b);
++            return Err(e);
++        }
++        total_read_us += t_wait.elapsed().as_micros();
++
++        let completed_buf_idx = pending_chunk_idx % 2;
++        let completed_buf = bufs[completed_buf_idx].lock().unwrap();
++        let offset = pending_chunk_idx * chunk_size;
++        let this_chunk = std::cmp::min(chunk_size, size - offset);
++        // Round-robin stream selection.
++        let cuda_stream = streams[pending_chunk_idx % 2];
++        let t_c = std::time::Instant::now();
++        let err = unsafe {
++            cuda_ffi::cudaMemcpyAsync(
++                (client_dev_ptr as *mut u8).add(offset) as *mut c_void,
++                completed_buf.as_ptr() as *const c_void,
++                this_chunk,
++                cuda_ffi::CUDA_MEMCPY_HOST_TO_DEVICE,
++                cuda_stream,
++            )
++        };
++        total_copy_us += t_c.elapsed().as_micros();
++        drop(completed_buf);
++        if err != cuda_ffi::CUDA_SUCCESS {
++            unsafe { cuda_ffi::cudaStreamDestroy(stream_a) };
++            unsafe { cuda_ffi::cudaStreamDestroy(stream_b) };
++            cleanup(registered_a, registered_b);
++            return Err(format!(
++                "cudaMemcpyAsync H2D chunk #{}: {}",
++                pending_chunk_idx, cuda_ffi::cuda_error_string(err)
++            ));
++        }
++
++        if chunk_i < num_chunks {
++            let next_buf_idx = chunk_i % 2;
++            let next_lba = (chunk_i as u64) * (sectors_per_chunk as u64);
++            match issue_single_read(ctx, Arc::clone(&bufs[next_buf_idx]), next_lba, chunk_size) {
++                Ok(ch) => {
++                    in_flight_channels = ch;
++                    pending_chunk_idx = chunk_i;
++                }
++                Err(e) => {
++                    unsafe { cuda_ffi::cudaStreamDestroy(stream_a) };
++                    unsafe { cuda_ffi::cudaStreamDestroy(stream_b) };
++                    cleanup(registered_a, registered_b);
++                    return Err(e);
++                }
++            }
++        }
++    }
++
++    let err_a = unsafe { cuda_ffi::cudaStreamSynchronize(stream_a) };
++    let err_b = unsafe { cuda_ffi::cudaStreamSynchronize(stream_b) };
++    let total_us = t_total.elapsed().as_micros();
++
++    unsafe { cuda_ffi::cudaStreamDestroy(stream_a) };
++    unsafe { cuda_ffi::cudaStreamDestroy(stream_b) };
++    cleanup(registered_a, registered_b);
++
++    if err_a != cuda_ffi::CUDA_SUCCESS {
++        return Err(format!("cudaStreamSynchronize A: {}", cuda_ffi::cuda_error_string(err_a)));
++    }
++    if err_b != cuda_ffi::CUDA_SUCCESS {
++        return Err(format!("cudaStreamSynchronize B: {}", cuda_ffi::cuda_error_string(err_b)));
++    }
++
++    Ok(format!(
++        "OK {} bytes (bounce-pipelined-2stream, {} chunks) read_us={} copy_us={} total_us={}",
++        size, num_chunks, total_read_us, total_copy_us, total_us
++    ))
++}
++
+ fn main() {
+     let cli = Cli::parse();
+ 
+@@ -607,6 +982,8 @@ fn main() {
+         TransferMode::Bounce => "bounce",
+         TransferMode::P2p => "p2p",
+         TransferMode::P2pCold => "p2p-cold",
++        TransferMode::BouncePipelined => "bounce-pipelined",
++        TransferMode::BouncePipelined2stream => "bounce-pipelined-2stream",
+     };
+ 
+     // Signal handling.
+@@ -649,6 +1026,12 @@ fn main() {
+                     TransferMode::P2pCold => {
+                         handle_p2p_cold(&mut stream, &ctx, cli.chunk_size)
+                     }
++                    TransferMode::BouncePipelined => {
++                        handle_bounce_pipelined(&mut stream, &ctx, cli.chunk_size)
++                    }
++                    TransferMode::BouncePipelined2stream => {
++                        handle_bounce_pipelined_2stream(&mut stream, &ctx, cli.chunk_size)
++                    }
+                 };
+                 match result {
+                     Ok(msg) => {
+diff --git a/components/gpu-services/v0/src/cuda_ffi.rs b/components/gpu-services/v0/src/cuda_ffi.rs
+index bb06af6..67e24b8 100644
+--- a/components/gpu-services/v0/src/cuda_ffi.rs
++++ b/components/gpu-services/v0/src/cuda_ffi.rs
+@@ -68,6 +68,9 @@ pub const CUDA_MEMCPY_DEVICE_TO_DEVICE: c_int = 3;
+ pub const CUDA_HOST_ALLOC_DEFAULT: c_int = 0;
+ pub const CUDA_HOST_ALLOC_MAPPED: c_int = 2;
+ 
++/// Opaque CUDA stream handle.
++pub type cudaStream_t = *mut c_void;
++
+ extern "C" {
+     pub fn cudaGetDeviceCount(count: *mut c_int) -> cudaError_t;
+     pub fn cudaGetDeviceProperties(prop: *mut cudaDeviceProp, device: c_int) -> cudaError_t;
+@@ -99,6 +102,16 @@ extern "C" {
+         count: usize,
+         kind: c_int,
+     ) -> cudaError_t;
++    pub fn cudaMemcpyAsync(
++        dst: *mut c_void,
++        src: *const c_void,
++        count: usize,
++        kind: c_int,
++        stream: cudaStream_t,
++    ) -> cudaError_t;
++    pub fn cudaStreamCreate(stream: *mut cudaStream_t) -> cudaError_t;
++    pub fn cudaStreamSynchronize(stream: cudaStream_t) -> cudaError_t;
++    pub fn cudaStreamDestroy(stream: cudaStream_t) -> cudaError_t;
+     pub fn cudaFree(devptr: *mut c_void) -> cudaError_t;
+     pub fn cudaHostGetDevicePointer(
+         pdevice: *mut *mut c_void,

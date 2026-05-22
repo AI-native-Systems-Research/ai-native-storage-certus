@@ -1,0 +1,30 @@
+[
+  {
+    "id": "RP-1",
+    "statement": "For NVMe→GPU transfers with 128 KiB chunks on NVIDIA A30 hardware, direct P2P DMA (NVMe→GPU-BAR1→D2D) with a pre-warmed GDRCopy staging pool achieves ~2x higher throughput and ~2x lower latency than a bounce buffer path (NVMe→host-DMA→H2D), because D2D copies stay within GPU memory and avoid PCIe traversal, while the extra H2D copy in the bounce path dominates total latency.",
+    "confidence": "high",
+    "regime": "NVIDIA A30 GPU, NVMe SSD via SPDK/VFIO, 4 MiB transfer as 32 x 128 KiB chunks, pre-allocated GDRCopy staging pool (warm), sequential copy phase after full BatchSubmit NVMe reads",
+    "evidence": ["iteration-1-h-main"],
+    "contradicts": ["initial-hypothesis-bounce-faster"],
+    "extraction_iteration": 1,
+    "mechanism": "The bounce path (handle_bounce at p2p_server.rs:374) performs 32 sequential cudaMemcpy H2D calls after NVMe reads complete. H2D copies traverse the PCIe bus from host to GPU. The P2P warm path (handle_p2p at p2p_server.rs:436) performs 32 sequential cudaMemcpy D2D calls from GPU staging (BAR1-mapped) to client GPU buffer. D2D copies do not traverse the PCIe bus — they execute within GPU memory via the GPU's internal copy engine. At 128 KiB chunk size, the per-chunk D2D copy latency is substantially lower than H2D, making the warm P2P path ~2x faster overall despite NVMe DMA targeting GPU BAR1 instead of host memory.",
+    "applicability_bounds": "Applies when: (1) GDRCopy staging pool is pre-allocated (warm), (2) chunk size is 128 KiB, (3) GPU is NVIDIA A30 or similar with fast internal copy engine, (4) PCIe topology is such that GPU BAR1 DMA from NVMe is not severely penalized. May not hold if: chunk size is much smaller (per-copy overhead dominates), GPU BAR1 DMA bandwidth is throttled, or hardware lacks fast D2D copy engine.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-2",
+    "statement": "GDRCopy per-request pin/map/unpin overhead for 32 x 128 KiB GPU staging buffers on NVIDIA A30 adds approximately 6ms latency per 4 MiB transfer request (vs ~1.3ms with pre-allocated pool), a ~5.6x penalty dominated by nvidia_p2p_get_pages/put_pages kernel transitions.",
+    "confidence": "high",
+    "regime": "NVIDIA A30 GPU, GDRCopy 2.5 (libgdrapi), 32 chunks per request (4 MiB / 128 KiB), per-request cudaMalloc + gdr_open + gdr_pin_buffer + gdr_map + spdk_mem_register + full teardown",
+    "evidence": ["iteration-1-h-control-negative"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "P2P cold path (handle_p2p_cold at p2p_server.rs:493) calls create_gpu_staging (p2p_server.rs:224) per chunk, which invokes create_spdk_dma_buffer_from_gpu_bar (dma.rs:353): cudaMalloc + gdr_open + gdr_pin_buffer (nvidia_p2p_get_pages) + gdr_map + spdk_mem_register. Each pin/unpin cycle requires kernel round-trips through the NVIDIA driver. At 32 chunks per 4 MiB transfer, these kernel transitions accumulate to ~6ms total overhead, dwarfing the actual NVMe I/O and copy time.",
+    "applicability_bounds": "Applies to GDRCopy 2.5 on NVIDIA A30 with per-request allocation. Overhead is O(num_chunks). Pre-allocating a pool (warm mode) and reusing across requests eliminates this entirely. Relevant for any system that must decide between per-request and amortized GPU buffer management for P2P DMA paths.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  }
+]

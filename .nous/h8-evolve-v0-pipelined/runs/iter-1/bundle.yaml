@@ -1,0 +1,159 @@
+metadata:
+  iteration: 1
+  family: "evolve-v0-pipeline-vs-p2p"
+  research_question: >
+    Evolving dispatcher v0 to overlap NVMe reads with GPU copies (true pipelining)
+    is faster than direct P2P DMA for 4 MiB lookups (32x128 KiB chunks) through
+    certus-server.
+
+arms:
+  - type: h-main
+    prediction: >
+      True pipelined v0 (overlapping NVMe reads with GPU copies via double-buffered
+      cudaHostAlloc buffers and cudaMemcpyAsync) will reduce SSD-tier lookup latency
+      compared to the sequential baseline. The GPU copy time (~200 us for 4 MiB
+      synchronous) is fully hidden behind NVMe reads when done per-chunk
+      asynchronously, yielding a latency reduction on the order of the eliminated
+      synchronous copy time.
+    mechanism: >
+      Sequential baseline serializes: 32 × ReadSync (~3-4 us per 128 KiB chunk on
+      this SSD = ~96-128 us total NVMe) then one 4 MiB cudaMemcpy H2D (~200 us at
+      ~20 GB/s). Total NVMe+copy time: ~300-330 us. Pipelining with double-buffered
+      cudaHostAlloc: after each ReadSync completion, immediately launch
+      cudaMemcpyAsync (non-blocking, ~6 us per 128 KiB at 20 GB/s) while
+      simultaneously submitting the next ReadSync. The GPU copy engine and NVMe
+      controller operate on independent DMA channels — true hardware parallelism.
+      Net savings: the large synchronous copy is replaced by per-chunk async copies
+      that execute concurrently with NVMe reads. Only the final chunk's copy adds
+      to critical path (~6 us). Code: components/dispatcher/v0/src/lib.rs:179-276.
+    diagnostic: >
+      If pipelined is NOT faster than sequential: (1) CUDA may be falling back to
+      synchronous despite cudaHostAlloc — verify with nsys or cudaStreamQuery. (2)
+      The NVMe read latency per chunk may be too short for overlap to matter (if
+      read_us < copy_us per chunk, the copy becomes the bottleneck). (3) Channel
+      overhead from ReadAsync submission may dominate. Measure per-chunk read_us
+      and copy_us independently. If pipelined is faster but less than expected:
+      check if cudaStreamSynchronize dominates (partial overlap only).
+    code_changes:
+      - file: "components/gpu-services/v0/src/cuda_ffi.rs"
+        intent: >
+          Add to the extern "C" block: cudaStream_t type alias (as *mut c_void),
+          cudaStreamCreate, cudaStreamDestroy, cudaStreamSynchronize, and
+          cudaMemcpyAsync declarations. These match the libcudart.so symbols already
+          linked by the crate.
+        rationale: >
+          The pipelined path requires non-blocking GPU copies. cudaMemcpyAsync
+          returns immediately to the CPU while the copy engine processes the
+          transfer on the given stream. Not currently in the FFI.
+      - file: "components/dispatcher/v0/src/lib.rs"
+        intent: >
+          Replace read_from_block_device (lines 179-276) with a pipelined version.
+          Key changes: (1) At dispatcher initialization or first use, allocate 2 x
+          128 KiB pinned buffers via cudaHostAlloc + create_spdk_dma_buffer_from_cuda_host_alloc,
+          and create one CUDA stream. Store in component fields. (2) In the pipelined
+          read path: call connect_client() once, submit ReadAsync for chunk[0] into
+          buf_a, then loop: recv completion → cudaMemcpyAsync from completed buf to
+          GPU at correct offset → submit ReadAsync for next chunk into other buf →
+          swap. After last chunk: recv + cudaMemcpyAsync + cudaStreamSynchronize.
+          The GPU device pointer comes from ipc_handle.address (already opened by
+          certus-server's service.rs via cudaIpcOpenMemHandle).
+        rationale: >
+          Double-buffering with cudaHostAlloc is the proven approach (h8-pipelined
+          RP-4): SPDK can DMA into cudaHostAlloc memory (registered via
+          spdk_mem_register), and CUDA can async-copy from it without internal
+          staging. Single connect_client() eliminates the 544us per-chunk channel
+          allocation overhead found in h8-evolve-v0 iter-1.
+      - file: "components/dispatcher/v0/Cargo.toml"
+        intent: >
+          Add gpu-services as a dependency (for access to dma::create_spdk_dma_buffer_from_cuda_host_alloc
+          and cuda_ffi module). The crate already depends on interfaces which has
+          DmaBuffer.
+        rationale: >
+          The dispatcher needs to call cuda_ffi functions and the DMA buffer
+          creation helper directly for the pipelined path.
+
+  - type: h-control-negative
+    prediction: >
+      For a single-chunk value (4 KiB, which fits in one 128 KiB segment), pipelined
+      v0 will show no improvement over sequential v0. SSD-tier latency will be
+      identical within measurement noise because there is only one chunk and thus no
+      opportunity to overlap read N with copy N-1.
+    mechanism: >
+      Pipelining benefit = overlap between consecutive chunks. With 1 chunk total
+      (4 KiB < 128 KiB MDTS → segment_io returns 1 segment per io_segmenter.rs:62-69),
+      the pipeline degrades to: read chunk[0], then cudaMemcpyAsync + sync — identical
+      to sequential (read then copy) with marginally more overhead (stream creation,
+      buffer selection logic). The overlap mechanism is structurally impossible with
+      N=1 chunks.
+    diagnostic: >
+      If pipelined IS somehow faster for single-chunk: could be smaller buffer
+      allocation (128 KiB pinned vs value-sized SPDK alloc), or different allocator
+      path. Compare allocation times between the two paths.
+    code_changes:
+      - file: "components/dispatcher/v0/src/lib.rs"
+        intent: >
+          Same pipelined implementation as h-main. The test varies the parameter:
+          use --bench-object-size 4096 instead of 4194304.
+        rationale: >
+          Validates that the mechanism only provides benefit when multiple chunks
+          exist to overlap. Single-chunk case confirms specificity.
+
+  - type: h-robustness
+    prediction: >
+      P2P direct DMA (NVMe → GPU BAR1, no host bounce) will show lower SSD-tier
+      lookup latency than sequential v0 for 4 MiB values. With NODE-level PCIe
+      topology (NVMe 63:00.0 and GPU0 on same NUMA node), P2P should achieve
+      meaningful advantage by eliminating the host-memory intermediary entirely.
+    mechanism: >
+      P2P path: NVMe controller DMAs each 128 KiB chunk directly to GPU BAR1 memory
+      (SPDK-registered via prepare_memory_for_spdk). No host buffer allocation, no
+      cudaMemcpy. 32 sequential ReadSync operations target GPU memory directly.
+      While BAR1 writes may have slightly higher per-chunk latency than host-DRAM
+      writes (write-combining vs cacheable), the elimination of the entire 4 MiB
+      H2D copy (~200 us) provides net savings. At NODE level (same NUMA, different
+      root complex), PCIe routing stays within the socket — avoiding the cross-NUMA
+      penalty that made P2P 65% slower in h8-v0-pinned (SYS level).
+      Code: IGpuServices::prepare_memory_for_spdk at gpu-services/v0/src/lib.rs:330.
+    diagnostic: >
+      If P2P is slower than sequential: (1) Check nvidia-smi topo -m for topology
+      level between NVMe and GPU — must be NODE not SYS. (2) Verify nvidia_peermem
+      + gdrdrv loaded. (3) Check if spdk_mem_register succeeds on GPU memory. (4)
+      Sub-buffer vtophys resolution may fail — if so, try 32 separate
+      prepare_memory_for_spdk calls (one per chunk) instead of sub-views.
+    code_changes:
+      - file: "components/interfaces/src/idispatcher.rs"
+        intent: >
+          Add cuda_ipc_handle_bytes: Option<Vec<u8>> field to IpcHandle struct.
+          Update all construction sites to include None. This allows the dispatcher
+          to receive raw CUDA IPC handle bytes for prepare_memory_for_spdk.
+        rationale: >
+          The dispatcher needs the 64-byte CUDA IPC handle to construct the
+          prepare_memory_for_spdk payload. Currently only the opened device pointer
+          is passed through.
+      - file: "apps/certus-server/src/service.rs"
+        intent: >
+          In the lookup handler (lines 176-254), when constructing IpcHandle for
+          each entry, set cuda_ipc_handle_bytes to Some(handle.cuda_ipc_handle.clone())
+          so the dispatcher can use prepare_memory_for_spdk for P2P.
+        rationale: >
+          The server has the raw 64-byte CUDA IPC handle from the gRPC message.
+          Passing it through enables the P2P path in the dispatcher.
+      - file: "components/dispatcher/v0/src/lib.rs"
+        intent: >
+          Add read_from_block_device_p2p method: (1) construct 72-byte payload from
+          cuda_ipc_handle_bytes (64) + total_size as u64 LE (8), (2) base64 encode,
+          (3) call gpu.prepare_memory_for_spdk(payload, None) to get GPU DmaBuffer,
+          (4) for each segment from segment_io, create a non-owning DmaBuffer sub-view
+          via unsafe DmaBuffer::from_raw(gpu_ptr + buffer_offset, seg.length, noop_free, -1),
+          (5) issue ReadSync targeting each sub-view. In lookup(), when
+          ipc_handle.cuda_ipc_handle_bytes.is_some(), call this P2P path instead of
+          the standard read_from_block_device.
+        rationale: >
+          Eliminates host buffer and GPU copy entirely. NVMe DMA targets GPU BAR1
+          directly via SPDK peer-to-peer DMA.
+      - file: "components/dispatcher/v0/Cargo.toml"
+        intent: >
+          Add base64 = "0.22" dependency for encoding the prepare_memory_for_spdk
+          payload.
+        rationale: >
+          prepare_memory_for_spdk expects a base64-encoded string.

@@ -1,0 +1,49 @@
+metadata:
+  iteration: 2
+  bundle_ref: "runs/iter-2/bundle.yaml"
+  description: >
+    Test P2P SSD->GPU DMA performance at NODE-level (63:00.0, same NUMA as GPU0)
+    vs SYS-level (c2:00.0, cross-NUMA) topology to isolate Infinity Fabric contribution.
+    Four conditions: bounce and P2P at each topology.
+
+setup:
+  - cmd: "ln -sfn /home/nara/certus/ai-native-storage-certus/deps/spdk /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-08973370/deps/spdk && ln -sfn /home/nara/certus/ai-native-storage-certus/deps/spdk-build /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-08973370/deps/spdk-build"
+    description: "Restore SPDK symlinks in worktree"
+  - cmd: "RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server"
+    description: "Build certus-server"
+
+arms:
+  - arm_id: "h-main"
+    conditions:
+      - name: "condition-A-bounce-node"
+        description: "Pipelined bounce path, NVMe 63:00.0 (NUMA 0, NODE-level)"
+        cmd: "LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-08973370/target/debug/certus-server --metadata-pci 0000:62:00.0 --data-pci 0000:63:00.0 --dispatcher-version v1 --listen 0.0.0.0:50051 & sleep 5 && cd /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-08973370/apps/certus-server/python-client && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 test_client.py --server localhost:50051 --bench-only --bench-object-size 4194304 --bench-num-objects 10 --bench-iterations 1"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-pinned/runs/iter-2/results/h-main/condition-A-bounce-node.txt"
+
+      - name: "condition-B-p2p-node"
+        description: "P2P direct SSD->GPU, NVMe 63:00.0 (NUMA 0, NODE-level), patch applied"
+        cmd: "git -C /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-08973370 apply /home/nara/certus/ai-native-storage-certus/.nous/h8-v1-pinned/runs/iter-2/patches/h-main.patch && RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-08973370/target/debug/certus-server --metadata-pci 0000:62:00.0 --data-pci 0000:63:00.0 --dispatcher-version v1 --listen 0.0.0.0:50051 & sleep 5 && cd /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-08973370/apps/certus-server/python-client && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 test_client.py --server localhost:50051 --bench-only --bench-object-size 4194304 --bench-num-objects 10 --bench-iterations 1"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-pinned/runs/iter-2/patches/h-main.patch"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-pinned/runs/iter-2/results/h-main/condition-B-p2p-node.txt"
+
+  - arm_id: "h-control-negative"
+    conditions:
+      - name: "condition-C-bounce-sys"
+        description: "Pipelined bounce path, NVMe c2:00.0 (NUMA 1, SYS-level)"
+        cmd: "LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-08973370/target/debug/certus-server --metadata-pci 0000:c1:00.0 --data-pci 0000:c2:00.0 --dispatcher-version v1 --listen 0.0.0.0:50051 & sleep 5 && cd /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-08973370/apps/certus-server/python-client && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 test_client.py --server localhost:50051 --bench-only --bench-object-size 4194304 --bench-num-objects 10 --bench-iterations 1"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-pinned/runs/iter-2/results/h-control-negative/condition-C-bounce-sys.txt"
+
+      - name: "condition-D-p2p-sys"
+        description: "P2P direct SSD->GPU, NVMe c2:00.0 (NUMA 1, SYS-level), patch applied"
+        cmd: "git -C /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-08973370 apply /home/nara/certus/ai-native-storage-certus/.nous/h8-v1-pinned/runs/iter-2/patches/h-main.patch && RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-08973370/target/debug/certus-server --metadata-pci 0000:c1:00.0 --data-pci 0000:c2:00.0 --dispatcher-version v1 --listen 0.0.0.0:50051 & sleep 5 && cd /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-08973370/apps/certus-server/python-client && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 test_client.py --server localhost:50051 --bench-only --bench-object-size 4194304 --bench-num-objects 10 --bench-iterations 1"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-pinned/runs/iter-2/patches/h-main.patch"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-pinned/runs/iter-2/results/h-control-negative/condition-D-p2p-sys.txt"
+
+  - arm_id: "h-robustness"
+    conditions:
+      - name: "analysis-from-h-main-conditions"
+        description: "Robustness analysis of per-object variance across all 10 objects in conditions A/B/C/D"
+        cmd: "echo 'Robustness analysis: see results/h-robustness/analysis.txt'"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-pinned/runs/iter-2/results/h-robustness/analysis.txt"

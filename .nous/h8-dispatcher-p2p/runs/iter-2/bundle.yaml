@@ -1,0 +1,115 @@
+metadata:
+  iteration: 2
+  family: "dispatcher-p2p-vs-bounce"
+  research_question: >
+    Does the P2P (NVMe→GPU via BAR1) advantage over bounce survive when
+    using sequential per-chunk ReadSync (matching the dispatcher's pipeline.rs
+    pattern) instead of concurrent BatchSubmit? This decomposes the iter-1
+    result into path effect vs submission-strategy effect.
+
+# Arm selection rationale:
+# - h-main: Tests whether P2P path alone (with sequential submission matching
+#   the dispatcher) is still faster than bounce-sequential. This is the key
+#   question for dispatcher integration — if serial P2P isn't faster than serial
+#   bounce, the dispatcher gains nothing from P2P without also switching to BatchSubmit.
+# - h-robustness: Confirms that BatchSubmit P2P (iter-1 result) still dominates,
+#   establishing the ceiling and validating experimental setup consistency.
+# - h-ablation: Tests BatchSubmit bounce vs sequential bounce to quantify how much
+#   the submission strategy alone contributes (independent of path). This isolates
+#   the two factors cleanly.
+
+arms:
+  - type: h-main
+    prediction: >
+      P2P sequential (ReadSync per chunk into BAR1 buffers, then D2D copy) will
+      achieve lower avg latency than bounce sequential (ReadSync per chunk into
+      host DRAM, then cudaMemcpy H2D) for 4 MiB at 128 KiB chunks. The P2P path
+      advantage (eliminating host DRAM hop) will remain the dominant factor even
+      without concurrent submission — P2P-seq avg latency will be consistently
+      lower than bounce-seq avg latency across all seeds.
+    mechanism: >
+      The P2P path saves one PCIe DMA hop per chunk: bounce requires NVMe→host
+      DRAM (PCIe write) + host DRAM→GPU (cudaMemcpy H2D = PCIe read from host +
+      write to GPU), while P2P requires only NVMe→GPU BAR1 (single PCIe write
+      targeting GPU's BAR1 aperture). Even with sequential ReadSync submission
+      (no pipelining of NVMe commands), the per-chunk latency is lower because
+      each chunk traverses fewer PCIe hops. The D2D copy (staging→client) is
+      intra-GPU and negligible (~2-5us per 128 KiB chunk at 900 GB/s GPU
+      memory bandwidth).
+    diagnostic: >
+      If bounce-seq matches or beats P2P-seq: the BAR1 write path may have
+      higher per-transfer latency than expected (PCIe TLP size constraints on
+      BAR1 writes, IOMMU overhead per transaction). Check whether NVMe controller
+      DMA targeting BAR1 produces smaller TLPs than targeting host DRAM. Also
+      check if ReadSync to BAR1 buffer has additional SPDK polling overhead
+      compared to ReadSync to host DRAM buffer.
+    code_changes:
+      - file: "components/gpu-services/v0/src/bin/p2p_server.rs"
+        intent: >
+          Add a new TransferMode variant `P2pSeq` and corresponding handler
+          `handle_p2p_seq` that uses the pre-pinned GPU staging chunk pool
+          (same as handle_p2p) but issues sequential ReadSync per chunk instead
+          of BatchSubmit. After all chunks are read, perform D2D copies to the
+          client buffer (same as handle_p2p). This isolates the path effect from
+          the submission strategy effect.
+        rationale: >
+          The dispatcher's pipeline.rs uses sequential ReadSync. To predict whether
+          P2P integration in the dispatcher will help, we need to measure P2P with
+          the same sequential submission pattern. The existing handle_p2p uses
+          BatchSubmit which is not how the dispatcher works.
+
+  - type: h-robustness
+    prediction: >
+      P2P warm with BatchSubmit (existing --mode p2p) will still outperform
+      bounce with BatchSubmit (existing --mode bounce) by approximately 1.5-2.5x
+      on avg latency, consistent with iter-1 findings. This confirms the
+      experimental setup is producing reproducible results and establishes
+      the performance ceiling for the P2P path.
+    mechanism: >
+      Same as iter-1 h-main: single-hop DMA (NVMe→GPU BAR1) vs two-hop
+      (NVMe→host DRAM→GPU). BatchSubmit issues all 32 chunks concurrently,
+      saturating the NVMe controller queue for both paths. The path savings
+      dominate because they apply to every chunk regardless of submission order.
+    diagnostic: >
+      If the P2P/bounce ratio is significantly different from iter-1 (2.47x):
+      check system thermal state, NVMe controller queue depth saturation,
+      CUDA driver version changes, or interference from other processes.
+      Run nvidia-smi and check for thermal throttling.
+
+  - type: h-ablation
+    prediction: >
+      Bounce with BatchSubmit (existing --mode bounce) will achieve lower avg
+      latency than bounce with sequential ReadSync (new mode). The submission
+      strategy contribution will be measurable but smaller than the path
+      contribution: BatchSubmit-bounce will be faster than seq-bounce by less
+      than the gap between P2P-seq and bounce-seq.
+    mechanism: >
+      BatchSubmit issues all NVMe read commands before waiting for completions,
+      allowing the NVMe controller to process them concurrently (queue depth > 1).
+      Sequential ReadSync waits for each completion before issuing the next,
+      limiting effective queue depth to 1. For 32 chunks × 128 KiB, the NVMe
+      controller can overlap multiple transfers when queue depth > 1. However,
+      for 128 KiB chunks, each NVMe read completes in ~30-50us (given ~3 GB/s
+      NVMe sequential read), so 32 sequential reads take ~1-1.6ms vs ~0.05ms
+      when fully concurrent (limited by PCIe bandwidth). The submission strategy
+      matters but less than the path factor.
+    diagnostic: >
+      If BatchSubmit-bounce is faster than P2P-seq: the submission strategy
+      contributes more than the path savings. This would mean dispatcher
+      integration needs both P2P AND BatchSubmit to be worthwhile — just adding
+      P2P with sequential ReadSync won't help.
+    code_changes:
+      - file: "components/gpu-services/v0/src/bin/p2p_server.rs"
+        intent: >
+          Add a new TransferMode variant `BounceSeq` and corresponding handler
+          `handle_bounce_seq` that allocates host DMA buffers (same as
+          handle_bounce) but issues sequential ReadSync per chunk instead of
+          BatchSubmit. After all chunks are read, perform sequential cudaMemcpy
+          H2D per chunk to the client buffer. This is functionally equivalent to
+          what the dispatcher's pipeline.rs does today.
+        rationale: >
+          To quantify the submission strategy contribution independently of
+          the path, we need a bounce-sequential baseline. The existing --mode
+          bounce uses BatchSubmit which doesn't match the dispatcher. Comparing
+          bounce-seq vs bounce-BatchSubmit isolates the submission strategy
+          effect on the bounce path.

@@ -1,0 +1,132 @@
+metadata:
+  iteration: 1
+  family: "p2p-persistent-staging"
+  research_question: >
+    Is direct SSD→GPU P2P DMA with persistently cached GPU staging buffers faster
+    than the existing pipelined bounce-buffer path (SSD→DRAM→GPU) for 4 MiB object
+    lookups broken into sequential 128 KiB NVMe reads, when per-lookup
+    prepare_memory_for_spdk overhead is eliminated by caching the GPU DmaBuffer?
+
+arm_selection_rationale: >
+  h-main tests the core claim (P2P persistent faster than bounce on first-hit).
+  h-robustness tests stability over 20 iterations (sustained performance without
+  memory-tier warming). No h-control-negative because the 4 KiB regime was already
+  tested in h8-v1-vs-p2p iter-1 (confirmed P2P doesn't help for tiny objects).
+  No h-ablation because the single mechanism (caching) IS the intervention —
+  removing it reverts to the prior experiment's failure case (already documented).
+
+arms:
+  - type: h-main
+    prediction: >
+      P2P persistent staging (Condition B) will show lower SSD-tier avg latency
+      than baseline bounce (Condition A) on 1-iteration first-hit measurement
+      of 4 MiB objects. The improvement eliminates 32 per-chunk cudaMemcpy H2D
+      copies (~3-4 μs each) and 32 host memcpy operations, yielding a measurable
+      reduction in end-to-end lookup latency.
+    mechanism: >
+      The pipelined bounce path (pipeline.rs:30-123) performs per-chunk: (1) NVMe
+      ReadSync into host DMA buffer, (2) std::ptr::copy_nonoverlapping to
+      memory-tier (pipeline.rs:98-104), (3) gpu.dma_copy_to_device H2D copy
+      (pipeline.rs:109-117). Steps 2-3 add ~100-130 μs total for 32 chunks.
+      The P2P path reads NVMe directly into the GPU-registered DmaBuffer,
+      eliminating steps 2-3 entirely. The cached DmaBuffer (keyed by 64-byte
+      CUDA IPC handle) avoids the per-lookup prepare_memory_for_spdk cost
+      (~50 μs: cudaIpcOpenMemHandle + spdk_mem_register) that caused the
+      prior 17.5% regression.
+    diagnostic: >
+      If P2P is NOT faster: (1) Check PCIe topology — if NVMe and GPU are on
+      different root complexes, P2P DMA traverses root-complex-to-root-complex
+      link adding latency. Run nvidia-smi topo -m and lspci -tvvv. (2) Check
+      if spdk_vtophys returns valid physical addresses for GPU sub-offsets —
+      if not, DMA may silently fail or use fallback paths. (3) Measure
+      prepare_memory_for_spdk cache hit rate (should be 100% after first
+      lookup) by adding a log line on cache miss.
+    code_changes:
+      - file: "components/interfaces/src/idispatcher.rs"
+        intent: >
+          Add field `pub cuda_ipc_handle_bytes: Option<Vec<u8>>` to the IpcHandle
+          struct after the `size` field. Update the doc example to include the new
+          field set to None.
+        rationale: >
+          The dispatcher needs the raw 64-byte CUDA IPC handle to call
+          prepare_memory_for_spdk (which takes a base64-encoded payload).
+          Currently the service layer consumes the handle bytes and only passes
+          the opened device pointer.
+      - file: "components/dispatcher/v1/src/lib.rs"
+        intent: >
+          Add a `gpu_dma_cache: Mutex<HashMap<[u8; 64], Arc<Mutex<DmaBuffer>>>>`
+          field to the define_component! fields block. Add a method
+          `get_or_create_gpu_dma(&self, handle_bytes: &[u8], total_size: usize,
+          gpu: &dyn IGpuServices) -> Result<Arc<Mutex<DmaBuffer>>, DispatcherError>`
+          that checks the cache first, and on miss constructs the 72-byte payload
+          (64 handle bytes + 8 LE size bytes), base64-encodes it, calls
+          gpu.prepare_memory_for_spdk(), wraps result in Arc<Mutex<>>, inserts
+          into cache, and returns.
+        rationale: >
+          Caching the GPU DmaBuffer across lookups eliminates the ~50 μs per-lookup
+          overhead from cudaIpcOpenMemHandle + spdk_mem_register that caused the
+          prior experiment's 17.5% regression (RP-7).
+      - file: "components/dispatcher/v1/src/pipeline.rs"
+        intent: >
+          Add function `pub unsafe fn p2p_ssd_to_gpu_persistent(drive: &dyn
+          IBlockDevice, gpu_dma_buf: &DmaBuffer, start_lba: u64, total_bytes:
+          usize, numa_node: i32) -> Result<(), DispatcherError>` after line 123.
+          It uses segment_io to split into 128 KiB chunks, then for each segment:
+          creates a sub-DmaBuffer view via DmaBuffer::from_raw(base_ptr + offset,
+          chunk_size, noop_free, -1), wraps in Arc<Mutex<>>, issues ReadSync via
+          connect_client channels, waits for ReadDone completion, then forgets the
+          sub-buffer wrapper. No memory-tier copy, no GPU DMA copy — NVMe reads
+          directly into GPU BAR1 memory.
+        rationale: >
+          This is the core P2P mechanism. Reading directly into GPU-registered
+          memory eliminates both the host memcpy (to memory-tier) and the
+          cudaMemcpy (H2D DMA copy) per chunk, which together account for the
+          bounce path overhead above pure NVMe read time.
+      - file: "components/dispatcher/v1/src/lib.rs"
+        intent: >
+          In promote_and_serve(), before the existing pipelined_ssd_to_gpu call
+          (around line 240), add a branch: if ipc_handle.cuda_ipc_handle_bytes
+          is Some, call get_or_create_gpu_dma to obtain the cached DmaBuffer,
+          then call p2p_ssd_to_gpu_persistent with it. After the P2P read,
+          release_write(key) and return Ok(()) WITHOUT inserting into memory-tier
+          or updating the dispatch-map (leave as BlockDevice so subsequent
+          iterations re-test SSD).
+        rationale: >
+          Routes lookups to P2P when the handle bytes are available, while
+          preserving the existing bounce path as fallback. Skipping memory-tier
+          promotion ensures the benchmark measures pure SSD→GPU transfer each
+          iteration.
+      - file: "apps/certus-server/src/service.rs"
+        intent: >
+          In the lookup handler's IpcHandle construction (line 233), add
+          `cuda_ipc_handle_bytes: Some(handle.cuda_ipc_handle.clone())` to pass
+          the raw 64-byte handle through to the dispatcher.
+        rationale: >
+          The service layer has the raw handle bytes (from the protobuf message)
+          but currently only passes the opened device pointer. The P2P path needs
+          the bytes to construct the prepare_memory_for_spdk payload.
+      - file: "components/dispatcher/v1/Cargo.toml"
+        intent: >
+          Add `base64 = "0.22"` to [dependencies].
+        rationale: >
+          The get_or_create_gpu_dma method needs base64 encoding to construct
+          the payload for prepare_memory_for_spdk.
+
+  - type: h-robustness
+    prediction: >
+      P2P persistent staging over 20 iterations (Condition C) will show stable
+      SSD-tier latency with max/min ratio below 1.3, confirming that the DmaBuffer
+      cache functions correctly across repeated lookups and does not degrade.
+      The average will be consistent with the 1-iteration measurement (within 10%).
+    mechanism: >
+      The GPU DmaBuffer is cached on first lookup (cache miss). All subsequent
+      lookups (iterations 2-20) hit the cache — no IPC open, no SPDK register,
+      no allocation. The only work per iteration is: connect_client + 32×ReadSync
+      into pre-registered GPU memory. Since NVMe read latency is deterministic
+      for sequential reads of fixed size, variance should be low.
+    diagnostic: >
+      If latency increases over iterations: (1) Check for memory pressure
+      causing GPU page migration (unlikely with pinned memory). (2) Check if
+      NVMe thermal throttling occurs during extended benchmarks. (3) Check if
+      SPDK's internal state grows (completion queue overflow, etc).
+    code_changes: []

@@ -1,0 +1,44 @@
+[
+  {
+    "id": "RP-12",
+    "statement": "BatchSubmit QD=32 provides no measurable end-to-end latency improvement for 4 MiB SSD-tier lookups through certus-server's gRPC path. The gRPC round-trip + connect_client() channel setup + actor dispatch overhead (~15-25ms) completely dominates NVMe read time (~0.3-0.8ms for QD=32), making NVMe parallelism invisible at the benchmark level.",
+    "confidence": "high",
+    "regime": "certus-server gRPC dispatcher, --bench-iterations 1, 4 MiB objects, single-object measurement, --dispatcher-version v0",
+    "evidence": ["iteration-2-h-main", "iteration-2-h-ablation"],
+    "contradicts": [],
+    "extraction_iteration": 2,
+    "mechanism": "The certus-server benchmark measures end-to-end gRPC latency. connect_client() creates new actor channels per lookup with synchronization overhead. The actor's poll loop harvests NVMe completions opportunistically. Even if all 32 NVMe reads complete in ~800us at QD=32, the surrounding infrastructure (gRPC serialization, channel setup, actor scheduling) adds 15-25ms that swamps the NVMe improvement. The h8-v1-pinned experiment (777us for P2P+BatchSubmit) was likely measured without gRPC overhead, explaining the 30x discrepancy.",
+    "applicability_bounds": "Applies to full gRPC round-trip benchmarks. Does NOT apply to direct actor-level benchmarks (no gRPC). The NVMe QD=32 mechanism is valid; the overhead is in the surrounding infrastructure, not the NVMe layer.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-13",
+    "statement": "At the certus-server benchmark level, async GPU copy (cudaMemcpyAsync per chunk) and synchronous copy (cudaMemcpy per chunk) are indistinguishable in latency for 4 MiB 32-chunk lookups. The ~200us GPU copy time is negligible relative to the ~20ms total round-trip latency.",
+    "confidence": "medium",
+    "regime": "certus-server gRPC path, 4 MiB objects (32 x 128 KiB chunks), --bench-iterations 1",
+    "evidence": ["iteration-2-h-ablation"],
+    "contradicts": ["RP-11"],
+    "extraction_iteration": 2,
+    "mechanism": "At QD=32 with BatchSubmit, total GPU copy time (32 x 128 KiB cudaMemcpyAsync) is ~200us. When this contributes <1% of total round-trip latency (~20ms), overlap provides no measurable benefit. RP-11 measured 16% improvement for single-chunk (4 KiB) transfers where the copy itself was a larger fraction of total latency. The regime boundary is: async copy matters only when GPU copy time is >10% of total latency.",
+    "applicability_bounds": "Async copy provides negligible benefit when total latency >> GPU copy time. For single-chunk scenarios (RP-11) or isolated GPU copy benchmarks, async remains beneficial. The 16% improvement in RP-11 was measured in a context where copy was the dominant term.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-9",
+    "statement": "Per-chunk SPDK DmaBuffer::new is NOT the dominant latency component for SSD-tier lookups through the full certus-server gRPC path. Earlier measurements showing DmaBuffer::new as dominant were made at a regime where the gRPC round-trip overhead was not properly characterized. Total end-to-end latency is ~20-27ms, with DmaBuffer::new contributing ~3-5ms of that.",
+    "confidence": "medium",
+    "regime": "Updated assessment based on iter-2 results showing BatchSubmit (which eliminates DmaBuffer::new) provides no speedup",
+    "evidence": ["iteration-2-h-main", "iteration-2-h-ablation"],
+    "contradicts": [],
+    "extraction_iteration": 2,
+    "mechanism": "If DmaBuffer::new were truly dominant, replacing it with pre-allocated cudaHostAlloc buffers (as in h-main) would produce a 2x+ speedup. Both h-main and h-ablation pre-allocate 32 buffers lazily and show no improvement over sequential baseline, suggesting the actual bottleneck is elsewhere (gRPC, connect_client, actor scheduling). Note: iter-1's 2x speedup (19,502 -> 9,659 us) may have been a variance artifact or a warm-cache effect in that specific run.",
+    "applicability_bounds": "This revision applies to the full gRPC pipeline benchmark. At the direct NVMe actor level (bypassing gRPC), DmaBuffer::new overhead may still dominate.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  }
+]

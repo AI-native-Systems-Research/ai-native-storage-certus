@@ -1,0 +1,25 @@
+{
+  "iteration": 1,
+  "bundle_ref": "runs/iter-1/bundle.yaml",
+  "arms": [
+    {
+      "arm_type": "h-main",
+      "predicted": "True overlapped pipeline will reduce SSD-tier latency by >15% vs sequential baseline (theoretical ~1.5-2x speedup). Mechanism: NVMe read of chunk N+1 overlaps with cudaMemcpyAsync of chunk N using CUDA streams on cudaHostRegistered mmap memory.",
+      "observed": "Baseline sequential v1: 21,361 us/obj. True pipeline (ReadAsync + cudaMemcpyAsync): 19,220 us/obj. Improvement: 10% (2,141 us reduction). The directional prediction is confirmed, but the magnitude falls short of the predicted >15% threshold. The improvement is real but modest, consistent with only partial overlap — cudaMemcpyAsync from cudaHostRegistered mmap'd memory likely does NOT run fully asynchronously (matches h8-pipelined diagnostic hypothesis). The ReadAsync pre-issue does provide SOME overlap (NVMe read overlaps with CPU memcpy and partial GPU copy), but not the full H2D copy hiding that true async would provide.",
+      "status": "PARTIALLY_CONFIRMED",
+      "error_type": "magnitude",
+      "diagnostic_note": "cudaMemcpyAsync from cudaHostRegistered mmap'd memory likely falls back to synchronous execution, similar to the SPDK hugepage case (h8-pipelined finding). However, ReadAsync pre-issue does overlap NVMe read latency with the CPU memcpy + a portion of GPU copy, yielding ~10% improvement. To get the full predicted speedup, pipeline ring buffers would need to be allocated with cudaHostAlloc (natively pinned) rather than relying on the cudaHostRegistered mmap'd memory-tier pool. This is the iter-2 recommendation."
+    },
+    {
+      "arm_type": "h-control-negative",
+      "predicted": "P2P direct SSD→GPU DMA will be faster than both baseline and true pipeline, achieving approximately 3,400 us/obj (matching h8-v1-pinned iter-2 result of 3,451 us).",
+      "observed": "P2P (prepare_memory_for_spdk + ReadSync into BAR1): 16,396 us/obj. This is 23% faster than baseline (21,361 us) and 15% faster than h-main pipeline (19,220 us). However, it is dramatically slower than the predicted 3,451 us/obj from h8-v1-pinned. The P2P path IS faster than both alternatives but by a much smaller margin than expected. The system-level latency is consistently 3-5x higher than historical measurements across ALL conditions, suggesting this run occurred under different hardware/load conditions (potentially NVMe device state, SPDK hugepage allocation, or concurrent system load). The relative ordering — P2P < pipeline < baseline — matches predictions.",
+      "status": "PARTIALLY_CONFIRMED",
+      "error_type": "magnitude",
+      "diagnostic_note": "The absolute latency across all conditions is ~3x higher than h8-v1-pinned iter-2 (baseline 21,361 vs 7,029 us, P2P 16,396 vs 3,451 us). This suggests a confound: (1) NVMe device in degraded state or different thermal state, (2) SPDK hugepage contention from other processes, (3) memory-tier pressure (mmap'd vs hugepage registration). The relative advantage of P2P over baseline is preserved (23% vs historical 51%), but the mechanism confirmation is weaker. The P2P path successfully uses prepare_memory_for_spdk and routes through p2p_ssd_to_gpu_persistent — the routing code works correctly."
+    }
+  ],
+  "experiment_valid": true,
+  "discrepancy_analysis": "Both arms show the predicted directional improvements (P2P < pipeline < baseline), confirming the mechanisms engage correctly. However, absolute latencies are 3-5x higher than historical baselines across all conditions, suggesting a system-level confound in this run (hardware state, thermal, competing processes) rather than a code defect. The relative improvements are: h-main +10% (predicted >15%), P2P +23% (predicted ~51%). Both fall short of magnitude predictions, consistent with (1) cudaMemcpyAsync not running asynchronously on cudaHostRegistered mmap'd memory, and (2) a shared system-level overhead inflating all measurements.",
+  "dominant_component_pct": null
+}

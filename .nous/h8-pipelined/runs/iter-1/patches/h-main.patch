@@ -1,0 +1,280 @@
+diff --git a/components/gpu-services/v0/src/bin/p2p_server.rs b/components/gpu-services/v0/src/bin/p2p_server.rs
+index a54c740..78fe187 100644
+--- a/components/gpu-services/v0/src/bin/p2p_server.rs
++++ b/components/gpu-services/v0/src/bin/p2p_server.rs
+@@ -29,6 +29,8 @@ use spdk_env::SPDKEnvComponent;
+ enum TransferMode {
+     /// NVMe → host bounce buffer → cudaMemcpy H2D → client GPU
+     Bounce,
++    /// NVMe → pipelined double-buffered bounce with cudaMemcpyAsync H2D → client GPU
++    BouncePipeline,
+     /// NVMe → pre-pinned GPU staging (GDRCopy amortized) → D2D → client GPU
+     P2p,
+     /// NVMe → per-request GDRCopy pin/unpin → D2D → client GPU (cold baseline)
+@@ -432,6 +434,214 @@ fn handle_bounce(
+     Ok(format!("OK {} bytes (bounce, {} chunks)", size, num_chunks))
+ }
+ 
++/// Pipelined bounce: double-buffered NVMe reads overlapped with cudaMemcpyAsync H2D.
++///
++/// While chunk[i] is being copied H2D asynchronously on the CUDA stream, the CPU
++/// blocks on NVMe ReadDone for chunk[i+1] into the alternate buffer. The two hardware
++/// engines (NVMe DMA and GPU copy engine) operate concurrently on different PCIe lanes.
++fn handle_bounce_pipeline(
++    stream: &mut UnixStream,
++    ctx: &ServerContext,
++    chunk_size: usize,
++) -> Result<String, String> {
++    let (ipc_handle_bytes, size) = parse_client_payload(stream)?;
++    let client_dev_ptr = open_ipc_handle(&ipc_handle_bytes)?;
++
++    let num_chunks = (size + chunk_size - 1) / chunk_size;
++
++    // Allocate exactly 2 host DMA buffers (double-buffer A and B).
++    let buf_a = interfaces::DmaBuffer::new(chunk_size, ctx.sector_size, None)
++        .map_err(|e| format!("DMA alloc buf_a: {e}"));
++    let buf_b = interfaces::DmaBuffer::new(chunk_size, ctx.sector_size, None)
++        .map_err(|e| format!("DMA alloc buf_b: {e}"));
++
++    let (buf_a, buf_b) = match (buf_a, buf_b) {
++        (Ok(a), Ok(b)) => (a, b),
++        (Err(e), _) | (_, Err(e)) => {
++            unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
++            return Err(e);
++        }
++    };
++
++    // Pin both SPDK hugepage buffers in CUDA address space for full async bandwidth.
++    // SPDK hugepages are physically pinned but CUDA needs to know that.
++    let err = unsafe {
++        cuda_ffi::cudaHostRegister(
++            buf_a.as_ptr() as *mut c_void,
++            chunk_size,
++            cuda_ffi::CUDA_HOST_REGISTER_DEFAULT,
++        )
++    };
++    if err != cuda_ffi::CUDA_SUCCESS {
++        unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
++        return Err(format!(
++            "cudaHostRegister buf_a: {}",
++            cuda_ffi::cuda_error_string(err)
++        ));
++    }
++    let err = unsafe {
++        cuda_ffi::cudaHostRegister(
++            buf_b.as_ptr() as *mut c_void,
++            chunk_size,
++            cuda_ffi::CUDA_HOST_REGISTER_DEFAULT,
++        )
++    };
++    if err != cuda_ffi::CUDA_SUCCESS {
++        unsafe {
++            cuda_ffi::cudaHostUnregister(buf_a.as_ptr() as *mut c_void);
++            cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr);
++        }
++        return Err(format!(
++            "cudaHostRegister buf_b: {}",
++            cuda_ffi::cuda_error_string(err)
++        ));
++    }
++
++    // Create a CUDA stream for async H2D copies.
++    let mut cuda_stream: cuda_ffi::cudaStream_t = std::ptr::null_mut();
++    let err = unsafe { cuda_ffi::cudaStreamCreate(&mut cuda_stream) };
++    if err != cuda_ffi::CUDA_SUCCESS {
++        unsafe {
++            cuda_ffi::cudaHostUnregister(buf_a.as_ptr() as *mut c_void);
++            cuda_ffi::cudaHostUnregister(buf_b.as_ptr() as *mut c_void);
++            cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr);
++        }
++        return Err(format!(
++            "cudaStreamCreate: {}",
++            cuda_ffi::cuda_error_string(err)
++        ));
++    }
++
++    let bufs = [
++        Arc::new(Mutex::new(buf_a)),
++        Arc::new(Mutex::new(buf_b)),
++    ];
++
++    let sectors_per_chunk = chunk_size / ctx.sector_size;
++
++    let ibd = query::<dyn IBlockDevice + Send + Sync>(&*ctx.block_dev)
++        .ok_or_else(|| "IBlockDevice query failed".to_string())?;
++    let channels = ibd
++        .connect_client()
++        .map_err(|e| format!("connect_client: {e}"))?;
++
++    let mut pipeline_err: Option<String> = None;
++
++    // Submit first read into buffer[0].
++    let send_result = channels.command_tx.send(interfaces::Command::ReadAsync {
++        ns_id: ctx.ns_id,
++        lba: 0,
++        buf: Arc::clone(&bufs[0]),
++        timeout_ms: 5000,
++    });
++    if let Err(e) = send_result {
++        pipeline_err = Some(format!("ReadAsync send chunk#0: {e}"));
++    }
++
++    if pipeline_err.is_none() {
++        let mut current = 0usize; // index into bufs[] that has the in-flight NVMe read
++
++        for chunk_idx in 0..num_chunks {
++            let offset = chunk_idx * chunk_size;
++            let this_chunk = std::cmp::min(chunk_size, size - offset);
++
++            // Wait for NVMe read into bufs[current] to complete.
++            match channels.completion_rx.recv() {
++                Ok(interfaces::Completion::ReadDone { result, .. }) => {
++                    if let Err(e) = result {
++                        pipeline_err = Some(format!("NVMe read chunk#{chunk_idx}: {e}"));
++                        break;
++                    }
++                }
++                Ok(interfaces::Completion::Timeout { handle }) => {
++                    pipeline_err =
++                        Some(format!("NVMe read timeout chunk#{chunk_idx} (handle {handle:?})"));
++                    break;
++                }
++                Ok(other) => {
++                    pipeline_err =
++                        Some(format!("unexpected completion chunk#{chunk_idx}: {other:?}"));
++                    break;
++                }
++                Err(e) => {
++                    pipeline_err = Some(format!("recv chunk#{chunk_idx}: {e}"));
++                    break;
++                }
++            }
++
++            // Submit next NVMe read into bufs[1-current] (while this chunk copies async).
++            let next_chunk = chunk_idx + 1;
++            if next_chunk < num_chunks {
++                let next_buf = 1 - current;
++                let next_lba = next_chunk as u64 * sectors_per_chunk as u64;
++                if let Err(e) = channels.command_tx.send(interfaces::Command::ReadAsync {
++                    ns_id: ctx.ns_id,
++                    lba: next_lba,
++                    buf: Arc::clone(&bufs[next_buf]),
++                    timeout_ms: 5000,
++                }) {
++                    pipeline_err = Some(format!("ReadAsync send chunk#{next_chunk}: {e}"));
++                    break;
++                }
++            }
++
++            // Launch async H2D copy from bufs[current] to client GPU at offset.
++            let buf_guard = bufs[current].lock().unwrap();
++            let err = unsafe {
++                cuda_ffi::cudaMemcpyAsync(
++                    (client_dev_ptr as *mut u8).add(offset) as *mut c_void,
++                    buf_guard.as_ptr() as *const c_void,
++                    this_chunk,
++                    cuda_ffi::CUDA_MEMCPY_HOST_TO_DEVICE,
++                    cuda_stream,
++                )
++            };
++            drop(buf_guard);
++            if err != cuda_ffi::CUDA_SUCCESS {
++                pipeline_err = Some(format!(
++                    "cudaMemcpyAsync chunk#{chunk_idx}: {}",
++                    cuda_ffi::cuda_error_string(err)
++                ));
++                break;
++            }
++
++            current = 1 - current;
++        }
++    }
++
++    // Wait for all async H2D copies to finish.
++    if pipeline_err.is_none() {
++        let err = unsafe { cuda_ffi::cudaStreamSynchronize(cuda_stream) };
++        if err != cuda_ffi::CUDA_SUCCESS {
++            pipeline_err = Some(format!(
++                "cudaStreamSynchronize: {}",
++                cuda_ffi::cuda_error_string(err)
++            ));
++        }
++    }
++
++    // Cleanup (always).
++    unsafe {
++        cuda_ffi::cudaStreamDestroy(cuda_stream);
++        let buf_a_guard = bufs[0].lock().unwrap();
++        let buf_b_guard = bufs[1].lock().unwrap();
++        cuda_ffi::cudaHostUnregister(buf_a_guard.as_ptr() as *mut c_void);
++        cuda_ffi::cudaHostUnregister(buf_b_guard.as_ptr() as *mut c_void);
++        drop(buf_b_guard);
++        drop(buf_a_guard);
++        cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr);
++    }
++
++    if let Some(e) = pipeline_err {
++        return Err(e);
++    }
++
++    Ok(format!(
++        "OK {} bytes (bounce-pipeline, {} chunks)",
++        size, num_chunks
++    ))
++}
++
+ /// P2P mode with pre-pinned chunk pool: NVMe → GPU staging chunks → D2D → client.
+ fn handle_p2p(
+     stream: &mut UnixStream,
+@@ -605,6 +815,7 @@ fn main() {
+ 
+     let mode_str = match cli.mode {
+         TransferMode::Bounce => "bounce",
++        TransferMode::BouncePipeline => "bounce-pipeline",
+         TransferMode::P2p => "p2p",
+         TransferMode::P2pCold => "p2p-cold",
+     };
+@@ -643,6 +854,9 @@ fn main() {
+                     TransferMode::Bounce => {
+                         handle_bounce(&mut stream, &ctx, cli.chunk_size)
+                     }
++                    TransferMode::BouncePipeline => {
++                        handle_bounce_pipeline(&mut stream, &ctx, cli.chunk_size)
++                    }
+                     TransferMode::P2p => {
+                         handle_p2p(&mut stream, &ctx, chunk_pool.as_ref().unwrap())
+                     }
+diff --git a/components/gpu-services/v0/src/cuda_ffi.rs b/components/gpu-services/v0/src/cuda_ffi.rs
+index bb06af6..58d484f 100644
+--- a/components/gpu-services/v0/src/cuda_ffi.rs
++++ b/components/gpu-services/v0/src/cuda_ffi.rs
+@@ -68,6 +68,12 @@ pub const CUDA_MEMCPY_DEVICE_TO_DEVICE: c_int = 3;
+ pub const CUDA_HOST_ALLOC_DEFAULT: c_int = 0;
+ pub const CUDA_HOST_ALLOC_MAPPED: c_int = 2;
+ 
++/// Opaque CUDA stream handle (pointer-sized).
++pub type cudaStream_t = *mut c_void;
++
++/// cudaHostRegister flags.
++pub const CUDA_HOST_REGISTER_DEFAULT: c_int = 0;
++
+ extern "C" {
+     pub fn cudaGetDeviceCount(count: *mut c_int) -> cudaError_t;
+     pub fn cudaGetDeviceProperties(prop: *mut cudaDeviceProp, device: c_int) -> cudaError_t;
+@@ -108,6 +114,16 @@ extern "C" {
+     pub fn cudaGetErrorString(error: cudaError_t) -> *const c_char;
+     pub fn cudaDeviceGetPCIBusId(pci_bus_id: *mut c_char, len: c_int, device: c_int)
+         -> cudaError_t;
++    pub fn cudaStreamCreate(p_stream: *mut cudaStream_t) -> cudaError_t;
++    pub fn cudaStreamDestroy(stream: cudaStream_t) -> cudaError_t;
++    pub fn cudaStreamSynchronize(stream: cudaStream_t) -> cudaError_t;
++    pub fn cudaMemcpyAsync(
++        dst: *mut c_void,
++        src: *const c_void,
++        count: usize,
++        kind: c_int,
++        stream: cudaStream_t,
++    ) -> cudaError_t;
+ }
+ 
+ /// Translate a CUDA error code to a descriptive Rust String.

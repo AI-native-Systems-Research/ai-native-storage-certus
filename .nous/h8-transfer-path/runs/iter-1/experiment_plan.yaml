@@ -1,0 +1,55 @@
+metadata:
+  iteration: 1
+  bundle_ref: "runs/iter-1/bundle.yaml"
+  description: "Bounce vs P2P transfer path comparison for 4 MiB NVMe->GPU transfer. Build requires RUSTFLAGS=-L /usr/local/lib because libgdrapi.so is at /usr/local/lib."
+
+setup:
+  - cmd: "cd /home/nara/certus/ai-native-storage-certus && RUSTFLAGS='-L /usr/local/lib' cargo build -p gpu-services --features p2p --bin gpu-p2p-server"
+    description: "Build gpu-p2p-server with CUDA, SPDK, and GDRCopy support"
+
+arms:
+  - arm_id: "h-main"
+    conditions:
+      - name: "bounce-seed1"
+        description: "Baseline: bounce mode, seed 1 (first run of 50 iterations)"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/inputs/run_condition.sh bounce /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/results/h-main/bounce-s1.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/results/h-main/bounce-s1.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/inputs/run_condition.sh"
+
+      - name: "p2p-warm-seed1"
+        description: "Treatment: p2p warm mode, seed 1 (first run of 50 iterations)"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/inputs/run_condition.sh p2p /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/results/h-main/p2p-warm-s1.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/results/h-main/p2p-warm-s1.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/inputs/run_condition.sh"
+
+      - name: "bounce-seed2"
+        description: "Baseline: bounce mode, seed 2 (second run for consistency)"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/inputs/run_condition.sh bounce /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/results/h-main/bounce-s2.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/results/h-main/bounce-s2.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/inputs/run_condition.sh"
+
+      - name: "p2p-warm-seed2"
+        description: "Treatment: p2p warm mode, seed 2 (second run for consistency)"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/inputs/run_condition.sh p2p /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/results/h-main/p2p-warm-s2.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/results/h-main/p2p-warm-s2.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/inputs/run_condition.sh"
+
+  - arm_id: "h-control-negative"
+    conditions:
+      - name: "p2p-cold-seed1"
+        description: "P2P cold mode, seed 1 - per-request GDRCopy pin/map/unpin overhead"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/inputs/run_condition.sh p2p-cold /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/results/h-control-negative/p2p-cold-s1.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/results/h-control-negative/p2p-cold-s1.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/inputs/run_condition.sh"
+
+      - name: "p2p-cold-seed2"
+        description: "P2P cold mode, seed 2 - second run for consistency"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/inputs/run_condition.sh p2p-cold /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/results/h-control-negative/p2p-cold-s2.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/results/h-control-negative/p2p-cold-s2.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-1/inputs/run_condition.sh"

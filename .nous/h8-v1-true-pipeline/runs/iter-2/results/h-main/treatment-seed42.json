@@ -1,0 +1,16 @@
+{
+  "condition": "treatment",
+  "arm": "h-main",
+  "seed": 42,
+  "patch": "patches/h-main.patch",
+  "metrics": {
+    "memory_tier_avg_us": 543.1,
+    "ssd_tier_avg_us": 22522.8,
+    "ssd_tier_min_us": 22522.8,
+    "ssd_tier_max_us": 22522.8,
+    "ssd_tier_avg_gbs": 0.19,
+    "ssd_memory_ratio": 41.5
+  },
+  "raw_output": "Memory-tier: 543.1 us/obj, 7.72 GB/s | SSD-tier: 22522.8 us/obj, 0.19 GB/s",
+  "notes": "cudaHostAlloc staging pipeline. Result is 14.6% SLOWER than baseline (19646 us). Unexpected — may be system variance or cudaHostAlloc+spdk_mem_register overhead per call."
+}

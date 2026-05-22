@@ -1,0 +1,58 @@
+[
+  {
+    "id": "RP-1",
+    "statement": "P2P NVMe→GPU transfers through certus-server dispatcher v0 are slower than bounce (NVMe→host DRAM→GPU) when prepare_memory_for_spdk is called per-lookup, due to per-call CUDA IPC open + spdk_mem_register overhead (~4-5ms) that exceeds the cudaMemcpy cost it eliminates.",
+    "confidence": "high",
+    "regime": "certus-server with dispatcher v0, sequential ReadSync pattern, 4 MiB or 1 MiB objects, prepare_memory_for_spdk called fresh per lookup",
+    "evidence": ["iteration-1-h-main", "iteration-1-h-robustness"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "The P2P implementation calls gpu.prepare_memory_for_spdk() once per lookup call. This function executes: (1) cudaIpcOpenMemHandle (~100-500us), (2) check pin state in a mutex-locked HashMap, (3) spdk_mem_register on the full GPU buffer (~1-3ms for 4 MiB on BAR1), (4) insert into registered_regions map. On drop, it unregisters from SPDK and closes the IPC handle. This ~4-5ms setup cost is additive to the 32 x NVMe read latency. The bounce path pre-opens the CUDA IPC handle once in service.rs and reuses the device pointer across multiple lookups in the same batch, paying the open cost only at batch start. Source: gpu-services/v0/src/dma.rs:114-162 and gpu-services/v0/src/lib.rs:330-485.",
+    "applicability_bounds": "Applies when prepare_memory_for_spdk is called per-lookup without caching. If the GPU DmaBuffer is pre-allocated and cached across lookups (warm P2P), the setup overhead is amortized and P2P should be faster (as shown in h8-transfer-path iter-1 where P2P-warm was 2x faster). This principle does NOT apply to the warm-P2P case where the buffer is pre-pinned.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-2",
+    "statement": "The P2P advantage over bounce is size-dependent under per-lookup setup costs: at 4 MiB P2P is 33% slower than bounce; at 1 MiB P2P is only 8% slower. The per-call overhead of prepare_memory_for_spdk scales with buffer size (larger spdk_mem_register cost for larger GPU buffers) while the cudaMemcpy savings also scale with size, partially offsetting.",
+    "confidence": "medium",
+    "regime": "Per-lookup prepare_memory_for_spdk, sequential ReadSync, certus-server dispatcher v0",
+    "evidence": ["iteration-1-h-main", "iteration-1-h-robustness"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "For 4 MiB: spdk_mem_register(4 MiB GPU buffer) ≈ 4ms, cudaMemcpy eliminated ≈ 4 MiB / 25 GB/s ≈ 0.16ms. The setup cost is ~25x larger than the elimination savings. For 1 MiB: spdk_mem_register(1 MiB) is smaller but still dominates (~1ms), cudaMemcpy savings ≈ 0.04ms. The 8% vs 33% gap shows the overhead scales sub-linearly with size (likely SPDK registration has fixed + per-page components), while the NVMe read time dominates at both sizes.",
+    "applicability_bounds": "Applies specifically to certus-server path with per-lookup prepare_memory_for_spdk. With pre-pinned warm P2P (buffer cached between lookups), the crossover favors P2P at all sizes. The crossover object size for warm P2P should be determined in a follow-up experiment.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-3",
+    "statement": "Staging-tier (memory) lookup latency is not meaningfully affected by the P2P vs bounce path choice when IPC handle opening cost is similar, confirming that the P2P mechanism is specific to the NVMe read path.",
+    "confidence": "high",
+    "regime": "certus-server dispatcher v0, objects in staging buffer, 4 MiB object size",
+    "evidence": ["iteration-1-h-control-negative"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "When a key resolves to LookupResult::Staging, the dispatcher calls gpu.dma_copy_to_device() from the staging buffer regardless of path. In the P2P condition, the service.rs now passes raw IPC bytes instead of a pre-opened pointer; the dispatcher must call open_cuda_ipc_from_bytes() for staging lookups, adding ~300us vs the bounce path's pre-opened pointer. This 300us overhead is within run-to-run noise (~±2ms for 4 MiB objects). Source: dispatcher v0 src/lib.rs staging branch.",
+    "applicability_bounds": "Applies when staging lookup timing is measured. The ~300us additional IPC-open overhead per staging lookup in P2P mode is negligible relative to the CUDA DMA copy cost for large objects but may matter for very small objects (< 64 KiB) where DMA cost approaches the IPC-open cost.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-4",
+    "statement": "To realize P2P performance advantages through certus-server, GPU DmaBuffers must be pre-allocated and cached across lookups (warm P2P), not re-created per-lookup. The per-call overhead of prepare_memory_for_spdk makes cold P2P slower than bounce regardless of object size.",
+    "confidence": "high",
+    "regime": "certus-server dispatcher v0, sequential ReadSync, any object size",
+    "evidence": ["iteration-1-h-main", "iteration-1-h-robustness"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "The warm P2P path (from h8-transfer-path experiments) achieved 2x speedup over bounce because the GPU buffer was pre-pinned once at process start. The cold P2P path (this experiment) opens and registers the buffer on every lookup, paying 4-5ms setup cost that swamps the 0.16ms cudaMemcpy savings. A GPU buffer cache keyed by CUDA IPC handle would allow warm P2P amortization in certus-server, likely restoring the 2x speedup observed in h8-transfer-path.",
+    "applicability_bounds": "Applies to the current certus-server architecture where prepare_memory_for_spdk is the API for P2P buffer setup. If the server is refactored to pre-pin GPU buffers during populate() and cache them for subsequent lookup() calls (keyed by IPC handle), warm P2P would apply. This optimization is the natural next step.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  }
+]

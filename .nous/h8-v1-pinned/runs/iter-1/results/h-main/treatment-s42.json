@@ -1,0 +1,27 @@
+{
+  "condition": "treatment-seed42",
+  "arm": "h-main",
+  "description": "P2P persistent staging path, 1 iteration, NVMe at 0000:c2:00.0",
+  "raw_output": "Memory-tier 818.1 us/obj 5.13 GB/s | SSD-tier 10498.3 us/obj 0.40 GB/s",
+  "metrics": {
+    "memory_tier_avg_us": 818.1,
+    "memory_tier_min_us": 818.1,
+    "memory_tier_max_us": 818.1,
+    "memory_tier_avg_gbs": 5.13,
+    "ssd_tier_avg_us": 10498.3,
+    "ssd_tier_min_us": 10498.3,
+    "ssd_tier_max_us": 10498.3,
+    "ssd_tier_avg_gbs": 0.40
+  },
+  "config": {
+    "bench_object_size": 4194304,
+    "bench_num_objects": 10,
+    "bench_iterations": 1,
+    "metadata_pci": "0000:c1:00.0",
+    "data_pci": "0000:c2:00.0",
+    "dispatcher_version": "v1",
+    "path": "p2p-persistent"
+  },
+  "p2p_active": true,
+  "prepare_memory_called": true
+}

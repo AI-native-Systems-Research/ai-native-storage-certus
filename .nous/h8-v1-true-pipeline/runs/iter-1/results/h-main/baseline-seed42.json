@@ -1,0 +1,17 @@
+{
+  "condition": "baseline",
+  "arm": "h-main",
+  "dispatcher_version": "v1",
+  "patch": null,
+  "object_size_bytes": 4194304,
+  "num_objects": 10,
+  "bench_iterations": 1,
+  "memory_tier_avg_us": 568.7,
+  "ssd_tier_avg_us": 21361.5,
+  "ssd_tier_min_us": 21361.5,
+  "ssd_tier_max_us": 21361.5,
+  "ssd_tier_avg_gbs": 0.20,
+  "ssd_tier_peak_gbs": 0.20,
+  "ssd_memory_ratio": 37.6,
+  "raw_output": "Memory-tier 568.7 us/obj, SSD-tier 21361.5 us/obj, ratio 37.6x"
+}

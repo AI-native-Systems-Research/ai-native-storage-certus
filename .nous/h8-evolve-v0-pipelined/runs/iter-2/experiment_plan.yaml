@@ -1,0 +1,32 @@
+metadata:
+  iteration: 2
+  bundle_ref: "runs/iter-2/bundle.yaml"
+
+setup:
+  - cmd: "ln -sf /home/nara/certus/ai-native-storage-certus/deps/spdk /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-a4efd5ef/deps/spdk && ln -sf /home/nara/certus/ai-native-storage-certus/deps/spdk-build /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-a4efd5ef/deps/spdk-build"
+    description: "Symlink SPDK source and build dirs into worktree"
+  - cmd: "RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server"
+    description: "Build certus-server baseline (unpatched)"
+
+arms:
+  - arm_id: "h-main"
+    conditions:
+      - name: "baseline-seed42"
+        description: "Sequential v0 baseline (unpatched QD=1 ReadSync), 4 MiB, 1 iteration"
+        cmd: "git checkout -- . && RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server && rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /var/tmp/spdk_pci_lock_0000:64:00.0 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-a4efd5ef/target/debug/certus-server --metadata-pci 0000:63:00.0 --data-pci 0000:64:00.0 --dispatcher-version v0 --listen 0.0.0.0:50051 & sleep 12 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-a4efd5ef/apps/certus-server/python-client/test_client.py --server localhost:50051 --bench-only --bench-object-size 4194304 --bench-num-objects 1 --bench-iterations 1"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0-pipelined/runs/iter-2/results/h-main/baseline-s42.txt"
+        inputs: []
+
+      - name: "treatment-seed42"
+        description: "BatchSubmit QD=32 + 32x cudaHostAlloc buffers + per-chunk cudaMemcpyAsync, 4 MiB, 1 iteration"
+        cmd: "git checkout -- . && git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0-pipelined/runs/iter-2/patches/h-main.patch && RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server && rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /var/tmp/spdk_pci_lock_0000:64:00.0 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-a4efd5ef/target/debug/certus-server --metadata-pci 0000:63:00.0 --data-pci 0000:64:00.0 --dispatcher-version v0 --listen 0.0.0.0:50051 & sleep 12 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-a4efd5ef/apps/certus-server/python-client/test_client.py --server localhost:50051 --bench-only --bench-object-size 4194304 --bench-num-objects 1 --bench-iterations 1"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0-pipelined/runs/iter-2/results/h-main/treatment-s42.txt"
+        inputs: []
+
+  - arm_id: "h-ablation"
+    conditions:
+      - name: "treatment-seed42"
+        description: "BatchSubmit QD=32 + 32x cudaHostAlloc buffers + single synchronous cudaMemcpy after all reads, 4 MiB, 1 iteration"
+        cmd: "git checkout -- . && git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0-pipelined/runs/iter-2/patches/h-ablation.patch && RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server && rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 /var/tmp/spdk_pci_lock_0000:64:00.0 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-a4efd5ef/target/debug/certus-server --metadata-pci 0000:63:00.0 --data-pci 0000:64:00.0 --dispatcher-version v0 --listen 0.0.0.0:50051 & sleep 12 && LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH python3 /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-2-a4efd5ef/apps/certus-server/python-client/test_client.py --server localhost:50051 --bench-only --bench-object-size 4194304 --bench-num-objects 1 --bench-iterations 1"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-evolve-v0-pipelined/runs/iter-2/results/h-ablation/treatment-s42.txt"
+        inputs: []

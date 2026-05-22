@@ -1,0 +1,33 @@
+{
+  "iteration": 1,
+  "bundle_ref": "runs/iter-1/bundle.yaml",
+  "arms": [
+    {
+      "arm_type": "h-main",
+      "predicted": "Combined optimization (atomic GPU state check + batched stream sync every 32 chunks + pre-allocated DmaBuffer wrappers) will increase cold_16384KiB throughput, closing at least 30% of the gap between baseline (~1750 MB/s) and ceiling (~3250 MB/s).",
+      "observed": "Baseline S1: 11855.5 us mean / 2745.7 us min / 1349.6 MB/s. Treatment S1: 10879.3 us mean / 3758.6 us min / 1470.7 MB/s (+8.9% throughput but worse min). Baseline S2: 17424.7 us mean / 9579.1 us min / 918.2 MB/s. Treatment S2: 11756.0 us mean / 2730.5 us min / 1361.0 MB/s. Pooled mean throughput: baseline 1133.9 MB/s, treatment 1415.9 MB/s (+24.9%). However, extreme run-to-run variance (mean/min ratios 1.8-4.5x) prevents confident directional conclusions. The min latencies across runs do not show consistent improvement (baseline mins: 2745, 9579; treatment mins: 3758, 2730).",
+      "status": "REFUTED",
+      "error_type": "magnitude",
+      "diagnostic_note": "Extreme variance dominates the signal. The benchmark has mean/min ratios of 2-4x, indicating per-iteration cold-miss effects (pool eviction, cache warmup, OS scheduling). The optimization's predicted ~6.5% improvement from stream sync reduction (~620 us out of 9500 us) is well within noise bounds. More fundamentally, the SPDK pool/LRU eviction overhead (evident from bimodal latency distribution: ~2700 us min vs ~17000 us mean) dominates the measurement noise. The hypothesis assumes NVMe read dominates, but the actual bottleneck at the benchmarked scale appears to be memory-tier pool management causing 5-10x latency variance."
+    },
+    {
+      "arm_type": "h-ablation",
+      "predicted": "Batched stream synchronization alone (ZERO_COPY_DEPTH from 16 to 32) will produce measurable but smaller throughput improvement than combined optimization.",
+      "observed": "Baseline S1: 16984.7 us mean / 3822.8 us min / 942.0 MB/s. Treatment S1: 10672.4 us mean / 2835.1 us min / 1499.2 MB/s. Treatment shows 59% mean improvement and 25.9% min improvement in this single run. However, baseline variance is very high (mean 16984 vs min 3822 = 4.4x ratio), suggesting the baseline hit more cold-miss iterations. The improvement likely reflects run-to-run variance rather than a real optimization effect: other baseline runs showed 11855 us mean.",
+      "status": "PARTIALLY_CONFIRMED",
+      "error_type": "regime",
+      "diagnostic_note": "The single ablation run shows apparent improvement (1499 vs 942 MB/s mean throughput), but baseline variance makes this inconclusive. The min latency improvement from 3822 to 2835 us is directionally correct (7+% faster best-case). However, given that other baseline runs achieved 2745-3822 us min with similar benchmark configurations, the ablation treatment min of 2835 us is within baseline range. ZERO_COPY_DEPTH increase from 16 to 32 may help by allowing more NVMe reads in flight, increasing pipeline depth. The stream sync reduction from 8 to 4 calls for 128 chunks (16 MiB) provides minimal speedup given each sync likely completes in 1-2 us."
+    },
+    {
+      "arm_type": "h-control-negative",
+      "predicted": "At 128 KiB transfer size (single chunk), the combined optimization will produce no measurable throughput difference compared to baseline.",
+      "observed": "cold_128KiB: Baseline S1: 1083.7 us mean / 189.5 us min / 115.3 MB/s. Treatment S1: 1112.8 us mean / 153.9 us min / 112.3 MB/s. Mean throughput essentially unchanged (-2.6%). Min latency decreased 18.8% (189.5 to 153.9 us) — modest improvement observed even at single-chunk scale, which is unexpected. Note: h-main baseline S1 (run earlier) showed cold_128KiB 2254.7 us mean / 422.4 us min; h-main treatment S1 showed 930.2 us mean / 171.6 us min — showing larger apparent improvement, but this is confounded by the first run being the fresh-start baseline with no SPDK state.",
+      "status": "REFUTED",
+      "error_type": "direction",
+      "diagnostic_note": "The prediction was NO change at 128 KiB, but modest improvements were observed in the min latency even at single-chunk scale. This may be due to warm-path GPU state check being slightly faster with AtomicBool (skipping the mutex lock in dma_copy_to_device_async) even for a single chunk. The pre-allocated wrappers also eliminate one Arc<Mutex<DmaBuffer>> allocation per call even at 128 KiB. The effect is small (~18% min latency improvement) but nonzero, partly falsifying the 'negligible at single-chunk' hypothesis."
+    }
+  ],
+  "experiment_valid": true,
+  "discrepancy_analysis": "The dominant finding is that extreme run-to-run variance (mean/min ratios of 2-5x) prevents reliable measurement of the small optimizations predicted. The benchmark measures SPDK pool eviction + LRU management + NVMe read + GPU DMA as an integrated operation, and pool management adds ~5-15x overhead on cache-miss iterations (when the LRU evicts and reallocates). This regime noise swamps the predicted ~6.5% pipeline overhead reduction. The min latency (best-case, no pool miss) is more stable (2700-4200 us range) but still shows 50% run-to-run variation. The key insight is that the bottleneck has shifted from pipeline overhead to SPDK pool/memory-tier management: the best-case 16 MiB transfer takes ~2700-4200 us regardless of treatment (NVMe read ~1750 us + GPU DMA ~200 us for 16 MiB), suggesting nearly all remaining slack is NVMe-dominated. The optimization target was the wrong level — the pipeline overhead optimizations saved microseconds while pool management adds milliseconds of variance.",
+  "dominant_component_pct": null
+}

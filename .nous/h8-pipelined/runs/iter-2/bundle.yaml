@@ -1,0 +1,50 @@
+metadata:
+  iteration: 2
+  family: "pipelined-bounce-vs-p2p"
+  research_question: >
+    Does a pipelined bounce-buffer transfer using CUDA-native pinned memory
+    (cudaHostAlloc registered with SPDK) achieve true async overlap and outperform
+    non-pipelined bounce for 4 MiB transfers of 32x128 KiB chunks? Iter-1 showed
+    pipelining with cudaHostRegister on SPDK hugepages was 11-13% SLOWER — this
+    iteration tests whether CUDA-native pinned memory eliminates the async fallback.
+
+arm_selection_rationale: >
+  h-main tests the core fix (CUDA-native pinned buffers enabling true async).
+  h-control-negative repeats the stable non-pipelined baseline for same-run comparison.
+  h-robustness keeps P2P warm as the latency target. h-ablation is omitted because
+  the iter-1 SPDK-hugepage implementation already serves as the ablation evidence.
+
+arms:
+  - type: h-main
+    prediction: >
+      Pipelined bounce with CUDA-native pinned buffers (cudaHostAlloc + SPDK registration,
+      pre-allocated at startup) will achieve lower avg latency than non-pipelined bounce
+      for 4 MiB / 32-chunk transfers, consistently across both seeds.
+    mechanism: >
+      NVMe DMA and GPU H2D copy use independent PCIe hardware engines. With
+      cudaHostAlloc-allocated buffers, cudaMemcpyAsync is guaranteed truly async.
+      Double-buffering allows chunk[i] H2D copy to overlap with chunk[i+1] NVMe read.
+    code_changes:
+      - file: "components/gpu-services/v0/src/cuda_ffi.rs"
+        intent: >
+          Add cudaStream_t type alias and FFI declarations for cudaStreamCreate,
+          cudaStreamDestroy, cudaStreamSynchronize, and cudaMemcpyAsync.
+        rationale: >
+          The pipelined mode needs non-blocking H2D copies on a CUDA stream.
+      - file: "components/gpu-services/v0/src/bin/p2p_server.rs"
+        intent: >
+          Add BouncePipelineV2 variant to TransferMode enum, PipelineState struct,
+          handle_bounce_pipeline_v2 function with pre-allocated cudaHostAlloc buffers
+          and reused CUDA stream, and wire into main() CLI dispatch.
+        rationale: >
+          Tests RP-4: CUDA-native pinned memory enables true async cudaMemcpyAsync.
+
+  - type: h-control-negative
+    prediction: >
+      Non-pipelined bounce (--mode bounce) will serve as the within-experiment baseline,
+      consistently slower than pipeline-v2 across both seeds.
+
+  - type: h-robustness
+    prediction: >
+      P2P warm (--mode p2p) will consistently outperform bounce, providing the
+      reference lower bound for latency.

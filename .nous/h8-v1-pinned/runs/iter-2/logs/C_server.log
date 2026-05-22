@@ -1,0 +1,42 @@
+certus-server: metadata=0000:62:00.0, data=["0000:63:00.0"], dispatcher=v1, lookup_path=p2p-batch
+certus-server: initializing SPDK environment...
+[spdk-env] Pre-flight checks passed. Initializing SPDK/DPDK environment...
+EAL: No free 1048576 kB hugepages reported on node 0
+[spdk-env] SPDK/DPDK environment initialized. Enumerating devices...
+EAL: Cannot open /dev/vfio/104: Device or resource busy
+EAL: Failed to open VFIO group 104
+PCI_BUS: Requested device 0000:c1:00.0 cannot be used
+EAL: Cannot open /dev/vfio/105: Device or resource busy
+EAL: Failed to open VFIO group 105
+PCI_BUS: Requested device 0000:c2:00.0 cannot be used
+[spdk-env] Device enumeration complete. Found 5 device(s).
+certus-server: initializing GPU services...
+2026-05-20T02:19:57.698Z INFO  Initializing CUDA environment
+2026-05-20T02:19:57.841Z INFO  Found 2 qualifying GPU(s)
+certus-server: initializing metadata block device at 0000:62:00.0...
+2026-05-20T02:19:57.842Z INFO  initializing block device for PCI address 0000:62:00.0
+block-device-spdk-nvme v2: controller ptr = 0x2010ffffb140, numa = 0
+2026-05-20T02:19:58.156Z INFO  block device initialized, actor started
+certus-server: initializing metadata extent manager...
+2026-05-20T02:19:58.157Z INFO  actor started on NUMA-local core
+2026-05-20T02:19:58.157Z INFO  format complete
+certus-server: initializing dispatch map...
+2026-05-20T02:19:58.157Z INFO  dispatch-map: DMA allocator set
+2026-05-20T02:19:58.157Z INFO  dispatch-map: beginning state recovery from extent manager
+2026-05-20T02:19:58.157Z INFO  dispatch-map: state recovery complete — 0 extents restored
+certus-server: initializing memory-tier...
+2026-05-20T02:19:58.157Z INFO  memory-tier: initialized with 256 MiB pool
+certus-server: memory-tier pool registered with CUDA (256 MiB pinned)
+certus-server: initializing dispatcher v1 (memory-tier)...
+2026-05-20T02:19:59.160Z INFO  dispatcher: initializing
+2026-05-20T02:19:59.160Z INFO  initializing block device for PCI address 0000:63:00.0
+block-device-spdk-nvme v2: controller ptr = 0x2010ffccf440, numa = 0
+2026-05-20T02:19:59.512Z INFO  block device initialized, actor started
+2026-05-20T02:19:59.512Z INFO  actor started on NUMA-local core
+2026-05-20T02:19:59.513Z INFO  format complete
+2026-05-20T02:19:59.513Z INFO  dispatcher: data drive 0 initialized at 0000:63:00.0 (block_device=V2)
+2026-05-20T02:19:59.513Z INFO  dispatcher: initialized (lookup_path=P2pBatch)
+certus-server: component stack initialized
+certus-server: listening on 0.0.0.0:50051
+2026-05-20T02:20:05.769Z INFO  prepare_memory_for_spdk: pinning GPU memory for DMA
+2026-05-20T02:20:05.769Z INFO  prepare_memory_for_spdk: DmaBuffer created (4194304 bytes)

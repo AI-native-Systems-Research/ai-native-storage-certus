@@ -1,0 +1,88 @@
+{
+  "principles": [
+    {
+      "id": "RP-1",
+      "statement": "For NVMe\u2192GPU transfers with 128 KiB chunks on NVIDIA A30 hardware, direct P2P DMA (NVMe\u2192GPU-BAR1\u2192D2D) with a pre-warmed GDRCopy staging pool achieves ~2x higher throughput and ~2x lower latency than a bounce buffer path (NVMe\u2192host-DMA\u2192H2D), because D2D copies stay within GPU memory and avoid PCIe traversal, while the extra H2D copy in the bounce path dominates total latency.",
+      "confidence": "high",
+      "regime": "128 KiB chunks, 32 concurrent reads, NVIDIA A30, PCIe 4.0 x16, pre-warmed pool",
+      "evidence": [
+        "iteration-1-h-main",
+        "iteration-2-h-main"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 1,
+      "mechanism": "D2D copies between GPU memory regions use the GPU's internal memory fabric (~35 GB/s), while H2D copies must traverse the PCIe bus (~4.9 GB/s effective for 128 KiB). The NVMe read phase takes approximately equal time in both modes (~700-790us for 4MB), so the 700us copy advantage of D2D over H2D produces the ~2x total latency difference.",
+      "applicability_bounds": "Pre-warmed pool only (iter-1 showed p2p-cold is 5.6x slower than p2p-warm). Does not apply to P2P cold mode. Chunk size is fixed at 128KiB MDTS limit.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-2",
+      "statement": "GDRCopy per-request pin/map/unpin overhead for 32 x 128 KiB GPU staging buffers on NVIDIA A30 adds approximately 6ms latency per 4 MiB transfer request (vs ~1.3ms with pre-allocated pool), a ~5.6x penalty dominated by nvidia_p2p_get_pages/put_pages kernel transitions.",
+      "confidence": "high",
+      "regime": "Per-request GDRCopy allocation, 32 chunks x 128 KiB, NVIDIA A30",
+      "evidence": [
+        "iteration-1-h-p2p-cold"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 1,
+      "mechanism": "nvidia_p2p_get_pages and nvidia_p2p_put_pages are kernel calls that pin/unpin GPU memory pages for RDMA/DMA access. Each call has substantial kernel-mode overhead (~tens of microseconds per page group). With 32 chunks per request, this accumulates to ~6ms.",
+      "applicability_bounds": "Only applies when GDRCopy handles are allocated per-request. Pre-allocated pool amortizes this cost across all requests.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-3",
+      "statement": "The H2D cudaMemcpy throughput for 32 x 128 KiB transfers on NVIDIA A30 is ~4.9 GB/s effective, while D2D cudaMemcpy throughput for the same pattern is ~35 GB/s \u2014 a 7x intrinsic speed ratio that is consistent whether or not a preceding NVMe DMA read occurred.",
+      "confidence": "high",
+      "regime": "32 x 128 KiB sequential cudaMemcpy on NVIDIA A30, default CUDA stream (synchronous), PCIe 4.0 x16",
+      "evidence": [
+        "iteration-2-h-main",
+        "iteration-2-h-ablation"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 2,
+      "mechanism": "H2D copies (cudaMemcpy HOST_TO_DEVICE) must DMA each 128 KiB chunk across the PCIe bus from host DRAM to GPU VRAM. 32 sequential H2D copies accumulate PCIe latency and bandwidth limits. D2D copies (cudaMemcpy DEVICE_TO_DEVICE) between GPU memory regions use the GPU's NVLink/internal fabric at full GPU memory bandwidth, bypassing PCIe entirely. The ratio is not confounded by preceding NVMe DMA traffic \u2014 ablation (skip-nvme) yields the same 6.8x ratio as the full path 7.2x ratio.",
+      "applicability_bounds": "128 KiB chunk size, NVIDIA A30 hardware, synchronous cudaMemcpy on default stream. Ratio may differ at other chunk sizes (larger chunks may reduce per-transfer overhead for H2D) or with cudaMemcpyAsync + CUDA streams (potential overlap with NVMe reads). Does not account for CPU cache effects from preceding NVMe DMA to host memory.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-4",
+      "statement": "NVMe DMA read time is approximately equal (~10% difference) regardless of whether the DMA target is host DRAM or GPU BAR1 (GDRCopy-pinned staging), for 128 KiB chunks on a system with VFIO-passthrough NVMe.",
+      "confidence": "medium",
+      "regime": "128 KiB chunks, 32 concurrent BatchSubmit reads, VFIO vfio-pci, IOMMU enabled, NVMe at 0000:62:00.0, GPU BAR1 via GDRCopy",
+      "evidence": [
+        "iteration-2-h-control-negative"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 2,
+      "mechanism": "The NVMe controller issues PCIe write TLPs to the IOMMU-mapped DMA target address. Both host DRAM and GPU BAR1 accept PCIe TLPs; at 128 KiB chunk size, the NVMe controller saturates PCIe bandwidth similarly for both targets. The IOMMU translation path is equivalent (both use vfio-pci IOMMU groups). BAR1 write combining does not significantly affect per-chunk completion time at 128 KiB granularity.",
+      "applicability_bounds": "Medium confidence because read_us variance is high (outliers up to 8-9ms in some seeds), making the average sensitive to tail latencies. The 10% difference is well within the 20% threshold but the mechanism should be validated with additional seeds or a more controlled test. May not hold if NVMe and GPU are on different PCIe root ports with different latency characteristics.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-5",
+      "statement": "For 4 MiB NVMe\u2192GPU transfers, the overall ~2x latency advantage of P2P over bounce is produced by a ~7x copy speed advantage (D2D vs H2D) that is diluted by the NVMe read phase which consumes comparable time in both modes (~700-790us) and is not the differentiator.",
+      "confidence": "high",
+      "regime": "4 MiB transfer, 32 x 128 KiB chunks, NVIDIA A30, pre-warmed GDRCopy pool",
+      "evidence": [
+        "iteration-2-h-main",
+        "iteration-2-h-ablation",
+        "iteration-2-h-control-negative"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 2,
+      "mechanism": "Phase decomposition: bounce = NVMe read (~790us) + H2D copy (~819us) + overhead (~980us); P2P = NVMe read (~710us) + D2D copy (~114us) + overhead (~450us). The copy phase difference (819-114=705us) accounts for nearly all of the ~1300us latency advantage of P2P over bounce. If NVMe reads could be eliminated entirely, P2P copy alone (~114us) would yield ~6x better copy performance, but the NVMe bottleneck (~700us) limits achievable end-to-end improvement regardless of copy method.",
+      "applicability_bounds": "The NVMe read phase (~700us for 4MB) sets a floor on end-to-end latency regardless of copy method. Pipelining NVMe reads with copies (using CUDA streams) could break this floor. Applies to the sequential read-all-then-copy-all design of the current server \u2014 a pipelined design would change the phase decomposition.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    }
+  ]
+}

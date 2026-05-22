@@ -1,0 +1,33 @@
+{
+  "iteration": 2,
+  "bundle_ref": "runs/iter-2/bundle.yaml",
+  "arms": [
+    {
+      "arm_type": "h-main",
+      "predicted": "BatchSubmit all-at-once with deferred GPU DMA will reduce cold_16384KiB mean latency and reduce mean/min ratio below 2.0 by eliminating per-completion resubmission jitter and concentrating reads on a single depth-256 qpair.",
+      "observed": "REGRESSION. Baseline S1/S2: mean=10228.6/9402.3 us, min=2786.8/2639.2 us, throughput=1564.2/1701.7 MB/s, mean/min=3.67/3.56. H-main S1/S2: mean=12716.1/12632.7 us, min=5806.1/4679.8 us, throughput=1258.2/1266.6 MB/s, mean/min=2.19/2.70. Mean increased ~29%, min latency doubled (~5200 us vs ~2700 us), throughput decreased ~23%. The mean/min ratio was reduced (2.4 vs 3.6 baseline), but this is because BOTH mean AND min worsened — the SSD is no longer delivering sequential reads efficiently.",
+      "status": "REFUTED",
+      "error_type": "direction",
+      "diagnostic_note": "The deferred GPU DMA approach concentrates all 128 reads on a single depth-256 qpair, but this serializes the reads onto one qpair that may not have the optimal access pattern for this SSD. The baseline distributed reads across 3 qpairs (depth 4, 16, 64) enabling some degree of SSD-internal parallelism across channels. With BatchSubmit deferred GPU, the SSD must complete all 128 reads before any GPU DMA begins — eliminating NVMe/GPU overlap costs ~128 us but the qpair concentration into a single queue appears to hurt SSD throughput. The min latency floor increased from ~2700 to ~4700-5800 us, strongly suggesting the SSD is actually slower when all reads are concentrated on one deep qpair (possibly due to write-leveling interference or qpair scheduling on this specific SSD hardware)."
+    },
+    {
+      "arm_type": "h-ablation",
+      "predicted": "BatchSubmit with per-completion GPU DMA (maintaining NVMe/GPU overlap) will show a smaller improvement than h-main. Qpair concentration effect isolated from GPU DMA timing.",
+      "observed": "NO CHANGE at 16 MiB target. H-ablation S1/S2: mean=10287.6/10198.8 us, min=2815.0/2778.2 us, throughput=1555.3/1568.8 MB/s, mean/min=3.65/3.67. Statistically indistinguishable from baseline within measurement noise. However, dramatic improvement observed at 128 KiB: H-ablation S1/S2 mean=775.7/777.4 us vs baseline S1/S2 mean=2816.6/2997.2 us — approximately 3.6x faster. This unexpected 128KiB improvement suggests the single-element BatchSubmit path selects a different (lower-latency) qpair than the per-completion individual ReadAsync path.",
+      "status": "REFUTED",
+      "error_type": "direction",
+      "diagnostic_note": "At 16 MiB (128 chunks), BatchSubmit + per-completion GPU DMA produces no measurable improvement vs baseline. The per-completion GPU DMA maintains NVMe/GPU overlap and keeps the same mean/min variance pattern. This isolates the two effects: (1) qpair concentration via BatchSubmit(128) does NOT improve throughput at 16 MiB — it is neutral; (2) the deferred GPU DMA in h-main is the cause of the regression, not the BatchSubmit itself. The unexpected 128 KiB improvement is worth investigating but is outside the primary measurement target."
+    },
+    {
+      "arm_type": "h-control-negative",
+      "predicted": "At cold_128KiB (single chunk), BatchSubmit all-at-once will produce no measurable throughput difference from baseline — functionally identical at 1 chunk.",
+      "observed": "UNEXPECTED IMPROVEMENT at 128KiB. H-control-negative treatment (same code as h-main, BatchSubmit deferred GPU DMA): S1 mean=846.1 us (vs baseline 2816.6 us), min=137.4 us (vs 510.0 us). S2 mean=2723.9 us (vs baseline 2997.2 us), min=462.8 us (vs 516.0 us). S1 shows dramatic speedup (~3.3x); S2 shows no improvement. However, h-ablation also shows consistent 128KiB speedup (~3.6x in both sessions). The variance between S1 and S2 for h-control-negative at 128KiB suggests measurement noise or path effects. The consistent improvement in h-ablation S1/S2 at 128KiB indicates the BatchSubmit path uses a fundamentally different qpair selection logic for 1 op vs individual ReadAsync, affecting cold 128KiB latency.",
+      "status": "REFUTED",
+      "error_type": "direction",
+      "diagnostic_note": "The negative control was violated — BatchSubmit with 1 op is NOT functionally equivalent to individual ReadAsync at 128KiB. The qpair selection in BatchSubmit uses select_index(batch_size) which with batch_size=1 may select a lower-depth (faster) qpair, while the per-completion path's select_index(pending_ops.len()+1) at first submission (with pending_ops.len()=0) selects a different qpair. This is a surprising mechanism difference that warrants a dedicated future experiment."
+    }
+  ],
+  "experiment_valid": true,
+  "discrepancy_analysis": "All three predictions were refuted. The primary finding is that BatchSubmit with deferred GPU DMA HURTS performance at 16 MiB: mean increased 29%, min latency doubled from ~2700 to ~5000 us. The mechanism hypothesis (qpair concentration enables SSD read coalescing) was wrong — concentrating 128 reads on a single depth-256 qpair appears to hurt SSD throughput compared to distributing across depth-4/16/64 qpairs. The ablation confirms the damage comes from deferred GPU DMA (blocking all GPU DMA until all NVMe reads complete), not from BatchSubmit per se. BatchSubmit alone (h-ablation) is neutral at 16 MiB but shows unexpected speedup at 128KiB — a different mechanism worth investigating. The negative control failure at 128KiB reveals that select_index(1) for BatchSubmit selects a different qpair than select_index(1) in the per-completion path, suggesting the two code paths route differently even at equivalent logical load.",
+  "dominant_component_pct": null
+}

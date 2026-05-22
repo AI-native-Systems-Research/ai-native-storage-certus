@@ -1,0 +1,32 @@
+{
+  "condition": "treatment-seed42",
+  "arm": "h-main",
+  "patch": "h-main.patch",
+  "dispatcher_version": "v0",
+  "metadata_pci": "0000:63:00.0",
+  "data_pci": "0000:64:00.0",
+  "bench_object_size": 4194304,
+  "bench_num_objects": 1,
+  "bench_iterations": 1,
+  "raw_output": {
+    "memory_tier_avg_us": 28296.9,
+    "memory_tier_min_us": 28296.9,
+    "memory_tier_max_us": 28296.9,
+    "memory_tier_avg_gbs": 0.15,
+    "memory_tier_peak_gbs": 0.15,
+    "ssd_tier_avg_us": 9659.3,
+    "ssd_tier_min_us": 9659.3,
+    "ssd_tier_max_us": 9659.3,
+    "ssd_tier_avg_gbs": 0.43,
+    "ssd_tier_peak_gbs": 0.43
+  },
+  "key_metric": {
+    "ssd_tier_avg_us": 9659.3,
+    "ssd_tier_avg_gbs": 0.43
+  },
+  "comparison_to_baseline": {
+    "speedup_factor": 2.02,
+    "latency_reduction_us": 9842.5
+  },
+  "notes": "Pipelined v0: double-buffered cudaHostAlloc + cudaMemcpyAsync, 2x speedup confirmed"
+}

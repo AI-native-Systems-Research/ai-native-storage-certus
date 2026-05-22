@@ -1,0 +1,44 @@
+[
+  {
+    "id": "RP-5",
+    "statement": "P2P direct SSD-to-GPU transfers with persistently pre-pinned GPU memory are faster than bounce-buffer transfers ONLY when the NVMe and GPU share the same PCIe root complex or switch. When NVMe and GPU are on different root complexes, P2P DMA traverses a longer PCIe path and is consistently slower (65%+ penalty observed at 4 MiB, 128 KiB chunks).",
+    "confidence": "high",
+    "regime": "4 MiB sequential 128 KiB NVMe reads; NVMe on c-bus (0000:c2:00.0), GPU on separate PCIe hierarchy; SPDK sequential ReadSync submission",
+    "evidence": ["iteration-1-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "P2P DMA from NVMe to GPU BAR1 requires the DMA request to traverse from the NVMe root complex, through the CPU interconnect (QPI/UPI), to the GPU root complex. This root-complex-to-root-complex path adds substantial latency per 128 KiB DMA transfer (estimated 200-500ns per transfer × 32 transfers = 6-16ms additional latency). In contrast, bounce-path DRAM is always on the local memory bus, making NVMe DMA fast regardless of GPU placement. Prior RP-5 was derived from experiments where PCIe topology was coincidentally favorable; this experiment used c-bus NVMe which is likely on a different root complex from the GPU.",
+    "applicability_bounds": "P2P advantage requires: (1) NVMe and GPU on same PCIe switch or root port (verify with nvidia-smi topo -m), (2) GPU supports peer-to-peer via gdrdrv, (3) SPDK can register GPU BAR1 pages via spdk_mem_register. When NVMe is on a different PCIe hierarchy from GPU, bounce path (SSD→DRAM→GPU) is faster because DRAM DMA avoids cross-complex routing.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-7",
+    "statement": "Caching prepare_memory_for_spdk results (keyed by 64-byte CUDA IPC handle) successfully eliminates per-lookup P2P overhead. The DmaBuffer cache works correctly: prepare_memory_for_spdk is called once per unique handle and subsequent lookups reuse the cached registration. However, eliminating this overhead does not make P2P competitive when PCIe topology causes P2P DMA to be inherently slower than bounce.",
+    "confidence": "high",
+    "regime": "4 MiB GPU buffers; single lookup_tensor reused across all benchmark iterations; certus-server with dispatcher v1",
+    "evidence": ["iteration-1-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "The gpu_dma_cache HashMap (keyed by [u8; 64] CUDA IPC handle) correctly caches the SPDK-registered DmaBuffer. Server log confirmed prepare_memory_for_spdk was called exactly once (4194304 bytes pinned). Cache hit rate was 100% for subsequent lookups. The ~50 μs per-lookup overhead from prior h8-v1-vs-p2p experiment was eliminated. But even with overhead eliminated, PCIe topology dominates.",
+    "applicability_bounds": "Caching eliminates software overhead but cannot overcome hardware topology constraints. Use RP-5 to first verify PCIe co-location before pursuing P2P optimization.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-8",
+    "statement": "Before implementing P2P NVMe-to-GPU transfers, verify PCIe topology: NVMe and GPU must share the same root complex or PCIe switch. Use nvidia-smi topo -m to identify GPU PCIe affinity and lspci -tvvv to map NVMe devices to root complexes. P2P DMA across root-complex boundaries adds 6-16ms latency for 4 MiB reads at 128 KiB chunks, making bounce consistently faster.",
+    "confidence": "high",
+    "regime": "Any P2P DMA experiment with separate CPU sockets or PCIe root complexes",
+    "evidence": ["iteration-1-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "When NVMe (c-bus: 0000:c2:00.0) and GPU are on different PCIe root complexes, each 128 KiB DMA write to GPU BAR1 must traverse: NVMe PCIe → root complex 1 → CPU interconnect (UPI) → root complex 2 → GPU BAR1. This multi-hop path introduces latency and bandwidth limitation not present in DRAM DMA which uses the same CPU's memory controller. Observed penalty: 10498 vs 6336 μs (65% slower) for 32 × 128 KiB sequential reads.",
+    "applicability_bounds": "Critical check before any P2P experiment. Even with perfect software (caching, SPDK registration), hardware topology determines whether P2P can beat bounce. This check should be the first diagnostic when P2P underperforms.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  }
+]

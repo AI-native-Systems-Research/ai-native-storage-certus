@@ -1,0 +1,13 @@
+cudaMalloc: dev_ptr=0x7fe49b000000, size=4194304
+Benchmarking 50 x 4.00 MB transfers...
+
+============================================================
+  GPU P2P DMA Benchmark: 4.00 MB x 50 iterations
+============================================================
+  Throughput:    1969.7 MB/s
+  Avg latency:   2.03 ms
+  Min latency:   1.98 ms
+  Max latency:   2.06 ms
+  Total data:    200.0 MB in 0.102 s
+============================================================
+

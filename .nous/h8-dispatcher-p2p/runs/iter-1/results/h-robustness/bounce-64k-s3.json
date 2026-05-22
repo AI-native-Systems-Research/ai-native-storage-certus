@@ -1,0 +1,12 @@
+{
+  "mode": "bounce",
+  "chunk_size": 65536,
+  "iterations": 20,
+  "transfer_size": 4194304,
+  "pci": "0000:63:00.0",
+  "throughput_mbs": 1072.8,
+  "avg_latency_ms": 3.73,
+  "min_latency_ms": 2.36,
+  "max_latency_ms": 12.14,
+  "raw_output": "cudaMalloc: dev_ptr=0x7f7ab3000000, size=4194304\nBenchmarking 20 x 4.00 MB transfers...\n\n============================================================\n  GPU P2P DMA Benchmark: 4.00 MB x 20 iterations\n============================================================\n  Throughput:    1072.8 MB/s\n  Avg latency:   3.73 ms\n  Min latency:   2.36 ms\n  Max latency:   12.14 ms\n  Total data:    80.0 MB in 0.075 s\n============================================================\n"
+}

@@ -1,0 +1,74 @@
+metadata:
+  iteration: 2
+  bundle_ref: "runs/iter-2/bundle.yaml"
+
+setup:
+  - cmd: "cd /home/nara/certus/ai-native-storage-certus && git apply .nous/h8-transfer-path/runs/iter-2/patches/combined.patch"
+  - cmd: "cd /home/nara/certus/ai-native-storage-certus && RUSTFLAGS='-L /usr/local/lib' cargo build -p gpu-services --features p2p --bin gpu-p2p-server"
+
+arms:
+  - arm_id: "h-main"
+    conditions:
+      - name: "instrumented-bounce-s1"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh bounce /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-main/instrumented-bounce-s1.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-main/instrumented-bounce-s1.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh"
+      - name: "instrumented-bounce-s2"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh bounce /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-main/instrumented-bounce-s2.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-main/instrumented-bounce-s2.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh"
+      - name: "instrumented-bounce-s3"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh bounce /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-main/instrumented-bounce-s3.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-main/instrumented-bounce-s3.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh"
+      - name: "instrumented-p2p-s1"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh p2p /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-main/instrumented-p2p-s1.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-main/instrumented-p2p-s1.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh"
+      - name: "instrumented-p2p-s2"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh p2p /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-main/instrumented-p2p-s2.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-main/instrumented-p2p-s2.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh"
+      - name: "instrumented-p2p-s3"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh p2p /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-main/instrumented-p2p-s3.txt 0000:62:00.0"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-main/instrumented-p2p-s3.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh"
+
+  - arm_id: "h-ablation"
+    conditions:
+      - name: "copy-only-bounce-s1"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh bounce /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-ablation/copy-only-bounce-s1.txt 0000:62:00.0 --skip-nvme"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-ablation/copy-only-bounce-s1.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh"
+      - name: "copy-only-bounce-s2"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh bounce /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-ablation/copy-only-bounce-s2.txt 0000:62:00.0 --skip-nvme"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-ablation/copy-only-bounce-s2.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh"
+      - name: "copy-only-bounce-s3"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh bounce /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-ablation/copy-only-bounce-s3.txt 0000:62:00.0 --skip-nvme"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-ablation/copy-only-bounce-s3.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh"
+      - name: "copy-only-p2p-s1"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh p2p /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-ablation/copy-only-p2p-s1.txt 0000:62:00.0 --skip-nvme"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-ablation/copy-only-p2p-s1.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh"
+      - name: "copy-only-p2p-s2"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh p2p /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-ablation/copy-only-p2p-s2.txt 0000:62:00.0 --skip-nvme"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-ablation/copy-only-p2p-s2.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh"
+      - name: "copy-only-p2p-s3"
+        cmd: "bash /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh p2p /home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-ablation/copy-only-p2p-s3.txt 0000:62:00.0 --skip-nvme"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/results/h-ablation/copy-only-p2p-s3.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-transfer-path/runs/iter-2/inputs/run_condition.sh"

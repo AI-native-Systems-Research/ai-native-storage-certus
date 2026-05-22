@@ -1,0 +1,85 @@
+{
+  "principles": [
+    {
+      "id": "RP-1",
+      "statement": "For 4 MiB NVMe\u2192GPU transfers at 128 KiB MDTS chunk size, direct P2P via pre-pinned GDRCopy BAR1 mapping achieves ~2.5x lower avg latency (1.10ms vs 2.73ms) and ~2.5x higher throughput (3641 vs 1465 MB/s) than bounce-buffer with BatchSubmit. P2P-batch min latency (1.08ms) is 1.67x lower than bounce-batch min latency (1.80ms).",
+      "confidence": "high",
+      "regime": "4 MiB transfer, 128 KiB chunks, BatchSubmit concurrent submission, pre-pinned staging pool, debug build, RHEL 9.7, device 0000:63:00.0, A30 GPU",
+      "evidence": [
+        "iteration-1-h-main",
+        "iteration-2-h-robustness"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 2,
+      "mechanism": "P2P eliminates one PCIe DMA hop (NVMe\u2192host DRAM\u2192GPU becomes NVMe\u2192GPU BAR1 direct). Each 128 KiB chunk traverses fewer TLPs. BatchSubmit concurrent submission saturates NVMe queue depth for both paths, so the per-chunk path savings dominate. Note: bounce-batch shows 10-11ms tail latency spikes (NVMe controller queue saturation artifacts) inflating avg; min latency ratio (1.67x) is more representative of the intrinsic path advantage.",
+      "applicability_bounds": "Applies to pre-pinned staging (GDRCopy amortized). Does not apply to per-request pin/unpin (p2p-cold is 2.74x slower than bounce per RP-2). Batch size assumption: 32 chunks \u00d7 128 KiB = 4 MiB total.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-2",
+      "statement": "GDRCopy per-request pin/unpin (p2p-cold mode) is 2.74x slower than bounce-buffer for 4 MiB transfers, making pre-pinned staging (amortization) a hard requirement for P2P to deliver a latency advantage.",
+      "confidence": "high",
+      "regime": "4 MiB transfer, 128 KiB chunks, per-request GDRCopy pin/unpin, debug build",
+      "evidence": [
+        "iteration-1-h-ablation"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 1,
+      "mechanism": "GDRCopy pin/unpin involves IOMMU mapping setup per request, adding ~4-6ms overhead per 4 MiB transfer. Pre-pinned staging amortizes this cost across all requests.",
+      "applicability_bounds": "Cold path only. With pre-pinned staging, P2P is 2.5x faster (RP-1). Only relevant for systems that cannot maintain a persistent staging pool.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-3",
+      "statement": "Halving NVMe chunk size from 128 KiB to 64 KiB (doubling command count) narrows the P2P warm vs bounce latency advantage from 2.47x to 2.04x, but P2P warm remains decisively faster. Both paths degrade at smaller chunks, with P2P warm degrading more (71% latency increase) than bounce (40% latency increase).",
+      "confidence": "medium",
+      "regime": "4 MiB transfer, 64 KiB vs 128 KiB chunks, BatchSubmit, pre-pinned staging",
+      "evidence": [
+        "iteration-1-h-robustness"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 1,
+      "mechanism": "Smaller chunks increase command count and overhead per byte. BAR1-targeted writes may have higher per-command overhead (IOMMU page granularity constraints) than host DRAM writes, explaining the asymmetric degradation.",
+      "applicability_bounds": "128 KiB is the MDTS limit for this NVMe controller. 64 KiB is a sub-optimal chunk size but shows the trend direction.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-4",
+      "statement": "P2P path advantage (NVMe\u2192GPU BAR1 vs NVMe\u2192host DRAM\u2192GPU) survives when using sequential ReadSync submission (matching the dispatcher's pipeline.rs pattern). P2P-seq achieves 1.47x lower avg latency than bounce-seq (1.58ms vs 2.32ms) with high consistency (max-min spread <0.11ms vs <0.20ms).",
+      "confidence": "high",
+      "regime": "4 MiB transfer, 128 KiB chunks, sequential ReadSync per chunk (queue depth 1), pre-pinned BAR1 staging for P2P, host DMA buffers for bounce, debug build, device 0000:63:00.0",
+      "evidence": [
+        "iteration-2-h-main"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 2,
+      "mechanism": "Sequential ReadSync issues one NVMe read command and waits for completion before issuing the next. For P2P, each chunk DMA targets BAR1 GPU memory directly (single PCIe write path). For bounce, each chunk first goes to host DRAM (PCIe write to host), then cudaMemcpy H2D copies it to GPU (PCIe read + write). The extra host DRAM hop adds ~0.74ms over 32 sequential chunks even though each operation is serialized. At 128 KiB per chunk, PCIe DMA to host DRAM + H2D copy takes ~0.072ms/chunk, while P2P DMA to BAR1 takes ~0.049ms/chunk \u2014 a 1.47x per-chunk speedup with no batch concurrency needed.",
+      "applicability_bounds": "Applies to the dispatcher's current sequential pipeline.rs pattern without BatchSubmit. The advantage narrows vs BatchSubmit P2P because sequential submission eliminates pipelining gains, but the path factor alone (1.47x) justifies P2P integration in the dispatcher even before a BatchSubmit refactor. Requires pre-pinned staging pool; cold P2P is slower (RP-2).",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-5",
+      "statement": "BatchSubmit submission strategy contributes a 1.26x speedup on bounce min latency (1.80ms vs 2.27ms) but increases avg latency due to tail amplification (10-11ms outliers at 20-iteration runs). Sequential submission is more predictable for bounce path. P2P-batch shows no such tail amplification (all iterations within 0.03ms of mean).",
+      "confidence": "medium",
+      "regime": "4 MiB transfer, 128 KiB chunks, 20 iterations, bounce path (host DMA), debug build, device 0000:63:00.0",
+      "evidence": [
+        "iteration-2-h-ablation"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 2,
+      "mechanism": "BatchSubmit for bounce saturates the NVMe controller's submission queue with 32 simultaneous read requests targeting host DRAM. Occasionally, the controller reorders completions or a DMA to host hits a TLB miss or cache conflict, producing 10-11ms tail latency. P2P-batch targeting BAR1 may be less susceptible because GPU BAR1 DMA is handled by nvidia-peermem kernel driver which provides more predictable completion ordering. Sequential submission serializes access, eliminating queue depth as a source of variance at the cost of losing pipelining benefits.",
+      "applicability_bounds": "Tail amplification observed over 20 iterations per run. Not observed in shorter 5-iteration smoke tests. Dispatcher use case (single lookup per request) will naturally use sequential submission \u2014 this finding confirms that serial P2P integration is the right approach for dispatcher (avoid bounce-batch variance with bulk dispatch).",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    }
+  ]
+}

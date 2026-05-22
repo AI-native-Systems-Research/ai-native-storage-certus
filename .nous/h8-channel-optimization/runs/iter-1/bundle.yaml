@@ -1,0 +1,49 @@
+metadata:
+  iteration: 1
+  family: "zero-copy-pipeline-overhead"
+  research_question: "Can the dispatcher v1 cold 16 MiB lookup throughput (~1750 MB/s) match the gpu-bb-vs-p2p ceiling (~3250 MB/s) by eliminating per-chunk synchronization overhead in pipelined_ssd_to_gpu_zero_copy?"
+
+# Arm selection rationale:
+# - h-main: Tests the combined optimization (GPU state atomic + batched sync + pre-allocated wrappers)
+#   because individual overheads are small (~20ns Mutex each) but compound across 128 chunks.
+# - h-ablation: Tests batched sync alone — the largest single intervention since it reduces
+#   cudaStreamSynchronize calls from 128 to ~4, and each sync can block for GPU completion.
+# - h-control-negative: Tests at 128 KiB (single chunk) where pipeline overhead should be negligible —
+#   validates that the optimization targets multi-chunk pipelines specifically.
+
+arms:
+  - type: h-main
+    prediction: "Combined optimization (atomic GPU state check + batched stream sync every 32 chunks + pre-allocated DmaBuffer wrappers) will increase cold_16384KiB throughput, closing at least 30% of the gap between baseline (~1750 MB/s) and ceiling (~3250 MB/s), because it eliminates 128 Mutex lock operations on the GPU state, reduces cudaStreamSynchronize calls from 128 to 4, and removes per-call allocation of 128 Arc<Mutex<DmaBuffer>> objects."
+    mechanism: "The dispatcher pipeline processes 128 sequential chunks for a 16 MiB transfer. Each chunk currently requires: (1) Mutex lock on GPU services state inside dma_copy_to_device_async (gpu-services/v0/src/lib.rs:632) — this is a contested lock if other threads use GPU services, or adds ~20ns uncontested overhead x128 = 2.5us; (2) cudaStreamSynchronize on alternate stream (pipeline.rs:353) — each sync can block for 3-5us while the GPU copy engine finishes, totaling 384-640us for 128 calls; (3) allocation and deallocation of 128 Arc<Mutex<DmaBuffer>> at pipeline entry/exit (pipeline.rs:277-288, 384-386) — involving 128 heap allocations, 128 atomic refcount increments, and 128 Mutex initializations. The combined optimization eliminates all three sources. The largest contributor is likely the stream sync: at 5us per sync x 128 chunks = 640us, batching to 4 syncs saves ~620us, reducing total latency from ~9500us to ~8880us (6.5% improvement). Combined with other savings, the prediction is ≥30% gap closure (≥1200 MB/s improvement to ≥2200 MB/s)."
+    diagnostic: "If throughput does not improve: (1) Profile to determine if NVMe read latency dominates so completely that pipeline overhead is truly negligible; (2) Check if cudaStreamSynchronize is actually blocking — it may return immediately if copies complete before the next NVMe completion arrives; (3) Verify that the Mutex in gpu-services is actually being hit in the hot path (check for compiler optimization removing the state check)."
+    code_changes:
+      - file: "components/gpu-services/v0/src/lib.rs"
+        intent: "Add an AtomicBool field `initialized_fast` to GpuServicesComponentV0 that mirrors the initialized state. In dma_copy_to_device_async, check this atomic first with Ordering::Acquire — if true, skip the Mutex lock on state entirely and proceed directly to cudaMemcpyAsync. Set the atomic in initialize() and clear in shutdown()."
+        rationale: "Eliminates 128 Mutex acquisitions per 16 MiB transfer in the GPU services component. The initialized state is write-rarely/read-often, making an atomic flag the correct synchronization primitive."
+      - file: "components/dispatcher/v1/src/pipeline.rs"
+        intent: "In pipelined_ssd_to_gpu_zero_copy, replace per-completion stream synchronization (line 353-355) with batched synchronization: only call stream_synchronize on both streams when (completed + 1) % ZERO_COPY_DEPTH == 0 or completed == num_chunks - 1. This matches the pattern already used in the non-zero-copy pipelined_ssd_to_gpu function (lines 192-197)."
+        rationale: "Reduces cudaStreamSynchronize calls from 128 to 4 for a 16 MiB transfer. Since NVMe read latency (~50-100us) far exceeds GPU H2D copy time (~5us per 128 KiB chunk), all GPU copies complete before their ring slot is reused. The non-zero-copy path already validates this assumption with its batch-sync approach."
+      - file: "components/dispatcher/v1/src/pipeline.rs"
+        intent: "Pre-allocate the chunk DmaBuffer wrappers as part of PipelineRing initialization rather than creating them per-call. Add a field `zero_copy_bufs: Vec<Arc<Mutex<DmaBuffer>>>` to PipelineRing with ZERO_COPY_DEPTH entries using noop_free DmaBuffers. In pipelined_ssd_to_gpu_zero_copy, instead of allocating new DmaBuffer wrappers, update the internal pointer of each pre-allocated wrapper to point at the correct memory-tier offset, then use them for NVMe reads. After completion, leave the wrappers in place for next call."
+        rationale: "Eliminates per-call allocation of 128 Arc<Mutex<DmaBuffer>> objects (heap allocs + atomic ops + Mutex init). The DmaBuffer wrappers use noop_free so the memory-tier retains ownership."
+
+  - type: h-ablation
+    prediction: "Batched stream synchronization alone (without GPU atomic or pre-allocated wrappers) will produce measurable but smaller throughput improvement than the combined optimization, because stream sync batching is the largest single contributor to overhead reduction."
+    mechanism: "cudaStreamSynchronize is a blocking call that waits for all operations on the stream to complete. When called 128 times per transfer (once per chunk), even if each completes quickly (~1-5us actual GPU work), the syscall overhead and kernel-to-user transition cost accumulates. Batching to 4 calls eliminates 124 unnecessary synchronization points. However, if GPU copies truly complete before the next NVMe read returns (as the existing code comment at pipeline.rs:190 suggests), the sync calls may already be no-ops — returning immediately without blocking."
+    diagnostic: "If no improvement: the stream_synchronize calls are already returning immediately (GPU copies finish before next NVMe completion). In that case, the bottleneck is purely NVMe read serialization and the overhead hypothesis is falsified."
+    code_changes:
+      - file: "components/dispatcher/v1/src/pipeline.rs"
+        intent: "In pipelined_ssd_to_gpu_zero_copy, replace per-completion stream synchronization (line 353-355) with batched synchronization: only call stream_synchronize on both streams when (completed + 1) % ZERO_COPY_DEPTH == 0 or completed == num_chunks - 1."
+        rationale: "Isolated test of stream sync batching to determine if it's the dominant overhead contributor."
+
+  - type: h-control-negative
+    prediction: "At 128 KiB transfer size (single chunk), the combined optimization will produce no measurable throughput difference compared to baseline, because the pipeline processes only 1 chunk and the per-chunk overhead is negligible at that scale."
+    mechanism: "With a single 128 KiB chunk, the pipeline executes: 1 NVMe read, 1 Mutex lock on DmaBuffer, 1 Mutex lock on GPU state, 1 cudaMemcpyAsync, 1 cudaStreamSynchronize. The overhead from these operations (~25ns + ~25ns + ~1us sync = ~1us total) is negligible compared to the NVMe read latency (~50-100us). The optimization targets the 128x multiplication effect that occurs at 16 MiB."
+    diagnostic: "If improvement IS observed at 128 KiB: the mechanism is not per-chunk accumulation but something else (e.g., first-call initialization, allocation overhead affects even single chunks). Investigate DmaBuffer wrapper creation cost even for 1 chunk."
+    code_changes:
+      - file: "components/gpu-services/v0/src/lib.rs"
+        intent: "Same as h-main: Add AtomicBool initialized_fast field."
+        rationale: "Apply same optimization to verify it has no effect at single-chunk scale."
+      - file: "components/dispatcher/v1/src/pipeline.rs"
+        intent: "Same as h-main: batched sync + pre-allocated wrappers."
+        rationale: "Apply same optimization to verify it has no effect at single-chunk scale."

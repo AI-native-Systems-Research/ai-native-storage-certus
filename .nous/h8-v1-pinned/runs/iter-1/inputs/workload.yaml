@@ -1,0 +1,17 @@
+object_size_bytes: 4194304
+num_objects: 10
+pool_capacity: 64
+bench_flags:
+  - "--bench"
+  - "--bench-object-size"
+  - "4194304"
+  - "--bench-num-objects"
+  - "10"
+hardware:
+  metadata_pci: "0000:62:00.0"
+  data_pci: "0000:63:00.0"
+notes: >
+  4 MiB objects, 10 objects per tier.
+  Pool capacity 64 forces eviction when 74 objects are populated.
+  metadata and data use different NVMe PCI addresses (62 and 63)
+  because SPDK cannot open the same NVMe controller twice in one process.

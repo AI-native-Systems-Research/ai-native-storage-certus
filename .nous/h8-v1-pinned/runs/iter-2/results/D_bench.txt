@@ -1,0 +1,25 @@
+Testing certus-server gRPC dispatcher at localhost:50051...
+
+============================================================
+Lookup Latency Benchmark
+============================================================
+  Object size:      4096 KiB
+  Pool capacity:    64 objects (256 MiB)
+  Total to populate: 69 (to force 5 evictions)
+  Lookup iterations: 1
+
+  Populating 69 objects... done (0.06s, 1245 obj/s)
+  Waiting for write-through to complete... done
+  Benchmarking memory-tier lookups (5 objects x 1 iters)... done
+  Benchmarking SSD-tier lookups (5 objects x 1 iters)...
+  WARNING: 4 cold lookups failed: SSD batch read failed: block device error: Read failed: async spdk_nvme_ns_cmd_read submit failed with rc=-12
+ done
+
+  Tier            Avg (us/obj)   Min (us/obj)   Max (us/obj)   Avg (GB/s)   Peak (GB/s) 
+  --------------------------------------------------------------------------------
+  Memory-tier     921.6          921.6          921.6          4.55         4.55        
+  SSD-tier        6878.2         6878.2         6878.2         0.61         0.61        
+
+  SSD/Memory-tier ratio: 7.5x latency, 7.5x throughput
+
+  Cleaning up... done

@@ -1,0 +1,601 @@
+diff --git a/apps/certus-server/src/service.rs b/apps/certus-server/src/service.rs
+index f6bd2d2..76b4782 100644
+--- a/apps/certus-server/src/service.rs
++++ b/apps/certus-server/src/service.rs
+@@ -157,6 +157,7 @@ impl Dispatcher for DispatcherService {
+                     let ipc = IpcHandle {
+                         address: dev_ptr as *mut u8,
+                         size: handle.size,
++                        cuda_ipc_handle_bytes: None,
+                     };
+                     let result = match disp.populate(entry.key, ipc) {
+                         Ok(()) => success_result(entry.key),
+@@ -233,6 +234,7 @@ impl Dispatcher for DispatcherService {
+                     let ipc = IpcHandle {
+                         address: dev_ptr as *mut u8,
+                         size: handle.size,
++                        cuda_ipc_handle_bytes: Some(handle.cuda_ipc_handle.clone()),
+                     };
+                     match disp.lookup(entry.key, ipc) {
+                         Ok(()) => success_result(entry.key),
+diff --git a/certus-connector/src/engine.rs b/certus-connector/src/engine.rs
+index e7bec4a..5d3b88a 100644
+--- a/certus-connector/src/engine.rs
++++ b/certus-connector/src/engine.rs
+@@ -473,6 +473,7 @@ impl EngineInner {
+             let handle = IpcHandle {
+                 address: offset as *mut u8,
+                 size: self.gpu_block_size as u32,
++                cuda_ipc_handle_bytes: None,
+             };
+ 
+             if let Err(_e) = self.dispatcher.populate(*key, handle) {
+@@ -523,6 +524,7 @@ impl EngineInner {
+             let handle = IpcHandle {
+                 address: offset as *mut u8,
+                 size: self.gpu_block_size as u32,
++                cuda_ipc_handle_bytes: None,
+             };
+ 
+             if let Err(_e) = self.dispatcher.lookup(*key, handle) {
+diff --git a/components/dispatcher/v0/benches/dispatcher_benchmark.rs b/components/dispatcher/v0/benches/dispatcher_benchmark.rs
+index 9448c1f..b860c3e 100644
+--- a/components/dispatcher/v0/benches/dispatcher_benchmark.rs
++++ b/components/dispatcher/v0/benches/dispatcher_benchmark.rs
+@@ -268,6 +268,7 @@ fn make_handle(buf: &mut [u8]) -> IpcHandle {
+     IpcHandle {
+         address: buf.as_mut_ptr(),
+         size: buf.len() as u32,
++        cuda_ipc_handle_bytes: None,
+     }
+ }
+ 
+diff --git a/components/dispatcher/v0/src/lib.rs b/components/dispatcher/v0/src/lib.rs
+index 39f02a6..f2441f3 100644
+--- a/components/dispatcher/v0/src/lib.rs
++++ b/components/dispatcher/v0/src/lib.rs
+@@ -1386,6 +1386,7 @@ mod tests {
+         IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: buf.len() as u32,
++            cuda_ipc_handle_bytes: None,
+         }
+     }
+ 
+@@ -1440,6 +1441,7 @@ mod tests {
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 4096,
++            cuda_ipc_handle_bytes: None,
+         };
+         let err = d.lookup(42, handle);
+         assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
+@@ -1469,6 +1471,7 @@ mod tests {
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 4096,
++            cuda_ipc_handle_bytes: None,
+         };
+         let err = d.populate(42, handle);
+         assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
+@@ -1484,6 +1487,7 @@ mod tests {
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 0,
++            cuda_ipc_handle_bytes: None,
+         };
+         let err = d.populate(42, handle);
+         // Will fail with NotInitialized since that check comes first
+@@ -1604,6 +1608,7 @@ mod tests {
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 0,
++            cuda_ipc_handle_bytes: None,
+         };
+         let err = d.populate(1, handle);
+         assert!(matches!(err, Err(DispatcherError::InvalidParameter(_))));
+@@ -1655,6 +1660,7 @@ mod tests {
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 5000,
++            cuda_ipc_handle_bytes: None,
+         };
+         assert!(d.populate(1, handle).is_ok());
+         d.shutdown().unwrap();
+diff --git a/components/dispatcher/v0/tests/integration.rs b/components/dispatcher/v0/tests/integration.rs
+index 6ac1cfb..0e9a68f 100644
+--- a/components/dispatcher/v0/tests/integration.rs
++++ b/components/dispatcher/v0/tests/integration.rs
+@@ -361,6 +361,7 @@ fn make_handle(buf: &mut [u8]) -> IpcHandle {
+     IpcHandle {
+         address: buf.as_mut_ptr(),
+         size: buf.len() as u32,
++        cuda_ipc_handle_bytes: None,
+     }
+ }
+ 
+@@ -430,6 +431,7 @@ fn hw_idispatcher_full_integration() {
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 0,
++            cuda_ipc_handle_bytes: None,
+         };
+         let err = d.populate(999, handle);
+         assert!(
+diff --git a/components/dispatcher/v0/tests/lazy_migration.rs b/components/dispatcher/v0/tests/lazy_migration.rs
+index ec5b81b..5731dee 100644
+--- a/components/dispatcher/v0/tests/lazy_migration.rs
++++ b/components/dispatcher/v0/tests/lazy_migration.rs
+@@ -312,6 +312,7 @@ fn make_handle(buf: &mut [u8]) -> IpcHandle {
+     IpcHandle {
+         address: buf.as_mut_ptr(),
+         size: buf.len() as u32,
++        cuda_ipc_handle_bytes: None,
+     }
+ }
+ 
+diff --git a/components/dispatcher/v1/Cargo.toml b/components/dispatcher/v1/Cargo.toml
+index 8dd7b9f..2e132c7 100644
+--- a/components/dispatcher/v1/Cargo.toml
++++ b/components/dispatcher/v1/Cargo.toml
+@@ -17,6 +17,7 @@ block-device-spdk-nvme-v2.workspace = true
+ extent-manager-v2.workspace = true
+ memory-tier.workspace = true
+ libc = "0.2"
++base64 = "0.22"
+ 
+ [features]
+ hardware-test = []
+diff --git a/components/dispatcher/v1/benches/dispatcher_benchmark.rs b/components/dispatcher/v1/benches/dispatcher_benchmark.rs
+index 9448c1f..b860c3e 100644
+--- a/components/dispatcher/v1/benches/dispatcher_benchmark.rs
++++ b/components/dispatcher/v1/benches/dispatcher_benchmark.rs
+@@ -268,6 +268,7 @@ fn make_handle(buf: &mut [u8]) -> IpcHandle {
+     IpcHandle {
+         address: buf.as_mut_ptr(),
+         size: buf.len() as u32,
++        cuda_ipc_handle_bytes: None,
+     }
+ }
+ 
+diff --git a/components/dispatcher/v1/src/lib.rs b/components/dispatcher/v1/src/lib.rs
+index dc4ead6..fa6c7cc 100644
+--- a/components/dispatcher/v1/src/lib.rs
++++ b/components/dispatcher/v1/src/lib.rs
+@@ -15,6 +15,7 @@ use std::collections::HashMap;
+ use std::sync::atomic::{AtomicBool, Ordering};
+ use std::sync::{Arc, Mutex};
+ 
++use base64::Engine as _;
+ use component_framework::define_component;
+ use interfaces::{
+     BlockDeviceVersion, CacheKey, Command, Completion, DmaAllocFn, DmaBuffer,
+@@ -74,6 +75,7 @@ define_component! {
+             bg_evictor: Mutex<Option<BackgroundEvictor>>,
+             data_drives: Mutex<Vec<DataDrive>>,
+             pending_writes: Mutex<HashMap<CacheKey, PendingWrite>>,
++            gpu_dma_cache: Mutex<HashMap<[u8; 64], Arc<Mutex<DmaBuffer>>>>,
+         },
+     }
+ }
+@@ -113,6 +115,39 @@ impl DispatcherComponentV0 {
+         Ok(())
+     }
+ 
++    /// Return a cached GPU DmaBuffer for the given 64-byte CUDA IPC handle, creating it on miss.
++    fn get_or_create_gpu_dma(
++        &self,
++        handle_bytes: &[u8],
++        total_size: usize,
++        gpu: &dyn IGpuServices,
++    ) -> Result<Arc<Mutex<DmaBuffer>>, DispatcherError> {
++        let key: [u8; 64] = handle_bytes.try_into().map_err(|_| {
++            DispatcherError::InvalidParameter(format!(
++                "cuda_ipc_handle_bytes must be 64 bytes, got {}",
++                handle_bytes.len()
++            ))
++        })?;
++
++        let mut cache = self.gpu_dma_cache.lock().unwrap();
++        if let Some(entry) = cache.get(&key) {
++            return Ok(Arc::clone(entry));
++        }
++
++        // Build 72-byte payload: 64 handle bytes + 8 LE size bytes, then base64-encode.
++        let mut payload = Vec::with_capacity(72);
++        payload.extend_from_slice(handle_bytes);
++        payload.extend_from_slice(&(total_size as u64).to_le_bytes());
++        let encoded = base64::engine::general_purpose::STANDARD.encode(&payload);
++
++        let dma_buf = gpu.prepare_memory_for_spdk(&encoded, None).map_err(|e| {
++            DispatcherError::IoError(format!("prepare_memory_for_spdk failed: {e}"))
++        })?;
++        let entry = Arc::new(Mutex::new(dma_buf));
++        cache.insert(key, Arc::clone(&entry));
++        Ok(entry)
++    }
++
+     /// Write `buffer` contents to SSD using MDTS-aware segmented I/O.
+     ///
+     /// Splits the write into segments that respect the drive's maximum transfer
+@@ -237,6 +272,29 @@ impl DispatcherComponentV0 {
+         let block_dev = Arc::clone(&drive.block_dev_iface);
+         drop(drives);
+ 
++        // P2P path: read NVMe directly into cached GPU-registered DmaBuffer.
++        if let Some(ref handle_bytes) = ipc_handle.cuda_ipc_handle_bytes {
++            let gpu_dma_arc = self.get_or_create_gpu_dma(handle_bytes, total_bytes, &**gpu)?;
++            let gpu_dma_guard = gpu_dma_arc.lock().unwrap();
++            // SAFETY: gpu_dma_guard points to GPU BAR1 registered with SPDK via spdk_mem_register.
++            // The NVMe controller will DMA directly into this GPU memory region.
++            unsafe {
++                pipeline::p2p_ssd_to_gpu_persistent(
++                    &*block_dev,
++                    &gpu_dma_guard,
++                    start_lba,
++                    total_bytes,
++                    numa_node,
++                )?;
++            }
++            drop(gpu_dma_guard);
++            // Release memory-tier slot (allocated above but not needed for P2P path).
++            // Re-insert the BlockDevice entry so subsequent iterations re-test SSD.
++            let _ = mt.remove(key);
++            let _ = dm.release_write(key);
++            return Ok(());
++        }
++
+         // Use pipelined reader: SSD → memory-tier → GPU.
+         // SAFETY: mem_ptr is a valid memory-tier slot for total_bytes.
+         // ipc_handle.address is a valid GPU destination pointer.
+@@ -1652,6 +1710,7 @@ mod tests {
+             Mutex::new(None),
+             Mutex::new(Vec::new()),
+             Mutex::new(HashMap::new()),
++            Mutex::new(HashMap::new()),
+         );
+         c.dispatch_map
+             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
+@@ -1675,6 +1734,7 @@ mod tests {
+         IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: buf.len() as u32,
++            cuda_ipc_handle_bytes: None,
+         }
+     }
+ 
+@@ -1684,19 +1744,19 @@ mod tests {
+ 
+     #[test]
+     fn component_creation() {
+-        let _c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let _c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()));
+     }
+ 
+     #[test]
+     fn query_idispatcher() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()));
+         let d = query_interface!(c, IDispatcher);
+         assert!(d.is_some());
+     }
+ 
+     #[test]
+     fn initialize_without_receptacles_fails() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()));
+         let d = query_interface!(c, IDispatcher).unwrap();
+         let config = DispatcherConfig {
+             metadata_pci_addr: "0000:01:00.0".to_string(),
+@@ -1709,7 +1769,7 @@ mod tests {
+ 
+     #[test]
+     fn initialize_with_empty_pci_addrs_fails() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()));
+         let d = query_interface!(c, IDispatcher).unwrap();
+         let config = DispatcherConfig {
+             metadata_pci_addr: "0000:01:00.0".to_string(),
+@@ -1723,12 +1783,13 @@ mod tests {
+ 
+     #[test]
+     fn lookup_before_initialize_fails() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()));
+         let d = query_interface!(c, IDispatcher).unwrap();
+         let mut buf = vec![0u8; 4096];
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 4096,
++            cuda_ipc_handle_bytes: None,
+         };
+         let err = d.lookup(42, handle);
+         assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
+@@ -1736,7 +1797,7 @@ mod tests {
+ 
+     #[test]
+     fn check_before_initialize_fails() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()));
+         let d = query_interface!(c, IDispatcher).unwrap();
+         let err = d.check(42);
+         assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
+@@ -1744,7 +1805,7 @@ mod tests {
+ 
+     #[test]
+     fn remove_before_initialize_fails() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()));
+         let d = query_interface!(c, IDispatcher).unwrap();
+         let err = d.remove(42);
+         assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
+@@ -1752,12 +1813,13 @@ mod tests {
+ 
+     #[test]
+     fn populate_before_initialize_fails() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()));
+         let d = query_interface!(c, IDispatcher).unwrap();
+         let mut buf = vec![0u8; 4096];
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 4096,
++            cuda_ipc_handle_bytes: None,
+         };
+         let err = d.populate(42, handle);
+         assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
+@@ -1765,7 +1827,7 @@ mod tests {
+ 
+     #[test]
+     fn populate_with_zero_size_fails() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()));
+         let d = query_interface!(c, IDispatcher).unwrap();
+         // Even though not initialized, zero-size check comes after init check.
+         // This test verifies the parameter validation exists in the code path.
+@@ -1773,6 +1835,7 @@ mod tests {
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 0,
++            cuda_ipc_handle_bytes: None,
+         };
+         let err = d.populate(42, handle);
+         // Will fail with NotInitialized since that check comes first
+@@ -1781,14 +1844,14 @@ mod tests {
+ 
+     #[test]
+     fn shutdown_without_initialize_succeeds() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()));
+         let d = query_interface!(c, IDispatcher).unwrap();
+         assert!(d.shutdown().is_ok());
+     }
+ 
+     #[test]
+     fn double_shutdown_succeeds() {
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()));
+         let d = query_interface!(c, IDispatcher).unwrap();
+         assert!(d.shutdown().is_ok());
+         assert!(d.shutdown().is_ok());
+@@ -1802,6 +1865,7 @@ mod tests {
+             Mutex::new(None),
+             Mutex::new(Vec::new()),
+             Mutex::new(HashMap::new()),
++            Mutex::new(HashMap::new()),
+         ));
+ 
+         let handles: Vec<_> = (0..4)
+@@ -1841,7 +1905,7 @@ mod tests {
+     fn initialize_empty_addrs_with_dispatch_map() {
+         let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
+         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()));
+         c.dispatch_map.connect(dm).unwrap();
+         c.memory_tier.connect(mt).unwrap();
+ 
+@@ -1860,7 +1924,7 @@ mod tests {
+         let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
+         let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
+         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()));
+         c.dispatch_map.connect(dm).unwrap();
+         c.logger.connect(logger).unwrap();
+         c.memory_tier.connect(mt).unwrap();
+@@ -1897,6 +1961,7 @@ mod tests {
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 0,
++            cuda_ipc_handle_bytes: None,
+         };
+         let err = d.populate(1, handle);
+         assert!(matches!(err, Err(DispatcherError::InvalidParameter(_))));
+@@ -1923,7 +1988,7 @@ mod tests {
+         let gpu: Arc<dyn IGpuServices + Send + Sync> = Arc::new(MockGpuServices);
+         let mt: Arc<dyn IMemoryTier + Send + Sync> =
+             Arc::new(MockMemoryTier::with_fail_insert(1024 * 1024));
+-        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()));
++        let c = DispatcherComponentV0::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(HashMap::new()));
+         c.dispatch_map.connect(dm).unwrap();
+         c.logger.connect(logger).unwrap();
+         c.gpu_services.connect(gpu).unwrap();
+@@ -1951,6 +2016,7 @@ mod tests {
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 5000,
++            cuda_ipc_handle_bytes: None,
+         };
+         assert!(d.populate(1, handle).is_ok());
+         d.shutdown().unwrap();
+@@ -2242,6 +2308,7 @@ mod tests {
+             Mutex::new(None),
+             Mutex::new(Vec::new()),
+             Mutex::new(HashMap::new()),
++            Mutex::new(HashMap::new()),
+         );
+         c.dispatch_map
+             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
+diff --git a/components/dispatcher/v1/src/pipeline.rs b/components/dispatcher/v1/src/pipeline.rs
+index 4462243..158082b 100644
+--- a/components/dispatcher/v1/src/pipeline.rs
++++ b/components/dispatcher/v1/src/pipeline.rs
+@@ -11,6 +11,7 @@ use interfaces::{
+ };
+ 
+ use crate::io_segmenter;
++use crate::noop_free;
+ 
+ /// Number of ring buffers for pipelined transfers.
+ pub const PIPELINE_RING_SIZE: usize = 4;
+@@ -122,6 +123,88 @@ pub unsafe fn pipelined_ssd_to_gpu(
+     Ok(())
+ }
+ 
++/// Read from SSD directly into a GPU-registered DmaBuffer (P2P path).
++///
++/// Each 128 KiB chunk is read via NVMe ReadSync into a sub-view of `gpu_dma_buf`,
++/// which is pre-registered with SPDK via `spdk_mem_register`. No DRAM bounce buffer,
++/// no GPU DMA copy — NVMe DMA engine writes directly into GPU BAR1 memory.
++///
++/// # Safety
++///
++/// - `gpu_dma_buf` must be a DmaBuffer registered with SPDK for the full `total_bytes` range.
++/// - The physical address range covered by `gpu_dma_buf` must be valid for NVMe DMA.
++pub unsafe fn p2p_ssd_to_gpu_persistent(
++    drive: &dyn IBlockDevice,
++    gpu_dma_buf: &DmaBuffer,
++    start_lba: u64,
++    total_bytes: usize,
++    numa_node: i32,
++) -> Result<(), DispatcherError> {
++    let block_size = drive.block_size() as usize;
++    let chunk_size = drive.max_transfer_size() as usize;
++    let aligned_bytes = total_bytes.next_multiple_of(block_size);
++
++    let channels: ClientChannels = drive.connect_client().map_err(|e| {
++        DispatcherError::IoError(format!("p2p connect_client failed: {e}"))
++    })?;
++
++    let segments = io_segmenter::segment_io(start_lba, aligned_bytes, chunk_size as u32, block_size as u32);
++
++    let base_ptr = gpu_dma_buf.as_ptr() as usize;
++
++    for seg in &segments {
++        let seg_len = seg.length.min(aligned_bytes.saturating_sub(seg.buffer_offset));
++        if seg_len == 0 {
++            continue;
++        }
++
++        // Create a sub-DmaBuffer view into the GPU buffer at this segment's offset.
++        // SAFETY: base_ptr + seg.buffer_offset is within the registered GPU DmaBuffer range.
++        // noop_free ensures the sub-view does not free the parent buffer on drop.
++        let sub_buf = unsafe {
++            DmaBuffer::from_raw(
++                (base_ptr + seg.buffer_offset) as *mut std::ffi::c_void,
++                seg_len,
++                noop_free,
++                numa_node,
++            )
++        }
++        .map_err(|e| DispatcherError::IoError(format!("p2p sub-buffer view failed: {e}")))?;
++        let sub_arc = Arc::new(Mutex::new(sub_buf));
++
++        channels
++            .command_tx
++            .send(Command::ReadSync {
++                ns_id: 1,
++                lba: seg.lba,
++                buf: Arc::clone(&sub_arc),
++            })
++            .map_err(|_| DispatcherError::IoError("p2p send ReadSync failed".into()))?;
++
++        match channels.completion_rx.recv() {
++            Ok(Completion::ReadDone { result, .. }) => {
++                result.map_err(|e| DispatcherError::IoError(format!("p2p SSD read failed: {e}")))?;
++            }
++            Ok(other) => {
++                return Err(DispatcherError::IoError(format!(
++                    "p2p unexpected completion: {other:?}"
++                )));
++            }
++            Err(_) => {
++                return Err(DispatcherError::IoError(
++                    "p2p completion channel disconnected".into(),
++                ));
++            }
++        }
++
++        // Sub-buffer view wraps GPU memory we don't own here — let the Arc drop
++        // normally (noop_free prevents freeing the underlying GPU memory).
++        drop(sub_arc);
++    }
++
++    Ok(())
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git a/components/dispatcher/v1/tests/integration.rs b/components/dispatcher/v1/tests/integration.rs
+index 7084f11..d504e0c 100644
+--- a/components/dispatcher/v1/tests/integration.rs
++++ b/components/dispatcher/v1/tests/integration.rs
+@@ -361,6 +361,7 @@ fn make_handle(buf: &mut [u8]) -> IpcHandle {
+     IpcHandle {
+         address: buf.as_mut_ptr(),
+         size: buf.len() as u32,
++        cuda_ipc_handle_bytes: None,
+     }
+ }
+ 
+@@ -430,6 +431,7 @@ fn hw_idispatcher_full_integration() {
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 0,
++            cuda_ipc_handle_bytes: None,
+         };
+         let err = d.populate(999, handle);
+         assert!(
+diff --git a/components/dispatcher/v1/tests/lazy_migration.rs b/components/dispatcher/v1/tests/lazy_migration.rs
+index 230c11a..1e60538 100644
+--- a/components/dispatcher/v1/tests/lazy_migration.rs
++++ b/components/dispatcher/v1/tests/lazy_migration.rs
+@@ -428,6 +428,7 @@ fn make_handle(buf: &mut [u8]) -> IpcHandle {
+     IpcHandle {
+         address: buf.as_mut_ptr(),
+         size: buf.len() as u32,
++        cuda_ipc_handle_bytes: None,
+     }
+ }
+ 
+diff --git a/components/interfaces/src/idispatcher.rs b/components/interfaces/src/idispatcher.rs
+index 060f4ea..cab523f 100644
+--- a/components/interfaces/src/idispatcher.rs
++++ b/components/interfaces/src/idispatcher.rs
+@@ -106,6 +106,7 @@ impl Default for DispatcherConfig {
+ /// let handle = IpcHandle {
+ ///     address: buf.as_mut_ptr(),
+ ///     size: 4096,
++///     cuda_ipc_handle_bytes: None,
+ /// };
+ /// assert_eq!(handle.size, 4096);
+ /// ```
+@@ -115,6 +116,8 @@ pub struct IpcHandle {
+     pub address: *mut u8,
+     /// Size of the data in bytes.
+     pub size: u32,
++    /// Raw 64-byte CUDA IPC handle bytes, used to route P2P lookups.
++    pub cuda_ipc_handle_bytes: Option<Vec<u8>>,
+ }
+ 
+ // SAFETY: GPU memory is accessible cross-thread via DMA engine.
+@@ -296,6 +299,7 @@ mod tests {
+         let handle = IpcHandle {
+             address: buf.as_mut_ptr(),
+             size: 4096,
++            cuda_ipc_handle_bytes: None,
+         };
+         assert_eq!(handle.size, 4096);
+     }

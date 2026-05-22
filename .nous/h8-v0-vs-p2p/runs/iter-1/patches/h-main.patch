@@ -1,0 +1,323 @@
+diff --git a/apps/certus-server/src/service.rs b/apps/certus-server/src/service.rs
+index f6bd2d2..272dfd4 100644
+--- a/apps/certus-server/src/service.rs
++++ b/apps/certus-server/src/service.rs
+@@ -1,6 +1,6 @@
+ //! gRPC service implementation for the Certus Dispatcher.
+ 
+-use std::collections::{HashMap, HashSet};
++use std::collections::HashSet;
+ use std::sync::{Arc, Mutex};
+ 
+ use tonic::{Request, Response, Status};
+@@ -157,6 +157,7 @@ impl Dispatcher for DispatcherService {
+                     let ipc = IpcHandle {
+                         address: dev_ptr as *mut u8,
+                         size: handle.size,
++                        cuda_ipc_handle_bytes: None,
+                     };
+                     let result = match disp.populate(entry.key, ipc) {
+                         Ok(()) => success_result(entry.key),
+@@ -184,9 +185,6 @@ impl Dispatcher for DispatcherService {
+         let dispatcher = Arc::clone(&self.dispatcher);
+         let results = tokio::task::spawn_blocking(move || {
+             let disp = dispatcher.lock().unwrap();
+-            // Cache opened IPC handles within the batch to avoid repeated
+-            // cudaIpcOpenMemHandle/Close for entries sharing the same handle.
+-            let mut ipc_cache: HashMap<[u8; 64], *mut std::ffi::c_void> = HashMap::new();
+ 
+             let results: Vec<_> = req.entries
+                 .iter()
+@@ -202,37 +200,20 @@ impl Dispatcher for DispatcherService {
+                             );
+                         }
+                     };
+-                    let handle_key: [u8; 64] = match handle.cuda_ipc_handle.as_slice().try_into() {
+-                        Ok(k) => k,
+-                        Err(_) => {
+-                            return error_result(
+-                                entry.key,
+-                                &DispatcherError::InvalidParameter(
+-                                    format!("cuda_ipc_handle must be 64 bytes, got {}", handle.cuda_ipc_handle.len()),
+-                                ),
+-                            );
+-                        }
+-                    };
+-                    let dev_ptr = match ipc_cache.get(&handle_key) {
+-                        Some(&ptr) => ptr,
+-                        None => {
+-                            match open_cuda_ipc(&handle.cuda_ipc_handle) {
+-                                Ok(ptr) => {
+-                                    ipc_cache.insert(handle_key, ptr);
+-                                    ptr
+-                                }
+-                                Err(e) => {
+-                                    return error_result(
+-                                        entry.key,
+-                                        &DispatcherError::IoError(format!("IPC open failed: {e}")),
+-                                    );
+-                                }
+-                            }
+-                        }
+-                    };
++                    if handle.cuda_ipc_handle.len() != 64 {
++                        return error_result(
++                            entry.key,
++                            &DispatcherError::InvalidParameter(
++                                format!("cuda_ipc_handle must be 64 bytes, got {}", handle.cuda_ipc_handle.len()),
++                            ),
++                        );
++                    }
++                    // P2P path: pass raw handle bytes to dispatcher; let it call
++                    // prepare_memory_for_spdk internally. address is unused for P2P.
+                     let ipc = IpcHandle {
+-                        address: dev_ptr as *mut u8,
++                        address: std::ptr::null_mut(),
+                         size: handle.size,
++                        cuda_ipc_handle_bytes: Some(handle.cuda_ipc_handle.clone()),
+                     };
+                     match disp.lookup(entry.key, ipc) {
+                         Ok(()) => success_result(entry.key),
+@@ -241,11 +222,6 @@ impl Dispatcher for DispatcherService {
+                 })
+                 .collect();
+ 
+-            // Close all cached IPC handles once at the end of the batch.
+-            for &ptr in ipc_cache.values() {
+-                close_cuda_ipc(ptr);
+-            }
+-
+             results
+         })
+         .await
+diff --git a/components/dispatcher/v0/Cargo.toml b/components/dispatcher/v0/Cargo.toml
+index 298f826..dea52de 100644
+--- a/components/dispatcher/v0/Cargo.toml
++++ b/components/dispatcher/v0/Cargo.toml
+@@ -15,6 +15,7 @@ spdk-env.workspace = true
+ block-device-spdk-nvme.workspace = true
+ block-device-spdk-nvme-v2.workspace = true
+ extent-manager-v2.workspace = true
++base64 = "0.22"
+ libc = "0.2"
+ 
+ [features]
+diff --git a/components/dispatcher/v0/src/lib.rs b/components/dispatcher/v0/src/lib.rs
+index 39f02a6..b629000 100644
+--- a/components/dispatcher/v0/src/lib.rs
++++ b/components/dispatcher/v0/src/lib.rs
+@@ -176,6 +176,35 @@ impl DispatcherComponentV0 {
+         Ok(())
+     }
+ 
++    /// Open a CUDA IPC handle from raw 64-byte handle bytes.
++    fn open_cuda_ipc_from_bytes(bytes: &[u8]) -> Result<*mut std::ffi::c_void, String> {
++        if bytes.len() != 64 {
++            return Err(format!("expected 64 bytes, got {}", bytes.len()));
++        }
++        let mut reserved = [0u8; 64];
++        reserved.copy_from_slice(bytes);
++        let cuda_handle = gpu_services::cuda_ffi::cudaIpcMemHandle_t { reserved };
++        let mut dev_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
++        // SAFETY: cuda_handle is a valid IPC handle structure from the client.
++        let err = unsafe {
++            gpu_services::cuda_ffi::cudaIpcOpenMemHandle(
++                &mut dev_ptr,
++                cuda_handle,
++                gpu_services::cuda_ffi::CUDA_IPC_MEM_LAZY_ENABLE_PEER_ACCESS,
++            )
++        };
++        if err != gpu_services::cuda_ffi::CUDA_SUCCESS {
++            return Err(format!(
++                "cudaIpcOpenMemHandle failed: {}",
++                gpu_services::cuda_ffi::cuda_error_string(err)
++            ));
++        }
++        if dev_ptr.is_null() {
++            return Err("cudaIpcOpenMemHandle returned null".into());
++        }
++        Ok(dev_ptr)
++    }
++
+     fn read_from_block_device(
+         &self,
+         key: CacheKey,
+@@ -275,6 +304,116 @@ impl DispatcherComponentV0 {
+         Ok(())
+     }
+ 
++    /// P2P path: read NVMe chunks directly into GPU BAR1 memory, skipping host DRAM.
++    ///
++    /// Calls `prepare_memory_for_spdk` to get an SPDK-registered DmaBuffer backed by
++    /// GPU BAR1, then issues per-segment ReadSync commands targeting sub-views of that
++    /// buffer. No `dma_copy_to_device` is needed — data lands directly on the GPU.
++    fn read_from_block_device_p2p(
++        &self,
++        key: CacheKey,
++        offset: u64,
++        ipc_handle: &IpcHandle,
++        gpu: &Arc<dyn IGpuServices + Send + Sync>,
++    ) -> Result<(), DispatcherError> {
++        use base64::Engine;
++
++        let handle_bytes = ipc_handle
++            .cuda_ipc_handle_bytes
++            .as_ref()
++            .ok_or_else(|| DispatcherError::IoError("P2P path requires cuda_ipc_handle_bytes".into()))?;
++
++        if handle_bytes.len() != 64 {
++            return Err(DispatcherError::IoError(format!(
++                "cuda_ipc_handle_bytes must be 64 bytes, got {}",
++                handle_bytes.len()
++            )));
++        }
++
++        // Build 72-byte payload: 64 bytes CUDA handle + 8 bytes LE u64 size.
++        let total_bytes = ipc_handle.size as usize;
++        let mut payload = [0u8; 72];
++        payload[..64].copy_from_slice(handle_bytes);
++        payload[64..72].copy_from_slice(&(total_bytes as u64).to_le_bytes());
++        let base64_payload = base64::engine::general_purpose::STANDARD.encode(payload);
++
++        // Obtain a GPU-backed DmaBuffer registered with SPDK for P2P DMA.
++        let gpu_buf = gpu
++            .prepare_memory_for_spdk(&base64_payload, None)
++            .map_err(|e| DispatcherError::IoError(format!("prepare_memory_for_spdk failed: {e}")))?;
++
++        let drives = self.data_drives.lock().unwrap();
++        if drives.is_empty() {
++            return Err(DispatcherError::IoError(
++                "no data drives available for block device read".into(),
++            ));
++        }
++
++        let idx = Self::drive_index(key, drives.len());
++        let drive = &drives[idx];
++        let block_size = drive.block_dev_iface.block_size();
++        let max_transfer = drive.block_dev_iface.max_transfer_size();
++        let start_lba = offset / block_size as u64;
++        let aligned_bytes = total_bytes.next_multiple_of(block_size as usize);
++
++        let channels = drive.block_dev_iface.connect_client().map_err(|e| {
++            DispatcherError::IoError(format!("connect_client failed: {e}"))
++        })?;
++
++        drop(drives);
++
++        let segments =
++            io_segmenter::segment_io(start_lba, aligned_bytes, max_transfer, block_size);
++
++        let gpu_base_ptr = gpu_buf.as_ptr() as *mut u8;
++
++        for seg in &segments {
++            // Create a non-owning sub-view of the GPU DmaBuffer at chunk offset.
++            // SAFETY: gpu_base_ptr + seg.buffer_offset is within the registered GPU allocation
++            // (total size = aligned_bytes). The parent gpu_buf outlives all sub-views.
++            // noop_free prevents double-free — gpu_buf owns the memory.
++            unsafe extern "C" fn noop_free(_: *mut std::ffi::c_void) {}
++
++            let chunk_ptr = unsafe { gpu_base_ptr.add(seg.buffer_offset) as *mut std::ffi::c_void };
++            // SAFETY: chunk_ptr points within the SPDK-registered GPU region. noop_free is safe.
++            let seg_buf = unsafe {
++                DmaBuffer::from_raw(chunk_ptr, seg.length, noop_free, -1)
++                    .map_err(|e| DispatcherError::AllocationFailed(format!("GPU sub-view: {e}")))?
++            };
++            let seg_buf = Arc::new(Mutex::new(seg_buf));
++
++            channels
++                .command_tx
++                .send(Command::ReadSync {
++                    ns_id: 1,
++                    lba: seg.lba,
++                    buf: Arc::clone(&seg_buf),
++                })
++                .map_err(|_| DispatcherError::IoError("send ReadSync failed".into()))?;
++
++            match channels.completion_rx.recv() {
++                Ok(Completion::ReadDone { result, .. }) => {
++                    result.map_err(|e| {
++                        DispatcherError::IoError(format!("SSD read (P2P) failed: {e}"))
++                    })?;
++                }
++                Ok(other) => {
++                    return Err(DispatcherError::IoError(format!(
++                        "unexpected completion: {other:?}"
++                    )));
++                }
++                Err(_) => {
++                    return Err(DispatcherError::IoError(
++                        "completion channel disconnected".into(),
++                    ));
++                }
++            }
++        }
++
++        // Data is already on GPU — no dma_copy_to_device needed.
++        Ok(())
++    }
++
+     fn run_eviction_cycle(
+         dm: &Arc<dyn IDispatchMap + Send + Sync>,
+         extent_mgrs: &[Arc<ExtentManagerV2>],
+@@ -718,19 +857,37 @@ impl IDispatcher for DispatcherComponentV0 {
+                         ))
+                     }
+                     LookupResult::Staging { buffer } => {
++                        // Resolve the GPU destination address. For the P2P lookup path,
++                        // service.rs omits opening the handle (address = null, bytes provided).
++                        let (dev_ptr, opened_here) = if let Some(bytes) = &ipc_handle.cuda_ipc_handle_bytes {
++                            // Open the handle so we have a valid GPU pointer for dma_copy_to_device.
++                            let ptr = Self::open_cuda_ipc_from_bytes(bytes)
++                                .map_err(|e| DispatcherError::IoError(format!("IPC open (staging): {e}")))?;
++                            (ptr, true)
++                        } else {
++                            (ipc_handle.address as *mut std::ffi::c_void, false)
++                        };
++
+                         let copy_result = gpu.dma_copy_to_device(
+                             &buffer,
+-                            ipc_handle.address as *mut std::ffi::c_void,
++                            dev_ptr,
+                             ipc_handle.size as usize,
+                         );
+                         let _ = dm.release_read(key);
++                        if opened_here {
++                            // SAFETY: ptr was obtained from cudaIpcOpenMemHandle above.
++                            unsafe { gpu_services::cuda_ffi::cudaIpcCloseMemHandle(dev_ptr); }
++                        }
+                         copy_result.map_err(|e| {
+                             DispatcherError::IoError(format!("GPU DMA copy (staging→device) failed: {e}"))
+                         })
+                     }
+                     LookupResult::BlockDevice { offset } => {
+-                        let result =
+-                            self.read_from_block_device(key, offset, &ipc_handle, &gpu);
++                        let result = if ipc_handle.cuda_ipc_handle_bytes.is_some() {
++                            self.read_from_block_device_p2p(key, offset, &ipc_handle, &gpu)
++                        } else {
++                            self.read_from_block_device(key, offset, &ipc_handle, &gpu)
++                        };
+                         let _ = dm.release_read(key);
+                         result
+                     }
+diff --git a/components/interfaces/src/idispatcher.rs b/components/interfaces/src/idispatcher.rs
+index 060f4ea..d57e463 100644
+--- a/components/interfaces/src/idispatcher.rs
++++ b/components/interfaces/src/idispatcher.rs
+@@ -106,6 +106,7 @@ impl Default for DispatcherConfig {
+ /// let handle = IpcHandle {
+ ///     address: buf.as_mut_ptr(),
+ ///     size: 4096,
++///     cuda_ipc_handle_bytes: None,
+ /// };
+ /// assert_eq!(handle.size, 4096);
+ /// ```
+@@ -115,6 +116,8 @@ pub struct IpcHandle {
+     pub address: *mut u8,
+     /// Size of the data in bytes.
+     pub size: u32,
++    /// Raw 64-byte CUDA IPC handle bytes for P2P path (None for bounce path).
++    pub cuda_ipc_handle_bytes: Option<Vec<u8>>,
+ }
+ 
+ // SAFETY: GPU memory is accessible cross-thread via DMA engine.

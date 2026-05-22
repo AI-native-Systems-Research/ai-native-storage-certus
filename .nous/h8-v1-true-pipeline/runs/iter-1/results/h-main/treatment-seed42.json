@@ -1,0 +1,18 @@
+{
+  "condition": "treatment",
+  "arm": "h-main",
+  "dispatcher_version": "v1",
+  "patch": "patches/h-main.patch",
+  "description": "Double-buffered async pipeline: ReadAsync + cudaMemcpyAsync overlap",
+  "object_size_bytes": 4194304,
+  "num_objects": 10,
+  "bench_iterations": 1,
+  "memory_tier_avg_us": 540.0,
+  "ssd_tier_avg_us": 19220.3,
+  "ssd_tier_min_us": 19220.3,
+  "ssd_tier_max_us": 19220.3,
+  "ssd_tier_avg_gbs": 0.22,
+  "ssd_tier_peak_gbs": 0.22,
+  "ssd_memory_ratio": 35.6,
+  "raw_output": "Memory-tier 540.0 us/obj, SSD-tier 19220.3 us/obj, ratio 35.6x"
+}

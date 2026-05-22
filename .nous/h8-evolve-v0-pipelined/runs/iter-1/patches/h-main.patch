@@ -1,0 +1,388 @@
+diff --git a/components/dispatcher/v0/Cargo.toml b/components/dispatcher/v0/Cargo.toml
+index 298f826..ddee6fe 100644
+--- a/components/dispatcher/v0/Cargo.toml
++++ b/components/dispatcher/v0/Cargo.toml
+@@ -10,7 +10,7 @@ component-framework.workspace = true
+ component-core.workspace = true
+ component-macros.workspace = true
+ interfaces = { workspace = true, features = ["spdk"] }
+-gpu-services = { workspace = true, features = ["spdk"] }
++gpu-services = { workspace = true, features = ["gpu", "spdk"] }
+ spdk-env.workspace = true
+ block-device-spdk-nvme.workspace = true
+ block-device-spdk-nvme-v2.workspace = true
+diff --git a/components/dispatcher/v0/src/lib.rs b/components/dispatcher/v0/src/lib.rs
+index 39f02a6..84b2de0 100644
+--- a/components/dispatcher/v0/src/lib.rs
++++ b/components/dispatcher/v0/src/lib.rs
+@@ -11,9 +11,31 @@ mod background;
+ pub mod io_segmenter;
+ 
+ use std::collections::HashMap;
++use std::ffi::c_void;
+ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+ use std::sync::{Arc, Mutex};
+ 
++/// Holds the lazily-initialized state for the double-buffered pipelined read path.
++struct PipelineState {
++    /// Two pinned host buffers (cudaHostAlloc + spdk_mem_register), alternating ping-pong.
++    bufs: [DmaBuffer; 2],
++    /// CUDA stream used for all cudaMemcpyAsync calls in the pipeline.
++    stream: gpu_services::cuda_ffi::cudaStream_t,
++}
++
++// SAFETY: PipelineState is only accessed under the pipeline_state Mutex.
++unsafe impl Send for PipelineState {}
++
++impl Drop for PipelineState {
++    fn drop(&mut self) {
++        // SAFETY: stream was created by cudaStreamCreate and not yet destroyed.
++        unsafe {
++            gpu_services::cuda_ffi::cudaStreamDestroy(self.stream);
++        }
++        // bufs are dropped automatically — their free_fn calls spdk_mem_unregister + cudaFreeHost.
++    }
++}
++
+ use component_framework::define_component;
+ use interfaces::{
+     BlockDeviceVersion, CacheKey, Command, Completion, DmaAllocFn, DmaBuffer,
+@@ -72,6 +94,7 @@ define_component! {
+             data_drives: Mutex<Vec<DataDrive>>,
+             eviction_watermark: AtomicUsize,
+             pending_writes: Mutex<HashMap<CacheKey, PendingWrite>>,
++            pipeline_state: Mutex<Option<PipelineState>>,
+         },
+     }
+ }
+@@ -80,6 +103,9 @@ unsafe extern "C" fn libc_free(ptr: *mut std::ffi::c_void) {
+     unsafe { libc::free(ptr) };
+ }
+ 
++/// No-op free function for DmaBuffer wrappers that borrow memory owned elsewhere.
++unsafe extern "C" fn noop_free(_ptr: *mut std::ffi::c_void) {}
++
+ impl DispatcherComponentV0 {
+     fn log_info(&self, msg: &str) {
+         if let Ok(logger) = self.logger.get() {
+@@ -176,13 +202,80 @@ impl DispatcherComponentV0 {
+         Ok(())
+     }
+ 
++    /// Ensure the pipeline state is initialized, creating it lazily on first use.
++    fn ensure_pipeline_state(&self) -> Result<(), DispatcherError> {
++        let mut state = self.pipeline_state.lock().unwrap();
++        if state.is_some() {
++            return Ok(());
++        }
++
++        const CHUNK_SIZE: usize = 131072; // 128 KiB
++
++        // Allocate two pinned host buffers using cudaHostAlloc (CUDA_HOST_ALLOC_DEFAULT).
++        // These are dual-registered: CUDA-pinned for true async copy + SPDK for NVMe DMA.
++        let mut ptr0: *mut c_void = std::ptr::null_mut();
++        let mut ptr1: *mut c_void = std::ptr::null_mut();
++
++        let err = unsafe {
++            gpu_services::cuda_ffi::cudaHostAlloc(
++                &mut ptr0,
++                CHUNK_SIZE,
++                gpu_services::cuda_ffi::CUDA_HOST_ALLOC_DEFAULT,
++            )
++        };
++        if err != gpu_services::cuda_ffi::CUDA_SUCCESS {
++            return Err(DispatcherError::AllocationFailed(format!(
++                "cudaHostAlloc buf0 failed: {}",
++                gpu_services::cuda_ffi::cuda_error_string(err)
++            )));
++        }
++
++        let err = unsafe {
++            gpu_services::cuda_ffi::cudaHostAlloc(
++                &mut ptr1,
++                CHUNK_SIZE,
++                gpu_services::cuda_ffi::CUDA_HOST_ALLOC_DEFAULT,
++            )
++        };
++        if err != gpu_services::cuda_ffi::CUDA_SUCCESS {
++            unsafe { gpu_services::cuda_ffi::cudaFreeHost(ptr0) };
++            return Err(DispatcherError::AllocationFailed(format!(
++                "cudaHostAlloc buf1 failed: {}",
++                gpu_services::cuda_ffi::cuda_error_string(err)
++            )));
++        }
++
++        let buf0 = gpu_services::dma::create_spdk_dma_buffer_from_cuda_host_alloc(ptr0, CHUNK_SIZE)
++            .map_err(|e| DispatcherError::AllocationFailed(format!("pipeline buf0: {e}")))?;
++        let buf1 = gpu_services::dma::create_spdk_dma_buffer_from_cuda_host_alloc(ptr1, CHUNK_SIZE)
++            .map_err(|e| DispatcherError::AllocationFailed(format!("pipeline buf1: {e}")))?;
++
++        let mut stream: gpu_services::cuda_ffi::cudaStream_t = std::ptr::null_mut();
++        let err = unsafe { gpu_services::cuda_ffi::cudaStreamCreate(&mut stream) };
++        if err != gpu_services::cuda_ffi::CUDA_SUCCESS {
++            return Err(DispatcherError::AllocationFailed(format!(
++                "cudaStreamCreate failed: {}",
++                gpu_services::cuda_ffi::cuda_error_string(err)
++            )));
++        }
++
++        *state = Some(PipelineState {
++            bufs: [buf0, buf1],
++            stream,
++        });
++        Ok(())
++    }
++
+     fn read_from_block_device(
+         &self,
+         key: CacheKey,
+         offset: u64,
+         ipc_handle: &IpcHandle,
+-        gpu: &Arc<dyn IGpuServices + Send + Sync>,
++        _gpu: &Arc<dyn IGpuServices + Send + Sync>,
+     ) -> Result<(), DispatcherError> {
++        // Lazy-init the double-buffer pipeline state.
++        self.ensure_pipeline_state()?;
++
+         let drives = self.data_drives.lock().unwrap();
+         if drives.is_empty() {
+             return Err(DispatcherError::IoError(
+@@ -194,7 +287,6 @@ impl DispatcherComponentV0 {
+         let drive = &drives[idx];
+         let block_size = drive.block_dev_iface.block_size();
+         let max_transfer = drive.block_dev_iface.max_transfer_size();
+-        let numa_node = drive.block_dev_iface.numa_node();
+         let start_lba = offset / block_size as u64;
+         let total_bytes = ipc_handle.size as usize;
+         let aligned_bytes = total_bytes.next_multiple_of(block_size as usize);
+@@ -209,68 +301,158 @@ impl DispatcherComponentV0 {
+         let segments =
+             io_segmenter::segment_io(start_lba, aligned_bytes, max_transfer, block_size);
+ 
+-        // Allocate a contiguous DMA buffer for the full read, then copy to GPU.
+-        let read_buf = DmaBuffer::new(aligned_bytes, block_size as usize, Some(numa_node))
+-            .map_err(|e| {
+-                DispatcherError::AllocationFailed(format!("DMA read buffer: {e}"))
+-            })?;
+-
+-        for seg in &segments {
+-            let seg_buf =
+-                DmaBuffer::new(seg.length, block_size as usize, Some(numa_node)).map_err(
+-                    |e| DispatcherError::AllocationFailed(format!("DMA segment buffer: {e}")),
+-                )?;
+-            let seg_buf = Arc::new(Mutex::new(seg_buf));
+-
+-            channels
+-                .command_tx
++        if segments.is_empty() {
++            return Ok(());
++        }
++
++        let gpu_base = ipc_handle.address as *mut c_void;
++
++        // Acquire the pipeline state lock for the duration of this read.
++        let mut ps_guard = self.pipeline_state.lock().unwrap();
++        let ps = ps_guard.as_mut().unwrap();
++        let stream = ps.stream;
++
++        // Double-buffered pipeline:
++        //   - buf[current]  receives the current NVMe read
++        //   - buf[1-current] is the previously completed read being async-copied to GPU
++        //
++        // Step 1: submit read for segment[0] into buf[0].
++        let mut current: usize = 0;
++        {
++            let buf_ptr = ps.bufs[current].as_ptr();
++            let buf_arc = Arc::new(Mutex::new(
++                // SAFETY: buf_ptr is a valid pinned buffer owned by ps.bufs[current].
++                // We hold ps_guard for the entire pipeline, so it won't be freed.
++                // The Arc<Mutex<DmaBuffer>> wrapper does NOT own the memory (noop free),
++                // so we avoid double-free. The real owner is ps.bufs[current].
++                unsafe {
++                    DmaBuffer::from_raw(
++                        buf_ptr as *mut c_void,
++                        segments[0].length,
++                        noop_free,
++                        -1,
++                    ).map_err(|e| DispatcherError::AllocationFailed(format!("pipeline wrapper: {e}")))?
++                },
++            ));
++            channels.command_tx
+                 .send(Command::ReadSync {
+                     ns_id: 1,
+-                    lba: seg.lba,
+-                    buf: Arc::clone(&seg_buf),
++                    lba: segments[0].lba,
++                    buf: buf_arc,
+                 })
+-                .map_err(|_| {
+-                    DispatcherError::IoError("send ReadSync failed".into())
+-                })?;
++                .map_err(|_| DispatcherError::IoError("send ReadSync chunk[0] failed".into()))?;
++        }
+ 
++        // Steps 2..N: for each subsequent segment, wait for current read to complete,
++        // launch async GPU copy of the completed buffer, then submit the next read
++        // into the other buffer.
++        for i in 1..segments.len() {
++            // Wait for chunk[i-1] read to complete.
+             match channels.completion_rx.recv() {
+                 Ok(Completion::ReadDone { result, .. }) => {
+-                    result.map_err(|e| {
+-                        DispatcherError::IoError(format!("SSD read failed: {e}"))
+-                    })?;
++                    result.map_err(|e| DispatcherError::IoError(format!("SSD read chunk[{}] failed: {e}", i - 1)))?;
+                 }
+                 Ok(other) => {
+-                    return Err(DispatcherError::IoError(format!(
+-                        "unexpected completion: {other:?}"
+-                    )));
++                    return Err(DispatcherError::IoError(format!("unexpected completion: {other:?}")));
+                 }
+                 Err(_) => {
+-                    return Err(DispatcherError::IoError(
+-                        "completion channel disconnected".into(),
+-                    ));
++                    return Err(DispatcherError::IoError("completion channel disconnected".into()));
+                 }
+             }
+ 
+-            // Copy segment data into the contiguous read buffer.
+-            let guard = seg_buf.lock().unwrap();
+-            unsafe {
+-                std::ptr::copy_nonoverlapping(
+-                    guard.as_ptr() as *const u8,
+-                    (read_buf.as_ptr() as *mut u8).add(seg.buffer_offset),
+-                    seg.length,
+-                );
++            // Async copy completed chunk[i-1] to GPU (non-blocking — copy engine runs independently).
++            let seg_prev = &segments[i - 1];
++            let copy_len = seg_prev.length.min(total_bytes.saturating_sub(seg_prev.buffer_offset));
++            if copy_len > 0 {
++                // SAFETY: gpu_base + buffer_offset is within the GPU allocation.
++                // ps.bufs[current].as_ptr() is the cudaHostAlloc buffer filled by the just-completed read.
++                let err = unsafe {
++                    gpu_services::cuda_ffi::cudaMemcpyAsync(
++                        (gpu_base as *mut u8).add(seg_prev.buffer_offset) as *mut c_void,
++                        ps.bufs[current].as_ptr() as *const c_void,
++                        copy_len,
++                        gpu_services::cuda_ffi::CUDA_MEMCPY_HOST_TO_DEVICE,
++                        stream,
++                    )
++                };
++                if err != gpu_services::cuda_ffi::CUDA_SUCCESS {
++                    return Err(DispatcherError::IoError(format!(
++                        "cudaMemcpyAsync chunk[{}] failed: {}",
++                        i - 1,
++                        gpu_services::cuda_ffi::cuda_error_string(err)
++                    )));
++                }
++            }
++
++            // Submit read for chunk[i] into the other buffer (ping-pong).
++            let next = 1 - current;
++            let buf_ptr = ps.bufs[next].as_ptr();
++            let buf_arc = Arc::new(Mutex::new(
++                // SAFETY: same rationale as above — noop_free wrapper, real owner is ps.bufs[next].
++                unsafe {
++                    DmaBuffer::from_raw(
++                        buf_ptr as *mut c_void,
++                        segments[i].length,
++                        noop_free,
++                        -1,
++                    ).map_err(|e| DispatcherError::AllocationFailed(format!("pipeline wrapper: {e}")))?
++                },
++            ));
++            channels.command_tx
++                .send(Command::ReadSync {
++                    ns_id: 1,
++                    lba: segments[i].lba,
++                    buf: buf_arc,
++                })
++                .map_err(|_| DispatcherError::IoError(format!("send ReadSync chunk[{i}] failed")))?;
++
++            current = next;
++        }
++
++        // Wait for the last read to complete.
++        match channels.completion_rx.recv() {
++            Ok(Completion::ReadDone { result, .. }) => {
++                result.map_err(|e| DispatcherError::IoError(format!("SSD read last chunk failed: {e}")))?;
++            }
++            Ok(other) => {
++                return Err(DispatcherError::IoError(format!("unexpected completion: {other:?}")));
++            }
++            Err(_) => {
++                return Err(DispatcherError::IoError("completion channel disconnected".into()));
+             }
+         }
+ 
+-        // DMA copy the assembled data to the GPU/caller.
+-        gpu.dma_copy_to_device(
+-            &read_buf,
+-            ipc_handle.address as *mut std::ffi::c_void,
+-            total_bytes,
+-        )
+-        .map_err(|e| {
+-            DispatcherError::IoError(format!("GPU DMA copy (SSD→device) failed: {e}"))
+-        })?;
++        // Async copy the last chunk to GPU.
++        let seg_last = segments.last().unwrap();
++        let copy_len = seg_last.length.min(total_bytes.saturating_sub(seg_last.buffer_offset));
++        if copy_len > 0 {
++            // SAFETY: same as above.
++            let err = unsafe {
++                gpu_services::cuda_ffi::cudaMemcpyAsync(
++                    (gpu_base as *mut u8).add(seg_last.buffer_offset) as *mut c_void,
++                    ps.bufs[current].as_ptr() as *const c_void,
++                    copy_len,
++                    gpu_services::cuda_ffi::CUDA_MEMCPY_HOST_TO_DEVICE,
++                    stream,
++                )
++            };
++            if err != gpu_services::cuda_ffi::CUDA_SUCCESS {
++                return Err(DispatcherError::IoError(format!(
++                    "cudaMemcpyAsync last chunk failed: {}",
++                    gpu_services::cuda_ffi::cuda_error_string(err)
++                )));
++            }
++        }
++
++        // Wait for all async copies to finish before returning.
++        // SAFETY: stream is a valid CUDA stream created by cudaStreamCreate.
++        let err = unsafe { gpu_services::cuda_ffi::cudaStreamSynchronize(stream) };
++        if err != gpu_services::cuda_ffi::CUDA_SUCCESS {
++            return Err(DispatcherError::IoError(format!(
++                "cudaStreamSynchronize failed: {}",
++                gpu_services::cuda_ffi::cuda_error_string(err)
++            )));
++        }
+ 
+         Ok(())
+     }
+diff --git a/components/gpu-services/v0/src/cuda_ffi.rs b/components/gpu-services/v0/src/cuda_ffi.rs
+index bb06af6..173251d 100644
+--- a/components/gpu-services/v0/src/cuda_ffi.rs
++++ b/components/gpu-services/v0/src/cuda_ffi.rs
+@@ -108,8 +108,21 @@ extern "C" {
+     pub fn cudaGetErrorString(error: cudaError_t) -> *const c_char;
+     pub fn cudaDeviceGetPCIBusId(pci_bus_id: *mut c_char, len: c_int, device: c_int)
+         -> cudaError_t;
++    pub fn cudaStreamCreate(p_stream: *mut cudaStream_t) -> cudaError_t;
++    pub fn cudaStreamDestroy(stream: cudaStream_t) -> cudaError_t;
++    pub fn cudaStreamSynchronize(stream: cudaStream_t) -> cudaError_t;
++    pub fn cudaMemcpyAsync(
++        dst: *mut c_void,
++        src: *const c_void,
++        count: usize,
++        kind: c_int,
++        stream: cudaStream_t,
++    ) -> cudaError_t;
+ }
+ 
++/// Opaque CUDA stream handle.
++pub type cudaStream_t = *mut c_void;
++
+ /// Translate a CUDA error code to a descriptive Rust String.
+ pub fn cuda_error_string(err: cudaError_t) -> String {
+     if err == CUDA_SUCCESS {

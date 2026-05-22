@@ -1,0 +1,3 @@
+Validation passes. Here's the summary:
+
+**Iteration 2 design complete.** The hypothesis bundle addresses iter-1's magnitude failure by replacing `cudaHostRegistered` mmap'd memory (which falls back to synchronous GPU copies) with `cudaHostAlloc`-allocated staging buffers that enable true asynchronous DMA. The key innovation is using `create_spdk_dma_buffer_from_cuda_host_alloc` to create buffers that serve triple duty: NVMe DMA target (SPDK-registered), async GPU copy source (natively CUDA-pinned), and source for mem-tier fill (CPU-accessible). Two arms: h-main tests the cudaHostAlloc staging pipeline (predicting >25% speedup vs sequential), h-control-negative validates P2P ordering consistency.

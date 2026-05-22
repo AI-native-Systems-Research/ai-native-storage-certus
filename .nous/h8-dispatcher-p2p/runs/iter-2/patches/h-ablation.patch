@@ -1,0 +1,233 @@
+diff --git a/components/gpu-services/v0/src/bin/p2p_server.rs b/components/gpu-services/v0/src/bin/p2p_server.rs
+index a54c740..0092210 100644
+--- a/components/gpu-services/v0/src/bin/p2p_server.rs
++++ b/components/gpu-services/v0/src/bin/p2p_server.rs
+@@ -33,6 +33,12 @@ enum TransferMode {
+     P2p,
+     /// NVMe → per-request GDRCopy pin/unpin → D2D → client GPU (cold baseline)
+     P2pCold,
++    /// NVMe → pre-pinned GPU staging, sequential ReadSync per chunk → D2D → client GPU
++    #[value(name = "p2p-seq")]
++    P2pSeq,
++    /// NVMe → host bounce buffers, sequential ReadSync per chunk → cudaMemcpy H2D → client GPU
++    #[value(name = "bounce-seq")]
++    BounceSeq,
+ }
+ 
+ #[derive(Parser)]
+@@ -322,6 +328,49 @@ fn do_chunked_read(
+     Ok(())
+ }
+ 
++/// Issue sequential (one-at-a-time) NVMe reads via ReadSync for all chunks.
++/// Matches the dispatcher's pipeline.rs pattern: each chunk completes before the next starts.
++fn do_chunked_read_seq(
++    ctx: &ServerContext,
++    dma_bufs: &[Arc<Mutex<interfaces::DmaBuffer>>],
++    base_lba: u64,
++    chunk_size: usize,
++) -> Result<(), String> {
++    let sectors_per_chunk = chunk_size / ctx.sector_size;
++
++    let ibd = query::<dyn IBlockDevice + Send + Sync>(&*ctx.block_dev)
++        .ok_or("IBlockDevice query failed".to_string())?;
++    let channels = ibd
++        .connect_client()
++        .map_err(|e| format!("connect_client: {e}"))?;
++
++    for (i, buf) in dma_bufs.iter().enumerate() {
++        let lba = base_lba + (i as u64 * sectors_per_chunk as u64);
++        channels
++            .command_tx
++            .send(interfaces::Command::ReadSync {
++                ns_id: ctx.ns_id,
++                lba,
++                buf: Arc::clone(buf),
++            })
++            .map_err(|e| format!("ReadSync send chunk #{i}: {e}"))?;
++
++        match channels.completion_rx.recv() {
++            Ok(interfaces::Completion::ReadDone { result, .. }) => {
++                result.map_err(|e| format!("NVMe sync read chunk #{i}: {e}"))?;
++            }
++            Ok(other) => {
++                return Err(format!("unexpected completion chunk #{i}: {other:?}"));
++            }
++            Err(e) => {
++                return Err(format!("recv chunk #{i}: {e}"));
++            }
++        }
++    }
++
++    Ok(())
++}
++
+ fn parse_client_payload(stream: &mut UnixStream) -> Result<([u8; 64], usize), String> {
+     let mut reader = std::io::BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
+     let mut line = String::new();
+@@ -489,6 +538,131 @@ fn handle_p2p(
+     Ok(format!("OK {} bytes (p2p, {} chunks)", size, num_chunks))
+ }
+ 
++/// P2P sequential mode: pre-pinned chunk pool + sequential ReadSync per chunk (matches dispatcher pattern).
++fn handle_p2p_seq(
++    stream: &mut UnixStream,
++    ctx: &ServerContext,
++    pool: &ChunkPool,
++) -> Result<String, String> {
++    let (ipc_handle_bytes, size) = parse_client_payload(stream)?;
++
++    let total_capacity: usize = pool.buffers.iter().map(|b| b.capacity).sum();
++    if size > total_capacity {
++        return Err(format!(
++            "requested {} exceeds pool capacity {}",
++            size, total_capacity
++        ));
++    }
++
++    let num_chunks = (size + pool.chunk_size - 1) / pool.chunk_size;
++    let client_dev_ptr = open_ipc_handle(&ipc_handle_bytes)?;
++
++    let dma_bufs: Vec<Arc<Mutex<interfaces::DmaBuffer>>> = pool.buffers[..num_chunks]
++        .iter()
++        .map(|b| Arc::clone(&b.dma_buf))
++        .collect();
++
++    // Sequential NVMe reads into pre-pinned GPU staging chunks (one at a time).
++    if let Err(e) = do_chunked_read_seq(ctx, &dma_bufs, 0, pool.chunk_size) {
++        unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
++        return Err(e);
++    }
++
++    // D2D copy per chunk: staging chunk → client at correct offset.
++    for (i, staging_buf) in pool.buffers[..num_chunks].iter().enumerate() {
++        let offset = i * pool.chunk_size;
++        let this_chunk = std::cmp::min(pool.chunk_size, size - offset);
++        let err = unsafe {
++            cuda_ffi::cudaMemcpy(
++                (client_dev_ptr as *mut u8).add(offset) as *mut c_void,
++                staging_buf.dev_ptr as *const c_void,
++                this_chunk,
++                cuda_ffi::CUDA_MEMCPY_DEVICE_TO_DEVICE,
++            )
++        };
++        if err != cuda_ffi::CUDA_SUCCESS {
++            unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
++            return Err(format!(
++                "cudaMemcpy D2D chunk #{i}: {}",
++                cuda_ffi::cuda_error_string(err)
++            ));
++        }
++    }
++
++    unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
++
++    Ok(format!(
++        "OK {} bytes (p2p-seq, {} chunks)",
++        size, num_chunks
++    ))
++}
++
++/// Bounce sequential mode: host DMA buffers + sequential ReadSync per chunk + cudaMemcpy H2D.
++/// Functionally equivalent to the dispatcher's current pipeline.rs pattern.
++fn handle_bounce_seq(
++    stream: &mut UnixStream,
++    ctx: &ServerContext,
++    chunk_size: usize,
++) -> Result<String, String> {
++    let (ipc_handle_bytes, size) = parse_client_payload(stream)?;
++    let client_dev_ptr = open_ipc_handle(&ipc_handle_bytes)?;
++
++    let num_chunks = (size + chunk_size - 1) / chunk_size;
++
++    // Allocate one host DMA buffer per chunk from SPDK hugepages.
++    let mut host_bufs: Vec<Arc<Mutex<interfaces::DmaBuffer>>> = Vec::with_capacity(num_chunks);
++    for i in 0..num_chunks {
++        let this_chunk = std::cmp::min(chunk_size, size - i * chunk_size);
++        match interfaces::DmaBuffer::new(this_chunk, ctx.sector_size, None) {
++            Ok(buf) => host_bufs.push(Arc::new(Mutex::new(buf))),
++            Err(e) => {
++                drop(host_bufs);
++                unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
++                return Err(format!("DMA alloc chunk #{i}: {e}"));
++            }
++        }
++    }
++
++    // Sequential NVMe reads into host DMA buffers (one at a time, matching dispatcher).
++    if let Err(e) = do_chunked_read_seq(ctx, &host_bufs, 0, chunk_size) {
++        drop(host_bufs);
++        unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
++        return Err(e);
++    }
++
++    // cudaMemcpy H2D per chunk at correct offset.
++    for (i, buf) in host_bufs.iter().enumerate() {
++        let offset = i * chunk_size;
++        let this_chunk = std::cmp::min(chunk_size, size - offset);
++        let buf_guard = buf.lock().unwrap();
++        let err = unsafe {
++            cuda_ffi::cudaMemcpy(
++                (client_dev_ptr as *mut u8).add(offset) as *mut c_void,
++                buf_guard.as_ptr() as *const c_void,
++                this_chunk,
++                cuda_ffi::CUDA_MEMCPY_HOST_TO_DEVICE,
++            )
++        };
++        drop(buf_guard);
++        if err != cuda_ffi::CUDA_SUCCESS {
++            drop(host_bufs);
++            unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
++            return Err(format!(
++                "cudaMemcpy H2D chunk #{i}: {}",
++                cuda_ffi::cuda_error_string(err)
++            ));
++        }
++    }
++
++    drop(host_bufs);
++    unsafe { cuda_ffi::cudaIpcCloseMemHandle(client_dev_ptr) };
++
++    Ok(format!(
++        "OK {} bytes (bounce-seq, {} chunks)",
++        size, num_chunks
++    ))
++}
++
+ /// P2P cold mode: per-request GDRCopy pin/unpin (baseline, measures setup overhead).
+ fn handle_p2p_cold(
+     stream: &mut UnixStream,
+@@ -578,9 +752,9 @@ fn main() {
+         }
+     };
+ 
+-    // Pre-allocate chunk pool for p2p mode.
++    // Pre-allocate chunk pool for p2p and p2p-seq modes.
+     let chunk_pool = match cli.mode {
+-        TransferMode::P2p => {
++        TransferMode::P2p | TransferMode::P2pSeq => {
+             let num_chunks = (cli.staging_size + cli.chunk_size - 1) / cli.chunk_size;
+             eprintln!(
+                 "Pre-allocating chunk pool: {} x {} byte GPU staging buffers...",
+@@ -607,6 +781,8 @@ fn main() {
+         TransferMode::Bounce => "bounce",
+         TransferMode::P2p => "p2p",
+         TransferMode::P2pCold => "p2p-cold",
++        TransferMode::P2pSeq => "p2p-seq",
++        TransferMode::BounceSeq => "bounce-seq",
+     };
+ 
+     // Signal handling.
+@@ -649,6 +825,12 @@ fn main() {
+                     TransferMode::P2pCold => {
+                         handle_p2p_cold(&mut stream, &ctx, cli.chunk_size)
+                     }
++                    TransferMode::P2pSeq => {
++                        handle_p2p_seq(&mut stream, &ctx, chunk_pool.as_ref().unwrap())
++                    }
++                    TransferMode::BounceSeq => {
++                        handle_bounce_seq(&mut stream, &ctx, cli.chunk_size)
++                    }
+                 };
+                 match result {
+                     Ok(msg) => {

@@ -1,0 +1,58 @@
+[
+  {
+    "id": "RP-1",
+    "statement": "SPDK hugepage DMA buffers satisfy CUDA's pinned-memory requirement for cudaMemcpyAsync: async H2D dispatch reduces copy-phase time from 826μs (synchronous) to 112μs (async dispatch) for 32×128KiB chunks, confirming true non-blocking operation.",
+    "confidence": "high",
+    "regime": "SPDK DmaBuffer allocations (hugepage-backed) + CUDA H2D memcpy on A100/V100 class GPUs, 128KiB chunk size",
+    "evidence": ["iteration-1-h-main", "iteration-1-h-control-negative"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "SPDK allocates DMA buffers from pre-pinned hugepages (mlock'd physical memory registered with the IOMMU). CUDA's cudaMemcpyAsync requires page-locked host memory for true async operation. SPDK hugepages satisfy this constraint without requiring explicit cudaHostRegister. The 826μs → 112μs reduction in copy_us across 32 chunks confirms the GPU copy engine processes each 128KiB H2D copy in ~3.5μs dispatch latency, with actual data transfer running asynchronously on the copy engine while CPU continues work.",
+    "applicability_bounds": "Applies to SPDK DmaBuffer from spdk_malloc/hugepages. Does not apply to regular malloc buffers. Does not apply if IOMMU is disabled or hugepages are not pre-registered. cudaHostRegister is not required but does not hurt.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-2",
+    "statement": "In the current IBlockDevice implementation, each connect_client() call introduces ~13-17μs overhead. Per-chunk pipelining that calls connect_client() for each of 32 chunks costs ~544μs additional latency vs BatchSubmit (which calls connect_client() once), negating a large fraction of the pipeline speedup.",
+    "confidence": "high",
+    "regime": "block-device-spdk-nvme v1, IBlockDevice.connect_client() + ReadAsync, 32 chunks per 4MiB transfer",
+    "evidence": ["iteration-1-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "connect_client() creates a new SPDK I/O channel pair (command_tx + completion_rx) for each client. Channel creation has per-operation overhead (likely SPDK thread message passing for channel allocation). BatchSubmit amortizes this by using one channel for all 32 reads, while the pipelined implementation creates one channel per chunk. Measured: pipelined read_us=1204μs vs sequential batch read_us=649μs for the same 32 NVMe reads, difference=555μs ÷ 32 chunks = ~17μs per extra connect_client() call.",
+    "applicability_bounds": "Applies when pipelining requires per-chunk channel creation. Can be eliminated by reusing a single channel across all chunks in the pipeline loop. Does not apply to BatchSubmit which naturally reuses one channel.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-3",
+    "statement": "Pipelined bounce (NVMe reads overlapped with async H2D copies) achieves 17% throughput improvement (1440→1764 MB/s) over sequential bounce, but cannot match P2P warm (3082 MB/s) primarily because NVMe PCIe reads and H2D copies run on the same PCIe bus segment, competing for bandwidth.",
+    "confidence": "medium",
+    "regime": "4MiB transfer (32×128KiB), bounce vs P2P warm on NVMe PCIe 4.0 + A100/V100 GPU",
+    "evidence": ["iteration-1-h-main", "iteration-1-h-control-negative"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "Even with perfect pipelining, bounce mode must transfer 4MiB over PCIe twice (NVMe→CPU DMA, then CPU→GPU H2D), while P2P only transfers once (NVMe→GPU staging via GDRCopy BAR1, then D2D). The theoretical best for pipelined bounce is max(read_time, copy_time) ≈ max(790, 819) ≈ 819μs server-side, but P2P warm achieves 771μs total including a D2D copy. The fundamental limit is double PCIe bandwidth consumption in bounce mode vs single in P2P.",
+    "applicability_bounds": "This principle holds when PCIe bandwidth is the bottleneck. At smaller transfer sizes (where PCIe overhead is not limiting), pipelining overhead may dominate. At very large transfers, the double-bandwidth penalty of bounce becomes even more pronounced relative to P2P.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-4",
+    "statement": "A single CUDA stream is not a bottleneck for pipelined H2D copies at 128KiB chunk size: 1-stream and 2-stream pipelined bounce achieve identical throughput (1764 vs 1774 MB/s, within 1%). The GPU H2D copy engine processes 128KiB chunks faster than the NVMe read rate, so adding streams provides zero benefit.",
+    "confidence": "high",
+    "regime": "32×128KiB H2D async copies, CUDA stream concurrency, A100/V100 class GPU",
+    "evidence": ["iteration-1-h-robustness"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "Per-chunk H2D dispatch takes ~3.5μs (112μs / 32 chunks). Per-chunk NVMe read takes ~37.6μs with per-chunk connect_client() (1204μs / 32). The copy rate is ~10x faster than the read rate, so the CUDA stream queue is empty before the next chunk arrives. A second stream cannot overlap work that isn't queued. This confirms NVMe reads (not GPU copies) are the pipeline's rate-limiting step at 128KiB chunk sizes.",
+    "applicability_bounds": "Holds at 128KiB chunks where H2D bandwidth >> per-chunk NVMe throughput. Multi-stream might help at very large chunks where per-chunk H2D time exceeds per-chunk NVMe read time. Not applicable to D2D copies (same bandwidth class as NVMe reads).",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  }
+]

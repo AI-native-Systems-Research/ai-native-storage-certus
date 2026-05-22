@@ -1,0 +1,143 @@
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling unicode-ident v1.0.24
+   Compiling libc v0.2.186
+   Compiling crossbeam-utils v0.8.21
+   Compiling glob v0.3.3
+   Compiling prettyplease v0.2.37
+   Compiling minimal-lexical v0.2.1
+   Compiling cfg-if v1.0.4
+   Compiling regex-syntax v0.8.10
+   Compiling memchr v2.8.0
+   Compiling either v1.16.0
+   Compiling bindgen v0.71.1
+   Compiling scopeguard v1.2.0
+   Compiling bitflags v2.11.1
+   Compiling shlex v1.3.0
+   Compiling log v0.4.29
+   Compiling rustc-hash v2.1.2
+   Compiling futures-core v0.3.32
+   Compiling pin-project-lite v0.2.17
+   Compiling rtrb v0.3.4
+   Compiling autocfg v1.5.0
+   Compiling serde_core v1.0.228
+   Compiling utf8parse v0.2.2
+   Compiling colorchoice v1.0.5
+   Compiling anstyle-query v1.1.5
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling iana-time-zone v0.1.65
+   Compiling anstyle v1.0.14
+   Compiling zerocopy v0.8.48
+   Compiling heck v0.5.0
+   Compiling parking_lot_core v0.9.12
+   Compiling strsim v0.11.1
+   Compiling zmij v1.0.21
+   Compiling clap_lex v1.1.0
+   Compiling serde v1.0.228
+   Compiling smallvec v1.15.1
+   Compiling rayon-core v1.13.0
+   Compiling crc32fast v1.5.0
+   Compiling serde_json v1.0.150
+   Compiling ciborium-io v0.2.2
+   Compiling gpu-services v0.1.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/gpu-services/v0)
+   Compiling plotters-backend v0.3.7
+   Compiling itoa v1.0.18
+   Compiling same-file v1.0.6
+   Compiling base64 v0.22.1
+   Compiling cast v0.3.0
+   Compiling anes v0.1.6
+   Compiling once_cell v1.21.4
+   Compiling oorandom v11.1.5
+   Compiling libloading v0.8.9
+   Compiling lock_api v0.4.14
+   Compiling tokio v1.52.3
+   Compiling walkdir v2.5.0
+   Compiling anstyle-parse v1.0.0
+   Compiling itertools v0.13.0
+   Compiling clang-sys v1.8.1
+   Compiling itertools v0.10.5
+   Compiling plotters-svg v0.3.7
+   Compiling nom v7.1.3
+   Compiling num-traits v0.2.19
+   Compiling kanal v0.1.1
+   Compiling anstream v1.0.0
+   Compiling clap_builder v4.6.0
+   Compiling crossbeam-channel v0.5.15
+   Compiling crossbeam-epoch v0.9.18
+   Compiling syn v2.0.117
+   Compiling regex-automata v0.4.14
+   Compiling crossbeam-deque v0.8.6
+   Compiling chrono v0.4.44
+   Compiling plotters v0.3.7
+   Compiling component-core v0.1.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/component-framework/crates/component-core)
+   Compiling is-terminal v0.4.17
+   Compiling parking_lot v0.12.5
+   Compiling rayon v1.12.0
+   Compiling criterion-plot v0.5.0
+   Compiling cexpr v0.6.0
+   Compiling regex v1.12.3
+   Compiling component-macros v0.1.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/component-framework/crates/component-macros)
+   Compiling zerocopy-derive v0.8.48
+   Compiling clap_derive v4.6.1
+   Compiling serde_derive v1.0.228
+   Compiling component-framework v0.1.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/component-framework/crates/component-framework)
+   Compiling clap v4.6.1
+   Compiling tinytemplate v1.2.1
+   Compiling spdk-sys v0.1.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/spdk-sys)
+   Compiling half v2.7.1
+   Compiling ciborium-ll v0.2.2
+   Compiling ciborium v0.2.2
+   Compiling criterion v0.5.1
+   Compiling interfaces v0.1.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/interfaces)
+   Compiling spdk-env v0.1.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/spdk-env)
+   Compiling logger v0.1.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/logger/v1)
+   Compiling memory-tier v0.1.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/memory-tier/v0)
+   Compiling extent-manager-v2 v0.1.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/extent-manager/v2)
+   Compiling block-device-spdk-nvme v0.1.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/block-device-spdk-nvme/v1)
+   Compiling block-device-spdk-nvme-v2 v0.2.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/block-device-spdk-nvme/v2)
+   Compiling dispatcher-v1 v1.0.0 (/home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-1fc1014b/components/dispatcher/v1)
+    Finished `bench` profile [optimized] target(s) in 15.15s
+     Running benches/dispatcher_hw_benchmark.rs (/tmp/certus-target/release/deps/dispatcher_hw_benchmark-6ae13d41ac1db2e0)
+Initializing hardware stack...
+[spdk-env] Pre-flight checks passed. Initializing SPDK/DPDK environment...
+[spdk-env] SPDK/DPDK environment initialized. Enumerating devices...
+[spdk-env] Device enumeration complete. Found 7 device(s).
+  NVMe devices: ["0000:61:00.0", "0000:62:00.0", "0000:63:00.0", "0000:64:00.0", "0000:c1:00.0", "0000:c2:00.0", "0000:c3:00.0"]
+  GPU: 2 device(s)
+    [0] NVIDIA A30 (24164 MiB)
+  Memory-tier: 512 MiB pool
+block-device-spdk-nvme v2: controller ptr = 0x20007fffb140, numa = 0
+block-device-spdk-nvme v2: controller ptr = 0x20007fccf440, numa = 0
+block-device-spdk-nvme v2: controller ptr = 0x20007f9a4240, numa = 0
+block-device-spdk-nvme v2: controller ptr = 0x20007f679440, numa = 0
+block-device-spdk-nvme v2: controller ptr = 0x20007f355440, numa = 0
+block-device-spdk-nvme v2: controller ptr = 0x20007f031440, numa = 0
+
+=== Dispatcher HW Benchmark: Warm & Cold Lookup ===
+  warmup:   5 iterations
+  measured: 50 iterations
+  pool:     512 MiB
+
+  benchmarking 128 KiB (cold) ... done
+  benchmarking 128 KiB (warm) ... done
+  benchmarking 512 KiB (cold) ... done
+  benchmarking 512 KiB (warm) ... done
+  benchmarking 1024 KiB (cold) ... done
+  benchmarking 1024 KiB (warm) ... done
+  benchmarking 4096 KiB (cold) ... done
+  benchmarking 4096 KiB (warm) ... done
+  benchmarking 16384 KiB (cold) ... done
+  benchmarking 16384 KiB (warm) ... done
+
+--- Results Summary ---
+               cold_128KiB |      128 KiB | mean    2254.7 us | min     422.4 us | p50     427.8 us | p99   14940.2 us | max   14940.2 us |     55.4 MB/s
+               warm_128KiB |      128 KiB | mean      21.5 us | min      20.9 us | p50      21.4 us | p99      24.2 us | max      24.2 us |   5804.7 MB/s
+               cold_512KiB |      512 KiB | mean    2696.1 us | min     523.5 us | p50     529.0 us | p99   15002.0 us | max   15002.0 us |    185.5 MB/s
+               warm_512KiB |      512 KiB | mean      52.5 us | min      51.6 us | p50      52.4 us | p99      55.3 us | max      55.3 us |   9519.9 MB/s
+              cold_1024KiB |     1024 KiB | mean    1732.4 us | min     372.5 us | p50     377.9 us | p99    9632.1 us | max    9632.1 us |    577.2 MB/s
+              warm_1024KiB |     1024 KiB | mean      94.2 us | min      93.2 us | p50      94.2 us | p99      95.6 us | max      95.6 us |  10618.8 MB/s
+              cold_4096KiB |     4096 KiB | mean    3678.7 us | min     832.2 us | p50     971.5 us | p99   17610.9 us | max   17610.9 us |   1087.4 MB/s
+              warm_4096KiB |     4096 KiB | mean     286.5 us | min     207.3 us | p50     207.5 us | p99    4145.8 us | max    4145.8 us |  13963.8 MB/s
+             cold_16384KiB |    16384 KiB | mean   11855.5 us | min    2745.7 us | p50   12204.9 us | p99   22155.5 us | max   22155.5 us |   1349.6 MB/s
+             warm_16384KiB |    16384 KiB | mean    5407.0 us | min     752.6 us | p50    1092.0 us | p99   27234.5 us | max   27234.5 us |   2959.1 MB/s
+

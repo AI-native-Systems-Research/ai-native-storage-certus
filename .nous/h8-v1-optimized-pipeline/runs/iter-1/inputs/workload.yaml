@@ -1,0 +1,14 @@
+object_size_bytes: 4194304
+num_objects: 20
+iterations: 1
+server_pci_metadata: "0000:63:00.0"
+server_pci_data: "0000:64:00.0"
+dispatcher_version: "v1"
+server_binary: "target/debug/certus-server"
+client_script: "apps/certus-server/python-client/test_client.py"
+bench_cmd_args: "--bench-only --bench-object-size 4194304 --bench-num-objects 20 --bench-iterations 1"
+notes: |
+  Use --bench-iterations 1 to get pure SSD-tier latency.
+  With multiple iterations, objects get promoted to memory-tier after first access,
+  making subsequent iterations measure memory-tier latency and distorting the average.
+  Ring size limited to 2 due to SPDK qpair submission limit (rc=-12 at ring_size>=3).

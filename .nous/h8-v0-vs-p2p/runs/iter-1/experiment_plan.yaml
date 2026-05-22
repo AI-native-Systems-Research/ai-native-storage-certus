@@ -1,0 +1,159 @@
+metadata:
+  iteration: 1
+  bundle_ref: "runs/iter-1/bundle.yaml"
+  description: >
+    Dispatcher v0 bounce vs P2P sequential lookup benchmark.
+    All conditions run through certus-server with --dispatcher-version v0.
+    Python client at apps/certus-server/python-client/test_client.py is the harness.
+    Server must be started and stopped between each condition to isolate state.
+    Results captured by redirecting client stdout to JSON files.
+
+setup:
+  - cmd: "RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server"
+    description: "Build certus-server (bounce baseline, no patch)"
+  - cmd: "lsmod | grep nvidia_peermem && lsmod | grep gdrdrv"
+    description: "Verify kernel modules required for P2P are loaded"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# h-main: Bounce (A) vs P2P (B) for 4 MiB objects on SSD tier
+# ─────────────────────────────────────────────────────────────────────────────
+arms:
+  - arm_id: "h-main"
+    description: "Compare bounce vs P2P for 4 MiB SSD-tier lookups"
+    conditions:
+
+      # ── Condition A: Bounce baseline (no patch) ────────────────────────────
+      - name: "baseline-bounce-4mib"
+        description: "Existing bounce path (sequential ReadSync + dma_copy_to_device)"
+        server_cmd: >
+          rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 &&
+          LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+          ./target/debug/certus-server
+            --metadata-pci 0000:63:00.0
+            --data-pci 0000:63:00.0
+            --dispatcher-version v0
+            --listen 0.0.0.0:50051
+        client_cmd: >
+          cd apps/certus-server/python-client &&
+          LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+          python3 test_client.py
+            --server localhost:50051
+            --bench
+            --bench-object-size 4194304
+            --bench-num-objects 10
+            --bench-iterations 20
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v0-vs-p2p/runs/iter-1/results/h-main/baseline-bounce-4mib.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-v0-vs-p2p/runs/iter-1/inputs/workload.yaml"
+        patch: null
+
+      # ── Condition B: P2P treatment ─────────────────────────────────────────
+      - name: "treatment-p2p-4mib"
+        description: "P2P path (prepare_memory_for_spdk + ReadSync into GPU BAR1)"
+        patch_cmd: >
+          git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-v0-vs-p2p/runs/iter-1/patches/h-main.patch &&
+          RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server
+        server_cmd: >
+          rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 &&
+          LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+          ./target/debug/certus-server
+            --metadata-pci 0000:63:00.0
+            --data-pci 0000:63:00.0
+            --dispatcher-version v0
+            --listen 0.0.0.0:50051
+        client_cmd: >
+          cd apps/certus-server/python-client &&
+          LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+          python3 test_client.py
+            --server localhost:50051
+            --bench
+            --bench-object-size 4194304
+            --bench-num-objects 10
+            --bench-iterations 20
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v0-vs-p2p/runs/iter-1/results/h-main/treatment-p2p-4mib.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-v0-vs-p2p/runs/iter-1/inputs/workload.yaml"
+        patch: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v0-vs-p2p/runs/iter-1/patches/h-main.patch"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # h-control-negative: Staging tier — P2P and bounce should be identical
+  # ─────────────────────────────────────────────────────────────────────────────
+  - arm_id: "h-control-negative"
+    description: "Staging-tier latency should not differ between bounce and P2P"
+    conditions:
+      - name: "staging-bounce"
+        description: "Bounce path staging lookup (no --bench wait, measure memory tier)"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v0-vs-p2p/runs/iter-1/results/h-control-negative/staging-bounce.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-v0-vs-p2p/runs/iter-1/inputs/workload.yaml"
+
+      - name: "staging-p2p"
+        description: "P2P path staging lookup"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v0-vs-p2p/runs/iter-1/results/h-control-negative/staging-p2p.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-v0-vs-p2p/runs/iter-1/inputs/workload.yaml"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # h-robustness: 1 MiB objects — does P2P advantage hold at smaller size?
+  # ─────────────────────────────────────────────────────────────────────────────
+  - arm_id: "h-robustness"
+    description: "P2P vs bounce for 1 MiB objects (smaller setup overhead ratio)"
+    conditions:
+      - name: "baseline-bounce-1mib"
+        description: "Bounce path, 1 MiB objects"
+        server_cmd: >
+          rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 &&
+          LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+          ./target/debug/certus-server
+            --metadata-pci 0000:63:00.0
+            --data-pci 0000:63:00.0
+            --dispatcher-version v0
+            --listen 0.0.0.0:50051
+        client_cmd: >
+          cd apps/certus-server/python-client &&
+          LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+          python3 test_client.py
+            --server localhost:50051
+            --bench
+            --bench-object-size 1048576
+            --bench-num-objects 10
+            --bench-iterations 20
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v0-vs-p2p/runs/iter-1/results/h-robustness/baseline-bounce-1mib.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-v0-vs-p2p/runs/iter-1/inputs/workload.yaml"
+        patch: null
+
+      - name: "treatment-p2p-1mib"
+        description: "P2P path, 1 MiB objects"
+        patch_cmd: >
+          git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-v0-vs-p2p/runs/iter-1/patches/h-main.patch &&
+          RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server
+        server_cmd: >
+          rm -f /var/tmp/spdk_pci_lock_0000:63:00.0 &&
+          LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+          ./target/debug/certus-server
+            --metadata-pci 0000:63:00.0
+            --data-pci 0000:63:00.0
+            --dispatcher-version v0
+            --listen 0.0.0.0:50051
+        client_cmd: >
+          cd apps/certus-server/python-client &&
+          LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+          python3 test_client.py
+            --server localhost:50051
+            --bench
+            --bench-object-size 1048576
+            --bench-num-objects 10
+            --bench-iterations 20
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v0-vs-p2p/runs/iter-1/results/h-robustness/treatment-p2p-1mib.txt"
+        inputs:
+          - "/home/nara/certus/ai-native-storage-certus/.nous/h8-v0-vs-p2p/runs/iter-1/inputs/workload.yaml"
+        patch: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v0-vs-p2p/runs/iter-1/patches/h-main.patch"
+
+analysis:
+  parse_target: "SSD-tier"
+  parse_metric: "Avg (us/obj)"
+  secondary_metric: "Avg (GB/s)"
+  staging_parse_target: "Memory-tier"
+  comparison: "lower latency = better"
+  ratio_threshold: 1.2  # h-main confirmed if P2P < bounce by >= 1.2x

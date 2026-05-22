@@ -1,0 +1,56 @@
+metadata:
+  iteration: 2
+  bundle_ref: "runs/iter-2/bundle.yaml"
+  description: "Dispatcher v1 cudaHostAlloc staging pipeline (h-main) vs P2P direct DMA (h-control-negative) vs baseline"
+
+setup:
+  - cmd: "RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server"
+    description: "Build certus-server with gpu+spdk features unified"
+
+arms:
+  - arm_id: "baseline"
+    conditions:
+      - name: "baseline-seed42"
+        description: "Sequential v1 pipeline, no patch (ReadSync per chunk + sync dma_copy_to_device)"
+        cmd: >
+          git checkout -- . &&
+          RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server &&
+          pkill -f certus-server || true && sleep 3 &&
+          LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH target/debug/certus-server --metadata-pci 0000:62:00.0 --data-pci 0000:63:00.0 --dispatcher-version v1 --listen 0.0.0.0:50051 &
+          sleep 12 &&
+          python3 apps/certus-server/python-client/test_client.py --server localhost:50051 --bench-only --bench-object-size 4194304 --bench-num-objects 10 --bench-iterations 1 &&
+          pkill certus-server
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-true-pipeline/runs/iter-2/results/baseline/baseline-seed42.json"
+        inputs: []
+
+  - arm_id: "h-main"
+    conditions:
+      - name: "treatment-seed42"
+        description: "cudaHostAlloc staging pipeline: NVMe reads directly into cudaHostAlloc+SPDK-registered buffers, cudaMemcpyAsync from natively-pinned staging to GPU"
+        cmd: >
+          git checkout -- . &&
+          git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-v1-true-pipeline/runs/iter-2/patches/h-main.patch &&
+          RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server &&
+          pkill certus-server || true && sleep 3 &&
+          LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH target/debug/certus-server --metadata-pci 0000:62:00.0 --data-pci 0000:63:00.0 --dispatcher-version v1 --listen 0.0.0.0:50051 &
+          sleep 12 &&
+          python3 apps/certus-server/python-client/test_client.py --server localhost:50051 --bench-only --bench-object-size 4194304 --bench-num-objects 10 --bench-iterations 1 &&
+          pkill certus-server
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-true-pipeline/runs/iter-2/results/h-main/treatment-seed42.json"
+        inputs: []
+
+  - arm_id: "h-control-negative"
+    conditions:
+      - name: "treatment-seed42"
+        description: "P2P direct SSD to GPU DMA via prepare_memory_for_spdk + p2p_ssd_to_gpu_persistent"
+        cmd: >
+          git checkout -- . &&
+          git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-v1-true-pipeline/runs/iter-2/patches/h-control-negative.patch &&
+          RUSTFLAGS='-L /usr/local/lib' cargo build -p certus-server &&
+          pkill certus-server || true && sleep 3 &&
+          LD_LIBRARY_PATH=/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH target/debug/certus-server --metadata-pci 0000:62:00.0 --data-pci 0000:63:00.0 --dispatcher-version v1 --listen 0.0.0.0:50051 &
+          sleep 12 &&
+          python3 apps/certus-server/python-client/test_client.py --server localhost:50051 --bench-only --bench-object-size 4194304 --bench-num-objects 10 --bench-iterations 1 &&
+          pkill certus-server
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-v1-true-pipeline/runs/iter-2/results/h-control-negative/treatment-seed42.json"
+        inputs: []

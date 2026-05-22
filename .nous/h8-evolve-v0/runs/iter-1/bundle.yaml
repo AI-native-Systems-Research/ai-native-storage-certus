@@ -1,0 +1,119 @@
+metadata:
+  iteration: 1
+  family: "pipelined-bounce-transfer"
+  research_question: "Using a bounce buffer SSD->CPU->GPU with pipelined transfers is faster than direct SSD->GPU for transfer of 4MiB broken into a stream of 128KiB transfers. Must use pipelined implementation, implement if not present."
+
+arm_selection_rationale: >
+  h-main tests the core pipelining hypothesis with code changes (the mechanism doesn't exist yet).
+  h-control-negative uses sequential bounce as a known-slower baseline to validate measurement.
+  h-robustness tests whether a single CUDA stream is a bottleneck (2-stream variant).
+  No h-ablation because pipelining is atomic — you either overlap or you don't; there's no sub-component to remove.
+
+arms:
+  - type: h-main
+    prediction: >
+      Pipelined bounce (overlapping NVMe reads with cudaMemcpyAsync H2D) will achieve
+      end-to-end latency within 30% of P2P warm mode, and will be consistently faster
+      than sequential bounce across all seeds. Predicted mechanism: total_us approaches
+      max(read_us, copy_us) instead of read_us + copy_us, yielding ~50% latency reduction
+      from sequential bounce's ~1610μs to ~820μs.
+    mechanism: >
+      The NVMe DMA engine and GPU copy engine operate on independent PCIe paths (confirmed
+      by iter-2 ablation: <4% interference). In sequential bounce, these phases execute
+      serially: 790μs NVMe reads + 819μs H2D copies. With pipelining, each completed
+      NVMe read chunk triggers an immediate cudaMemcpyAsync on a CUDA stream while the
+      next NVMe read is already in flight. With 32 chunks and double-buffering, the
+      pipeline reaches steady state after 1-2 chunks, achieving near-perfect overlap.
+      Total time converges to max(total_read_time, total_copy_time) plus pipeline
+      startup/drain overhead (~2 chunk periods).
+    diagnostic: >
+      If pipelined bounce is NOT faster than sequential: (1) Check that cudaMemcpyAsync
+      is truly async — SPDK DMA buffers may not be pinned in the way CUDA requires for
+      async transfers, causing fallback to synchronous behavior. Verify with
+      cudaHostGetDevicePointer or cudaPointerGetAttributes on the DMA buffer pointer.
+      (2) Check that NVMe individual ReadAsync completions arrive with similar latency
+      to BatchSubmit — if the NVMe controller optimizes batched reads, individual reads
+      may be slower. (3) Measure pipeline utilization: if read_us >> copy_us or vice versa,
+      the faster phase idles waiting for the slower, limiting speedup.
+    code_changes:
+      - file: "components/gpu-services/v0/src/cuda_ffi.rs"
+        intent: >
+          Add FFI bindings for cudaMemcpyAsync, cudaStreamCreate, cudaStreamSynchronize,
+          cudaStreamDestroy, and the cudaStream_t type. These are needed for non-blocking
+          H2D copies that can overlap with NVMe DMA.
+        rationale: >
+          The current FFI only has synchronous cudaMemcpy. Pipelining requires async copies
+          on a dedicated CUDA stream so the CPU thread can issue the next NVMe read while
+          the previous H2D copy is in flight on the GPU's copy engine.
+      - file: "components/gpu-services/v0/src/bin/p2p_server.rs"
+        intent: >
+          Add a new TransferMode variant BouncePipelined and implement handle_bounce_pipelined.
+          The function uses double-buffering (2 host DMA buffers) and a CUDA stream:
+          (1) Issue ReadAsync for chunk 0 into buffer A.
+          (2) On completion, start cudaMemcpyAsync H2D from buffer A, simultaneously issue
+          ReadAsync for chunk 1 into buffer B.
+          (3) Alternate buffers, always overlapping the current NVMe read with the previous
+          H2D copy.
+          (4) After last chunk read completes and its async copy is launched, call
+          cudaStreamSynchronize.
+          Add per-phase timing: total_us, and report in response.
+          Add --mode bounce-pipelined to the CLI enum.
+        rationale: >
+          This implements the core hypothesis — true overlap of NVMe reads and H2D copies.
+          Double-buffering ensures one buffer is always available for NVMe DMA while the other
+          is being copied to GPU. Individual ReadAsync (not BatchSubmit) is needed so completions
+          arrive one at a time, enabling per-chunk pipeline progression.
+      - file: "components/gpu-services/v0/src/bin/p2p_server.rs"
+        intent: >
+          Add per-phase timing instrumentation to existing handle_bounce and handle_p2p
+          functions. Wrap do_chunked_read with Instant timing (read_us), wrap the copy loop
+          with Instant timing (copy_us), and include both in the OK response string as
+          read_us=N copy_us=N total_us=N.
+        rationale: >
+          Enables direct comparison of phase timing across all conditions. For pipelined mode,
+          total_us < read_us + copy_us proves overlap is occurring.
+
+  - type: h-control-negative
+    prediction: >
+      Sequential (non-pipelined) bounce will show total_us approximately equal to
+      read_us + copy_us (within 10%), confirming no overlap occurs in the baseline.
+      Its end-to-end latency will remain at ~2.6ms (matching prior iter-1/iter-2 measurements
+      of ~1610μs server-side + socket/IPC overhead).
+    mechanism: >
+      The existing handle_bounce calls do_chunked_read (blocks until all 32 NVMe reads
+      complete), then iterates a synchronous cudaMemcpy loop. These are strictly serial —
+      the CPU thread blocks on each phase before starting the next. Total server time =
+      read_time + copy_time with no overlap.
+    diagnostic: >
+      If sequential bounce is unexpectedly fast (close to pipelined): the CUDA driver or
+      NVMe controller may be doing implicit pipelining. Check whether cudaMemcpy on SPDK
+      buffers returns before the copy is complete (unlikely but possible with driver
+      optimization). Verify with cudaDeviceSynchronize after the copy loop.
+
+  - type: h-robustness
+    prediction: >
+      Pipelined bounce with 2 CUDA streams will show similar latency to single-stream
+      pipelined bounce (within 10%). The single stream is not a bottleneck because each
+      128KiB H2D copy takes ~25μs (819μs / 32 chunks) which is shorter than each NVMe
+      read (~24μs per chunk = 790μs / 32), meaning the stream is never the limiting factor.
+    mechanism: >
+      With 32 chunks of 128KiB, per-chunk H2D time is ~25μs and per-chunk NVMe read time
+      is ~24μs. Since these are nearly equal, a single CUDA stream can absorb copies as fast
+      as NVMe delivers them. A second stream would only help if per-chunk copy time exceeded
+      per-chunk read time, causing pipeline stalls. At 128KiB with ~4.9 GB/s H2D bandwidth,
+      the copy is not the bottleneck.
+    diagnostic: >
+      If 2-stream is significantly faster than 1-stream: the CUDA stream has higher overhead
+      per-operation than expected, or there's a synchronization barrier within a single stream
+      that prevents back-to-back async copies from overlapping with reads. Investigate CUDA
+      stream concurrency with nvprof/nsys if available.
+    code_changes:
+      - file: "components/gpu-services/v0/src/bin/p2p_server.rs"
+        intent: >
+          Add a BounceP ipelined2Stream variant that uses the same double-buffer pipelining
+          logic but creates 2 CUDA streams and round-robins async copies across them. This
+          allows two H2D copies to be in flight simultaneously.
+        rationale: >
+          Tests whether a single CUDA stream is a serialization point. If 2 streams show
+          no improvement, it confirms the NVMe read rate (not GPU copy bandwidth) is the
+          pipeline's limiting factor at 128KiB chunks.

@@ -1,0 +1,44 @@
+[
+  {
+    "id": "RP-13",
+    "statement": "cudaMemcpyAsync from cudaHostRegistered mmap'd memory provides only partial async benefit: ReadAsync pre-issue overlaps NVMe read with CPU memcpy, but cudaMemcpyAsync itself likely falls back to synchronous execution, yielding ~10% improvement rather than the theoretically possible 1.5-2x.",
+    "confidence": "medium",
+    "regime": "certus-server dispatcher v1, 4 MiB objects, 32x128 KiB chunks, cudaHostRegistered 256 MiB mmap'd memory-tier pool, NODE-level NVMe/GPU topology",
+    "evidence": ["iteration-1-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "The memory-tier pool is registered with cudaHostRegister on mmap'd (non-hugepage) memory at server startup. While CUDA documentation states cudaHostRegister should enable async DMA, the h8-pipelined experiment showed SPDK hugepages do NOT enable async; this experiment shows mmap'd pool also provides only partial benefit. The ReadAsync pre-issue does achieve true NVMe/CPU overlap (~10% gain), but the cudaMemcpyAsync call appears to synchronize at the CUDA level (no true PCIe DMA pipelining). To achieve full async H2D copy, ring buffers must be allocated with cudaHostAlloc (natively pinned memory, not registered memory).",
+    "applicability_bounds": "Applies when using cudaHostRegister on memory that was not originally allocated as pinned (cudaHostAlloc). Does not apply to cudaHostAlloc-allocated buffers, which natively enable async DMA (confirmed in h8-pipelined iter-2). The 10% improvement from ReadAsync pre-issue IS reliable regardless of async copy behavior.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-14",
+    "statement": "P2P direct SSD→GPU DMA (prepare_memory_for_spdk + ReadSync into BAR1) is consistently faster than the memory-tier pipeline path, even when absolute latencies are 3-5x higher than historical baselines due to system-level confounds.",
+    "confidence": "medium",
+    "regime": "certus-server dispatcher v1, 4 MiB objects, 32 chunks, NVMe 63:00.0 NODE-level topology, CUDA IPC handle routing through certus-server gRPC",
+    "evidence": ["iteration-1-h-control-negative"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "P2P bypasses the DRAM memory-tier intermediate copy entirely: NVMe DMA writes directly to GPU BAR1 physical address space, mapped via GDRCopy's nvidia_p2p_get_pages. This eliminates the DRAM bandwidth cost of the memory-tier copy. However, the gain is smaller than h8-v1-pinned (~23% vs historical ~51%) when system-level latency is elevated, suggesting that the absolute NVMe read time (dominant at high baseline latency) masks the memory-tier copy savings.",
+    "applicability_bounds": "P2P advantage scales with the ratio of memory-tier copy time to total latency. At low base latency (~7ms), the copy savings are proportionally large (~50%). At high base latency (~21ms from system confounds), the copy savings are proportionally smaller (~23%). The routing code (cuda_ipc_handle_bytes in IpcHandle) works correctly through the gRPC service layer.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-15",
+    "statement": "The ordering P2P < async_pipeline < sequential is preserved under system load conditions that inflate absolute latency 3-5x, confirming mechanism correctness even when magnitude predictions fail.",
+    "confidence": "high",
+    "regime": "certus-server dispatcher v1, any conditions where NVMe read dominates total latency",
+    "evidence": ["iteration-1-h-main", "iteration-1-h-control-negative"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "The relative performance ordering reflects architectural constants: P2P eliminates DRAM intermediary; async pipeline overlaps NVMe and GPU copy; sequential pipeline serializes all stages. These structural advantages persist regardless of absolute timing scale. System confounds that inflate all measurements equally (thermal, SPDK state, system load) do not change relative ordering.",
+    "applicability_bounds": "This ordering holds as long as the optimizations are actually executing (no silent fallback to sequential). The 10% h-main improvement confirms ReadAsync overlap is real; the 23% P2P improvement confirms BAR1 DMA routing is active. If either fell back silently, the improvement would be near-zero.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  }
+]

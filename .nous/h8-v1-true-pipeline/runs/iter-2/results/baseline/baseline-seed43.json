@@ -1,0 +1,16 @@
+{
+  "condition": "baseline",
+  "arm": "baseline",
+  "seed": 43,
+  "patch": null,
+  "metrics": {
+    "memory_tier_avg_us": 574.0,
+    "ssd_tier_avg_us": 23716.9,
+    "ssd_tier_min_us": 23716.9,
+    "ssd_tier_max_us": 23716.9,
+    "ssd_tier_avg_gbs": 0.18,
+    "ssd_memory_ratio": 41.3
+  },
+  "raw_output": "Memory-tier: 574.0 us/obj, 7.31 GB/s | SSD-tier: 23716.9 us/obj, 0.18 GB/s",
+  "notes": "Second baseline run. High variance (19646 vs 23717 us) confirms system-level confound from iter-1."
+}

@@ -1,0 +1,29 @@
+{
+  "total_calls": 6,
+  "total_cost_usd": 29.446124400000002,
+  "total_input_tokens": 6314,
+  "total_output_tokens": 159583,
+  "total_duration_ms": 4366616,
+  "by_phase": {
+    "design": {
+      "calls": 3,
+      "cost_usd": 6.83169375,
+      "input_tokens": 5938,
+      "output_tokens": 52205
+    },
+    "execute-analyze": {
+      "calls": 3,
+      "cost_usd": 22.614430650000003,
+      "input_tokens": 376,
+      "output_tokens": 107378
+    }
+  },
+  "by_dispatcher": {
+    "cli": {
+      "calls": 6,
+      "cost_usd": 29.446124400000002,
+      "input_tokens": 6314,
+      "output_tokens": 159583
+    }
+  }
+}

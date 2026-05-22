@@ -1,0 +1,143 @@
+metadata:
+  iteration: 2
+  family: "bounce-vs-p2p-transfer-path"
+  research_question: >
+    Is the 2x latency gap between bounce and P2P warm caused by the copy phase
+    (H2D vs D2D cudaMemcpy) or the NVMe read phase (host-DMA target vs GPU BAR1-DMA
+    target)? Specifically: do both modes spend equal time in the NVMe read phase,
+    with the copy phase accounting for the entire observed difference?
+
+arm_selection_rationale: >
+  h-main tests the core decomposition claim (copy phase dominates the difference).
+  h-ablation removes the NVMe read entirely to isolate and directly measure the
+  copy-only latency difference, confirming the mechanism without confounding NVMe
+  effects. h-control-negative checks that the NVMe read phase is NOT the
+  differentiator by verifying it takes approximately equal time regardless of DMA
+  target. h-robustness is omitted because we are already testing on the same hardware
+  that established the 2x gap.
+
+arms:
+  - type: h-main
+    prediction: >
+      With per-phase instrumentation, the copy phase (cudaMemcpy loop) in bounce
+      mode will account for >60% of total server-side time and be consistently >1.5x
+      longer than the copy phase in P2P warm mode, across all seeds. The NVMe read
+      phase will be approximately equal between modes (within 20% of each other).
+      This demonstrates the copy type (H2D vs D2D) is the dominant latency
+      differentiator, not the NVMe DMA target.
+    mechanism: >
+      cudaMemcpy with CUDA_MEMCPY_HOST_TO_DEVICE for 128 KiB transfers must DMA
+      data across the PCIe bus from host DRAM to GPU VRAM — each of 32 chunks
+      traverses the full PCIe link. cudaMemcpy with CUDA_MEMCPY_DEVICE_TO_DEVICE
+      between two GPU memory regions (staging BAR1 region to client VRAM) stays
+      within the GPU's internal memory fabric or uses high-bandwidth D2D paths
+      without PCIe traversal. At 128 KiB x 32 chunks, the accumulated PCIe overhead
+      of H2D dominates. Meanwhile, NVMe DMA write targets (host memory vs GPU BAR1)
+      complete in similar time because the NVMe controller's DMA engine saturates the
+      PCIe link in both cases for 128 KiB sequential writes — the GPU's BAR1 aperture
+      accepts writes at PCIe line rate for aligned sequential access.
+      Code: handle_bounce at p2p_server.rs:374 (H2D loop at lines 406-427);
+      handle_p2p at p2p_server.rs:436 (D2D loop at lines 467-485);
+      do_chunked_read at p2p_server.rs:272-322 (common NVMe path).
+    diagnostic: >
+      If the copy phases are approximately equal (H2D is NOT >1.5x slower than D2D):
+      then the NVMe read phase must be the differentiator — check if BAR1 DMA reads
+      complete faster than host DMA reads (perhaps same-switch topology advantage).
+      If NVMe read phases differ substantially (>20%): the DMA target matters more
+      than expected — investigate PCIe topology (lspci -tv) to determine if NVMe and
+      GPU share a PCIe switch, giving BAR1 writes a shorter path. If instrumentation
+      overhead is high (read_us + copy_us << total latency): the IPC handle open or
+      socket overhead is significant — add timing around those operations too.
+    code_changes:
+      - file: "components/gpu-services/v0/src/bin/p2p_server.rs"
+        intent: >
+          Add std::time::Instant timing in handle_bounce: measure elapsed time for
+          the do_chunked_read() call (read phase) and the cudaMemcpy H2D loop (copy
+          phase). Append read_us=<microseconds> copy_us=<microseconds> to the OK
+          response string.
+        rationale: >
+          Per-phase timing decomposes the end-to-end 2.59ms bounce latency into
+          NVMe-read vs H2D-copy components, enabling direct comparison with P2P.
+      - file: "components/gpu-services/v0/src/bin/p2p_server.rs"
+        intent: >
+          Add equivalent std::time::Instant timing in handle_p2p: measure elapsed
+          time for the do_chunked_read() call (read phase) and the cudaMemcpy D2D
+          loop (copy phase). Append read_us=<microseconds> copy_us=<microseconds>
+          to the OK response string.
+        rationale: >
+          Enables direct comparison of NVMe read time (same operation, different DMA
+          target) and copy time (D2D vs H2D) between the two modes.
+      - file: "components/gpu-services/v0/tests/gpu_client_p2p.py"
+        intent: >
+          Modify the benchmark reporting to parse read_us and copy_us from server
+          response strings, compute average/min/max for each phase, and print a
+          phase breakdown table alongside the existing throughput/latency report.
+        rationale: >
+          Makes the per-phase data visible in the benchmark output for analysis
+          without requiring manual log parsing.
+
+  - type: h-ablation
+    prediction: >
+      With NVMe reads removed (--skip-nvme flag), the copy-only latency for bounce
+      mode (32 x cudaMemcpy H2D of 128 KiB) will be consistently >1.5x longer than
+      the copy-only latency for P2P mode (32 x cudaMemcpy D2D of 128 KiB), across
+      all seeds. The absolute copy-only time for bounce will approximate the copy_us
+      measured in the instrumented full-path condition.
+    mechanism: >
+      Removing the NVMe read isolates the pure copy cost. If D2D is intrinsically
+      faster than H2D at 128 KiB (as RP-1 suggests), this difference must persist
+      even without NVMe reads preceding the copies. The ablation confirms that the
+      copy speed difference is not an artifact of memory state left by the NVMe DMA
+      (e.g., cache pollution, TLB state, PCIe congestion from recent NVMe traffic).
+      Code: handle_bounce at p2p_server.rs:399 calls do_chunked_read — skip this;
+      handle_p2p at p2p_server.rs:461 calls do_chunked_read — skip this.
+    diagnostic: >
+      If copy-only times are similar between H2D and D2D (ratio < 1.3x): the NVMe
+      read phase somehow primes the copy path differently in each mode. Possible
+      causes: PCIe congestion from NVMe traffic affects H2D more than D2D, or NVMe
+      DMA to host DRAM pollutes CPU caches that H2D then stalls on. This would shift
+      the mechanism from "intrinsic copy speed" to "NVMe/copy interference."
+    code_changes:
+      - file: "components/gpu-services/v0/src/bin/p2p_server.rs"
+        intent: >
+          Add a --skip-nvme CLI flag (bool, default false). When set, both
+          handle_bounce and handle_p2p skip the do_chunked_read() call entirely and
+          proceed directly to the copy phase. Keep the timing instrumentation active
+          (copy_us still reported; read_us reports 0).
+        rationale: >
+          Isolates the copy phase from NVMe effects. If the H2D/D2D ratio matches
+          the full-path ratio, the copy is the sole mechanism. If it differs,
+          NVMe-copy interaction effects exist.
+
+  - type: h-control-negative
+    prediction: >
+      The NVMe read phase (read_us) will be approximately equal between bounce and
+      P2P warm modes — within 20% of each other consistently across seeds. Neither
+      DMA target (host memory vs GPU BAR1) will show a systematic latency advantage
+      for the NVMe read operation.
+    mechanism: >
+      The NVMe controller issues PCIe write TLPs to the DMA target address. For
+      128 KiB chunks at NVMe queue depth 32 (BatchSubmit), the controller saturates
+      the PCIe link regardless of whether the target is host DRAM or GPU BAR1. The
+      GPU's BAR1 aperture accepts aligned sequential writes at PCIe line rate (it is
+      designed for NVMe-class DMA workloads via GDRCopy). The IOMMU mapping path is
+      equivalent (both use vfio-pci IOMMU groups). Therefore, NVMe read completion
+      time should not differ systematically between targets.
+      Code: do_chunked_read at p2p_server.rs:272 is shared by both modes —
+      identical NVMe submission logic, only the DMA buffer backing differs.
+    diagnostic: >
+      If read phases differ by >20% consistently: PCIe topology matters. Use
+      lspci -tv to check if NVMe and GPU are on the same PCIe switch (shorter path
+      for BAR1 writes) or different root ports (host DRAM has shorter path). Also
+      check if BAR1 write combining is enabled (nvidia-smi -q) — WC could batch TLPs
+      and affect NVMe completion signaling. If BAR1 reads are faster, the mechanism
+      is "same-switch locality" not just "copy speed."
+    code_changes:
+      - file: "components/gpu-services/v0/src/bin/p2p_server.rs"
+        intent: >
+          Same instrumentation as h-main — the read_us timing in both handle_bounce
+          and handle_p2p provides the data for this control. No additional code
+          change beyond what h-main already requires.
+        rationale: >
+          The h-control-negative uses the same instrumented code as h-main; the
+          analysis differs (comparing read_us across modes rather than copy_us).

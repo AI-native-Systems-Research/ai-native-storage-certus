@@ -1,0 +1,40 @@
+metadata:
+  iteration: 2
+  family: "h8-channel-optimization"
+  research_question: "Can submitting all NVMe read chunks via a single BatchSubmit command (concentrating them on one deep qpair) reduce cold lookup latency variance and improve mean throughput compared to the current per-completion resubmission pattern?"
+
+arms:
+  # Arms included: h-main, h-ablation, h-control-negative.
+  # Rationale: h-main tests the full structural change (BatchSubmit + deferred GPU DMA).
+  # h-ablation isolates whether BatchSubmit alone (without changing GPU DMA timing) provides benefit.
+  # h-control-negative validates that at single-chunk scale, BatchSubmit has no effect (mechanism specificity).
+  # No h-robustness or h-super-additivity — the previous iteration showed that micro-optimizations
+  # (atomic GPU state, pre-allocated wrappers) don't produce measurable effect, so combining them
+  # with BatchSubmit would not add signal.
+
+  - type: h-main
+    prediction: "Submitting all 128 NVMe reads via a single BatchSubmit command with post-completion GPU DMA will consistently reduce cold_16384KiB mean latency and reduce the mean/min ratio (variance indicator). The improvement comes from eliminating per-completion scheduling jitter between dispatcher and actor threads, and from concentrating all reads on a single depth-256 qpair enabling SSD read coalescing."
+    mechanism: "The current pipeline submits individual ReadAsync commands that get scattered across qpairs of depth 4, 16, and 64 as pending_ops grows (qpair.rs:256-265). Each resubmission requires: channel send → actor poll cycle → qpair selection → SPDK submit. This creates 128 inter-thread synchronization points with scheduling jitter. BatchSubmit sends one message containing all 128 ops, which the actor unpacks in a tight loop (actor.rs:750-768) onto a single depth-256 qpair. The SSD sees all 128 sequential reads simultaneously, enabling internal read coalescing. Post-completion GPU DMA in a tight loop eliminates 128 stream_synchronize calls from the read-processing phase."
+    diagnostic: "If no improvement: (1) Check if qpair scattering doesn't actually occur (log which qpair each command uses). (2) Check if the SSD already coalesces sequential reads from different qpairs. (3) Verify that the deferred GPU DMA phase doesn't add more latency than eliminated by BatchSubmit. (4) Profile whether variance comes from outside the pipeline (memory-tier Mutex, dispatch-map operations)."
+    code_changes:
+      - file: "components/dispatcher/v1/src/pipeline.rs"
+        intent: "Replace the prime-and-resubmit loop in pipelined_ssd_to_gpu_zero_copy with: (1) Build a Vec of all 128 ReadAsync commands, (2) Send them as a single BatchSubmit message, (3) Receive all 128 completions in a loop (no GPU DMA in this loop), (4) After all reads complete, issue GPU DMA for all chunks using dual-stream interleaving with batched sync every 8 chunks."
+        rationale: "This is the core structural change: from interleaved submit-complete-DMA to batch-submit-all → collect-all → DMA-all. Eliminates per-completion scheduling jitter and concentrates commands on one deep qpair."
+
+  - type: h-ablation
+    prediction: "Submitting all 128 NVMe reads via BatchSubmit but keeping the per-completion GPU DMA interleaving (issuing GPU DMA as each completion arrives, with per-chunk alternate stream sync) will show a smaller improvement than h-main. This isolates the BatchSubmit qpair-concentration effect from the GPU DMA scheduling change."
+    mechanism: "BatchSubmit concentrates all 128 commands on a single depth-256 qpair (vs scattered across 4/16/64). This enables SSD internal read coalescing for sequential LBAs. However, the per-completion GPU DMA + stream_synchronize overhead remains (128 calls). The improvement, if any, comes purely from better NVMe scheduling and reduced channel overhead (1 send vs 128 sends for the initial submission, though resubmission is still 0 since all commands are submitted upfront)."
+    diagnostic: "If h-ablation shows equal improvement to h-main: the deferred GPU DMA in h-main provides no additional benefit — the gain is purely from BatchSubmit. If h-ablation shows no improvement: qpair concentration and channel overhead reduction don't matter; the variance source is elsewhere."
+    code_changes:
+      - file: "components/dispatcher/v1/src/pipeline.rs"
+        intent: "Replace the prime-and-resubmit loop with: (1) Build all 128 ReadAsync commands as a BatchSubmit, (2) Send the single BatchSubmit message, (3) Process completions one at a time as they arrive — for each completion, issue GPU DMA on alternating streams and sync the other stream (keeping the existing per-chunk interleaving pattern). Remove the resubmission logic since all commands are already submitted."
+        rationale: "This tests whether BatchSubmit alone (qpair concentration + single channel message) provides benefit without changing the GPU DMA strategy. The only difference from baseline is how commands reach the actor — individually vs as a batch."
+
+  - type: h-control-negative
+    prediction: "At cold_128KiB (single chunk), the BatchSubmit all-at-once approach will produce no measurable throughput difference from baseline. With only 1 chunk, BatchSubmit contains exactly 1 ReadAsync — functionally identical to the current code."
+    mechanism: "At 128 KiB (single MDTS chunk), the pipeline processes exactly 1 read + 1 GPU DMA. There is no multi-chunk scheduling, no qpair scattering, no resubmission loop. BatchSubmit with 1 op is equivalent to sending 1 ReadAsync directly. Any improvement at this scale would indicate the mechanism is not what we hypothesize."
+    diagnostic: "If improvement IS observed at 128 KiB: something in the BatchSubmit code path itself is faster (unlikely given it just wraps the ops), OR the measurement includes warmup/overhead from the surrounding dispatcher code that BatchSubmit incidentally affects."
+    code_changes:
+      - file: "components/dispatcher/v1/src/pipeline.rs"
+        intent: "Same code change as h-main. The benchmark measures cold_128KiB which exercises the same code path but with only 1 chunk (since 128 KiB = 1 MDTS chunk)."
+        rationale: "Verifies mechanism specificity — the optimization should only help when there are multiple chunks to schedule."

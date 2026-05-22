@@ -1,0 +1,33 @@
+{
+  "iteration": 1,
+  "bundle_ref": "runs/iter-1/bundle.yaml",
+  "arms": [
+    {
+      "arm_type": "h-main",
+      "predicted": "P2P warm (pre-pinned GDRCopy BAR1) will achieve lower latency and higher throughput than bounce for 4 MiB transfers at 128 KiB chunk size. P2P warm avg latency will be consistently lower than bounce avg latency across all seeds, falsifying the hypothesis that bounce is faster.",
+      "observed": "Bounce: avg 2.72ms (seeds: 2.79, 2.65, 2.73ms), throughput avg 1469 MB/s (seeds: 1432.6, 1508.8, 1466.6 MB/s), min-lat range 1.78-11.27ms. P2P warm: avg 1.10ms (seeds: 1.11, 1.09, 1.10ms), throughput avg 3638 MB/s (seeds: 3615.0, 3656.7, 3642.8 MB/s), min-lat range 1.05-1.13ms. P2P warm is 2.47x lower avg latency and 2.47x higher throughput. Min-max latency ranges do NOT overlap: P2P warm max (1.13ms) < bounce min (1.78ms). Directional effect consistent across all 3 seeds.",
+      "status": "CONFIRMED",
+      "error_type": null,
+      "diagnostic_note": "The hypothesis that bounce is faster is decisively falsified. P2P warm's single-hop DMA (NVMe→GPU BAR1 via GDRCopy-resolved physical addresses) eliminates the host DRAM intermediate stage. The latency advantage is so large that the min-max ranges across 20 iterations do not overlap at all, confirming statistical significance without formal testing. The mechanism (BatchSubmit issuing all 32 chunks concurrently to the NVMe controller queue) applies equally to both paths, so the advantage is attributable solely to the path difference."
+    },
+    {
+      "arm_type": "h-control-negative",
+      "predicted": "P2P cold (per-request GDRCopy pin/unpin) will have higher latency than P2P warm, and may approach or exceed bounce latency. GDRCopy pin+map+SPDK-register overhead (~6ms per call) will dominate transfer time.",
+      "observed": "P2P cold: avg 7.45ms (seeds: 7.39, 7.72, 7.25ms), throughput avg 537 MB/s (seeds: 541.4, 518.1, 551.9 MB/s), min-lat range 4.31-14.20ms. This is 2.74x slower than bounce avg (2.72ms) and 6.77x slower than P2P warm avg (1.10ms). The GDRCopy cold per-request overhead is confirmed as the dominant cost. Cold P2P is NOT a viable path for per-request transfers.",
+      "status": "CONFIRMED",
+      "error_type": null,
+      "diagnostic_note": "The prediction that P2P cold would exceed bounce latency was confirmed — P2P cold is 2.74x slower than bounce, not just approaching it. The per-request pin/unpin overhead (~4-6ms based on min latency floor) dominates the actual DMA time. Interestingly, cold P2P min latency (4.31ms) is notably higher than bounce min latency (1.78ms), showing that even in best-case the pinning overhead cannot be hidden. The ~6ms prior estimate per call appears to represent one full pin cycle; per-request transfers pay this on every request."
+    },
+    {
+      "arm_type": "h-robustness",
+      "predicted": "At 64 KiB chunk size (64 chunks), P2P warm will still outperform bounce, but the advantage may narrow because NVMe command submission overhead increases and per-chunk D2D copy cost becomes more significant.",
+      "observed": "Bounce 64K: avg 3.83ms (seeds: 3.63, 4.12, 3.73ms), throughput avg 1048 MB/s (seeds: 1101.6, 970.3, 1072.8 MB/s). P2P warm 64K: avg 1.88ms (seeds: 1.92, 1.88, 1.85ms), throughput avg 2125 MB/s (seeds: 2083.5, 2132.4, 2159.9 MB/s). P2P warm 64K is 2.04x lower avg latency vs 2.47x at 128K. Advantage narrowed from 2.47x to 2.04x when halving chunk size, consistent with prediction. P2P warm still decisively faster at 64K. Note: P2P warm 64K latency variance increased (min 1.39-1.40ms, max 9.79-11.13ms) vs 128K (min 1.05-1.09ms, max 1.11-1.13ms), suggesting occasional scheduling or PCIe contention at higher command counts.",
+      "status": "CONFIRMED",
+      "error_type": null,
+      "diagnostic_note": "The advantage narrowed as predicted: 2.47x at 128K vs 2.04x at 64K. Bounce also degraded at 64K (128K avg 2.72ms vs 64K avg 3.83ms, +40%), while P2P warm degraded less (128K 1.10ms vs 64K 1.88ms, +71%). This suggests the 64 D2D copy overhead in P2P mode does add cost at higher chunk counts, but the path savings still dominate. The increased latency variance in P2P 64K (max ~10ms vs max ~1.1ms in 128K) suggests occasional outliers from the doubled NVMe command queue depth."
+    }
+  ],
+  "experiment_valid": true,
+  "discrepancy_analysis": "All three arms confirmed their directional predictions. The h-main arm falsified the original hypothesis (bounce faster) with a 2.47x advantage for P2P warm that has non-overlapping latency ranges. h-control-negative confirmed that pre-pinning is what creates the P2P advantage, not the path alone — cold P2P is 2.74x slower than bounce. h-robustness confirmed the advantage holds at 64K chunks but narrows from 2.47x to 2.04x. The magnitude of P2P cold penalty was larger than anticipated (7.45ms avg vs expected ~6ms from prior notes), possibly because the 20-iteration benchmark includes variance in the pin/unpin cycle timing.",
+  "dominant_component_pct": null
+}

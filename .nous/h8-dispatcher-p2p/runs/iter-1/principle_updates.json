@@ -1,0 +1,44 @@
+[
+  {
+    "id": "RP-1",
+    "statement": "For 4 MiB NVMe→GPU transfers at 128 KiB MDTS chunk size, direct P2P via pre-pinned GDRCopy BAR1 mapping achieves ~2.5x lower latency (1.10ms vs 2.72ms) and ~2.5x higher throughput (3638 vs 1469 MB/s) than bounce-buffer (SSD→DRAM→GPU via cudaMemcpy H2D).",
+    "confidence": "high",
+    "regime": "4 MiB transfer, 32 × 128 KiB NVMe chunks, BatchSubmit concurrent reads, pre-pinned GPU staging pool, A30 GPU + Intel P5800X-class NVMe, NUMA-local placement",
+    "evidence": ["iteration-1-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "Bounce requires two PCIe DMA hops per chunk: NVMe→host DRAM then host DRAM→GPU (cudaMemcpy H2D). P2P warm uses one hop: NVMe DMA engine writes directly to GPU VRAM via BAR1 physical addresses resolved by GDRCopy. Halving PCIe round-trips and eliminating CPU memcpy from the hot path produces a 2.47x latency reduction. The advantage is so consistent (zero overlap in min-max latency ranges across 3 seeds × 20 iterations) that it reflects a structural path difference, not noise.",
+    "applicability_bounds": "Holds when GDRCopy staging is pre-pinned (amortized setup cost). Does not hold for per-request pin/unpin (see RP-2). Likely holds for transfer sizes where DMA time dominates over command overhead (≥1 MiB). May not apply if GPU BAR1 aperture is insufficient for concurrent chunk mappings or if IOMMU fragmentation overhead dominates at this granularity.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-2",
+    "statement": "GDRCopy per-request pin/unpin (p2p-cold mode) is 2.74x slower than bounce-buffer for 4 MiB transfers, making pre-pinned staging (amortization) a hard requirement for P2P to deliver a latency advantage.",
+    "confidence": "high",
+    "regime": "4 MiB transfer, 32 × 128 KiB chunks, per-request gdr_pin_buffer + gdr_map + spdk_mem_register, A30 GPU + Intel P5800X-class NVMe",
+    "evidence": ["iteration-1-h-control-negative"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "Each transfer in p2p-cold mode calls nvidia_p2p_get_pages (kernel round-trip to pin GPU pages), gdr_map (BAR1 userspace mapping), and spdk_mem_register (IOMMU programming). This overhead floor (~4-6ms per call based on observed min latency of 4.31ms) exceeds the actual DMA time for a 4 MiB transfer. Pre-pinning amortizes this to near-zero across all requests after initialization.",
+    "applicability_bounds": "Applies to any per-request GDRCopy workflow at this transfer size. For very large transfers (>1 GB) the pin overhead may become negligible relative to DMA time — not tested. The ~6ms overhead matches the prior experimental observation from the designer handoff.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-3",
+    "statement": "Halving NVMe chunk size from 128 KiB to 64 KiB (doubling command count) narrows the P2P warm vs bounce latency advantage from 2.47x to 2.04x, but P2P warm remains decisively faster. Both paths degrade at smaller chunks, with P2P warm degrading more (71% latency increase) than bounce (40% latency increase).",
+    "confidence": "medium",
+    "regime": "4 MiB transfer, 64 × 64 KiB NVMe chunks, BatchSubmit concurrent reads, A30 GPU + Intel P5800X-class NVMe",
+    "evidence": ["iteration-1-h-robustness"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "At 64K chunk size, each P2P transfer requires 64 D2D copies (staging→client) with per-call CUDA launch overhead (~2-5μs each), adding ~128-320μs total overhead not present at 32 chunks. Additionally, the increased P2P warm latency variance (max ~10ms vs ~1.1ms at 128K) suggests occasional NVMe queue depth contention with 64 concurrent commands. Bounce's analogous H2D copy overhead scales similarly but the path still requires two DMA hops, so P2P retains its structural advantage.",
+    "applicability_bounds": "This chunk-size effect applies when increasing NVMe command count to a point where D2D copy overhead and queue depth effects become measurable. At even smaller chunk sizes (≤32 KiB), the P2P advantage may narrow further or reverse. At larger chunks (256 KiB) where MDTS allows, the advantage would likely exceed 2.47x.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  }
+]

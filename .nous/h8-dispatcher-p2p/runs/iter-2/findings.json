@@ -1,0 +1,33 @@
+{
+  "iteration": 2,
+  "bundle_ref": "runs/iter-2/bundle.yaml",
+  "arms": [
+    {
+      "arm_type": "h-main",
+      "predicted": "P2P sequential (ReadSync per chunk into BAR1 buffers, then D2D copy) will achieve lower avg latency than bounce sequential (ReadSync per chunk into host DRAM, then cudaMemcpy H2D) for 4 MiB at 128 KiB chunks. The P2P path advantage (eliminating host DRAM hop) will remain the dominant factor even without concurrent submission.",
+      "observed": "p2p-seq avg latency: 1.59ms / 1.57ms / 1.58ms (seeds 1-3, mean 1.58ms, throughput ~2534 MB/s). bounce-seq avg latency: 2.33ms / 2.31ms / 2.32ms (seeds 1-3, mean 2.32ms, throughput ~1724 MB/s). P2P-seq is 1.47x lower latency than bounce-seq across all seeds. Both are highly consistent (p2p-seq max 1.63ms vs min 1.52ms; bounce-seq max 2.47ms vs min 2.27ms).",
+      "status": "CONFIRMED",
+      "error_type": null,
+      "diagnostic_note": "The path advantage (1.47x) is smaller than BatchSubmit P2P vs BatchSubmit bounce (2.48x), because sequential submission serializes chunk reads and the bounce path benefits disproportionately from BatchSubmit pipelining. The 1.47x advantage with sequential submission is sufficient to justify P2P integration in the dispatcher's current pipeline.rs pattern without requiring a BatchSubmit refactor first."
+    },
+    {
+      "arm_type": "h-robustness",
+      "predicted": "P2P warm with BatchSubmit (existing --mode p2p) will still outperform bounce with BatchSubmit (existing --mode bounce) by approximately 1.5-2.5x on avg latency, consistent with iter-1 findings.",
+      "observed": "p2p-batch avg latency: 1.11ms / 1.10ms / 1.09ms (seeds 1-3, mean 1.10ms, throughput ~3641 MB/s). bounce-batch avg latency: 2.77ms / 2.68ms / 2.75ms (seeds 1-3, mean 2.73ms, throughput ~1465 MB/s). Ratio: 2.48x lower latency for P2P-batch vs bounce-batch. NOTE: bounce-batch has high tail latency (max 10-11ms on all seeds), inflating the avg. Min latencies are more stable: p2p-batch min ~1.08-1.09ms, bounce-batch min ~1.79-1.81ms. With min latency ratio: 1.08/1.80 = 1.67x. P2P-batch results are extremely consistent (max-min spread <0.03ms).",
+      "status": "CONFIRMED",
+      "error_type": null,
+      "diagnostic_note": "P2P-batch vs bounce-batch ratio is 2.48x (avg), within the predicted 1.5-2.5x range. The bounce-batch outliers (10-11ms max) are likely NVMe controller scheduling jitter when all 32 read commands saturate the submission queue simultaneously. The iter-1 ratio of 2.47x is reproduced to within measurement precision. System is stable and results are reproducible."
+    },
+    {
+      "arm_type": "h-ablation",
+      "predicted": "Bounce with BatchSubmit (existing --mode bounce) will achieve lower avg latency than bounce with sequential ReadSync (new mode). The submission strategy contribution will be measurable but smaller than the path contribution: BatchSubmit-bounce will be faster than seq-bounce by less than the gap between P2P-seq and bounce-seq.",
+      "observed": "bounce-batch avg latency: 2.73ms (with 10-11ms tail outliers, min 1.80ms). bounce-seq avg latency: 2.32ms (consistent, min 2.27ms, max 2.47ms). By avg, bounce-seq (2.32ms) is FASTER than bounce-batch (2.73ms). By min latency, bounce-batch (1.80ms) is faster than bounce-seq (2.27ms) by 1.26x. The gap between P2P-seq and bounce-seq is 0.74ms; the gap between bounce-batch-min and bounce-seq is 0.47ms — so the submission strategy effect (min-to-min) is smaller than the path effect, as predicted. However, the submission strategy effect manifests primarily in tail latency reduction for the bounce path, not consistent avg improvement.",
+      "status": "PARTIALLY_CONFIRMED",
+      "error_type": "regime",
+      "diagnostic_note": "The prediction that BatchSubmit-bounce has lower avg latency than seq-bounce is refuted by avg latency (bounce-batch avg 2.73ms > bounce-seq avg 2.32ms), but confirmed by min latency (bounce-batch min 1.80ms < bounce-seq min 2.27ms). The discrepancy is explained by BatchSubmit occasionally causing NVMe controller queue saturation that produces 10-11ms tail latency spikes when all 32 read requests complete out-of-order. Sequential submission serializes NVMe access, eliminating queuing jitter at the cost of longer baseline per-request time. The prediction that the submission strategy contribution is smaller than the path contribution holds when comparing min latencies (0.47ms vs 0.74ms), but the avg-based comparison reveals a different regime: BatchSubmit hurts avg latency on the bounce path due to outlier amplification."
+    }
+  ],
+  "experiment_valid": true,
+  "discrepancy_analysis": "h-main and h-robustness are cleanly confirmed. h-ablation is partially confirmed: the submission strategy contributes measurably (1.26x speedup on min latency for bounce), but the avg latency comparison is reversed due to BatchSubmit tail latency amplification on the bounce path. This is an important finding: BatchSubmit's benefit for bounce is latency-floor improvement (when queue depth helps), not avg latency improvement, because the NVMe controller occasionally produces high-latency completions when 32 concurrent reads saturate its queue. P2P-batch does not show this effect (consistent 1.08-1.11ms across 20 iterations), likely because BAR1-targeted DMA is less susceptible to completion reordering.",
+  "dominant_component_pct": 62
+}

@@ -1,0 +1,33 @@
+{
+  "iteration": 1,
+  "bundle_ref": "runs/iter-1/bundle.yaml",
+  "arms": [
+    {
+      "arm_type": "h-main",
+      "predicted": "Pipelined bounce (double-buffered NVMe reads overlapped with cudaMemcpyAsync H2D) will reduce end-to-end 4 MiB transfer latency by 40-50% compared to non-pipelined bounce, approaching P2P warm latency. Expected: ~900-1100μs vs non-pipelined ~2650μs. Throughput will increase from ~1510 MB/s to ~3000+ MB/s.",
+      "observed": "Pipelined bounce (bounce-pipeline mode) avg latency 2.07-2.12 ms, throughput 1890-1935 MB/s. Measured on two different NVMe devices (c2:00.0, c3:00.0) with 10 iterations each. Non-pipelined bounce avg 1.87 ms on same hardware. Pipelined is 11-13% SLOWER than non-pipelined, in the wrong direction. Results are consistent across two seeds/devices.",
+      "status": "REFUTED",
+      "error_type": "direction",
+      "diagnostic_note": "The pipeline shows no speedup — instead a small regression. This strongly suggests cudaMemcpyAsync is NOT achieving true async execution (falling back to synchronous behavior). Root cause candidates: (1) cudaHostRegister on SPDK hugepage buffers may be failing silently or not providing page-locked memory that CUDA's DMA engine can use directly; (2) the extra overhead of cudaHostRegister calls (2x per transfer) plus CUDA stream creation/sync adds latency exceeding any overlap benefit; (3) the individual ReadAsync per chunk approach generates one-at-a-time channel operations versus BatchSubmit's more efficient dispatch in the baseline. The prior measurement of NVMe read=790μs and H2D copy=819μs was under different conditions (hypothesis-8, different hardware state) — actual device throughput here shows baseline at 1.87ms for the full transfer, suggesting NVMe reads dominate differently. Action for iter-2: (a) check cudaHostRegister return codes and log them, (b) try cudaHostAlloc (CUDA-pinned from the start) + SPDK registration instead of registering SPDK buffers, (c) verify actual async execution with cudaStreamQuery after enqueue."
+    },
+    {
+      "arm_type": "h-control-negative",
+      "predicted": "Non-pipelined bounce (existing --mode bounce) will show no latency improvement over prior measurements (~2.5-2.7ms for 4 MiB). It serves as the no-overlap baseline.",
+      "observed": "Bounce mode avg 1.87 ms, throughput 2143 MB/s (4 MiB, 10 iterations, consistent across two runs on devices 63:00.0 and c3:00.0). Note: this is faster than the prior 2.65ms measurement from hypothesis-8 iter-1. The difference may be due to different NVMe devices in the prior experiment or warmer CPU/DRAM state. The measurement is stable (s1=1.87, s2=1.87).",
+      "status": "PARTIALLY_CONFIRMED",
+      "error_type": "magnitude",
+      "diagnostic_note": "Non-pipelined baseline is faster than prior measurements (1.87ms vs 2.65ms prior). This suggests either: (a) different NVMe devices with better latency, (b) system warmup effects (hugepages pre-allocated, CPU caches warmer), or (c) prior measurements were on a differently-configured system. The no-improvement prediction holds within the experiment (s1≈s2=1.87ms, showing stability). The prediction that it serves as the no-overlap baseline is confirmed — it is measurably faster than the pipelined version, showing the pipeline adds overhead."
+    },
+    {
+      "arm_type": "h-robustness",
+      "predicted": "P2P warm (--mode p2p) latency will remain at ~1.2-1.5ms as measured in prior iterations. Pipelined bounce should achieve latency within 30% of P2P warm.",
+      "observed": "P2P warm avg 1.34ms (s1, device 64:00.0) and 1.27ms (s2, device c3:00.0), throughput 2976-3147 MB/s. This matches the prior 1.32ms measurement precisely. Pipelined bounce at 2.07-2.12ms is 54-67% SLOWER than P2P warm, far outside the 30% threshold. The 30% parity criterion is not met.",
+      "status": "PARTIALLY_CONFIRMED",
+      "error_type": "regime",
+      "diagnostic_note": "P2P warm latency confirmed at ~1.27-1.34ms, consistent with prior measurements. The robustness of the P2P measurement is validated. However the secondary prediction (pipelined bounce within 30% of P2P) fails because the pipeline implementation does not achieve the expected speedup. The P2P reference point holds: NVMe+D2D at ~1.3ms is the target; non-pipelined bounce at 1.87ms is already within 44% of P2P; pipelined bounce at 2.1ms is worse."
+    }
+  ],
+  "experiment_valid": true,
+  "discrepancy_analysis": "H-main prediction is directionally wrong: pipelined bounce (2.07-2.12ms) is slower than non-pipelined bounce (1.87ms) by 11-13%. The expected 40-50% speedup was not observed. Three possible explanations: (1) cudaMemcpyAsync with SPDK hugepage buffers does not achieve true async execution even after cudaHostRegister, because SPDK huge pages may not satisfy CUDA's DMA requirements; (2) the overhead of per-transfer cudaHostRegister calls, stream creation, and stream synchronization exceeds any overlap benefit at this chunk count; (3) the actual per-chunk NVMe and H2D durations on this hardware may not be the ~25μs/chunk assumed from prior measurements. The baseline measurements are faster than prior hypothesis-8 data (1.87ms vs 2.65ms), suggesting these NVMe devices have lower latency — meaning the per-chunk times are likely different from the 790μs/819μs decomposition used in the design. Control condition (non-pipelined bounce) is stable and consistent. P2P warm matches prior measurements exactly (~1.3ms).",
+  "dominant_component_pct": null
+}

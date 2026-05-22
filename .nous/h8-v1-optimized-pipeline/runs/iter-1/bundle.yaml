@@ -1,0 +1,101 @@
+metadata:
+  iteration: 1
+  family: "v1-pipeline-parallelism"
+  research_question: >
+    Optimized v1 pipeline achieves lower SSD-tier latency than current v1
+    sequential pipeline for 4 MiB objects.
+
+# Arms chosen:
+# - h-main: Full optimization (parallel NVMe + async GPU) — the primary prediction
+# - h-ablation: NVMe parallelism only (no async GPU) — tests which component matters
+#   This ablation is critical because RP-16 from previous experiments predicts that
+#   NVMe read time dominates and GPU overlap is second-order. If the ablation shows
+#   similar gains to h-main, it confirms the mechanism is NVMe parallelism, not GPU
+#   async overlap.
+# Excluded: h-control-negative (no meaningful regime where the effect vanishes for
+#   a code change — we can't "turn off" parallelism via a parameter without reverting
+#   the code change), h-robustness (single object size mandated by campaign).
+
+arms:
+  - type: h-main
+    prediction: >
+      The optimized pipeline (parallel NVMe ReadAsync with primed ring + async GPU
+      copies on alternating CUDA streams) will consistently reduce mean SSD-tier
+      lookup latency compared to the current sequential pipeline for 4 MiB objects.
+      Expected improvement direction: latency decreases, throughput increases. The
+      magnitude should be substantial (>30%) because the current implementation
+      serializes 32 NVMe round-trips that could overlap.
+    mechanism: >
+      The current pipeline.rs:60-119 issues Command::ReadSync per chunk, blocking
+      the thread until each 128 KiB NVMe read completes before starting the next.
+      With 32 chunks per 4 MiB object and ~600us per NVMe read (from prior experiments),
+      this yields ~19,200us sequential floor. The optimized pipeline primes the NVMe
+      queue with multiple ReadAsync requests, allowing the NVMe controller to process
+      them in parallel (internal parallelism + queue optimizations). Additionally,
+      cudaMemcpyAsync on alternating CUDA streams allows GPU DMA to overlap with
+      NVMe completion polling. The NVMe SSD can service multiple outstanding reads
+      concurrently, reducing effective per-chunk latency from ~600us to approximately
+      600us / min(ring_size, internal_parallelism). The reference gpu-bb-vs-p2p
+      achieves ~3.2 GB/s = ~1,300us for 4 MiB with ring_size=32 — a 15x improvement
+      over sequential 19,200us, suggesting the NVMe controller has significant
+      internal parallelism.
+    diagnostic: >
+      If prediction is wrong: (1) Check that ReadAsync requests are actually being
+      submitted in parallel (verify multiple outstanding in the NVMe submission queue).
+      (2) Measure individual chunk latencies — if they don't decrease with QD, the
+      SSD may not have internal parallelism at this queue depth. (3) Check if
+      connect_client() per-lookup creates a fresh channel that resets the queue —
+      the pipeline runs within a single lookup call so should use one channel.
+      (4) Verify the ring buffer synchronization isn't serializing (Mutex contention).
+    code_changes:
+      - file: "components/dispatcher/v1/src/pipeline.rs"
+        intent: >
+          Replace the sequential ReadSync loop (lines 60-119) with a primed-ring
+          parallel pipeline: (1) Issue ReadAsync for first min(ring_size, num_segments)
+          chunks to prime the NVMe queue. (2) Create two CUDA streams via
+          cudaStreamCreate. (3) For each completion received: copy chunk to memory-tier,
+          issue cudaMemcpyAsync to GPU on stream[completed % 2], sync stream[(completed+1) % 2],
+          resubmit next ReadAsync if chunks remain. (4) After all chunks: sync both streams.
+          Keep the existing ring buffer allocation. Increase PIPELINE_RING_SIZE to 8.
+          Use gpu_services::cuda_ffi for CUDA stream operations. The function signature
+          remains the same — this is an internal implementation change.
+        rationale: >
+          This mirrors the proven pattern in apps/gpu-bb-vs-p2p/src/main.rs:198-328
+          which achieves ~3.2 GB/s. The key insight is that NVMe SSDs have significant
+          internal parallelism — issuing multiple reads in parallel via ReadAsync allows
+          the controller to optimize scheduling and reduce per-chunk effective latency.
+
+  - type: h-ablation
+    prediction: >
+      Parallel NVMe reads alone (without async GPU copies) will capture the majority
+      of the latency improvement seen in h-main. The difference between h-ablation
+      and h-main should be less than 10% of total latency, because RP-16 establishes
+      that GPU copy time is second-order (<8% theoretical maximum at 128 KiB chunks).
+    mechanism: >
+      NVMe read time dominates the SSD-tier pipeline (~600us × 32 chunks = 19,200us
+      vs ~50us × 32 chunks = 1,600us for GPU copies). Parallelizing NVMe reads
+      addresses the binding constraint directly. Adding async GPU copies provides
+      only marginal additional overlap because the GPU H2D transfer is already fast
+      relative to NVMe. This ablation isolates the NVMe parallelism mechanism from
+      the GPU async mechanism.
+    diagnostic: >
+      If h-ablation shows significantly less improvement than h-main (>15% gap),
+      then GPU copy overhead is larger than RP-16 predicted. Investigate: (1) Is the
+      memory-tier pool not CUDA-pinned? (cudaHostRegister in certus-server/src/main.rs:192
+      may have failed). (2) Is cudaMemcpy triggering a page fault or staging path?
+      (3) Is there a per-call overhead in dma_copy_to_device beyond the actual transfer?
+    code_changes:
+      - file: "components/dispatcher/v1/src/pipeline.rs"
+        intent: >
+          Replace the sequential ReadSync loop with a primed-ring parallel pipeline
+          using ReadAsync (same as h-main step 1-2), but keep the EXISTING synchronous
+          gpu.dma_copy_to_device() call for the GPU copy. Specifically: (1) Issue
+          ReadAsync for first min(ring_size, num_segments) chunks. (2) For each
+          completion: copy chunk to memory-tier, call gpu.dma_copy_to_device() (sync),
+          then resubmit next ReadAsync. No CUDA streams, no cudaMemcpyAsync. This
+          isolates the NVMe parallelism benefit from GPU async.
+        rationale: >
+          RP-16 predicts that NVMe read dominance is the binding constraint. This
+          ablation tests that claim directly — if NVMe parallelism alone gives most
+          of the speedup, it confirms the mechanism and simplifies the implementation
+          (no need for CUDA stream management in the production path).

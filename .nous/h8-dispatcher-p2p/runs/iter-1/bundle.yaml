@@ -1,0 +1,76 @@
+metadata:
+  iteration: 1
+  family: "dispatcher-p2p-vs-bounce"
+  research_question: >
+    Using a bounce buffer SSD->CPU->GPU with pipelined transfers is faster
+    than direct SSD->GPU for transfer of 4MiB broken into a stream of 128KiB
+    transfers.
+
+# Arm selection rationale:
+# - h-main: Tests the core hypothesis (bounce vs P2P warm). Initial probes suggest
+#   the hypothesis is false (P2P is faster), which is still a valid falsification.
+# - h-control-negative (P2P cold): Tests that the P2P advantage depends on amortized
+#   GDRCopy setup. If cold P2P is slower than bounce, it validates that the mechanism
+#   (pre-pinning) is what creates the advantage, not just the path itself.
+# - h-robustness: Tests whether the advantage holds at a different chunk size (64 KiB)
+#   which doubles the number of NVMe commands and may shift the balance.
+
+arms:
+  - type: h-main
+    prediction: >
+      P2P warm (pre-pinned GDRCopy BAR1) will achieve lower latency and higher
+      throughput than bounce (host DRAM staging + cudaMemcpy H2D) for 4 MiB
+      transfers at 128 KiB chunk size. Specifically, P2P warm avg latency will
+      be consistently lower than bounce avg latency across all seeds, falsifying
+      the hypothesis that bounce is faster.
+    mechanism: >
+      Bounce requires two DMA hops per chunk: NVMe→host DRAM (PCIe DMA) then
+      host DRAM→GPU (cudaMemcpy H2D via PCIe). P2P uses one hop: NVMe writes
+      directly into GPU VRAM via BAR1 mapping (GDRCopy-resolved physical addresses).
+      With pre-pinned staging, the NVMe controller's DMA engine targets GPU BAR1
+      pages directly — halving PCIe round-trips and eliminating CPU memcpy. The
+      BatchSubmit path (p2p_server.rs:286-301) issues all 32 chunk reads concurrently,
+      further reducing total latency versus sequential per-chunk reads.
+    diagnostic: >
+      If bounce unexpectedly beats P2P warm: check whether the BAR1 mapping produces
+      PCIe TLP fragmentation (BAR aperture smaller than transfer), whether IOMMU
+      translation overhead dominates at 128 KiB granularity, or whether the D2D copy
+      step (staging→client) in P2P mode adds unexpected latency. Also check if the
+      A30's BAR1 size (via nvidia-smi -q | grep BAR1) is sufficient for concurrent
+      chunk mappings.
+
+  - type: h-control-negative
+    prediction: >
+      P2P cold (per-request GDRCopy pin/unpin) will have higher latency than P2P warm,
+      and may approach or exceed bounce latency. The GDRCopy pin+map+SPDK-register
+      overhead (observed ~6ms per call in prior experiments) will dominate the transfer
+      time for 4 MiB at this throughput level.
+    mechanism: >
+      GDRCopy's gdr_pin_buffer calls nvidia_p2p_get_pages (kernel round-trip to pin GPU
+      pages), gdr_map creates the BAR1 userspace mapping, and spdk_mem_register programs
+      the IOMMU. This ~6ms setup cost per request negates the single-hop DMA advantage
+      for small (4 MiB) transfers. Pre-pinning amortizes this to near-zero. This validates
+      that the P2P advantage is specifically from amortized BAR1 setup, not from the DMA
+      path alone.
+    diagnostic: >
+      If P2P cold is still faster than bounce: the GDRCopy setup overhead has been reduced
+      (driver optimization or caching). Measure setup time separately by timing the
+      create_gpu_staging call.
+
+  - type: h-robustness
+    prediction: >
+      At 64 KiB chunk size (doubling command count to 64 chunks), P2P warm will still
+      outperform bounce, but the advantage may narrow because NVMe command submission
+      overhead increases for both paths and the per-chunk D2D copy cost in P2P
+      becomes more significant relative to the DMA time.
+    mechanism: >
+      Halving chunk size doubles NVMe commands (64 vs 32). Both paths submit via
+      BatchSubmit, so command overhead scales similarly. However, the P2P path
+      requires 64 D2D copies (staging chunk → client) which are small cudaMemcpy
+      Device-to-Device calls with non-trivial launch overhead (~2-5 us each). At
+      64 chunks this adds ~128-320 us total, eating into the P2P margin. Bounce's
+      analogous cost is 64 cudaMemcpy H2D calls which have similar overhead.
+    diagnostic: >
+      If the 64 KiB P2P advantage is larger than 128 KiB: the NVMe controller may
+      achieve better parallelism with smaller transfers (queue depth effects). Check
+      whether BatchSubmit produces more concurrent outstanding commands at 64 KiB.

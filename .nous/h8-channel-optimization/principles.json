@@ -1,0 +1,105 @@
+{
+  "principles": [
+    {
+      "id": "RP-17",
+      "statement": "The dispatcher_hw_benchmark cold lookup latency is dominated by SPDK memory-tier pool management (eviction + reallocation), not pipeline overhead. Run-to-run variance is 2-5x (min 2700 us, mean 10,000-18,000 us for 16 MiB), making sub-millisecond optimizations unmeasurable.",
+      "confidence": "high",
+      "regime": "dispatcher-v1 cold_16384KiB benchmark, 7x NVMe SSDs bound to VFIO, NVIDIA A30 GPU",
+      "evidence": [
+        "iteration-1-h-main",
+        "iteration-2-h-ablation"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 1,
+      "mechanism": "Each cold lookup triggers SPDK memory-tier pool eviction and reallocation. The FreeList allocator is fast but pool management has variable latency due to SPDK internal state (jitter 2-5x mean/min). BatchSubmit does not change this path.",
+      "applicability_bounds": "Applies when cold lookup requires eviction from a full memory-tier pool. Would not apply to warm lookups or if pool is not full.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-18",
+      "statement": "The best-case (minimum) cold_16384KiB latency is 2700-4200 us and stable across individual ReadAsync code paths. Concentrating all 128 reads on a single deep qpair (BatchSubmit+deferred) INCREASES the min latency floor to 4700-5800 us, likely due to NVMe qpair scheduling degradation on this SSD hardware.",
+      "confidence": "medium",
+      "regime": "dispatcher-v1 cold_16384KiB benchmark with Intel NVMe SSDs (0000:61:00.0 etc), 7 SSDs across 2 NUMA nodes",
+      "evidence": [
+        "iteration-2-h-main"
+      ],
+      "contradicts": [
+        "iteration-1-h-main-baseline"
+      ],
+      "extraction_iteration": 2,
+      "mechanism": "Individual ReadAsync distributes 128 reads across qpairs of depth 4, 16, and 64 as in-flight count grows. BatchSubmit(128 ops) forces all reads to the depth-256 qpair via select_index(128). The Intel NVMe SSDs may have worse multi-read scheduling on a single deep qpair vs distributing across multiple shallower qpairs \u2014 possibly due to internal NCQ scheduling differences or write-leveling interference.",
+      "applicability_bounds": "Applies to this specific SSD configuration (Intel NVMe, 7 drives, NUMA 0). May not hold for SSDs with better deep-queue performance. The depth-256 qpair concentration being harmful is hardware-specific.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-19",
+      "statement": "Pipeline overhead optimizations (stream sync batching, per-call allocation elimination, atomic state checks) do not produce measurable throughput improvement in the dispatcher cold lookup path at the current variance level. BatchSubmit with per-completion GPU DMA (h-ablation) is also neutral at 16 MiB, confirming that command scheduling changes at the dispatcher level cannot overcome the fundamental variance from SPDK pool management.",
+      "confidence": "high",
+      "regime": "dispatcher-v1 cold_16384KiB benchmark",
+      "evidence": [
+        "iteration-1-h-main",
+        "iteration-2-h-ablation"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 1,
+      "mechanism": "At 16 MiB, the ~9000-11000 us mean and 2-5x variance are dominated by SPDK pool eviction latency. All dispatcher-level scheduling changes affect a ~600-1000 us window that is swamped by the variance noise floor.",
+      "applicability_bounds": "Applies to 16 MiB cold lookups. Does NOT apply to 128KiB where BatchSubmit (h-ablation) shows consistent 3-4x improvement, suggesting smaller transfers have a different dominant bottleneck.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-20",
+      "statement": "The ZERO_COPY_DEPTH parameter (max in-flight NVMe reads) affects latency floor even when the optimization is nominally for a different purpose. Increasing from 16 to 32 shows consistent min latency improvement (3822 us \u2192 2835 us, -25%) suggesting deeper pipelining helps NVMe throughput.",
+      "confidence": "low",
+      "regime": "dispatcher-v1 cold_16384KiB benchmark",
+      "evidence": [
+        "iteration-1-h-main"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 1,
+      "mechanism": "More in-flight reads keep the SSD NVMe queue fuller, improving utilization. At ZERO_COPY_DEPTH=16, the SSD is underutilized early in the transfer. At 32, the SSD sees commands sooner and processes them more efficiently.",
+      "applicability_bounds": "Diminishing returns beyond 32 (128 chunks at depth 32 means ~4 queue rotations). BatchSubmit with all 128 at once on depth-256 was NOT better \u2014 suggests depth-256 is past the optimal point for this SSD.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-21",
+      "statement": "BatchSubmit(N ops) and N individual ReadAsync commands use different qpair selection logic in the actor. BatchSubmit selects qpair via select_index(batch_size), while sequential individual ReadAsync commands select via select_index(pending_ops.len()+1) at each submission. For small N (1-2), BatchSubmit may select a lower-latency qpair, producing unexpectedly faster cold reads at 128KiB (3-4x speedup observed). This is NOT due to batching overhead reduction but due to qpair routing differences.",
+      "confidence": "medium",
+      "regime": "dispatcher-v1 cold_128KiB benchmark, h-ablation and h-control-negative conditions",
+      "evidence": [
+        "iteration-2-h-ablation-128KiB",
+        "iteration-2-h-control-negative-128KiB"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 2,
+      "mechanism": "In actor.rs:750-768, BatchSubmit calls select_index(batch_size) ONCE before dispatching all ops. Individual ReadAsync calls select_index(pending_ops.len()+1) at each invocation. For batch_size=1 (128KiB), select_index(1) picks the shallowest available qpair (depth-4), while the first individual ReadAsync with pending_ops.len()=0 also calls select_index(1), so they should be equivalent \u2014 BUT the pending_ops state at the time of first ReadAsync may differ from a fresh BatchSubmit call (memory-tier Mutex release timing, actor loop state). The consistent 128KiB speedup in h-ablation (both sessions) vs inconsistent result in h-control-negative suggests the effect is real but condition-dependent.",
+      "applicability_bounds": "Only relevant for small transfer sizes (1-4 chunks) where qpair selection for individual vs batch differs meaningfully. Not applicable at 16 MiB where 128 chunks overwhelm any per-chunk qpair selection difference.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-22",
+      "statement": "Deferred GPU DMA (waiting for ALL NVMe reads to complete before issuing any GPU copies) hurts cold 16 MiB latency by ~29% and doubles the min latency floor. This is caused by the combination of: (a) forcing all 128 reads to a single depth-256 qpair, which degrades NVMe SSD scheduling, and (b) losing NVMe/GPU overlap. The ~128 us cost of sequential (non-overlapping) GPU DMA is negligible compared to the SSD scheduling degradation.",
+      "confidence": "medium",
+      "regime": "dispatcher-v1 cold_16384KiB with 7 Intel NVMe SSDs, NVIDIA A30",
+      "evidence": [
+        "iteration-2-h-main"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 2,
+      "mechanism": "H-main (BatchSubmit+deferred) mean=12674 us vs baseline mean=9815 us (+29%). H-ablation (BatchSubmit+per-completion) mean=10243 us vs baseline (+4%, within noise). The delta between h-main and h-ablation isolates the deferred GPU DMA effect at ~2430 us. However, since h-ablation uses the same BatchSubmit (same qpair selection), the difference between h-main and h-ablation cannot be entirely from qpair effects \u2014 the deferred pattern adds waiting overhead for all 128 reads before any DMA.",
+      "applicability_bounds": "Applies when NVMe/GPU overlap provides meaningful speedup. At 16 MiB with 128 sequential reads at ~18 us each = ~2300 us total NVMe time, the GPU DMA overlap was covering a significant fraction. Deferred DMA eliminates this overlap entirely.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    }
+  ]
+}

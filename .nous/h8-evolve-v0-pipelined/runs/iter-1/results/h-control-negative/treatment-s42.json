@@ -1,0 +1,32 @@
+{
+  "condition": "treatment-seed42",
+  "arm": "h-control-negative",
+  "patch": "h-control-negative.patch",
+  "dispatcher_version": "v0",
+  "metadata_pci": "0000:63:00.0",
+  "data_pci": "0000:64:00.0",
+  "bench_object_size": 4096,
+  "bench_num_objects": 1,
+  "bench_iterations": 1,
+  "raw_output": {
+    "memory_tier_avg_us": 15056.2,
+    "memory_tier_min_us": 15056.2,
+    "memory_tier_max_us": 15056.2,
+    "memory_tier_avg_gbs": 0.00,
+    "memory_tier_peak_gbs": 0.00,
+    "ssd_tier_avg_us": 1466.4,
+    "ssd_tier_min_us": 1466.4,
+    "ssd_tier_max_us": 1466.4,
+    "ssd_tier_avg_gbs": 0.00,
+    "ssd_tier_peak_gbs": 0.00
+  },
+  "key_metric": {
+    "ssd_tier_avg_us": 1466.4,
+    "ssd_tier_avg_gbs": 0.00
+  },
+  "comparison_to_baseline": {
+    "speedup_factor": 1.19,
+    "latency_reduction_us": 282.6
+  },
+  "notes": "Pipelined v0 for 4 KiB (single segment). Unexpected ~19% faster than sequential baseline. Mechanism: cudaHostAlloc buffer pre-allocated (no per-call alloc), cudaMemcpyAsync non-blocking even for single chunk avoids synchronous cudaMemcpy overhead."
+}

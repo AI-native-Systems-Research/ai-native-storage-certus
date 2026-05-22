@@ -1,0 +1,27 @@
+{
+  "condition": "baseline-seed42",
+  "arm": "h-control-negative",
+  "dispatcher_version": "v0",
+  "metadata_pci": "0000:63:00.0",
+  "data_pci": "0000:64:00.0",
+  "bench_object_size": 4096,
+  "bench_num_objects": 1,
+  "bench_iterations": 1,
+  "raw_output": {
+    "memory_tier_avg_us": 15109.4,
+    "memory_tier_min_us": 15109.4,
+    "memory_tier_max_us": 15109.4,
+    "memory_tier_avg_gbs": 0.00,
+    "memory_tier_peak_gbs": 0.00,
+    "ssd_tier_avg_us": 1749.0,
+    "ssd_tier_min_us": 1749.0,
+    "ssd_tier_max_us": 1749.0,
+    "ssd_tier_avg_gbs": 0.00,
+    "ssd_tier_peak_gbs": 0.00
+  },
+  "key_metric": {
+    "ssd_tier_avg_us": 1749.0,
+    "ssd_tier_avg_gbs": 0.00
+  },
+  "notes": "Sequential v0: 1x4KiB ReadSync (fits in single segment) + single cudaMemcpy H2D"
+}

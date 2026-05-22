@@ -1,0 +1,33 @@
+{
+  "iteration": 1,
+  "bundle_ref": "runs/iter-1/bundle.yaml",
+  "arms": [
+    {
+      "arm_type": "h-main",
+      "predicted": "Pipelined bounce will achieve end-to-end latency within 30% of P2P warm mode, and will be consistently faster than sequential bounce. Predicted ~50% latency reduction from sequential bounce's ~1610μs to ~820μs server-side.",
+      "observed": "Pipelined bounce: 1764 MB/s, 2.27ms avg latency (50-iter benchmark). Sequential bounce: 1440 MB/s, 2.78ms avg latency. P2P warm: 3082 MB/s, 1.30ms avg latency. Phase timing (single-iter): pipelined read_us=1204, copy_us=112, total_us=1627 vs sequential read_us=649, copy_us=826, total_us=1475. Pipelined bounce is 17% faster than sequential bounce but only 57% of P2P warm throughput (2.27ms vs 1.30ms = 75% slower than P2P warm, far outside the predicted 30% threshold). cudaMemcpyAsync dispatch overhead is minimal (112μs for 32 copies vs 826μs synchronous) confirming async copies are truly non-blocking. However, pipelined read_us=1204μs >> sequential read_us=649μs: individual per-chunk ReadAsync has ~37.6μs per-chunk latency vs ~20.3μs per-chunk with BatchSubmit, indicating per-chunk connection overhead (each issue_single_read calls connect_client() independently) is dominating the read phase.",
+      "status": "PARTIALLY_CONFIRMED",
+      "error_type": "magnitude",
+      "diagnostic_note": "Direction confirmed: pipelined is faster than sequential. But magnitude off by >3x — predicted ~50% improvement, got ~17%. The root cause is per-chunk connection overhead: each issue_single_read() calls connect_client() and creates fresh IBlockDevice channels (overhead ~13-17μs per call amortized). With 32 chunks, this adds ~416-544μs to the read phase vs BatchSubmit which creates channels once. Additionally total_us=1627 > read_us+copy_us=1316, confirming per-call overhead in the pipeline loop. The pipelined mode achieves the predicted overlap (copy_us=112μs vs 826μs synchronous confirms cudaMemcpyAsync truly async), but the NVMe read phase became the new bottleneck due to connect_client() per chunk."
+    },
+    {
+      "arm_type": "h-control-negative",
+      "predicted": "Sequential bounce will show total_us approximately equal to read_us + copy_us (within 10%), confirming no overlap. End-to-end latency ~2.6ms.",
+      "observed": "Sequential bounce: 1440 MB/s, 2.78ms avg latency (50-iter, with outliers up to 11.52ms). Phase timing: read_us=649, copy_us=826, total_us=1475. total_us = read_us + copy_us = 1475 exactly (0% difference). End-to-end client latency 2.78ms includes socket/IPC overhead above the 1.475ms server-side time. P2P warm reference: 3082 MB/s, 1.30ms avg (within expected range of prior iter-2 results of 3031-3064 MB/s).",
+      "status": "CONFIRMED",
+      "error_type": null,
+      "diagnostic_note": "Exactly as predicted. The sequential phase timing proves the baseline is strictly serial with zero overlap. The high max latency (11.52ms) in the 50-iter run is consistent with SPDK/NVMe scheduling variance observed in prior iterations."
+    },
+    {
+      "arm_type": "h-robustness",
+      "predicted": "Pipelined bounce with 2 CUDA streams will show similar latency to single-stream pipelined bounce (within 10%).",
+      "observed": "1-stream pipelined: 1764 MB/s, 2.27ms avg. 2-stream pipelined: 1774 MB/s, 2.25ms avg. Difference: 0.6% throughput, 0.9% latency. Phase timing: 1-stream read_us=1204, copy_us=112, total_us=1627; 2-stream read_us=1212, copy_us=112, total_us=1630. Essentially identical.",
+      "status": "CONFIRMED",
+      "error_type": null,
+      "diagnostic_note": "Confirmed: single CUDA stream is not a bottleneck. The copy_us=112μs for both modes shows the GPU H2D copy engine processes 32x128KiB transfers in ~3.5μs each when dispatched asynchronously. The pipeline is NVMe-read-bound (the per-chunk connect_client() overhead), not copy-engine-bound. Adding a second stream provides zero benefit because copies complete faster than reads."
+    }
+  ],
+  "experiment_valid": true,
+  "discrepancy_analysis": "h-main direction confirmed but magnitude wrong. Root cause identified: each pipelined chunk issues connect_client() independently (creating fresh IBlockDevice channels per chunk), adding ~17μs overhead per chunk vs BatchSubmit which creates channels once for all 32 reads. This inflates pipelined read phase to 1204μs vs sequential's 649μs (BatchSubmit). The cudaMemcpyAsync overlap IS working correctly (copy_us drops from 826μs sync to 112μs async, confirming SPDK hugepages satisfy CUDA's pinned-memory requirement). Net effect: the NVMe read phase became the bottleneck due to per-chunk connection overhead, limiting pipelined speedup to 17% rather than the predicted 50%. To achieve the theoretical speedup, the pipelined implementation needs to reuse channels across chunks (or use BatchSubmit with per-completion pipelining via individual ops in a batch).",
+  "dominant_component_pct": null
+}

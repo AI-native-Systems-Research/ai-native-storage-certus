@@ -1,0 +1,100 @@
+metadata:
+  iteration: 2
+  family: "v1-true-pipeline-vs-p2p"
+  research_question: "Dispatcher v1 with true overlapped pipelining using cudaHostAlloc-allocated staging buffers (natively CUDA-pinned, SPDK-registered) achieves significantly faster SSD-tier lookup latency than the iter-1 approach (cudaHostRegistered mmap source), and approaches P2P direct DMA performance for 4 MiB lookups through certus-server."
+
+arms:
+  # Arms included:
+  # - h-main: cudaHostAlloc staging pipeline (the core iter-2 hypothesis — addresses iter-1's magnitude failure)
+  # - h-control-negative: P2P direct DMA (validates mechanism ordering is preserved; consistency check)
+  # No ablation needed because iter-1's sequential baseline + iter-1's cudaHostRegistered pipeline together
+  # constitute a two-level ablation: (1) no overlap, (2) partial overlap, (3) full overlap via cudaHostAlloc.
+  # h-robustness omitted: focus on confirming the mechanism works before varying conditions.
+
+  - type: h-main
+    prediction: "cudaHostAlloc staging pipeline will reduce SSD-tier lookup latency by >25% compared to the sequential baseline (iter-1 measured 21,361 us). This exceeds the iter-1 async pipeline improvement of only 10% because cudaHostAlloc buffers enable true asynchronous DMA engine transfers, fully hiding GPU copy latency behind NVMe reads. With 32 chunks, near-complete overlap is possible: total_time approaches N * max(nvme_read, gpu_copy) instead of N * (nvme_read + gpu_copy)."
+    mechanism: >
+      Iter-1 showed that cudaMemcpyAsync from cudaHostRegistered mmap'd memory falls back to synchronous
+      execution (only 10% speedup from ReadAsync overlap alone). The CUDA DMA engine requires
+      natively-pinned memory (cudaHostAlloc) to perform truly asynchronous transfers. By allocating
+      staging buffers via cudaHostAlloc + SPDK registration (create_spdk_dma_buffer_from_cuda_host_alloc
+      at dma.rs:253), we get buffers that are: (1) valid NVMe DMA targets (SPDK-registered), (2) valid
+      cudaMemcpyAsync sources (natively pinned). The pipeline reads NVMe directly into these staging
+      buffers, then cudaMemcpyAsync truly runs in the background on the CUDA stream while the next NVMe
+      read proceeds concurrently. Memory-tier fill happens via cheap CPU memcpy from the staging buffer
+      (overlapped with GPU DMA since it's a different bus).
+    diagnostic: >
+      If improvement is still ~10% (not >25%): (1) Verify cudaHostAlloc succeeds (check return code in
+      server log). (2) Check whether SPDK registration of cudaHostAlloc memory works without errors —
+      spdk_mem_register may fail on CUDA-pinned pages. (3) Profile per-chunk timing: if NVMe read
+      dominates completely (read >> copy), overlap provides diminishing returns regardless of async
+      capability. (4) Verify ReadAsync actually returns before the NVMe completes (not internally
+      serialized in the block-device actor). If staging allocation fails, the fallback is to use the
+      iter-1 approach (cudaMemcpyAsync from mem-tier), which should reproduce iter-1's 10% result.
+    code_changes:
+      - file: "components/gpu-services/v0/src/cuda_ffi.rs"
+        intent: >
+          Add CUDA stream FFI declarations inside the existing extern "C" block: cudaStream_t type
+          alias (as *mut c_void), cudaStreamCreate, cudaStreamDestroy, cudaStreamSynchronize, and
+          cudaMemcpyAsync. These are identical to the iter-1 patch additions that were not merged
+          back to the branch.
+        rationale: "Required for non-blocking H2D copies on a CUDA stream. Same symbols as iter-1 patch (runs/iter-1/patches/h-main.patch lines 293-312)."
+
+      - file: "components/dispatcher/v1/src/pipeline.rs"
+        intent: >
+          Rewrite pipelined_ssd_to_gpu to use cudaHostAlloc staging buffers:
+          (1) Allocate 2 staging buffers via gpu_services::dma::create_spdk_dma_buffer_from_cuda_host_alloc
+              (each chunk_size = 128 KiB, allocated with cudaHostAlloc then SPDK-registered).
+          (2) Create a CUDA stream via cudaStreamCreate.
+          (3) Issue ReadAsync for chunk 0 directly into staging_buf[0] (it IS an SPDK DmaBuffer).
+          (4) Loop: recv ReadDone → CPU memcpy from staging_buf[cur] to mem_tier_ptr+offset →
+              cudaMemcpyAsync from staging_buf[cur].as_ptr() to gpu_dst+offset (on stream) →
+              issue ReadAsync for next chunk into staging_buf[1-cur] → swap cur.
+          (5) After final ReadDone: memcpy to mem-tier, cudaMemcpyAsync, cudaStreamSynchronize.
+          (6) Destroy stream. Let staging buffers drop (their free_fn handles SPDK unregister + cudaFreeHost).
+          Key difference from iter-1: NVMe reads go directly into cudaHostAlloc buffers (not SPDK DMA
+          buffers), and cudaMemcpyAsync sources from these natively-pinned buffers (not from
+          cudaHostRegistered mmap'd mem-tier).
+        rationale: >
+          This is the minimal change that addresses iter-1's root cause: cudaHostRegistered memory
+          doesn't enable true async DMA. cudaHostAlloc memory does (proven in h8-pipelined: 2.4-3x
+          speedup). The staging buffers are created per-call (not pre-allocated) for simplicity —
+          the allocation cost (~10us) is negligible vs the 21ms transfer time.
+
+      - file: "components/dispatcher/v1/Cargo.toml"
+        intent: "Ensure gpu-services dependency has features = [\"spdk\"] (already present). No change needed if already correct."
+        rationale: "The pipeline module needs access to gpu_services::dma::create_spdk_dma_buffer_from_cuda_host_alloc which requires both gpu and spdk features (unified by workspace)."
+
+  - type: h-control-negative
+    prediction: "P2P direct SSD→GPU DMA will be faster than the cudaHostAlloc staging pipeline, maintaining its relative advantage from iter-1 (23% faster than sequential baseline). P2P eliminates ALL staging copies — NVMe reads directly into GPU BAR1 via the PCIe fabric. The cudaHostAlloc pipeline still has one CPU memcpy (staging → mem-tier) per chunk that P2P avoids entirely."
+    mechanism: >
+      P2P uses prepare_memory_for_spdk to register GPU device memory with SPDK via GDRCopy BAR1
+      mapping, then issues NVMe ReadSync directly into GPU memory. The PCIe root complex routes DMA
+      without host DRAM involvement. At NODE-level topology (NVMe 63:00.0 and GPU0 on same root
+      complex), the path is optimal. The ONLY overhead is PCIe bandwidth for NVMe→GPU (same bus
+      as NVMe→host). No memory-tier fill occurs in this path.
+    diagnostic: >
+      If P2P is NOT faster than cudaHostAlloc pipeline: the pipeline has achieved full overlap
+      (GPU copy completely hidden), and the remaining bottleneck is NVMe read time — identical
+      for both paths. In that case, the CPU memcpy to mem-tier is truly free (hidden behind
+      NVMe read). Or P2P may suffer from BAR1 aperture contention at high chunk counts.
+    code_changes:
+      - file: "components/interfaces/src/idispatcher.rs"
+        intent: "Add cuda_ipc_handle_bytes: Option<Vec<u8>> field to IpcHandle struct for P2P path selection."
+        rationale: "The dispatcher needs raw CUDA IPC handle bytes to call prepare_memory_for_spdk."
+
+      - file: "components/dispatcher/v1/src/pipeline.rs"
+        intent: "Add p2p_ssd_to_gpu_persistent function: reads NVMe chunks directly into pre-registered GPU DMA buffer via ReadSync. Same implementation as iter-1 h-control-negative patch."
+        rationale: "Direct DMA into GPU BAR1 memory — comparison target for the pipeline."
+
+      - file: "components/dispatcher/v1/src/lib.rs"
+        intent: "Add gpu_dma_cache field to DispatcherComponentV0, get_or_create_gpu_dma method, and P2P routing in promote_and_serve that checks cuda_ipc_handle_bytes. Same pattern as iter-1."
+        rationale: "Routes to P2P when CUDA IPC handle bytes are present, falls through to pipeline otherwise."
+
+      - file: "apps/certus-server/src/service.rs"
+        intent: "Pass cuda_ipc_handle_bytes: Some(handle.cuda_ipc_handle.clone()) in the lookup path's IpcHandle construction."
+        rationale: "Enables P2P path by providing handle bytes from the gRPC client."
+
+      - file: "components/dispatcher/v1/Cargo.toml"
+        intent: "Add base64 = \"0.22\" dependency for encoding CUDA IPC payloads in get_or_create_gpu_dma."
+        rationale: "prepare_memory_for_spdk takes encoded handle; base64 encoding used for the 72-byte payload."

@@ -1,0 +1,44 @@
+metadata:
+  iteration: 2
+  family: "h8-evolve-v0-pipelined"
+  research_question: "Does replacing sequential NVMe reads (QD=1) with BatchSubmit (QD=32) in dispatcher v0's pipelined read path further reduce 4 MiB SSD-tier lookup latency beyond the 2x speedup achieved in iteration 1?"
+
+arms:
+  # Arms chosen:
+  # - h-main: Tests the primary hypothesis — QD=32 via BatchSubmit with async GPU copies
+  # - h-ablation: Removes async GPU copy overlap to isolate whether QD=32 alone is sufficient
+  # h-control-negative omitted: iter-1 already tested single-chunk (4 KiB) regime and found
+  #   16% improvement from allocation avoidance alone. At QD=1 (single chunk), BatchSubmit
+  #   provides zero benefit — this is trivially predictable and not worth re-testing.
+  # h-robustness omitted: P2P was definitively ruled out in iter-1 (RP-10). No new conditions
+  #   to test under varied regimes.
+
+  - type: h-main
+    prediction: "BatchSubmit pipelined v0 (QD=32, cudaHostAlloc × 32 buffers, per-chunk cudaMemcpyAsync) will reduce SSD-tier lookup latency for 4 MiB objects to well below the iter-1 pipelined result of 9,659 us. Expected range: 1,200-2,500 us, based on NVMe flash parallelism at QD=32 reducing total read time from ~9,600 us (32 × 300 us sequential) to ~300-800 us (one read latency with flash die parallelism), plus ~200 us for GPU copy and ~200 us overhead."
+    mechanism: "BatchSubmit dispatches all 32 ReadAsync commands to the same NVMe queue pair without blocking (actor.rs:750-768). Each ReadAsync calls spdk_nvme_ns_cmd_read (actor.rs:623) which is a non-blocking NVMe submission. The NVMe controller sees QD=32 and exploits internal flash die parallelism to serve all reads concurrently. Total NVMe wall-clock time drops from 32x single-read latency to approximately 1x single-read latency (all NAND pages read in parallel). As completions arrive, per-chunk cudaMemcpyAsync copies overlap with remaining NVMe completions. The 32 pre-allocated cudaHostAlloc buffers eliminate all DmaBuffer::new allocation overhead (RP-9)."
+    diagnostic: "If latency does not improve beyond iter-1: (1) Check if BatchSubmit completions arrive sequentially rather than in parallel — this would indicate the NVMe controller is not parallelizing reads (QD not actually exploited). (2) Check for ENOMEM errors indicating SGL exhaustion with 32 concurrent cudaHostAlloc buffers. (3) Measure individual completion arrival times to determine if reads are truly in-flight simultaneously."
+    code_changes:
+      - file: "components/gpu-services/v0/src/cuda_ffi.rs"
+        intent: "Add cudaStream_t type, cudaStreamCreate, cudaStreamDestroy, cudaStreamSynchronize, and cudaMemcpyAsync FFI declarations to the extern C block (same additions as iter-1 patch)."
+        rationale: "Required for async GPU copies. These symbols exist in libcudart.so already linked. Validated in iter-1."
+      - file: "components/dispatcher/v0/Cargo.toml"
+        intent: "Change gpu-services dependency to include features = [\"gpu\", \"spdk\"] (add \"gpu\" feature flag)."
+        rationale: "Enables access to cuda_ffi module and create_spdk_dma_buffer_from_cuda_host_alloc function. Validated in iter-1."
+      - file: "components/dispatcher/v0/src/lib.rs"
+        intent: "Replace read_from_block_device with a BatchSubmit-based implementation: (1) Add BatchPipelineState struct holding 32 pre-allocated cudaHostAlloc DMA buffers + 1 CUDA stream, lazily initialized. (2) In read_from_block_device: connect_client once, wrap each of the 32 buffers as Arc<Mutex<DmaBuffer>> with noop_free, build a Vec<Command> of 32 ReadAsync commands (one per segment), send a single Command::BatchSubmit. (3) Loop recv() on completion_rx 32 times; for each ReadDone completion, issue cudaMemcpyAsync for that chunk's buffer to the correct GPU offset. (4) After all 32 completions received, cudaStreamSynchronize. (5) Note: ReadAsync completions may arrive out-of-order — use the OpHandle to identify which chunk completed and copy from the correct buffer."
+        rationale: "This is the core hypothesis: QD=32 NVMe parallelism combined with pre-allocated buffers and async GPU copies. Compared to iter-1's QD=1 pipeline (9,659 us), this should reduce NVMe wall-time from ~9,600 us to ~300-800 us."
+
+  - type: h-ablation
+    prediction: "BatchSubmit v0 with synchronous GPU copy (QD=32, 32 cudaHostAlloc buffers, single cudaMemcpy at end) will achieve SSD-tier latency within 15% of the h-main async-overlap variant. The bulk of the speedup comes from NVMe QD=32 parallelism, not from overlapping GPU copies with NVMe tail completions."
+    mechanism: "Same BatchSubmit QD=32 for NVMe reads, same 32 pre-allocated cudaHostAlloc buffers. But instead of per-chunk cudaMemcpyAsync during completion collection, all 32 chunks are assembled into a contiguous staging area and a single synchronous cudaMemcpy copies 4 MiB to GPU after all reads complete. This removes async copy overlap but retains the QD=32 NVMe advantage. The GPU copy of 4 MiB at ~20 GB/s takes ~200 us — if NVMe total is ~800 us, overlap can save at most ~200 us (the copy time), which is <20% of total."
+    diagnostic: "If ablation is significantly slower (>25% gap): the overlap is materially important, likely because NVMe completions are spread over time (not all arriving simultaneously) and the async copies pipeline effectively. If ablation is faster or equal: the single large cudaMemcpy is as efficient as 32 small async copies, validating that QD=32 NVMe parallelism is the dominant improvement."
+    code_changes:
+      - file: "components/gpu-services/v0/src/cuda_ffi.rs"
+        intent: "Same as h-main: add cudaStream_t, cudaStreamCreate, cudaStreamDestroy, cudaStreamSynchronize, cudaMemcpyAsync (needed for build compatibility even though this arm uses sync copy)."
+        rationale: "Build compatibility with shared code structure."
+      - file: "components/dispatcher/v0/Cargo.toml"
+        intent: "Same as h-main: add \"gpu\" feature to gpu-services dependency."
+        rationale: "Required for cudaHostAlloc buffer creation."
+      - file: "components/dispatcher/v0/src/lib.rs"
+        intent: "Same BatchSubmit structure as h-main but with different post-completion behavior: (1) Same BatchPipelineState with 32 buffers. (2) Same BatchSubmit of 32 ReadAsync. (3) Collect all 32 completions, copying each chunk's data into a contiguous host-side assembly buffer (ptr::copy_nonoverlapping from cudaHostAlloc buf to a contiguous DMA buffer). (4) After all reads complete, single cudaMemcpy of the full 4 MiB to GPU. No CUDA stream needed."
+        rationale: "Isolates the NVMe QD=32 effect from the async GPU copy overlap. If performance is similar to h-main, the overlap mechanism is not the bottleneck — confirming that QD=32 is the dominant factor."

@@ -1,0 +1,33 @@
+{
+  "iteration": 1,
+  "bundle_ref": "runs/iter-1/bundle.yaml",
+  "arms": [
+    {
+      "arm_type": "h-main",
+      "predicted": "P2P sequential lookup (NVMe→GPU BAR1 direct) will achieve lower per-object latency than bounce sequential lookup (NVMe→host DRAM→GPU cudaMemcpy) for 4 MiB objects on the SSD tier, with P2P being consistently faster across all 20 measurement iterations, with advantage >= 1.2x.",
+      "observed": "OPPOSITE direction: bounce (13763.8 us/obj, 0.30 GB/s) is 33% FASTER than P2P (18371.7 us/obj, 0.23 GB/s) for 4 MiB SSD-tier lookups. P2P/Bounce latency ratio = 1.33x, meaning P2P is 1.33x SLOWER. The prediction of P2P >= 1.2x faster was refuted; in fact bounce is 1.33x faster than P2P.",
+      "status": "REFUTED",
+      "error_type": "direction",
+      "diagnostic_note": "The P2P implementation uses sub-view DmaBuffers (DmaBuffer::from_raw at GPU base + chunk_offset) for each of the 32 x 128 KiB ReadSync calls. Each sub-view shares the parent spdk_mem_register'd region, so no per-chunk registration overhead should occur. However, the per-lookup call to prepare_memory_for_spdk has fixed overhead: (1) cudaIpcOpenMemHandle, (2) check pin state, (3) conditionally call spdk_mem_register on the full 4 MiB GPU buffer, (4) track in registered_regions map. For the bounce path, the server already holds the IPC handle open (bounce: open once per batch). The P2P path opens the handle fresh per lookup via prepare_memory_for_spdk (because service.rs passes raw bytes instead of the pre-opened pointer). This adds ~3-5 ms of CUDA IPC open + SPDK registration overhead per lookup. With 4 MiB NVMe reads at ~0.30 GB/s taking ~13ms, the additional 4-5ms P2P setup overhead explains the 33% slowdown. The hypothesis incorrectly assumed BAR1 write overhead would be lower than a 4 MiB cudaMemcpy; in practice the per-call prepare_memory_for_spdk setup cost dominates."
+    },
+    {
+      "arm_type": "h-control-negative",
+      "predicted": "For objects still in the staging tier, P2P and bounce paths will show identical latency because staging lookups bypass read_from_block_device entirely.",
+      "observed": "Staging (memory) tier latency is essentially identical: bounce 19315.7 us/obj vs P2P 19629.6 us/obj (1.016x ratio, within measurement noise). Both show 0.21-0.22 GB/s staging throughput. The P2P path for staging now opens the CUDA IPC handle in the dispatcher (from raw bytes) rather than the pre-opened pointer from service.rs — this adds a small overhead (~314 us difference) which is within run-to-run noise.",
+      "status": "CONFIRMED",
+      "error_type": null,
+      "diagnostic_note": "The staging path in the P2P condition opens the CUDA IPC handle from raw bytes (open_cuda_ipc_from_bytes) rather than using a pre-opened pointer. This adds a small ~300us overhead compared to the bounce baseline's pre-opened pointer. However, this difference is within natural run-to-run variability and does not constitute a meaningful divergence. The control hypothesis is confirmed: staging latency does not meaningfully differ between paths."
+    },
+    {
+      "arm_type": "h-robustness",
+      "predicted": "P2P sequential will also achieve lower per-object latency for 1 MiB objects (8 x 128 KiB chunks), though the relative advantage may be smaller due to proportionally larger prepare_memory_for_spdk setup overhead.",
+      "observed": "For 1 MiB objects: bounce SSD-tier = 5228.2 us/obj (0.20 GB/s), P2P SSD-tier = 5665.1 us/obj (0.19 GB/s). P2P is 8% SLOWER (ratio 1.08x). The P2P disadvantage is smaller at 1 MiB (1.08x) vs 4 MiB (1.33x), contradicting the prediction that P2P would be faster at both sizes. The setup cost of prepare_memory_for_spdk dominates more heavily at 1 MiB (fewer chunks to amortize over) but the 4 MiB result was already worse — the direction of the effect is the same but smaller at 1 MiB.",
+      "status": "REFUTED",
+      "error_type": "direction",
+      "diagnostic_note": "The prediction was that P2P would be faster at 1 MiB too. In fact P2P is slower at both sizes. The P2P disadvantage is indeed smaller at 1 MiB (1.08x) than at 4 MiB (1.33x), but the direction is wrong. This suggests: (1) the prepare_memory_for_spdk cost does dominate (as predicted in the diagnostic), but (2) the per-chunk NVMe→GPU BAR1 DMA overhead is also larger per-byte than NVMe→host DMA. The crossover point (where P2P becomes faster) requires pre-amortized pinning and likely a different submission strategy."
+    }
+  ],
+  "experiment_valid": true,
+  "discrepancy_analysis": "All three arms produced valid measurements. h-main was REFUTED with inverted direction: bounce (13.8ms) is faster than P2P (18.4ms) for 4 MiB SSD-tier. h-control-negative CONFIRMED: staging latencies are indistinguishable between paths. h-robustness also REFUTED: P2P is slower at 1 MiB too (1.08x vs 1.33x at 4 MiB). The primary cause of P2P underperformance is the per-lookup overhead of prepare_memory_for_spdk (cudaIpcOpenMemHandle + spdk_mem_register per lookup call), which adds ~4-5ms to each lookup versus the bounce path that pre-opens the IPC handle and reuses it. The prior h8-transfer-path experiments showed P2P-warm (pre-pinned) is 2x faster than bounce, but those used a persistent GPU buffer with pre-amortized pinning. This experiment's P2P implementation opens and pins the GPU buffer fresh on every lookup, making the setup cost dominate over the transfer savings.",
+  "dominant_component_pct": 30
+}

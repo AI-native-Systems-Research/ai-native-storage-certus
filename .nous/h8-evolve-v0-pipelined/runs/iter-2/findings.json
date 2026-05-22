@@ -1,0 +1,25 @@
+{
+  "iteration": 2,
+  "bundle_ref": "runs/iter-2/bundle.yaml",
+  "arms": [
+    {
+      "arm_type": "h-main",
+      "predicted": "BatchSubmit pipelined v0 (QD=32, cudaHostAlloc x32 buffers, per-chunk cudaMemcpyAsync) will reduce SSD-tier lookup latency for 4 MiB objects to well below the iter-1 pipelined result of 9,659 us. Expected range: 1,200-2,500 us based on NVMe flash parallelism at QD=32.",
+      "observed": "Canonical run: baseline 27,746 us/obj, h-main treatment 28,030 us/obj (1.01x vs baseline — statistically indistinguishable). Multi-run trials (5x each): baseline median ~22,071 us, h-main median ~23,015 us. No improvement observed. All values cluster 19,000-34,000 us with high variance (±30-50%). BatchSubmit QD=32 provides zero measurable latency reduction vs sequential QD=1.",
+      "status": "REFUTED",
+      "error_type": "magnitude",
+      "diagnostic_note": "BatchSubmit submits all 32 ReadAsync commands to the actor in one message, but NVMe completions arrive asynchronously and are only harvested when the actor's poll loop calls process_completions(). Since the actor polls continuously, completions trickle in over multiple poll cycles rather than all arriving simultaneously. More critically, gRPC + connect_client() + actor thread dispatch overhead (~10-15ms) completely dominates the ~300-800us NVMe read time, making the QD=32 NVMe parallelism invisible at the end-to-end benchmark level. The full 4 MiB lookup latency is dominated by gRPC round-trip + connect_client channel setup + SSD write-through wait — not NVMe read time itself. Additionally, the 32x cudaHostAlloc + spdk_mem_register lazy-init on the first lookup adds measurable overhead. The predicted mechanism (NVMe flash die parallelism) may work at the NVMe level, but it contributes only ~9,600 us of the 19-27k us total, and even that component cannot be isolated from the gRPC overhead in this benchmark architecture."
+    },
+    {
+      "arm_type": "h-ablation",
+      "predicted": "BatchSubmit v0 with synchronous GPU copy (QD=32, single cudaMemcpy at end) will achieve SSD-tier latency within 15% of the h-main async-overlap variant. The bulk of speedup comes from NVMe QD=32, not from GPU copy overlap.",
+      "observed": "Canonical run: h-ablation 20,235 us/obj vs h-main 28,030 us/obj — ablation is 28% faster than h-main in this canonical measurement, but this is within multi-run variance. Multi-run medians: h-ablation ~24,218 us vs h-main ~23,015 us (5% difference, not statistically significant given ±30% variance). Both conditions perform similarly to sequential baseline. The ablation arm is also not faster than baseline; neither the NVMe QD=32 benefit nor the async copy overlap makes a measurable difference.",
+      "status": "PARTIALLY_CONFIRMED",
+      "error_type": "regime",
+      "diagnostic_note": "The ablation prediction that h-ablation ≈ h-main was partially confirmed (both show similar performance), but only because neither BatchSubmit variant improved over baseline. The ablation correctly shows that async GPU copy overlap provides no measurable benefit vs synchronous copy — but the null result applies to both conditions. The regime assumption (that QD=32 NVMe speedup would dominate) was wrong; gRPC/actor overhead dominates instead."
+    }
+  ],
+  "experiment_valid": true,
+  "discrepancy_analysis": "The primary hypothesis (BatchSubmit QD=32 gives 4-8x speedup) was refuted. The mechanism is correct at the NVMe layer — BatchSubmit does submit 32 reads simultaneously to the hardware — but the end-to-end latency is dominated by non-NVMe overhead: (1) gRPC round-trip from client to server adds ~5-15ms baseline overhead, (2) connect_client() per-lookup creates new channels with actor synchronization overhead, (3) the 32x cudaHostAlloc + spdk_mem_register lazy-init on first SSD-tier lookup adds several milliseconds, (4) high variance in single-iteration measurements (±30-50%) makes it impossible to detect sub-5% improvements. The iter-1 finding (RP-9) that per-chunk DmaBuffer::new was the bottleneck may have been correct for the sequential allocations, but the BatchSubmit approach shifts that bottleneck to channel/gRPC overhead. The h8-v1-pinned experiment that showed 777us for P2P+BatchSubmit used a different code path that may have avoided the gRPC round-trip overhead, explaining the disparity. Key confound: this benchmark measures full round-trip latency including gRPC, populate cycle, channel setup — not pure NVMe read latency.",
+  "dominant_component_pct": null
+}

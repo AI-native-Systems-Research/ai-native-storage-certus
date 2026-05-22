@@ -1,0 +1,315 @@
+diff --git a/components/dispatcher/v1/src/pipeline.rs b/components/dispatcher/v1/src/pipeline.rs
+index 4462243..a601eae 100644
+--- a/components/dispatcher/v1/src/pipeline.rs
++++ b/components/dispatcher/v1/src/pipeline.rs
+@@ -1,28 +1,27 @@
+ //! Ring-buffer pipelined reader for SSD→DRAM→GPU transfers.
+ //!
+-//! Reads data from SSD in MDTS-sized chunks using a ring of DMA buffers,
+-//! copying each completed chunk to both the memory-tier slot and the GPU
+-//! destination. This pipelines SSD reads with DRAM→GPU DMA transfers.
++//! Reads data from SSD in MDTS-sized chunks using double-buffered async overlap:
++//! while one chunk copies to GPU via cudaMemcpyAsync, the next chunk reads from NVMe
++//! concurrently, hiding NVMe latency behind GPU DMA.
+ 
+ use std::sync::{Arc, Mutex};
+ 
++use gpu_services::cuda_ffi;
+ use interfaces::{
+     ClientChannels, Command, Completion, DmaBuffer, DispatcherError, IBlockDevice, IGpuServices,
+ };
+ 
+ use crate::io_segmenter;
+ 
+-/// Number of ring buffers for pipelined transfers.
+-pub const PIPELINE_RING_SIZE: usize = 4;
++/// Number of ring buffers for double-buffered overlap (2 = minimal for NVMe/GPU overlap).
++pub const PIPELINE_RING_SIZE: usize = 2;
+ 
+ /// Pipeline-read from SSD into a memory-tier slot while streaming chunks to GPU.
+ ///
+-/// For each chunk:
+-/// 1. Issue SSD read into ring buffer
+-/// 2. On completion, copy chunk to memory-tier slot
+-/// 3. DMA-copy chunk to GPU destination
++/// Implements true double-buffered async overlap:
++/// - While chunk N is being GPU-copied via cudaMemcpyAsync, chunk N+1 reads from NVMe.
++/// - cudaStreamSynchronize at the end drains all in-flight GPU copies.
+ ///
+-/// This overlaps SSD I/O with GPU DMA by working on different chunks concurrently.
+ /// # Safety
+ ///
+ /// - `mem_tier_ptr` must be valid for writes of at least `total_bytes` (aligned up to block size).
+@@ -46,7 +45,196 @@ pub unsafe fn pipelined_ssd_to_gpu(
+ 
+     let segments = io_segmenter::segment_io(start_lba, aligned_bytes, chunk_size as u32, block_size as u32);
+ 
+-    // Allocate ring of DMA buffers.
++    if segments.is_empty() {
++        return Ok(());
++    }
++
++    // Allocate double-buffer ring (2 buffers for overlap).
++    let ring: Vec<Arc<Mutex<DmaBuffer>>> = (0..PIPELINE_RING_SIZE.min(segments.len()))
++        .map(|_| {
++            DmaBuffer::new(chunk_size, block_size, Some(numa_node))
++                .map(|b| Arc::new(Mutex::new(b)))
++                .map_err(|e| {
++                    DispatcherError::AllocationFailed(format!("pipeline ring buffer: {e}"))
++                })
++        })
++        .collect::<Result<Vec<_>, _>>()?;
++
++    // Create a CUDA stream for async H2D copies.
++    let mut stream: cuda_ffi::cudaStream_t = std::ptr::null_mut();
++    let err = unsafe { cuda_ffi::cudaStreamCreate(&mut stream) };
++    if err != cuda_ffi::CUDA_SUCCESS {
++        // Fall back to synchronous path (gpu.dma_copy_to_device) if stream creation fails.
++        return pipelined_ssd_to_gpu_sync(
++            drive, gpu, mem_tier_ptr, gpu_dst, start_lba, total_bytes, numa_node,
++        );
++    }
++
++    let result = run_async_pipeline(
++        &channels,
++        &ring,
++        &segments,
++        mem_tier_ptr,
++        gpu_dst,
++        total_bytes,
++        stream,
++    );
++
++    // Always destroy the stream even on error.
++    unsafe { cuda_ffi::cudaStreamDestroy(stream) };
++
++    result
++}
++
++/// Execute the double-buffered async pipeline loop.
++///
++/// Pre-issues ReadAsync for the first chunk, then for each subsequent chunk:
++/// waits for the previous ReadDone, copies to mem-tier, launches cudaMemcpyAsync H2D,
++/// issues ReadAsync for the next chunk, alternating ring buffers.
++unsafe fn run_async_pipeline(
++    channels: &ClientChannels,
++    ring: &[Arc<Mutex<DmaBuffer>>],
++    segments: &[crate::io_segmenter::IoSegment],
++    mem_tier_ptr: *mut u8,
++    gpu_dst: *mut std::ffi::c_void,
++    total_bytes: usize,
++    stream: cuda_ffi::cudaStream_t,
++) -> Result<(), DispatcherError> {
++    let mut cur = 0usize; // current ring buffer index
++
++    // Pre-issue ReadAsync for the first chunk into ring[0].
++    channels
++        .command_tx
++        .send(Command::ReadAsync {
++            ns_id: 1,
++            lba: segments[0].lba,
++            buf: Arc::clone(&ring[cur]),
++            timeout_ms: 5000,
++        })
++        .map_err(|_| DispatcherError::IoError("send ReadAsync failed".into()))?;
++
++    for i in 0..segments.len() {
++        let seg = &segments[i];
++        let next_seg = segments.get(i + 1);
++
++        // Wait for completion of the current chunk read.
++        match channels.completion_rx.recv() {
++            Ok(Completion::ReadDone { result, .. }) => {
++                result.map_err(|e| DispatcherError::IoError(format!("SSD read failed: {e}")))?;
++            }
++            Ok(other) => {
++                return Err(DispatcherError::IoError(format!(
++                    "unexpected completion: {other:?}"
++                )));
++            }
++            Err(_) => {
++                return Err(DispatcherError::IoError(
++                    "completion channel disconnected".into(),
++                ));
++            }
++        }
++
++        // If there is a next chunk, pre-issue its ReadAsync immediately into the other ring buffer.
++        // This overlaps the NVMe read with the memcpy + cudaMemcpyAsync below.
++        let next_buf_idx = 1 - cur;
++        if let Some(ns) = next_seg {
++            let next_buf = if ring.len() > 1 {
++                Arc::clone(&ring[next_buf_idx])
++            } else {
++                // Single-buffer fallback: can't overlap but preserve correctness.
++                Arc::clone(&ring[0])
++            };
++            channels
++                .command_tx
++                .send(Command::ReadAsync {
++                    ns_id: 1,
++                    lba: ns.lba,
++                    buf: next_buf,
++                    timeout_ms: 5000,
++                })
++                .map_err(|_| DispatcherError::IoError("send ReadAsync (prefetch) failed".into()))?;
++        }
++
++        // Copy completed chunk to memory-tier slot (CPU memcpy, cheap).
++        let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
++        let guard = ring[cur].lock().unwrap();
++        if copy_len > 0 {
++            // SAFETY: mem_tier_ptr + buffer_offset is within the memory-tier slot.
++            unsafe {
++                std::ptr::copy_nonoverlapping(
++                    guard.as_ptr() as *const u8,
++                    mem_tier_ptr.add(seg.buffer_offset),
++                    copy_len,
++                );
++            }
++        }
++
++        // Launch async H2D GPU copy from mem-tier slot.
++        // The NVMe read for the next chunk is already in-flight concurrently.
++        if copy_len > 0 {
++            let gpu_offset = seg.buffer_offset;
++            // SAFETY: gpu_dst + gpu_offset is within the caller's GPU buffer.
++            let dst_ptr = unsafe { (gpu_dst as *mut u8).add(gpu_offset) as *mut std::ffi::c_void };
++            let src_ptr = unsafe { mem_tier_ptr.add(gpu_offset) as *const std::ffi::c_void };
++            let err = unsafe {
++                cuda_ffi::cudaMemcpyAsync(
++                    dst_ptr,
++                    src_ptr,
++                    copy_len,
++                    cuda_ffi::CUDA_MEMCPY_HOST_TO_DEVICE,
++                    stream,
++                )
++            };
++            if err != cuda_ffi::CUDA_SUCCESS {
++                drop(guard);
++                return Err(DispatcherError::IoError(format!(
++                    "cudaMemcpyAsync failed: {}",
++                    cuda_ffi::cuda_error_string(err)
++                )));
++            }
++        }
++
++        drop(guard);
++
++        // Advance ring buffer index for next iteration.
++        if ring.len() > 1 {
++            cur = next_buf_idx;
++        }
++    }
++
++    // Drain all in-flight GPU copies.
++    let err = unsafe { cuda_ffi::cudaStreamSynchronize(stream) };
++    if err != cuda_ffi::CUDA_SUCCESS {
++        return Err(DispatcherError::IoError(format!(
++            "cudaStreamSynchronize failed: {}",
++            cuda_ffi::cuda_error_string(err)
++        )));
++    }
++
++    Ok(())
++}
++
++/// Fallback: synchronous path identical to original sequential pipeline.
++/// Used when CUDA stream creation fails.
++unsafe fn pipelined_ssd_to_gpu_sync(
++    drive: &dyn IBlockDevice,
++    gpu: &dyn IGpuServices,
++    mem_tier_ptr: *mut u8,
++    gpu_dst: *mut std::ffi::c_void,
++    start_lba: u64,
++    total_bytes: usize,
++    numa_node: i32,
++) -> Result<(), DispatcherError> {
++    let block_size = drive.block_size() as usize;
++    let chunk_size = drive.max_transfer_size() as usize;
++    let aligned_bytes = total_bytes.next_multiple_of(block_size);
++
++    let channels: ClientChannels = drive.connect_client().map_err(|e| {
++        DispatcherError::IoError(format!("connect_client failed: {e}"))
++    })?;
++
++    let segments = io_segmenter::segment_io(start_lba, aligned_bytes, chunk_size as u32, block_size as u32);
++
+     let ring: Vec<Arc<Mutex<DmaBuffer>>> = (0..PIPELINE_RING_SIZE.min(segments.len()))
+         .map(|_| {
+             DmaBuffer::new(chunk_size, block_size, Some(numa_node))
+@@ -61,7 +249,6 @@ pub unsafe fn pipelined_ssd_to_gpu(
+         let ring_idx = i % ring.len();
+         let ring_buf = Arc::clone(&ring[ring_idx]);
+ 
+-        // Issue SSD read.
+         channels
+             .command_tx
+             .send(Command::ReadSync {
+@@ -73,9 +260,7 @@ pub unsafe fn pipelined_ssd_to_gpu(
+ 
+         match channels.completion_rx.recv() {
+             Ok(Completion::ReadDone { result, .. }) => {
+-                result.map_err(|e| {
+-                    DispatcherError::IoError(format!("SSD read failed: {e}"))
+-                })?;
++                result.map_err(|e| DispatcherError::IoError(format!("SSD read failed: {e}")))?;
+             }
+             Ok(other) => {
+                 return Err(DispatcherError::IoError(format!(
+@@ -89,12 +274,9 @@ pub unsafe fn pipelined_ssd_to_gpu(
+             }
+         }
+ 
+-        // Copy from ring buffer to memory-tier slot.
+         let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
+         let guard = ring_buf.lock().unwrap();
+         if copy_len > 0 {
+-            // SAFETY: mem_tier_ptr + buffer_offset is within the memory-tier slot.
+-            // guard.as_ptr() is valid for seg.length bytes.
+             unsafe {
+                 std::ptr::copy_nonoverlapping(
+                     guard.as_ptr() as *const u8,
+@@ -104,11 +286,9 @@ pub unsafe fn pipelined_ssd_to_gpu(
+             }
+         }
+ 
+-        // DMA-copy this chunk to GPU.
+         let gpu_offset = seg.buffer_offset;
+         gpu.dma_copy_to_device(
+             &guard,
+-            // SAFETY: gpu_dst + gpu_offset is within the caller's GPU buffer.
+             unsafe { (gpu_dst as *mut u8).add(gpu_offset) as *mut std::ffi::c_void },
+             copy_len,
+         )
+diff --git a/components/gpu-services/v0/src/cuda_ffi.rs b/components/gpu-services/v0/src/cuda_ffi.rs
+index bb06af6..5b00049 100644
+--- a/components/gpu-services/v0/src/cuda_ffi.rs
++++ b/components/gpu-services/v0/src/cuda_ffi.rs
+@@ -68,6 +68,9 @@ pub const CUDA_MEMCPY_DEVICE_TO_DEVICE: c_int = 3;
+ pub const CUDA_HOST_ALLOC_DEFAULT: c_int = 0;
+ pub const CUDA_HOST_ALLOC_MAPPED: c_int = 2;
+ 
++/// Opaque CUDA stream handle.
++pub type cudaStream_t = *mut c_void;
++
+ extern "C" {
+     pub fn cudaGetDeviceCount(count: *mut c_int) -> cudaError_t;
+     pub fn cudaGetDeviceProperties(prop: *mut cudaDeviceProp, device: c_int) -> cudaError_t;
+@@ -108,6 +111,16 @@ extern "C" {
+     pub fn cudaGetErrorString(error: cudaError_t) -> *const c_char;
+     pub fn cudaDeviceGetPCIBusId(pci_bus_id: *mut c_char, len: c_int, device: c_int)
+         -> cudaError_t;
++    pub fn cudaStreamCreate(p_stream: *mut cudaStream_t) -> cudaError_t;
++    pub fn cudaStreamDestroy(stream: cudaStream_t) -> cudaError_t;
++    pub fn cudaStreamSynchronize(stream: cudaStream_t) -> cudaError_t;
++    pub fn cudaMemcpyAsync(
++        dst: *mut c_void,
++        src: *const c_void,
++        count: usize,
++        kind: c_int,
++        stream: cudaStream_t,
++    ) -> cudaError_t;
+ }
+ 
+ /// Translate a CUDA error code to a descriptive Rust String.

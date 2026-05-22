@@ -1,0 +1,113 @@
+metadata:
+  iteration: 1
+  family: "v1-pipelined-bounce-vs-p2p-direct"
+  research_question: "Does direct SSD→GPU P2P DMA (bypassing host bounce buffers and cudaMemcpy) reduce end-to-end lookup latency for 4 MiB objects served from SSD through dispatcher v1, compared to the existing pipelined bounce-buffer path?"
+
+# Arm selection rationale:
+# - h-main: The core A/B comparison (bounce vs P2P) at 4 MiB (32 chunks)
+# - h-control-negative: Tests whether the effect vanishes at small sizes (4 KiB = 1 chunk)
+#   where prepare_memory_for_spdk setup cost dominates over eliminated cudaMemcpy savings.
+#   This validates the mechanism is truly about eliminating per-chunk H2D copies.
+# - Skipping h-ablation: The P2P path is a single mechanism (direct DMA), not composed of
+#   separable parts to ablate.
+# - Skipping h-robustness: First iteration should establish whether the effect exists at all.
+
+arms:
+  - type: h-main
+    prediction: "P2P direct path will achieve lower SSD-tier lookup latency (us/obj) and higher throughput (GB/s) than pipelined bounce for 4 MiB objects, because it eliminates 32 sequential cudaMemcpy(128KiB, H2D) calls and 4 host DMA buffer allocations from the critical path."
+    mechanism: |
+      The pipelined bounce path (pipeline.rs:30-123) performs for each of 32 chunks:
+        1. NVMe read into host DMA ring buffer (~100us PCIe DMA)
+        2. memcpy from ring buffer to memory-tier DRAM (~negligible for 128KiB)
+        3. cudaMemcpy(128KiB, HostToDevice) into GPU (~3-5us per chunk via PCIe)
+
+      Steps 2+3 execute serially after each NVMe read completes (no overlap with next read).
+      Total GPU copy overhead: 32 x ~4us = ~128us added latency.
+
+      The P2P path:
+        1. One-time prepare_memory_for_spdk() → registers GPU BAR1 with SPDK IOMMU (~50us warm)
+        2. For each chunk: NVMe DMA directly to GPU BAR1 address (~100us PCIe DMA, same bus)
+        3. No cudaMemcpy — data arrives at GPU destination without host intermediary
+
+      Net saving: eliminates ~128us of cudaMemcpy + eliminates ring buffer allocation overhead.
+      Tradeoff: skips memory-tier promotion (acceptable for benchmark since every iteration
+      reads from SSD anyway).
+    diagnostic: |
+      If P2P is NOT faster:
+      1. Check PCIe topology: if NVMe and GPU are on different PCIe root complexes, P2P DMA
+         crosses the CPU interconnect (UPI/Infinity Fabric), adding latency that may negate
+         the cudaMemcpy savings.
+      2. Check spdk_vtophys resolution: sub-buffer views at gpu_ptr+offset must resolve to
+         correct physical addresses. If SPDK falls back to bounce internally, no P2P occurs.
+      3. Measure prepare_memory_for_spdk latency — if cold-start overhead (IPC open + register)
+         is included in every lookup, it may exceed the cudaMemcpy savings.
+      4. Check nvidia-peermem module: without it, NVMe→GPU DMA fails silently and falls back.
+    code_changes:
+      - file: "components/interfaces/src/idispatcher.rs"
+        intent: "Add `pub cuda_ipc_handle_bytes: Option<Vec<u8>>` field to the IpcHandle struct. Update the doc example to include the new field (set to None). This carries the raw 64-byte CUDA IPC handle from the gRPC layer through to the dispatcher so it can call prepare_memory_for_spdk."
+        rationale: "The dispatcher needs the raw IPC handle bytes to construct the base64 payload for prepare_memory_for_spdk. Currently IpcHandle only carries the already-opened GPU device pointer, which can't be re-used for P2P registration."
+
+      - file: "apps/certus-server/src/service.rs"
+        intent: "In the lookup handler (line 233), when constructing the IpcHandle to pass to disp.lookup(), set `cuda_ipc_handle_bytes: Some(handle.cuda_ipc_handle.clone())` where `handle` is the proto IpcHandle. This passes the raw 64-byte handle through to the dispatcher."
+        rationale: "The server has access to the raw CUDA IPC handle bytes from the gRPC proto message. Passing them through allows the dispatcher to choose the P2P path."
+
+      - file: "components/dispatcher/v1/Cargo.toml"
+        intent: "Add `base64 = \"0.22\"` to the [dependencies] section."
+        rationale: "The P2P path needs base64 encoding to construct the payload for prepare_memory_for_spdk (which expects base64-encoded 72 bytes)."
+
+      - file: "components/dispatcher/v1/src/pipeline.rs"
+        intent: |
+          Add a new public function `p2p_ssd_to_gpu` that:
+          1. Accepts drive, gpu, cuda_ipc_handle_bytes (64 bytes), gpu_dst pointer, start_lba, total_bytes, numa_node
+          2. Constructs the 72-byte payload (handle_bytes ++ total_bytes as LE u64), base64-encodes it
+          3. Calls gpu.prepare_memory_for_spdk(payload, None) to get a GPU-backed DmaBuffer
+          4. Iterates over io_segmenter::segment_io() segments (same as pipelined_ssd_to_gpu)
+          5. For each segment: creates a non-owning DmaBuffer sub-view at gpu_dma_buf.as_ptr() + segment.buffer_offset, with chunk_size length and noop_free
+          6. Issues ReadSync with the sub-buffer, waits for completion
+          7. std::mem::forget() the sub-buffer (parent owns the memory)
+          8. After all segments: drops the parent GPU DmaBuffer (which closes IPC + unregisters)
+          9. Does NOT copy to memory-tier — this is a direct-serve path
+        rationale: "This is the P2P implementation: NVMe controller DMAs each 128KiB chunk directly to the GPU BAR1 address, eliminating the host ring buffer and cudaMemcpy steps."
+
+      - file: "components/dispatcher/v1/src/lib.rs"
+        intent: |
+          In the `promote_and_serve` method (line 190-266), add a branch at the top (after acquiring the drive info):
+          if ipc_handle.cuda_ipc_handle_bytes.is_some(), call pipeline::p2p_ssd_to_gpu() instead of the existing memory-tier promotion + pipelined_ssd_to_gpu flow. Skip mt.insert(), skip eviction, skip dispatch-map transitions. Just read directly into GPU and return Ok(()).
+          Also update all IpcHandle construction sites in the test code to include `cuda_ipc_handle_bytes: None`.
+        rationale: "This routes lookups with raw handle bytes available through the P2P path, while preserving the existing bounce path for lookups without handle bytes."
+
+  - type: h-control-negative
+    prediction: "At 4 KiB object size (1 NVMe chunk), P2P will NOT outperform bounce because the one-time prepare_memory_for_spdk overhead (~50us warm, ~6ms cold) exceeds the single eliminated cudaMemcpy(4KiB) which takes <1us."
+    mechanism: |
+      For 4 KiB objects, there is only 1 segment (no chunking). The bounce path:
+        1. One NVMe read (4KiB) into host DMA buffer
+        2. memcpy 4KiB to memory-tier
+        3. cudaMemcpy(4KiB, H2D) — takes <1us for 4KiB
+
+      The P2P path:
+        1. prepare_memory_for_spdk: decode base64 + cudaIpcOpenMemHandle + verify + pin + spdk_mem_register (~50us warm)
+        2. One NVMe read (4KiB) into GPU sub-buffer
+        3. Drop: spdk_mem_unregister + cudaIpcCloseMemHandle (~20us)
+
+      Net: P2P adds ~70us overhead to save <1us of cudaMemcpy. Should be significantly slower.
+    diagnostic: |
+      If P2P IS faster at 4KiB:
+      1. The prepare_memory_for_spdk caching may be active (handle already registered from previous call)
+      2. The bounce path's DMA buffer allocation may have unexpected overhead at 4KiB
+      3. Memory-tier insert/eviction overhead may be dominating at this size
+    code_changes:
+      - file: "components/interfaces/src/idispatcher.rs"
+        intent: "Same as h-main: add cuda_ipc_handle_bytes field to IpcHandle"
+        rationale: "Same interface change needed"
+      - file: "apps/certus-server/src/service.rs"
+        intent: "Same as h-main: pass cuda_ipc_handle_bytes through in lookup handler"
+        rationale: "Same server-side change needed"
+      - file: "components/dispatcher/v1/Cargo.toml"
+        intent: "Same as h-main: add base64 dependency"
+        rationale: "Same dependency needed"
+      - file: "components/dispatcher/v1/src/pipeline.rs"
+        intent: "Same as h-main: add p2p_ssd_to_gpu function"
+        rationale: "Same P2P implementation"
+      - file: "components/dispatcher/v1/src/lib.rs"
+        intent: "Same as h-main: add P2P routing branch in promote_and_serve"
+        rationale: "Same routing logic"

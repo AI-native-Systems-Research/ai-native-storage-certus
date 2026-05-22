@@ -1,0 +1,105 @@
+{
+  "principles": [
+    {
+      "id": "RP-9",
+      "statement": "Per-chunk SPDK DmaBuffer::new is NOT the dominant latency component for SSD-tier lookups through the full certus-server gRPC path. Earlier measurements showing DmaBuffer::new as dominant were made at a regime where the gRPC round-trip overhead was not properly characterized. Total end-to-end latency is ~20-27ms, with DmaBuffer::new contributing ~3-5ms of that.",
+      "confidence": "medium",
+      "regime": "Updated assessment based on iter-2 results showing BatchSubmit (which eliminates DmaBuffer::new) provides no speedup",
+      "evidence": [
+        "iteration-2-h-main",
+        "iteration-2-h-ablation"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 2,
+      "mechanism": "If DmaBuffer::new were truly dominant, replacing it with pre-allocated cudaHostAlloc buffers (as in h-main) would produce a 2x+ speedup. Both h-main and h-ablation pre-allocate 32 buffers lazily and show no improvement over sequential baseline, suggesting the actual bottleneck is elsewhere (gRPC, connect_client, actor scheduling). Note: iter-1's 2x speedup (19,502 -> 9,659 us) may have been a variance artifact or a warm-cache effect in that specific run.",
+      "applicability_bounds": "This revision applies to the full gRPC pipeline benchmark. At the direct NVMe actor level (bypassing gRPC), DmaBuffer::new overhead may still dominate.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-10",
+      "statement": "GPU P2P direct DMA (NVMe \u2192 GPU BAR1 via nvidia-peermem/gdrdrv) does not improve lookup latency vs host-bounce for 4 MiB objects even at NODE-level PCIe topology. BAR1 write overhead per-chunk matches or exceeds system-DRAM write + H2D cudaMemcpy cost.",
+      "confidence": "high",
+      "regime": "4 MiB objects, NVMe 0000:64:00.0 and GPU0 both NUMA node 0 (NODE-level), certus-server dispatcher v0, sequential ReadSync per 128 KiB chunk",
+      "evidence": [
+        "iteration-1-h-robustness"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 1,
+      "mechanism": "P2P path issues 32 ReadSync operations each DMAing 128 KiB directly to GPU BAR1 memory (via SPDK vtophys of GPU-backed DmaBuffer from prepare_memory_for_spdk). Result: 20,136 us vs 19,502 us baseline \u2014 no improvement. GPU BAR1 has lower per-byte write bandwidth than system DRAM for sequential 128 KiB writes, negating the elimination of the H2D cudaMemcpy (only ~200 us of 19,502 us total).",
+      "applicability_bounds": "Tested at NODE-level PCIe topology (same NUMA socket, different root complex). SYS-level (h8-v0-pinned) showed 65% slower. NODE-level is better but still not faster. May differ with larger BAR1 windows or GPU architectures with higher BAR1 bandwidth.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-11",
+      "statement": "cudaMemcpyAsync provides latency benefit over synchronous cudaMemcpy even for single-chunk (4 KiB) transfers (~16% improvement), independent of pipeline overlap. The async path avoids CPU synchronization overhead on the critical path.",
+      "confidence": "medium",
+      "regime": "Single 4 KiB object (1 segment), certus-server dispatcher v0, debug build, no hardware pipelining opportunity",
+      "evidence": [
+        "iteration-1-h-control-negative"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 1,
+      "mechanism": "Pipelined path calls cudaMemcpyAsync + cudaStreamSynchronize instead of cudaMemcpy. For single chunk, no read/copy overlap occurs \u2014 but cudaMemcpyAsync returns immediately, allowing cudaStreamSynchronize to observe the copy as already complete when the CUDA copy engine processes it independently. The CPU-side path is shorter (no blocking memcpy call). Combined with buffer pre-allocation (no DmaBuffer::new), total savings are ~283 us (1,749 - 1,466 us).",
+      "applicability_bounds": "Small transfers (4 KiB) where copy time is negligible. Effect may vary with CUDA driver version and stream overhead. The buffer pre-allocation component likely dominates for small objects.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-4",
+      "statement": "CUDA async copy (cudaMemcpyAsync) requires memory born from cudaHostAlloc for true asynchronous execution. cudaHostRegister on SPDK hugepage buffers falls back to synchronous copy. cudaHostAlloc + spdk_mem_register via create_spdk_dma_buffer_from_cuda_host_alloc provides both CUDA async capability and SPDK DMA registration.",
+      "confidence": "high",
+      "regime": "Any CUDA async copy operation in Certus with SPDK NVMe DMA",
+      "evidence": [
+        "h8-pipelined-iter-1",
+        "iteration-1-h-main"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 1,
+      "mechanism": "CUDA requires page-locked memory with specific allocation provenance for true DMA engine offload. SPDK hugepages (spdk_dma_malloc) are not recognized as CUDA-manageable memory; cudaHostRegister works at the CPU level but the CUDA driver uses a synchronous fallback path. cudaHostAlloc allocates directly in CUDA-managed page-locked memory that the copy engine can DMA without CPU intervention.",
+      "applicability_bounds": "Applies to all CUDA async memcpy operations in this codebase. Already validated in h8-pipelined-iter-1; further confirmed by successful 2x speedup in this iteration.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-12",
+      "statement": "BatchSubmit QD=32 provides no measurable end-to-end latency improvement for 4 MiB SSD-tier lookups through certus-server's gRPC path. The gRPC round-trip + connect_client() channel setup + actor dispatch overhead (~15-25ms) completely dominates NVMe read time (~0.3-0.8ms for QD=32), making NVMe parallelism invisible at the benchmark level.",
+      "confidence": "high",
+      "regime": "certus-server gRPC dispatcher, --bench-iterations 1, 4 MiB objects, single-object measurement, --dispatcher-version v0",
+      "evidence": [
+        "iteration-2-h-main",
+        "iteration-2-h-ablation"
+      ],
+      "contradicts": [],
+      "extraction_iteration": 2,
+      "mechanism": "The certus-server benchmark measures end-to-end gRPC latency. connect_client() creates new actor channels per lookup with synchronization overhead. The actor's poll loop harvests NVMe completions opportunistically. Even if all 32 NVMe reads complete in ~800us at QD=32, the surrounding infrastructure (gRPC serialization, channel setup, actor scheduling) adds 15-25ms that swamps the NVMe improvement. The h8-v1-pinned experiment (777us for P2P+BatchSubmit) was likely measured without gRPC overhead, explaining the 30x discrepancy.",
+      "applicability_bounds": "Applies to full gRPC round-trip benchmarks. Does NOT apply to direct actor-level benchmarks (no gRPC). The NVMe QD=32 mechanism is valid; the overhead is in the surrounding infrastructure, not the NVMe layer.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    },
+    {
+      "id": "RP-13",
+      "statement": "At the certus-server benchmark level, async GPU copy (cudaMemcpyAsync per chunk) and synchronous copy (cudaMemcpy per chunk) are indistinguishable in latency for 4 MiB 32-chunk lookups. The ~200us GPU copy time is negligible relative to the ~20ms total round-trip latency.",
+      "confidence": "medium",
+      "regime": "certus-server gRPC path, 4 MiB objects (32 x 128 KiB chunks), --bench-iterations 1",
+      "evidence": [
+        "iteration-2-h-ablation"
+      ],
+      "contradicts": [
+        "RP-11"
+      ],
+      "extraction_iteration": 2,
+      "mechanism": "At QD=32 with BatchSubmit, total GPU copy time (32 x 128 KiB cudaMemcpyAsync) is ~200us. When this contributes <1% of total round-trip latency (~20ms), overlap provides no measurable benefit. RP-11 measured 16% improvement for single-chunk (4 KiB) transfers where the copy itself was a larger fraction of total latency. The regime boundary is: async copy matters only when GPU copy time is >10% of total latency.",
+      "applicability_bounds": "Async copy provides negligible benefit when total latency >> GPU copy time. For single-chunk scenarios (RP-11) or isolated GPU copy benchmarks, async remains beneficial. The 16% improvement in RP-11 was measured in a context where copy was the dominant term.",
+      "superseded_by": null,
+      "category": "domain",
+      "status": "active"
+    }
+  ]
+}

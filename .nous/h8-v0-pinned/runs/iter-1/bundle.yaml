@@ -1,0 +1,69 @@
+metadata:
+  iteration: 1
+  family: "p2p-persistent-staging"
+  research_question: "Using a bounce buffer SSD→CPU→GPU with sequential transfers (dispatcher v0) is faster than direct SSD→GPU P2P DMA for transfer of 4 MiB broken into a stream of 128 KiB transfers, even with pre-pinned GPU memory."
+
+arms:
+  # Arms chosen:
+  # - h-main: Tests core prediction (P2P-pinned vs bounce)
+  # - h-control-negative: Staging tier should be unaffected (validates mechanism specificity)
+  # - h-ablation: P2P without promotion — isolates whether promotion copy negates advantage
+  # Skipped h-robustness (1 MiB variant) — focus on the pinning mechanism first.
+  # Skipped h-super-additivity — no combined factors to test in this iteration.
+
+  - type: h-main
+    prediction: "P2P with pre-pinned persistent GPU staging will achieve lower SSD-tier lookup latency than the bounce path for 4 MiB objects. The P2P-pinned path will be consistently faster across all 20 measurement iterations because the per-lookup setup cost (cudaIpcOpenMemHandle + spdk_mem_register) that caused 33% slowdown in h8-v0-vs-p2p is now amortized over the entire batch, leaving only the raw DMA path advantage visible."
+    mechanism: "The bounce path performs: (1) 32x sequential NVMe→host DRAM ReadSync [~10-12ms], then (2) one 4 MiB cudaMemcpy H2D [~1-2ms]. The P2P-pinned path performs: (1) 32x sequential NVMe→GPU BAR1 ReadSync directly [~10-12ms, no host DRAM intermediary], then (2) GPU→host copy for DRAM promotion [~1-2ms via dma_copy_to_host]. The NVMe read time is identical — the difference is whether the 4 MiB copy goes H2D (cudaMemcpy, PCIe Gen4 x16 ~25 GB/s) or is eliminated entirely by writing to GPU directly. With pre-pinning, the per-lookup overhead from the previous experiment (cudaIpcOpen + spdk_mem_register = 4-5ms) is amortized to near-zero over the batch. Net: P2P-pinned saves the 1-2ms final cudaMemcpy but adds a 1-2ms dma_copy_to_host for promotion — approximately break-even or slight P2P advantage due to BAR1 write coalescing behavior."
+    diagnostic: "If P2P-pinned is still slower: (1) Check whether spdk_mem_register is being called per-lookup despite pre-pinning (log registration count). (2) Verify that NVMe DMA to GPU BAR1 achieves the same throughput as NVMe DMA to host DRAM (check per-chunk completion times). (3) Measure the dma_copy_to_host (GPU→DRAM promotion) cost — if it exceeds the eliminated cudaMemcpy, the promotion requirement negates the path advantage. (4) Check if the CUDA IPC handle open is still happening per-lookup rather than per-batch."
+    code_changes:
+      - file: "components/interfaces/src/idispatcher.rs"
+        intent: "Add pub cuda_ipc_handle_bytes: Option<Vec<u8>> field to IpcHandle struct. Update the doc example to include the new field. Keep unsafe impl Send."
+        rationale: "The dispatcher needs raw CUDA IPC handle bytes to call prepare_memory_for_spdk. Passing through IpcHandle avoids changing the IDispatcher trait signature."
+
+      - file: "apps/certus-server/src/service.rs"
+        intent: "In the Lookup handler: instead of opening CUDA IPC handles per-entry with ipc_cache, call prepare_memory_for_spdk ONCE at the batch start using the first entry's handle bytes to get a persistent GPU DmaBuffer. For each entry, pass cuda_ipc_handle_bytes: Some(bytes) and the pre-opened dev_ptr via IpcHandle. After all lookups, drop the pinned buffer and close handles."
+        rationale: "Amortizes the heavy prepare_memory_for_spdk cost over the entire batch instead of paying it per-lookup. This is the key difference from the previous experiment."
+
+      - file: "components/dispatcher/v0/src/lib.rs"
+        intent: "Add read_from_block_device_p2p_pinned method. It accepts a reference to a pre-pinned GPU DmaBuffer (obtained externally). For each segment from io_segmenter, creates a sub-view DmaBuffer (from_raw at offset with noop_free) and issues ReadSync targeting it. After all chunks complete, copies data from a host DMA buffer to the dispatch map staging entry for DRAM promotion. In the lookup method, route to this new method when cuda_ipc_handle_bytes is present."
+        rationale: "Implements the P2P path that reads directly into pre-pinned GPU memory, bypassing the host DRAM bounce buffer. The sub-view approach was validated in h8-v0-vs-p2p as working correctly with SPDK DMA."
+
+      - file: "components/dispatcher/v0/Cargo.toml"
+        intent: "Add base64 = \"0.22\" to dependencies."
+        rationale: "Required for encoding the 72-byte payload for prepare_memory_for_spdk."
+
+  - type: h-control-negative
+    prediction: "For objects still in the staging tier (memory), P2P-pinned and bounce paths will show identical latency (within 5% of each other) because staging lookups call dma_copy_to_device from a host buffer regardless of path — the P2P code path is only invoked for BlockDevice lookups."
+    mechanism: "Staging lookup (LookupResult::Staging) bypasses read_from_block_device entirely, calling dma_copy_to_device directly from the staging buffer in host DRAM. The P2P modification only affects the BlockDevice lookup branch. Therefore staging-tier latency is unaffected by the P2P code change."
+    diagnostic: "If staging latencies differ: (1) Check whether the P2P service.rs changes accidentally affect the staging path (e.g., failing to open CUDA IPC for the dma_copy_to_device call). (2) Verify that the GPU DmaBuffer pre-pinning at batch start doesn't contend with the staging dma_copy_to_device (both use the same GPU). (3) Check for any lock contention introduced by the pre-pinning logic."
+    code_changes:
+      - file: "apps/certus-server/src/service.rs"
+        intent: "Same changes as h-main — the service layer pre-pins at batch start regardless of whether entries are staging or block-device."
+        rationale: "Same code runs for both arms; this arm validates that the staging path is unaffected."
+      - file: "components/dispatcher/v0/src/lib.rs"
+        intent: "Same changes as h-main — the lookup method routes staging entries through the existing dma_copy_to_device path unchanged."
+        rationale: "Confirms mechanism specificity: P2P only activates for BlockDevice entries."
+      - file: "components/interfaces/src/idispatcher.rs"
+        intent: "Same as h-main."
+        rationale: "Interface change is shared across all arms."
+      - file: "components/dispatcher/v0/Cargo.toml"
+        intent: "Same as h-main."
+        rationale: "Shared dependency."
+
+  - type: h-ablation
+    prediction: "P2P-pinned WITHOUT the host DRAM promotion copy (skip the staging buffer update) will show lower latency than P2P-pinned WITH promotion, by approximately 1-2ms per 4 MiB object (the cost of one 4 MiB memcpy from host buffer to staging buffer). This isolates the promotion cost."
+    mechanism: "The full P2P-pinned path does: NVMe→GPU (32 chunks) + host buffer copy for DRAM promotion. The ablation removes the promotion step, leaving only NVMe→GPU. If the promotion memcpy is ~1-2ms for 4 MiB (PCIe Gen4 bandwidth ~25 GB/s → 4 MiB in 0.16ms theoretical, ~1ms practical with overhead), removing it should produce a measurable latency reduction. This tells us whether the promotion requirement is what makes P2P uncompetitive with bounce."
+    diagnostic: "If no latency difference: the promotion copy is not on the critical path (perhaps it's overlapped or negligible). If promotion copy adds >3ms: something is wrong with the implementation (possibly using a slow copy path or introducing serialization)."
+    code_changes:
+      - file: "components/dispatcher/v0/src/lib.rs"
+        intent: "Same as h-main but in read_from_block_device_p2p_pinned, skip the host DRAM promotion step (do not copy data to staging buffer, do not call convert_to_storage or equivalent). Data lands on GPU only."
+        rationale: "Isolates the raw P2P DMA performance without the promotion overhead, revealing the true path advantage."
+      - file: "apps/certus-server/src/service.rs"
+        intent: "Same as h-main."
+        rationale: "Service layer is identical; ablation is in the dispatcher."
+      - file: "components/interfaces/src/idispatcher.rs"
+        intent: "Same as h-main."
+        rationale: "Shared interface change."
+      - file: "components/dispatcher/v0/Cargo.toml"
+        intent: "Same as h-main."
+        rationale: "Shared dependency."

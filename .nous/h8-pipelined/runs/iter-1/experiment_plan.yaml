@@ -1,0 +1,49 @@
+metadata:
+  iteration: 1
+  bundle_ref: "runs/iter-1/bundle.yaml"
+  description: >
+    Test pipelined bounce-buffer transfer (overlapping NVMe DMA with cudaMemcpyAsync H2D
+    via double-buffering) against non-pipelined bounce and direct SSD→GPU P2P for 4 MiB
+    transfers. Server requires LD_LIBRARY_PATH=/usr/local/lib for libgdrapi.so. All
+    server processes need a free NVMe device (not locked by SPDK). Client output goes
+    to result files. Server is started in background; kill after client finishes.
+
+setup:
+  - cmd: "ln -sf /home/nara/certus/ai-native-storage-certus/deps/spdk /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-baf1b525/deps/spdk && ln -sf /home/nara/certus/ai-native-storage-certus/deps/spdk-build /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-baf1b525/deps/spdk-build"
+    description: "Symlink SPDK source and build into the worktree"
+  - cmd: "cd /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-baf1b525 && RUSTFLAGS=\"-L /usr/local/lib\" cargo build -p gpu-services --features p2p"
+    description: "Build baseline binary (no patch applied)"
+
+arms:
+  - arm_id: "h-control-negative"
+    conditions:
+      - name: "baseline-seed1"
+        cmd: "LD_LIBRARY_PATH=/usr/local/lib /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-baf1b525/target/debug/gpu-p2p-server --mode bounce --chunk-size 131072 --staging-size 4194304 --socket /tmp/gpu_p2p_bounce.sock --pci 0000:63:00.0 & sleep 4 && python3 /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-baf1b525/components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_bounce.sock --iterations 10 2>&1 | tee /home/nara/certus/ai-native-storage-certus/.nous/h8-pipelined/runs/iter-1/results/h-control-negative/bounce-s1.txt; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-pipelined/runs/iter-1/results/h-control-negative/bounce-s1.txt"
+        description: "Non-pipelined bounce baseline (all reads then all H2D copies, no overlap)"
+      - name: "baseline-seed2"
+        cmd: "LD_LIBRARY_PATH=/usr/local/lib /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-baf1b525/target/debug/gpu-p2p-server --mode bounce --chunk-size 131072 --staging-size 4194304 --socket /tmp/gpu_p2p_bounce2.sock --pci 0000:c3:00.0 & sleep 4 && python3 /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-baf1b525/components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_bounce2.sock --iterations 10 2>&1 | tee /home/nara/certus/ai-native-storage-certus/.nous/h8-pipelined/runs/iter-1/results/h-control-negative/bounce-s2.txt; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-pipelined/runs/iter-1/results/h-control-negative/bounce-s2.txt"
+        description: "Non-pipelined bounce second run (device c3:00.0 for same-device comparison)"
+
+  - arm_id: "h-main"
+    conditions:
+      - name: "treatment-seed1"
+        cmd: "cd /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-baf1b525 && git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-pipelined/runs/iter-1/patches/h-main.patch && RUSTFLAGS=\"-L /usr/local/lib\" cargo build -p gpu-services --features p2p && LD_LIBRARY_PATH=/usr/local/lib ./target/debug/gpu-p2p-server --mode bounce-pipeline --chunk-size 131072 --staging-size 4194304 --socket /tmp/gpu_p2p_pipeline.sock --pci 0000:c2:00.0 & sleep 4 && python3 components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_pipeline.sock --iterations 10 2>&1 | tee /home/nara/certus/ai-native-storage-certus/.nous/h8-pipelined/runs/iter-1/results/h-main/pipeline-s1.txt; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-pipelined/runs/iter-1/results/h-main/pipeline-s1.txt"
+        description: "Pipelined bounce (double-buffered NVMe + cudaMemcpyAsync H2D, device c2:00.0)"
+      - name: "treatment-seed2"
+        cmd: "cd /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-baf1b525 && git checkout -- . && git apply /home/nara/certus/ai-native-storage-certus/.nous/h8-pipelined/runs/iter-1/patches/h-main.patch && RUSTFLAGS=\"-L /usr/local/lib\" cargo build -p gpu-services --features p2p && LD_LIBRARY_PATH=/usr/local/lib ./target/debug/gpu-p2p-server --mode bounce-pipeline --chunk-size 131072 --staging-size 4194304 --socket /tmp/gpu_p2p_pipeline2.sock --pci 0000:c3:00.0 & sleep 4 && python3 components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_pipeline2.sock --iterations 10 2>&1 | tee /home/nara/certus/ai-native-storage-certus/.nous/h8-pipelined/runs/iter-1/results/h-main/pipeline-s2.txt; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-pipelined/runs/iter-1/results/h-main/pipeline-s2.txt"
+        description: "Pipelined bounce second run (same device c3:00.0 as bounce-s2 for direct comparison)"
+
+  - arm_id: "h-robustness"
+    conditions:
+      - name: "p2p-seed1"
+        cmd: "LD_LIBRARY_PATH=/usr/local/lib /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-baf1b525/target/debug/gpu-p2p-server --mode p2p --chunk-size 131072 --staging-size 4194304 --socket /tmp/gpu_p2p_warm.sock --pci 0000:64:00.0 & sleep 5 && python3 /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-baf1b525/components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_warm.sock --iterations 10 2>&1 | tee /home/nara/certus/ai-native-storage-certus/.nous/h8-pipelined/runs/iter-1/results/h-robustness/p2p-s1.txt; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-pipelined/runs/iter-1/results/h-robustness/p2p-s1.txt"
+        description: "P2P warm reference (pre-pinned GDRCopy BAR1 staging, device 64:00.0)"
+      - name: "p2p-seed2"
+        cmd: "LD_LIBRARY_PATH=/usr/local/lib /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-baf1b525/target/debug/gpu-p2p-server --mode p2p --chunk-size 131072 --staging-size 4194304 --socket /tmp/gpu_p2p_warm2.sock --pci 0000:c3:00.0 & sleep 5 && python3 /home/nara/certus/ai-native-storage-certus/.nous-experiments/iter-1-baf1b525/components/gpu-services/v0/tests/gpu_client_p2p.py 4194304 /tmp/gpu_p2p_warm2.sock --iterations 10 2>&1 | tee /home/nara/certus/ai-native-storage-certus/.nous/h8-pipelined/runs/iter-1/results/h-robustness/p2p-s2.txt; kill %1 2>/dev/null"
+        output: "/home/nara/certus/ai-native-storage-certus/.nous/h8-pipelined/runs/iter-1/results/h-robustness/p2p-s2.txt"
+        description: "P2P warm second run (device c3:00.0 for same-device comparison)"

@@ -1,0 +1,58 @@
+[
+  {
+    "id": "RP-1",
+    "statement": "cudaMemcpyAsync does not reliably achieve true async execution when the source buffer is SPDK hugepage memory registered post-hoc via cudaHostRegister; the overhead of registration and stream management (~200μs per transfer) can exceed any overlap benefit for 4 MiB / 32-chunk workloads.",
+    "confidence": "medium",
+    "regime": "4 MiB transfers, 32×128 KiB chunks, SPDK hugepage DMA buffers, CUDA stream-based H2D copies on server-class GPUs with PCIe connectivity",
+    "evidence": ["iteration-1-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "SPDK allocates hugepage memory via DPDK/IOVA which is physically contiguous but not registered in CUDA's page-lock table. cudaHostRegister() at transfer time adds a per-buffer registration overhead and may not guarantee the DMA engine uses the registered pages in async mode — CUDA may still use an internal staging copy for unrecognized host memory. Stream creation and cudaStreamSynchronize calls add further serialization points that negate overlap benefits at small chunk counts.",
+    "applicability_bounds": "Applies when using SPDK DmaBuffer (hugepage-backed) as the source for cudaMemcpyAsync. May not apply if using cudaHostAlloc-allocated buffers from the start (CUDA-native pinning). May not apply for larger transfers where overlap amortizes registration overhead. Needs further validation.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-2",
+    "statement": "Non-pipelined bounce-buffer latency for 4 MiB NVMe→GPU transfers can be as low as 1.87ms (2143 MB/s) on these NVMe devices, substantially better than the 2.65ms measured in prior hypothesis-8 experiments — suggesting device-to-device variation is significant and prior measurements should not be directly extrapolated.",
+    "confidence": "high",
+    "regime": "4 MiB transfers, 128 KiB chunks, SPDK VFIO-bound NVMe, sequential bounce mode, warm system state",
+    "evidence": ["iteration-1-h-control-negative"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "Different NVMe devices on the same server may have different queue depths, controller latencies, and NUMA placement affecting transfer times. The 7 NVMe devices available span two NUMA nodes (61-64 on node 0, c1-c3 on node 1). Both nodes measured similar bounce latencies (~1.87ms), so NUMA effects are not the dominant factor here. Device model and firmware version differences are more likely.",
+    "applicability_bounds": "Specific to the test hardware with VFIO-bound NVMe devices. Bounce latency will vary with device model, firmware, and system load. The 1.87ms baseline should be used as the reference for this campaign.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-3",
+    "statement": "P2P warm mode (pre-pinned GDRCopy BAR1 staging) consistently achieves ~1.27-1.34ms for 4 MiB NVMe→GPU transfers across multiple NVMe devices and experimental runs, confirming it as a stable reference point for this hardware configuration.",
+    "confidence": "high",
+    "regime": "4 MiB transfers, 128 KiB chunks, SPDK VFIO NVMe, pre-pinned GDRCopy staging, warm system state",
+    "evidence": ["iteration-1-h-robustness"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "P2P warm uses GDRCopy BAR1-mapped GPU memory as the DMA destination for NVMe reads. The staging→client D2D copy (~114μs) is dominated by the NVMe read time (~710μs). Total is consistent because both the NVMe read and D2D copy are deterministic hardware operations with low variance.",
+    "applicability_bounds": "Requires nvidia_peermem and gdrdrv kernel modules, GDRCopy-compatible GPU, pre-allocated staging buffers. One-time setup cost amortized across requests. The ~1.3ms target should be treated as the performance ceiling for bounce-based approaches to aim for.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-4",
+    "statement": "For pipelined bounce to outperform non-pipelined bounce, the implementation must use CUDA-native pinned memory (cudaHostAlloc) rather than SPDK hugepage buffers with post-hoc cudaHostRegister, to ensure cudaMemcpyAsync executes truly asynchronously without internal staging copies.",
+    "confidence": "medium",
+    "regime": "Pipelined NVMe→CPU→GPU double-buffered transfers",
+    "evidence": ["iteration-1-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "CUDA's DMA engine can only perform truly async transfers from page-locked memory that was pinned at allocation time via cudaHostAlloc or equivalent. Memory registered via cudaHostRegister may be paged-locked but the DMA engine may still use an intermediate copy for non-native allocations. For the pipeline to work, iter-2 should: (1) allocate host buffers via cudaHostAlloc (CUDA-pinned), (2) register these buffers with SPDK via spdk_mem_register() for DMA accessibility, (3) verify async execution with cudaStreamQuery().",
+    "applicability_bounds": "Applies to any GPU pipeline using shared SPDK+CUDA buffers. The constraint is inherent to CUDA's memory model: async DMA requires CUDA-native allocation. This principle should guide all future pipelining attempts in this codebase.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  }
+]

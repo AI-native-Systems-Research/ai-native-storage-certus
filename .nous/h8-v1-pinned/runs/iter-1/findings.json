@@ -1,0 +1,25 @@
+{
+  "iteration": 1,
+  "bundle_ref": "runs/iter-1/bundle.yaml",
+  "arms": [
+    {
+      "arm_type": "h-main",
+      "predicted": "P2P persistent staging (Condition B) will show lower SSD-tier avg latency than baseline bounce (Condition A) on 1-iteration first-hit measurement of 4 MiB objects. Expected improvement from eliminating 32 per-chunk cudaMemcpy H2D copies and 32 host memcpy operations.",
+      "observed": "Bounce baseline: 6335.9 us/obj (0.66 GB/s). P2P treatment: 10498.3 us/obj (0.40 GB/s). P2P is 65.7% SLOWER than bounce. P2P path was confirmed active (prepare_memory_for_spdk called, DmaBuffer cached). The GPU DmaBuffer (4194304 bytes) was registered with SPDK. NVMe device: 0000:c2:00.0 (c-bus NVMe, NUMA node 0).",
+      "status": "REFUTED",
+      "error_type": "direction",
+      "diagnostic_note": "P2P was active and caching worked (prepare_memory_for_spdk called once for 4 MiB buffer), but NVMe DMA directly into GPU BAR1 is slower than DMA into DRAM with subsequent cudaMemcpy. Likely PCIe topology mismatch: c-bus NVMe (0000:c2:00.0) and GPU may be on different root complexes, causing P2P DMA to traverse root-complex-to-root-complex PCIe links. Compare: bounce DRAM DMA is always local to CPU, while P2P DMA to GPU BAR1 must traverse PCIe topology. The 65% slowdown (10498 vs 6336 us) suggests substantial PCIe overhead per DMA transfer, far exceeding the ~150us saved by eliminating memcpy operations. Recommendation: run nvidia-smi topo -m and lspci -tvvv to verify PCIe topology mismatch between c-bus NVMe and GPU."
+    },
+    {
+      "arm_type": "h-robustness",
+      "predicted": "P2P persistent staging over 20 iterations will show stable SSD-tier latency with max/min ratio below 1.3. Average consistent with 1-iteration measurement (within 10%).",
+      "observed": "P2P 20-iter: avg 7602.5 us (min 6086.4, max 8720.6). Max/min ratio = 1.43, exceeding 1.3 threshold. 20-iter avg (7602.5) differs from 1-iter (10498.3) by 27.6%, suggesting significant warm-up effect. The min value (6086.4 us) is close to the bounce baseline (6335.9 us), suggesting occasional fast P2P reads exist but are inconsistent.",
+      "status": "REFUTED",
+      "error_type": "magnitude",
+      "diagnostic_note": "Higher variance than predicted (1.43 vs 1.3). The 27.6% improvement from iteration 1 to subsequent iterations may indicate IOMMU TLB warming or PCIe bandwidth warming. The occasional fast reads (min 6086 us approaching bounce performance) suggest the hardware can achieve competitive P2P transfer but not consistently. GPU memory pinning via GDRCopy may have non-deterministic DMA performance over repeated accesses."
+    }
+  ],
+  "experiment_valid": true,
+  "discrepancy_analysis": "Both arms refuted. The core finding is that direct SSD-to-GPU P2P DMA (NVMe BAR to GPU BAR1) is slower than the bounce path (NVMe DMA to DRAM followed by cudaMemcpy H2D) for sequential 128 KiB reads of a 4 MiB object. The 65% slowdown in h-main contradicts RP-5 which predicted 2x speedup. The mechanism failure is PCIe path overhead: the c-bus NVMe (NUMA 0) likely shares PCIe bandwidth with GPU BAR1 through a longer PCIe path than CPU-attached DRAM. DmaBuffer caching (RP-7) worked correctly (prepare_memory_for_spdk called once), but even with per-lookup overhead eliminated, P2P transfers remain slower than bounce. This updates our understanding: P2P benefit requires NVMe and GPU to share the same PCIe switch or root port.",
+  "dominant_component_pct": 65.7
+}
