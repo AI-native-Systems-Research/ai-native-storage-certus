@@ -12,6 +12,7 @@ use std::os::raw::{c_char, c_int};
 /// CUDA error codes (subset).
 pub type cudaError_t = c_int;
 pub const CUDA_SUCCESS: cudaError_t = 0;
+pub const CUDA_ERROR_HOST_MEMORY_ALREADY_REGISTERED: cudaError_t = 712;
 
 /// CUDA IPC memory handle — 64 bytes opaque.
 #[repr(C)]

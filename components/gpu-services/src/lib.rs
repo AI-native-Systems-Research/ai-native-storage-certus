@@ -761,7 +761,10 @@ impl IGpuServices for GpuServicesComponent {
 
             // SAFETY: ptr is valid for `size` bytes and page-aligned (caller contract).
             let err = unsafe { cuda_ffi::cudaHostRegister(ptr, size, 0) };
-            if err != cuda_ffi::CUDA_SUCCESS {
+            let we_registered_cuda = err == cuda_ffi::CUDA_SUCCESS;
+            if err != cuda_ffi::CUDA_SUCCESS
+                && err != cuda_ffi::CUDA_ERROR_HOST_MEMORY_ALREADY_REGISTERED
+            {
                 return Err(format!(
                     "cudaHostRegister({} bytes) failed: {}",
                     size,
@@ -778,7 +781,9 @@ impl IGpuServices for GpuServicesComponent {
 
             let rc = unsafe { spdk_mem_register(ptr, size) };
             if rc != 0 {
-                unsafe { cuda_ffi::cudaHostUnregister(ptr) };
+                if we_registered_cuda {
+                    unsafe { cuda_ffi::cudaHostUnregister(ptr) };
+                }
                 return Err(format!("spdk_mem_register failed (rc={})", rc));
             }
 
