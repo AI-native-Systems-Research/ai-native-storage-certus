@@ -30,3 +30,15 @@ exclude=kernel*5.14.0-687* kernel*5.14.0-7*
 
 To check OFED is loaded and working do `modinfo ib_core` and check that it is pointing to extra not to drivers/infiniband. Make sure to install 'kernel-headers' package before trying to install OFED.
 
+Instal kernel source and development:
+```
+sudo dnf groupinstall "Development Tools"
+sudo dnf install kernel-devel-$(uname -r) kernel-headers-$(uname -r)
+```
+
+Check with:
+```
+ls -l /lib/modules/$(uname -r)/build
+```
+
+Do not install/upgrade kernel headers during DOCA ofed install.
