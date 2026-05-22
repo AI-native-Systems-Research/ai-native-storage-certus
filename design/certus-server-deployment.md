@@ -28,7 +28,7 @@
 │                                   │                                          │
 │  ┌────────────────────────────────▼───────────────────────────────────────┐  │
 │  │ DispatcherComponent                              «IDispatcher»         │  │
-│  │  version: 1.0.0 (--dispatcher-version v0|v1)                           │  │
+│  │  (--dispatcher-version v0|v1)                                          │  │
 │  │                                                                        │  │
 │  │  receptacles:                                                          │  │
 │  │    ├─ dispatch_map ──────────────────┐                                 │  │
@@ -57,7 +57,7 @@
 │                  │   │       │  │       │                                    │
 │                  ▼   │       │  ▼       ▼                                    │
 │  ┌────────────────┐  │  ┌─────────┐  ┌────────────────────────────────────┐  │
-│  │ LoggerCompV1   │  │  │MemoryTier│  │ DispatchMapComponentV0             │  │
+│  │ LoggerComponent   │  │  │MemoryTier│  │ DispatchMapComponent             │  │
 │  │ «ILogger»      │  │  │Component│  │ «IDispatchMap»                     │  │
 │  │                │  │  │«IMemory │  │                                    │  │
 │  │ (all comps     │  │  │ Tier»   │  │  receptacles:                      │  │
@@ -96,7 +96,7 @@
 │  └───────────────────────┬───────────────────────────────────┘               │
 │                          │                                                   │
 │  ┌───────────────────────────────────────────────────────────┐               │
-│  │ GpuServicesComponentV0                    «IGpuServices»  │               │
+│  │ GpuServicesComponent                    «IGpuServices»  │               │
 │  │  receptacles:                                             │               │
 │  │    └─ logger                                              │               │
 │  │  • cudaMemcpy (H2D / D2H, sync + async streams)          │─▶ GPU Memory  │
@@ -114,25 +114,25 @@
 
 ## Component Summary
 
-| Component | Version | Provides | Receptacles |
-|-----------|---------|----------|-------------|
-| SPDKEnvComponent | 0.1.0 | ISPDKEnv | — |
-| LoggerComponentV1 | — | ILogger | — |
-| GpuServicesComponentV0 | 0.1.0 | IGpuServices | logger |
-| MemoryTierComponent | 0.1.0 | IMemoryTier | logger |
-| BlockDeviceSpdkNvme | 0.2.0 | IBlockDevice, IBlockDeviceAdmin | spdk_env, logger |
-| ExtentManager | 0.1.0 | IExtentManager | metadata_device, logger |
-| DispatchMapComponentV0 | 0.1.0 | IDispatchMap | extent_manager, logger |
-| DispatcherComponent | 1.0.0 | IDispatcher | dispatch_map, memory_tier, gpu_services, spdk_env, logger |
+| Component | Provides | Receptacles |
+|-----------|----------|-------------|
+| SPDKEnvComponent | ISPDKEnv | — |
+| LoggerComponent | ILogger | — |
+| GpuServicesComponent | IGpuServices | logger |
+| MemoryTierComponent | IMemoryTier | logger |
+| BlockDeviceSpdkNvme | IBlockDevice, IBlockDeviceAdmin | spdk_env, logger |
+| ExtentManager | IExtentManager | metadata_device, logger |
+| DispatchMapComponent | IDispatchMap | extent_manager, logger |
+| DispatcherComponent | IDispatcher | dispatch_map, memory_tier, gpu_services, spdk_env, logger |
 
 ## Initialization Order
 
 1. **SPDKEnvComponent** — DPDK/EAL init, VFIO device discovery
-2. **LoggerComponentV1** — console/file logging
-3. **GpuServicesComponentV0** — CUDA device init
+2. **LoggerComponent** — console/file logging
+3. **GpuServicesComponent** — CUDA device init
 4. **Metadata BlockDeviceSpdkNvme** — NVMe controller for metadata (bound to spdk_env)
 5. **Metadata ExtentManager** — block allocator over metadata device
-6. **DispatchMapComponentV0** — key→location table (bound to metadata extent manager)
+6. **DispatchMapComponent** — key→location table (bound to metadata extent manager)
 7. **MemoryTierComponent** — mmap DRAM pool, CUDA-pinned via `cudaHostRegister`
 8. **DispatcherComponent** — top-level orchestrator (bound to dispatch_map, memory_tier, gpu, spdk_env)
    - Internally creates **DataDrive[0..N]**: one (BlockDeviceSpdkNvme + ExtentManager) pair per `--data-pci` address

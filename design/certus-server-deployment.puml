@@ -27,7 +27,7 @@ node "Server Host" as server_host {
             [cudaIpcOpenMemHandle\n/ CloseMemHandle\n(cached per batch)] as ipc_open
         }
 
-        component "DispatcherComponent v1.0.0\n<<IDispatcher>>" as dispatcher {
+        component "DispatcherComponent\n<<IDispatcher>>" as dispatcher {
             portin "receptacle: dispatch_map" as r_dm
             portin "receptacle: memory_tier" as r_mt
             portin "receptacle: gpu_services" as r_gpu
@@ -51,20 +51,20 @@ node "Server Host" as server_host {
             }
         }
 
-        component "MemoryTierComponent v0.1.0\n<<IMemoryTier>>" as memory_tier {
+        component "MemoryTierComponent\n<<IMemoryTier>>" as memory_tier {
             portin "receptacle: logger" as mt_log
             [mmap Pool\n(DRAM, CUDA-pinned)] as mt_pool
             [LRU Tracker] as mt_lru
             [FreeList Allocator] as mt_alloc
         }
 
-        component "DispatchMapComponentV0\n<<IDispatchMap>>" as dispatch_map {
+        component "DispatchMapComponent\n<<IDispatchMap>>" as dispatch_map {
             portin "receptacle: extent_manager" as dm_em
             portin "receptacle: logger" as dm_log
             [Entry Table\n(key → Location:\nMemoryTier|BlockDevice|Staging)] as entry_table
         }
 
-        component "GpuServicesComponentV0\n<<IGpuServices>>" as gpu_svc {
+        component "GpuServicesComponent\n<<IGpuServices>>" as gpu_svc {
             portin "receptacle: logger" as gpu_log
             [CUDA DMA\n(sync + async streams)] as cuda_dma
             [cudaHostRegister\n(memory-tier pinning)] as cuda_pin
@@ -84,7 +84,7 @@ node "Server Host" as server_host {
             portin "receptacle: logger" as mem_log
         }
 
-        component "LoggerComponentV1\n<<ILogger>>" as logger_comp
+        component "LoggerComponent\n<<ILogger>>" as logger_comp
     }
 
     database "GPU Memory\n(server context)" as server_gpu
