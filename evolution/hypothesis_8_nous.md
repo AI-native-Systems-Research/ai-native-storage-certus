@@ -173,13 +173,31 @@ Minimal campaign: research question, the full repository (all source code), targ
 6. Explores the winning path deeper rather than strengthening the losing path — once P2P won, Nous kept optimizing P2P instead of giving bounce its best shot (true pipelining)
 7. Iter-2 abandons working iter-1 approach — h8-evolve-v0-pipelined iter-1 achieved 2.02x with double-buffering, but iter-2 switched to BatchSubmit QD=32 (completely different strategy) and got no improvement. Never investigated why iter-1 worked or tried to refine it
 
-**Recommendations for Nous development:**
+**Recommendations for Nous development (from campaigns 1-9):**
 1. Add `constraints` field to campaign schema (hard rules validated before execution)
 2. Weight keywords in hypothesis — flag if experiment doesn't address them
 3. Hypothesis-to-experiment alignment gate (reject bundle if it doesn't test what's stated)
 
-**Recommendations for the test evaluator:**
+**Recommendations for the test evaluator (from campaigns 1-9):**
 1. Sanity-check gate on results (flag if measurements violate physical constraints, e.g. SSD faster than DRAM)
+
+**NEW recommendations (from campaigns 10-11, added 2026-05-21):**
+
+4. **Reference implementation as default campaign input** — Campaign 10 proved $3 vs $35 for equivalent insight quality (10-40x cost reduction). When a working example exists in the repo, always include it. When none exists, the human should write a simplified 50-100 line version first — still cheaper than 3 failed campaigns.
+
+5. **Iter-2 must explain iter-1 before changing approach** — If iter-1 produced a measurable gain, iter-2 must ablate iter-1's mechanism before trying a different strategy. Campaign 8 iter-1 got 2x with double-buffering; iter-2 abandoned it for BatchSubmit (0%) without understanding that the gain came from buffer pre-allocation.
+
+6. **Strengthen the loser before deepening the winner** — After one arm wins an A/B, test whether the losing arm can match with its best implementation before concluding. Nous kept optimizing P2P after it won; never gave bounce true pipelining. Result: bounce with pipelining ties P2P (~9.7ms vs ~9.3ms), which changes the conclusion entirely.
+
+7. **Architecture map as campaign input** — Campaign 11 showed Nous optimizes what it can see in one file but can't reason about system topology (actor thread model, core allocation, channel structure). Providing a component/thread/data-flow diagram as campaign input would let Nous know WHERE bottlenecks could live before touching code.
+
+8. **Profiling-first workflow** — Run perf/flamegraph BEFORE designing the experiment, not after. Campaign 11 optimized pipeline.rs when the bottleneck was in actor/channel scheduling. A flamegraph would have immediately shown where time was spent.
+
+9. **"Zoom out" checkpoint after iter-1** — Force a step asking: "Is the bottleneck in this file (local) or in the system around it (architectural)?" This breaks the tunnel vision of "optimize what I can see in the file I opened." Campaign 11 spent both iterations on pipeline.rs when the issue was thread topology.
+
+10. **Blast radius estimation before implementation** — Before writing code, enumerate all files that must change and estimate cost. If >5 files → flag for human review, don't attempt. Would have prevented campaign 6's $14 budget blowout (240 turns on a 12-file interface cascade).
+
+11. **Split diagnosis campaigns from implementation campaigns** — Campaign A: "what's the bottleneck?" (diagnosis only, no code changes). Campaign B: "fix this specific thing in this specific file" (implementation). This matches Nous's strengths (diagnosis: strong) vs weaknesses (multi-file architecture: weak).
 
 ---
 
