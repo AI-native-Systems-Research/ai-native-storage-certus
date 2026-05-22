@@ -1,0 +1,40 @@
+research_question: >
+  The dispatcher v1 cold 16 MiB throughput (currently ~1750 MB/s measured by
+  dispatcher_hw_benchmark) can match gpu-bb-vs-p2p throughput (~3250 MB/s)
+  without removing the component architecture or adding new external dependencies.
+
+run_id: h8-channel-optimization
+
+max_iterations: 2
+
+target_system:
+  name: "Certus Storage Engine — Dispatcher v1 cold lookup optimization"
+  description: >
+    AI-native KV-cache storage system. Dispatcher v1 cold lookup reads 16 MiB
+    from NVMe SSD and delivers it to GPU memory.
+
+    BENCHMARKS (use these for measurement):
+    - cargo bench -p dispatcher-v1 --features hardware-test --bench dispatcher_hw_benchmark
+      Reports mean/min/p50/p99 latency and throughput for cold and warm lookups
+      at various sizes (128 KiB to 16 MiB). Target: cold_16384KiB row.
+    - cargo run --release -p gpu-bb-vs-p2p -- --stream-size 16777216 --iterations 50
+      Reference ceiling (~3250 MB/s). Requires LD_LIBRARY_PATH=/usr/local/lib.
+
+    CONSTRAINTS:
+    - Do NOT remove the component architecture (actors, channels, components).
+    - Do NOT add new external crate dependencies.
+
+  observable_metrics:
+    - "cold_16384KiB mean latency (us) from dispatcher_hw_benchmark"
+    - "cold_16384KiB min latency (us)"
+    - "cold_16384KiB throughput (MB/s)"
+    - "cold_16384KiB mean/min ratio (variance indicator)"
+  repo_path: /home/nara/certus/ai-native-storage-certus
+
+models:
+  design: "claude-opus-4-6"
+  execute_analyze: "claude-sonnet-4-6"
+
+prompts:
+  methodology_layer: "prompts/methodology"
+  domain_adapter_layer: null
