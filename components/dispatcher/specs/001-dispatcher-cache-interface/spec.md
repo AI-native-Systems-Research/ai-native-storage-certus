@@ -9,7 +9,7 @@
 
 ### User Story 1 - Cache Population (GPU to Memory-Tier with Write-Through) (Priority: P1)
 
-A client application holds data in GPU memory and wants to cache it for future use. The client calls the dispatcher's populate method, providing a cache key and an IPC handle referencing the GPU memory region. The dispatcher evicts entries from the memory-tier if capacity is insufficient, allocates a slot in the DRAM memory-tier via `IMemoryTier::insert()`, initiates a DMA copy from GPU memory into the memory-tier slot, registers the entry in the dispatch map as a `MemoryTier` entry (via `create_memory_tier_entry`), and returns confirmation to the client. In the background, the dispatcher reads from the memory-tier pointer and asynchronously writes the data to the SSD via the block device and extent manager (write-through).
+A client application holds data in GPU memory and wants to cache it for future use. The client calls the dispatcher's populate method, providing a cache key and an IPC handle referencing the GPU memory region. The dispatcher evicts entries from the memory-tier if capacity is insufficient, allocates a slot in the DRAM memory-tier via `IMemoryTier::insert()`, initiates a DMA copy from GPU memory into the memory-tier slot, registers the entry in the dispatch map as a `MemoryTier` entry (via `create_memory_tier_entry`), and returns confirmation to the client. In the background, the dispatcher reads from the memory-tier pointer via `IMemoryTier::peek()` (which does not refresh LRU order, ensuring the write-through does not prevent eviction of the entry) and asynchronously writes the data to the SSD via the block device and extent manager (write-through).
 
 **Why this priority**: This is the primary write path — without the ability to populate the cache, no data enters the system. Every other operation depends on cached data existing.
 
@@ -113,7 +113,7 @@ A caller wants to write data directly to SSD without going through the GPU DMA m
 
 ### User Story 7 - Memory-Tier Capacity Eviction (Priority: P2)
 
-When the memory-tier pool does not have enough space for a new entry, the dispatcher must evict old entries to make room. Eviction is triggered by `populate` and `promote_and_serve` (the promotion path). The `evict_for_space` function evicts LRU entries from the memory-tier (via `IMemoryTier::evict_lru()`) until `used + needed <= capacity`. Each evicted entry is transitioned from MemoryTier to BlockDevice state in the dispatch map (via `convert_memory_tier_to_block`), provided its write-through has completed (ssd_offset is set).
+When the memory-tier pool does not have enough space for a new entry, the dispatcher must evict old entries to make room. Eviction is triggered by `populate` and `promote_and_serve` (the promotion path). The `evict_for_space` function uses a two-phase approach: it first queries `IMemoryTier::oldest_keys(MAX_SCAN)` to get candidate keys in LRU order, then checks each via `IDispatchMap::is_evictable(key)` to find entries whose write-through is complete (ssd_offset set) and have no active references. Evictable entries are removed from the memory-tier via `IMemoryTier::remove(key)` and transitioned to BlockDevice state via `convert_memory_tier_to_block`. If no evictable candidate is found, the function falls back to blind LRU eviction via `IMemoryTier::evict_lru()`, removing the dispatch-map entry entirely if the transition to BlockDevice fails (data loss accepted under extreme memory pressure). This loop continues until `used + needed <= capacity`.
 
 **Why this priority**: Without eviction, the cache fills up and no new entries can be stored. Required for long-running workloads.
 
@@ -121,9 +121,9 @@ When the memory-tier pool does not have enough space for a new entry, the dispat
 
 **Acceptance Scenarios**:
 
-1. **Given** memory-tier pool has 16 KiB capacity and 4 x 4 KiB entries exist, **When** a new 4 KiB entry is populated, **Then** `evict_for_space` evicts entries via `evict_lru()` until `used + 4096 <= 16384`, and the evicted entries' dispatch-map records are converted to BlockDevice.
-2. **Given** entries that have completed write-through (ssd_offset set), **When** eviction runs, **Then** those entries are eligible for eviction and can be re-read from SSD later.
-3. **Given** entries whose write-through has not yet completed (no ssd_offset), **When** eviction runs, **Then** those entries may be evicted from the memory-tier (the data is effectively lost from fast access but the dispatch-map transition to BlockDevice will fail gracefully).
+1. **Given** memory-tier pool has 16 KiB capacity and 4 x 4 KiB entries exist, **When** a new 4 KiB entry is populated, **Then** `evict_for_space` queries `oldest_keys(128)` and selects entries where `dm.is_evictable(key)` returns true, removes them from the memory-tier via `mt.remove(key)`, and converts their dispatch-map records to BlockDevice until `used + 4096 <= 16384`.
+2. **Given** entries that have completed write-through (ssd_offset set) and have no active references, **When** eviction runs, **Then** `is_evictable` returns true for those entries, they are preferred for eviction, and can be re-read from SSD later.
+3. **Given** no entries pass the `is_evictable` check (all have in-flight write-through or active references), **When** eviction runs, **Then** `evict_for_space` falls back to blind LRU eviction via `evict_lru()`. If the evicted entry's `convert_memory_tier_to_block` fails, the dispatch-map entry is removed entirely (data loss accepted under extreme pressure).
 4. **Given** the memory-tier has sufficient space for the requested allocation, **When** `evict_for_space` is called, **Then** no eviction occurs.
 
 ---
@@ -186,11 +186,18 @@ When the SSD data drives approach capacity, a background evictor removes the old
 - Multiple concurrent lookups for the same key are permitted (multiple read references allowed by dispatch map locking semantics).
 - When the block device reports an I/O error during background write-through, the write-through is abandoned (the entry remains in memory-tier without SSD backing).
 - When `prepare_store` fails after registering in the dispatch map (e.g., extent allocation failure), the dispatch map entry is cleaned up before returning the error.
-- When eviction is triggered but all memory-tier entries have no completed write-through, eviction may leave entries in an inconsistent state (lost from memory-tier but not retrievable from SSD). This is an acceptable trade-off for preventing complete stalls.
+- When eviction is triggered but no entries pass the `is_evictable` check (all have in-flight write-through or active references), eviction falls back to blind LRU via `evict_lru()`. If the evicted entry cannot transition to BlockDevice, its dispatch-map entry is removed entirely (data loss). This is an acceptable trade-off for preventing complete stalls.
 - When the SSD evictor runs but all candidate entries have active references, no entries are evicted in that sweep. The evictor re-checks on its next interval.
 - When the SSD evictor removes an entry, it frees the extent via the extent manager and removes the dispatch-map entry. No memory-tier operation is needed (the entry was already evicted from DRAM).
 
 ## Clarifications
+
+### Session 2026-05-22 (Eviction Refinement & Background Writer)
+
+- Q: How does `evict_for_space` choose which entry to evict? -> A: Two-phase approach. Phase 1: queries `IMemoryTier::oldest_keys(128)` for LRU candidates, then checks `IDispatchMap::is_evictable(key)` on each. `is_evictable` returns true when the entry is in MemoryTier state with `ssd_offset: Some(_)` (write-through complete) and no active read/write references. The first such entry is removed from the memory-tier via `mt.remove(key)` and transitioned via `convert_memory_tier_to_block`. Phase 2 (fallback): if no evictable candidate exists, calls `mt.evict_lru()` blindly and removes the dispatch-map entry if BlockDevice transition fails.
+- Q: Why does the background writer use `peek()` instead of `get()`? -> A: `IMemoryTier::peek()` returns the pointer and size without refreshing the entry's LRU position. This ensures background write-through does not artificially keep entries "hot" and prevent their eviction under memory pressure.
+- Q: What is `IMemoryTier::oldest_keys(n)`? -> A: Returns up to N keys in LRU order (oldest first) without removing them. Used by `evict_for_space` to scan for eviction candidates.
+- Q: What is `IDispatchMap::is_evictable(key)`? -> A: Returns true if the entry exists in MemoryTier state with a non-None `ssd_offset` and has no active read or write references. Used by `evict_for_space` to identify safe eviction candidates.
 
 ### Session 2026-05-12 (SSD Eviction)
 
@@ -199,9 +206,9 @@ When the SSD data drives approach capacity, a background evictor removes the old
 
 ### Session 2026-05-08 (Memory-Tier Rewrite)
 
-- Q: How is the memory-tier pool managed? -> A: The `IMemoryTier` interface provides `insert()`, `get()`, `remove()`, `evict_lru()`, `touch()`, `capacity()`, and `used()`. The pool is pre-allocated DRAM. Eviction is capacity-based: `used + needed > capacity` triggers LRU eviction.
+- Q: How is the memory-tier pool managed? -> A: The `IMemoryTier` interface provides `insert()`, `get()`, `peek()`, `remove()`, `evict_lru()`, `oldest_keys()`, `touch()`, `capacity()`, and `used()`. The `peek()` method returns the pointer and size without refreshing LRU (used by the background writer). The `oldest_keys(n)` method returns up to N keys in LRU order without removing them (used by `evict_for_space`). The pool is pre-allocated DRAM. Eviction is capacity-based: `used + needed > capacity` triggers LRU eviction.
 - Q: What happens when an evicted entry is looked up? -> A: The dispatch-map returns `LookupResult::BlockDevice { offset }`. The dispatcher calls `promote_and_serve` which reads from SSD, inserts into memory-tier, DMA-copies to GPU, and re-registers in the dispatch-map.
-- Q: What happens if write-through hasn't completed when eviction occurs? -> A: The `convert_memory_tier_to_block` call fails (no ssd_offset set). The entry is removed from the memory-tier anyway (by `evict_lru`). Effectively the data is lost. This is accepted as unlikely in practice.
+- Q: What happens if write-through hasn't completed when eviction occurs? -> A: The two-phase eviction preferentially selects entries where `is_evictable()` is true (write-through complete, no active references). Entries with incomplete write-through are only evicted as a last resort (fallback to blind `evict_lru`). In the fallback case, `convert_memory_tier_to_block` fails (no ssd_offset set), the dispatch-map entry is removed entirely, and the data is effectively lost. This is accepted as unlikely in practice due to the preference for evictable entries.
 - Q: Does lookup update the LRU order? -> A: Yes, `mt.touch(key)` is called after a successful MemoryTier lookup to refresh the entry's position in the LRU.
 - Q: How does the pipelined reader work? -> A: The primary path (`pipelined_ssd_to_gpu_zero_copy`) reads NVMe directly into the memory-tier slot (CUDA-pinned + SPDK-registered), then issues `cudaMemcpyAsync` H2D from the same memory on alternating CUDA streams, with up to 16 NVMe reads in flight. The fallback path (`pipelined_ssd_to_gpu`) allocates a ring of 8 DMA buffers and copies each chunk from ring → memory-tier slot + GPU.
 
@@ -212,7 +219,7 @@ When the SSD data drives approach capacity, a background evictor removes the old
 - **FR-001**: System MUST define an `IDispatcher` interface in the shared interfaces crate, providing `initialize`, `shutdown`, `lookup`, `lookup_async`, `check`, `remove`, `populate`, `prepare_store`, `commit_store`, `cancel_store`, and `touch` methods.
 - **FR-002**: System MUST define a `DispatcherError` error type in the shared interfaces crate, covering all failure modes (not initialized, key not found, duplicate key, I/O error, allocation failure, invalid parameter).
 - **FR-003**: The `populate(key, ipc_handle)` method MUST allocate a slot in the DRAM memory-tier via `IMemoryTier::insert()`, initiate DMA copy from the client's GPU memory into the memory-tier slot via `IGpuServices::dma_copy_to_host`, register the entry in the dispatch map as a MemoryTier entry (via `create_memory_tier_entry`), and enqueue an asynchronous background write-through job. MUST run `evict_for_space` if the memory-tier pool lacks capacity.
-- **FR-004**: After a successful populate, the system MUST asynchronously read from the memory-tier pointer and write the data to the SSD via the block device and extent manager (write-through), calling `convert_to_storage` on completion to record the SSD offset.
+- **FR-004**: After a successful populate, the system MUST asynchronously read from the memory-tier pointer (via `IMemoryTier::peek()` to avoid refreshing LRU order) and write the data to the SSD via the block device and extent manager (write-through), calling `convert_to_storage` on completion to record the SSD offset.
 - **FR-005**: The memory-tier entry MUST remain accessible for fast lookups even after the background SSD write-through completes. The memory-tier slot is NOT freed on write-through completion.
 - **FR-006**: The `lookup(key, ipc_handle)` method MUST query the dispatch map: if MemoryTier, DMA from memory-tier pointer to GPU and touch LRU; if BlockDevice (evicted), promote back to memory-tier via pipelined SSD-to-DRAM-to-GPU reader and re-register as MemoryTier; if Staging (legacy), DMA from staging buffer to GPU. When the memory-tier pool is CUDA-pinned (registered via FR-035), the MemoryTier path SHOULD use `IGpuServices::dma_copy_to_device_async` with a CUDA stream followed by `stream_synchronize` for the H2D transfer. Falls back to synchronous `dma_copy_to_device` when no CUDA streams are available.
 - **FR-007**: The `lookup` method MUST return a cache-miss indication if the key does not exist in the dispatch map.
@@ -232,7 +239,7 @@ When the SSD data drives approach capacity, a background evictor removes the old
 - **FR-021**: The `commit_store(key)` method MUST write the pending DMA buffer contents to SSD using MDTS-aware segmented I/O, publish the extent metadata, and transition the dispatch map entry to block-device state. MUST return `KeyNotFound` if no pending write exists.
 - **FR-022**: The `cancel_store(key)` method MUST drop the pending write (aborting the extent reservation via WriteHandle destructor) and remove the dispatch map entry. MUST return `KeyNotFound` if no pending write exists.
 - **FR-023**: The `touch(key)` method MUST update the entry's eviction timestamp in the dispatch map without performing any DMA transfer or acquiring any reference. MUST return `KeyNotFound` if the key does not exist.
-- **FR-024**: Eviction in v1 is purely capacity-based within the memory-tier pool. When the pool is full, `evict_for_space` writes LRU memory-tier entries to SSD (via `convert_memory_tier_to_block`) and releases their memory-tier slots. Count-based TSC eviction (from v0) is NOT used in v1.
+- **FR-024**: Eviction in v1 is purely capacity-based within the memory-tier pool. When the pool is full, `evict_for_space` uses a two-phase approach: (1) queries `IMemoryTier::oldest_keys(MAX_SCAN)` for LRU candidates and selects entries where `IDispatchMap::is_evictable(key)` returns true (write-through complete, no active references), removing them via `IMemoryTier::remove(key)` and transitioning via `convert_memory_tier_to_block`; (2) if no evictable candidate exists, falls back to blind `IMemoryTier::evict_lru()` and removes the dispatch-map entry if the transition fails. Count-based TSC eviction (from v0) is NOT used in v1.
 - **FR-025**: The `DispatcherConfig` MUST support a `format_on_init` flag (default true). When false, extent managers are not reformatted on initialization, preserving on-disk data from previous sessions.
 - **FR-026**: ~~REMOVED~~ *(superseded 2026-05-21)* — Block device version selection is no longer required. The implementation hardcodes a single block device component; there is no version multiplexing.
 - **FR-027**: ~~REMOVED~~ *(superseded 2026-05-21)* — Extent manager version selection is no longer required. The implementation hardcodes a single extent manager; there is no version multiplexing.
@@ -254,7 +261,7 @@ When the SSD data drives approach capacity, a background evictor removes the old
 - **Dispatch Map Entry**: A record tracking the state of a cached element -- MemoryTier (pointer + size + optional ssd_offset), BlockDevice (ssd_offset only), or Staging (legacy DMA buffer).
 - **Extent**: A contiguous region on a data block device, managed by the extent manager, used to store write-through cache data.
 - **Data Block Device**: An NVMe SSD that holds persisted cache data. There are N data block devices in the system.
-- **Background Writer**: A dedicated thread that processes write-through jobs, reading from memory-tier pointers and writing to SSD via extent managers.
+- **Background Writer**: A dedicated thread that processes write-through jobs, reading from memory-tier pointers via `IMemoryTier::peek()` (to avoid refreshing LRU) and writing to SSD via extent managers.
 - **Pipelined Reader**: A zero-copy pipeline (`pipeline.rs`) that reads SSD data in MDTS-sized chunks directly into the memory-tier slot (which is CUDA-pinned + SPDK-registered), then issues async H2D GPU DMA from the same memory. Falls back to a ring-buffer approach (`pipelined_ssd_to_gpu`) when the memory-tier pool is not registered for DMA.
 - **PendingWrite**: A temporary structure holding a WriteHandle (extent reservation), DMA buffer, size, and drive index for the prepare_store/commit_store/cancel_store workflow.
 - **Background SSD Evictor**: A dedicated thread that periodically checks SSD utilization and evicts the oldest BlockDevice entries when capacity exceeds a threshold.
@@ -281,7 +288,7 @@ When the SSD data drives approach capacity, a background evictor removes the old
 
 - Clients provide valid IPC handles referencing accessible GPU memory regions. The dispatcher does not validate GPU memory accessibility.
 - The SPDK environment is initialized and active before the dispatcher's `initialize()` is called (via the ISPDKEnv receptacle). When ISPDKEnv is not connected, the dispatcher operates in memory-tier-only mode.
-- The memory-tier pool is pre-allocated before initialization. The dispatcher does not manage the pool lifecycle (only calls insert/get/remove/evict_lru).
+- The memory-tier pool is pre-allocated before initialization. The dispatcher does not manage the pool lifecycle (only calls insert/get/peek/remove/evict_lru/oldest_keys/touch).
 - DMA buffer allocation for the pipelined reader and prepare_store uses SPDK DMA allocation (falls back to libc `aligned_alloc` without SPDK).
 - GPU-to-host DMA transfers use `IGpuServices::dma_copy_to_host` (populate direction). Host-to-GPU DMA transfers use `IGpuServices::dma_copy_to_device_async` with stream synchronization when the pool is CUDA-pinned, falling back to synchronous `dma_copy_to_device` (lookup direction).
 - NVMe SSDs have a Maximum Data Transfer Size (MDTS) limit. The `io_segmenter` module provides MDTS-aware I/O splitting.
