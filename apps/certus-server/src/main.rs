@@ -12,11 +12,10 @@ use std::sync::{Arc, Mutex};
 use clap::Parser;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 
-use component_core::binding::bind;
 use component_core::query_interface;
 use interfaces::{
-    DmaAllocFn, DmaBuffer, DispatcherConfig, FormatParams, IBlockDevice, IBlockDeviceAdmin,
-    IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger, IMemoryTier, PciAddress,
+    DmaAllocFn, DmaBuffer, DispatcherConfig, IDispatchMap, IDispatcher, IGpuServices, ILogger,
+    IMemoryTier, PciAddress,
 };
 
 use service::DispatcherService;
@@ -25,10 +24,6 @@ use service::DispatcherService;
 #[derive(Parser)]
 #[command(name = "certus-server", about = "Certus dispatcher gRPC server")]
 struct Cli {
-    /// PCI address of the metadata NVMe device (format: DDDD:BB:DD.F)
-    #[arg(long = "metadata-pci", required = true)]
-    metadata_pci: String,
-
     /// PCI address(es) of data NVMe device(s) — may be specified multiple times
     #[arg(long = "data-pci", required = true)]
     data_pci: Vec<String>,
@@ -72,7 +67,6 @@ fn parse_pci_address(addr: &str) -> Result<PciAddress, String> {
 }
 
 fn initialize_component_stack(
-    metadata_pci: &str,
     data_pci_addrs: &[String],
 ) -> Result<Arc<dyn IDispatcher + Send + Sync>, String> {
     eprintln!("certus-server: initializing SPDK environment...");
@@ -93,67 +87,11 @@ fn initialize_component_stack(
         query_interface!(gpu_comp, IGpuServices).ok_or("failed to query IGpuServices")?;
     gpu.initialize().map_err(|e| format!("GPU init failed: {e}"))?;
 
-    // --- Create metadata block device + extent manager for dispatch map ---
-    eprintln!("certus-server: initializing metadata block device at {metadata_pci}...");
-    let meta_pci = parse_pci_address(metadata_pci)
-        .map_err(|e| format!("metadata PCI parse: {e}"))?;
-
-    let meta_bd = block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent::new_default();
-    meta_bd
-        .spdk_env
-        .connect(Arc::clone(&spdk_iface) as Arc<dyn spdk_env::ISPDKEnv + Send + Sync>)
-        .map_err(|e| format!("metadata block device spdk_env bind: {e}"))?;
-    meta_bd
-        .logger
-        .connect(Arc::clone(&logger))
-        .map_err(|e| format!("metadata block device logger bind: {e}"))?;
-
-    let meta_admin = query_interface!(meta_bd, IBlockDeviceAdmin)
-        .ok_or("failed to query IBlockDeviceAdmin for metadata device")?;
-    meta_admin.set_pci_address(meta_pci);
-    meta_admin
-        .initialize()
-        .map_err(|e| format!("metadata block device init failed: {e}"))?;
-
-    let meta_ibd = query_interface!(meta_bd, IBlockDevice)
-        .ok_or("failed to query IBlockDevice for metadata device")?;
-
-    eprintln!("certus-server: initializing metadata extent manager...");
-    let meta_em = extent_manager::ExtentManager::new_inner();
-
-    let numa_node = meta_ibd.numa_node();
-    let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
-        DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
-    });
-    meta_em.set_dma_alloc(dma_alloc.clone());
-    meta_em
-        .logger
-        .connect(Arc::clone(&logger))
-        .map_err(|e| format!("metadata extent manager logger bind: {e}"))?;
-
-    bind(
-        &*meta_bd as &dyn component_core::IUnknown,
-        "IBlockDevice",
-        &*meta_em as &dyn component_core::IUnknown,
-        "metadata_device",
-    )
-    .map_err(|e| format!("failed to bind metadata block device to extent manager: {e}"))?;
-
-    let meta_iem = query_interface!(meta_em, IExtentManager)
-        .ok_or("failed to query IExtentManager for metadata")?;
-    meta_iem
-        .format(FormatParams::default())
-        .map_err(|e| format!("metadata extent manager format failed: {e}"))?;
-
-    // --- Create dispatch map wired to the metadata extent manager ---
+    // --- Create dispatch map (no persistence — starts fresh each time) ---
     eprintln!("certus-server: initializing dispatch map...");
     let dm_comp = dispatch_map::DispatchMapComponent::new(
         dispatch_map::DispatchMapState::default(),
     );
-    dm_comp
-        .extent_manager
-        .connect(Arc::clone(&meta_iem))
-        .map_err(|e| format!("dispatch map extent_manager bind: {e}"))?;
     dm_comp
         .logger
         .connect(Arc::clone(&logger))
@@ -161,6 +99,9 @@ fn initialize_component_stack(
 
     let dm: Arc<dyn IDispatchMap + Send + Sync> =
         query_interface!(dm_comp, IDispatchMap).ok_or("failed to query IDispatchMap")?;
+    let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
+        DmaBuffer::new(size, align, None).map_err(|e| e.to_string())
+    });
     dm.set_dma_alloc(dma_alloc);
     dm.initialize()
         .map_err(|e| format!("DispatchMap init failed: {e}"))?;
@@ -228,7 +169,6 @@ fn initialize_component_stack(
 
     dispatcher
         .initialize(DispatcherConfig {
-            metadata_pci_addr: metadata_pci.to_string(),
             data_pci_addrs: data_pci_addrs.to_vec(),
             ..Default::default()
         })
@@ -243,19 +183,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     // Validate PCI addresses
-    validate_pci_address(&cli.metadata_pci)?;
     for addr in &cli.data_pci {
         validate_pci_address(addr)?;
     }
 
-    eprintln!(
-        "certus-server: metadata={}, data={:?}",
-        cli.metadata_pci, cli.data_pci
-    );
+    eprintln!("certus-server: data={:?}", cli.data_pci);
 
     // Initialize Certus component stack
-    let dispatcher =
-        initialize_component_stack(&cli.metadata_pci, &cli.data_pci)?;
+    let dispatcher = initialize_component_stack(&cli.data_pci)?;
     let dispatcher_mutex = Arc::new(Mutex::new(dispatcher));
 
     let svc = DispatcherService::new(Arc::clone(&dispatcher_mutex));

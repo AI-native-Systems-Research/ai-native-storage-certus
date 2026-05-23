@@ -286,26 +286,47 @@ impl DispatcherComponent {
 
     /// Evict entries from the memory-tier until enough space is available.
     ///
-    /// Each evicted entry must have completed write-through (ssd_offset set).
-    /// The dispatch-map entry transitions from MemoryTier to BlockDevice.
+    /// Each evicted entry transitions from MemoryTier to BlockDevice in the
+    /// dispatch-map. If write-through hasn't completed (no ssd_offset), the
+    /// dispatch-map entry is removed entirely so lookups get NotExist rather
+    /// than a dangling memory-tier pointer.
     fn evict_for_space(
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
         needed: u32,
     ) -> Result<(), DispatcherError> {
+        const MAX_SCAN: usize = 128;
+
         while mt.used() + needed as usize > mt.capacity() {
-            let evicted_key = mt.evict_lru().ok_or_else(|| {
-                DispatcherError::AllocationFailed(
-                    "memory-tier full and nothing evictable".into(),
-                )
-            })?;
-            // Transition dispatch-map entry to BlockDevice.
-            // If write-through hasn't completed, this fails and we lose the entry
-            // from the memory-tier (acceptable: it's still tracked in dispatch-map
-            // as MemoryTier with no ssd_offset, meaning a re-read won't find it
-            // in memory-tier and will go to SSD). In practice, heavy eviction
-            // pressure with unfinished writes is unlikely.
-            let _ = dm.convert_memory_tier_to_block(evicted_key);
+            // Find an evictable entry: one whose write-through is complete
+            // (ssd_offset set, no active references).
+            let candidates = mt.oldest_keys(MAX_SCAN);
+            let evict_key = candidates.iter().find(|&&k| dm.is_evictable(k)).copied();
+
+            match evict_key {
+                Some(key) => {
+                    mt.remove(key).map_err(|_| {
+                        DispatcherError::AllocationFailed(
+                            "memory-tier remove failed during eviction".into(),
+                        )
+                    })?;
+                    let _ = dm.convert_memory_tier_to_block(key);
+                }
+                None => {
+                    // No evictable entry found — fall back to blind LRU eviction.
+                    // The entry's write-through may not be complete; remove from
+                    // dispatch-map so lookups get NotExist (data loss acceptable
+                    // under extreme pressure).
+                    let evicted_key = mt.evict_lru().ok_or_else(|| {
+                        DispatcherError::AllocationFailed(
+                            "memory-tier full and nothing evictable".into(),
+                        )
+                    })?;
+                    if dm.convert_memory_tier_to_block(evicted_key).is_err() {
+                        let _ = dm.remove(evicted_key);
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -317,8 +338,9 @@ impl DispatcherComponent {
         extent_mgrs: &[Arc<ExtentManager>],
         job: WriteJob,
     ) {
-        // Get the memory-tier pointer for this key.
-        let (mem_ptr, _size) = match mt.get(job.key) {
+        // Get the memory-tier pointer without refreshing LRU — the write-through
+        // must not prevent this entry from being evicted under memory pressure.
+        let (mem_ptr, _size) = match mt.peek(job.key) {
             Some(v) => v,
             None => return, // entry was removed before write-through
         };
@@ -1352,6 +1374,15 @@ mod tests {
             })
         }
 
+        fn peek(&self, key: CacheKey) -> Option<(*mut u8, u32)> {
+            self.get(key)
+        }
+
+        fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
+            let inner = self.inner.lock().unwrap();
+            inner.slots.keys().take(n).copied().collect()
+        }
+
         fn evict_lru(&self) -> Option<CacheKey> {
             let mut inner = self.inner.lock().unwrap();
             let key = inner.slots.keys().next().copied()?;
@@ -1659,6 +1690,17 @@ mod tests {
                 },
             }
         }
+
+        fn is_evictable(&self, key: CacheKey) -> bool {
+            let inner = self.inner.lock().unwrap();
+            match inner.entries.get(&key) {
+                Some(entry) => matches!(
+                    entry.location,
+                    MockEntryLocation::MemoryTier { ssd_offset: Some(_), .. }
+                ),
+                None => false,
+            }
+        }
     }
 
     struct MockLogger;
@@ -1804,7 +1846,6 @@ mod tests {
 
         let d = query_interface!(c, IDispatcher).unwrap();
         d.initialize(DispatcherConfig {
-            metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
             ..Default::default()
         })
@@ -1841,7 +1882,6 @@ mod tests {
         let c = DispatcherComponent::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
-            metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
             ..Default::default()
         };
@@ -1854,7 +1894,6 @@ mod tests {
         let c = DispatcherComponent::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
-            metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec![],
             ..Default::default()
         };
@@ -1991,7 +2030,6 @@ mod tests {
 
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
-            metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec![],
             ..Default::default()
         };
@@ -2011,7 +2049,6 @@ mod tests {
 
         let d = query_interface!(c, IDispatcher).unwrap();
         d.initialize(DispatcherConfig {
-            metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec![
                 "0000:02:00.0".to_string(),
                 "0000:03:00.0".to_string(),
@@ -2075,7 +2112,6 @@ mod tests {
 
         let d = query_interface!(c, IDispatcher).unwrap();
         d.initialize(DispatcherConfig {
-            metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
             ..Default::default()
         })
@@ -2267,7 +2303,6 @@ mod tests {
         d.shutdown().unwrap();
 
         d.initialize(DispatcherConfig {
-            metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
             ..Default::default()
         })
@@ -2398,7 +2433,6 @@ mod tests {
 
         let d = query_interface!(c, IDispatcher).unwrap();
         d.initialize(DispatcherConfig {
-            metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
             ..Default::default()
         })

@@ -99,6 +99,20 @@ impl LruList {
         Some(key)
     }
 
+    /// Return up to `n` keys starting from the front (oldest).
+    pub fn peek_front_n(&self, n: usize) -> Vec<CacheKey> {
+        let mut result = Vec::with_capacity(n);
+        let mut current = self.head;
+        while let Some(idx) = current {
+            if result.len() >= n {
+                break;
+            }
+            result.push(self.nodes[idx].key);
+            current = self.nodes[idx].next;
+        }
+        result
+    }
+
     /// Remove a node by index.
     pub fn remove(&mut self, idx: usize) {
         if !self.nodes[idx].active {

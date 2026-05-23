@@ -153,5 +153,11 @@ component_macros::define_interface! {
         /// `BlockDevice { offset: off }`. Fails if the entry has no
         /// recorded SSD offset (write-through not yet complete).
         fn convert_memory_tier_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError>;
+
+        /// Check if a memory-tier entry is safe to evict.
+        ///
+        /// Returns `true` if the entry exists, is in MemoryTier state with
+        /// `ssd_offset: Some(_)`, and has no active read/write references.
+        fn is_evictable(&self, key: CacheKey) -> bool;
     }
 }

@@ -18,7 +18,6 @@ use crate::spdk_types::DmaBuffer;
 /// use interfaces::DispatcherConfig;
 ///
 /// let config = DispatcherConfig {
-///     metadata_pci_addr: "0000:01:00.0".to_string(),
 ///     data_pci_addrs: vec![
 ///         "0000:02:00.0".to_string(),
 ///         "0000:03:00.0".to_string(),
@@ -29,8 +28,6 @@ use crate::spdk_types::DmaBuffer;
 /// ```
 #[derive(Debug, Clone)]
 pub struct DispatcherConfig {
-    /// PCI address of the metadata block device.
-    pub metadata_pci_addr: String,
     /// PCI addresses of N data block devices (one per extent manager).
     pub data_pci_addrs: Vec<String>,
     /// Maximum entries in the in-memory cache. Default: 10000.
@@ -57,7 +54,6 @@ pub struct DispatcherConfig {
 impl Default for DispatcherConfig {
     fn default() -> Self {
         Self {
-            metadata_pci_addr: String::new(),
             data_pci_addrs: Vec::new(),
             max_cache_entries: 10000,
             eviction_threshold: 0.8,
@@ -162,7 +158,6 @@ component_macros::define_interface! {
         /// # use interfaces::{IDispatcher, DispatcherConfig, DispatcherError};
         /// # fn example(dispatcher: &dyn IDispatcher) -> Result<(), DispatcherError> {
         /// let config = DispatcherConfig {
-        ///     metadata_pci_addr: "0000:01:00.0".to_string(),
         ///     data_pci_addrs: vec![
         ///         "0000:02:00.0".to_string(),
         ///         "0000:03:00.0".to_string(),
@@ -496,7 +491,6 @@ mod tests {
     #[test]
     fn dispatcher_config_clone() {
         let config = DispatcherConfig {
-            metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
             ..Default::default()
         };

@@ -196,21 +196,22 @@ impl ExtentManager {
             .as_ref()
             .ok_or_else(|| error::not_initialized("component not initialized"))?;
 
-        let data_disk_size = {
+        let (data_disk_size, data_start_offset) = {
             let shared = self.shared.lock().unwrap();
-            shared
+            let s = shared
                 .as_ref()
-                .ok_or_else(|| error::not_initialized("component not initialized"))?
-                .format_params
-                .data_disk_size
+                .ok_or_else(|| error::not_initialized("component not initialized"))?;
+            (s.format_params.data_disk_size, s.superblock.data_start_offset)
         };
 
-        let region_bytes = data_disk_size / regions.len() as u64;
+        let usable = data_disk_size - data_start_offset;
+        let region_bytes = usable / regions.len() as u64;
         if region_bytes == 0 {
             return Err(error::not_initialized("region size is zero"));
         }
 
-        let idx = (offset / region_bytes) as usize;
+        let relative_offset = offset.saturating_sub(data_start_offset);
+        let idx = (relative_offset / region_bytes) as usize;
         if idx >= regions.len() {
             return Err(error::offset_not_found(offset));
         }
@@ -335,7 +336,12 @@ impl IExtentManager for ExtentManager {
         } else {
             (sb_size + alignment - 1) / alignment * alignment
         };
-        let remaining = metadata_disk_size.saturating_sub(checkpoint_region_offset);
+        let effective_metadata_size = if params.metadata_region_size > 0 {
+            metadata_disk_size.min(params.metadata_region_size)
+        } else {
+            metadata_disk_size
+        };
+        let remaining = effective_metadata_size.saturating_sub(checkpoint_region_offset);
         let sector_size_u64 = params.sector_size as u64;
         let checkpoint_region_size = (remaining / 2) / sector_size_u64 * sector_size_u64;
 
@@ -345,17 +351,30 @@ impl IExtentManager for ExtentManager {
             ));
         }
 
-        // Set up data device regions — entire disk available for user extents
+        // When metadata_region_size > 0, metadata and data share a device:
+        // data starts after the metadata area. Otherwise data starts at 0.
+        let data_start_offset = if params.metadata_region_size > 0 {
+            checkpoint_region_offset + 2 * checkpoint_region_size
+        } else {
+            0
+        };
+        let usable_data_size = data_disk_size.saturating_sub(data_start_offset);
+        if usable_data_size == 0 {
+            return Err(error::corrupt_metadata(
+                "no usable data space after metadata reservation",
+            ));
+        }
+
         let region_count = params.region_count as usize;
-        let region_bytes = data_disk_size / region_count as u64;
+        let region_bytes = usable_data_size / region_count as u64;
 
         let mut region_vec = Vec::with_capacity(region_count);
         for i in 0..region_count {
-            let base = i as u64 * region_bytes;
+            let base = data_start_offset + i as u64 * region_bytes;
             let size = if i < region_count - 1 {
                 region_bytes
             } else {
-                data_disk_size - (region_count as u64 - 1) * region_bytes
+                usable_data_size - (region_count as u64 - 1) * region_bytes
             };
             let buddy = BuddyAllocator::new(base, size, params.sector_size);
             let region = RegionState::new(buddy, params.clone());
@@ -385,6 +404,7 @@ impl IExtentManager for ExtentManager {
             checkpoint_region_size,
             instance_id,
             params.metadata_disk_ns_id,
+            data_start_offset,
         );
 
         let metadata_client = self.get_metadata_client(params.metadata_disk_ns_id)?;
@@ -421,19 +441,21 @@ impl IExtentManager for ExtentManager {
             metadata_alignment: sb.checkpoint_region_offset,
             instance_id: Some(sb.instance_id),
             metadata_disk_ns_id: sb.metadata_disk_ns_id,
+            metadata_region_size: sb.checkpoint_region_offset + 2 * sb.checkpoint_region_size,
         };
 
-        let data_disk_size = sb.data_disk_size;
+        let data_start_offset = sb.data_start_offset;
+        let usable_data_size = sb.data_disk_size.saturating_sub(data_start_offset);
         let region_count = sb.region_count as usize;
-        let region_bytes = data_disk_size / region_count as u64;
+        let region_bytes = usable_data_size / region_count as u64;
 
         let mut region_vec = Vec::with_capacity(region_count);
         for i in 0..region_count {
-            let base = i as u64 * region_bytes;
+            let base = data_start_offset + i as u64 * region_bytes;
             let size = if i < region_count - 1 {
                 region_bytes
             } else {
-                data_disk_size - (region_count as u64 - 1) * region_bytes
+                usable_data_size - (region_count as u64 - 1) * region_bytes
             };
             let slab_descs = if i < per_region_data.len() {
                 per_region_data[i].clone()
