@@ -17,6 +17,9 @@ extent-manager.workspace = true
 memory-tier.workspace = true
 libc = "0.2"
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
 [features]
 hardware-test = []
 

@@ -47,7 +47,7 @@ pub fn segment_io(
             length,
         });
         buffer_offset += length;
-        lba += (length / ss) as u64;
+        lba += length.div_ceil(ss) as u64;
         remaining -= length;
     }
 
