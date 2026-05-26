@@ -38,7 +38,7 @@
 │  │    └─ logger ─┐   │       │  │       │                                 │  │
 │  │               │   │       │  │       │                                 │  │
 │  │  ┌────────────┼───┼───────┼──┼───────┼─────────────────────────────┐   │  │
-│  │  │ Inner: DataDrive[0..N] │  │(one per│--data-pci address)         │   │  │
+│  │  │ Inner: DataDrive[0..N] │  │(one per│--device-pci address)       │   │  │
 │  │  │            │   │       │  │       │                             │   │  │
 │  │  │  ┌─────────┼───┼───────┼──┼─┐  ┌─────┼─────────────────────────┐   │  │
 │  │  │  │ BlockDeviceSpdkNvme   │ │  │ ExtentManager               │   │  │
@@ -105,10 +105,10 @@
 │  └───────────────────────────────────────────────────────────┘               │
 │                          │                                                   │
 │                          ▼ VFIO                                              │
-│              ┌───────────────────────┐  ┌───────────────────────┐            │
-│              │  NVMe (metadata)      │  │  NVMe (data) [0..N]   │            │
-│              │  --metadata-pci       │  │  --data-pci           │            │
-│              └───────────────────────┘  └───────────────────────┘            │
+│              ┌───────────────────────────────────────────────┐            │
+│              │  NVMe device(s) [0..N]                         │            │
+│              │  --device-pci (data + metadata co-located)     │            │
+│              └───────────────────────────────────────────────┘            │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -130,12 +130,10 @@
 1. **SPDKEnvComponent** — DPDK/EAL init, VFIO device discovery
 2. **LoggerComponent** — console/file logging
 3. **GpuServicesComponent** — CUDA device init
-4. **Metadata BlockDeviceSpdkNvme** — NVMe controller for metadata (bound to spdk_env)
-5. **Metadata ExtentManager** — block allocator over metadata device
-6. **DispatchMapComponent** — key→location table (bound to metadata extent manager)
-7. **MemoryTierComponent** — mmap DRAM pool, CUDA-pinned via `cudaHostRegister`
-8. **DispatcherComponent** — top-level orchestrator (bound to dispatch_map, memory_tier, gpu, spdk_env)
-   - Internally creates **DataDrive[0..N]**: one (BlockDeviceSpdkNvme + ExtentManager) pair per `--data-pci` address
+4. **DispatchMapComponent** — key→location table (no persistence, starts fresh each session)
+5. **MemoryTierComponent** — mmap DRAM pool, CUDA-pinned via `cudaHostRegister`
+6. **DispatcherComponent** — top-level orchestrator (bound to dispatch_map, memory_tier, gpu, spdk_env)
+   - Internally creates **DataDrive[0..N]**: one (BlockDeviceSpdkNvme + ExtentManager) pair per `--device-pci` address; each drive stores both data and metadata
    - Allocates **PipelineRing** (CUDA-pinned + SPDK-registered ring buffers) for pipelined reads
    - Creates dedicated **warm_stream** (CUDA stream) for async memory-tier→GPU DMA
    - Starts **BackgroundWriter** thread for async DRAM→SSD write-through
@@ -185,19 +183,15 @@ SSD usage > threshold ──oldest_keys scan──▶ Remove extents from SSD
 
 ```
 certus-server \
-    --metadata-pci DDDD:BB:DD.F \
-    --data-pci DDDD:BB:DD.F [--data-pci ...] \
+    --device-pci DDDD:BB:DD.F [--device-pci ...] \
     --listen 0.0.0.0:50051 \
-    --dispatcher-version v1 \
     [--tls-cert path/to/cert.pem --tls-key path/to/key.pem]
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--metadata-pci` | PCI address for metadata NVMe device |
-| `--data-pci` | PCI address(es) for data NVMe device(s), repeatable |
+| `--device-pci` | PCI address(es) of NVMe device(s), repeatable |
 | `--listen` | gRPC bind address (default `0.0.0.0:50051`) |
-| `--dispatcher-version` | `v0` (staging-based, no memory-tier) or `v1` (memory-tier + LRU, default) |
 | `--tls-cert` / `--tls-key` | Enable TLS for gRPC transport |
 
 ## gRPC API (certus.dispatcher.v1)

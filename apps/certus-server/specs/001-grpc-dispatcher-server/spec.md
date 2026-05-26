@@ -18,8 +18,8 @@ An operator starts the certus-server application, providing one or more PCI addr
 
 **Acceptance Scenarios**:
 
-1. **Given** the server binary is available, **When** the operator launches it with `--data-pci 0000:02:00.0 --data-pci 0000:03:00.0`, **Then** the server initializes the dispatcher and listens for gRPC connections on the configured port.
-2. **Given** the server is launched without required arguments, **When** no `--data-pci` address is provided, **Then** the server exits with a clear usage error message.
+1. **Given** the server binary is available, **When** the operator launches it with `--device-pci 0000:02:00.0 --device-pci 0000:03:00.0`, **Then** the server initializes the dispatcher and listens for gRPC connections on the configured port.
+2. **Given** the server is launched without required arguments, **When** no `--device-pci` address is provided, **Then** the server exits with a clear usage error message.
 3. **Given** the server is running, **When** the operator sends a termination signal (SIGTERM/SIGINT), **Then** the server gracefully shuts down the dispatcher and exits cleanly.
 
 ---
@@ -105,7 +105,7 @@ A Python client submits a batch of cache keys to `touch`. The server calls the d
 - **FR-004**: The `check` gRPC method MUST accept a list of cache keys and execute the dispatcher's `check()` for each key, returning a list of boolean results.
 - **FR-005**: The `remove` gRPC method MUST accept a list of cache keys and execute the dispatcher's `remove()` for each key, returning per-entry results.
 - **FR-005b**: The `touch` gRPC method MUST accept a list of cache keys and execute the dispatcher's `touch()` for each key, returning per-entry results.
-- **FR-006**: The server application MUST accept command-line arguments for: one or more data NVMe PCI addresses (`--data-pci`, repeatable), gRPC listen address/port (`--listen`), and optional TLS certificate/key paths (`--tls-cert`, `--tls-key`).
+- **FR-006**: The server application MUST accept command-line arguments for: one or more data NVMe PCI addresses (`--device-pci`, repeatable), gRPC listen address/port (`--listen`), and optional TLS certificate/key paths (`--tls-cert`, `--tls-key`).
 - **FR-007**: Per-entry results MUST include the original key and either a success indicator or an error code with a descriptive message, so the client can correlate results to its input. Batch processing uses a partial-success model: each entry is processed independently regardless of other entries' success or failure.
 - **FR-008**: The server MUST auto-initialize the dispatcher on startup using the PCI addresses provided via command-line arguments. The component initialization stack is: SPDK environment init, GPU services init, dispatch map init (ephemeral, no persistence), memory-tier init with CUDA host registration, then dispatcher init with data PCI addresses.
 - **FR-008b**: The dispatch map MUST start fresh on each server launch (no on-disk persistence). There is no extent manager; the dispatch map is initialized without persistent storage backing.
@@ -116,7 +116,7 @@ A Python client submits a batch of cache keys to `touch`. The server calls the d
 - **FR-013**: The server MUST accept multiple client connections but serialize request processing (one request at a time). Concurrent requests are queued, not rejected. Serialization is achieved via a Mutex around the dispatcher reference; gRPC request handlers use `spawn_blocking` to avoid blocking the async runtime.
 - **FR-014**: The server MUST support optional TLS encryption via CLI flags (`--tls-cert`, `--tls-key`). When both are provided, TLS is enabled. When not provided, the server runs in plaintext mode.
 - **FR-015**: The server MUST pre-validate batch requests for duplicate keys. If a batch contains the same key more than once, the entire batch MUST be rejected with an error identifying the duplicate key(s).
-- **FR-016**: The server MUST support multiple data NVMe devices. The `--data-pci` CLI argument is repeatable, and all provided PCI addresses are passed to the dispatcher via `DispatcherConfig.data_pci_addrs` for multi-SSD striping/distribution.
+- **FR-016**: The server MUST support multiple data NVMe devices. The `--device-pci` CLI argument is repeatable, and all provided PCI addresses are passed to the dispatcher via `DispatcherConfig.data_pci_addrs` for multi-SSD striping/distribution.
 
 ### Key Entities
 
@@ -148,7 +148,7 @@ The server initializes components in the following order:
 - **SC-003**: Per-entry error reporting allows the client to identify exactly which entries in a batch failed and why.
 - **SC-004**: The server starts and becomes ready to accept connections within 10 seconds of launch (excluding SPDK initialization time).
 - **SC-005**: The Python test client provides pass/fail results for all defined acceptance scenarios.
-- **SC-006**: The server correctly initializes with multiple `--data-pci` arguments and distributes operations across all configured data devices.
+- **SC-006**: The server correctly initializes with multiple `--device-pci` arguments and distributes operations across all configured data devices.
 
 ## Clarifications
 
