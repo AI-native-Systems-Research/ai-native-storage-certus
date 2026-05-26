@@ -24,9 +24,9 @@ use service::DispatcherService;
 #[derive(Parser)]
 #[command(name = "certus-server", about = "Certus dispatcher gRPC server")]
 struct Cli {
-    /// PCI address(es) of data NVMe device(s) — may be specified multiple times
-    #[arg(long = "data-pci", required = true)]
-    data_pci: Vec<String>,
+    /// PCI address(es) of NVMe device(s) — may be specified multiple times
+    #[arg(long = "device-pci", required = true)]
+    device_pci: Vec<String>,
 
     /// gRPC listen address
     #[arg(long = "listen", default_value = "0.0.0.0:50051")]
@@ -67,7 +67,7 @@ fn parse_pci_address(addr: &str) -> Result<PciAddress, String> {
 }
 
 fn initialize_component_stack(
-    data_pci_addrs: &[String],
+    device_pci_addrs: &[String],
 ) -> Result<Arc<dyn IDispatcher + Send + Sync>, String> {
     eprintln!("certus-server: initializing SPDK environment...");
     let spdk_comp = spdk_env::SPDKEnvComponent::new_default();
@@ -169,7 +169,7 @@ fn initialize_component_stack(
 
     dispatcher
         .initialize(DispatcherConfig {
-            data_pci_addrs: data_pci_addrs.to_vec(),
+            data_pci_addrs: device_pci_addrs.to_vec(),
             ..Default::default()
         })
         .map_err(|e| format!("Dispatcher init failed: {e}"))?;
@@ -183,14 +183,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     // Validate PCI addresses
-    for addr in &cli.data_pci {
+    for addr in &cli.device_pci {
         validate_pci_address(addr)?;
     }
 
-    eprintln!("certus-server: data={:?}", cli.data_pci);
+    eprintln!("certus-server: devices={:?}", cli.device_pci);
 
     // Initialize Certus component stack
-    let dispatcher = initialize_component_stack(&cli.data_pci)?;
+    let dispatcher = initialize_component_stack(&cli.device_pci)?;
     let dispatcher_mutex = Arc::new(Mutex::new(dispatcher));
 
     let svc = DispatcherService::new(Arc::clone(&dispatcher_mutex));
