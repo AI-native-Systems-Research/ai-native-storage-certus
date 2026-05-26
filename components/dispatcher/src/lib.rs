@@ -342,14 +342,16 @@ impl DispatcherComponent {
         // must not prevent this entry from being evicted under memory pressure.
         let (mem_ptr, _size) = match mt.peek(job.key) {
             Some(v) => v,
-            None => return, // entry was removed before write-through
+            None => {
+                let _ = dm.release_read(job.key);
+                return;
+            }
         };
 
         if drives.is_empty() {
             // No block devices: mark as converted with a synthetic offset.
             let block_offset = job.key * 4096;
             let _ = dm.convert_to_storage(job.key, block_offset);
-            let _ = dm.release_read(job.key);
             return;
         }
 
@@ -370,24 +372,34 @@ impl DispatcherComponent {
             )
         } {
             Ok(buf) => buf,
-            Err(_) => return,
+            Err(_) => {
+                let _ = dm.release_read(job.key);
+                return;
+            }
         };
 
         // Allocate extent via the extent manager.
         let em = &extent_mgrs[drive_idx % extent_mgrs.len()];
         let iem = match query_interface!(em, IExtentManager) {
             Some(i) => i,
-            None => return,
+            None => {
+                let _ = dm.release_read(job.key);
+                return;
+            }
         };
         let write_handle = match iem.reserve_extent(job.key, aligned_bytes as u32) {
             Ok(wh) => wh,
-            Err(_) => return,
+            Err(_) => {
+                let _ = dm.release_read(job.key);
+                return;
+            }
         };
 
         let block_offset = write_handle.extent_offset();
         let start_lba = block_offset / block_size as u64;
 
         if Self::write_buffer_to_ssd(&**drive, &temp_buf, start_lba, total_bytes).is_err() {
+            let _ = dm.release_read(job.key);
             return; // write_handle drops → abort
         }
 
@@ -395,6 +407,7 @@ impl DispatcherComponent {
         std::mem::forget(temp_buf);
 
         // Data written successfully — commit the extent metadata.
+        // convert_to_storage also decrements the read reference.
         let _ = write_handle.publish();
         let _ = dm.convert_to_storage(job.key, block_offset);
         let _ = dm.release_read(job.key);
