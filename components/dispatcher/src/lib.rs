@@ -325,7 +325,7 @@ impl DispatcherComponent {
 
         if drives.is_empty() {
             // No block devices: mark as converted with a synthetic offset.
-            let block_offset = job.key.saturating_mul(4096);
+            let block_offset = job.key * 4096;
             let _ = dm.convert_to_storage(job.key, block_offset);
             let _ = dm.release_read(job.key);
             return;
@@ -357,9 +357,6 @@ impl DispatcherComponent {
             Some(i) => i,
             None => return,
         };
-        if aligned_bytes > u32::MAX as usize {
-            return;
-        }
         let write_handle = match iem.reserve_extent(job.key, aligned_bytes as u32) {
             Ok(wh) => wh,
             Err(_) => return,
