@@ -56,15 +56,21 @@ impl IDispatchMap for DispatchMapComponent {
     /// Recover dispatch map state from the extent manager's persisted extents.
     /// Each extent is re-inserted as a BlockDevice location with zero reference
     /// counts, restoring the map to a consistent view of committed storage.
+    /// If no extent manager is bound, starts with an empty map.
     fn initialize(&self) -> Result<(), DispatchMapError> {
+        let em = match self.extent_manager.get() {
+            Ok(em) => em,
+            Err(_) => {
+                if let Ok(logger) = self.logger.get() {
+                    logger.info("dispatch-map: no extent_manager bound, starting fresh");
+                }
+                return Ok(());
+            }
+        };
+
         if let Ok(logger) = self.logger.get() {
             logger.info("dispatch-map: beginning state recovery from extent manager");
         }
-
-        let em = self
-            .extent_manager
-            .get()
-            .map_err(|_| DispatchMapError::NotInitialized("extent_manager not bound".into()))?;
 
         let mut inner = self.state.inner.lock().unwrap();
         let mut count: u64 = 0;
@@ -445,6 +451,21 @@ impl IDispatchMap for DispatchMapComponent {
         self.state.condvar.notify_all();
 
         Ok(())
+    }
+
+    fn is_evictable(&self, key: CacheKey) -> bool {
+        let inner = self.state.inner.lock().unwrap();
+        match inner.entries.get(&key) {
+            Some(entry) => {
+                entry.read_ref == 0
+                    && entry.write_ref == 0
+                    && matches!(
+                        entry.location,
+                        Location::MemoryTier { ssd_offset: Some(_), .. }
+                    )
+            }
+            None => false,
+        }
     }
 }
 

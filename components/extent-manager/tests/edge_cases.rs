@@ -19,6 +19,7 @@ fn format_params() -> FormatParams {
         metadata_alignment: METADATA_ALIGNMENT,
         instance_id: None,
         metadata_disk_ns_id: 1,
+        metadata_region_size: 0,
     }
 }
 
@@ -60,6 +61,7 @@ fn out_of_space_returns_error() {
         metadata_alignment: METADATA_ALIGNMENT,
         instance_id: None,
         metadata_disk_ns_id: 1,
+        metadata_region_size: 0,
     })
     .expect("format");
 

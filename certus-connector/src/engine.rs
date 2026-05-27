@@ -11,9 +11,8 @@ use pyo3::types::PyDict;
 
 use component_core::query_interface;
 use interfaces::{
-    CacheKey, DispatcherConfig, DmaAllocFn, DmaBuffer, FormatParams, IBlockDevice,
-    IBlockDeviceAdmin, IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger, IpcHandle,
-    LookupResult, PciAddress,
+    CacheKey, DispatcherConfig, DmaAllocFn, DmaBuffer, IDispatchMap, IDispatcher, IGpuServices,
+    ILogger, IpcHandle, LookupResult,
 };
 
 use crate::keys;
@@ -34,22 +33,6 @@ struct TransferJob {
     gpu_block_ids: Vec<u64>,
     completed: AtomicBool,
     success: AtomicBool,
-}
-
-fn parse_pci_addr(s: &str) -> Result<PciAddress, String> {
-    let parts: Vec<&str> = s.split(':').collect();
-    if parts.len() != 3 {
-        return Err(format!("expected domain:bus:dev.func, got '{s}'"));
-    }
-    let domain = u32::from_str_radix(parts[0], 16).map_err(|_| format!("invalid domain '{}'", parts[0]))?;
-    let bus = u8::from_str_radix(parts[1], 16).map_err(|_| format!("invalid bus '{}'", parts[1]))?;
-    let dev_func: Vec<&str> = parts[2].split('.').collect();
-    if dev_func.len() != 2 {
-        return Err(format!("invalid dev.func '{}'", parts[2]));
-    }
-    let dev = u8::from_str_radix(dev_func[0], 16).map_err(|_| format!("invalid dev '{}'", dev_func[0]))?;
-    let func = u8::from_str_radix(dev_func[1], 16).map_err(|_| format!("invalid func '{}'", dev_func[1]))?;
-    Ok(PciAddress { domain, bus, dev, func })
 }
 
 // ─── EngineInner ───────────────────────────────────────────────────────────
@@ -80,11 +63,6 @@ impl EngineInner {
         let data_pci_addrs: Vec<String> = config
             .get_item("data_pci_addrs")?
             .ok_or_else(|| PyRuntimeError::new_err("missing 'data_pci_addrs'"))?
-            .extract()?;
-
-        let metadata_pci_addr: String = config
-            .get_item("metadata_pci_addr")?
-            .ok_or_else(|| PyRuntimeError::new_err("missing 'metadata_pci_addr'"))?
             .extract()?;
 
         let gpu_block_size: u64 = config
@@ -133,76 +111,19 @@ impl EngineInner {
         gpu.initialize()
             .map_err(|e| PyRuntimeError::new_err(format!("GPU init failed: {e}")))?;
 
-        // --- Create metadata block device ---
-        let meta_dev = block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent::new_default();
-        meta_dev
-            .logger
-            .connect(Arc::clone(&log))
-            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire logger for metadata device: {e}")))?;
-        meta_dev
-            .spdk_env
-            .connect(Arc::clone(&spdk_iface))
-            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire spdk_env for metadata device: {e}")))?;
-        let meta_admin: Arc<dyn IBlockDeviceAdmin + Send + Sync> =
-            query_interface!(meta_dev, IBlockDeviceAdmin)
-                .ok_or_else(|| PyRuntimeError::new_err("failed to query IBlockDeviceAdmin for metadata device"))?;
-        let pci = parse_pci_addr(&metadata_pci_addr)
-            .map_err(|e| PyRuntimeError::new_err(format!("invalid metadata PCI address '{metadata_pci_addr}': {e}")))?;
-        meta_admin.set_pci_address(pci);
-        meta_admin
-            .initialize()
-            .map_err(|e| PyRuntimeError::new_err(format!("metadata block device init failed: {e}")))?;
-        let meta_ibd: Arc<dyn IBlockDevice + Send + Sync> =
-            query_interface!(meta_dev, IBlockDevice)
-                .ok_or_else(|| PyRuntimeError::new_err("failed to query IBlockDevice for metadata device"))?;
-
-        // --- Create extent manager for metadata device ---
-        let meta_em = extent_manager::ExtentManager::new_inner();
-        let numa_node = meta_ibd.numa_node();
-        let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
-            DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
-        });
-        meta_em.set_dma_alloc(dma_alloc);
-        meta_em
-            .logger
-            .connect(Arc::clone(&log) as Arc<dyn ILogger + Send + Sync>)
-            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire logger for metadata extent manager: {e}")))?;
-        use component_core::binding::bind;
-        bind(
-            &*meta_dev,
-            "IBlockDevice",
-            &*meta_em as &dyn component_core::IUnknown,
-            "metadata_device",
-        )
-        .map_err(|e| PyRuntimeError::new_err(format!("failed to bind metadata block device to extent manager: {e}")))?;
-        let meta_iem: Arc<dyn IExtentManager + Send + Sync> =
-            query_interface!(meta_em, IExtentManager)
-                .ok_or_else(|| PyRuntimeError::new_err("failed to query IExtentManager for metadata device"))?;
-        let sector_size = meta_ibd.block_size();
-        let num_sectors = meta_ibd.num_sectors(1).unwrap_or(0);
-        let data_disk_size = num_sectors * sector_size as u64;
-        let defaults = FormatParams::default();
-        meta_iem
-            .format(FormatParams {
-                data_disk_size,
-                sector_size,
-                ..defaults
-            })
-            .map_err(|e| PyRuntimeError::new_err(format!("metadata extent manager format failed: {e}")))?;
-
-        // --- Create dispatch map, wire extent manager, initialize ---
+        // --- Create dispatch map (no persistence — starts fresh each time) ---
         let dm_comp =
             dispatch_map::DispatchMapComponent::new(dispatch_map::DispatchMapState::default());
         dm_comp
             .logger
             .connect(Arc::clone(&log) as Arc<dyn ILogger + Send + Sync>)
             .map_err(|e| PyRuntimeError::new_err(format!("failed to wire logger for dispatch map: {e}")))?;
-        dm_comp
-            .extent_manager
-            .connect(Arc::clone(&meta_iem))
-            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire extent_manager to dispatch map: {e}")))?;
         let dm: Arc<dyn IDispatchMap + Send + Sync> = query_interface!(dm_comp, IDispatchMap)
             .ok_or_else(|| PyRuntimeError::new_err("failed to query IDispatchMap"))?;
+        let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
+            DmaBuffer::new(size, align, None).map_err(|e| e.to_string())
+        });
+        dm.set_dma_alloc(dma_alloc);
         dm.initialize()
             .map_err(|e| PyRuntimeError::new_err(format!("DispatchMap init failed: {e}")))?;
 
@@ -231,7 +152,6 @@ impl EngineInner {
 
         dispatcher
             .initialize(DispatcherConfig {
-                metadata_pci_addr,
                 data_pci_addrs,
                 max_cache_entries,
                 eviction_threshold,

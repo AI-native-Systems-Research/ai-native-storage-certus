@@ -458,6 +458,7 @@ fn make_format_params(config: &BenchmarkConfig, count: u64) -> FormatParams {
         metadata_alignment: METADATA_ALIGNMENT,
         instance_id: None,
         metadata_disk_ns_id: config.metadata_ns_id,
+        ..Default::default()
     }
 }
 
