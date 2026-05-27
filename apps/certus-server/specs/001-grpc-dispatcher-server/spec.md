@@ -2,7 +2,7 @@
 
 **Feature Branch**: `dispatcher`  
 **Created**: 2026-05-05  
-**Updated**: 2026-05-22  
+**Updated**: 2026-05-27  
 **Status**: Draft  
 **Input**: User description: "Build an application that exposes an instance of the dispatcher component, and its interface IDispatcher, to a Python client via gRPC. The gRPC protocol should expose the methods on the IDispatcher interface. Configuration parameters, such as PCI addresses for data NVMe devices, should be command line configurable. The implementation must include a Python test-client that provides basic testing. The protocol should support multi-instance list-based parameters."
 
@@ -99,7 +99,7 @@ A Python client submits a batch of cache keys to `touch`. The server calls the d
 
 ### Functional Requirements
 
-- **FR-001**: System MUST expose a gRPC service with methods mapping to IDispatcher data operations: `lookup`, `check`, `remove`, `populate`, and `touch`. Lifecycle operations (initialize/shutdown) are NOT exposed via gRPC.
+- **FR-001**: System MUST expose a gRPC service with methods mapping to IDispatcher data operations: `lookup`, `check`, `remove`, `populate`, `touch`, and `clear_memory_tier`. Lifecycle operations (initialize/shutdown) are NOT exposed via gRPC.
 - **FR-002**: The `populate` gRPC method MUST accept a list of (key, ipc_handle) pairs and execute the dispatcher's `populate()` for each pair server-side, returning per-entry results.
 - **FR-003**: The `lookup` gRPC method MUST accept a list of (key, ipc_handle) pairs and execute the dispatcher's `lookup()` for each pair server-side, returning per-entry results. Within a single batch, IPC handles that share the same CUDA IPC memory handle are opened once and reused across entries to reduce open/close overhead.
 - **FR-004**: The `check` gRPC method MUST accept a list of cache keys and execute the dispatcher's `check()` for each key, returning a list of boolean results.
@@ -117,6 +117,7 @@ A Python client submits a batch of cache keys to `touch`. The server calls the d
 - **FR-014**: The server MUST support optional TLS encryption via CLI flags (`--tls-cert`, `--tls-key`). When both are provided, TLS is enabled. When not provided, the server runs in plaintext mode.
 - **FR-015**: The server MUST pre-validate batch requests for duplicate keys. If a batch contains the same key more than once, the entire batch MUST be rejected with an error identifying the duplicate key(s).
 - **FR-016**: The server MUST support multiple data NVMe devices. The `--device-pci` CLI argument is repeatable, and all provided PCI addresses are passed to the dispatcher via `DispatcherConfig.data_pci_addrs` for multi-SSD striping/distribution.
+- **FR-017**: The server MUST expose a `ClearMemoryTier` gRPC method that accepts an empty request and calls the dispatcher's `clear_memory_tier()` method. The response MUST include the number of entries cleared (`entries_cleared: uint64`). This operation evicts all entries from the server's DRAM memory-tier, demoting them to SSD-backed state in the dispatch map.
 
 ### Key Entities
 

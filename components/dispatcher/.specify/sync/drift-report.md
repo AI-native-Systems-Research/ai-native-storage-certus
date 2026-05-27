@@ -1,6 +1,6 @@
 # Drift Report: Dispatcher Cache Interface (001-dispatcher-cache-interface)
 
-**Generated**: 2026-05-21
+**Generated**: 2026-05-27
 **Spec**: `components/dispatcher/specs/001-dispatcher-cache-interface/spec.md`
 **Implementation**: `components/dispatcher/src/` (lib.rs, pipeline.rs, io_segmenter.rs, background.rs)
 **Interface**: `components/interfaces/src/idispatcher.rs`
@@ -9,10 +9,10 @@
 
 | Status | Count |
 |--------|-------|
-| Aligned | 28 |
+| Aligned | 29 |
 | Drifted | 4 |
 | Not Implemented | 2 |
-| Unspecced Code | 1 |
+| Unspecced Code | 0 |
 
 ---
 
@@ -267,6 +267,13 @@ During `shutdown()`, calls `gpu.unregister_host_memory()` before teardown (lib.r
 
 ---
 
+### FR-038: clear_memory_tier Method
+**Status**: ALIGNED
+
+Implementation at `lib.rs:1282-1300`: loops `mt.evict_lru()` until empty, calling `dm.convert_memory_tier_to_block(key)` for each evicted key (falls back to `dm.remove(key)` if transition fails). `IMemoryTier::clear()` also implemented in memory-tier component (resets slots, LRU, and allocator atomically).
+
+---
+
 ## Success Criteria
 
 ### SC-001 through SC-013
@@ -315,15 +322,12 @@ Test coverage exists for:
 
 ## Unspecced Code
 
-### 1. `lookup_async` Method
-The `lookup_async` method provides an async-DMA variant of `lookup` that returns a `GpuStream` handle. This allows callers to overlap DMA transfers with other work. The synchronous `lookup` delegates to it internally. This is a performance optimization not covered by the spec.
+None.
 
 ---
 
 ## Recommendations
 
-1. **Add `lookup_async` to spec**: The async lookup variant is a meaningful interface addition that callers can benefit from. Add as FR-036 or extend FR-001/FR-006.
-
-2. **Resolve FR-026 / FR-027**: Decide whether version selection is still a requirement. If only V2 components will be supported, remove these requirements. Otherwise, add the config fields and selection logic.
+1. **Resolve FR-026 / FR-027**: Decide whether version selection is still a requirement. If only V2 components will be supported, remove these requirements. Otherwise, add the config fields and selection logic.
 
 3. **Fix memory-tier-only mode initialization**: The empty PCI address check should be conditional on SPDK availability to properly support the memory-tier-only mode described in User Story 5, scenario 4.
