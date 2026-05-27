@@ -34,7 +34,7 @@
 
 **Decision**: Use `clap` with derive macros
 
-**Rationale**: Industry standard for Rust CLI applications. Provides repeatable arguments (`--data-pci` specified multiple times), built-in help/usage generation, and strong type safety. Already used in similar Rust projects.
+**Rationale**: Industry standard for Rust CLI applications. Provides repeatable arguments (`--device-pci` specified multiple times), built-in help/usage generation, and strong type safety. Already used in similar Rust projects.
 
 **Alternatives considered**:
 - `structopt`: deprecated in favor of clap derive

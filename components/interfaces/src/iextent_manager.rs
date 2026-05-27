@@ -59,6 +59,11 @@ pub struct FormatParams {
     pub instance_id: Option<u64>,
     /// NVMe namespace identifier for the metadata disk.
     pub metadata_disk_ns_id: u32,
+    /// Maximum bytes reserved for metadata (superblock + checkpoints) on the
+    /// device. Caps the checkpoint region calculation so that metadata and data
+    /// can coexist on the same SSD without the checkpoint area consuming the
+    /// entire device. Default: 128 MiB.
+    pub metadata_region_size: u64,
 }
 
 impl FormatParams {
@@ -82,6 +87,7 @@ impl Default for FormatParams {
             metadata_alignment: 128 * 1024, // 128 KiB
             instance_id: None,
             metadata_disk_ns_id: 1,
+            metadata_region_size: 128 * 1024 * 1024, // 128 MiB
         }
     }
 }

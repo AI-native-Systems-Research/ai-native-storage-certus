@@ -51,7 +51,7 @@ After data has been written to a staging buffer and flushed to the block device,
 
 **Acceptance Scenarios**:
 
-1. **Given** key 42 is staged, **When** `convert_to_storage(key=42, offset=8192)` is called, **Then** the entry location changes to `BlockDevice(offset=8192)`, the read reference count is decremented by 1, and the staging buffer can be freed.
+1. **Given** key 42 is staged, **When** `convert_to_storage(key=42, offset=8192)` is called, **Then** the entry location changes to `BlockDevice(offset=8192)`, the read reference count is conditionally decremented by 1 (only if read_ref > 0), and the staging buffer can be freed.
 2. **Given** key 42 does not exist, **When** `convert_to_storage(key=42, offset=8192)` is called, **Then** an error is returned.
 
 ---
@@ -79,16 +79,17 @@ Multiple callers access the same extent concurrently. The dispatch map enforces 
 
 ### User Story 5 - Recovery on Initialization (Priority: P2)
 
-When the dispatch map component starts up, it recovers the set of committed extents from persistent storage by iterating all extents via the `IExtentManager` receptacle. This repopulates the in-memory map so that previously persisted data is immediately available for lookup.
+When the dispatch map component starts up, it recovers the set of committed extents from persistent storage by iterating all extents via the `IExtentManager` receptacle. This repopulates the in-memory map so that previously persisted data is immediately available for lookup. If no `IExtentManager` is bound, initialization succeeds with an empty map.
 
 **Why this priority**: Recovery ensures durability across restarts, but is only exercised on startup.
 
-**Independent Test**: Can be tested by populating an extent manager with known extents, initializing the dispatch map against it, and verifying all extents appear in the map with correct metadata.
+**Independent Test**: Can be tested by populating an extent manager with known extents, initializing the dispatch map against it, and verifying all extents appear in the map with correct metadata. Additionally, initializing without a bound extent manager should succeed with an empty map.
 
 **Acceptance Scenarios**:
 
 1. **Given** the extent manager contains extents for keys [10, 20, 30], **When** the dispatch map initializes, **Then** `lookup(10)`, `lookup(20)`, and `lookup(30)` each return `BlockDeviceLocation` with the correct offset and size.
 2. **Given** the extent manager is empty, **When** the dispatch map initializes, **Then** the map is empty and lookups return `NotExist`.
+3. **Given** no `IExtentManager` is bound, **When** the dispatch map initializes, **Then** initialization succeeds (returns `Ok(())`) with an empty map and lookups return `NotExist`.
 
 ---
 
@@ -139,6 +140,24 @@ The dispatcher's eviction logic needs to identify the least-recently-used entrie
 
 ---
 
+### User Story 9 - Checking Evictability of a Memory-Tier Entry (Priority: P3)
+
+The dispatcher's eviction logic needs to determine whether a specific memory-tier entry can be safely evicted. It calls `is_evictable(key)` which returns true only when the entry is in the `MemoryTier` state with a completed write-through (`ssd_offset` is `Some`) and no active references.
+
+**Why this priority**: Eviction safety checks prevent data loss by ensuring entries are only evicted after their data has been persisted to SSD and no concurrent accessors hold references.
+
+**Independent Test**: Can be tested by creating a memory-tier entry, verifying it is not evictable (write ref held), releasing the write ref and verifying still not evictable (no ssd_offset), setting ssd_offset via `convert_to_storage`, and then verifying it becomes evictable.
+
+**Acceptance Scenarios**:
+
+1. **Given** key 42 is a MemoryTier entry with `ssd_offset: Some(8192)` and read_ref=0 and write_ref=0, **When** `is_evictable(key=42)` is called, **Then** `true` is returned.
+2. **Given** key 42 is a MemoryTier entry with `ssd_offset: None`, **When** `is_evictable(key=42)` is called, **Then** `false` is returned.
+3. **Given** key 42 is a MemoryTier entry with `ssd_offset: Some(8192)` but read_ref=1, **When** `is_evictable(key=42)` is called, **Then** `false` is returned.
+4. **Given** key 42 is a BlockDevice entry with read_ref=0 and write_ref=0, **When** `is_evictable(key=42)` is called, **Then** `false` is returned (only MemoryTier entries are evictable).
+5. **Given** key 99 does not exist, **When** `is_evictable(key=99)` is called, **Then** `false` is returned.
+
+---
+
 ### Edge Cases
 
 - `create_staging` with size=0 returns an error.
@@ -156,14 +175,14 @@ The dispatcher's eviction logic needs to identify the least-recently-used entrie
 - **FR-002**: System MUST store per-entry metadata consisting of: location (a `Location` enum with variants `Staging`, `BlockDevice`, and `MemoryTier`), size in 4KiB blocks, a read reference count (`u32`), a write reference count (`u32`), and a TSC timestamp (`u64`). Reference counts are protected by a `Mutex`/`Condvar` pair for blocking semantics.
 - **FR-003**: System MUST provide `create_staging(key, size)` that allocates a DMA-safe staging buffer, records the entry in the map with a write reference of 1, and returns the buffer. MUST return an error if size is 0 or if DMA buffer allocation fails.
 - **FR-004**: System MUST provide `lookup(key)` that returns one of: `NotExist`, `Staging(DmaBuffer)`, `BlockDevice(offset)`, or `MemoryTier(pointer, size)`. On success, the read reference count MUST be incremented. The call MUST block if a write reference is active until write_ref reaches 0, using a hardcoded default timeout (2000ms). The `MismatchSize` variant exists in the return enum for future use but is not currently triggered. The entry's TSC timestamp is refreshed on each successful lookup. Note: the size is stored internally in the `DispatchEntry` but is not exposed in the `LookupResult::BlockDevice` variant.
-- **FR-005**: System MUST provide `convert_to_storage(key, offset)` that transitions an entry's location from a staging buffer to a block-device offset. As a side effect, the read reference count is decremented by 1 (the caller's staging read reference is implicitly released). When called on a `MemoryTier` entry, it sets the `ssd_offset` field rather than fully transitioning to `BlockDevice`.
+- **FR-005**: System MUST provide `convert_to_storage(key, offset)` that transitions an entry's location from a staging buffer to a block-device offset. As a side effect, the read reference count is conditionally decremented by 1 (only if read_ref > 0); if read_ref is already 0, no decrement occurs. When called on a `MemoryTier` entry, it sets the `ssd_offset` field rather than fully transitioning to `BlockDevice`. Returns an error if the entry is already in `BlockDevice` state.
 - **FR-006**: System MUST provide `take_read(key)` that waits until write_ref=0 (using a hardcoded default timeout of 2000ms), then increments read_ref. MUST return a timeout error if the condition is not met within the deadline.
 - **FR-007**: System MUST provide `take_write(key)` that waits until both read_ref=0 and write_ref=0 (using a hardcoded default timeout of 2000ms), then increments write_ref. MUST return a timeout error if the condition is not met within the deadline.
 - **FR-008**: System MUST provide `release_read(key)` that atomically decrements read_ref. MUST return an error if read_ref is already 0.
 - **FR-009**: System MUST provide `release_write(key)` that atomically decrements write_ref. MUST return an error if write_ref is already 0.
 - **FR-010**: System MUST provide `downgrade_reference(key)` that atomically transitions from a write reference to a read reference (write_ref decremented and read_ref incremented in a single atomic step). MUST return an error if no write reference is held.
 - **FR-011**: System MUST provide `remove(key)` that deletes the entry from the map. The call MUST return an error if any read or write references are still active; the caller is responsible for draining all references before removal.
-- **FR-012**: On initialization, the system MUST recover all committed extents by calling `IExtentManager::for_each_extent` and populating the map with their metadata.
+- **FR-012**: On initialization, if an `IExtentManager` is bound, the system MUST recover all committed extents by calling `IExtentManager::for_each_extent` and populating the map with their metadata. If no `IExtentManager` is bound, initialization MUST succeed with an empty map (returns `Ok(())`).
 - **FR-013**: All `IDispatchMap` methods MUST be thread-safe and re-entrant, allowing concurrent calls from multiple threads.
 - **FR-014**: System MUST use the `ILogger` receptacle for info, debug, and error logging throughout the component.
 - **FR-015**: System MUST be implemented as a component using `define_component!` with `IDispatchMap` as a provided interface and `ILogger` and `IExtentManager` as receptacles.
@@ -171,8 +190,9 @@ The dispatcher's eviction logic needs to identify the least-recently-used entrie
 - **FR-017**: System MUST provide `oldest_keys(n)` that returns up to `n` keys sorted by ascending TSC value (oldest first). Used by the dispatcher's eviction logic to identify victim entries. MUST be thread-safe.
 - **FR-018**: The dispatch map MUST support a `MemoryTier` location variant with fields: `pointer: *mut u8`, `size: u32`, `ssd_offset: Option<u64>`. Two additional methods MUST be provided: `create_memory_tier_entry(key, pointer, size)` creates an entry with MemoryTier location (accepting `*mut u8` pointer and `u32` size); `convert_memory_tier_to_block(key, offset)` sets the `ssd_offset` field on a MemoryTier entry.
 - **FR-019**: The dispatch map MUST provide a `set_dma_alloc(alloc)` method for injecting the DMA allocator used by `create_staging`.
-- **FR-020**: The `initialize()` method MUST be an explicit public API call (not implicitly called during construction). It rebuilds the map from extent manager state via `IExtentManager::for_each_extent`.
+- **FR-020**: The `initialize()` method MUST be an explicit public API call (not implicitly called during construction). It rebuilds the map from extent manager state via `IExtentManager::for_each_extent` when an extent manager is bound. When no `IExtentManager` is bound, it returns `Ok(())` with an empty map.
 - **FR-021**: When `convert_to_storage` is called on a `MemoryTier` entry, it MUST set the `ssd_offset` field rather than transitioning to `BlockDevice` location.
+- **FR-022**: System MUST provide `is_evictable(key)` that returns `true` if and only if: the key exists in the map, the entry is in `MemoryTier` state with `ssd_offset: Some(_)` (write-through complete), and both `read_ref == 0` and `write_ref == 0` (no active references). Returns `false` for non-existent keys, non-MemoryTier entries, MemoryTier entries without `ssd_offset`, or entries with any active references.
 
 ### Key Entities
 
@@ -203,7 +223,7 @@ The dispatcher's eviction logic needs to identify the least-recently-used entrie
 ## Assumptions
 
 - The caller is responsible for performing actual I/O to/from the DMA buffer and block device; the dispatch map only tracks metadata and locations.
-- The `IExtentManager` receptacle is bound and initialized before the dispatch map's recovery phase runs.
+- The `IExtentManager` receptacle is optional. When bound and initialized before the dispatch map's `initialize()` call, extent recovery populates the map from persisted state. When not bound, the dispatch map starts with an empty map.
 - The `ILogger` receptacle is bound before any logging calls are made.
 - DMA buffer allocation is provided by the SPDK environment (via `DmaAllocFn`); the dispatch map delegates allocation but does not manage SPDK initialization.
 - A single dispatch map instance serves one storage namespace; multi-namespace support is out of scope for v0.
@@ -211,3 +231,4 @@ The dispatcher's eviction logic needs to identify the least-recently-used entrie
 - Size parameter in `create_staging` is measured in 4KiB blocks, consistent with the extent manager's granularity.
 - The `MemoryTier` location variant supports a DRAM caching tier where data resides in host memory before being written through to SSD.
 - `convert_to_storage` on a MemoryTier entry sets the `ssd_offset` field rather than transitioning to BlockDevice; `convert_memory_tier_to_block` is the explicit transition method.
+- The read_ref decrement in `convert_to_storage` is conditional — it only decrements if the current read_ref > 0, preventing underflow when no read reference is held at conversion time.

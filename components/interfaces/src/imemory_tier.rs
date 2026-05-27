@@ -56,10 +56,19 @@ component_macros::define_interface! {
         /// Returns `None` if the key is not present.
         fn get(&self, key: CacheKey) -> Option<(*mut u8, u32)>;
 
+        /// Get the pointer and size for an existing slot without updating LRU.
+        ///
+        /// Use this for background operations (e.g., write-through) that should
+        /// not prevent eviction of the entry.
+        fn peek(&self, key: CacheKey) -> Option<(*mut u8, u32)>;
+
         /// Evict the least-recently-used entry, freeing its slot.
         ///
         /// Returns the evicted key, or `None` if the pool is empty.
         fn evict_lru(&self) -> Option<CacheKey>;
+
+        /// Peek at the N oldest keys without removing them.
+        fn oldest_keys(&self, n: usize) -> Vec<CacheKey>;
 
         /// Remove a specific entry, freeing its slot.
         fn remove(&self, key: CacheKey) -> Result<(), MemoryTierError>;

@@ -114,107 +114,103 @@ pub unsafe fn pipelined_ssd_to_gpu(
     let ring_size = ring.buffers.len().min(num_chunks);
     let streams = &ring.streams;
 
-    // Prime the ring: submit initial async reads.
-    let prime_count = ring_size.min(num_chunks);
-    for i in 0..prime_count {
-        let slot = i % ring_size;
-        channels
-            .command_tx
-            .send(Command::ReadAsync {
-                ns_id: 1,
-                lba: segments[i].lba,
-                buf: Arc::clone(&ring.buffers[slot]),
-                timeout_ms: READ_TIMEOUT_MS,
-            })
-            .map_err(|e| DispatcherError::IoError(format!("ReadAsync send #{i}: {e}")))?;
-    }
+    // Process chunks in batches of ring_size. Each batch submits reads into
+    // distinct ring slots, waits for all to complete (order-independent since
+    // each slot is unique within the batch), then copies to memory-tier and GPU.
+    let mut chunk_idx = 0;
 
-    let mut next_to_submit = prime_count;
+    while chunk_idx < num_chunks {
+        let batch_end = (chunk_idx + ring_size).min(num_chunks);
+        let batch_len = batch_end - chunk_idx;
 
-    // Steady-state: process completions, issue async GPU copies, resubmit reads.
-    for completed in 0..num_chunks {
-        match channels.completion_rx.recv() {
-            Ok(Completion::ReadDone { result, .. }) => {
-                result.map_err(|e| {
-                    DispatcherError::IoError(format!("SSD read #{completed}: {e}"))
-                })?;
-            }
-            Ok(Completion::Timeout { handle }) => {
-                return Err(DispatcherError::IoError(format!(
-                    "NVMe read timeout (handle {:?})",
-                    handle
-                )));
-            }
-            Ok(other) => {
-                return Err(DispatcherError::IoError(format!(
-                    "unexpected completion: {other:?}"
-                )));
-            }
-            Err(_) => {
-                return Err(DispatcherError::IoError(
-                    "completion channel disconnected".into(),
-                ));
-            }
-        }
-
-        let slot = completed % ring_size;
-        let seg = &segments[completed];
-        let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
-        let current_stream = streams[completed % 2];
-
-        let guard = ring.buffers[slot].lock().unwrap();
-
-        // Stage 2: memcpy ring buffer → memory-tier slot (CPU copy, immediate).
-        if copy_len > 0 {
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    guard.as_ptr() as *const u8,
-                    mem_tier_ptr.add(seg.buffer_offset),
-                    copy_len,
-                );
-            }
-        }
-
-        // Stage 3: async DMA copy ring buffer → GPU on current stream.
-        gpu.dma_copy_to_device_async(
-            &guard,
-            unsafe { (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void },
-            copy_len,
-            current_stream,
-        )
-        .map_err(|e| {
-            DispatcherError::IoError(format!("GPU async DMA copy #{completed} failed: {e}"))
-        })?;
-
-        // Batch-sync both streams once per ring cycle. NVMe read latency (~50+ μs)
-        // always exceeds GPU async copy time (~5 μs at 128 KiB), so ring slots are
-        // safe to reuse well before the next NVMe completion arrives.
-        if (completed + 1) % ring_size == 0 {
-            gpu.stream_synchronize(streams[0])
-                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
-            gpu.stream_synchronize(streams[1])
-                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
-        }
-
-        drop(guard);
-
-        // Resubmit next NVMe read into the now-free ring slot.
-        if next_to_submit < num_chunks {
+        // Submit this batch's reads into ring slots.
+        for i in 0..batch_len {
             channels
                 .command_tx
                 .send(Command::ReadAsync {
                     ns_id: 1,
-                    lba: segments[next_to_submit].lba,
-                    buf: Arc::clone(&ring.buffers[slot]),
+                    lba: segments[chunk_idx + i].lba,
+                    buf: Arc::clone(&ring.buffers[i]),
                     timeout_ms: READ_TIMEOUT_MS,
                 })
                 .map_err(|e| {
-                    DispatcherError::IoError(format!(
-                        "ReadAsync resubmit #{next_to_submit}: {e}"
-                    ))
+                    DispatcherError::IoError(format!("ReadAsync send #{}: {e}", chunk_idx + i))
                 })?;
-            next_to_submit += 1;
         }
+
+        // Wait for all reads in this batch to complete.
+        for _i in 0..batch_len {
+            match channels.completion_rx.recv() {
+                Ok(Completion::ReadDone { handle, result }) => {
+                    result.map_err(|e| {
+                        DispatcherError::IoError(format!(
+                            "SSD read (handle {:?}): {e}",
+                            handle
+                        ))
+                    })?;
+                }
+                Ok(Completion::Timeout { handle }) => {
+                    return Err(DispatcherError::IoError(format!(
+                        "NVMe read timeout (handle {:?})",
+                        handle
+                    )));
+                }
+                Ok(other) => {
+                    return Err(DispatcherError::IoError(format!(
+                        "unexpected completion: {other:?}"
+                    )));
+                }
+                Err(_) => {
+                    return Err(DispatcherError::IoError(
+                        "completion channel disconnected".into(),
+                    ));
+                }
+            }
+        }
+
+        // All reads for this batch are complete. Process in order.
+        for i in 0..batch_len {
+            let seg = &segments[chunk_idx + i];
+            let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
+            let current_stream = streams[i % 2];
+
+            let guard = ring.buffers[i].lock().unwrap();
+
+            // memcpy ring buffer → memory-tier slot.
+            if copy_len > 0 {
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        guard.as_ptr() as *const u8,
+                        mem_tier_ptr.add(seg.buffer_offset),
+                        copy_len,
+                    );
+                }
+            }
+
+            // Async DMA copy ring buffer → GPU.
+            gpu.dma_copy_to_device_async(
+                &guard,
+                unsafe { (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void },
+                copy_len,
+                current_stream,
+            )
+            .map_err(|e| {
+                DispatcherError::IoError(format!(
+                    "GPU async DMA copy #{} failed: {e}",
+                    chunk_idx + i
+                ))
+            })?;
+
+            drop(guard);
+        }
+
+        // Sync both streams before reusing ring slots in the next batch.
+        gpu.stream_synchronize(streams[0])
+            .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+        gpu.stream_synchronize(streams[1])
+            .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+
+        chunk_idx = batch_end;
     }
 
     // Sync both streams to ensure all GPU copies are complete.
@@ -244,6 +240,7 @@ unsafe extern "C" fn noop_free(_ptr: *mut std::ffi::c_void) {}
 ///
 /// - `mem_tier_ptr` must be a valid, SPDK-registered, CUDA-pinned pointer for `total_bytes`.
 /// - `gpu_dst` must be a valid GPU destination pointer for `total_bytes`.
+#[allow(clippy::too_many_arguments)]
 pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
     drive: &dyn IBlockDevice,
     gpu: &dyn IGpuServices,
@@ -286,12 +283,12 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
         })
         .collect::<Result<Vec<_>, DispatcherError>>()?;
 
-    // Prime: submit initial async reads directly into memory-tier chunk offsets.
-    // Each chunk targets a unique offset in the memory-tier slot, so we can have
-    // many NVMe reads in flight simultaneously to saturate SSD parallelism.
-    // Use a high depth (16) since there's no buffer reuse — each chunk is unique.
+    // Submit all async reads into unique memory-tier chunk offsets. Since each
+    // chunk targets a unique address, completions may arrive in any order and the
+    // final memory content is correct regardless of ordering.
     const ZERO_COPY_DEPTH: usize = 16;
     let max_inflight = ZERO_COPY_DEPTH.min(num_chunks);
+
     for i in 0..max_inflight {
         channels
             .command_tx
@@ -306,13 +303,15 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
 
     let mut next_to_submit = max_inflight;
 
-    // Process completions: after each NVMe read completes into memory-tier,
-    // issue async H2D from the same memory-tier offset to GPU.
-    for completed in 0..num_chunks {
+    // Phase 1: Wait for all NVMe reads to complete. Since each read targets a
+    // unique memory-tier offset, out-of-order completions don't cause corruption.
+    // We still pipeline submissions (submit next read as each completes) to keep
+    // the NVMe queue saturated.
+    for _completed in 0..num_chunks {
         match channels.completion_rx.recv() {
-            Ok(Completion::ReadDone { result, .. }) => {
+            Ok(Completion::ReadDone { handle, result }) => {
                 result.map_err(|e| {
-                    DispatcherError::IoError(format!("SSD read #{completed}: {e}"))
+                    DispatcherError::IoError(format!("SSD read (handle {:?}): {e}", handle))
                 })?;
             }
             Ok(Completion::Timeout { handle }) => {
@@ -333,34 +332,7 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
             }
         }
 
-        let seg = &segments[completed];
-        let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
-        let current_stream = streams[completed % 2];
-
-        // Async H2D: memory-tier chunk → GPU (same memory NVMe just wrote into).
-        let guard = chunk_bufs[completed].lock().unwrap();
-        gpu.dma_copy_to_device_async(
-            &guard,
-            unsafe { (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void },
-            copy_len,
-            current_stream,
-        )
-        .map_err(|e| {
-            DispatcherError::IoError(format!("GPU async DMA copy #{completed} failed: {e}"))
-        })?;
-        drop(guard);
-
-        // Batch-sync both streams periodically. No buffer reuse in zero-copy
-        // (each chunk is a unique memory-tier offset), so sync only throttles
-        // the GPU command queue depth.
-        if (completed + 1) % 16 == 0 {
-            gpu.stream_synchronize(streams[0])
-                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
-            gpu.stream_synchronize(streams[1])
-                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
-        }
-
-        // Submit next NVMe read (into the next memory-tier chunk).
+        // Submit next NVMe read to keep the queue saturated.
         if next_to_submit < num_chunks {
             channels
                 .command_tx
@@ -372,10 +344,37 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
                 })
                 .map_err(|e| {
                     DispatcherError::IoError(format!(
-                        "ReadAsync resubmit #{next_to_submit}: {e}"
+                        "ReadAsync submit #{next_to_submit}: {e}"
                     ))
                 })?;
             next_to_submit += 1;
+        }
+    }
+
+    // Phase 2: All NVMe reads complete — memory-tier slot has correct data.
+    // Issue GPU H2D copies in segment order (deterministic stream assignment).
+    for (i, seg) in segments.iter().enumerate() {
+        let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
+        let current_stream = streams[i % 2];
+
+        let guard = chunk_bufs[i].lock().unwrap();
+        gpu.dma_copy_to_device_async(
+            &guard,
+            unsafe { (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void },
+            copy_len,
+            current_stream,
+        )
+        .map_err(|e| {
+            DispatcherError::IoError(format!("GPU async DMA copy (seg {i}) failed: {e}"))
+        })?;
+        drop(guard);
+
+        // Batch-sync both streams periodically to throttle GPU command queue.
+        if (i + 1) % 16 == 0 {
+            gpu.stream_synchronize(streams[0])
+                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+            gpu.stream_synchronize(streams[1])
+                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
         }
     }
 

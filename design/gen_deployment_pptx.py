@@ -161,7 +161,7 @@ dd_label = slide.shapes.add_textbox(dd_x + Inches(0.1), sub_y - Inches(0.02), In
 tf = dd_label.text_frame
 p = tf.paragraphs[0]
 run = p.add_run()
-run.text = "DataDrive[0..N] (per --data-pci)"
+run.text = "DataDrive[0..N] (per --device-pci)"
 run.font.size = Pt(7)
 run.font.italic = True
 run.font.color.rgb = RGBColor(0x45, 0x27, 0xA0)
@@ -216,7 +216,7 @@ add_box(slide, COL1_X, ROW6_Y, Inches(2.2), Inches(0.6),
         C_HW_BG, C_HW_BD, font_size=8, bold=True)
 
 add_box(slide, Inches(3.0), ROW6_Y, Inches(2.2), Inches(0.6),
-        "NVMe (data) [0..N]\n--data-pci",
+        "NVMe device(s) [0..N]\n--device-pci",
         C_HW_BG, C_HW_BD, font_size=8, bold=True)
 
 add_box(slide, Inches(5.8), ROW6_Y, Inches(2.2), Inches(0.6),

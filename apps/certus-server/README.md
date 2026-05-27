@@ -94,15 +94,14 @@ The build script automatically downloads `protoc` if not found on the system.
 ## Running
 
 ```bash
-certus-server --metadata-pci 0000:d8:00.0 --data-pci 0000:d9:00.0
+certus-server --device-pci 0000:d9:00.0
 ```
 
 ### CLI Options
 
 | Flag | Required | Default | Description |
 |------|----------|---------|-------------|
-| `--metadata-pci` | Yes | — | PCI address of the metadata NVMe device (DDDD:BB:DD.F) |
-| `--data-pci` | Yes | — | PCI address(es) of data NVMe device(s); repeatable |
+| `--device-pci` | Yes | — | PCI address(es) of NVMe device(s) (DDDD:BB:DD.F); repeatable |
 | `--listen` | No | `0.0.0.0:50051` | gRPC listen address |
 | `--tls-cert` | No | — | Path to TLS certificate (PEM) |
 | `--tls-key` | No | — | Path to TLS private key (PEM) |
