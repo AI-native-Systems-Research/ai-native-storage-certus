@@ -16,7 +16,8 @@ use proto::dispatcher_server::{Dispatcher, DispatcherServer};
 use proto::{
     BatchCheckRequest, BatchCheckResponse, BatchLookupRequest, BatchLookupResponse,
     BatchPopulateRequest, BatchPopulateResponse, BatchRemoveRequest, BatchRemoveResponse,
-    BatchTouchRequest, BatchTouchResponse, CheckResult, EntryResult, ErrorCode,
+    BatchTouchRequest, BatchTouchResponse, CheckResult, ClearMemoryTierRequest,
+    ClearMemoryTierResponse, EntryResult, ErrorCode,
 };
 
 pub fn dispatcher_server(svc: DispatcherService) -> DispatcherServer<DispatcherService> {
@@ -324,5 +325,23 @@ impl Dispatcher for DispatcherService {
         .map_err(|e| Status::internal(format!("task join error: {e}")))?;
 
         Ok(Response::new(BatchTouchResponse { results }))
+    }
+
+    async fn clear_memory_tier(
+        &self,
+        _request: Request<ClearMemoryTierRequest>,
+    ) -> Result<Response<ClearMemoryTierResponse>, Status> {
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let entries_cleared = tokio::task::spawn_blocking(move || {
+            let disp = dispatcher.lock().unwrap();
+            disp.clear_memory_tier()
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?
+        .map_err(|e| Status::internal(format!("clear_memory_tier failed: {e}")))?;
+
+        Ok(Response::new(ClearMemoryTierResponse {
+            entries_cleared: entries_cleared as u64,
+        }))
     }
 }

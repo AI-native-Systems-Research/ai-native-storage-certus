@@ -60,6 +60,11 @@ class DispatcherStub(object):
                 request_serializer=dispatcher__pb2.BatchTouchRequest.SerializeToString,
                 response_deserializer=dispatcher__pb2.BatchTouchResponse.FromString,
                 _registered_method=True)
+        self.ClearMemoryTier = channel.unary_unary(
+                '/certus.dispatcher.v1.Dispatcher/ClearMemoryTier',
+                request_serializer=dispatcher__pb2.ClearMemoryTierRequest.SerializeToString,
+                response_deserializer=dispatcher__pb2.ClearMemoryTierResponse.FromString,
+                _registered_method=True)
 
 
 class DispatcherServicer(object):
@@ -101,6 +106,13 @@ class DispatcherServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ClearMemoryTier(self, request, context):
+        """Clear all entries from the memory-tier cache pool.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_DispatcherServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -128,6 +140,11 @@ def add_DispatcherServicer_to_server(servicer, server):
                     servicer.Touch,
                     request_deserializer=dispatcher__pb2.BatchTouchRequest.FromString,
                     response_serializer=dispatcher__pb2.BatchTouchResponse.SerializeToString,
+            ),
+            'ClearMemoryTier': grpc.unary_unary_rpc_method_handler(
+                    servicer.ClearMemoryTier,
+                    request_deserializer=dispatcher__pb2.ClearMemoryTierRequest.FromString,
+                    response_serializer=dispatcher__pb2.ClearMemoryTierResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -266,6 +283,33 @@ class Dispatcher(object):
             '/certus.dispatcher.v1.Dispatcher/Touch',
             dispatcher__pb2.BatchTouchRequest.SerializeToString,
             dispatcher__pb2.BatchTouchResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ClearMemoryTier(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/certus.dispatcher.v1.Dispatcher/ClearMemoryTier',
+            dispatcher__pb2.ClearMemoryTierRequest.SerializeToString,
+            dispatcher__pb2.ClearMemoryTierResponse.FromString,
             options,
             channel_credentials,
             insecure,

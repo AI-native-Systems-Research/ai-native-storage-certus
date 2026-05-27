@@ -87,6 +87,11 @@ component_macros::define_interface! {
 
         /// Return the base pointer and size of the pool for CUDA host registration.
         fn pool_info(&self) -> Option<(*mut u8, usize)>;
+
+        /// Remove all entries from the pool, freeing all slots.
+        ///
+        /// Returns the number of entries that were cleared.
+        fn clear(&self) -> Result<usize, MemoryTierError>;
     }
 }
 

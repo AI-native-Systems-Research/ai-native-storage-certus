@@ -3,7 +3,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROTO_DIR="$SCRIPT_DIR/../proto"
+PROTO_DIR="$SCRIPT_DIR/../certus-server/proto"
 OUT_DIR="$SCRIPT_DIR"
 
 python -m grpc_tools.protoc \
