@@ -255,6 +255,18 @@ impl IMemoryTier for MemoryTierComponent {
             None
         }
     }
+
+    fn clear(&self) -> Result<usize, MemoryTierError> {
+        let mut state = self.state.lock().unwrap();
+        if !state.initialized {
+            return Err(MemoryTierError::NotInitialized("pool not initialized".into()));
+        }
+        let count = state.slots.len();
+        state.slots.clear();
+        state.lru = LruList::new();
+        state.allocator = FreeList::new(state.pool_size);
+        Ok(count)
+    }
 }
 
 #[cfg(test)]

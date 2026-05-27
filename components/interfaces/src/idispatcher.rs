@@ -439,6 +439,24 @@ component_macros::define_interface! {
         /// # }
         /// ```
         fn touch(&self, key: CacheKey) -> Result<(), DispatcherError>;
+
+        /// Evict all entries from the memory-tier, demoting them to block-device-backed.
+        ///
+        /// Entries whose write-through has completed are converted to block-device
+        /// state in the dispatch map. Entries still being written are removed entirely.
+        /// Returns the number of entries cleared.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # use interfaces::{IDispatcher, DispatcherError};
+        /// # fn example(dispatcher: &dyn IDispatcher) -> Result<(), DispatcherError> {
+        /// let cleared = dispatcher.clear_memory_tier()?;
+        /// println!("cleared {cleared} entries from memory-tier");
+        /// # Ok(())
+        /// # }
+        /// ```
+        fn clear_memory_tier(&self) -> Result<usize, DispatcherError>;
     }
 }
 

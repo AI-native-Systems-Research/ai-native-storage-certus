@@ -18,6 +18,9 @@ service Dispatcher {
 
   // Touch cache entries, updating eviction timestamps without DMA.
   rpc Touch(BatchTouchRequest) returns (BatchTouchResponse);
+
+  // Clear all entries from the memory-tier cache pool.
+  rpc ClearMemoryTier(ClearMemoryTierRequest) returns (ClearMemoryTierResponse);
 }
 
 // --- Common types ---
@@ -111,4 +114,12 @@ message BatchTouchRequest {
 
 message BatchTouchResponse {
   repeated EntryResult results = 1;
+}
+
+// --- ClearMemoryTier ---
+
+message ClearMemoryTierRequest {}
+
+message ClearMemoryTierResponse {
+  uint64 entries_cleared = 1;
 }

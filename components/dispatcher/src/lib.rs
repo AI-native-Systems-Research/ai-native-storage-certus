@@ -1276,6 +1276,29 @@ impl IDispatcher for DispatcherComponent {
         dm.touch(key)
             .map_err(|_| DispatcherError::KeyNotFound(key))
     }
+
+    fn clear_memory_tier(&self) -> Result<usize, DispatcherError> {
+        self.ensure_initialized()?;
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        let mut count = 0;
+        while let Some(key) = mt.evict_lru() {
+            if dm.convert_memory_tier_to_block(key).is_err() {
+                let _ = dm.remove(key);
+            }
+            count += 1;
+        }
+        Ok(count)
+    }
 }
 
 #[cfg(test)]
@@ -1434,6 +1457,14 @@ mod tests {
         fn pool_info(&self) -> Option<(*mut u8, usize)> {
             let inner = self.inner.lock().unwrap();
             Some((inner.pool.as_ptr() as *mut u8, inner.capacity))
+        }
+
+        fn clear(&self) -> Result<usize, MemoryTierError> {
+            let mut inner = self.inner.lock().unwrap();
+            let count = inner.slots.len();
+            inner.slots.clear();
+            inner.used = 0;
+            Ok(count)
         }
     }
 
