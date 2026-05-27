@@ -36,6 +36,11 @@ struct Cli {
     #[arg(long = "memory-tier-size", value_parser = parse_size)]
     memory_tier_size: Option<usize>,
 
+    /// Format extent managers on startup (destroys existing data).
+    /// Without this flag, the server recovers previously stored extents.
+    #[arg(long = "format")]
+    format: bool,
+
     /// Path to TLS certificate file (enables TLS when provided with --tls-key)
     #[arg(long = "tls-cert")]
     tls_cert: Option<String>,
@@ -91,16 +96,17 @@ fn parse_pci_address(addr: &str) -> Result<PciAddress, String> {
 fn initialize_component_stack(
     device_pci_addrs: &[String],
     memory_tier_size: usize,
-) -> Result<Arc<dyn IDispatcher + Send + Sync>, String> {
-    eprintln!("certus-server: initializing SPDK environment...");
+    format: bool,
+) -> Result<(Arc<dyn IDispatcher + Send + Sync>, Arc<dyn ILogger + Send + Sync>), String> {
+    let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponent::new_default();
+
+    logger.info("certus-server: initializing SPDK environment...");
     let spdk_comp = spdk_env::SPDKEnvComponent::new_default();
     let spdk_iface = query_interface!(spdk_comp, spdk_env::ISPDKEnv)
         .ok_or("failed to query ISPDKEnv")?;
     spdk_iface.init().map_err(|e| format!("SPDK init failed: {e}"))?;
 
-    let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponent::new_default();
-
-    eprintln!("certus-server: initializing GPU services...");
+    logger.info("certus-server: initializing GPU services...");
     let gpu_comp = gpu_services::GpuServicesComponent::new_default();
     gpu_comp
         .logger
@@ -110,8 +116,8 @@ fn initialize_component_stack(
         query_interface!(gpu_comp, IGpuServices).ok_or("failed to query IGpuServices")?;
     gpu.initialize().map_err(|e| format!("GPU init failed: {e}"))?;
 
-    // --- Create dispatch map (no persistence — starts fresh each time) ---
-    eprintln!("certus-server: initializing dispatch map...");
+    // --- Create dispatch map ---
+    logger.info("certus-server: initializing dispatch map...");
     let dm_comp = dispatch_map::DispatchMapComponent::new(
         dispatch_map::DispatchMapState::default(),
     );
@@ -130,7 +136,7 @@ fn initialize_component_stack(
         .map_err(|e| format!("DispatchMap init failed: {e}"))?;
 
     // --- Create memory-tier ---
-    eprintln!("certus-server: initializing memory-tier...");
+    logger.info("certus-server: initializing memory-tier...");
     let mt_comp = memory_tier::MemoryTierComponent::new_default();
     mt_comp
         .logger
@@ -151,20 +157,20 @@ fn initialize_component_stack(
             )
         };
         if err != gpu_services::cuda_ffi::CUDA_SUCCESS {
-            eprintln!(
-                "certus-server: WARNING: cudaHostRegister failed (err={err}), \
+            logger.warn(&format!(
+                "certus-server: cudaHostRegister failed (err={err}), \
                  memory-tier transfers will use staged path"
-            );
+            ));
         } else {
-            eprintln!(
+            logger.info(&format!(
                 "certus-server: memory-tier pool registered with CUDA ({} MiB pinned)",
                 pool_size / (1024 * 1024)
-            );
+            ));
         }
     }
 
     // --- Create dispatcher ---
-    eprintln!("certus-server: initializing dispatcher...");
+    logger.info("certus-server: initializing dispatcher...");
     let disp_comp = dispatcher::DispatcherComponent::new_default();
     disp_comp
         .dispatch_map
@@ -193,12 +199,13 @@ fn initialize_component_stack(
     dispatcher
         .initialize(DispatcherConfig {
             data_pci_addrs: device_pci_addrs.to_vec(),
+            format_on_init: format,
             ..Default::default()
         })
         .map_err(|e| format!("Dispatcher init failed: {e}"))?;
 
-    eprintln!("certus-server: component stack initialized");
-    Ok(dispatcher)
+    logger.info("certus-server: component stack initialized");
+    Ok((dispatcher, logger))
 }
 
 #[tokio::main]
@@ -210,12 +217,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         validate_pci_address(addr)?;
     }
 
-    eprintln!("certus-server: devices={:?}", cli.device_pci);
-
-    // Initialize Certus component stack
     let pool_size = cli.memory_tier_size.unwrap_or(memory_tier::DEFAULT_POOL_SIZE);
-    eprintln!("certus-server: memory-tier-size={} MiB", pool_size / (1024 * 1024));
-    let dispatcher = initialize_component_stack(&cli.device_pci, pool_size)?;
+    let (dispatcher, logger) = initialize_component_stack(&cli.device_pci, pool_size, cli.format)?;
+
+    logger.info(&format!("certus-server: devices={:?}", cli.device_pci));
+    logger.info(&format!(
+        "certus-server: memory-tier-size={} MiB",
+        pool_size / (1024 * 1024)
+    ));
+    if cli.format {
+        logger.info("certus-server: --format specified, extent managers will be reformatted");
+    } else {
+        logger.info("certus-server: recovering extents from disk (use --format for clean slate)");
+    }
+
     let dispatcher_mutex = Arc::new(Mutex::new(dispatcher));
 
     let svc = DispatcherService::new(Arc::clone(&dispatcher_mutex));
@@ -229,27 +244,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let key = tokio::fs::read(key_path).await?;
         let identity = Identity::from_pem(cert, key);
         server = server.tls_config(ServerTlsConfig::new().identity(identity))?;
-        eprintln!("certus-server: TLS enabled");
+        logger.info("certus-server: TLS enabled");
     }
 
-    eprintln!("certus-server: listening on {addr}");
+    logger.info(&format!("certus-server: listening on {addr}"));
 
     let shutdown_flag = Arc::new(AtomicBool::new(false));
     let flag_clone = Arc::clone(&shutdown_flag);
+    let shutdown_logger = Arc::clone(&logger);
 
     server
         .add_service(service::dispatcher_server(svc))
         .serve_with_shutdown(addr, async move {
-            tokio::signal::ctrl_c().await.ok();
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut sigterm = signal(SignalKind::terminate()).expect("failed to register SIGTERM");
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {},
+                _ = sigterm.recv() => {},
+            }
             flag_clone.store(true, Ordering::Release);
-            eprintln!("\ncertus-server: shutting down...");
+            shutdown_logger.info("certus-server: shutting down...");
         })
         .await?;
 
     // Shutdown dispatcher
     let disp = dispatcher_mutex.lock().unwrap();
     let _ = disp.shutdown();
-    eprintln!("certus-server: shutdown complete");
+    logger.info("certus-server: shutdown complete");
 
     Ok(())
 }

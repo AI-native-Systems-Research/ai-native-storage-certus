@@ -159,5 +159,16 @@ component_macros::define_interface! {
         /// Returns `true` if the entry exists, is in MemoryTier state with
         /// `ssd_offset: Some(_)`, and has no active read/write references.
         fn is_evictable(&self, key: CacheKey) -> bool;
+
+        /// Insert a recovered extent as a BlockDevice entry.
+        ///
+        /// Used during recovery to rebuild the dispatch map from persisted
+        /// extents without allocating staging buffers.
+        fn recover_extent(
+            &self,
+            key: CacheKey,
+            offset: u64,
+            size_blocks: u32,
+        ) -> Result<(), DispatchMapError>;
     }
 }

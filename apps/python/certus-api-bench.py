@@ -82,6 +82,9 @@ class ClientResult:
         self.hot_latencies = []
         self.cold_latencies = []
         self.errors = []
+        self.populate_start = 0.0
+        self.populate_end = 0.0
+        self.populate_objects = 0
         self.hot_start = 0.0
         self.hot_end = 0.0
         self.cold_start = 0.0
@@ -442,6 +445,9 @@ def run_client(
             result.errors.append(f"populate RPC error: {e.details()}")
             return
     t_pop_end = time.perf_counter()
+    result.populate_start = t_pop_start
+    result.populate_end = t_pop_end
+    result.populate_objects = total_objects
 
     # Wait for background write-through to flush to SSD.
     # All clients share the same SSD(s), so total flush volume is num_clients * data.
@@ -745,10 +751,16 @@ def main():
 
     # Compute true wall-clock aggregate throughput:
     # total bytes transferred by ALL clients / elapsed wall time (first start to last end)
+    pop_wall_agg = None
     hot_wall_agg = None
     cold_wall_agg = None
+    active_pop = [r for r in results if r.populate_objects > 0]
     active_hot = [r for r in results if r.hot_objects > 0]
     active_cold = [r for r in results if r.cold_objects > 0]
+    if active_pop:
+        pop_elapsed = max(r.populate_end for r in active_pop) - min(r.populate_start for r in active_pop)
+        pop_total_bytes = sum(r.populate_objects for r in active_pop) * BLOCK_SIZE
+        pop_wall_agg = (pop_total_bytes / pop_elapsed / 1e9) if pop_elapsed > 0 else 0
     if active_hot:
         hot_elapsed = max(r.hot_end for r in active_hot) - min(r.hot_start for r in active_hot)
         hot_total_bytes = sum(r.hot_objects for r in active_hot) * BLOCK_SIZE
@@ -764,7 +776,7 @@ def main():
     print()
     print("  Latency per object (all clients combined):")
     print()
-    print_stats("Populate", all_populate, num_clients)
+    print_stats("Populate", all_populate, num_clients, pop_wall_agg)
     print()
     print_stats("Lookup (hot)", all_hot, num_clients, hot_wall_agg)
     print()
