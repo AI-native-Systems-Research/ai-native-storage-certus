@@ -16,7 +16,7 @@ Fixed-size extent allocator with crash-consistent on-disk layout. Manages a data
 
 ### Crash Recovery
 
-On `initialize`, reads the superblock and latest valid checkpoint from the metadata device, then reconstructs in-memory allocator state. Checkpoints are coalesced and can be triggered explicitly or by a background thread (default: every 5 seconds).
+On `initialize`, reads the superblock and latest valid checkpoint from the metadata device, then reconstructs in-memory allocator state. Checkpoints are coalesced and can be triggered explicitly or by a background thread (default: every 300 seconds).
 
 ## Component Definition
 

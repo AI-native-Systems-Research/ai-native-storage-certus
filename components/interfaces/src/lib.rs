@@ -11,6 +11,7 @@ mod idispatcher;
 mod igpu_services;
 mod igreeter;
 mod ilogger;
+mod imemory_tier;
 
 pub use idispatch_map::CacheKey;
 pub use idispatch_map::DispatchMapError;
@@ -26,9 +27,13 @@ pub use idispatcher::IDispatcher;
 pub use igpu_services::GpuDeviceInfo;
 pub use igpu_services::GpuDmaBuffer;
 pub use igpu_services::GpuIpcHandle;
+pub use igpu_services::GpuStream;
 pub use igpu_services::IGpuServices;
 pub use igreeter::IGreeter;
 pub use ilogger::ILogger;
+pub use imemory_tier::MemoryTierError;
+#[cfg(feature = "spdk")]
+pub use imemory_tier::IMemoryTier;
 
 #[cfg(feature = "spdk")]
 pub mod spdk_types;

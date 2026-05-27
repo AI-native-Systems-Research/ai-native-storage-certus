@@ -1,0 +1,32 @@
+research_question: >
+  Using a bounce buffer SSD->CPU->GPU with pipelined transfers is faster
+  than direct SSD->GPU for transfer of 4MiB broken into a stream of 128KiB
+  transfers.
+
+run_id: h8-dispatcher-p2p
+
+max_iterations: 2
+
+target_system:
+  name: "Certus Storage Engine — Dispatcher v1"
+  description: >
+    AI-native KV-cache storage system. Dispatcher component at
+    components/dispatcher/v1/ implements pipelined SSD->DRAM->GPU
+    transfers using ring buffers (src/pipeline.rs). The lookup path
+    serves from memory-tier or promotes from SSD via pipelined reads.
+    No P2P (direct SSD->GPU) path exists in the dispatcher yet.
+  observable_metrics:
+    - "end-to-end transfer latency (ms) for 4 MiB"
+    - "sustained throughput (MB/s)"
+  controllable_knobs:
+    - "transfer path: pipelined bounce (existing) | P2P direct (to implement)"
+    - "chunk size (128 KiB, MDTS limited)"
+  repo_path: /home/nara/certus/ai-native-storage-certus
+
+models:
+  design: "claude-opus-4-6"
+  execute_analyze: "claude-sonnet-4-6"
+
+prompts:
+  methodology_layer: "prompts/methodology"
+  domain_adapter_layer: null

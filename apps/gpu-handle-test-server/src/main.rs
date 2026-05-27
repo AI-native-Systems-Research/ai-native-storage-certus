@@ -9,15 +9,15 @@ use std::os::unix::net::UnixListener;
 use std::sync::Arc;
 
 use component_core::query_interface;
-use gpu_services::GpuServicesComponentV0;
+use gpu_services::GpuServicesComponent;
 use interfaces::{IGpuServices, ILogger};
 
 const SOCKET_PATH: &str = "/tmp/gpu-services-ipc.sock";
 
 fn main() {
-    let component = GpuServicesComponentV0::new();
+    let component = GpuServicesComponent::new_default();
 
-    let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponentV1::new_default();
+    let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponent::new_default();
     component.logger.connect(logger).unwrap();
 
     let gpu = query_interface!(component, IGpuServices).expect("IGpuServices not available");

@@ -10,6 +10,16 @@ pub struct LatencyStats {
 }
 
 pub fn compute_stats(samples: &mut [Duration]) -> LatencyStats {
+    if samples.is_empty() {
+        return LatencyStats {
+            count: 0,
+            min: Duration::ZERO,
+            max: Duration::ZERO,
+            mean: Duration::ZERO,
+            p50: Duration::ZERO,
+            p99: Duration::ZERO,
+        };
+    }
     samples.sort();
     let count = samples.len() as u64;
     let min = samples[0];

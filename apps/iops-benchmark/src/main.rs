@@ -20,15 +20,14 @@ use std::time::Instant;
 
 use clap::Parser;
 
-use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponentV1;
-use block_device_spdk_nvme_v2::BlockDeviceSpdkNvmeComponentV2;
+use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent;
 use component_core::binding::bind;
 use component_core::iunknown::query;
 use component_core::numa::{set_thread_affinity, CpuSet, NumaTopology};
 use interfaces::{Command, Completion, IBlockDevice};
 use spdk_env::SPDKEnvComponent;
 
-use config::{BenchConfig, Driver};
+use config::BenchConfig;
 use stats::FinalReport;
 
 fn main() {
@@ -36,10 +35,8 @@ fn main() {
 
     // --- Component wiring ---
     let spdk_env_comp = SPDKEnvComponent::new_default();
-    let block_dev: std::sync::Arc<dyn component_core::IUnknown> = match config.driver {
-        Driver::V1 => BlockDeviceSpdkNvmeComponentV1::new_default(),
-        Driver::V2 => BlockDeviceSpdkNvmeComponentV2::new_default(),
-    };
+    let block_dev: std::sync::Arc<dyn component_core::IUnknown> =
+        BlockDeviceSpdkNvmeComponent::new_default();
 
     bind(&*spdk_env_comp, "ISPDKEnv", &*block_dev, "spdk_env").unwrap_or_else(|e| {
         eprintln!("error: failed to bind spdk_env: {e}");
@@ -331,7 +328,11 @@ fn main() {
     let report = FinalReport::from_results(&results, actual_duration);
     report::print_final(&report, config.op, &results);
 
-    std::process::exit(0);
+    // Shutdown the block device actor thread before process exit.
+    // The component uses a self-referential Arc cycle (InterfaceMap holds
+    // Arc<Self>), so Drop will never fire. We must explicitly join the actor
+    // to prevent it from executing SPDK FFI calls during process teardown.
+    let _ = admin.shutdown();
 }
 
 /// Parse a PCI BDF address string like "0000:03:00.0" into components.

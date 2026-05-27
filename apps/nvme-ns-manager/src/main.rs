@@ -7,20 +7,13 @@
 
 use std::io::{self, BufRead, Write};
 
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 
-use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponentV1;
-use block_device_spdk_nvme_v2::BlockDeviceSpdkNvmeComponentV2;
+use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent;
 use component_core::binding::bind;
 use component_core::iunknown::query;
 use interfaces::{ClientChannels, Command, Completion};
 use spdk_env::SPDKEnvComponent;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-enum Driver {
-    V1,
-    V2,
-}
 
 #[derive(Parser)]
 #[command(name = "nvme-ns-manager", about = "Interactive NVMe namespace manager via SPDK")]
@@ -28,10 +21,6 @@ struct Cli {
     /// NVMe controller PCI BDF address (e.g. 0000:03:00.0). Uses first device if omitted.
     #[arg(long)]
     pci_addr: Option<String>,
-
-    /// Block device driver version.
-    #[arg(long, default_value = "v2", value_enum)]
-    driver: Driver,
 }
 
 fn main() {
@@ -39,10 +28,8 @@ fn main() {
 
     // --- Component wiring ---
     let spdk_env_comp = SPDKEnvComponent::new_default();
-    let block_dev: std::sync::Arc<dyn component_core::IUnknown> = match cli.driver {
-        Driver::V1 => BlockDeviceSpdkNvmeComponentV1::new_default(),
-        Driver::V2 => BlockDeviceSpdkNvmeComponentV2::new_default(),
-    };
+    let block_dev: std::sync::Arc<dyn component_core::IUnknown> =
+        BlockDeviceSpdkNvmeComponent::new_default();
 
     bind(&*spdk_env_comp, "ISPDKEnv", &*block_dev, "spdk_env").unwrap_or_else(|e| {
         eprintln!("error: failed to bind spdk_env: {e}");
@@ -92,13 +79,9 @@ fn main() {
         &devices[0]
     };
 
-    let driver_label = match cli.driver {
-        Driver::V1 => "v1",
-        Driver::V2 => "v2",
-    };
     println!(
-        "Device: {}  Driver: {}",
-        device.address, driver_label
+        "Device: {}  Driver: v2",
+        device.address
     );
 
     // --- Initialize block device ---

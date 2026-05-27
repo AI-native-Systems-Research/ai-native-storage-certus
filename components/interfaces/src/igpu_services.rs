@@ -207,6 +207,27 @@ impl std::fmt::Debug for GpuDmaBuffer {
     }
 }
 
+/// Opaque handle to a CUDA stream for async GPU operations.
+///
+/// Wraps a raw `cudaStream_t` pointer. Created via
+/// [`IGpuServices::create_stream`] and destroyed via
+/// [`IGpuServices::destroy_stream`].
+///
+/// # Examples
+///
+/// ```
+/// use interfaces::GpuStream;
+///
+/// let stream = GpuStream(std::ptr::null_mut());
+/// assert!(stream.0.is_null());
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct GpuStream(pub *mut std::ffi::c_void);
+
+// SAFETY: CUDA streams can be used from any thread.
+unsafe impl Send for GpuStream {}
+unsafe impl Sync for GpuStream {}
+
 define_interface! {
     pub IGpuServices {
         /// Initialize CUDA libraries and discover qualifying GPUs.
@@ -365,5 +386,256 @@ define_interface! {
         fn create_dma_buffer(
             &self, handle: GpuIpcHandle
         ) -> Result<GpuDmaBuffer, String>;
+
+        /// Copy data from GPU device memory to a DMA staging buffer.
+        ///
+        /// Performs a synchronous `cudaMemcpy` with `DeviceToHost` direction.
+        /// Copies exactly `size` bytes from the GPU source into `dst`.
+        ///
+        /// # Safety (caller contract)
+        ///
+        /// * `src` must be a valid GPU device pointer for at least `size` bytes.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if GPU support is not compiled in, the component
+        /// is not initialized, `size` exceeds the destination buffer length,
+        /// or the CUDA memcpy operation fails.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # use interfaces::{IGpuServices, DmaBuffer};
+        /// # fn example(gpu: &dyn IGpuServices, gpu_ptr: *const std::ffi::c_void, buf: &DmaBuffer) {
+        /// gpu.dma_copy_to_host(gpu_ptr, buf, 4096).unwrap();
+        /// # }
+        /// ```
+        #[cfg(feature = "spdk")]
+        fn dma_copy_to_host(
+            &self, src: *const std::ffi::c_void, dst: &crate::spdk_types::DmaBuffer, size: usize
+        ) -> Result<(), String>;
+
+        /// Copy data from a DMA staging buffer to GPU device memory.
+        ///
+        /// Performs a synchronous `cudaMemcpy` with `HostToDevice` direction.
+        /// Copies exactly `size` bytes from `src` into the GPU destination.
+        ///
+        /// # Safety (caller contract)
+        ///
+        /// * `dst` must be a valid GPU device pointer for at least `size` bytes.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if GPU support is not compiled in, the component
+        /// is not initialized, `size` exceeds the source buffer length,
+        /// or the CUDA memcpy operation fails.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # use interfaces::{IGpuServices, DmaBuffer};
+        /// # fn example(gpu: &dyn IGpuServices, buf: &DmaBuffer, gpu_ptr: *mut std::ffi::c_void) {
+        /// gpu.dma_copy_to_device(buf, gpu_ptr, 4096).unwrap();
+        /// # }
+        /// ```
+        #[cfg(feature = "spdk")]
+        fn dma_copy_to_device(
+            &self, src: &crate::spdk_types::DmaBuffer, dst: *mut std::ffi::c_void, size: usize
+        ) -> Result<(), String>;
+
+        /// Prepare GPU IPC memory for peer-to-peer SSD DMA in one call.
+        ///
+        /// Accepts a base64-encoded CUDA IPC handle payload (64-byte handle +
+        /// 8-byte LE size = 72 bytes), opens it with lazy peer access, checks
+        /// whether the memory is already pinned, conditionally pins it, and
+        /// returns an SPDK [`DmaBuffer`](crate::spdk_types::DmaBuffer) suitable
+        /// for direct NVMe peer-to-peer transfers.
+        ///
+        /// The returned buffer's drop behavior depends on the original pin state:
+        /// - If this function pinned the memory, drop unpins then closes the IPC handle.
+        /// - If the memory was already pinned, drop only closes the IPC handle.
+        ///
+        /// # Parameters
+        ///
+        /// * `base64_payload` — base64-encoded 72-byte IPC handle from PyTorch (via gRPC).
+        /// * `device_index` — optional CUDA device ordinal; if `Some`, sets the
+        ///   device context before opening the handle. If `None`, uses the current
+        ///   CUDA device.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if not initialized, the payload is invalid, the IPC
+        /// handle cannot be opened, pinning fails, or buffer creation fails. No
+        /// GPU resources are leaked on error.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # use interfaces::IGpuServices;
+        /// # fn example(gpu: &dyn IGpuServices, payload: &str) {
+        /// gpu.initialize().unwrap();
+        /// let dma_buf = gpu.prepare_memory_for_spdk(payload, None).unwrap();
+        /// assert!(dma_buf.len() > 0);
+        /// # }
+        /// ```
+        #[cfg(feature = "spdk")]
+        fn prepare_memory_for_spdk(
+            &self, base64_payload: &str, device_index: Option<u32>
+        ) -> Result<crate::spdk_types::DmaBuffer, String>;
+
+        /// Create a CUDA stream for async GPU operations.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if GPU support is not compiled in, the component
+        /// is not initialized, or CUDA stream creation fails.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # use interfaces::IGpuServices;
+        /// # fn example(gpu: &dyn IGpuServices) {
+        /// let stream = gpu.create_stream().unwrap();
+        /// gpu.destroy_stream(stream).unwrap();
+        /// # }
+        /// ```
+        fn create_stream(&self) -> Result<GpuStream, String>;
+
+        /// Destroy a CUDA stream previously created with [`create_stream`].
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the stream handle is invalid or destruction fails.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # use interfaces::IGpuServices;
+        /// # fn example(gpu: &dyn IGpuServices) {
+        /// let stream = gpu.create_stream().unwrap();
+        /// gpu.destroy_stream(stream).unwrap();
+        /// # }
+        /// ```
+        fn destroy_stream(&self, stream: GpuStream) -> Result<(), String>;
+
+        /// Synchronize a CUDA stream, blocking until all operations complete.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if synchronization fails or the stream is invalid.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # use interfaces::IGpuServices;
+        /// # fn example(gpu: &dyn IGpuServices) {
+        /// let stream = gpu.create_stream().unwrap();
+        /// gpu.stream_synchronize(stream).unwrap();
+        /// gpu.destroy_stream(stream).unwrap();
+        /// # }
+        /// ```
+        fn stream_synchronize(&self, stream: GpuStream) -> Result<(), String>;
+
+        /// Asynchronously copy data from a DMA buffer to GPU device memory.
+        ///
+        /// Issues a `cudaMemcpyAsync` on the given stream. The copy runs
+        /// on the GPU DMA engine concurrently with CPU/NVMe work. Call
+        /// [`stream_synchronize`] to wait for completion.
+        ///
+        /// # Safety (caller contract)
+        ///
+        /// * `dst` must be a valid GPU device pointer for at least `size` bytes.
+        /// * The source buffer must remain valid until the stream is synchronized.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if GPU support is not compiled in, the component
+        /// is not initialized, `size` exceeds the source buffer length,
+        /// or the CUDA async memcpy operation fails.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # use interfaces::{IGpuServices, DmaBuffer, GpuStream};
+        /// # fn example(gpu: &dyn IGpuServices, buf: &DmaBuffer, gpu_ptr: *mut std::ffi::c_void) {
+        /// let stream = gpu.create_stream().unwrap();
+        /// gpu.dma_copy_to_device_async(buf, gpu_ptr, 4096, stream).unwrap();
+        /// gpu.stream_synchronize(stream).unwrap();
+        /// gpu.destroy_stream(stream).unwrap();
+        /// # }
+        /// ```
+        #[cfg(feature = "spdk")]
+        fn dma_copy_to_device_async(
+            &self, src: &crate::spdk_types::DmaBuffer, dst: *mut std::ffi::c_void,
+            size: usize, stream: GpuStream
+        ) -> Result<(), String>;
+
+        /// Asynchronously copy from a raw host pointer to GPU device memory.
+        ///
+        /// Like [`dma_copy_to_device_async`] but takes a raw `src` pointer,
+        /// avoiding the need to wrap pre-existing pinned memory in a `DmaBuffer`.
+        ///
+        /// # Safety (caller contract)
+        ///
+        /// * `src` must be a valid, CUDA-pinned host pointer for at least `size` bytes.
+        /// * `dst` must be a valid GPU device pointer for at least `size` bytes.
+        /// * Both pointers must remain valid until the stream is synchronized.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if GPU support is not compiled in, the component
+        /// is not initialized, or the CUDA async memcpy operation fails.
+        #[cfg(feature = "spdk")]
+        fn memcpy_h2d_async(
+            &self, src: *const std::ffi::c_void, dst: *mut std::ffi::c_void,
+            size: usize, stream: GpuStream
+        ) -> Result<(), String>;
+
+        /// Allocate a CUDA-pinned host buffer registered with SPDK for DMA.
+        ///
+        /// The returned buffer is:
+        /// - Page-locked via `cudaHostAlloc` (enables truly async H2D copies)
+        /// - Registered with SPDK (`spdk_mem_register`) so NVMe can DMA into it
+        ///
+        /// This is the correct allocation for pipeline ring buffers that need
+        /// to receive NVMe reads AND be source for async GPU copies.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if GPU support is not compiled, CUDA host allocation
+        /// fails, or SPDK memory registration fails.
+        #[cfg(feature = "spdk")]
+        fn allocate_pinned_dma_buffer(&self, size: usize) -> Result<crate::spdk_types::DmaBuffer, String>;
+
+        /// Register existing host memory as CUDA-pinned and SPDK DMA-capable.
+        ///
+        /// Calls `cudaHostRegister` to page-lock the memory (enabling async
+        /// GPU DMA) then `spdk_mem_register` so NVMe controllers can DMA
+        /// directly to/from it.
+        ///
+        /// Use this to make a pre-allocated pool (e.g., memory-tier mmap)
+        /// usable for zero-copy NVMe and GPU transfers without reallocating.
+        ///
+        /// # Safety (caller contract)
+        ///
+        /// * `ptr` must be page-aligned and valid for `size` bytes.
+        /// * The memory must remain allocated until `unregister_host_memory`.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if CUDA host registration or SPDK registration fails.
+        #[cfg(feature = "spdk")]
+        fn register_host_memory(&self, ptr: *mut std::ffi::c_void, size: usize) -> Result<(), String>;
+
+        /// Unregister host memory previously registered with `register_host_memory`.
+        ///
+        /// Calls `spdk_mem_unregister` then `cudaHostUnregister`. Must be
+        /// called before freeing the underlying allocation.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if unregistration fails.
+        #[cfg(feature = "spdk")]
+        fn unregister_host_memory(&self, ptr: *mut std::ffi::c_void, size: usize) -> Result<(), String>;
     }
 }

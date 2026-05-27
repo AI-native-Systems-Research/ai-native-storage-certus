@@ -1,0 +1,61 @@
+{
+  "generated": "2026-05-05T00:00:00Z",
+  "project": "SPDK Env",
+  "summary": {
+    "specs_analyzed": 2,
+    "requirements_checked": 15,
+    "aligned": 11,
+    "drifted": 2,
+    "not_implemented": 2,
+    "unspecced_features": 0
+  },
+  "specs": [
+    {
+      "id": "001-spdk-vfio-env",
+      "title": "SPDK VFIO Env (template)",
+      "aligned": [],
+      "drifted": [],
+      "not_implemented": []
+    },
+    {
+      "id": "002-spdk-env-vfio-init",
+      "title": "SPDK/DPDK Environment Component with VFIO Device Iteration",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006",
+        "FR-008", "FR-009", "FR-011", "FR-012", "FR-013", "FR-014", "FR-015"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-007",
+          "spec_text": "MUST use framework's logging actor via receptacle; init() MUST fail if logger not connected",
+          "actual": "Uses eprintln! with no logger receptacle defined in component",
+          "location": "src/lib.rs",
+          "severity": "high"
+        },
+        {
+          "requirement": "FR-010",
+          "spec_text": "Test example must wire logger before calling init()",
+          "actual": "Example exists but cannot wire logger because receptacle doesn't exist",
+          "location": "examples/spdk-env-example.rs",
+          "severity": "low"
+        }
+      ],
+      "not_implemented": [
+        {
+          "requirement": "FR-007",
+          "spec_text": "Logger receptacle definition",
+          "actual": "No receptacles block in define_component!",
+          "severity": "high"
+        },
+        {
+          "requirement": "FR-010",
+          "spec_text": "Logger wiring in example",
+          "actual": "Blocked by missing logger receptacle",
+          "severity": "low"
+        }
+      ]
+    }
+  ],
+  "unspecced": [],
+  "conflicts": []
+}

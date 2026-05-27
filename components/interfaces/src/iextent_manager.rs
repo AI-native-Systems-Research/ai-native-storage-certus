@@ -18,10 +18,9 @@ pub struct Extent {
 #[derive(Debug, Clone)]
 pub enum ExtentManagerError {
     CorruptMetadata(String),
-    DuplicateKey(ExtentKey),
     IoError(String),
-    KeyNotFound(ExtentKey),
     NotInitialized(String),
+    OffsetNotFound(u64),
     OutOfSpace,
 }
 
@@ -29,10 +28,9 @@ impl fmt::Display for ExtentManagerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::CorruptMetadata(msg) => write!(f, "corrupt metadata: {msg}"),
-            Self::DuplicateKey(k) => write!(f, "duplicate key: {k}"),
             Self::IoError(msg) => write!(f, "I/O error: {msg}"),
-            Self::KeyNotFound(k) => write!(f, "key not found: {k}"),
             Self::NotInitialized(msg) => write!(f, "not initialized: {msg}"),
+            Self::OffsetNotFound(off) => write!(f, "no extent at offset: {off}"),
             Self::OutOfSpace => write!(f, "out of space"),
         }
     }
@@ -61,6 +59,11 @@ pub struct FormatParams {
     pub instance_id: Option<u64>,
     /// NVMe namespace identifier for the metadata disk.
     pub metadata_disk_ns_id: u32,
+    /// Maximum bytes reserved for metadata (superblock + checkpoints) on the
+    /// device. Caps the checkpoint region calculation so that metadata and data
+    /// can coexist on the same SSD without the checkpoint area consuming the
+    /// entire device. Default: 128 MiB.
+    pub metadata_region_size: u64,
 }
 
 impl FormatParams {
@@ -84,6 +87,7 @@ impl Default for FormatParams {
             metadata_alignment: 128 * 1024, // 128 KiB
             instance_id: None,
             metadata_disk_ns_id: 1,
+            metadata_region_size: 128 * 1024 * 1024, // 128 MiB
         }
     }
 }
@@ -175,16 +179,28 @@ define_interface! {
             size: u32,
         ) -> Result<WriteHandle, ExtentManagerError>;
 
-        fn lookup_extent(&self, key: ExtentKey) -> Result<Extent, ExtentManagerError>;
-
         fn get_extents(&self) -> Vec<Extent>;
 
         fn for_each_extent(&self, cb: &mut dyn FnMut(&Extent));
 
-        fn remove_extent(&self, key: ExtentKey) -> Result<(), ExtentManagerError>;
+        fn remove_extent(&self, offset: u64) -> Result<(), ExtentManagerError>;
 
         fn checkpoint(&self) -> Result<(), ExtentManagerError>;
 
         fn get_instance_id(&self) -> Result<u64, ExtentManagerError>;
+
+        /// Set the automatic checkpoint interval.
+        ///
+        /// `Some(duration)` enables the background checkpoint thread to fire
+        /// every `duration`. `None` disables automatic checkpoints entirely;
+        /// callers must then invoke `checkpoint()` manually. The default is
+        /// five minutes.
+        fn set_checkpoint_interval(&self, interval: Option<std::time::Duration>);
+
+        /// Return the number of bytes currently allocated across all regions.
+        fn used_bytes(&self) -> u64;
+
+        /// Return the total usable capacity in bytes across all regions.
+        fn capacity_bytes(&self) -> u64;
     }
 }

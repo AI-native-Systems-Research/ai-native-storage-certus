@@ -1,5 +1,5 @@
 use component_core::query_interface;
-use gpu_services::GpuServicesComponentV0;
+use gpu_services::GpuServicesComponent;
 use interfaces::IGpuServices;
 
 fn architecture_name(major: u32, minor: u32) -> &'static str {
@@ -27,7 +27,7 @@ fn format_memory(bytes: u64) -> String {
 }
 
 fn main() {
-    let component = GpuServicesComponentV0::new();
+    let component = GpuServicesComponent::new_default();
     let gpu = query_interface!(component, IGpuServices).expect("IGpuServices not available");
 
     if let Err(e) = gpu.initialize() {

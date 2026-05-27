@@ -8,7 +8,6 @@ use crate::config::BenchConfig;
 /// Print the configuration summary to stdout.
 pub fn print_config(config: &BenchConfig, device_contexts: &[DeviceContext]) {
     println!("=== IOPS Benchmark (Multi-Device) ===");
-    println!("Driver:       {}", config.driver);
     println!("Devices:      {}", device_contexts.len());
     for (i, ctx) in device_contexts.iter().enumerate() {
         println!(

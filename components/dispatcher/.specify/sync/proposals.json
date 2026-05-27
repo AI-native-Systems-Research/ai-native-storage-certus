@@ -1,0 +1,66 @@
+{
+  "generated": "2026-05-21",
+  "spec": "components/dispatcher/specs/001-dispatcher-cache-interface/spec.md",
+  "proposals": [
+    {
+      "id": "BACKFILL-001",
+      "type": "backfill",
+      "status": "approved-and-applied",
+      "drift_ref": "drift-2",
+      "requirement": "FR-026",
+      "title": "Remove BlockDeviceVersion selection requirement",
+      "rationale": "The implementation hardcodes a single block device component. There is no version multiplexing in the codebase — only one version exists. The config field was removed intentionally.",
+      "action": "Mark FR-026 as REMOVED/superseded in spec.md",
+      "files_modified": [
+        "components/dispatcher/specs/001-dispatcher-cache-interface/spec.md",
+        "components/dispatcher/specs/001-dispatcher-cache-interface/contracts/idispatcher.md"
+      ]
+    },
+    {
+      "id": "BACKFILL-002",
+      "type": "backfill",
+      "status": "approved-and-applied",
+      "drift_ref": "drift-3",
+      "requirement": "FR-027",
+      "title": "Remove ExtentManagerVersion selection requirement",
+      "rationale": "The implementation hardcodes a single extent manager. There is no version multiplexing — only one version exists. The config field was removed intentionally.",
+      "action": "Mark FR-027 as REMOVED/superseded in spec.md",
+      "files_modified": [
+        "components/dispatcher/specs/001-dispatcher-cache-interface/spec.md",
+        "components/dispatcher/specs/001-dispatcher-cache-interface/contracts/idispatcher.md"
+      ]
+    },
+    {
+      "id": "BACKFILL-003",
+      "type": "backfill",
+      "status": "approved-and-applied",
+      "drift_ref": null,
+      "requirement": null,
+      "title": "Rename DispatcherComponentV0 to DispatcherComponent",
+      "rationale": "The component type was renamed to DispatcherComponent in code. The V0 suffix was vestigial and misleading since v1 is the current implementation.",
+      "action": "Replace all references to DispatcherComponentV0 with DispatcherComponent in spec companion files",
+      "files_modified": [
+        "components/dispatcher/specs/001-dispatcher-cache-interface/quickstart.md",
+        "components/dispatcher/specs/001-dispatcher-cache-interface/contracts/idispatcher.md",
+        "components/dispatcher/design/DESIGN.md",
+        "components/dispatcher/CLAUDE.md"
+      ]
+    }
+  ],
+  "deferred": [
+    {
+      "id": "DEFER-001",
+      "drift_ref": "drift-1",
+      "requirement": "FR-001",
+      "title": "lookup_async not in spec",
+      "reason": "Requires human decision: add lookup_async to FR-001 method list, or create a new FR-036."
+    },
+    {
+      "id": "DEFER-002",
+      "drift_ref": "drift-4",
+      "requirement": "User Story 5, Scenario 4",
+      "title": "initialize() rejects empty data_pci_addrs before checking spdk_env",
+      "reason": "Requires human decision: either move the check inside the spdk_env block, or update the spec to match current behavior."
+    }
+  ]
+}
