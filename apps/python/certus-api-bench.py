@@ -27,7 +27,29 @@ import dispatcher_pb2_grpc
 
 assert torch.cuda.is_available(), "CUDA GPU required"
 
-BLOCK_SIZE = 4 * 1024 * 1024  # 4 MiB
+BLOCK_SIZE = 4 * 1024 * 1024  # 4 MiB (default, overridden by --block-size)
+
+
+def parse_size(s):
+    """Parse a human-readable size string (e.g. '128K', '4M', '2G') into bytes."""
+    s = s.strip()
+    if not s:
+        raise argparse.ArgumentTypeError("empty size string")
+    suffix = s[-1].upper()
+    multipliers = {"K": 1024, "M": 1024 * 1024, "G": 1024 * 1024 * 1024}
+    if suffix in multipliers:
+        num_str = s[:-1]
+        multiplier = multipliers[suffix]
+    else:
+        num_str = s
+        multiplier = 1
+    try:
+        value = int(num_str)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid size number: '{num_str}'")
+    if value <= 0:
+        raise argparse.ArgumentTypeError(f"size must be positive, got '{s}'")
+    return value * multiplier
 
 _libcudart = ctypes.CDLL("libcudart.so")
 _libcudart.cudaIpcGetMemHandle.restype = ctypes.c_int
@@ -594,7 +616,7 @@ def print_stats(label, all_latencies, num_clients, wall_aggregate_gbps=None):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Certus multi-client throughput/latency benchmark (4 MiB blocks)"
+        description="Certus multi-client throughput/latency benchmark"
     )
     parser.add_argument(
         "--server",
@@ -620,6 +642,12 @@ def main():
         help="Lookup iterations per phase (default: 10)",
     )
     parser.add_argument(
+        "--block-size",
+        type=parse_size,
+        default=None,
+        help="Block size (e.g. 4M, 128K, 1G). Defaults to 4M.",
+    )
+    parser.add_argument(
         "--verify-integrity",
         action="store_true",
         help="Run data integrity check (populate with known patterns, verify hot and cold reads)",
@@ -631,6 +659,10 @@ def main():
         help="Number of objects to verify in integrity check (default: 16)",
     )
     args = parser.parse_args()
+
+    global BLOCK_SIZE
+    if args.block_size is not None:
+        BLOCK_SIZE = args.block_size
 
     num_clients = args.clients
     num_objects = args.num_objects

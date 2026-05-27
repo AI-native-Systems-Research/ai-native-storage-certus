@@ -32,6 +32,10 @@ struct Cli {
     #[arg(long = "listen", default_value = "0.0.0.0:50051")]
     listen: String,
 
+    /// Memory-tier pool size (e.g. 256M, 1G, 512K). Defaults to 256M.
+    #[arg(long = "memory-tier-size", value_parser = parse_size)]
+    memory_tier_size: Option<usize>,
+
     /// Path to TLS certificate file (enables TLS when provided with --tls-key)
     #[arg(long = "tls-cert")]
     tls_cert: Option<String>,
@@ -39,6 +43,24 @@ struct Cli {
     /// Path to TLS private key file (enables TLS when provided with --tls-cert)
     #[arg(long = "tls-key")]
     tls_key: Option<String>,
+}
+
+fn parse_size(s: &str) -> Result<usize, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("empty size string".into());
+    }
+    let (num_str, multiplier) = match s.as_bytes().last() {
+        Some(b'K' | b'k') => (&s[..s.len() - 1], 1024usize),
+        Some(b'M' | b'm') => (&s[..s.len() - 1], 1024 * 1024),
+        Some(b'G' | b'g') => (&s[..s.len() - 1], 1024 * 1024 * 1024),
+        _ => (s, 1usize),
+    };
+    let num: usize = num_str
+        .parse()
+        .map_err(|_| format!("invalid size number: '{num_str}'"))?;
+    num.checked_mul(multiplier)
+        .ok_or_else(|| format!("size overflow: '{s}'"))
 }
 
 fn validate_pci_address(addr: &str) -> Result<(), String> {
@@ -68,6 +90,7 @@ fn parse_pci_address(addr: &str) -> Result<PciAddress, String> {
 
 fn initialize_component_stack(
     device_pci_addrs: &[String],
+    memory_tier_size: usize,
 ) -> Result<Arc<dyn IDispatcher + Send + Sync>, String> {
     eprintln!("certus-server: initializing SPDK environment...");
     let spdk_comp = spdk_env::SPDKEnvComponent::new_default();
@@ -115,7 +138,7 @@ fn initialize_component_stack(
         .map_err(|e| format!("memory-tier logger bind: {e}"))?;
     let mt: Arc<dyn IMemoryTier + Send + Sync> =
         query_interface!(mt_comp, IMemoryTier).ok_or("failed to query IMemoryTier")?;
-    mt.initialize(memory_tier::DEFAULT_POOL_SIZE)
+    mt.initialize(memory_tier_size)
         .map_err(|e| format!("MemoryTier init failed: {e}"))?;
 
     // Register the memory-tier pool with CUDA for pinned DMA transfers.
@@ -190,7 +213,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("certus-server: devices={:?}", cli.device_pci);
 
     // Initialize Certus component stack
-    let dispatcher = initialize_component_stack(&cli.device_pci)?;
+    let pool_size = cli.memory_tier_size.unwrap_or(memory_tier::DEFAULT_POOL_SIZE);
+    eprintln!("certus-server: memory-tier-size={} MiB", pool_size / (1024 * 1024));
+    let dispatcher = initialize_component_stack(&cli.device_pci, pool_size)?;
     let dispatcher_mutex = Arc::new(Mutex::new(dispatcher));
 
     let svc = DispatcherService::new(Arc::clone(&dispatcher_mutex));
