@@ -358,6 +358,7 @@ def run_client(
     iterations,
     base_key,
     num_clients,
+    batch_size,
     barrier,
     result,
 ):
@@ -412,7 +413,6 @@ def run_client(
     total_objects = pool_capacity + cold_objects
 
     # --- Phase 1: Populate ---
-    batch_size = 10
     barrier.wait()  # synchronize start across all clients
 
     t_pop_start = time.perf_counter()
@@ -654,6 +654,12 @@ def main():
         help="Block size (e.g. 4M, 128K, 1G). Defaults to 4M.",
     )
     parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=10,
+        help="Number of requests per batch/RPC call per client (default: 10)",
+    )
+    parser.add_argument(
         "--verify-integrity",
         action="store_true",
         help="Run data integrity check (populate with known patterns, verify hot and cold reads)",
@@ -673,6 +679,7 @@ def main():
     num_clients = args.clients
     num_objects = args.num_objects
     iterations = args.iterations
+    batch_size = args.batch_size
 
     pool_capacity = (256 * 1024 * 1024) // BLOCK_SIZE
     cold_per_client = num_objects * iterations
@@ -684,6 +691,7 @@ def main():
     print(f"  Server:            {args.server}")
     print(f"  Clients:           {num_clients}")
     print(f"  Block size:        {BLOCK_SIZE // (1024*1024)} MiB")
+    print(f"  Batch size:        {batch_size}")
     print(f"  Objects/batch:     {num_objects}")
     print(f"  Iterations:        {iterations}")
     print(f"  Pool capacity:     {pool_capacity} objects (256 MiB)")
@@ -715,6 +723,7 @@ def main():
                 iterations,
                 base_keys[i],
                 num_clients,
+                batch_size,
                 barrier,
                 results[i],
             ),
