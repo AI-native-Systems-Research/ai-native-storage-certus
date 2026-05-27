@@ -1,0 +1,87 @@
+# SkyDiscover AdaEvolve config for H3: Multi-client concurrent throughput
+# Usage: skydiscover-run initial_program_h3.rs evaluator/ -c config-concurrent.yaml
+#
+# Uses concatenated single-file approach: initial_program_h3.rs contains sections
+# from service.rs, lib.rs, and pipeline.rs with "// === FILE: <name>.rs ..." markers.
+# The evaluator detects these markers and patches each section into the correct file.
+language: rust
+max_iterations: 50
+checkpoint_interval: 5
+
+llm:
+  api_base: "https://ete-litellm.ai-models.vpc-int.res.ibm.com"
+  models:
+    - name: "aws/claude-opus-4-6"
+      weight: 1.0
+  max_tokens: 16384
+  timeout: 300
+
+prompt:
+  system_message: |-
+    You are optimizing a Rust storage dispatcher for maximum MULTI-CLIENT concurrent throughput.
+
+    CONTEXT (H3 — Architectural Contention):
+    - Target: certus storage system's dispatcher component (service.rs + lib.rs + pipeline.rs)
+    - Hardware: 6x NVMe Gen4 SSDs, NVIDIA A30 GPU, PCIe Gen4 x16
+    - Evaluation: 8 concurrent clients, 4 MiB objects, cold lookups
+    - Current: ~5 GB/s aggregate (same as single-client — bottlenecked on Mutex)
+    - Target: 15-20 GB/s aggregate (utilize all 6 NVMe drives in parallel)
+
+    THIS FILE CONTAINS THREE SECTIONS delimited by markers:
+      // === FILE: service.rs (lines ...) ===
+      // === FILE: lib.rs (lines ...) ===
+      // === FILE: pipeline.rs (full file) ===
+
+    You MUST preserve these section delimiters in your output. The evaluator parses
+    them to patch each section into the correct source file.
+
+    SERIALIZATION BOTTLENECKS (outermost to innermost):
+    1. service.rs: Arc<Mutex<Arc<dyn IDispatcher>>> — ALL gRPC requests serialize here
+       -> Fix: Remove Mutex (IDispatcher methods take &self, are internally thread-safe)
+       -> Or: Use RwLock (lookup is read-only from the service's perspective)
+    2. lib.rs promote_and_serve: self.data_drives.lock() + self.pipeline_ring.lock()
+       -> Fix: Per-drive pipeline rings (shard by drive_index, no cross-drive contention)
+       -> Fix: RwLock for data_drives (read-only after init)
+    3. lib.rs lookup_async: warm_stream is single shared AtomicU64
+       -> Fix: Per-client or pooled CUDA streams
+    4. pipeline.rs: ZERO_COPY_DEPTH is set to 32 (optimal for single-client).
+       With 8 concurrent clients sharing drives, per-client QD may need adjustment.
+       NOTE: QD=32 is already proven optimal for single-client. The multi-client
+       question is whether 8×QD=32 causes NVMe queue contention or not.
+
+    MULTI-CLIENT ANALYSIS:
+    With 8 clients doing cold lookups simultaneously:
+    - Client 1 holds service Mutex, enters promote_and_serve
+    - promote_and_serve holds pipeline_ring Mutex for ~0.8ms (4 MiB at 5 GB/s)
+    - Clients 2-8 BLOCK on service Mutex for the entire duration
+    - Effective throughput = single-client throughput (fully serialized)
+
+    EVOLUTION STRATEGY (ordered by expected impact):
+    1. Remove or relax service.rs Mutex (biggest win: enables 8x parallelism)
+    2. Per-drive pipeline rings in lib.rs (allows N drives to pipeline in parallel)
+    3. Higher ZERO_COPY_DEPTH in pipeline.rs (improves individual transfer speed)
+    4. Per-client CUDA streams (reduces warm-path contention)
+
+    CONSTRAINTS:
+    - Must compile: cargo build -p certus-server --release
+    - Must maintain function signatures (called across module boundaries)
+    - Must preserve correctness: no data races, SPDK/CUDA lifetime guarantees
+    - IDispatcher trait methods take &self — they ARE safe to call concurrently
+    - define_component! macro only supports Mutex<T> — use Arc<RwLock<T>> inside if needed
+
+    SCORING: Higher AGGREGATE throughput (GB/s) with 8 concurrent clients = better.
+    The evaluator starts the server with 6 NVMe drives and benchmarks with --clients 8.
+
+    HINTS:
+    - The simplest high-impact change: remove Mutex in service.rs (just use Arc directly)
+    - Keys are already sharded by drive_index = key % num_drives
+    - Reads to different drives are independent — they should NEVER contend
+    - Pipeline ring has 2 CUDA streams — multi-client needs more streams total
+    - Consider: what if each drive had its own PipelineRing + ClientChannels?
+    - EVOLVE-BLOCK markers in lib.rs sections guide which code to change
+
+evaluator:
+  timeout: 120
+
+monitor:
+  enabled: false

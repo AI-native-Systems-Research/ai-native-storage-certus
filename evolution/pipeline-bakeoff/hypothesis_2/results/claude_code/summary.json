@@ -1,0 +1,13 @@
+{
+  "framework": "claude_code",
+  "iterations_completed": 0,
+  "iterations_requested": 10,
+  "wall_time_seconds": 1.2,
+  "best_score": 0.0,
+  "mean_score": 0.0,
+  "scores": [],
+  "returncode": 1,
+  "eval_mode": "concurrent",
+  "timestamp": "2026-05-25_23-02-30",
+  "log_file": "/home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/claude_code/run-2026-05-25_23-02-29.log"
+}

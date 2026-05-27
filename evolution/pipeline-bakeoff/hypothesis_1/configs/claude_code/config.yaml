@@ -1,0 +1,67 @@
+# SkyDiscover AdaEvolve claude_code mode — multi-file capable
+# Usage: skydiscover-run initial_program.rs evaluator/ -c config-claude_code.yaml --tool claude_code
+language: rust
+max_iterations: 50
+checkpoint_interval: 5
+
+tool: claude_code
+
+llm:
+  api_base: "https://ete-litellm.ai-models.vpc-int.res.ibm.com"
+  models:
+    - name: "aws/claude-opus-4-6"
+      weight: 1.0
+  max_tokens: 32768
+  timeout: 600
+
+prompt:
+  system_message: |-
+    You are optimizing a Rust SSD→GPU transfer pipeline for maximum cold lookup throughput.
+    You have access to the FULL workspace — you can modify multiple files.
+
+    CONTEXT:
+    - Target: certus storage system's transfer pipeline
+    - Hardware: 7× NVMe Gen4 SSDs, NVIDIA A30 GPU, PCIe Gen4 x16
+    - Each NVMe command transfers 128 KiB (MDTS limit), objects are 1-16 MiB (8-128 chunks)
+    - Current throughput: ~4.9 GB/s at 1 client. Raw NVMe ceiling at QD=32: 5.28 GB/s
+    - P2P direct (NVMe→GPU BAR1): 3.4 GB/s — pipeline must BEAT this
+    - 8-client regression: 7.8 GB/s → 5.8 GB/s (caused by global Mutex in lib.rs)
+
+    FILES YOU CAN MODIFY:
+    - components/dispatcher/src/pipeline.rs — pipeline implementation (primary target)
+    - components/dispatcher/src/lib.rs — promote_and_serve() call site, PipelineRing Mutex
+    - components/dispatcher/Cargo.toml — enable features (e.g., p2p)
+    - components/gpu-services/src/lib.rs — GPU service interface
+    - components/gpu-services/src/dma.rs — P2P DMA implementation
+
+    MULTI-FILE OPPORTUNITIES:
+    - Per-drive pipeline state (eliminate global Mutex in lib.rs)
+    - Variable stream count (change PipelineRing struct + construction)
+    - Pass transfer size context from lib.rs to pipeline for adaptive logic
+    - Wire P2P path as alternative (already implemented in dma.rs)
+
+    KEY TUNABLES (pipeline.rs):
+    - ZERO_COPY_DEPTH (current: 16) — NVMe queue depth
+    - SYNC_FREQUENCY (current: 16) — CUDA stream sync cadence
+    - Number of streams (current: 2)
+    - Completion processing strategy
+
+    CONSTRAINTS:
+    - Must compile: cargo build -p certus-server --release
+    - Must maintain public function signatures
+    - Safety: no data races, maintain SPDK/CUDA lifetime guarantees
+
+    SCORING: Higher throughput (GB/s) on cold lookup = better score.
+
+    OUTPUT: Place modified files in a directory. The evaluator accepts:
+    - pipeline.rs → components/dispatcher/src/pipeline.rs
+    - lib.rs → components/dispatcher/src/lib.rs
+    - Cargo.toml → components/dispatcher/Cargo.toml
+    - gpu_services_lib.rs → components/gpu-services/src/lib.rs
+    - dma.rs → components/gpu-services/src/dma.rs
+
+evaluator:
+  timeout: 120
+
+monitor:
+  enabled: false

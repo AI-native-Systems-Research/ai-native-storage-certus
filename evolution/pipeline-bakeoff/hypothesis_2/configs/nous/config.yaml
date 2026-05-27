@@ -1,0 +1,72 @@
+# Nous campaign for H1: Controlled comparison of pipeline architectures
+#
+# Research question: "There exists an optimal pipelining configuration that
+# significantly outperforms current dispatcher and matches or exceeds P2P"
+#
+# Nous gets FULL REPO ACCESS — it uses Claude to implement changes, build,
+# and run benchmarks directly. No external evaluator script needed.
+
+research_question: >
+  There exists an optimal pipelining configuration that significantly
+  outperforms the current dispatcher and matches or exceeds P2P direct
+  (NVMe→GPU BAR1 via GDRCopy). Specifically: can we find pipeline constants
+  and/or structural changes to pipelined_ssd_to_gpu_zero_copy() that achieve
+  higher throughput than both (a) the current defaults (ZERO_COPY_DEPTH=16,
+  SYNC_FREQUENCY=16, 2 streams) and (b) the P2P direct path?
+
+run_id: h1-pipeline-bakeoff
+
+max_iterations: 3
+
+target_system:
+  name: "Certus Storage Engine — Pipeline vs P2P Bakeoff"
+  description: >
+    AI-native KV-cache storage system for LLM inference.
+    The cold lookup path reads from NVMe SSD → DRAM (memory-tier) → GPU.
+    Primary implementation: pipelined_ssd_to_gpu_zero_copy() in
+    components/dispatcher/src/pipeline.rs — uses ZERO_COPY_DEPTH=16 concurrent
+    NVMe reads, 2 CUDA streams, sync every 16 completions.
+    P2P implementation exists in components/gpu-services/src/dma.rs
+    (create_spdk_dma_buffer_from_gpu_bar) but is NOT wired into the main
+    dispatcher's promote_and_serve(). P2P tested standalone at 3.4 GB/s.
+    Current pipeline: 3.59 GB/s (single drive, 4 MiB objects).
+    Raw NVMe ceiling at QD=32: 5.28 GB/s.
+
+    BENCHMARKING:
+    - Start server: ./target/release/certus-server --metadata-pci 0000:61:00.0 --data-pci 0000:62:00.0
+    - Run benchmark: python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10
+    - Parse cold lookup: look for "Lookup (cold)" then "per-client=X.XX GB/s"
+    - ALWAYS kill and restart server after code changes (pkill certus-server, rebuild, relaunch)
+    - Server takes ~3s to initialize. Wait for gRPC port 50051 to be open.
+
+    KEY FILES:
+    - components/dispatcher/src/pipeline.rs — primary evolution target (~280 LOC zero-copy fn)
+    - components/dispatcher/src/lib.rs — promote_and_serve() call site, PipelineRing Mutex
+    - components/gpu-services/src/dma.rs — P2P DMA implementation (700+ LOC, feature="p2p")
+    - components/gpu-services/src/bin/p2p_server.rs — standalone P2P server (reference)
+    - apps/python/certus-api-bench.py — primary benchmark
+
+    HYPOTHESIS ARMS:
+    Arm A: Optimize pipeline constants + structure (higher QD, better sync, more streams)
+    Arm B: Wire P2P direct into promote_and_serve (NVMe → GPU BAR1, bypass DRAM)
+    Arm C: Control-negative (single sync read + single DMA, no pipelining)
+    Measure each arm at 1 and 4 clients.
+
+  observable_metrics:
+    - "cold lookup throughput (GB/s) at 1 client, single drive"
+    - "cold lookup throughput (GB/s) at 4 clients, single drive"
+    - "cold lookup latency p50 (µs)"
+  controllable_knobs:
+    - "ZERO_COPY_DEPTH (1-64)"
+    - "SYNC_FREQUENCY (4-128 or sync-at-end)"
+    - "number of CUDA streams (1-4)"
+    - "transfer architecture (pipeline vs P2P vs no-pipeline)"
+  repo_path: /home/nara/certus/ai-native-storage-certus
+
+models:
+  design: "aws/claude-opus-4-6"
+  execute_analyze: "aws/claude-opus-4-6"
+
+prompts:
+  methodology_layer: "prompts/methodology"
+  domain_adapter_layer: null

@@ -27,7 +27,8 @@ import dispatcher_pb2_grpc
 
 assert torch.cuda.is_available(), "CUDA GPU required"
 
-BLOCK_SIZE = 4 * 1024 * 1024  # 4 MiB
+DEFAULT_BLOCK_SIZE = 4 * 1024 * 1024  # 4 MiB
+BLOCK_SIZE = DEFAULT_BLOCK_SIZE  # overridden by --block-size CLI arg
 
 _libcudart = ctypes.CDLL("libcudart.so")
 _libcudart.cudaIpcGetMemHandle.restype = ctypes.c_int
@@ -242,7 +243,7 @@ def print_stats(label, all_latencies, num_clients):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Certus multi-client throughput/latency benchmark (4 MiB blocks)"
+        description="Certus multi-client throughput/latency benchmark"
     )
     parser.add_argument(
         "--server",
@@ -267,7 +268,16 @@ def main():
         default=10,
         help="Lookup iterations per phase (default: 10)",
     )
+    parser.add_argument(
+        "--block-size",
+        type=int,
+        default=DEFAULT_BLOCK_SIZE,
+        help="Cache block size in bytes (default: 4194304 = 4 MiB)",
+    )
     args = parser.parse_args()
+
+    global BLOCK_SIZE
+    BLOCK_SIZE = args.block_size
 
     num_clients = args.clients
     num_objects = args.num_objects
@@ -282,7 +292,8 @@ def main():
     print(f"{'='*70}")
     print(f"  Server:            {args.server}")
     print(f"  Clients:           {num_clients}")
-    print(f"  Block size:        {BLOCK_SIZE // (1024*1024)} MiB")
+    block_label = f"{BLOCK_SIZE/(1024*1024):.3g} MiB" if BLOCK_SIZE >= 1024*1024 else f"{BLOCK_SIZE//1024} KiB"
+    print(f"  Block size:        {block_label}")
     print(f"  Objects/batch:     {num_objects}")
     print(f"  Iterations:        {iterations}")
     print(f"  Pool capacity:     {pool_capacity} objects (256 MiB)")
@@ -348,7 +359,8 @@ def main():
         all_cold.extend(r.cold_latencies)
 
     print(f"\n{'='*70}")
-    print(f"Results ({num_clients} client(s), {BLOCK_SIZE//(1024*1024)} MiB blocks)")
+    block_label = f"{BLOCK_SIZE/(1024*1024):.3g} MiB" if BLOCK_SIZE >= 1024*1024 else f"{BLOCK_SIZE//1024} KiB"
+    print(f"Results ({num_clients} client(s), {block_label} blocks)")
     print(f"{'='*70}")
     print()
     print("  Latency per object (all clients combined):")

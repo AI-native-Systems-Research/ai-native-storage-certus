@@ -1,0 +1,17 @@
+{
+  "framework": "nous",
+  "iterations_completed": 1,
+  "iterations_requested": 10,
+  "wall_time_seconds": 7200.0,
+  "best_score": 22.02,
+  "mean_score": 22.02,
+  "scores": [
+    22.02
+  ],
+  "returncode": -1,
+  "eval_mode": "concurrent",
+  "timestamp": "2026-05-26_03-39-20",
+  "log_file": "/home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/nous/run-2026-05-26_01-39-20.log",
+  "test_score": 22.02,
+  "notes": "Control arm invalid (ran against patched server). h-main arm result of 22.02 GB/s is legitimate."
+}

@@ -1,0 +1,26 @@
+{
+  "framework": "openevolve_native",
+  "iterations_completed": 10,
+  "iterations_requested": 10,
+  "wall_time_seconds": 659.6,
+  "best_score": 8.34,
+  "mean_score": 7.15,
+  "scores": [
+    6.77,
+    0.0,
+    0.0,
+    6.19,
+    0.0,
+    0.0,
+    7.49,
+    6.25,
+    6.32,
+    8.34,
+    6.58
+  ],
+  "returncode": 0,
+  "eval_mode": "concurrent",
+  "timestamp": "2026-05-26_01-24-05",
+  "log_file": "/home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/openevolve_native/run-2026-05-26_01-13-05.log",
+  "test_score": 6.58
+}

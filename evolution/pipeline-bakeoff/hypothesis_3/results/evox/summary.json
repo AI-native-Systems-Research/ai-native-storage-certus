@@ -1,0 +1,26 @@
+{
+  "framework": "evox",
+  "iterations_completed": 10,
+  "iterations_requested": 10,
+  "wall_time_seconds": 811.3,
+  "best_score": 6.59,
+  "mean_score": 6.93,
+  "scores": [
+    6.59,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    6.59,
+    0.0,
+    7.85
+  ],
+  "returncode": 0,
+  "eval_mode": "concurrent",
+  "timestamp": "2026-05-26_00-53-02",
+  "log_file": "/home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/evox/run-2026-05-26_00-39-31.log",
+  "test_score": 7.85
+}

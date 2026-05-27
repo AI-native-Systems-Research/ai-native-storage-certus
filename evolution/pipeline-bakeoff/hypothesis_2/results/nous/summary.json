@@ -1,0 +1,13 @@
+{
+  "framework": "nous",
+  "iterations_completed": 0,
+  "iterations_requested": 10,
+  "wall_time_seconds": 3807.3,
+  "best_score": 0.0,
+  "mean_score": 0.0,
+  "scores": [],
+  "returncode": 0,
+  "eval_mode": "fixed",
+  "timestamp": "2026-05-25_20-30-13",
+  "log_file": "/home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/nous/run-2026-05-25_19-26-46.log"
+}

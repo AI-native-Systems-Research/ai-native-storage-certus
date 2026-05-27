@@ -1,0 +1,33 @@
+======================================================================
+  Pipeline Bakeoff Orchestrator — Autonomous Mode
+======================================================================
+  Frameworks: ['nous']
+  Iterations per framework: 10
+  Eval mode: fixed
+  Results dir: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results
+  Baseline: 3.59 GB/s (current dispatcher, single drive)
+  Target: beat P2P (3.4 GB/s) and approach NVMe ceiling (5.28 GB/s)
+
+
+======================================================================
+  Starting: nous | iterations=10 | eval=fixed
+  Output: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/nous
+======================================================================
+
+  CMD: /usr/bin/python3.12 /home/nara/certus/evo_frameworks/agentic-strategy-evolution/run_campaign.py /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/frameworks/nous/config.yaml --max-iterations 2 --auto-approve --run-id h1-bakeoff-2026-05-25_19-26-46 --timeout 1800
+
+
+  nous complete: 0 iterations, best=0.0000 GB/s, wall=3807s
+
+
+Analysis written to: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/analysis-fixed-2026-05-25_20-30-13.md
+
+Analysis written to: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/analysis-fixed-2026-05-25_20-30-13.md
+
+======================================================================
+  BAKEOFF COMPLETE
+======================================================================
+  Frameworks run: 1
+  Winner: nous (0.0000 GB/s)
+  Analysis: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/analysis-fixed-2026-05-25_20-30-13.md
+

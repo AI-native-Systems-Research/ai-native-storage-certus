@@ -1,0 +1,91 @@
+# Nous campaign for H3: Multi-client concurrent throughput
+#
+# Research question: "Can architectural changes to the dispatcher's locking
+# strategy achieve near-linear scaling of cold lookup throughput across
+# multiple concurrent clients?"
+#
+# Nous has full repo access and controls Claude directly — it can edit
+# multiple files natively without the concatenated-file constraint.
+
+research_question: >
+  The current dispatcher serializes ALL cold lookups behind THREE layers of Mutex:
+  (1) service.rs Mutex<Arc<dyn IDispatcher>>, (2) lib.rs data_drives Mutex,
+  (3) lib.rs pipeline_ring Mutex. With 8 concurrent clients, aggregate throughput
+  equals single-client throughput (~5 GB/s). Can we achieve near-linear scaling
+  (target: 15-20 GB/s with 8 clients) by eliminating the serialization bottleneck
+  through removing unnecessary mutexes, drive-sharded pipeline rings, and/or
+  lock-free patterns?
+
+run_id: h3-concurrent-bakeoff
+
+max_iterations: 3
+
+target_system:
+  name: "Certus Storage Engine — Multi-Client Concurrent Throughput Optimization"
+  description: >
+    AI-native KV-cache storage system for LLM inference.
+    The cold lookup path reads from NVMe SSD -> DRAM (memory-tier) -> GPU.
+    Primary implementation spans THREE files:
+    - apps/certus-server/src/service.rs — gRPC service with Mutex<Arc<dyn IDispatcher>>
+      This is the OUTERMOST lock: ALL gRPC requests serialize here before reaching
+      the dispatcher. Since IDispatcher methods take &self, this Mutex is unnecessary
+      for correctness — removing it is the single highest-impact change.
+    - components/dispatcher/src/lib.rs — DispatcherComponent with Mutex<> fields,
+      promote_and_serve() method that holds both data_drives and pipeline_ring locks
+    - components/dispatcher/src/pipeline.rs — pipelined_ssd_to_gpu_zero_copy()
+
+    H3 HYPOTHESIS: The triple-mutex architecture is the primary bottleneck for
+    multi-client throughput. Layer 1 (service.rs Mutex) is the worst because it
+    serializes ALL requests including warm hits. Layer 2 (pipeline_ring Mutex) is
+    the next worst because it holds the lock for the entire pipeline duration (~0.8ms).
+    By removing layer 1 and sharding layer 2 per-drive, clients accessing different
+    drives can run their pipelines simultaneously.
+
+    KEY FINDING FROM H1: ZERO_COPY_DEPTH=32-48 is optimal for single-client.
+    Pipeline constants are NOT the bottleneck — the Mutex architecture is.
+
+    BENCHMARKING (CONCURRENT MODE):
+    - Start server with ALL drives: ./target/release/certus-server --metadata-pci 0000:61:00.0 --data-pci 0000:62:00.0 --data-pci 0000:63:00.0 --data-pci 0000:64:00.0 --data-pci 0000:c1:00.0 --data-pci 0000:c2:00.0 --data-pci 0000:c3:00.0
+    - Run concurrent benchmark:
+      python3 apps/python/certus-api-bench.py --clients 8 --num-objects 16 --iterations 10 --block-size 4194304
+    - Score = aggregate cold lookup throughput (GB/s) across all 8 clients
+    - Parse: look for "Lookup (cold)" then "aggregate=X.XX GB/s"
+    - ALWAYS kill and restart server after code changes
+    - Server takes ~5s to initialize with 6 drives. Wait for gRPC port 50051.
+
+    KEY FILES (multi-file evolution target):
+    - apps/certus-server/src/service.rs — Mutex<Arc<dyn IDispatcher>> (REMOVE THIS FIRST)
+    - components/dispatcher/src/lib.rs — promote_and_serve(), lookup_async(), pipeline_ring
+    - components/dispatcher/src/pipeline.rs — PipelineRing struct, zero-copy pipeline function
+    - apps/python/certus-api-bench.py — benchmark (--clients flag for concurrency)
+
+    HYPOTHESIS ARMS:
+    Arm A: Remove service Mutex + drive-sharded rings — remove the service.rs Mutex
+           entirely (use Arc<dyn IDispatcher> directly), allocate one PipelineRing per
+           DataDrive, select by drive_index in promote_and_serve.
+           Predicted improvement: ~6x (limited by num_drives=6, GPU PCIe bandwidth).
+    Arm B: Remove service Mutex + lock-free ring pool — remove service.rs Mutex,
+           use crossbeam::ArrayQueue<PipelineRing> as a pool in lib.rs.
+           Predicted improvement: ~4-6x (depends on pool size and GPU stream count).
+    Arm C: Control-baseline — current triple-Mutex architecture, measured with 8 clients.
+    Score each arm on aggregate GB/s.
+
+  observable_metrics:
+    - "aggregate cold lookup throughput (GB/s) with 8 clients"
+    - "per-client cold lookup throughput (GB/s)"
+    - "lock contention time (if measurable via timing)"
+  controllable_knobs:
+    - "service.rs locking (Mutex/RwLock/none)"
+    - "pipeline ring allocation strategy (shared/per-drive/pool)"
+    - "data_drives lock type (Mutex vs RwLock vs lock-free)"
+    - "number of CUDA streams (currently 2 shared, need per-pipeline)"
+    - "warm_stream strategy (shared AtomicU64 vs per-client streams)"
+  repo_path: /home/nara/certus/ai-native-storage-certus
+
+models:
+  design: "aws/claude-opus-4-6"
+  execute_analyze: "aws/claude-opus-4-6"
+
+prompts:
+  methodology_layer: "prompts/methodology"
+  domain_adapter_layer: null

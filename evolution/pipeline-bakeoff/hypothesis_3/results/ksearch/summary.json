@@ -1,0 +1,26 @@
+{
+  "framework": "ksearch",
+  "iterations_completed": 10,
+  "iterations_requested": 10,
+  "wall_time_seconds": 914.6,
+  "best_score": 10.93,
+  "mean_score": 8.32,
+  "scores": [
+    10.93,
+    0.0,
+    7.15,
+    8.09,
+    5.39,
+    7.18,
+    10.93,
+    6.27,
+    6.99,
+    7.52,
+    6.97
+  ],
+  "returncode": 0,
+  "eval_mode": "concurrent",
+  "timestamp": "2026-05-26_01-39-20",
+  "log_file": "/home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/ksearch/run-2026-05-26_01-24-05.log",
+  "test_score": 6.97
+}

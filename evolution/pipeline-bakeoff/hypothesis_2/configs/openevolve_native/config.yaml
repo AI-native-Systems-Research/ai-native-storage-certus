@@ -1,0 +1,44 @@
+# OpenEvolve Native config for pipeline bakeoff (SkyDiscover --search openevolve_native)
+language: rust
+max_iterations: 50
+
+llm:
+  api_base: "https://ete-litellm.ai-models.vpc-int.res.ibm.com"
+  models:
+    - name: "aws/claude-opus-4-6"
+      weight: 1.0
+  max_tokens: 16384
+  timeout: 300
+
+optimization:
+  objective: "maximize cold lookup throughput (GB/s)"
+
+evaluator:
+  timeout: 90
+
+prompt:
+  system_message: |-
+    You are optimizing a Rust SSD→GPU transfer pipeline for maximum cold lookup throughput.
+
+    CONTEXT:
+    - Target: certus storage system's zero-copy pipeline (pipelined_ssd_to_gpu_zero_copy)
+    - Hardware: 7× NVMe Gen4 SSDs, NVIDIA A30 GPU, PCIe Gen4 x16
+    - Each NVMe command transfers 128 KiB (MDTS limit), objects are 1-16 MiB (8-128 chunks)
+    - Current throughput: ~4.9 GB/s at 1 client. Raw NVMe ceiling at QD=32: 5.28 GB/s
+    - P2P direct (NVMe→GPU BAR1): 3.4 GB/s — pipeline must BEAT this
+
+    KEY TUNABLES:
+    - ZERO_COPY_DEPTH (current: 16) — NVMe queue depth. QD=32 gives 41% more raw throughput
+    - SYNC_FREQUENCY (current: 16) — how often to sync CUDA streams
+    - Number of streams (current: 2)
+    - Adaptive logic — branch on num_chunks for different strategies per object size
+
+    CONSTRAINTS:
+    - Must compile as valid Rust (cargo build -p certus-server --release)
+    - Must maintain the function signatures
+    - chunk_size is fixed at 128 KiB (MDTS)
+
+    SCORING: Higher throughput (GB/s) = better score.
+
+seed:
+  path: "initial_program.rs"

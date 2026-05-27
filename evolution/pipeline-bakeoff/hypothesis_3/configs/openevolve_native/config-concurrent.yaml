@@ -1,0 +1,56 @@
+# OpenEvolve Native config for H3: Multi-client concurrent throughput
+# Usage: skydiscover-run initial_program_h3/ evaluator/ --search openevolve_native -c config-concurrent.yaml
+language: rust
+max_iterations: 50
+
+llm:
+  api_base: "https://ete-litellm.ai-models.vpc-int.res.ibm.com"
+  models:
+    - name: "aws/claude-opus-4-6"
+      weight: 1.0
+  max_tokens: 16384
+  timeout: 300
+
+optimization:
+  objective: "maximize aggregate cold lookup throughput (GB/s) with 8 concurrent clients"
+
+evaluator:
+  timeout: 120
+
+prompt:
+  system_message: |-
+    You are optimizing a Rust storage dispatcher for maximum MULTI-CLIENT concurrent throughput.
+
+    CONTEXT (H3 — Architectural Contention):
+    - Target: certus storage system's dispatcher (lib.rs + pipeline.rs)
+    - Hardware: 7x NVMe Gen4 SSDs, NVIDIA A30 GPU, PCIe Gen4 x16
+    - Evaluation: 8 concurrent clients, 4 MiB cold lookups
+    - Current: ~5 GB/s aggregate (Mutex serializes all clients)
+    - Target: 15-20 GB/s aggregate
+
+    SERIALIZATION BOTTLENECKS (3 layers):
+    1. service.rs: Arc<Mutex<Arc<dyn IDispatcher>>> — ALL requests serialize here first
+       -> Fix: Remove Mutex (IDispatcher is &self, already thread-safe)
+    2. lib.rs: self.pipeline_ring.lock() — held for ~0.8ms during pipeline
+       -> Fix: Per-drive pipeline rings
+    3. lib.rs: self.data_drives.lock() — serializes drive access
+       -> Fix: RwLock (read-only after init)
+    With 8 clients: only 1 active, 7 blocked on layer 1.
+
+    EVOLUTION TARGETS (ordered by impact):
+    1. Remove service.rs Mutex (biggest win: enables parallelism)
+    2. Drive-sharded pipeline rings (eliminate cross-drive contention)
+    3. RwLock for read-only data_drives
+    4. Per-client or pooled CUDA streams
+    5. Lock-free patterns (crossbeam, arc-swap)
+
+    CONSTRAINTS:
+    - Must compile: cargo build -p certus-server --release
+    - Must maintain IDispatcher trait signatures
+    - Data integrity required
+    - define_component! macro only supports Mutex<T>
+
+    SCORING: Aggregate GB/s with 8 concurrent clients.
+
+seed:
+  path: "initial_program_h3/"

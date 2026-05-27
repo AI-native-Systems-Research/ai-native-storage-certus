@@ -1,0 +1,71 @@
+# SkyDiscover EvoX config for H3: Multi-client concurrent throughput
+# Usage: skydiscover-run initial_program_h3/ evaluator/ -c config-concurrent.yaml --search evox
+language: rust
+max_iterations: 50
+checkpoint_interval: 5
+
+search:
+  type: evox
+  share_llm: true
+
+llm:
+  api_base: "https://ete-litellm.ai-models.vpc-int.res.ibm.com"
+  models:
+    - name: "aws/claude-opus-4-6"
+      weight: 1.0
+  guide_models:
+    - name: "aws/claude-opus-4-6"
+      max_tokens: 8000
+      timeout: 300
+  max_tokens: 16384
+  timeout: 300
+
+prompt:
+  system_message: |-
+    You are optimizing a Rust storage dispatcher for maximum MULTI-CLIENT concurrent throughput.
+
+    CONTEXT (H3 — Architectural Contention):
+    - Target: certus storage system's dispatcher component (lib.rs + pipeline.rs)
+    - Hardware: 7x NVMe Gen4 SSDs, NVIDIA A30 GPU, PCIe Gen4 x16
+    - Evaluation: 8 concurrent clients, 4 MiB objects, cold lookups
+    - Current: ~5 GB/s aggregate (same as single-client — bottlenecked on Mutex)
+    - Target: 15-20 GB/s aggregate (utilize all 7 NVMe drives in parallel)
+
+    SERIALIZATION BOTTLENECKS (outermost to innermost):
+    1. service.rs: Arc<Mutex<Arc<dyn IDispatcher>>> — ALL gRPC requests serialize here
+       -> Fix: Remove Mutex (IDispatcher takes &self, is internally thread-safe)
+    2. lib.rs promote_and_serve: self.pipeline_ring.lock() held for ~0.8ms per object
+       -> Fix: Per-drive pipeline rings (clients on different drives never contend)
+    3. lib.rs: self.data_drives.lock() — serializes drive access
+       -> Fix: RwLock (read-only after init)
+    Result: with 8 clients, only 1 runs at a time due to layer 1.
+
+    WHAT TO CHANGE:
+    - service.rs: Remove outer Mutex (IDispatcher methods are already thread-safe)
+    - lib.rs: Remove/reduce Mutex contention on hot paths
+      - Drive-sharded pipeline rings (per-drive, no cross-drive contention)
+      - RwLock for data_drives (read-only after init)
+      - Per-client or pooled CUDA streams
+      - Lock-free ring pool (crossbeam::ArrayQueue)
+    - pipeline.rs: May need to support multiple simultaneous pipeline instances
+
+    CONSTRAINTS:
+    - Must compile: cargo build -p certus-server --release
+    - Must maintain IDispatcher trait signatures
+    - Must use interfaces crate types
+    - Data integrity must be preserved
+    - define_component! macro only supports Mutex<T>
+
+    SCORING: Higher AGGREGATE throughput (GB/s) with 8 concurrent clients = better.
+
+    HINTS:
+    - Keys sharded by drive_index = key % num_drives — different drives = no contention
+    - Warm path already lock-free — focus exclusively on cold path
+    - Each drive should ideally have its own PipelineRing + ClientChannels
+    - More total CUDA streams needed for 8 parallel GPU DMA operations
+
+evaluator:
+  timeout: 120
+
+monitor:
+  enabled: false

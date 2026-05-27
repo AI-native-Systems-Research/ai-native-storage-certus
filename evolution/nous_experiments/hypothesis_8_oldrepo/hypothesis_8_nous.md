@@ -173,13 +173,31 @@ Minimal campaign: research question, the full repository (all source code), targ
 6. Explores the winning path deeper rather than strengthening the losing path — once P2P won, Nous kept optimizing P2P instead of giving bounce its best shot (true pipelining)
 7. Iter-2 abandons working iter-1 approach — h8-evolve-v0-pipelined iter-1 achieved 2.02x with double-buffering, but iter-2 switched to BatchSubmit QD=32 (completely different strategy) and got no improvement. Never investigated why iter-1 worked or tried to refine it
 
-**Recommendations for Nous development:**
+**Recommendations for Nous development (from campaigns 1-9):**
 1. Add `constraints` field to campaign schema (hard rules validated before execution)
 2. Weight keywords in hypothesis — flag if experiment doesn't address them
 3. Hypothesis-to-experiment alignment gate (reject bundle if it doesn't test what's stated)
 
-**Recommendations for the test evaluator:**
+**Recommendations for the test evaluator (from campaigns 1-9):**
 1. Sanity-check gate on results (flag if measurements violate physical constraints, e.g. SSD faster than DRAM)
+
+**NEW recommendations (from campaigns 10-11, added 2026-05-21):**
+
+4. **Reference implementation as default campaign input** — Campaign 10 proved $3 vs $35 for equivalent insight quality (10-40x cost reduction). When a working example exists in the repo, always include it. When none exists, the human should write a simplified 50-100 line version first — still cheaper than 3 failed campaigns.
+
+5. **Iter-2 must explain iter-1 before changing approach** — If iter-1 produced a measurable gain, iter-2 must ablate iter-1's mechanism before trying a different strategy. Campaign 8 iter-1 got 2x with double-buffering; iter-2 abandoned it for BatchSubmit (0%) without understanding that the gain came from buffer pre-allocation.
+
+6. **Strengthen the loser before deepening the winner** — After one arm wins an A/B, test whether the losing arm can match with its best implementation before concluding. Nous kept optimizing P2P after it won; never gave bounce true pipelining. Result: bounce with pipelining ties P2P (~9.7ms vs ~9.3ms), which changes the conclusion entirely.
+
+7. **Architecture map as campaign input** — Campaign 11 showed Nous optimizes what it can see in one file but can't reason about system topology (actor thread model, core allocation, channel structure). Providing a component/thread/data-flow diagram as campaign input would let Nous know WHERE bottlenecks could live before touching code.
+
+8. **Profiling-first workflow** — Run perf/flamegraph BEFORE designing the experiment, not after. Campaign 11 optimized pipeline.rs when the bottleneck was in actor/channel scheduling. A flamegraph would have immediately shown where time was spent.
+
+9. **"Zoom out" checkpoint after iter-1** — Force a step asking: "Is the bottleneck in this file (local) or in the system around it (architectural)?" This breaks the tunnel vision of "optimize what I can see in the file I opened." Campaign 11 spent both iterations on pipeline.rs when the issue was thread topology.
+
+10. **Blast radius estimation before implementation** — Before writing code, enumerate all files that must change and estimate cost. If >5 files → flag for human review, don't attempt. Would have prevented campaign 6's $14 budget blowout (240 turns on a 12-file interface cascade).
+
+11. **Split diagnosis campaigns from implementation campaigns** — Campaign A: "what's the bottleneck?" (diagnosis only, no code changes). Campaign B: "fix this specific thing in this specific file" (implementation). This matches Nous's strengths (diagnosis: strong) vs weaknesses (multi-file architecture: weak).
 
 ---
 
@@ -486,3 +504,58 @@ Told to "fix v1 to truly overlap reads and copies" — same directive as h8-evol
 4. **Direct actor-level benchmarking** — bypass gRPC entirely to measure true NVMe + DMA performance through the dispatcher's actor. This isolates whether the overhead is in gRPC/networking or in the dispatcher logic itself.
 5. **Sustained multi-key throughput** — all experiments measured single-key (or 10-key) latency. Under sustained load, buffer reuse, NVMe queue depth, and GPU stream scheduling may behave differently.
 
+---
+
+## Campaign 11: h8-channel-optimization (2026-05-21)
+
+**Context:** After manual optimization brought dispatcher v1 from ~300 MB/s to 1,748 MB/s (via QD=32, sync-previous-stream, zero-copy pipeline), a ~2x gap remains vs gpu-bb-vs-p2p (3,258 MB/s). Manual channel experiments (futex, park_timeout tuning, spin loops) all failed — proved the actor's completion delivery cadence is the bottleneck, not channel wakeup.
+
+**Campaign design:** Minimal — only gave Nous the research question ("match gpu-bb-vs-p2p throughput"), benchmark commands, and two constraints (keep architecture, no new deps). No diagnosis, no failed approaches, no implementation hints. Let Nous explore the code independently.
+
+**Result:** No improvement on target metric. Cold 16 MiB throughput remained ~1750 MB/s (iter-1 within noise, iter-2 regressed 29%). The 1750→3250 MB/s gap was not closed.
+
+**Cost:** $14.60 (4 LLM calls, 124k tokens)
+
+### Iter-1: Pipeline Overhead Reduction
+
+**What Nous implemented** (5 files, 321 lines):
+1. `AtomicBool` GPU state fast-path in gpu-services (skip Mutex lock per chunk)
+2. `ZERO_COPY_DEPTH` 16→32 (same change we already had — Nous rediscovered it)
+3. Batched stream sync every 32 chunks instead of per-chunk
+4. Pre-allocated `DmaBuffer` wrappers with `noop_free` + new `update_ptr_and_len` on DmaBuffer
+
+**Results:**
+
+| Arm | Predicted | Observed | Status |
+|-----|-----------|----------|--------|
+| h-main (combined) | +30% gap closure (→2200 MB/s) | +8.9% one run, high variance | REFUTED |
+| h-ablation (QD32 only) | Smaller improvement | One run 59% better (noise) | PARTIALLY_CONFIRMED |
+| h-control-negative (128KiB) | No effect | 18% min latency improvement | REFUTED |
+
+**Nous's diagnosis:** "Extreme run-to-run variance (mean/min 2-5x) from SPDK pool/LRU eviction dominates measurement. The pipeline is already fast (min ~2700 µs). The optimization targets the wrong level — pool management adds milliseconds of variance while pipeline overhead saves microseconds."
+
+### Iter-2: BatchSubmit + Deferred GPU DMA
+
+**What Nous implemented** (1 file: pipeline.rs):
+1. All 128 NVMe reads submitted via single `BatchSubmit` message (concentrate on one depth-256 qpair)
+2. h-main: Deferred GPU DMA — collect all completions first, then do all GPU copies
+3. h-ablation: BatchSubmit + per-completion GPU DMA (keeps NVMe/GPU overlap)
+
+**Results:**
+
+| Arm | Predicted | Observed | Status |
+|-----|-----------|----------|--------|
+| h-main (BatchSubmit + deferred DMA) | Reduce variance, improve mean | **REGRESSION** — 29% worse mean, min doubled | REFUTED |
+| h-ablation (BatchSubmit + per-completion DMA) | Smaller improvement | No change at 16 MiB; **3.6x faster at 128 KiB** | REFUTED |
+| h-control-negative (128KiB) | No effect | **3.3x faster** (unexpected) | REFUTED |
+
+**Nous's diagnosis:** "Concentrating 128 reads on one depth-256 qpair hurts SSD throughput vs distributing across depth-4/16/64 qpairs. Deferred GPU DMA eliminates NVMe/GPU overlap, costing performance. Surprising: BatchSubmit at 128 KiB uses different qpair selection logic (`select_index(batch_size)` vs `select_index(pending_ops.len()+1)`), routing to a lower-latency qpair."
+
+### Key Findings
+
+1. **Nous never touched the actor or channel** — diagnosed pool eviction variance as the bottleneck, not actor delivery cadence. This is a different (possibly complementary) diagnosis from our manual experiments.
+2. **Rediscovered QD=32** independently but as part of a larger bundle, not isolated.
+3. **Found a real bug/opportunity**: BatchSubmit routes 128 KiB lookups to a different (faster) qpair via `select_index` logic difference. Worth investigating.
+4. **BatchSubmit at 16 MiB hurts** — concentrating on one deep qpair is worse than distributing across multiple shallower qpairs. This contradicts the intuition that deeper queues = better throughput for this SSD.
+5. **Deferred GPU DMA is a net negative** — eliminating NVMe/GPU overlap costs more than the scheduling simplification saves.
+6. **Campaign design worked** — with minimal hints, Nous read the code, formed its own theory, and produced testable experiments. It found things we hadn't tried (BatchSubmit, AtomicBool fast-path, qpair selection discovery).

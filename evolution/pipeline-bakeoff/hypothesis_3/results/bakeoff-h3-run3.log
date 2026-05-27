@@ -1,0 +1,96 @@
+======================================================================
+  Pipeline Bakeoff Orchestrator — Autonomous Mode
+======================================================================
+  Frameworks: ['adaevolve', 'evox', 'gepa_native', 'openevolve_native', 'ksearch', 'nous']
+  Iterations per framework: 10
+  Eval mode: concurrent
+  Results dir: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results
+  Baseline: 3.59 GB/s (current dispatcher, single drive)
+  Target: beat P2P (3.4 GB/s) and approach NVMe ceiling (5.28 GB/s)
+
+
+======================================================================
+  Starting: adaevolve | iterations=10 | eval=concurrent
+  Output: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/adaevolve
+======================================================================
+
+  CMD: uv run --project /home/nara/certus/evo_frameworks/skydiscover skydiscover-run /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/initial_program.rs /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/evaluator/evaluate.py --search adaevolve --config /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/configs/adaevolve/config-concurrent.yaml -i 10 -o /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/adaevolve/output
+
+
+  adaevolve complete: 0 iterations, best=0.0000 GB/s, wall=769s
+
+
+Analysis written to: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/analysis-concurrent-2026-05-26_00-39-31.md
+
+======================================================================
+  Starting: evox | iterations=10 | eval=concurrent
+  Output: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/evox
+======================================================================
+
+  CMD: uv run --project /home/nara/certus/evo_frameworks/skydiscover skydiscover-run /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/initial_program.rs /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/evaluator/evaluate.py --search evox --config /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/configs/evox/config-concurrent.yaml -i 10 -o /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/evox/output
+
+
+  evox complete: 0 iterations, best=0.0000 GB/s, wall=811s
+
+
+Analysis written to: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/analysis-concurrent-2026-05-26_00-53-02.md
+
+======================================================================
+  Starting: gepa_native | iterations=10 | eval=concurrent
+  Output: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/gepa_native
+======================================================================
+
+  CMD: uv run --project /home/nara/certus/evo_frameworks/skydiscover skydiscover-run /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/initial_program.rs /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/evaluator/evaluate.py --search gepa_native --config /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/configs/gepa_native/config-concurrent.yaml -i 10 -o /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/gepa_native/output
+
+
+  gepa_native complete: 0 iterations, best=0.0000 GB/s, wall=1203s
+
+
+Analysis written to: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/analysis-concurrent-2026-05-26_01-13-05.md
+
+======================================================================
+  Starting: openevolve_native | iterations=10 | eval=concurrent
+  Output: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/openevolve_native
+======================================================================
+
+  CMD: uv run --project /home/nara/certus/evo_frameworks/skydiscover skydiscover-run /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/initial_program.rs /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/evaluator/evaluate.py --search openevolve_native --config /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/configs/openevolve_native/config-concurrent.yaml -i 10 -o /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/openevolve_native/output
+
+
+  openevolve_native complete: 0 iterations, best=0.0000 GB/s, wall=660s
+
+
+Analysis written to: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/analysis-concurrent-2026-05-26_01-24-05.md
+
+======================================================================
+  Starting: ksearch | iterations=10 | eval=concurrent
+  Output: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/ksearch
+======================================================================
+
+  CMD: uv run --project /home/nara/certus/evo_frameworks/skydiscover skydiscover-run /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/initial_program.rs /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/evaluator/evaluate.py --search adaevolve --config /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/configs/ksearch/config-concurrent.yaml -i 10 -o /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/ksearch/output
+
+
+  ksearch complete: 0 iterations, best=0.0000 GB/s, wall=915s
+
+
+Analysis written to: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/analysis-concurrent-2026-05-26_01-39-20.md
+
+======================================================================
+  Starting: nous | iterations=10 | eval=concurrent
+  Output: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/nous
+======================================================================
+
+  CMD: /usr/bin/python3.12 /home/nara/certus/evo_frameworks/agentic-strategy-evolution/run_campaign.py /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/configs/nous/config-concurrent.yaml --max-iterations 3 --auto-approve --run-id h3-bakeoff-2026-05-26_01-39-20 --timeout 7200
+
+
+  nous complete: 0 iterations, best=0.0000 GB/s, wall=7200s
+
+
+Analysis written to: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/analysis-concurrent-2026-05-26_03-39-20.md
+Traceback (most recent call last):
+  File "/home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/run_bakeoff.py", line 656, in <module>
+    main()
+  File "/home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/run_bakeoff.py", line 639, in main
+    analyze_framework_result(name, args.eval, summary)
+  File "/home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/run_bakeoff.py", line 446, in analyze_framework_result
+    import openai
+ModuleNotFoundError: No module named 'openai'

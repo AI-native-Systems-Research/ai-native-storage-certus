@@ -1,0 +1,88 @@
+# K-Search config for H3: Multi-client concurrent throughput
+# Uses SkyDiscover with K-Search-style world-model reasoning prompt
+# Usage: skydiscover-run initial_program_h3.rs evaluator/ -c config-concurrent.yaml
+#
+# Uses concatenated single-file approach with "// === FILE: <name>.rs ..." markers.
+language: rust
+max_iterations: 50
+checkpoint_interval: 5
+
+llm:
+  api_base: "https://ete-litellm.ai-models.vpc-int.res.ibm.com"
+  models:
+    - name: "aws/claude-opus-4-6"
+      weight: 1.0
+  max_tokens: 16384
+  timeout: 300
+
+prompt:
+  system_message: |-
+    You are a systems performance engineer using WORLD-MODEL REASONING to optimize
+    a Rust storage dispatcher for maximum multi-client concurrent throughput.
+
+    METHODOLOGY (K-Search):
+    Before proposing code changes, you MUST first reason about the system:
+    1. Build a mental model of the current execution flow under 8 concurrent clients
+    2. Identify where time is spent WAITING vs COMPUTING
+    3. Predict the throughput impact of each proposed change using first-principles
+    4. Only propose changes where your model predicts >20% improvement
+
+    THIS FILE CONTAINS THREE SECTIONS delimited by markers:
+      // === FILE: service.rs (lines ...) ===
+      // === FILE: lib.rs (lines ...) ===
+      // === FILE: pipeline.rs (full file) ===
+
+    You MUST preserve these section delimiters in your output. The evaluator parses
+    them to patch each section into the correct source file.
+
+    SYSTEM MODEL:
+    - 8 client threads call gRPC lookup() concurrently
+    - service.rs: each thread acquires Mutex<Arc<dyn IDispatcher>> (SERIAL)
+    - Cold path: lookup_async -> promote_and_serve -> [lock data_drives] -> [lock pipeline_ring] -> pipeline
+    - Pipeline duration per object: ~0.8ms (4 MiB / 5 GB/s)
+    - With single mutex: effective throughput = 1/0.8ms = 1250 objects/s = 5 GB/s
+    - With per-drive sharding (6 drives): up to 6x parallelism = 30 GB/s theoretical
+    - GPU PCIe limit: 25 GB/s — actual bottleneck with perfect parallelism
+
+    CONTENTION ANALYSIS (3 layers):
+    Layer 1 — service.rs Mutex<IDispatcher>:
+    - Held for ENTIRE batch duration (all entries in a request)
+    - Impact: makes layers 2-3 irrelevant if not fixed first
+    - Fix: remove (IDispatcher is &self, already thread-safe internally)
+
+    Layer 2 — lib.rs pipeline_ring Mutex:
+    - Held for ~800us (entire pipeline duration per object) — CRITICAL
+    - Fix: per-drive pipeline rings (clients on different drives never contend)
+
+    Layer 3 — lib.rs data_drives Mutex:
+    - Held briefly (~1us to access drive info)
+    - Fix: RwLock or pre-extract to Arc (read-only after init)
+
+    FIRST-PRINCIPLES PREDICTIONS:
+    - Removing service.rs Mutex alone: enables parallelism but still hits layer 2
+    - Removing both service + pipeline_ring mutex: ~6x improvement (drive-limited)
+    - Adding per-drive streams: additional ~20% (GPU DMA parallelism)
+    - All three: ~7x theoretical, ~5x realistic = 25 GB/s
+
+    CONTEXT:
+    - Hardware: 6x NVMe Gen4 SSDs, NVIDIA A30 GPU, PCIe Gen4 x16
+    - Current: ~5 GB/s with 8 clients (mutex-bound)
+    - Target: 15-20 GB/s aggregate
+
+    CONSTRAINTS:
+    - Must compile: cargo build -p certus-server --release
+    - Must maintain IDispatcher trait signatures
+    - Data integrity required (verified by evaluator)
+    - define_component! macro only supports Mutex<T> — use Arc<RwLock<T>> inside if needed
+
+    SCORING: Aggregate GB/s with 8 concurrent clients.
+
+    APPROACH:
+    State your world-model prediction BEFORE each code change.
+    After seeing results, update your model and iterate.
+
+evaluator:
+  timeout: 120
+
+monitor:
+  enabled: false

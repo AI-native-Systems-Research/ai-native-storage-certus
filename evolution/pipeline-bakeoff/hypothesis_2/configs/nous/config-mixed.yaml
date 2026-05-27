@@ -1,0 +1,79 @@
+# Nous campaign for H2: Mixed workload sizes (1/2/4/16 MiB)
+#
+# Research question: "Can adaptive pipeline configuration per object size
+# outperform a single static configuration across mixed workloads?"
+
+research_question: >
+  The current pipeline uses a single static configuration (ZERO_COPY_DEPTH=16,
+  SYNC_FREQUENCY=16, 2 CUDA streams) regardless of object size. With mixed
+  workloads (1 MiB, 2 MiB, 4 MiB, 16 MiB objects), different sizes may have
+  different optimal configurations. Can an adaptive approach (branching on
+  object size / num_chunks) outperform the static defaults on a composite
+  throughput metric across all sizes?
+
+run_id: h2-mixed-bakeoff
+
+max_iterations: 3
+
+target_system:
+  name: "Certus Storage Engine — Mixed Workload Pipeline Optimization"
+  description: >
+    AI-native KV-cache storage system for LLM inference.
+    The cold lookup path reads from NVMe SSD → DRAM (memory-tier) → GPU.
+    Primary implementation: pipelined_ssd_to_gpu_zero_copy() in
+    components/dispatcher/src/pipeline.rs — uses ZERO_COPY_DEPTH=16 concurrent
+    NVMe reads, 2 CUDA streams, sync every 16 completions.
+
+    H2 HYPOTHESIS: Workload-dependent optima exist. Small objects (1-2 MiB, 8-16
+    chunks) may benefit from simpler sync strategies (fewer streams, sync-at-end),
+    while large objects (16 MiB, 128 chunks) benefit from higher QD and batched
+    completions. An adaptive pipeline that branches based on num_chunks could
+    outperform any single static configuration.
+
+    BENCHMARKING (MIXED MODE):
+    - Start server: ./target/release/certus-server --metadata-pci 0000:61:00.0 --data-pci 0000:62:00.0
+    - Run mixed benchmark (4 sizes, 1 client each):
+      python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 1048576
+      python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 2097152
+      python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304
+      python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 16777216
+    - Score = average cold lookup GB/s across all 4 sizes
+    - Parse cold lookup: look for "Lookup (cold)" then "per-client=X.XX GB/s"
+    - ALWAYS kill and restart server after code changes (pkill certus-server, rebuild, relaunch)
+    - Server takes ~3s to initialize. Wait for gRPC port 50051 to be open.
+
+    KEY FILES:
+    - components/dispatcher/src/pipeline.rs — primary evolution target (~280 LOC zero-copy fn)
+    - components/dispatcher/src/lib.rs — promote_and_serve() call site, PipelineRing Mutex
+    - apps/python/certus-api-bench.py — primary benchmark (supports --block-size flag)
+
+    HYPOTHESIS ARMS:
+    Arm A: Adaptive branching — add conditional logic in pipelined_ssd_to_gpu_zero_copy()
+           that selects QD/sync/streams based on num_chunks (object size).
+           Small objects (<=16 chunks): QD=num_chunks, sync-at-end, 1 stream.
+           Large objects (>64 chunks): QD=64, sync every 32, 4 streams.
+    Arm B: High-QD static — ZERO_COPY_DEPTH=64, SYNC_FREQUENCY=64, 4 streams for all sizes.
+           Tests whether one aggressive config is universally better.
+    Arm C: Control-baseline — current defaults unchanged, measured across all 4 sizes.
+    Score each arm on composite throughput (avg GB/s across 1/2/4/16 MiB).
+
+  observable_metrics:
+    - "cold lookup throughput (GB/s) at 1 MiB objects"
+    - "cold lookup throughput (GB/s) at 2 MiB objects"
+    - "cold lookup throughput (GB/s) at 4 MiB objects"
+    - "cold lookup throughput (GB/s) at 16 MiB objects"
+    - "composite throughput (avg of 4 sizes)"
+  controllable_knobs:
+    - "ZERO_COPY_DEPTH (1-64, possibly per-size)"
+    - "SYNC_FREQUENCY (4-128 or sync-at-end, possibly per-size)"
+    - "number of CUDA streams (1-4, possibly per-size)"
+    - "branching logic based on num_chunks"
+  repo_path: /home/nara/certus/ai-native-storage-certus
+
+models:
+  design: "aws/claude-opus-4-6"
+  execute_analyze: "aws/claude-opus-4-6"
+
+prompts:
+  methodology_layer: "prompts/methodology"
+  domain_adapter_layer: null
