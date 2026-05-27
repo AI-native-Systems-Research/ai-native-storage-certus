@@ -458,6 +458,14 @@ impl IMemoryTier for MockMemoryTier {
         let inner = self.inner.lock().unwrap();
         Some((inner.pool.as_ptr() as *mut u8, inner.capacity))
     }
+
+    fn clear(&self) -> Result<usize, MemoryTierError> {
+        let mut inner = self.inner.lock().unwrap();
+        let count = inner.slots.len();
+        inner.slots.clear();
+        inner.next_offset = 0;
+        Ok(count)
+    }
 }
 
 // ---------------------------------------------------------------------------
