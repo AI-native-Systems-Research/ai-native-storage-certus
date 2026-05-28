@@ -1,0 +1,156 @@
+# Triggered on every push to `unstable`.
+#
+# Merges the new unstable commit into `unstable-kani`, runs all Kani
+# harnesses, and pushes the updated branch back to origin.
+# Opens a GitHub issue if Kani fails — but the job itself always
+# succeeds so this check is ADVISORY and never blocks PRs to main.
+#
+# unstable ──push──► this workflow
+#                       │
+#                 merge into unstable-kani
+#                       │
+#                 cargo kani (dispatch-map)      ← advisory
+#                 cargo kani (example-helloworld) ← advisory
+#                 cargo kani (component-core)     ← advisory
+#                       │
+#              ┌────────┴────────┐
+#           PASS              FAIL
+#              │                 │
+#   push unstable-kani    open issue
+#   back to origin        (still push unstable-kani)
+#   job: SUCCESS          job: SUCCESS (advisory)
+
+name: Kani — sync and verify
+
+on:
+  push:
+    branches: [unstable]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: kani-sync-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync-and-verify:
+    name: Merge unstable → unstable-kani and run Kani
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout unstable-kani
+        uses: actions/checkout@v4
+        with:
+          ref: unstable-kani
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge origin/unstable into unstable-kani
+        id: merge
+        run: |
+          git fetch origin unstable
+          if git merge origin/unstable --no-edit \
+               -m "chore: sync unstable → unstable-kani [automated]"; then
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Merge conflict between unstable and unstable-kani — manual resolution required."
+            exit 1
+          fi
+
+      # Kani requires a specific nightly toolchain. Pin to the version
+      # that matches the installed kani-verifier (see cache key below).
+      - name: Install Rust nightly
+        continue-on-error: true
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-11-21
+
+      # Cache both the cargo-kani binary and the Kani toolchain directory
+      # (~/.kani/) which contains CBMC and supporting tools (~1 GB).
+      - name: Cache Kani toolchain
+        id: kani-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-kani
+            ~/.kani/
+          key: kani-0.67.0-v2-${{ runner.os }}
+
+      - name: Install Kani verifier
+        id: kani-install
+        if: steps.kani-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: |
+          cargo install kani-verifier --version 0.67.0 --locked
+          cargo kani setup
+
+      # Advisory: continue-on-error means failures show as warnings,
+      # not as job failures, so this check never blocks PR merges.
+      - name: Run Kani harnesses — dispatch-map
+        id: kani-dispatch-map
+        continue-on-error: true
+        run: |
+          cargo kani --package dispatch-map
+
+      - name: Run Kani harnesses — example-helloworld
+        id: kani-helloworld
+        continue-on-error: true
+        run: |
+          cargo kani --package example-helloworld
+
+      - name: Run Kani harnesses — component-core
+        id: kani-component-core
+        continue-on-error: true
+        run: |
+          cargo kani --package component-core
+
+      # Always push unstable-kani as long as the merge succeeded.
+      - name: Push updated unstable-kani
+        if: steps.merge.outputs.merged == 'true'
+        continue-on-error: true
+        run: git push origin unstable-kani
+
+      # Open an issue if any Kani harness failed — visibility without blocking.
+      - name: Open issue on Kani failure
+        continue-on-error: true
+        if: |
+          steps.kani-dispatch-map.outcome == 'failure' ||
+          steps.kani-helloworld.outcome == 'failure' ||
+          steps.kani-component-core.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha    = context.payload.after ?? context.sha;
+            const short  = sha.slice(0, 7);
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            const failed = [
+              '${{ steps.kani-dispatch-map.outcome }}'   === 'failure' ? 'dispatch-map'      : null,
+              '${{ steps.kani-helloworld.outcome }}'     === 'failure' ? 'example-helloworld' : null,
+              '${{ steps.kani-component-core.outcome }}' === 'failure' ? 'component-core'     : null,
+            ].filter(Boolean).join(', ');
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              title: `Kani advisory: harness failure after unstable commit ${short}`,
+              body: [
+                `Kani harnesses failed (advisory — did not block merge) after commit \`${sha}\`.`,
+                ``,
+                `**Failed packages:** ${failed}`,
+                ``,
+                `**Action required:** review the [failing run](${runUrl}) and either:`,
+                `- Fix the bug introduced in \`unstable\`, or`,
+                `- Update the Kani harnesses if the change is intentional.`,
+              ].join('\n'),
+              labels: ['kani', 'verification-failure'],
+            });

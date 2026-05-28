@@ -1,0 +1,88 @@
+{
+  "generated": "2026-05-21T00:00:00Z",
+  "project": "GPU Services V0",
+  "summary": {
+    "specs_analyzed": 2,
+    "requirements_checked": 36,
+    "aligned": 33,
+    "drifted": 1,
+    "not_implemented": 0,
+    "unspecced_features": 5
+  },
+  "specs": [
+    {
+      "id": "001-gpu-cuda-services",
+      "title": "GPU CUDA Services",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-006", "FR-007",
+        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013",
+        "FR-014", "FR-015", "FR-016"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-005",
+          "spec_text": "pin verifies device-residency and tracks state in internal HashSet; pin_memory is idempotent, unpin_memory returns error if not pinned",
+          "actual": "pin_memory only calls check_memory_attributes if pointer is not in the verified set (optimization: skips re-verification for already-verified pointers). Functionally correct for IPC workflow.",
+          "location": "src/lib.rs:193-225",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": [],
+      "success_criteria": {
+        "aligned": ["SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006", "SC-007", "SC-008"],
+        "drifted": [],
+        "not_implemented": []
+      }
+    },
+    {
+      "id": "002-gpu-ssd-dma-prepare",
+      "title": "GPU-to-SSD DMA Buffer Preparation",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006",
+        "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-012",
+        "FR-013", "FR-014", "FR-015", "FR-016", "FR-017", "FR-018",
+        "FR-019", "FR-020"
+      ],
+      "drifted": [],
+      "not_implemented": [],
+      "success_criteria": {
+        "aligned": ["SC-001", "SC-002", "SC-003", "SC-004", "SC-005"],
+        "drifted": [],
+        "not_implemented": []
+      }
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "CUDA Stream API",
+      "description": "create_stream, destroy_stream, stream_synchronize methods for async GPU operations",
+      "location": "src/lib.rs:539-605, interfaces/src/igpu_services.rs:486-537",
+      "suggested_spec": "003-gpu-async-stream-ops or 004-gpu-pipeline"
+    },
+    {
+      "feature": "Async DMA copy (dma_copy_to_device_async)",
+      "description": "cudaMemcpyAsync H2D with CUDA stream for concurrent GPU/CPU work",
+      "location": "src/lib.rs:608-660",
+      "suggested_spec": "003-gpu-async-stream-ops or 004-gpu-pipeline"
+    },
+    {
+      "feature": "Raw pointer async copy (memcpy_h2d_async)",
+      "description": "Raw *const c_void to *mut c_void async memcpy without DmaBuffer wrapper",
+      "location": "src/lib.rs:662-704",
+      "suggested_spec": "003-gpu-async-stream-ops or 004-gpu-pipeline"
+    },
+    {
+      "feature": "Pinned DMA buffer allocation (allocate_pinned_dma_buffer)",
+      "description": "cudaHostAlloc + spdk_mem_register for page-locked host buffers usable by both NVMe and GPU DMA",
+      "location": "src/lib.rs:706-744",
+      "suggested_spec": "003-gpu-async-stream-ops or 004-gpu-pipeline"
+    },
+    {
+      "feature": "GDRCopy P2P DMA path",
+      "description": "Full GDRCopy BAR1 mapping for true NVMe-to-GPU P2P DMA via gdr_pin_buffer/gdr_map, DPDK IOMMU programming (rte_extmem_register, rte_vfio_container_dma_map), and cross-process physical address DMA. Includes p2p_server binary and integration tests.",
+      "location": "src/dma.rs:353-720, src/bin/p2p_server.rs, tests/gpu_nvme_p2p.rs, src/gdrcopy_ffi.rs",
+      "suggested_spec": "003-gpu-p2p-dma"
+    }
+  ],
+  "conflicts": []
+}

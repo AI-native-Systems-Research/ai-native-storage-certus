@@ -17,22 +17,19 @@ cargo build -p certus-server
 ## Run the Server
 
 ```bash
-# Minimal (one data drive, default port 50051)
+# Minimal (one device, default port 50051)
 ./target/debug/certus-server \
-  --metadata-pci 0000:01:00.0 \
-  --data-pci 0000:02:00.0
+  --device-pci 0000:02:00.0
 
-# Multiple data drives, custom port
+# Multiple devices, custom port
 ./target/debug/certus-server \
-  --metadata-pci 0000:01:00.0 \
-  --data-pci 0000:02:00.0 \
-  --data-pci 0000:03:00.0 \
+  --device-pci 0000:02:00.0 \
+  --device-pci 0000:03:00.0 \
   --listen 0.0.0.0:50052
 
 # With TLS
 ./target/debug/certus-server \
-  --metadata-pci 0000:01:00.0 \
-  --data-pci 0000:02:00.0 \
+  --device-pci 0000:02:00.0 \
   --tls-cert /path/to/cert.pem \
   --tls-key /path/to/key.pem
 ```

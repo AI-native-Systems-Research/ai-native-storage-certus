@@ -8,7 +8,6 @@ use crate::config::BenchConfig;
 /// Print the configuration summary to stdout.
 pub fn print_config(config: &BenchConfig, pci_addr_str: &str, ns_info: &NamespaceInfo) {
     println!("=== IOPS Benchmark ===");
-    println!("Driver:       {}", config.driver);
     println!("Device:       {}", pci_addr_str);
     println!(
         "Namespace:    {} ({} sectors, {}B sectors)",

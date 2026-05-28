@@ -1,0 +1,46 @@
+[package]
+name = "dispatcher"
+version = "1.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+component-framework.workspace = true
+component-core.workspace = true
+component-macros.workspace = true
+interfaces = { workspace = true, features = ["spdk"] }
+gpu-services = { workspace = true, features = ["spdk", "gpu"] }
+spdk-env.workspace = true
+block-device-spdk-nvme.workspace = true
+extent-manager.workspace = true
+memory-tier.workspace = true
+libc = "0.2"
+crossbeam-channel = "0.5"
+parking_lot = "0.12"
+
+[features]
+hardware-test = []
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+logger.workspace = true
+libc = "0.2"
+
+[[bench]]
+name = "dispatcher_benchmark"
+harness = false
+
+[[bench]]
+name = "ssd_evictor_benchmark"
+harness = false
+
+[[bench]]
+name = "pipeline_hw_benchmark"
+harness = false
+required-features = ["hardware-test"]
+
+[[bench]]
+name = "dispatcher_hw_benchmark"
+harness = false
+required-features = ["hardware-test"]

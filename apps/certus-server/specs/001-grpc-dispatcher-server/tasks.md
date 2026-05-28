@@ -32,7 +32,7 @@
 
 **CRITICAL**: No user story work can begin until this phase is complete.
 
-- [x] T007 Implement CLI argument parsing in `apps/certus-server/src/main.rs` using clap derive: `--metadata-pci`, `--data-pci` (repeatable), `--listen` (default 0.0.0.0:50051), `--tls-cert`, `--tls-key`
+- [x] T007 Implement CLI argument parsing in `apps/certus-server/src/main.rs` using clap derive: `--device-pci` (repeatable), `--listen` (default 0.0.0.0:50051), `--tls-cert`, `--tls-key`
 - [x] T008 Implement Certus component stack initialization in `apps/certus-server/src/main.rs` following `certus-connector/src/engine.rs` pattern: SPDKEnv → GpuServices → DispatchMap → Dispatcher wiring and initialization
 - [x] T009 Create `apps/certus-server/src/service.rs` with gRPC service struct holding `Arc<std::sync::Mutex<dyn IDispatcher + Send + Sync>>` and implementing the tonic-generated `Dispatcher` trait (empty stubs returning unimplemented)
 - [x] T010 Implement tokio runtime setup, gRPC server creation (with optional TLS from CLI args), signal handling (SIGTERM/SIGINT → graceful shutdown), and server startup in `apps/certus-server/src/main.rs`
@@ -52,7 +52,7 @@
 ### Implementation for User Story 1
 
 - [x] T013 [US1] Add startup logging in `apps/certus-server/src/main.rs`: log PCI addresses being used, component initialization progress, and final "listening on <addr>" message
-- [x] T014 [US1] Add CLI validation in `apps/certus-server/src/main.rs`: exit with usage error if `--metadata-pci` missing or `--data-pci` not provided at least once; validate PCI address format
+- [x] T014 [US1] Add CLI validation in `apps/certus-server/src/main.rs`: exit with usage error if `--device-pci` not provided at least once; validate PCI address format
 - [x] T015 [US1] Verify build compiles with `cargo build -p certus-server` and fix any dependency issues
 
 **Checkpoint**: Server starts with valid CLI args, logs initialization, reports readiness on port. Exits with clear error on missing/invalid args. Handles SIGTERM/SIGINT gracefully.

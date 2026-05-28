@@ -12,11 +12,10 @@ use std::sync::{Arc, Mutex};
 use clap::Parser;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 
-use component_core::binding::bind;
 use component_core::query_interface;
 use interfaces::{
-    DmaAllocFn, DmaBuffer, DispatcherConfig, FormatParams, IBlockDevice, IBlockDeviceAdmin,
-    IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger, IMemoryTier, PciAddress,
+    DmaAllocFn, DmaBuffer, DispatcherConfig, IDispatchMap, IDispatcher, IGpuServices, ILogger,
+    IMemoryTier, PciAddress,
 };
 
 use service::DispatcherService;
@@ -25,17 +24,22 @@ use service::DispatcherService;
 #[derive(Parser)]
 #[command(name = "certus-server", about = "Certus dispatcher gRPC server")]
 struct Cli {
-    /// PCI address of the metadata NVMe device (format: DDDD:BB:DD.F)
-    #[arg(long = "metadata-pci", required = true)]
-    metadata_pci: String,
-
-    /// PCI address(es) of data NVMe device(s) — may be specified multiple times
-    #[arg(long = "data-pci", required = true)]
-    data_pci: Vec<String>,
+    /// PCI address(es) of NVMe device(s) — may be specified multiple times
+    #[arg(long = "device-pci", required = true)]
+    device_pci: Vec<String>,
 
     /// gRPC listen address
     #[arg(long = "listen", default_value = "0.0.0.0:50051")]
     listen: String,
+
+    /// Memory-tier pool size (e.g. 256M, 1G, 512K). Defaults to 256M.
+    #[arg(long = "memory-tier-size", value_parser = parse_size)]
+    memory_tier_size: Option<usize>,
+
+    /// Format extent managers on startup (destroys existing data).
+    /// Without this flag, the server recovers previously stored extents.
+    #[arg(long = "format")]
+    format: bool,
 
     /// Path to TLS certificate file (enables TLS when provided with --tls-key)
     #[arg(long = "tls-cert")]
@@ -44,10 +48,24 @@ struct Cli {
     /// Path to TLS private key file (enables TLS when provided with --tls-cert)
     #[arg(long = "tls-key")]
     tls_key: Option<String>,
+}
 
-    /// Dispatcher version to use: "v0" (staging-based) or "v1" (memory-tier, default)
-    #[arg(long = "dispatcher-version", default_value = "v1")]
-    dispatcher_version: String,
+fn parse_size(s: &str) -> Result<usize, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("empty size string".into());
+    }
+    let (num_str, multiplier) = match s.as_bytes().last() {
+        Some(b'K' | b'k') => (&s[..s.len() - 1], 1024usize),
+        Some(b'M' | b'm') => (&s[..s.len() - 1], 1024 * 1024),
+        Some(b'G' | b'g') => (&s[..s.len() - 1], 1024 * 1024 * 1024),
+        _ => (s, 1usize),
+    };
+    let num: usize = num_str
+        .parse()
+        .map_err(|_| format!("invalid size number: '{num_str}'"))?;
+    num.checked_mul(multiplier)
+        .ok_or_else(|| format!("size overflow: '{s}'"))
 }
 
 fn validate_pci_address(addr: &str) -> Result<(), String> {
@@ -76,20 +94,20 @@ fn parse_pci_address(addr: &str) -> Result<PciAddress, String> {
 }
 
 fn initialize_component_stack(
-    metadata_pci: &str,
-    data_pci_addrs: &[String],
-    dispatcher_version: &str,
-) -> Result<Arc<dyn IDispatcher + Send + Sync>, String> {
-    eprintln!("certus-server: initializing SPDK environment...");
+    device_pci_addrs: &[String],
+    memory_tier_size: usize,
+    format: bool,
+) -> Result<(Arc<dyn IDispatcher + Send + Sync>, Arc<dyn ILogger + Send + Sync>), String> {
+    let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponent::new_default();
+
+    logger.info("certus-server: initializing SPDK environment...");
     let spdk_comp = spdk_env::SPDKEnvComponent::new_default();
     let spdk_iface = query_interface!(spdk_comp, spdk_env::ISPDKEnv)
         .ok_or("failed to query ISPDKEnv")?;
     spdk_iface.init().map_err(|e| format!("SPDK init failed: {e}"))?;
 
-    let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponentV1::new_default();
-
-    eprintln!("certus-server: initializing GPU services...");
-    let gpu_comp = gpu_services::GpuServicesComponentV0::new_default();
+    logger.info("certus-server: initializing GPU services...");
+    let gpu_comp = gpu_services::GpuServicesComponent::new_default();
     gpu_comp
         .logger
         .connect(Arc::clone(&logger))
@@ -98,67 +116,11 @@ fn initialize_component_stack(
         query_interface!(gpu_comp, IGpuServices).ok_or("failed to query IGpuServices")?;
     gpu.initialize().map_err(|e| format!("GPU init failed: {e}"))?;
 
-    // --- Create metadata block device + extent manager for dispatch map ---
-    eprintln!("certus-server: initializing metadata block device at {metadata_pci}...");
-    let meta_pci = parse_pci_address(metadata_pci)
-        .map_err(|e| format!("metadata PCI parse: {e}"))?;
-
-    let meta_bd = block_device_spdk_nvme_v2::BlockDeviceSpdkNvmeComponentV2::new_default();
-    meta_bd
-        .spdk_env
-        .connect(Arc::clone(&spdk_iface) as Arc<dyn spdk_env::ISPDKEnv + Send + Sync>)
-        .map_err(|e| format!("metadata block device spdk_env bind: {e}"))?;
-    meta_bd
-        .logger
-        .connect(Arc::clone(&logger))
-        .map_err(|e| format!("metadata block device logger bind: {e}"))?;
-
-    let meta_admin = query_interface!(meta_bd, IBlockDeviceAdmin)
-        .ok_or("failed to query IBlockDeviceAdmin for metadata device")?;
-    meta_admin.set_pci_address(meta_pci);
-    meta_admin
-        .initialize()
-        .map_err(|e| format!("metadata block device init failed: {e}"))?;
-
-    let meta_ibd = query_interface!(meta_bd, IBlockDevice)
-        .ok_or("failed to query IBlockDevice for metadata device")?;
-
-    eprintln!("certus-server: initializing metadata extent manager...");
-    let meta_em = extent_manager_v2::ExtentManagerV2::new_inner();
-
-    let numa_node = meta_ibd.numa_node();
-    let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
-        DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
-    });
-    meta_em.set_dma_alloc(dma_alloc.clone());
-    meta_em
-        .logger
-        .connect(Arc::clone(&logger))
-        .map_err(|e| format!("metadata extent manager logger bind: {e}"))?;
-
-    bind(
-        &*meta_bd as &dyn component_core::IUnknown,
-        "IBlockDevice",
-        &*meta_em as &dyn component_core::IUnknown,
-        "metadata_device",
-    )
-    .map_err(|e| format!("failed to bind metadata block device to extent manager: {e}"))?;
-
-    let meta_iem = query_interface!(meta_em, IExtentManager)
-        .ok_or("failed to query IExtentManager for metadata")?;
-    meta_iem
-        .format(FormatParams::default())
-        .map_err(|e| format!("metadata extent manager format failed: {e}"))?;
-
-    // --- Create dispatch map wired to the metadata extent manager ---
-    eprintln!("certus-server: initializing dispatch map...");
-    let dm_comp = dispatch_map::DispatchMapComponentV0::new(
+    // --- Create dispatch map ---
+    logger.info("certus-server: initializing dispatch map...");
+    let dm_comp = dispatch_map::DispatchMapComponent::new(
         dispatch_map::DispatchMapState::default(),
     );
-    dm_comp
-        .extent_manager
-        .connect(Arc::clone(&meta_iem))
-        .map_err(|e| format!("dispatch map extent_manager bind: {e}"))?;
     dm_comp
         .logger
         .connect(Arc::clone(&logger))
@@ -166,108 +128,84 @@ fn initialize_component_stack(
 
     let dm: Arc<dyn IDispatchMap + Send + Sync> =
         query_interface!(dm_comp, IDispatchMap).ok_or("failed to query IDispatchMap")?;
+    let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
+        DmaBuffer::new(size, align, None).map_err(|e| e.to_string())
+    });
     dm.set_dma_alloc(dma_alloc);
     dm.initialize()
         .map_err(|e| format!("DispatchMap init failed: {e}"))?;
 
-    // --- Create dispatcher (version-dependent) ---
-    let dispatcher: Arc<dyn IDispatcher + Send + Sync> = match dispatcher_version {
-        "v1" => {
-            eprintln!("certus-server: initializing memory-tier...");
-            let mt_comp = memory_tier::MemoryTierComponentV0::new_default();
-            mt_comp
-                .logger
-                .connect(Arc::clone(&logger))
-                .map_err(|e| format!("memory-tier logger bind: {e}"))?;
-            let mt: Arc<dyn IMemoryTier + Send + Sync> =
-                query_interface!(mt_comp, IMemoryTier).ok_or("failed to query IMemoryTier")?;
-            mt.initialize(memory_tier::DEFAULT_POOL_SIZE)
-                .map_err(|e| format!("MemoryTier init failed: {e}"))?;
+    // --- Create memory-tier ---
+    logger.info("certus-server: initializing memory-tier...");
+    let mt_comp = memory_tier::MemoryTierComponent::new_default();
+    mt_comp
+        .logger
+        .connect(Arc::clone(&logger))
+        .map_err(|e| format!("memory-tier logger bind: {e}"))?;
+    let mt: Arc<dyn IMemoryTier + Send + Sync> =
+        query_interface!(mt_comp, IMemoryTier).ok_or("failed to query IMemoryTier")?;
+    mt.initialize(memory_tier_size)
+        .map_err(|e| format!("MemoryTier init failed: {e}"))?;
 
-            // Register the memory-tier pool with CUDA for pinned DMA transfers.
-            // Without this, cudaMemcpy from mmap'd memory uses a staged internal
-            // buffer, cutting H2D bandwidth roughly in half.
-            if let Some((pool_ptr, pool_size)) = mt.pool_info() {
-                let err = unsafe {
-                    gpu_services::cuda_ffi::cudaHostRegister(
-                        pool_ptr as *mut std::ffi::c_void,
-                        pool_size,
-                        0,
-                    )
-                };
-                if err != gpu_services::cuda_ffi::CUDA_SUCCESS {
-                    eprintln!(
-                        "certus-server: WARNING: cudaHostRegister failed (err={err}), \
-                         memory-tier transfers will use staged path"
-                    );
-                } else {
-                    eprintln!(
-                        "certus-server: memory-tier pool registered with CUDA ({} MiB pinned)",
-                        pool_size / (1024 * 1024)
-                    );
-                }
-            }
-
-            eprintln!("certus-server: initializing dispatcher v1 (memory-tier)...");
-            let disp_comp = dispatcher_v1::DispatcherComponentV0::new_default();
-            disp_comp
-                .dispatch_map
-                .connect(Arc::clone(&dm))
-                .map_err(|e| format!("failed to bind dispatch_map: {e}"))?;
-            disp_comp
-                .memory_tier
-                .connect(Arc::clone(&mt))
-                .map_err(|e| format!("failed to bind memory_tier: {e}"))?;
-            disp_comp
-                .gpu_services
-                .connect(Arc::clone(&gpu))
-                .map_err(|e| format!("failed to bind gpu_services: {e}"))?;
-            disp_comp
-                .spdk_env
-                .connect(Arc::clone(&spdk_iface))
-                .map_err(|e| format!("failed to bind spdk_env: {e}"))?;
-            disp_comp
-                .logger
-                .connect(Arc::clone(&logger))
-                .map_err(|e| format!("failed to bind logger: {e}"))?;
-
-            query_interface!(disp_comp, IDispatcher).ok_or("failed to query IDispatcher")?
+    // Register the memory-tier pool with CUDA for pinned DMA transfers.
+    if let Some((pool_ptr, pool_size)) = mt.pool_info() {
+        let err = unsafe {
+            gpu_services::cuda_ffi::cudaHostRegister(
+                pool_ptr as *mut std::ffi::c_void,
+                pool_size,
+                0,
+            )
+        };
+        if err != gpu_services::cuda_ffi::CUDA_SUCCESS {
+            logger.warn(&format!(
+                "certus-server: cudaHostRegister failed (err={err}), \
+                 memory-tier transfers will use staged path"
+            ));
+        } else {
+            logger.info(&format!(
+                "certus-server: memory-tier pool registered with CUDA ({} MiB pinned)",
+                pool_size / (1024 * 1024)
+            ));
         }
-        "v0" => {
-            eprintln!("certus-server: initializing dispatcher v0 (staging)...");
-            let disp_comp = dispatcher::DispatcherComponentV0::new_default();
-            disp_comp
-                .dispatch_map
-                .connect(Arc::clone(&dm))
-                .map_err(|e| format!("failed to bind dispatch_map: {e}"))?;
-            disp_comp
-                .gpu_services
-                .connect(Arc::clone(&gpu))
-                .map_err(|e| format!("failed to bind gpu_services: {e}"))?;
-            disp_comp
-                .spdk_env
-                .connect(Arc::clone(&spdk_iface))
-                .map_err(|e| format!("failed to bind spdk_env: {e}"))?;
-            disp_comp
-                .logger
-                .connect(Arc::clone(&logger))
-                .map_err(|e| format!("failed to bind logger: {e}"))?;
+    }
 
-            query_interface!(disp_comp, IDispatcher).ok_or("failed to query IDispatcher")?
-        }
-        other => return Err(format!("unknown dispatcher version: {other} (use 'v0' or 'v1')")),
-    };
+    // --- Create dispatcher ---
+    logger.info("certus-server: initializing dispatcher...");
+    let disp_comp = dispatcher::DispatcherComponent::new_default();
+    disp_comp
+        .dispatch_map
+        .connect(Arc::clone(&dm))
+        .map_err(|e| format!("failed to bind dispatch_map: {e}"))?;
+    disp_comp
+        .memory_tier
+        .connect(Arc::clone(&mt))
+        .map_err(|e| format!("failed to bind memory_tier: {e}"))?;
+    disp_comp
+        .gpu_services
+        .connect(Arc::clone(&gpu))
+        .map_err(|e| format!("failed to bind gpu_services: {e}"))?;
+    disp_comp
+        .spdk_env
+        .connect(Arc::clone(&spdk_iface))
+        .map_err(|e| format!("failed to bind spdk_env: {e}"))?;
+    disp_comp
+        .logger
+        .connect(Arc::clone(&logger))
+        .map_err(|e| format!("failed to bind logger: {e}"))?;
+
+    let dispatcher: Arc<dyn IDispatcher + Send + Sync> =
+        query_interface!(disp_comp, IDispatcher).ok_or("failed to query IDispatcher")?;
 
     dispatcher
         .initialize(DispatcherConfig {
-            metadata_pci_addr: metadata_pci.to_string(),
-            data_pci_addrs: data_pci_addrs.to_vec(),
+            data_pci_addrs: device_pci_addrs.to_vec(),
+            format_on_init: format,
             ..Default::default()
         })
         .map_err(|e| format!("Dispatcher init failed: {e}"))?;
 
-    eprintln!("certus-server: component stack initialized");
-    Ok(dispatcher)
+    logger.info("certus-server: component stack initialized");
+    Ok((dispatcher, logger))
 }
 
 #[tokio::main]
@@ -275,19 +213,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     // Validate PCI addresses
-    validate_pci_address(&cli.metadata_pci)?;
-    for addr in &cli.data_pci {
+    for addr in &cli.device_pci {
         validate_pci_address(addr)?;
     }
 
-    eprintln!(
-        "certus-server: metadata={}, data={:?}, dispatcher={}",
-        cli.metadata_pci, cli.data_pci, cli.dispatcher_version
-    );
+    let pool_size = cli.memory_tier_size.unwrap_or(memory_tier::DEFAULT_POOL_SIZE);
+    let (dispatcher, logger) = initialize_component_stack(&cli.device_pci, pool_size, cli.format)?;
 
-    // Initialize Certus component stack
-    let dispatcher =
-        initialize_component_stack(&cli.metadata_pci, &cli.data_pci, &cli.dispatcher_version)?;
+    logger.info(&format!("certus-server: devices={:?}", cli.device_pci));
+    logger.info(&format!(
+        "certus-server: memory-tier-size={} MiB",
+        pool_size / (1024 * 1024)
+    ));
+    if cli.format {
+        logger.info("certus-server: --format specified, extent managers will be reformatted");
+    } else {
+        logger.info("certus-server: recovering extents from disk (use --format for clean slate)");
+    }
+
     let dispatcher_mutex = Arc::new(Mutex::new(dispatcher));
 
     let svc = DispatcherService::new(Arc::clone(&dispatcher_mutex));
@@ -301,27 +244,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let key = tokio::fs::read(key_path).await?;
         let identity = Identity::from_pem(cert, key);
         server = server.tls_config(ServerTlsConfig::new().identity(identity))?;
-        eprintln!("certus-server: TLS enabled");
+        logger.info("certus-server: TLS enabled");
     }
 
-    eprintln!("certus-server: listening on {addr}");
+    logger.info(&format!("certus-server: listening on {addr}"));
 
     let shutdown_flag = Arc::new(AtomicBool::new(false));
     let flag_clone = Arc::clone(&shutdown_flag);
+    let shutdown_logger = Arc::clone(&logger);
 
     server
         .add_service(service::dispatcher_server(svc))
         .serve_with_shutdown(addr, async move {
-            tokio::signal::ctrl_c().await.ok();
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut sigterm = signal(SignalKind::terminate()).expect("failed to register SIGTERM");
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {},
+                _ = sigterm.recv() => {},
+            }
             flag_clone.store(true, Ordering::Release);
-            eprintln!("\ncertus-server: shutting down...");
+            shutdown_logger.info("certus-server: shutting down...");
         })
         .await?;
 
     // Shutdown dispatcher
     let disp = dispatcher_mutex.lock().unwrap();
     let _ = disp.shutdown();
-    eprintln!("certus-server: shutdown complete");
+    logger.info("certus-server: shutdown complete");
 
     Ok(())
 }

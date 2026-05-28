@@ -16,7 +16,8 @@ use proto::dispatcher_server::{Dispatcher, DispatcherServer};
 use proto::{
     BatchCheckRequest, BatchCheckResponse, BatchLookupRequest, BatchLookupResponse,
     BatchPopulateRequest, BatchPopulateResponse, BatchRemoveRequest, BatchRemoveResponse,
-    BatchTouchRequest, BatchTouchResponse, CheckResult, EntryResult, ErrorCode,
+    BatchTouchRequest, BatchTouchResponse, CheckResult, ClearMemoryTierRequest,
+    ClearMemoryTierResponse, EntryResult, ErrorCode,
 };
 
 pub fn dispatcher_server(svc: DispatcherService) -> DispatcherServer<DispatcherService> {
@@ -188,58 +189,95 @@ impl Dispatcher for DispatcherService {
             // cudaIpcOpenMemHandle/Close for entries sharing the same handle.
             let mut ipc_cache: HashMap<[u8; 64], *mut std::ffi::c_void> = HashMap::new();
 
-            let results: Vec<_> = req.entries
-                .iter()
-                .map(|entry| {
-                    let handle = match entry.ipc_handle.as_ref() {
-                        Some(h) => h,
-                        None => {
-                            return error_result(
-                                entry.key,
-                                &DispatcherError::InvalidParameter(
-                                    "missing ipc_handle".into(),
-                                ),
-                            );
-                        }
-                    };
-                    let handle_key: [u8; 64] = match handle.cuda_ipc_handle.as_slice().try_into() {
-                        Ok(k) => k,
-                        Err(_) => {
-                            return error_result(
-                                entry.key,
-                                &DispatcherError::InvalidParameter(
-                                    format!("cuda_ipc_handle must be 64 bytes, got {}", handle.cuda_ipc_handle.len()),
-                                ),
-                            );
-                        }
-                    };
-                    let dev_ptr = match ipc_cache.get(&handle_key) {
-                        Some(&ptr) => ptr,
-                        None => {
-                            match open_cuda_ipc(&handle.cuda_ipc_handle) {
-                                Ok(ptr) => {
-                                    ipc_cache.insert(handle_key, ptr);
-                                    ptr
-                                }
-                                Err(e) => {
-                                    return error_result(
-                                        entry.key,
-                                        &DispatcherError::IoError(format!("IPC open failed: {e}")),
-                                    );
-                                }
-                            }
-                        }
-                    };
-                    let ipc = IpcHandle {
-                        address: dev_ptr as *mut u8,
-                        size: handle.size,
-                    };
-                    match disp.lookup(entry.key, ipc) {
-                        Ok(()) => success_result(entry.key),
-                        Err(e) => error_result(entry.key, &e),
+            // Build batch entries, validating IPC handles upfront.
+            let mut batch_entries: Vec<(u64, IpcHandle)> = Vec::with_capacity(req.entries.len());
+            let mut pre_errors: Vec<Option<EntryResult>> = vec![None; req.entries.len()];
+
+            for (i, entry) in req.entries.iter().enumerate() {
+                let handle = match entry.ipc_handle.as_ref() {
+                    Some(h) => h,
+                    None => {
+                        pre_errors[i] = Some(error_result(
+                            entry.key,
+                            &DispatcherError::InvalidParameter("missing ipc_handle".into()),
+                        ));
+                        batch_entries.push((entry.key, IpcHandle {
+                            address: std::ptr::null_mut(),
+                            size: 0,
+                        }));
+                        continue;
                     }
+                };
+                let handle_key: [u8; 64] = match handle.cuda_ipc_handle.as_slice().try_into() {
+                    Ok(k) => k,
+                    Err(_) => {
+                        pre_errors[i] = Some(error_result(
+                            entry.key,
+                            &DispatcherError::InvalidParameter(format!(
+                                "cuda_ipc_handle must be 64 bytes, got {}",
+                                handle.cuda_ipc_handle.len()
+                            )),
+                        ));
+                        batch_entries.push((entry.key, IpcHandle {
+                            address: std::ptr::null_mut(),
+                            size: 0,
+                        }));
+                        continue;
+                    }
+                };
+                let dev_ptr = match ipc_cache.get(&handle_key) {
+                    Some(&ptr) => ptr,
+                    None => match open_cuda_ipc(&handle.cuda_ipc_handle) {
+                        Ok(ptr) => {
+                            ipc_cache.insert(handle_key, ptr);
+                            ptr
+                        }
+                        Err(e) => {
+                            pre_errors[i] = Some(error_result(
+                                entry.key,
+                                &DispatcherError::IoError(format!("IPC open failed: {e}")),
+                            ));
+                            batch_entries.push((entry.key, IpcHandle {
+                                address: std::ptr::null_mut(),
+                                size: 0,
+                            }));
+                            continue;
+                        }
+                    },
+                };
+                batch_entries.push((entry.key, IpcHandle {
+                    address: dev_ptr as *mut u8,
+                    size: handle.size,
+                }));
+            }
+
+            // Filter to valid entries and call batch_lookup.
+            let valid_indices: Vec<usize> = (0..batch_entries.len())
+                .filter(|&i| pre_errors[i].is_none())
+                .collect();
+            let valid_batch: Vec<(u64, IpcHandle)> = valid_indices
+                .iter()
+                .map(|&i| {
+                    let (key, ref ipc) = batch_entries[i];
+                    (key, IpcHandle { address: ipc.address, size: ipc.size })
                 })
                 .collect();
+
+            let batch_results = disp.batch_lookup(&valid_batch);
+
+            // Merge results back.
+            let mut results: Vec<EntryResult> = Vec::with_capacity(req.entries.len());
+            let mut batch_iter = batch_results.into_iter();
+            for (i, entry) in req.entries.iter().enumerate() {
+                if let Some(err_result) = pre_errors[i].take() {
+                    results.push(err_result);
+                } else {
+                    match batch_iter.next().unwrap() {
+                        Ok(()) => results.push(success_result(entry.key)),
+                        Err(e) => results.push(error_result(entry.key, &e)),
+                    }
+                }
+            }
 
             // Close all cached IPC handles once at the end of the batch.
             for &ptr in ipc_cache.values() {
@@ -324,5 +362,23 @@ impl Dispatcher for DispatcherService {
         .map_err(|e| Status::internal(format!("task join error: {e}")))?;
 
         Ok(Response::new(BatchTouchResponse { results }))
+    }
+
+    async fn clear_memory_tier(
+        &self,
+        _request: Request<ClearMemoryTierRequest>,
+    ) -> Result<Response<ClearMemoryTierResponse>, Status> {
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let entries_cleared = tokio::task::spawn_blocking(move || {
+            let disp = dispatcher.lock().unwrap();
+            disp.clear_memory_tier()
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?
+        .map_err(|e| Status::internal(format!("clear_memory_tier failed: {e}")))?;
+
+        Ok(Response::new(ClearMemoryTierResponse {
+            entries_cleared: entries_cleared as u64,
+        }))
     }
 }

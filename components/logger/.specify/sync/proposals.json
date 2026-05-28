@@ -1,0 +1,19 @@
+{
+  "generated": "2026-05-21T00:00:00Z",
+  "based_on": "drift-report from 2026-05-21T00:00:00Z",
+  "proposals": [
+    {
+      "id": 1,
+      "spec": "001-logger-component",
+      "requirement": "FR-001",
+      "direction": "BACKFILL",
+      "description": "Update spec to use LoggerComponent instead of LoggerComponentV1",
+      "spec_text": "The component MUST be named LoggerComponentV1 and defined using the define_component! macro.",
+      "actual": "Component is named LoggerComponent (without V1 suffix) at src/lib.rs:124. The V1 suffix was removed intentionally as part of a codebase-wide naming cleanup.",
+      "resolution": "Replace all occurrences of LoggerComponentV1 with LoggerComponent in spec.md",
+      "rationale": "The V1 suffix removal was intentional and applied codebase-wide. Only one version exists. The spec should reflect the actual component name.",
+      "confidence": "HIGH",
+      "approved": true
+    }
+  ]
+}

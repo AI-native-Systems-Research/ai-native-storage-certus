@@ -1,0 +1,57 @@
+{
+  "report_date": "2026-05-28",
+  "spec": "components/dispatcher/specs/001-dispatcher-cache-interface/spec.md",
+  "implementation": [
+    "components/dispatcher/src/lib.rs",
+    "components/dispatcher/src/pipeline.rs",
+    "components/dispatcher/src/io_segmenter.rs",
+    "components/dispatcher/src/background.rs"
+  ],
+  "interface": "components/interfaces/src/idispatcher.rs",
+  "summary": {
+    "aligned": 29,
+    "drifted": 5,
+    "not_implemented": 0,
+    "unspecced_features": 1
+  },
+  "specs": [
+    {
+      "id": "001-dispatcher-cache-interface",
+      "title": "Dispatcher Cache Interface (Memory-Tier Architecture)",
+      "aligned": ["FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014", "FR-015", "FR-016", "FR-017", "FR-018", "FR-020", "FR-021", "FR-022", "FR-023", "FR-024", "FR-025", "FR-028", "FR-029", "FR-030", "FR-031", "FR-032", "FR-033", "FR-034", "FR-035", "FR-036", "FR-037", "FR-038"],
+      "drifted": [
+        {
+          "requirement": "FR-001",
+          "spec_text": "System MUST define an IDispatcher interface providing initialize, shutdown, lookup, lookup_async, check, remove, populate, prepare_store, commit_store, cancel_store, and touch methods.",
+          "actual": "Interface additionally includes batch_lookup(entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> for parallel cold promotion",
+          "location": "components/interfaces/src/idispatcher.rs:266",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "FR-019",
+          "spec_text": "Phase 1 issues up to 16 concurrent NVMe reads directly into unique offsets of the memory-tier slot",
+          "actual": "Pipeline accepts max_queue_depth parameter; single-entry path uses 16, batch path uses 16/num_queues (8 with 2 queues/drive) to prevent NVMe submission queue overflow",
+          "location": "components/dispatcher/src/pipeline.rs:244",
+          "severity": "minor"
+        },
+        {
+          "requirement": "User Story 9",
+          "spec_text": "promote_and_serve promotes a single cold entry sequentially via pipelined reader",
+          "actual": "batch_lookup additionally promotes multiple cold entries concurrently with per-drive parallelism (std::thread::scope) and multi-queue threads (MAX_QUEUES_PER_DRIVE=2)",
+          "location": "components/dispatcher/src/lib.rs:1024-1190",
+          "severity": "moderate"
+        }
+      ],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "batch_lookup with parallel per-drive multi-queue cold promotion",
+      "location": "components/dispatcher/src/lib.rs:865-1190",
+      "lines": 325,
+      "suggested_spec": "New FR + User Story 11"
+    }
+  ],
+  "conflicts": []
+}
