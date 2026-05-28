@@ -2529,9 +2529,9 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(Vec::new()),
+            RwLock::new(Vec::new()),
             Mutex::new(HashMap::new()),
-            Mutex::new(None),
+            RwLock::new(None),
             AtomicU64::new(0),
         ));
 
@@ -2996,9 +2996,9 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(Vec::new()),
+            RwLock::new(Vec::new()),
             Mutex::new(HashMap::new()),
-            Mutex::new(None),
+            RwLock::new(None),
             AtomicU64::new(0),
         );
         c.dispatch_map
