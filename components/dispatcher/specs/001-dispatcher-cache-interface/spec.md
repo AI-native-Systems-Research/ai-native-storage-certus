@@ -177,6 +177,24 @@ When the SSD data drives approach capacity, a background evictor removes the old
 
 ---
 
+### User Story 11 - Parallel Batch Cold Promotion (Priority: P1)
+
+A client application submits a batch of cache keys to `batch_lookup`. For entries in BlockDevice state (cold — evicted from memory-tier but on SSD), the dispatcher promotes them in parallel across drives and queue threads. Each data drive's cold entries are split across up to `MAX_QUEUES_PER_DRIVE` (default 2) threads, each with its own NVMe client channels and CUDA streams. Each thread uses a reduced NVMe pipeline depth (`16 / num_queues`) to share the drive's submission queue capacity without overflow. This delivers significantly higher single-client cold throughput by exploiting drive-level and queue-level parallelism.
+
+**Why this priority**: Single-entry sequential cold promotion yields only ~0.34 GB/s per client (limited by queue-depth-1 per drive). Parallel batch promotion reaches ~5.6 GB/s by saturating multiple drives and queues concurrently, closing the gap between cold and hot throughput for inference workloads that experience working-set churn.
+
+**Independent Test**: Can be tested by populating entries, clearing the memory-tier (forcing all to BlockDevice state), then calling `batch_lookup` with a batch of 20 keys and verifying all are served correctly with wall time significantly lower than 20 × sequential-lookup time.
+
+**Acceptance Scenarios**:
+
+1. **Given** 20 entries exist in BlockDevice state spread across 3 drives, **When** `batch_lookup` is called with all 20 keys and IPC handles, **Then** cold entries are promoted in parallel (per-drive thread groups), all results are returned in input order, and total latency is bounded by the slowest single drive (not sum of all entries).
+2. **Given** a batch contains a mix of MemoryTier (hot) and BlockDevice (cold) entries, **When** `batch_lookup` is called, **Then** hot entries are served inline without waiting for cold promotions to complete, and cold entries are promoted in parallel.
+3. **Given** `MAX_QUEUES_PER_DRIVE = 2`, **When** a drive has 10 cold entries, **Then** entries are split into two groups of 5, each processed by a separate thread with `max_queue_depth = 8` (16/2), keeping total per-drive NVMe commands at ≤16.
+4. **Given** a cold entry's NVMe read or GPU DMA fails, **When** the thread encounters the error, **Then** the error is reported for that entry only; other entries in the batch continue to be processed independently.
+5. **Given** entries that do not exist in the dispatch map, **When** `batch_lookup` is called, **Then** those entries receive `KeyNotFound` errors while valid entries are served normally.
+
+---
+
 ### Edge Cases
 
 - When memory-tier insertion fails during populate (pool full after eviction attempt), populate returns an `AllocationFailed` error to the caller and no dispatch map entry is created.
@@ -216,7 +234,7 @@ When the SSD data drives approach capacity, a background evictor removes the old
 
 ### Functional Requirements
 
-- **FR-001**: System MUST define an `IDispatcher` interface in the shared interfaces crate, providing `initialize`, `shutdown`, `lookup`, `lookup_async`, `check`, `remove`, `populate`, `prepare_store`, `commit_store`, `cancel_store`, and `touch` methods.
+- **FR-001**: System MUST define an `IDispatcher` interface in the shared interfaces crate, providing `initialize`, `shutdown`, `lookup`, `lookup_async`, `batch_lookup`, `check`, `remove`, `populate`, `prepare_store`, `commit_store`, `cancel_store`, and `touch` methods.
 - **FR-002**: System MUST define a `DispatcherError` error type in the shared interfaces crate, covering all failure modes (not initialized, key not found, duplicate key, I/O error, allocation failure, invalid parameter).
 - **FR-003**: The `populate(key, ipc_handle)` method MUST allocate a slot in the DRAM memory-tier via `IMemoryTier::insert()`, initiate DMA copy from the client's GPU memory into the memory-tier slot via `IGpuServices::dma_copy_to_host`, register the entry in the dispatch map as a MemoryTier entry (via `create_memory_tier_entry`), and enqueue an asynchronous background write-through job. MUST run `evict_for_space` if the memory-tier pool lacks capacity.
 - **FR-004**: After a successful populate, the system MUST asynchronously read from the memory-tier pointer (via `IMemoryTier::peek()` to avoid refreshing LRU order) and write the data to the SSD via the block device and extent manager (write-through), calling `convert_to_storage` on completion to record the SSD offset.
@@ -234,7 +252,7 @@ When the SSD data drives approach capacity, a background evictor removes the old
 - **FR-016**: The dispatcher MUST pass the data block device size and computed FormatParams to each extent manager's format function.
 - **FR-017**: When the asynchronous background write-through fails (extent allocation failure or block device I/O error), the background writer silently drops the job. The dispatch map entry remains in MemoryTier state. (Known limitation.)
 - **FR-018**: The `remove(key)` method does NOT block waiting for background write-through to complete. It proceeds immediately with removal.
-- **FR-019**: All block device I/O operations MUST be segmented to respect MDTS (typically 128 KiB). The primary promotion path uses a two-phase zero-copy pipeline: Phase 1 issues up to 16 concurrent NVMe reads directly into unique offsets of the memory-tier slot (CUDA-pinned + SPDK-registered via FR-035), completing all reads before Phase 2. Phase 2 issues GPU H2D async DMA copies in segment order from the memory-tier slot to the GPU destination, using alternating CUDA streams. The two-phase design ensures correct GPU memory layout regardless of NVMe completion ordering. A ring-buffer fallback path (`pipelined_ssd_to_gpu`) exists for when the memory-tier pool is not registered for DMA; it processes in batches of ring_size (8), completing all reads per batch before issuing GPU copies.
+- **FR-019**: All block device I/O operations MUST be segmented to respect MDTS (typically 128 KiB). The primary promotion path uses a two-phase zero-copy pipeline with a configurable `max_queue_depth` parameter: Phase 1 issues up to `max_queue_depth` concurrent NVMe reads directly into unique offsets of the memory-tier slot (CUDA-pinned + SPDK-registered via FR-035), completing all reads before Phase 2. Phase 2 issues GPU H2D async DMA copies in segment order from the memory-tier slot to the GPU destination, using alternating CUDA streams. The two-phase design ensures correct GPU memory layout regardless of NVMe completion ordering. The single-entry `promote_and_serve` path uses `max_queue_depth=16`. The `batch_lookup` path uses `16 / num_queues` per thread (where `num_queues` is the number of concurrent threads sharing the same drive) to prevent NVMe submission queue overflow while maximizing per-drive parallelism. A ring-buffer fallback path (`pipelined_ssd_to_gpu`) exists for when the memory-tier pool is not registered for DMA; it processes in batches of ring_size (8), completing all reads per batch before issuing GPU copies.
 - **FR-020**: The `prepare_store(key, size)` method MUST run eviction if the cache is over capacity, reserve an extent on the target data drive, register the key in the dispatch map, and return a DMA buffer for the caller to write into. MUST return `AlreadyExists` if the key exists, `AllocationFailed` if extent reservation fails, `InvalidParameter` if size is 0.
 - **FR-021**: The `commit_store(key)` method MUST write the pending DMA buffer contents to SSD using MDTS-aware segmented I/O, publish the extent metadata, and transition the dispatch map entry to block-device state. MUST return `KeyNotFound` if no pending write exists.
 - **FR-022**: The `cancel_store(key)` method MUST drop the pending write (aborting the extent reservation via WriteHandle destructor) and remove the dispatch map entry. MUST return `KeyNotFound` if no pending write exists.
@@ -254,6 +272,7 @@ When the SSD data drives approach capacity, a background evictor removes the old
 - **FR-036**: System MUST provide a `lookup_async(key, ipc_handle) -> Result<GpuStream, DispatcherError>` method on the `IDispatcher` interface. This method performs the same cache lookup as `lookup` (dispatch-map query, memory-tier hit, BlockDevice promotion, staging fallback) but returns a `GpuStream` handle instead of blocking on the H2D DMA transfer. The caller MUST call `stream_synchronize` on the returned stream before accessing the GPU destination memory. For non-memory-tier paths (staging, SSD promotion) the copy completes synchronously and a null stream is returned. The synchronous `lookup` method MUST delegate to `lookup_async` internally and call `stream_synchronize` before returning.
 - **FR-037**: The dispatcher MUST pre-allocate a dedicated CUDA stream (`warm_stream`) during `initialize()` for the memory-tier lookup hot path. This stream is used by `lookup_async` for `memcpy_h2d_async` on raw memory-tier pointers, avoiding the overhead of acquiring the `pipeline_ring` mutex and wrapping pointers in DmaBuffer. The warm stream MUST be destroyed during `shutdown()`.
 - **FR-038**: System MUST provide a `clear_memory_tier() -> Result<usize, DispatcherError>` method on the `IDispatcher` interface. This method evicts ALL entries from the memory-tier pool by calling `IMemoryTier::evict_lru()` in a loop until empty. For each evicted key, it transitions the dispatch-map entry to BlockDevice state via `convert_memory_tier_to_block`. If the transition fails (write-through not complete), the entry is removed from the dispatch map entirely. Returns the number of entries cleared. The `IMemoryTier` trait MUST also provide a `clear() -> Result<usize, MemoryTierError>` method that resets the pool (clears slots, LRU list, and allocator) in a single operation.
+- **FR-039**: System MUST provide a `batch_lookup(entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>>` method on the `IDispatcher` interface. This method processes a batch of lookup entries concurrently: (1) classifies all entries by dispatch-map state, (2) serves MemoryTier and Staging hits inline (same as single-entry `lookup`), (3) groups BlockDevice (cold) entries by target drive using `key % num_drives`, (4) spawns up to `MAX_QUEUES_PER_DRIVE` (default 2) threads per drive using `std::thread::scope`, each with its own NVMe client channels and CUDA streams, (5) each thread calls `pipelined_ssd_to_gpu_zero_copy` with `max_queue_depth = 16 / num_queues` to share the NVMe submission queue capacity, (6) merges results back in input order. Returns one `Result` per input entry.
 
 ### Key Entities
 
@@ -285,6 +304,7 @@ When the SSD data drives approach capacity, a background evictor removes the old
 - **SC-011**: Entries evicted from memory-tier but present on SSD can be promoted back via the pipelined reader on subsequent lookup.
 - **SC-012**: The pipelined reader correctly transfers MDTS-sized chunks from SSD to both memory-tier and GPU using the two-phase approach (all NVMe reads into unique memory-tier offsets, then ordered GPU H2D copies), producing correct data regardless of NVMe completion order.
 - **SC-013**: The background SSD evictor removes the oldest BlockDevice entries when SSD utilization exceeds the configured threshold, freeing extents until utilization drops below the low-water mark.
+- **SC-014**: `batch_lookup` with a batch of 20 cold entries across 3 drives completes with total wall time bounded by the slowest single drive (parallel promotion), achieving ≥5x throughput improvement over sequential single-entry lookups.
 
 ## Assumptions
 

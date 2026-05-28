@@ -29,7 +29,7 @@ exclude=kernel*5.14.0-687* kernel*5.14.0-7* rdma-core* libibverbs* ibacm* infini
 
 ```
 
-To check OFED is loaded and working do `modinfo ib_core` and check that it is pointing to extra not to drivers/infiniband. Make sure to install 'kernel-headers' package before trying to install OFED.
+To check OFED is loaded and working do `modinfo ib_core` and check that it is pointing to extra not to drivers/infiniband. Make sure to install 'kernel-headers' package before trying to install OFED.**
 
 Instal kernel source and development:
 ```

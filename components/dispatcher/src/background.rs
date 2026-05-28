@@ -1,16 +1,14 @@
 //! Background write worker for staging-to-SSD persistence and SSD eviction.
 
+use crossbeam_channel::{Receiver, Sender};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use component_core::query_interface;
 use extent_manager::ExtentManager;
-use interfaces::{
-    CacheKey, IDispatchMap, IExtentManager, ILogger, IMemoryTier, LookupResult,
-};
+use interfaces::{CacheKey, IDispatchMap, IExtentManager, ILogger, IMemoryTier, LookupResult};
 
 /// A job for the background writer to persist a staging buffer to SSD.
 #[derive(Debug)]
@@ -39,7 +37,8 @@ impl BackgroundWriter {
     where
         F: FnMut(WriteJob) + Send + 'static,
     {
-        let (sender, receiver): (Sender<WriteJob>, Receiver<WriteJob>) = std::sync::mpsc::channel();
+        let (sender, receiver): (Sender<WriteJob>, Receiver<WriteJob>) =
+            crossbeam_channel::unbounded();
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = Arc::clone(&shutdown);
 
@@ -67,6 +66,7 @@ impl BackgroundWriter {
     /// All jobs already in the channel are processed before the thread exits.
     pub fn shutdown(&mut self) {
         self.shutdown.store(true, Ordering::Release);
+        // Drop a cloned sender to help close the channel for any receivers.
         drop(self.sender.clone());
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
@@ -80,7 +80,7 @@ impl BackgroundWriter {
         loop {
             match receiver.recv_timeout(std::time::Duration::from_millis(50)) {
                 Ok(job) => process_job(job),
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                     if shutdown.load(Ordering::Acquire) {
                         while let Ok(job) = receiver.try_recv() {
                             process_job(job);
@@ -88,7 +88,7 @@ impl BackgroundWriter {
                         return;
                     }
                 }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
             }
         }
     }
