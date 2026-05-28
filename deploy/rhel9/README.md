@@ -25,7 +25,8 @@ sudo grubby --set-default=/boot/vmlinuz-5.14.0-611.30.1.el9_7.x86_64
 
 Prevent kernel upgrades, open /etc/dnf/dnf.conf and append the following instruction line:
 ```
-exclude=kernel*5.14.0-687* kernel*5.14.0-7*
+exclude=kernel*5.14.0-687* kernel*5.14.0-7* rdma-core* libibverbs* ibacm* infiniband-diags* perftest* librdmacm* libmlx5* libibumad* opensm*
+
 ```
 
 To check OFED is loaded and working do `modinfo ib_core` and check that it is pointing to extra not to drivers/infiniband. Make sure to install 'kernel-headers' package before trying to install OFED.

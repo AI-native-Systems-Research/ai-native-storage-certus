@@ -88,10 +88,10 @@ impl ExtentManager {
     pub fn new_inner() -> Arc<Self> {
         let component = ExtentManager::new_default();
 
-        // Default: automatic checkpoint every 5 minutes.
+        // Default: automatic checkpoint every 30 seconds.
         component
             .checkpoint_timer_state
-            .set_interval(Some(std::time::Duration::from_secs(300)));
+            .set_interval(Some(std::time::Duration::from_secs(30)));
 
         // Start background checkpoint thread.  The thread holds only
         // Arc<CheckpointTimerState> (for sleeping) and Weak<Self> (for
@@ -250,6 +250,7 @@ impl ExtentManager {
         }
 
         self.log_info("checkpoint_start");
+        let t0 = std::time::Instant::now();
 
         let ns_id = {
             let shared = self.shared.lock().unwrap();
@@ -281,7 +282,24 @@ impl ExtentManager {
             }
         }
 
-        self.log_info("checkpoint_complete");
+        let extent_count = {
+            let regions = self.regions.read();
+            regions.as_ref().map_or(0u64, |regions| {
+                regions.iter().map(|r| {
+                    let r = r.read();
+                    r.slabs.values().map(|slab| {
+                        (0..slab.num_slots() as usize)
+                            .filter(|&i| slab.get_key(i) != FREE_KEY)
+                            .count() as u64
+                    }).sum::<u64>()
+                }).sum()
+            })
+        };
+
+        let elapsed = t0.elapsed();
+        self.log_info(&format!(
+            "checkpoint_complete ({elapsed:.2?}, {extent_count} extents)"
+        ));
 
         Ok(())
     }

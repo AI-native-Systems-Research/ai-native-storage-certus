@@ -467,6 +467,27 @@ impl IDispatchMap for DispatchMapComponent {
             None => false,
         }
     }
+
+    fn recover_extent(
+        &self,
+        key: CacheKey,
+        offset: u64,
+        size_blocks: u32,
+    ) -> Result<(), DispatchMapError> {
+        let mut inner = self.state.inner.lock().unwrap();
+        if inner.entries.contains_key(&key) {
+            return Err(DispatchMapError::AlreadyExists(key));
+        }
+        let entry = DispatchEntry {
+            location: Location::BlockDevice { offset },
+            size_blocks,
+            read_ref: 0,
+            write_ref: 0,
+            tsc: rdtsc(),
+        };
+        inner.entries.insert(key, entry);
+        Ok(())
+    }
 }
 
 #[cfg(test)]

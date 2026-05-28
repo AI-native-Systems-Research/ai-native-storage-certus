@@ -588,6 +588,12 @@ impl DispatcherComponent {
                         "failed to format extent manager for data drive {i}: {e}"
                     ))
                 })?;
+            } else {
+                iem.initialize().map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "failed to recover extent manager for data drive {i}: {e}"
+                    ))
+                })?;
             }
 
             self.log_info(&format!(
@@ -632,6 +638,30 @@ impl IDispatcher for DispatcherComponent {
         if self.spdk_env.is_connected() {
             let drives = self.create_data_drives(&config)?;
             *self.data_drives.lock().unwrap() = drives;
+
+            // Rebuild dispatch-map from recovered extents when not formatting.
+            if !config.format_on_init {
+                let t0 = std::time::Instant::now();
+                let dm = self.dispatch_map.get().map_err(|_| {
+                    DispatcherError::NotInitialized("dispatch_map not bound".into())
+                })?;
+                let mut recovered: u64 = 0;
+                let drives_guard = self.data_drives.lock().unwrap();
+                for drive in drives_guard.iter() {
+                    let iem = query_interface!(drive.extent_mgr, IExtentManager).ok_or_else(|| {
+                        DispatcherError::IoError("failed to query IExtentManager during recovery".into())
+                    })?;
+                    iem.for_each_extent(&mut |extent| {
+                        let _ = dm.recover_extent(extent.key, extent.offset, extent.size);
+                        recovered += 1;
+                    });
+                }
+                drop(drives_guard);
+                let elapsed = t0.elapsed();
+                self.log_info(&format!(
+                    "dispatcher: dispatch-map recovered {recovered} extents from disk ({elapsed:.2?})"
+                ));
+            }
 
             // Pre-allocate pipeline ring for promote_and_serve (CUDA-pinned + SPDK-registered).
             if let Ok(gpu) = self.gpu_services.get() {
@@ -776,6 +806,20 @@ impl IDispatcher for DispatcherComponent {
         }
 
         self.pending_writes.lock().unwrap().clear();
+
+        // Checkpoint all extent managers to persist metadata before teardown.
+        {
+            let drives = self.data_drives.lock().unwrap();
+            for (i, drive) in drives.iter().enumerate() {
+                if let Some(iem) = query_interface!(drive.extent_mgr, IExtentManager) {
+                    if let Err(e) = iem.checkpoint() {
+                        self.log_error(&format!(
+                            "dispatcher: extent manager {i} checkpoint failed: {e}"
+                        ));
+                    }
+                }
+            }
+        }
 
         // Unregister memory-tier pool from CUDA/SPDK before tearing down.
         if let (Ok(gpu), Ok(mt)) = (self.gpu_services.get(), self.memory_tier.get()) {
@@ -1744,6 +1788,31 @@ mod tests {
                 ),
                 None => false,
             }
+        }
+
+        fn recover_extent(
+            &self,
+            key: CacheKey,
+            offset: u64,
+            _size_blocks: u32,
+        ) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.entries.contains_key(&key) {
+                return Err(DispatchMapError::AlreadyExists(key));
+            }
+            inner.entries.insert(
+                key,
+                MockEntry {
+                    location: MockEntryLocation::MemoryTier {
+                        pointer: std::ptr::null_mut(),
+                        size: 0,
+                        ssd_offset: Some(offset),
+                    },
+                    write_ref: false,
+                    read_refs: 0,
+                },
+            );
+            Ok(())
         }
     }
 

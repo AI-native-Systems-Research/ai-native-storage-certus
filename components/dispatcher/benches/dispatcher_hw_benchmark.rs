@@ -247,6 +247,19 @@ impl IDispatchMap for HwDispatchMap {
             None => Err(DispatchMapError::KeyNotFound(key)),
         }
     }
+
+    fn is_evictable(&self, _key: CacheKey) -> bool {
+        false
+    }
+
+    fn recover_extent(
+        &self,
+        _key: CacheKey,
+        _offset: u64,
+        _size_blocks: u32,
+    ) -> Result<(), DispatchMapError> {
+        Ok(())
+    }
 }
 
 // ===========================================================================

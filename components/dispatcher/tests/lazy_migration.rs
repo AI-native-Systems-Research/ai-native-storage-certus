@@ -236,6 +236,15 @@ impl IDispatchMap for MockDispatchMap {
         let inner = self.inner.lock().unwrap();
         inner.entries.contains_key(&key)
     }
+
+    fn recover_extent(
+        &self,
+        _key: CacheKey,
+        _offset: u64,
+        _size_blocks: u32,
+    ) -> Result<(), DispatchMapError> {
+        Ok(())
+    }
 }
 
 struct MockLogger;

@@ -27,7 +27,29 @@ import dispatcher_pb2_grpc
 
 assert torch.cuda.is_available(), "CUDA GPU required"
 
-BLOCK_SIZE = 4 * 1024 * 1024  # 4 MiB
+BLOCK_SIZE = 4 * 1024 * 1024  # 4 MiB (default, overridden by --block-size)
+
+
+def parse_size(s):
+    """Parse a human-readable size string (e.g. '128K', '4M', '2G') into bytes."""
+    s = s.strip()
+    if not s:
+        raise argparse.ArgumentTypeError("empty size string")
+    suffix = s[-1].upper()
+    multipliers = {"K": 1024, "M": 1024 * 1024, "G": 1024 * 1024 * 1024}
+    if suffix in multipliers:
+        num_str = s[:-1]
+        multiplier = multipliers[suffix]
+    else:
+        num_str = s
+        multiplier = 1
+    try:
+        value = int(num_str)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid size number: '{num_str}'")
+    if value <= 0:
+        raise argparse.ArgumentTypeError(f"size must be positive, got '{s}'")
+    return value * multiplier
 
 _libcudart = ctypes.CDLL("libcudart.so")
 _libcudart.cudaIpcGetMemHandle.restype = ctypes.c_int
@@ -60,6 +82,9 @@ class ClientResult:
         self.hot_latencies = []
         self.cold_latencies = []
         self.errors = []
+        self.populate_start = 0.0
+        self.populate_end = 0.0
+        self.populate_objects = 0
         self.hot_start = 0.0
         self.hot_end = 0.0
         self.cold_start = 0.0
@@ -333,6 +358,7 @@ def run_client(
     iterations,
     base_key,
     num_clients,
+    batch_size,
     barrier,
     result,
 ):
@@ -387,7 +413,6 @@ def run_client(
     total_objects = pool_capacity + cold_objects
 
     # --- Phase 1: Populate ---
-    batch_size = 10
     barrier.wait()  # synchronize start across all clients
 
     t_pop_start = time.perf_counter()
@@ -420,6 +445,9 @@ def run_client(
             result.errors.append(f"populate RPC error: {e.details()}")
             return
     t_pop_end = time.perf_counter()
+    result.populate_start = t_pop_start
+    result.populate_end = t_pop_end
+    result.populate_objects = total_objects
 
     # Wait for background write-through to flush to SSD.
     # All clients share the same SSD(s), so total flush volume is num_clients * data.
@@ -594,7 +622,7 @@ def print_stats(label, all_latencies, num_clients, wall_aggregate_gbps=None):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Certus multi-client throughput/latency benchmark (4 MiB blocks)"
+        description="Certus multi-client throughput/latency benchmark"
     )
     parser.add_argument(
         "--server",
@@ -620,6 +648,18 @@ def main():
         help="Lookup iterations per phase (default: 10)",
     )
     parser.add_argument(
+        "--block-size",
+        type=parse_size,
+        default=None,
+        help="Block size (e.g. 4M, 128K, 1G). Defaults to 4M.",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=10,
+        help="Number of requests per batch/RPC call per client (default: 10)",
+    )
+    parser.add_argument(
         "--verify-integrity",
         action="store_true",
         help="Run data integrity check (populate with known patterns, verify hot and cold reads)",
@@ -632,9 +672,14 @@ def main():
     )
     args = parser.parse_args()
 
+    global BLOCK_SIZE
+    if args.block_size is not None:
+        BLOCK_SIZE = args.block_size
+
     num_clients = args.clients
     num_objects = args.num_objects
     iterations = args.iterations
+    batch_size = args.batch_size
 
     pool_capacity = (256 * 1024 * 1024) // BLOCK_SIZE
     cold_per_client = num_objects * iterations
@@ -646,6 +691,7 @@ def main():
     print(f"  Server:            {args.server}")
     print(f"  Clients:           {num_clients}")
     print(f"  Block size:        {BLOCK_SIZE // (1024*1024)} MiB")
+    print(f"  Batch size:        {batch_size}")
     print(f"  Objects/batch:     {num_objects}")
     print(f"  Iterations:        {iterations}")
     print(f"  Pool capacity:     {pool_capacity} objects (256 MiB)")
@@ -677,6 +723,7 @@ def main():
                 iterations,
                 base_keys[i],
                 num_clients,
+                batch_size,
                 barrier,
                 results[i],
             ),
@@ -713,10 +760,16 @@ def main():
 
     # Compute true wall-clock aggregate throughput:
     # total bytes transferred by ALL clients / elapsed wall time (first start to last end)
+    pop_wall_agg = None
     hot_wall_agg = None
     cold_wall_agg = None
+    active_pop = [r for r in results if r.populate_objects > 0]
     active_hot = [r for r in results if r.hot_objects > 0]
     active_cold = [r for r in results if r.cold_objects > 0]
+    if active_pop:
+        pop_elapsed = max(r.populate_end for r in active_pop) - min(r.populate_start for r in active_pop)
+        pop_total_bytes = sum(r.populate_objects for r in active_pop) * BLOCK_SIZE
+        pop_wall_agg = (pop_total_bytes / pop_elapsed / 1e9) if pop_elapsed > 0 else 0
     if active_hot:
         hot_elapsed = max(r.hot_end for r in active_hot) - min(r.hot_start for r in active_hot)
         hot_total_bytes = sum(r.hot_objects for r in active_hot) * BLOCK_SIZE
@@ -732,7 +785,7 @@ def main():
     print()
     print("  Latency per object (all clients combined):")
     print()
-    print_stats("Populate", all_populate, num_clients)
+    print_stats("Populate", all_populate, num_clients, pop_wall_agg)
     print()
     print_stats("Lookup (hot)", all_hot, num_clients, hot_wall_agg)
     print()
