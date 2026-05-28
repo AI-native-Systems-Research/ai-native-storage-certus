@@ -1,14 +1,14 @@
 ---
 name: tools-init-creusot
 description: Prepare an existing Cargo project to use Creusot formal verification
-argument-hint: <project-directory>  (e.g. components/extent-manager/v2)
+argument-hint: <project-directory>  (e.g. components/extent-manager)
 ---
 
 This skill takes a cargo project directory and configures it for Creusot verification.
 
 ## Input
 
-The user must provide the target project directory as an argument (e.g. `/tools-init-creusot components/dispatch-map/v0`).
+The user must provide the target project directory as an argument (e.g. `/tools-init-creusot components/dispatch-map`).
 
 If no argument is provided, show the hint and stop.
 

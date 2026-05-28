@@ -282,6 +282,8 @@ fn run_zero_copy_bench(
     let label = format!("zero_copy_{}KiB", total_bytes / 1024);
     let chunk_size = ctx.max_transfer;
 
+    const MAX_QUEUE_DEPTH: usize = 4;
+
     // Warmup
     for _ in 0..WARMUP_ITERS {
         unsafe {
@@ -295,6 +297,7 @@ fn run_zero_copy_bench(
                 0,
                 total_bytes,
                 chunk_size,
+                MAX_QUEUE_DEPTH,
             )
         }
         .map_err(|e| format!("warmup: {e}"))?;
@@ -315,6 +318,7 @@ fn run_zero_copy_bench(
                 0,
                 total_bytes,
                 chunk_size,
+                MAX_QUEUE_DEPTH,
             )
         }
         .map_err(|e| format!("iteration {i}: {e}"))?;
