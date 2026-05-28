@@ -81,7 +81,9 @@ jobs:
           key: kani-0.67.0-v2-${{ runner.os }}
 
       - name: Install Kani verifier
+        id: kani-install
         if: steps.kani-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
         run: |
           cargo install kani-verifier --version 0.67.0 --locked
           cargo kani setup
