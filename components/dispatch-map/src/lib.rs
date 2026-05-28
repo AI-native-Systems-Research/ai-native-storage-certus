@@ -458,6 +458,7 @@ mod verification {
             size_blocks: 1,
             read_ref,
             write_ref,
+            tsc: 0,
         }
     }
 
