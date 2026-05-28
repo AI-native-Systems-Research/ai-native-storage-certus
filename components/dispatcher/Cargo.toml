@@ -16,6 +16,8 @@ block-device-spdk-nvme.workspace = true
 extent-manager.workspace = true
 memory-tier.workspace = true
 libc = "0.2"
+crossbeam-channel = "0.5"
+parking_lot = "0.12"
 
 [features]
 hardware-test = []

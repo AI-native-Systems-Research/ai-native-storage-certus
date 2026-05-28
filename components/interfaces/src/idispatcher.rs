@@ -256,6 +256,18 @@ component_macros::define_interface! {
         /// ```
         fn lookup_async(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<GpuStream, DispatcherError>;
 
+        /// Batch lookup: retrieve multiple cache entries concurrently.
+        ///
+        /// For entries in the memory-tier or staging, behaves like sequential
+        /// lookups. For entries on SSD (cold path), promotes them in parallel
+        /// to exploit multi-drive bandwidth.
+        ///
+        /// Returns one `Result` per input entry, in the same order.
+        fn batch_lookup(
+            &self,
+            entries: &[(CacheKey, IpcHandle)],
+        ) -> Vec<Result<(), DispatcherError>>;
+
         /// Check whether a cache entry exists without transferring data.
         ///
         /// Returns `true` if the key is present in the cache (any tier),

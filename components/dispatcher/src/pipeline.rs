@@ -251,6 +251,7 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
     start_lba: u64,
     total_bytes: usize,
     chunk_size: usize,
+    max_queue_depth: usize,
 ) -> Result<(), DispatcherError> {
     let block_size = drive.block_size() as usize;
     let aligned_bytes = total_bytes.next_multiple_of(block_size);
@@ -283,11 +284,7 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
         })
         .collect::<Result<Vec<_>, DispatcherError>>()?;
 
-    // Submit all async reads into unique memory-tier chunk offsets. Since each
-    // chunk targets a unique address, completions may arrive in any order and the
-    // final memory content is correct regardless of ordering.
-    const ZERO_COPY_DEPTH: usize = 16;
-    let max_inflight = ZERO_COPY_DEPTH.min(num_chunks);
+    let max_inflight = max_queue_depth.min(num_chunks);
 
     for i in 0..max_inflight {
         channels
