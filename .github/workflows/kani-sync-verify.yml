@@ -76,7 +76,7 @@ jobs:
           path: |
             ~/.cargo/bin/cargo-kani
             ~/.kani/
-          key: kani-0.67.0-${{ runner.os }}
+          key: kani-0.67.0-v2-${{ runner.os }}
 
       - name: Install Kani verifier
         if: steps.kani-cache.outputs.cache-hit != 'true'
