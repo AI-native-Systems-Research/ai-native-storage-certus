@@ -84,6 +84,14 @@ jobs:
           cargo install kani-verifier --version 0.67.0 --locked
           cargo kani setup
 
+      - name: Diagnose Kani environment
+        run: |
+          echo "cache-hit: ${{ steps.kani-cache.outputs.cache-hit }}"
+          echo "cargo-kani location: $(which cargo-kani 2>/dev/null || echo NOT FOUND)"
+          cargo kani --version || echo "cargo kani --version FAILED"
+          echo "rustup show:"
+          rustup show
+
       - name: Run Kani harnesses — dispatch-map
         run: |
           cargo kani --package dispatch-map
