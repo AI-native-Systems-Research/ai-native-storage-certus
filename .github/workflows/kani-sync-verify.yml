@@ -30,6 +30,10 @@ permissions:
   contents: write
   issues: write
 
+concurrency:
+  group: kani-sync-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   sync-and-verify:
     name: Merge unstable → unstable-kani and run Kani
@@ -65,6 +69,7 @@ jobs:
       # Kani requires a specific nightly toolchain. Pin to the version
       # that matches the installed kani-verifier (see cache key below).
       - name: Install Rust nightly
+        continue-on-error: true
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2025-11-21
@@ -111,10 +116,12 @@ jobs:
       # Always push unstable-kani as long as the merge succeeded.
       - name: Push updated unstable-kani
         if: steps.merge.outputs.merged == 'true'
+        continue-on-error: true
         run: git push origin unstable-kani
 
       # Open an issue if any Kani harness failed — visibility without blocking.
       - name: Open issue on Kani failure
+        continue-on-error: true
         if: |
           steps.kani-dispatch-map.outcome == 'failure' ||
           steps.kani-helloworld.outcome == 'failure' ||
