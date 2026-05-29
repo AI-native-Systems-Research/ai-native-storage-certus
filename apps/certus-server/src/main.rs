@@ -7,7 +7,7 @@
 mod service;
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use clap::Parser;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
@@ -48,6 +48,13 @@ struct Cli {
     /// Path to TLS private key file (enables TLS when provided with --tls-cert)
     #[arg(long = "tls-key")]
     tls_key: Option<String>,
+
+    /// Pin each NVMe poller thread to a dedicated CPU core.
+    /// Drive N is pinned to core (poller-base-cpu + N).
+    /// Recommended: pick cores in the same NUMA zone as the drives
+    /// (e.g. --poller-base-cpu 2 for drives on NUMA 0 with 4 drives → cores 2,3,4,5).
+    #[arg(long = "poller-base-cpu")]
+    poller_base_cpu: Option<usize>,
 }
 
 fn parse_size(s: &str) -> Result<usize, String> {
@@ -97,6 +104,7 @@ fn initialize_component_stack(
     device_pci_addrs: &[String],
     memory_tier_size: usize,
     format: bool,
+    poller_base_cpu: Option<usize>,
 ) -> Result<(Arc<dyn IDispatcher + Send + Sync>, Arc<dyn ILogger + Send + Sync>), String> {
     let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponent::new_default();
 
@@ -200,6 +208,7 @@ fn initialize_component_stack(
         .initialize(DispatcherConfig {
             data_pci_addrs: device_pci_addrs.to_vec(),
             format_on_init: format,
+            poller_base_cpu,
             ..Default::default()
         })
         .map_err(|e| format!("Dispatcher init failed: {e}"))?;
@@ -218,7 +227,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let pool_size = cli.memory_tier_size.unwrap_or(memory_tier::DEFAULT_POOL_SIZE);
-    let (dispatcher, logger) = initialize_component_stack(&cli.device_pci, pool_size, cli.format)?;
+    let (dispatcher, logger) = initialize_component_stack(&cli.device_pci, pool_size, cli.format, cli.poller_base_cpu)?;
 
     logger.info(&format!("certus-server: devices={:?}", cli.device_pci));
     logger.info(&format!(
@@ -231,9 +240,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         logger.info("certus-server: recovering extents from disk (use --format for clean slate)");
     }
 
-    let dispatcher_mutex = Arc::new(Mutex::new(dispatcher));
-
-    let svc = DispatcherService::new(Arc::clone(&dispatcher_mutex));
+    let svc = DispatcherService::new(Arc::clone(&dispatcher));
 
     let addr = cli.listen.parse()?;
 
@@ -268,8 +275,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     // Shutdown dispatcher
-    let disp = dispatcher_mutex.lock().unwrap();
-    let _ = disp.shutdown();
+    let _ = dispatcher.shutdown();
     logger.info("certus-server: shutdown complete");
 
     Ok(())
