@@ -2,7 +2,7 @@
 
 **Feature Branch**: `dispatcher`  
 **Created**: 2026-05-05  
-**Updated**: 2026-05-27  
+**Updated**: 2026-05-29  
 **Status**: Draft  
 **Input**: User description: "Build an application that exposes an instance of the dispatcher component, and its interface IDispatcher, to a Python client via gRPC. The gRPC protocol should expose the methods on the IDispatcher interface. Configuration parameters, such as PCI addresses for data NVMe devices, should be command line configurable. The implementation must include a Python test-client that provides basic testing. The protocol should support multi-instance list-based parameters."
 
@@ -112,18 +112,20 @@ A Python client submits a batch of cache keys to `touch`. The server calls the d
 - **FR-008c**: The memory-tier pool MUST be registered with CUDA via `cudaHostRegister` after initialization to enable pinned DMA transfers between GPU and the memory tier. If registration fails, the server logs a warning and continues (staged transfer path is used as fallback).
 - **FR-009**: The server MUST shut down the dispatcher when receiving SIGTERM/SIGINT, draining active requests and completing all in-flight operations before exiting.
 - **FR-010**: A Python test client MUST be provided that exercises all gRPC methods, demonstrating batch operations and error handling.
-- **FR-011**: The IPC handle in the gRPC protocol MUST be represented as a serializable structure containing a CUDA IPC memory handle (64-byte opaque blob from `cudaIpcGetMemHandle`) and a size field (`uint32`, data size in bytes). The server opens the IPC handle via `cudaIpcOpenMemHandle` to obtain a device pointer in its own CUDA context, performs the operation, then closes the handle via `cudaIpcCloseMemHandle`.
+- **FR-011**: The IPC handle in the gRPC protocol MUST be represented as a serializable structure containing: (1) a CUDA IPC memory handle (`bytes`, 64-byte opaque blob from `cudaIpcGetMemHandle`), (2) a size field (`uint32`, data size in bytes), and (3) a `gpu_device_id` field (`int32`, the CUDA device ordinal that allocated the memory). The client MUST populate `gpu_device_id` so the server can call `cudaSetDevice` on the correct device before opening the handle. The server opens the IPC handle via `cudaIpcOpenMemHandle` to obtain a device pointer in its own CUDA context; the device pointer is cached for the lifetime of the request batch (see FR-018). Handles are released via `cudaIpcCloseMemHandle` when no longer needed.
 - **FR-013**: The server MUST accept multiple client connections but serialize request processing (one request at a time). Concurrent requests are queued, not rejected. Serialization is achieved via a Mutex around the dispatcher reference; gRPC request handlers use `spawn_blocking` to avoid blocking the async runtime.
 - **FR-014**: The server MUST support optional TLS encryption via CLI flags (`--tls-cert`, `--tls-key`). When both are provided, TLS is enabled. When not provided, the server runs in plaintext mode.
 - **FR-015**: The server MUST pre-validate batch requests for duplicate keys. If a batch contains the same key more than once, the entire batch MUST be rejected with an error identifying the duplicate key(s).
 - **FR-016**: The server MUST support multiple data NVMe devices. The `--device-pci` CLI argument is repeatable, and all provided PCI addresses are passed to the dispatcher via `DispatcherConfig.data_pci_addrs` for multi-SSD striping/distribution.
 - **FR-017**: The server MUST expose a `ClearMemoryTier` gRPC method that accepts an empty request and calls the dispatcher's `clear_memory_tier()` method. The response MUST include the number of entries cleared (`entries_cleared: uint64`). This operation evicts all entries from the server's DRAM memory-tier, demoting them to SSD-backed state in the dispatch map.
+- **FR-018**: The server MUST maintain a global, process-lifetime IPC handle cache (keyed by the 64-byte CUDA IPC handle bytes) on the `DispatcherService` instance. Each cache entry stores the opened device pointer (`dev_ptr`), the `gpu_device_id` used when opening, and a reference count. When a batch operation requires an IPC handle: if the handle is already in the cache the existing device pointer is reused and the reference count is incremented; if the handle is not cached, the server opens it via `cudaIpcOpenMemHandle` (after calling `cudaSetDevice`, per FR-019), inserts it with `refcount = 1`, and records the opened pointer. After processing a batch, the server decrements the reference count for each handle opened during that batch; when the reference count reaches zero, the server calls `cudaIpcCloseMemHandle` and removes the entry from the cache. This design eliminates "resource already mapped" errors from concurrent batches and removes serialization on CUDA's global IPC lock.
+- **FR-019**: Before calling `cudaIpcOpenMemHandle` for a handle that is not already in the IPC cache, the server MUST call `cudaSetDevice(gpu_device_id)` when the `gpu_device_id` field of the `IpcHandle` message is non-negative (>= 0). If `cudaSetDevice` fails, the server MUST propagate the error as an `IoError` for that entry without opening the handle. This ensures the server CUDA context is associated with the correct device before the handle is opened, which is required for correct operation on multi-GPU systems.
 
 ### Key Entities
 
 - **DispatcherConfig**: Configuration containing a list of data PCI addresses (`data_pci_addrs: Vec<String>`).
 - **CacheKey**: A 64-bit unsigned integer identifying a cache entry.
-- **IpcHandle**: Opaque handle to client GPU memory containing a 64-byte CUDA IPC memory handle and a size (uint32).
+- **IpcHandle**: Opaque handle to client GPU memory containing: a 64-byte CUDA IPC memory handle (`bytes`), a data size (`uint32`), and the CUDA device ordinal that allocated the memory (`gpu_device_id: int32`). The `gpu_device_id` field is used by the server to call `cudaSetDevice` before opening the IPC handle (see FR-019).
 - **EntryResult**: Per-entry outcome containing the original key, success/failure status, and optional error information.
 - **CheckResult**: Per-entry outcome for check operations containing the key and a boolean `exists` field.
 - **BatchRequest**: A list of operation parameters (key + optional ipc_handle) sent in a single gRPC call.
@@ -166,6 +168,12 @@ The server initializes components in the following order:
 - Q: Is a metadata device required? → A: No. The `--metadata-pci` argument has been removed. The dispatch map operates ephemerally without persistent storage. Only data NVMe devices are configured.
 - Q: Does the dispatch map persist state across restarts? → A: No. The dispatch map starts fresh on each server launch. There is no extent manager or on-disk persistence for the mapping table.
 - Q: How is GPU DMA performance optimized? → A: The memory-tier pool is registered with CUDA via `cudaHostRegister` after initialization, enabling pinned (zero-copy) DMA transfers. If registration fails, the server falls back to a staged transfer path.
+
+### Session 2026-05-29
+
+- Q: How does the server avoid "resource already mapped" errors when multiple concurrent batches reference the same CUDA IPC handle? → A: A global persistent IPC handle cache on `DispatcherService` keyed by the 64-byte handle bytes deduplicates open/close calls. Concurrent batches sharing a handle increment/decrement a reference count; `cudaIpcCloseMemHandle` is only called when the count reaches zero. This removes serialization on CUDA's global IPC lock and eliminates the "resource already mapped" error class entirely.
+- Q: When must the server call `cudaSetDevice`? → A: Immediately before calling `cudaIpcOpenMemHandle` for any handle not already in the cache, using the `gpu_device_id` provided in the `IpcHandle` message. Required for multi-GPU correctness; skipped when `gpu_device_id < 0` (sentinel value meaning "not specified").
+- Q: Does the IpcHandle proto message need a device identifier? → A: Yes. Field 3 (`gpu_device_id: int32`) was added to carry the CUDA device ordinal from the client so the server can call `cudaSetDevice` correctly before opening the handle.
 
 ## Assumptions
 

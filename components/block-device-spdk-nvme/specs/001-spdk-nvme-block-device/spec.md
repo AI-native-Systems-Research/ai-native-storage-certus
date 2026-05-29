@@ -204,7 +204,7 @@ confirm functionality is restored.
 - **FR-012**: Each component instance MUST be associated with a single NVMe controller device, configured via `IBlockDeviceAdmin::set_pci_address` and attached via `IBlockDeviceAdmin::initialize` (see FR-021).
 - **FR-013**: The actor service thread MUST be pinned to a core in the same NUMA zone as the NVMe controller device.
 - **FR-014**: The actor thread MUST poll all attached client channels.
-- **FR-015**: The component MUST exploit different NVMe IO queues with varying queue depths to minimize latency for a given batch size.
+- **FR-015**: The component MUST exploit different NVMe IO queues with varying queue depths to minimize latency for a given batch size. The queue pair pool MUST allocate queue pairs at standard depths [4, 16, 64, 256] (capped by the controller's maximum queue depth). The selection heuristic MUST choose the shallowest queue pair with sufficient available capacity for the batch, falling back to the deepest queue pair when all queues are at capacity. Each queue pair's `io_queue_requests` MUST be set to `depth * 2` to allow for SPDK request splitting.
 - **FR-016**: The component MUST use a ILogger receptacle for debug logging; LoggerComponent MUST be usable for testing.
 - **FR-017**: The component MUST use the spdk-env component for SPDK initialization.
 - **FR-018**: Client-provided DmaBuffer structs MUST be accepted for read/write memory. Arc references MUST be usable in messages since clients are in-process.
@@ -214,6 +214,7 @@ confirm functionality is restored.
 - **FR-022**: The actor MUST use a hardware TSC (Time Stamp Counter) clock (`TscClock`) for async operation timeout checking, calibrated once at construction against `clock_gettime`. Timeout checks are throttled to approximately once per millisecond using TSC comparison.
 - **FR-023**: The actor MUST use a `ContextPool` slab allocator for async IO context objects, eliminating per-IO heap allocation. Contexts are acquired at submission and returned to the pool in the SPDK completion callback.
 - **FR-024**: The actor MUST use pre-allocated scratch buffers (`completion_scratch`, `timeout_scratch`) for draining completions and collecting timed-out handles, avoiding allocation in the hot path.
+- **FR-025**: When an asynchronous NVMe command submission fails with ENOMEM (rc=-12, indicating the submission queue or internal tracker pool is full), the actor MUST retry the submission in a tight loop for up to 50ms. On each retry iteration the actor MUST poll all queue pairs for hardware completions to free submission slots. If the deadline expires without a successful submit, the operation MUST be failed with an error completion sent to the client.
 
 ### Key Entities
 
