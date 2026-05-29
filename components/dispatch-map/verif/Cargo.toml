@@ -1,0 +1,16 @@
+[package]
+name = "dispatch-map-verif"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+creusot-std = "0.12.0-dev"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(creusot)'] }
+
+[patch.crates-io]
+creusot-std = { path = "../../../tools/creusot/creusot/creusot-std" }

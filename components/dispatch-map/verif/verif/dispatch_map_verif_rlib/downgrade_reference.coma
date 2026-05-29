@@ -1,0 +1,187 @@
+(* #"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 125 0 125 85 *)
+
+let%span slib = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 126 26 126 27
+let%span slib'0 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 129 22 129 23
+let%span slib'1 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 130 54 130 55
+let%span slib'2 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 130 27 130 56
+let%span slib'3 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 119 11 119 34
+let%span slib'4 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 120 11 120 36
+let%span slib'5 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 121 11 121 41
+let%span slib'6 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 122 10 122 36
+let%span slib'7 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 123 10 123 55
+let%span slib'8 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 124 10 124 35
+let%span slib'9 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 45 16 45 58
+let%span snum = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/num.rs" 306 20 307 89
+let%span snum'0 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/num.rs" 310 26 310 87
+let%span sord = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 162 41 162 102
+let%span sord'0 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 168 41 168 99
+let%span sord'1 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 174 41 174 99
+let%span sord'2 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 180 41 180 102
+let%span sord'3 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 186 41 186 83
+let%span sord'4 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 192 42 192 59
+let%span sord'5 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 193 42 193 59
+let%span sord'6 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 194 41 194 58
+let%span sord'7 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 200 42 200 83
+let%span sord'8 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 201 41 201 85
+let%span sord'9 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 207 42 207 86
+let%span sord'10 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 208 41 208 82
+let%span sord'11 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 214 41 214 97
+let%span sord'12 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 296 16 302 17
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_Location = Staging UInt64.t | BlockDevice UInt64.t | MemoryTier UInt64.t UInt32.t t_Option_u64
+
+type t_DispatchEntry = {
+  location: t_Location;
+  size_blocks: UInt32.t;
+  read_ref: UInt32.t;
+  write_ref: UInt32.t;
+  tsc: UInt64.t }
+
+predicate resolve_refmut_DispatchEntry [@inline:trivial] (_1: MutBorrow.t t_DispatchEntry) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_DispatchEntry
+
+type t_DispatchMapError =
+  | InvalidSize
+  | AlreadyExists
+  | KeyNotFound
+  | Timeout
+  | RefCountOverflow
+  | RefCountUnderflow
+  | NoWriteReference
+  | ActiveReferences
+  | InvalidState
+
+type t_Result_unit_DispatchMapError = Ok () | Err t_DispatchMapError
+
+type t_Option_u32 = None'0 | Some'0 UInt32.t
+
+constant const_MIN: UInt32.t = (0: UInt32.t)
+
+constant const_MAX: UInt32.t = (4294967295: UInt32.t)
+
+let checked_add (self_: UInt32.t) (rhs: UInt32.t) (return (x: t_Option_u32)) = any
+  [ return (result: t_Option_u32) ->
+  {[@stop_split] [@expl:checked_add ensures] ([@stop_split] [@expl:checked_add ensures #0] [%#snum] (result = None'0)
+      = (UInt32.t'int self_ + UInt32.t'int rhs < UInt32.t'int const_MIN
+      \/ UInt32.t'int self_ + UInt32.t'int rhs > UInt32.t'int const_MAX))
+    /\ ([@stop_split] [@expl:checked_add ensures #1] [%#snum'0] forall r: UInt32.t. result = Some'0 r
+      -> UInt32.t'int r = UInt32.t'int self_ + UInt32.t'int rhs)}
+    (! return {result}) ]
+
+let elim_Some (_x: t_Option_u32) (return (f0: UInt32.t)) = any
+  [ _k (f0: UInt32.t) -> {Some'0 f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some'0 _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+predicate inv_write_binary [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 44 0 44 50] (e: t_DispatchEntry) =
+  [%#slib'9] e.write_ref = (0: UInt32.t) \/ e.write_ref = (1: UInt32.t)
+
+type t_Ordering = Less | Equal | Greater
+
+function cmp_log_u32 (self: UInt32.t) (o: UInt32.t) : t_Ordering = [%#sord'12] if UInt32.lt self o then
+    Less
+  else
+    if self = o then Equal else Greater
+
+
+function eq_cmp_u32 (x: UInt32.t) (y: UInt32.t) : ()
+
+axiom eq_cmp_u32_spec: forall x: UInt32.t, y: UInt32.t. [%#sord'11] (x = y) = (cmp_log_u32 x y = Equal)
+
+function antisym2_u32 (x: UInt32.t) (y: UInt32.t) : ()
+
+axiom antisym2_u32_spec: forall x: UInt32.t, y: UInt32.t. ([%#sord'9] cmp_log_u32 x y = Greater)
+    -> ([%#sord'10] cmp_log_u32 y x = Less)
+
+function antisym1_u32 (x: UInt32.t) (y: UInt32.t) : ()
+
+axiom antisym1_u32_spec: forall x: UInt32.t, y: UInt32.t. ([%#sord'7] cmp_log_u32 x y = Less)
+    -> ([%#sord'8] cmp_log_u32 y x = Greater)
+
+function trans_u32 (x: UInt32.t) (y: UInt32.t) (z: UInt32.t) (o: t_Ordering) : ()
+
+axiom trans_u32_spec: forall x: UInt32.t, y: UInt32.t, z: UInt32.t, o: t_Ordering. ([%#sord'4] cmp_log_u32 x y = o)
+    -> ([%#sord'5] cmp_log_u32 y z = o) -> ([%#sord'6] cmp_log_u32 x z = o)
+
+function refl_u32 (x: UInt32.t) : ()
+
+axiom refl_u32_spec: forall x: UInt32.t. [%#sord'3] cmp_log_u32 x x = Equal
+
+function cmp_gt_log_u32 (x: UInt32.t) (y: UInt32.t) : ()
+
+axiom cmp_gt_log_u32_spec: forall x: UInt32.t, y: UInt32.t. [%#sord'2] UInt32.gt x y = (cmp_log_u32 x y = Greater)
+
+function cmp_ge_log_u32 (x: UInt32.t) (y: UInt32.t) : ()
+
+axiom cmp_ge_log_u32_spec: forall x: UInt32.t, y: UInt32.t. [%#sord'1] UInt32.ge x y = (cmp_log_u32 x y <> Less)
+
+function cmp_lt_log_u32 (x: UInt32.t) (y: UInt32.t) : ()
+
+axiom cmp_lt_log_u32_spec: forall x: UInt32.t, y: UInt32.t. [%#sord'0] UInt32.lt x y = (cmp_log_u32 x y = Less)
+
+function cmp_le_log_u32 (x: UInt32.t) (y: UInt32.t) : ()
+
+axiom cmp_le_log_u32_spec: forall x: UInt32.t, y: UInt32.t. [%#sord] UInt32.le x y = (cmp_log_u32 x y <> Greater)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let downgrade_reference [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 125 0 125 85]
+  (entry: MutBorrow.t t_DispatchEntry) (return (x: t_Result_unit_DispatchMapError)) =
+{[@stop_split] [@expl:downgrade_reference requires] ([@stop_split] [@expl:downgrade_reference requires #0] [%#slib'3] inv_write_binary entry.current)
+  /\ ([@stop_split] [@expl:downgrade_reference requires #1] [%#slib'4] UInt32.gt entry.current.write_ref (0: UInt32.t))
+  /\ ([@stop_split] [@expl:downgrade_reference requires #2] [%#slib'5] UInt32.t'int entry.current.read_ref
+  < UInt32.t'int const_MAX)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_15 <- entry.current.write_ref = ([%#slib] (0: UInt32.t)) ] s1
+    | s1 = any [ br0 -> {_15 = false} (! bb2) | br1 -> {_15} (! bb1) ] ]
+  | bb1 = s0
+    [ s0 = -{resolve_refmut_DispatchEntry entry}- s1
+    | s1 = [ &_18 <- NoWriteReference ] s2
+    | s2 = [ &_ret <- Err _18 ] s3
+    | s3 = return {_ret} ]
+  | bb2 = s0
+    [ s0 = [ &entry <- { entry with current = { entry.current with write_ref = ([%#slib'0] (0: UInt32.t)) } } ] s1
+    | s1 = checked_add [%#slib'2] {entry.current.read_ref} {[%#slib'1] (1: UInt32.t)}
+        (fun (_x: t_Option_u32) -> [ &_20 <- _x ] s2)
+    | s2 = any [ br0 -> {_20 = None'0} (! bb6) | br1 (x0: UInt32.t) -> {_20 = Some'0 x0} (! bb7) ] ]
+  | bb7 = s0
+    [ s0 = elim_Some {_20} (fun (r0: UInt32.t) -> [ &v <- r0 ] s1)
+    | s1 = [ &entry <- { entry with current = { entry.current with read_ref = v } } ] s2
+    | s2 = -{resolve_refmut_DispatchEntry entry}- s3
+    | s3 = [ &_ret <- Ok _26 ] s4
+    | s4 = return {_ret} ]
+  | bb6 = s0
+    [ s0 = -{resolve_refmut_DispatchEntry entry}- s1
+    | s1 = [ &_25 <- RefCountOverflow ] s2
+    | s2 = [ &_ret <- Err _25 ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: t_Result_unit_DispatchMapError = Any.any_l ()
+  | & entry: MutBorrow.t t_DispatchEntry = entry
+  | & _15: bool = Any.any_l ()
+  | & _18: t_DispatchMapError = Any.any_l ()
+  | & _20: t_Option_u32 = Any.any_l ()
+  | & v: UInt32.t = Any.any_l ()
+  | & _25: t_DispatchMapError = Any.any_l ()
+  | & _26: () = Any.any_l () ])
+  [ return (result: t_Result_unit_DispatchMapError) ->
+  {[@stop_split] [@expl:downgrade_reference ensures] ([@stop_split] [@expl:downgrade_reference ensures #0] [%#slib'6] entry.final.write_ref
+      = (0: UInt32.t))
+    /\ ([@stop_split] [@expl:downgrade_reference ensures #1] [%#slib'7] entry.final.read_ref
+      = UInt32.add entry.current.read_ref (1: UInt32.t))
+    /\ ([@stop_split] [@expl:downgrade_reference ensures #2] [%#slib'8] inv_write_binary entry.final)}
+    (! return {result}) ]

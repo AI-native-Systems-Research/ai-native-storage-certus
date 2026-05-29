@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_convert_to_storage": { "prover": "z3", "time": 0.016 },
+      "vc_elim_MemoryTier": { "prover": "alt-ergo", "time": 0.021 }
+    }
+  }
+}

@@ -1,0 +1,64 @@
+(* #"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 207 0 207 50 *)
+
+let%span slib = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 208 22 208 23
+let%span slib'0 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 209 30 209 31
+let%span slib'1 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 208 4 216 9
+let%span slib'2 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 206 11 206 34
+let%span slib'3 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 45 16 45 58
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_Location = Staging UInt64.t | BlockDevice UInt64.t | MemoryTier UInt64.t UInt32.t t_Option_u64
+
+type t_DispatchEntry = {
+  location: t_Location;
+  size_blocks: UInt32.t;
+  read_ref: UInt32.t;
+  write_ref: UInt32.t;
+  tsc: UInt64.t }
+
+let elim_MemoryTier (_x: t_Location) (return (mem_handle: UInt64.t) (size: UInt32.t) (ssd_offset: t_Option_u64)) = any
+  [ _k (mem_handle: UInt64.t) (size: UInt32.t) (ssd_offset: t_Option_u64) -> {MemoryTier mem_handle size ssd_offset
+    = _x}
+    (! return {mem_handle} {size} {ssd_offset})
+  | _chk -> (! {[@expl:elim MemoryTier] match _x with
+      | MemoryTier _ _ _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+predicate inv_write_binary [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 44 0 44 50] (e: t_DispatchEntry) =
+  [%#slib'3] e.write_ref = (0: UInt32.t) \/ e.write_ref = (1: UInt32.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let is_evictable [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 207 0 207 50]
+  (entry: t_DispatchEntry) (return (x: bool)) =
+{[@stop_split] [@expl:is_evictable requires] [%#slib'2] inv_write_binary entry}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_4 <- entry.read_ref = ([%#slib] (0: UInt32.t)) ] s1
+    | s1 = any [ br0 -> {_4 = false} (! bb5) | br1 -> {_4} (! bb1) ] ]
+  | bb1 = s0
+    [ s0 = [ &_6 <- entry.write_ref = ([%#slib'0] (0: UInt32.t)) ] s1
+    | s1 = any [ br0 -> {_6 = false} (! bb5) | br1 -> {_6} (! bb2) ] ]
+  | bb2 = any
+    [ br0 (x0: UInt64.t) -> {entry.location = Staging x0} (! bb6)
+    | br1 (x0: UInt64.t) -> {entry.location = BlockDevice x0} (! bb6)
+    | br2 (x0: UInt64.t) (x1: UInt32.t) (x2: t_Option_u64) -> {entry.location = MemoryTier x0 x1 x2} (! bb7) ]
+  | bb7 = elim_MemoryTier {entry.location}
+      (fun (rmem_handle: UInt64.t) (rsize: UInt32.t) (rssd_offset: t_Option_u64) ->
+        any [ br0 -> {rssd_offset = None} (! bb6) | br1 (x0: UInt64.t) -> {rssd_offset = Some x0} (! bb9) ])
+  | bb6 = s0 [ s0 = [ &_ret <- false ] s1 | s1 = return {_ret} ]
+  | bb9 = s0 [ s0 = [ &_ret <- true ] s1 | s1 = return {_ret} ]
+  | bb5 = s0 [ s0 = [ &_ret <- [%#slib'1] false ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l ()
+  | & entry: t_DispatchEntry = entry
+  | & _4: bool = Any.any_l ()
+  | & _6: bool = Any.any_l () ]) [ return (result: bool) -> (! return {result}) ]
