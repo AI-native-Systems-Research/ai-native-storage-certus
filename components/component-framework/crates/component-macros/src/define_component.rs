@@ -307,6 +307,7 @@ pub(crate) fn expand(input: ComponentInput) -> TokenStream {
     let init_method = format_ident!("__init_interfaces_{}", name_snake);
 
     quote! {
+        #[cfg(not(creusot))]
         #vis struct #name {
             __interface_map: ::component_core::component::InterfaceMap,
             __interface_info: ::std::vec::Vec<::component_core::interface::InterfaceInfo>,
@@ -316,11 +317,14 @@ pub(crate) fn expand(input: ComponentInput) -> TokenStream {
             #(#user_field_defs,)*
         }
 
+        #[cfg(creusot)]
+        #vis struct #name {
+            #(#recep_field_defs,)*
+            #(#user_field_defs,)*
+        }
+
+        #[cfg(not(creusot))]
         impl #name {
-            /// Create a new instance of this component.
-            ///
-            /// The returned `Arc` is required because the component stores
-            /// `Arc` references to itself for interface queries.
             #vis fn new(#(#constructor_params),*) -> ::std::sync::Arc<Self> {
                 let component = Self {
                     __interface_map: ::component_core::component::InterfaceMap::new(),
@@ -338,14 +342,23 @@ pub(crate) fn expand(input: ComponentInput) -> TokenStream {
             #new_default_method
         }
 
-        /// Initialize the interface map after Arc construction.
-        /// This is safe because we have exclusive access during construction.
+        #[cfg(creusot)]
+        impl #name {
+            #[cfg(not(feature = "creusot_custom_new"))]
+            #vis fn new(#(#constructor_params),*) -> ::std::sync::Arc<Self> {
+                let component = Self {
+                    #(#recep_field_inits,)*
+                    #(#user_field_inits,)*
+                };
+                ::std::sync::Arc::new(component)
+            }
+
+            #new_default_method
+        }
+
+        #[cfg(not(creusot))]
         fn #init_method(self_arc: &::std::sync::Arc<#name>) {
             let ptr = ::std::sync::Arc::as_ptr(self_arc) as *mut #name;
-            // SAFETY: We have the only Arc reference at this point during
-            // construction, so no other thread can observe the mutation.
-            // The InterfaceMap, interface_info, and receptacle_info fields
-            // are being initialized before the Arc is shared.
             unsafe {
                 let component = &mut *ptr;
                 let mut __interface_map = ::component_core::component::InterfaceMap::new();
@@ -371,6 +384,7 @@ pub(crate) fn expand(input: ComponentInput) -> TokenStream {
             }
         }
 
+        #[cfg(not(creusot))]
         impl ::component_core::iunknown::IUnknown for #name {
             fn query_interface_raw(
                 &self,
@@ -405,9 +419,9 @@ pub(crate) fn expand(input: ComponentInput) -> TokenStream {
             }
         }
 
-        // SAFETY: All fields are Send + Sync (InterfaceMap uses HashMap + Box<dyn Any + Send + Sync>,
-        // Receptacle uses RwLock, user fields must be Send + Sync by trait bounds on provided interfaces).
+        #[cfg(not(creusot))]
         unsafe impl Send for #name {}
+        #[cfg(not(creusot))]
         unsafe impl Sync for #name {}
     }
 }

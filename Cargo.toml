@@ -44,6 +44,9 @@ default-members = [
 
 resolver = "2"
 
+[patch.crates-io]
+creusot-std = { path = "tools/creusot/creusot/creusot-std" }
+
 [workspace.package]
 edition = "2021"
 rust-version = "1.75"
@@ -65,3 +68,4 @@ dispatcher = { path = "components/dispatcher" }
 extent-manager = { path = "components/extent-manager" }
 gpu-services = { path = "components/gpu-services" }
 certus-connector = { path = "certus-connector" }
+creusot-std = "0.12.0-dev"

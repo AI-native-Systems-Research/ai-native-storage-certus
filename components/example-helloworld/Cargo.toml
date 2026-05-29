@@ -5,8 +5,15 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+creusot_custom_new = []
+
 [dependencies]
 component-framework.workspace = true
 component-core.workspace = true
 interfaces.workspace = true
 logger.workspace = true
+creusot-std.workspace = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(creusot)'] }

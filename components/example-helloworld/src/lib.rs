@@ -16,9 +16,15 @@
 //! greeter_handle.deactivate().unwrap();
 //! ```
 
+use creusot_std::prelude::*;
+#[allow(unused_imports)]
+use std::vec;
+
+#[cfg(not(creusot))]
 use component_framework::actor::ActorHandler;
 use component_framework::{define_component, define_interface};
 use interfaces::ILogger;
+#[cfg(not(creusot))]
 use std::sync::Arc;
 
 // Define an interface for the greeter component.
@@ -39,6 +45,14 @@ define_component! {
     }
 }
 
+#[cfg(creusot)]
+impl HelloWorldComponent {
+    #[trusted]
+    pub fn new() -> ::std::sync::Arc<Self> {
+        panic!()
+    }
+}
+
 impl IGreeter for HelloWorldComponent {
     fn greeting_prefix(&self) -> &str {
         "Hello"
@@ -53,7 +67,9 @@ pub struct GreetRequest {
 
 /// Actor handler that prints greetings and logs via ILogger.
 pub struct GreeterHandler {
+    #[cfg_attr(creusot, allow(dead_code))]
     count: u32,
+    #[cfg(not(creusot))]
     logger: Option<Arc<dyn ILogger + Send + Sync>>,
 }
 
@@ -62,11 +78,13 @@ impl GreeterHandler {
     pub fn new() -> Self {
         Self {
             count: 0,
+            #[cfg(not(creusot))]
             logger: None,
         }
     }
 
     /// Create a handler with an ILogger for structured logging.
+    #[cfg(not(creusot))]
     pub fn with_logger(logger: Arc<dyn ILogger + Send + Sync>) -> Self {
         Self {
             count: 0,
@@ -81,6 +99,7 @@ impl Default for GreeterHandler {
     }
 }
 
+#[cfg(not(creusot))]
 impl ActorHandler<GreetRequest> for GreeterHandler {
     fn on_start(&mut self) {
         if let Some(log) = &self.logger {
