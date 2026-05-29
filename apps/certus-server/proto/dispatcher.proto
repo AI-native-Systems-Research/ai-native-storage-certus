@@ -29,7 +29,8 @@ message IpcHandle {
   // CUDA IPC memory handle (64 bytes from cudaIpcGetMemHandle) for cross-process GPU sharing.
   // The server opens this handle to obtain a device pointer in its own CUDA context.
   bytes cuda_ipc_handle = 1;
-  uint32 size = 2;     // Data size in bytes
+  uint32 size = 2;              // Data size in bytes
+  int32 gpu_device_id = 3;     // CUDA device ordinal that allocated this memory
 }
 
 enum ErrorCode {

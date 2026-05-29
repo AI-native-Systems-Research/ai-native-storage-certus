@@ -1,7 +1,7 @@
 //! gRPC service implementation for the Certus Dispatcher.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use tonic::{Request, Response, Status};
 
@@ -24,13 +24,93 @@ pub fn dispatcher_server(svc: DispatcherService) -> DispatcherServer<DispatcherS
     DispatcherServer::new(svc)
 }
 
+struct IpcCacheEntry {
+    dev_ptr: *mut std::ffi::c_void,
+    #[allow(dead_code)]
+    gpu_device_id: i32,
+    refcount: usize,
+}
+
+// SAFETY: dev_ptr is a CUDA device pointer only used from blocking threads.
+unsafe impl Send for IpcCacheEntry {}
+unsafe impl Sync for IpcCacheEntry {}
+
+type IpcCache = Arc<Mutex<HashMap<[u8; 64], IpcCacheEntry>>>;
+
 pub struct DispatcherService {
     dispatcher: Arc<dyn IDispatcher + Send + Sync>,
+    ipc_cache: IpcCache,
 }
 
 impl DispatcherService {
     pub fn new(dispatcher: Arc<dyn IDispatcher + Send + Sync>) -> Self {
-        Self { dispatcher }
+        Self {
+            dispatcher,
+            ipc_cache: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+}
+
+fn ipc_cache_open(
+    cache: &IpcCache,
+    handle_bytes: &[u8; 64],
+    gpu_device_id: i32,
+) -> Result<*mut std::ffi::c_void, String> {
+    let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(entry) = map.get_mut(handle_bytes) {
+        entry.refcount += 1;
+        return Ok(entry.dev_ptr);
+    }
+
+    // Set the correct GPU device before opening the IPC handle.
+    if gpu_device_id >= 0 {
+        let err = unsafe { cuda_ffi::cudaSetDevice(gpu_device_id) };
+        if err != cuda_ffi::CUDA_SUCCESS {
+            return Err(format!(
+                "cudaSetDevice({}) failed: {}",
+                gpu_device_id,
+                cuda_ffi::cuda_error_string(err)
+            ));
+        }
+    }
+
+    let cuda_handle = cuda_ffi::cudaIpcMemHandle_t {
+        reserved: *handle_bytes,
+    };
+    let mut dev_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+    let err = unsafe {
+        cuda_ffi::cudaIpcOpenMemHandle(
+            &mut dev_ptr,
+            cuda_handle,
+            cuda_ffi::CUDA_IPC_MEM_LAZY_ENABLE_PEER_ACCESS,
+        )
+    };
+    if err != cuda_ffi::CUDA_SUCCESS {
+        return Err(format!(
+            "cudaIpcOpenMemHandle failed: {}",
+            cuda_ffi::cuda_error_string(err)
+        ));
+    }
+    if dev_ptr.is_null() {
+        return Err("cudaIpcOpenMemHandle returned null".to_string());
+    }
+
+    map.insert(*handle_bytes, IpcCacheEntry {
+        dev_ptr,
+        gpu_device_id,
+        refcount: 1,
+    });
+    Ok(dev_ptr)
+}
+
+fn ipc_cache_close(cache: &IpcCache, handle_bytes: &[u8; 64]) {
+    let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(entry) = map.get_mut(handle_bytes) {
+        entry.refcount -= 1;
+        if entry.refcount == 0 {
+            unsafe { cuda_ffi::cudaIpcCloseMemHandle(entry.dev_ptr); }
+            map.remove(handle_bytes);
+        }
     }
 }
 
@@ -63,42 +143,6 @@ fn map_dispatcher_error(err: &DispatcherError) -> (ErrorCode, String) {
     }
 }
 
-fn open_cuda_ipc(handle_bytes: &[u8]) -> Result<*mut std::ffi::c_void, String> {
-    if handle_bytes.len() != 64 {
-        return Err(format!(
-            "cuda_ipc_handle must be 64 bytes, got {}",
-            handle_bytes.len()
-        ));
-    }
-    let mut reserved = [0u8; 64];
-    reserved.copy_from_slice(handle_bytes);
-    let cuda_handle = cuda_ffi::cudaIpcMemHandle_t { reserved };
-
-    let mut dev_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
-    let err = unsafe {
-        cuda_ffi::cudaIpcOpenMemHandle(
-            &mut dev_ptr,
-            cuda_handle,
-            cuda_ffi::CUDA_IPC_MEM_LAZY_ENABLE_PEER_ACCESS,
-        )
-    };
-    if err != cuda_ffi::CUDA_SUCCESS {
-        return Err(format!(
-            "cudaIpcOpenMemHandle failed: {}",
-            cuda_ffi::cuda_error_string(err)
-        ));
-    }
-    if dev_ptr.is_null() {
-        return Err("cudaIpcOpenMemHandle returned null".to_string());
-    }
-    Ok(dev_ptr)
-}
-
-fn close_cuda_ipc(dev_ptr: *mut std::ffi::c_void) {
-    unsafe {
-        cuda_ffi::cudaIpcCloseMemHandle(dev_ptr);
-    }
-}
 
 fn success_result(key: u64) -> EntryResult {
     EntryResult {
@@ -130,15 +174,13 @@ impl Dispatcher for DispatcherService {
         check_duplicate_keys(&keys)?;
 
         let dispatcher = Arc::clone(&self.dispatcher);
+        let cache = Arc::clone(&self.ipc_cache);
         let results = tokio::task::spawn_blocking(move || {
-            // Cache opened IPC handles within the batch — many entries commonly
-            // share the same GPU source buffer (same handle bytes), so opening
-            // once per unique handle avoids redundant cudaIpcOpenMemHandle calls
-            // that would otherwise serialize under CUDA's global IPC lock.
-            let mut ipc_cache: HashMap<[u8; 64], *mut std::ffi::c_void> = HashMap::new();
+            let mut opened_keys: Vec<[u8; 64]> = Vec::new();
             let mut pre_errors: Vec<Option<EntryResult>> = vec![None; req.entries.len()];
 
-            // Resolve all unique IPC handles upfront.
+            // Resolve all unique IPC handles upfront via global cache.
+            let mut local_ptrs: HashMap<[u8; 64], *mut std::ffi::c_void> = HashMap::new();
             for (i, entry) in req.entries.iter().enumerate() {
                 let handle = match entry.ipc_handle.as_ref() {
                     Some(h) => h,
@@ -163,9 +205,12 @@ impl Dispatcher for DispatcherService {
                         continue;
                     }
                 };
-                if !ipc_cache.contains_key(&key) {
-                    match open_cuda_ipc(&handle.cuda_ipc_handle) {
-                        Ok(ptr) => { ipc_cache.insert(key, ptr); }
+                if !local_ptrs.contains_key(&key) {
+                    match ipc_cache_open(&cache, &key, handle.gpu_device_id) {
+                        Ok(ptr) => {
+                            local_ptrs.insert(key, ptr);
+                            opened_keys.push(key);
+                        }
                         Err(e) => {
                             pre_errors[i] = Some(error_result(
                                 entry.key,
@@ -182,7 +227,7 @@ impl Dispatcher for DispatcherService {
                 }
                 let handle = entry.ipc_handle.as_ref().unwrap();
                 let key: [u8; 64] = handle.cuda_ipc_handle.as_slice().try_into().unwrap();
-                let dev_ptr = match ipc_cache.get(&key) {
+                let dev_ptr = match local_ptrs.get(&key) {
                     Some(&ptr) => ptr,
                     None => return error_result(
                         entry.key,
@@ -196,8 +241,8 @@ impl Dispatcher for DispatcherService {
                 }
             }).collect();
 
-            for &ptr in ipc_cache.values() {
-                close_cuda_ipc(ptr);
+            for key in &opened_keys {
+                ipc_cache_close(&cache, key);
             }
             results
         })
@@ -216,14 +261,12 @@ impl Dispatcher for DispatcherService {
         check_duplicate_keys(&keys)?;
 
         let dispatcher = Arc::clone(&self.dispatcher);
+        let cache = Arc::clone(&self.ipc_cache);
         let results = tokio::task::spawn_blocking(move || {
-            // Cache opened IPC handles within the batch to avoid repeated
-            // cudaIpcOpenMemHandle/Close for entries sharing the same handle.
-            let mut ipc_cache: HashMap<[u8; 64], *mut std::ffi::c_void> = HashMap::new();
-
-            // Build batch entries, validating IPC handles upfront.
+            let mut opened_keys: Vec<[u8; 64]> = Vec::new();
             let mut batch_entries: Vec<(u64, IpcHandle)> = Vec::with_capacity(req.entries.len());
             let mut pre_errors: Vec<Option<EntryResult>> = vec![None; req.entries.len()];
+            let mut local_ptrs: HashMap<[u8; 64], *mut std::ffi::c_void> = HashMap::new();
 
             for (i, entry) in req.entries.iter().enumerate() {
                 let handle = match entry.ipc_handle.as_ref() {
@@ -257,11 +300,12 @@ impl Dispatcher for DispatcherService {
                         continue;
                     }
                 };
-                let dev_ptr = match ipc_cache.get(&handle_key) {
+                let dev_ptr = match local_ptrs.get(&handle_key) {
                     Some(&ptr) => ptr,
-                    None => match open_cuda_ipc(&handle.cuda_ipc_handle) {
+                    None => match ipc_cache_open(&cache, &handle_key, handle.gpu_device_id) {
                         Ok(ptr) => {
-                            ipc_cache.insert(handle_key, ptr);
+                            local_ptrs.insert(handle_key, ptr);
+                            opened_keys.push(handle_key);
                             ptr
                         }
                         Err(e) => {
@@ -311,9 +355,8 @@ impl Dispatcher for DispatcherService {
                 }
             }
 
-            // Close all cached IPC handles once at the end of the batch.
-            for &ptr in ipc_cache.values() {
-                close_cuda_ipc(ptr);
+            for key in &opened_keys {
+                ipc_cache_close(&cache, key);
             }
 
             results
