@@ -447,11 +447,11 @@ def run_client(
                 result.errors.append(
                     f"populate batch failed: {failed[0].error_message}"
                 )
-                return
+                break
             result.populate_latencies.append((t1 - t0) / len(keys))
         except grpc.RpcError as e:
             result.errors.append(f"populate RPC error: {e.details()}")
-            return
+            break
     t_pop_end = time.perf_counter()
     result.populate_start = t_pop_start
     result.populate_end = t_pop_end
