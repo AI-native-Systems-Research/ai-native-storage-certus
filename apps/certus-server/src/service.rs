@@ -1,7 +1,7 @@
 //! gRPC service implementation for the Certus Dispatcher.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use tonic::{Request, Response, Status};
 
@@ -25,11 +25,11 @@ pub fn dispatcher_server(svc: DispatcherService) -> DispatcherServer<DispatcherS
 }
 
 pub struct DispatcherService {
-    dispatcher: Arc<Mutex<Arc<dyn IDispatcher + Send + Sync>>>,
+    dispatcher: Arc<dyn IDispatcher + Send + Sync>,
 }
 
 impl DispatcherService {
-    pub fn new(dispatcher: Arc<Mutex<Arc<dyn IDispatcher + Send + Sync>>>) -> Self {
+    pub fn new(dispatcher: Arc<dyn IDispatcher + Send + Sync>) -> Self {
         Self { dispatcher }
     }
 }
@@ -131,42 +131,75 @@ impl Dispatcher for DispatcherService {
 
         let dispatcher = Arc::clone(&self.dispatcher);
         let results = tokio::task::spawn_blocking(move || {
-            let disp = dispatcher.lock().unwrap();
-            req.entries
-                .iter()
-                .map(|entry| {
-                    let handle = match entry.ipc_handle.as_ref() {
-                        Some(h) => h,
-                        None => {
-                            return error_result(
-                                entry.key,
-                                &DispatcherError::InvalidParameter(
-                                    "missing ipc_handle".into(),
-                                ),
-                            );
-                        }
-                    };
-                    let dev_ptr = match open_cuda_ipc(&handle.cuda_ipc_handle) {
-                        Ok(ptr) => ptr,
+            // Cache opened IPC handles within the batch — many entries commonly
+            // share the same GPU source buffer (same handle bytes), so opening
+            // once per unique handle avoids redundant cudaIpcOpenMemHandle calls
+            // that would otherwise serialize under CUDA's global IPC lock.
+            let mut ipc_cache: HashMap<[u8; 64], *mut std::ffi::c_void> = HashMap::new();
+            let mut pre_errors: Vec<Option<EntryResult>> = vec![None; req.entries.len()];
+
+            // Resolve all unique IPC handles upfront.
+            for (i, entry) in req.entries.iter().enumerate() {
+                let handle = match entry.ipc_handle.as_ref() {
+                    Some(h) => h,
+                    None => {
+                        pre_errors[i] = Some(error_result(
+                            entry.key,
+                            &DispatcherError::InvalidParameter("missing ipc_handle".into()),
+                        ));
+                        continue;
+                    }
+                };
+                let key: [u8; 64] = match handle.cuda_ipc_handle.as_slice().try_into() {
+                    Ok(k) => k,
+                    Err(_) => {
+                        pre_errors[i] = Some(error_result(
+                            entry.key,
+                            &DispatcherError::InvalidParameter(format!(
+                                "cuda_ipc_handle must be 64 bytes, got {}",
+                                handle.cuda_ipc_handle.len()
+                            )),
+                        ));
+                        continue;
+                    }
+                };
+                if !ipc_cache.contains_key(&key) {
+                    match open_cuda_ipc(&handle.cuda_ipc_handle) {
+                        Ok(ptr) => { ipc_cache.insert(key, ptr); }
                         Err(e) => {
-                            return error_result(
+                            pre_errors[i] = Some(error_result(
                                 entry.key,
                                 &DispatcherError::IoError(format!("IPC open failed: {e}")),
-                            );
+                            ));
                         }
-                    };
-                    let ipc = IpcHandle {
-                        address: dev_ptr as *mut u8,
-                        size: handle.size,
-                    };
-                    let result = match disp.populate(entry.key, ipc) {
-                        Ok(()) => success_result(entry.key),
-                        Err(e) => error_result(entry.key, &e),
-                    };
-                    close_cuda_ipc(dev_ptr);
-                    result
-                })
-                .collect::<Vec<_>>()
+                    }
+                }
+            }
+
+            let results: Vec<EntryResult> = req.entries.iter().enumerate().map(|(i, entry)| {
+                if let Some(err) = pre_errors[i].take() {
+                    return err;
+                }
+                let handle = entry.ipc_handle.as_ref().unwrap();
+                let key: [u8; 64] = handle.cuda_ipc_handle.as_slice().try_into().unwrap();
+                let dev_ptr = match ipc_cache.get(&key) {
+                    Some(&ptr) => ptr,
+                    None => return error_result(
+                        entry.key,
+                        &DispatcherError::IoError("IPC handle not cached".into()),
+                    ),
+                };
+                let ipc = IpcHandle { address: dev_ptr as *mut u8, size: handle.size };
+                match dispatcher.populate(entry.key, ipc) {
+                    Ok(()) => success_result(entry.key),
+                    Err(e) => error_result(entry.key, &e),
+                }
+            }).collect();
+
+            for &ptr in ipc_cache.values() {
+                close_cuda_ipc(ptr);
+            }
+            results
         })
         .await
         .map_err(|e| Status::internal(format!("task join error: {e}")))?;
@@ -184,7 +217,6 @@ impl Dispatcher for DispatcherService {
 
         let dispatcher = Arc::clone(&self.dispatcher);
         let results = tokio::task::spawn_blocking(move || {
-            let disp = dispatcher.lock().unwrap();
             // Cache opened IPC handles within the batch to avoid repeated
             // cudaIpcOpenMemHandle/Close for entries sharing the same handle.
             let mut ipc_cache: HashMap<[u8; 64], *mut std::ffi::c_void> = HashMap::new();
@@ -263,7 +295,7 @@ impl Dispatcher for DispatcherService {
                 })
                 .collect();
 
-            let batch_results = disp.batch_lookup(&valid_batch);
+            let batch_results = dispatcher.batch_lookup(&valid_batch);
 
             // Merge results back.
             let mut results: Vec<EntryResult> = Vec::with_capacity(req.entries.len());
@@ -301,11 +333,10 @@ impl Dispatcher for DispatcherService {
 
         let dispatcher = Arc::clone(&self.dispatcher);
         let results = tokio::task::spawn_blocking(move || {
-            let disp = dispatcher.lock().unwrap();
             req.keys
                 .iter()
                 .map(|&key| {
-                    let exists: bool = disp.check(key).unwrap_or_default();
+                    let exists: bool = dispatcher.check(key).unwrap_or_default();
                     CheckResult { key, exists }
                 })
                 .collect::<Vec<_>>()
@@ -325,10 +356,9 @@ impl Dispatcher for DispatcherService {
 
         let dispatcher = Arc::clone(&self.dispatcher);
         let results = tokio::task::spawn_blocking(move || {
-            let disp = dispatcher.lock().unwrap();
             req.keys
                 .iter()
-                .map(|&key| match disp.remove(key) {
+                .map(|&key| match dispatcher.remove(key) {
                     Ok(()) => success_result(key),
                     Err(e) => error_result(key, &e),
                 })
@@ -349,10 +379,9 @@ impl Dispatcher for DispatcherService {
 
         let dispatcher = Arc::clone(&self.dispatcher);
         let results = tokio::task::spawn_blocking(move || {
-            let disp = dispatcher.lock().unwrap();
             req.keys
                 .iter()
-                .map(|&key| match disp.touch(key) {
+                .map(|&key| match dispatcher.touch(key) {
                     Ok(()) => success_result(key),
                     Err(e) => error_result(key, &e),
                 })
@@ -370,8 +399,7 @@ impl Dispatcher for DispatcherService {
     ) -> Result<Response<ClearMemoryTierResponse>, Status> {
         let dispatcher = Arc::clone(&self.dispatcher);
         let entries_cleared = tokio::task::spawn_blocking(move || {
-            let disp = dispatcher.lock().unwrap();
-            disp.clear_memory_tier()
+            dispatcher.clear_memory_tier()
         })
         .await
         .map_err(|e| Status::internal(format!("task join error: {e}")))?
