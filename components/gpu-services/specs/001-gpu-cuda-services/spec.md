@@ -216,7 +216,12 @@ by a verification read-back.
   enumeration.
 - **FR-003**: Component MUST deserialize a base64-encoded CUDA IPC
   handle and size originating from a Python process into native Rust
-  data structures.
+  data structures. **Precondition**: the caller is responsible for
+  setting the correct CUDA device context (via `cudaSetDevice`) before
+  calling `deserialize_ipc_handle`. `open_ipc_handle` does not call
+  `cudaSetDevice` internally. Callers using the high-level
+  `prepare_memory_for_spdk` (FR-013) are exempt from this requirement
+  since that function manages device context internally.
 - **FR-004**: Component MUST verify that GPU memory referenced by an
   IPC handle is CUDA device memory via `cudaPointerGetAttributes`
   before allowing DMA buffer creation. Verified pointers are tracked
@@ -356,6 +361,13 @@ by a verification read-back.
   for SPDK operations.
 - All target GPUs have compute capability 7.0 or higher (Volta
   architecture and newer). Pre-Volta GPUs are not supported.
-- GPU device selection for IPC operations is implicit — the IPC handle
-  carries the originating device context and the component follows it
-  automatically.
+- `open_ipc_handle` (and the `deserialize_ipc_handle` method that calls
+  it) does **not** call `cudaSetDevice`. It is a low-level function with
+  an implicit precondition: the caller must have already set the CUDA
+  device context to the target GPU via `cudaSetDevice` before calling
+  this function. In the certus-server integration, `service.rs` is
+  responsible for calling `cudaSetDevice` before invoking
+  `deserialize_ipc_handle`. The high-level `prepare_memory_for_spdk`
+  (FR-013) handles device context setup internally when an optional
+  device index is provided — callers of that path are not required to
+  manage device context themselves.

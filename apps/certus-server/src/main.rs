@@ -7,7 +7,7 @@
 mod service;
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use clap::Parser;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
@@ -24,9 +24,15 @@ use service::DispatcherService;
 #[derive(Parser)]
 #[command(name = "certus-server", about = "Certus dispatcher gRPC server")]
 struct Cli {
-    /// PCI address(es) of NVMe device(s) — may be specified multiple times
-    #[arg(long = "device-pci", required = true)]
+    /// PCI address(es) of NVMe device(s) — may be specified multiple times.
+    /// Mutually exclusive with --drive-count.
+    #[arg(long = "device-pci")]
     device_pci: Vec<String>,
+
+    /// Use the first N discovered NVMe drives (alternative to --device-pci).
+    /// Requires SPDK to enumerate available devices at startup.
+    #[arg(long = "drive-count", conflicts_with = "device_pci")]
+    drive_count: Option<usize>,
 
     /// gRPC listen address
     #[arg(long = "listen", default_value = "0.0.0.0:50051")]
@@ -48,6 +54,13 @@ struct Cli {
     /// Path to TLS private key file (enables TLS when provided with --tls-cert)
     #[arg(long = "tls-key")]
     tls_key: Option<String>,
+
+    /// Pin each NVMe poller thread to a dedicated CPU core.
+    /// Drive N is pinned to core (poller-base-cpu + N).
+    /// Recommended: pick cores in the same NUMA zone as the drives
+    /// (e.g. --poller-base-cpu 2 for drives on NUMA 0 with 4 drives → cores 2,3,4,5).
+    #[arg(long = "poller-base-cpu")]
+    poller_base_cpu: Option<usize>,
 }
 
 fn parse_size(s: &str) -> Result<usize, String> {
@@ -95,9 +108,11 @@ fn parse_pci_address(addr: &str) -> Result<PciAddress, String> {
 
 fn initialize_component_stack(
     device_pci_addrs: &[String],
+    drive_count: Option<usize>,
     memory_tier_size: usize,
     format: bool,
-) -> Result<(Arc<dyn IDispatcher + Send + Sync>, Arc<dyn ILogger + Send + Sync>), String> {
+    poller_base_cpu: Option<usize>,
+) -> Result<(Arc<dyn IDispatcher + Send + Sync>, Arc<dyn ILogger + Send + Sync>, Vec<String>), String> {
     let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponent::new_default();
 
     logger.info("certus-server: initializing SPDK environment...");
@@ -105,6 +120,37 @@ fn initialize_component_stack(
     let spdk_iface = query_interface!(spdk_comp, spdk_env::ISPDKEnv)
         .ok_or("failed to query ISPDKEnv")?;
     spdk_iface.init().map_err(|e| format!("SPDK init failed: {e}"))?;
+
+    // Resolve device addresses: use explicit list or auto-select from discovered devices.
+    // NVMe PCI class code: 0x010802 (Mass Storage Controller, NVM Express).
+    const NVME_CLASS_CODE: u32 = 0x010802;
+    let device_pci_addrs = if device_pci_addrs.is_empty() {
+        let count = drive_count.unwrap_or(1);
+        let devices = spdk_iface.devices();
+        let mut nvme_devices: Vec<_> = devices
+            .iter()
+            .filter(|d| d.id.class_id == NVME_CLASS_CODE)
+            .collect();
+        // Prioritize NUMA node 0 devices first.
+        nvme_devices.sort_by_key(|d| if d.numa_node == 0 { 0 } else { 1 });
+        if nvme_devices.len() < count {
+            return Err(format!(
+                "--drive-count={count} but only {} NVMe device(s) discovered",
+                nvme_devices.len()
+            ));
+        }
+        let addrs: Vec<String> = nvme_devices[..count]
+            .iter()
+            .map(|d| d.address.to_string())
+            .collect();
+        logger.info(&format!(
+            "certus-server: auto-selected {} drive(s): {:?}",
+            count, addrs
+        ));
+        addrs
+    } else {
+        device_pci_addrs.to_vec()
+    };
 
     logger.info("certus-server: initializing GPU services...");
     let gpu_comp = gpu_services::GpuServicesComponent::new_default();
@@ -198,29 +244,45 @@ fn initialize_component_stack(
 
     dispatcher
         .initialize(DispatcherConfig {
-            data_pci_addrs: device_pci_addrs.to_vec(),
+            data_pci_addrs: device_pci_addrs.clone(),
             format_on_init: format,
+            poller_base_cpu,
             ..Default::default()
         })
         .map_err(|e| format!("Dispatcher init failed: {e}"))?;
 
     logger.info("certus-server: component stack initialized");
-    Ok((dispatcher, logger))
+    Ok((dispatcher, logger, device_pci_addrs))
+}
+
+fn resolve_device_addresses(cli: &Cli) -> Result<Vec<String>, String> {
+    if !cli.device_pci.is_empty() {
+        for addr in &cli.device_pci {
+            validate_pci_address(addr)?;
+        }
+        Ok(cli.device_pci.clone())
+    } else if cli.drive_count.is_some() {
+        // Deferred — resolved after SPDK init in initialize_component_stack.
+        Ok(Vec::new())
+    } else {
+        Err("either --device-pci or --drive-count must be specified".into())
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    // Validate PCI addresses
-    for addr in &cli.device_pci {
-        validate_pci_address(addr)?;
-    }
+    let device_pci = resolve_device_addresses(&cli)
+        .map_err(Box::<dyn std::error::Error>::from)?;
 
-    let pool_size = cli.memory_tier_size.unwrap_or(memory_tier::DEFAULT_POOL_SIZE);
-    let (dispatcher, logger) = initialize_component_stack(&cli.device_pci, pool_size, cli.format)?;
+    const DEFAULT_MEMORY_TIER_SIZE: usize = 2 * 1024 * 1024 * 1024; // 2 GiB
+    let pool_size = cli.memory_tier_size.unwrap_or(DEFAULT_MEMORY_TIER_SIZE);
+    let (dispatcher, logger, device_pci) = initialize_component_stack(
+        &device_pci, cli.drive_count, pool_size, cli.format, cli.poller_base_cpu,
+    )?;
 
-    logger.info(&format!("certus-server: devices={:?}", cli.device_pci));
+    logger.info(&format!("certus-server: devices={:?}", device_pci));
     logger.info(&format!(
         "certus-server: memory-tier-size={} MiB",
         pool_size / (1024 * 1024)
@@ -231,9 +293,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         logger.info("certus-server: recovering extents from disk (use --format for clean slate)");
     }
 
-    let dispatcher_mutex = Arc::new(Mutex::new(dispatcher));
-
-    let svc = DispatcherService::new(Arc::clone(&dispatcher_mutex));
+    let svc = DispatcherService::new(Arc::clone(&dispatcher));
 
     let addr = cli.listen.parse()?;
 
@@ -268,8 +328,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     // Shutdown dispatcher
-    let disp = dispatcher_mutex.lock().unwrap();
-    let _ = disp.shutdown();
+    let _ = dispatcher.shutdown();
     logger.info("certus-server: shutdown complete");
 
     Ok(())

@@ -1,14 +1,14 @@
 {
-  "generated": "2026-05-21T00:00:00Z",
+  "generated": "2026-05-29T00:00:00Z",
   "project": "block-device-spdk-nvme v2",
-  "previous_report": "2026-05-05",
+  "previous_report": "2026-05-21",
   "summary": {
     "specs_analyzed": 2,
-    "requirements_checked": 48,
-    "aligned": 44,
-    "drifted": 1,
+    "requirements_checked": 51,
+    "aligned": 47,
+    "drifted": 2,
     "not_implemented": 0,
-    "unspecced_features": 3
+    "unspecced_features": 1
   },
   "specs": [
     {
@@ -23,11 +23,34 @@
       ],
       "drifted": [
         {
+          "id": "D1",
           "requirement": "SC-008",
-          "spec_text": "Performance-sensitive paths (IO submission, batch processing, qpair selection) MUST have benchmarks — either Criterion benchmarks for public interface paths or unit-level benchmarks for internal algorithms",
-          "actual": "No benches/ directory exists in the block-device-spdk-nvme crate. QueuePairPool is pub and has unit tests but no Criterion benchmarks. The apps/iops-benchmark application measures aggregate performance but is not a per-function microbenchmark.",
+          "spec_text": "Performance-sensitive paths (IO submission, batch processing, qpair selection) MUST have benchmarks",
+          "actual": "No benches/ directory in block-device-spdk-nvme crate. QueuePairPool is pub with unit tests. apps/iops-benchmark measures aggregate performance but not per-function overhead.",
           "location": "components/block-device-spdk-nvme/ (missing benches/ directory)",
-          "severity": "minor"
+          "severity": "minor",
+          "carried_from": "2026-05-21"
+        },
+        {
+          "id": "D2",
+          "requirement": "FR-004, FR-015",
+          "spec_text": "FR-004 specifies async IO submission; FR-015 specifies queue pair exploitation. Neither addresses behavior when spdk_nvme_ns_cmd_read/write returns ENOMEM.",
+          "actual": "When rc == ENOMEM (-12), actor enters a spin-retry loop for up to 1ms (TscClock). On each retry, all queue pairs are polled via process_completions(0) to drain completions and free slots. If deadline expires with rc still non-zero, context is reclaimed, pending_ops entry removed, and error completion sent to client.",
+          "location": "src/actor.rs:618-670 (ReadAsync), src/actor.rs:718-773 (WriteAsync)",
+          "severity": "moderate",
+          "new_in": "2026-05-29",
+          "suggested_requirement": "FR-025",
+          "suggested_text": "When spdk_nvme_ns_cmd_read or spdk_nvme_ns_cmd_write returns ENOMEM (-12), the actor MUST retry the submission for up to 1ms (measured by TscClock). On each retry, the actor MUST poll all queue pairs for completions. If the 1ms deadline expires without successful submission, the operation MUST fail with an error completion; pending_ops entry and context pool slot MUST be reclaimed."
+        },
+        {
+          "id": "D3",
+          "requirement": "FR-015",
+          "spec_text": "The component MUST exploit different NVMe IO queues with varying queue depths to minimize latency for a given batch size.",
+          "actual": "STANDARD_DEPTHS = [4, 16, 64, 256]. select_index chooses shallowest queue with available() >= batch_size; falls back to deepest. io_queue_requests = depth * 2. CONTEXT_POOL_CAPACITY = 340 (sum of standard depths).",
+          "location": "src/qpair.rs:141 (STANDARD_DEPTHS), src/qpair.rs:256-265 (select_index), src/actor.rs:269 (CONTEXT_POOL_CAPACITY)",
+          "severity": "minor",
+          "new_in": "2026-05-29",
+          "note": "Under-specification rather than conflict. Depth values, shallowest-fit algorithm, fallback-to-deepest, and 2x request pool sizing are unconstrained by spec."
         }
       ],
       "not_implemented": []
@@ -40,6 +63,7 @@
         "FR-006a", "FR-006b", "FR-007", "FR-008", "FR-009", "FR-010",
         "FR-011", "FR-012", "FR-013", "FR-014", "FR-015", "FR-016",
         "FR-017", "FR-018", "FR-019", "FR-020", "FR-021", "FR-022",
+        "FR-023", "FR-024", "FR-025",
         "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006", "SC-007"
       ],
       "drifted": [],
@@ -48,49 +72,31 @@
   ],
   "unspecced": [
     {
-      "feature": "Mixed block sizes (comma-separated --block-size for random mixed-size workloads)",
-      "location": "apps/iops-benchmark/src/config.rs:74-75",
-      "lines": 5,
-      "suggested_spec": "002-iops-benchmark"
-    },
-    {
-      "feature": "--batch-size flag (groups commands into BatchSubmit messages)",
-      "location": "apps/iops-benchmark/src/config.rs:80-82",
-      "lines": 4,
-      "suggested_spec": "002-iops-benchmark"
-    },
-    {
-      "feature": "NUMA worker thread pinning (round-robin on controller NUMA node, skipping actor core)",
-      "location": "apps/iops-benchmark/src/main.rs:176-206",
-      "lines": 30,
-      "suggested_spec": "002-iops-benchmark"
+      "id": "U1",
+      "feature": "ENOMEM retry loop with 1ms TSC deadline and all-qpair poll on each attempt",
+      "location": "src/actor.rs:618-670 (ReadAsync), src/actor.rs:718-773 (WriteAsync)",
+      "lines": 53,
+      "suggested_spec": "001-spdk-nvme-block-device",
+      "suggested_requirement": "FR-025",
+      "new_in": "2026-05-29"
     }
   ],
   "conflicts": [],
   "resolved_since_last": [
     {
-      "requirement": "SC-001",
-      "resolution": "Integration test sc001_sync_latency_envelope added at tests/integration.rs:1028"
+      "id": "U1",
+      "feature": "Mixed block sizes (comma-separated --block-size)",
+      "resolution": "Now specified as FR-023 in spec 002"
     },
     {
-      "requirement": "SC-002",
-      "resolution": "Integration test sc002_timeout_accuracy added at tests/integration.rs:1106"
+      "id": "U2",
+      "feature": "--batch-size flag (BatchSubmit grouping)",
+      "resolution": "Now specified as FR-024 in spec 002"
     },
     {
-      "requirement": "SC-006",
-      "resolution": "Integration test sc006_telemetry_accuracy added at tests/integration.rs:1171"
-    },
-    {
-      "requirement": "IBlockDeviceAdmin (was unspecced)",
-      "resolution": "Now specified as FR-021 in spec 001"
-    },
-    {
-      "requirement": "TscClock (was unspecced)",
-      "resolution": "Now specified as FR-022 in spec 001"
-    },
-    {
-      "requirement": "--io-mode (was unspecced)",
-      "resolution": "Now specified as FR-022 in spec 002"
+      "id": "U3",
+      "feature": "NUMA worker thread pinning",
+      "resolution": "Now specified as FR-025 in spec 002"
     }
   ]
 }
