@@ -458,10 +458,10 @@ def run_client(
     result.populate_objects = total_objects
 
     # Wait for background write-through to flush to SSD.
-    # All clients share the same SSD(s), so total flush volume is num_clients * data.
-    # Use conservative 1 GB/s estimate to ensure all data is fully persisted.
-    total_flush_bytes = num_clients * total_objects * BLOCK_SIZE
-    wt_wait = max(8.0, total_flush_bytes / (1 * 1024**3))
+    # All clients flush in parallel so use per-client volume, not total.
+    # Conservative 2 GB/s per SSD estimate.
+    per_client_flush_bytes = total_objects * BLOCK_SIZE
+    wt_wait = max(5.0, per_client_flush_bytes / (2 * 1024**3))
     time.sleep(wt_wait)
 
     # --- Phase 2: Hot lookups (memory-tier) ---
@@ -532,10 +532,9 @@ def run_client(
             pass
 
     # Wait for flush writes to complete through to SSD NAND.
-    # The SSD can write ~3-5 GB/s; total flush across all clients sharing one
-    # drive is num_clients * flush_count * 4 MiB. Use conservative 2 GB/s.
-    flush_bytes = num_clients * flush_count * BLOCK_SIZE
-    flush_wait = max(8.0, flush_bytes / (2 * 1024**3))
+    # Clients flush in parallel; use per-client volume at ~3 GB/s.
+    flush_bytes = flush_count * BLOCK_SIZE
+    flush_wait = max(5.0, flush_bytes / (3 * 1024**3))
     barrier.wait()
     time.sleep(flush_wait)
 
