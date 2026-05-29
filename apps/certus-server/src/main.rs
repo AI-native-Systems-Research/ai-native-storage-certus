@@ -276,7 +276,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let device_pci = resolve_device_addresses(&cli)
         .map_err(Box::<dyn std::error::Error>::from)?;
 
-    let pool_size = cli.memory_tier_size.unwrap_or(memory_tier::DEFAULT_POOL_SIZE);
+    const DEFAULT_MEMORY_TIER_SIZE: usize = 2 * 1024 * 1024 * 1024; // 2 GiB
+    let pool_size = cli.memory_tier_size.unwrap_or(DEFAULT_MEMORY_TIER_SIZE);
     let (dispatcher, logger, device_pci) = initialize_component_stack(
         &device_pci, cli.drive_count, pool_size, cli.format, cli.poller_base_cpu,
     )?;
