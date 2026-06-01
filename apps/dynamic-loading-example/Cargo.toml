@@ -1,0 +1,11 @@
+[package]
+name = "dynamic-loading-example"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+component-core.workspace = true
+example-helloworld.workspace = true
+libloading.workspace = true
