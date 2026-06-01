@@ -1,0 +1,20 @@
+# GEPA native config for P2P evolution experiment
+# Scoring: 60% throughput + 40% latency (workload-first)
+# Seed: pipeline.rs + lib.rs + dma.rs (multi-file dict)
+# Evaluator: full certus-server stack
+
+max_iterations: 30
+
+llm:
+  api_base: "https://ete-litellm.ai-models.vpc-int.res.ibm.com"
+  model: "openai/aws/claude-opus-4-6"
+  max_tokens: 16384
+
+optimization:
+  objective: "Maximize cold-lookup throughput and minimize tail latency"
+  module_selector: "all"
+  cache_evaluation: true
+  parallel: false
+
+evaluator:
+  timeout: 90

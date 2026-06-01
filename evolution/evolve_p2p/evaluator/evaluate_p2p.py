@@ -76,9 +76,20 @@ LATENCY_TARGET_MS = 0.4         # Below best observed p50 (382us on 4 drives)
 
 
 def kill_server():
-    subprocess.run(["pkill", "-x", "certus-server"], capture_output=True, timeout=5)
-    time.sleep(1)
-    subprocess.run(["pkill", "-9", "-x", "certus-server"], capture_output=True, timeout=5)
+    global _server_pid
+    if _server_pid is not None:
+        try:
+            os.killpg(os.getpgid(_server_pid), signal.SIGTERM)
+        except (ProcessLookupError, OSError):
+            pass
+        time.sleep(1)
+        try:
+            os.killpg(os.getpgid(_server_pid), signal.SIGKILL)
+        except (ProcessLookupError, OSError):
+            pass
+        _server_pid = None
+    else:
+        subprocess.run(["pkill", "-x", "certus-server"], capture_output=True, timeout=5)
     time.sleep(1)
 
 
@@ -98,7 +109,11 @@ def build_server() -> tuple[bool, str]:
         return False, str(e)
 
 
+_server_pid = None
+
+
 def start_server() -> tuple[bool, str]:
+    global _server_pid
     cmd = [str(SERVER_BIN)]
     for pci in DATA_PCI_LIST:
         cmd.extend(["--device-pci", pci.strip()])
@@ -106,9 +121,10 @@ def start_server() -> tuple[bool, str]:
 
     try:
         proc = subprocess.Popen(
-            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             preexec_fn=os.setsid,
         )
+        _server_pid = proc.pid
     except Exception as e:
         return False, str(e)
 
@@ -127,6 +143,7 @@ def start_server() -> tuple[bool, str]:
         os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
     except ProcessLookupError:
         pass
+    _server_pid = None
     return False, "Server startup timeout"
 
 
@@ -223,6 +240,27 @@ def fitness(metrics: dict) -> float:
     return round(0.60 * throughput + 0.40 * latency, 4)
 
 
+def split_concatenated(text: str) -> dict[str, str]:
+    """Split a concatenated multi-file string on '// --- FILE: xxx ---' markers.
+
+    If no markers are found, assumes the entire text is pipeline.rs.
+    """
+    import re as _re
+    marker_re = _re.compile(r"^//\s*---\s*FILE:\s*(\S+?)(?:\s*\(.*?\))?\s*---\s*$", _re.MULTILINE)
+    markers = list(marker_re.finditer(text))
+    if not markers:
+        return {"pipeline.rs": text}
+
+    files = {}
+    for i, m in enumerate(markers):
+        filename = m.group(1)
+        start = m.end()
+        end = markers[i + 1].start() if i + 1 < len(markers) else len(text)
+        content = text[start:end].strip("\n")
+        files[filename] = content
+    return files
+
+
 def evaluate(candidate: str | dict) -> tuple[float, dict]:
     """GEPA-compatible evaluator. Scores only throughput + latency."""
     import gepa.optimize_anything as oa
@@ -230,7 +268,7 @@ def evaluate(candidate: str | dict) -> tuple[float, dict]:
     t_start = time.time()
 
     if isinstance(candidate, str):
-        files = {"pipeline.rs": candidate}
+        files = split_concatenated(candidate)
     else:
         files = candidate
 

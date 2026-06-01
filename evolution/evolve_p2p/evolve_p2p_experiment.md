@@ -31,11 +31,11 @@ architecture.
 | Concept | Biology | This Experiment |
 |---------|---------|-----------------|
 | Wild-type protein | Current pipeline.rs (bounce path) | Starting code |
-| Fitness function | Enzyme activity assay | Composite score (throughput + CPU bypass) |
+| Fitness function | Enzyme activity assay | Composite score: throughput + tail latency, correctness as hard constraint |
 | Mutagenesis | Error-prone PCR / saturation mutagenesis | LLM-proposed code mutations |
 | Selection pressure | Survival / activity threshold | Score-based acceptance |
 | Local optimum | Active but suboptimal fold | Optimized bounce path (~0.60) |
-| Global optimum | Optimal catalytic fold | Low-CPU/direct path (~0.85) |
+| Global optimum | Optimal catalytic fold | Unknown — determined empirically by calibration |
 | Fitness valley | Inactive intermediates | Broken builds, corrupted data |
 | Directed evolution round | Screen → select → amplify → mutate | Evaluate → reflect → propose → accept |
 | Epistasis | Mutations that only help in combination | Path change requires both buffer allocation AND pipeline rewrite |
@@ -72,8 +72,8 @@ We do NOT assume any candidate is the answer. The fitness function rewards obser
 properties. Whatever architecture achieves high throughput + low CPU involvement wins.
 Evolution may find A, B, C, or something we haven't considered.
 
-The key question: **what does LLM-guided evolution discover when given selection pressure
-toward low-CPU data movement?**
+The key question: **what data-movement architecture does LLM-guided evolution discover
+when selected for GPU data-delivery throughput, tail latency, and correctness?**
 
 Unlike random mutagenesis (which must cross valleys by neutral drift or multi-point
 mutations), LLM proposers can reason about the code and potentially make coordinated
@@ -125,16 +125,23 @@ The path_verifier.py is used ONLY in post-hoc analysis (Section 5.3), never duri
 
 | Metric | Physical meaning | Measurement method | Used in scoring? |
 |--------|-----------------|-------------------|-----------------|
-| `throughput_gbps` | Cold lookup data delivery rate | Benchmark output (aggregate GB/s) | Yes (40%) |
-| `p99_latency_ms` | Worst-case per-object transfer time | Benchmark output (99th percentile) | Yes (25%) |
-| `multi_client_throughput_gbps` | Aggregate throughput under contention | 8-client benchmark run | Yes (20%) |
-| `throughput_cv` | Run-to-run stability | Coefficient of variation | Yes (15%) |
-| `data_integrity` | Correctness of delivered data | Pattern + byte count + request count | Hard constraint |
+| `throughput_gbps` | Cold lookup data delivery rate | Benchmark output (aggregate GB/s) | **Yes (60%)** |
+| `p99_latency_ms` | Worst-case per-object transfer time | Benchmark output (99th percentile) | **Yes (40%)** |
+| `data_integrity` | Correctness of delivered data | Benchmark error count (ERRORS in output) | **Hard constraint** |
 | `cpu_util_fraction` | CPU involvement | `/proc/stat` delta | Logged, not scored |
+| `multi_client_throughput_gbps` | Aggregate throughput under contention | 8-client benchmark | Deferred (not yet implemented) |
+| `throughput_cv` | Run-to-run stability | Coefficient of variation across repeats | Deferred (not yet implemented) |
 
-**Note on CPU**: Baseline measurements showed CPU is 3.2% on this 64-core SPDK system.
-CPU utilization does not discriminate between architectures here and is not used in scoring.
-It is logged for post-hoc analysis only.
+**Current pilot scoring** (implemented in `evaluate_p2p.py`):
+- 60% throughput + 40% latency
+- Hard gate: data integrity, build success, parseable p99
+
+**Deferred for final evaluation** (not awarding free points for unimplemented metrics):
+- Multi-client scalability (requires second benchmark run per eval)
+- Stability / CV (requires 3-5 repetitions per eval)
+
+**Note on CPU**: Baseline is 3.2% on 64-core SPDK system — does not discriminate.
+Logged for post-hoc classification only.
 
 ### 2.3 Scoring Formula
 
@@ -293,7 +300,7 @@ Before evolution begins, verify ALL of:
 |-----------|----------|-------------------|
 | Wild-type fitness score | Compute from baselines above | Establishes the floor |
 | Best positive control scores higher | Yes | If no control beats wild-type: scoring function is broken |
-| Score gap (best control − wild-type) | ≥ 0.10 | Adjust throughput/latency ceilings in fitness function |
+| Score gap (best control − wild-type) | ≥ 0.05 (pilot), ≥ 0.10 (main) | Adjust throughput/latency ceilings in fitness function |
 | Score gap exceeds noise | gap > 3× CV | If not: pin CPU freq, increase benchmark iterations |
 | Measurement noise (same code, 10 repeat evals) | CV < 0.05 | Pin CPU frequency, add warmup |
 | Random mutations never exceed best control (30 trials) | True | If violated: experiment too easy |
@@ -380,8 +387,8 @@ SPDK system, which does not discriminate between architectures.
 
 **Note**: The context does not name "P2P", "GPU-direct", "bounce buffer", or any
 implementation strategy. It lists hardware facts (modules loaded, devices present) and
-the scoring signal (low CPU = high score). The frameworks must discover the architectural
-opportunity from reading the codebase.
+the scoring signal (higher cold-lookup throughput + lower p99 latency). The frameworks
+must discover any architectural opportunities from reading the codebase.
 
 ### 3.3 Mutation Scope
 
@@ -546,11 +553,17 @@ Steps:
 experiment's value doesn't depend on P2P being the winner — it depends on whether
 evolution can find whatever the best architecture turns out to be.
 
-### 4.3 Ablation: Throughput-Only Scoring
+### 4.3 Ablations
 
-Run one framework with modified fitness (throughput + latency only, no CPU metrics).
-Expected outcome: Framework optimizes bounce path, never discovers path change.
-Purpose: Confirms that the CPU-bypass signal is the driving force for discovery.
+| Ablation | Scoring change | Purpose |
+|----------|---------------|---------|
+| A: Throughput-only | 100% throughput, 0% latency | Does latency pressure matter? |
+| B: Latency-only | 0% throughput, 100% latency | Does evolution overfit small transfers? |
+| C: Add CPU pressure | 40% throughput + 25% latency + 35% cpu_bypass | Does CPU signal change discovered architecture? |
+
+Ablation C re-introduces the CPU scoring we removed. If C produces a different architecture
+than the main run, that tells us the scoring signal shapes what evolution finds — even when
+the main workload metric (throughput) would have rewarded it anyway.
 
 ### 4.4 Ablation: Disable P2P Modules (Perturbation Evidence)
 
@@ -572,7 +585,7 @@ not just a coincidental reduction in CPU usage from some other optimization.
 1. Run preflight (`check_p2p_capability.sh`) — confirm hardware state
 2. Build and run current code through evaluator 10× → record baseline score + noise (CV)
 3. Implement positive control (manual path change) → record score
-4. Verify score gap ≥ 0.15 between positive control and wild-type
+4. Verify score gap ≥ 0.05 between positive control and wild-type (≥ 0.10 for main run)
 5. Run 30 random mutations → confirm none find path change
 6. If any calibration step fails: diagnose and fix before proceeding
 

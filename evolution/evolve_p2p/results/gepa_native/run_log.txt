@@ -1,0 +1,2 @@
+Iteration 0: Base program full valset score: 0.2074 over 1 / 1 examples
+Iteration 1: Selected program 0 score: 0.2074
