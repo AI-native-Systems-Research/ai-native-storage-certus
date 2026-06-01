@@ -1,5 +1,5 @@
 ---
-name: tools-init-creusot
+name: tools-creusot-init
 description: Prepare an existing Cargo project to use Creusot formal verification
 argument-hint: <project-directory>  (e.g. components/extent-manager)
 ---

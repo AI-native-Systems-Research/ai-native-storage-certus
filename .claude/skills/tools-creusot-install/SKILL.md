@@ -1,5 +1,5 @@
 ---
-name: tools-install-creusot
+name: tools-creusot-install
 description: Install the Creusot Rust verification tool
 ---
 
