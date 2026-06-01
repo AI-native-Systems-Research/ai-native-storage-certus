@@ -1,8 +1,10 @@
-(* #"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 182 0 184 33 *)
+(* #"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 266 0 268 33 *)
 
-let%span slib = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 180 11 180 34
-let%span slib'0 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 181 10 181 35
-let%span slib'1 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 45 16 45 58
+let%span slib = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 262 11 262 34
+let%span slib'0 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 263 10 263 35
+let%span slib'1 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 264 10 264 48
+let%span slib'2 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 265 10 265 50
+let%span slib'3 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 47 16 47 58
 
 use creusot.int.UInt64
 use creusot.int.UInt32
@@ -34,6 +36,8 @@ type t_DispatchMapError =
   | NoWriteReference
   | ActiveReferences
   | InvalidState
+  | AllocationFailed
+  | NotInitialized
 
 type t_Result_unit_DispatchMapError = Ok () | Err t_DispatchMapError
 
@@ -55,55 +59,59 @@ let elim_Some (_x: t_Option_u64) (return (f0: UInt64.t)) = any
       end}
     any) ]
 
-predicate inv_write_binary [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 44 0 44 50] (e: t_DispatchEntry) =
-  [%#slib'1] e.write_ref = (0: UInt32.t) \/ e.write_ref = (1: UInt32.t)
+predicate inv_write_binary [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 46 0 46 50] (e: t_DispatchEntry) =
+  [%#slib'3] e.write_ref = (0: UInt32.t) \/ e.write_ref = (1: UInt32.t)
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let convert_memory_tier_to_block [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 182 0 184 33]
+let convert_memory_tier_to_block [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 266 0 268 33]
   (entry: MutBorrow.t t_DispatchEntry) (return (x: t_Result_unit_DispatchMapError)) =
 {[@stop_split] [@expl:convert_memory_tier_to_block requires] [%#slib] inv_write_binary entry.current}
   (! bb0
   [ bb0 = s0
-    [ s0 = [ &_7 <- entry.current.location ] s1
+    [ s0 = [ &_11 <- entry.current.location ] s1
     | s1 = any
-      [ br0 (x0: UInt64.t) -> {_7 = Staging x0} (! bb1)
-      | br1 (x0: UInt64.t) -> {_7 = BlockDevice x0} (! bb1)
-      | br2 (x0: UInt64.t) (x1: UInt32.t) (x2: t_Option_u64) -> {_7 = MemoryTier x0 x1 x2} (! bb2) ] ]
+      [ br0 (x0: UInt64.t) -> {_11 = Staging x0} (! bb1)
+      | br1 (x0: UInt64.t) -> {_11 = BlockDevice x0} (! bb1)
+      | br2 (x0: UInt64.t) (x1: UInt32.t) (x2: t_Option_u64) -> {_11 = MemoryTier x0 x1 x2} (! bb2) ] ]
   | bb1 = s0
     [ s0 = -{resolve_refmut_DispatchEntry entry}- s1
-    | s1 = [ &_17 <- InvalidState ] s2
-    | s2 = [ &_ret <- Err _17 ] s3
+    | s1 = [ &_21 <- InvalidState ] s2
+    | s2 = [ &_ret <- Err _21 ] s3
     | s3 = return {_ret} ]
-  | bb2 = elim_MemoryTier {_7}
+  | bb2 = elim_MemoryTier {_11}
       (fun (rmem_handle: UInt64.t) (rsize: UInt32.t) (rssd_offset: t_Option_u64) ->
         any [ br0 -> {rssd_offset = None} (! bb4) | br1 (x0: UInt64.t) -> {rssd_offset = Some x0} (! bb6) ])
   | bb6 = s0
-    [ s0 = elim_MemoryTier {_7}
+    [ s0 = elim_MemoryTier {_11}
         (fun (rmem_handle: UInt64.t) (rsize: UInt32.t) (rssd_offset: t_Option_u64) ->
           elim_Some {rssd_offset} (fun (r0: UInt64.t) -> [ &offset <- r0 ] s1))
     | s1 = [ &offset'0 <- offset ] s2
-    | s2 = [ &_12 <- BlockDevice offset'0 ] s3
-    | s3 = [ &entry <- { entry with current = { entry.current with location = _12 } } ] s4
+    | s2 = [ &_16 <- BlockDevice offset'0 ] s3
+    | s3 = [ &entry <- { entry with current = { entry.current with location = _16 } } ] s4
     | s4 = -{resolve_refmut_DispatchEntry entry}- s5
-    | s5 = [ &_ret <- Ok _18 ] s6
+    | s5 = [ &_ret <- Ok _22 ] s6
     | s6 = return {_ret} ]
   | bb4 = s0
     [ s0 = -{resolve_refmut_DispatchEntry entry}- s1
-    | s1 = [ &_15 <- InvalidState ] s2
-    | s2 = [ &_ret <- Err _15 ] s3
+    | s1 = [ &_19 <- InvalidState ] s2
+    | s2 = [ &_ret <- Err _19 ] s3
     | s3 = return {_ret} ] ]
   [ & _ret: t_Result_unit_DispatchMapError = Any.any_l ()
   | & entry: MutBorrow.t t_DispatchEntry = entry
-  | & _7: t_Location = Any.any_l ()
+  | & _11: t_Location = Any.any_l ()
   | & offset: UInt64.t = Any.any_l ()
   | & offset'0: UInt64.t = Any.any_l ()
-  | & _12: t_Location = Any.any_l ()
-  | & _15: t_DispatchMapError = Any.any_l ()
-  | & _17: t_DispatchMapError = Any.any_l ()
-  | & _18: () = Any.any_l () ])
+  | & _16: t_Location = Any.any_l ()
+  | & _19: t_DispatchMapError = Any.any_l ()
+  | & _21: t_DispatchMapError = Any.any_l ()
+  | & _22: () = Any.any_l () ])
   [ return (result: t_Result_unit_DispatchMapError) ->
-  {[@stop_split] [@expl:convert_memory_tier_to_block ensures] [%#slib'0] inv_write_binary entry.final}
+  {[@stop_split] [@expl:convert_memory_tier_to_block ensures] ([@stop_split] [@expl:convert_memory_tier_to_block ensures #0] [%#slib'0] inv_write_binary entry.final)
+    /\ ([@stop_split] [@expl:convert_memory_tier_to_block ensures #1] [%#slib'1] entry.final.read_ref
+      = entry.current.read_ref)
+    /\ ([@stop_split] [@expl:convert_memory_tier_to_block ensures #2] [%#slib'2] entry.final.write_ref
+    = entry.current.write_ref)}
     (! return {result}) ]

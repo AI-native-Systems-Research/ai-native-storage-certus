@@ -1,12 +1,12 @@
-(* #"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 85 0 85 76 *)
+(* #"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 161 0 161 76 *)
 
-let%span slib = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 86 22 86 23
-let%span slib'0 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 80 11 80 36
-let%span slib'1 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 81 11 81 37
-let%span slib'2 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 82 10 82 36
-let%span slib'3 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 83 10 83 35
-let%span slib'4 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 84 10 84 35
-let%span slib'5 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 45 16 45 58
+let%span slib = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 162 22 162 23
+let%span slib'0 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 156 11 156 36
+let%span slib'1 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 157 11 157 37
+let%span slib'2 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 158 10 158 36
+let%span slib'3 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 159 10 159 35
+let%span slib'4 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 160 10 160 35
+let%span slib'5 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 47 16 47 58
 
 use creusot.int.UInt32
 use creusot.int.UInt64
@@ -38,17 +38,19 @@ type t_DispatchMapError =
   | NoWriteReference
   | ActiveReferences
   | InvalidState
+  | AllocationFailed
+  | NotInitialized
 
 type t_Result_unit_DispatchMapError = Ok () | Err t_DispatchMapError
 
-predicate inv_write_binary [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 44 0 44 50] (e: t_DispatchEntry) =
+predicate inv_write_binary [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 46 0 46 50] (e: t_DispatchEntry) =
   [%#slib'5] e.write_ref = (0: UInt32.t) \/ e.write_ref = (1: UInt32.t)
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let take_write [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 85 0 85 76]
+let take_write [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 161 0 161 76]
   (entry: MutBorrow.t t_DispatchEntry) (return (x: t_Result_unit_DispatchMapError)) =
 {[@stop_split] [@expl:take_write requires] ([@stop_split] [@expl:take_write requires #0] [%#slib'0] entry.current.read_ref
     = (0: UInt32.t))

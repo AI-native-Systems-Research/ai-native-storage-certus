@@ -1,0 +1,50 @@
+(* #"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 308 0 308 49 *)
+
+let%span slib = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 304 11 304 34
+let%span slib'0 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 305 10 305 48
+let%span slib'1 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 306 10 306 50
+let%span slib'2 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 307 10 307 35
+let%span slib'3 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 47 16 47 58
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_Location = Staging UInt64.t | BlockDevice UInt64.t | MemoryTier UInt64.t UInt32.t t_Option_u64
+
+type t_DispatchEntry = {
+  location: t_Location;
+  size_blocks: UInt32.t;
+  read_ref: UInt32.t;
+  write_ref: UInt32.t;
+  tsc: UInt64.t }
+
+predicate resolve_refmut_DispatchEntry [@inline:trivial] (_1: MutBorrow.t t_DispatchEntry) = _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_DispatchEntry
+
+predicate inv_write_binary [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 46 0 46 50] (e: t_DispatchEntry) =
+  [%#slib'3] e.write_ref = (0: UInt32.t) \/ e.write_ref = (1: UInt32.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let touch [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 308 0 308 49]
+  (entry: MutBorrow.t t_DispatchEntry) (tsc'0: UInt64.t) (return (x: ())) =
+{[@stop_split] [@expl:touch requires] [%#slib] inv_write_binary entry.current}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &entry <- { entry with current = { entry.current with tsc = tsc'0 } } ] s1
+    | s1 = -{resolve_refmut_DispatchEntry entry}- s2
+    | s2 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l () | & entry: MutBorrow.t t_DispatchEntry = entry | & tsc'0: UInt64.t = tsc'0 ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:touch ensures] ([@stop_split] [@expl:touch ensures #0] [%#slib'0] entry.final.read_ref
+      = entry.current.read_ref)
+    /\ ([@stop_split] [@expl:touch ensures #1] [%#slib'1] entry.final.write_ref = entry.current.write_ref)
+    /\ ([@stop_split] [@expl:touch ensures #2] [%#slib'2] inv_write_binary entry.final)}
+    (! return {result}) ]

@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_create_staging": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_lifecycle_lookup": { "prover": "alt-ergo", "time": 0.042 },
+      "vc_lookup": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_release_read": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_release_write": { "prover": "alt-ergo", "time": 0.016 }
+    }
+  }
+}

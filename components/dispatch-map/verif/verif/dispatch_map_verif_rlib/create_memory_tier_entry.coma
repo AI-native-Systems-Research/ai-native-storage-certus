@@ -1,14 +1,17 @@
-(* #"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 172 0 172 78 *)
+(* #"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 90 0 90 86 *)
 
-let%span slib = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 173 25 173 26
-let%span slib'0 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 176 22 176 23
-let%span slib'1 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 176 4 176 23
-let%span slib'2 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 167 11 167 34
-let%span slib'3 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 168 11 168 35
-let%span slib'4 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 169 10 169 55
-let%span slib'5 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 170 10 170 50
-let%span slib'6 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 171 10 171 35
-let%span slib'7 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 47 16 47 58
+let%span slib = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 97 29 97 33
+let%span slib'0 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 97 21 97 34
+let%span slib'1 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 97 37 97 41
+let%span slib'2 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 97 21 97 41
+let%span slib'3 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 98 18 98 19
+let%span slib'4 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 99 19 99 20
+let%span slib'5 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 85 11 85 22
+let%span slib'6 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 86 11 86 36
+let%span slib'7 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 87 10 87 34
+let%span slib'8 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 88 10 88 33
+let%span slib'9 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 89 10 89 35
+let%span slib'10 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 47 16 47 58
 let%span sord = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 162 41 162 102
 let%span sord'0 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 168 41 168 99
 let%span sord'1 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 174 41 174 99
@@ -26,8 +29,8 @@ let%span sord'12 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/cre
 
 use creusot.int.UInt64
 use creusot.int.UInt32
-use creusot.prelude.MutBorrow
 use creusot.prelude.Any
+use int.Int
 
 type t_Option_u64 = None | Some UInt64.t
 
@@ -39,28 +42,6 @@ type t_DispatchEntry = {
   read_ref: UInt32.t;
   write_ref: UInt32.t;
   tsc: UInt64.t }
-
-predicate resolve_refmut_DispatchEntry [@inline:trivial] (_1: MutBorrow.t t_DispatchEntry) = _1.final = _1.current
-
-meta "rewrite_def" predicate resolve_refmut_DispatchEntry
-
-type t_DispatchMapError =
-  | InvalidSize
-  | AlreadyExists
-  | KeyNotFound
-  | Timeout
-  | RefCountOverflow
-  | RefCountUnderflow
-  | NoWriteReference
-  | ActiveReferences
-  | InvalidState
-  | AllocationFailed
-  | NotInitialized
-
-type t_Result_unit_DispatchMapError = Ok () | Err t_DispatchMapError
-
-predicate inv_write_binary [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 46 0 46 50] (e: t_DispatchEntry) =
-  [%#slib'7] e.write_ref = (0: UInt32.t) \/ e.write_ref = (1: UInt32.t)
 
 type t_Ordering = Less | Equal | Greater
 
@@ -109,37 +90,46 @@ function cmp_le_log_u32 (x: UInt32.t) (y: UInt32.t) : ()
 
 axiom cmp_le_log_u32_spec: forall x: UInt32.t, y: UInt32.t. [%#sord] UInt32.le x y = (cmp_log_u32 x y <> Greater)
 
+constant const_MAX: UInt32.t = (4294967295: UInt32.t)
+
+predicate inv_write_binary [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 46 0 46 50] (e: t_DispatchEntry) =
+  [%#slib'10] e.write_ref = (0: UInt32.t) \/ e.write_ref = (1: UInt32.t)
+
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let release_read [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 172 0 172 78]
-  (entry: MutBorrow.t t_DispatchEntry) (return (x: t_Result_unit_DispatchMapError)) =
-{[@stop_split] [@expl:release_read requires] ([@stop_split] [@expl:release_read requires #0] [%#slib'2] inv_write_binary entry.current)
-  /\ ([@stop_split] [@expl:release_read requires #1] [%#slib'3] UInt32.gt entry.current.read_ref (0: UInt32.t))}
+let create_memory_tier_entry [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 90 0 90 86]
+  (mem_handle: UInt64.t) (size: UInt32.t) (tsc'0: UInt64.t) (return (x: t_DispatchEntry)) =
+{[@stop_split] [@expl:create_memory_tier_entry requires] ([@stop_split] [@expl:create_memory_tier_entry requires #0] [%#slib'5] UInt32.gt size (0: UInt32.t))
+  /\ ([@stop_split] [@expl:create_memory_tier_entry requires #1] [%#slib'6] UInt32.t'int size + 4095
+  <= UInt32.t'int const_MAX)}
   (! bb0
   [ bb0 = s0
-    [ s0 = [ &_13 <- entry.current.read_ref = ([%#slib] (0: UInt32.t)) ] s1
-    | s1 = any [ br0 -> {_13 = false} (! bb2) | br1 -> {_13} (! bb1) ] ]
-  | bb1 = s0
-    [ s0 = -{resolve_refmut_DispatchEntry entry}- s1
-    | s1 = [ &_16 <- RefCountUnderflow ] s2
-    | s2 = [ &_ret <- Err _16 ] s3
-    | s3 = return {_ret} ]
-  | bb2 = s0
-    [ s0 = UInt32.sub [%#slib'1] {entry.current.read_ref} {[%#slib'0] (1: UInt32.t)}
-        (fun (_x: UInt32.t) -> [ &entry <- { entry with current = { entry.current with read_ref = _x } } ] s1)
-    | s1 = -{resolve_refmut_DispatchEntry entry}- s2
-    | s2 = [ &_ret <- Ok _17 ] s3
-    | s3 = return {_ret} ] ]
-  [ & _ret: t_Result_unit_DispatchMapError = Any.any_l ()
-  | & entry: MutBorrow.t t_DispatchEntry = entry
-  | & _13: bool = Any.any_l ()
-  | & _16: t_DispatchMapError = Any.any_l ()
-  | & _17: () = Any.any_l () ])
-  [ return (result: t_Result_unit_DispatchMapError) ->
-  {[@stop_split] [@expl:release_read ensures] ([@stop_split] [@expl:release_read ensures #0] [%#slib'4] entry.final.read_ref
-      = UInt32.sub entry.current.read_ref (1: UInt32.t))
-    /\ ([@stop_split] [@expl:release_read ensures #1] [%#slib'5] entry.final.write_ref = entry.current.write_ref)
-    /\ ([@stop_split] [@expl:release_read ensures #2] [%#slib'6] inv_write_binary entry.final)}
+    [ s0 = [ &_14 <- None ] s1
+    | s1 = [ &_11 <- MemoryTier mem_handle size _14 ] s2
+    | s2 = UInt32.add [%#slib'0] {size} {[%#slib] (4095: UInt32.t)} (fun (_x: UInt32.t) -> [ &_16 <- _x ] s3)
+    | s3 = [ &_18 <- ([%#slib'1] (4096: UInt32.t)) = ([%#slib'2] (0: UInt32.t)) ] s4
+    | s4 = {[@expl:division by zero] [%#slib'2] not _18} s5
+    | s5 = UInt32.div [%#slib'2] {_16} {[%#slib'1] (4096: UInt32.t)} (fun (_x: UInt32.t) -> [ &_15 <- _x ] s6)
+    | s6 = [ &_ret <- { location = _11;
+                        size_blocks = _15;
+                        read_ref = ([%#slib'3] (0: UInt32.t));
+                        write_ref = ([%#slib'4] (1: UInt32.t));
+                        tsc = tsc'0 } ] s7
+    | s7 = return {_ret} ] ]
+  [ & _ret: t_DispatchEntry = Any.any_l ()
+  | & mem_handle: UInt64.t = mem_handle
+  | & size: UInt32.t = size
+  | & tsc'0: UInt64.t = tsc'0
+  | & _11: t_Location = Any.any_l ()
+  | & _14: t_Option_u64 = Any.any_l ()
+  | & _15: UInt32.t = Any.any_l ()
+  | & _16: UInt32.t = Any.any_l ()
+  | & _18: bool = Any.any_l () ])
+  [ return (result: t_DispatchEntry) ->
+  {[@stop_split] [@expl:create_memory_tier_entry ensures] ([@stop_split] [@expl:create_memory_tier_entry ensures #0] [%#slib'7] result.write_ref
+      = (1: UInt32.t))
+    /\ ([@stop_split] [@expl:create_memory_tier_entry ensures #1] [%#slib'8] result.read_ref = (0: UInt32.t))
+    /\ ([@stop_split] [@expl:create_memory_tier_entry ensures #2] [%#slib'9] inv_write_binary result)}
     (! return {result}) ]

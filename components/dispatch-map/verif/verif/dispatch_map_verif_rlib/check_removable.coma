@@ -1,11 +1,11 @@
-(* #"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 143 0 143 81 *)
+(* #"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 219 0 219 81 *)
 
-let%span slib = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 144 24 144 25
-let%span slib'0 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 144 47 144 48
-let%span slib'1 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 138 11 138 34
-let%span slib'2 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 139 10 142 1
-let%span slib'3 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 45 16 45 58
-let%span slib'4 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 51 16 51 57
+let%span slib = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 220 24 220 25
+let%span slib'0 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 220 47 220 48
+let%span slib'1 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 214 11 214 34
+let%span slib'2 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 215 10 218 1
+let%span slib'3 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 47 16 47 58
+let%span slib'4 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 53 16 53 57
 let%span sord = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 162 41 162 102
 let%span sord'0 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 168 41 168 99
 let%span sord'1 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 174 41 174 99
@@ -51,13 +51,15 @@ type t_DispatchMapError =
   | NoWriteReference
   | ActiveReferences
   | InvalidState
+  | AllocationFailed
+  | NotInitialized
 
 type t_Result_unit_DispatchMapError = Ok () | Err t_DispatchMapError
 
-predicate inv_write_binary [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 44 0 44 50] (e: t_DispatchEntry) =
+predicate inv_write_binary [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 46 0 46 50] (e: t_DispatchEntry) =
   [%#slib'3] e.write_ref = (0: UInt32.t) \/ e.write_ref = (1: UInt32.t)
 
-predicate no_active_refs [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 50 0 50 48] (e: t_DispatchEntry) =
+predicate no_active_refs [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 52 0 52 48] (e: t_DispatchEntry) =
   [%#slib'4] e.read_ref = (0: UInt32.t) /\ e.write_ref = (0: UInt32.t)
 
 type t_Ordering = Less | Equal | Greater
@@ -111,7 +113,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let check_removable [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 143 0 143 81]
+let check_removable [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 219 0 219 81]
   (entry: MutBorrow.t t_DispatchEntry) (return (x: t_Result_unit_DispatchMapError)) =
 {[@stop_split] [@expl:check_removable requires] [%#slib'1] inv_write_binary entry.current}
   (! bb0

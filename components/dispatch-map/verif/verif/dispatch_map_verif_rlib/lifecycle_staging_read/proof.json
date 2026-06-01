@@ -2,6 +2,7 @@
   "profile": [],
   "proofs": {
     "Coma": {
+      "vc_create_staging": { "prover": "alt-ergo", "time": 0.018 },
       "vc_lifecycle_staging_read": { "prover": "alt-ergo", "time": 0.039 },
       "vc_release_read": { "prover": "alt-ergo", "time": 0.025 },
       "vc_release_write": { "prover": "alt-ergo", "time": 0.022 },

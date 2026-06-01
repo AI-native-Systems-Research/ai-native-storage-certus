@@ -1,18 +1,16 @@
-(* #"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 125 0 125 85 *)
+(* #"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 201 0 201 85 *)
 
-let%span slib = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 126 26 126 27
-let%span slib'0 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 129 22 129 23
-let%span slib'1 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 130 54 130 55
-let%span slib'2 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 130 27 130 56
-let%span slib'3 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 119 11 119 34
-let%span slib'4 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 120 11 120 36
-let%span slib'5 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 121 11 121 41
-let%span slib'6 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 122 10 122 36
-let%span slib'7 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 123 10 123 55
-let%span slib'8 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 124 10 124 35
-let%span slib'9 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 45 16 45 58
-let%span snum = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/num.rs" 306 20 307 89
-let%span snum'0 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/num.rs" 310 26 310 87
+let%span slib = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 202 26 202 27
+let%span slib'0 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 205 22 205 23
+let%span slib'1 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 206 54 206 55
+let%span slib'2 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 206 27 206 56
+let%span slib'3 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 195 11 195 34
+let%span slib'4 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 196 11 196 36
+let%span slib'5 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 197 11 197 41
+let%span slib'6 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 198 10 198 36
+let%span slib'7 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 199 10 199 55
+let%span slib'8 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 200 10 200 35
+let%span slib'9 = "/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 47 16 47 58
 let%span sord = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 162 41 162 102
 let%span sord'0 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 168 41 168 99
 let%span sord'1 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 174 41 174 99
@@ -27,6 +25,8 @@ let%span sord'9 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creu
 let%span sord'10 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 208 41 208 82
 let%span sord'11 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 214 41 214 97
 let%span sord'12 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 296 16 302 17
+let%span snum = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/num.rs" 306 20 307 89
+let%span snum'0 = "/home/dwaddington/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/num.rs" 310 26 310 87
 
 use creusot.int.UInt64
 use creusot.int.UInt32
@@ -59,6 +59,8 @@ type t_DispatchMapError =
   | NoWriteReference
   | ActiveReferences
   | InvalidState
+  | AllocationFailed
+  | NotInitialized
 
 type t_Result_unit_DispatchMapError = Ok () | Err t_DispatchMapError
 
@@ -85,7 +87,7 @@ let elim_Some (_x: t_Option_u32) (return (f0: UInt32.t)) = any
       end}
     any) ]
 
-predicate inv_write_binary [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 44 0 44 50] (e: t_DispatchEntry) =
+predicate inv_write_binary [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 46 0 46 50] (e: t_DispatchEntry) =
   [%#slib'9] e.write_ref = (0: UInt32.t) \/ e.write_ref = (1: UInt32.t)
 
 type t_Ordering = Less | Equal | Greater
@@ -139,7 +141,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let downgrade_reference [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 125 0 125 85]
+let downgrade_reference [#"/home/dwaddington/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 201 0 201 85]
   (entry: MutBorrow.t t_DispatchEntry) (return (x: t_Result_unit_DispatchMapError)) =
 {[@stop_split] [@expl:downgrade_reference requires] ([@stop_split] [@expl:downgrade_reference requires #0] [%#slib'3] inv_write_binary entry.current)
   /\ ([@stop_split] [@expl:downgrade_reference requires #1] [%#slib'4] UInt32.gt entry.current.write_ref (0: UInt32.t))

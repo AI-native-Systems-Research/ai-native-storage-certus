@@ -3,6 +3,7 @@
   "proofs": {
     "Coma": {
       "vc_convert_to_storage": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_create_staging": { "prover": "alt-ergo", "time": 0.018 },
       "vc_lifecycle_staging_to_block": {
         "prover": "alt-ergo",
         "time": 0.034

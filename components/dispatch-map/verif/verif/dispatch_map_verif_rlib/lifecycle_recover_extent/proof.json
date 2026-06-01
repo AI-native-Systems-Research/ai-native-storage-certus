@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lifecycle_recover_extent": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_recover_extent": { "prover": "alt-ergo", "time": 0.018 }
+    }
+  }
+}
