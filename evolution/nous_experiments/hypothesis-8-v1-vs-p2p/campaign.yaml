@@ -1,0 +1,42 @@
+research_question: >
+  Using a bounce buffer SSD→CPU→GPU with pipelined transfers (dispatcher v1
+  ring-buffer pipeline) is faster than direct SSD→GPU P2P DMA for transfer of
+  4 MiB broken into a stream of 128 KiB transfers, even with pre-pinned GPU memory.
+
+run_id: h8-v1-vs-p2p
+
+max_iterations: 3
+
+target_system:
+  name: "Certus Storage Engine — Dispatcher v1 (pipelined bounce) vs P2P"
+  description: >
+    AI-native KV-cache storage system. Dispatcher v1 at components/dispatcher/v1/
+    handles lookup via pipelined_ssd_to_gpu() in src/pipeline.rs — uses a ring of
+    4 DMA buffers, reads each 128KiB chunk via ReadSync, then per-chunk copies to
+    both memory-tier and GPU destination. The IGpuServices receptacle provides
+    prepare_memory_for_spdk() which returns a DMA buffer backed by GPU BAR1 (via
+    GDRCopy) for P2P. Implement a P2P path in dispatcher v1 and compare against
+    the existing pipelined bounce-buffer path. Test through certus-server with
+    --dispatcher-version v1.
+    CONSTRAINTS: Do NOT use or modify gpu-p2p-server. Do NOT create standalone
+    benchmark binaries. All benchmarks MUST run through certus-server
+    (apps/certus-server/) with --dispatcher-version v1. Python client at
+    apps/certus-server/python-client/ is the test harness. P2P implementation
+    goes in components/dispatcher/v1/. P2P requires pre-pinned GPU staging via
+    IGpuServices::prepare_memory_for_spdk().
+  observable_metrics:
+    - "end-to-end lookup latency (ms) for a single 4 MiB key"
+    - "sustained lookup throughput (MB/s) over N sequential lookups"
+  controllable_knobs:
+    - "transfer path: pipelined bounce (existing) | P2P direct (to implement)"
+    - "value size (4 MiB)"
+    - "chunk size (128 KiB, NVMe MDTS limited)"
+  repo_path: /home/nara/certus/ai-native-storage-certus
+
+models:
+  design: "claude-opus-4-6"
+  execute_analyze: "claude-sonnet-4-6"
+
+prompts:
+  methodology_layer: "prompts/methodology"
+  domain_adapter_layer: null
