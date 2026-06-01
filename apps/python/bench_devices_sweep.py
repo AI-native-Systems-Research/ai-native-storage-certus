@@ -34,7 +34,7 @@ ALL_DEVICES = [
     "0000:c1:00.0",
     "0000:c2:00.0",
     "0000:c3:00.0",
-    "0000:c4:00.0",
+#    "0000:c4:00.0",
 ]
 
 BENCH_SCRIPT = os.path.join(SCRIPT_DIR, "certus-api-bench.py")
