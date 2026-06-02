@@ -34,6 +34,12 @@ pub struct IoSegment {
 #[requires(start_lba@ + total_bytes@ / sector_size@ <= u64::MAX@)]
 #[ensures(total_bytes@ == 0 ==> result@.len() == 0)]
 #[ensures(total_bytes@ > 0 ==> result@.len() > 0)]
+// No gaps, no overlaps: each segment starts exactly where the previous one ended.
+#[ensures(
+    forall<i: Int>
+        0 <= i && i + 1 < result@.len()
+        ==> result@[i].buffer_offset@ + result@[i].length@ == result@[i + 1].buffer_offset@
+)]
 pub fn segment_io(
     start_lba: u64,
     total_bytes: usize,
@@ -62,6 +68,21 @@ pub fn segment_io(
     // lba stays within u64 range: it started at start_lba and advanced by at most buffer_offset/ss.
     #[invariant(lba@ <= start_lba@ + buffer_offset@ / ss@)]
     #[invariant(lba@ <= u64::MAX@)]
+    // Adjacent segments tile without gaps or overlaps.
+    #[invariant(
+        forall<j: Int>
+            0 <= j && j + 1 < segments@.len()
+            ==> segments@[j].buffer_offset@ + segments@[j].length@ == segments@[j + 1].buffer_offset@
+    )]
+    // The last segment's end equals the current buffer_offset — connects the
+    // loop variable to the Vec contents so the adjacency invariant can be
+    // extended when the next segment is pushed.
+    #[invariant(
+        segments@.len() > 0
+            ==> segments@[segments@.len() - 1].buffer_offset@
+                + segments@[segments@.len() - 1].length@
+                == buffer_offset@
+    )]
     #[variant(remaining)]
     while remaining > 0 {
         let length = if remaining < mts { remaining } else { mts };
