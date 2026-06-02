@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_release_read": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_roundtrip_two_concurrent_reads": {
+        "prover": "alt-ergo",
+        "time": 0.033
+      },
+      "vc_take_read": { "prover": "alt-ergo", "time": 0.015 }
+    }
+  }
+}

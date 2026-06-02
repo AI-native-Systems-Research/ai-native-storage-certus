@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_downgrade_reference": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_release_read": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_roundtrip_downgrade": { "prover": "alt-ergo", "time": 0.023 },
+      "vc_take_write": { "prover": "alt-ergo", "time": 0.015 }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_release_write": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_roundtrip_write": { "prover": "alt-ergo", "time": 0.022 },
+      "vc_take_write": { "prover": "alt-ergo", "time": 0.015 }
+    }
+  }
+}

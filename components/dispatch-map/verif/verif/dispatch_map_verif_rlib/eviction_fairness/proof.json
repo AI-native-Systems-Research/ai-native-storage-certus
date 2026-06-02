@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_eviction_fairness": { "prover": "alt-ergo", "time": 0.022 }
+    }
+  }
+}

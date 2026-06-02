@@ -1,0 +1,137 @@
+(* #"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 500 0 503 23 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 505 50 505 51
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 506 21 506 22
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 507 18 507 19
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 508 19 508 20
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 512 50 512 51
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 513 21 513 22
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 514 18 514 19
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 515 19 515 20
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 518 21 518 31
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 519 4 519 21
+let%span slib'9 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 520 4 520 20
+let%span slib'10 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 521 18 521 46
+let%span slib'11 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 522 18 522 45
+let%span slib'12 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 523 18 523 37
+let%span slib'13 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 494 11 494 31
+let%span slib'14 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 495 10 495 28
+let%span slib'15 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 496 10 496 38
+let%span slib'16 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 497 10 497 37
+let%span slib'17 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 498 10 498 29
+let%span slib'18 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 499 10 499 52
+let%span slib'19 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 463 8 465 52
+let%span slib'20 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 475 8 477 52
+let%span svec = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
+let%span svec'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
+let%span svec'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use seq.Seq
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_Location = Staging UInt64.t | BlockDevice UInt64.t | MemoryTier UInt64.t UInt32.t t_Option_u64
+
+type t_DispatchEntry = {
+  location: t_Location;
+  size_blocks: UInt32.t;
+  read_ref: UInt32.t;
+  write_ref: UInt32.t;
+  tsc: UInt64.t }
+
+type t_Vec_DispatchEntry_Global
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_DispatchEntry_Global (self: t_Vec_DispatchEntry_Global) : Seq.seq t_DispatchEntry
+
+axiom view_Vec_DispatchEntry_Global_spec:
+  forall self: t_Vec_DispatchEntry_Global [view_Vec_DispatchEntry_Global self]. [%#svec'1] Seq.length (view_Vec_DispatchEntry_Global self)
+    <= UInt64.t'int const_MAX
+
+let new_DispatchEntry (return (x: t_Vec_DispatchEntry_Global)) = any
+  [ return (result: t_Vec_DispatchEntry_Global) ->
+  {[@stop_split] [@expl:new ensures] [%#svec] Seq.length (view_Vec_DispatchEntry_Global result) = 0}
+    (! return {result}) ]
+
+let push_DispatchEntry (self_: MutBorrow.t t_Vec_DispatchEntry_Global) (v: t_DispatchEntry) (return (x: ())) = any
+  [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'0] view_Vec_DispatchEntry_Global self_.final
+    = Seq.snoc (view_Vec_DispatchEntry_Global self_.current) v}
+    (! return {result}) ]
+
+predicate tsc_sorted [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 461 0 461 55] (entries: t_Vec_DispatchEntry_Global) =
+  [%#slib'19] forall i: int, j: int. 0 <= i /\ i < j /\ j < Seq.length (view_Vec_DispatchEntry_Global entries)
+    -> UInt64.t'int (Seq.get (view_Vec_DispatchEntry_Global entries) i).tsc
+    <= UInt64.t'int (Seq.get (view_Vec_DispatchEntry_Global entries) j).tsc
+
+predicate prefix_colder_than_suffix [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 473 0 473 80] (entries: t_Vec_DispatchEntry_Global) (n: UInt64.t) =
+  [%#slib'20] forall i: int, j: int. 0 <= i
+      /\ i < UInt64.t'int n /\ UInt64.t'int n <= j /\ j < Seq.length (view_Vec_DispatchEntry_Global entries)
+    -> UInt64.t'int (Seq.get (view_Vec_DispatchEntry_Global entries) i).tsc
+    <= UInt64.t'int (Seq.get (view_Vec_DispatchEntry_Global entries) j).tsc
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let lifecycle_cold_evicted_before_hot [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 500 0 503 23]
+  (cold_tsc: UInt64.t) (hot_tsc: UInt64.t) (return (x: t_Vec_DispatchEntry_Global)) =
+{[@stop_split] [@expl:lifecycle_cold_evicted_before_hot requires] [%#slib'13] UInt64.t'int cold_tsc
+  < UInt64.t'int hot_tsc}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_14 <- BlockDevice ([%#slib] (0: UInt64.t)) ] s1
+    | s1 = [ &cold <- { location = _14;
+                        size_blocks = ([%#slib'0] (1: UInt32.t));
+                        read_ref = ([%#slib'1] (0: UInt32.t));
+                        write_ref = ([%#slib'2] (0: UInt32.t));
+                        tsc = cold_tsc } ] s2
+    | s2 = [ &_17 <- BlockDevice ([%#slib'3] (0: UInt64.t)) ] s3
+    | s3 = [ &hot <- { location = _17;
+                       size_blocks = ([%#slib'4] (1: UInt32.t));
+                       read_ref = ([%#slib'5] (0: UInt32.t));
+                       write_ref = ([%#slib'6] (0: UInt32.t));
+                       tsc = hot_tsc } ] s4
+    | s4 = new_DispatchEntry [%#slib'7] (fun (_x: t_Vec_DispatchEntry_Global) -> [ &result <- _x ] s5)
+    | s5 = MutBorrow.borrow_mut <t_Vec_DispatchEntry_Global> {result}
+        (fun (_bor: MutBorrow.t t_Vec_DispatchEntry_Global) -> [ &_21 <- _bor ] [ &result <- _bor.final ] s6)
+    | s6 = push_DispatchEntry [%#slib'8] {_21} {cold} (fun (_x: ()) -> [ &_20 <- _x ] s7)
+    | s7 = MutBorrow.borrow_mut <t_Vec_DispatchEntry_Global> {result}
+        (fun (_bor: MutBorrow.t t_Vec_DispatchEntry_Global) -> [ &_24 <- _bor ] [ &result <- _bor.final ] s8)
+    | s8 = push_DispatchEntry [%#slib'9] {_24} {hot} (fun (_x: ()) -> [ &_23 <- _x ] s9)
+    | s9 = {[@expl:assertion] [%#slib'10] UInt64.t'int (Seq.get (view_Vec_DispatchEntry_Global result) 0).tsc
+      = UInt64.t'int cold_tsc}
+      s10
+    | s10 = {[@expl:assertion] [%#slib'11] UInt64.t'int (Seq.get (view_Vec_DispatchEntry_Global result) 1).tsc
+      = UInt64.t'int hot_tsc}
+      s11
+    | s11 = {[@expl:assertion] [%#slib'12] tsc_sorted result} s12
+    | s12 = [ &_ret <- result ] s13
+    | s13 = return {_ret} ] ]
+  [ & _ret: t_Vec_DispatchEntry_Global = Any.any_l ()
+  | & cold_tsc: UInt64.t = cold_tsc
+  | & hot_tsc: UInt64.t = hot_tsc
+  | & cold: t_DispatchEntry = Any.any_l ()
+  | & _14: t_Location = Any.any_l ()
+  | & hot: t_DispatchEntry = Any.any_l ()
+  | & _17: t_Location = Any.any_l ()
+  | & result: t_Vec_DispatchEntry_Global = Any.any_l ()
+  | & _20: () = Any.any_l ()
+  | & _21: MutBorrow.t t_Vec_DispatchEntry_Global = Any.any_l ()
+  | & _23: () = Any.any_l ()
+  | & _24: MutBorrow.t t_Vec_DispatchEntry_Global = Any.any_l () ])
+  [ return (result: t_Vec_DispatchEntry_Global) ->
+  {[@stop_split] [@expl:lifecycle_cold_evicted_before_hot ensures] ([@stop_split] [@expl:lifecycle_cold_evicted_before_hot ensures #0] [%#slib'14] Seq.length (view_Vec_DispatchEntry_Global result)
+      = 2)
+    /\ ([@stop_split] [@expl:lifecycle_cold_evicted_before_hot ensures #1] [%#slib'15] UInt64.t'int (Seq.get (view_Vec_DispatchEntry_Global result) 0).tsc
+      = UInt64.t'int cold_tsc)
+    /\ ([@stop_split] [@expl:lifecycle_cold_evicted_before_hot ensures #2] [%#slib'16] UInt64.t'int (Seq.get (view_Vec_DispatchEntry_Global result) 1).tsc
+      = UInt64.t'int hot_tsc)
+    /\ ([@stop_split] [@expl:lifecycle_cold_evicted_before_hot ensures #3] [%#slib'17] tsc_sorted result)
+    /\ ([@stop_split] [@expl:lifecycle_cold_evicted_before_hot ensures #4] [%#slib'18] prefix_colder_than_suffix result (1: UInt64.t))}
+    (! return {result}) ]

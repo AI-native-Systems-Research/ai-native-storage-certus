@@ -1,0 +1,13 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lifecycle_cold_evicted_before_hot": {
+        "prover": "alt-ergo",
+        "time": 0.039
+      },
+      "vc_new_DispatchEntry": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_push_DispatchEntry": { "prover": "alt-ergo", "time": 0.017 }
+    }
+  }
+}

@@ -1,0 +1,61 @@
+(* #"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 489 0 489 64 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 486 11 486 31
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 487 11 487 30
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 488 10 488 47
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 463 8 465 52
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 475 8 477 52
+let%span svec = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
+
+use creusot.prelude.Any
+use creusot.int.UInt64
+use seq.Seq
+use creusot.int.UInt32
+use int.Int
+
+type t_Vec_DispatchEntry_Global
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_Location = Staging UInt64.t | BlockDevice UInt64.t | MemoryTier UInt64.t UInt32.t t_Option_u64
+
+type t_DispatchEntry = {
+  location: t_Location;
+  size_blocks: UInt32.t;
+  read_ref: UInt32.t;
+  write_ref: UInt32.t;
+  tsc: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+function view_Vec_DispatchEntry_Global (self: t_Vec_DispatchEntry_Global) : Seq.seq t_DispatchEntry
+
+axiom view_Vec_DispatchEntry_Global_spec:
+  forall self: t_Vec_DispatchEntry_Global [view_Vec_DispatchEntry_Global self]. [%#svec] Seq.length (view_Vec_DispatchEntry_Global self)
+    <= UInt64.t'int const_MAX
+
+predicate tsc_sorted [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 461 0 461 55] (entries: t_Vec_DispatchEntry_Global) =
+  [%#slib'2] forall i: int, j: int. 0 <= i /\ i < j /\ j < Seq.length (view_Vec_DispatchEntry_Global entries)
+    -> UInt64.t'int (Seq.get (view_Vec_DispatchEntry_Global entries) i).tsc
+    <= UInt64.t'int (Seq.get (view_Vec_DispatchEntry_Global entries) j).tsc
+
+predicate prefix_colder_than_suffix [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 473 0 473 80] (entries: t_Vec_DispatchEntry_Global) (n: UInt64.t) =
+  [%#slib'3] forall i: int, j: int. 0 <= i
+      /\ i < UInt64.t'int n /\ UInt64.t'int n <= j /\ j < Seq.length (view_Vec_DispatchEntry_Global entries)
+    -> UInt64.t'int (Seq.get (view_Vec_DispatchEntry_Global entries) i).tsc
+    <= UInt64.t'int (Seq.get (view_Vec_DispatchEntry_Global entries) j).tsc
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let eviction_fairness [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 489 0 489 64]
+  (entries: t_Vec_DispatchEntry_Global) (n: UInt64.t) (return (x: ())) =
+{[@stop_split] [@expl:eviction_fairness requires] ([@stop_split] [@expl:eviction_fairness requires #0] [%#slib] UInt64.t'int n
+    <= Seq.length (view_Vec_DispatchEntry_Global entries))
+  /\ ([@stop_split] [@expl:eviction_fairness requires #1] [%#slib'0] tsc_sorted entries)}
+  (! bb0
+  [ bb0 = return {_ret} ] [ & _ret: () = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:eviction_fairness ensures] [%#slib'1] prefix_colder_than_suffix entries n}
+    (! return {result}) ]

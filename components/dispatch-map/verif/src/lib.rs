@@ -376,3 +376,150 @@ pub fn lifecycle_lookup() -> DispatchEntry {
     let _ = release_read(&mut e);
     e
 }
+
+// ============================================================
+// Ref-count balance: round-trip proofs
+// ============================================================
+// Property: every take_* must be matched by a corresponding release_*.
+// A balanced sequence leaves read_ref and write_ref exactly unchanged.
+// This rules out both reference leaks (take without release) and
+// double-frees (release without a prior take).
+
+/// Single read round-trip: take_read then release_read returns read_ref
+/// to its original value. Net change = 0.
+#[requires(inv_write_binary(entry))]
+#[requires((*entry).write_ref == 0u32)]
+#[requires((*entry).read_ref@ < u32::MAX@)]
+#[ensures((^entry).read_ref == (*entry).read_ref)]
+#[ensures((^entry).write_ref == (*entry).write_ref)]
+#[ensures(inv_write_binary(&^entry))]
+pub fn roundtrip_read(entry: &mut DispatchEntry) {
+    let _ = take_read(entry);
+    let _ = release_read(entry);
+}
+
+/// Single write round-trip: take_write then release_write returns write_ref
+/// to its original value. Net change = 0.
+#[requires(inv_write_binary(entry))]
+#[requires((*entry).read_ref == 0u32)]
+#[requires((*entry).write_ref == 0u32)]
+#[ensures((^entry).write_ref == (*entry).write_ref)]
+#[ensures((^entry).read_ref == (*entry).read_ref)]
+#[ensures(inv_write_binary(&^entry))]
+pub fn roundtrip_write(entry: &mut DispatchEntry) {
+    let _ = take_write(entry);
+    let _ = release_write(entry);
+}
+
+/// Downgrade round-trip: take_write → downgrade_reference → release_read
+/// returns both ref counts to their original values. Net change = 0.
+/// This proves downgrade is not a leak: write ref is converted to read ref,
+/// then released — no net ref is held after the sequence.
+#[requires(inv_write_binary(entry))]
+#[requires((*entry).read_ref == 0u32)]
+#[requires((*entry).write_ref == 0u32)]
+#[ensures((^entry).read_ref == (*entry).read_ref)]
+#[ensures((^entry).write_ref == (*entry).write_ref)]
+#[ensures(inv_write_binary(&^entry))]
+pub fn roundtrip_downgrade(entry: &mut DispatchEntry) {
+    let _ = take_write(entry);
+    let _ = downgrade_reference(entry);
+    let _ = release_read(entry);
+}
+
+/// Two concurrent readers round-trip: two take_reads followed by two
+/// release_reads returns read_ref to its original value.
+/// Proves balance holds even when multiple readers hold refs simultaneously.
+#[requires(inv_write_binary(entry))]
+#[requires((*entry).write_ref == 0u32)]
+#[requires((*entry).read_ref@ + 2 <= u32::MAX@)]
+#[ensures((^entry).read_ref == (*entry).read_ref)]
+#[ensures((^entry).write_ref == (*entry).write_ref)]
+#[ensures(inv_write_binary(&^entry))]
+pub fn roundtrip_two_concurrent_reads(entry: &mut DispatchEntry) {
+    let _ = take_read(entry);
+    let _ = take_read(entry);
+    let _ = release_read(entry);
+    let _ = release_read(entry);
+}
+
+// ============================================================
+// Eviction ordering: TSC-based fairness proofs
+// ============================================================
+// Property: oldest_keys() sorts entries by tsc ascending and returns
+// the first n. Cold (low-tsc) entries are always evicted before hot ones.
+//
+// We cannot verify stdlib sort_unstable_by_key directly — that is a
+// trusted axiom from the standard library. What we prove here is:
+//   GIVEN a tsc-sorted list  →  the first n entries are all colder
+//   than every entry not selected.
+//
+// This is the eviction fairness guarantee the evictor relies on.
+
+/// Predicate: a Vec of DispatchEntry is sorted by tsc ascending (coldest first).
+#[logic]
+pub fn tsc_sorted(entries: &Vec<DispatchEntry>) -> bool {
+    pearlite! {
+        forall<i: Int, j: Int>
+            0 <= i && i < j && j < entries@.len()
+            ==> entries@[i].tsc@ <= entries@[j].tsc@
+    }
+}
+
+/// Predicate: every entry at index < n has tsc ≤ every entry at index ≥ n.
+/// This is the eviction fairness guarantee: the first n candidates returned
+/// by oldest_keys are always at least as cold as every entry not selected.
+#[logic]
+pub fn prefix_colder_than_suffix(entries: &Vec<DispatchEntry>, n: usize) -> bool {
+    pearlite! {
+        forall<i: Int, j: Int>
+            0 <= i && i < n@ && n@ <= j && j < entries@.len()
+            ==> entries@[i].tsc@ <= entries@[j].tsc@
+    }
+}
+
+/// Core eviction fairness lemma: a TSC-sorted list guarantees its first n
+/// entries are all colder than (or equal to) all remaining entries.
+///
+/// Proof: take any i < n and j >= n. Since i < n <= j, we have i < j.
+/// By tsc_sorted, entries[i].tsc <= entries[j].tsc. QED.
+#[requires(n@ <= entries@.len())]
+#[requires(tsc_sorted(entries))]
+#[ensures(prefix_colder_than_suffix(entries, n))]
+pub fn eviction_fairness(entries: &Vec<DispatchEntry>, n: usize) {}
+
+/// Concrete lifecycle: cold entry (low tsc) always precedes hot entry (high tsc)
+/// in a correctly sorted eviction list. If the evictor picks 1 entry, it is
+/// always the cold one — the hot entry is never evicted first.
+#[requires(cold_tsc@ < hot_tsc@)]
+#[ensures(result@.len() == 2)]
+#[ensures(result@[0].tsc@ == cold_tsc@)]
+#[ensures(result@[1].tsc@ == hot_tsc@)]
+#[ensures(tsc_sorted(&result))]
+#[ensures(prefix_colder_than_suffix(&result, 1usize))]
+pub fn lifecycle_cold_evicted_before_hot(
+    cold_tsc: u64,
+    hot_tsc: u64,
+) -> Vec<DispatchEntry> {
+    let cold = DispatchEntry {
+        location: Location::BlockDevice { offset: 0 },
+        size_blocks: 1,
+        read_ref: 0,
+        write_ref: 0,
+        tsc: cold_tsc,
+    };
+    let hot = DispatchEntry {
+        location: Location::BlockDevice { offset: 0 },
+        size_blocks: 1,
+        read_ref: 0,
+        write_ref: 0,
+        tsc: hot_tsc,
+    };
+    let mut result = Vec::new();
+    result.push(cold);
+    result.push(hot);
+    proof_assert!(result@[0].tsc@ == cold_tsc@);
+    proof_assert!(result@[1].tsc@ == hot_tsc@);
+    proof_assert!(tsc_sorted(&result));
+    result
+}
