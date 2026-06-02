@@ -49,6 +49,14 @@ pub struct DispatcherConfig {
     /// Seconds between SSD utilization checks.
     /// Default: 5.
     pub ssd_eviction_interval_secs: u64,
+    /// Base CPU index for NVMe poller threads.
+    ///
+    /// Drive `i`'s actor thread is pinned to CPU `poller_base_cpu + i`.
+    /// When `None`, each drive's actor falls back to the first available CPU
+    /// in its NUMA node (all drives on the same node would share that core).
+    /// Set this to a dedicated core range to give each drive exclusive use of
+    /// a core, which is required for SPDK busy-polling to achieve full bandwidth.
+    pub poller_base_cpu: Option<usize>,
 }
 
 impl Default for DispatcherConfig {
@@ -62,6 +70,7 @@ impl Default for DispatcherConfig {
             ssd_eviction_low_watermark: 0.8,
             ssd_eviction_batch_size: 64,
             ssd_eviction_interval_secs: 5,
+            poller_base_cpu: None,
         }
     }
 }

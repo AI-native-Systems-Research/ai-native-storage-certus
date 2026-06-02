@@ -614,23 +614,39 @@ impl BlockDeviceHandler {
                     ctx.tsc = tsc as *const TscClock;
                 }
 
-                let qp = controller
-                    .qpairs
-                    .get_mut(qp_idx)
-                    .expect("qpair index valid");
                 let ctx_raw = Box::into_raw(ctx);
-                let rc = unsafe {
-                    spdk_sys::spdk_nvme_ns_cmd_read(
-                        ns_ptr,
-                        qp.as_ptr(),
-                        buf_ptr,
-                        lba,
-                        num_blocks,
-                        Some(async_completion_cb),
-                        ctx_raw as *mut std::ffi::c_void,
-                        0,
-                    )
-                };
+                let mut rc;
+                const ENOMEM: i32 = -12;
+                // Retry for up to ~1ms (typical NVMe latency is 10-100us).
+                let deadline = tsc.deadline_from_ms(tsc.now(), 1);
+
+                loop {
+                    let qp = controller
+                        .qpairs
+                        .get_mut(qp_idx)
+                        .expect("qpair index valid");
+                    rc = unsafe {
+                        spdk_sys::spdk_nvme_ns_cmd_read(
+                            ns_ptr,
+                            qp.as_ptr(),
+                            buf_ptr,
+                            lba,
+                            num_blocks,
+                            Some(async_completion_cb),
+                            ctx_raw as *mut std::ffi::c_void,
+                            0,
+                        )
+                    };
+                    if rc != ENOMEM || tsc.now() >= deadline {
+                        break;
+                    }
+                    // Poll all qpairs to advance hardware completions.
+                    for i in 0..controller.qpairs.len() {
+                        if let Some(qp) = controller.qpairs.get_mut(i) {
+                            unsafe { qp.process_completions(0); }
+                        }
+                    }
+                }
 
                 if rc != 0 {
                     // SAFETY: submission failed, SPDK did not take ownership.
@@ -646,6 +662,10 @@ impl BlockDeviceHandler {
                         )),
                     });
                 } else {
+                    let qp = controller
+                        .qpairs
+                        .get_mut(qp_idx)
+                        .expect("qpair index valid");
                     qp.submit();
                 }
             }
@@ -697,23 +717,38 @@ impl BlockDeviceHandler {
                     ctx.tsc = tsc as *const TscClock;
                 }
 
-                let qp = controller
-                    .qpairs
-                    .get_mut(qp_idx)
-                    .expect("qpair index valid");
                 let ctx_raw = Box::into_raw(ctx);
-                let rc = unsafe {
-                    spdk_sys::spdk_nvme_ns_cmd_write(
-                        ns_ptr,
-                        qp.as_ptr(),
-                        buf.as_ptr() as *mut _,
-                        lba,
-                        num_blocks,
-                        Some(async_completion_cb),
-                        ctx_raw as *mut std::ffi::c_void,
-                        0,
-                    )
-                };
+                let mut rc;
+                const ENOMEM: i32 = -12;
+                let deadline = tsc.deadline_from_ms(tsc.now(), 1);
+
+                loop {
+                    let qp = controller
+                        .qpairs
+                        .get_mut(qp_idx)
+                        .expect("qpair index valid");
+                    rc = unsafe {
+                        spdk_sys::spdk_nvme_ns_cmd_write(
+                            ns_ptr,
+                            qp.as_ptr(),
+                            buf.as_ptr() as *mut _,
+                            lba,
+                            num_blocks,
+                            Some(async_completion_cb),
+                            ctx_raw as *mut std::ffi::c_void,
+                            0,
+                        )
+                    };
+                    if rc != ENOMEM || tsc.now() >= deadline {
+                        break;
+                    }
+                    // Poll all qpairs to advance hardware completions.
+                    for i in 0..controller.qpairs.len() {
+                        if let Some(qp) = controller.qpairs.get_mut(i) {
+                            unsafe { qp.process_completions(0); }
+                        }
+                    }
+                }
 
                 if rc != 0 {
                     // SAFETY: submission failed, SPDK did not take ownership.
@@ -729,6 +764,10 @@ impl BlockDeviceHandler {
                         )),
                     });
                 } else {
+                    let qp = controller
+                        .qpairs
+                        .get_mut(qp_idx)
+                        .expect("qpair index valid");
                     qp.submit();
                 }
             }

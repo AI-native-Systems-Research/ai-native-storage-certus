@@ -298,35 +298,48 @@ impl DispatcherComponent {
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
         needed: u32,
     ) -> Result<(), DispatcherError> {
-        const MAX_SCAN: usize = 128;
+        // Under high concurrency (many threads promoting cold entries simultaneously),
+        // scanning many candidates per attempt causes severe MT lock contention because
+        // oldest_keys(N) holds the lock while scanning N entries.  Use a tiny scan
+        // window and prefer blind LRU as the primary fast path — one O(1) lock
+        // acquisition per iteration keeps contention proportional to thread count.
+        const MAX_SCAN: usize = 4;
+        const MAX_ATTEMPTS: usize = 512;
 
+        let mut attempts = 0usize;
         while mt.used() + needed as usize > mt.capacity() {
-            // Find an evictable entry: one whose write-through is complete
-            // (ssd_offset set, no active references).
-            let candidates = mt.oldest_keys(MAX_SCAN);
-            let evict_key = candidates.iter().find(|&&k| dm.is_evictable(k)).copied();
+            attempts += 1;
+            if attempts > MAX_ATTEMPTS {
+                return Err(DispatcherError::AllocationFailed(
+                    "memory-tier full: eviction did not free enough space".into(),
+                ));
+            }
+
+            // Every 8th attempt probe a small batch for a clean eviction
+            // (write-through complete, no data loss).  All other iterations
+            // fall straight through to blind LRU to minimise lock hold time.
+            let evict_key = if attempts % 8 == 0 {
+                let candidates = mt.oldest_keys(MAX_SCAN);
+                candidates.iter().find(|&&k| dm.is_evictable(k)).copied()
+            } else {
+                None
+            };
 
             match evict_key {
                 Some(key) => {
-                    mt.remove(key).map_err(|_| {
-                        DispatcherError::AllocationFailed(
-                            "memory-tier remove failed during eviction".into(),
-                        )
-                    })?;
-                    let _ = dm.convert_memory_tier_to_block(key);
+                    // Another thread may have concurrently evicted this key.
+                    if mt.remove(key).is_ok() {
+                        let _ = dm.convert_memory_tier_to_block(key);
+                    }
                 }
                 None => {
-                    // No evictable entry found — fall back to blind LRU eviction.
-                    // The entry's write-through may not be complete; remove from
-                    // dispatch-map so lookups get NotExist (data loss acceptable
-                    // under extreme pressure).
-                    let evicted_key = mt.evict_lru().ok_or_else(|| {
-                        DispatcherError::AllocationFailed(
-                            "memory-tier full and nothing evictable".into(),
-                        )
-                    })?;
-                    if dm.convert_memory_tier_to_block(evicted_key).is_err() {
-                        let _ = dm.remove(evicted_key);
+                    // Blind LRU: O(1) under the MT lock. Data loss is acceptable
+                    // under pressure; entries still in flight on SSD are removed
+                    // from the dispatch-map so stale lookups get NotExist.
+                    if let Some(evicted_key) = mt.evict_lru() {
+                        if dm.convert_memory_tier_to_block(evicted_key).is_err() {
+                            let _ = dm.remove(evicted_key);
+                        }
                     }
                 }
             }
@@ -456,6 +469,7 @@ impl DispatcherComponent {
     fn create_block_device(
         &self,
         i: usize,
+        poller_base_cpu: Option<usize>,
         spdk_env: &Arc<dyn ISPDKEnv + Send + Sync>,
         logger: &Arc<dyn ILogger + Send + Sync>,
         pci_addr: PciAddress,
@@ -484,6 +498,9 @@ impl DispatcherComponent {
             ))
         })?;
         admin.set_pci_address(pci_addr);
+        if let Some(base) = poller_base_cpu {
+            admin.set_actor_cpu(base + i);
+        }
         admin.initialize().map_err(|e| {
             DispatcherError::IoError(format!(
                 "failed to initialize block device at {addr_str}: {e}"
@@ -519,7 +536,7 @@ impl DispatcherComponent {
             let pci_addr = Self::parse_pci_addr(addr_str)?;
 
             let (block_dev_component, admin, ibd) =
-                self.create_block_device(i, &spdk_env, &logger, pci_addr, addr_str)?;
+                self.create_block_device(i, config.poller_base_cpu, &spdk_env, &logger, pci_addr, addr_str)?;
 
             let extent_mgr = ExtentManager::new_inner();
 
@@ -592,8 +609,11 @@ impl DispatcherComponent {
                 })?;
             }
 
+            let cpu_msg = config.poller_base_cpu
+                .map(|base| format!(", poller pinned to CPU {}", base + i))
+                .unwrap_or_default();
             self.log_info(&format!(
-                "dispatcher: data drive {i} initialized at {addr_str}"
+                "dispatcher: data drive {i} initialized at {addr_str}{cpu_msg}"
             ));
 
             let cached_channels = ibd.connect_client().ok();

@@ -134,19 +134,15 @@ class SimpleLRUTarget:
 def _make_cpu_manager_target(num_blocks: int, block_size: int = 16,
                              policy: str = "lru", **_ignored):
     """vLLM-backed target. Imports vLLM lazily; wraps key conversion."""
-    import inspect
     from vllm.v1.core.kv_cache_utils import BlockHash
     from vllm.v1.kv_offload.cpu.manager import CPUOffloadingManager
 
-    ctor_kwargs = {
-        "num_blocks": num_blocks,
-        "cache_policy": policy,
-        "enable_events": False,
-    }
-    sig = inspect.signature(CPUOffloadingManager.__init__)
-    if "block_size" in sig.parameters:
-        ctor_kwargs["block_size"] = block_size
-    inner = CPUOffloadingManager(**ctor_kwargs)
+    inner = CPUOffloadingManager(
+        block_size=block_size,
+        num_blocks=num_blocks,
+        cache_policy=policy,
+        enable_events=False,
+    )
 
     def _bh(k):
         return BlockHash(bytes.fromhex(k)) if isinstance(k, str) else k
@@ -207,22 +203,12 @@ def _make_fs_backend_target(
     import storage_offload  # noqa: F401
 
     from vllm.v1.core.kv_cache_utils import BlockHash
-    try:
-        from vllm.v1.kv_offload.mediums import GPULoadStoreSpec
-    except ModuleNotFoundError:
-        from vllm.v1.kv_offload.base import GPULoadStoreSpec  # vLLM >= 0.20
-    try:
-        from vllm.v1.kv_offload.spec import (
-            CanonicalKVCacheRef,
-            CanonicalKVCacheTensor,
-            CanonicalKVCaches,
-        )
-    except ModuleNotFoundError:
-        from vllm.v1.kv_offload.base import (  # vLLM >= 0.20
-            CanonicalKVCacheRef,
-            CanonicalKVCacheTensor,
-            CanonicalKVCaches,
-        )
+    from vllm.v1.kv_offload.mediums import GPULoadStoreSpec
+    from vllm.v1.kv_offload.spec import (
+        CanonicalKVCacheRef,
+        CanonicalKVCacheTensor,
+        CanonicalKVCaches,
+    )
     from llmd_fs_backend.file_mapper import FileMapper
     from llmd_fs_backend.manager import SharedStorageOffloadingManager
     from llmd_fs_backend.mediums import SharedStorageLoadStoreSpec
@@ -284,63 +270,31 @@ def _make_fs_backend_target(
             raise TimeoutError(f"fs-backend: {len(pending)} transfers did not "
                                f"complete within {timeout_s}s")
 
-    # vLLM 0.20 API detection: lookup is singular + ReqContext; OffloadKey is
-    # bytes = block_hash + 4-byte group_idx. Pre-0.20 uses BlockHash + list API.
-    import inspect as _inspect
-    _lookup_sig = _inspect.signature(type(manager).lookup)
-    _v020 = "req_context" in _lookup_sig.parameters
-    if _v020:
-        from vllm.v1.kv_offload.abstract import ReqContext, OffloadKey
-        _req_ctx = ReqContext()
-        def _bh_ok(k):  # OffloadKey = block_hash || group_idx (0, 4 bytes)
-            return OffloadKey(bytes.fromhex(k) + (0).to_bytes(4, "big"))
-    else:
-        _bh_ok = _bh
-
     class _Wrapper:
         def lookup(self, keys):
+            # Drain completions so recently-finished stores show up as hits.
             _drain_finished()
-            if _v020:
-                total = 0
-                for k in keys:
-                    if manager.lookup(_bh_ok(k), _req_ctx):
-                        total += 1
-                    else:
-                        break  # prefix semantics: first miss ends the run
-                return total
             return manager.lookup([_bh(k) for k in keys]) or 0
 
         def touch(self, keys):
-            manager.touch([_bh_ok(k) for k in keys])
+            manager.touch([_bh(k) for k in keys])
 
         def prepare_load(self, keys):
-            ks = [_bh_ok(k) for k in keys]
-            if _v020:
-                manager.prepare_load(ks, _req_ctx)
-            else:
-                manager.prepare_load(ks)
+            manager.prepare_load([_bh(k) for k in keys])
 
         def complete_load(self, keys):
-            manager.complete_load([_bh_ok(k) for k in keys])
+            manager.complete_load([_bh(k) for k in keys])
 
         def prepare_store(self, keys):
-            hashes = [_bh_ok(k) for k in keys]
-            out = (manager.prepare_store(hashes, _req_ctx) if _v020
-                   else manager.prepare_store(hashes))
+            hashes = [_bh(k) for k in keys]
+            out = manager.prepare_store(hashes)
             if out is None:
                 return None
-            to_store = list(getattr(out, "keys_to_store",
-                                     getattr(out, "block_hashes_to_store", [])))
-            evicted = list(getattr(out, "evicted_keys",
-                                    getattr(out, "block_hashes_evicted", [])))
+            to_store = list(out.block_hashes_to_store)
             if to_store:
                 block_ids = _take_gpu_block_ids(len(to_store))
-                _gpu_kwargs = {"block_ids": block_ids,
-                               "group_sizes": [len(to_store)]}
-                if "block_indices" in _inspect.signature(
-                        GPULoadStoreSpec.__init__).parameters:
-                    _gpu_kwargs["block_indices"] = [0]  # single group starts at block 0
-                src = GPULoadStoreSpec(**_gpu_kwargs)
+                src = GPULoadStoreSpec(block_ids=block_ids,
+                                       group_sizes=[len(to_store)])
                 dst = SharedStorageLoadStoreSpec(to_store)
                 jid = next_job[0]
                 next_job[0] += 1
@@ -348,12 +302,15 @@ def _make_fs_backend_target(
                     pending.add(jid)
             return PrepareStoreOutput(
                 block_hashes_to_store=[bytes(h).hex() for h in to_store],
-                block_hashes_evicted=[bytes(h).hex() for h in evicted],
+                block_hashes_evicted=[bytes(h).hex()
+                                       for h in out.block_hashes_evicted],
             )
 
         def complete_store(self, keys, success=True):
+            # Block until all in-flight writes have finished so the files
+            # are on disk before subsequent lookups run.
             _drain_until_empty()
-            manager.complete_store([_bh_ok(k) for k in keys], success=success)
+            manager.complete_store([_bh(k) for k in keys], success=success)
 
     return _Wrapper()
 
@@ -530,22 +487,12 @@ def _make_fs_handler_target(
     import storage_offload  # noqa: F401
 
     from vllm.v1.core.kv_cache_utils import BlockHash
-    try:
-        from vllm.v1.kv_offload.mediums import GPULoadStoreSpec
-    except ModuleNotFoundError:
-        from vllm.v1.kv_offload.base import GPULoadStoreSpec  # vLLM >= 0.20
-    try:
-        from vllm.v1.kv_offload.spec import (
-            CanonicalKVCacheRef,
-            CanonicalKVCacheTensor,
-            CanonicalKVCaches,
-        )
-    except ModuleNotFoundError:
-        from vllm.v1.kv_offload.base import (  # vLLM >= 0.20
-            CanonicalKVCacheRef,
-            CanonicalKVCacheTensor,
-            CanonicalKVCaches,
-        )
+    from vllm.v1.kv_offload.mediums import GPULoadStoreSpec
+    from vllm.v1.kv_offload.spec import (
+        CanonicalKVCacheRef,
+        CanonicalKVCacheTensor,
+        CanonicalKVCaches,
+    )
     from llmd_fs_backend.file_mapper import FileMapper
     from llmd_fs_backend.mediums import SharedStorageLoadStoreSpec
     from llmd_fs_backend.worker import StorageOffloadingHandlers
@@ -595,16 +542,6 @@ def _make_fs_handler_target(
 
     _pbb = per_block_bytes
 
-    import inspect as _inspect_h
-    _needs_bidx = "block_indices" in _inspect_h.signature(
-        GPULoadStoreSpec.__init__).parameters
-
-    def _gpu_spec(block_ids, n_blocks):
-        kw = {"block_ids": block_ids, "group_sizes": [n_blocks]}
-        if _needs_bidx:
-            kw["block_indices"] = [0]
-        return GPULoadStoreSpec(**kw)
-
     class _HT:
         per_block_bytes = _pbb  # for replay-loop stats
 
@@ -613,7 +550,8 @@ def _make_fs_handler_target(
             if direction == "out":
                 hashes = _fresh_hashes(n_blocks)
                 stored_hashes.extend(hashes)
-                src = _gpu_spec(block_ids, n_blocks)
+                src = GPULoadStoreSpec(block_ids=block_ids,
+                                        group_sizes=[n_blocks])
                 dst = SharedStorageLoadStoreSpec(hashes)
                 return put_handler.transfer_async(job_id, (src, dst))
             else:
@@ -621,7 +559,8 @@ def _make_fs_handler_target(
                     return False
                 hashes = stored_hashes[-n_blocks:]
                 src = SharedStorageLoadStoreSpec(hashes)
-                dst = _gpu_spec(block_ids, n_blocks)
+                dst = GPULoadStoreSpec(block_ids=block_ids,
+                                        group_sizes=[n_blocks])
                 return get_handler.transfer_async(job_id, (src, dst))
 
         def wait(self, job_ids):

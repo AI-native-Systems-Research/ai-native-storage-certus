@@ -28,6 +28,7 @@ import dispatcher_pb2_grpc
 assert torch.cuda.is_available(), "CUDA GPU required"
 
 BLOCK_SIZE = 4 * 1024 * 1024  # 4 MiB (default, overridden by --block-size)
+MEMORY_TIER_SIZE = 2 * 1024 * 1024 * 1024  # 2 GiB (default, overridden by --memory-tier-size)
 
 
 def parse_size(s):
@@ -52,6 +53,8 @@ def parse_size(s):
     return value * multiplier
 
 _libcudart = ctypes.CDLL("libcudart.so")
+_libcudart.cudaSetDevice.restype = ctypes.c_int
+_libcudart.cudaSetDevice.argtypes = [ctypes.c_int]
 _libcudart.cudaIpcGetMemHandle.restype = ctypes.c_int
 _libcudart.cudaIpcGetMemHandle.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 _libcudart.cudaMalloc.restype = ctypes.c_int
@@ -143,7 +146,7 @@ def run_integrity_check(server_addr, num_objects):
     Strategy:
     - Populate num_objects with unique per-key byte patterns.
     - Immediately look them up (hot path, still in memory-tier) and verify.
-    - Populate enough extra objects to evict the originals from the 256 MiB pool.
+    - Populate enough extra objects to evict the originals from the memory-tier pool.
     - Wait for write-through, then look up the original keys (cold path, from SSD).
     - Verify the cold-path data matches the original pattern.
     """
@@ -164,7 +167,7 @@ def run_integrity_check(server_addr, num_objects):
     stub = dispatcher_pb2_grpc.DispatcherStub(channel)
 
     base_key = random.randint(50_000_000, 90_000_000)
-    pool_capacity = (256 * 1024 * 1024) // BLOCK_SIZE  # 64 for 4 MiB blocks
+    pool_capacity = MEMORY_TIER_SIZE // BLOCK_SIZE
     passed = 0
     failed = 0
 
@@ -361,8 +364,13 @@ def run_client(
     batch_size,
     barrier,
     result,
+    gpu_id=0,
 ):
     """Single client worker: populate objects, then measure hot and cold lookups."""
+
+    # Pin this client to its assigned GPU.
+    _libcudart.cudaSetDevice(gpu_id)
+    cuda_device = f"cuda:{gpu_id}"
 
     channel = grpc.insecure_channel(
         server_addr,
@@ -376,19 +384,19 @@ def run_client(
     # Each client gets its own GPU buffer (4 MiB) filled with unique data.
     torch.manual_seed(base_key)
     populate_tensor = torch.randint(
-        0, 256, (BLOCK_SIZE // 4,), dtype=torch.float32, device="cuda:0"
+        0, 256, (BLOCK_SIZE // 4,), dtype=torch.float32, device=cuda_device
     )
     populate_handle_bytes = _get_cuda_ipc_handle(populate_tensor.data_ptr())
     populate_ipc = dispatcher_pb2.IpcHandle(
-        cuda_ipc_handle=populate_handle_bytes, size=BLOCK_SIZE
+        cuda_ipc_handle=populate_handle_bytes, size=BLOCK_SIZE, gpu_device_id=gpu_id
     )
 
     lookup_tensor = torch.zeros(
-        BLOCK_SIZE // 4, dtype=torch.float32, device="cuda:0"
+        BLOCK_SIZE // 4, dtype=torch.float32, device=cuda_device
     )
     lookup_handle_bytes = _get_cuda_ipc_handle(lookup_tensor.data_ptr())
     lookup_ipc = dispatcher_pb2.IpcHandle(
-        cuda_ipc_handle=lookup_handle_bytes, size=BLOCK_SIZE
+        cuda_ipc_handle=lookup_handle_bytes, size=BLOCK_SIZE, gpu_device_id=gpu_id
     )
 
     # Separate GPU buffers for cold lookups — one per key in the batch.
@@ -400,14 +408,14 @@ def run_client(
         ptr, handle_bytes = _cuda_alloc(BLOCK_SIZE)
         cold_lookup_ptrs.append(ptr)
         cold_lookup_ipcs.append(
-            dispatcher_pb2.IpcHandle(cuda_ipc_handle=handle_bytes, size=BLOCK_SIZE)
+            dispatcher_pb2.IpcHandle(cuda_ipc_handle=handle_bytes, size=BLOCK_SIZE, gpu_device_id=gpu_id)
         )
 
-    # Memory-tier pool is 256 MiB => can hold 64 x 4 MiB objects.
+    # Memory-tier pool can hold MEMORY_TIER_SIZE / BLOCK_SIZE objects.
     # For cold-path testing we need objects evicted to SSD.
     # Strategy: populate enough objects to overflow the pool fraction this client owns,
     # so the earliest keys get evicted to SSD.
-    pool_capacity = (256 * 1024 * 1024) // BLOCK_SIZE  # 64 objects total
+    pool_capacity = MEMORY_TIER_SIZE // BLOCK_SIZE
     # We'll populate pool_capacity + cold objects so cold keys are evicted.
     cold_objects = num_objects * iterations
     total_objects = pool_capacity + cold_objects
@@ -422,7 +430,7 @@ def run_client(
         # Write unique data per batch (seeded by first key in batch)
         torch.manual_seed(keys[0])
         populate_tensor.copy_(
-            torch.randint(0, 256, (BLOCK_SIZE // 4,), dtype=torch.float32, device="cuda:0")
+            torch.randint(0, 256, (BLOCK_SIZE // 4,), dtype=torch.float32, device=cuda_device)
         )
         entries = [
             dispatcher_pb2.PopulateEntry(key=k, ipc_handle=populate_ipc)
@@ -439,21 +447,21 @@ def run_client(
                 result.errors.append(
                     f"populate batch failed: {failed[0].error_message}"
                 )
-                return
+                break
             result.populate_latencies.append((t1 - t0) / len(keys))
         except grpc.RpcError as e:
             result.errors.append(f"populate RPC error: {e.details()}")
-            return
+            break
     t_pop_end = time.perf_counter()
     result.populate_start = t_pop_start
     result.populate_end = t_pop_end
     result.populate_objects = total_objects
 
     # Wait for background write-through to flush to SSD.
-    # All clients share the same SSD(s), so total flush volume is num_clients * data.
-    # Use conservative 1 GB/s estimate to ensure all data is fully persisted.
-    total_flush_bytes = num_clients * total_objects * BLOCK_SIZE
-    wt_wait = max(8.0, total_flush_bytes / (1 * 1024**3))
+    # All clients flush in parallel so use per-client volume, not total.
+    # Conservative 2 GB/s per SSD estimate.
+    per_client_flush_bytes = total_objects * BLOCK_SIZE
+    wt_wait = max(5.0, per_client_flush_bytes / (2 * 1024**3))
     time.sleep(wt_wait)
 
     # --- Phase 2: Hot lookups (memory-tier) ---
@@ -524,10 +532,9 @@ def run_client(
             pass
 
     # Wait for flush writes to complete through to SSD NAND.
-    # The SSD can write ~3-5 GB/s; total flush across all clients sharing one
-    # drive is num_clients * flush_count * 4 MiB. Use conservative 2 GB/s.
-    flush_bytes = num_clients * flush_count * BLOCK_SIZE
-    flush_wait = max(8.0, flush_bytes / (2 * 1024**3))
+    # Clients flush in parallel; use per-client volume at ~3 GB/s.
+    flush_bytes = flush_count * BLOCK_SIZE
+    flush_wait = max(5.0, flush_bytes / (3 * 1024**3))
     barrier.wait()
     time.sleep(flush_wait)
 
@@ -660,6 +667,13 @@ def main():
         help="Number of requests per batch/RPC call per client (default: 10)",
     )
     parser.add_argument(
+        "--gpus",
+        type=int,
+        default=1,
+        help="Number of GPUs to spread clients across (default: 1). "
+        "Clients are assigned round-robin to GPUs 0..N-1.",
+    )
+    parser.add_argument(
         "--verify-integrity",
         action="store_true",
         help="Run data integrity check (populate with known patterns, verify hot and cold reads)",
@@ -680,8 +694,17 @@ def main():
     num_objects = args.num_objects
     iterations = args.iterations
     batch_size = args.batch_size
+    num_gpus = args.gpus
 
-    pool_capacity = (256 * 1024 * 1024) // BLOCK_SIZE
+    available_gpus = torch.cuda.device_count()
+    if num_gpus > available_gpus:
+        print(
+            f"ERROR: --gpus {num_gpus} requested but only {available_gpus} GPU(s) available",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    pool_capacity = MEMORY_TIER_SIZE // BLOCK_SIZE
     cold_per_client = num_objects * iterations
     total_per_client = pool_capacity + cold_per_client
 
@@ -690,11 +713,13 @@ def main():
     print(f"{'='*70}")
     print(f"  Server:            {args.server}")
     print(f"  Clients:           {num_clients}")
+    print(f"  GPUs:              {num_gpus}")
     print(f"  Block size:        {BLOCK_SIZE // (1024*1024)} MiB")
     print(f"  Batch size:        {batch_size}")
     print(f"  Objects/batch:     {num_objects}")
     print(f"  Iterations:        {iterations}")
-    print(f"  Pool capacity:     {pool_capacity} objects (256 MiB)")
+    pool_mib = MEMORY_TIER_SIZE // (1024 * 1024)
+    print(f"  Pool capacity:     {pool_capacity} objects ({pool_mib} MiB)")
     print(f"  Total per client:  {total_per_client} objects")
     print(f"  Cold per client:   {cold_per_client} objects")
     print()
@@ -714,6 +739,7 @@ def main():
     t_total_start = time.perf_counter()
 
     for i in range(num_clients):
+        gpu_id = i % num_gpus
         t = threading.Thread(
             target=run_client,
             args=(
@@ -726,6 +752,7 @@ def main():
                 batch_size,
                 barrier,
                 results[i],
+                gpu_id,
             ),
             daemon=True,
         )
@@ -805,16 +832,17 @@ def main():
     # Per-client summary
     print(f"\n  Per-client breakdown:")
     print(
-        f"  {'Client':<8} {'Hot avg (us)':<14} {'Cold avg (us)':<14} {'Errors':<8}"
+        f"  {'Client':<8} {'GPU':<5} {'Hot avg (us)':<14} {'Cold avg (us)':<14} {'Errors':<8}"
     )
-    print(f"  {'-'*44}")
+    print(f"  {'-'*49}")
     for r in results:
+        gpu_id = r.client_id % num_gpus
         hot_avg = statistics.mean(r.hot_latencies) * 1e6 if r.hot_latencies else 0
         cold_avg = (
             statistics.mean(r.cold_latencies) * 1e6 if r.cold_latencies else 0
         )
         print(
-            f"  {r.client_id:<8} {hot_avg:<14.1f} {cold_avg:<14.1f} {len(r.errors):<8}"
+            f"  {r.client_id:<8} {gpu_id:<5} {hot_avg:<14.1f} {cold_avg:<14.1f} {len(r.errors):<8}"
         )
 
     print()
