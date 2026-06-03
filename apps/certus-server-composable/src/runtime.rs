@@ -136,7 +136,7 @@ pub fn initialize_stack(
             loaded.library
         };
 
-        let component = loader::create_component(&library).map_err(|e| {
+        let component = loader::create_component(&library, &comp_spec.dylib).map_err(|e| {
             teardown_reverse(&live_components);
             format!("component '{}': {e}", instance_name)
         })?;

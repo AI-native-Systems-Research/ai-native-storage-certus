@@ -445,7 +445,7 @@ mod tests {
 /// a default-configured `MemoryTierComponent`.
 #[cfg(feature = "dylib")]
 #[no_mangle]
-pub fn create_component() -> component_core::component_ref::ComponentRef {
+pub fn create_component_memory_tier() -> component_core::component_ref::ComponentRef {
     component_core::component_ref::ComponentRef::from(
         MemoryTierComponent::new_default() as std::sync::Arc<_>,
     )

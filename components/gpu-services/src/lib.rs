@@ -1088,7 +1088,7 @@ mod tests {
 /// a default-configured `GpuServicesComponent`.
 #[cfg(feature = "dylib")]
 #[no_mangle]
-pub fn create_component() -> component_core::component_ref::ComponentRef {
+pub fn create_component_gpu_services() -> component_core::component_ref::ComponentRef {
     component_core::component_ref::ComponentRef::from(
         GpuServicesComponent::new_default() as std::sync::Arc<_>,
     )

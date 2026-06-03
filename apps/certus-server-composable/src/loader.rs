@@ -40,20 +40,39 @@ pub fn load_library(path: &Path) -> Result<LoadedLibrary, String> {
     })
 }
 
-/// Call `create_component()` on a loaded library to instantiate a component.
+/// Derive the factory symbol name from a dylib filename.
+///
+/// Convention: `lib<crate_name>.so` → `create_component_<crate_name>`
+/// Example: `liblogger.so` → `create_component_logger`
+///          `libblock_device_spdk_nvme.so` → `create_component_block_device_spdk_nvme`
+fn derive_symbol_name(dylib_filename: &str) -> String {
+    let stem = dylib_filename
+        .strip_prefix("lib")
+        .unwrap_or(dylib_filename)
+        .strip_suffix(".so")
+        .unwrap_or(dylib_filename);
+    format!("create_component_{stem}")
+}
+
+/// Call the component factory on a loaded library to instantiate a component.
+///
+/// The factory symbol name is derived from `dylib_filename`:
+/// `lib<name>.so` → `create_component_<name>`.
 ///
 /// Catches panics from the factory function and converts them to errors.
 ///
 /// # Errors
 ///
-/// Returns an error if the `create_component` symbol is not found or if
-/// the factory function panics.
-pub fn create_component(library: &Library) -> Result<ComponentRef, String> {
+/// Returns an error if the symbol is not found or if the factory panics.
+pub fn create_component(library: &Library, dylib_filename: &str) -> Result<ComponentRef, String> {
+    let symbol_name = derive_symbol_name(dylib_filename);
+
     // SAFETY: The symbol has the Rust-ABI signature `fn() -> ComponentRef`.
     // We trust ABI compatibility (same toolchain) per project assumptions.
-    let create: Symbol<fn() -> ComponentRef> = unsafe { library.get(b"create_component") }
-        .map_err(|e| format!("symbol 'create_component' not found: {e}"))?;
+    let create: Symbol<fn() -> ComponentRef> =
+        unsafe { library.get(symbol_name.as_bytes()) }
+            .map_err(|e| format!("symbol '{}' not found: {e}", symbol_name))?;
 
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(&*create))
-        .map_err(|_| "create_component() panicked".to_string())
+        .map_err(|_| format!("{}() panicked", symbol_name))
 }

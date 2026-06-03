@@ -3387,7 +3387,7 @@ mod tests {
 /// a default-configured `DispatcherComponent`.
 #[cfg(feature = "dylib")]
 #[no_mangle]
-pub fn create_component() -> component_core::component_ref::ComponentRef {
+pub fn create_component_dispatcher() -> component_core::component_ref::ComponentRef {
     component_core::component_ref::ComponentRef::from(
         DispatcherComponent::new_default() as Arc<_>,
     )

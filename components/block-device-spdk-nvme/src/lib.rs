@@ -644,7 +644,7 @@ mod tests {
 /// a default-configured `BlockDeviceSpdkNvmeComponent`.
 #[cfg(feature = "dylib")]
 #[no_mangle]
-pub fn create_component() -> component_core::component_ref::ComponentRef {
+pub fn create_component_block_device_spdk_nvme() -> component_core::component_ref::ComponentRef {
     component_core::component_ref::ComponentRef::from(
         BlockDeviceSpdkNvmeComponent::new_default() as std::sync::Arc<_>,
     )

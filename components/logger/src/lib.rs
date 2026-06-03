@@ -432,6 +432,6 @@ mod tests {
 /// a default-configured `LoggerComponent`.
 #[cfg(feature = "dylib")]
 #[no_mangle]
-pub fn create_component() -> component_core::component_ref::ComponentRef {
+pub fn create_component_logger() -> component_core::component_ref::ComponentRef {
     component_core::component_ref::ComponentRef::from(LoggerComponent::new_default() as Arc<_>)
 }

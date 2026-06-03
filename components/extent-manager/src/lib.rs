@@ -681,7 +681,7 @@ impl IExtentManager for ExtentManager {
 /// checkpoint timer. Returns a `ComponentRef` wrapping the instance.
 #[cfg(feature = "dylib")]
 #[no_mangle]
-pub fn create_component() -> component_core::component_ref::ComponentRef {
+pub fn create_component_extent_manager() -> component_core::component_ref::ComponentRef {
     component_core::component_ref::ComponentRef::from(
         ExtentManager::new_inner() as std::sync::Arc<_>,
     )

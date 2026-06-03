@@ -881,7 +881,7 @@ mod tests {
 /// a default-configured `DispatchMapComponent`.
 #[cfg(feature = "dylib")]
 #[no_mangle]
-pub fn create_component() -> component_core::component_ref::ComponentRef {
+pub fn create_component_dispatch_map() -> component_core::component_ref::ComponentRef {
     component_core::component_ref::ComponentRef::from(
         DispatchMapComponent::new_default() as Arc<_>,
     )

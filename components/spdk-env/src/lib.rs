@@ -244,7 +244,7 @@ mod tests {
 /// a default-configured `SPDKEnvComponent`.
 #[cfg(feature = "dylib")]
 #[no_mangle]
-pub fn create_component() -> component_core::component_ref::ComponentRef {
+pub fn create_component_spdk_env() -> component_core::component_ref::ComponentRef {
     component_core::component_ref::ComponentRef::from(
         SPDKEnvComponent::new_default() as std::sync::Arc<_>,
     )
