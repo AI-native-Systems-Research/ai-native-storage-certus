@@ -1,0 +1,12 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_take_read": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_take_read_prevents_eviction": {
+        "prover": "alt-ergo",
+        "time": 0.021
+      }
+    }
+  }
+}

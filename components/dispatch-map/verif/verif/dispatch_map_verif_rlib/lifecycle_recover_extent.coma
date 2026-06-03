@@ -1,18 +1,34 @@
-(* #"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 350 0 350 50 *)
+(* #"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 354 0 354 50 *)
 
-let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 351 19 351 23
-let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 351 25 351 26
-let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 351 28 351 29
-let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 351 4 351 30
-let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 348 10 348 33
-let%span slib'4 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 349 10 349 35
-let%span slib'5 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 106 10 106 34
-let%span slib'6 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 107 10 107 33
-let%span slib'7 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 108 10 108 43
-let%span slib'8 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 109 10 109 33
-let%span slib'9 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 110 10 110 35
-let%span slib'10 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 53 16 53 57
-let%span slib'11 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 47 16 47 58
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 355 19 355 23
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 355 25 355 26
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 355 28 355 29
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 355 4 355 30
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 352 10 352 33
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 353 10 353 35
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 108 11 108 29
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 109 10 109 34
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 110 10 110 33
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 111 10 111 43
+let%span slib'9 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 112 10 112 35
+let%span slib'10 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 113 10 113 33
+let%span slib'11 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 114 10 114 35
+let%span slib'12 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 53 16 53 57
+let%span slib'13 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 47 16 47 58
+let%span sord = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 162 41 162 102
+let%span sord'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 168 41 168 99
+let%span sord'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 174 41 174 99
+let%span sord'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 180 41 180 102
+let%span sord'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 186 41 186 83
+let%span sord'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 192 42 192 59
+let%span sord'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 193 42 193 59
+let%span sord'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 194 41 194 58
+let%span sord'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 200 42 200 83
+let%span sord'8 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 201 41 201 85
+let%span sord'9 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 207 42 207 86
+let%span sord'10 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 208 41 208 82
+let%span sord'11 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 214 41 214 97
+let%span sord'12 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 296 16 302 17
 
 use creusot.int.UInt64
 use creusot.int.UInt32
@@ -29,27 +45,77 @@ type t_DispatchEntry = {
   write_ref: UInt32.t;
   tsc: UInt64.t }
 
+type t_Ordering = Less | Equal | Greater
+
+function cmp_log_u32 (self: UInt32.t) (o: UInt32.t) : t_Ordering = [%#sord'12] if UInt32.lt self o then
+    Less
+  else
+    if self = o then Equal else Greater
+
+
+function eq_cmp_u32 (x: UInt32.t) (y: UInt32.t) : ()
+
+axiom eq_cmp_u32_spec: forall x: UInt32.t, y: UInt32.t. [%#sord'11] (x = y) = (cmp_log_u32 x y = Equal)
+
+function antisym2_u32 (x: UInt32.t) (y: UInt32.t) : ()
+
+axiom antisym2_u32_spec: forall x: UInt32.t, y: UInt32.t. ([%#sord'9] cmp_log_u32 x y = Greater)
+    -> ([%#sord'10] cmp_log_u32 y x = Less)
+
+function antisym1_u32 (x: UInt32.t) (y: UInt32.t) : ()
+
+axiom antisym1_u32_spec: forall x: UInt32.t, y: UInt32.t. ([%#sord'7] cmp_log_u32 x y = Less)
+    -> ([%#sord'8] cmp_log_u32 y x = Greater)
+
+function trans_u32 (x: UInt32.t) (y: UInt32.t) (z: UInt32.t) (o: t_Ordering) : ()
+
+axiom trans_u32_spec: forall x: UInt32.t, y: UInt32.t, z: UInt32.t, o: t_Ordering. ([%#sord'4] cmp_log_u32 x y = o)
+    -> ([%#sord'5] cmp_log_u32 y z = o) -> ([%#sord'6] cmp_log_u32 x z = o)
+
+function refl_u32 (x: UInt32.t) : ()
+
+axiom refl_u32_spec: forall x: UInt32.t. [%#sord'3] cmp_log_u32 x x = Equal
+
+function cmp_gt_log_u32 (x: UInt32.t) (y: UInt32.t) : ()
+
+axiom cmp_gt_log_u32_spec: forall x: UInt32.t, y: UInt32.t. [%#sord'2] UInt32.gt x y = (cmp_log_u32 x y = Greater)
+
+function cmp_ge_log_u32 (x: UInt32.t) (y: UInt32.t) : ()
+
+axiom cmp_ge_log_u32_spec: forall x: UInt32.t, y: UInt32.t. [%#sord'1] UInt32.ge x y = (cmp_log_u32 x y <> Less)
+
+function cmp_lt_log_u32 (x: UInt32.t) (y: UInt32.t) : ()
+
+axiom cmp_lt_log_u32_spec: forall x: UInt32.t, y: UInt32.t. [%#sord'0] UInt32.lt x y = (cmp_log_u32 x y = Less)
+
+function cmp_le_log_u32 (x: UInt32.t) (y: UInt32.t) : ()
+
+axiom cmp_le_log_u32_spec: forall x: UInt32.t, y: UInt32.t. [%#sord] UInt32.le x y = (cmp_log_u32 x y <> Greater)
+
 predicate no_active_refs [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 52 0 52 48] (e: t_DispatchEntry) =
-  [%#slib'10] e.read_ref = (0: UInt32.t) /\ e.write_ref = (0: UInt32.t)
+  [%#slib'12] e.read_ref = (0: UInt32.t) /\ e.write_ref = (0: UInt32.t)
 
 predicate inv_write_binary [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 46 0 46 50] (e: t_DispatchEntry) =
-  [%#slib'11] e.write_ref = (0: UInt32.t) \/ e.write_ref = (1: UInt32.t)
+  [%#slib'13] e.write_ref = (0: UInt32.t) \/ e.write_ref = (1: UInt32.t)
 
-let recover_extent (offset: UInt64.t) (size_blocks'0: UInt32.t) (tsc'0: UInt64.t) (return (x: t_DispatchEntry)) = any
+let recover_extent (offset: UInt64.t) (size_blocks'0: UInt32.t) (tsc'0: UInt64.t) (return (x: t_DispatchEntry)) =
+{[@stop_split] [@expl:recover_extent requires] [%#slib'5] UInt32.gt size_blocks'0 (0: UInt32.t)}
+  any
   [ return (result: t_DispatchEntry) ->
-  {[@stop_split] [@expl:recover_extent ensures] ([@stop_split] [@expl:recover_extent ensures #0] [%#slib'5] result.write_ref
+  {[@stop_split] [@expl:recover_extent ensures] ([@stop_split] [@expl:recover_extent ensures #0] [%#slib'6] result.write_ref
       = (0: UInt32.t))
-    /\ ([@stop_split] [@expl:recover_extent ensures #1] [%#slib'6] result.read_ref = (0: UInt32.t))
-    /\ ([@stop_split] [@expl:recover_extent ensures #2] [%#slib'7] result.size_blocks = size_blocks'0)
-    /\ ([@stop_split] [@expl:recover_extent ensures #3] [%#slib'8] no_active_refs result)
-    /\ ([@stop_split] [@expl:recover_extent ensures #4] [%#slib'9] inv_write_binary result)}
+    /\ ([@stop_split] [@expl:recover_extent ensures #1] [%#slib'7] result.read_ref = (0: UInt32.t))
+    /\ ([@stop_split] [@expl:recover_extent ensures #2] [%#slib'8] result.size_blocks = size_blocks'0)
+    /\ ([@stop_split] [@expl:recover_extent ensures #3] [%#slib'9] UInt32.gt result.size_blocks (0: UInt32.t))
+    /\ ([@stop_split] [@expl:recover_extent ensures #4] [%#slib'10] no_active_refs result)
+    /\ ([@stop_split] [@expl:recover_extent ensures #5] [%#slib'11] inv_write_binary result)}
     (! return {result}) ]
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let lifecycle_recover_extent [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 350 0 350 50]
+let lifecycle_recover_extent [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 354 0 354 50]
   (return (x: t_DispatchEntry)) = (! bb0
   [ bb0 = s0
     [ s0 = recover_extent [%#slib'2] {[%#slib] (4096: UInt64.t)} {[%#slib'0] (8: UInt32.t)} {[%#slib'1] (0: UInt64.t)}

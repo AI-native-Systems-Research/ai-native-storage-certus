@@ -1,13 +1,14 @@
-(* #"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 72 0 72 79 *)
+(* #"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 73 0 73 79 *)
 
-let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 76 18 76 19
-let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 77 19 77 20
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 77 18 77 19
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 78 19 78 20
 let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 67 11 67 22
 let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 68 10 68 34
 let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 69 10 69 33
 let%span slib'4 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 70 10 70 36
 let%span slib'5 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 71 10 71 35
-let%span slib'6 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 47 16 47 58
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 72 10 72 35
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 47 16 47 58
 let%span sord = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 162 41 162 102
 let%span sord'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 168 41 168 99
 let%span sord'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 174 41 174 99
@@ -86,19 +87,19 @@ function cmp_le_log_u32 (x: UInt32.t) (y: UInt32.t) : ()
 axiom cmp_le_log_u32_spec: forall x: UInt32.t, y: UInt32.t. [%#sord] UInt32.le x y = (cmp_log_u32 x y <> Greater)
 
 predicate inv_write_binary [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 46 0 46 50] (e: t_DispatchEntry) =
-  [%#slib'6] e.write_ref = (0: UInt32.t) \/ e.write_ref = (1: UInt32.t)
+  [%#slib'7] e.write_ref = (0: UInt32.t) \/ e.write_ref = (1: UInt32.t)
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let create_staging [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 72 0 72 79]
+let create_staging [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 73 0 73 79]
   (size: UInt32.t) (buffer_handle: UInt64.t) (tsc'0: UInt64.t) (return (x: t_DispatchEntry)) =
 {[@stop_split] [@expl:create_staging requires] [%#slib'1] UInt32.gt size (0: UInt32.t)}
   (! bb0
   [ bb0 = s0
-    [ s0 = [ &_11 <- Staging buffer_handle ] s1
-    | s1 = [ &_ret <- { location = _11;
+    [ s0 = [ &_12 <- Staging buffer_handle ] s1
+    | s1 = [ &_ret <- { location = _12;
                         size_blocks = size;
                         read_ref = ([%#slib] (0: UInt32.t));
                         write_ref = ([%#slib'0] (1: UInt32.t));
@@ -108,11 +109,12 @@ let create_staging [#"/home/cornel/ai-native-storage-certus/components/dispatch-
   | & size: UInt32.t = size
   | & buffer_handle: UInt64.t = buffer_handle
   | & tsc'0: UInt64.t = tsc'0
-  | & _11: t_Location = Any.any_l () ])
+  | & _12: t_Location = Any.any_l () ])
   [ return (result: t_DispatchEntry) ->
   {[@stop_split] [@expl:create_staging ensures] ([@stop_split] [@expl:create_staging ensures #0] [%#slib'2] result.write_ref
       = (1: UInt32.t))
     /\ ([@stop_split] [@expl:create_staging ensures #1] [%#slib'3] result.read_ref = (0: UInt32.t))
     /\ ([@stop_split] [@expl:create_staging ensures #2] [%#slib'4] result.size_blocks = size)
-    /\ ([@stop_split] [@expl:create_staging ensures #3] [%#slib'5] inv_write_binary result)}
+    /\ ([@stop_split] [@expl:create_staging ensures #3] [%#slib'5] UInt32.gt result.size_blocks (0: UInt32.t))
+    /\ ([@stop_split] [@expl:create_staging ensures #4] [%#slib'6] inv_write_binary result)}
     (! return {result}) ]

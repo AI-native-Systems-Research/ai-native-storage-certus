@@ -68,6 +68,7 @@ pub fn no_active_refs(e: &DispatchEntry) -> bool {
 #[ensures(result.write_ref == 1u32)]
 #[ensures(result.read_ref == 0u32)]
 #[ensures(result.size_blocks == size)]
+#[ensures(result.size_blocks > 0u32)]
 #[ensures(inv_write_binary(&result))]
 pub fn create_staging(size: u32, buffer_handle: u64, tsc: u64) -> DispatchEntry {
     DispatchEntry {
@@ -86,6 +87,7 @@ pub fn create_staging(size: u32, buffer_handle: u64, tsc: u64) -> DispatchEntry 
 #[requires(size@ + 4095 <= u32::MAX@)]
 #[ensures(result.write_ref == 1u32)]
 #[ensures(result.read_ref == 0u32)]
+#[ensures(result.size_blocks > 0u32)]
 #[ensures(inv_write_binary(&result))]
 pub fn create_memory_tier_entry(mem_handle: u64, size: u32, tsc: u64) -> DispatchEntry {
     DispatchEntry {
@@ -103,9 +105,11 @@ pub fn create_memory_tier_entry(mem_handle: u64, size: u32, tsc: u64) -> Dispatc
 
 /// Mirrors `recover_extent` — returns the entry for a recovered extent.
 /// The real code: checks key not present, inserts a BlockDevice entry with zero refs.
+#[requires(size_blocks > 0u32)]
 #[ensures(result.write_ref == 0u32)]
 #[ensures(result.read_ref == 0u32)]
 #[ensures(result.size_blocks == size_blocks)]
+#[ensures(result.size_blocks > 0u32)]
 #[ensures(no_active_refs(&result))]
 #[ensures(inv_write_binary(&result))]
 pub fn recover_extent(offset: u64, size_blocks: u32, tsc: u64) -> DispatchEntry {
@@ -348,7 +352,7 @@ pub fn lifecycle_staging_to_block() -> DispatchEntry {
 #[ensures(no_active_refs(&result))]
 #[ensures(inv_write_binary(&result))]
 pub fn lifecycle_recover_extent() -> DispatchEntry {
-    recover_extent(4096, 8, 0)
+    recover_extent(4096, 8, 0)  // size_blocks=8 satisfies new #[requires(size_blocks > 0u32)]
 }
 
 /// Proves: create_memory_tier → convert_to_storage (sets ssd_offset) →
@@ -425,6 +429,18 @@ pub fn roundtrip_downgrade(entry: &mut DispatchEntry) {
     let _ = take_write(entry);
     let _ = downgrade_reference(entry);
     let _ = release_read(entry);
+}
+
+/// After take_read, the entry has an active reader (read_ref > 0).
+/// Since is_evictable requires read_ref == 0, active readers always prevent eviction.
+/// This closes the safety argument: data being read cannot be evicted from under the reader.
+#[requires(inv_write_binary(entry))]
+#[requires((*entry).write_ref == 0u32)]
+#[requires((*entry).read_ref@ < u32::MAX@)]
+#[ensures((^entry).read_ref > 0u32)]
+#[ensures(inv_write_binary(&^entry))]
+pub fn take_read_prevents_eviction(entry: &mut DispatchEntry) {
+    let _ = take_read(entry);
 }
 
 /// Two concurrent readers round-trip: two take_reads followed by two

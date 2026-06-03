@@ -40,6 +40,12 @@ pub struct IoSegment {
         0 <= i && i + 1 < result@.len()
         ==> result@[i].buffer_offset@ + result@[i].length@ == result@[i + 1].buffer_offset@
 )]
+// Exact segment count: result.len() == ceil(total_bytes / max_transfer_size).
+#[ensures(
+    total_bytes@ > 0 ==>
+        (result@.len() - 1) * max_transfer_size@ < total_bytes@
+        && total_bytes@ <= result@.len() * max_transfer_size@
+)]
 pub fn segment_io(
     start_lba: u64,
     total_bytes: usize,
@@ -68,26 +74,29 @@ pub fn segment_io(
     // lba stays within u64 range: it started at start_lba and advanced by at most buffer_offset/ss.
     #[invariant(lba@ <= start_lba@ + buffer_offset@ / ss@)]
     #[invariant(lba@ <= u64::MAX@)]
-    // Adjacent segments tile without gaps or overlaps.
+    // Adjacent buffer_offset: each segment starts where the previous ended.
     #[invariant(
         forall<j: Int>
             0 <= j && j + 1 < segments@.len()
             ==> segments@[j].buffer_offset@ + segments@[j].length@ == segments@[j + 1].buffer_offset@
     )]
-    // The last segment's end equals the current buffer_offset — connects the
-    // loop variable to the Vec contents so the adjacency invariant can be
-    // extended when the next segment is pushed.
+    // Last segment's buffer end == current buffer_offset.
     #[invariant(
         segments@.len() > 0
             ==> segments@[segments@.len() - 1].buffer_offset@
                 + segments@[segments@.len() - 1].length@
                 == buffer_offset@
     )]
+    #[invariant(remaining@ > 0 ==> buffer_offset@ == segments@.len() * mts@)]
+    #[invariant(segments@.len() > 0 ==> (segments@.len() - 1) * mts@ < buffer_offset@)]
+    #[invariant(buffer_offset@ <= segments@.len() * mts@)]
     #[variant(remaining)]
     while remaining > 0 {
         let length = if remaining < mts { remaining } else { mts };
         // length > 0 because remaining > 0 and mts > 0.
         proof_assert!(length@ > 0);
+        proof_assert!(length@ == mts@ || remaining@ == length@);
+        proof_assert!(buffer_offset@ == segments@.len() * mts@);
         segments.push(IoSegment {
             buffer_offset,
             lba,
@@ -98,5 +107,7 @@ pub fn segment_io(
         remaining -= length;
     }
 
+    proof_assert!(buffer_offset@ == total_bytes@);
+    proof_assert!(segments@.len() == 0 || (segments@.len() - 1) * mts@ < total_bytes@);
     segments
 }
