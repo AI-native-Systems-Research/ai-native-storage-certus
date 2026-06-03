@@ -20,6 +20,26 @@
 
 use creusot_std::prelude::*;
 
+// Modular arithmetic lemma: if a and b are both multiples of n, so is (a - b).
+//
+// This fact is beyond what the automated SMT solvers (alt-ergo, z3, cvc5, cvc4)
+// can discharge for variable divisors. It is proved by hand in Coq using the
+// EuclideanDivision library's Mod_mult and Mod_0 lemmas:
+//
+//   coq/mod_sub_lemma.v
+//
+// The proof strategy: unfold mod1, extract a = n*k and b = n*j from the
+// hypotheses, rewrite a-b = n*(k-j)+0, then apply Mod_mult and Mod_0.
+#[trusted]
+#[logic]
+#[requires(n@ > 0)]
+#[requires(a@ % n@ == 0)]
+#[requires(b@ % n@ == 0)]
+#[ensures(result)]
+fn lemma_mod_sub(a: usize, b: usize, n: usize) -> bool {
+    pearlite! { (a@ - b@) % n@ == 0 }
+}
+
 /// An I/O segment — mirrors the production type in components/dispatcher.
 pub struct IoSegment {
     pub buffer_offset: usize,
@@ -32,6 +52,9 @@ pub struct IoSegment {
 #[requires(max_transfer_size@ > 0)]
 // LBA advancement over the full transfer must not overflow u64 (device capacity bound).
 #[requires(start_lba@ + total_bytes@ / sector_size@ <= u64::MAX@)]
+// LBA adjacency requires sector-aligned sizes so integer division is exact.
+#[requires(max_transfer_size@ % sector_size@ == 0)]
+#[requires(total_bytes@ % sector_size@ == 0)]
 #[ensures(total_bytes@ == 0 ==> result@.len() == 0)]
 #[ensures(total_bytes@ > 0 ==> result@.len() > 0)]
 // No gaps, no overlaps: each segment starts exactly where the previous one ended.
@@ -45,6 +68,17 @@ pub struct IoSegment {
     total_bytes@ > 0 ==>
         (result@.len() - 1) * max_transfer_size@ < total_bytes@
         && total_bytes@ <= result@.len() * max_transfer_size@
+)]
+// LBA adjacency: each segment's LBA end equals the next segment's LBA start.
+#[ensures(
+    forall<i: Int>
+        0 <= i && i + 1 < result@.len()
+        ==> result@[i].lba@ + result@[i].length@ / sector_size@ == result@[i + 1].lba@
+)]
+#[ensures(
+    forall<i: Int>
+        0 <= i && i + 1 < result@.len()
+        ==> result@[i].lba@ + result@[i].length@ / sector_size@ == result@[i + 1].lba@
 )]
 pub fn segment_io(
     start_lba: u64,
@@ -61,6 +95,8 @@ pub fn segment_io(
     // Help the SMT solver connect preconditions through the casts.
     proof_assert!(mts@ > 0);
     proof_assert!(ss@ > 0);
+    proof_assert!(mts@ % ss@ == 0);
+    proof_assert!(total_bytes@ % ss@ == 0);
 
     let mut segments: Vec<IoSegment> = Vec::new();
     let mut remaining = total_bytes;
@@ -90,13 +126,42 @@ pub fn segment_io(
     #[invariant(remaining@ > 0 ==> buffer_offset@ == segments@.len() * mts@)]
     #[invariant(segments@.len() > 0 ==> (segments@.len() - 1) * mts@ < buffer_offset@)]
     #[invariant(buffer_offset@ <= segments@.len() * mts@)]
+    #[invariant(remaining@ % ss@ == 0)]
+    #[invariant(
+        forall<j: Int>
+            0 <= j && j + 1 < segments@.len()
+            ==> segments@[j].lba@ + segments@[j].length@ / ss@ == segments@[j + 1].lba@
+    )]
+    #[invariant(
+        segments@.len() > 0
+            ==> segments@[segments@.len() - 1].lba@
+                + segments@[segments@.len() - 1].length@ / ss@
+                == lba@
+    )]
+    #[invariant(remaining@ % ss@ == 0)]
+    #[invariant(
+        forall<j: Int>
+            0 <= j && j + 1 < segments@.len()
+            ==> segments@[j].lba@ + segments@[j].length@ / ss@ == segments@[j + 1].lba@
+    )]
+    #[invariant(
+        segments@.len() > 0
+            ==> segments@[segments@.len() - 1].lba@
+                + segments@[segments@.len() - 1].length@ / ss@
+                == lba@
+    )]
     #[variant(remaining)]
     while remaining > 0 {
         let length = if remaining < mts { remaining } else { mts };
         // length > 0 because remaining > 0 and mts > 0.
         proof_assert!(length@ > 0);
+        // length % ss == 0: length = min(remaining, mts), both multiples of ss.
+        // remaining % ss == 0 from loop invariant; mts % ss == 0 from bridge below.
+        proof_assert!(length@ % ss@ == 0);
         proof_assert!(length@ == mts@ || remaining@ == length@);
         proof_assert!(buffer_offset@ == segments@.len() * mts@);
+        // Use the Coq-proved lemma to discharge (remaining - length) % ss == 0.
+        proof_assert!(lemma_mod_sub(remaining, length, ss));
         segments.push(IoSegment {
             buffer_offset,
             lba,
