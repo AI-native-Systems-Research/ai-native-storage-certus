@@ -1,11 +1,11 @@
 {
   "variables": {
-    "num_ssd_devices": 1
+    "num_ssd_devices": 4
   },
   "search_paths": ["./target/release"],
   "server": {
     "listen": "127.0.0.1:50051",
-    "device_pci": ["0000:61:00.0"],
+    "drive_count": 4,
     "memory_tier_size": "2G",
     "format": true,
     "poller_base_cpu": 4
