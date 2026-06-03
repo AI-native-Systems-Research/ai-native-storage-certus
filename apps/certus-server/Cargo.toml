@@ -7,12 +7,14 @@ publish = false
 
 [features]
 p2p = ["gpu-services/p2p", "dispatcher/p2p"]
+p2p-native = ["gpu-services/p2p", "dep:dispatcher-p2p"]
 
 [dependencies]
 interfaces = { workspace = true, features = ["spdk"] }
 component-framework.workspace = true
 component-core.workspace = true
 dispatcher.workspace = true
+dispatcher-p2p = { workspace = true, optional = true }
 dispatch-map.workspace = true
 memory-tier.workspace = true
 block-device-spdk-nvme.workspace = true

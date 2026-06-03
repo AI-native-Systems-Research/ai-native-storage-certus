@@ -18,6 +18,9 @@ use interfaces::{
     IMemoryTier, PciAddress,
 };
 
+#[cfg(feature = "p2p-native")]
+use dispatcher_p2p as dispatcher;
+
 use service::DispatcherService;
 
 /// Certus gRPC server exposing the IDispatcher interface.
