@@ -6,7 +6,7 @@ rust-version.workspace = true
 publish = false
 
 [features]
-p2p = ["gpu-services/p2p"]
+p2p = ["gpu-services/p2p", "dispatcher/p2p"]
 
 [dependencies]
 interfaces = { workspace = true, features = ["spdk"] }
