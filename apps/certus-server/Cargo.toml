@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+p2p = ["gpu-services/p2p"]
+
 [dependencies]
 interfaces = { workspace = true, features = ["spdk"] }
 component-framework.workspace = true
@@ -17,7 +20,6 @@ extent-manager.workspace = true
 spdk-env.workspace = true
 gpu-services = { workspace = true, features = ["gpu"] }
 logger.workspace = true
-
 tonic = { version = "0.12", features = ["tls"] }
 prost = "0.13"
 tokio = { version = "1", features = ["full"] }

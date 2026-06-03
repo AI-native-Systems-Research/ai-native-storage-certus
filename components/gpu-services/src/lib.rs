@@ -38,6 +38,7 @@ mod memory;
 use component_framework::define_component;
 use interfaces::{GpuDeviceInfo, GpuDmaBuffer, GpuIpcHandle, IGpuServices, ILogger};
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 /// Internal component state tracking initialization and handles.
@@ -65,6 +66,7 @@ define_component! {
         },
         fields: {
             gpu_state: Mutex<GpuState>,
+            initialized_fast: AtomicBool,
         },
     }
 }
@@ -102,6 +104,7 @@ impl IGpuServices for GpuServicesComponent {
 
             state.devices = devices;
             state.initialized = true;
+            self.initialized_fast.store(true, Ordering::Release);
             Ok(())
         }
     }
@@ -507,11 +510,10 @@ impl IGpuServices for GpuServicesComponent {
 
         #[cfg(feature = "gpu")]
         {
-            let state = self.state().lock().map_err(|e| e.to_string())?;
-            if !state.initialized {
+            // Fast path: use atomic flag to avoid mutex contention.
+            if !self.initialized_fast.load(Ordering::Acquire) {
                 return Err("Not initialized: call initialize() first".to_string());
             }
-            drop(state);
 
             // SAFETY: Caller guarantees dst is a valid GPU device pointer covering
             // at least `size` bytes. src.as_ptr() is a valid DMA host buffer and
@@ -629,11 +631,10 @@ impl IGpuServices for GpuServicesComponent {
 
         #[cfg(feature = "gpu")]
         {
-            let state = self.state().lock().map_err(|e| e.to_string())?;
-            if !state.initialized {
+            // Fast path: use atomic flag to avoid mutex contention on the hot path.
+            if !self.initialized_fast.load(Ordering::Acquire) {
                 return Err("Not initialized: call initialize() first".to_string());
             }
-            drop(state);
 
             // SAFETY: Caller guarantees dst is a valid GPU device pointer covering
             // at least `size` bytes. src.as_ptr() is a valid DMA host buffer,
@@ -676,11 +677,10 @@ impl IGpuServices for GpuServicesComponent {
 
         #[cfg(feature = "gpu")]
         {
-            let state = self.state().lock().map_err(|e| e.to_string())?;
-            if !state.initialized {
+            // Fast path: use atomic flag to avoid mutex contention.
+            if !self.initialized_fast.load(Ordering::Acquire) {
                 return Err("Not initialized: call initialize() first".to_string());
             }
-            drop(state);
 
             let err = unsafe {
                 cuda_ffi::cudaMemcpyAsync(
