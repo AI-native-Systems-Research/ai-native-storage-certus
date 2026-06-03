@@ -12,20 +12,14 @@
   },
   "components": [
     { "name": "logger", "dylib": "liblogger.so" },
-    { "name": "spdk-env", "dylib": "libspdk_env.so" },
+    { "name": "spdk-env", "dylib": "libdispatcher.so" },
     { "name": "gpu-services", "dylib": "libgpu_services.so" },
-    { "name": "block-device", "dylib": "libblock_device_spdk_nvme.so", "instances": "$num_ssd_devices" },
-    { "name": "extent-manager", "dylib": "libextent_manager.so", "instances": "$num_ssd_devices" },
     { "name": "dispatch-map", "dylib": "libdispatch_map.so" },
     { "name": "memory-tier", "dylib": "libmemory_tier.so" },
     { "name": "dispatcher", "dylib": "libdispatcher.so" }
   ],
   "bindings": [
     { "target": "gpu-services", "receptacle": "logger", "source": "logger" },
-    { "target": "block-device", "receptacle": "logger", "source": "logger" },
-    { "target": "block-device", "receptacle": "spdk_env", "source": "spdk-env" },
-    { "target": "extent-manager", "receptacle": "logger", "source": "logger" },
-    { "target": "extent-manager", "receptacle": "metadata_device", "source": "block-device" },
     { "target": "dispatch-map", "receptacle": "logger", "source": "logger" },
     { "target": "memory-tier", "receptacle": "logger", "source": "logger" },
     { "target": "dispatcher", "receptacle": "logger", "source": "logger" },

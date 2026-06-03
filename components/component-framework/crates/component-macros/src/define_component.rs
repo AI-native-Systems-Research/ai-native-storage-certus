@@ -247,8 +247,10 @@ pub(crate) fn expand(input: ComponentInput) -> TokenStream {
         .collect();
 
     // Generate connect_receptacle_raw match arms.
-    // Each arm queries the provider (via IUnknown) for the expected interface
-    // type, then connects the resulting Arc to the receptacle.
+    // Each arm queries the provider by interface NAME (not TypeId) to support
+    // cross-dylib binding where TypeIds may differ between compilation units.
+    // The provider's query_interface_by_name uses ITS OWN TypeId internally,
+    // then we transmute the result since the trait layout is ABI-compatible.
     let receptacle_connect_arms: Vec<_> = receptacles
         .iter()
         .map(|(rname, iface)| {
@@ -256,21 +258,21 @@ pub(crate) fn expand(input: ComponentInput) -> TokenStream {
             let iface_str = iface.to_string();
             quote! {
                 #rname_str => {
-                    let type_id = ::std::any::TypeId::of::<
-                        ::std::sync::Arc<dyn #iface + ::std::marker::Send + ::std::marker::Sync>
-                    >();
-                    let any_ref = provider.query_interface_raw(type_id)
+                    let any_ref = provider.query_interface_by_name(#iface_str)
                         .ok_or_else(|| ::component_core::error::RegistryError::BindingFailed {
                             detail: format!(
                                 "provider does not implement '{}' needed by receptacle '{}'",
                                 #iface_str, #rname_str
                             ),
                         })?;
-                    let arc = any_ref
-                        .downcast_ref::<::std::sync::Arc<dyn #iface + ::std::marker::Send + ::std::marker::Sync>>()
-                        .ok_or_else(|| ::component_core::error::RegistryError::BindingFailed {
-                            detail: format!("type mismatch for receptacle '{}'", #rname_str),
-                        })?;
+                    // SAFETY: query_interface_by_name returns &Arc<dyn Trait + Send + Sync>
+                    // stored by the provider. The trait layout is identical across dylib
+                    // boundaries (same compiler, same ABI). We transmute because
+                    // downcast_ref would fail due to TypeId mismatch across dylibs.
+                    let arc = unsafe {
+                        &*(any_ref as *const (dyn ::std::any::Any + ::std::marker::Send + ::std::marker::Sync)
+                            as *const ::std::sync::Arc<dyn #iface + ::std::marker::Send + ::std::marker::Sync>)
+                    };
                     self.#rname.connect(::std::sync::Arc::clone(arc)).map_err(|e| {
                         ::component_core::error::RegistryError::BindingFailed {
                             detail: format!("receptacle '{}': {}", #rname_str, e),
@@ -402,6 +404,14 @@ pub(crate) fn expand(input: ComponentInput) -> TokenStream {
                         detail: format!("unknown receptacle: {}", receptacle_name),
                     }),
                 }
+            }
+
+            fn query_interface_by_name(
+                &self,
+                name: &str,
+            ) -> Option<&(dyn ::std::any::Any + Send + Sync)> {
+                let info = self.__interface_info.iter().find(|i| i.name == name)?;
+                self.__interface_map.lookup(info.type_id)
             }
         }
 

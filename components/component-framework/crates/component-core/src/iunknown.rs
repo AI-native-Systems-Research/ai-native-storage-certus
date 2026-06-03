@@ -129,6 +129,24 @@ pub trait IUnknown: Send + Sync {
         receptacle_name: &str,
         provider: &dyn IUnknown,
     ) -> Result<(), RegistryError>;
+
+    /// Look up an interface by name and return it as a type-erased reference.
+    ///
+    /// Unlike [`query_interface_raw`](Self::query_interface_raw) which uses
+    /// `TypeId` (unstable across dylib boundaries), this method uses the
+    /// interface name string. The returned `&dyn Any` can be transmuted to
+    /// the correct `&Arc<dyn Trait>` by the caller when they know the name
+    /// matches the expected type.
+    ///
+    /// Default implementation searches `provided_interfaces()` by name and
+    /// delegates to `query_interface_raw` using the component's own TypeId.
+    fn query_interface_by_name(&self, name: &str) -> Option<&(dyn Any + Send + Sync)> {
+        let info = self
+            .provided_interfaces()
+            .iter()
+            .find(|i| i.name == name)?;
+        self.query_interface_raw(info.type_id)
+    }
 }
 
 /// Typed wrapper for [`IUnknown::query_interface_raw`].
