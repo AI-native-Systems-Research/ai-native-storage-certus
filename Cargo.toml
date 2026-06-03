@@ -43,7 +43,6 @@ default-members = [
     "components/example-helloworld-dylib",
     "apps/helloworld-mainline",
     "apps/dynamic-loading-example",
-    "apps/certus-server-composable",
     "components/logger",
     "components/gpu-services"
 ]
