@@ -9,6 +9,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use component_core::component_ref::ComponentRef;
+use component_core::iunknown::query;
+use interfaces::{
+    DmaAllocFn, DmaBuffer, IBlockDevice, IBlockDeviceAdmin, IDispatchMap, IDispatcher,
+    IExtentManager, IGpuServices, IMemoryTier, ISPDKEnv, PciAddress,
+};
 use libloading::Library;
 
 use crate::binder::{self, NamedComponent};
@@ -162,9 +167,300 @@ pub fn initialize_stack(
         e
     })?;
 
+    // Post-binding: initialize block-devices and register them with the dispatcher.
+    initialize_data_drives(&live_components, config, &instance_map).map_err(|e| {
+        teardown_reverse(&live_components);
+        e
+    })?;
+
     Ok(ComponentStack {
         components: live_components,
     })
+}
+
+fn parse_memory_size(s: &str) -> Result<usize, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("empty size string".into());
+    }
+    let (num_str, multiplier) = match s.as_bytes().last() {
+        Some(b'K' | b'k') => (&s[..s.len() - 1], 1024usize),
+        Some(b'M' | b'm') => (&s[..s.len() - 1], 1024 * 1024),
+        Some(b'G' | b'g') => (&s[..s.len() - 1], 1024 * 1024 * 1024),
+        _ => (s, 1usize),
+    };
+    let num: usize = num_str
+        .parse()
+        .map_err(|_| format!("invalid size: '{s}'"))?;
+    num.checked_mul(multiplier)
+        .ok_or_else(|| format!("size overflow: '{s}'"))
+}
+
+fn parse_pci_address(addr: &str) -> Result<PciAddress, String> {
+    let parts: Vec<&str> = addr.split(':').collect();
+    if parts.len() != 3 {
+        return Err(format!(
+            "invalid PCI address format '{addr}': expected DDDD:BB:DD.F"
+        ));
+    }
+    let domain = u32::from_str_radix(parts[0], 16)
+        .map_err(|_| format!("invalid PCI domain in '{addr}'"))?;
+    let bus = u8::from_str_radix(parts[1], 16)
+        .map_err(|_| format!("invalid PCI bus in '{addr}'"))?;
+    let dev_func: Vec<&str> = parts[2].split('.').collect();
+    if dev_func.len() != 2 {
+        return Err(format!(
+            "invalid PCI dev.func in '{addr}': expected DD.F"
+        ));
+    }
+    let dev = u8::from_str_radix(dev_func[0], 16)
+        .map_err(|_| format!("invalid PCI device in '{addr}'"))?;
+    let func = u8::from_str_radix(dev_func[1], 16)
+        .map_err(|_| format!("invalid PCI function in '{addr}'"))?;
+    Ok(PciAddress {
+        domain,
+        bus,
+        dev,
+        func,
+    })
+}
+
+/// Initialize block-device and extent-manager instances, then register them
+/// with the dispatcher via `add_data_drive`.
+fn initialize_data_drives(
+    components: &[LiveComponent],
+    config: &Configuration,
+    instance_map: &HashMap<String, Vec<String>>,
+) -> Result<(), String> {
+    // Collect block-device instance names.
+    let bd_instances: Vec<&str> = instance_map
+        .get("block-device")
+        .map(|v| v.iter().map(|s| s.as_str()).collect())
+        .unwrap_or_else(|| {
+            components
+                .iter()
+                .filter(|c| c.name == "block-device")
+                .map(|c| c.name.as_str())
+                .collect()
+        });
+
+    // Collect extent-manager instance names.
+    let em_instances: Vec<&str> = instance_map
+        .get("extent-manager")
+        .map(|v| v.iter().map(|s| s.as_str()).collect())
+        .unwrap_or_else(|| {
+            components
+                .iter()
+                .filter(|c| c.name == "extent-manager")
+                .map(|c| c.name.as_str())
+                .collect()
+        });
+
+    if bd_instances.is_empty() {
+        // No external block-devices: initialize dispatcher with data_pci_addrs from config.
+        if let Some(dispatcher_comp) = components.iter().find(|c| c.name == "dispatcher") {
+            if let Some(dispatcher) =
+                query::<dyn IDispatcher + Send + Sync>(&*dispatcher_comp.component)
+            {
+                let pci_addrs = config
+                    .server
+                    .device_pci
+                    .clone()
+                    .unwrap_or_default();
+                let format_on_init = config.server.format.unwrap_or(false);
+                dispatcher
+                    .initialize(interfaces::DispatcherConfig {
+                        data_pci_addrs: pci_addrs,
+                        format_on_init,
+                        poller_base_cpu: config.server.poller_base_cpu,
+                        ..Default::default()
+                    })
+                    .map_err(|e| format!("dispatcher initialize failed: {e}"))?;
+                eprintln!("[certus-composable] dispatcher initialized (internal drives)");
+            }
+        }
+        return Ok(());
+    }
+
+    if bd_instances.len() != em_instances.len() {
+        return Err(format!(
+            "block-device count ({}) != extent-manager count ({})",
+            bd_instances.len(),
+            em_instances.len()
+        ));
+    }
+
+    // Get PCI addresses from config.
+    let pci_addrs = config
+        .server
+        .device_pci
+        .as_ref()
+        .ok_or("server.device_pci required when block-device components are configured")?;
+
+    if pci_addrs.len() < bd_instances.len() {
+        return Err(format!(
+            "not enough PCI addresses ({}) for {} block-device instances",
+            pci_addrs.len(),
+            bd_instances.len()
+        ));
+    }
+
+    // Initialize SPDK environment before block-device initialization.
+    if let Some(spdk_comp) = components.iter().find(|c| c.name == "spdk-env") {
+        let spdk: Arc<dyn ISPDKEnv + Send + Sync> =
+            query::<dyn ISPDKEnv + Send + Sync>(&*spdk_comp.component)
+                .ok_or("spdk-env does not provide ISPDKEnv")?;
+        spdk.init()
+            .map_err(|e| format!("SPDK environment init failed: {e}"))?;
+        eprintln!("[certus-composable] SPDK environment initialized");
+    }
+
+    // Initialize GPU services.
+    if let Some(gpu_comp) = components.iter().find(|c| c.name == "gpu-services") {
+        let gpu: Arc<dyn IGpuServices + Send + Sync> =
+            query::<dyn IGpuServices + Send + Sync>(&*gpu_comp.component)
+                .ok_or("gpu-services does not provide IGpuServices")?;
+        gpu.initialize()
+            .map_err(|e| format!("GPU services init failed: {e}"))?;
+        eprintln!("[certus-composable] GPU services initialized");
+    }
+
+    // Initialize dispatch-map.
+    if let Some(dm_comp) = components.iter().find(|c| c.name == "dispatch-map") {
+        let dm: Arc<dyn IDispatchMap + Send + Sync> =
+            query::<dyn IDispatchMap + Send + Sync>(&*dm_comp.component)
+                .ok_or("dispatch-map does not provide IDispatchMap")?;
+        let dma_alloc: DmaAllocFn = Arc::new(|size, align, _numa| {
+            DmaBuffer::new(size, align, None).map_err(|e| e.to_string())
+        });
+        dm.set_dma_alloc(dma_alloc);
+        dm.initialize()
+            .map_err(|e| format!("dispatch-map init failed: {e}"))?;
+        eprintln!("[certus-composable] dispatch-map initialized");
+    }
+
+    // Initialize memory-tier.
+    if let Some(mt_comp) = components.iter().find(|c| c.name == "memory-tier") {
+        let mt: Arc<dyn IMemoryTier + Send + Sync> =
+            query::<dyn IMemoryTier + Send + Sync>(&*mt_comp.component)
+                .ok_or("memory-tier does not provide IMemoryTier")?;
+        let pool_size = parse_memory_size(
+            config.server.memory_tier_size.as_deref().unwrap_or("2G"),
+        )?;
+        mt.initialize(pool_size)
+            .map_err(|e| format!("memory-tier init failed: {e}"))?;
+        eprintln!(
+            "[certus-composable] memory-tier initialized ({} MiB)",
+            pool_size / (1024 * 1024)
+        );
+    }
+
+    // Initialize each block-device.
+    for (i, bd_name) in bd_instances.iter().enumerate() {
+        let bd_comp = components
+            .iter()
+            .find(|c| c.name == *bd_name)
+            .ok_or_else(|| format!("block-device instance '{bd_name}' not found"))?;
+
+        let admin: Arc<dyn IBlockDeviceAdmin + Send + Sync> =
+            query::<dyn IBlockDeviceAdmin + Send + Sync>(&*bd_comp.component)
+                .ok_or_else(|| format!("'{bd_name}' does not provide IBlockDeviceAdmin"))?;
+
+        let pci = parse_pci_address(&pci_addrs[i])?;
+        admin.set_pci_address(pci);
+
+        if let Some(base_cpu) = config.server.poller_base_cpu {
+            admin.set_actor_cpu(base_cpu + i);
+        }
+
+        admin
+            .initialize()
+            .map_err(|e| format!("block-device '{bd_name}' init failed: {e}"))?;
+
+        eprintln!(
+            "[certus-composable] block-device '{}' initialized at {}",
+            bd_name, pci_addrs[i]
+        );
+    }
+
+    // Set DMA alloc on each extent-manager.
+    for (i, em_name) in em_instances.iter().enumerate() {
+        let bd_name = &bd_instances[i];
+        let bd_comp = components
+            .iter()
+            .find(|c| c.name == *bd_name)
+            .ok_or_else(|| format!("block-device '{bd_name}' not found"))?;
+
+        let ibd: Arc<dyn IBlockDevice + Send + Sync> =
+            query::<dyn IBlockDevice + Send + Sync>(&*bd_comp.component)
+                .ok_or_else(|| format!("'{bd_name}' does not provide IBlockDevice"))?;
+
+        let numa_node = ibd.numa_node();
+        let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
+            DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
+        });
+
+        let em_comp = components
+            .iter()
+            .find(|c| c.name == *em_name)
+            .ok_or_else(|| format!("extent-manager '{em_name}' not found"))?;
+
+        let iem: Arc<dyn IExtentManager + Send + Sync> =
+            query::<dyn IExtentManager + Send + Sync>(&*em_comp.component)
+                .ok_or_else(|| format!("'{em_name}' does not provide IExtentManager"))?;
+
+        iem.set_dma_alloc(dma_alloc);
+    }
+
+    // Register each (block-device, extent-manager) pair with the dispatcher.
+    let dispatcher_comp = components
+        .iter()
+        .find(|c| c.name == "dispatcher")
+        .ok_or("no 'dispatcher' component found")?;
+
+    let dispatcher: Arc<dyn IDispatcher + Send + Sync> =
+        query::<dyn IDispatcher + Send + Sync>(&*dispatcher_comp.component)
+            .ok_or("dispatcher does not provide IDispatcher")?;
+
+    for (i, (bd_name, em_name)) in bd_instances.iter().zip(em_instances.iter()).enumerate() {
+        let bd_comp = components.iter().find(|c| c.name == *bd_name).unwrap();
+        let em_comp = components.iter().find(|c| c.name == *em_name).unwrap();
+
+        let ibd: Arc<dyn IBlockDevice + Send + Sync> =
+            query::<dyn IBlockDevice + Send + Sync>(&*bd_comp.component)
+                .ok_or_else(|| format!("'{bd_name}' does not provide IBlockDevice"))?;
+
+        let admin: Arc<dyn IBlockDeviceAdmin + Send + Sync> =
+            query::<dyn IBlockDeviceAdmin + Send + Sync>(&*bd_comp.component)
+                .ok_or_else(|| format!("'{bd_name}' does not provide IBlockDeviceAdmin"))?;
+
+        let iem: Arc<dyn IExtentManager + Send + Sync> =
+            query::<dyn IExtentManager + Send + Sync>(&*em_comp.component)
+                .ok_or_else(|| format!("'{em_name}' does not provide IExtentManager"))?;
+
+        dispatcher
+            .add_data_drive(ibd, admin, iem)
+            .map_err(|e| format!("add_data_drive[{i}] failed: {e}"))?;
+
+        eprintln!(
+            "[certus-composable] registered drive pair: {} + {}",
+            bd_name, em_name
+        );
+    }
+
+    // Initialize the dispatcher with empty data_pci_addrs (drives are pre-registered).
+    let format_on_init = config.server.format.unwrap_or(false);
+    dispatcher
+        .initialize(interfaces::DispatcherConfig {
+            data_pci_addrs: Vec::new(),
+            format_on_init,
+            poller_base_cpu: config.server.poller_base_cpu,
+            ..Default::default()
+        })
+        .map_err(|e| format!("dispatcher initialize failed: {e}"))?;
+
+    eprintln!("[certus-composable] dispatcher initialized with {} external drives", bd_instances.len());
+    Ok(())
 }
 
 fn teardown_reverse(components: &[LiveComponent]) {
