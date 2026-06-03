@@ -12,7 +12,6 @@
   },
   "components": [
     { "name": "logger", "dylib": "liblogger.so" },
-    { "name": "spdk-env", "dylib": "libdispatcher.so" },
     { "name": "gpu-services", "dylib": "libgpu_services.so" },
     { "name": "dispatch-map", "dylib": "libdispatch_map.so" },
     { "name": "memory-tier", "dylib": "libmemory_tier.so" },
@@ -25,7 +24,6 @@
     { "target": "dispatcher", "receptacle": "logger", "source": "logger" },
     { "target": "dispatcher", "receptacle": "dispatch_map", "source": "dispatch-map" },
     { "target": "dispatcher", "receptacle": "memory_tier", "source": "memory-tier" },
-    { "target": "dispatcher", "receptacle": "gpu_services", "source": "gpu-services" },
-    { "target": "dispatcher", "receptacle": "spdk_env", "source": "spdk-env" }
+    { "target": "dispatcher", "receptacle": "gpu_services", "source": "gpu-services" }
   ]
 }

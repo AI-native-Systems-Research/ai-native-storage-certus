@@ -168,6 +168,16 @@ pub fn initialize_stack(
             format!("component '{}': {e}", instance_name)
         })?;
 
+        eprintln!(
+            "[debug] component '{}' provides: {:?}",
+            instance_name,
+            component
+                .provided_interfaces()
+                .iter()
+                .map(|i| i.name)
+                .collect::<Vec<_>>()
+        );
+
         live_components.push(LiveComponent {
             name: instance_name.clone(),
             component,
