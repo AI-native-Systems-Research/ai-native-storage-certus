@@ -29,7 +29,7 @@ git submodule update --init
 
 # Configure
 echo "Configuring SPDK..."
-./configure --prefix="${INSTALL_DIR}" --without-crypto "$@"
+./configure --prefix="${INSTALL_DIR}" --with-shared --without-crypto "$@"
 
 # Build
 echo "Building SPDK ($(nproc) jobs)..."

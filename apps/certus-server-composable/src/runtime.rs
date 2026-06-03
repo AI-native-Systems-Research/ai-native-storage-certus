@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::any::Any;
 
 use component_core::component_ref::ComponentRef;
-use component_core::iunknown::{query, IUnknown};
+use component_core::iunknown::IUnknown;
 use interfaces::{
     DmaAllocFn, DmaBuffer, IBlockDevice, IBlockDeviceAdmin, IDispatchMap, IDispatcher,
     IExtentManager, IGpuServices, IMemoryTier, ISPDKEnv, PciAddress,
@@ -235,15 +235,13 @@ fn parse_pci_address(addr: &str) -> Result<PciAddress, String> {
             "invalid PCI address format '{addr}': expected DDDD:BB:DD.F"
         ));
     }
-    let domain = u32::from_str_radix(parts[0], 16)
-        .map_err(|_| format!("invalid PCI domain in '{addr}'"))?;
-    let bus = u8::from_str_radix(parts[1], 16)
-        .map_err(|_| format!("invalid PCI bus in '{addr}'"))?;
+    let domain =
+        u32::from_str_radix(parts[0], 16).map_err(|_| format!("invalid PCI domain in '{addr}'"))?;
+    let bus =
+        u8::from_str_radix(parts[1], 16).map_err(|_| format!("invalid PCI bus in '{addr}'"))?;
     let dev_func: Vec<&str> = parts[2].split('.').collect();
     if dev_func.len() != 2 {
-        return Err(format!(
-            "invalid PCI dev.func in '{addr}': expected DD.F"
-        ));
+        return Err(format!("invalid PCI dev.func in '{addr}': expected DD.F"));
     }
     let dev = u8::from_str_radix(dev_func[0], 16)
         .map_err(|_| format!("invalid PCI device in '{addr}'"))?;
@@ -291,14 +289,13 @@ fn initialize_data_drives(
     if bd_instances.is_empty() {
         // No external block-devices: initialize dispatcher with data_pci_addrs from config.
         if let Some(dispatcher_comp) = components.iter().find(|c| c.name == "dispatcher") {
-            if let Some(dispatcher) =
-                unsafe { query_by_name::<dyn IDispatcher + Send + Sync>(&*dispatcher_comp.component, "IDispatcher") }
-            {
-                let pci_addrs = config
-                    .server
-                    .device_pci
-                    .clone()
-                    .unwrap_or_default();
+            if let Some(dispatcher) = unsafe {
+                query_by_name::<dyn IDispatcher + Send + Sync>(
+                    &*dispatcher_comp.component,
+                    "IDispatcher",
+                )
+            } {
+                let pci_addrs = config.server.device_pci.clone().unwrap_or_default();
                 let format_on_init = config.server.format.unwrap_or(false);
                 dispatcher
                     .initialize(interfaces::DispatcherConfig {
@@ -339,9 +336,10 @@ fn initialize_data_drives(
 
     // Initialize SPDK environment before block-device initialization.
     if let Some(spdk_comp) = components.iter().find(|c| c.name == "spdk-env") {
-        let spdk: Arc<dyn ISPDKEnv + Send + Sync> =
-            unsafe { query_by_name::<dyn ISPDKEnv + Send + Sync>(&*spdk_comp.component, "ISPDKEnv") }
-                .ok_or("spdk-env does not provide ISPDKEnv")?;
+        let spdk: Arc<dyn ISPDKEnv + Send + Sync> = unsafe {
+            query_by_name::<dyn ISPDKEnv + Send + Sync>(&*spdk_comp.component, "ISPDKEnv")
+        }
+        .ok_or("spdk-env does not provide ISPDKEnv")?;
         spdk.init()
             .map_err(|e| format!("SPDK environment init failed: {e}"))?;
         eprintln!("[certus-composable] SPDK environment initialized");
@@ -349,9 +347,10 @@ fn initialize_data_drives(
 
     // Initialize GPU services.
     if let Some(gpu_comp) = components.iter().find(|c| c.name == "gpu-services") {
-        let gpu: Arc<dyn IGpuServices + Send + Sync> =
-            unsafe { query_by_name::<dyn IGpuServices + Send + Sync>(&*gpu_comp.component, "IGpuServices") }
-                .ok_or("gpu-services does not provide IGpuServices")?;
+        let gpu: Arc<dyn IGpuServices + Send + Sync> = unsafe {
+            query_by_name::<dyn IGpuServices + Send + Sync>(&*gpu_comp.component, "IGpuServices")
+        }
+        .ok_or("gpu-services does not provide IGpuServices")?;
         gpu.initialize()
             .map_err(|e| format!("GPU services init failed: {e}"))?;
         eprintln!("[certus-composable] GPU services initialized");
@@ -359,9 +358,10 @@ fn initialize_data_drives(
 
     // Initialize dispatch-map.
     if let Some(dm_comp) = components.iter().find(|c| c.name == "dispatch-map") {
-        let dm: Arc<dyn IDispatchMap + Send + Sync> =
-            unsafe { query_by_name::<dyn IDispatchMap + Send + Sync>(&*dm_comp.component, "IDispatchMap") }
-                .ok_or("dispatch-map does not provide IDispatchMap")?;
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = unsafe {
+            query_by_name::<dyn IDispatchMap + Send + Sync>(&*dm_comp.component, "IDispatchMap")
+        }
+        .ok_or("dispatch-map does not provide IDispatchMap")?;
         let dma_alloc: DmaAllocFn = Arc::new(|size, align, _numa| {
             DmaBuffer::new(size, align, None).map_err(|e| e.to_string())
         });
@@ -373,12 +373,12 @@ fn initialize_data_drives(
 
     // Initialize memory-tier.
     if let Some(mt_comp) = components.iter().find(|c| c.name == "memory-tier") {
-        let mt: Arc<dyn IMemoryTier + Send + Sync> =
-            unsafe { query_by_name::<dyn IMemoryTier + Send + Sync>(&*mt_comp.component, "IMemoryTier") }
-                .ok_or("memory-tier does not provide IMemoryTier")?;
-        let pool_size = parse_memory_size(
-            config.server.memory_tier_size.as_deref().unwrap_or("2G"),
-        )?;
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = unsafe {
+            query_by_name::<dyn IMemoryTier + Send + Sync>(&*mt_comp.component, "IMemoryTier")
+        }
+        .ok_or("memory-tier does not provide IMemoryTier")?;
+        let pool_size =
+            parse_memory_size(config.server.memory_tier_size.as_deref().unwrap_or("2G"))?;
         mt.initialize(pool_size)
             .map_err(|e| format!("memory-tier init failed: {e}"))?;
         eprintln!(
@@ -394,9 +394,13 @@ fn initialize_data_drives(
             .find(|c| c.name == *bd_name)
             .ok_or_else(|| format!("block-device instance '{bd_name}' not found"))?;
 
-        let admin: Arc<dyn IBlockDeviceAdmin + Send + Sync> =
-            unsafe { query_by_name::<dyn IBlockDeviceAdmin + Send + Sync>(&*bd_comp.component, "IBlockDeviceAdmin") }
-                .ok_or_else(|| format!("'{bd_name}' does not provide IBlockDeviceAdmin"))?;
+        let admin: Arc<dyn IBlockDeviceAdmin + Send + Sync> = unsafe {
+            query_by_name::<dyn IBlockDeviceAdmin + Send + Sync>(
+                &*bd_comp.component,
+                "IBlockDeviceAdmin",
+            )
+        }
+        .ok_or_else(|| format!("'{bd_name}' does not provide IBlockDeviceAdmin"))?;
 
         let pci = parse_pci_address(&pci_addrs[i])?;
         admin.set_pci_address(pci);
@@ -423,9 +427,10 @@ fn initialize_data_drives(
             .find(|c| c.name == *bd_name)
             .ok_or_else(|| format!("block-device '{bd_name}' not found"))?;
 
-        let ibd: Arc<dyn IBlockDevice + Send + Sync> =
-            unsafe { query_by_name::<dyn IBlockDevice + Send + Sync>(&*bd_comp.component, "IBlockDevice") }
-                .ok_or_else(|| format!("'{bd_name}' does not provide IBlockDevice"))?;
+        let ibd: Arc<dyn IBlockDevice + Send + Sync> = unsafe {
+            query_by_name::<dyn IBlockDevice + Send + Sync>(&*bd_comp.component, "IBlockDevice")
+        }
+        .ok_or_else(|| format!("'{bd_name}' does not provide IBlockDevice"))?;
 
         let numa_node = ibd.numa_node();
         let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
@@ -437,9 +442,10 @@ fn initialize_data_drives(
             .find(|c| c.name == *em_name)
             .ok_or_else(|| format!("extent-manager '{em_name}' not found"))?;
 
-        let iem: Arc<dyn IExtentManager + Send + Sync> =
-            unsafe { query_by_name::<dyn IExtentManager + Send + Sync>(&*em_comp.component, "IExtentManager") }
-                .ok_or_else(|| format!("'{em_name}' does not provide IExtentManager"))?;
+        let iem: Arc<dyn IExtentManager + Send + Sync> = unsafe {
+            query_by_name::<dyn IExtentManager + Send + Sync>(&*em_comp.component, "IExtentManager")
+        }
+        .ok_or_else(|| format!("'{em_name}' does not provide IExtentManager"))?;
 
         iem.set_dma_alloc(dma_alloc);
     }
@@ -450,25 +456,32 @@ fn initialize_data_drives(
         .find(|c| c.name == "dispatcher")
         .ok_or("no 'dispatcher' component found")?;
 
-    let dispatcher: Arc<dyn IDispatcher + Send + Sync> =
-        unsafe { query_by_name::<dyn IDispatcher + Send + Sync>(&*dispatcher_comp.component, "IDispatcher") }
-            .ok_or("dispatcher does not provide IDispatcher")?;
+    let dispatcher: Arc<dyn IDispatcher + Send + Sync> = unsafe {
+        query_by_name::<dyn IDispatcher + Send + Sync>(&*dispatcher_comp.component, "IDispatcher")
+    }
+    .ok_or("dispatcher does not provide IDispatcher")?;
 
     for (i, (bd_name, em_name)) in bd_instances.iter().zip(em_instances.iter()).enumerate() {
         let bd_comp = components.iter().find(|c| c.name == *bd_name).unwrap();
         let em_comp = components.iter().find(|c| c.name == *em_name).unwrap();
 
-        let ibd: Arc<dyn IBlockDevice + Send + Sync> =
-            unsafe { query_by_name::<dyn IBlockDevice + Send + Sync>(&*bd_comp.component, "IBlockDevice") }
-                .ok_or_else(|| format!("'{bd_name}' does not provide IBlockDevice"))?;
+        let ibd: Arc<dyn IBlockDevice + Send + Sync> = unsafe {
+            query_by_name::<dyn IBlockDevice + Send + Sync>(&*bd_comp.component, "IBlockDevice")
+        }
+        .ok_or_else(|| format!("'{bd_name}' does not provide IBlockDevice"))?;
 
-        let admin: Arc<dyn IBlockDeviceAdmin + Send + Sync> =
-            unsafe { query_by_name::<dyn IBlockDeviceAdmin + Send + Sync>(&*bd_comp.component, "IBlockDeviceAdmin") }
-                .ok_or_else(|| format!("'{bd_name}' does not provide IBlockDeviceAdmin"))?;
+        let admin: Arc<dyn IBlockDeviceAdmin + Send + Sync> = unsafe {
+            query_by_name::<dyn IBlockDeviceAdmin + Send + Sync>(
+                &*bd_comp.component,
+                "IBlockDeviceAdmin",
+            )
+        }
+        .ok_or_else(|| format!("'{bd_name}' does not provide IBlockDeviceAdmin"))?;
 
-        let iem: Arc<dyn IExtentManager + Send + Sync> =
-            unsafe { query_by_name::<dyn IExtentManager + Send + Sync>(&*em_comp.component, "IExtentManager") }
-                .ok_or_else(|| format!("'{em_name}' does not provide IExtentManager"))?;
+        let iem: Arc<dyn IExtentManager + Send + Sync> = unsafe {
+            query_by_name::<dyn IExtentManager + Send + Sync>(&*em_comp.component, "IExtentManager")
+        }
+        .ok_or_else(|| format!("'{em_name}' does not provide IExtentManager"))?;
 
         dispatcher
             .add_data_drive(ibd, admin, iem)
@@ -491,7 +504,10 @@ fn initialize_data_drives(
         })
         .map_err(|e| format!("dispatcher initialize failed: {e}"))?;
 
-    eprintln!("[certus-composable] dispatcher initialized with {} external drives", bd_instances.len());
+    eprintln!(
+        "[certus-composable] dispatcher initialized with {} external drives",
+        bd_instances.len()
+    );
     Ok(())
 }
 
