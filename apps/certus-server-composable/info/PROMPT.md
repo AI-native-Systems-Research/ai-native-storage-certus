@@ -1,0 +1,34 @@
+/speckit-constitution Create principles focused on code quality,
+extensive testing, established good engineering practice,
+maintainability and meeting performance requirements. All code must
+run on the Linux operating system. All code must have unit tests for
+correctness and performance, and must be well documented. Rust
+documentation tests should exist for all public internal
+APIs. Assurance of code correctness is of high importance. Any new components
+should conform to the components/component-framework
+methodology. Component must only expose functions through interfaces,
+public functions outside the component are not allowed. All interfaces
+should be defined in the components/interfaces crate.
+
+/speckit-specify Write a new version of apps/certus-server, called
+apps/certus-server-composable, that replicates the functionality of
+certus-server but only uses dylib component versions that are loaded
+at runtime.  certus-server-compose should include a JSON specification
+that defines what component versions are used, and how they are
+instantiated and bound to other components. Variables such as the
+number of SSD devices, may be included in the specification, e.g., to
+derive number of instances of block-device-spdk-nvme to
+create. Ultimately, certus-server-compose will allow different
+component configurations to be deployed depending on particular
+deployment requirements and restrictions, such as the number of
+available SSD.
+
+/speckit-clarify
+
+❯ Add to the specs, that the filename of the JSON configuration file, should be passed as a parameter to certus-server-composable
+❯ Add to the specs, that the user can optionally specify the --device-pci parameters as part of the JSON configuration.
+❯ Add to the specs, that the locations of the .so dylib files are checked, and verified as accessible, *before* any components are instantiated.
+
+/speckit-plan
+
+/speckit-tasks

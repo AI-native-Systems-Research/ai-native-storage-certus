@@ -1,0 +1,61 @@
+{
+  "generated": "2026-06-03T23:30:00Z",
+  "project": "certus-server-composable",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 14,
+    "aligned": 10,
+    "drifted": 3,
+    "not_implemented": 1,
+    "unspecced_features": 2
+  },
+  "specs": [
+    {
+      "id": "001-composable-server-dylib",
+      "title": "Composable Server with Dynamic Component Loading",
+      "aligned": ["FR-002", "FR-003", "FR-004", "FR-005", "FR-007", "FR-008", "FR-011", "FR-012", "FR-013", "FR-014"],
+      "drifted": [
+        {
+          "requirement": "FR-001",
+          "spec_text": "using the create_component() entry point convention",
+          "actual": "Uses create_component_<crate_name>() unique per-crate symbols",
+          "location": "src/loader.rs:45-54",
+          "severity": "minor"
+        },
+        {
+          "requirement": "FR-006",
+          "spec_text": "expose the same gRPC interface as the existing certus-server",
+          "actual": "service.rs has stub implementations returning empty results instead of delegating to IDispatcher",
+          "location": "src/service.rs:91-120",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "FR-010",
+          "spec_text": "verify interface compatibility at bind time",
+          "actual": "Name-based binding with unsafe transmute; semantic name matching but no runtime type verification",
+          "location": "component-macros/src/define_component.rs:258-280",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": ["FR-009"]
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "query_by_name unsafe cross-dylib interface query",
+      "location": "src/runtime.rs:24-38",
+      "lines": 15,
+      "suggested_spec": "Update spec clarifications"
+    },
+    {
+      "feature": "parse_memory_size helper",
+      "location": "src/runtime.rs:203-216",
+      "lines": 14,
+      "suggested_spec": null
+    }
+  ],
+  "conflicts": [
+    "Spec says create_component() but implementation uses create_component_<name>() to avoid symbol conflicts",
+    "Spec describes external block-device/extent-manager dylibs but SPDK singleton requires them inside dispatcher dylib"
+  ]
+}

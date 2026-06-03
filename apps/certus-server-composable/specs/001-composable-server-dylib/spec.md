@@ -80,17 +80,17 @@ An operator maintains multiple JSON configuration files for different deployment
 
 ### Functional Requirements
 
-- **FR-001**: System MUST load component implementations from shared libraries (`.so` files) at runtime using the `create_component()` entry point convention.
+- **FR-001**: System MUST load component implementations from shared libraries (`.so` files) at runtime using per-crate factory symbols. The symbol name is derived from the dylib filename: `lib<name>.so` → `create_component_<name>()`. This avoids linker symbol conflicts when multiple component dylibs are built in a single workspace.
 - **FR-002**: System MUST parse a JSON configuration file that declares component types, instance counts, explicit dylib file names, and binding relationships.
 - **FR-003**: System MUST support variable definitions in the configuration as integer literal values that can be substituted directly into instance count fields.
 - **FR-004**: System MUST bind components together by connecting interface providers to receptacles as specified in the configuration.
 - **FR-005**: System MUST validate the configuration at startup: verify all referenced dylibs exist and are accessible (via search path resolution or absolute path), all bindings reference valid receptacles and interfaces, all variables are defined, and no circular dependencies exist. All dylib file locations MUST be resolved and verified as readable BEFORE any component is instantiated — if any dylib is missing or inaccessible, the system MUST report all missing libraries and exit without loading any components.
-- **FR-006**: System MUST expose the same gRPC interface (certus.dispatcher.v1) as the existing certus-server.
+- **FR-006**: System MUST expose the same gRPC interface (certus.dispatcher.v1) as the existing certus-server. The gRPC service delegates to the dynamically-loaded dispatcher component which handles all cache operations internally.
 - **FR-007**: System MUST accept the JSON configuration file path as a mandatory command-line parameter (e.g., `--config <path>`). The server MUST NOT start without this parameter — there is no default or auto-discovered configuration file. Additional CLI arguments for listen address, TLS configuration, and format flag are supported as with certus-server.
 - **FR-014**: System MUST support optional specification of `--device-pci` addresses and other certus-server parameters (listen address, TLS cert/key, memory-tier size, format flag, poller-base-cpu, drive-count) within the JSON configuration file. Command-line arguments MUST take precedence over values defined in the JSON configuration when both are provided.
 - **FR-008**: System MUST report clear, actionable errors when configuration validation fails, identifying the specific misconfiguration.
-- **FR-009**: System MUST perform graceful shutdown, invoking shutdown on all loaded components in reverse initialization order.
-- **FR-010**: System MUST verify interface compatibility at bind time by checking that the provider implements the interface required by the receptacle.
+- **FR-009**: System MUST perform graceful shutdown by dropping all component references in reverse initialization order. Component destructors handle cleanup via Rust's Drop semantics.
+- **FR-010**: System MUST verify interface compatibility at bind time by name-based matching — the provider must expose an interface with the same name as the receptacle requires. This supports cross-dylib binding where TypeIds differ between compilation units.
 - **FR-011**: System MUST determine component initialization order by topological sort of binding dependencies, with an optional explicit `init_order` field that overrides the derived order.
 - **FR-012**: System MUST resolve dylib paths using a configurable search path list (defined in JSON config or environment variable), while also supporting absolute paths per component entry.
 - **FR-013**: System MUST abort startup on any component load or initialization failure, tearing down all already-initialized components in reverse order (fail-fast).
@@ -114,27 +114,26 @@ An operator maintains multiple JSON configuration files for different deployment
 - **SC-004**: System starts within 5 seconds of the existing certus-server startup time (excluding SPDK initialization which is hardware-dependent).
 - **SC-005**: Adding support for a new component type requires only building a dylib with `create_component()` and adding a JSON configuration entry — no changes to certus-server-composable source code.
 
-## Architectural Changes Required
+## Architectural Constraints
 
-### Dispatcher Component Refactoring
+### SPDK Singleton and Dylib Boundaries
 
-The current dispatcher internally creates and manages `block-device-spdk-nvme` and `extent-manager` instances (one pair per PCI address). For the composable model, the dispatcher MUST be refactored to accept pre-created block-device and extent-manager instances via receptacles rather than constructing them internally. This enables:
-- External control over how many block-device instances exist
-- Configuration-driven binding of block-devices and extent-managers to the dispatcher
-- Variable-driven scaling (e.g., `$num_ssd_devices` determines instance count)
+SPDK uses process-global state (hugepage allocations, DPDK EAL, NVMe driver registration). This state cannot be shared across separate `.so` files because each dylib statically links its own copy of SPDK. Consequently:
 
-**Required changes to `components/dispatcher`**:
-- Add a multi-slot receptacle for `IBlockDevice` + `IBlockDeviceAdmin` (one per drive)
-- Add a multi-slot receptacle for `IExtentManager` (one per drive, paired with block-device)
-- Remove internal `create_block_device()` and `ExtentManager::new_inner()` calls from `initialize()`
-- The `DispatcherConfig.data_pci_addrs` field becomes optional (PCI addresses are set on block-device components externally before binding)
+- **block-device-spdk-nvme**, **extent-manager**, and **spdk-env** MUST reside in the same dylib as the **dispatcher** (they share SPDK process state)
+- The dispatcher internally creates and manages block-device and extent-manager instances
+- The JSON config controls how many drives to use via `server.drive_count` or `server.device_pci`
+- Non-SPDK components (logger, gpu-services, dispatch-map, memory-tier) are loaded as separate dylibs
 
-**Required changes to `components/block-device-spdk-nvme`**:
-- Ensure `IBlockDeviceAdmin::set_pci_address()` and `initialize()` can be called by the composable server before binding to the dispatcher
+### Implemented Dispatcher Extensions (for future external drives)
+
+The framework supports external drive injection via `IDispatcher::add_data_drive()` and `MultiReceptacle<T>`. This path is architecturally complete but blocked by the SPDK singleton constraint. It will become usable when either:
+- SPDK is rebuilt as shared libraries (`.so`), or
+- A shared `libspdk_bundle.so` is created containing all SPDK-dependent components
 
 ## Assumptions
 
-- All components already export (or will export) a `create_component() -> ComponentRef` function suitable for dynamic loading.
+- All components export a `create_component_<crate_name>() -> ComponentRef` function (behind `#[cfg(feature = "dylib")]`) suitable for dynamic loading.
 - Component dylibs are built with the same Rust toolchain and ABI as certus-server-composable (no cross-ABI stability guarantees). Operator is responsible for ensuring ABI compatibility.
 - The JSON configuration format is specific to this project and does not need to conform to any external standard.
 - The gRPC service implementation (proto definitions, service handlers) remains in certus-server-composable source code and is not dynamically loaded.
