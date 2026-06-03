@@ -1,0 +1,41 @@
+{
+  "variables": {
+    "num_ssd_devices": 8
+  },
+  "search_paths": ["/opt/certus/lib", "./target/release"],
+  "server": {
+    "listen": "0.0.0.0:50051",
+    "device_pci": [
+      "0000:41:00.0", "0000:42:00.0", "0000:43:00.0", "0000:44:00.0",
+      "0000:45:00.0", "0000:46:00.0", "0000:47:00.0", "0000:48:00.0"
+    ],
+    "memory_tier_size": "2G",
+    "format": false,
+    "poller_base_cpu": 2
+  },
+  "components": [
+    { "name": "logger", "dylib": "liblogger.so" },
+    { "name": "spdk-env", "dylib": "libspdk_env.so" },
+    { "name": "gpu-services", "dylib": "libgpu_services.so" },
+    { "name": "block-device", "dylib": "libblock_device_spdk_nvme.so", "instances": "$num_ssd_devices" },
+    { "name": "extent-manager", "dylib": "libextent_manager.so", "instances": "$num_ssd_devices" },
+    { "name": "dispatch-map", "dylib": "libdispatch_map.so" },
+    { "name": "memory-tier", "dylib": "libmemory_tier.so" },
+    { "name": "dispatcher", "dylib": "libdispatcher.so" }
+  ],
+  "bindings": [
+    { "target": "gpu-services", "receptacle": "logger", "source": "logger" },
+    { "target": "block-device", "receptacle": "logger", "source": "logger" },
+    { "target": "block-device", "receptacle": "spdk_env", "source": "spdk-env" },
+    { "target": "extent-manager", "receptacle": "logger", "source": "logger" },
+    { "target": "dispatch-map", "receptacle": "logger", "source": "logger" },
+    { "target": "memory-tier", "receptacle": "logger", "source": "logger" },
+    { "target": "dispatcher", "receptacle": "logger", "source": "logger" },
+    { "target": "dispatcher", "receptacle": "dispatch_map", "source": "dispatch-map" },
+    { "target": "dispatcher", "receptacle": "memory_tier", "source": "memory-tier" },
+    { "target": "dispatcher", "receptacle": "gpu_services", "source": "gpu-services" },
+    { "target": "dispatcher", "receptacle": "spdk_env", "source": "spdk-env" },
+    { "target": "dispatcher", "receptacle": "block_devices", "source": "block-device" },
+    { "target": "dispatcher", "receptacle": "extent_managers", "source": "extent-manager" }
+  ]
+}

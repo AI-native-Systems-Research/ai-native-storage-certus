@@ -669,6 +669,10 @@ impl IExtentManager for ExtentManager {
 
         result
     }
+
+    fn set_dma_alloc(&self, alloc: interfaces::DmaAllocFn) {
+        *self.dma_alloc.lock().unwrap() = Some(alloc);
+    }
 }
 
 /// Create a new ExtentManager component instance.

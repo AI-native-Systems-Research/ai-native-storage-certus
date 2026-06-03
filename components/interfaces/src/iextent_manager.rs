@@ -202,5 +202,11 @@ define_interface! {
 
         /// Return the total usable capacity in bytes across all regions.
         fn capacity_bytes(&self) -> u64;
+
+        /// Set the DMA allocation function used for I/O buffers.
+        ///
+        /// Must be called before [`initialize`] or [`format`]. The allocator
+        /// provides DMA-safe buffers for block device I/O.
+        fn set_dma_alloc(&self, alloc: crate::DmaAllocFn);
     }
 }

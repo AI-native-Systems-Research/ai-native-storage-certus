@@ -51,6 +51,7 @@ pub mod iunknown;
 pub mod log;
 pub mod numa;
 pub mod prelude;
+pub mod multi_receptacle;
 pub mod receptacle;
 pub mod registry;
 
@@ -68,5 +69,6 @@ pub use error::{QueryError, ReceptacleError, RegistryError};
 pub use interface::{Interface, InterfaceInfo, ReceptacleInfo};
 pub use iunknown::{query, IUnknown};
 pub use log::{LogHandler, LogLevel, LogMessage};
+pub use multi_receptacle::MultiReceptacle;
 pub use receptacle::Receptacle;
 pub use registry::{ComponentFactory, ComponentRegistry};

@@ -181,6 +181,23 @@ component_macros::define_interface! {
         /// ```
         fn initialize(&self, config: DispatcherConfig) -> Result<(), DispatcherError>;
 
+        /// Register a pre-created data drive (block-device + extent-manager pair).
+        ///
+        /// Call this N times before [`initialize`] to inject externally-created
+        /// block-device and extent-manager components. When `initialize` is called
+        /// with an empty `data_pci_addrs`, it uses the drives registered here
+        /// instead of creating them internally.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`DispatcherError::InvalidParameter`] if called after initialization.
+        fn add_data_drive(
+            &self,
+            block_device: Arc<dyn crate::IBlockDevice + Send + Sync>,
+            block_device_admin: Arc<dyn crate::IBlockDeviceAdmin + Send + Sync>,
+            extent_manager: Arc<dyn crate::IExtentManager + Send + Sync>,
+        ) -> Result<(), DispatcherError>;
+
         /// Shut down the dispatcher, completing all in-flight background writes.
         ///
         /// Blocks until all pending staging-to-SSD writes finish, then shuts down

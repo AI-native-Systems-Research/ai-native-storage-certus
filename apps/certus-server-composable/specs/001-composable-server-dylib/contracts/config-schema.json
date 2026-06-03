@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Certus Composable Server Configuration",
+  "description": "JSON configuration schema for certus-server-composable. Defines components, bindings, variables, and server settings.",
+  "type": "object",
+  "required": ["components", "bindings"],
+  "properties": {
+    "variables": {
+      "type": "object",
+      "description": "Named integer values for substitution in instance count fields.",
+      "additionalProperties": {
+        "type": "integer"
+      }
+    },
+    "search_paths": {
+      "type": "array",
+      "description": "Ordered list of directories to search for dylib files. CERTUS_LIB_PATH env var is prepended.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "server": {
+      "type": "object",
+      "description": "Server-level settings. CLI arguments override these values.",
+      "properties": {
+        "listen": {
+          "type": "string",
+          "description": "gRPC listen address.",
+          "default": "0.0.0.0:50051"
+        },
+        "tls_cert": {
+          "type": ["string", "null"],
+          "description": "Path to TLS certificate file."
+        },
+        "tls_key": {
+          "type": ["string", "null"],
+          "description": "Path to TLS private key file."
+        },
+        "device_pci": {
+          "type": "array",
+          "description": "PCI addresses of NVMe devices.",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\\.[0-9a-fA-F]$"
+          }
+        },
+        "drive_count": {
+          "type": ["integer", "null"],
+          "description": "Auto-select first N discovered NVMe drives.",
+          "minimum": 1
+        },
+        "memory_tier_size": {
+          "type": "string",
+          "description": "Memory pool size with suffix (K/M/G).",
+          "pattern": "^[0-9]+(K|k|M|m|G|g)?$"
+        },
+        "format": {
+          "type": "boolean",
+          "description": "Format extent managers on startup (destroys existing data).",
+          "default": false
+        },
+        "poller_base_cpu": {
+          "type": ["integer", "null"],
+          "description": "Base CPU core for NVMe poller thread pinning.",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "components": {
+      "type": "array",
+      "description": "Component declarations. Each entry defines a component type to load and instantiate.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "dylib"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Unique identifier for this component (referenced in bindings).",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "dylib": {
+            "type": "string",
+            "description": "Filename of the shared library (e.g., 'liblogger.so')."
+          },
+          "path": {
+            "type": "string",
+            "description": "Absolute path override. If provided, search_paths are not consulted for this component."
+          },
+          "instances": {
+            "oneOf": [
+              { "type": "integer", "minimum": 1 },
+              { "type": "string", "pattern": "^\\$[a-z_][a-z0-9_]*$" }
+            ],
+            "description": "Number of instances to create. Integer literal or '$variable_name' reference.",
+            "default": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "bindings": {
+      "type": "array",
+      "description": "Wiring rules connecting component interfaces to receptacles.",
+      "items": {
+        "type": "object",
+        "required": ["target", "receptacle", "source"],
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Name of the component that has the receptacle."
+          },
+          "receptacle": {
+            "type": "string",
+            "description": "Name of the receptacle slot on the target component."
+          },
+          "source": {
+            "type": "string",
+            "description": "Name of the component that provides the required interface."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "init_order": {
+      "type": "array",
+      "description": "Optional explicit initialization order. Must be a valid topological ordering of the binding dependency graph.",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

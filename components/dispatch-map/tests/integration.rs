@@ -487,6 +487,8 @@ impl IExtentManager for MockExtentManagerComponent {
     fn capacity_bytes(&self) -> u64 {
         0
     }
+
+    fn set_dma_alloc(&self, _alloc: interfaces::DmaAllocFn) {}
 }
 
 #[test]
