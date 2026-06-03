@@ -3242,3 +3242,15 @@ mod tests {
         evictor.shutdown();
     }
 }
+
+/// Create a new Dispatcher component instance.
+///
+/// Exported for dynamic loading. Returns a `ComponentRef` wrapping
+/// a default-configured `DispatcherComponent`.
+#[cfg(feature = "dylib")]
+#[no_mangle]
+pub fn create_component() -> component_core::component_ref::ComponentRef {
+    component_core::component_ref::ComponentRef::from(
+        DispatcherComponent::new_default() as Arc<_>,
+    )
+}

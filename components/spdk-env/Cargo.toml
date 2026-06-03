@@ -5,6 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[lib]
+crate-type = ["rlib", "dylib"]
+
+[features]
+dylib = []
+
 [dependencies]
 component-framework.workspace = true
 component-core.workspace = true

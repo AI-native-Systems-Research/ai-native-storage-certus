@@ -6,8 +6,12 @@ rust-version.workspace = true
 license.workspace = true
 description = "SPDK NVMe block device component with actor model, async IO, and telemetry"
 
+[lib]
+crate-type = ["rlib", "dylib"]
+
 [features]
 default = []
+dylib = []
 telemetry = []
 spdk = []
 

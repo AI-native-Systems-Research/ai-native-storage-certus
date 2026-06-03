@@ -1081,3 +1081,15 @@ mod tests {
         }
     }
 }
+
+/// Create a new GpuServices component instance.
+///
+/// Exported for dynamic loading. Returns a `ComponentRef` wrapping
+/// a default-configured `GpuServicesComponent`.
+#[cfg(feature = "dylib")]
+#[no_mangle]
+pub fn create_component() -> component_core::component_ref::ComponentRef {
+    component_core::component_ref::ComponentRef::from(
+        GpuServicesComponent::new_default() as std::sync::Arc<_>,
+    )
+}

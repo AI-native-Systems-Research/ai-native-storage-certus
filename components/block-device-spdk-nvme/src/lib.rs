@@ -637,3 +637,15 @@ mod tests {
         assert_eq!(snap2.numa_node, 0);
     }
 }
+
+/// Create a new BlockDeviceSpdkNvme component instance.
+///
+/// Exported for dynamic loading. Returns a `ComponentRef` wrapping
+/// a default-configured `BlockDeviceSpdkNvmeComponent`.
+#[cfg(feature = "dylib")]
+#[no_mangle]
+pub fn create_component() -> component_core::component_ref::ComponentRef {
+    component_core::component_ref::ComponentRef::from(
+        BlockDeviceSpdkNvmeComponent::new_default() as std::sync::Arc<_>,
+    )
+}

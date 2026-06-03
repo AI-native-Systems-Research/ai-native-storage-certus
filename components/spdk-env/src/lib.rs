@@ -237,3 +237,15 @@ mod tests {
         drop(comp);
     }
 }
+
+/// Create a new SPDKEnv component instance.
+///
+/// Exported for dynamic loading. Returns a `ComponentRef` wrapping
+/// a default-configured `SPDKEnvComponent`.
+#[cfg(feature = "dylib")]
+#[no_mangle]
+pub fn create_component() -> component_core::component_ref::ComponentRef {
+    component_core::component_ref::ComponentRef::from(
+        SPDKEnvComponent::new_default() as std::sync::Arc<_>,
+    )
+}

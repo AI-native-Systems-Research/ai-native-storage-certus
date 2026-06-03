@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[lib]
+crate-type = ["rlib", "dylib"]
+
 [dependencies]
 component-core.workspace = true
 component-macros.workspace = true
@@ -19,6 +22,7 @@ extent-manager = { path = ".", features = ["testing"] }
 
 [features]
 default = ["spdk"]
+dylib = []
 spdk = []
 testing = []
 # Enable NVMe flush commands after writes.  Leave disabled when the drives are

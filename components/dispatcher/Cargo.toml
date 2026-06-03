@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[lib]
+crate-type = ["rlib", "dylib"]
+
 [dependencies]
 component-framework.workspace = true
 component-core.workspace = true
@@ -20,6 +23,7 @@ crossbeam-channel = "0.5"
 parking_lot = "0.12"
 
 [features]
+dylib = []
 hardware-test = []
 
 [dev-dependencies]

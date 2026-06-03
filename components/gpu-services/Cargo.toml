@@ -5,7 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[lib]
+crate-type = ["rlib", "dylib"]
+
 [features]
+dylib = []
 gpu = ["interfaces/gpu", "base64", "libc", "clap"]
 spdk = ["interfaces/spdk", "spdk-sys", "dep:block-device-spdk-nvme", "dep:spdk-env"]
 p2p = ["gpu", "spdk"]
