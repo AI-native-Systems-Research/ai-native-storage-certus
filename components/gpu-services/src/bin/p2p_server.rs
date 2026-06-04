@@ -22,7 +22,6 @@ use gpu_services::cuda_ffi;
 use gpu_services::dma::create_spdk_dma_buffer_from_gpu_bar;
 use gpu_services::GpuServicesComponent;
 use interfaces::{IBlockDevice, IGpuServices, ILogger};
-use logger::LoggerComponent;
 use spdk_env::SPDKEnvComponent;
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -70,7 +69,7 @@ struct ServerContext {
     #[allow(dead_code)]
     gpu_component: Arc<GpuServicesComponent>,
     #[allow(dead_code)]
-    logger: Arc<LoggerComponent>,
+    logger: Arc<dyn ILogger + Send + Sync>,
     sector_size: usize,
     ns_id: u32,
 }
@@ -133,17 +132,17 @@ fn initialize_stack(pci: Option<&str>) -> Result<ServerContext, String> {
 
     let spdk_env_comp = SPDKEnvComponent::new_default();
     let block_dev = BlockDeviceSpdkNvmeComponent::new_default();
-    let logger = LoggerComponent::new_default();
+    let logger = logger::LoggerComponent::new_default();
     let gpu_component = GpuServicesComponent::new_default();
 
     bind(&*spdk_env_comp, "ISPDKEnv", &*block_dev, "spdk_env")
         .map_err(|e| format!("bind spdk_env: {e}"))?;
     bind(&*logger, "ILogger", &*block_dev, "logger").map_err(|e| format!("bind logger: {e}"))?;
 
-    let logger_iface: Arc<dyn ILogger + Send + Sync> = LoggerComponent::new_default();
+    let logger: Arc<dyn ILogger + Send + Sync> = logger;
     gpu_component
         .logger
-        .connect(logger_iface)
+        .connect(Arc::clone(&logger))
         .map_err(|e| format!("connect logger: {e}"))?;
 
     let gpu = query_interface!(gpu_component, IGpuServices)
