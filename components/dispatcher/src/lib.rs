@@ -736,6 +736,20 @@ impl IDispatcher for DispatcherComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
+        // Auto-create and connect spdk-env if not externally bound.
+        if !self.spdk_env.is_connected() {
+            let spdk_comp = spdk_env::SPDKEnvComponent::new_default();
+            let spdk_iface = query_interface!(spdk_comp, ISPDKEnv)
+                .ok_or_else(|| DispatcherError::NotInitialized("failed to create ISPDKEnv".into()))?;
+            spdk_iface.init().map_err(|e| {
+                DispatcherError::IoError(format!("SPDK env init failed: {e}"))
+            })?;
+            self.spdk_env.connect(spdk_iface).map_err(|e| {
+                DispatcherError::IoError(format!("failed to connect spdk_env: {e}"))
+            })?;
+            self.log_info("dispatcher: auto-created and initialized SPDK environment");
+        }
+
         let use_external_drives = !self.external_block_devices.is_empty();
 
         // Resolve PCI addresses: use explicit list, or auto-select from discovered devices.
