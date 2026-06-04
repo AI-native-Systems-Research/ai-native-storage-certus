@@ -1,0 +1,10 @@
+{
+  "framework": "coding_agent",
+  "best_score": 0.3891,
+  "beat_baseline": true,
+  "p2p_attempted": false,
+  "p2p_compiled": false,
+  "diagnosis": "Sequential iterate-with-feedback. Got 4.59 GB/s via multi-object interleaving, QD36-38, 4 CUDA streams. Stuck in local optimum \u2014 never tried more than 2 queues/drive. Never explored dma.rs or discovered P2P.",
+  "build_fail_count": 0,
+  "build_success_count": 9
+}

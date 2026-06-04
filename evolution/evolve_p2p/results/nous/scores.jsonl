@@ -1,0 +1,9 @@
+{"combined_score": 0.3265, "iteration": 0, "arm_type": "h-main", "throughput_gbps": 3.93, "p99_latency_ms": 1.231, "build_succeeded": true, "failure_type": "success", "error": "", "status": "CONFIRMED"}
+{"combined_score": 0.3265, "iteration": 0, "arm_type": "h-ablation", "throughput_gbps": 3.93, "p99_latency_ms": 1.231, "build_succeeded": true, "failure_type": "success", "error": "", "status": "REFUTED"}
+{"combined_score": 0.3199, "iteration": 0, "arm_type": "h-super-additivity", "throughput_gbps": 3.93, "p99_latency_ms": 1.297, "build_succeeded": true, "failure_type": "success", "error": "", "status": "REFUTED"}
+{"combined_score": 0.3161, "iteration": 1, "arm_type": "h-main", "throughput_gbps": 3.78, "p99_latency_ms": 1.259, "build_succeeded": true, "failure_type": "success", "error": "", "status": "REFUTED"}
+{"combined_score": 0.3775, "iteration": 1, "arm_type": "h-ablation", "throughput_gbps": 4.59, "p99_latency_ms": 1.081, "build_succeeded": true, "failure_type": "success", "error": "", "status": "PARTIALLY_CONFIRMED"}
+{"combined_score": 0.195, "iteration": 1, "arm_type": "h-robustness", "throughput_gbps": 3.9, "p99_latency_ms": null, "build_succeeded": true, "failure_type": "success", "error": "", "status": "PARTIALLY_CONFIRMED"}
+{"combined_score": 0.4624, "iteration": 2, "arm_type": "h-main", "throughput_gbps": 5.63, "p99_latency_ms": 0.8846, "build_succeeded": true, "failure_type": "success", "error": "", "status": "CONFIRMED"}
+{"combined_score": 0.4808, "iteration": 2, "arm_type": "h-ablation", "throughput_gbps": 5.96, "p99_latency_ms": 0.8755, "build_succeeded": true, "failure_type": "success", "error": "", "status": "PARTIALLY_CONFIRMED"}
+{"combined_score": 0.3216, "iteration": 2, "arm_type": "h-robustness", "throughput_gbps": 3.89, "p99_latency_ms": 1.2584000000000002, "build_succeeded": true, "failure_type": "success", "error": "", "status": "PARTIALLY_CONFIRMED"}

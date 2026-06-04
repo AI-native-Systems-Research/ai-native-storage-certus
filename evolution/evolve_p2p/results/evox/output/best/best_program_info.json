@@ -1,0 +1,27 @@
+{
+  "id": "b56c17b0-292f-4615-a375-19794375f9c1",
+  "generation": 0,
+  "iteration": 9,
+  "timestamp": 1780359929.0852892,
+  "parent_id": "39aa0aff-4a47-47be-94b1-66855f2ae1e9",
+  "metrics": {
+    "throughput_gbps": 2.4,
+    "p99_latency_ms": 1.8072000000000001,
+    "p50_latency_ms": 1.7438,
+    "mean_latency_ms": 1.7459,
+    "cpu_util_fraction": 0.026699534374144074,
+    "data_integrity": true,
+    "build_succeeded": true,
+    "combined_score": 0.2085,
+    "test_throughput_gbps": 2.4,
+    "test_p99_latency_ms": 1.9132,
+    "test_p50_latency_ms": 1.7293,
+    "test_mean_latency_ms": 1.7458,
+    "test_cpu_util_fraction": 0.026544702548335186,
+    "test_data_integrity": true,
+    "test_build_succeeded": true,
+    "test_combined_score": 0.2036
+  },
+  "language": "rust",
+  "saved_at": 1780359956.784183
+}

@@ -1,0 +1,267 @@
+{
+  "computed_signals": {
+    "round_index": 0,
+    "trace": {
+      "latency_ms": null,
+      "mean_vs_baseline_factor": null,
+      "reference_latency_ms": null,
+      "speedup_factor": null,
+      "status": "initial"
+    }
+  },
+  "decision_tree": {
+    "active_leaf_id": "qd_tuning_v2",
+    "nodes": [
+      {
+        "action": {
+          "description": "",
+          "difficulty_1_to_5": 3,
+          "expected_vs_baseline_factor": null,
+          "rationale": "",
+          "score_0_to_1": 0.0,
+          "title": ""
+        },
+        "choice": null,
+        "confidence_0_to_1": 0.5,
+        "decision": null,
+        "impacts": {
+          "compute_intensity_and_hw_fit": {
+            "hw_notes": "A30 PCIe Gen4 x16 = ~25 GB/s bidirectional BAR1; nvidia-peermem + gdrdrv enable P2P DMA from NVMe to GPU memory.",
+            "notes": "This is not a compute kernel; it is a data-movement pipeline optimization. The 'compute' is zero \u2014 purely I/O bound.",
+            "rating_0_to_10": 2.0,
+            "risk": "BAR1 aperture size on A30 may limit concurrent DMA windows."
+          },
+          "memory_bandwidth": {
+            "notes": "Dominant bottleneck is PCIe Gen4 x16 bandwidth (~25 GB/s theoretical, ~22 GB/s practical). NVMe Gen4 per-drive caps at 5.9 GB/s. With 2 drives the aggregate 11.8 GB/s is below PCIe limit, so NVMe is the bottleneck for 2 drives. Score target 12 GB/s implies 2+ drives.",
+            "rating_0_to_10": 9.0,
+            "risk": "BAR1 write combining / GPU memory controller contention may reduce effective BW below theoretical PCIe max."
+          },
+          "register_pressure": {
+            "notes": "Not applicable \u2014 no GPU kernel execution; this is a DMA path optimization.",
+            "rating_0_to_10": 0.0,
+            "risk": "None."
+          }
+        },
+        "last_updated_round": 0,
+        "node_id": "root",
+        "node_type": "root",
+        "notes": "ANALYSIS:\n1) Problem classification: NOT a GPU compute kernel. This is a storage-to-GPU data transfer pipeline optimization. The task is to replace a two-hop path (NVMe\u2192host DRAM\u2192GPU via cudaMemcpy) with a single-hop P2P path (NVMe DMA directly into GPU BAR1 memory via GPUDirect Storage). Primary output: data resident in GPU memory, ready for inference. No reductions, no compute. Access is sequential/streaming bulk DMA.\n2) Canonical operation: For each I/O request of size S bytes: old = spdk_read(nvme, host_buf, S) + cudaMemcpyH2D(gpu_buf, host_buf, S); new = spdk_read(nvme, gpu_bar_buf, S). The DMA target changes from pinned host memory to GPU BAR1-mapped memory registered with SPDK.\n3) Data layout: Bulk contiguous buffers (e.g., 2MB aligned for hugepage/BAR). dtype is raw bytes. Ring of 8 buffers. Streams used for overlap are CUDA streams \u2014 in P2P path, CUDA streams are not needed for the copy (DMA is done by NVMe controller), but may be needed for synchronization/ordering with downstream GPU kernels.\n4) Bottleneck regimes: (a) Low QD / small I/O: latency-bound \u2014 NVMe command overhead dominates; (b) High QD large I/O, single drive: NVMe BW-bound at ~5.9 GB/s; (c) High QD large I/O, multi-drive: PCIe BW-bound or BAR1 contention-bound at ~22 GB/s effective. Current baseline at 2.4 GB/s is limited by the host-bounce copy adding latency and halving effective PCIe utilization.\n5) Design knobs: buffer count in ring (8 default), buffer size (alignment to 2MB hugepage), queue depth per NVMe namespace, number of SPDK polling threads, use of CUDA events for GPU-side fence, whether to keep CUDA streams for downstream kernel overlap.\n6) Skeleton: (Phase 1) Allocate GPU memory via cuMemAlloc, get device pointer. (Phase 2) Register that device pointer with SPDK as a DMA-able buffer via create_spdk_dma_buffer_from_gpu_bar. (Phase 3) In transfer loop, issue SPDK reads targeting the GPU BAR buffer directly. (Phase 4) On completion callback, signal readiness (CUDA event or flag) to inference pipeline.\n7) Candidate families: See child nodes.",
+        "overall_rating_0_to_10": 3.0,
+        "parent_id": null,
+        "solution_ref": {
+          "eval": {
+            "latency_ms": 1.812,
+            "mean_vs_baseline_factor": null,
+            "metrics": {
+              "combined_score": 0.2108,
+              "cpu_util_fraction": 0.03280575539568342,
+              "p50_latency_ms": 1.6910999999999998,
+              "p99_latency_ms": 1.812,
+              "score": 0.2108,
+              "throughput_gbps": 2.45
+            },
+            "reference_latency_ms": null,
+            "speedup_factor": 1.012396694214876,
+            "status": "passed"
+          },
+          "parent_solution_id": null,
+          "solution_id": "e2c757ee42495587b9dd19916aba187e784ba53f"
+        }
+      },
+      {
+        "action": {
+          "description": "Replace the PipelineRing buffer allocation in pipeline.rs to use gpu_services::dma::create_spdk_dma_buffer_from_gpu_bar instead of host-pinned buffers. Allocate GPU memory with cuMemAlloc, then wrap as SPDK DMA buffer. Remove the cudaMemcpy H2D step from the transfer loop since DMA lands directly in GPU memory. Keep the ring structure (8 slots) and completion tracking intact.",
+          "difficulty_1_to_5": 4,
+          "expected_vs_baseline_factor": 2.5,
+          "rationale": "Eliminating the host bounce removes one full PCIe traversal and the cudaMemcpy latency. Expected throughput improvement from ~2.4 GB/s to ~5.5-5.9 GB/s (single drive limited). Latency drops from ~0.8ms to ~0.35ms by removing the copy stage.",
+          "score_0_to_1": 0.3,
+          "title": "Enable basic P2P GPUDirect Storage path"
+        },
+        "choice": "",
+        "confidence_0_to_1": 0.4,
+        "decision": "",
+        "impacts": {
+          "compute_intensity_and_hw_fit": {
+            "hw_notes": "A30 has 24GB BAR1 aperture which is sufficient for 8x2MB ring buffers. nvidia-peermem module is loaded per spec.",
+            "notes": "A30 supports P2P via BAR1; main risk is SPDK+nvidia-peermem integration correctness",
+            "rating_0_to_10": 6.0,
+            "risk": "Depends on nvidia-peermem and SPDK mem registration working correctly on A30"
+          },
+          "memory_bandwidth": {
+            "notes": "Direct NVMe-to-GPU DMA avoids host DRAM copy, theoretical 2-3x bandwidth improvement for SSD-bound workloads",
+            "rating_0_to_10": 7.0,
+            "risk": "P2P eliminates host bounce but BAR1 bandwidth on A30 may be limited to ~25 GB/s"
+          },
+          "register_pressure": {
+            "notes": "No GPU kernel involved, only DMA path setup",
+            "rating_0_to_10": 5.0,
+            "risk": "N/A - this is a host-side pipeline, no GPU kernel register pressure"
+          }
+        },
+        "last_updated_round": 0,
+        "node_id": "p2p_basic",
+        "node_type": "decision",
+        "notes": "SELF_CHECK: This is the fundamental P2P enablement \u2014 the other siblings (QD tuning, multi-buffer overlap) cannot function without this being established first. However, the qd_tuning attempt already included P2P code (pipeline.rs has pipelined_ssd_to_gpu_p2p). The real issue is lib.rs function name mismatches. This node is now somewhat redundant with qd_tuning's child fix node.\nUPDATE_BELIEF:\n  what changed: qd_tuning's failure revealed that dma.rs function naming is the blocker, not P2P logic itself. The P2P logic in pipeline.rs looks correct.\n  next bet: De-prioritize this node since the P2P path is already implemented in the qd_tuning code; the fix is a naming issue in lib.rs.",
+        "overall_rating_0_to_10": 4.5,
+        "parent_id": "root",
+        "solution_ref": {
+          "eval": {
+            "score": null,
+            "score_name": null,
+            "status": ""
+          },
+          "parent_solution_id": null,
+          "solution_id": null
+        }
+      },
+      {
+        "action": {
+          "description": "After P2P path is working, increase NVMe queue depth from default to 64 and increase the number of in-flight SPDK read commands per ring slot. Use multiple SPDK I/O channels if available. This saturates the NVMe controller's internal parallelism and keeps the PCIe link busy.",
+          "difficulty_1_to_5": 4,
+          "expected_vs_baseline_factor": 3.5,
+          "rationale": "NVMe Gen4 drives achieve rated 5.9 GB/s only at QD64. If current implementation uses low QD, throughput is artificially limited. Increasing QD after P2P is in place should push throughput toward the per-drive maximum.",
+          "score_0_to_1": 0.15,
+          "title": "Increase NVMe queue depth and in-flight I/O concurrency"
+        },
+        "choice": "",
+        "confidence_0_to_1": 0.7,
+        "decision": "",
+        "impacts": {
+          "compute_intensity_and_hw_fit": {
+            "hw_notes": "SPDK supports up to 65535 QD per queue pair; NVMe spec allows up to controller max.",
+            "notes": "More in-flight I/Os means more SPDK completions to poll, but SPDK is designed for this.",
+            "rating_0_to_10": 6.0,
+            "risk": "Too high QD may increase tail latency if NVMe controller saturates internally."
+          },
+          "memory_bandwidth": {
+            "notes": "Higher QD keeps the PCIe link saturated with read completions flowing to GPU BAR1.",
+            "rating_0_to_10": 8.0,
+            "risk": "BAR1 write bandwidth may become the bottleneck before NVMe BW is saturated."
+          },
+          "register_pressure": {
+            "notes": "N/A.",
+            "rating_0_to_10": 0.0,
+            "risk": "None."
+          }
+        },
+        "last_updated_round": 0,
+        "node_id": "qd_tuning",
+        "node_type": "decision",
+        "notes": "CURRENT:\n  does: Implements a pipelined SSD-to-GPU transfer with QD64 sliding window, zero-copy path, and a P2P path using GPU BAR1 registration. Uses dma.rs with register/unregister_gpu_bar_region and create_spdk_dma_buffer_from_gpu_bar.\n  bottleneck: Build failure - references to non-existent functions `dma::create_gpu_dma_buffer` and `dma::create_spdk_dma_buffer_from_gpu` in lib.rs (line 270, line 4). The dma.rs module exports different names.\nFOLLOW_THROUGH:\n  aligned_with_intent: no\n  if_no: Intent was to increase queue depth and overlap I/O. Actual code introduced correct QD logic in pipeline.rs but the consuming lib.rs calls mismatched function names from dma.rs, causing build failure.\nUPDATE_BELIEF:\n  what changed: Build fails due to function name mismatch between lib.rs imports and dma.rs exports. The pipeline logic itself is sound but unusable.\n  next bet: Fix lib.rs to call the correct dma.rs function names (create_spdk_dma_buffer_from_gpu_bar, register_gpu_bar_region) or add re-exports/aliases. This is a trivial naming fix that should unblock the build.\nSELF_CHECK: This node represents the QD-tuning approach that failed on build. Child node will fix the naming issue.",
+        "overall_rating_0_to_10": 3.0,
+        "parent_id": "root",
+        "solution_ref": {
+          "eval": {
+            "score": 0.0,
+            "score_name": null,
+            "status": "failed"
+          },
+          "parent_solution_id": "e2c757ee42495587b9dd19916aba187e784ba53f",
+          "solution_id": "qd_tuning_failed_r0"
+        }
+      },
+      {
+        "action": {
+          "description": "Tune the DMA buffer size to 2MB (aligned to hugepage boundaries) and ensure GPU allocations are 2MB-aligned for optimal TLB and BAR1 mapping efficiency. In dma.rs, use cuMemAllocHost or cuMemAlloc with explicit alignment, and set SPDK DMA buffer registration with 2MB alignment. Test 1MB vs 2MB vs 4MB buffer sizes for optimal throughput/latency tradeoff.",
+          "difficulty_1_to_5": 2,
+          "expected_vs_baseline_factor": 3.0,
+          "rationale": "Large aligned buffers reduce TLB misses in both NVMe controller IOMMU and GPU BAR1 page table. 2MB hugepage alignment matches the system's hugepage configuration (2048 hugepages allocated per spec).",
+          "score_0_to_1": 0.35,
+          "title": "Optimize buffer size alignment for DMA transfer granularity"
+        },
+        "choice": "",
+        "confidence_0_to_1": 0.4,
+        "decision": "",
+        "impacts": {
+          "compute_intensity_and_hw_fit": {
+            "hw_notes": "2048 hugepages available; A30 BAR1 supports large page mappings.",
+            "notes": "Alignment ensures IOMMU and GPU page tables use large pages, reducing translation overhead.",
+            "rating_0_to_10": 5.0,
+            "risk": "If cuMemAlloc doesn't guarantee 2MB alignment, may need platform-specific allocation."
+          },
+          "memory_bandwidth": {
+            "notes": "Larger DMA transfers amortize per-command overhead and improve PCIe efficiency (fewer TLP headers per byte).",
+            "rating_0_to_10": 7.0,
+            "risk": "Very large buffers increase latency for first-byte delivery; tradeoff with p99 latency requirement."
+          },
+          "register_pressure": {
+            "notes": "N/A.",
+            "rating_0_to_10": 0.0,
+            "risk": "None."
+          }
+        },
+        "last_updated_round": 0,
+        "node_id": "buffer_size_align",
+        "node_type": "decision",
+        "notes": "SELF_CHECK: This addresses DMA transfer granularity and memory mapping efficiency, distinct from QD tuning (which addresses command-level parallelism). However, the qd_tuning code already uses next_multiple_of(block_size) alignment. This node adds marginal value until the build is fixed.\nUPDATE_BELIEF:\n  what changed: The current pipeline.rs code already does block_size alignment. Buffer size optimization is secondary to fixing the build.\n  next bet: Defer this until after the build fix lands and we have a baseline throughput number.",
+        "overall_rating_0_to_10": 4.0,
+        "parent_id": "root",
+        "solution_ref": {
+          "eval": {
+            "score": null,
+            "score_name": null,
+            "status": ""
+          },
+          "parent_solution_id": null,
+          "solution_id": null
+        }
+      },
+      {
+        "action": {
+          "description": "",
+          "difficulty_1_to_5": 1,
+          "expected_vs_baseline_factor": 3.5,
+          "rationale": "",
+          "score_0_to_1": 0.7,
+          "title": "Fix lib.rs function name mismatches with dma.rs exports"
+        },
+        "choice": "",
+        "confidence_0_to_1": 0.75,
+        "decision": "",
+        "impacts": {
+          "compute_intensity_and_hw_fit": {
+            "hw_notes": "",
+            "notes": "",
+            "rating_0_to_10": 0.0,
+            "risk": ""
+          },
+          "memory_bandwidth": {
+            "notes": "",
+            "rating_0_to_10": 0.0,
+            "risk": ""
+          },
+          "register_pressure": {
+            "notes": "",
+            "rating_0_to_10": 0.0,
+            "risk": ""
+          }
+        },
+        "last_updated_round": 0,
+        "node_id": "qd_tuning_v2",
+        "node_type": "decision",
+        "notes": "SELF_CHECK: This is a direct child fix for the build failure in qd_tuning. The issue is that lib.rs:270 calls `dma::create_gpu_dma_buffer` and lib.rs:4 calls `dma::create_spdk_dma_buffer_from_gpu`, but dma.rs exports `create_spdk_dma_buffer_from_gpu_bar` and `register_gpu_bar_region`. Fix: rename calls in lib.rs to match dma.rs, or add type aliases/re-exports in dma.rs.\n\nACTION PLAN:\n1. In lib.rs, replace `dma::create_gpu_dma_buffer(handle)` with the correct call pattern: either `dma::create_spdk_dma_buffer_from_gpu_bar(ptr, size)` or use `dma::register_gpu_bar_region` + `DmaBuffer::from_raw`.\n2. Replace `dma::create_spdk_dma_buffer_from_gpu` with `dma::create_spdk_dma_buffer_from_gpu_bar`.\n3. Ensure all #[cfg(feature = \"p2p\")] gates are consistent.\n4. This should unblock the build and let the QD64 sliding window + zero-copy pipeline run.\n\nRISK: Low \u2014 this is a trivial naming fix. The actual logic in pipeline.rs and dma.rs is already aligned.",
+        "overall_rating_0_to_10": 7.0,
+        "parent_id": "qd_tuning",
+        "solution_ref": {
+          "eval": {
+            "status": ""
+          },
+          "parent_solution_id": "qd_tuning_failed_r0",
+          "solution_id": null
+        }
+      }
+    ],
+    "root_id": "root"
+  },
+  "kernel_summary": "This is a storage-to-GPU data transfer pipeline optimization, not a traditional GPU compute kernel. The task replaces a two-hop NVMe\u2192host DRAM\u2192GPU path with a single-hop GPUDirect Storage P2P path where NVMe controllers DMA directly into GPU BAR1 memory. The target hardware is an NVIDIA A30 (PCIe Gen4 x16, ~25 GB/s theoretical) with Gen4 NVMe SSDs (5.9 GB/s each at QD64). The bottleneck is PCIe bandwidth utilization and DMA path efficiency. The scoring function weights throughput (60%, target 12 GB/s) and p99 latency (40%, target 0.4ms). Data integrity is a hard constraint. Current baseline achieves only 2.4 GB/s due to the host-bounce serialization overhead.",
+  "open_questions": [
+    "What is the actual BAR1 aperture size on the A30 and does cuMemAlloc return BAR1-accessible addresses by default, or is a special allocation API needed?",
+    "Does SPDK's DMA buffer registration (via create_spdk_dma_buffer_from_gpu_bar) require the GPU memory to be allocated with specific flags (e.g., CU_MEM_ALLOC_GRANULARITY for peer access)?",
+    "How many NVMe drives are available in the system \u2014 the 12 GB/s target implies at least 2-3 drives running in parallel?",
+    "What is the current buffer size and queue depth in the baseline implementation \u2014 are we starting from QD=1 or already at QD=64?",
+    "Is there a GPU-side synchronization mechanism needed (CUDA event, memory fence) to ensure the inference kernel sees complete DMA data before executing?",
+    "Does the SPDK completion callback execute on the same thread that polls, and can it safely signal GPU readiness without a context switch?",
+    "What is the actual p99 latency of a single NVMe read at QD64 for a 2MB block \u2014 is 0.4ms achievable for the combined SSD+DMA path?",
+    "Are there IOMMU/VFIO constraints that limit the size or number of GPU BAR1 regions that can be registered as SPDK DMA buffers?"
+  ]
+}

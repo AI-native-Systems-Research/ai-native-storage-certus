@@ -1,0 +1,7 @@
+{"combined_score": 0.1945, "iteration": 0, "throughput_gbps": 2.31, "p99_latency_ms": null, "build_succeeded": true, "failure_type": "success", "error": ""}
+{"combined_score": 0.201, "iteration": 1, "throughput_gbps": null, "p99_latency_ms": null, "build_succeeded": true, "failure_type": "success", "error": ""}
+{"combined_score": 0.3374, "iteration": 2, "throughput_gbps": 3.89, "p99_latency_ms": null, "build_succeeded": true, "failure_type": "success", "error": ""}
+{"combined_score": 0.356, "iteration": 3, "throughput_gbps": 4.22, "p99_latency_ms": null, "build_succeeded": true, "failure_type": "success", "error": ""}
+{"combined_score": 0.3582, "iteration": 4, "throughput_gbps": null, "p99_latency_ms": null, "build_succeeded": true, "failure_type": "success", "error": ""}
+{"combined_score": 0.3865, "iteration": 5, "throughput_gbps": null, "p99_latency_ms": null, "build_succeeded": true, "failure_type": "success", "error": ""}
+{"combined_score": 0.3945, "iteration": 6, "throughput_gbps": 4.65, "p99_latency_ms": null, "build_succeeded": true, "failure_type": "success", "error": ""}

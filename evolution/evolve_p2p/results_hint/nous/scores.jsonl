@@ -1,0 +1,7 @@
+{"combined_score": 0.2094, "iteration": 0, "arm_type": "h-main", "throughput_gbps": 2.43, "p99_latency_ms": 1.82, "build_succeeded": true, "failure_type": "success", "error": "", "status": "REFUTED"}
+{"combined_score": 0.099, "iteration": 0, "arm_type": "h-ablation", "throughput_gbps": 1.98, "p99_latency_ms": null, "build_succeeded": true, "failure_type": "success", "error": "", "status": "PARTIALLY_CONFIRMED"}
+{"combined_score": 0.0005, "iteration": 1, "arm_type": "h-main", "throughput_gbps": 0.01, "p99_latency_ms": null, "build_succeeded": true, "failure_type": "success", "error": "", "status": "REFUTED"}
+{"combined_score": 0.0004, "iteration": 1, "arm_type": "h-ablation", "throughput_gbps": 0.008, "p99_latency_ms": null, "build_succeeded": true, "failure_type": "success", "error": "", "status": "REFUTED"}
+{"combined_score": 0.1205, "iteration": 2, "arm_type": "h-main", "throughput_gbps": 2.41, "p99_latency_ms": null, "build_succeeded": true, "failure_type": "success", "error": "", "status": "REFUTED"}
+{"combined_score": 0.116, "iteration": 2, "arm_type": "h-ablation", "throughput_gbps": 2.32, "p99_latency_ms": null, "build_succeeded": true, "failure_type": "success", "error": "", "status": "REFUTED"}
+{"combined_score": 0.116, "iteration": 2, "arm_type": "h-control-negative", "throughput_gbps": 2.32, "p99_latency_ms": null, "build_succeeded": true, "failure_type": "success", "error": "", "status": "CONFIRMED"}

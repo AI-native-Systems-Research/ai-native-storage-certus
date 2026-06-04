@@ -1,0 +1,51 @@
+## Task: Optimize SSD-to-GPU Data Transfer Path
+
+You are optimizing a Rust storage server's data path that moves data from
+NVMe SSDs to GPU memory for inference workloads.
+
+### Current Architecture (suboptimal — replace with P2P)
+- NVMe SSD → host DRAM (via SPDK async DMA) → GPU (via cudaMemcpy H2D)
+- Uses a ring of 8 CUDA-pinned + SPDK-registered DMA buffers
+- 2 CUDA streams for overlapped H2D copies
+- Transfer loop in pipeline.rs, buffer management in lib.rs
+
+### Optimization Target
+Implement GPUDirect Storage (P2P): NVMe reads DMA directly into GPU BAR1 memory,
+bypassing host DRAM entirely. This eliminates the host-bounce cudaMemcpy step.
+
+### Hardware
+- NVMe Gen4 SSDs via SPDK userspace driver (5.9 GB/s per drive at QD64)
+- NVIDIA A30 GPU, PCIe Gen4 x16
+- Kernel modules loaded: nvidia-peermem, gdrdrv
+- 2048 hugepages, memlock unlimited, VFIO-bound NVMe devices
+
+### Scoring
+- 60% * (throughput_gbps / 12.0) + 40% * (0.4ms / p99_latency_ms)
+- Data integrity is a hard constraint (corruption = score -1.0)
+- Current baseline: ~2.4 GB/s, score ~0.20
+
+### Files You Can Modify
+- pipeline.rs: The transfer loop (SSD→DRAM→GPU path)
+- lib.rs: Dispatcher buffer management, ring allocation, promote_and_serve
+- dma.rs: DMA buffer creation functions for various memory types (gpu-services crate)
+
+### Implementation Notes
+- Build uses --features p2p, so all #[cfg(feature = "p2p")] code is compiled and type-checked.
+- The cuda_ffi module uses std::os::raw::c_int for all flags and error return types.
+- From pipeline.rs, call P2P function as: `gpu_services::dma::create_spdk_dma_buffer_from_gpu_bar(dev_ptr, size)`
+- The function returns `Result<interfaces::DmaBuffer, String>` — same DmaBuffer type used by the ring.
+- PipelineRing.streams is [GpuStream; 2] — callers pass &ring.streams as a fixed-size array.
+
+### Output Format
+Return these two files with '// --- FILE: xxx ---' markers:
+```
+// --- FILE: pipeline.rs ---
+<full pipeline.rs content>
+
+// --- FILE: dma.rs ---
+<full dma.rs content>
+```
+
+Note: lib.rs is provided as read-only context (shows how pipeline.rs is called).
+Implement P2P within pipeline.rs and dma.rs only. PipelineRing::new() can allocate
+GPU BAR buffers directly by calling create_spdk_dma_buffer_from_gpu_bar in dma.rs.

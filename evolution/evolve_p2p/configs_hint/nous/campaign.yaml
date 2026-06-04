@@ -1,0 +1,76 @@
+# Nous campaign for evolve_p2p: Single-client SSD-to-GPU throughput (with hints)
+
+research_question: >
+  Implement GPUDirect Storage (P2P) for the cold lookup path: NVMe reads DMA
+  directly into GPU BAR1 memory, bypassing host DRAM entirely. The current path
+  bounces through host DRAM (NVMe → DRAM → GPU via cudaMemcpy) achieving only
+  2.4 GB/s against a 5.9 GB/s drive ceiling. P2P eliminates the host bounce.
+
+run_id: p2p-evolve-hint
+
+max_iterations: 3
+
+target_system:
+  name: "Certus Storage Engine — SSD-to-GPU Data Path Optimization"
+  description: >
+    A storage server that moves data from NVMe SSDs to GPU memory for inference
+    workloads. The cold lookup path currently reads NVMe SSD → host DRAM → GPU.
+
+    HARDWARE:
+    - NVMe Gen4 SSDs via SPDK (userspace driver, no kernel filesystem)
+    - NVIDIA A30 GPU, PCIe Gen4 x16
+    - Kernel modules loaded: nvidia-peermem, gdrdrv
+    - 2048 hugepages allocated, memlock unlimited, NVMe devices bound to VFIO
+
+    SCORING:
+    score = 0.60 * min(1.0, throughput_gbps / 12.0) + 0.40 * min(1.0, 0.4 / p99_latency_ms)
+    Hard constraints: build must succeed, data integrity must pass.
+
+    BUILD & EVALUATION:
+    - cargo build -p certus-server --release --features p2p
+    - The p2p feature enables GPU-direct DMA buffer functions in gpu-services
+    - Start server: ./target/release/certus-server --metadata-pci 0000:61:00.0 --data-pci 0000:62:00.0
+    - Run benchmark: python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304
+    - Parse cold lookup: look for "Lookup (cold)" then "per-client=X.XX GB/s"
+    - ALWAYS kill and restart server after code changes
+    - Server takes ~3s to initialize. Wait for gRPC port 50051.
+
+    TARGET OPTIMIZATION: Implement GPUDirect Storage (P2P)
+    NVMe reads DMA directly into GPU BAR1 memory, bypassing host DRAM entirely.
+    This eliminates the host-bounce cudaMemcpy step.
+
+    CODEBASE:
+    The gpu-services crate (components/gpu-services/src/) contains DMA buffer creation
+    functions for various memory types. The dispatcher crate (components/dispatcher/src/)
+    manages the data transfer. The interfaces crate defines DmaBuffer, GpuStream, etc.
+
+    KEY FILES:
+    - components/dispatcher/src/pipeline.rs — transfer loop
+    - components/dispatcher/src/lib.rs — promote_and_serve() call site
+    - components/gpu-services/src/dma.rs — DMA buffer creation functions
+
+    IMPLEMENTATION NOTES:
+    - The cuda_ffi module uses std::os::raw::c_int for all flags and error return types.
+    - Build uses --features p2p, so all #[cfg(feature = "p2p")] code is compiled and type-checked.
+    - The function create_spdk_dma_buffer_from_gpu_bar(gpu_ptr, size, container_fd) in dma.rs creates an SPDK-registered DMA buffer backed by GPU BAR1 memory for P2P NVMe→GPU transfers.
+    - PipelineRing.streams is [GpuStream; 2] — callers pass &ring.streams as a fixed-size array.
+
+  observable_metrics:
+    - "cold lookup throughput (GB/s) single drive, 1 client"
+    - "cold lookup p99 latency (ms)"
+    - "CPU utilization fraction"
+    - "data integrity (PASS/FAIL)"
+  controllable_knobs:
+    - "ring depth"
+    - "number of CUDA streams"
+    - "DMA buffer configuration"
+    - "transfer architecture"
+  repo_path: /home/nara/certus/evolve_p2p/ai-native-storage-certus
+
+models:
+  design: "aws/claude-opus-4-6"
+  execute_analyze: "aws/claude-opus-4-6"
+
+prompts:
+  methodology_layer: "prompts/methodology"
+  domain_adapter_layer: null

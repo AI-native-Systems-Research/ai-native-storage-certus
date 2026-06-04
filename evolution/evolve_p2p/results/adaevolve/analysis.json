@@ -1,0 +1,10 @@
+{
+  "framework": "adaevolve",
+  "best_score": 0.21,
+  "beat_baseline": false,
+  "p2p_attempted": false,
+  "p2p_compiled": false,
+  "diagnosis": "Minor parameter tuning only (+4.1% over baseline). Saw P2P in seed but mutations too conservative to attempt structural change. Best: 0.2100.",
+  "build_fail_count": 0,
+  "build_success_count": 0
+}

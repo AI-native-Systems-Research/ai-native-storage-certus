@@ -1,0 +1,14 @@
+{
+  "framework": "openevolve",
+  "total_evals": 12,
+  "best_score": 0.2116,
+  "beat_baseline": true,
+  "p2p_attempted": false,
+  "p2p_compiled": false,
+  "stagnation_ceiling": "baseline",
+  "primary_failure_mode": "hint_ignored",
+  "build_errors": [],
+  "build_fail_count": 0,
+  "build_success_count": 12,
+  "diagnosis": "Evolutionary search over 12 generations. Stuck near baseline (0.21) \u2014 all candidates are minor knob variations. Never attempted structural P2P change."
+}

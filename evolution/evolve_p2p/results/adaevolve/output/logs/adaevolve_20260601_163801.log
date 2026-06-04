@@ -1,0 +1,106 @@
+2026-06-01 16:38:01,924 - skydiscover.search.utils.logging_utils - INFO - Logging to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/adaevolve/output/logs/adaevolve_20260601_163801.log
+2026-06-01 16:38:01,925 - skydiscover.search.adaevolve.database - INFO - AdaEvolveDatabase initialized: num_islands=2, decay=0.9, intensity=[0.15, 0.5], migration=True (interval=15), unified_archive=True, adaptive_search=True, ucb_selection=True, dynamic_islands=True, paradigm_breakthrough=True, multiobjective=False
+2026-06-01 16:38:01,925 - skydiscover.runner - INFO - Runner ready: search=adaevolve, program=/home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/initial_programs/concatenated_seed.rs.skydiscover
+2026-06-01 16:38:01,973 - skydiscover.llm - INFO - OpenAI LLM: aws/claude-opus-4-6
+2026-06-01 16:38:01,998 - skydiscover.evaluation.evaluator - WARNING - cascade_evaluation is true but /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/evaluator/evaluate_p2p.py has no evaluate_stage1 — will fall back to direct evaluation
+2026-06-01 16:38:01,999 - skydiscover.evaluation.evaluator - INFO - Initialized evaluator with /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/evaluator/evaluate_p2p.py
+2026-06-01 16:38:01,999 - skydiscover.search.default_discovery_controller - INFO - DiscoveryController initialized: num_context_programs=4
+2026-06-01 16:38:02,013 - skydiscover.search.adaevolve.controller - INFO - Paradigm LLM: using guide_models [aws/claude-opus-4-6]
+2026-06-01 16:38:02,014 - skydiscover.search.adaevolve.controller - INFO - AdaEvolveController initialized (language=rust, paradigm_breakthrough=True)
+2026-06-01 16:38:02,014 - skydiscover.runner - INFO - Adding initial program to database
+2026-06-01 16:38:29,555 - skydiscover.evaluation.evaluator - INFO - Evaluated program f02fca36-43ec-4355-85c5-8f073cd0d64a in 27.54s: throughput_gbps=2.3900, p99_latency_ms=1.8399, p50_latency_ms=1.7723, mean_latency_ms=1.7503, cpu_util_fraction=0.0265, data_integrity=True, build_succeeded=True, combined_score=0.2065
+2026-06-01 16:38:29,556 - skydiscover.search.base_database - INFO - Database has 1 programs, best program score is throughput_gbps=2.3900, p99_latency_ms=1.8399, p50_latency_ms=1.7723, mean_latency_ms=1.7503, cpu_util_fraction=0.0265, data_integrity=True, build_succeeded=True, combined_score=0.2065
+2026-06-01 16:38:29,556 - skydiscover.search.adaevolve.controller - INFO - AdaEvolve: Running 10 iterations across 2 islands
+2026-06-01 16:38:29,556 - skydiscover.search.adaevolve.controller - INFO - AdaEvolve iteration stats will be logged to: /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/adaevolve/output/adaevolve_iteration_stats_20260601_163829.jsonl
+2026-06-01 16:38:29,556 - skydiscover.search.adaevolve.controller - INFO - Seeded island 1
+2026-06-01 16:40:20,162 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 16:40:22,254 - skydiscover.evaluation.evaluator - INFO - Evaluated program 663ce828-57f6-4250-a197-209d0c0742d4 in 2.08s: error=   Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+   Compiling dispatcher v1.0.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/dispatcher)
+error[E0308]: mismatched types
+   --> components/dispatcher/src/lib.rs:264:17
+    |
+261 |             pipeline::pipelined_ssd_to_gpu_zero_copy(
+    |             ---------------------------------------- arguments to this function are incorrect
+...
+264 |                 &ring_re, build_succeeded=False, combined_score=0.0000
+2026-06-01 16:42:08,513 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 16:42:10,491 - skydiscover.evaluation.evaluator - INFO - Evaluated program 75cdf1a4-ba36-4c8d-8599-950b3785bb3d in 1.97s: error=   Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+   Compiling dispatcher v1.0.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/dispatcher)
+error[E0308]: mismatched types
+   --> components/dispatcher/src/lib.rs:264:17
+    |
+261 |             pipeline::pipelined_ssd_to_gpu_zero_copy(
+    |             ---------------------------------------- arguments to this function are incorrect
+...
+264 |                 &ring_re, build_succeeded=False, combined_score=0.0000
+2026-06-01 16:44:08,452 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 16:44:36,268 - skydiscover.evaluation.evaluator - INFO - Evaluated program f6c69bf2-fa85-41a3-843d-efa74624192e in 27.73s: throughput_gbps=2.3800, p99_latency_ms=1.8306, p50_latency_ms=1.7482, mean_latency_ms=1.7540, cpu_util_fraction=0.0274, data_integrity=True, build_succeeded=True, combined_score=0.2064
+2026-06-01 16:44:36,269 - skydiscover.search.adaevolve.controller - INFO - Iteration 1: Program f6c69bf2 (parent: f02fca36) completed in 145.78s (llm: 118.05s, eval: 27.73s)
+2026-06-01 16:44:36,269 - skydiscover.search.adaevolve.controller - INFO - Metrics: throughput_gbps=2.3800, p99_latency_ms=1.8306, p50_latency_ms=1.7482, mean_latency_ms=1.7540, cpu_util_fraction=0.0274, data_integrity=True, build_succeeded=True, combined_score=0.2064
+2026-06-01 16:46:31,611 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 16:46:59,259 - skydiscover.evaluation.evaluator - INFO - Evaluated program e49f6b8b-10db-4015-bc39-e718f8f72712 in 27.56s: throughput_gbps=2.4200, p99_latency_ms=1.8856, p50_latency_ms=1.7052, mean_latency_ms=1.7297, cpu_util_fraction=0.0334, data_integrity=True, build_succeeded=True, combined_score=0.2059
+2026-06-01 16:46:59,260 - skydiscover.search.adaevolve.controller - INFO - Iteration 2: Program e49f6b8b (parent: f6c69bf2) completed in 142.92s (llm: 115.35s, eval: 27.57s)
+2026-06-01 16:46:59,260 - skydiscover.search.adaevolve.controller - INFO - Metrics: throughput_gbps=2.4200, p99_latency_ms=1.8856, p50_latency_ms=1.7052, mean_latency_ms=1.7297, cpu_util_fraction=0.0334, data_integrity=True, build_succeeded=True, combined_score=0.2059
+2026-06-01 16:48:34,723 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 16:48:36,793 - skydiscover.evaluation.evaluator - INFO - Evaluated program 330f78f8-1d53-4263-8b2e-6a28d5641883 in 1.99s: error=   Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+   Compiling dispatcher v1.0.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/dispatcher)
+error[E0308]: mismatched types
+   --> components/dispatcher/src/lib.rs:264:17
+    |
+261 |             pipeline::pipelined_ssd_to_gpu_zero_copy(
+    |             ---------------------------------------- arguments to this function are incorrect
+...
+264 |                 &ring_re, build_succeeded=False, combined_score=0.0000
+2026-06-01 16:50:28,380 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 16:50:55,855 - skydiscover.evaluation.evaluator - INFO - Evaluated program 0519a2a5-9394-4987-a2bc-8fa189336437 in 27.39s: throughput_gbps=2.4000, p99_latency_ms=1.8518, p50_latency_ms=1.7288, mean_latency_ms=1.7394, cpu_util_fraction=0.0286, data_integrity=True, build_succeeded=True, combined_score=0.2064
+2026-06-01 16:50:55,856 - skydiscover.search.adaevolve.controller - INFO - Iteration 3: Program 0519a2a5 (parent: c9089f64) completed in 139.06s (llm: 111.67s, eval: 27.39s)
+2026-06-01 16:50:55,856 - skydiscover.search.adaevolve.controller - INFO - Metrics: throughput_gbps=2.4000, p99_latency_ms=1.8518, p50_latency_ms=1.7288, mean_latency_ms=1.7394, cpu_util_fraction=0.0286, data_integrity=True, build_succeeded=True, combined_score=0.2064
+2026-06-01 16:52:33,117 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 16:53:00,608 - skydiscover.evaluation.evaluator - INFO - Evaluated program 73d86869-b7be-4aa1-a65b-055fcbdf880c in 27.49s: throughput_gbps=2.4100, p99_latency_ms=1.8328, p50_latency_ms=1.7307, mean_latency_ms=1.7362, cpu_util_fraction=0.0287, data_integrity=True, build_succeeded=True, combined_score=0.2078
+2026-06-01 16:53:00,610 - skydiscover.search.adaevolve.controller - INFO - Iteration 4: Program 73d86869 (parent: c9089f64) completed in 124.68s (llm: 97.19s, eval: 27.49s)
+2026-06-01 16:53:00,610 - skydiscover.search.adaevolve.controller - INFO - Metrics: throughput_gbps=2.4100, p99_latency_ms=1.8328, p50_latency_ms=1.7307, mean_latency_ms=1.7362, cpu_util_fraction=0.0287, data_integrity=True, build_succeeded=True, combined_score=0.2078
+2026-06-01 16:53:00,610 - skydiscover.search.adaevolve.controller - INFO - New best solution found at iteration 4
+2026-06-01 16:54:43,376 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 16:55:10,713 - skydiscover.evaluation.evaluator - INFO - Evaluated program 6aa3f8fc-17c3-4241-8db8-5bf642f74628 in 27.33s: throughput_gbps=2.4400, p99_latency_ms=1.8377, p50_latency_ms=1.6974, mean_latency_ms=1.7158, cpu_util_fraction=0.0265, data_integrity=True, build_succeeded=True, combined_score=0.2091
+2026-06-01 16:55:10,714 - skydiscover.search.adaevolve.controller - INFO - Iteration 5: Program 6aa3f8fc (parent: 0519a2a5) completed in 129.93s (llm: 102.59s, eval: 27.34s)
+2026-06-01 16:55:10,715 - skydiscover.search.adaevolve.controller - INFO - Metrics: throughput_gbps=2.4400, p99_latency_ms=1.8377, p50_latency_ms=1.6974, mean_latency_ms=1.7158, cpu_util_fraction=0.0265, data_integrity=True, build_succeeded=True, combined_score=0.2091
+2026-06-01 16:55:10,715 - skydiscover.search.adaevolve.controller - INFO - New best solution found at iteration 5
+2026-06-01 16:56:55,990 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 16:57:23,505 - skydiscover.evaluation.evaluator - INFO - Evaluated program 51c506a2-7604-4313-9e31-9dc05e51fbe1 in 27.51s: throughput_gbps=2.4000, p99_latency_ms=1.8673, p50_latency_ms=1.7455, mean_latency_ms=1.7429, cpu_util_fraction=0.0265, data_integrity=True, build_succeeded=True, combined_score=0.2057
+2026-06-01 16:57:23,506 - skydiscover.search.adaevolve.controller - INFO - Iteration 6: Program 51c506a2 (parent: f02fca36) completed in 132.50s (llm: 104.99s, eval: 27.51s)
+2026-06-01 16:57:23,507 - skydiscover.search.adaevolve.controller - INFO - Metrics: throughput_gbps=2.4000, p99_latency_ms=1.8673, p50_latency_ms=1.7455, mean_latency_ms=1.7429, cpu_util_fraction=0.0265, data_integrity=True, build_succeeded=True, combined_score=0.2057
+2026-06-01 16:59:01,934 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 16:59:29,373 - skydiscover.evaluation.evaluator - INFO - Evaluated program 453f10c4-4b11-4c67-95d9-2e1bb76d15dd in 27.43s: throughput_gbps=2.3700, p99_latency_ms=1.9035, p50_latency_ms=1.7461, mean_latency_ms=1.7647, cpu_util_fraction=0.0264, data_integrity=True, build_succeeded=True, combined_score=0.2026
+2026-06-01 16:59:29,374 - skydiscover.search.adaevolve.controller - INFO - Iteration 7: Program 453f10c4 (parent: f02fca36) completed in 125.55s (llm: 98.11s, eval: 27.44s)
+2026-06-01 16:59:29,374 - skydiscover.search.adaevolve.controller - INFO - Metrics: throughput_gbps=2.3700, p99_latency_ms=1.9035, p50_latency_ms=1.7461, mean_latency_ms=1.7647, cpu_util_fraction=0.0264, data_integrity=True, build_succeeded=True, combined_score=0.2026
+2026-06-01 17:01:15,065 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 17:01:42,167 - skydiscover.evaluation.evaluator - INFO - Evaluated program a2716413-706f-4e5d-90b8-39b133b9c323 in 27.10s: throughput_gbps=2.4400, p99_latency_ms=1.8184, p50_latency_ms=1.7126, mean_latency_ms=1.7119, cpu_util_fraction=0.0266, data_integrity=True, build_succeeded=True, combined_score=0.2100
+2026-06-01 17:01:42,168 - skydiscover.search.adaevolve.controller - INFO - Iteration 8: Program a2716413 (parent: 6aa3f8fc) completed in 132.34s (llm: 105.24s, eval: 27.10s)
+2026-06-01 17:01:42,169 - skydiscover.search.adaevolve.controller - INFO - Metrics: throughput_gbps=2.4400, p99_latency_ms=1.8184, p50_latency_ms=1.7126, mean_latency_ms=1.7119, cpu_util_fraction=0.0266, data_integrity=True, build_succeeded=True, combined_score=0.2100
+2026-06-01 17:01:42,169 - skydiscover.search.adaevolve.controller - INFO - New best solution found at iteration 8
+2026-06-01 17:03:29,263 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 17:03:56,673 - skydiscover.evaluation.evaluator - INFO - Evaluated program 12d0e116-2604-43c1-a2cb-ed5394b8de0e in 27.41s: throughput_gbps=2.4000, p99_latency_ms=1.8589, p50_latency_ms=1.7277, mean_latency_ms=1.7437, cpu_util_fraction=0.0281, data_integrity=True, build_succeeded=True, combined_score=0.2061
+2026-06-01 17:03:56,675 - skydiscover.search.adaevolve.controller - INFO - Iteration 9: Program 12d0e116 (parent: e49f6b8b) completed in 134.05s (llm: 106.64s, eval: 27.41s)
+2026-06-01 17:03:56,675 - skydiscover.search.adaevolve.controller - INFO - Metrics: throughput_gbps=2.4000, p99_latency_ms=1.8589, p50_latency_ms=1.7277, mean_latency_ms=1.7437, cpu_util_fraction=0.0281, data_integrity=True, build_succeeded=True, combined_score=0.2061
+2026-06-01 17:05:24,881 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 17:05:52,301 - skydiscover.evaluation.evaluator - INFO - Evaluated program d671d82a-6012-410d-af82-406cc9ac1430 in 27.42s: throughput_gbps=2.3800, p99_latency_ms=1.9217, p50_latency_ms=1.7505, mean_latency_ms=1.7605, cpu_util_fraction=0.0266, data_integrity=True, build_succeeded=True, combined_score=0.2023
+2026-06-01 17:05:52,302 - skydiscover.search.adaevolve.controller - INFO - Iteration 10: Program d671d82a (parent: a2716413) completed in 114.99s (llm: 87.57s, eval: 27.42s)
+2026-06-01 17:05:52,302 - skydiscover.search.adaevolve.controller - INFO - Metrics: throughput_gbps=2.3800, p99_latency_ms=1.9217, p50_latency_ms=1.7505, mean_latency_ms=1.7605, cpu_util_fraction=0.0266, data_integrity=True, build_succeeded=True, combined_score=0.2023
+2026-06-01 17:05:52,302 - skydiscover.search.adaevolve.controller - INFO - Checkpoint interval reached at iteration 10
+2026-06-01 17:05:52,303 - skydiscover.search.base_database - INFO - Database has 12 programs, best program score is throughput_gbps=2.4400, p99_latency_ms=1.8184, p50_latency_ms=1.7126, mean_latency_ms=1.7119, cpu_util_fraction=0.0266, data_integrity=True, build_succeeded=True, combined_score=0.2100
+2026-06-01 17:05:52,325 - skydiscover.search.utils.checkpoint_manager - INFO - [CHECKPOINT] Saved database with 12 programs to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/adaevolve/output/checkpoints/checkpoint_10
+2026-06-01 17:05:52,325 - skydiscover.search.adaevolve.database - INFO - Saved AdaEvolve state to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/adaevolve/output/checkpoints/checkpoint_10
+2026-06-01 17:05:52,326 - skydiscover.runner - INFO - Checkpoint 10: best=throughput_gbps=2.4400, p99_latency_ms=1.8184, p50_latency_ms=1.7126, mean_latency_ms=1.7119, cpu_util_fraction=0.0266, data_integrity=True, build_succeeded=True, combined_score=0.2100
+2026-06-01 17:05:52,326 - skydiscover.runner - INFO - Checkpoint saved to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/adaevolve/output/checkpoints/checkpoint_10
+2026-06-01 17:05:52,897 - skydiscover.search.adaevolve.controller - INFO - AdaEvolve completed
+2026-06-01 17:05:52,898 - skydiscover.search.base_database - INFO - Database has 12 programs, best program score is throughput_gbps=2.4400, p99_latency_ms=1.8184, p50_latency_ms=1.7126, mean_latency_ms=1.7119, cpu_util_fraction=0.0266, data_integrity=True, build_succeeded=True, combined_score=0.2100
+2026-06-01 17:05:52,898 - skydiscover.search.adaevolve.controller - INFO - AdaEvolve iteration stats saved to: /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/adaevolve/output/adaevolve_iteration_stats_20260601_163829.jsonl
+2026-06-01 17:05:52,920 - skydiscover.search.utils.checkpoint_manager - INFO - [CHECKPOINT] Saved database with 12 programs to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/adaevolve/output/checkpoints/checkpoint_10
+2026-06-01 17:05:52,921 - skydiscover.search.adaevolve.database - INFO - Saved AdaEvolve state to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/adaevolve/output/checkpoints/checkpoint_10
+2026-06-01 17:05:52,922 - skydiscover.runner - INFO - Checkpoint 10: best=throughput_gbps=2.4400, p99_latency_ms=1.8184, p50_latency_ms=1.7126, mean_latency_ms=1.7119, cpu_util_fraction=0.0266, data_integrity=True, build_succeeded=True, combined_score=0.2100
+2026-06-01 17:05:52,922 - skydiscover.runner - INFO - Checkpoint saved to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/adaevolve/output/checkpoints/checkpoint_10
+2026-06-01 17:06:20,377 - skydiscover.evaluation.evaluator - INFO - Evaluated program a2716413-706f-4e5d-90b8-39b133b9c323 in 27.45s: throughput_gbps=2.3600, p99_latency_ms=1.8908, p50_latency_ms=1.7652, mean_latency_ms=1.7716, cpu_util_fraction=0.0255, data_integrity=True, build_succeeded=True, combined_score=0.2026
+2026-06-01 17:06:20,377 - skydiscover.runner - INFO - Test evaluation for best program: throughput_gbps=2.3600, p99_latency_ms=1.8908, p50_latency_ms=1.7652, mean_latency_ms=1.7716, cpu_util_fraction=0.0255, data_integrity=True, build_succeeded=True, combined_score=0.2026
+2026-06-01 17:06:20,378 - skydiscover.runner - INFO - Best program saved to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/adaevolve/output/best
+2026-06-01 17:06:20,385 - skydiscover.runner - INFO - Discovery completed. Best: throughput_gbps=2.4400, p99_latency_ms=1.8184, p50_latency_ms=1.7126, mean_latency_ms=1.7119, cpu_util_fraction=0.0266, data_integrity=True, build_succeeded=True, combined_score=0.2100, test_throughput_gbps=2.3600, test_p99_latency_ms=1.8908, test_p50_latency_ms=1.7652, test_mean_latency_ms=1.7716, test_cpu_util_fraction=0.0255, test_data_integrity=True, test_build_succeeded=True, test_combined_score=0.2026
+2026-06-01 17:06:20,386 - skydiscover.runner - INFO - Best program saved to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/adaevolve/output/best

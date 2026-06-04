@@ -1,0 +1,101 @@
+======================================================================
+  P2P Evolution Experiment
+======================================================================
+  Frameworks: ['gepa_native', 'adaevolve', 'evox', 'openevolve', 'shinkaevolve', 'ksearch', 'random']
+  Iterations: 10
+  Results: /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results
+  Evaluator: /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/evaluator/evaluate_p2p.py
+  Scoring: 60% throughput + 40% latency
+  Data PCI: 0000:62:00.0
+
+
+======================================================================
+  Starting: gepa_native | iterations=10
+  Output: /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/gepa_native
+======================================================================
+
+  CMD: uv run --project /home/nara/certus/evo_frameworks/gepa python /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/run_gepa_p2p.py --iterations 10 --run-dir /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/gepa_native
+
+
+  gepa_native complete: 5 iterations, best=0.2017, wall=190s
+
+
+======================================================================
+  Starting: adaevolve | iterations=10
+  Output: /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/adaevolve
+======================================================================
+
+  CMD: uv run --project /home/nara/certus/evo_frameworks/skydiscover skydiscover-run /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/initial_programs/concatenated_seed.rs.skydiscover /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/evaluator/evaluate_p2p.py --search adaevolve --config /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/configs/skydiscover/config.yaml -i 10 -o /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/adaevolve/output
+
+
+  adaevolve complete: 0 iterations, best=0.0000, wall=1200s
+
+
+======================================================================
+  Starting: evox | iterations=10
+  Output: /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/evox
+======================================================================
+
+  CMD: uv run --project /home/nara/certus/evo_frameworks/skydiscover skydiscover-run /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/initial_programs/concatenated_seed.rs.skydiscover /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/evaluator/evaluate_p2p.py --search evox --config /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/configs/skydiscover/config.yaml -i 10 -o /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/evox/output
+
+
+  evox complete: 0 iterations, best=0.0000, wall=1200s
+
+
+======================================================================
+  Starting: openevolve | iterations=10
+  Output: /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/openevolve
+======================================================================
+
+  CMD: uv run --project /home/nara/certus/evo_frameworks/skydiscover skydiscover-run /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/initial_programs/concatenated_seed.rs.skydiscover /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/evaluator/evaluate_p2p.py --search openevolve_native --config /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/configs/skydiscover/config.yaml -i 10 -o /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/openevolve/output
+
+
+  openevolve complete: 0 iterations, best=0.0000, wall=1200s
+
+
+======================================================================
+  Starting: shinkaevolve | iterations=10
+  Output: /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve
+======================================================================
+
+  CMD: uv run --project /home/nara/certus/evo_frameworks/skydiscover skydiscover-run /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/initial_programs/concatenated_seed.rs.skydiscover /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/evaluator/evaluate_p2p.py --search shinkaevolve --config /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/configs/skydiscover/config.yaml -i 10 -o /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output
+
+
+  shinkaevolve complete: 0 iterations, best=0.0000, wall=4s
+
+
+======================================================================
+  Starting: ksearch | iterations=10
+  Output: /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/ksearch
+======================================================================
+
+  CMD: python3 /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/run_ksearch_p2p.py --iterations 10 --run-dir /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/ksearch --model openai/aws/claude-opus-4-6 --api-base https://ete-litellm.ai-models.vpc-int.res.ibm.com --api-key sk-2as0_qF2ELuQ5Cbi2VPBsA
+
+
+  ksearch complete: 0 iterations, best=0.0000, wall=1s
+
+
+======================================================================
+  Starting: random | iterations=10
+  Output: /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/random
+======================================================================
+
+  CMD: python3 /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/random_search.py --iterations 10 --run-dir /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/random
+
+
+  random complete: 0 iterations, best=0.0000, wall=269s
+
+
+======================================================================
+  EXPERIMENT COMPLETE
+======================================================================
+
+  Framework         Iters     Best     Mean  Wall(s)
+  --------------------------------------------------
+  gepa_native           5   0.2017   0.2017      190
+  adaevolve             0   0.0000   0.0000     1200
+  evox                  0   0.0000   0.0000     1200
+  openevolve            0   0.0000   0.0000     1200
+  shinkaevolve          0   0.0000   0.0000        4
+  ksearch               0   0.0000   0.0000        1
+  random                0   0.0000   0.0000      269

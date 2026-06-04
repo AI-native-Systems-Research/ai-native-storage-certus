@@ -1,0 +1,10 @@
+{
+  "framework": "nous",
+  "best_score": 0.4808,
+  "beat_baseline": true,
+  "p2p_attempted": false,
+  "p2p_compiled": false,
+  "diagnosis": "Hypothesis-driven optimization via host-bounce path. Achieved 5.96 GB/s (near drive ceiling) with 4 queues x QD32, 4 CUDA streams, removed mid-pipeline sync. Ablation arm (QD64 + no sync) outperformed main hypothesis. Never discovered or attempted P2P.",
+  "build_fail_count": 0,
+  "build_success_count": 13
+}

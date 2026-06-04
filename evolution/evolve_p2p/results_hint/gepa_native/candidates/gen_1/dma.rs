@@ -1,0 +1,952 @@
+//! DMA buffer creation from GPU IPC handles.
+//! 
+//! Optimized for high-throughput cold-lookup with buffer pooling and
+//! pre-registration to minimize per-request overhead.
+
+#[cfg(feature = "gpu")]
+use crate::cuda_ffi;
+
+#[cfg(feature = "gpu")]
+use interfaces::{GpuDmaBuffer, GpuIpcHandle};
+
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+// SPDK functions used by the general GPU+SPDK DMA path.
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+extern "C" {
+    fn spdk_mem_register(vaddr: *mut std::ffi::c_void, len: usize) -> std::os::raw::c_int;
+    fn spdk_mem_unregister(vaddr: *mut std::ffi::c_void, len: usize) -> std::os::raw::c_int;
+}
+
+// DPDK/VFIO functions only used by the P2P (GDRCopy) path.
+#[cfg(feature = "p2p")]
+extern "C" {
+    fn rte_extmem_register(
+        va_addr: *mut std::ffi::c_void,
+        len: usize,
+        iova_addrs: *const u64,
+        n_pages: std::os::raw::c_uint,
+        page_sz: usize,
+    ) -> std::os::raw::c_int;
+    fn rte_extmem_unregister(va_addr: *mut std::ffi::c_void, len: usize) -> std::os::raw::c_int;
+    fn rte_vfio_container_dma_map(
+        container_fd: std::os::raw::c_int,
+        vaddr: u64,
+        iova: u64,
+        len: u64,
+    ) -> std::os::raw::c_int;
+    fn rte_vfio_container_dma_unmap(
+        container_fd: std::os::raw::c_int,
+        vaddr: u64,
+        iova: u64,
+        len: u64,
+    ) -> std::os::raw::c_int;
+    fn spdk_vtophys(buf: *const std::ffi::c_void, size: *mut u64) -> u64;
+}
+
+/// Free function for GpuDmaBuffer that closes the CUDA IPC handle.
+#[cfg(feature = "gpu")]
+unsafe extern "C" fn cuda_ipc_close_mem_handle(ptr: *mut std::ffi::c_void) {
+    // SAFETY: ptr was obtained from cudaIpcOpenMemHandle and has not been closed.
+    unsafe {
+        cuda_ffi::cudaIpcCloseMemHandle(ptr);
+    }
+}
+
+/// Tracks registered GPU memory regions so free functions can look up sizes.
+/// Uses a concurrent-friendly structure with sharding to reduce lock contention.
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+const SHARD_COUNT: usize = 16;
+
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+static REGISTERED_REGIONS: std::sync::OnceLock<
+    Vec<std::sync::Mutex<std::collections::HashMap<usize, usize>>>,
+> = std::sync::OnceLock::new();
+
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+fn registered_regions_shard(ptr: usize) -> &'static std::sync::Mutex<std::collections::HashMap<usize, usize>> {
+    let shards = REGISTERED_REGIONS.get_or_init(|| {
+        (0..SHARD_COUNT)
+            .map(|_| std::sync::Mutex::new(std::collections::HashMap::with_capacity(256)))
+            .collect()
+    });
+    &shards[ptr % SHARD_COUNT]
+}
+
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+fn register_region(ptr: usize, size: usize) {
+    registered_regions_shard(ptr)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(ptr, size);
+}
+
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+fn unregister_region(ptr: usize) -> usize {
+    registered_regions_shard(ptr)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&ptr)
+        .unwrap_or(0)
+}
+
+/// Free function that unregisters from SPDK, then closes the CUDA IPC handle.
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+pub unsafe extern "C" fn spdk_unregister_and_ipc_close(ptr: *mut std::ffi::c_void) {
+    unsafe {
+        let size = unregister_region(ptr as usize);
+        if size > 0 {
+            spdk_mem_unregister(ptr, size);
+        }
+        cuda_ffi::cudaIpcCloseMemHandle(ptr);
+    }
+}
+
+/// Free function that unregisters from SPDK, unpins memory, then closes IPC handle.
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+pub unsafe extern "C" fn spdk_unregister_unpin_and_ipc_close(ptr: *mut std::ffi::c_void) {
+    unsafe {
+        let size = unregister_region(ptr as usize);
+        if size > 0 {
+            spdk_mem_unregister(ptr, size);
+        }
+        cuda_ffi::cudaHostUnregister(ptr);
+        cuda_ffi::cudaIpcCloseMemHandle(ptr);
+    }
+}
+
+/// Create an SPDK `DmaBuffer` from a GPU device pointer with the appropriate
+/// free function based on whether the memory was already pinned.
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+pub fn create_spdk_dma_buffer_from_gpu(
+    ptr: *mut std::ffi::c_void,
+    size: usize,
+    was_already_pinned: bool,
+) -> Result<interfaces::DmaBuffer, String> {
+    let rc = unsafe { spdk_mem_register(ptr, size) };
+    if rc != 0 {
+        return Err(format!(
+            "spdk_mem_register failed (rc={}). Is nvidia-peermem loaded?",
+            rc
+        ));
+    }
+
+    register_region(ptr as usize, size);
+
+    let free_fn: unsafe extern "C" fn(*mut std::ffi::c_void) = if was_already_pinned {
+        spdk_unregister_and_ipc_close
+    } else {
+        spdk_unregister_unpin_and_ipc_close
+    };
+
+    let result = unsafe {
+        interfaces::DmaBuffer::from_raw(ptr, size, free_fn, -1)
+            .map_err(|e| format!("DmaBuffer creation failed: {}", e))
+    };
+
+    if result.is_err() {
+        unregister_region(ptr as usize);
+        unsafe {
+            spdk_mem_unregister(ptr, size);
+        }
+    }
+
+    result
+}
+
+/// Free function that unregisters from SPDK then frees via cudaFree.
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+pub unsafe extern "C" fn spdk_unregister_and_cuda_free(ptr: *mut std::ffi::c_void) {
+    unsafe {
+        let size = unregister_region(ptr as usize);
+        if size > 0 {
+            spdk_mem_unregister(ptr, size);
+        }
+        cuda_ffi::cudaFree(ptr);
+    }
+}
+
+/// Create an SPDK `DmaBuffer` from a `cudaMalloc`-allocated GPU pointer.
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+pub fn create_spdk_dma_buffer_from_cuda_malloc(
+    ptr: *mut std::ffi::c_void,
+    size: usize,
+) -> Result<interfaces::DmaBuffer, String> {
+    let rc = unsafe { spdk_mem_register(ptr, size) };
+    if rc != 0 {
+        return Err(format!(
+            "spdk_mem_register failed (rc={}). Is nvidia-peermem loaded?",
+            rc
+        ));
+    }
+
+    register_region(ptr as usize, size);
+
+    let result = unsafe {
+        interfaces::DmaBuffer::from_raw(ptr, size, spdk_unregister_and_cuda_free, -1)
+            .map_err(|e| format!("DmaBuffer creation failed: {}", e))
+    };
+
+    if result.is_err() {
+        unregister_region(ptr as usize);
+        unsafe {
+            spdk_mem_unregister(ptr, size);
+        }
+    }
+
+    result
+}
+
+/// Free function that unregisters from SPDK then frees via cudaFreeHost.
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+pub unsafe extern "C" fn spdk_unregister_and_cuda_free_host(ptr: *mut std::ffi::c_void) {
+    unsafe {
+        let size = unregister_region(ptr as usize);
+        if size > 0 {
+            spdk_mem_unregister(ptr, size);
+        }
+        cuda_ffi::cudaFreeHost(ptr);
+    }
+}
+
+/// Create an SPDK `DmaBuffer` from a `cudaHostAlloc`-allocated pinned host pointer.
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+pub fn create_spdk_dma_buffer_from_cuda_host_alloc(
+    ptr: *mut std::ffi::c_void,
+    size: usize,
+) -> Result<interfaces::DmaBuffer, String> {
+    let rc = unsafe { spdk_mem_register(ptr, size) };
+    if rc != 0 {
+        return Err(format!("spdk_mem_register failed (rc={})", rc));
+    }
+
+    register_region(ptr as usize, size);
+
+    let result = unsafe {
+        interfaces::DmaBuffer::from_raw(ptr, size, spdk_unregister_and_cuda_free_host, -1)
+            .map_err(|e| format!("DmaBuffer creation failed: {}", e))
+    };
+
+    if result.is_err() {
+        unregister_region(ptr as usize);
+        unsafe {
+            spdk_mem_unregister(ptr, size);
+        }
+    }
+
+    result
+}
+
+/// Tracks GDRCopy mapping state so free functions can perform full cleanup.
+#[cfg(feature = "p2p")]
+struct GdrMappingState {
+    gdr: crate::gdrcopy_ffi::gdr_t,
+    mh: crate::gdrcopy_ffi::gdr_mh_t,
+    bar_ptr: *mut std::ffi::c_void,
+    size: usize,
+}
+
+// SAFETY: GDRCopy handles are process-global and not thread-bound.
+#[cfg(feature = "p2p")]
+unsafe impl Send for GdrMappingState {}
+#[cfg(feature = "p2p")]
+unsafe impl Sync for GdrMappingState {}
+
+#[cfg(feature = "p2p")]
+static GDR_MAPPINGS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<usize, GdrMappingState>>,
+> = std::sync::OnceLock::new();
+
+#[cfg(feature = "p2p")]
+fn gdr_mappings() -> &'static std::sync::Mutex<std::collections::HashMap<usize, GdrMappingState>> {
+    GDR_MAPPINGS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::with_capacity(64)))
+}
+
+/// Free function: unregisters from SPDK, unmaps GDRCopy BAR mapping,
+/// unpins the GPU buffer, and closes the GDRCopy handle.
+#[cfg(feature = "p2p")]
+pub unsafe extern "C" fn spdk_unregister_gdr_unmap_and_close(ptr: *mut std::ffi::c_void) {
+    unsafe {
+        let state = gdr_mappings()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&(ptr as usize));
+
+        if let Some(s) = state {
+            spdk_mem_unregister(s.bar_ptr, s.size);
+            crate::gdrcopy_ffi::gdr_unmap(s.gdr, s.mh, s.bar_ptr, s.size);
+            crate::gdrcopy_ffi::gdr_unpin_buffer(s.gdr, s.mh);
+            crate::gdrcopy_ffi::gdr_close(s.gdr);
+        }
+    }
+}
+
+// ============================================================================
+// Buffer Pool for GDR BAR-mapped DMA buffers
+// ============================================================================
+
+/// Pre-allocated pool of GDR BAR-mapped DMA buffers to avoid per-request
+/// pin/map/register overhead. Buffers are allocated in common sizes and
+/// recycled after use.
+#[cfg(feature = "p2p")]
+pub struct GdrBufferPool {
+    /// Pool of ready-to-use buffers indexed by size class
+    pools: Vec<std::sync::Mutex<VecDeque<PooledGdrBuffer>>>,
+    /// Size classes available (in bytes)
+    size_classes: Vec<usize>,
+    /// Maximum buffers per size class
+    max_per_class: usize,
+    /// Whether the pool has been initialized
+    initialized: AtomicBool,
+}
+
+#[cfg(feature = "p2p")]
+struct PooledGdrBuffer {
+    dev_ptr: *mut std::ffi::c_void,
+    bar_ptr: *mut std::ffi::c_void,
+    effective_bar_ptr: *mut std::ffi::c_void,
+    size: usize,
+    aligned_size: usize,
+    gdr: crate::gdrcopy_ffi::gdr_t,
+    mh: crate::gdrcopy_ffi::gdr_mh_t,
+    registered_with_spdk: bool,
+}
+
+#[cfg(feature = "p2p")]
+unsafe impl Send for PooledGdrBuffer {}
+#[cfg(feature = "p2p")]
+unsafe impl Sync for PooledGdrBuffer {}
+
+#[cfg(feature = "p2p")]
+impl GdrBufferPool {
+    /// Common size classes for cold-lookup workloads (4KB to 2MB)
+    const DEFAULT_SIZE_CLASSES: &'static [usize] = &[
+        4096,           // 4KB
+        8192,           // 8KB
+        16384,          // 16KB
+        32768,          // 32KB
+        65536,          // 64KB (GPU page)
+        131072,         // 128KB
+        262144,         // 256KB
+        524288,         // 512KB
+        1048576,        // 1MB
+        2097152,        // 2MB
+        4194304,        // 4MB
+    ];
+
+    pub const fn new() -> Self {
+        Self {
+            pools: Vec::new(),
+            size_classes: Vec::new(),
+            max_per_class: 32,
+            initialized: AtomicBool::new(false),
+        }
+    }
+
+    /// Find the appropriate size class for a given size
+    fn size_class_index(&self, size: usize) -> Option<usize> {
+        self.size_classes.iter().position(|&s| s >= size)
+    }
+}
+
+#[cfg(feature = "p2p")]
+static GDR_BUFFER_POOL: std::sync::OnceLock<GdrBufferPool> = std::sync::OnceLock::new();
+
+#[cfg(feature = "p2p")]
+fn get_buffer_pool() -> &'static GdrBufferPool {
+    GDR_BUFFER_POOL.get_or_init(|| {
+        let size_classes: Vec<usize> = GdrBufferPool::DEFAULT_SIZE_CLASSES.to_vec();
+        let pools: Vec<std::sync::Mutex<VecDeque<PooledGdrBuffer>>> = size_classes
+            .iter()
+            .map(|_| std::sync::Mutex::new(VecDeque::with_capacity(32)))
+            .collect();
+        GdrBufferPool {
+            pools,
+            size_classes,
+            max_per_class: 32,
+            initialized: AtomicBool::new(true),
+        }
+    })
+}
+
+/// Pre-warm the buffer pool by allocating buffers ahead of time.
+/// Call this during server initialization to avoid cold-path latency.
+#[cfg(feature = "p2p")]
+pub fn prewarm_gdr_buffer_pool(buffers_per_class: usize) -> Result<(), String> {
+    let pool = get_buffer_pool();
+    
+    for (idx, &size) in pool.size_classes.iter().enumerate() {
+        for _ in 0..buffers_per_class {
+            match allocate_pooled_gdr_buffer(size) {
+                Ok(buf) => {
+                    let mut queue = pool.pools[idx].lock().unwrap_or_else(|e| e.into_inner());
+                    queue.push_back(buf);
+                }
+                Err(e) => {
+                    // Don't fail hard on prewarm - some size classes might not be needed
+                    eprintln!("prewarm_gdr_buffer_pool: size={} failed: {}", size, e);
+                    break;
+                }
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Allocate a single pooled GDR buffer (GPU alloc + GDR pin + map + SPDK register)
+#[cfg(feature = "p2p")]
+fn allocate_pooled_gdr_buffer(size: usize) -> Result<PooledGdrBuffer, String> {
+    use crate::gdrcopy_ffi::*;
+
+    let aligned_size = (size + GPU_PAGE_SIZE - 1) & !(GPU_PAGE_SIZE - 1);
+
+    // Allocate GPU memory
+    let mut dev_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+    let rc = unsafe { cuda_ffi::cudaMalloc(&mut dev_ptr, aligned_size) };
+    if rc != 0 {
+        return Err(format!("cudaMalloc failed (rc={}) for size {}", rc, aligned_size));
+    }
+
+    // Open GDRCopy handle
+    let gdr = unsafe { gdr_open() };
+    if gdr.is_null() {
+        unsafe { cuda_ffi::cudaFree(dev_ptr) };
+        return Err("gdr_open() failed".to_string());
+    }
+
+    // Pin the buffer
+    let mut mh = gdr_mh_t::default();
+    let rc = unsafe {
+        gdr_pin_buffer(gdr, dev_ptr as std::os::raw::c_ulong, aligned_size, 0, 0, &mut mh)
+    };
+    if rc != 0 {
+        unsafe {
+            gdr_close(gdr);
+            cuda_ffi::cudaFree(dev_ptr);
+        }
+        return Err(format!("gdr_pin_buffer failed (rc={})", rc));
+    }
+
+    // Map through BAR1
+    let mut bar_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+    let rc = unsafe { gdr_map(gdr, mh, &mut bar_ptr, aligned_size) };
+    if rc != 0 {
+        unsafe {
+            gdr_unpin_buffer(gdr, mh);
+            gdr_close(gdr);
+            cuda_ffi::cudaFree(dev_ptr);
+        }
+        return Err(format!("gdr_map failed (rc={})", rc));
+    }
+
+    if bar_ptr.is_null() {
+        unsafe {
+            gdr_unpin_buffer(gdr, mh);
+            gdr_close(gdr);
+            cuda_ffi::cudaFree(dev_ptr);
+        }
+        return Err("gdr_map returned null".to_string());
+    }
+
+    // Register with SPDK
+    let rc = unsafe { spdk_mem_register(bar_ptr, aligned_size) };
+    if rc != 0 {
+        unsafe {
+            gdr_unmap(gdr, mh, bar_ptr, aligned_size);
+            gdr_unpin_buffer(gdr, mh);
+            gdr_close(gdr);
+            cuda_ffi::cudaFree(dev_ptr);
+        }
+        return Err(format!("spdk_mem_register failed (rc={})", rc));
+    }
+
+    let offset = (dev_ptr as usize) & (GPU_PAGE_SIZE - 1);
+    let effective_bar_ptr = unsafe { (bar_ptr as *mut u8).add(offset) as *mut std::ffi::c_void };
+
+    Ok(PooledGdrBuffer {
+        dev_ptr,
+        bar_ptr,
+        effective_bar_ptr,
+        size,
+        aligned_size,
+        gdr,
+        mh,
+        registered_with_spdk: true,
+    })
+}
+
+/// Return a buffer to the pool instead of deallocating it.
+#[cfg(feature = "p2p")]
+fn return_buffer_to_pool(buf: PooledGdrBuffer) {
+    let pool = get_buffer_pool();
+    if let Some(idx) = pool.size_class_index(buf.size) {
+        let mut queue = pool.pools[idx].lock().unwrap_or_else(|e| e.into_inner());
+        if queue.len() < pool.max_per_class {
+            queue.push_back(buf);
+            return;
+        }
+    }
+    // Pool full or no matching class - actually free
+    free_pooled_gdr_buffer(buf);
+}
+
+/// Actually free a pooled buffer (full cleanup)
+#[cfg(feature = "p2p")]
+fn free_pooled_gdr_buffer(buf: PooledGdrBuffer) {
+    use crate::gdrcopy_ffi::*;
+    unsafe {
+        if buf.registered_with_spdk {
+            spdk_mem_unregister(buf.bar_ptr, buf.aligned_size);
+        }
+        gdr_unmap(buf.gdr, buf.mh, buf.bar_ptr, buf.aligned_size);
+        gdr_unpin_buffer(buf.gdr, buf.mh);
+        gdr_close(buf.gdr);
+        cuda_ffi::cudaFree(buf.dev_ptr);
+    }
+}
+
+/// Acquire a buffer from the pool (or allocate a new one)
+#[cfg(feature = "p2p")]
+pub fn acquire_gdr_buffer(size: usize) -> Result<(*mut std::ffi::c_void, *mut std::ffi::c_void, usize), String> {
+    let pool = get_buffer_pool();
+    
+    if let Some(idx) = pool.size_class_index(size) {
+        let mut queue = pool.pools[idx].lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(buf) = queue.pop_front() {
+            // Return (effective_bar_ptr for DMA, dev_ptr for CUDA, actual allocated size)
+            return Ok((buf.effective_bar_ptr, buf.dev_ptr, buf.size));
+        }
+        drop(queue);
+        
+        // Allocate new buffer of this size class
+        let class_size = pool.size_classes[idx];
+        let buf = allocate_pooled_gdr_buffer(class_size)?;
+        Ok((buf.effective_bar_ptr, buf.dev_ptr, buf.size))
+    } else {
+        // Size exceeds all classes, allocate directly
+        let buf = allocate_pooled_gdr_buffer(size)?;
+        Ok((buf.effective_bar_ptr, buf.dev_ptr, buf.size))
+    }
+}
+
+// ============================================================================
+// Original GDR BAR path (non-pooled, for IPC handles)
+// ============================================================================
+
+/// Create an SPDK `DmaBuffer` backed by a GDRCopy BAR1 mapping of GPU device memory.
+///
+/// This enables true NVMe→GPU P2P DMA: GDRCopy pins the GPU memory via
+/// `nvidia_p2p_get_pages` and maps it through GPU BAR1, producing a CPU-visible
+/// virtual address with valid pagemap entries pointing to GPU BAR1 physical
+/// addresses. SPDK's vtophys can then resolve these for VFIO IOMMU DMA mapping.
+#[cfg(feature = "p2p")]
+pub fn create_spdk_dma_buffer_from_gpu_bar(
+    dev_ptr: *mut std::ffi::c_void,
+    size: usize,
+) -> Result<interfaces::DmaBuffer, String> {
+    use crate::gdrcopy_ffi::*;
+
+    // Align size up to GPU page boundary (64KB).
+    let aligned_size = (size + GPU_PAGE_SIZE - 1) & !(GPU_PAGE_SIZE - 1);
+
+    // SAFETY: Opens a connection to the gdrdrv kernel module.
+    let gdr = unsafe { gdr_open() };
+    if gdr.is_null() {
+        return Err("gdr_open() failed — is gdrdrv kernel module loaded?".to_string());
+    }
+
+    // SAFETY: dev_ptr is a valid CUDA device pointer; size is the allocation size.
+    let mut mh = gdr_mh_t::default();
+    let rc = unsafe {
+        gdr_pin_buffer(
+            gdr,
+            dev_ptr as std::os::raw::c_ulong,
+            aligned_size,
+            0,
+            0,
+            &mut mh,
+        )
+    };
+    if rc != 0 {
+        unsafe { gdr_close(gdr) };
+        return Err(format!("gdr_pin_buffer failed (rc={})", rc));
+    }
+
+    // SAFETY: mh is a valid pinned handle from gdr_pin_buffer.
+    let mut bar_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+    let rc = unsafe { gdr_map(gdr, mh, &mut bar_ptr, aligned_size) };
+    if rc != 0 {
+        unsafe {
+            gdr_unpin_buffer(gdr, mh);
+            gdr_close(gdr);
+        }
+        return Err(format!("gdr_map failed (rc={})", rc));
+    }
+
+    if bar_ptr.is_null() {
+        unsafe {
+            gdr_unpin_buffer(gdr, mh);
+            gdr_close(gdr);
+        }
+        return Err("gdr_map returned null pointer".to_string());
+    }
+
+    // Account for alignment offset
+    let offset = (dev_ptr as usize) & (GPU_PAGE_SIZE - 1);
+    let effective_bar_ptr = unsafe { (bar_ptr as *mut u8).add(offset) as *mut std::ffi::c_void };
+
+    // Register the BAR mapping with SPDK.
+    let rc = unsafe { spdk_mem_register(bar_ptr, aligned_size) };
+    if rc != 0 {
+        unsafe {
+            gdr_unmap(gdr, mh, bar_ptr, aligned_size);
+            gdr_unpin_buffer(gdr, mh);
+            gdr_close(gdr);
+        }
+        return Err(format!(
+            "spdk_mem_register on BAR mapping failed (rc={}). Is nvidia-peermem loaded?",
+            rc
+        ));
+    }
+
+    // Store state for cleanup.
+    gdr_mappings()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(
+            effective_bar_ptr as usize,
+            GdrMappingState {
+                gdr,
+                mh,
+                bar_ptr,
+                size: aligned_size,
+            },
+        );
+
+    let result = unsafe {
+        interfaces::DmaBuffer::from_raw(
+            effective_bar_ptr,
+            size,
+            spdk_unregister_gdr_unmap_and_close,
+            -1,
+        )
+        .map_err(|e| format!("DmaBuffer creation failed: {}", e))
+    };
+
+    if result.is_err() {
+        gdr_mappings()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&(effective_bar_ptr as usize));
+        unsafe {
+            spdk_mem_unregister(bar_ptr, aligned_size);
+            gdr_unmap(gdr, mh, bar_ptr, aligned_size);
+            gdr_unpin_buffer(gdr, mh);
+            gdr_close(gdr);
+        }
+    }
+
+    result
+}
+
+/// Tracks physical DMA mappings (mmap'd VA → phys) for cleanup.
+#[cfg(feature = "p2p")]
+struct PhysMappingState {
+    va: *mut std::ffi::c_void,
+    phys_addr: u64,
+    size: usize,
+}
+
+// SAFETY: The VA is process-global and not thread-bound.
+#[cfg(feature = "p2p")]
+unsafe impl Send for PhysMappingState {}
+#[cfg(feature = "p2p")]
+unsafe impl Sync for PhysMappingState {}
+
+#[cfg(feature = "p2p")]
+static PHYS_MAPPINGS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<usize, PhysMappingState>>,
+> = std::sync::OnceLock::new();
+
+#[cfg(feature = "p2p")]
+fn phys_mappings() -> &'static std::sync::Mutex<std::collections::HashMap<usize, PhysMappingState>>
+{
+    PHYS_MAPPINGS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::with_capacity(64)))
+}
+
+/// # Safety
+///
+/// `ptr` must be a VA previously created by `create_spdk_dma_buffer_from_phys`.
+#[cfg(feature = "p2p")]
+pub unsafe extern "C" fn vfio_unmap_extmem_munmap(ptr: *mut std::ffi::c_void) {
+    unsafe {
+        let state = phys_mappings()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&(ptr as usize));
+
+        if let Some(s) = state {
+            rte_vfio_container_dma_unmap(-1, s.va as u64, s.phys_addr, s.size as u64);
+            rte_extmem_unregister(s.va, s.size);
+            libc::munmap(s.va, s.size);
+        }
+    }
+}
+
+/// Resolve a virtual address to its physical/IOVA address via SPDK's vtophys.
+///
+/// # Safety
+///
+/// `ptr` must point to SPDK-registered memory of at least `size` bytes.
+#[cfg(feature = "p2p")]
+pub unsafe fn get_phys_addr(ptr: *const std::ffi::c_void, size: usize) -> Option<u64> {
+    const SPDK_VTOPHYS_ERROR: u64 = 0xFFFF_FFFF_FFFF_FFFF;
+    let mut sz = size as u64;
+    let phys = unsafe { spdk_vtophys(ptr, &mut sz) };
+    if phys == SPDK_VTOPHYS_ERROR {
+        None
+    } else {
+        Some(phys)
+    }
+}
+
+/// Create an SPDK `DmaBuffer` targeting a known physical address via DPDK IOMMU mapping.
+#[cfg(feature = "p2p")]
+pub fn create_spdk_dma_buffer_from_phys(
+    phys_addr: u64,
+    size: usize,
+) -> Result<interfaces::DmaBuffer, String> {
+    // Use hugepage-aligned size for better TLB efficiency
+    let aligned_size = (size + 4095) & !4095;
+    
+    // SAFETY: mmap anonymous private pages as a VA placeholder.
+    let va = unsafe {
+        libc::mmap(
+            std::ptr::null_mut(),
+            aligned_size,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_POPULATE,
+            -1,
+            0,
+        )
+    };
+    if va == libc::MAP_FAILED {
+        return Err("mmap anonymous pages failed".to_string());
+    }
+
+    // Tell DPDK that this VA range maps to the given physical/IOVA address.
+    let iova_array: [u64; 1] = [phys_addr];
+    let rc = unsafe { rte_extmem_register(va, aligned_size, iova_array.as_ptr(), 1, aligned_size) };
+    if rc != 0 {
+        unsafe { libc::munmap(va, aligned_size) };
+        return Err(format!("rte_extmem_register failed (rc={})", rc));
+    }
+
+    // Program the VFIO IOMMU
+    let rc = unsafe { rte_vfio_container_dma_map(-1, va as u64, phys_addr, aligned_size as u64) };
+    if rc != 0 {
+        unsafe {
+            rte_extmem_unregister(va, aligned_size);
+            libc::munmap(va, aligned_size);
+        }
+        return Err(format!("rte_vfio_container_dma_map failed (rc={})", rc));
+    }
+
+    phys_mappings()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(
+            va as usize,
+            PhysMappingState {
+                va,
+                phys_addr,
+                size: aligned_size,
+            },
+        );
+
+    let result = unsafe {
+        interfaces::DmaBuffer::from_raw(va, size, vfio_unmap_extmem_munmap, -1)
+            .map_err(|e| format!("DmaBuffer creation failed: {}", e))
+    };
+
+    if result.is_err() {
+        phys_mappings()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&(va as usize));
+        unsafe {
+            rte_vfio_container_dma_unmap(-1, va as u64, phys_addr, aligned_size as u64);
+            rte_extmem_unregister(va, aligned_size);
+            libc::munmap(va, aligned_size);
+        }
+    }
+
+    result
+}
+
+/// Create an SPDK `DmaBuffer` from an existing BAR VA using direct DPDK IOMMU programming.
+///
+/// # Safety
+///
+/// `bar_ptr` must be a valid pointer to a GDRCopy BAR mapping of at least `size` bytes.
+#[cfg(feature = "p2p")]
+pub unsafe fn create_spdk_dma_buffer_from_bar_direct(
+    bar_ptr: *mut std::ffi::c_void,
+    size: usize,
+) -> Result<interfaces::DmaBuffer, String> {
+    let iova = bar_ptr as u64;
+
+    // Use system page size for alignment (GDRCopy BAR mappings are 4K-aligned).
+    let page_sz: usize = 4096;
+    let n_pages = size.div_ceil(page_sz);
+    let iova_array: Vec<u64> = (0..n_pages).map(|i| iova + (i * page_sz) as u64).collect();
+    let rc = unsafe {
+        rte_extmem_register(
+            bar_ptr,
+            size,
+            iova_array.as_ptr(),
+            n_pages as std::os::raw::c_uint,
+            page_sz,
+        )
+    };
+    if rc != 0 {
+        let errno = std::io::Error::last_os_error();
+        return Err(format!(
+            "rte_extmem_register failed (rc={}, errno={}, va={:?}, size={}, page_sz={}, n_pages={})",
+            rc, errno, bar_ptr, size, page_sz, n_pages
+        ));
+    }
+
+    // Program the VFIO IOMMU
+    let rc = unsafe { rte_vfio_container_dma_map(-1, bar_ptr as u64, iova, size as u64) };
+    if rc != 0 {
+        unsafe { rte_extmem_unregister(bar_ptr, size) };
+        return Err(format!("rte_vfio_container_dma_map failed (rc={})", rc));
+    }
+
+    phys_mappings()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(
+            bar_ptr as usize,
+            PhysMappingState {
+                va: bar_ptr,
+                phys_addr: iova,
+                size,
+            },
+        );
+
+    let result = unsafe {
+        interfaces::DmaBuffer::from_raw(bar_ptr, size, vfio_unmap_extmem_only, -1)
+            .map_err(|e| format!("DmaBuffer creation failed: {}", e))
+    };
+
+    if result.is_err() {
+        phys_mappings()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&(bar_ptr as usize));
+        unsafe {
+            rte_vfio_container_dma_unmap(-1, bar_ptr as u64, iova, size as u64);
+            rte_extmem_unregister(bar_ptr, size);
+        }
+    }
+
+    result
+}
+
+/// # Safety
+///
+/// `ptr` must be a BAR VA previously registered via `create_spdk_dma_buffer_from_bar_direct`.
+#[cfg(feature = "p2p")]
+pub unsafe extern "C" fn vfio_unmap_extmem_only(ptr: *mut std::ffi::c_void) {
+    unsafe {
+        let state = phys_mappings()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&(ptr as usize));
+
+        if let Some(s) = state {
+            rte_vfio_container_dma_unmap(-1, s.va as u64, s.phys_addr, s.size as u64);
+            rte_extmem_unregister(s.va, s.size);
+        }
+    }
+}
+
+// ============================================================================
+// Batch registration for multiple buffers
+// ============================================================================
+
+/// Register a contiguous GPU memory region with SPDK for multiple sub-buffers.
+/// This avoids per-buffer spdk_mem_register overhead by registering the entire
+/// region once.
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+pub fn register_gpu_region_with_spdk(
+    base_ptr: *mut std::ffi::c_void,
+    total_size: usize,
+) -> Result<(), String> {
+    let rc = unsafe { spdk_mem_register(base_ptr, total_size) };
+    if rc != 0 {
+        return Err(format!("spdk_mem_register failed (rc={})", rc));
+    }
+    register_region(base_ptr as usize, total_size);
+    Ok(())
+}
+
+/// Unregister a previously registered GPU memory region from SPDK.
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+pub fn unregister_gpu_region_from_spdk(base_ptr: *mut std::ffi::c_void) -> Result<(), String> {
+    let size = unregister_region(base_ptr as usize);
+    if size > 0 {
+        let rc = unsafe { spdk_mem_unregister(base_ptr, size) };
+        if rc != 0 {
+            return Err(format!("spdk_mem_unregister failed (rc={})", rc));
+        }
+    }
+    Ok(())
+}
+
+// ============================================================================
+// Optimized DMA buffer creation with pre-registered regions
+// ============================================================================
+
+/// No-op free function for buffers whose lifetime is managed externally
+/// (e.g., from a pre-registered pool or region).
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+pub unsafe extern "C" fn noop_free(_ptr: *mut std::ffi::c_void) {
+    // Buffer lifetime managed externally (pool or region owner)
+}
+
+/// Create a DmaBuffer from a sub-region of an already-registered GPU memory area.
+/// This avoids the spdk_mem_register call entirely since the parent region is
+/// already registered. The free function is a no-op since the parent owns cleanup.
+///
+/// # Safety
+///
+/// `ptr` must point within a region previously registered via
+/// `register_gpu_region_with_spdk`, and the region must outlive this buffer.
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+pub unsafe fn create_dma_buffer_from_preregistered(
+    ptr: *mut std::ffi::c_void,
+    size: usize,
+) -> Result<interfaces::DmaBuffer, String> {
+    unsafe {
+        interfaces::DmaBuffer::from_raw(ptr, size, noop_free, -1)
+            .map_err(|e| format!("DmaBuffer creation failed: {}", e))
+    }
+}
+
+/// Create a GpuDmaBuffer from a verified and pinned IPC handle.
+#[cfg(feature = "gpu")]
+pub fn create_gpu_dma_buffer(handle: GpuIpcHandle) -> Result<GpuDmaBuffer, String> {
+    if handle.as_ptr().is_null() {
+        return Err("Handle has null pointer".to_string());
+    }
+
+    let buf =
+        unsafe { GpuDmaBuffer::new(handle.as_ptr(), handle.size(), cuda_ipc_close_mem_handle) };
+
+    Ok(buf)
+}

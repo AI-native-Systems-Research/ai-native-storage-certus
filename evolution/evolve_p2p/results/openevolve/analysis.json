@@ -1,0 +1,10 @@
+{
+  "framework": "openevolve",
+  "best_score": 0.0,
+  "beat_baseline": false,
+  "p2p_attempted": true,
+  "p2p_compiled": false,
+  "diagnosis": "Attempted P2P in iteration 1 \u2014 used truncated function name (create_spdk_dma_buffer_from_gpu instead of create_spdk_dma_buffer_from_gpu_bar). Failed to compile after 3 retries. Same LLM recall failure as K-Search. Subsequent iterations also failed to compile.",
+  "build_fail_count": 3,
+  "build_success_count": 0
+}

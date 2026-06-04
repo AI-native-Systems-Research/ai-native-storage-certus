@@ -1,0 +1,14 @@
+{
+  "generation": 7,
+  "novelty_attempt": 1,
+  "resample_attempt": 1,
+  "patch_attempt": 1,
+  "success": true,
+  "num_applied": 1,
+  "patch_name": "sliding_window_pipeline_overlap",
+  "patch_description": "The original pipeline loop used a batch approach: submit N reads, wait for ALL N to complete, then copy all to GPU. This serializes I/O and GPU DMA, resulting in low throughput and high latency.\n\nThe fix converts the pipeline loop to a true sliding-window approach: as each individual NVMe read completes, immediately start the GPU DMA copy for that chunk and submit the next NVMe read. This overlaps SSD I/O with GPU transfers, significantly improving throughput and reducing latency. Also increased PIPELINE_RING_SIZE to 16 for deeper queue depth.",
+  "error_msg": null,
+  "timestamp": "2026-06-01T20:01:21.735633",
+  "llm_cost": 0.0,
+  "llm_model": "aws/claude-opus-4-6"
+}

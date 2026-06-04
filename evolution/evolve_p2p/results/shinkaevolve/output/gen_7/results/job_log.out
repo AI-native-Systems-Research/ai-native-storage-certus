@@ -1,0 +1,16 @@
+[eval] Benchmark failed: Benchmark reported errors: er object (all clients combined):
+
+  Populate             avg=    342.4 us  p50=    311.1 us  p99=    615.2 us  min=    235.1 us  max=    615.2 us
+                       per-client= 12.25 GB/s  aggregate= 11.47 GB/s
+
+  Lookup (hot)         no data
+
+  Lookup (cold)        no data
+
+
+  Total wall time:   10.55s
+
+  Per-client breakdown:
+  Client   GPU   Hot avg (us)   Cold avg (us)  Errors  
+  -------------------------------------------------
+  0        0     0.0          

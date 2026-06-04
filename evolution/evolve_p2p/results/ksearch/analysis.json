@@ -1,0 +1,10 @@
+{
+  "framework": "ksearch",
+  "best_score": 0.199,
+  "beat_baseline": false,
+  "p2p_attempted": true,
+  "p2p_compiled": false,
+  "diagnosis": "World model correctly identified P2P as highest-value action (rated 8/10). Rounds 1-5 attempted GDS P2P, rounds 6-10 attempted deep pipeline. All 10 failed to compile. Used wrong function names (create_gpu_dma_buffer, create_spdk_dma_buffer_from_gpu) despite compiler suggesting alternatives. LLM reconstructs names from semantic memory instead of copying from context.",
+  "build_fail_count": 10,
+  "build_success_count": 1
+}

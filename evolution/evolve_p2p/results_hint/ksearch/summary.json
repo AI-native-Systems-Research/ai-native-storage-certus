@@ -1,0 +1,14 @@
+{
+  "framework": "ksearch",
+  "iterations_completed": 1,
+  "iterations_requested": 10,
+  "wall_time_seconds": 1051.7,
+  "best_score": 0.2108,
+  "mean_score": 0.2108,
+  "scores": [
+    0.2108
+  ],
+  "returncode": 0,
+  "timestamp": "2026-06-02_21-19-53",
+  "log_file": "/home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results_hint/ksearch/run-2026-06-02_21-02-21.log"
+}

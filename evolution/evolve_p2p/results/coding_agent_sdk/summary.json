@@ -1,0 +1,29 @@
+{
+  "framework": "coding_agent_sdk",
+  "iterations_completed": 16,
+  "iterations_requested": 12,
+  "wall_time_seconds": 2400,
+  "best_score": 0.4076,
+  "mean_score": 0.3839,
+  "scores": [
+    0.3704,
+    0.3646,
+    0.3672,
+    0.3982,
+    0.3823,
+    0.3882,
+    0.4065,
+    0.3468,
+    0.4076,
+    0.3852,
+    0.371,
+    0.3915,
+    0.3891,
+    0.3973,
+    0.3982,
+    0.3788
+  ],
+  "returncode": 0,
+  "timestamp": "2026-06-02_15-50-00",
+  "note": "Killed mid-run. Supervisor never fired (max_turns=200 too high)."
+}

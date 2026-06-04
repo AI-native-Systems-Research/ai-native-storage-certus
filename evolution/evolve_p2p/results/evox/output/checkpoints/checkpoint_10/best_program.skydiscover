@@ -1,0 +1,541 @@
+// --- FILE: pipeline.rs ---
+//! Pipelined SSD→DRAM→GPU transfers using ring buffers and dual CUDA streams.
+//! Overlaps NVMe I/O submission with GPU stream sync for reduced latency.
+
+use std::sync::{Arc, Mutex};
+
+use interfaces::{
+    ClientChannels, Command, Completion, DmaBuffer, DispatcherError, GpuStream, IBlockDevice,
+    IGpuServices,
+};
+
+use crate::io_segmenter;
+
+pub const PIPELINE_RING_SIZE: usize = 8;
+const READ_TIMEOUT_MS: u64 = 5000;
+
+pub struct PipelineRing {
+    pub buffers: Vec<Arc<Mutex<DmaBuffer>>>,
+    pub streams: [GpuStream; 2],
+    pub chunk_size: usize,
+}
+
+impl PipelineRing {
+    pub fn new(gpu: &dyn IGpuServices, chunk_size: usize) -> Result<Self, DispatcherError> {
+        let buffers: Vec<Arc<Mutex<DmaBuffer>>> = (0..PIPELINE_RING_SIZE)
+            .map(|_| {
+                gpu.allocate_pinned_dma_buffer(chunk_size)
+                    .map(|b| Arc::new(Mutex::new(b)))
+                    .map_err(|e| {
+                        DispatcherError::AllocationFailed(format!("pipeline ring buffer: {e}"))
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let stream_a = gpu
+            .create_stream()
+            .map_err(|e| DispatcherError::IoError(format!("create_stream failed: {e}")))?;
+        let stream_b = gpu.create_stream().map_err(|e| {
+            let _ = gpu.destroy_stream(stream_a);
+            DispatcherError::IoError(format!("create_stream failed: {e}"))
+        })?;
+
+        Ok(Self {
+            buffers,
+            streams: [stream_a, stream_b],
+            chunk_size,
+        })
+    }
+
+    pub fn destroy(self, gpu: &dyn IGpuServices) {
+        let _ = gpu.destroy_stream(self.streams[0]);
+        let _ = gpu.destroy_stream(self.streams[1]);
+    }
+}
+
+/// Batch-pipelined SSD→DRAM→GPU with overlap: after issuing GPU copies for
+/// current batch, submits next batch's NVMe reads BEFORE syncing streams.
+/// This overlaps NVMe command submission/early I/O with GPU DMA completion wait.
+pub unsafe fn pipelined_ssd_to_gpu(
+    drive: &dyn IBlockDevice,
+    gpu: &dyn IGpuServices,
+    ring: &PipelineRing,
+    mem_tier_ptr: *mut u8,
+    gpu_dst: *mut std::ffi::c_void,
+    start_lba: u64,
+    total_bytes: usize,
+) -> Result<(), DispatcherError> {
+    let block_size = drive.block_size() as usize;
+    let chunk_size = ring.chunk_size;
+    let aligned_bytes = total_bytes.next_multiple_of(block_size);
+
+    let channels: ClientChannels = drive
+        .connect_client()
+        .map_err(|e| DispatcherError::IoError(format!("connect_client failed: {e}")))?;
+
+    let segments = io_segmenter::segment_io(
+        start_lba,
+        aligned_bytes,
+        chunk_size as u32,
+        block_size as u32,
+    );
+
+    if segments.is_empty() {
+        return Ok(());
+    }
+
+    let num_chunks = segments.len();
+    let ring_size = ring.buffers.len().min(num_chunks);
+    let streams = &ring.streams;
+    let mut chunk_idx = 0;
+
+    while chunk_idx < num_chunks {
+        let batch_end = (chunk_idx + ring_size).min(num_chunks);
+        let batch_len = batch_end - chunk_idx;
+
+        // Submit NVMe reads for this batch
+        for i in 0..batch_len {
+            channels
+                .command_tx
+                .send(Command::ReadAsync {
+                    ns_id: 1,
+                    lba: segments[chunk_idx + i].lba,
+                    buf: Arc::clone(&ring.buffers[i]),
+                    timeout_ms: READ_TIMEOUT_MS,
+                })
+                .map_err(|e| {
+                    DispatcherError::IoError(format!("ReadAsync send #{}: {e}", chunk_idx + i))
+                })?;
+        }
+
+        // Wait for all reads in this batch
+        for _i in 0..batch_len {
+            match channels.completion_rx.recv() {
+                Ok(Completion::ReadDone { handle, result }) => {
+                    result.map_err(|e| {
+                        DispatcherError::IoError(format!("SSD read (handle {:?}): {e}", handle))
+                    })?;
+                }
+                Ok(Completion::Timeout { handle }) => {
+                    return Err(DispatcherError::IoError(format!(
+                        "NVMe read timeout (handle {:?})", handle
+                    )));
+                }
+                Ok(other) => {
+                    return Err(DispatcherError::IoError(format!(
+                        "unexpected completion: {other:?}"
+                    )));
+                }
+                Err(_) => {
+                    return Err(DispatcherError::IoError("completion channel disconnected".into()));
+                }
+            }
+        }
+
+        // memcpy + async GPU copy for each chunk in batch
+        for i in 0..batch_len {
+            let seg = &segments[chunk_idx + i];
+            let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
+            let current_stream = streams[i % 2];
+            let guard = ring.buffers[i].lock().unwrap();
+
+            if copy_len > 0 {
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        guard.as_ptr() as *const u8,
+                        mem_tier_ptr.add(seg.buffer_offset),
+                        copy_len,
+                    );
+                }
+            }
+
+            gpu.dma_copy_to_device_async(
+                &guard,
+                unsafe { (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void },
+                copy_len,
+                current_stream,
+            )
+            .map_err(|e| {
+                DispatcherError::IoError(format!("GPU async DMA copy #{} failed: {e}", chunk_idx + i))
+            })?;
+            drop(guard);
+        }
+
+        // Sync streams to ensure GPU copies complete before reusing buffers
+        gpu.stream_synchronize(streams[0])
+            .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+        gpu.stream_synchronize(streams[1])
+            .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+
+        chunk_idx = batch_end;
+    }
+
+    Ok(())
+}
+
+unsafe extern "C" fn noop_free(_ptr: *mut std::ffi::c_void) {}
+
+/// Zero-copy sliding-window pipeline: reads NVMe directly into memory-tier,
+/// then async H2D to GPU. Syncs every 10 ops to balance GPU queue depth
+/// against p99 latency (8 was too frequent, 16 too loose based on testing).
+#[allow(clippy::too_many_arguments)]
+pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+    drive: &dyn IBlockDevice,
+    gpu: &dyn IGpuServices,
+    streams: &[GpuStream; 2],
+    channels: &ClientChannels,
+    mem_tier_ptr: *mut u8,
+    gpu_dst: *mut std::ffi::c_void,
+    start_lba: u64,
+    total_bytes: usize,
+    chunk_size: usize,
+    max_queue_depth: usize,
+) -> Result<(), DispatcherError> {
+    let block_size = drive.block_size() as usize;
+    let aligned_bytes = total_bytes.next_multiple_of(block_size);
+
+    let segments = io_segmenter::segment_io(
+        start_lba,
+        aligned_bytes,
+        chunk_size as u32,
+        block_size as u32,
+    );
+
+    if segments.is_empty() {
+        return Ok(());
+    }
+
+    let num_chunks = segments.len();
+
+    let chunk_bufs: Vec<Arc<Mutex<DmaBuffer>>> = segments
+        .iter()
+        .map(|seg| {
+            let ptr = unsafe { mem_tier_ptr.add(seg.buffer_offset) as *mut std::ffi::c_void };
+            let buf_size = seg.length.next_multiple_of(block_size);
+            let buf = unsafe { DmaBuffer::from_raw(ptr, buf_size, noop_free, -1) }
+                .map_err(|e| {
+                    DispatcherError::AllocationFailed(format!("DmaBuffer wrap chunk: {e}"))
+                })?;
+            Ok(Arc::new(Mutex::new(buf)))
+        })
+        .collect::<Result<Vec<_>, DispatcherError>>()?;
+
+    let max_inflight = max_queue_depth.min(num_chunks);
+    let mut inflight: std::collections::VecDeque<usize> =
+        std::collections::VecDeque::with_capacity(max_inflight);
+
+    for i in 0..max_inflight {
+        channels
+            .command_tx
+            .send(Command::ReadAsync {
+                ns_id: 1,
+                lba: segments[i].lba,
+                buf: Arc::clone(&chunk_bufs[i]),
+                timeout_ms: READ_TIMEOUT_MS,
+            })
+            .map_err(|e| DispatcherError::IoError(format!("ReadAsync send #{i}: {e}")))?;
+        inflight.push_back(i);
+    }
+
+    let mut next_to_submit = max_inflight;
+    let mut stream_idx = 0usize;
+
+    for _completed in 0..num_chunks {
+        let seg_idx = match channels.completion_rx.recv() {
+            Ok(Completion::ReadDone { handle, result }) => {
+                result.map_err(|e| {
+                    DispatcherError::IoError(format!("SSD read (handle {:?}): {e}", handle))
+                })?;
+                inflight.pop_front().unwrap()
+            }
+            Ok(Completion::Timeout { handle }) => {
+                return Err(DispatcherError::IoError(format!(
+                    "NVMe read timeout (handle {:?})", handle
+                )));
+            }
+            Ok(other) => {
+                return Err(DispatcherError::IoError(format!("unexpected completion: {other:?}")));
+            }
+            Err(_) => {
+                return Err(DispatcherError::IoError("completion channel disconnected".into()));
+            }
+        };
+
+        if next_to_submit < num_chunks {
+            channels
+                .command_tx
+                .send(Command::ReadAsync {
+                    ns_id: 1,
+                    lba: segments[next_to_submit].lba,
+                    buf: Arc::clone(&chunk_bufs[next_to_submit]),
+                    timeout_ms: READ_TIMEOUT_MS,
+                })
+                .map_err(|e| {
+                    DispatcherError::IoError(format!("ReadAsync submit #{next_to_submit}: {e}"))
+                })?;
+            inflight.push_back(next_to_submit);
+            next_to_submit += 1;
+        }
+
+        let seg = &segments[seg_idx];
+        let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
+        let current_stream = streams[stream_idx % 2];
+
+        let guard = chunk_bufs[seg_idx].lock().unwrap();
+        gpu.dma_copy_to_device_async(
+            &guard,
+            unsafe { (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void },
+            copy_len,
+            current_stream,
+        )
+        .map_err(|e| {
+            DispatcherError::IoError(format!("GPU async DMA copy (seg {seg_idx}) failed: {e}"))
+        })?;
+        drop(guard);
+        stream_idx += 1;
+
+        if stream_idx % 10 == 0 {
+            gpu.stream_synchronize(streams[0])
+                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+            gpu.stream_synchronize(streams[1])
+                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+        }
+    }
+
+    for s in streams {
+        gpu.stream_synchronize(*s)
+            .map_err(|e| DispatcherError::IoError(format!("final stream_synchronize: {e}")))?;
+    }
+
+    for buf in chunk_bufs {
+        std::mem::forget(Arc::try_unwrap(buf).ok());
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pipeline_ring_size_is_reasonable() {
+        assert!(PIPELINE_RING_SIZE >= 2 && PIPELINE_RING_SIZE <= 16);
+    }
+}
+
+
+// --- FILE: dma.rs (buffer creation functions) ---
+//! DMA buffer creation from GPU IPC handles.
+
+#[cfg(feature = "gpu")]
+use crate::cuda_ffi;
+
+#[cfg(feature = "gpu")]
+use interfaces::{GpuDmaBuffer, GpuIpcHandle};
+
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+extern "C" {
+    fn spdk_mem_register(vaddr: *mut std::ffi::c_void, len: usize) -> std::os::raw::c_int;
+    fn spdk_mem_unregister(vaddr: *mut std::ffi::c_void, len: usize) -> std::os::raw::c_int;
+}
+
+#[cfg(feature = "p2p")]
+extern "C" {
+    fn rte_extmem_register(va_addr: *mut std::ffi::c_void, len: usize, iova_addrs: *const u64, n_pages: std::os::raw::c_uint, page_sz: usize) -> std::os::raw::c_int;
+    fn rte_extmem_unregister(va_addr: *mut std::ffi::c_void, len: usize) -> std::os::raw::c_int;
+    fn rte_vfio_container_dma_map(container_fd: std::os::raw::c_int, vaddr: u64, iova: u64, len: u64) -> std::os::raw::c_int;
+    fn rte_vfio_container_dma_unmap(container_fd: std::os::raw::c_int, vaddr: u64, iova: u64, len: u64) -> std::os::raw::c_int;
+    fn spdk_vtophys(buf: *const std::ffi::c_void, size: *mut u64) -> u64;
+}
+
+#[cfg(feature = "gpu")]
+unsafe extern "C" fn cuda_ipc_close_mem_handle(ptr: *mut std::ffi::c_void) {
+    unsafe { cuda_ffi::cudaIpcCloseMemHandle(ptr); }
+}
+
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+static REGISTERED_REGIONS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<usize, usize>>> = std::sync::OnceLock::new();
+
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+fn registered_regions() -> &'static std::sync::Mutex<std::collections::HashMap<usize, usize>> {
+    REGISTERED_REGIONS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+pub unsafe extern "C" fn spdk_unregister_and_ipc_close(ptr: *mut std::ffi::c_void) {
+    unsafe {
+        let size = registered_regions().lock().unwrap_or_else(|e| e.into_inner()).remove(&(ptr as usize)).unwrap_or(0);
+        if size > 0 { spdk_mem_unregister(ptr, size); }
+        cuda_ffi::cudaIpcCloseMemHandle(ptr);
+    }
+}
+
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+pub unsafe extern "C" fn spdk_unregister_unpin_and_ipc_close(ptr: *mut std::ffi::c_void) {
+    unsafe {
+        let size = registered_regions().lock().unwrap_or_else(|e| e.into_inner()).remove(&(ptr as usize)).unwrap_or(0);
+        if size > 0 { spdk_mem_unregister(ptr, size); }
+        cuda_ffi::cudaHostUnregister(ptr);
+        cuda_ffi::cudaIpcCloseMemHandle(ptr);
+    }
+}
+
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+pub fn create_spdk_dma_buffer_from_gpu(ptr: *mut std::ffi::c_void, size: usize, was_already_pinned: bool) -> Result<interfaces::DmaBuffer, String> {
+    let rc = unsafe { spdk_mem_register(ptr, size) };
+    if rc != 0 { return Err(format!("spdk_mem_register failed (rc={}). Is nvidia-peermem loaded?", rc)); }
+    registered_regions().lock().unwrap_or_else(|e| e.into_inner()).insert(ptr as usize, size);
+    let free_fn: unsafe extern "C" fn(*mut std::ffi::c_void) = if was_already_pinned { spdk_unregister_and_ipc_close } else { spdk_unregister_unpin_and_ipc_close };
+    let result = unsafe { interfaces::DmaBuffer::from_raw(ptr, size, free_fn, -1).map_err(|e| format!("DmaBuffer creation failed: {}", e)) };
+    if result.is_err() { registered_regions().lock().unwrap_or_else(|e| e.into_inner()).remove(&(ptr as usize)); unsafe { spdk_mem_unregister(ptr, size); } }
+    result
+}
+
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+pub unsafe extern "C" fn spdk_unregister_and_cuda_free(ptr: *mut std::ffi::c_void) {
+    unsafe {
+        let size = registered_regions().lock().unwrap_or_else(|e| e.into_inner()).remove(&(ptr as usize)).unwrap_or(0);
+        if size > 0 { spdk_mem_unregister(ptr, size); }
+        cuda_ffi::cudaFree(ptr);
+    }
+}
+
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+pub fn create_spdk_dma_buffer_from_cuda_malloc(ptr: *mut std::ffi::c_void, size: usize) -> Result<interfaces::DmaBuffer, String> {
+    let rc = unsafe { spdk_mem_register(ptr, size) };
+    if rc != 0 { return Err(format!("spdk_mem_register failed (rc={}). Is nvidia-peermem loaded?", rc)); }
+    registered_regions().lock().unwrap_or_else(|e| e.into_inner()).insert(ptr as usize, size);
+    let result = unsafe { interfaces::DmaBuffer::from_raw(ptr, size, spdk_unregister_and_cuda_free, -1).map_err(|e| format!("DmaBuffer creation failed: {}", e)) };
+    if result.is_err() { registered_regions().lock().unwrap_or_else(|e| e.into_inner()).remove(&(ptr as usize)); unsafe { spdk_mem_unregister(ptr, size); } }
+    result
+}
+
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+pub unsafe extern "C" fn spdk_unregister_and_cuda_free_host(ptr: *mut std::ffi::c_void) {
+    unsafe {
+        let size = registered_regions().lock().unwrap_or_else(|e| e.into_inner()).remove(&(ptr as usize)).unwrap_or(0);
+        if size > 0 { spdk_mem_unregister(ptr, size); }
+        cuda_ffi::cudaFreeHost(ptr);
+    }
+}
+
+#[cfg(all(feature = "gpu", feature = "spdk"))]
+pub fn create_spdk_dma_buffer_from_cuda_host_alloc(ptr: *mut std::ffi::c_void, size: usize) -> Result<interfaces::DmaBuffer, String> {
+    let rc = unsafe { spdk_mem_register(ptr, size) };
+    if rc != 0 { return Err(format!("spdk_mem_register failed (rc={})", rc)); }
+    registered_regions().lock().unwrap_or_else(|e| e.into_inner()).insert(ptr as usize, size);
+    let result = unsafe { interfaces::DmaBuffer::from_raw(ptr, size, spdk_unregister_and_cuda_free_host, -1).map_err(|e| format!("DmaBuffer creation failed: {}", e)) };
+    if result.is_err() { registered_regions().lock().unwrap_or_else(|e| e.into_inner()).remove(&(ptr as usize)); unsafe { spdk_mem_unregister(ptr, size); } }
+    result
+}
+
+#[cfg(feature = "p2p")]
+struct GdrMappingState { gdr: crate::gdrcopy_ffi::gdr_t, mh: crate::gdrcopy_ffi::gdr_mh_t, bar_ptr: *mut std::ffi::c_void, size: usize }
+#[cfg(feature = "p2p")]
+unsafe impl Send for GdrMappingState {}
+#[cfg(feature = "p2p")]
+unsafe impl Sync for GdrMappingState {}
+
+#[cfg(feature = "p2p")]
+static GDR_MAPPINGS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<usize, GdrMappingState>>> = std::sync::OnceLock::new();
+#[cfg(feature = "p2p")]
+fn gdr_mappings() -> &'static std::sync::Mutex<std::collections::HashMap<usize, GdrMappingState>> { GDR_MAPPINGS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new())) }
+
+#[cfg(feature = "p2p")]
+pub unsafe extern "C" fn spdk_unregister_gdr_unmap_and_close(ptr: *mut std::ffi::c_void) {
+    unsafe {
+        let state = gdr_mappings().lock().unwrap_or_else(|e| e.into_inner()).remove(&(ptr as usize));
+        if let Some(s) = state { spdk_mem_unregister(s.bar_ptr, s.size); crate::gdrcopy_ffi::gdr_unmap(s.gdr, s.mh, s.bar_ptr, s.size); crate::gdrcopy_ffi::gdr_unpin_buffer(s.gdr, s.mh); crate::gdrcopy_ffi::gdr_close(s.gdr); }
+    }
+}
+
+#[cfg(feature = "p2p")]
+pub fn create_spdk_dma_buffer_from_gpu_bar(dev_ptr: *mut std::ffi::c_void, size: usize) -> Result<interfaces::DmaBuffer, String> {
+    use crate::gdrcopy_ffi::*;
+    let aligned_size = (size + GPU_PAGE_SIZE - 1) & !(GPU_PAGE_SIZE - 1);
+    let gdr = unsafe { gdr_open() };
+    if gdr.is_null() { return Err("gdr_open() failed".to_string()); }
+    let mut mh = gdr_mh_t::default();
+    let rc = unsafe { gdr_pin_buffer(gdr, dev_ptr as std::os::raw::c_ulong, aligned_size, 0, 0, &mut mh) };
+    if rc != 0 { unsafe { gdr_close(gdr) }; return Err(format!("gdr_pin_buffer failed (rc={})", rc)); }
+    let mut bar_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+    let rc = unsafe { gdr_map(gdr, mh, &mut bar_ptr, aligned_size) };
+    if rc != 0 { unsafe { gdr_unpin_buffer(gdr, mh); gdr_close(gdr); } return Err(format!("gdr_map failed (rc={})", rc)); }
+    if bar_ptr.is_null() { unsafe { gdr_unpin_buffer(gdr, mh); gdr_close(gdr); } return Err("gdr_map returned null".to_string()); }
+    let offset = (dev_ptr as usize) & (GPU_PAGE_SIZE - 1);
+    let effective_bar_ptr = unsafe { (bar_ptr as *mut u8).add(offset) as *mut std::ffi::c_void };
+    let rc = unsafe { spdk_mem_register(bar_ptr, aligned_size) };
+    if rc != 0 { unsafe { gdr_unmap(gdr, mh, bar_ptr, aligned_size); gdr_unpin_buffer(gdr, mh); gdr_close(gdr); } return Err(format!("spdk_mem_register on BAR failed (rc={})", rc)); }
+    gdr_mappings().lock().unwrap_or_else(|e| e.into_inner()).insert(effective_bar_ptr as usize, GdrMappingState { gdr, mh, bar_ptr, size: aligned_size });
+    let result = unsafe { interfaces::DmaBuffer::from_raw(effective_bar_ptr, size, spdk_unregister_gdr_unmap_and_close, -1).map_err(|e| format!("DmaBuffer creation failed: {}", e)) };
+    if result.is_err() { gdr_mappings().lock().unwrap_or_else(|e| e.into_inner()).remove(&(effective_bar_ptr as usize)); unsafe { spdk_mem_unregister(bar_ptr, aligned_size); gdr_unmap(gdr, mh, bar_ptr, aligned_size); gdr_unpin_buffer(gdr, mh); gdr_close(gdr); } }
+    result
+}
+
+#[cfg(feature = "p2p")]
+struct PhysMappingState { va: *mut std::ffi::c_void, phys_addr: u64, size: usize }
+#[cfg(feature = "p2p")]
+unsafe impl Send for PhysMappingState {}
+#[cfg(feature = "p2p")]
+unsafe impl Sync for PhysMappingState {}
+#[cfg(feature = "p2p")]
+static PHYS_MAPPINGS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<usize, PhysMappingState>>> = std::sync::OnceLock::new();
+#[cfg(feature = "p2p")]
+fn phys_mappings() -> &'static std::sync::Mutex<std::collections::HashMap<usize, PhysMappingState>> { PHYS_MAPPINGS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new())) }
+
+#[cfg(feature = "p2p")]
+pub unsafe extern "C" fn vfio_unmap_extmem_munmap(ptr: *mut std::ffi::c_void) {
+    unsafe { let state = phys_mappings().lock().unwrap_or_else(|e| e.into_inner()).remove(&(ptr as usize)); if let Some(s) = state { rte_vfio_container_dma_unmap(-1, s.va as u64, s.phys_addr, s.size as u64); rte_extmem_unregister(s.va, s.size); libc::munmap(s.va, s.size); } }
+}
+
+#[cfg(feature = "p2p")]
+pub unsafe fn get_phys_addr(ptr: *const std::ffi::c_void, size: usize) -> Option<u64> {
+    const SPDK_VTOPHYS_ERROR: u64 = 0xFFFF_FFFF_FFFF_FFFF;
+    let mut sz = size as u64;
+    let phys = unsafe { spdk_vtophys(ptr, &mut sz) };
+    if phys == SPDK_VTOPHYS_ERROR { None } else { Some(phys) }
+}
+
+#[cfg(feature = "p2p")]
+pub fn create_spdk_dma_buffer_from_phys(phys_addr: u64, size: usize) -> Result<interfaces::DmaBuffer, String> {
+    let va = unsafe { libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_PRIVATE | libc::MAP_ANONYMOUS, -1, 0) };
+    if va == libc::MAP_FAILED { return Err("mmap failed".to_string()); }
+    let iova_array: [u64; 1] = [phys_addr];
+    let rc = unsafe { rte_extmem_register(va, size, iova_array.as_ptr(), 1, size) };
+    if rc != 0 { unsafe { libc::munmap(va, size) }; return Err(format!("rte_extmem_register failed (rc={})", rc)); }
+    let rc = unsafe { rte_vfio_container_dma_map(-1, va as u64, phys_addr, size as u64) };
+    if rc != 0 { unsafe { rte_extmem_unregister(va, size); libc::munmap(va, size); } return Err(format!("rte_vfio_container_dma_map failed (rc={})", rc)); }
+    phys_mappings().lock().unwrap_or_else(|e| e.into_inner()).insert(va as usize, PhysMappingState { va, phys_addr, size });
+    let result = unsafe { interfaces::DmaBuffer::from_raw(va, size, vfio_unmap_extmem_munmap, -1).map_err(|e| format!("DmaBuffer creation failed: {}", e)) };
+    if result.is_err() { phys_mappings().lock().unwrap_or_else(|e| e.into_inner()).remove(&(va as usize)); unsafe { rte_vfio_container_dma_unmap(-1, va as u64, phys_addr, size as u64); rte_extmem_unregister(va, size); libc::munmap(va, size); } }
+    result
+}
+
+#[cfg(feature = "p2p")]
+pub unsafe extern "C" fn vfio_unmap_extmem_only(ptr: *mut std::ffi::c_void) {
+    unsafe { let state = phys_mappings().lock().unwrap_or_else(|e| e.into_inner()).remove(&(ptr as usize)); if let Some(s) = state { rte_vfio_container_dma_unmap(-1, s.va as u64, s.phys_addr, s.size as u64); rte_extmem_unregister(s.va, s.size); } }
+}
+
+#[cfg(feature = "p2p")]
+pub unsafe fn create_spdk_dma_buffer_from_bar_direct(bar_ptr: *mut std::ffi::c_void, size: usize) -> Result<interfaces::DmaBuffer, String> {
+    let iova = bar_ptr as u64;
+    let page_sz: usize = 4096;
+    let n_pages = size.div_ceil(page_sz);
+    let iova_array: Vec<u64> = (0..n_pages).map(|i| iova + (i * page_sz) as u64).collect();
+    let rc = unsafe { rte_extmem_register(bar_ptr, size, iova_array.as_ptr(), n_pages as std::os::raw::c_uint, page_sz) };
+    if rc != 0 { return Err(format!("rte_extmem_register failed (rc={})", rc)); }
+    let rc = unsafe { rte_vfio_container_dma_map(-1, bar_ptr as u64, iova, size as u64) };
+    if rc != 0 { unsafe { rte_extmem_unregister(bar_ptr, size) }; return Err(format!("rte_vfio_container_dma_map failed (rc={})", rc)); }
+    phys_mappings().lock().unwrap_or_else(|e| e.into_inner()).insert(bar_ptr as usize, PhysMappingState { va: bar_ptr, phys_addr: iova, size });
+    let result = unsafe { interfaces::DmaBuffer::from_raw(bar_ptr, size, vfio_unmap_extmem_only, -1).map_err(|e| format!("DmaBuffer creation failed: {}", e)) };
+    if result.is_err() { phys_mappings().lock().unwrap_or_else(|e| e.into_inner()).remove(&(bar_ptr as usize)); unsafe { rte_vfio_container_dma_unmap(-1, bar_ptr as u64, iova, size as u64); rte_extmem_unregister(bar_ptr, size); } }
+    result
+}
+
+#[cfg(feature = "gpu")]
+pub fn create_gpu_dma_buffer(handle: GpuIpcHandle) -> Result<GpuDmaBuffer, String> {
+    if handle.as_ptr().is_null() { return Err("Handle has null pointer".to_string()); }
+    let buf = unsafe { GpuDmaBuffer::new(handle.as_ptr(), handle.size(), cuda_ipc_close_mem_handle) };
+    Ok(buf)
+}

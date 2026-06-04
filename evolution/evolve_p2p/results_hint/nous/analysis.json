@@ -1,0 +1,14 @@
+{
+  "framework": "nous",
+  "total_evals": 3,
+  "best_score": 0.2094,
+  "beat_baseline": false,
+  "p2p_attempted": true,
+  "p2p_compiled": true,
+  "stagnation_ceiling": "baseline",
+  "primary_failure_mode": "p2p_slower",
+  "build_errors": [],
+  "diagnosis": "Tried P2P 3 times, all REFUTED. Same GDRCopy BAR1 + D2D approach as coding_agent but got opposite results (140x slower vs 72% faster). Iter-2 reported GPU L2 cache coherence issues with D2D from dev_ptr. Likely implementation difference in pipeline timing or buffer management caused stale reads that coding_agent avoided. Iter-3 tried nvidia-peermem direct, no improvement.",
+  "build_fail_count": 0,
+  "build_success_count": 7
+}

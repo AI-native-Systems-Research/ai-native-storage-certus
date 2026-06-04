@@ -1,0 +1,10 @@
+{
+  "framework": "gepa_native",
+  "best_score": 0.2017,
+  "beat_baseline": false,
+  "p2p_attempted": false,
+  "p2p_compiled": false,
+  "diagnosis": "All 5 iterations produced build failures. P2P functions existed in seed behind cfg gates (dead code, never type-checked). LLM elaborated on P2P code in cfg blocks but never called it from pipeline.rs. No real P2P attempt.",
+  "build_fail_count": 5,
+  "build_success_count": 0
+}

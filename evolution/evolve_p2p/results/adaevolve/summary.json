@@ -1,0 +1,12 @@
+{
+  "framework": "adaevolve",
+  "iterations_completed": 0,
+  "iterations_requested": 10,
+  "wall_time_seconds": 1200.0,
+  "best_score": 0.0,
+  "mean_score": 0.0,
+  "scores": [],
+  "returncode": -1,
+  "timestamp": "2026-06-01_16-58-00",
+  "log_file": "/home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/adaevolve/run-2026-06-01_16-38-00.log"
+}

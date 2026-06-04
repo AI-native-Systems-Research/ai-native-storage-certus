@@ -1,0 +1,10 @@
+{
+  "framework": "autoscientists",
+  "best_score": 0.3368,
+  "beat_baseline": true,
+  "p2p_attempted": false,
+  "p2p_compiled": false,
+  "diagnosis": "Greedy hill-climbing via host-bounce tuning: removed periodic GPU sync, 2 queues QD32, pre-allocated memory-tier slots. Got 3.94 GB/s. Never explored dma.rs or discovered P2P opportunity.",
+  "build_fail_count": 0,
+  "build_success_count": 10
+}

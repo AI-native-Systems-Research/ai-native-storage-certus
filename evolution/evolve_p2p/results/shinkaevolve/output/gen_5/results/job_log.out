@@ -1,0 +1,1 @@
+[eval] Score: 0.2073 | Throughput: 2.41 GB/s | p99: 1844us | CPU: 5.7% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']

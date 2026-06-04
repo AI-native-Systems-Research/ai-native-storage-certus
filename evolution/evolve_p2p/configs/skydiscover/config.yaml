@@ -1,0 +1,30 @@
+language: rust
+max_iterations: 30
+diff_based_generation: false
+
+llm:
+  api_base: "https://ete-litellm.ai-models.vpc-int.res.ibm.com"
+  models:
+    - name: "aws/claude-opus-4-6"
+      weight: 1.0
+  max_tokens: 16384
+  timeout: 300
+
+optimization:
+  objective: "Maximize cold-lookup throughput and minimize tail latency for SSD-to-GPU transfer"
+
+evaluator:
+  timeout: 90
+
+prompt:
+  system_message: |
+    You are optimizing a storage server's NVMe-SSD-to-GPU data transfer path.
+    The score rewards higher throughput (GB/s) and lower p99 latency.
+    Hardware: NVMe Gen4 SSDs via SPDK, NVIDIA A30 GPU PCIe Gen4 x16.
+    Kernel modules loaded: nvidia-peermem, gdrdrv.
+    The gpu-services crate has DMA buffer creation functions for various memory types.
+    Data integrity is mandatory — corruption scores -1.
+
+    The code is structured as multiple files separated by '// --- FILE: xxx ---' markers.
+    Your output MUST preserve these markers and include ALL files in the same format.
+    You may modify any or all files between markers.

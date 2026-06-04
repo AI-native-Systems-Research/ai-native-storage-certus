@@ -1,0 +1,27 @@
+{
+  "framework": "shinkaevolve",
+  "iterations_completed": 14,
+  "iterations_requested": 10,
+  "wall_time_seconds": 476.3,
+  "best_score": 0.2073,
+  "mean_score": 0.0,
+  "scores": [
+    0.1976,
+    0.1976,
+    0.1976,
+    0.1976,
+    0.1976,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.2073,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "returncode": 0,
+  "timestamp": "2026-06-01_20-05-20",
+  "log_file": "/home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/run-2026-06-01_19-57-24.log"
+}

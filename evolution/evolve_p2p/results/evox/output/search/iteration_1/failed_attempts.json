@@ -1,0 +1,13 @@
+{
+  "iteration": 1,
+  "failed_attempts": [
+    {
+      "attempt_number": 1,
+      "solution_iter": 3,
+      "error": "LLM generation failed: Error code: 401 - {'error': {'message': \"team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5\", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}",
+      "stage": "generation",
+      "solution": "",
+      "program_id": "unknown"
+    }
+  ]
+}

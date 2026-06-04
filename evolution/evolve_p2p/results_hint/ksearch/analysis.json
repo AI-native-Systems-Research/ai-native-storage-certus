@@ -1,0 +1,18 @@
+{
+  "framework": "ksearch",
+  "total_evals": 1,
+  "best_score": 0.2108,
+  "beat_baseline": false,
+  "p2p_attempted": true,
+  "p2p_compiled": false,
+  "stagnation_ceiling": "baseline",
+  "primary_failure_mode": "implementation_failure",
+  "build_errors": [
+    "cannot find function `create_gpu_dma_buffer` in module `dma`",
+    "Cannot find: create_gpu_dma_buffer",
+    "cannot find function `create_gpu_dma_buffer` in module `dma"
+  ],
+  "diagnosis": "Only completed 1 iteration in 17 minutes. Single eval scored 0.21 (baseline). Slow due to world-model reasoning overhead per action.",
+  "build_fail_count": 10,
+  "build_success_count": 1
+}

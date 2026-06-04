@@ -1,0 +1,10 @@
+{
+  "framework": "evox",
+  "best_score": 0.0,
+  "beat_baseline": false,
+  "p2p_attempted": false,
+  "p2p_compiled": false,
+  "diagnosis": "Timed out during discovery retries. Benchmark returned empty data. Never produced improving candidates.",
+  "build_fail_count": 0,
+  "build_success_count": 0
+}

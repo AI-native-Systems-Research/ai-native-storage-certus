@@ -1,0 +1,14 @@
+{
+  "generation": 4,
+  "novelty_attempt": 1,
+  "resample_attempt": 1,
+  "patch_attempt": 1,
+  "success": true,
+  "num_applied": 1,
+  "patch_name": "sliding_window_pipeline",
+  "patch_description": "The batch-based pipeline in `pipelined_ssd_to_gpu` was serializing SSD reads and GPU copies: it submitted a batch of reads, waited for ALL to complete, then did all GPU copies. This prevented overlap between I/O and DMA transfers.\n\nFix: Converted to a sliding-window pipeline (matching the zero-copy variant's design). Now each completed NVMe read immediately triggers a GPU H2D copy, and the next NVMe read is submitted right away. This overlaps SSD I/O with GPU DMA transfers. Also increased PIPELINE_RING_SIZE to 16 for deeper NVMe queue depth.",
+  "error_msg": null,
+  "timestamp": "2026-06-01T20:01:16.813077",
+  "llm_cost": 0.0,
+  "llm_model": "aws/claude-opus-4-6"
+}

@@ -1,0 +1,257 @@
+{
+  "computed_signals": {
+    "round_index": 0,
+    "trace": {
+      "latency_ms": null,
+      "mean_vs_baseline_factor": null,
+      "reference_latency_ms": null,
+      "speedup_factor": null,
+      "status": "init"
+    }
+  },
+  "decision_tree": {
+    "active_leaf_id": "deep_pipeline_fix_build",
+    "nodes": [
+      {
+        "action": {
+          "description": "",
+          "difficulty_1_to_5": 3,
+          "expected_vs_baseline_factor": null,
+          "rationale": "",
+          "score_0_to_1": 0.0,
+          "title": ""
+        },
+        "choice": null,
+        "confidence_0_to_1": 0.5,
+        "decision": null,
+        "impacts": {
+          "compute_intensity_and_hw_fit": {
+            "hw_notes": "A30 PCIe Gen4 x16 with nvidia-peermem and gdrdrv loaded. Peak unidirectional PCIe BW ~25 GB/s theoretical, ~16.8 GB/s measured for H2D. GPUDirect Storage can bypass host DRAM.",
+            "notes": "This is a data-movement kernel, not a compute kernel. The bottleneck is PCIe and NVMe bandwidth, not ALU utilization.",
+            "rating_0_to_10": 2.0,
+            "risk": "Misclassifying this as compute-bound would waste effort."
+          },
+          "memory_bandwidth": {
+            "notes": "Primary bottleneck. NVMe Gen4 = 5.4 GB/s/drive, PCIe Gen4 x16 = ~25 GB/s theoretical. Current 2.4 GB/s indicates severe pipeline stalls, small transfer sizes, or serialization. Target 12 GB/s requires near-full PCIe saturation and multiple NVMe drives in parallel.",
+            "rating_0_to_10": 9.0,
+            "risk": "If only 1 NVMe drive, physical limit is 5.4 GB/s regardless of software optimization."
+          },
+          "register_pressure": {
+            "notes": "Not applicable - this is a data transfer pipeline, not a GPU compute kernel.",
+            "rating_0_to_10": 1.0,
+            "risk": "None"
+          }
+        },
+        "last_updated_round": 0,
+        "node_id": "root",
+        "node_type": "root",
+        "notes": "ANALYSIS:\n1) Problem classification: Data-movement pipeline optimization (SSD\u2192DRAM\u2192GPU). Not a traditional GPU compute kernel. Primary output is data landing in GPU memory with correct contents. No reductions. Access is sequential/streaming. The 'kernel' here is the orchestration of DMA transfers across NVMe, host DRAM, and GPU memory.\n2) Canonical computation: For each request chunk C of size S: (a) SPDK async read from NVMe LBA range \u2192 pinned host buffer, (b) cudaMemcpyAsync H2D from pinned buffer \u2192 GPU buffer. Pipeline multiple chunks to hide latencies. With GPUDirect Storage: NVMe \u2192 GPU directly via P2P DMA.\n3) Data layout: Sequential 4KiB-aligned NVMe blocks \u2192 contiguous pinned DMA buffers \u2192 contiguous GPU device memory. All accesses are dense sequential streaming.\n4) Bottleneck hypotheses:\n  - Regime A (small transfers <256KiB): PCIe latency-bound, cudaMemcpy overhead dominates. Fix: batch/coalesce.\n  - Regime B (medium 256KiB-4MiB, few streams): Pipeline bubble-bound. Only 2 CUDA streams and 8 buffers means insufficient overlap. Fix: more streams, deeper pipeline.\n  - Regime C (large transfers, good overlap): NVMe bandwidth-bound if single drive, or PCIe BW-bound if multi-drive. Fix: GPUDirect Storage to eliminate host bounce.\n5) Kernel design space knobs:\n  - Transfer size (granularity of each DMA op)\n  - Number of CUDA streams (currently 2)\n  - Ring buffer depth (currently 8)\n  - GPUDirect Storage vs host-bounce path\n  - Number of NVMe drives reading in parallel\n  - SPDK queue depth and completion polling strategy\n  - Buffer allocation type (pinned, BAR1-mapped, GDR-mapped)\n6) High-level skeleton: Deep pipeline with N stages: SPDK submit \u2192 SPDK complete \u2192 H2D start \u2192 H2D complete (or with GDS: SPDK submit P2P \u2192 complete). Multiple in-flight at each stage.\n7) Candidate families: (A) Deep-pipeline host-bounce with more streams/buffers, (B) GPUDirect Storage P2P path, (C) Hybrid with adaptive routing.",
+        "overall_rating_0_to_10": 3.0,
+        "parent_id": null,
+        "solution_ref": {
+          "eval": {
+            "score": 0.199,
+            "score_name": null,
+            "status": "passed"
+          },
+          "parent_solution_id": null,
+          "solution_id": "ec9899ed2b285013ee1dd842df1673732582ee12"
+        }
+      },
+      {
+        "action": {
+          "description": "Increase CUDA streams from 2 to 8 and ring buffer depth from 8 to 32. Use larger transfer sizes (4 MiB). Ensure all SPDK completions immediately trigger H2D on the next available stream. This maximizes PCIe utilization by keeping multiple H2D transfers in flight and overlapping with NVMe reads.",
+          "difficulty_1_to_5": 3,
+          "expected_vs_baseline_factor": 2.0,
+          "rationale": "Current 2 streams with 8 buffers severely limits overlap. At 4 MiB per transfer and 16.8 GB/s PCIe, each H2D takes ~0.24ms. With only 2 in flight, we waste time on pipeline bubbles. 8 streams with 32 buffers allows full NVMe-to-PCIe overlap.",
+          "score_0_to_1": 0.3,
+          "title": "Deep pipeline with increased stream count and buffer depth"
+        },
+        "choice": "",
+        "confidence_0_to_1": 0.4,
+        "decision": "Maximize host-bounce pipeline depth and concurrency",
+        "impacts": {
+          "compute_intensity_and_hw_fit": {
+            "hw_notes": "A30 PCIe Gen4 x16 supports multiple concurrent DMA engines. More streams = better PCIe utilization up to BW limit.",
+            "notes": "No GPU compute involved. Fit is about DMA engine saturation.",
+            "rating_0_to_10": 6.0,
+            "risk": "Diminishing returns past PCIe saturation point."
+          },
+          "memory_bandwidth": {
+            "notes": "Host DRAM bandwidth for bounce: DDR4-3200 easily handles 25+ GB/s reads. PCIe is the real limit at ~16.8 GB/s. More streams helps approach this limit.",
+            "rating_0_to_10": 7.0,
+            "risk": "Still limited by host-bounce copy doubling effective memory traffic on host side."
+          },
+          "register_pressure": {
+            "notes": "N/A for data transfer pipeline.",
+            "rating_0_to_10": 1.0,
+            "risk": "None"
+          }
+        },
+        "last_updated_round": 0,
+        "node_id": "deep_pipeline",
+        "node_type": "decision",
+        "notes": "CURRENT:\n  does: The current_code implements a 32-buffer ring with 8 CUDA streams, 4MiB chunks, and a zero-copy variant. Uses allocate_pinned_dma_buffer from IGpuServices.\n  bottleneck: Build failure - code references `dma::create_gpu_dma_buffer` and `dma::create_spdk_dma_buffer_from_gpu` which don't exist in lib.rs.\nFOLLOW_THROUGH:\n  aligned_with_intent: no\n  if_no: Intent was to increase pipeline depth/streams (which the pipeline.rs code does correctly), but lib.rs references non-existent functions in dma module causing build failure.\nUPDATE_BELIEF:\n  what changed: Build failed because lib.rs calls functions that don't exist in dma.rs. The pipeline.rs and dma.rs files are correct but lib.rs has stale references.\n  next bet: Fix lib.rs to only use functions that actually exist in dma.rs (allocate_pinned_dma_buffer, allocate_gpu_buffer, register_host_memory). Remove calls to create_gpu_dma_buffer and create_spdk_dma_buffer_from_gpu.\nSELF_CHECK: This node represents the host-bounce pipeline approach. gds_p2p is the alternative (direct NVMe->GPU) which has failed.",
+        "overall_rating_0_to_10": 4.0,
+        "parent_id": "root",
+        "solution_ref": {
+          "eval": {
+            "score": null,
+            "score_name": null,
+            "status": ""
+          },
+          "parent_solution_id": null,
+          "solution_id": null
+        }
+      },
+      {
+        "action": {
+          "description": "Use nvidia-peermem/gdrdrv to enable GPUDirect Storage (GDS) path: allocate GPU BAR1-mapped buffers, register them with SPDK, and issue NVMe reads directly into GPU memory. This eliminates the host DRAM bounce entirely, reducing latency and freeing host memory bandwidth. Implement in dma.rs for buffer creation, pipeline.rs for the transfer loop.",
+          "difficulty_1_to_5": 5,
+          "expected_vs_baseline_factor": 5.0,
+          "rationale": "Host bounce doubles effective data movement (NVMe\u2192host + host\u2192GPU). GDS does NVMe\u2192GPU in one hop. With nvidia-peermem and gdrdrv already loaded, the hardware supports P2P. This can theoretically reach min(NVMe_BW, PCIe_BW) directly. With multiple NVMe drives, can approach 12+ GB/s.",
+          "score_0_to_1": 0.05,
+          "title": "GPUDirect Storage P2P path (NVMe directly to GPU)"
+        },
+        "choice": "",
+        "confidence_0_to_1": 0.9,
+        "decision": "Eliminate host bounce via GPUDirect Storage",
+        "impacts": {
+          "compute_intensity_and_hw_fit": {
+            "hw_notes": "nvidia-peermem and gdrdrv loaded confirms P2P DMA support. A30 has BAR1 aperture for P2P. SPDK must be configured to use GPU-registered memory regions.",
+            "notes": "Perfect HW fit - all required kernel modules present. SPDK VFIO path should support arbitrary IOVA mappings.",
+            "rating_0_to_10": 9.0,
+            "risk": "SPDK may not natively support GPU memory registration without custom IOVA mapping. May need cuMemAlloc + manual IOMMU mapping."
+          },
+          "memory_bandwidth": {
+            "notes": "Eliminates host DRAM as bottleneck entirely. Single hop from NVMe to GPU over PCIe fabric. Effective BW = min(sum_NVMe_BW, PCIe_BW).",
+            "rating_0_to_10": 9.0,
+            "risk": "P2P DMA may have lower per-transfer BW than host-staged for small sizes due to BAR1 mapping overhead."
+          },
+          "register_pressure": {
+            "notes": "N/A",
+            "rating_0_to_10": 1.0,
+            "risk": "None"
+          }
+        },
+        "last_updated_round": 0,
+        "node_id": "gds_p2p",
+        "node_type": "decision",
+        "notes": "CURRENT:\n  does: Attempted to use GPUDirect Storage P2P but the required APIs (create_gpu_dma_buffer) don't exist in this environment.\n  bottleneck: API availability - the environment doesn't support GDS.\nFOLLOW_THROUGH:\n  aligned_with_intent: no\n  if_no: Intent was direct NVMe->GPU DMA but the APIs simply don't exist.\nUPDATE_BELIEF:\n  what changed: Confirmed after 5 rounds that GDS APIs are not available. This path is dead.\n  next bet: Abandon this approach entirely. Focus on host-bounce pipeline optimization.\nSELF_CHECK: Dead path - APIs unavailable. hybrid_adaptive depends on this and is also dead.",
+        "overall_rating_0_to_10": 1.0,
+        "parent_id": "root",
+        "solution_ref": {
+          "eval": {
+            "score": 0.0,
+            "score_name": null,
+            "status": "failed"
+          },
+          "parent_solution_id": null,
+          "solution_id": null
+        }
+      },
+      {
+        "action": {
+          "description": "Implement a hybrid path: use GDS for large sequential reads (>1 MiB) and optimized host-bounce for small/random reads (<1 MiB). Add adaptive routing logic in pipeline.rs that selects the path based on request size. Allocate both GPU-direct and pinned-host buffer pools in lib.rs. This captures GDS throughput benefits for bulk transfers while maintaining low latency for small requests.",
+          "difficulty_1_to_5": 5,
+          "expected_vs_baseline_factor": 3.0,
+          "rationale": "GDS has higher per-op setup cost but eliminates bounce for large transfers. Small transfers benefit more from pre-warmed pinned buffers with low-latency cudaMemcpy. Adaptive routing gets best of both worlds but adds complexity.",
+          "score_0_to_1": 0.05,
+          "title": "Adaptive routing between GDS and host-bounce based on transfer size"
+        },
+        "choice": "",
+        "confidence_0_to_1": 0.9,
+        "decision": "Adaptive routing between GDS and host-bounce based on transfer size",
+        "impacts": {
+          "compute_intensity_and_hw_fit": {
+            "hw_notes": "Requires both buffer types allocated and both paths working. More complex resource management.",
+            "notes": "Optimal HW utilization across all request sizes. May not be worth complexity if workload is uniform.",
+            "rating_0_to_10": 7.0,
+            "risk": "Complexity of maintaining two paths may introduce bugs. Threshold tuning is workload-dependent."
+          },
+          "memory_bandwidth": {
+            "notes": "Gets best of both: GDS eliminates bounce for large, fast pinned path for small. Total BW depends on workload mix.",
+            "rating_0_to_10": 8.0,
+            "risk": "Memory fragmentation from two buffer pools. May waste pinned memory if most requests are large."
+          },
+          "register_pressure": {
+            "notes": "N/A",
+            "rating_0_to_10": 1.0,
+            "risk": "None"
+          }
+        },
+        "last_updated_round": 0,
+        "node_id": "hybrid_adaptive",
+        "node_type": "decision",
+        "notes": "CURRENT:\n  does: Not implemented.\n  bottleneck: Depends on GDS P2P which is proven infeasible.\nFOLLOW_THROUGH:\n  aligned_with_intent: no\n  if_no: Cannot implement adaptive routing when one of the two paths (GDS) doesn't exist.\nUPDATE_BELIEF:\n  what changed: GDS confirmed unavailable after 5 rounds of attempts.\n  next bet: Abandon. Focus solely on optimizing the host-bounce pipeline.\nSELF_CHECK: Dead path - depends on GDS which is unavailable.",
+        "overall_rating_0_to_10": 1.0,
+        "parent_id": "root",
+        "solution_ref": {
+          "eval": {
+            "score": null,
+            "score_name": null,
+            "status": ""
+          },
+          "parent_solution_id": null,
+          "solution_id": null
+        }
+      },
+      {
+        "action": {
+          "description": "",
+          "difficulty_1_to_5": 1,
+          "expected_vs_baseline_factor": 2.0,
+          "rationale": "",
+          "score_0_to_1": 0.7,
+          "title": "Fix lib.rs build: remove create_gpu_dma_buffer and create_spdk_dma_buffer_from_gpu calls"
+        },
+        "choice": "",
+        "confidence_0_to_1": 0.75,
+        "decision": "Fix build errors by removing references to non-existent dma functions",
+        "impacts": {
+          "compute_intensity_and_hw_fit": {
+            "hw_notes": "",
+            "notes": "",
+            "rating_0_to_10": 0.0,
+            "risk": ""
+          },
+          "memory_bandwidth": {
+            "notes": "",
+            "rating_0_to_10": 0.0,
+            "risk": ""
+          },
+          "register_pressure": {
+            "notes": "",
+            "rating_0_to_10": 0.0,
+            "risk": ""
+          }
+        },
+        "last_updated_round": 0,
+        "node_id": "deep_pipeline_fix_build",
+        "node_type": "decision",
+        "notes": "CURRENT:\n  does: Will fix the build by ensuring lib.rs only calls functions that exist in dma.rs module.\n  bottleneck: Build failure due to referencing non-existent functions.\nFOLLOW_THROUGH:\n  aligned_with_intent: yes\n  if_no: N/A\nUPDATE_BELIEF:\n  what changed: The error log shows lib.rs:267 calls dma::create_gpu_dma_buffer and lib.rs references create_spdk_dma_buffer_from_gpu - neither exists in dma.rs.\n  next bet: The pipeline.rs and dma.rs files look correct. lib.rs needs to be fixed to only use promote_and_serve / promote_and_serve_zero_copy which use the correct APIs.\nSELF_CHECK: This is the fix-build child of deep_pipeline, not an alternative approach.",
+        "overall_rating_0_to_10": 7.0,
+        "parent_id": "deep_pipeline",
+        "solution_ref": {
+          "eval": {
+            "status": ""
+          },
+          "parent_solution_id": null,
+          "solution_id": null
+        }
+      }
+    ],
+    "root_id": "root"
+  },
+  "kernel_summary": "This is a data-movement pipeline optimization problem (not a traditional GPU compute kernel) targeting maximum throughput from NVMe SSDs to A30 GPU memory over PCIe Gen4 x16. The current architecture uses a host-DRAM bounce buffer with only 2 CUDA streams and 8 ring buffers, achieving 2.4 GB/s against a 12 GB/s target. Key hardware enablers (nvidia-peermem, gdrdrv, SPDK with VFIO) are already in place for GPUDirect Storage. The primary bottleneck is pipeline underutilization: insufficient concurrency between NVMe reads and H2D copies, combined with unnecessary host-DRAM bounce. The scoring function weights throughput 60% and p99 latency 40%, with a hard constraint on data integrity.",
+  "open_questions": [
+    "How many NVMe drives are available? Single drive caps at 5.4 GB/s regardless of software optimization, making 12 GB/s target impossible without multiple drives.",
+    "What are the typical request sizes in the workload? Small random reads vs large sequential reads fundamentally change which optimization path is effective.",
+    "Does SPDK in this configuration support registering GPU memory (cuMemAlloc'd or GDR-mapped) as DMA buffers for direct P2P transfers?",
+    "What is the actual SPDK queue depth and how many I/O completions are batched per poll? Low queue depth would serialize NVMe reads.",
+    "Is the p99 latency measured per-request or per-batch? This affects whether we optimize for individual request latency or aggregate throughput.",
+    "What is the BAR1 aperture size on this A30 for P2P DMA? Limited BAR1 could restrict the number of GPU-mapped buffers for GDS.",
+    "Are the hugepages (2048 x 2MiB = 4 GiB) sufficient for the increased buffer pool sizes needed for deeper pipelining?",
+    "Is there a CUDA driver overhead for frequent cudaMemcpyAsync calls that could be avoided with cuMemcpy or persistent DMA descriptors?"
+  ]
+}

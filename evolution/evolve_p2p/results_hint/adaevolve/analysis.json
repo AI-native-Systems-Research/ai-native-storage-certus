@@ -1,0 +1,16 @@
+{
+  "framework": "adaevolve",
+  "total_evals": 8,
+  "best_score": 0.2117,
+  "beat_baseline": false,
+  "p2p_attempted": false,
+  "p2p_compiled": false,
+  "stagnation_ceiling": "baseline",
+  "primary_failure_mode": "hint_ignored",
+  "build_errors": [
+    "1 syntax error (mismatched delimiter) on first attempt"
+  ],
+  "build_fail_count": 1,
+  "build_success_count": 7,
+  "diagnosis": "Ran 8 iterations (2 islands), all compiled to baseline (~0.20-0.21). First attempt had syntax error in dma.rs. Subsequent mutations were conservative parameter tweaks (queue constants, loop bounds). Never attempted P2P \u2014 evolutionary mutation engine ignores architectural hints and defaults to safe incremental changes it can verify compile."
+}

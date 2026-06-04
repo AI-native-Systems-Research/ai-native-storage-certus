@@ -1,0 +1,23 @@
+{
+  "framework": "autoscientists",
+  "iterations_completed": 10,
+  "iterations_requested": 10,
+  "wall_time_seconds": 1679.1,
+  "best_score": 0.3368,
+  "mean_score": 0.2909,
+  "scores": [
+    0.2063,
+    0.1773,
+    0.27,
+    0.2718,
+    0.3266,
+    0.3366,
+    0.3251,
+    0.3274,
+    0.3322,
+    0.3356
+  ],
+  "returncode": 0,
+  "timestamp": "2026-06-02_09-11-36",
+  "log_file": "/home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/autoscientists/run-2026-06-02_08-43-37.log"
+}

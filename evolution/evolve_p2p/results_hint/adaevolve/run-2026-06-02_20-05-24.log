@@ -1,0 +1,100 @@
+Using search algorithm: adaevolve
+20:05:25 [search.utils] Logging to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results_hint/adaevolve/output/logs/adaevolve_20260602_200525.log
+20:05:25 [search.adaevolve] AdaEvolveDatabase initialized: num_islands=2, decay=0.9, intensity=[0.15, 0.5], migration=True (interval=15), unified_archive=True, adaptive_search=True, ucb_selection=True, dynamic_islands=True, paradigm_breakthrough=True, multiobjective=False
+20:05:25 [runner] Runner ready: search=adaevolve, program=/home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/initial_programs/concatenated_seed.rs.skydiscover
+20:05:25 [llm] OpenAI LLM: aws/claude-opus-4-6
+20:05:25 WARNING [evaluator] cascade_evaluation is true but /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/evaluator/evaluate_p2p.py has no evaluate_stage1 — will fall back to direct evaluation
+20:05:25 [evaluator] Initialized evaluator with /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/evaluator/evaluate_p2p.py
+20:05:25 [default_discovery_controller] DiscoveryController initialized: num_context_programs=4
+20:05:25 [search.adaevolve] Paradigm LLM: using guide_models [aws/claude-opus-4-6]
+20:05:25 [search.adaevolve] AdaEvolveController initialized (language=rust, paradigm_breakthrough=True)
+20:05:25 [runner] Adding initial program to database
+[eval] Build failed:    Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error: mismatched closing delimiter: `)`
+    --> components/gpu-services/src/dma.rs:1157:84
+     |
+1157 |                     for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
+     |                                                                                    ^ unclosed delimiter
+...
+1280 |                         })?;
+     |                          ^ mismatched 
+20:05:27 [evaluator] Evaluated program 9559ad3a-52cd-4ecf-bdec-cb732902e05b in 1.32s: error=   Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error: mismatched closing delimiter: `)`
+    --> components/gpu-services/src/dma.rs:1157:84
+     |
+1157 |                     for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
+     |                                                                                    ^ unclosed delimiter
+...
+1280 |                         })?;
+     |                          ^ mismatched , build_succeeded=False, combined_score=0.0000
+20:05:27 [base_database] Database has 1 programs, best program score is error=   Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error: mismatched closing delimiter: `)`
+    --> components/gpu-services/src/dma.rs:1157:84
+     |
+1157 |                     for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
+     |                                                                                    ^ unclosed delimiter
+...
+1280 |                         })?;
+     |                          ^ mismatched , build_succeeded=False, combined_score=0.0000
+20:05:27 [search.adaevolve] AdaEvolve: Running 10 iterations across 2 islands
+20:05:27 [search.adaevolve] AdaEvolve iteration stats will be logged to: /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results_hint/adaevolve/output/adaevolve_iteration_stats_20260602_200527.jsonl
+20:05:27 [search.adaevolve] Seeded island 1
+[eval] Score: 0.2060 | Throughput: 2.38 GB/s | p99: 1840us | CPU: 3.2% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+20:08:19 [evaluator] Evaluated program 0333f4fb-eeac-4e36-8594-e92e337967e8 in 26.77s: throughput_gbps=2.3800, p99_latency_ms=1.8395, p50_latency_ms=1.7453, mean_latency_ms=1.7542, cpu_util_fraction=0.0317, data_integrity=True, build_succeeded=True, combined_score=0.2060
+20:08:19 [search.adaevolve] Iteration 1: Program 0333f4fb (parent: 9559ad3a) completed in 172.00s (llm: 145.23s, eval: 26.77s)
+20:08:19 [search.adaevolve] Metrics: throughput_gbps=2.3800, p99_latency_ms=1.8395, p50_latency_ms=1.7453, mean_latency_ms=1.7542, cpu_util_fraction=0.0317, data_integrity=True, build_succeeded=True, combined_score=0.2060
+20:08:19 [search.adaevolve] New best solution found at iteration 1
+[eval] Score: 0.2081 | Throughput: 2.44 GB/s | p99: 1858us | CPU: 3.5% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+20:11:02 [evaluator] Evaluated program 265e6ae3-9b10-43f8-abc4-7a4901ec9322 in 26.87s: throughput_gbps=2.4400, p99_latency_ms=1.8584, p50_latency_ms=1.6980, mean_latency_ms=1.7145, cpu_util_fraction=0.0350, data_integrity=True, build_succeeded=True, combined_score=0.2081
+20:11:02 [search.adaevolve] Iteration 2: Program 265e6ae3 (parent: 0cfa1097) completed in 163.23s (llm: 136.36s, eval: 26.87s)
+20:11:02 [search.adaevolve] Metrics: throughput_gbps=2.4400, p99_latency_ms=1.8584, p50_latency_ms=1.6980, mean_latency_ms=1.7145, cpu_util_fraction=0.0350, data_integrity=True, build_succeeded=True, combined_score=0.2081
+20:11:02 [search.adaevolve] New best solution found at iteration 2
+[eval] Score: 0.2085 | Throughput: 2.43 GB/s | p99: 1839us | CPU: 3.5% | Integrity: PASS | Time: 26s | Files: ['pipeline.rs', 'dma.rs']
+20:13:09 [evaluator] Evaluated program 57082913-c11f-4561-b804-1cb30f2f59a7 in 27.51s: throughput_gbps=2.4300, p99_latency_ms=1.8389, p50_latency_ms=1.7208, mean_latency_ms=1.7232, cpu_util_fraction=0.0349, data_integrity=True, build_succeeded=True, combined_score=0.2085
+20:13:09 [search.adaevolve] Iteration 3: Program 57082913 (parent: 0333f4fb) completed in 126.74s (llm: 99.23s, eval: 27.51s)
+20:13:09 [search.adaevolve] Metrics: throughput_gbps=2.4300, p99_latency_ms=1.8389, p50_latency_ms=1.7208, mean_latency_ms=1.7232, cpu_util_fraction=0.0349, data_integrity=True, build_succeeded=True, combined_score=0.2085
+20:13:09 [search.adaevolve] New best solution found at iteration 3
+[eval] Score: 0.2096 | Throughput: 2.46 GB/s | p99: 1848us | CPU: 3.2% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+20:15:19 [evaluator] Evaluated program 298725fe-490a-4121-bfbd-482e7703b22f in 26.99s: throughput_gbps=2.4600, p99_latency_ms=1.8482, p50_latency_ms=1.6752, mean_latency_ms=1.7020, cpu_util_fraction=0.0317, data_integrity=True, build_succeeded=True, combined_score=0.2096
+20:15:19 [search.adaevolve] Iteration 4: Program 298725fe (parent: 265e6ae3) completed in 130.05s (llm: 103.06s, eval: 26.99s)
+20:15:19 [search.adaevolve] Metrics: throughput_gbps=2.4600, p99_latency_ms=1.8482, p50_latency_ms=1.6752, mean_latency_ms=1.7020, cpu_util_fraction=0.0317, data_integrity=True, build_succeeded=True, combined_score=0.2096
+20:15:19 [search.adaevolve] New best solution found at iteration 4
+[eval] Score: 0.2024 | Throughput: 2.35 GB/s | p99: 1885us | CPU: 2.7% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+20:17:20 [evaluator] Evaluated program 5a6a1a1f-0cf1-4d03-944b-9128f8b44ba8 in 27.13s: throughput_gbps=2.3500, p99_latency_ms=1.8850, p50_latency_ms=1.7928, mean_latency_ms=1.7807, cpu_util_fraction=0.0267, data_integrity=True, build_succeeded=True, combined_score=0.2024
+20:17:20 [search.adaevolve] Iteration 5: Program 5a6a1a1f (parent: 298725fe) completed in 120.95s (llm: 93.81s, eval: 27.13s)
+20:17:20 [search.adaevolve] Metrics: throughput_gbps=2.3500, p99_latency_ms=1.8850, p50_latency_ms=1.7928, mean_latency_ms=1.7807, cpu_util_fraction=0.0267, data_integrity=True, build_succeeded=True, combined_score=0.2024
+[eval] Score: 0.2117 | Throughput: 2.47 GB/s | p99: 1813us | CPU: 2.8% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+20:19:21 [evaluator] Evaluated program 93fc5575-1a1e-4802-803b-edc984403cc7 in 27.47s: throughput_gbps=2.4700, p99_latency_ms=1.8132, p50_latency_ms=1.7026, mean_latency_ms=1.6905, cpu_util_fraction=0.0278, data_integrity=True, build_succeeded=True, combined_score=0.2117
+20:19:21 [search.adaevolve] Iteration 6: Program 93fc5575 (parent: 57082913) completed in 120.19s (llm: 92.71s, eval: 27.47s)
+20:19:21 [search.adaevolve] Metrics: throughput_gbps=2.4700, p99_latency_ms=1.8132, p50_latency_ms=1.7026, mean_latency_ms=1.6905, cpu_util_fraction=0.0278, data_integrity=True, build_succeeded=True, combined_score=0.2117
+20:19:21 [search.adaevolve] New best solution found at iteration 6
+[eval] Score: 0.2000 | Throughput: 2.36 GB/s | p99: 1950us | CPU: 2.7% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+20:21:26 [evaluator] Evaluated program 1b653cfa-f3e8-429f-84dc-45490ca40443 in 27.17s: throughput_gbps=2.3600, p99_latency_ms=1.9502, p50_latency_ms=1.7712, mean_latency_ms=1.7716, cpu_util_fraction=0.0266, data_integrity=True, build_succeeded=True, combined_score=0.2000
+20:21:26 [search.adaevolve] Iteration 7: Program 1b653cfa (parent: 93fc5575) completed in 125.41s (llm: 98.24s, eval: 27.17s)
+20:21:26 [search.adaevolve] Metrics: throughput_gbps=2.3600, p99_latency_ms=1.9502, p50_latency_ms=1.7712, mean_latency_ms=1.7716, cpu_util_fraction=0.0266, data_integrity=True, build_succeeded=True, combined_score=0.2000
+[eval] Build failed:  struct Receiver<T: Send + 'static> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: `std::sync::mpsc::Receiver<Completion>` is defined in crate `std`
+   --> /rustc/a454fccb02df9d361f1201b747c01257f58a8b37/library/std/src/sync/mpsc.rs:177:1
+note: function defined here
+   --> components/dispatcher/src/pipeline.rs:30:4
+    |
+ 30 | fn recv_completion(rx: &std::sync::mpsc::Receiver<Completion>) -> Result<(), DispatcherError> {
+    |    ^^^^^^^^^^^^^^^ ------------------------------------------
+
+
+20:22:53 [evaluator] Evaluated program 36453bb4-ccf4-4fe5-82f3-540e64e41cf6 in 1.97s: error= struct Receiver<T: Send + 'static> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: `std::sync::mpsc::Receiver<Completion>` is defined in crate `std`
+   --> /rustc/a454fccb02df9d361f1201b747c01257f58a8b37/library/std/src/sync/mpsc.rs:177:1
+note: function defined here
+   --> components/dispatcher/src/pipeline.rs:30:4
+    |
+ 30 | fn recv_completion(rx: &std::sync::mpsc::Receiver<Completion>) -> Result<(), DispatcherError> {
+    |    ^^^^^^^^^^^^^^^ ------------------------------------------
+
+, build_succeeded=False, combined_score=0.0000
+[eval] Score: 0.2077 | Throughput: 2.42 GB/s | p99: 1845us | CPU: 3.2% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+20:24:55 [evaluator] Evaluated program 99861693-5569-4f02-b165-22a6bd406fe5 in 27.50s: throughput_gbps=2.4200, p99_latency_ms=1.8452, p50_latency_ms=1.7066, mean_latency_ms=1.7294, cpu_util_fraction=0.0321, data_integrity=True, build_succeeded=True, combined_score=0.2077
+20:24:55 [search.adaevolve] Iteration 8: Program 99861693 (parent: 0cfa1097) completed in 122.52s (llm: 95.02s, eval: 27.50s)
+20:24:55 [search.adaevolve] Metrics: throughput_gbps=2.4200, p99_latency_ms=1.8452, p50_latency_ms=1.7066, mean_latency_ms=1.7294, cpu_util_fraction=0.0321, data_integrity=True, build_succeeded=True, combined_score=0.2077

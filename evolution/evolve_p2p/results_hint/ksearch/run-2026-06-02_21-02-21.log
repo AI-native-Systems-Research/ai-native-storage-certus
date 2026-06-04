@@ -1,0 +1,256 @@
+Starting K-Search world-model evolution (10 rounds)...
+
+[STAGE] init SolutionDB
+
+[STAGE] resume from solution=wild_type
+
+[STAGE] seed eval for continue-from solution: wild_type
+[eval] Score: 0.2108 | Throughput: 2.45 GB/s | p99: 1812us | CPU: 3.3% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs', 'lib.rs']
+  [K-Search eval 1] score=0.2108 best=0.2108 status=passed
+[WM] Initialized+seeded root from continue_from_solution (code+eval).
+WM status: nodes=4 attached_solutions=1 active_leaf_id=root depth=0
+  last_trace: status=initial speedup=- latency=-
+  active_path: root:<root>
+  nodes_preview: root:<root> | p2p_basic: | qd_tuning: | buffer_size_align:
+
+[STAGE] world model: select next action (cycle start @ round 1)
+WM status: nodes=4 attached_solutions=1 active_leaf_id=root depth=0
+  last_trace: status=initial speedup=- latency=-
+  active_path: root:<root>
+  nodes_preview: root:<root> | p2p_basic: | qd_tuning: | buffer_size_align:
+World Model: Open Action Nodes (candidates) frontier=3 total_open=3
+1. rating=7.0/10 score=0.75 diff=3/5 conf=0.70 vs_base~2.50x | node_id=p2p_basic parent_id=root | Implement basic P2P path: GPU BAR buffer allocation + direct NVMe DMA — Replace the PipelineRing buffer allocation in pipeline.rs to use gpu_services::dma::create_spdk_dma_buffer_from_gpu_bar instead of host-pinned buffers. Allocate GPU memory with cuMemAlloc, then wrap as SPDK DMA buffer. Remove the cudaMemcpy H2D step from the transfer loop since DMA lands directly in GPU memory. Keep the ring structure (8 slots) and completion tracking intact.
+2. rating=6.0/10 score=0.65 diff=2/5 conf=0.60 vs_base~3.50x | node_id=qd_tuning parent_id=root | Increase NVMe queue depth and in-flight I/O concurrency — After P2P path is working, increase NVMe queue depth from default to 64 and increase the number of in-flight SPDK read commands per ring slot. Use multiple SPDK I/O channels if available. This saturates the NVMe controller's internal parallelism and keeps the PCIe link busy.
+3. rating=5.0/10 score=0.60 diff=2/5 conf=0.55 vs_base~3.00x | node_id=buffer_size_align parent_id=root | Optimize buffer size and alignment for P2P DMA efficiency — Tune the DMA buffer size to 2MB (aligned to hugepage boundaries) and ensure GPU allocations are 2MB-aligned for optimal TLB and BAR1 mapping efficiency. In dma.rs, use cuMemAllocHost or cuMemAlloc with explicit alignment, and set SPDK DMA buffer registration with 2MB alignment. Test 1MB vs 2MB vs 4MB buffer sizes for optimal throughput/latency tradeoff.
+World Model: Chosen Next Action (from decision tree node)
+- node_id: p2p_basic
+- base_node_id: root
+- title: Implement basic P2P path: GPU BAR buffer allocation + direct NVMe DMA
+- difficulty_1_to_5: 3
+- description: Replace the PipelineRing buffer allocation in pipeline.rs to use gpu_services::dma::create_spdk_dma_buffer_from_gpu_bar instead of host-pinned buffers. Allocate GPU memory with cuMemAlloc, then wrap as SPDK DMA buffer. Remove the cudaMemcpy H2D step from the transfer loop since DMA lands directly in GPU memory. Keep the ring structure (8 slots) and completion tracking intact.
+- expected_vs_baseline_factor: 2.50x
+- rationale: Eliminating the host bounce removes one full PCIe traversal and the cudaMemcpy latency. Expected throughput improvement from ~2.4 GB/s to ~5.5-5.9 GB/s (single drive limited). Latency drops from ~0.8ms to ~0.35ms by removing the copy stage.
+
+=== Optimization Round 1/10 ===
+[CYCLE] action_node_id=p2p_basic attempt=1 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 1 (round 1) no_improve_streak=0/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 1)
+
+[STAGE] evaluate solution (round 1)
+[eval] Build failed:    Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error[E0425]: cannot find function `create_gpu_dma_buffer` in module `dma`
+   --> components/gpu-services/src/lib.rs:270:28
+    |
+270 |             let buf = dma::create_gpu_dma_buffer(handle)?;
+    |                            ^^^^^^^^^^^^^^^^^^^^^ not found in `dma`
+
+error[E0425]: cannot find function `create_spdk_dma_buffer_from_gpu` in module `dma`
+   --> components/gpu-services/s
+  [K-Search eval 2] score=0.0000 best=0.2108 status=failed
+
+=== Optimization Round 2/10 ===
+[CYCLE] action_node_id=p2p_basic attempt=2 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 2 (round 2) no_improve_streak=1/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 2)
+
+[STAGE] evaluate solution (round 2)
+[eval] Build failed:    Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error[E0425]: cannot find function `create_gpu_dma_buffer` in module `dma`
+   --> components/gpu-services/src/lib.rs:270:28
+    |
+270 |             let buf = dma::create_gpu_dma_buffer(handle)?;
+    |                            ^^^^^^^^^^^^^^^^^^^^^ not found in `dma`
+
+error[E0425]: cannot find function `create_spdk_dma_buffer_from_gpu` in module `dma`
+   --> components/gpu-services/s
+  [K-Search eval 3] score=0.0000 best=0.2108 status=failed
+
+=== Optimization Round 3/10 ===
+[CYCLE] action_node_id=p2p_basic attempt=3 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 3 (round 3) no_improve_streak=2/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 3)
+
+[STAGE] evaluate solution (round 3)
+[eval] Build failed:    Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error[E0425]: cannot find function `create_gpu_dma_buffer` in module `dma`
+   --> components/gpu-services/src/lib.rs:270:28
+    |
+270 |             let buf = dma::create_gpu_dma_buffer(handle)?;
+    |                            ^^^^^^^^^^^^^^^^^^^^^ not found in `dma`
+
+error[E0425]: cannot find function `create_spdk_dma_buffer_from_gpu` in module `dma`
+   --> components/gpu-services/s
+  [K-Search eval 4] score=0.0000 best=0.2108 status=failed
+
+=== Optimization Round 4/10 ===
+[CYCLE] action_node_id=p2p_basic attempt=4 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 4 (round 4) no_improve_streak=3/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 4)
+
+[STAGE] evaluate solution (round 4)
+[eval] Build failed:    Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error[E0425]: cannot find function `create_gpu_dma_buffer` in module `dma`
+   --> components/gpu-services/src/lib.rs:270:28
+    |
+270 |             let buf = dma::create_gpu_dma_buffer(handle)?;
+    |                            ^^^^^^^^^^^^^^^^^^^^^ not found in `dma`
+
+error[E0425]: cannot find function `create_spdk_dma_buffer_from_gpu` in module `dma`
+   --> components/gpu-services/s
+  [K-Search eval 5] score=0.0000 best=0.2108 status=failed
+
+=== Optimization Round 5/10 ===
+[CYCLE] action_node_id=p2p_basic attempt=5 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 5 (round 5) no_improve_streak=4/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 5)
+
+[STAGE] evaluate solution (round 5)
+[eval] Build failed:    Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error[E0425]: cannot find function `create_gpu_dma_buffer` in module `dma`
+   --> components/gpu-services/src/lib.rs:270:28
+    |
+270 |             let buf = dma::create_gpu_dma_buffer(handle)?;
+    |                            ^^^^^^^^^^^^^^^^^^^^^ not found in `dma`
+
+error[E0425]: cannot find function `create_spdk_dma_buffer_from_gpu` in module `dma`
+   --> components/gpu-services/s
+  [K-Search eval 6] score=0.0000 best=0.2108 status=failed
+
+[STAGE] cycle end: no PASSED solution; mark action too hard
+[WM] apply_edit_ops: ops=3 updates=3 inserts=0 split_children=0 deletes=0 new_nodes_added=0/3 skipped_cap=0 skipped_missing_parent=0 skipped_parent_solution_id_mismatch=0 skipped_update_missing_node=0 skipped_insert_invalid_node=0 skipped_split_invalid_children=0 skipped_delete_not_allowed=0
+WM status: nodes=4 attached_solutions=1 active_leaf_id=p2p_basic depth=1
+  last_trace: status=initial speedup=- latency=-
+  active_path: root:<root> | p2p_basic:
+  nodes_preview: root:<root> | p2p_basic: | qd_tuning: | buffer_size_align:
+
+[STAGE] world model: select next action (cycle start @ round 6)
+WM status: nodes=4 attached_solutions=1 active_leaf_id=p2p_basic depth=1
+  last_trace: status=initial speedup=- latency=-
+  active_path: root:<root> | p2p_basic:
+  nodes_preview: root:<root> | p2p_basic: | qd_tuning: | buffer_size_align:
+World Model: Open Action Nodes (candidates) frontier=3 total_open=3
+1. rating=5.5/10 score=0.55 diff=2/5 conf=0.50 vs_base~3.50x | node_id=qd_tuning parent_id=root | Increase NVMe queue depth and in-flight I/O concurrency — After P2P path is working, increase NVMe queue depth from default to 64 and increase the number of in-flight SPDK read commands per ring slot. Use multiple SPDK I/O channels if available. This saturates the NVMe controller's internal parallelism and keeps the PCIe link busy.
+2. rating=5.0/10 score=0.50 diff=2/5 conf=0.50 vs_base~3.00x | node_id=buffer_size_align parent_id=root | Optimize buffer size alignment for DMA transfer granularity — Tune the DMA buffer size to 2MB (aligned to hugepage boundaries) and ensure GPU allocations are 2MB-aligned for optimal TLB and BAR1 mapping efficiency. In dma.rs, use cuMemAllocHost or cuMemAlloc with explicit alignment, and set SPDK DMA buffer registration with 2MB alignment. Test 1MB vs 2MB vs 4MB buffer sizes for optimal throughput/latency tradeoff.
+3. rating=4.0/10 score=0.35 diff=4/5 conf=0.40 vs_base~2.50x | node_id=p2p_basic parent_id=root | Implement basic P2P path: GPU BAR buffer allocation + direct NVMe DMA — Replace the PipelineRing buffer allocation in pipeline.rs to use gpu_services::dma::create_spdk_dma_buffer_from_gpu_bar instead of host-pinned buffers. Allocate GPU memory with cuMemAlloc, then wrap as SPDK DMA buffer. Remove the cudaMemcpy H2D step from the transfer loop since DMA lands directly in GPU memory. Keep the ring structure (8 slots) and completion tracking intact.
+World Model: Chosen Next Action (from decision tree node)
+- node_id: qd_tuning
+- base_node_id: root
+- title: Increase NVMe queue depth and in-flight I/O concurrency
+- difficulty_1_to_5: 2
+- description: After P2P path is working, increase NVMe queue depth from default to 64 and increase the number of in-flight SPDK read commands per ring slot. Use multiple SPDK I/O channels if available. This saturates the NVMe controller's internal parallelism and keeps the PCIe link busy.
+- expected_vs_baseline_factor: 3.50x
+- rationale: NVMe Gen4 drives achieve rated 5.9 GB/s only at QD64. If current implementation uses low QD, throughput is artificially limited. Increasing QD after P2P is in place should push throughput toward the per-drive maximum.
+
+=== Optimization Round 6/10 ===
+[CYCLE] action_node_id=qd_tuning attempt=1 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 1 (round 6) no_improve_streak=0/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 6)
+
+[STAGE] evaluate solution (round 6)
+[eval] Build failed: g gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error[E0425]: cannot find function `create_gpu_dma_buffer` in module `dma`
+   --> components/gpu-services/src/lib.rs:270:28
+    |
+270 |             let buf = dma::create_gpu_dma_buffer(handle)?;
+    |                            ^^^^^^^^^^^^^^^^^^^^^ not found in `dma`
+
+error[E0425]: cannot find function `create_spdk_dma_buffer_from_gpu` in module `dma`
+   --> components/gpu-services/src/lib.rs:4
+  [K-Search eval 7] score=0.0000 best=0.2108 status=failed
+
+=== Optimization Round 7/10 ===
+[CYCLE] action_node_id=qd_tuning attempt=2 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 2 (round 7) no_improve_streak=1/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 7)
+
+[STAGE] evaluate solution (round 7)
+[eval] Build failed: g gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error[E0425]: cannot find function `create_gpu_dma_buffer` in module `dma`
+   --> components/gpu-services/src/lib.rs:270:28
+    |
+270 |             let buf = dma::create_gpu_dma_buffer(handle)?;
+    |                            ^^^^^^^^^^^^^^^^^^^^^ not found in `dma`
+
+error[E0425]: cannot find function `create_spdk_dma_buffer_from_gpu` in module `dma`
+   --> components/gpu-services/src/lib.rs:4
+  [K-Search eval 8] score=0.0000 best=0.2108 status=failed
+
+=== Optimization Round 8/10 ===
+[CYCLE] action_node_id=qd_tuning attempt=3 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 3 (round 8) no_improve_streak=2/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 8)
+
+[STAGE] evaluate solution (round 8)
+[eval] Build failed: g gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error[E0425]: cannot find function `create_gpu_dma_buffer` in module `dma`
+   --> components/gpu-services/src/lib.rs:270:28
+    |
+270 |             let buf = dma::create_gpu_dma_buffer(handle)?;
+    |                            ^^^^^^^^^^^^^^^^^^^^^ not found in `dma`
+
+error[E0425]: cannot find function `create_spdk_dma_buffer_from_gpu` in module `dma`
+   --> components/gpu-services/src/lib.rs:4
+  [K-Search eval 9] score=0.0000 best=0.2108 status=failed
+
+=== Optimization Round 9/10 ===
+[CYCLE] action_node_id=qd_tuning attempt=4 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 4 (round 9) no_improve_streak=3/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 9)
+
+[STAGE] evaluate solution (round 9)
+[eval] Build failed: g gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error[E0425]: cannot find function `create_gpu_dma_buffer` in module `dma`
+   --> components/gpu-services/src/lib.rs:270:28
+    |
+270 |             let buf = dma::create_gpu_dma_buffer(handle)?;
+    |                            ^^^^^^^^^^^^^^^^^^^^^ not found in `dma`
+
+error[E0425]: cannot find function `create_spdk_dma_buffer_from_gpu` in module `dma`
+   --> components/gpu-services/src/lib.rs:4
+  [K-Search eval 10] score=0.0000 best=0.2108 status=failed
+
+=== Optimization Round 10/10 ===
+[CYCLE] action_node_id=qd_tuning attempt=5 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 5 (round 10) no_improve_streak=4/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 10)
+
+[STAGE] evaluate solution (round 10)
+[eval] Build failed: g gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error[E0425]: cannot find function `create_gpu_dma_buffer` in module `dma`
+   --> components/gpu-services/src/lib.rs:270:28
+    |
+270 |             let buf = dma::create_gpu_dma_buffer(handle)?;
+    |                            ^^^^^^^^^^^^^^^^^^^^^ not found in `dma`
+
+error[E0425]: cannot find function `create_spdk_dma_buffer_from_gpu` in module `dma`
+   --> components/gpu-services/src/lib.rs:4
+  [K-Search eval 11] score=0.0000 best=0.2108 status=failed
+
+[STAGE] cycle end: no PASSED solution; mark action too hard
+[WM] apply_edit_ops: ops=4 updates=3 inserts=1 split_children=0 deletes=0 new_nodes_added=1/3 skipped_cap=0 skipped_missing_parent=0 skipped_parent_solution_id_mismatch=0 skipped_update_missing_node=0 skipped_insert_invalid_node=0 skipped_split_invalid_children=0 skipped_delete_not_allowed=0
+WM status: nodes=5 attached_solutions=2 active_leaf_id=qd_tuning_v2 depth=2
+  last_trace: status=initial speedup=- latency=-
+  active_path: root:<root> | qd_tuning: | qd_tuning_v2:
+  nodes_preview: root:<root> | p2p_basic: | qd_tuning: | buffer_size_align: | qd_tuning_v2:
+
+K-Search complete. Best score: 0.2108 (11 evaluations)

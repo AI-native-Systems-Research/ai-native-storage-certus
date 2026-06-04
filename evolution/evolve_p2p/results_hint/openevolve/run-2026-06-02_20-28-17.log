@@ -1,0 +1,62 @@
+Using search algorithm: openevolve_native
+20:28:18 [search.utils] Logging to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results_hint/openevolve/output/logs/openevolve_native_20260602_202818.log
+20:28:18 [search.openevolve_native] OpenEvolveNativeDatabase: 5 islands, pop=40, archive=100, features=['complexity', 'diversity'], bins=10, migration_interval=10, migration_rate=0.10
+20:28:18 [runner] Runner ready: search=openevolve_native, program=/home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/initial_programs/concatenated_seed.rs.skydiscover
+20:28:18 [llm] OpenAI LLM: aws/claude-opus-4-6
+20:28:18 WARNING [evaluator] cascade_evaluation is true but /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/evaluator/evaluate_p2p.py has no evaluate_stage1 — will fall back to direct evaluation
+20:28:18 [evaluator] Initialized evaluator with /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/evaluator/evaluate_p2p.py
+20:28:18 [default_discovery_controller] DiscoveryController initialized: num_context_programs=4
+20:28:18 [runner] Adding initial program to database
+[eval] Build failed:    Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error: mismatched closing delimiter: `)`
+    --> components/gpu-services/src/dma.rs:1157:84
+     |
+1157 |                     for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
+     |                                                                                    ^ unclosed delimiter
+...
+1280 |                         })?;
+     |                          ^ mismatched 
+20:28:20 [evaluator] Evaluated program d6272bcf-7485-4f10-9d48-e919556a31f2 in 1.33s: error=   Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error: mismatched closing delimiter: `)`
+    --> components/gpu-services/src/dma.rs:1157:84
+     |
+1157 |                     for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
+     |                                                                                    ^ unclosed delimiter
+...
+1280 |                         })?;
+     |                          ^ mismatched , build_succeeded=False, combined_score=0.0000
+20:28:20 [base_database] Database has 1 programs, best program score is error=   Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error: mismatched closing delimiter: `)`
+    --> components/gpu-services/src/dma.rs:1157:84
+     |
+1157 |                     for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
+     |                                                                                    ^ unclosed delimiter
+...
+1280 |                         })?;
+     |                          ^ mismatched , build_succeeded=False, combined_score=0.0000
+[eval] Score: 0.2116 | Throughput: 2.45 GB/s | p99: 1797us | CPU: 3.2% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+20:31:32 [evaluator] Evaluated program 360a2b7f-8a6d-4255-9fbe-c622436cd6b4 in 27.18s: throughput_gbps=2.4500, p99_latency_ms=1.7966, p50_latency_ms=1.6997, mean_latency_ms=1.7055, cpu_util_fraction=0.0321, data_integrity=True, build_succeeded=True, combined_score=0.2116
+20:31:32 [search.openevolve_native] New best program 360a2b7f-8a6d-4255-9fbe-c622436cd6b4 replaces d6272bcf-7485-4f10-9d48-e919556a31f2 (0.0000 -> 0.2116)
+20:31:32 [default_discovery_controller] Iteration 1: Program 360a2b7f-8a6d-4255-9fbe-c622436cd6b4 (parent: d6272bcf-7485-4f10-9d48-e919556a31f2) completed in 192.55s (llm: 165.37s, eval: 27.18s)
+20:31:32 [default_discovery_controller] Metrics: throughput_gbps=2.4500, p99_latency_ms=1.7966, p50_latency_ms=1.6997, mean_latency_ms=1.7055, cpu_util_fraction=0.0321, data_integrity=1.0000, build_succeeded=1.0000, combined_score=0.2116
+20:31:32 [default_discovery_controller] 🌟 New best solution found at iteration 1
+[eval] Score: 0.2095 | Throughput: 2.43 GB/s | p99: 1819us | CPU: 3.3% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+20:34:45 [evaluator] Evaluated program 7792e988-cddf-4014-897a-199fb066a8e7 in 27.36s: throughput_gbps=2.4300, p99_latency_ms=1.8187, p50_latency_ms=1.7267, mean_latency_ms=1.7228, cpu_util_fraction=0.0327, data_integrity=True, build_succeeded=True, combined_score=0.2095
+20:34:45 [default_discovery_controller] Iteration 2: Program 7792e988-cddf-4014-897a-199fb066a8e7 (parent: d6272bcf-7485-4f10-9d48-e919556a31f2) completed in 192.58s (llm: 165.22s, eval: 27.36s)
+20:34:45 [default_discovery_controller] Metrics: throughput_gbps=2.4300, p99_latency_ms=1.8187, p50_latency_ms=1.7267, mean_latency_ms=1.7228, cpu_util_fraction=0.0327, data_integrity=1.0000, build_succeeded=1.0000, combined_score=0.2095
+[eval] Score: 0.2067 | Throughput: 2.42 GB/s | p99: 1867us | CPU: 2.7% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+20:38:03 [evaluator] Evaluated program 02ab19df-7ccd-4e29-b9f9-3659d1f8ae67 in 27.13s: throughput_gbps=2.4200, p99_latency_ms=1.8668, p50_latency_ms=1.7303, mean_latency_ms=1.7259, cpu_util_fraction=0.0268, data_integrity=True, build_succeeded=True, combined_score=0.2067
+20:38:03 [default_discovery_controller] Iteration 3: Program 02ab19df-7ccd-4e29-b9f9-3659d1f8ae67 (parent: 360a2b7f-8a6d-4255-9fbe-c622436cd6b4) completed in 198.28s (llm: 171.15s, eval: 27.14s)
+20:38:03 [default_discovery_controller] Metrics: throughput_gbps=2.4200, p99_latency_ms=1.8668, p50_latency_ms=1.7303, mean_latency_ms=1.7259, cpu_util_fraction=0.0268, data_integrity=1.0000, build_succeeded=1.0000, combined_score=0.2067
+[eval] Score: 0.2105 | Throughput: 2.44 GB/s | p99: 1809us | CPU: 2.6% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+20:41:05 [evaluator] Evaluated program feb201c0-c5d3-4ba0-bc84-f676e3ef8113 in 26.78s: throughput_gbps=2.4400, p99_latency_ms=1.8087, p50_latency_ms=1.7091, mean_latency_ms=1.7163, cpu_util_fraction=0.0264, data_integrity=True, build_succeeded=True, combined_score=0.2105
+20:41:05 [default_discovery_controller] Iteration 4: Program feb201c0-c5d3-4ba0-bc84-f676e3ef8113 (parent: fa074b09-cff8-4aba-8649-0f7ceb7a4632) completed in 181.70s (llm: 154.91s, eval: 26.78s)
+20:41:05 [default_discovery_controller] Metrics: throughput_gbps=2.4400, p99_latency_ms=1.8087, p50_latency_ms=1.7091, mean_latency_ms=1.7163, cpu_util_fraction=0.0264, data_integrity=1.0000, build_succeeded=1.0000, combined_score=0.2105
+[eval] Score: 0.2047 | Throughput: 2.38 GB/s | p99: 1866us | CPU: 2.8% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+20:44:13 [evaluator] Evaluated program b891670f-c039-4261-88c8-51dc8f8e718b in 27.16s: throughput_gbps=2.3800, p99_latency_ms=1.8662, p50_latency_ms=1.7409, mean_latency_ms=1.7579, cpu_util_fraction=0.0280, data_integrity=True, build_succeeded=True, combined_score=0.2047
+20:44:13 [default_discovery_controller] Iteration 5: Program b891670f-c039-4261-88c8-51dc8f8e718b (parent: 02ab19df-7ccd-4e29-b9f9-3659d1f8ae67) completed in 188.39s (llm: 161.23s, eval: 27.16s)
+20:44:13 [default_discovery_controller] Metrics: throughput_gbps=2.3800, p99_latency_ms=1.8662, p50_latency_ms=1.7409, mean_latency_ms=1.7579, cpu_util_fraction=0.0280, data_integrity=1.0000, build_succeeded=1.0000, combined_score=0.2047
+[eval] Score: 0.2110 | Throughput: 2.43 GB/s | p99: 1788us | CPU: 3.1% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+20:46:33 [evaluator] Evaluated program 275ad4ad-54bd-46a6-ad32-c61a0d910c1e in 26.78s: throughput_gbps=2.4300, p99_latency_ms=1.7879, p50_latency_ms=1.7196, mean_latency_ms=1.7218, cpu_util_fraction=0.0312, data_integrity=True, build_succeeded=True, combined_score=0.2110
+20:46:33 [default_discovery_controller] Iteration 6: Program 275ad4ad-54bd-46a6-ad32-c61a0d910c1e (parent: 360a2b7f-8a6d-4255-9fbe-c622436cd6b4) completed in 139.62s (llm: 112.84s, eval: 26.78s)
+20:46:33 [default_discovery_controller] Metrics: throughput_gbps=2.4300, p99_latency_ms=1.7879, p50_latency_ms=1.7196, mean_latency_ms=1.7218, cpu_util_fraction=0.0312, data_integrity=1.0000, build_succeeded=1.0000, combined_score=0.2110

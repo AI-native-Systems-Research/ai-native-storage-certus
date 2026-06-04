@@ -1,0 +1,266 @@
+Starting K-Search world-model evolution (10 rounds)...
+
+[STAGE] init SolutionDB
+
+[STAGE] resume from solution=wild_type
+
+[STAGE] seed eval for continue-from solution: wild_type
+[eval] Score: 0.1990 | Throughput: 2.37 GB/s | p99: 1988us | CPU: 3.0% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+  [K-Search eval 1] score=0.1990 best=0.1990 status=passed
+[WM] Initialized+seeded root from continue_from_solution (code+eval).
+WM status: nodes=4 attached_solutions=1 active_leaf_id=root depth=0
+  last_trace: status=init speedup=- latency=-
+  active_path: root:<root>
+  nodes_preview: root:<root> | deep_pipeline:Maximize host-bounce ...  concurrency | gds_p2p:Eliminate host bounc ... rect Storage | hybrid_adaptive:Adaptive routing bet ... ransfer size
+
+[STAGE] world model: select next action (cycle start @ round 1)
+WM status: nodes=4 attached_solutions=1 active_leaf_id=root depth=0
+  last_trace: status=init speedup=- latency=-
+  active_path: root:<root>
+  nodes_preview: root:<root> | deep_pipeline:Maximize host-bounce ...  concurrency | gds_p2p:Eliminate host bounc ... rect Storage | hybrid_adaptive:Adaptive routing bet ... ransfer size
+World Model: Open Action Nodes (candidates) frontier=3 total_open=3
+1. rating=8.0/10 score=0.80 diff=4/5 conf=0.50 vs_base~5.00x | node_id=gds_p2p parent_id=root | GPUDirect Storage P2P path (NVMe directly to GPU) — Use nvidia-peermem/gdrdrv to enable GPUDirect Storage (GDS) path: allocate GPU BAR1-mapped buffers, register them with SPDK, and issue NVMe reads directly into GPU memory. This eliminates the host DRAM bounce entirely, reducing latency and freeing host memory bandwidth. Implement in dma.rs for buffer creation, pipeline.rs for the transfer loop.
+2. rating=6.0/10 score=0.70 diff=2/5 conf=0.60 vs_base~3.00x | node_id=deep_pipeline parent_id=root | Deep pipeline with increased stream count and buffer depth — Increase CUDA streams from 2 to 8 and ring buffer depth from 8 to 32. Use larger transfer sizes (4 MiB). Ensure all SPDK completions immediately trigger H2D on the next available stream. This maximizes PCIe utilization by keeping multiple H2D transfers in flight and overlapping with NVMe reads.
+3. rating=6.0/10 score=0.60 diff=5/5 conf=0.35 vs_base~4.50x | node_id=hybrid_adaptive parent_id=root | Hybrid adaptive path (GDS for large, host-bounce for small) — Implement a hybrid path: use GDS for large sequential reads (>1 MiB) and optimized host-bounce for small/random reads (<1 MiB). Add adaptive routing logic in pipeline.rs that selects the path based on request size. Allocate both GPU-direct and pinned-host buffer pools in lib.rs. This captures GDS throughput benefits for bulk transfers while maintaining low latency for small requests.
+World Model: Chosen Next Action (from decision tree node)
+- node_id: gds_p2p
+- base_node_id: root
+- title: GPUDirect Storage P2P path (NVMe directly to GPU)
+- difficulty_1_to_5: 4
+- description: Use nvidia-peermem/gdrdrv to enable GPUDirect Storage (GDS) path: allocate GPU BAR1-mapped buffers, register them with SPDK, and issue NVMe reads directly into GPU memory. This eliminates the host DRAM bounce entirely, reducing latency and freeing host memory bandwidth. Implement in dma.rs for buffer creation, pipeline.rs for the transfer loop.
+- expected_vs_baseline_factor: 5.00x
+- rationale: Host bounce doubles effective data movement (NVMe→host + host→GPU). GDS does NVMe→GPU in one hop. With nvidia-peermem and gdrdrv already loaded, the hardware supports P2P. This can theoretically reach min(NVMe_BW, PCIe_BW) directly. With multiple NVMe drives, can approach 12+ GB/s.
+
+=== Optimization Round 1/10 ===
+[CYCLE] action_node_id=gds_p2p attempt=1 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 1 (round 1) no_improve_streak=0/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 1)
+
+[STAGE] evaluate solution (round 1)
+[eval] Build failed: lve_p2p/ai-native-storage-certus/components/gpu-services)
+error[E0425]: cannot find function `create_gpu_dma_buffer` in module `dma`
+   --> components/gpu-services/src/lib.rs:267:28
+    |
+267 |               let buf = dma::create_gpu_dma_buffer(handle)?;
+    |                              ^^^^^^^^^^^^^^^^^^^^^ help: a function with a similar name exists: `allocate_gpu_dma_buffer`
+    |
+   ::: components/gpu-services/src/dma.rs:34:1
+    |
+ 34 | / pub fn allocate_gpu_dma_buffer(
+ 35 | |     gpu: &
+  [K-Search eval 2] score=0.0000 best=0.1990 status=failed
+
+=== Optimization Round 2/10 ===
+[CYCLE] action_node_id=gds_p2p attempt=2 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 2 (round 2) no_improve_streak=1/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 2)
+
+[STAGE] evaluate solution (round 2)
+[eval] Build failed: lve_p2p/ai-native-storage-certus/components/gpu-services)
+error[E0425]: cannot find function `create_gpu_dma_buffer` in module `dma`
+   --> components/gpu-services/src/lib.rs:267:28
+    |
+267 |               let buf = dma::create_gpu_dma_buffer(handle)?;
+    |                              ^^^^^^^^^^^^^^^^^^^^^ help: a function with a similar name exists: `allocate_gpu_dma_buffer`
+    |
+   ::: components/gpu-services/src/dma.rs:34:1
+    |
+ 34 | / pub fn allocate_gpu_dma_buffer(
+ 35 | |     gpu: &
+  [K-Search eval 3] score=0.0000 best=0.1990 status=failed
+
+=== Optimization Round 3/10 ===
+[CYCLE] action_node_id=gds_p2p attempt=3 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 3 (round 3) no_improve_streak=2/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 3)
+
+[STAGE] evaluate solution (round 3)
+[eval] Build failed: lve_p2p/ai-native-storage-certus/components/gpu-services)
+error[E0425]: cannot find function `create_gpu_dma_buffer` in module `dma`
+   --> components/gpu-services/src/lib.rs:267:28
+    |
+267 |               let buf = dma::create_gpu_dma_buffer(handle)?;
+    |                              ^^^^^^^^^^^^^^^^^^^^^ help: a function with a similar name exists: `allocate_gpu_dma_buffer`
+    |
+   ::: components/gpu-services/src/dma.rs:34:1
+    |
+ 34 | / pub fn allocate_gpu_dma_buffer(
+ 35 | |     gpu: &
+  [K-Search eval 4] score=0.0000 best=0.1990 status=failed
+
+=== Optimization Round 4/10 ===
+[CYCLE] action_node_id=gds_p2p attempt=4 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 4 (round 4) no_improve_streak=3/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 4)
+
+[STAGE] evaluate solution (round 4)
+[eval] Build failed: lve_p2p/ai-native-storage-certus/components/gpu-services)
+error[E0425]: cannot find function `create_gpu_dma_buffer` in module `dma`
+   --> components/gpu-services/src/lib.rs:267:28
+    |
+267 |               let buf = dma::create_gpu_dma_buffer(handle)?;
+    |                              ^^^^^^^^^^^^^^^^^^^^^ help: a function with a similar name exists: `allocate_gpu_dma_buffer`
+    |
+   ::: components/gpu-services/src/dma.rs:34:1
+    |
+ 34 | / pub fn allocate_gpu_dma_buffer(
+ 35 | |     gpu: &
+  [K-Search eval 5] score=0.0000 best=0.1990 status=failed
+
+=== Optimization Round 5/10 ===
+[CYCLE] action_node_id=gds_p2p attempt=5 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 5 (round 5) no_improve_streak=4/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 5)
+
+[STAGE] evaluate solution (round 5)
+[eval] Build failed: lve_p2p/ai-native-storage-certus/components/gpu-services)
+error[E0425]: cannot find function `create_gpu_dma_buffer` in module `dma`
+   --> components/gpu-services/src/lib.rs:267:28
+    |
+267 |               let buf = dma::create_gpu_dma_buffer(handle)?;
+    |                              ^^^^^^^^^^^^^^^^^^^^^ help: a function with a similar name exists: `allocate_gpu_dma_buffer`
+    |
+   ::: components/gpu-services/src/dma.rs:16:1
+    |
+ 16 | / pub fn allocate_gpu_dma_buffer(
+ 17 | |     gpu: &
+  [K-Search eval 6] score=0.0000 best=0.1990 status=failed
+
+[STAGE] cycle end: no PASSED solution; mark action too hard
+[WM] apply_edit_ops: ops=4 updates=4 inserts=0 split_children=0 deletes=0 new_nodes_added=0/3 skipped_cap=0 skipped_missing_parent=0 skipped_parent_solution_id_mismatch=0 skipped_update_missing_node=0 skipped_insert_invalid_node=0 skipped_split_invalid_children=0 skipped_delete_not_allowed=0
+WM status: nodes=4 attached_solutions=1 active_leaf_id=deep_pipeline depth=1
+  last_trace: status=init speedup=- latency=-
+  active_path: root:<root> | deep_pipeline:Maximize host-bounce pipeline depth and concurrency
+  nodes_preview: root:<root> | deep_pipeline:Maximize host-bounce ...  concurrency | gds_p2p:Eliminate host bounc ... rect Storage | hybrid_adaptive:Adaptive routing bet ... ransfer size
+
+[STAGE] world model: select next action (cycle start @ round 6)
+WM status: nodes=4 attached_solutions=1 active_leaf_id=deep_pipeline depth=1
+  last_trace: status=init speedup=- latency=-
+  active_path: root:<root> | deep_pipeline:Maximize host-bounce pipeline depth and concurrency
+  nodes_preview: root:<root> | deep_pipeline:Maximize host-bounce ...  concurrency | gds_p2p:Eliminate host bounc ... rect Storage | hybrid_adaptive:Adaptive routing bet ... ransfer size
+World Model: Open Action Nodes (candidates) frontier=3 total_open=3
+1. rating=7.5/10 score=0.75 diff=2/5 conf=0.70 vs_base~2.50x | node_id=deep_pipeline parent_id=root | Deep pipeline with increased stream count and buffer depth — Increase CUDA streams from 2 to 8 and ring buffer depth from 8 to 32. Use larger transfer sizes (4 MiB). Ensure all SPDK completions immediately trigger H2D on the next available stream. This maximizes PCIe utilization by keeping multiple H2D transfers in flight and overlapping with NVMe reads.
+2. rating=4.0/10 score=0.20 diff=5/5 conf=0.30 vs_base~5.00x | node_id=gds_p2p parent_id=root | GPUDirect Storage P2P path (NVMe directly to GPU) — Use nvidia-peermem/gdrdrv to enable GPUDirect Storage (GDS) path: allocate GPU BAR1-mapped buffers, register them with SPDK, and issue NVMe reads directly into GPU memory. This eliminates the host DRAM bounce entirely, reducing latency and freeing host memory bandwidth. Implement in dma.rs for buffer creation, pipeline.rs for the transfer loop.
+3. rating=3.0/10 score=0.15 diff=5/5 conf=0.20 vs_base~2.00x | node_id=hybrid_adaptive parent_id=root | Adaptive routing between GDS and host-bounce based on transfer size — Implement a hybrid path: use GDS for large sequential reads (>1 MiB) and optimized host-bounce for small/random reads (<1 MiB). Add adaptive routing logic in pipeline.rs that selects the path based on request size. Allocate both GPU-direct and pinned-host buffer pools in lib.rs. This captures GDS throughput benefits for bulk transfers while maintaining low latency for small requests.
+World Model: Chosen Next Action (from decision tree node)
+- node_id: deep_pipeline
+- base_node_id: root
+- title: Deep pipeline with increased stream count and buffer depth
+- difficulty_1_to_5: 2
+- description: Increase CUDA streams from 2 to 8 and ring buffer depth from 8 to 32. Use larger transfer sizes (4 MiB). Ensure all SPDK completions immediately trigger H2D on the next available stream. This maximizes PCIe utilization by keeping multiple H2D transfers in flight and overlapping with NVMe reads.
+- expected_vs_baseline_factor: 2.50x
+- rationale: Current 2 streams with 8 buffers severely limits overlap. At 4 MiB per transfer and 16.8 GB/s PCIe, each H2D takes ~0.24ms. With only 2 in flight, we waste time on pipeline bubbles. 8 streams with 32 buffers allows full NVMe-to-PCIe overlap.
+
+=== Optimization Round 6/10 ===
+[CYCLE] action_node_id=deep_pipeline attempt=1 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 1 (round 6) no_improve_streak=0/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 6)
+
+[STAGE] evaluate solution (round 6)
+[eval] Build failed:    Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+   Compiling dispatcher v1.0.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/dispatcher)
+error[E0308]: mismatched types
+   --> components/dispatcher/src/lib.rs:264:17
+    |
+261 |             pipeline::pipelined_ssd_to_gpu_zero_copy(
+    |             ---------------------------------------- arguments to this function are incorrect
+...
+264 |                 &ring_re
+  [K-Search eval 7] score=0.0000 best=0.1990 status=failed
+
+=== Optimization Round 7/10 ===
+[CYCLE] action_node_id=deep_pipeline attempt=2 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 2 (round 7) no_improve_streak=1/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 7)
+
+[STAGE] evaluate solution (round 7)
+[eval] Build failed:    Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error[E0425]: cannot find function `create_gpu_dma_buffer` in module `dma`
+   --> components/gpu-services/src/lib.rs:267:28
+    |
+267 |             let buf = dma::create_gpu_dma_buffer(handle)?;
+    |                            ^^^^^^^^^^^^^^^^^^^^^ not found in `dma`
+
+error[E0425]: cannot find function `create_spdk_dma_buffer_from_gpu` in module `dma`
+   --> components/gpu-services/s
+  [K-Search eval 8] score=0.0000 best=0.1990 status=failed
+
+=== Optimization Round 8/10 ===
+[CYCLE] action_node_id=deep_pipeline attempt=3 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 3 (round 8) no_improve_streak=2/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 8)
+
+[STAGE] evaluate solution (round 8)
+[eval] Build failed:    Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error[E0425]: cannot find function `create_gpu_dma_buffer` in module `dma`
+   --> components/gpu-services/src/lib.rs:267:28
+    |
+267 |             let buf = dma::create_gpu_dma_buffer(handle)?;
+    |                            ^^^^^^^^^^^^^^^^^^^^^ not found in `dma`
+
+error[E0425]: cannot find function `create_spdk_dma_buffer_from_gpu` in module `dma`
+   --> components/gpu-services/s
+  [K-Search eval 9] score=0.0000 best=0.1990 status=failed
+
+=== Optimization Round 9/10 ===
+[CYCLE] action_node_id=deep_pipeline attempt=4 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 4 (round 9) no_improve_streak=3/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 9)
+
+[STAGE] evaluate solution (round 9)
+[eval] Build failed:    Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error[E0425]: cannot find function `create_gpu_dma_buffer` in module `dma`
+   --> components/gpu-services/src/lib.rs:267:28
+    |
+267 |             let buf = dma::create_gpu_dma_buffer(handle)?;
+    |                            ^^^^^^^^^^^^^^^^^^^^^ not found in `dma`
+
+error[E0425]: cannot find function `create_spdk_dma_buffer_from_gpu` in module `dma`
+   --> components/gpu-services/s
+  [K-Search eval 10] score=0.0000 best=0.1990 status=failed
+
+=== Optimization Round 10/10 ===
+[CYCLE] action_node_id=deep_pipeline attempt=5 parent_is_root=yes base_code=yes
+
+[STAGE] codegen: attempt 5 (round 10) no_improve_streak=4/5 no_improve_over_base=0/5
+
+[STAGE] create Solution object from current code (round 10)
+
+[STAGE] evaluate solution (round 10)
+[eval] Build failed:    Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error[E0425]: cannot find function `create_gpu_dma_buffer` in module `dma`
+   --> components/gpu-services/src/lib.rs:267:28
+    |
+267 |             let buf = dma::create_gpu_dma_buffer(handle)?;
+    |                            ^^^^^^^^^^^^^^^^^^^^^ not found in `dma`
+
+error[E0425]: cannot find function `create_spdk_dma_buffer_from_gpu` in module `dma`
+   --> components/gpu-services/s
+  [K-Search eval 11] score=0.0000 best=0.1990 status=failed
+
+[STAGE] cycle end: no PASSED solution; mark action too hard
+[WM] apply_edit_ops: ops=4 updates=3 inserts=1 split_children=0 deletes=0 new_nodes_added=1/3 skipped_cap=0 skipped_missing_parent=0 skipped_parent_solution_id_mismatch=0 skipped_update_missing_node=0 skipped_insert_invalid_node=0 skipped_split_invalid_children=0 skipped_delete_not_allowed=0
+WM status: nodes=5 attached_solutions=1 active_leaf_id=deep_pipeline_fix_build depth=2
+  last_trace: status=init speedup=- latency=-
+  active_path: root:<root> | deep_pipeline:Maximize host-bounce pipeline depth and concurrency | deep_pipeline_fix_build:Fix build errors by removing references to non-existent dma functions
+  nodes_preview: root:<root> | deep_pipeline:Maximize host-bounce ...  concurrency | gds_p2p:Eliminate host bounc ... rect Storage | hybrid_adaptive:Adaptive routing bet ... ransfer size | deep_pipeline_fix_build:Fix build errors by  ... ma functions
+
+K-Search complete. Best score: 0.1990 (11 evaluations)

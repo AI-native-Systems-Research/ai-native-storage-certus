@@ -1,0 +1,254 @@
+16:58:01 [search.utils] Logging to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/evox/output/logs/evox_20260601_165801.log
+16:58:01 [runner] Runner ready: search=evox, program=/home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/initial_programs/concatenated_seed.rs.skydiscover
+16:58:02 [llm] OpenAI LLM: aws/claude-opus-4-6
+16:58:02 WARNING [evaluator] cascade_evaluation is true but /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/evaluator/evaluate_p2p.py has no evaluate_stage1 — will fall back to direct evaluation
+16:58:02 [evaluator] Initialized evaluator with /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/evaluator/evaluate_p2p.py
+16:58:02 [default_discovery_controller] DiscoveryController initialized: num_context_programs=4
+16:58:02 [llm] OpenAI LLM: gpt-5
+16:58:02 [llm] OpenAI LLM: gpt-5-mini
+16:58:02 [builder] Initialized guide LLM inside EvoxContextBuilder: gpt-5-mini
+16:58:02 [builder] Templates set: system=None, user=search_evolution_user_message
+16:58:02 [evaluator] Initialized evaluator with /home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/evox/database/search_strategy_evaluator.py
+16:58:02 [default_discovery_controller] DiscoveryController initialized: num_context_programs=2
+16:58:02 [search.evox] ======================================================================
+16:58:02 [search.evox] [EVOX CO-EVOLUTION SETUP]
+16:58:02 [search.evox] ----------------------------------------------------------------------
+16:58:02 [search.evox]   [SOLUTION EVOLUTION]
+16:58:02 [search.evox]     Initial search strategy file : /home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/evox/database/initial_search_strategy.py
+16:58:02 [search.evox]     Solution database class      : EvolvedProgramDatabase
+16:58:02 [search.evox]   [META EVOLUTION OF SEARCH STRATEGY]
+16:58:02 [search.evox]     Search strategy database class: SearchStrategyDatabase
+16:58:02 [search.evox]     Search strategy evaluator     : /home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/evox/database/search_strategy_evaluator.py
+16:58:02 [search.evox]     Search strategy config        : /home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/evox/config/search.yaml
+16:58:02 [search.evox] ======================================================================
+16:58:02 [runner] Adding initial program to database
+16:58:29 [evaluator] Evaluated program 1f30b2b8-9fe2-4377-b842-d3e64abeda7f in 27.30s: throughput_gbps=2.3900, p99_latency_ms=1.8928, p50_latency_ms=1.7451, mean_latency_ms=1.7482, cpu_util_fraction=0.0264, data_integrity=True, build_succeeded=True, combined_score=0.2040
+16:58:29 [registry] Using search strategy from: /home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/evox/database/initial_search_strategy.py
+16:58:29 [base_database] Database has 1 programs, best program score is throughput_gbps=2.3900, p99_latency_ms=1.8928, p50_latency_ms=1.7451, mean_latency_ms=1.7482, cpu_util_fraction=0.0264, data_integrity=True, build_succeeded=True, combined_score=0.2040
+16:58:29 [search.evox] Switch if 1 iterations of stagnation detected
+16:58:29 [search.evox] Label generation: using guide_model = [gpt-5-mini]
+16:58:30 WARNING [llm] Error attempt 1/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+16:58:35 WARNING [llm] Error attempt 2/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+16:58:40 WARNING [llm] Error attempt 3/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+16:58:49 ERROR [search.evox] Label generation failed: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, setting labels to empty strings
+17:01:13 [evaluator] Evaluated program ba0f5bea-b4de-4846-877b-493390aa3dbb in 2.08s: error=   Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+   Compiling dispatcher v1.0.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/dispatcher)
+error[E0308]: mismatched types
+   --> components/dispatcher/src/lib.rs:264:17
+    |
+261 |             pipeline::pipelined_ssd_to_gpu_zero_copy(
+    |             ---------------------------------------- arguments to this function are incorrect
+...
+264 |                 &ring_re, build_succeeded=False, combined_score=0.0000
+17:01:13 WARNING [default_discovery_controller] Evaluation failed (attempt 1/3): validity=None, error=   Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+   Compiling dispatcher v1.0.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/dispatcher)
+error[E0308]: mismatched types
+   --> components/dispatcher/src/lib.rs:264:17
+    |
+261 |             pipeline::pipelined_ssd_to_gpu_zero_copy(
+    |             ---------------------------------------- arguments to this function are incorrect
+...
+264 |                 &ring_re
+17:01:13 [default_discovery_controller] Retry 2/3: rebuilding prompt with 1 failed attempt(s)
+17:04:46 [evaluator] Evaluated program ad5652d2-1cc1-4eb9-95c2-67a4d28f1859 in 26.82s: throughput_gbps=2.3700, p99_latency_ms=1.8929, p50_latency_ms=1.7729, mean_latency_ms=1.7656, cpu_util_fraction=0.0268, data_integrity=True, build_succeeded=True, combined_score=0.2030
+17:04:46 [default_discovery_controller] Iteration 1: Program ad5652d2-1cc1-4eb9-95c2-67a4d28f1859 (parent: 1f30b2b8-9fe2-4377-b842-d3e64abeda7f) completed in 356.67s (llm: 185.76s, eval: 26.82s)
+17:04:46 [default_discovery_controller] Metrics: throughput_gbps=2.3700, p99_latency_ms=1.8929, p50_latency_ms=1.7729, mean_latency_ms=1.7656, cpu_util_fraction=0.0268, data_integrity=1.0000, build_succeeded=1.0000, combined_score=0.2030
+17:07:07 [evaluator] Evaluated program 42223be2-3efc-406f-9eff-0f9271c02f6d in 27.13s: throughput_gbps=2.3700, p99_latency_ms=1.9565, p50_latency_ms=1.7719, mean_latency_ms=1.7661, cpu_util_fraction=0.0287, data_integrity=True, build_succeeded=True, combined_score=0.2003
+17:07:07 [default_discovery_controller] Iteration 3: Program 42223be2-3efc-406f-9eff-0f9271c02f6d (parent: ad5652d2-1cc1-4eb9-95c2-67a4d28f1859) completed in 141.19s (llm: 114.06s, eval: 27.13s)
+17:07:07 [default_discovery_controller] Metrics: throughput_gbps=2.3700, p99_latency_ms=1.9565, p50_latency_ms=1.7719, mean_latency_ms=1.7661, cpu_util_fraction=0.0287, data_integrity=1.0000, build_succeeded=1.0000, combined_score=0.2003
+17:07:07 [search.evox] Stagnation detected -> evolving search strategy (solution_iter=3)
+17:07:07 [search.evox] Search strategy score: combined=0.000000, improvement=0.000000, start=0.204000, end=0.204000, horizon=1
+17:07:07 WARNING [llm] Error attempt 1/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:07:07 WARNING [llm] Error attempt 1/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:07:15 WARNING [llm] Error attempt 2/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:07:15 WARNING [llm] Error attempt 2/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:07:20 WARNING [llm] Error attempt 3/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:07:21 WARNING [llm] Error attempt 3/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:07:26 WARNING [llm] Error attempt 1/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:07:34 WARNING [llm] Error attempt 2/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:07:39 WARNING [llm] Error attempt 3/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:07:46 ERROR [default_discovery_controller] LLM generation failed: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}
+17:07:46 WARNING [default_discovery_controller] Iteration 1 failed: LLM generation failed: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}
+17:07:46 WARNING [search.evox] Failed to generate search algorithm: LLM generation failed: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}
+17:09:51 [evaluator] Evaluated program 87d56ee1-db37-4987-9120-69d53cfd923d in 27.39s: throughput_gbps=2.3900, p99_latency_ms=1.8794, p50_latency_ms=1.7387, mean_latency_ms=1.7521, cpu_util_fraction=0.0264, data_integrity=True, build_succeeded=True, combined_score=0.2046
+17:09:51 [default_discovery_controller] Iteration 4: Program 87d56ee1-db37-4987-9120-69d53cfd923d (parent: ad5652d2-1cc1-4eb9-95c2-67a4d28f1859) completed in 125.36s (llm: 97.97s, eval: 27.39s)
+17:09:51 [default_discovery_controller] Metrics: throughput_gbps=2.3900, p99_latency_ms=1.8794, p50_latency_ms=1.7387, mean_latency_ms=1.7521, cpu_util_fraction=0.0264, data_integrity=1.0000, build_succeeded=1.0000, combined_score=0.2046
+17:09:51 [default_discovery_controller] 🌟 New best solution found at iteration 4
+17:09:51 [search.evox] Stagnation detected -> evolving search strategy (solution_iter=4)
+17:09:52 WARNING [llm] Error attempt 1/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:09:52 WARNING [llm] Error attempt 1/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:09:57 WARNING [llm] Error attempt 2/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:09:57 WARNING [llm] Error attempt 2/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:10:06 WARNING [llm] Error attempt 3/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:10:06 WARNING [llm] Error attempt 3/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:10:17 WARNING [llm] Error attempt 1/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:10:22 WARNING [llm] Error attempt 2/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:10:28 WARNING [llm] Error attempt 3/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:10:35 ERROR [default_discovery_controller] LLM generation failed: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}
+17:10:35 WARNING [default_discovery_controller] Iteration 2 failed: LLM generation failed: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}
+17:10:35 WARNING [search.evox] Failed to generate search algorithm: LLM generation failed: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}
+17:12:59 [evaluator] Evaluated program 0a38ec97-0eb0-42d6-8e7a-485e8886b516 in 27.01s: throughput_gbps=2.4700, p99_latency_ms=2.1667, p50_latency_ms=1.6628, mean_latency_ms=1.6923, cpu_util_fraction=0.0278, data_integrity=True, build_succeeded=True, combined_score=0.1973
+17:12:59 [default_discovery_controller] Iteration 5: Program 0a38ec97-0eb0-42d6-8e7a-485e8886b516 (parent: 1f30b2b8-9fe2-4377-b842-d3e64abeda7f) completed in 143.92s (llm: 116.90s, eval: 27.02s)
+17:12:59 [default_discovery_controller] Metrics: throughput_gbps=2.4700, p99_latency_ms=2.1667, p50_latency_ms=1.6628, mean_latency_ms=1.6923, cpu_util_fraction=0.0278, data_integrity=1.0000, build_succeeded=1.0000, combined_score=0.1973
+17:12:59 [search.evox] Stagnation detected -> evolving search strategy (solution_iter=5)
+17:12:59 WARNING [llm] Error attempt 1/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:12:59 WARNING [llm] Error attempt 1/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:13:04 WARNING [llm] Error attempt 2/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:13:05 WARNING [llm] Error attempt 2/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:13:10 WARNING [llm] Error attempt 3/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:13:10 WARNING [llm] Error attempt 3/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:13:16 WARNING [llm] Error attempt 1/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:13:22 WARNING [llm] Error attempt 2/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:13:27 WARNING [llm] Error attempt 3/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:13:34 ERROR [default_discovery_controller] LLM generation failed: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}
+17:13:34 WARNING [default_discovery_controller] Iteration 3 failed: LLM generation failed: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}
+17:13:34 WARNING [search.evox] Failed to generate search algorithm: LLM generation failed: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}
+17:15:39 [evaluator] Evaluated program b5452979-0ec3-4e71-8213-6b6fad3b2014 in 27.68s: throughput_gbps=2.4000, p99_latency_ms=1.8988, p50_latency_ms=1.7299, mean_latency_ms=1.7417, cpu_util_fraction=0.0268, data_integrity=True, build_succeeded=True, combined_score=0.2043
+17:15:39 [default_discovery_controller] Iteration 6: Program b5452979-0ec3-4e71-8213-6b6fad3b2014 (parent: 87d56ee1-db37-4987-9120-69d53cfd923d) completed in 124.97s (llm: 97.29s, eval: 27.68s)
+17:15:39 [default_discovery_controller] Metrics: throughput_gbps=2.4000, p99_latency_ms=1.8988, p50_latency_ms=1.7299, mean_latency_ms=1.7417, cpu_util_fraction=0.0268, data_integrity=1.0000, build_succeeded=1.0000, combined_score=0.2043
+17:15:39 [search.evox] Stagnation detected -> evolving search strategy (solution_iter=6)
+17:15:39 WARNING [llm] Error attempt 1/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:15:39 WARNING [llm] Error attempt 1/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:15:46 WARNING [llm] Error attempt 2/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:15:46 WARNING [llm] Error attempt 2/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:15:51 WARNING [llm] Error attempt 3/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:15:52 WARNING [llm] Error attempt 3/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:15:57 WARNING [llm] Error attempt 1/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:16:06 WARNING [llm] Error attempt 2/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:16:11 WARNING [llm] Error attempt 3/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:16:17 ERROR [default_discovery_controller] LLM generation failed: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}
+17:16:17 WARNING [default_discovery_controller] Iteration 4 failed: LLM generation failed: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}
+17:16:17 WARNING [search.evox] Failed to generate search algorithm: LLM generation failed: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}
+17:18:31 [evaluator] Evaluated program 67e68b8e-c664-4877-b927-e77a78193b3e in 28.94s: error=Server startup timeout, build_succeeded=True, combined_score=0.0000
+17:18:31 WARNING [default_discovery_controller] Evaluation failed (attempt 1/3): validity=None, error=Server startup timeout
+17:18:31 [default_discovery_controller] Retry 2/3: rebuilding prompt with 1 failed attempt(s)
+17:20:39 [evaluator] Evaluated program 39aa0aff-4a47-47be-94b1-66855f2ae1e9 in 27.71s: throughput_gbps=2.3900, p99_latency_ms=1.8465, p50_latency_ms=1.7626, mean_latency_ms=1.7487, cpu_util_fraction=0.0266, data_integrity=True, build_succeeded=True, combined_score=0.2062
+17:20:39 [default_discovery_controller] Iteration 7: Program 39aa0aff-4a47-47be-94b1-66855f2ae1e9 (parent: 1f30b2b8-9fe2-4377-b842-d3e64abeda7f) completed in 262.20s (llm: 100.37s, eval: 27.72s)
+17:20:39 [default_discovery_controller] Metrics: throughput_gbps=2.3900, p99_latency_ms=1.8465, p50_latency_ms=1.7626, mean_latency_ms=1.7487, cpu_util_fraction=0.0266, data_integrity=1.0000, build_succeeded=1.0000, combined_score=0.2062
+17:20:39 [default_discovery_controller] 🌟 New best solution found at iteration 7
+17:20:39 [search.evox] Stagnation detected -> evolving search strategy (solution_iter=7)
+17:20:39 WARNING [llm] Error attempt 1/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:20:39 WARNING [llm] Error attempt 1/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:20:45 WARNING [llm] Error attempt 2/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:20:45 WARNING [llm] Error attempt 2/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:20:51 WARNING [llm] Error attempt 3/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:20:51 WARNING [llm] Error attempt 3/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5-mini", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:20:56 WARNING [llm] Error attempt 1/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:21:04 WARNING [llm] Error attempt 2/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:21:09 WARNING [llm] Error attempt 3/4: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}, retrying...
+17:21:15 ERROR [default_discovery_controller] LLM generation failed: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}
+17:21:15 WARNING [default_discovery_controller] Iteration 5 failed: LLM generation failed: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}
+17:21:15 WARNING [search.evox] Failed to generate search algorithm: LLM generation failed: Error code: 401 - {'error': {'message': "team not allowed to access model. This team can only access models=['aws/claude-sonnet-4-6', 'aws/claude-opus-4-6', 'Azure/gpt-5-mini-2025-08-07', 'Azure/gpt-5-2025-08-07', 'Azure/gpt-5.1-codex-2025-11-13', 'azure/gpt-5.4', 'aws/claude-opus-4-7', 'azure/gpt-5.5']. Tried to access gpt-5", 'type': 'team_model_access_denied', 'param': 'model', 'code': '401'}}
+17:23:15 [evaluator] Evaluated program 6839bf36-ecc6-4301-9921-e7871c0dc39b in 26.44s: error=Benchmark reported errors: ==============================
+Results (1 client(s), 4 MiB blocks)
+======================================================================
+
+  Latency per object (all clients combined):
+
+  Populate             no data
+
+  Lookup (hot)         no data
+
+  Lookup (cold)        no data
+
+
+  Total wall time:   10.35s
+
+  Per-client breakdown:
+  Client   GPU   Hot avg (us)   Cold avg (us)  Errors  
+  -------------------------------------------------
+  0        0     0.0          , build_succeeded=True, combined_score=0.0000
+17:23:15 WARNING [default_discovery_controller] Evaluation failed (attempt 1/3): validity=None, error=Benchmark reported errors: ==============================
+Results (1 client(s), 4 MiB blocks)
+======================================================================
+
+  Latency per object (all clients combined):
+
+  Populate             no data
+
+  Lookup (hot)         no data
+
+  Lookup (cold)        no data
+
+
+  Total wall time:   10.35s
+
+  Per-client breakdown:
+  Client   GPU   Hot avg (us)   Cold avg (us)  Errors  
+  -------------------------------------------------
+  0        0     0.0          
+17:23:15 [default_discovery_controller] Retry 2/3: rebuilding prompt with 1 failed attempt(s)
+17:25:29 [evaluator] Evaluated program b56c17b0-292f-4615-a375-19794375f9c1 in 27.31s: throughput_gbps=2.4000, p99_latency_ms=1.8072, p50_latency_ms=1.7438, mean_latency_ms=1.7459, cpu_util_fraction=0.0267, data_integrity=True, build_succeeded=True, combined_score=0.2085
+17:25:29 [default_discovery_controller] Iteration 9: Program b56c17b0-292f-4615-a375-19794375f9c1 (parent: 39aa0aff-4a47-47be-94b1-66855f2ae1e9) completed in 253.50s (llm: 105.99s, eval: 27.31s)
+17:25:29 [default_discovery_controller] Metrics: throughput_gbps=2.4000, p99_latency_ms=1.8072, p50_latency_ms=1.7438, mean_latency_ms=1.7459, cpu_util_fraction=0.0267, data_integrity=1.0000, build_succeeded=1.0000, combined_score=0.2085
+17:25:29 [default_discovery_controller] 🌟 New best solution found at iteration 9
+17:25:29 [search.evox] [SOLUTION EVOLUTION] Evolution completed: evox
+17:25:29 [search.utils] [CHECKPOINT] Saved database with 8 programs to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/evox/output/checkpoints/checkpoint_10
+17:25:29 [runner] Checkpoint 10: best=throughput_gbps=2.4000, p99_latency_ms=1.8072, p50_latency_ms=1.7438, mean_latency_ms=1.7459, cpu_util_fraction=0.0267, data_integrity=True, build_succeeded=True, combined_score=0.2085
+17:25:29 [runner] Checkpoint saved to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/evox/output/checkpoints/checkpoint_10
+17:25:56 [evaluator] Evaluated program b56c17b0-292f-4615-a375-19794375f9c1 in 27.67s: throughput_gbps=2.4000, p99_latency_ms=1.9132, p50_latency_ms=1.7293, mean_latency_ms=1.7458, cpu_util_fraction=0.0265, data_integrity=True, build_succeeded=True, combined_score=0.2036
+17:25:56 [runner] Test evaluation for best program: throughput_gbps=2.4000, p99_latency_ms=1.9132, p50_latency_ms=1.7293, mean_latency_ms=1.7458, cpu_util_fraction=0.0265, data_integrity=True, build_succeeded=True, combined_score=0.2036
+17:25:56 [runner] Best program saved to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/evox/output/best
+17:25:56 [runner] Discovery completed. Best: throughput_gbps=2.4000, p99_latency_ms=1.8072, p50_latency_ms=1.7438, mean_latency_ms=1.7459, cpu_util_fraction=0.0267, data_integrity=True, build_succeeded=True, combined_score=0.2085, test_throughput_gbps=2.4000, test_p99_latency_ms=1.9132, test_p50_latency_ms=1.7293, test_mean_latency_ms=1.7458, test_cpu_util_fraction=0.0265, test_data_integrity=True, test_build_succeeded=True, test_combined_score=0.2036
+17:25:56 [runner] Best program saved to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/evox/output/best
+Using search algorithm: evox
+[eval] Score: 0.2040 | Throughput: 2.39 GB/s | p99: 1893us | CPU: 2.6% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+[eval] Build failed:    Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+   Compiling dispatcher v1.0.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/dispatcher)
+error[E0308]: mismatched types
+   --> components/dispatcher/src/lib.rs:264:17
+    |
+261 |             pipeline::pipelined_ssd_to_gpu_zero_copy(
+    |             ---------------------------------------- arguments to this function are incorrect
+...
+264 |                 &ring_re
+[eval] Score: 0.2030 | Throughput: 2.37 GB/s | p99: 1893us | CPU: 2.7% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+[eval] Score: 0.2003 | Throughput: 2.37 GB/s | p99: 1956us | CPU: 2.9% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+[eval] Score: 0.2046 | Throughput: 2.39 GB/s | p99: 1879us | CPU: 2.6% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+[eval] Score: 0.1973 | Throughput: 2.47 GB/s | p99: 2167us | CPU: 2.8% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+[eval] Score: 0.2043 | Throughput: 2.40 GB/s | p99: 1899us | CPU: 2.7% | Integrity: PASS | Time: 26s | Files: ['pipeline.rs', 'dma.rs']
+[eval] Server failed: Server startup timeout
+[eval] Score: 0.2062 | Throughput: 2.39 GB/s | p99: 1846us | CPU: 2.7% | Integrity: PASS | Time: 26s | Files: ['pipeline.rs', 'dma.rs']
+[eval] Benchmark failed: Benchmark reported errors: ==============================
+Results (1 client(s), 4 MiB blocks)
+======================================================================
+
+  Latency per object (all clients combined):
+
+  Populate             no data
+
+  Lookup (hot)         no data
+
+  Lookup (cold)        no data
+
+
+  Total wall time:   10.35s
+
+  Per-client breakdown:
+  Client   GPU   Hot avg (us)   Cold avg (us)  Errors  
+  -------------------------------------------------
+  0        0     0.0          
+[eval] Score: 0.2085 | Throughput: 2.40 GB/s | p99: 1807us | CPU: 2.7% | Integrity: PASS | Time: 25s | Files: ['pipeline.rs', 'dma.rs']
+[eval] Score: 0.2036 | Throughput: 2.40 GB/s | p99: 1913us | CPU: 2.7% | Integrity: PASS | Time: 26s | Files: ['pipeline.rs', 'dma.rs']
+
+Discovery complete!
+Best program metrics:
+  throughput_gbps: 2.4000
+  p99_latency_ms: 1.8072
+  p50_latency_ms: 1.7438
+  mean_latency_ms: 1.7459
+  cpu_util_fraction: 0.0267
+  data_integrity: 1.0000
+  build_succeeded: 1.0000
+  combined_score: 0.2085
+  test_throughput_gbps: 2.4000
+  test_p99_latency_ms: 1.9132
+  test_p50_latency_ms: 1.7293
+  test_mean_latency_ms: 1.7458
+  test_cpu_util_fraction: 0.0265
+  test_data_integrity: 1.0000
+  test_build_succeeded: 1.0000
+  test_combined_score: 0.2036
+
+Latest checkpoint: /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/evox/output/checkpoints/checkpoint_10
+To resume: --checkpoint /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/evox/output/checkpoints/checkpoint_10

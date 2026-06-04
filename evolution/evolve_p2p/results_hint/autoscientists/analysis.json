@@ -1,0 +1,14 @@
+{
+  "framework": "autoscientists",
+  "total_evals": 7,
+  "best_score": 0.3945,
+  "beat_baseline": true,
+  "p2p_attempted": true,
+  "p2p_compiled": false,
+  "stagnation_ceiling": "mid_range",
+  "primary_failure_mode": "local_optimum",
+  "build_errors": [],
+  "diagnosis": "Attempted P2P in iter 2 \u2014 compiled but failed at runtime (agent reports GDRCopy rc=22 on IPC memory, reverted). Optimized host-bounce path instead: QD64, removed periodic stream sync, multi-object interleaved pipeline with overlapped H2D copies. Achieved 4.65 GB/s (0.3945).",
+  "build_fail_count": 0,
+  "build_success_count": 7
+}

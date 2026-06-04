@@ -1,0 +1,946 @@
+  @@@@@@@@@@@@@@@@@@@@@      ░██████╗██╗░░██╗██╗███╗░░██╗██╗░░██╗░█████╗░
+  @                   @      ██╔════╝██║░░██║██║████╗░██║██║░██╔╝██╔══██╗
+  @          @        @      ╚█████╗░███████║██║██╔██╗██║█████═╝░███████║
+  @    @@   @@  @@    @      ░╚═══██╗██╔══██║██║██║╚████║██╔═██╗░██╔══██║
+  @   @     @    @@   @      ██████╔╝██║░░██║██║██║░╚███║██║░╚██╗██║░░██║
+  @    @@  @    @     @      ╚═════╝░╚═╝░░╚═╝╚═╝╚═╝░░╚══╝╚═╝░░╚═╝╚═╝░░╚═╝
+  @        @          @      @@@@@@@@@@@@@@@
+  @                   @   @@                 @@@@@
+  @@@@@@@@@@@@@@@@@@@@ @@                       @  @@                 █▀▀
+                      @                          @@  @                ██▄
+                    @      @@                      @  @@
+                   @       @         @              @   @             █░█
+                   @                 @               @  @             ▀▄▀
+                     @@@@@          @     @           @  @
+                      @            @          @       @ @@            █▀█
+                   @@    @@     @@       @@   @        @              █▄█
+                  @@        @@         @     @         @
+                 @@       @@   @@       @@@@@          @        @@    █░░
+              @ @@                @                    @              █▄▄
+             @ @@@@@             @@ @@                 @      @@
+            @                  @       @@              @    @@        █░█
+       @@@@@@@@@@@@@@@@@@@@@@             @@@          @@@@@@@  @@    ▀▄▀
+       @     @         @                      @@         @@@  @@
+        @@               @                      @      @   @  @@      █▀▀
+          @@@@@@@@@@@@@@@@@@                   @    @   @   @@        ██▄
+                                               @  @  @   @
+                                               @  @  @@@@
+                                               @  @@
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO - Saved init_program_str to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/init_program.rs
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO - Saved evaluate_str to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/evaluate.py
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO - 🖥️  System resources detected:
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO -    • CPU cores: 64
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO -    • Memory: 503.2 GB
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO - 🔧 Concurrency settings:
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO -    • Evaluation jobs: 4
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO -    • Proposal jobs: 6
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO -    • DB workers: 2
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO -    • Total threads: 12
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO - Configured local numeric thread cap per eval process: 16
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO - ================================================================================
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO - ASYNC EVOLUTION RUN STARTED
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO - ================================================================================
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO - Max evaluation jobs: 4
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO - Max proposal jobs: 6
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO - Target generations: 10
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO - Language: rust
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO - Results directory: /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO - Log file: /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/evolution_run.log
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO - ================================================================================
+2026-06-01 19:57:28 - shinka.database.async_dbase - INFO - 🔧 AsyncDB initialized with 2 workers, 2 concurrent DB ops (WAL mode)
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO - Copying initial program from /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/init_program.rs
+2026-06-01 19:57:28 - shinka.core.async_runner - INFO - Starting initial program evaluation: /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_0/main.rs
+2026-06-01 19:57:28 - shinka.launch.local - INFO - Submitted local process with PID: 3981318
+2026-06-01 19:57:28 - shinka.launch.local - INFO - Launched local command: /home/nara/certus/evo_frameworks/skydiscover/.venv/bin/python3 /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/evaluate.py --program_path /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_0/main.rs --results_dir /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_0/results
+2026-06-01 19:57:56 - shinka.core.async_runner - INFO - Initial program evaluation completed in 28.01s
+2026-06-01 19:57:57 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 401 Unauthorized"
+2026-06-01 19:57:57 - shinka.embed.embedding - ERROR - Error getting embedding: Error code: 401 - {'error': {'message': 'Incorrect API key provided: sk-2as0_*************PBsA. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'code': 'invalid_api_key', 'param': None}, 'status': 401}
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Initial program evaluated - correct: False, combined_score: 0.1976
+2026-06-01 19:57:57 - shinka.database.dbase - INFO - Program 8a2805ec-9cb4-478d-882d-28e0d856d79c added to DB - score: 0.1976.
+                                 Program Evaluation Summary - Gen 0 | Total Cost: $0.00                                 
+╭─────────────┬─────────┬───────────────┬─────────┬─────────────────────────────────┬────────┬────────┬─────────┬──────╮
+│  GenID: 0   │ Island  │    Status     │   Score │ Patch Name                      │ Type   │ Compl… │    Cost │ Time │
+├─────────────┼─────────┼───────────────┼─────────┼─────────────────────────────────┼────────┼────────┼─────────┼──────┤
+│  Best: N/A  │   I-0   │  ✗ Incorrect  │   0.198 │ initial_program                 │ init   │    1.0 │  $0.000 │ 28.… │
+╰─────────────┴─────────┴───────────────┴─────────┴─────────────────────────────────┴────────┴────────┴─────────┴──────╯
+2026-06-01 19:57:57 - shinka.database.dbase - INFO - Creating copies of initial program 8a2805ec-9cb4-478d-882d-28e0d856d79c for all islands
+2026-06-01 19:57:57 - shinka.database.islands - INFO - Created copy 54237802... of program 8a2805ec... for island 1
+2026-06-01 19:57:57 - shinka.database.islands - INFO - Created copy 373a5d95... of program 8a2805ec... for island 2
+2026-06-01 19:57:57 - shinka.database.islands - INFO - Created copy bf74f0c7... of program 8a2805ec... for island 3
+2026-06-01 19:57:57 - shinka.database.islands - INFO - Created copy 9a402b70... of program 8a2805ec... for island 4
+2026-06-01 19:57:57 - shinka.database.islands - INFO - Created 4 copies of program 8a2805ec... for islands 1-4
+2026-06-01 19:57:57 - shinka.core.summarizer - INFO - Added program 8a2805ec-9cb4-478d-882d-28e0d856d79c to meta memory tracking (correct=False, total: 1)
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Setup initial program: 8a2805ec-9cb4-478d-882d-28e0d856d79c
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Generation 0 completed during setup
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Verifying database is ready for sampling...
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Database ready - 5 program(s) available for sampling
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Database verification completed - ready for proposal generation
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - 🔄 Job monitor task started
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Proposal target=4 (sampling_ewma=0.00s, evaluation_ewma=0.00s, timing_samples=0, active_proposals=0, running_jobs=0)
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Starting 4 new proposals. Pipeline: 0/4 (running_jobs=0, active_proposals=0/6), Remaining completed work: 9 (completed=1/10, next_generation=1)
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Started proposal task for generation 1 (cost: $0.0000)
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Started proposal task for generation 2 (cost: $0.0000)
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Started proposal task for generation 3 (cost: $0.0000)
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Started proposal task for generation 4 (cost: $0.0000)
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - 🔄 Meta summarizer task started
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - 🔍 Meta task check: completed_gens=1, target=10, pending_work=9, running_eval_jobs=0, running_proposal_jobs=4, api_costs=$0.0000, should_stop=False, is_stuck=False, stuck_count=0, time_since_progress=0.0s
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Generating proposal for generation 1
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Generating proposal for generation 2
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Generating proposal for generation 3
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Generating proposal for generation 4
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Getting meta recs for gen 1, sample_single_meta_rec=True
+2026-06-01 19:57:57 - shinka.core.summarizer - INFO - get_sampled_recommendation called, meta_recommendations exists: False
+2026-06-01 19:57:57 - shinka.core.summarizer - INFO - No meta recommendations available to sample from
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - meta_recs result: False
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Getting meta recs for gen 2, sample_single_meta_rec=True
+2026-06-01 19:57:57 - shinka.core.summarizer - INFO - get_sampled_recommendation called, meta_recommendations exists: False
+2026-06-01 19:57:57 - shinka.core.summarizer - INFO - No meta recommendations available to sample from
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - meta_recs result: False
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Getting meta recs for gen 3, sample_single_meta_rec=True
+2026-06-01 19:57:57 - shinka.core.summarizer - INFO - get_sampled_recommendation called, meta_recommendations exists: False
+2026-06-01 19:57:57 - shinka.core.summarizer - INFO - No meta recommendations available to sample from
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - meta_recs result: False
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Getting meta recs for gen 4, sample_single_meta_rec=True
+2026-06-01 19:57:57 - shinka.core.summarizer - INFO - get_sampled_recommendation called, meta_recommendations exists: False
+2026-06-01 19:57:57 - shinka.core.summarizer - INFO - No meta recommendations available to sample from
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - meta_recs result: False
+2026-06-01 19:57:57 - shinka.database.dbase - INFO - No correct programs. Randomly sampled incorrect program 54237802-2c43-4671-ad13-34ec64e9af32 (Gen: 0) [from 5 incorrect programs].
+              Parent & Context Sampling Summary - Gen 1 | Total Cost: $0.00 (Novelty: 1/3, Resample: 1/3)               
+┏━━━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┳━━━━━━┓
+┃ Role        ┃ Gen  ┃ Island  ┃  ✓/✗  ┃    Score ┃ Patch Name                      ┃ Type   ┃ Compl… ┃    Cost ┃ Time ┃
+┡━━━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━━━╇━━━━━━┩
+│ FIX TARGET  │  0   │   I-1   │   ✗   │    0.198 │ initial_program                 │ init   │    1.0 │  $0.000 │ 28.… │
+└─────────────┴──────┴─────────┴───────┴──────────┴─────────────────────────────────┴────────┴────────┴─────────┴──────┘
+2026-06-01 19:57:57 - shinka.database.dbase - INFO - No correct programs. Randomly sampled incorrect program bf74f0c7-bfc3-41df-89d6-9e0cf92f73a7 (Gen: 0) [from 5 incorrect programs].
+              Parent & Context Sampling Summary - Gen 2 | Total Cost: $0.00 (Novelty: 1/3, Resample: 1/3)               
+┏━━━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┳━━━━━━┓
+┃ Role        ┃ Gen  ┃ Island  ┃  ✓/✗  ┃    Score ┃ Patch Name                      ┃ Type   ┃ Compl… ┃    Cost ┃ Time ┃
+┡━━━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━━━╇━━━━━━┩
+│ FIX TARGET  │  0   │   I-3   │   ✗   │    0.198 │ initial_program                 │ init   │    1.0 │  $0.000 │ 28.… │
+└─────────────┴──────┴─────────┴───────┴──────────┴─────────────────────────────────┴────────┴────────┴─────────┴──────┘
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - FIX MODE: Attempting to fix incorrect program 54237802-2c43-4671-ad13-34ec64e9af32 (Gen: 0)
+2026-06-01 19:57:57 - shinka.core.sampler - INFO - Generated FIX prompt for incorrect program (Gen: 0, Score: 0.1976, Ancestors: 0)
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Generated FIX patch type: fix
+2026-06-01 19:57:57 - shinka.llm.llm - INFO - ==> SAMPLING:
+  local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY   1.0000
+2026-06-01 19:57:57 - shinka.llm.llm - INFO - ==> QUERYING: ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '0.7', '16384']
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - FIX MODE: Attempting to fix incorrect program bf74f0c7-bfc3-41df-89d6-9e0cf92f73a7 (Gen: 0)
+2026-06-01 19:57:57 - shinka.core.sampler - INFO - Generated FIX prompt for incorrect program (Gen: 0, Score: 0.1976, Ancestors: 0)
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Generated FIX patch type: fix
+2026-06-01 19:57:57 - shinka.llm.llm - INFO - ==> SAMPLING:
+  local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY   1.0000
+2026-06-01 19:57:57 - shinka.llm.llm - INFO - ==> QUERYING: ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '1.0', '16384']
+2026-06-01 19:57:57 - shinka.database.dbase - INFO - No correct programs. Randomly sampled incorrect program 9a402b70-dfdc-4a00-91f6-28e978d16337 (Gen: 0) [from 5 incorrect programs].
+              Parent & Context Sampling Summary - Gen 3 | Total Cost: $0.00 (Novelty: 1/3, Resample: 1/3)               
+┏━━━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┳━━━━━━┓
+┃ Role        ┃ Gen  ┃ Island  ┃  ✓/✗  ┃    Score ┃ Patch Name                      ┃ Type   ┃ Compl… ┃    Cost ┃ Time ┃
+┡━━━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━━━╇━━━━━━┩
+│ FIX TARGET  │  0   │   I-4   │   ✗   │    0.198 │ initial_program                 │ init   │    1.0 │  $0.000 │ 28.… │
+└─────────────┴──────┴─────────┴───────┴──────────┴─────────────────────────────────┴────────┴────────┴─────────┴──────┘
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - FIX MODE: Attempting to fix incorrect program 9a402b70-dfdc-4a00-91f6-28e978d16337 (Gen: 0)
+2026-06-01 19:57:57 - shinka.core.sampler - INFO - Generated FIX prompt for incorrect program (Gen: 0, Score: 0.1976, Ancestors: 0)
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Generated FIX patch type: fix
+2026-06-01 19:57:57 - shinka.llm.llm - INFO - ==> SAMPLING:
+  local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY   1.0000
+2026-06-01 19:57:57 - shinka.llm.llm - INFO - ==> QUERYING: ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '0.7', '16384']
+2026-06-01 19:57:57 - shinka.database.dbase - INFO - No correct programs. Randomly sampled incorrect program 373a5d95-05d1-4787-a1ea-46a4aa028304 (Gen: 0) [from 5 incorrect programs].
+              Parent & Context Sampling Summary - Gen 4 | Total Cost: $0.00 (Novelty: 1/3, Resample: 1/3)               
+┏━━━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┳━━━━━━┓
+┃ Role        ┃ Gen  ┃ Island  ┃  ✓/✗  ┃    Score ┃ Patch Name                      ┃ Type   ┃ Compl… ┃    Cost ┃ Time ┃
+┡━━━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━━━╇━━━━━━┩
+│ FIX TARGET  │  0   │   I-2   │   ✗   │    0.198 │ initial_program                 │ init   │    1.0 │  $0.000 │ 28.… │
+└─────────────┴──────┴─────────┴───────┴──────────┴─────────────────────────────────┴────────┴────────┴─────────┴──────┘
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - FIX MODE: Attempting to fix incorrect program 373a5d95-05d1-4787-a1ea-46a4aa028304 (Gen: 0)
+2026-06-01 19:57:57 - shinka.core.sampler - INFO - Generated FIX prompt for incorrect program (Gen: 0, Score: 0.1976, Ancestors: 0)
+2026-06-01 19:57:57 - shinka.core.async_runner - INFO - Generated FIX patch type: fix
+2026-06-01 19:57:57 - shinka.llm.llm - INFO - ==> SAMPLING:
+  local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY   1.0000
+2026-06-01 19:57:57 - shinka.llm.llm - INFO - ==> QUERYING: ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '0.0', '16384']
+2026-06-01 20:01:00 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:01:00 - shinka.llm.llm - INFO - ==> QUERY: API cost: $0.0000
+2026-06-01 20:01:00 - shinka.core.async_runner - INFO -   FIX ATTEMPT 1/3 SUCCESS
+                         Patch Metadata - Gen 1/10 - Novelty: 1/3 - Resample: 1/3 - Patch: 1/3                          
+╭──────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────╮
+│ Field                    │ Value                                                                                     │
+├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────┤
+│ patch_type               │ fix                                                                                       │
+│ patch_name               │ sliding_window_pipeline                                                                   │
+│ patch_description        │ The batch-based pipeline loop serialized SSD reads and GPU copies between batches,        │
+│                          │ killing throughput. Changed to a sliding-window approach where each NVMe read completion  │
+│                          │ immediately triggers a GPU DMA copy and the next read submission. This overlaps I/O with  │
+│                          │ GPU transfers. Also increased ring size to 16 for deeper pipelining and reduced the sync  │
+│                          │ frequency to every 32 operations to reduce synchronization overhead.                      │
+│ num_applied              │ 1                                                                                         │
+│ api_costs                │ $0.0000                                                                                   │
+│ error_attempt            │ None                                                                                      │
+│ model_name               │ local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_en │
+│                          │ v=OPENAI_AP...                                                                            │
+│ temperature              │ 1.0                                                                                       │
+│ max_tokens               │ 16384                                                                                     │
+│ diff_summary             │ added: 28; deleted: 0; modified: 90;                                                      │
+╰──────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────╯
+2026-06-01 20:01:00 - shinka.core.async_runner - INFO - Getting code embedding for generation 1...
+2026-06-01 20:01:01 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 401 Unauthorized"
+2026-06-01 20:01:01 - shinka.embed.embedding - ERROR - Error getting embedding: Error code: 401 - {'error': {'message': 'Incorrect API key provided: sk-2as0_*************PBsA. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'code': 'invalid_api_key', 'param': None}, 'status': 401}
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - Code embedding completed for generation 1 (cost: $0.0000)
+2026-06-01 20:01:01 - shinka.launch.local - INFO - Submitted local process with PID: 3983790
+2026-06-01 20:01:01 - shinka.launch.local - INFO - Launched local command: /home/nara/certus/evo_frameworks/skydiscover/.venv/bin/python3 /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/evaluate.py --program_path /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_1/main.rs --results_dir /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_1/results
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - Proposal → Eval: gen 1 submitted for eval (cost: $0.0000, total: $0.0000). Running jobs: 1/4, Proposals: 4/6
+2026-06-01 20:01:01 - shinka.launch.scheduler - WARNING - Process 3983790 exceeded timeout of 00:01:30. Killing. => Gen. 1
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - ✅ Job ProcessWithLogging(PID: 3983790) completed (gen 1) after 184.0s
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - 🔄 Processing 1 completed jobs: gens [1] (cost: $0.0000)
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - 🔄 SAFE PROCESSING: Starting job ProcessWithLogging(PID: 3983790) (gen 1)
+2026-06-01 20:01:01 - shinka.launch.local - INFO - Monitoring local process with PID: 3983790...
+2026-06-01 20:01:01 - shinka.launch.local - INFO - Process 3983790 completed with return code: -9
+2026-06-01 20:01:01 - shinka.utils.general - WARNING - Metrics file not found at /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_1/results/metrics.json
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - 📂 RESULTS: Got results for ProcessWithLogging(PID: 3983790): True
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - ✅ VALID RESULTS: ProcessWithLogging(PID: 3983790) has valid results - correct=False, score=0.0
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - 💾 DB ADD: Adding program to database for ProcessWithLogging(PID: 3983790) (gen 1)...
+2026-06-01 20:01:01 - shinka.database.dbase - INFO - Program 5eecb08e-95ce-47b8-8144-ad64da7cae84 added to DB - score: 0.0.
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - ✅ DB SUCCESS: Program 5eecb08e-95ce-47b8-8144-ad64da7cae84 successfully added to database for ProcessWithLogging(PID: 3983790) (gen 1)
+                                 Program Evaluation Summary - Gen 1 | Total Cost: $0.00                                 
+╭─────────────┬─────────┬───────────────┬─────────┬─────────────────────────────────┬────────┬────────┬─────────┬──────╮
+│  GenID: 1   │ Island  │    Status     │   Score │ Patch Name                      │ Type   │ Compl… │    Cost │ Time │
+├─────────────┼─────────┼───────────────┼─────────┼─────────────────────────────────┼────────┼────────┼─────────┼──────┤
+│  Best: N/A  │   I-1   │  ✗ Incorrect  │   0.000 │ sliding_window_pipeline         │ fix    │    1.0 │  $0.000 │ 0.0s │
+╰─────────────┴─────────┴───────────────┴─────────┴─────────────────────────────────┴────────┴────────┴─────────┴──────╯
+2026-06-01 20:01:01 - shinka.core.summarizer - INFO - Added program 5eecb08e-95ce-47b8-8144-ad64da7cae84 to meta memory tracking (correct=False, total: 2)
+    AsymmetricUCB (c=1.000, eps=0.200, adaptive=True, asym=True, exp_base=1.000, shift_base=True, shift_parent=True,    
+                         log_sum=True, cost_k=0.000, cost_c=0.100, cost_pow=1.00, cost_pct=50)                          
+╭─────────────────────────┬─────┬────────┬─────────┬─────────┬─────────┬─────────┬──────────┬───────┬──────────┬───────╮
+│ arm                     │   n │ n_cost │ tot_co… │ mean_c… │ exploit │ explore │ score_r… │ scor… │    score │  post │
+├─────────────────────────┼─────┼────────┼─────────┼─────────┼─────────┼─────────┼──────────┼───────┼──────────┼───────┤
+│ local/aws/claude-opus-… │   4 │      1 │  0.0000 │  0.0000 │  0.0000 │  0.8326 │   0.8326 │ 1.00… │   0.8326 │ 1.00… │
+╰─────────────────────────┴─────┴────────┴─────────┴─────────┴─────────┴─────────┴──────────┴───────┴──────────┴───────╯
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - No correct programs found yet, cannot determine best solution.
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - ✅ JOB COMPLETE: Finished processing ProcessWithLogging(PID: 3983790) - program 5eecb08e-95ce-47b8-8144-ad64da7cae84 added (gen 1)
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - ✅ Successfully processed 1/1 jobs
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - ✅ Completed generations updated: 1 -> 2 (cost: $0.0000)
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - Proposal target=4 (sampling_ewma=184.00s, evaluation_ewma=0.01s, timing_samples=1, active_proposals=3, running_jobs=0)
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - Starting 1 new proposals. Pipeline: 3/4 (running_jobs=0, active_proposals=3/6), Remaining completed work: 5 (completed=2/10, next_generation=5)
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - Started proposal task for generation 5 (cost: $0.0000)
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - Generating proposal for generation 5
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - Getting meta recs for gen 5, sample_single_meta_rec=True
+2026-06-01 20:01:01 - shinka.core.summarizer - INFO - get_sampled_recommendation called, meta_recommendations exists: False
+2026-06-01 20:01:01 - shinka.core.summarizer - INFO - No meta recommendations available to sample from
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - meta_recs result: False
+2026-06-01 20:01:01 - shinka.database.dbase - INFO - No correct programs. Randomly sampled incorrect program 373a5d95-05d1-4787-a1ea-46a4aa028304 (Gen: 0) [from 6 incorrect programs].
+              Parent & Context Sampling Summary - Gen 5 | Total Cost: $0.00 (Novelty: 1/3, Resample: 1/3)               
+┏━━━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┳━━━━━━┓
+┃ Role        ┃ Gen  ┃ Island  ┃  ✓/✗  ┃    Score ┃ Patch Name                      ┃ Type   ┃ Compl… ┃    Cost ┃ Time ┃
+┡━━━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━━━╇━━━━━━┩
+│ FIX TARGET  │  0   │   I-2   │   ✗   │    0.198 │ initial_program                 │ init   │    1.0 │  $0.000 │ 28.… │
+└─────────────┴──────┴─────────┴───────┴──────────┴─────────────────────────────────┴────────┴────────┴─────────┴──────┘
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - FIX MODE: Attempting to fix incorrect program 373a5d95-05d1-4787-a1ea-46a4aa028304 (Gen: 0)
+2026-06-01 20:01:01 - shinka.core.sampler - INFO - Generated FIX prompt for incorrect program (Gen: 0, Score: 0.1976, Ancestors: 0)
+2026-06-01 20:01:01 - shinka.core.async_runner - INFO - Generated FIX patch type: fix
+2026-06-01 20:01:01 - shinka.llm.llm - INFO - ==> SAMPLING:
+  local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY   1.0000
+2026-06-01 20:01:01 - shinka.llm.llm - INFO - ==> QUERYING: ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '0.7', '16384']
+2026-06-01 20:01:01 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:01:02 - shinka.llm.llm - INFO - ==> QUERY: API cost: $0.0000
+2026-06-01 20:01:02 - shinka.core.async_runner - INFO -   FIX ATTEMPT 1/3 SUCCESS
+                         Patch Metadata - Gen 5/10 - Novelty: 1/3 - Resample: 1/3 - Patch: 1/3                          
+╭──────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────╮
+│ Field                    │ Value                                                                                     │
+├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────┤
+│ patch_type               │ fix                                                                                       │
+│ patch_name               │ sliding_window_pipeline                                                                   │
+│ patch_description        │ The batch-based pipeline loop serialized SSD reads and GPU copies between batches,        │
+│                          │ killing throughput. Changed to a sliding-window approach where each NVMe read completion  │
+│                          │ immediately triggers a GPU DMA copy and the next read submission. This overlaps I/O with  │
+│                          │ GPU transfers. Also increased ring size to 16 for deeper pipelining and reduced the sync  │
+│                          │ frequency to every 32 operations to reduce synchronization overhead.                      │
+│ num_applied              │ 1                                                                                         │
+│ api_costs                │ $0.0000                                                                                   │
+│ error_attempt            │ None                                                                                      │
+│ model_name               │ local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_en │
+│                          │ v=OPENAI_AP...                                                                            │
+│ temperature              │ 1.0                                                                                       │
+│ max_tokens               │ 16384                                                                                     │
+│ diff_summary             │ added: 28; deleted: 0; modified: 90;                                                      │
+╰──────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────╯
+2026-06-01 20:01:02 - shinka.core.async_runner - INFO - Getting code embedding for generation 5...
+2026-06-01 20:01:02 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 401 Unauthorized"
+2026-06-01 20:01:02 - shinka.embed.embedding - ERROR - Error getting embedding: Error code: 401 - {'error': {'message': 'Incorrect API key provided: sk-2as0_*************PBsA. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'code': 'invalid_api_key', 'param': None}, 'status': 401}
+2026-06-01 20:01:02 - shinka.core.async_runner - INFO - Code embedding completed for generation 5 (cost: $0.0000)
+2026-06-01 20:01:02 - shinka.launch.local - INFO - Submitted local process with PID: 3983819
+2026-06-01 20:01:02 - shinka.launch.local - INFO - Launched local command: /home/nara/certus/evo_frameworks/skydiscover/.venv/bin/python3 /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/evaluate.py --program_path /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_5/main.rs --results_dir /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_5/results
+2026-06-01 20:01:02 - shinka.core.async_runner - INFO - Proposal → Eval: gen 5 submitted for eval (cost: $0.0000, total: $0.0000). Running jobs: 1/4, Proposals: 4/6
+2026-06-01 20:01:16 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:01:16 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:01:16 - shinka.llm.llm - INFO - ==> QUERY: API cost: $0.0000
+2026-06-01 20:01:16 - shinka.core.async_runner - INFO -   FIX ATTEMPT 1/3 SUCCESS
+                         Patch Metadata - Gen 4/10 - Novelty: 1/3 - Resample: 1/3 - Patch: 1/3                          
+╭──────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────╮
+│ Field                    │ Value                                                                                     │
+├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────┤
+│ patch_type               │ fix                                                                                       │
+│ patch_name               │ sliding_window_pipeline                                                                   │
+│ patch_description        │ The batch-based pipeline in `pipelined_ssd_to_gpu` was serializing SSD reads and GPU      │
+│                          │ copies: it submitted a batch of reads, waited for ALL to complete, then did all GPU       │
+│                          │ copies. This prevented overlap between I/O and DMA transfers.                             │
+│                          │                                                                                           │
+│                          │ Fix: Converted to a sliding-window pipeline (matching the zero-copy variant's design).    │
+│                          │ Now each completed NVMe read immediately triggers a GPU H2D copy, and the next NVMe read  │
+│                          │ is submitted right away. This overlaps SSD I/O with GPU DMA transfers. Also increased     │
+│                          │ PIPELINE_RING_SIZE to 16 for deeper NVMe queue depth.                                     │
+│ num_applied              │ 1                                                                                         │
+│ api_costs                │ $0.0000                                                                                   │
+│ error_attempt            │ None                                                                                      │
+│ model_name               │ local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_en │
+│                          │ v=OPENAI_AP...                                                                            │
+│ temperature              │ 1.0                                                                                       │
+│ max_tokens               │ 16384                                                                                     │
+│ diff_summary             │ added: 26; deleted: 0; modified: 90;                                                      │
+╰──────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────╯
+2026-06-01 20:01:16 - shinka.core.async_runner - INFO - Getting code embedding for generation 4...
+2026-06-01 20:01:16 - shinka.llm.llm - INFO - ==> QUERY: API cost: $0.0000
+2026-06-01 20:01:16 - shinka.core.async_runner - INFO -   FIX ATTEMPT 1/3 SUCCESS
+                         Patch Metadata - Gen 3/10 - Novelty: 1/3 - Resample: 1/3 - Patch: 1/3                          
+╭──────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────╮
+│ Field                    │ Value                                                                                     │
+├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────┤
+│ patch_type               │ fix                                                                                       │
+│ patch_name               │ sliding_window_pipeline_overlap                                                           │
+│ patch_description        │ The original pipeline loop used a batch approach: submit N reads, wait for ALL N to       │
+│                          │ complete, then copy all to GPU. This serializes I/O and GPU DMA, resulting in low         │
+│                          │ throughput and high latency.                                                              │
+│                          │                                                                                           │
+│                          │ The fix converts the pipeline loop to a true sliding-window approach: as each individual  │
+│                          │ NVMe read completes, immediately start the GPU DMA copy for that chunk and submit the     │
+│                          │ next NVMe read. This overlaps SSD I/O with GPU transfers, significantly improving         │
+│                          │ throughput and reducing latency. Also increased PIPELINE_RING_SIZE to 16 for deeper queue │
+│                          │ depth.                                                                                    │
+│ num_applied              │ 1                                                                                         │
+│ api_costs                │ $0.0000                                                                                   │
+│ error_attempt            │ None                                                                                      │
+│ model_name               │ local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_en │
+│                          │ v=OPENAI_AP...                                                                            │
+│ temperature              │ 1.0                                                                                       │
+│ max_tokens               │ 16384                                                                                     │
+│ diff_summary             │ added: 26; deleted: 0; modified: 90;                                                      │
+╰──────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────╯
+2026-06-01 20:01:16 - shinka.core.async_runner - INFO - Getting code embedding for generation 3...
+2026-06-01 20:01:17 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 401 Unauthorized"
+2026-06-01 20:01:17 - shinka.embed.embedding - ERROR - Error getting embedding: Error code: 401 - {'error': {'message': 'Incorrect API key provided: sk-2as0_*************PBsA. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'code': 'invalid_api_key', 'param': None}, 'status': 401}
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - Code embedding completed for generation 4 (cost: $0.0000)
+2026-06-01 20:01:17 - shinka.launch.local - INFO - Submitted local process with PID: 3984534
+2026-06-01 20:01:17 - shinka.launch.local - INFO - Launched local command: /home/nara/certus/evo_frameworks/skydiscover/.venv/bin/python3 /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/evaluate.py --program_path /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_4/main.rs --results_dir /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_4/results
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - Proposal → Eval: gen 4 submitted for eval (cost: $0.0000, total: $0.0000). Running jobs: 2/4, Proposals: 3/6
+2026-06-01 20:01:17 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 401 Unauthorized"
+2026-06-01 20:01:17 - shinka.embed.embedding - ERROR - Error getting embedding: Error code: 401 - {'error': {'message': 'Incorrect API key provided: sk-2as0_*************PBsA. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'code': 'invalid_api_key', 'param': None}, 'status': 401}
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - Code embedding completed for generation 3 (cost: $0.0000)
+2026-06-01 20:01:17 - shinka.launch.local - INFO - Submitted local process with PID: 3984537
+2026-06-01 20:01:17 - shinka.launch.local - INFO - Launched local command: /home/nara/certus/evo_frameworks/skydiscover/.venv/bin/python3 /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/evaluate.py --program_path /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_3/main.rs --results_dir /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_3/results
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - Proposal → Eval: gen 3 submitted for eval (cost: $0.0000, total: $0.0000). Running jobs: 3/4, Proposals: 2/6
+2026-06-01 20:01:17 - shinka.launch.scheduler - WARNING - Process 3984534 exceeded timeout of 00:01:30. Killing. => Gen. 4
+2026-06-01 20:01:17 - shinka.launch.scheduler - WARNING - Process 3984537 exceeded timeout of 00:01:30. Killing. => Gen. 3
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - ✅ Job ProcessWithLogging(PID: 3984534) completed (gen 4) after 199.9s
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - ✅ Job ProcessWithLogging(PID: 3984537) completed (gen 3) after 199.9s
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - 🔄 Processing 2 completed jobs: gens [4, 3] (cost: $0.0000)
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - 🔄 SAFE PROCESSING: Starting job ProcessWithLogging(PID: 3984534) (gen 4)
+2026-06-01 20:01:17 - shinka.launch.local - INFO - Monitoring local process with PID: 3984534...
+2026-06-01 20:01:17 - shinka.launch.local - INFO - Process 3984534 completed with return code: -9
+2026-06-01 20:01:17 - shinka.utils.general - WARNING - Metrics file not found at /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_4/results/metrics.json
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - 📂 RESULTS: Got results for ProcessWithLogging(PID: 3984534): True
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - ✅ VALID RESULTS: ProcessWithLogging(PID: 3984534) has valid results - correct=False, score=0.0
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - 💾 DB ADD: Adding program to database for ProcessWithLogging(PID: 3984534) (gen 4)...
+2026-06-01 20:01:17 - shinka.database.dbase - INFO - Program 64119f0a-ed59-4941-9821-fb4eb85a0f09 added to DB - score: 0.0.
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - ✅ DB SUCCESS: Program 64119f0a-ed59-4941-9821-fb4eb85a0f09 successfully added to database for ProcessWithLogging(PID: 3984534) (gen 4)
+                                 Program Evaluation Summary - Gen 4 | Total Cost: $0.00                                 
+╭─────────────┬─────────┬───────────────┬─────────┬─────────────────────────────────┬────────┬────────┬─────────┬──────╮
+│  GenID: 4   │ Island  │    Status     │   Score │ Patch Name                      │ Type   │ Compl… │    Cost │ Time │
+├─────────────┼─────────┼───────────────┼─────────┼─────────────────────────────────┼────────┼────────┼─────────┼──────┤
+│  Best: N/A  │   I-2   │  ✗ Incorrect  │   0.000 │ sliding_window_pipeline         │ fix    │    1.0 │  $0.000 │ 0.0s │
+╰─────────────┴─────────┴───────────────┴─────────┴─────────────────────────────────┴────────┴────────┴─────────┴──────╯
+2026-06-01 20:01:17 - shinka.core.summarizer - INFO - Added program 64119f0a-ed59-4941-9821-fb4eb85a0f09 to meta memory tracking (correct=False, total: 3)
+    AsymmetricUCB (c=1.000, eps=0.200, adaptive=True, asym=True, exp_base=1.000, shift_base=True, shift_parent=True,    
+                         log_sum=True, cost_k=0.000, cost_c=0.100, cost_pow=1.00, cost_pct=50)                          
+╭─────────────────────────┬─────┬────────┬─────────┬─────────┬─────────┬─────────┬──────────┬───────┬──────────┬───────╮
+│ arm                     │   n │ n_cost │ tot_co… │ mean_c… │ exploit │ explore │ score_r… │ scor… │    score │  post │
+├─────────────────────────┼─────┼────────┼─────────┼─────────┼─────────┼─────────┼──────────┼───────┼──────────┼───────┤
+│ local/aws/claude-opus-… │   5 │      4 │  0.0000 │  0.0000 │  0.0000 │  0.8024 │   0.8024 │ 1.00… │   0.8024 │ 1.00… │
+╰─────────────────────────┴─────┴────────┴─────────┴─────────┴─────────┴─────────┴──────────┴───────┴──────────┴───────╯
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - No correct programs found yet, cannot determine best solution.
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - ✅ JOB COMPLETE: Finished processing ProcessWithLogging(PID: 3984534) - program 64119f0a-ed59-4941-9821-fb4eb85a0f09 added (gen 4)
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - 🔄 SAFE PROCESSING: Starting job ProcessWithLogging(PID: 3984537) (gen 3)
+2026-06-01 20:01:17 - shinka.launch.local - INFO - Monitoring local process with PID: 3984537...
+2026-06-01 20:01:17 - shinka.launch.local - INFO - Process 3984537 completed with return code: -9
+2026-06-01 20:01:17 - shinka.utils.general - WARNING - Metrics file not found at /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_3/results/metrics.json
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - 📂 RESULTS: Got results for ProcessWithLogging(PID: 3984537): True
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - ✅ VALID RESULTS: ProcessWithLogging(PID: 3984537) has valid results - correct=False, score=0.0
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - 💾 DB ADD: Adding program to database for ProcessWithLogging(PID: 3984537) (gen 3)...
+2026-06-01 20:01:17 - shinka.database.dbase - INFO - Program bbc5e33d-dc1d-4d08-8f64-225e1d38d8a8 added to DB - score: 0.0.
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - ✅ DB SUCCESS: Program bbc5e33d-dc1d-4d08-8f64-225e1d38d8a8 successfully added to database for ProcessWithLogging(PID: 3984537) (gen 3)
+                                 Program Evaluation Summary - Gen 3 | Total Cost: $0.00                                 
+╭─────────────┬─────────┬───────────────┬─────────┬─────────────────────────────────┬────────┬────────┬─────────┬──────╮
+│  GenID: 3   │ Island  │    Status     │   Score │ Patch Name                      │ Type   │ Compl… │    Cost │ Time │
+├─────────────┼─────────┼───────────────┼─────────┼─────────────────────────────────┼────────┼────────┼─────────┼──────┤
+│  Best: N/A  │   I-4   │  ✗ Incorrect  │   0.000 │ sliding_window_pipeline_overla  │ fix    │    1.0 │  $0.000 │ 0.1s │
+╰─────────────┴─────────┴───────────────┴─────────┴─────────────────────────────────┴────────┴────────┴─────────┴──────╯
+2026-06-01 20:01:17 - shinka.core.summarizer - INFO - Added program bbc5e33d-dc1d-4d08-8f64-225e1d38d8a8 to meta memory tracking (correct=False, total: 4)
+    AsymmetricUCB (c=1.000, eps=0.200, adaptive=True, asym=True, exp_base=1.000, shift_base=True, shift_parent=True,    
+                         log_sum=True, cost_k=0.000, cost_c=0.100, cost_pow=1.00, cost_pct=50)                          
+╭─────────────────────────┬─────┬────────┬─────────┬─────────┬─────────┬─────────┬──────────┬───────┬──────────┬───────╮
+│ arm                     │   n │ n_cost │ tot_co… │ mean_c… │ exploit │ explore │ score_r… │ scor… │    score │  post │
+├─────────────────────────┼─────┼────────┼─────────┼─────────┼─────────┼─────────┼──────────┼───────┼──────────┼───────┤
+│ local/aws/claude-opus-… │   5 │      4 │  0.0000 │  0.0000 │  0.0000 │  0.8024 │   0.8024 │ 1.00… │   0.8024 │ 1.00… │
+╰─────────────────────────┴─────┴────────┴─────────┴─────────┴─────────┴─────────┴──────────┴───────┴──────────┴───────╯
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - No correct programs found yet, cannot determine best solution.
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - ✅ JOB COMPLETE: Finished processing ProcessWithLogging(PID: 3984537) - program bbc5e33d-dc1d-4d08-8f64-225e1d38d8a8 added (gen 3)
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - ✅ Successfully processed 2/2 jobs
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - ✅ Completed generations updated: 2 -> 4 (cost: $0.0000)
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - Proposal target=4 (sampling_ewma=192.09s, evaluation_ewma=0.04s, timing_samples=3, active_proposals=1, running_jobs=1)
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - Starting 2 new proposals. Pipeline: 2/4 (running_jobs=1, active_proposals=1/6), Remaining completed work: 4 (completed=4/10, next_generation=6)
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - Started proposal task for generation 6 (cost: $0.0000)
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - Started proposal task for generation 7 (cost: $0.0000)
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - Generating proposal for generation 6
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - Generating proposal for generation 7
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - Getting meta recs for gen 6, sample_single_meta_rec=True
+2026-06-01 20:01:17 - shinka.core.summarizer - INFO - get_sampled_recommendation called, meta_recommendations exists: False
+2026-06-01 20:01:17 - shinka.core.summarizer - INFO - No meta recommendations available to sample from
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - meta_recs result: False
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - Getting meta recs for gen 7, sample_single_meta_rec=True
+2026-06-01 20:01:17 - shinka.core.summarizer - INFO - get_sampled_recommendation called, meta_recommendations exists: False
+2026-06-01 20:01:17 - shinka.core.summarizer - INFO - No meta recommendations available to sample from
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - meta_recs result: False
+2026-06-01 20:01:17 - shinka.database.dbase - INFO - No correct programs. Randomly sampled incorrect program bbc5e33d-dc1d-4d08-8f64-225e1d38d8a8 (Gen: 3) [from 8 incorrect programs].
+2026-06-01 20:01:17 - shinka.database.dbase - INFO - No correct programs. Randomly sampled incorrect program 54237802-2c43-4671-ad13-34ec64e9af32 (Gen: 0) [from 8 incorrect programs].
+2026-06-01 20:01:17 - shinka.database.dbase - INFO - Retrieved 1 ancestors for program bbc5e33d-dc1d-4d08-8f64-225e1d38d8a8 (generations: [0])
+              Parent & Context Sampling Summary - Gen 7 | Total Cost: $0.00 (Novelty: 1/3, Resample: 1/3)               
+┏━━━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┳━━━━━━┓
+┃ Role        ┃ Gen  ┃ Island  ┃  ✓/✗  ┃    Score ┃ Patch Name                      ┃ Type   ┃ Compl… ┃    Cost ┃ Time ┃
+┡━━━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━━━╇━━━━━━┩
+│ FIX TARGET  │  0   │   I-1   │   ✗   │    0.198 │ initial_program                 │ init   │    1.0 │  $0.000 │ 28.… │
+└─────────────┴──────┴─────────┴───────┴──────────┴─────────────────────────────────┴────────┴────────┴─────────┴──────┘
+              Parent & Context Sampling Summary - Gen 6 | Total Cost: $0.00 (Novelty: 1/3, Resample: 1/3)               
+┏━━━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┳━━━━━━┓
+┃ Role        ┃ Gen  ┃ Island  ┃  ✓/✗  ┃    Score ┃ Patch Name                      ┃ Type   ┃ Compl… ┃    Cost ┃ Time ┃
+┡━━━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━━━╇━━━━━━┩
+│ FIX TARGET  │  3   │   I-4   │   ✗   │    0.000 │ sliding_window_pipeline_overla  │ fix    │    1.0 │  $0.000 │ 0.1s │
+│ ANCESTOR-1  │  0   │   I-4   │   ✗   │    0.198 │ initial_program                 │ init   │    1.0 │  $0.000 │ 28.… │
+└─────────────┴──────┴─────────┴───────┴──────────┴─────────────────────────────────┴────────┴────────┴─────────┴──────┘
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - FIX MODE: Attempting to fix incorrect program 54237802-2c43-4671-ad13-34ec64e9af32 (Gen: 0)
+2026-06-01 20:01:17 - shinka.core.sampler - INFO - Generated FIX prompt for incorrect program (Gen: 0, Score: 0.1976, Ancestors: 0)
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - Generated FIX patch type: fix
+2026-06-01 20:01:17 - shinka.llm.llm - INFO - ==> SAMPLING:
+  local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY   1.0000
+2026-06-01 20:01:17 - shinka.llm.llm - INFO - ==> QUERYING: ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '0.7', '16384']
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - FIX MODE: Attempting to fix incorrect program bbc5e33d-dc1d-4d08-8f64-225e1d38d8a8 (Gen: 3)
+2026-06-01 20:01:17 - shinka.core.sampler - INFO - Generated FIX prompt for incorrect program (Gen: 3, Score: 0.0000, Ancestors: 1)
+2026-06-01 20:01:17 - shinka.core.async_runner - INFO - Generated FIX patch type: fix
+2026-06-01 20:01:17 - shinka.llm.llm - INFO - ==> SAMPLING:
+  local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY   1.0000
+2026-06-01 20:01:17 - shinka.llm.llm - INFO - ==> QUERYING: ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '1.0', '16384']
+2026-06-01 20:01:20 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:01:20 - shinka.llm.llm - INFO - ==> QUERY: API cost: $0.0000
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO -   FIX ATTEMPT 1/3 SUCCESS
+                         Patch Metadata - Gen 2/10 - Novelty: 1/3 - Resample: 1/3 - Patch: 1/3                          
+╭──────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────╮
+│ Field                    │ Value                                                                                     │
+├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────┤
+│ patch_type               │ fix                                                                                       │
+│ patch_name               │ sliding_window_pipeline_overlap                                                           │
+│ patch_description        │ The batch-based pipeline loop serialized SSD reads and GPU copies - it submitted all      │
+│                          │ reads in a batch, waited for all completions, then did all GPU copies. This prevented any │
+│                          │ overlap between I/O and compute. Fixed by implementing a sliding-window approach: prime   │
+│                          │ the ring with initial reads, then for each completion immediately issue the GPU copy and  │
+│                          │ submit the next read. This overlaps SSD I/O with GPU DMA transfers. Also increased        │
+│                          │ PIPELINE_RING_SIZE from 8 to 16 to better saturate the NVMe queue depth.                  │
+│ num_applied              │ 1                                                                                         │
+│ api_costs                │ $0.0000                                                                                   │
+│ error_attempt            │ None                                                                                      │
+│ model_name               │ local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_en │
+│                          │ v=OPENAI_AP...                                                                            │
+│ temperature              │ 0.7                                                                                       │
+│ max_tokens               │ 16384                                                                                     │
+│ diff_summary             │ added: 23; deleted: 0; modified: 90;                                                      │
+╰──────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────╯
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - Getting code embedding for generation 2...
+2026-06-01 20:01:20 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 401 Unauthorized"
+2026-06-01 20:01:20 - shinka.embed.embedding - ERROR - Error getting embedding: Error code: 401 - {'error': {'message': 'Incorrect API key provided: sk-2as0_*************PBsA. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'code': 'invalid_api_key', 'param': None}, 'status': 401}
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - Code embedding completed for generation 2 (cost: $0.0000)
+2026-06-01 20:01:20 - shinka.launch.local - INFO - Submitted local process with PID: 3984600
+2026-06-01 20:01:20 - shinka.launch.local - INFO - Launched local command: /home/nara/certus/evo_frameworks/skydiscover/.venv/bin/python3 /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/evaluate.py --program_path /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_2/main.rs --results_dir /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_2/results
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - Proposal → Eval: gen 2 submitted for eval (cost: $0.0000, total: $0.0000). Running jobs: 2/4, Proposals: 3/6
+2026-06-01 20:01:20 - shinka.launch.scheduler - WARNING - Process 3984600 exceeded timeout of 00:01:30. Killing. => Gen. 2
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - ✅ Job ProcessWithLogging(PID: 3984600) completed (gen 2) after 203.7s
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - 🔄 Processing 1 completed jobs: gens [2] (cost: $0.0000)
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - 🔄 SAFE PROCESSING: Starting job ProcessWithLogging(PID: 3984600) (gen 2)
+2026-06-01 20:01:20 - shinka.launch.local - INFO - Monitoring local process with PID: 3984600...
+2026-06-01 20:01:20 - shinka.launch.local - INFO - Process 3984600 completed with return code: -9
+2026-06-01 20:01:20 - shinka.utils.general - WARNING - Metrics file not found at /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_2/results/metrics.json
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - 📂 RESULTS: Got results for ProcessWithLogging(PID: 3984600): True
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - ✅ VALID RESULTS: ProcessWithLogging(PID: 3984600) has valid results - correct=False, score=0.0
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - 💾 DB ADD: Adding program to database for ProcessWithLogging(PID: 3984600) (gen 2)...
+2026-06-01 20:01:20 - shinka.database.dbase - INFO - Program c6fbc173-9677-470f-9268-71a695686c97 added to DB - score: 0.0.
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - ✅ DB SUCCESS: Program c6fbc173-9677-470f-9268-71a695686c97 successfully added to database for ProcessWithLogging(PID: 3984600) (gen 2)
+                                 Program Evaluation Summary - Gen 2 | Total Cost: $0.00                                 
+╭─────────────┬─────────┬───────────────┬─────────┬─────────────────────────────────┬────────┬────────┬─────────┬──────╮
+│  GenID: 2   │ Island  │    Status     │   Score │ Patch Name                      │ Type   │ Compl… │    Cost │ Time │
+├─────────────┼─────────┼───────────────┼─────────┼─────────────────────────────────┼────────┼────────┼─────────┼──────┤
+│  Best: N/A  │   I-3   │  ✗ Incorrect  │   0.000 │ sliding_window_pipeline_overla  │ fix    │    1.0 │  $0.000 │ 0.1s │
+╰─────────────┴─────────┴───────────────┴─────────┴─────────────────────────────────┴────────┴────────┴─────────┴──────╯
+2026-06-01 20:01:20 - shinka.core.summarizer - INFO - Added program c6fbc173-9677-470f-9268-71a695686c97 to meta memory tracking (correct=False, total: 5)
+    AsymmetricUCB (c=1.000, eps=0.200, adaptive=True, asym=True, exp_base=1.000, shift_base=True, shift_parent=True,    
+                         log_sum=True, cost_k=0.000, cost_c=0.100, cost_pow=1.00, cost_pct=50)                          
+╭─────────────────────────┬─────┬────────┬─────────┬─────────┬─────────┬─────────┬──────────┬───────┬──────────┬───────╮
+│ arm                     │   n │ n_cost │ tot_co… │ mean_c… │ exploit │ explore │ score_r… │ scor… │    score │  post │
+├─────────────────────────┼─────┼────────┼─────────┼─────────┼─────────┼─────────┼──────────┼───────┼──────────┼───────┤
+│ local/aws/claude-opus-… │   7 │      5 │  0.0000 │  0.0000 │  0.0000 │  0.7456 │   0.7456 │ 1.00… │   0.7456 │ 1.00… │
+╰─────────────────────────┴─────┴────────┴─────────┴─────────┴─────────┴─────────┴──────────┴───────┴──────────┴───────╯
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - No correct programs found yet, cannot determine best solution.
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - ✅ JOB COMPLETE: Finished processing ProcessWithLogging(PID: 3984600) - program c6fbc173-9677-470f-9268-71a695686c97 added (gen 2)
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - ✅ Successfully processed 1/1 jobs
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - ✅ Completed generations updated: 4 -> 5 (cost: $0.0000)
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - Proposal target=4 (sampling_ewma=195.53s, evaluation_ewma=0.06s, timing_samples=4, active_proposals=2, running_jobs=1)
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - Starting 1 new proposals. Pipeline: 3/4 (running_jobs=1, active_proposals=2/6), Remaining completed work: 2 (completed=5/10, next_generation=8)
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - Started proposal task for generation 8 (cost: $0.0000)
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - Generating proposal for generation 8
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - Getting meta recs for gen 8, sample_single_meta_rec=True
+2026-06-01 20:01:20 - shinka.core.summarizer - INFO - get_sampled_recommendation called, meta_recommendations exists: False
+2026-06-01 20:01:20 - shinka.core.summarizer - INFO - No meta recommendations available to sample from
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - meta_recs result: False
+2026-06-01 20:01:20 - shinka.database.dbase - INFO - No correct programs. Randomly sampled incorrect program bbc5e33d-dc1d-4d08-8f64-225e1d38d8a8 (Gen: 3) [from 9 incorrect programs].
+2026-06-01 20:01:20 - shinka.database.dbase - INFO - Retrieved 1 ancestors for program bbc5e33d-dc1d-4d08-8f64-225e1d38d8a8 (generations: [0])
+              Parent & Context Sampling Summary - Gen 8 | Total Cost: $0.00 (Novelty: 1/3, Resample: 1/3)               
+┏━━━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┳━━━━━━┓
+┃ Role        ┃ Gen  ┃ Island  ┃  ✓/✗  ┃    Score ┃ Patch Name                      ┃ Type   ┃ Compl… ┃    Cost ┃ Time ┃
+┡━━━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━━━╇━━━━━━┩
+│ FIX TARGET  │  3   │   I-4   │   ✗   │    0.000 │ sliding_window_pipeline_overla  │ fix    │    1.0 │  $0.000 │ 0.1s │
+│ ANCESTOR-1  │  0   │   I-4   │   ✗   │    0.198 │ initial_program                 │ init   │    1.0 │  $0.000 │ 28.… │
+└─────────────┴──────┴─────────┴───────┴──────────┴─────────────────────────────────┴────────┴────────┴─────────┴──────┘
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - FIX MODE: Attempting to fix incorrect program bbc5e33d-dc1d-4d08-8f64-225e1d38d8a8 (Gen: 3)
+2026-06-01 20:01:20 - shinka.core.sampler - INFO - Generated FIX prompt for incorrect program (Gen: 3, Score: 0.0000, Ancestors: 1)
+2026-06-01 20:01:20 - shinka.core.async_runner - INFO - Generated FIX patch type: fix
+2026-06-01 20:01:20 - shinka.llm.llm - INFO - ==> SAMPLING:
+  local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY   1.0000
+2026-06-01 20:01:20 - shinka.llm.llm - INFO - ==> QUERYING: ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '0.7', '16384']
+2026-06-01 20:01:21 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:01:21 - shinka.llm.llm - INFO - ==> QUERY: API cost: $0.0000
+2026-06-01 20:01:21 - shinka.core.async_runner - INFO -   FIX ATTEMPT 1/3 SUCCESS
+                         Patch Metadata - Gen 7/10 - Novelty: 1/3 - Resample: 1/3 - Patch: 1/3                          
+╭──────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────╮
+│ Field                    │ Value                                                                                     │
+├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────┤
+│ patch_type               │ fix                                                                                       │
+│ patch_name               │ sliding_window_pipeline_overlap                                                           │
+│ patch_description        │ The original pipeline loop used a batch approach: submit N reads, wait for ALL N to       │
+│                          │ complete, then copy all to GPU. This serializes I/O and GPU DMA, resulting in low         │
+│                          │ throughput and high latency.                                                              │
+│                          │                                                                                           │
+│                          │ The fix converts the pipeline loop to a true sliding-window approach: as each individual  │
+│                          │ NVMe read completes, immediately start the GPU DMA copy for that chunk and submit the     │
+│                          │ next NVMe read. This overlaps SSD I/O with GPU transfers, significantly improving         │
+│                          │ throughput and reducing latency. Also increased PIPELINE_RING_SIZE to 16 for deeper queue │
+│                          │ depth.                                                                                    │
+│ num_applied              │ 1                                                                                         │
+│ api_costs                │ $0.0000                                                                                   │
+│ error_attempt            │ None                                                                                      │
+│ model_name               │ local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_en │
+│                          │ v=OPENAI_AP...                                                                            │
+│ temperature              │ 1.0                                                                                       │
+│ max_tokens               │ 16384                                                                                     │
+│ diff_summary             │ added: 26; deleted: 0; modified: 90;                                                      │
+╰──────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────╯
+2026-06-01 20:01:21 - shinka.core.async_runner - INFO - Getting code embedding for generation 7...
+2026-06-01 20:01:21 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 401 Unauthorized"
+2026-06-01 20:01:21 - shinka.embed.embedding - ERROR - Error getting embedding: Error code: 401 - {'error': {'message': 'Incorrect API key provided: sk-2as0_*************PBsA. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'code': 'invalid_api_key', 'param': None}, 'status': 401}
+2026-06-01 20:01:21 - shinka.core.async_runner - INFO - Code embedding completed for generation 7 (cost: $0.0000)
+2026-06-01 20:01:21 - shinka.launch.local - INFO - Submitted local process with PID: 3984628
+2026-06-01 20:01:21 - shinka.launch.local - INFO - Launched local command: /home/nara/certus/evo_frameworks/skydiscover/.venv/bin/python3 /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/evaluate.py --program_path /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_7/main.rs --results_dir /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_7/results
+2026-06-01 20:01:21 - shinka.core.async_runner - INFO - Proposal → Eval: gen 7 submitted for eval (cost: $0.0000, total: $0.0000). Running jobs: 2/4, Proposals: 3/6
+2026-06-01 20:01:27 - shinka.core.async_runner - INFO - 🔍 Meta task check: completed_gens=5, target=10, pending_work=5, running_eval_jobs=2, running_proposal_jobs=2, api_costs=$0.0000, should_stop=False, is_stuck=False, stuck_count=0, time_since_progress=6.3s
+2026-06-01 20:01:29 - shinka.core.async_runner - INFO - ✅ Job ProcessWithLogging(PID: 3983819) completed (gen 5) after 27.9s
+2026-06-01 20:01:29 - shinka.core.async_runner - INFO - 🔄 Processing 1 completed jobs: gens [5] (cost: $0.0000)
+2026-06-01 20:01:29 - shinka.core.async_runner - INFO - 🔄 SAFE PROCESSING: Starting job ProcessWithLogging(PID: 3983819) (gen 5)
+2026-06-01 20:01:29 - shinka.launch.local - INFO - Monitoring local process with PID: 3983819...
+2026-06-01 20:01:29 - shinka.launch.local - INFO - Process 3983819 completed with return code: 0
+2026-06-01 20:01:29 - shinka.core.async_runner - INFO - 📂 RESULTS: Got results for ProcessWithLogging(PID: 3983819): True
+2026-06-01 20:01:29 - shinka.core.async_runner - INFO - ✅ VALID RESULTS: ProcessWithLogging(PID: 3983819) has valid results - correct=False, score=0.2073
+2026-06-01 20:01:29 - shinka.core.async_runner - INFO - 💾 DB ADD: Adding program to database for ProcessWithLogging(PID: 3983819) (gen 5)...
+2026-06-01 20:01:29 - shinka.database.dbase - INFO - Program 37d07523-48e6-488e-bdba-c7e083e645f3 added to DB - score: 0.2073.
+2026-06-01 20:01:29 - shinka.core.async_runner - INFO - ✅ DB SUCCESS: Program 37d07523-48e6-488e-bdba-c7e083e645f3 successfully added to database for ProcessWithLogging(PID: 3983819) (gen 5)
+                                 Program Evaluation Summary - Gen 5 | Total Cost: $0.00                                 
+╭─────────────┬─────────┬───────────────┬─────────┬─────────────────────────────────┬────────┬────────┬─────────┬──────╮
+│  GenID: 5   │ Island  │    Status     │   Score │ Patch Name                      │ Type   │ Compl… │    Cost │ Time │
+├─────────────┼─────────┼───────────────┼─────────┼─────────────────────────────────┼────────┼────────┼─────────┼──────┤
+│  Best: N/A  │   I-2   │  ✗ Incorrect  │   0.207 │ sliding_window_pipeline         │ fix    │    1.0 │  $0.000 │ 27.… │
+╰─────────────┴─────────┴───────────────┴─────────┴─────────────────────────────────┴────────┴────────┴─────────┴──────╯
+2026-06-01 20:01:29 - shinka.database.dbase - INFO - Running scheduled migration operation
+2026-06-01 20:01:29 - shinka.database.islands - INFO - Performing island migration at generation 5
+2026-06-01 20:01:29 - shinka.database.islands - INFO - Migration complete. Migrated 0 programs.
+2026-06-01 20:01:29 - shinka.core.summarizer - INFO - Added program 37d07523-48e6-488e-bdba-c7e083e645f3 to meta memory tracking (correct=False, total: 6)
+    AsymmetricUCB (c=1.000, eps=0.200, adaptive=True, asym=True, exp_base=1.000, shift_base=True, shift_parent=True,    
+                         log_sum=True, cost_k=0.000, cost_c=0.100, cost_pow=1.00, cost_pct=50)                          
+╭─────────────────────────┬─────┬────────┬─────────┬─────────┬─────────┬─────────┬──────────┬───────┬──────────┬───────╮
+│ arm                     │   n │ n_cost │ tot_co… │ mean_c… │ exploit │ explore │ score_r… │ scor… │    score │  post │
+├─────────────────────────┼─────┼────────┼─────────┼─────────┼─────────┼─────────┼──────────┼───────┼──────────┼───────┤
+│ local/aws/claude-opus-… │   8 │      6 │  0.0000 │  0.0000 │  0.0000 │  0.7210 │   0.7210 │ 1.00… │   0.7210 │ 1.00… │
+╰─────────────────────────┴─────┴────────┴─────────┴─────────┴─────────┴─────────┴──────────┴───────┴──────────┴───────╯
+2026-06-01 20:01:29 - shinka.core.async_runner - INFO - No correct programs found yet, cannot determine best solution.
+2026-06-01 20:01:29 - shinka.core.async_runner - INFO - ✅ JOB COMPLETE: Finished processing ProcessWithLogging(PID: 3983819) - program 37d07523-48e6-488e-bdba-c7e083e645f3 added (gen 5)
+2026-06-01 20:01:29 - shinka.core.async_runner - INFO - ✅ Successfully processed 1/1 jobs
+2026-06-01 20:01:29 - shinka.core.async_runner - INFO - ✅ Completed generations updated: 5 -> 6 (cost: $0.0000)
+2026-06-01 20:01:29 - shinka.core.async_runner - INFO - Proposal target=4 (sampling_ewma=137.14s, evaluation_ewma=8.14s, timing_samples=5, active_proposals=2, running_jobs=1)
+2026-06-01 20:01:29 - shinka.core.async_runner - INFO - Starting 1 new proposals. Pipeline: 3/4 (running_jobs=1, active_proposals=2/6), Remaining completed work: 1 (completed=6/10, next_generation=9)
+2026-06-01 20:01:29 - shinka.core.async_runner - INFO - Started proposal task for generation 9 (cost: $0.0000)
+2026-06-01 20:01:29 - shinka.core.async_runner - INFO - Generating proposal for generation 9
+2026-06-01 20:01:29 - shinka.core.async_runner - INFO - Getting meta recs for gen 9, sample_single_meta_rec=True
+2026-06-01 20:01:29 - shinka.core.summarizer - INFO - get_sampled_recommendation called, meta_recommendations exists: False
+2026-06-01 20:01:29 - shinka.core.summarizer - INFO - No meta recommendations available to sample from
+2026-06-01 20:01:29 - shinka.core.async_runner - INFO - meta_recs result: False
+2026-06-01 20:01:29 - shinka.database.dbase - INFO - No correct programs. Randomly sampled incorrect program 8a2805ec-9cb4-478d-882d-28e0d856d79c (Gen: 0) [from 10 incorrect programs].
+              Parent & Context Sampling Summary - Gen 9 | Total Cost: $0.00 (Novelty: 1/3, Resample: 1/3)               
+┏━━━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┳━━━━━━┓
+┃ Role        ┃ Gen  ┃ Island  ┃  ✓/✗  ┃    Score ┃ Patch Name                      ┃ Type   ┃ Compl… ┃    Cost ┃ Time ┃
+┡━━━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━━━╇━━━━━━┩
+│ FIX TARGET  │  0   │   I-0   │   ✗   │    0.198 │ initial_program                 │ init   │    1.0 │  $0.000 │ 28.… │
+└─────────────┴──────┴─────────┴───────┴──────────┴─────────────────────────────────┴────────┴────────┴─────────┴──────┘
+2026-06-01 20:01:29 - shinka.core.async_runner - INFO - FIX MODE: Attempting to fix incorrect program 8a2805ec-9cb4-478d-882d-28e0d856d79c (Gen: 0)
+2026-06-01 20:01:29 - shinka.core.sampler - INFO - Generated FIX prompt for incorrect program (Gen: 0, Score: 0.1976, Ancestors: 0)
+2026-06-01 20:01:29 - shinka.core.async_runner - INFO - Generated FIX patch type: fix
+2026-06-01 20:01:29 - shinka.llm.llm - INFO - ==> SAMPLING:
+  local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY   1.0000
+2026-06-01 20:01:29 - shinka.llm.llm - INFO - ==> QUERYING: ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '1.0', '16384']
+2026-06-01 20:01:29 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:01:29 - shinka.llm.llm - INFO - ==> QUERY: API cost: $0.0000
+2026-06-01 20:01:30 - shinka.core.async_runner - INFO -   FIX ATTEMPT 1/3 SUCCESS
+                         Patch Metadata - Gen 9/10 - Novelty: 1/3 - Resample: 1/3 - Patch: 1/3                          
+╭──────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────╮
+│ Field                    │ Value                                                                                     │
+├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────┤
+│ patch_type               │ fix                                                                                       │
+│ patch_name               │ sliding_window_pipeline_overlap                                                           │
+│ patch_description        │ The batch-based pipeline loop serialized SSD reads and GPU copies - it submitted all      │
+│                          │ reads in a batch, waited for all completions, then did all GPU copies. This prevented any │
+│                          │ overlap between I/O and compute. Fixed by implementing a sliding-window approach: prime   │
+│                          │ the ring with initial reads, then for each completion immediately issue the GPU copy and  │
+│                          │ submit the next read. This overlaps SSD I/O with GPU DMA transfers. Also increased        │
+│                          │ PIPELINE_RING_SIZE from 8 to 16 to better saturate the NVMe queue depth.                  │
+│ num_applied              │ 1                                                                                         │
+│ api_costs                │ $0.0000                                                                                   │
+│ error_attempt            │ None                                                                                      │
+│ model_name               │ local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_en │
+│                          │ v=OPENAI_AP...                                                                            │
+│ temperature              │ 0.0                                                                                       │
+│ max_tokens               │ 16384                                                                                     │
+│ diff_summary             │ added: 23; deleted: 0; modified: 90;                                                      │
+╰──────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────╯
+2026-06-01 20:01:30 - shinka.core.async_runner - INFO - Getting code embedding for generation 9...
+2026-06-01 20:01:30 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 401 Unauthorized"
+2026-06-01 20:01:30 - shinka.embed.embedding - ERROR - Error getting embedding: Error code: 401 - {'error': {'message': 'Incorrect API key provided: sk-2as0_*************PBsA. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'code': 'invalid_api_key', 'param': None}, 'status': 401}
+2026-06-01 20:01:30 - shinka.core.async_runner - INFO - Code embedding completed for generation 9 (cost: $0.0000)
+2026-06-01 20:01:30 - shinka.launch.local - INFO - Submitted local process with PID: 3984983
+2026-06-01 20:01:30 - shinka.launch.local - INFO - Launched local command: /home/nara/certus/evo_frameworks/skydiscover/.venv/bin/python3 /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/evaluate.py --program_path /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_9/main.rs --results_dir /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_9/results
+2026-06-01 20:01:30 - shinka.core.async_runner - INFO - Proposal → Eval: gen 9 submitted for eval (cost: $0.0000, total: $0.0000). Running jobs: 2/4, Proposals: 3/6
+2026-06-01 20:01:48 - shinka.core.async_runner - INFO - ✅ Job ProcessWithLogging(PID: 3984628) completed (gen 7) after 31.0s
+2026-06-01 20:01:48 - shinka.core.async_runner - INFO - 🔄 Processing 1 completed jobs: gens [7] (cost: $0.0000)
+2026-06-01 20:01:48 - shinka.core.async_runner - INFO - 🔄 SAFE PROCESSING: Starting job ProcessWithLogging(PID: 3984628) (gen 7)
+2026-06-01 20:01:48 - shinka.launch.local - INFO - Monitoring local process with PID: 3984628...
+2026-06-01 20:01:48 - shinka.launch.local - INFO - Process 3984628 completed with return code: 0
+2026-06-01 20:01:48 - shinka.core.async_runner - INFO - 📂 RESULTS: Got results for ProcessWithLogging(PID: 3984628): True
+2026-06-01 20:01:48 - shinka.core.async_runner - INFO - ✅ VALID RESULTS: ProcessWithLogging(PID: 3984628) has valid results - correct=False, score=0.0
+2026-06-01 20:01:48 - shinka.core.async_runner - INFO - 💾 DB ADD: Adding program to database for ProcessWithLogging(PID: 3984628) (gen 7)...
+2026-06-01 20:01:48 - shinka.database.dbase - INFO - Program 07bc4ad0-099e-4f53-8821-de03e2047107 added to DB - score: 0.0.
+2026-06-01 20:01:48 - shinka.core.async_runner - INFO - ✅ DB SUCCESS: Program 07bc4ad0-099e-4f53-8821-de03e2047107 successfully added to database for ProcessWithLogging(PID: 3984628) (gen 7)
+                                 Program Evaluation Summary - Gen 7 | Total Cost: $0.00                                 
+╭─────────────┬─────────┬───────────────┬─────────┬─────────────────────────────────┬────────┬────────┬─────────┬──────╮
+│  GenID: 7   │ Island  │    Status     │   Score │ Patch Name                      │ Type   │ Compl… │    Cost │ Time │
+├─────────────┼─────────┼───────────────┼─────────┼─────────────────────────────────┼────────┼────────┼─────────┼──────┤
+│  Best: N/A  │   I-1   │  ✗ Incorrect  │   0.000 │ sliding_window_pipeline_overla  │ fix    │    1.0 │  $0.000 │ 26.… │
+╰─────────────┴─────────┴───────────────┴─────────┴─────────────────────────────────┴────────┴────────┴─────────┴──────╯
+2026-06-01 20:01:48 - shinka.core.summarizer - INFO - Added program 07bc4ad0-099e-4f53-8821-de03e2047107 to meta memory tracking (correct=False, total: 7)
+    AsymmetricUCB (c=1.000, eps=0.200, adaptive=True, asym=True, exp_base=1.000, shift_base=True, shift_parent=True,    
+                         log_sum=True, cost_k=0.000, cost_c=0.100, cost_pow=1.00, cost_pct=50)                          
+╭─────────────────────────┬─────┬────────┬─────────┬─────────┬─────────┬─────────┬──────────┬───────┬──────────┬───────╮
+│ arm                     │   n │ n_cost │ tot_co… │ mean_c… │ exploit │ explore │ score_r… │ scor… │    score │  post │
+├─────────────────────────┼─────┼────────┼─────────┼─────────┼─────────┼─────────┼──────────┼───────┼──────────┼───────┤
+│ local/aws/claude-opus-… │   9 │      7 │  0.0000 │  0.0000 │  0.0000 │  0.6988 │   0.6988 │ 1.00… │   0.6988 │ 1.00… │
+╰─────────────────────────┴─────┴────────┴─────────┴─────────┴─────────┴─────────┴──────────┴───────┴──────────┴───────╯
+2026-06-01 20:01:48 - shinka.core.async_runner - INFO - No correct programs found yet, cannot determine best solution.
+2026-06-01 20:01:48 - shinka.core.async_runner - INFO - ✅ JOB COMPLETE: Finished processing ProcessWithLogging(PID: 3984628) - program 07bc4ad0-099e-4f53-8821-de03e2047107 added (gen 7)
+2026-06-01 20:01:48 - shinka.core.async_runner - INFO - ✅ Successfully processed 1/1 jobs
+2026-06-01 20:01:48 - shinka.core.async_runner - INFO - ✅ Completed generations updated: 6 -> 7 (cost: $0.0000)
+2026-06-01 20:01:48 - shinka.core.async_runner - INFO - Proposal target=4 (sampling_ewma=97.38s, evaluation_ewma=13.63s, timing_samples=6, active_proposals=2, running_jobs=1)
+2026-06-01 20:01:53 - shinka.core.async_runner - INFO - ✅ Job ProcessWithLogging(PID: 3984983) completed (gen 9) after 24.0s
+2026-06-01 20:01:53 - shinka.core.async_runner - INFO - 🔄 Processing 1 completed jobs: gens [9] (cost: $0.0000)
+2026-06-01 20:01:53 - shinka.core.async_runner - INFO - 🔄 SAFE PROCESSING: Starting job ProcessWithLogging(PID: 3984983) (gen 9)
+2026-06-01 20:01:53 - shinka.launch.local - INFO - Monitoring local process with PID: 3984983...
+2026-06-01 20:01:53 - shinka.launch.local - INFO - Process 3984983 completed with return code: 0
+2026-06-01 20:01:53 - shinka.core.async_runner - INFO - 📂 RESULTS: Got results for ProcessWithLogging(PID: 3984983): True
+2026-06-01 20:01:53 - shinka.core.async_runner - INFO - ✅ VALID RESULTS: ProcessWithLogging(PID: 3984983) has valid results - correct=False, score=0.0
+2026-06-01 20:01:53 - shinka.core.async_runner - INFO - 💾 DB ADD: Adding program to database for ProcessWithLogging(PID: 3984983) (gen 9)...
+2026-06-01 20:01:53 - shinka.database.dbase - INFO - Program 99ae6e0a-2006-49ab-8ec7-e9091f14ae4d added to DB - score: 0.0.
+2026-06-01 20:01:53 - shinka.core.async_runner - INFO - ✅ DB SUCCESS: Program 99ae6e0a-2006-49ab-8ec7-e9091f14ae4d successfully added to database for ProcessWithLogging(PID: 3984983) (gen 9)
+                                 Program Evaluation Summary - Gen 9 | Total Cost: $0.00                                 
+╭─────────────┬─────────┬───────────────┬─────────┬─────────────────────────────────┬────────┬────────┬─────────┬──────╮
+│  GenID: 9   │ Island  │    Status     │   Score │ Patch Name                      │ Type   │ Compl… │    Cost │ Time │
+├─────────────┼─────────┼───────────────┼─────────┼─────────────────────────────────┼────────┼────────┼─────────┼──────┤
+│  Best: N/A  │   I-0   │  ✗ Incorrect  │   0.000 │ sliding_window_pipeline_overla  │ fix    │    1.0 │  $0.000 │ 23.… │
+╰─────────────┴─────────┴───────────────┴─────────┴─────────────────────────────────┴────────┴────────┴─────────┴──────╯
+2026-06-01 20:01:53 - shinka.core.summarizer - INFO - Added program 99ae6e0a-2006-49ab-8ec7-e9091f14ae4d to meta memory tracking (correct=False, total: 8)
+    AsymmetricUCB (c=1.000, eps=0.200, adaptive=True, asym=True, exp_base=1.000, shift_base=True, shift_parent=True,    
+                         log_sum=True, cost_k=0.000, cost_c=0.100, cost_pow=1.00, cost_pct=50)                          
+╭─────────────────────────┬─────┬────────┬─────────┬─────────┬─────────┬─────────┬──────────┬───────┬──────────┬───────╮
+│ arm                     │   n │ n_cost │ tot_co… │ mean_c… │ exploit │ explore │ score_r… │ scor… │    score │  post │
+├─────────────────────────┼─────┼────────┼─────────┼─────────┼─────────┼─────────┼──────────┼───────┼──────────┼───────┤
+│ local/aws/claude-opus-… │   9 │      7 │  0.0000 │  0.0000 │  0.0000 │  0.6988 │   0.6988 │ 1.00… │   0.6988 │ 1.00… │
+╰─────────────────────────┴─────┴────────┴─────────┴─────────┴─────────┴─────────┴──────────┴───────┴──────────┴───────╯
+2026-06-01 20:01:53 - shinka.core.async_runner - INFO - No correct programs found yet, cannot determine best solution.
+2026-06-01 20:01:53 - shinka.core.async_runner - INFO - ✅ JOB COMPLETE: Finished processing ProcessWithLogging(PID: 3984983) - program 99ae6e0a-2006-49ab-8ec7-e9091f14ae4d added (gen 9)
+2026-06-01 20:01:53 - shinka.core.async_runner - INFO - ✅ Successfully processed 1/1 jobs
+2026-06-01 20:01:53 - shinka.core.async_runner - INFO - ✅ Completed generations updated: 7 -> 8 (cost: $0.0000)
+2026-06-01 20:01:53 - shinka.core.async_runner - INFO - Proposal target=4 (sampling_ewma=68.45s, evaluation_ewma=16.47s, timing_samples=7, active_proposals=2, running_jobs=0)
+2026-06-01 20:01:57 - shinka.core.async_runner - INFO - 🔍 Meta task check: completed_gens=8, target=10, pending_work=2, running_eval_jobs=0, running_proposal_jobs=2, api_costs=$0.0000, should_stop=False, is_stuck=False, stuck_count=0, time_since_progress=3.8s
+2026-06-01 20:04:20 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:04:20 - shinka.llm.llm - INFO - ==> QUERY: API cost: $0.0000
+2026-06-01 20:04:20 - shinka.core.async_runner - INFO -   FIX ATTEMPT 1/3 SUCCESS
+                         Patch Metadata - Gen 6/10 - Novelty: 1/3 - Resample: 1/3 - Patch: 1/3                          
+╭──────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────╮
+│ Field                    │ Value                                                                                     │
+├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────┤
+│ patch_type               │ fix                                                                                       │
+│ patch_name               │ fix_pipeline_ring_size_and_stream_sync_ordering                                           │
+│ patch_description        │ The issue is in the `pipelined_ssd_to_gpu` function's pipeline loop. There are two        │
+│                          │ problems:                                                                                 │
+│                          │                                                                                           │
+│                          │ 1. **PIPELINE_RING_SIZE = 16** - The test asserts `size >= 2 && size <= 16`, so 16 is     │
+│                          │ valid, but the original working code used 8. More critically, the sliding-window approach │
+│                          │ has a data integrity bug.                                                                 │
+│                          │                                                                                           │
+│                          │ 2. **Stream synchronization ordering bug**: In the sliding-window pipeline, we issue a    │
+│                          │ GPU async DMA copy from a ring buffer, then later resubmit a new NVMe read into that same │
+│                          │ ring slot. However, the stream synchronization happens AFTER the DMA copy is issued but   │
+│                          │ BEFORE the ring slot is reused for a new read. The problem is that we sync                │
+│                          │ `streams[(completed_count) % 2]` which is the SAME stream we just issued the copy on, not │
+│                          │ the OPPOSITE stream. This means we're syncing the current copy (blocking until it's done) │
+│                          │ but the previous copy on the other stream may still be in flight when we reuse its ring   │
+│                          │ slot for a new NVMe read.                                                                 │
+│                          │                                                                                           │
+│                          │ The fix: Revert to the batch-based approach from the prior working program which          │
+│                          │ guarantees all GPU copies complete before ring slots are reused, ensuring no data         │
+│                          │ corruption. We also revert PIPELINE_RING_SIZE to 8 to match the validated prior program.  │
+│ num_applied              │ 1                                                                                         │
+│ api_costs                │ $0.0000                                                                                   │
+│ error_attempt            │ None                                                                                      │
+│ model_name               │ local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_en │
+│                          │ v=OPENAI_AP...                                                                            │
+│ temperature              │ 1.0                                                                                       │
+│ max_tokens               │ 16384                                                                                     │
+│ diff_summary             │ added: 0; deleted: 26; modified: 90;                                                      │
+╰──────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────╯
+2026-06-01 20:04:20 - shinka.core.async_runner - INFO - Getting code embedding for generation 6...
+2026-06-01 20:04:21 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 401 Unauthorized"
+2026-06-01 20:04:21 - shinka.embed.embedding - ERROR - Error getting embedding: Error code: 401 - {'error': {'message': 'Incorrect API key provided: sk-2as0_*************PBsA. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'code': 'invalid_api_key', 'param': None}, 'status': 401}
+2026-06-01 20:04:21 - shinka.core.async_runner - INFO - Code embedding completed for generation 6 (cost: $0.0000)
+2026-06-01 20:04:21 - shinka.launch.local - INFO - Submitted local process with PID: 3987365
+2026-06-01 20:04:21 - shinka.launch.local - INFO - Launched local command: /home/nara/certus/evo_frameworks/skydiscover/.venv/bin/python3 /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/evaluate.py --program_path /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_6/main.rs --results_dir /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_6/results
+2026-06-01 20:04:21 - shinka.core.async_runner - INFO - Proposal → Eval: gen 6 submitted for eval (cost: $0.0000, total: $0.0000). Running jobs: 1/4, Proposals: 2/6
+2026-06-01 20:04:21 - shinka.launch.scheduler - WARNING - Process 3987365 exceeded timeout of 00:01:30. Killing. => Gen. 6
+2026-06-01 20:04:21 - shinka.core.async_runner - INFO - ✅ Job ProcessWithLogging(PID: 3987365) completed (gen 6) after 184.1s
+2026-06-01 20:04:21 - shinka.core.async_runner - INFO - 🔄 Processing 1 completed jobs: gens [6] (cost: $0.0000)
+2026-06-01 20:04:21 - shinka.core.async_runner - INFO - 🔄 SAFE PROCESSING: Starting job ProcessWithLogging(PID: 3987365) (gen 6)
+2026-06-01 20:04:21 - shinka.launch.local - INFO - Monitoring local process with PID: 3987365...
+2026-06-01 20:04:21 - shinka.launch.local - INFO - Process 3987365 completed with return code: -9
+2026-06-01 20:04:21 - shinka.utils.general - WARNING - Metrics file not found at /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_6/results/metrics.json
+2026-06-01 20:04:21 - shinka.core.async_runner - INFO - 📂 RESULTS: Got results for ProcessWithLogging(PID: 3987365): True
+2026-06-01 20:04:21 - shinka.core.async_runner - INFO - ✅ VALID RESULTS: ProcessWithLogging(PID: 3987365) has valid results - correct=False, score=0.0
+2026-06-01 20:04:21 - shinka.core.async_runner - INFO - 💾 DB ADD: Adding program to database for ProcessWithLogging(PID: 3987365) (gen 6)...
+2026-06-01 20:04:21 - shinka.database.dbase - INFO - Program d7397f85-6f87-4a8a-897f-22fa6cff22ae added to DB - score: 0.0.
+2026-06-01 20:04:21 - shinka.core.async_runner - INFO - ✅ DB SUCCESS: Program d7397f85-6f87-4a8a-897f-22fa6cff22ae successfully added to database for ProcessWithLogging(PID: 3987365) (gen 6)
+                                 Program Evaluation Summary - Gen 6 | Total Cost: $0.00                                 
+╭─────────────┬─────────┬───────────────┬─────────┬─────────────────────────────────┬────────┬────────┬─────────┬──────╮
+│  GenID: 6   │ Island  │    Status     │   Score │ Patch Name                      │ Type   │ Compl… │    Cost │ Time │
+├─────────────┼─────────┼───────────────┼─────────┼─────────────────────────────────┼────────┼────────┼─────────┼──────┤
+│  Best: N/A  │   I-4   │  ✗ Incorrect  │   0.000 │ fix_pipeline_ring_size_and_str  │ fix    │    1.0 │  $0.000 │ 0.1s │
+╰─────────────┴─────────┴───────────────┴─────────┴─────────────────────────────────┴────────┴────────┴─────────┴──────╯
+2026-06-01 20:04:21 - shinka.core.summarizer - INFO - Added program d7397f85-6f87-4a8a-897f-22fa6cff22ae to meta memory tracking (correct=False, total: 9)
+    AsymmetricUCB (c=1.000, eps=0.200, adaptive=True, asym=True, exp_base=1.000, shift_base=True, shift_parent=True,    
+                         log_sum=True, cost_k=0.000, cost_c=0.100, cost_pow=1.00, cost_pct=50)                          
+╭─────────────────────────┬─────┬────────┬─────────┬─────────┬─────────┬─────────┬──────────┬───────┬──────────┬───────╮
+│ arm                     │   n │ n_cost │ tot_co… │ mean_c… │ exploit │ explore │ score_r… │ scor… │    score │  post │
+├─────────────────────────┼─────┼────────┼─────────┼─────────┼─────────┼─────────┼──────────┼───────┼──────────┼───────┤
+│ local/aws/claude-opus-… │   9 │      8 │  0.0000 │  0.0000 │  0.0000 │  0.6988 │   0.6988 │ 1.00… │   0.6988 │ 1.00… │
+╰─────────────────────────┴─────┴────────┴─────────┴─────────┴─────────┴─────────┴──────────┴───────┴──────────┴───────╯
+2026-06-01 20:04:21 - shinka.core.async_runner - INFO - No correct programs found yet, cannot determine best solution.
+2026-06-01 20:04:21 - shinka.core.async_runner - INFO - ✅ JOB COMPLETE: Finished processing ProcessWithLogging(PID: 3987365) - program d7397f85-6f87-4a8a-897f-22fa6cff22ae added (gen 6)
+2026-06-01 20:04:21 - shinka.core.async_runner - INFO - ✅ Successfully processed 1/1 jobs
+2026-06-01 20:04:21 - shinka.core.async_runner - INFO - ✅ Completed generations updated: 8 -> 9 (cost: $0.0000)
+2026-06-01 20:04:21 - shinka.core.async_runner - INFO - Proposal target=4 (sampling_ewma=103.11s, evaluation_ewma=11.56s, timing_samples=8, active_proposals=1, running_jobs=0)
+2026-06-01 20:04:23 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:04:23 - shinka.llm.llm - INFO - ==> QUERY: API cost: $0.0000
+2026-06-01 20:04:23 - shinka.core.async_runner - INFO -   FIX ATTEMPT 1/3 SUCCESS
+                         Patch Metadata - Gen 8/10 - Novelty: 1/3 - Resample: 1/3 - Patch: 1/3                          
+╭──────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────╮
+│ Field                    │ Value                                                                                     │
+├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────┤
+│ patch_type               │ fix                                                                                       │
+│ patch_name               │ fix_pipeline_ring_size_and_stream_sync_ordering                                           │
+│ patch_description        │ The bug is in the `pipelined_ssd_to_gpu` function's pipeline loop. There are two issues:  │
+│                          │                                                                                           │
+│                          │ 1. **PIPELINE_RING_SIZE = 16** - The test asserts `size >= 2 && size <= 16`, so 16 is     │
+│                          │ valid, but the original working code used 8. More critically, with a sliding window       │
+│                          │ approach, we need to ensure ring slot reuse safety.                                       │
+│                          │                                                                                           │
+│                          │ 2. **Stream synchronization before ring slot reuse** - The critical bug is that after     │
+│                          │ issuing an async GPU DMA copy from a ring buffer, we resubmit a new NVMe read into the    │
+│                          │ same ring slot *before* ensuring the GPU async copy from that buffer has completed. The   │
+│                          │ `stream_synchronize` call happens for the "other" stream but doesn't guarantee the        │
+│                          │ current stream's copy (which uses the ring slot we're about to reuse) is done.            │
+│                          │                                                                                           │
+│                          │ The fix ensures we synchronize the stream that was used for the DMA copy from a ring slot │
+│                          │ BEFORE resubmitting a new NVMe read into that same slot. I'm reverting to the batch-based │
+│                          │ approach from the prior working implementation which correctly syncs both streams before  │
+│                          │ reusing any ring slots, and using PIPELINE_RING_SIZE = 8 to match the known-good          │
+│                          │ configuration.                                                                            │
+│ num_applied              │ 1                                                                                         │
+│ api_costs                │ $0.0000                                                                                   │
+│ error_attempt            │ None                                                                                      │
+│ model_name               │ local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_en │
+│                          │ v=OPENAI_AP...                                                                            │
+│ temperature              │ 1.0                                                                                       │
+│ max_tokens               │ 16384                                                                                     │
+│ diff_summary             │ added: 0; deleted: 23; modified: 96;                                                      │
+╰──────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────╯
+2026-06-01 20:04:23 - shinka.core.async_runner - INFO - Getting code embedding for generation 8...
+2026-06-01 20:04:23 - httpx - INFO - HTTP Request: POST https://api.openai.com/v1/embeddings "HTTP/1.1 401 Unauthorized"
+2026-06-01 20:04:23 - shinka.embed.embedding - ERROR - Error getting embedding: Error code: 401 - {'error': {'message': 'Incorrect API key provided: sk-2as0_*************PBsA. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'code': 'invalid_api_key', 'param': None}, 'status': 401}
+2026-06-01 20:04:23 - shinka.core.async_runner - INFO - Code embedding completed for generation 8 (cost: $0.0000)
+2026-06-01 20:04:23 - shinka.launch.local - INFO - Submitted local process with PID: 3987405
+2026-06-01 20:04:23 - shinka.launch.local - INFO - Launched local command: /home/nara/certus/evo_frameworks/skydiscover/.venv/bin/python3 /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/evaluate.py --program_path /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_8/main.rs --results_dir /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_8/results
+2026-06-01 20:04:23 - shinka.core.async_runner - INFO - Proposal → Eval: gen 8 submitted for eval (cost: $0.0000, total: $0.0000). Running jobs: 1/4, Proposals: 1/6
+2026-06-01 20:04:23 - shinka.launch.scheduler - WARNING - Process 3987405 exceeded timeout of 00:01:30. Killing. => Gen. 8
+2026-06-01 20:04:23 - shinka.core.async_runner - INFO - ✅ Job ProcessWithLogging(PID: 3987405) completed (gen 8) after 182.7s
+2026-06-01 20:04:23 - shinka.core.async_runner - INFO - 🔄 Processing 1 completed jobs: gens [8] (cost: $0.0000)
+2026-06-01 20:04:23 - shinka.core.async_runner - INFO - 🔄 SAFE PROCESSING: Starting job ProcessWithLogging(PID: 3987405) (gen 8)
+2026-06-01 20:04:23 - shinka.launch.local - INFO - Monitoring local process with PID: 3987405...
+2026-06-01 20:04:23 - shinka.launch.local - INFO - Process 3987405 completed with return code: -9
+2026-06-01 20:04:23 - shinka.utils.general - WARNING - Metrics file not found at /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/gen_8/results/metrics.json
+2026-06-01 20:04:23 - shinka.core.async_runner - INFO - 📂 RESULTS: Got results for ProcessWithLogging(PID: 3987405): True
+2026-06-01 20:04:23 - shinka.core.async_runner - INFO - ✅ VALID RESULTS: ProcessWithLogging(PID: 3987405) has valid results - correct=False, score=0.0
+2026-06-01 20:04:23 - shinka.core.async_runner - INFO - 💾 DB ADD: Adding program to database for ProcessWithLogging(PID: 3987405) (gen 8)...
+2026-06-01 20:04:23 - shinka.database.dbase - INFO - Program bb8ebf37-0ed3-41bf-af16-b32b46596625 added to DB - score: 0.0.
+2026-06-01 20:04:23 - shinka.database.async_dbase - INFO - Scheduled embedding recomputation after 10 program additions
+2026-06-01 20:04:23 - shinka.core.async_runner - INFO - ✅ DB SUCCESS: Program bb8ebf37-0ed3-41bf-af16-b32b46596625 successfully added to database for ProcessWithLogging(PID: 3987405) (gen 8)
+                                 Program Evaluation Summary - Gen 8 | Total Cost: $0.00                                 
+╭─────────────┬─────────┬───────────────┬─────────┬─────────────────────────────────┬────────┬────────┬─────────┬──────╮
+│  GenID: 8   │ Island  │    Status     │   Score │ Patch Name                      │ Type   │ Compl… │    Cost │ Time │
+├─────────────┼─────────┼───────────────┼─────────┼─────────────────────────────────┼────────┼────────┼─────────┼──────┤
+│  Best: N/A  │   I-4   │  ✗ Incorrect  │   0.000 │ fix_pipeline_ring_size_and_str  │ fix    │    1.0 │  $0.000 │ 0.1s │
+╰─────────────┴─────────┴───────────────┴─────────┴─────────────────────────────────┴────────┴────────┴─────────┴──────╯
+2026-06-01 20:04:23 - shinka.core.summarizer - INFO - Added program bb8ebf37-0ed3-41bf-af16-b32b46596625 to meta memory tracking (correct=False, total: 10)
+2026-06-01 20:04:23 - shinka.core.async_runner - INFO - Updating meta memory...
+2026-06-01 20:04:23 - shinka.core.async_summarizer - INFO - ==> Step 1 - Processing 10 programs with async batch query
+2026-06-01 20:04:23 - shinka.llm.llm - INFO - ==> SAMPLING 10 SAMPLES:
+  local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY   1.0000
+2026-06-01 20:04:23 - shinka.llm.llm - INFO - ==> SAMPLING: 1/10 ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '0.7', '16384']
+2026-06-01 20:04:23 - shinka.llm.llm - INFO - ==> SAMPLING: 2/10 ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '0.7', '16384']
+2026-06-01 20:04:23 - shinka.llm.llm - INFO - ==> SAMPLING: 3/10 ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '0.7', '16384']
+2026-06-01 20:04:23 - shinka.llm.llm - INFO - ==> SAMPLING: 4/10 ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '0.7', '16384']
+2026-06-01 20:04:23 - shinka.llm.llm - INFO - ==> SAMPLING: 5/10 ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '0.7', '16384']
+2026-06-01 20:04:23 - shinka.llm.llm - INFO - ==> SAMPLING: 6/10 ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '0.7', '16384']
+2026-06-01 20:04:23 - shinka.llm.llm - INFO - ==> SAMPLING: 7/10 ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '0.7', '16384']
+2026-06-01 20:04:23 - shinka.llm.llm - INFO - ==> SAMPLING: 8/10 ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '0.7', '16384']
+2026-06-01 20:04:23 - shinka.llm.llm - INFO - ==> SAMPLING: 9/10 ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '0.7', '16384']
+2026-06-01 20:04:23 - shinka.llm.llm - INFO - ==> SAMPLING: 10/10 ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '0.7', '16384']
+2026-06-01 20:04:23 - shinka.database.async_dbase - INFO - Background embedding recomputation completed
+2026-06-01 20:04:27 - shinka.core.async_runner - INFO - 🔍 Meta task check: completed_gens=9, target=10, pending_work=1, running_eval_jobs=0, running_proposal_jobs=0, api_costs=$0.0000, should_stop=False, is_stuck=False, stuck_count=0, time_since_progress=5.9s
+2026-06-01 20:04:28 - shinka.core.async_runner - INFO - Proposal target=4 (sampling_ewma=126.96s, evaluation_ewma=8.12s, timing_samples=9, active_proposals=0, running_jobs=0)
+2026-06-01 20:04:33 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:04:33 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:04:33 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:04:34 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:04:34 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:04:35 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:04:35 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:04:35 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:04:35 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:04:35 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:04:35 - shinka.llm.llm - INFO - ==> SAMPLING: Individual API costs: ['0.0000', '0.0000', '0.0000', '0.0000', '0.0000', '0.0000', '0.0000', '0.0000', '0.0000', '0.0000']
+2026-06-01 20:04:35 - shinka.llm.llm - INFO - ==> SAMPLING: Total API costs: $0.0000
+2026-06-01 20:04:35 - shinka.core.async_summarizer - INFO - ==> Step 1 - 10/10 individual summaries generated (cost: $0.0000)
+2026-06-01 20:04:35 - shinka.llm.llm - INFO - ==> QUERYING: ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '0.7', '16384']
+2026-06-01 20:05:00 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:05:00 - shinka.llm.llm - INFO - ==> QUERY: API cost: $0.0000
+2026-06-01 20:05:00 - shinka.core.async_summarizer - INFO - ==> Step 2 - Global insights generated (cost: $0.0000)
+2026-06-01 20:05:00 - shinka.llm.llm - INFO - ==> QUERYING: ['local/aws/claude-opus-4-6@https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1?api_key_env=OPENAI_API_KEY', '0.7', '16384']
+2026-06-01 20:05:18 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-06-01 20:05:18 - shinka.llm.llm - INFO - ==> QUERY: API cost: $0.0000
+2026-06-01 20:05:18 - shinka.core.async_summarizer - INFO - ==> Step 3 - Recommendations generated (cost: $0.0000)
+2026-06-01 20:05:18 - shinka.core.async_summarizer - INFO - ==> Meta-analysis completed successfully with 3-step process (total cost: $0.0000)
+2026-06-01 20:05:18 - shinka.core.async_summarizer - INFO - Processed and cleared 10 programs from meta memory (total processed: 10)
+2026-06-01 20:05:18 - shinka.core.async_summarizer - INFO - Wrote meta output to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/shinkaevolve/output/meta/meta_10.txt
+    AsymmetricUCB (c=1.000, eps=0.200, adaptive=True, asym=True, exp_base=1.000, shift_base=True, shift_parent=True,    
+                         log_sum=True, cost_k=0.000, cost_c=0.100, cost_pow=1.00, cost_pct=50)                          
+╭─────────────────────────┬─────┬────────┬─────────┬─────────┬─────────┬─────────┬──────────┬───────┬──────────┬───────╮
+│ arm                     │   n │ n_cost │ tot_co… │ mean_c… │ exploit │ explore │ score_r… │ scor… │    score │  post │
+├─────────────────────────┼─────┼────────┼─────────┼─────────┼─────────┼─────────┼──────────┼───────┼──────────┼───────┤
+│ local/aws/claude-opus-… │   9 │      9 │  0.0000 │  0.0000 │  0.0000 │  0.6988 │   0.6988 │ 1.00… │   0.6988 │ 1.00… │
+╰─────────────────────────┴─────┴────────┴─────────┴─────────┴─────────┴─────────┴──────────┴───────┴──────────┴───────╯
+2026-06-01 20:05:18 - shinka.core.async_runner - INFO - No correct programs found yet, cannot determine best solution.
+2026-06-01 20:05:18 - shinka.core.async_runner - INFO - ✅ JOB COMPLETE: Finished processing ProcessWithLogging(PID: 3987405) - program bb8ebf37-0ed3-41bf-af16-b32b46596625 added (gen 8)
+2026-06-01 20:05:18 - shinka.core.async_runner - INFO - ✅ Successfully processed 1/1 jobs
+2026-06-01 20:05:18 - shinka.core.async_runner - INFO - ✅ Completed generations updated: 9 -> 10 (cost: $0.0000)
+2026-06-01 20:05:18 - shinka.core.async_runner - INFO - Evolution stopping: completed_generations=10, target=10, running_jobs=0, active_proposals=0
+2026-06-01 20:05:18 - shinka.core.async_runner - INFO - 🛑 Job monitor setting should_stop signal
+2026-06-01 20:05:18 - shinka.core.async_runner - INFO - 🏁 Job monitor setting finalization_complete signal
+2026-06-01 20:05:18 - shinka.core.async_runner - INFO - Job monitor task exited
+2026-06-01 20:05:18 - shinka.core.async_runner - INFO - 🔄 Performing final embedding recomputation and meta summary...
+2026-06-01 20:05:18 - shinka.core.async_runner - INFO - Starting final PCA/embedding recomputation...
+2026-06-01 20:05:18 - shinka.core.async_runner - INFO - ⚠️  This may take a while for large datasets...
+2026-06-01 20:05:18 - shinka.database.async_dbase - INFO - Forcing final embedding and cluster recomputation...
+2026-06-01 20:05:18 - shinka.database.async_dbase - INFO - Scheduled embedding recomputation after 10 program additions
+2026-06-01 20:05:19 - shinka.database.async_dbase - INFO - Background embedding recomputation completed
+2026-06-01 20:05:19 - shinka.database.async_dbase - INFO - Final embedding and cluster recomputation complete.
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Final PCA/embedding recomputation completed successfully
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Starting final meta summary generation...
+2026-06-01 20:05:19 - shinka.core.async_runner - WARNING - No best program found for final meta summary
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - 🏁 All final operations completed, proceeding to cleanup...
+2026-06-01 20:05:19 - shinka.database.async_dbase - INFO - 🔧 Closing async database with monitoring...
+2026-06-01 20:05:19 - shinka.database.async_dbase - INFO - Async database closed
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - ================================================================================
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - ASYNC EVOLUTION COMPLETED
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - ================================================================================
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Target generations: 10
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Stored programs: 10
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Generations without program (proposal generation exhausted retries): 0
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Generation IDs without program after proposal retries: []
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Total proposals generated: 9
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Total API cost: $0.0000
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Total runtime: 471.30 seconds
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Average time per proposal: 52.37 seconds
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - ----------------------------------------
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - FINAL OPERATIONS STATUS:
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - PCA/Embedding recomputation: COMPLETED
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Meta summary generation: COMPLETED
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - ----------------------------------------
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - ----------------------------------------
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - TIMING BOTTLENECK SUMMARY:
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Programs analyzed: 9 (generation > 0 with persisted metadata)
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Sampling: mean=128.92s median=183.96s p90=203.55s max=203.55s (n=9)
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Evaluation: mean=8.55s median=0.11s p90=27.01s max=27.01s (n=9)
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Eval->Postprocess Wait: mean=0.00s median=0.00s p90=0.00s max=0.00s (n=9)
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Postprocess Hot Path: mean=0.03s median=0.03s p90=0.04s max=0.04s (n=9)
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Postprocess->Apply Wait: mean=0.00s median=0.00s p90=0.00s max=0.00s (n=9)
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Side-Effect Apply: mean=6.17s median=0.03s p90=55.26s max=55.26s (n=9)
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Pipeline Unaccounted: mean=0.00s median=0.00s p90=0.00s max=0.00s (n=9)
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - End-to-End w/ Side Effects: mean=143.68s median=184.17s p90=238.01s max=238.01s (n=9)
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Top Eval->Postprocess Waits: gen 4=0.0s, gen 2=0.0s, gen 9=0.0s, gen 6=0.0s, gen 3=0.0s
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Top Postprocess->Apply Waits: gen 6=0.0s, gen 8=0.0s, gen 9=0.0s, gen 5=0.0s, gen 4=0.0s
+2026-06-01 20:05:19 - shinka.core.async_runner - INFO - Top Side-Effect Apply Durations: gen 8=55.3s, gen 6=0.1s, gen 5=0.0s, gen 9=0.0s, gen 7=0.0s
+        Program Database Summary                   Cost & Stats Summary          
+╭────────────────────┬─────────────────╮ ╭──────────────────────┬───────────────╮
+│ Metric             │ Value           │ │ Metric               │ Value         │
+├────────────────────┼─────────────────┤ ├──────────────────────┼───────────────┤
+│ Overall Best Score │ 0.00            │ │ Total Compute        │ 0h 3m 37s     │
+│ Total Programs     │ 14 / 10         │ ╰──────────────────────┴───────────────╯
+│ Correct Programs   │ 0 / 14 (0%)     │                                         
+│ Archived Programs  │ 0 / 20 (0%)     │                                         
+│ Island Populations │ I0: 2 | I1: 3 | │                                         
+│                    │ I2: 3 | I3: 2 | │                                         
+│                    │ I4: 4           │                                         
+│ Migration Policy   │ 5G, 10%(E)      │                                         
+╰────────────────────┴─────────────────╯                                         
+No programs with scores in the database to display.

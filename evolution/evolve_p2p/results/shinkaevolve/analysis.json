@@ -1,0 +1,10 @@
+{
+  "framework": "shinkaevolve",
+  "best_score": 0.21,
+  "beat_baseline": false,
+  "p2p_attempted": false,
+  "p2p_compiled": false,
+  "diagnosis": "Produced 2 compiling candidates (0.1976, 0.2073). Minor knob tuning only (+2.8%). Did not attempt P2P despite seeing it in seed.",
+  "build_fail_count": 0,
+  "build_success_count": 0
+}

@@ -1,0 +1,52 @@
+2026-06-02 20:28:18,747 - skydiscover.search.utils.logging_utils - INFO - Logging to /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results_hint/openevolve/output/logs/openevolve_native_20260602_202818.log
+2026-06-02 20:28:18,748 - skydiscover.search.openevolve_native.database - INFO - OpenEvolveNativeDatabase: 5 islands, pop=40, archive=100, features=['complexity', 'diversity'], bins=10, migration_interval=10, migration_rate=0.10
+2026-06-02 20:28:18,748 - skydiscover.runner - INFO - Runner ready: search=openevolve_native, program=/home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/initial_programs/concatenated_seed.rs.skydiscover
+2026-06-02 20:28:18,784 - skydiscover.llm - INFO - OpenAI LLM: aws/claude-opus-4-6
+2026-06-02 20:28:18,803 - skydiscover.evaluation.evaluator - WARNING - cascade_evaluation is true but /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/evaluator/evaluate_p2p.py has no evaluate_stage1 — will fall back to direct evaluation
+2026-06-02 20:28:18,803 - skydiscover.evaluation.evaluator - INFO - Initialized evaluator with /home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/evaluator/evaluate_p2p.py
+2026-06-02 20:28:18,803 - skydiscover.search.default_discovery_controller - INFO - DiscoveryController initialized: num_context_programs=4
+2026-06-02 20:28:18,803 - skydiscover.runner - INFO - Adding initial program to database
+2026-06-02 20:28:20,136 - skydiscover.evaluation.evaluator - INFO - Evaluated program d6272bcf-7485-4f10-9d48-e919556a31f2 in 1.33s: error=   Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error: mismatched closing delimiter: `)`
+    --> components/gpu-services/src/dma.rs:1157:84
+     |
+1157 |                     for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
+     |                                                                                    ^ unclosed delimiter
+...
+1280 |                         })?;
+     |                          ^ mismatched , build_succeeded=False, combined_score=0.0000
+2026-06-02 20:28:20,136 - skydiscover.search.base_database - INFO - Database has 1 programs, best program score is error=   Compiling gpu-services v0.1.0 (/home/nara/certus/evolve_p2p/ai-native-storage-certus/components/gpu-services)
+error: mismatched closing delimiter: `)`
+    --> components/gpu-services/src/dma.rs:1157:84
+     |
+1157 |                     for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
+     |                                                                                    ^ unclosed delimiter
+...
+1280 |                         })?;
+     |                          ^ mismatched , build_succeeded=False, combined_score=0.0000
+2026-06-02 20:31:05,414 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 20:31:32,685 - skydiscover.evaluation.evaluator - INFO - Evaluated program 360a2b7f-8a6d-4255-9fbe-c622436cd6b4 in 27.18s: throughput_gbps=2.4500, p99_latency_ms=1.7966, p50_latency_ms=1.6997, mean_latency_ms=1.7055, cpu_util_fraction=0.0321, data_integrity=True, build_succeeded=True, combined_score=0.2116
+2026-06-02 20:31:32,687 - skydiscover.search.openevolve_native.database - INFO - New best program 360a2b7f-8a6d-4255-9fbe-c622436cd6b4 replaces d6272bcf-7485-4f10-9d48-e919556a31f2 (0.0000 -> 0.2116)
+2026-06-02 20:31:32,688 - skydiscover.search.default_discovery_controller - INFO - Iteration 1: Program 360a2b7f-8a6d-4255-9fbe-c622436cd6b4 (parent: d6272bcf-7485-4f10-9d48-e919556a31f2) completed in 192.55s (llm: 165.37s, eval: 27.18s)
+2026-06-02 20:31:32,688 - skydiscover.search.default_discovery_controller - INFO - Metrics: throughput_gbps=2.4500, p99_latency_ms=1.7966, p50_latency_ms=1.6997, mean_latency_ms=1.7055, cpu_util_fraction=0.0321, data_integrity=1.0000, build_succeeded=1.0000, combined_score=0.2116
+2026-06-02 20:31:32,688 - skydiscover.search.default_discovery_controller - INFO - 🌟 New best solution found at iteration 1
+2026-06-02 20:34:17,825 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 20:34:45,268 - skydiscover.evaluation.evaluator - INFO - Evaluated program 7792e988-cddf-4014-897a-199fb066a8e7 in 27.36s: throughput_gbps=2.4300, p99_latency_ms=1.8187, p50_latency_ms=1.7267, mean_latency_ms=1.7228, cpu_util_fraction=0.0327, data_integrity=True, build_succeeded=True, combined_score=0.2095
+2026-06-02 20:34:45,271 - skydiscover.search.default_discovery_controller - INFO - Iteration 2: Program 7792e988-cddf-4014-897a-199fb066a8e7 (parent: d6272bcf-7485-4f10-9d48-e919556a31f2) completed in 192.58s (llm: 165.22s, eval: 27.36s)
+2026-06-02 20:34:45,271 - skydiscover.search.default_discovery_controller - INFO - Metrics: throughput_gbps=2.4300, p99_latency_ms=1.8187, p50_latency_ms=1.7267, mean_latency_ms=1.7228, cpu_util_fraction=0.0327, data_integrity=1.0000, build_succeeded=1.0000, combined_score=0.2095
+2026-06-02 20:37:36,250 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 20:38:03,553 - skydiscover.evaluation.evaluator - INFO - Evaluated program 02ab19df-7ccd-4e29-b9f9-3659d1f8ae67 in 27.13s: throughput_gbps=2.4200, p99_latency_ms=1.8668, p50_latency_ms=1.7303, mean_latency_ms=1.7259, cpu_util_fraction=0.0268, data_integrity=True, build_succeeded=True, combined_score=0.2067
+2026-06-02 20:38:03,557 - skydiscover.search.default_discovery_controller - INFO - Iteration 3: Program 02ab19df-7ccd-4e29-b9f9-3659d1f8ae67 (parent: 360a2b7f-8a6d-4255-9fbe-c622436cd6b4) completed in 198.28s (llm: 171.15s, eval: 27.14s)
+2026-06-02 20:38:03,557 - skydiscover.search.default_discovery_controller - INFO - Metrics: throughput_gbps=2.4200, p99_latency_ms=1.8668, p50_latency_ms=1.7303, mean_latency_ms=1.7259, cpu_util_fraction=0.0268, data_integrity=1.0000, build_succeeded=1.0000, combined_score=0.2067
+2026-06-02 20:40:38,387 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 20:41:05,254 - skydiscover.evaluation.evaluator - INFO - Evaluated program feb201c0-c5d3-4ba0-bc84-f676e3ef8113 in 26.78s: throughput_gbps=2.4400, p99_latency_ms=1.8087, p50_latency_ms=1.7091, mean_latency_ms=1.7163, cpu_util_fraction=0.0264, data_integrity=True, build_succeeded=True, combined_score=0.2105
+2026-06-02 20:41:05,260 - skydiscover.search.default_discovery_controller - INFO - Iteration 4: Program feb201c0-c5d3-4ba0-bc84-f676e3ef8113 (parent: fa074b09-cff8-4aba-8649-0f7ceb7a4632) completed in 181.70s (llm: 154.91s, eval: 26.78s)
+2026-06-02 20:41:05,260 - skydiscover.search.default_discovery_controller - INFO - Metrics: throughput_gbps=2.4400, p99_latency_ms=1.8087, p50_latency_ms=1.7091, mean_latency_ms=1.7163, cpu_util_fraction=0.0264, data_integrity=1.0000, build_succeeded=1.0000, combined_score=0.2105
+2026-06-02 20:43:46,413 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 20:44:13,653 - skydiscover.evaluation.evaluator - INFO - Evaluated program b891670f-c039-4261-88c8-51dc8f8e718b in 27.16s: throughput_gbps=2.3800, p99_latency_ms=1.8662, p50_latency_ms=1.7409, mean_latency_ms=1.7579, cpu_util_fraction=0.0280, data_integrity=True, build_succeeded=True, combined_score=0.2047
+2026-06-02 20:44:13,660 - skydiscover.search.default_discovery_controller - INFO - Iteration 5: Program b891670f-c039-4261-88c8-51dc8f8e718b (parent: 02ab19df-7ccd-4e29-b9f9-3659d1f8ae67) completed in 188.39s (llm: 161.23s, eval: 27.16s)
+2026-06-02 20:44:13,660 - skydiscover.search.default_discovery_controller - INFO - Metrics: throughput_gbps=2.3800, p99_latency_ms=1.8662, p50_latency_ms=1.7409, mean_latency_ms=1.7579, cpu_util_fraction=0.0280, data_integrity=1.0000, build_succeeded=1.0000, combined_score=0.2047
+2026-06-02 20:46:06,506 - httpx - INFO - HTTP Request: POST https://ete-litellm.ai-models.vpc-int.res.ibm.com/chat/completions "HTTP/1.1 200 OK"
+2026-06-02 20:46:33,289 - skydiscover.evaluation.evaluator - INFO - Evaluated program 275ad4ad-54bd-46a6-ad32-c61a0d910c1e in 26.78s: throughput_gbps=2.4300, p99_latency_ms=1.7879, p50_latency_ms=1.7196, mean_latency_ms=1.7218, cpu_util_fraction=0.0312, data_integrity=True, build_succeeded=True, combined_score=0.2110
+2026-06-02 20:46:33,296 - skydiscover.search.default_discovery_controller - INFO - Iteration 6: Program 275ad4ad-54bd-46a6-ad32-c61a0d910c1e (parent: 360a2b7f-8a6d-4255-9fbe-c622436cd6b4) completed in 139.62s (llm: 112.84s, eval: 26.78s)
+2026-06-02 20:46:33,296 - skydiscover.search.default_discovery_controller - INFO - Metrics: throughput_gbps=2.4300, p99_latency_ms=1.7879, p50_latency_ms=1.7196, mean_latency_ms=1.7218, cpu_util_fraction=0.0312, data_integrity=1.0000, build_succeeded=1.0000, combined_score=0.2110

@@ -1,0 +1,32 @@
+## System Under Optimization
+
+A storage server that moves data from NVMe SSDs to GPU memory for inference workloads.
+
+## Hardware
+
+- NVMe Gen4 SSDs via SPDK (userspace driver, no kernel filesystem)
+- NVIDIA A30 GPU, PCIe Gen4 x16
+- Kernel modules loaded: nvidia-peermem, gdrdrv
+- 2048 hugepages allocated, memlock unlimited, NVMe devices bound to VFIO
+
+## Fitness Function
+
+score = 0.60 * throughput + 0.40 * latency
+
+Where:
+- throughput = min(1.0, cold_lookup_gbps / 12.0)
+- latency = min(1.0, 0.4 / p99_latency_ms)
+
+Hard constraints: build must succeed, data integrity must pass.
+
+## Optimization Target
+
+Implement GPUDirect Storage (P2P): NVMe reads DMA directly into GPU BAR1 memory,
+bypassing host DRAM entirely. This eliminates the host-bounce cudaMemcpy step.
+
+## Implementation Notes
+
+- Build uses --features p2p, so all #[cfg(feature = "p2p")] code is compiled and type-checked.
+- The cuda_ffi module uses std::os::raw::c_int for all flags and error return types.
+- The function create_spdk_dma_buffer_from_gpu_bar(gpu_ptr, size, container_fd) in dma.rs creates an SPDK-registered DMA buffer backed by GPU BAR1 memory.
+- PipelineRing.streams is [GpuStream; 2] — callers pass &ring.streams as a fixed-size array.

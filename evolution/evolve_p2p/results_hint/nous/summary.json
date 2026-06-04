@@ -1,0 +1,26 @@
+{
+  "framework": "nous",
+  "iterations_completed": 13,
+  "iterations_requested": 10,
+  "wall_time_seconds": 7200.0,
+  "best_score": 0.4808,
+  "mean_score": 0.2643,
+  "scores": [
+    0.3265,
+    0.3265,
+    0.3199,
+    0.3161,
+    0.3775,
+    0.195,
+    0.4624,
+    0.4808,
+    0.3216,
+    0.2094,
+    0.099,
+    0.0005,
+    0.0004
+  ],
+  "returncode": -1,
+  "timestamp": "2026-06-02_23-41-43",
+  "log_file": "/home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results_hint/nous/run-2026-06-02_21-41-43.log"
+}

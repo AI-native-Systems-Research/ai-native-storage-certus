@@ -1,0 +1,14 @@
+{
+  "framework": "gepa_native",
+  "total_evals": 8,
+  "best_score": 0.3314,
+  "beat_baseline": true,
+  "p2p_attempted": false,
+  "p2p_compiled": false,
+  "stagnation_ceiling": "mid_range",
+  "primary_failure_mode": "local_optimum",
+  "build_errors": [],
+  "diagnosis": "Improved to 0.3314 (3.87 GB/s) via host-bounce optimizations: increased QD, removed mid-pipeline sync, tuned ring parameters. Reproduced P2P function definitions in dma.rs but never called them from pipeline.rs \u2014 same coordination failure as other evolutionary frameworks.",
+  "build_fail_count": 0,
+  "build_success_count": 8
+}

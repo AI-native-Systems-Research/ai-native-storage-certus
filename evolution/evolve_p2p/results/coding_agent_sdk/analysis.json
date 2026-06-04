@@ -1,0 +1,10 @@
+{
+  "framework": "coding_agent_sdk",
+  "best_score": 0.0,
+  "beat_baseline": false,
+  "p2p_attempted": false,
+  "p2p_compiled": false,
+  "diagnosis": "SDK-based agent with Glia supervisor intervention on stagnation. Run incomplete.",
+  "build_fail_count": 0,
+  "build_success_count": 0
+}

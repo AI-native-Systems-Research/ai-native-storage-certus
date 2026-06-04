@@ -1,0 +1,14 @@
+{
+  "generation": 1,
+  "novelty_attempt": 1,
+  "resample_attempt": 1,
+  "patch_attempt": 1,
+  "success": true,
+  "num_applied": 1,
+  "patch_name": "sliding_window_pipeline",
+  "patch_description": "The batch-based pipeline loop serialized SSD reads and GPU copies between batches, killing throughput. Changed to a sliding-window approach where each NVMe read completion immediately triggers a GPU DMA copy and the next read submission. This overlaps I/O with GPU transfers. Also increased ring size to 16 for deeper pipelining and reduced the sync frequency to every 32 operations to reduce synchronization overhead.",
+  "error_msg": null,
+  "timestamp": "2026-06-01T20:01:00.827789",
+  "llm_cost": 0.0,
+  "llm_model": "aws/claude-opus-4-6"
+}

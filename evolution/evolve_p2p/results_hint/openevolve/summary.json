@@ -1,0 +1,24 @@
+{
+  "framework": "openevolve",
+  "iterations_completed": 12,
+  "iterations_requested": 10,
+  "wall_time_seconds": 1200,
+  "best_score": 0.2116,
+  "mean_score": 0.209,
+  "scores": [
+    0.2116,
+    0.2116,
+    0.2095,
+    0.2095,
+    0.2067,
+    0.2067,
+    0.2105,
+    0.2105,
+    0.2047,
+    0.2047,
+    0.211,
+    0.211
+  ],
+  "returncode": 0,
+  "timestamp": "2026-06-02_20-35-00"
+}

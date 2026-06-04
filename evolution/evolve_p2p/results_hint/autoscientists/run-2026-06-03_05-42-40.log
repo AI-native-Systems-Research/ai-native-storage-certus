@@ -1,0 +1,23 @@
+Stable at 0.38-0.39, with average ~0.39. This is approximately 2x the baseline (0.20).
+
+Let me now print the final JSON summary as required by the task:
+
+```json
+{"iterations": 7, "best_score": 0.3945, "scores": [0.1945, 0.2010, 0.3374, 0.3560, 0.3582, 0.3865, 0.3945]}
+```
+
+Here's a summary of the optimizations applied:
+
+**Iteration 1** (baseline): Score 0.1945, 2.31 GB/s - Original code with QD8, 2 queues, periodic stream sync every 16 ops
+
+**Iteration 2** (P2P attempt): Score 0.2010 - P2P path attempted but GDRCopy fails with IPC-opened memory (rc=22). Fell back to zero-copy.
+
+**Iteration 3** (QD increase): Score 0.3374, 3.89 GB/s - Increased NVMe queue depth from 8 to 64, removed periodic stream sync. Major improvement from better NVMe utilization.
+
+**Iteration 4** (multi-object pipeline): Score 0.3560, 4.22 GB/s - Replaced per-object sequential processing with multi-object pipeline: submit all NVMe reads for all objects upfront, then bulk H2D copies.
+
+**Iteration 5** (overlapped H2D): Score 0.3945, 4.65 GB/s - Issue H2D copy for each object as soon as its chunks complete, overlapping with NVMe reads of later objects. Best score.
+
+Key changes in the final version:
+- `pipeline.rs`: Removed per-16-ops stream synchronization, uses `memcpy_h2d_async` directly instead of DmaBuffer-wrapped copies
+- `lib.rs`: Multi-object interleaved pipeline in `batch_lookup` that submits ALL NVMe reads for all cold objects simultaneously, then issues H2D copies eagerly as each object's reads complete

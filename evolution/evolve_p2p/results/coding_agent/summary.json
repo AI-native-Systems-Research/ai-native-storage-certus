@@ -1,0 +1,22 @@
+{
+  "framework": "coding_agent",
+  "iterations_completed": 9,
+  "iterations_requested": 10,
+  "wall_time_seconds": 2535.5,
+  "best_score": 0.3891,
+  "mean_score": 0.3734,
+  "scores": [
+    0.3363,
+    0.3547,
+    0.3656,
+    0.3792,
+    0.3855,
+    0.3891,
+    0.3855,
+    0.3837,
+    0.3808
+  ],
+  "returncode": 0,
+  "timestamp": "2026-06-02_14-21-11",
+  "log_file": "/home/nara/certus/evolve_p2p/ai-native-storage-certus/evolution/evolve_p2p/results/coding_agent/run-2026-06-02_13-38-56.log"
+}

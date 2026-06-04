@@ -1,0 +1,1 @@
+{"throughput_gbps": 2.41, "p99_latency_ms": 1.8440999999999999, "p50_latency_ms": 1.7261, "mean_latency_ms": 1.7343, "cpu_util_fraction": 0.05652817025785939, "data_integrity": true, "build_succeeded": true, "combined_score": 0.2073}

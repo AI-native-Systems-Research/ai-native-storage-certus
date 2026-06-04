@@ -1,0 +1,19 @@
+{
+  "id": "b56c17b0-292f-4615-a375-19794375f9c1",
+  "generation": 0,
+  "iteration": 9,
+  "current_iteration": 10,
+  "metrics": {
+    "throughput_gbps": 2.4,
+    "p99_latency_ms": 1.8072000000000001,
+    "p50_latency_ms": 1.7438,
+    "mean_latency_ms": 1.7459,
+    "cpu_util_fraction": 0.026699534374144074,
+    "data_integrity": true,
+    "build_succeeded": true,
+    "combined_score": 0.2085
+  },
+  "language": "rust",
+  "timestamp": 1780359929.0852892,
+  "saved_at": 1780359929.100631
+}
