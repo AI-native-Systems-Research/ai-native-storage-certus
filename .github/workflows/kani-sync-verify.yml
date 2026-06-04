@@ -90,17 +90,19 @@ jobs:
         if: steps.kani-cache.outputs.cache-hit != 'true'
         continue-on-error: true
         run: |
+          # Step 1: install cargo-kani (the Cargo subcommand wrapper) using the
+          # pinned nightly toolchain so it compiles against the right Rust version.
+          cargo +nightly-2025-11-21 install kani-verifier --version 0.67.0 --locked
+          # Step 2: instead of running 'cargo kani setup' (which downloads ~1GB),
+          # extract the pre-built CBMC and Kani backend tools from the GitHub release
+          # and place them where cargo-kani expects them (~/.kani/kani-0.67.0/bin).
           curl -sSL https://github.com/model-checking/kani/releases/download/kani-0.67.0/kani-0.67.0-x86_64-unknown-linux-gnu.tar.gz \
             -o /tmp/kani.tar.gz
           mkdir -p /tmp/kani-release
           tar xzf /tmp/kani.tar.gz -C /tmp/kani-release
           KANI_DIR=$(find /tmp/kani-release -maxdepth 1 -mindepth 1 -type d | head -1)
-          echo "Kani dir: $KANI_DIR"
-          ls "$KANI_DIR/bin/"
-          mkdir -p ~/.cargo/bin
-          cp "$KANI_DIR/bin/cargo-kani" ~/.cargo/bin/cargo-kani
-          chmod +x ~/.cargo/bin/cargo-kani
-          cargo kani setup
+          mkdir -p ~/.kani/kani-0.67.0/bin
+          cp "$KANI_DIR"/bin/* ~/.kani/kani-0.67.0/bin/
 
       # Advisory: continue-on-error means failures show as warnings,
       # not as job failures, so this check never blocks PR merges.
