@@ -123,6 +123,10 @@ jobs:
           cat rust-toolchain.toml 2>/dev/null || cat rust-toolchain 2>/dev/null || echo "(none found)"
           echo "=== rust-toolchain-version final content ==="
           cat ~/.kani/kani-0.67.0/rust-toolchain-version
+          echo "=== full ~/.kani/kani-0.67.0/ contents ==="
+          ls -la ~/.kani/kani-0.67.0/
+          echo "=== CARGO env var ==="
+          echo "CARGO=${CARGO}"
 
       # Advisory: continue-on-error means failures show as warnings,
       # not as job failures, so this check never blocks PR merges.
