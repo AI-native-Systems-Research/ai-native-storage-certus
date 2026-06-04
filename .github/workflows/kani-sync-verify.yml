@@ -183,7 +183,7 @@ jobs:
           int      spdk_pci_device_get_serial_number(spdk_pci_device *dev, char *sn, size_t max_len);
           EOF
 
-          cp deps/spdk-build/include/spdk/env.h deps/spdk-build/include/spdk/env_dpdk.h
+          printf '#pragma once\n#include "env.h"\n' > deps/spdk-build/include/spdk/env_dpdk.h
 
           cat > deps/spdk-build/include/spdk/nvme.h << 'EOF'
           #pragma once
