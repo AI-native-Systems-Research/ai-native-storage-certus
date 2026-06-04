@@ -96,11 +96,13 @@ jobs:
           # Step 2: instead of running 'cargo kani setup' (which downloads ~1GB),
           # extract the pre-built CBMC and Kani backend tools from the GitHub release
           # and place them where cargo-kani expects them (~/.kani/kani-0.67.0/bin).
-          # Extract the full pre-built release directly into ~/.kani/ so that
-          # cargo-kani finds all expected files (bin/, rust-toolchain-version, etc.)
+          # Extract the pre-built CBMC/Kani tools into ~/.kani/
           mkdir -p ~/.kani
           curl -sSL https://github.com/model-checking/kani/releases/download/kani-0.67.0/kani-0.67.0-x86_64-unknown-linux-gnu.tar.gz \
             | tar xz -C ~/.kani/
+          # rust-toolchain-version is written by 'cargo kani setup' but is not
+          # in the tarball — create it manually with the pinned toolchain version.
+          echo "nightly-2025-11-21" > ~/.kani/kani-0.67.0/rust-toolchain-version
 
       # Advisory: continue-on-error means failures show as warnings,
       # not as job failures, so this check never blocks PR merges.
