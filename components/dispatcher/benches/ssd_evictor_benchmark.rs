@@ -115,6 +115,19 @@ impl IDispatchMap for EvictorBenchMap {
     fn convert_memory_tier_to_block(&self, _key: CacheKey) -> Result<(), DispatchMapError> {
         Ok(())
     }
+
+    fn is_evictable(&self, _key: CacheKey) -> bool {
+        false
+    }
+
+    fn recover_extent(
+        &self,
+        _key: CacheKey,
+        _offset: u64,
+        _size_blocks: u32,
+    ) -> Result<(), DispatchMapError> {
+        Ok(())
+    }
 }
 
 // ===========================================================================

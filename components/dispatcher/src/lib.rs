@@ -11,16 +11,18 @@ mod background;
 pub mod io_segmenter;
 pub mod pipeline;
 
+use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use component_framework::define_component;
 use interfaces::{
-    CacheKey, ClientChannels, Command, Completion, DmaAllocFn, DmaBuffer,
-    DispatcherConfig, DispatcherError, FormatParams, GpuStream, IBlockDevice,
-    IBlockDeviceAdmin, IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger,
-    IMemoryTier, IpcHandle, LookupResult, PciAddress, WriteHandle,
+    CacheKey, ClientChannels, Command, Completion, DispatcherConfig, DispatcherError, DmaAllocFn,
+    DmaBuffer, FormatParams, GpuStream, IBlockDevice, IBlockDeviceAdmin, IDispatchMap, IDispatcher,
+    IExtentManager, IGpuServices, ILogger, IMemoryTier, IpcHandle, LookupResult, PciAddress,
+    WriteHandle,
 };
 
 use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent;
@@ -72,9 +74,9 @@ define_component! {
             initialized: AtomicBool,
             bg_writer: Mutex<Option<BackgroundWriter>>,
             bg_evictor: Mutex<Option<BackgroundEvictor>>,
-            data_drives: Mutex<Vec<DataDrive>>,
+            data_drives: RwLock<Vec<DataDrive>>,
             pending_writes: Mutex<HashMap<CacheKey, PendingWrite>>,
-            pipeline_ring: Mutex<Option<pipeline::PipelineRing>>,
+            pipeline_ring: RwLock<Option<pipeline::PipelineRing>>,
             warm_stream: AtomicU64,
         },
     }
@@ -130,19 +132,21 @@ impl DispatcherComponent {
         let numa_node = drive.numa_node();
         let aligned_bytes = total_bytes.next_multiple_of(block_size);
 
-        let channels = drive.connect_client().map_err(|e| {
-            DispatcherError::IoError(format!("connect_client failed: {e}"))
-        })?;
+        let channels = drive
+            .connect_client()
+            .map_err(|e| DispatcherError::IoError(format!("connect_client failed: {e}")))?;
 
         let segments =
             io_segmenter::segment_io(start_lba, aligned_bytes, max_transfer, block_size as u32);
 
         for seg in &segments {
-            let seg_buf = DmaBuffer::new(seg.length, block_size, Some(numa_node)).map_err(
-                |e| DispatcherError::AllocationFailed(format!("DMA segment buffer: {e}")),
-            )?;
+            let seg_buf = DmaBuffer::new(seg.length, block_size, Some(numa_node)).map_err(|e| {
+                DispatcherError::AllocationFailed(format!("DMA segment buffer: {e}"))
+            })?;
 
-            let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
+            let copy_len = seg
+                .length
+                .min(total_bytes.saturating_sub(seg.buffer_offset));
             if copy_len > 0 {
                 unsafe {
                     std::ptr::copy_nonoverlapping(
@@ -165,9 +169,8 @@ impl DispatcherComponent {
 
             match channels.completion_rx.recv() {
                 Ok(Completion::WriteDone { result, .. }) => {
-                    result.map_err(|e| {
-                        DispatcherError::IoError(format!("SSD write failed: {e}"))
-                    })?;
+                    result
+                        .map_err(|e| DispatcherError::IoError(format!("SSD write failed: {e}")))?;
                 }
                 Ok(other) => {
                     return Err(DispatcherError::IoError(format!(
@@ -183,7 +186,6 @@ impl DispatcherComponent {
         }
         Ok(())
     }
-
 
     /// Promote an SSD-resident entry back into the memory-tier and serve to GPU.
     ///
@@ -209,7 +211,7 @@ impl DispatcherComponent {
         })?;
 
         // Read from SSD into memory-tier using pipelined reader.
-        let drives = self.data_drives.lock().unwrap();
+        let drives = self.data_drives.read();
         if drives.is_empty() {
             // No hardware: just copy zeros to GPU (test/staging-only mode).
             let aligned = total_bytes.next_multiple_of(4096).max(4096);
@@ -251,10 +253,10 @@ impl DispatcherComponent {
         // Zero-copy pipelined reader: NVMe → memory-tier slot → GPU (no intermediate ring copy).
         // SAFETY: mem_ptr is a valid, CUDA-pinned, SPDK-registered memory-tier slot.
         // ipc_handle.address is a valid GPU destination pointer.
-        let ring_guard = self.pipeline_ring.lock().unwrap();
-        let ring_ref = ring_guard.as_ref().ok_or_else(|| {
-            DispatcherError::NotInitialized("pipeline ring not allocated".into())
-        })?;
+        let ring_guard = self.pipeline_ring.read();
+        let ring_ref = ring_guard
+            .as_ref()
+            .ok_or_else(|| DispatcherError::NotInitialized("pipeline ring not allocated".into()))?;
         unsafe {
             pipeline::pipelined_ssd_to_gpu_zero_copy(
                 &*block_dev,
@@ -266,6 +268,7 @@ impl DispatcherComponent {
                 start_lba,
                 total_bytes,
                 ring_ref.chunk_size,
+                16,
             )?;
         }
         drop(ring_guard);
@@ -286,26 +289,60 @@ impl DispatcherComponent {
 
     /// Evict entries from the memory-tier until enough space is available.
     ///
-    /// Each evicted entry must have completed write-through (ssd_offset set).
-    /// The dispatch-map entry transitions from MemoryTier to BlockDevice.
+    /// Each evicted entry transitions from MemoryTier to BlockDevice in the
+    /// dispatch-map. If write-through hasn't completed (no ssd_offset), the
+    /// dispatch-map entry is removed entirely so lookups get NotExist rather
+    /// than a dangling memory-tier pointer.
     fn evict_for_space(
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
         needed: u32,
     ) -> Result<(), DispatcherError> {
+        // Under high concurrency (many threads promoting cold entries simultaneously),
+        // scanning many candidates per attempt causes severe MT lock contention because
+        // oldest_keys(N) holds the lock while scanning N entries.  Use a tiny scan
+        // window and prefer blind LRU as the primary fast path — one O(1) lock
+        // acquisition per iteration keeps contention proportional to thread count.
+        const MAX_SCAN: usize = 4;
+        const MAX_ATTEMPTS: usize = 512;
+
+        let mut attempts = 0usize;
         while mt.used() + needed as usize > mt.capacity() {
-            let evicted_key = mt.evict_lru().ok_or_else(|| {
-                DispatcherError::AllocationFailed(
-                    "memory-tier full and nothing evictable".into(),
-                )
-            })?;
-            // Transition dispatch-map entry to BlockDevice.
-            // If write-through hasn't completed, this fails and we lose the entry
-            // from the memory-tier (acceptable: it's still tracked in dispatch-map
-            // as MemoryTier with no ssd_offset, meaning a re-read won't find it
-            // in memory-tier and will go to SSD). In practice, heavy eviction
-            // pressure with unfinished writes is unlikely.
-            let _ = dm.convert_memory_tier_to_block(evicted_key);
+            attempts += 1;
+            if attempts > MAX_ATTEMPTS {
+                return Err(DispatcherError::AllocationFailed(
+                    "memory-tier full: eviction did not free enough space".into(),
+                ));
+            }
+
+            // Every 8th attempt probe a small batch for a clean eviction
+            // (write-through complete, no data loss).  All other iterations
+            // fall straight through to blind LRU to minimise lock hold time.
+            let evict_key = if attempts % 8 == 0 {
+                let candidates = mt.oldest_keys(MAX_SCAN);
+                candidates.iter().find(|&&k| dm.is_evictable(k)).copied()
+            } else {
+                None
+            };
+
+            match evict_key {
+                Some(key) => {
+                    // Another thread may have concurrently evicted this key.
+                    if mt.remove(key).is_ok() {
+                        let _ = dm.convert_memory_tier_to_block(key);
+                    }
+                }
+                None => {
+                    // Blind LRU: O(1) under the MT lock. Data loss is acceptable
+                    // under pressure; entries still in flight on SSD are removed
+                    // from the dispatch-map so stale lookups get NotExist.
+                    if let Some(evicted_key) = mt.evict_lru() {
+                        if dm.convert_memory_tier_to_block(evicted_key).is_err() {
+                            let _ = dm.remove(evicted_key);
+                        }
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -317,17 +354,20 @@ impl DispatcherComponent {
         extent_mgrs: &[Arc<ExtentManager>],
         job: WriteJob,
     ) {
-        // Get the memory-tier pointer for this key.
-        let (mem_ptr, _size) = match mt.get(job.key) {
+        // Get the memory-tier pointer without refreshing LRU — the write-through
+        // must not prevent this entry from being evicted under memory pressure.
+        let (mem_ptr, _size) = match mt.peek(job.key) {
             Some(v) => v,
-            None => return, // entry was removed before write-through
+            None => {
+                let _ = dm.release_read(job.key);
+                return;
+            }
         };
 
         if drives.is_empty() {
             // No block devices: mark as converted with a synthetic offset.
             let block_offset = job.key * 4096;
             let _ = dm.convert_to_storage(job.key, block_offset);
-            let _ = dm.release_read(job.key);
             return;
         }
 
@@ -348,24 +388,34 @@ impl DispatcherComponent {
             )
         } {
             Ok(buf) => buf,
-            Err(_) => return,
+            Err(_) => {
+                let _ = dm.release_read(job.key);
+                return;
+            }
         };
 
         // Allocate extent via the extent manager.
         let em = &extent_mgrs[drive_idx % extent_mgrs.len()];
         let iem = match query_interface!(em, IExtentManager) {
             Some(i) => i,
-            None => return,
+            None => {
+                let _ = dm.release_read(job.key);
+                return;
+            }
         };
         let write_handle = match iem.reserve_extent(job.key, aligned_bytes as u32) {
             Ok(wh) => wh,
-            Err(_) => return,
+            Err(_) => {
+                let _ = dm.release_read(job.key);
+                return;
+            }
         };
 
         let block_offset = write_handle.extent_offset();
         let start_lba = block_offset / block_size as u64;
 
         if Self::write_buffer_to_ssd(&**drive, &temp_buf, start_lba, total_bytes).is_err() {
+            let _ = dm.release_read(job.key);
             return; // write_handle drops → abort
         }
 
@@ -373,6 +423,7 @@ impl DispatcherComponent {
         std::mem::forget(temp_buf);
 
         // Data written successfully — commit the extent metadata.
+        // convert_to_storage also decrements the read reference.
         let _ = write_handle.publish();
         let _ = dm.convert_to_storage(job.key, block_offset);
         let _ = dm.release_read(job.key);
@@ -418,6 +469,7 @@ impl DispatcherComponent {
     fn create_block_device(
         &self,
         i: usize,
+        poller_base_cpu: Option<usize>,
         spdk_env: &Arc<dyn ISPDKEnv + Send + Sync>,
         logger: &Arc<dyn ILogger + Send + Sync>,
         pci_addr: PciAddress,
@@ -435,38 +487,39 @@ impl DispatcherComponent {
             .spdk_env
             .connect(Arc::clone(spdk_env))
             .map_err(|e| {
-                DispatcherError::IoError(format!(
-                    "failed to wire spdk_env for data drive {i}: {e}"
-                ))
+                DispatcherError::IoError(format!("failed to wire spdk_env for data drive {i}: {e}"))
             })?;
-        block_dev
-            .logger
-            .connect(Arc::clone(logger))
-            .map_err(|e| {
-                DispatcherError::IoError(format!(
-                    "failed to wire logger for data drive {i}: {e}"
-                ))
-            })?;
+        block_dev.logger.connect(Arc::clone(logger)).map_err(|e| {
+            DispatcherError::IoError(format!("failed to wire logger for data drive {i}: {e}"))
+        })?;
         let admin = query_interface!(block_dev, IBlockDeviceAdmin).ok_or_else(|| {
             DispatcherError::IoError(format!(
                 "failed to query IBlockDeviceAdmin for data drive {i}"
             ))
         })?;
         admin.set_pci_address(pci_addr);
+        if let Some(base) = poller_base_cpu {
+            admin.set_actor_cpu(base + i);
+        }
         admin.initialize().map_err(|e| {
             DispatcherError::IoError(format!(
                 "failed to initialize block device at {addr_str}: {e}"
             ))
         })?;
         let ibd = query_interface!(block_dev, IBlockDevice).ok_or_else(|| {
-            DispatcherError::IoError(format!(
-                "failed to query IBlockDevice for data drive {i}"
-            ))
+            DispatcherError::IoError(format!("failed to query IBlockDevice for data drive {i}"))
         })?;
-        Ok((block_dev as Arc<dyn component_core::IUnknown + Send + Sync>, admin, ibd))
+        Ok((
+            block_dev as Arc<dyn component_core::IUnknown + Send + Sync>,
+            admin,
+            ibd,
+        ))
     }
 
-    fn create_data_drives(&self, config: &DispatcherConfig) -> Result<Vec<DataDrive>, DispatcherError> {
+    fn create_data_drives(
+        &self,
+        config: &DispatcherConfig,
+    ) -> Result<Vec<DataDrive>, DispatcherError> {
         let spdk_env = self
             .spdk_env
             .get()
@@ -482,13 +535,8 @@ impl DispatcherComponent {
         for (i, addr_str) in config.data_pci_addrs.iter().enumerate() {
             let pci_addr = Self::parse_pci_addr(addr_str)?;
 
-            let (block_dev_component, admin, ibd) = self.create_block_device(
-                i,
-                &spdk_env,
-                &logger,
-                pci_addr,
-                addr_str,
-            )?;
+            let (block_dev_component, admin, ibd) =
+                self.create_block_device(i, config.poller_base_cpu, &spdk_env, &logger, pci_addr, addr_str)?;
 
             let extent_mgr = ExtentManager::new_inner();
 
@@ -553,10 +601,19 @@ impl DispatcherComponent {
                         "failed to format extent manager for data drive {i}: {e}"
                     ))
                 })?;
+            } else {
+                iem.initialize().map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "failed to recover extent manager for data drive {i}: {e}"
+                    ))
+                })?;
             }
 
+            let cpu_msg = config.poller_base_cpu
+                .map(|base| format!(", poller pinned to CPU {}", base + i))
+                .unwrap_or_default();
             self.log_info(&format!(
-                "dispatcher: data drive {i} initialized at {addr_str}"
+                "dispatcher: data drive {i} initialized at {addr_str}{cpu_msg}"
             ));
 
             let cached_channels = ibd.connect_client().ok();
@@ -596,20 +653,46 @@ impl IDispatcher for DispatcherComponent {
         // If spdk_env is not connected, skip drive creation (memory-tier-only mode).
         if self.spdk_env.is_connected() {
             let drives = self.create_data_drives(&config)?;
-            *self.data_drives.lock().unwrap() = drives;
+            *self.data_drives.write() = drives;
+
+            // Rebuild dispatch-map from recovered extents when not formatting.
+            if !config.format_on_init {
+                let t0 = std::time::Instant::now();
+                let dm = self.dispatch_map.get().map_err(|_| {
+                    DispatcherError::NotInitialized("dispatch_map not bound".into())
+                })?;
+                let mut recovered: u64 = 0;
+                let drives_guard = self.data_drives.read();
+                for drive in drives_guard.iter() {
+                    let iem =
+                        query_interface!(drive.extent_mgr, IExtentManager).ok_or_else(|| {
+                            DispatcherError::IoError(
+                                "failed to query IExtentManager during recovery".into(),
+                            )
+                        })?;
+                    iem.for_each_extent(&mut |extent| {
+                        let _ = dm.recover_extent(extent.key, extent.offset, extent.size);
+                        recovered += 1;
+                    });
+                }
+                drop(drives_guard);
+                let elapsed = t0.elapsed();
+                self.log_info(&format!(
+                    "dispatcher: dispatch-map recovered {recovered} extents from disk ({elapsed:.2?})"
+                ));
+            }
 
             // Pre-allocate pipeline ring for promote_and_serve (CUDA-pinned + SPDK-registered).
             if let Ok(gpu) = self.gpu_services.get() {
-                let chunk_size = self
-                    .data_drives
-                    .lock()
-                    .unwrap()
-                    .first()
-                    .map(|d| d.block_dev_iface.max_transfer_size() as usize)
-                    .unwrap_or(131072);
+                let chunk_size = {
+                    let dd = self.data_drives.read();
+                    dd.first()
+                        .map(|d| d.block_dev_iface.max_transfer_size() as usize)
+                        .unwrap_or(131072)
+                };
                 match pipeline::PipelineRing::new(&*gpu, chunk_size) {
                     Ok(ring) => {
-                        *self.pipeline_ring.lock().unwrap() = Some(ring);
+                        *self.pipeline_ring.write() = Some(ring);
                     }
                     Err(e) => {
                         self.log_info(&format!(
@@ -624,9 +707,7 @@ impl IDispatcher for DispatcherComponent {
                         self.warm_stream.store(stream.0 as u64, Ordering::Release);
                     }
                     Err(e) => {
-                        self.log_info(&format!(
-                            "warm stream allocation failed (non-fatal): {e}"
-                        ));
+                        self.log_info(&format!("warm stream allocation failed (non-fatal): {e}"));
                     }
                 }
 
@@ -634,10 +715,8 @@ impl IDispatcher for DispatcherComponent {
                 // for zero-copy NVMe reads and async GPU transfers.
                 if let Ok(mt) = self.memory_tier.get() {
                     if let Some((pool_ptr, pool_size)) = mt.pool_info() {
-                        match gpu.register_host_memory(
-                            pool_ptr as *mut std::ffi::c_void,
-                            pool_size,
-                        ) {
+                        match gpu.register_host_memory(pool_ptr as *mut std::ffi::c_void, pool_size)
+                        {
                             Ok(()) => {
                                 self.log_info(&format!(
                                     "dispatcher: registered memory-tier pool ({} MiB) for zero-copy DMA",
@@ -666,23 +745,23 @@ impl IDispatcher for DispatcherComponent {
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
         // Collect block device interfaces and extent managers for the background writer.
-        let bg_drives: Vec<Arc<dyn IBlockDevice + Send + Sync>> = self
-            .data_drives
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|d| Arc::clone(&d.block_dev_iface))
-            .collect();
-        let bg_extent_mgrs: Vec<Arc<ExtentManager>> = self
-            .data_drives
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|d| Arc::clone(&d.extent_mgr))
-            .collect();
+        let bg_drives: Vec<Arc<dyn IBlockDevice + Send + Sync>> = {
+            let dd = self.data_drives.read();
+            dd.iter().map(|d| Arc::clone(&d.block_dev_iface)).collect()
+        };
+        let bg_extent_mgrs: Vec<Arc<ExtentManager>> = {
+            let dd = self.data_drives.read();
+            dd.iter().map(|d| Arc::clone(&d.extent_mgr)).collect()
+        };
 
         let writer = BackgroundWriter::start(move |job: WriteJob| {
-            Self::process_write_job(&dm_for_writer, &mt_for_writer, &bg_drives, &bg_extent_mgrs, job);
+            Self::process_write_job(
+                &dm_for_writer,
+                &mt_for_writer,
+                &bg_drives,
+                &bg_extent_mgrs,
+                job,
+            );
         });
 
         *self.bg_writer.lock().unwrap() = Some(writer);
@@ -697,13 +776,10 @@ impl IDispatcher for DispatcherComponent {
                 .memory_tier
                 .get()
                 .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
-            let evictor_extent_mgrs: Vec<Arc<ExtentManager>> = self
-                .data_drives
-                .lock()
-                .unwrap()
-                .iter()
-                .map(|d| Arc::clone(&d.extent_mgr))
-                .collect();
+            let evictor_extent_mgrs: Vec<Arc<ExtentManager>> = {
+                let dd = self.data_drives.read();
+                dd.iter().map(|d| Arc::clone(&d.extent_mgr)).collect()
+            };
             let evictor_logger = self.logger.get().ok();
 
             if !evictor_extent_mgrs.is_empty() {
@@ -742,13 +818,24 @@ impl IDispatcher for DispatcherComponent {
 
         self.pending_writes.lock().unwrap().clear();
 
+        // Checkpoint all extent managers to persist metadata before teardown.
+        {
+            let drives = self.data_drives.read();
+            for (i, drive) in drives.iter().enumerate() {
+                if let Some(iem) = query_interface!(drive.extent_mgr, IExtentManager) {
+                    if let Err(e) = iem.checkpoint() {
+                        self.log_error(&format!(
+                            "dispatcher: extent manager {i} checkpoint failed: {e}"
+                        ));
+                    }
+                }
+            }
+        }
+
         // Unregister memory-tier pool from CUDA/SPDK before tearing down.
         if let (Ok(gpu), Ok(mt)) = (self.gpu_services.get(), self.memory_tier.get()) {
             if let Some((pool_ptr, pool_size)) = mt.pool_info() {
-                let _ = gpu.unregister_host_memory(
-                    pool_ptr as *mut std::ffi::c_void,
-                    pool_size,
-                );
+                let _ = gpu.unregister_host_memory(pool_ptr as *mut std::ffi::c_void, pool_size);
             }
         }
 
@@ -758,13 +845,18 @@ impl IDispatcher for DispatcherComponent {
             if raw != 0 {
                 let _ = gpu.destroy_stream(GpuStream(raw as *mut std::ffi::c_void));
             }
-            if let Some(ring) = self.pipeline_ring.lock().unwrap().take() {
+            let ring_opt = self.pipeline_ring.write().take();
+            if let Some(ring) = ring_opt {
                 ring.destroy(&*gpu);
             }
         }
 
         // Shut down block devices in reverse order
-        let drives = std::mem::take(&mut *self.data_drives.lock().unwrap());
+        let drives = {
+            let mut g = self.data_drives.write();
+            let taken = std::mem::take(&mut *g);
+            taken
+        };
         for (i, drive) in drives.iter().enumerate().rev() {
             if let Err(e) = drive.block_dev_admin.shutdown() {
                 self.log_error(&format!(
@@ -785,14 +877,350 @@ impl IDispatcher for DispatcherComponent {
                 .gpu_services
                 .get()
                 .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
-            gpu.stream_synchronize(stream).map_err(|e| {
-                DispatcherError::IoError(format!("stream_synchronize failed: {e}"))
-            })?;
+            gpu.stream_synchronize(stream)
+                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
         }
         Ok(())
     }
 
-    fn lookup_async(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<GpuStream, DispatcherError> {
+    fn batch_lookup(
+        &self,
+        entries: &[(CacheKey, IpcHandle)],
+    ) -> Vec<Result<(), DispatcherError>> {
+        if entries.is_empty() {
+            return Vec::new();
+        }
+
+        let init_check = self.ensure_initialized();
+        if let Err(e) = init_check {
+            return entries.iter().map(|_| Err(e.clone())).collect();
+        }
+
+        let dm = match self.dispatch_map.get() {
+            Ok(dm) => dm,
+            Err(_) => {
+                let e = DispatcherError::NotInitialized("dispatch_map not bound".into());
+                return entries.iter().map(|_| Err(e.clone())).collect();
+            }
+        };
+        let mt = match self.memory_tier.get() {
+            Ok(mt) => mt,
+            Err(_) => {
+                let e = DispatcherError::NotInitialized("memory_tier not bound".into());
+                return entries.iter().map(|_| Err(e.clone())).collect();
+            }
+        };
+        let gpu = match self.gpu_services.get() {
+            Ok(gpu) => gpu,
+            Err(_) => {
+                let e = DispatcherError::NotInitialized("gpu_services not bound".into());
+                return entries.iter().map(|_| Err(e.clone())).collect();
+            }
+        };
+
+        let mut results: Vec<Option<Result<(), DispatcherError>>> = vec![None; entries.len()];
+
+        // Classify entries and handle fast paths inline.
+        struct ColdEntry {
+            idx: usize,
+            key: CacheKey,
+            offset: u64,
+            ipc_handle_addr: *mut u8,
+            ipc_handle_size: u32,
+        }
+        // SAFETY: ColdEntry contains a raw pointer from IpcHandle (GPU device pointer).
+        // These pointers are valid across threads — CUDA IPC handles are designed for
+        // cross-process/thread use. We only read the pointer value to pass to CUDA APIs.
+        unsafe impl Send for ColdEntry {}
+        unsafe impl Sync for ColdEntry {}
+
+        let mut cold_entries: Vec<ColdEntry> = Vec::new();
+
+        for (i, (key, ipc_handle)) in entries.iter().enumerate() {
+            let key = *key;
+            match dm.lookup(key) {
+                Ok(lookup_result) => match lookup_result {
+                    LookupResult::NotExist => {
+                        results[i] = Some(Err(DispatcherError::KeyNotFound(key)));
+                    }
+                    LookupResult::MismatchSize => {
+                        let _ = dm.release_read(key);
+                        results[i] = Some(Err(DispatcherError::InvalidParameter(
+                            "size mismatch on lookup".into(),
+                        )));
+                    }
+                    LookupResult::MemoryTier { pointer, size } => {
+                        let copy_size = (ipc_handle.size as usize).min(size as usize);
+                        let raw = self.warm_stream.load(Ordering::Acquire);
+                        let res = if raw != 0 {
+                            let s = GpuStream(raw as *mut std::ffi::c_void);
+                            gpu.memcpy_h2d_async(
+                                pointer as *const std::ffi::c_void,
+                                ipc_handle.address as *mut std::ffi::c_void,
+                                copy_size,
+                                s,
+                            )
+                            .map_err(|e| {
+                                DispatcherError::IoError(format!(
+                                    "GPU DMA copy (memory-tier→device) failed: {e}"
+                                ))
+                            })
+                            .and_then(|_| {
+                                gpu.stream_synchronize(s).map_err(|e| {
+                                    DispatcherError::IoError(format!(
+                                        "stream_synchronize failed: {e}"
+                                    ))
+                                })
+                            })
+                        } else {
+                            let aligned = copy_size.next_multiple_of(4096).max(4096);
+                            let temp_buf = unsafe {
+                                DmaBuffer::from_raw(
+                                    pointer as *mut std::ffi::c_void,
+                                    aligned,
+                                    noop_free,
+                                    -1,
+                                )
+                            }
+                            .map_err(|e| {
+                                DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}"))
+                            });
+                            match temp_buf {
+                                Ok(buf) => {
+                                    let r = gpu.dma_copy_to_device(
+                                        &buf,
+                                        ipc_handle.address as *mut std::ffi::c_void,
+                                        copy_size,
+                                    )
+                                    .map_err(|e| {
+                                        DispatcherError::IoError(format!(
+                                            "GPU DMA copy (memory-tier→device) failed: {e}"
+                                        ))
+                                    });
+                                    std::mem::forget(buf);
+                                    r
+                                }
+                                Err(e) => Err(e),
+                            }
+                        };
+                        let _ = dm.release_read(key);
+                        mt.touch(key);
+                        results[i] = Some(res);
+                    }
+                    LookupResult::Staging { buffer } => {
+                        let res = gpu
+                            .dma_copy_to_device(
+                                &buffer,
+                                ipc_handle.address as *mut std::ffi::c_void,
+                                ipc_handle.size as usize,
+                            )
+                            .map_err(|e| {
+                                DispatcherError::IoError(format!(
+                                    "GPU DMA copy (staging→device) failed: {e}"
+                                ))
+                            });
+                        let _ = dm.release_read(key);
+                        results[i] = Some(res);
+                    }
+                    LookupResult::BlockDevice { offset } => {
+                        let _ = dm.release_read(key);
+                        cold_entries.push(ColdEntry {
+                            idx: i,
+                            key,
+                            offset,
+                            ipc_handle_addr: ipc_handle.address,
+                            ipc_handle_size: ipc_handle.size,
+                        });
+                    }
+                },
+                Err(_) => {
+                    results[i] = Some(Err(DispatcherError::KeyNotFound(key)));
+                }
+            }
+        }
+
+        // Promote cold entries in parallel — multiple queue threads per drive.
+        // Each thread gets its own NVMe queue pair and CUDA streams, enabling
+        // concurrent reads on the same physical drive.
+        if !cold_entries.is_empty() {
+            const MAX_QUEUES_PER_DRIVE: usize = 2;
+
+            let chunk_size = {
+                let ring_guard = self.pipeline_ring.read();
+                ring_guard.as_ref().map_or(131072, |r| r.chunk_size)
+            };
+
+            let drives = self.data_drives.read();
+            let num_drives = drives.len();
+
+            if num_drives == 0 {
+                for entry in &cold_entries {
+                    Self::evict_for_space(&dm, &mt, entry.ipc_handle_size).ok();
+                    let res = mt.insert(entry.key, entry.ipc_handle_size).map(|mem_ptr| {
+                        let _ = dm.create_memory_tier_entry(entry.key, mem_ptr, entry.ipc_handle_size);
+                        let _ = dm.release_write(entry.key);
+                    }).map_err(|e| {
+                        DispatcherError::AllocationFailed(format!("promote insert failed: {e}"))
+                    });
+                    results[entry.idx] = Some(res);
+                }
+            } else {
+                // Group cold entries by target drive.
+                let mut per_drive: Vec<Vec<usize>> = vec![Vec::new(); num_drives];
+                for (ci, entry) in cold_entries.iter().enumerate() {
+                    let drive_idx = Self::drive_index(entry.key, num_drives);
+                    per_drive[drive_idx].push(ci);
+                }
+
+                std::thread::scope(|s| {
+                    let mut thread_handles: Vec<
+                        std::thread::ScopedJoinHandle<Vec<(usize, Result<(), DispatcherError>)>>,
+                    > = Vec::new();
+
+                    for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
+                        if entry_indices.is_empty() {
+                            continue;
+                        }
+
+                        // Split this drive's entries across multiple queue threads.
+                        let num_queues = MAX_QUEUES_PER_DRIVE.min(entry_indices.len());
+                        let chunks: Vec<&[usize]> = entry_indices
+                            .chunks((entry_indices.len() + num_queues - 1) / num_queues)
+                            .collect();
+
+                        let queue_depth = 16 / num_queues;
+
+                        for chunk in chunks {
+                            let dm_ref = &dm;
+                            let mt_ref = &mt;
+                            let gpu_ref = &gpu;
+                            let drives_ref = &drives;
+                            let cold_ref = &cold_entries;
+                            let indices = chunk.to_vec();
+
+                            let handle = s.spawn(move || {
+                                let drive = &drives_ref[drive_idx];
+                                let block_size = drive.block_dev_iface.block_size();
+
+                                let channels =
+                                    drive.block_dev_iface.connect_client().map_err(|e| {
+                                        DispatcherError::IoError(format!(
+                                            "connect_client failed: {e}"
+                                        ))
+                                    });
+                                let streams_result = gpu_ref.create_stream().and_then(|a| {
+                                    gpu_ref.create_stream().map(|b| [a, b]).map_err(|e| {
+                                        let _ = gpu_ref.destroy_stream(a);
+                                        e
+                                    })
+                                });
+
+                                let mut batch_results: Vec<(usize, Result<(), DispatcherError>)> =
+                                    Vec::with_capacity(indices.len());
+
+                                let (channels, streams) = match (channels, streams_result) {
+                                    (Ok(ch), Ok(st)) => (ch, st),
+                                    (Err(e), _) => {
+                                        for &ci in &indices {
+                                            batch_results.push((ci, Err(e.clone())));
+                                        }
+                                        return batch_results;
+                                    }
+                                    (_, Err(e)) => {
+                                        let err = DispatcherError::IoError(format!(
+                                            "create_stream failed: {e}"
+                                        ));
+                                        for &ci in &indices {
+                                            batch_results.push((ci, Err(err.clone())));
+                                        }
+                                        return batch_results;
+                                    }
+                                };
+
+                                for &ci in &indices {
+                                    let entry = &cold_ref[ci];
+                                    let ipc = IpcHandle {
+                                        address: entry.ipc_handle_addr,
+                                        size: entry.ipc_handle_size,
+                                    };
+                                    let total_bytes = ipc.size as usize;
+
+                                    let res = (|| -> Result<(), DispatcherError> {
+                                        Self::evict_for_space(dm_ref, mt_ref, ipc.size)?;
+
+                                        let mem_ptr =
+                                            mt_ref.insert(entry.key, ipc.size).map_err(|e| {
+                                                DispatcherError::AllocationFailed(format!(
+                                                    "promote insert failed: {e}"
+                                                ))
+                                            })?;
+
+                                        let start_lba = entry.offset / block_size as u64;
+
+                                        let pipeline_result = unsafe {
+                                            pipeline::pipelined_ssd_to_gpu_zero_copy(
+                                                &*drive.block_dev_iface,
+                                                &**gpu_ref,
+                                                &streams,
+                                                &channels,
+                                                mem_ptr,
+                                                ipc.address as *mut std::ffi::c_void,
+                                                start_lba,
+                                                total_bytes,
+                                                chunk_size,
+                                                queue_depth,
+                                            )
+                                        };
+
+                                        pipeline_result?;
+
+                                        let _ = dm_ref.remove(entry.key);
+                                        dm_ref
+                                            .create_memory_tier_entry(entry.key, mem_ptr, ipc.size)
+                                            .map_err(|e| {
+                                                DispatcherError::IoError(format!(
+                                                    "promote re-register failed: {e}"
+                                                ))
+                                            })?;
+                                        let _ =
+                                            dm_ref.convert_to_storage(entry.key, entry.offset);
+                                        let _ = dm_ref.release_write(entry.key);
+
+                                        Ok(())
+                                    })();
+
+                                    batch_results.push((ci, res));
+                                }
+
+                                let _ = gpu_ref.destroy_stream(streams[0]);
+                                let _ = gpu_ref.destroy_stream(streams[1]);
+
+                                batch_results
+                            });
+
+                            thread_handles.push(handle);
+                        }
+                    }
+
+                    // Collect results from all threads.
+                    for handle in thread_handles {
+                        let batch_results = handle.join().unwrap_or_else(|_| Vec::new());
+                        for (ci, res) in batch_results {
+                            results[cold_entries[ci].idx] = Some(res);
+                        }
+                    }
+                });
+            }
+        }
+
+        results.into_iter().map(|r| r.unwrap()).collect()
+    }
+
+    fn lookup_async(
+        &self,
+        key: CacheKey,
+        ipc_handle: IpcHandle,
+    ) -> Result<GpuStream, DispatcherError> {
         self.ensure_initialized()?;
 
         let dm = self
@@ -956,7 +1384,7 @@ impl IDispatcher for DispatcherComponent {
             .map_err(|_| DispatcherError::KeyNotFound(key))?;
 
         if let Some(offset) = block_offset {
-            let drives = self.data_drives.lock().unwrap();
+            let drives = self.data_drives.read();
             let idx = Self::drive_index(key, drives.len().max(1));
             if let Some(drive) = drives.get(idx) {
                 if let Some(iem) = query_interface!(drive.extent_mgr, IExtentManager) {
@@ -1003,7 +1431,12 @@ impl IDispatcher for DispatcherComponent {
         let aligned_size = (ipc_handle.size as usize).next_multiple_of(4096);
         // SAFETY: mem_ptr is valid for aligned_size bytes, owned by memory-tier.
         let temp_buf = unsafe {
-            DmaBuffer::from_raw(mem_ptr as *mut std::ffi::c_void, aligned_size, noop_free, -1)
+            DmaBuffer::from_raw(
+                mem_ptr as *mut std::ffi::c_void,
+                aligned_size,
+                noop_free,
+                -1,
+            )
         }
         .map_err(|e| {
             let _ = mt.remove(key);
@@ -1048,7 +1481,10 @@ impl IDispatcher for DispatcherComponent {
             .map_err(|e| DispatcherError::IoError(e.to_string()))?;
 
         // Enqueue background write-through to SSD.
-        let num_drives = self.data_drives.lock().unwrap().len().max(1);
+        let num_drives = {
+            let dd = self.data_drives.read();
+            dd.len().max(1)
+        };
         let guard = self.bg_writer.lock().unwrap();
         if let Some(ref writer) = *guard {
             let _ = writer.enqueue(WriteJob {
@@ -1066,9 +1502,7 @@ impl IDispatcher for DispatcherComponent {
         self.log_info(&format!("dispatcher: prepare_store key={key} size={size}"));
 
         if size == 0 {
-            return Err(DispatcherError::InvalidParameter(
-                "size must be > 0".into(),
-            ));
+            return Err(DispatcherError::InvalidParameter("size must be > 0".into()));
         }
 
         let dm = self
@@ -1084,7 +1518,7 @@ impl IDispatcher for DispatcherComponent {
         })?;
 
         // Determine target drive and allocate extent.
-        let drives = self.data_drives.lock().unwrap();
+        let drives = self.data_drives.read();
         let num_drives = drives.len().max(1);
         let drive_idx = Self::drive_index(key, num_drives);
 
@@ -1097,10 +1531,8 @@ impl IDispatcher for DispatcherComponent {
             (4096, -1)
         };
 
-        let extent_mgrs: Vec<Arc<ExtentManager>> = drives
-            .iter()
-            .map(|d| Arc::clone(&d.extent_mgr))
-            .collect();
+        let extent_mgrs: Vec<Arc<ExtentManager>> =
+            drives.iter().map(|d| Arc::clone(&d.extent_mgr)).collect();
         drop(drives);
 
         let aligned_size = (size as usize).next_multiple_of(block_size);
@@ -1177,7 +1609,7 @@ impl IDispatcher for DispatcherComponent {
             .remove(&key)
             .ok_or(DispatcherError::KeyNotFound(key))?;
 
-        let drives = self.data_drives.lock().unwrap();
+        let drives = self.data_drives.read();
         let drive = drives.get(pending.drive_idx).ok_or_else(|| {
             DispatcherError::IoError("data drive not available for commit".into())
         })?;
@@ -1238,8 +1670,30 @@ impl IDispatcher for DispatcherComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
 
-        dm.touch(key)
-            .map_err(|_| DispatcherError::KeyNotFound(key))
+        dm.touch(key).map_err(|_| DispatcherError::KeyNotFound(key))
+    }
+
+    fn clear_memory_tier(&self) -> Result<usize, DispatcherError> {
+        self.ensure_initialized()?;
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        let mut count = 0;
+        while let Some(key) = mt.evict_lru() {
+            if dm.convert_memory_tier_to_block(key).is_err() {
+                let _ = dm.remove(key);
+            }
+            count += 1;
+        }
+        Ok(count)
     }
 }
 
@@ -1269,7 +1723,10 @@ mod tests {
         let sz = size.max(4096);
         let aligned_sz = sz.next_multiple_of(4096);
         let ptr = unsafe { libc::aligned_alloc(4096, aligned_sz) };
-        assert!(!ptr.is_null(), "aligned_alloc failed for {aligned_sz} bytes");
+        assert!(
+            !ptr.is_null(),
+            "aligned_alloc failed for {aligned_sz} bytes"
+        );
         unsafe { std::ptr::write_bytes(ptr as *mut u8, 0, aligned_sz) };
         let buf = unsafe { DmaBuffer::from_raw(ptr, aligned_sz, dma_free, -1) }.unwrap();
         Arc::new(buf)
@@ -1352,6 +1809,15 @@ mod tests {
             })
         }
 
+        fn peek(&self, key: CacheKey) -> Option<(*mut u8, u32)> {
+            self.get(key)
+        }
+
+        fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
+            let inner = self.inner.lock().unwrap();
+            inner.slots.keys().take(n).copied().collect()
+        }
+
         fn evict_lru(&self) -> Option<CacheKey> {
             let mut inner = self.inner.lock().unwrap();
             let key = inner.slots.keys().next().copied()?;
@@ -1391,13 +1857,27 @@ mod tests {
             let inner = self.inner.lock().unwrap();
             Some((inner.pool.as_ptr() as *mut u8, inner.capacity))
         }
+
+        fn clear(&self) -> Result<usize, MemoryTierError> {
+            let mut inner = self.inner.lock().unwrap();
+            let count = inner.slots.len();
+            inner.slots.clear();
+            inner.used = 0;
+            Ok(count)
+        }
     }
 
     // --- MockDispatchMap ---
 
     enum MockEntryLocation {
-        Staging { buffer: Arc<DmaBuffer> },
-        MemoryTier { pointer: *mut u8, size: u32, ssd_offset: Option<u64> },
+        Staging {
+            buffer: Arc<DmaBuffer>,
+        },
+        MemoryTier {
+            pointer: *mut u8,
+            size: u32,
+            ssd_offset: Option<u64>,
+        },
     }
 
     // SAFETY: pointers in MemoryTier refer to MockMemoryTier pool (test-only).
@@ -1490,17 +1970,19 @@ mod tests {
                     MockEntryLocation::Staging { buffer } => Ok(LookupResult::Staging {
                         buffer: Arc::clone(buffer),
                     }),
-                    MockEntryLocation::MemoryTier { pointer, size, ssd_offset } => {
-                        match ssd_offset {
-                            Some(offset) if pointer.is_null() => {
-                                Ok(LookupResult::BlockDevice { offset: *offset })
-                            }
-                            _ => Ok(LookupResult::MemoryTier {
-                                pointer: *pointer,
-                                size: *size,
-                            }),
+                    MockEntryLocation::MemoryTier {
+                        pointer,
+                        size,
+                        ssd_offset,
+                    } => match ssd_offset {
+                        Some(offset) if pointer.is_null() => {
+                            Ok(LookupResult::BlockDevice { offset: *offset })
                         }
-                    }
+                        _ => Ok(LookupResult::MemoryTier {
+                            pointer: *pointer,
+                            size: *size,
+                        }),
+                    },
                 },
             }
         }
@@ -1644,7 +2126,10 @@ mod tests {
             match inner.entries.get_mut(&key) {
                 None => Err(DispatchMapError::KeyNotFound(key)),
                 Some(entry) => match &entry.location {
-                    MockEntryLocation::MemoryTier { ssd_offset: Some(offset), .. } => {
+                    MockEntryLocation::MemoryTier {
+                        ssd_offset: Some(offset),
+                        ..
+                    } => {
                         let off = *offset;
                         entry.location = MockEntryLocation::MemoryTier {
                             pointer: std::ptr::null_mut(),
@@ -1653,11 +2138,48 @@ mod tests {
                         };
                         Ok(())
                     }
-                    _ => Err(DispatchMapError::InvalidState(
-                        "no ssd_offset set".into(),
-                    )),
+                    _ => Err(DispatchMapError::InvalidState("no ssd_offset set".into())),
                 },
             }
+        }
+
+        fn is_evictable(&self, key: CacheKey) -> bool {
+            let inner = self.inner.lock().unwrap();
+            match inner.entries.get(&key) {
+                Some(entry) => matches!(
+                    entry.location,
+                    MockEntryLocation::MemoryTier {
+                        ssd_offset: Some(_),
+                        ..
+                    }
+                ),
+                None => false,
+            }
+        }
+
+        fn recover_extent(
+            &self,
+            key: CacheKey,
+            offset: u64,
+            _size_blocks: u32,
+        ) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.entries.contains_key(&key) {
+                return Err(DispatchMapError::AlreadyExists(key));
+            }
+            inner.entries.insert(
+                key,
+                MockEntry {
+                    location: MockEntryLocation::MemoryTier {
+                        pointer: std::ptr::null_mut(),
+                        size: 0,
+                        ssd_offset: Some(offset),
+                    },
+                    write_ref: false,
+                    read_refs: 0,
+                },
+            );
+            Ok(())
         }
     }
 
@@ -1790,9 +2312,9 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(Vec::new()),
+            RwLock::new(Vec::new()),
             Mutex::new(HashMap::new()),
-            Mutex::new(None),
+            RwLock::new(None),
             AtomicU64::new(0),
         );
         c.dispatch_map
@@ -1804,7 +2326,6 @@ mod tests {
 
         let d = query_interface!(c, IDispatcher).unwrap();
         d.initialize(DispatcherConfig {
-            metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
             ..Default::default()
         })
@@ -1826,22 +2347,45 @@ mod tests {
 
     #[test]
     fn component_creation() {
-        let _c = DispatcherComponent::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
+        let _c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+        );
     }
 
     #[test]
     fn query_idispatcher() {
-        let c = DispatcherComponent::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+        );
         let d = query_interface!(c, IDispatcher);
         assert!(d.is_some());
     }
 
     #[test]
     fn initialize_without_receptacles_fails() {
-        let c = DispatcherComponent::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+        );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
-            metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
             ..Default::default()
         };
@@ -1851,10 +2395,17 @@ mod tests {
 
     #[test]
     fn initialize_with_empty_pci_addrs_fails() {
-        let c = DispatcherComponent::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+        );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
-            metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec![],
             ..Default::default()
         };
@@ -1865,7 +2416,15 @@ mod tests {
 
     #[test]
     fn lookup_before_initialize_fails() {
-        let c = DispatcherComponent::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+        );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
         let handle = IpcHandle {
@@ -1878,7 +2437,15 @@ mod tests {
 
     #[test]
     fn check_before_initialize_fails() {
-        let c = DispatcherComponent::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+        );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.check(42);
         assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
@@ -1886,7 +2453,15 @@ mod tests {
 
     #[test]
     fn remove_before_initialize_fails() {
-        let c = DispatcherComponent::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+        );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.remove(42);
         assert!(matches!(err, Err(DispatcherError::NotInitialized(_))));
@@ -1894,7 +2469,15 @@ mod tests {
 
     #[test]
     fn populate_before_initialize_fails() {
-        let c = DispatcherComponent::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+        );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
         let handle = IpcHandle {
@@ -1907,7 +2490,15 @@ mod tests {
 
     #[test]
     fn populate_with_zero_size_fails() {
-        let c = DispatcherComponent::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+        );
         let d = query_interface!(c, IDispatcher).unwrap();
         // Even though not initialized, zero-size check comes after init check.
         // This test verifies the parameter validation exists in the code path.
@@ -1923,14 +2514,30 @@ mod tests {
 
     #[test]
     fn shutdown_without_initialize_succeeds() {
-        let c = DispatcherComponent::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+        );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
     }
 
     #[test]
     fn double_shutdown_succeeds() {
-        let c = DispatcherComponent::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+        );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
         assert!(d.shutdown().is_ok());
@@ -1942,9 +2549,9 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(Vec::new()),
+            RwLock::new(Vec::new()),
             Mutex::new(HashMap::new()),
-            Mutex::new(None),
+            RwLock::new(None),
             AtomicU64::new(0),
         ));
 
@@ -1985,13 +2592,20 @@ mod tests {
     fn initialize_empty_addrs_with_dispatch_map() {
         let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
-        let c = DispatcherComponent::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+        );
         c.dispatch_map.connect(dm).unwrap();
         c.memory_tier.connect(mt).unwrap();
 
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
-            metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec![],
             ..Default::default()
         };
@@ -2004,14 +2618,21 @@ mod tests {
         let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
         let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
-        let c = DispatcherComponent::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+        );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
         c.memory_tier.connect(mt).unwrap();
 
         let d = query_interface!(c, IDispatcher).unwrap();
         d.initialize(DispatcherConfig {
-            metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec![
                 "0000:02:00.0".to_string(),
                 "0000:03:00.0".to_string(),
@@ -2067,7 +2688,15 @@ mod tests {
         let gpu: Arc<dyn IGpuServices + Send + Sync> = Arc::new(MockGpuServices);
         let mt: Arc<dyn IMemoryTier + Send + Sync> =
             Arc::new(MockMemoryTier::with_fail_insert(1024 * 1024));
-        let c = DispatcherComponent::new(AtomicBool::new(false), Mutex::new(None), Mutex::new(None), Mutex::new(Vec::new()), Mutex::new(HashMap::new()), Mutex::new(None), AtomicU64::new(0));
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+        );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
         c.gpu_services.connect(gpu).unwrap();
@@ -2075,7 +2704,6 @@ mod tests {
 
         let d = query_interface!(c, IDispatcher).unwrap();
         d.initialize(DispatcherConfig {
-            metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
             ..Default::default()
         })
@@ -2145,7 +2773,10 @@ mod tests {
         // which copies zeros to GPU and re-registers the entry.
         let mut buf2 = vec![0u8; 4096];
         let result = d.lookup(1, make_handle(&mut buf2));
-        assert!(result.is_ok(), "promote without hardware should succeed, got: {result:?}");
+        assert!(
+            result.is_ok(),
+            "promote without hardware should succeed, got: {result:?}"
+        );
         d.shutdown().unwrap();
     }
 
@@ -2267,7 +2898,6 @@ mod tests {
         d.shutdown().unwrap();
 
         d.initialize(DispatcherConfig {
-            metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
             ..Default::default()
         })
@@ -2344,7 +2974,8 @@ mod tests {
         // Insert 4 entries into the memory-tier directly.
         for key in 0..4u64 {
             mt.insert(key, 4096).unwrap();
-            dm.create_memory_tier_entry(key, std::ptr::null_mut(), 4096).unwrap();
+            dm.create_memory_tier_entry(key, std::ptr::null_mut(), 4096)
+                .unwrap();
             dm.release_write(key).unwrap();
             // Set ssd_offset so convert_memory_tier_to_block can succeed.
             dm.convert_to_storage(key, key * 4096).unwrap();
@@ -2364,7 +2995,8 @@ mod tests {
 
         // Insert one 4 KiB entry.
         mt.insert(0, 4096).unwrap();
-        dm.create_memory_tier_entry(0, std::ptr::null_mut(), 4096).unwrap();
+        dm.create_memory_tier_entry(0, std::ptr::null_mut(), 4096)
+            .unwrap();
         dm.release_write(0).unwrap();
 
         // Plenty of space, no eviction needed.
@@ -2384,9 +3016,9 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(Vec::new()),
+            RwLock::new(Vec::new()),
             Mutex::new(HashMap::new()),
-            Mutex::new(None),
+            RwLock::new(None),
             AtomicU64::new(0),
         );
         c.dispatch_map
@@ -2398,7 +3030,6 @@ mod tests {
 
         let d = query_interface!(c, IDispatcher).unwrap();
         d.initialize(DispatcherConfig {
-            metadata_pci_addr: "0000:01:00.0".to_string(),
             data_pci_addrs: vec!["0000:02:00.0".to_string()],
             ..Default::default()
         })
@@ -2537,7 +3168,11 @@ mod tests {
             dm_iface.remove(*key).unwrap();
         }
 
-        assert_eq!(dm.entry_count(), 5, "5 entries should remain after evicting 5");
+        assert_eq!(
+            dm.entry_count(),
+            5,
+            "5 entries should remain after evicting 5"
+        );
     }
 
     #[test]

@@ -1,65 +1,64 @@
 # Sync Apply Report
 
-Generated: 2026-05-21
+Generated: 2026-05-29
 Component: gpu-services
-Based on: drift-report from 2026-05-21
+Based on: drift-report from 2026-05-29
 
 ## Applied Changes
 
-### 1. Naming Backfill: GpuServicesComponentV0 -> GpuServicesComponent
-
-**Files modified**:
-- `specs/001-gpu-cuda-services/quickstart.md` — renamed type and updated constructor
-- `specs/002-gpu-ssd-dma-prepare/quickstart.md` — renamed type and updated constructor
-- `CLAUDE.md` — updated component name in Architecture section
-
-**Changes**:
-- `GpuServicesComponentV0::new()` replaced with `GpuServicesComponent::new_default()`
-- All references now match the actual public API
-
-### 2. FR-005 Verification Caching (spec 001)
+### 1. Backfill open_ipc_handle Caller Precondition (spec 001)
 
 **File modified**: `specs/001-gpu-cuda-services/spec.md`
 
-**Change**: Added clarifying sentence to FR-005:
+**Change 1 — Assumptions section (last bullet, replaced)**:
 
-> As an optimization, `pin_memory` MAY skip re-verification (via `cudaPointerGetAttributes`) for pointers already present in the verified set, since verification is a prerequisite in the standard IPC workflow.
+Removed the inaccurate assumption that "GPU device selection for IPC
+operations is implicit — the IPC handle carries the originating device
+context and the component follows it automatically."
 
-**Effect**: The minor drift flagged in the drift report is now documented as intentional behavior. No code changes required.
+Replaced with accurate language documenting that:
+- `open_ipc_handle` (and `deserialize_ipc_handle`) does NOT call
+  `cudaSetDevice`
+- It is a low-level function with an explicit caller precondition:
+  the caller must set the CUDA device context via `cudaSetDevice` before
+  calling `deserialize_ipc_handle`
+- In the certus-server integration, `service.rs` fulfills this
+  precondition
+- The high-level `prepare_memory_for_spdk` (FR-013) handles device
+  context internally and is exempt from this requirement
 
-### 3. Unspecced Feature Backfill (spec 001): CUDA Streams, Async DMA, Pinned Buffers
+**Change 2 — FR-003 (augmented with precondition note)**:
 
-**File modified**: `specs/001-gpu-cuda-services/spec.md`
+Added a **Precondition** clause to FR-003 stating that the caller is
+responsible for setting the correct CUDA device context before calling
+`deserialize_ipc_handle`, and that `open_ipc_handle` does not call
+`cudaSetDevice` internally. The high-level `prepare_memory_for_spdk`
+path is identified as exempt.
 
-**Changes**: Added FR-017 through FR-020:
-- **FR-017**: CUDA stream lifecycle (`create_stream`, `destroy_stream`, `stream_synchronize`)
-- **FR-018**: Async DMA copy from `DmaBuffer` to GPU (`dma_copy_to_device_async`)
-- **FR-019**: Raw pointer async H2D copy (`memcpy_h2d_async`)
-- **FR-020**: Pinned DMA buffer allocation (`allocate_pinned_dma_buffer`)
+**Effect**: The drift between the Assumptions section and actual code
+behavior of `src/ipc.rs open_ipc_handle()` is now resolved. No code
+changes required — the code is correct, the spec was inaccurate.
 
-**Effect**: 4 previously unspecced features now have formal FR coverage in the CUDA services spec.
+## Not Applied
 
-### 4. Unspecced Feature Backfill (spec 002): GDRCopy P2P DMA Path
-
-**File modified**: `specs/002-gpu-ssd-dma-prepare/spec.md`
-
-**Changes**: Added FR-021 through FR-024:
-- **FR-021**: `create_spdk_dma_buffer_from_gpu_bar` — full GDRCopy BAR1 P2P pipeline
-- **FR-022**: `create_spdk_dma_buffer_from_phys` — cross-process P2P via physical address IOMMU mapping
-- **FR-023**: `create_spdk_dma_buffer_from_bar_direct` — DPDK IOMMU registration for existing BAR VA
-- **FR-024**: Exposed GDRCopy FFI bindings and `GPU_PAGE_SIZE` for decomposed P2P operations
-
-**Effect**: The full GDRCopy P2P DMA path (feature-gated behind `p2p`) now has formal FR coverage.
-
-## Not Applied (Awaiting Human Decision)
-
-None. All 5 previously unspecced features have been backfilled into existing specs.
+None. The single drift item has been fully addressed by spec backfill.
 
 ## Post-Apply Drift Status
 
 | Category | Before | After |
 |----------|--------|-------|
-| Aligned | 33 | 42 |
+| Aligned (requirements) | 43 | 44 |
 | Drifted | 1 | 0 |
 | Not Implemented | 0 | 0 |
-| Unspecced | 5 | 0 |
+| Unspecced | 0 | 0 |
+
+## Notes
+
+The previous sync (2026-05-21) had already resolved all prior drift and
+unspecced features. This sync addresses a single documentation-level
+drift: an inaccurate Assumption about device context selection for
+`open_ipc_handle`. The correction clarifies the architectural boundary
+between the low-level IPC path (caller-managed device context) and the
+high-level `prepare_memory_for_spdk` path (self-managing device
+context). This is particularly important for future callers who use
+`deserialize_ipc_handle` directly in multi-GPU scenarios.

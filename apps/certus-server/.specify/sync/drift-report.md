@@ -1,6 +1,6 @@
 # Spec Drift Report
 
-Generated: 2026-05-05
+Generated: 2026-05-29
 Project: certus-server
 
 ## Summary
@@ -8,11 +8,11 @@ Project: certus-server
 | Category | Count |
 |----------|-------|
 | Specs Analyzed | 1 |
-| Requirements Checked | 14 |
-| Aligned | 12 (86%) |
-| Drifted | 2 (14%) |
+| Requirements Checked | 17 |
+| Aligned | 15 (88%) |
+| Drifted | 2 (12%) |
 | Not Implemented | 0 (0%) |
-| Unspecced Code | 1 |
+| Unspecced Code | 3 |
 
 ## Detailed Findings
 
@@ -20,53 +20,61 @@ Project: certus-server
 
 #### Aligned
 
-- FR-001: gRPC service exposes lookup, check, remove, populate; no lifecycle methods in proto -> `proto/dispatcher.proto:6-18`, `src/service.rs:122-276`
-- FR-002: Populate accepts list of (key, ipc_handle), returns per-entry results -> `src/service.rs:123-174`
-- FR-003: Lookup accepts list of (key, ipc_handle), returns per-entry results -> `src/service.rs:176-225`
-- FR-004: Check accepts list of keys, returns list of boolean results -> `src/service.rs:229-249`
-- FR-005: Remove accepts list of keys, returns per-entry results -> `src/service.rs:253-275`
-- FR-006: CLI accepts metadata PCI, data PCI(s), listen address/port, TLS cert/key paths -> `src/main.rs:27-47`
-- FR-007: Per-entry results include key, success, error_code, error_message -> `proto/dispatcher.proto:41-46`, `src/service.rs:102-119`
-- FR-008: Server auto-initializes dispatcher on startup using CLI PCI addresses -> `src/main.rs:219`
-- FR-010: Python test client exercises all gRPC methods with batch operations -> `python-client/test_client.py`
-- FR-013: Multiple connections supported, processing serialized via Mutex -> `src/main.rs:220` (Arc<Mutex<...>>)
-- FR-014: Optional TLS via --tls-cert/--tls-key, plaintext when absent -> `src/main.rs:228-234`
-- FR-015: Pre-validates batch for duplicate keys, rejects entire batch -> `src/service.rs:37-47`
+- FR-001: gRPC service exposes lookup, check, remove, populate, touch, clear_memory_tier -> `proto/dispatcher.proto`, `src/service.rs`
+- FR-002: Populate accepts list of (key, ipc_handle), returns per-entry results -> `src/service.rs`
+- FR-003: Lookup internally calls `batch_lookup()` for parallel cold promotion; IPC handles deduplicated within batch -> `src/service.rs` (updated 2026-05-28)
+- FR-004: Check accepts list of keys, returns list of boolean results -> `src/service.rs`
+- FR-005: Remove accepts list of keys, returns per-entry results -> `src/service.rs`
+- FR-005b: Touch accepts list of keys, returns per-entry results -> `src/service.rs`
+- FR-006: CLI accepts device PCI(s), listen address/port, TLS cert/key paths -> `src/main.rs`
+- FR-007: Per-entry results include key, success, error_code, error_message -> `proto/dispatcher.proto`, `src/service.rs`
+- FR-008: Server auto-initializes dispatcher on startup using CLI PCI addresses -> `src/main.rs`
+- FR-008b: Dispatch map starts fresh each launch -> confirmed
+- FR-008c: Memory-tier pool registered with CUDA via cudaHostRegister -> confirmed
+- FR-010: Python test client exercises all gRPC methods with batch operations -> `python-client/`
+- FR-013: Multiple connections supported, processing serialized via Mutex -> `src/service.rs`
+- FR-014: Optional TLS via --tls-cert/--tls-key -> `src/main.rs`
+- FR-015: Pre-validates batch for duplicate keys, rejects entire batch -> `src/service.rs`
+- FR-016: Multiple --device-pci arguments supported -> `src/main.rs`
+- FR-017: ClearMemoryTier gRPC method exposed -> `src/service.rs`
 
 #### Drifted
 
-- FR-009: Spec says "shut down dispatcher when receiving SIGTERM/SIGINT" but code only handles SIGINT via `tokio::signal::ctrl_c()`. SIGTERM is not caught.
-  - Location: `src/main.rs:244`
+- **FR-009**: Spec says "shut down dispatcher when receiving SIGTERM/SIGINT" but code only handles SIGINT via
+  `tokio::signal::ctrl_c()`. SIGTERM is not caught.
+  - Location: `src/main.rs`
   - Severity: moderate
-  - Fix: Add `tokio::signal::unix::signal(SignalKind::terminate())` alongside ctrl_c
 
-- FR-011: Spec assumes IPC handle contains "a memory address (or opaque identifier) and a size field" transmitted as a 64-bit integer. Implementation uses a 64-byte CUDA IPC handle (`bytes cuda_ipc_handle`) instead of a raw pointer. This is functionally superior (correct for cross-process GPU sharing) but diverges from spec text.
-  - Location: `proto/dispatcher.proto:22-27`
-  - Severity: minor (spec should be updated to match the better design)
+- **FR-011 / Key Entities / IpcHandle**: Spec says IpcHandle contains "a 64-byte CUDA IPC memory handle and a
+  size (uint32)". The proto now has a third field `gpu_device_id` (int32, field 3). The spec definition in
+  FR-011 and the Key Entities section does not mention this field.
+  - Location: `proto/dispatcher.proto:33`, `src/service.rs:209,305`
+  - Severity: moderate — the field is required for correct multi-GPU operation; missing from spec entirely
 
 #### Not Implemented
 
 (none)
 
-### Success Criteria
-
-- SC-001: Aligned - Batch operations supported, test client validates with 10-entry batches (4 round-trips)
-- SC-002: Aligned - `test_large_batch` exercises 1000 entries without timeout
-- SC-003: Aligned - Per-entry error reporting with key, code, and message
-- SC-004: Cannot verify statically (runtime startup timing)
-- SC-005: Aligned - Python test client has pass/fail output for all scenarios
-
 ### Unspecced Code
 
-| Feature | Location | Lines | Suggested Spec |
-|---------|----------|-------|----------------|
-| CUDA IPC handle open/close | `src/service.rs:65-99` | 35 | Update 001 FR-011 assumptions |
-
-## Inter-Spec Conflicts
-
-(none - only one spec analyzed)
+| # | Feature | Location | Severity | Notes |
+|---|---------|----------|----------|-------|
+| 1 | **Global persistent IPC handle cache** (`IpcCacheEntry` with `dev_ptr`, `gpu_device_id`, `refcount`; keyed by 64-byte handle bytes; lives on `DispatcherService` for the lifetime of the server process) | `src/service.rs:27-115` | high | Previous report only noted within-batch deduplication (FR-003). The current cache is a persistent cross-request structure that eliminates repeated open/close across concurrent batches and removes serialization on CUDA's global IPC lock. Qualitatively different from within-batch reuse — requires a new requirement. |
+| 2 | **`cudaSetDevice(gpu_device_id)` before `cudaIpcOpenMemHandle`** | `src/service.rs:65-75` | high | When a handle is not yet in the cache, the server calls `cudaSetDevice(gpu_device_id)` (when `gpu_device_id >= 0`) prior to opening the IPC handle. This behavior is entirely absent from the spec. It is necessary for correct operation on multi-GPU systems and to avoid "resource already mapped" errors when the server CUDA context is not on the allocating device. |
+| 3 | **Reference-counted cache eviction** (`refcount` incremented on open, decremented on close; `cudaIpcCloseMemHandle` called only when refcount reaches zero) | `src/service.rs:106-115` | moderate | The mechanism by which cached handles are eventually closed — reference counting rather than LRU or explicit eviction — is not specified anywhere. |
 
 ## Recommendations
 
-1. **Fix SIGTERM handling (FR-009)**: Add a SIGTERM signal handler using `tokio::signal::unix::signal(SignalKind::terminate())` and select on both it and ctrl_c in the shutdown future. This is a moderate gap since `kill <pid>` (default SIGTERM) won't trigger graceful shutdown.
-2. **Update spec FR-011 and Assumptions**: The CUDA IPC handle design (`bytes cuda_ipc_handle` + `uint32 size`) is superior to the spec's raw-pointer assumption. Update the spec to reflect the actual cross-process GPU memory sharing mechanism and remove the assumption about "same address space."
+1. **Add FR-018** (new): Specify the global IPC handle cache that persists across requests. Include the
+   keying strategy (64-byte handle bytes), the fields stored (`dev_ptr`, `gpu_device_id`, `refcount`),
+   and the motivation (eliminate "resource already mapped" errors, remove CUDA IPC lock serialization).
+
+2. **Add FR-019** (new): Specify that the server calls `cudaSetDevice(gpu_device_id)` before opening an
+   IPC handle that is not already cached, when `gpu_device_id >= 0`.
+
+3. **Update FR-011 and Key Entities IpcHandle**: Add `gpu_device_id` (int32, field 3) to the IpcHandle
+   description. Explain that the client provides the CUDA device ordinal that allocated the memory so the
+   server can set the correct device before opening the handle.
+
+4. **Fix SIGTERM handling (FR-009)**: Add SIGTERM handler alongside the existing SIGINT handler
+   (`tokio::signal::ctrl_c`).

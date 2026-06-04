@@ -19,6 +19,7 @@ fn format_params() -> FormatParams {
         metadata_alignment: METADATA_ALIGNMENT,
         instance_id: None,
         metadata_disk_ns_id: 1,
+        metadata_region_size: 0,
     }
 }
 
@@ -104,6 +105,7 @@ fn out_of_space() {
         metadata_alignment: METADATA_ALIGNMENT,
         instance_id: None,
         metadata_disk_ns_id: 1,
+        metadata_region_size: 0,
     })
     .expect("format");
 
@@ -240,4 +242,99 @@ fn for_each_extent_visits_all() {
         count += 1;
     });
     assert_eq!(count, 5);
+}
+
+// ============================================================
+// Data/Metadata Co-location (single SSD partitioning)
+// ============================================================
+
+#[test]
+fn data_start_offset_extents_above_metadata() {
+    let disk_size: u64 = 256 * 1024 * 1024; // 256 MiB
+    let metadata_region: u64 = 16 * 1024 * 1024; // 16 MiB cap
+    let (c, _mock) = create_test_component(disk_size);
+    c.format(FormatParams {
+        data_disk_size: disk_size,
+        slab_size: SLAB_SIZE,
+        max_extent_size: MAX_EXTENT_SIZE,
+        sector_size: SECTOR_SIZE,
+        region_count: 4,
+        metadata_alignment: METADATA_ALIGNMENT,
+        instance_id: None,
+        metadata_disk_ns_id: 1,
+        metadata_region_size: metadata_region,
+    })
+    .expect("format");
+
+    for k in 1..=20u64 {
+        let h = c.reserve_extent(k, 4096).expect("reserve");
+        let ext = h.publish().expect("publish");
+        assert!(
+            ext.offset >= metadata_region,
+            "extent offset {:#x} below metadata region end {:#x}",
+            ext.offset,
+            metadata_region
+        );
+    }
+}
+
+#[test]
+fn data_start_offset_recovery_preserves_offsets() {
+    use extent_manager::test_support::{heap_dma_alloc, MockBlockDevice, MockLogger};
+    use interfaces::{IBlockDevice, ILogger};
+    use std::sync::Arc;
+
+    let disk_size: u64 = 256 * 1024 * 1024;
+    let metadata_region: u64 = 16 * 1024 * 1024;
+    let metadata_mock = Arc::new(MockBlockDevice::new(disk_size));
+    let metadata_shared = metadata_mock.shared_state();
+
+    let original_offset;
+    {
+        let c = extent_manager::ExtentManager::new_inner();
+        c.metadata_device
+            .connect(metadata_mock.clone() as Arc<dyn IBlockDevice + Send + Sync>)
+            .unwrap();
+        c.logger
+            .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
+            .unwrap();
+        c.set_dma_alloc(heap_dma_alloc());
+        c.format(FormatParams {
+            data_disk_size: disk_size,
+            slab_size: SLAB_SIZE,
+            max_extent_size: MAX_EXTENT_SIZE,
+            sector_size: SECTOR_SIZE,
+            region_count: 4,
+            metadata_alignment: METADATA_ALIGNMENT,
+            instance_id: Some(0x1234),
+            metadata_disk_ns_id: 1,
+            metadata_region_size: metadata_region,
+        })
+        .expect("format");
+
+        let h = c.reserve_extent(1, 4096).expect("reserve");
+        let ext = h.publish().expect("publish");
+        c.checkpoint().expect("checkpoint");
+        original_offset = ext.offset;
+    }
+
+    let metadata_mock2 = Arc::new(MockBlockDevice::reboot_from(&metadata_shared));
+    let c2 = extent_manager::ExtentManager::new_inner();
+    c2.metadata_device
+        .connect(metadata_mock2 as Arc<dyn IBlockDevice + Send + Sync>)
+        .unwrap();
+    c2.logger
+        .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
+        .unwrap();
+    c2.set_dma_alloc(heap_dma_alloc());
+    c2.initialize().expect("initialize");
+
+    let extents = c2.get_extents();
+    assert_eq!(extents.len(), 1);
+    assert_eq!(extents[0].offset, original_offset);
+    assert!(extents[0].offset >= metadata_region);
+
+    let h2 = c2.reserve_extent(2, 4096).expect("reserve after recovery");
+    let ext2 = h2.publish().expect("publish after recovery");
+    assert!(ext2.offset >= metadata_region);
 }

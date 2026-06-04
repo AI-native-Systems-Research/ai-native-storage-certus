@@ -192,6 +192,18 @@ impl IMemoryTier for MemoryTierComponent {
         Some((ptr, size))
     }
 
+    fn peek(&self, key: CacheKey) -> Option<(*mut u8, u32)> {
+        let state = self.state.lock().unwrap();
+        let slot = state.slots.get(&key)?;
+        let ptr = unsafe { state.pool_ptr.add(slot.offset) };
+        Some((ptr, slot.size))
+    }
+
+    fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
+        let state = self.state.lock().unwrap();
+        state.lru.peek_front_n(n)
+    }
+
     fn evict_lru(&self) -> Option<CacheKey> {
         let mut state = self.state.lock().unwrap();
         let key = state.lru.pop_front()?;
@@ -242,6 +254,18 @@ impl IMemoryTier for MemoryTierComponent {
         } else {
             None
         }
+    }
+
+    fn clear(&self) -> Result<usize, MemoryTierError> {
+        let mut state = self.state.lock().unwrap();
+        if !state.initialized {
+            return Err(MemoryTierError::NotInitialized("pool not initialized".into()));
+        }
+        let count = state.slots.len();
+        state.slots.clear();
+        state.lru = LruList::new();
+        state.allocator = FreeList::new(state.pool_size);
+        Ok(count)
     }
 }
 

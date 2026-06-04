@@ -288,6 +288,7 @@ mod tests {
             metadata_alignment: 1048576,
             instance_id: None,
             metadata_disk_ns_id: 1,
+            metadata_region_size: 0,
         };
 
         // Region 0: one slab with key 42 in slot 2

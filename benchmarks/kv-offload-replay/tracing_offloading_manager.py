@@ -160,28 +160,39 @@ class TracingOffloadingManager(OffloadingManager):
 
     # ── Primary API ────────────────────────────────────────────────────────
 
-    def lookup(self, block_hashes: Iterable[BlockHash]) -> int | None:
-        block_hashes = list(block_hashes)
+    def lookup(self, *args, **kwargs):
+        # vLLM 0.19: lookup(keys: Iterable) -> int | None
+        # vLLM 0.20: lookup(key: OffloadKey, req_context: ReqContext) -> bool
         t0 = _now()
+        if args and isinstance(args[0], (bytes, bytearray, memoryview)):
+            # 0.20: single-key + req_context
+            keys_for_log = [args[0]]
+        else:
+            # 0.19: iterable of keys
+            keys_for_log = list(args[0]) if args else []
+            args = (keys_for_log, *args[1:])
         try:
-            return self._inner.lookup(block_hashes)
+            return self._inner.lookup(*args, **kwargs)
         finally:
             _write({
                 "ts": t0,
                 "method": "lookup",
-                "keys": _keys_summary(block_hashes),
+                "keys": _keys_summary(keys_for_log),
             })
 
-    def prepare_load(self, block_hashes: Iterable[BlockHash]) -> LoadStoreSpec:
-        block_hashes = list(block_hashes)
+    def prepare_load(self, *args, **kwargs):
+        # 0.19: (keys);  0.20: (keys, req_context)
+        keys_for_log = list(args[0]) if args else list(kwargs.get("keys") or [])
+        if args:
+            args = (keys_for_log, *args[1:])
         t0 = _now()
         try:
-            return self._inner.prepare_load(block_hashes)
+            return self._inner.prepare_load(*args, **kwargs)
         finally:
             _write({
                 "ts": t0,
                 "method": "prepare_load",
-                "keys": _keys_summary(block_hashes),
+                "keys": _keys_summary(keys_for_log),
             })
 
     def touch(self, block_hashes: Iterable[BlockHash]) -> None:
@@ -208,16 +219,17 @@ class TracingOffloadingManager(OffloadingManager):
                 "keys": _keys_summary(block_hashes),
             })
 
-    def prepare_store(
-        self, block_hashes: Iterable[BlockHash]
-    ) -> PrepareStoreOutput | None:
-        block_hashes = list(block_hashes)
+    def prepare_store(self, *args, **kwargs):
+        # 0.19: (keys);  0.20: (keys, req_context)
+        keys_for_log = list(args[0]) if args else list(kwargs.get("keys") or [])
+        if args:
+            args = (keys_for_log, *args[1:])
         t0 = _now()
         try:
-            return self._inner.prepare_store(block_hashes)
+            return self._inner.prepare_store(*args, **kwargs)
         finally:
             _write({"ts": t0, "method": "prepare_store",
-                    "keys": _keys_summary(block_hashes)})
+                    "keys": _keys_summary(keys_for_log)})
 
     def complete_store(
         self, block_hashes: Iterable[BlockHash], success: bool = True

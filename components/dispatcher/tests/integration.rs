@@ -352,6 +352,32 @@ impl IDispatchMap for HwDispatchMap {
         let inner = self.inner.lock().unwrap();
         inner.keys().copied().take(n).collect()
     }
+
+    fn create_memory_tier_entry(
+        &self,
+        _key: CacheKey,
+        _pointer: *mut u8,
+        _size: u32,
+    ) -> Result<(), DispatchMapError> {
+        Ok(())
+    }
+
+    fn convert_memory_tier_to_block(&self, _key: CacheKey) -> Result<(), DispatchMapError> {
+        Ok(())
+    }
+
+    fn is_evictable(&self, _key: CacheKey) -> bool {
+        false
+    }
+
+    fn recover_extent(
+        &self,
+        _key: CacheKey,
+        _offset: u64,
+        _size_blocks: u32,
+    ) -> Result<(), DispatchMapError> {
+        Ok(())
+    }
 }
 
 // ===========================================================================

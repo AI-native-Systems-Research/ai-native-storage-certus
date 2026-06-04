@@ -231,6 +231,20 @@ impl IDispatchMap for MockDispatchMap {
             Err(DispatchMapError::KeyNotFound(key))
         }
     }
+
+    fn is_evictable(&self, key: CacheKey) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner.entries.contains_key(&key)
+    }
+
+    fn recover_extent(
+        &self,
+        _key: CacheKey,
+        _offset: u64,
+        _size_blocks: u32,
+    ) -> Result<(), DispatchMapError> {
+        Ok(())
+    }
 }
 
 struct MockLogger;
@@ -410,6 +424,15 @@ impl IMemoryTier for MockMemoryTier {
         })
     }
 
+    fn peek(&self, key: CacheKey) -> Option<(*mut u8, u32)> {
+        self.get(key)
+    }
+
+    fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
+        let inner = self.inner.lock().unwrap();
+        inner.slots.keys().take(n).copied().collect()
+    }
+
     fn evict_lru(&self) -> Option<CacheKey> {
         let mut inner = self.inner.lock().unwrap();
         let key = inner.slots.keys().next().copied()?;
@@ -444,6 +467,14 @@ impl IMemoryTier for MockMemoryTier {
         let inner = self.inner.lock().unwrap();
         Some((inner.pool.as_ptr() as *mut u8, inner.capacity))
     }
+
+    fn clear(&self) -> Result<usize, MemoryTierError> {
+        let mut inner = self.inner.lock().unwrap();
+        let count = inner.slots.len();
+        inner.slots.clear();
+        inner.next_offset = 0;
+        Ok(count)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -465,7 +496,6 @@ fn setup() -> (Arc<DispatcherComponent>, Arc<MockDispatchMap>) {
 
     let d = query_interface!(c, IDispatcher).unwrap();
     d.initialize(DispatcherConfig {
-        metadata_pci_addr: "0000:01:00.0".to_string(),
         data_pci_addrs: vec!["0000:02:00.0".to_string()],
         ..Default::default()
     })
@@ -530,7 +560,6 @@ fn lookup_after_migration_requires_hardware() {
 
     // Re-initialize to allow lookups
     d.initialize(DispatcherConfig {
-        metadata_pci_addr: "0000:01:00.0".to_string(),
         data_pci_addrs: vec!["0000:02:00.0".to_string()],
         ..Default::default()
     })
@@ -558,7 +587,6 @@ fn check_finds_migrated_entry() {
     d.shutdown().unwrap();
 
     d.initialize(DispatcherConfig {
-        metadata_pci_addr: "0000:01:00.0".to_string(),
         data_pci_addrs: vec!["0000:02:00.0".to_string()],
         ..Default::default()
     })
