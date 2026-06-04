@@ -12,10 +12,10 @@
   },
   "components": [
     { "name": "logger", "dylib": "liblogger.so" },
-    { "name": "spdk-env", "dylib": "libdispatcher.so", "symbol": "create_component_spdk_env" },
+    { "name": "spdk-env", "dylib": "libspdk_env.so" },
     { "name": "gpu-services", "dylib": "libgpu_services.so" },
-    { "name": "block-device", "dylib": "libdispatcher.so", "symbol": "create_component_block_device_spdk_nvme", "instances": "$num_ssd_devices" },
-    { "name": "extent-manager", "dylib": "libdispatcher.so", "symbol": "create_component_extent_manager", "instances": "$num_ssd_devices" },
+    { "name": "block-device", "dylib": "libblock_device_spdk_nvme.so", "instances": "$num_ssd_devices" },
+    { "name": "extent-manager", "dylib": "libextent_manager.so", "instances": "$num_ssd_devices" },
     { "name": "dispatch-map", "dylib": "libdispatch_map.so" },
     { "name": "memory-tier", "dylib": "libmemory_tier.so" },
     { "name": "dispatcher", "dylib": "libdispatcher.so" }

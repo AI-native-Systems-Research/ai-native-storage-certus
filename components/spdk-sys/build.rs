@@ -41,45 +41,39 @@ fn main() {
         .lines()
         .any(|line| line.trim() == "#define SPDK_CONFIG_ISAL 1");
 
-    // Emit link search path.
+    // Emit link search path and rpath for shared SPDK/DPDK libraries.
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_dir.display());
+    // Force all SPDK/DPDK shared libs into DT_NEEDED regardless of symbol usage.
+    // SPDK shared libs are underlinked (don't list all their deps in DT_NEEDED),
+    // so the consuming binary/dylib must pull everything in.
+    println!("cargo:rustc-link-arg=-Wl,--no-as-needed");
 
-    // Link SPDK libraries we need (static, all +whole-archive).
-    //
-    // Rust only emits native library -l flags for symbols that Rust code
-    // references directly.  SPDK is a C library stack where spdk_nvme and
-    // spdk_sock_posix (both +whole-archive) pull in all their object files,
-    // creating C-level references to spdk_log, spdk_util, spdk_env_dpdk, etc.
-    // that no Rust code calls directly.  Rust therefore silently drops the
-    // -l flags for those support libs, leaving the whole-archive objects with
-    // unresolved symbols.  Using +whole-archive on every SPDK lib forces them
-    // all into the link unconditionally, so the C-level cross-references are
-    // always satisfied regardless of what Rust code calls.
-    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_env_dpdk");
-    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_log");
-    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_util");
+    // Link SPDK and DPDK as shared libraries.
+    // This ensures a single copy of SPDK/DPDK process-global state exists in
+    // the process, enabling multiple component dylibs to share NVMe controllers,
+    // hugepage allocations, and the DPDK EAL.
+    let spdk_libs = [
+        "spdk_env_dpdk",
+        "spdk_log",
+        "spdk_util",
+        "spdk_nvme",
+        "spdk_trace",
+        "spdk_dma",
+        "spdk_keyring",
+        "spdk_json",
+        "spdk_jsonrpc",
+        "spdk_rpc",
+        "spdk_sock",
+        "spdk_sock_posix",
+        "spdk_thread",
+    ];
 
-    // NVMe driver — +whole-archive so the PCI driver constructor
-    // (SPDK_PCI_DRIVER_REGISTER) is included by the linker.  Without this,
-    // spdk_pci_get_driver("nvme") returns NULL and no NVMe devices are enumerated.
-    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_nvme");
+    for lib in &spdk_libs {
+        println!("cargo:rustc-link-lib=dylib={lib}");
+    }
 
-    // Transitive dependencies of spdk_nvme (from spdk_nvme.pc / spdk_sock.pc):
-    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_trace");
-    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_dma");
-    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_keyring");
-    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_json");
-    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_jsonrpc");
-    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_rpc");
-    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_sock");
-    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_sock_posix");
-    println!("cargo:rustc-link-lib=static:+whole-archive=spdk_thread");
-
-    // Link DPDK libraries (static).
-    // These are the libraries that spdk_env_dpdk depends on, discovered from
-    // the spdk_env_dpdk.pc and libdpdk.pc files. We link them manually because
-    // DPDK's .pc files use -l:libfoo.a syntax which the Rust pkg-config crate
-    // cannot handle.
+    // Link DPDK libraries (shared).
     let dpdk_libs = [
         "rte_eal",
         "rte_kvargs",
@@ -94,15 +88,8 @@ fn main() {
         "rte_pci",
         "rte_power",
         "rte_timer",
-        "rte_power_acpi",
-        "rte_power_amd_pstate",
-        "rte_power_cppc",
-        "rte_power_intel_pstate",
-        "rte_power_intel_uncore",
-        "rte_power_kvm_vm",
         "rte_vhost",
         "rte_ethdev",
-        "rte_meter",
         "rte_cryptodev",
         "rte_dmadev",
         "rte_hash",
@@ -110,21 +97,20 @@ fn main() {
         "rte_mbuf",
         "rte_rcu",
         "rte_cmdline",
-        "rte_stack",
     ];
 
     for lib in &dpdk_libs {
-        println!("cargo:rustc-link-lib=static:+whole-archive={lib}");
+        println!("cargo:rustc-link-lib=dylib={lib}");
     }
 
     // Intel ISA-L is only linked when the installed SPDK build enables it.
-    // Some repo setups build SPDK with CONFIG_ISAL=n, in which case libisal
-    // is neither installed nor required by the generated SPDK archives.
     if is_isal_enabled {
-        println!("cargo:rustc-link-lib=static:+whole-archive=isal");
+        println!("cargo:rustc-link-lib=dylib=isal");
     }
 
     // Link system libraries that SPDK/DPDK depend on.
+    // These must appear as DT_NEEDED in consuming dylibs because SPDK's shared
+    // libraries reference them without listing them in their own DT_NEEDED.
     println!("cargo:rustc-link-lib=dylib=pthread");
     println!("cargo:rustc-link-lib=dylib=dl");
     println!("cargo:rustc-link-lib=dylib=numa");
@@ -132,9 +118,6 @@ fn main() {
     println!("cargo:rustc-link-lib=dylib=ssl");
     println!("cargo:rustc-link-lib=dylib=crypto");
     println!("cargo:rustc-link-lib=dylib=m");
-    // Link the FUSE library (CUSE support) — required by spdk_nvme CUSE code.
-    // Link libfuse3 (preferred). Do not link generic 'fuse' to avoid
-    // requiring unversioned dev symlinks on the host.
     println!("cargo:rustc-link-lib=dylib=fuse3");
 
     // Detect the GCC internal include path so that clang (used by bindgen)
