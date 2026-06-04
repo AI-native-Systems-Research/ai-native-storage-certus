@@ -132,6 +132,12 @@ jobs:
           echo "=== CARGO env var ==="
           echo "CARGO=${CARGO}"
 
+      # spdk-sys build script checks deps/spdk/ exists. Kani compiles the full
+      # workspace so this check fires even for packages that don't use SPDK.
+      # Create a stub so the existence check passes (no actual SPDK needed).
+      - name: Create SPDK stub for Kani workspace compilation
+        run: mkdir -p deps/spdk deps/spdk-build
+
       # Advisory: continue-on-error means failures show as warnings,
       # not as job failures, so this check never blocks PR merges.
       - name: Run Kani harnesses — dispatch-map
