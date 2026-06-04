@@ -90,16 +90,17 @@ jobs:
         if: steps.kani-cache.outputs.cache-hit != 'true'
         continue-on-error: true
         run: |
-          # 1. Extract pre-built Kani backend tools (CBMC etc.) from GitHub release.
-          #    Done FIRST so the files exist even if cargo install below fails.
+          # 1. Ensure nightly-2025-11-21 is installed — required by cargo-kani at
+          #    runtime to run 'cargo metadata' and compile harnesses.
+          rustup toolchain install nightly-2025-11-21 --no-self-update --profile minimal
+          # 2. Extract pre-built Kani backend tools (CBMC etc.) from GitHub release.
           mkdir -p ~/.kani
           curl -sSL https://github.com/model-checking/kani/releases/download/kani-0.67.0/kani-0.67.0-x86_64-unknown-linux-gnu.tar.gz \
             | tar xz -C ~/.kani/
-          # 2. Create rust-toolchain-version — written by 'cargo kani setup'
+          # 3. Create rust-toolchain-version — written by 'cargo kani setup'
           #    but not included in the tarball.
           echo "nightly-2025-11-21" > ~/.kani/kani-0.67.0/rust-toolchain-version
-          # 3. Install cargo-kani wrapper using the pinned nightly toolchain.
-          #    This is compiled from source; must use the same nightly as Kani.
+          # 4. Install cargo-kani wrapper using the pinned nightly toolchain.
           cargo +nightly-2025-11-21 install kani-verifier --version 0.67.0 --locked
 
       # Advisory: continue-on-error means failures show as warnings,
