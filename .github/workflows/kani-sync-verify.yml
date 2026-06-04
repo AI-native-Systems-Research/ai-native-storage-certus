@@ -135,6 +135,10 @@ jobs:
         continue-on-error: true
         run: |
           NIGHTLY_CARGO="${HOME}/.rustup/toolchains/nightly-2025-11-21-x86_64-unknown-linux-gnu/bin/cargo"
+          strace -e trace=execve,stat,openat -f \
+            env CARGO="${NIGHTLY_CARGO}" RUSTUP_HOME="${HOME}/.rustup" CARGO_HOME="${HOME}/.cargo" \
+            "${HOME}/.cargo/bin/cargo-kani" kani --package dispatch-map 2>&1 \
+            | grep -E "ENOENT|execve.*cargo" | head -30 || true
           CARGO="${NIGHTLY_CARGO}" \
           RUSTUP_HOME="${HOME}/.rustup" \
           CARGO_HOME="${HOME}/.cargo" \
