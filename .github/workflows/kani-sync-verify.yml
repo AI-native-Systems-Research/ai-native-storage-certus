@@ -93,8 +93,12 @@ jobs:
           curl -sSL https://github.com/model-checking/kani/releases/download/kani-0.67.0/kani-0.67.0-x86_64-unknown-linux-gnu.tar.gz \
             | tar xz -C ~/.kani/
           # 3. Create rust-toolchain-version — written by 'cargo kani setup'
-          #    but not included in the tarball.
-          echo "nightly-2025-11-21" > ~/.kani/kani-0.67.0/rust-toolchain-version
+          #    but not included in the tarball. Must be the FULL toolchain name
+          #    including host triple (e.g. nightly-2025-11-21-x86_64-unknown-linux-gnu)
+          #    because cargo-kani constructs the cargo path as
+          #    ~/.rustup/toolchains/<version>/bin/cargo.
+          TOOLCHAIN=$(rustup toolchain list | grep "nightly-2025-11-21" | head -1 | awk '{print $1}')
+          echo "$TOOLCHAIN" > ~/.kani/kani-0.67.0/rust-toolchain-version
           # 4. Install cargo-kani wrapper using the pinned nightly toolchain.
           cargo +nightly-2025-11-21 install kani-verifier --version 0.67.0 --locked
 
