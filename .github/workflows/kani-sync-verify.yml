@@ -134,8 +134,11 @@ jobs:
         id: kani-dispatch-map
         continue-on-error: true
         run: |
-          unset CARGO RUSTUP_HOME CARGO_HOME
-          rustup run nightly-2025-11-21 cargo kani --package dispatch-map
+          NIGHTLY_CARGO="${HOME}/.rustup/toolchains/nightly-2025-11-21-x86_64-unknown-linux-gnu/bin/cargo"
+          CARGO="${NIGHTLY_CARGO}" \
+          RUSTUP_HOME="${HOME}/.rustup" \
+          CARGO_HOME="${HOME}/.cargo" \
+          "${HOME}/.cargo/bin/cargo-kani" kani --package dispatch-map
 
       - name: Run Kani harnesses — example-helloworld
         id: kani-helloworld
