@@ -1,0 +1,25 @@
+{
+  "iteration": 1,
+  "bundle_ref": "runs/iter-1/bundle.yaml",
+  "arms": [
+    {
+      "arm_type": "h-main",
+      "predicted": "P2P cold lookup throughput will be significantly higher than baseline (NVMe→DRAM→GPU). The improvement direction is positive because P2P eliminates the cudaMemcpyAsync H2D step.",
+      "observed": "Baseline: 2.41-2.43 GB/s (avg=1733 us, p99=1820 us). P2P treatment: 1.95-1.98 GB/s (avg=2132 us, p99=2256 us). P2P is 19% SLOWER than baseline across all 3 seeds. Data integrity PASSED.",
+      "status": "REFUTED",
+      "error_type": "direction",
+      "diagnostic_note": "The P2P path is slower because it replaces the baseline's zero-copy sliding-window pipeline (NVMe reads directly into DRAM memory-tier slot with overlapped H2D async copies) with a batch-based pipeline (NVMe reads into BAR1 staging buffers, wait for batch, then D2D copy + D2H backfill). Three factors cause the regression: (1) Batch-based approach loses pipeline overlap — all reads in a batch must complete before D2D copies start, whereas baseline overlaps reads with H2D copies. (2) The P2P path adds a D2D copy step (BAR1 staging → final GPU destination) that didn't exist in baseline (baseline reads directly into the final DRAM location). (3) The D2H backfill (GPU → DRAM) runs on the same stream as the D2D copy, serializing two copy operations where baseline had zero additional copies for the DRAM path. The fundamental issue: the baseline already reads NVMe directly into the final destination (DRAM memory-tier slot) with zero intermediate copies. P2P necessarily introduces a staging step because the BAR1 ring buffers cannot be the final destination (IPC handle alignment constraints)."
+    },
+    {
+      "arm_type": "h-ablation",
+      "predicted": "P2P without memory-tier backfill will show slightly higher throughput than P2P with backfill (h-main), because eliminating the async GPU→DRAM copy removes one stream synchronization point and reduces PCIe contention.",
+      "observed": "P2P with backfill (h-main): 1.95-1.98 GB/s (avg=2132 us). P2P without backfill (ablation): 2.01-2.04 GB/s (avg=2068 us). Ablation is ~3% faster than h-main. Data integrity PASSED.",
+      "status": "PARTIALLY_CONFIRMED",
+      "error_type": "magnitude",
+      "diagnostic_note": "The directional prediction is correct — removing the D2H backfill copy improves throughput slightly. However, the magnitude is minimal (~3%) because the backfill D2H copy is serialized on the same stream as the D2D copy (not truly overlapped). The dominant bottleneck is the batch-based NVMe read approach which forces serial read→copy phases, not the backfill copy itself."
+    }
+  ],
+  "experiment_valid": true,
+  "discrepancy_analysis": "The h-main hypothesis was refuted because the mechanism model was incorrect. The prediction assumed P2P eliminates a redundant H2D copy by reading NVMe directly into GPU VRAM. In reality, the baseline's zero-copy path already reads NVMe directly into the final DRAM destination (memory-tier slot) without any intermediate buffer copy — the only copy is the H2D async transfer to GPU. The P2P path cannot eliminate this copy; it merely substitutes a D2D copy (BAR1 staging → GPU final) for the H2D copy (DRAM → GPU). Since D2D copies on PCIe (GPU BAR1 → GPU VRAM) are limited to BAR1 read bandwidth rather than internal GPU memory bandwidth, the substitution does not improve performance. Additionally, the need for batch-based processing (to avoid ring slot reuse races) loses the sliding-window overlap that the baseline enjoys. The h-ablation confirms the backfill overhead is small (~3%), indicating the main performance penalty comes from the batch-based pipeline structure, not the backfill copy.",
+  "dominant_component_pct": null
+}

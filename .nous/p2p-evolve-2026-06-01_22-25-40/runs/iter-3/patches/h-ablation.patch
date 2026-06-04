@@ -1,0 +1,40 @@
+diff --git a/components/dispatcher/src/lib.rs b/components/dispatcher/src/lib.rs
+index 888a4e3..80944b6 100644
+--- a/components/dispatcher/src/lib.rs
++++ b/components/dispatcher/src/lib.rs
+@@ -268,7 +268,7 @@ impl DispatcherComponent {
+                 start_lba,
+                 total_bytes,
+                 ring_ref.chunk_size,
+-                16,
++                64,
+             )?;
+         }
+         drop(ring_guard);
+@@ -1088,7 +1088,7 @@ impl IDispatcher for DispatcherComponent {
+                             .chunks((entry_indices.len() + num_queues - 1) / num_queues)
+                             .collect();
+ 
+-                        let queue_depth = 16 / num_queues;
++                        let queue_depth = 128 / num_queues;
+ 
+                         for chunk in chunks {
+                             let dm_ref = &dm;
+diff --git a/components/dispatcher/src/pipeline.rs b/components/dispatcher/src/pipeline.rs
+index bed224c..fa0856b 100644
+--- a/components/dispatcher/src/pipeline.rs
++++ b/components/dispatcher/src/pipeline.rs
+@@ -377,13 +377,6 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+         drop(guard);
+         stream_idx += 1;
+ 
+-        // Periodically sync to bound the GPU command queue depth.
+-        if stream_idx % 16 == 0 {
+-            gpu.stream_synchronize(streams[0])
+-                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+-            gpu.stream_synchronize(streams[1])
+-                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+-        }
+     }
+ 
+     // Sync both streams to ensure all GPU copies are complete.

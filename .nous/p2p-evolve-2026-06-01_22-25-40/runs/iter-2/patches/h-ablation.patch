@@ -1,0 +1,142 @@
+diff --git a/components/dispatcher/src/lib.rs b/components/dispatcher/src/lib.rs
+index 888a4e3..7c8af14 100644
+--- a/components/dispatcher/src/lib.rs
++++ b/components/dispatcher/src/lib.rs
+@@ -268,7 +268,7 @@ impl DispatcherComponent {
+                 start_lba,
+                 total_bytes,
+                 ring_ref.chunk_size,
+-                16,
++                64,
+             )?;
+         }
+         drop(ring_guard);
+@@ -1043,7 +1043,7 @@ impl IDispatcher for DispatcherComponent {
+         // Each thread gets its own NVMe queue pair and CUDA streams, enabling
+         // concurrent reads on the same physical drive.
+         if !cold_entries.is_empty() {
+-            const MAX_QUEUES_PER_DRIVE: usize = 2;
++            const MAX_QUEUES_PER_DRIVE: usize = 4;
+ 
+             let chunk_size = {
+                 let ring_guard = self.pipeline_ring.read();
+@@ -1088,7 +1088,7 @@ impl IDispatcher for DispatcherComponent {
+                             .chunks((entry_indices.len() + num_queues - 1) / num_queues)
+                             .collect();
+ 
+-                        let queue_depth = 16 / num_queues;
++                        let queue_depth = 64 / num_queues;
+ 
+                         for chunk in chunks {
+                             let dm_ref = &dm;
+@@ -1109,7 +1109,17 @@ impl IDispatcher for DispatcherComponent {
+                                         ))
+                                     });
+                                 let streams_result = gpu_ref.create_stream().and_then(|a| {
+-                                    gpu_ref.create_stream().map(|b| [a, b]).map_err(|e| {
++                                    gpu_ref.create_stream().and_then(|b| {
++                                        gpu_ref.create_stream().and_then(|c| {
++                                            gpu_ref.create_stream().map(|d| [a, b, c, d]).map_err(|e| {
++                                                let _ = gpu_ref.destroy_stream(c);
++                                                e
++                                            })
++                                        }).map_err(|e| {
++                                            let _ = gpu_ref.destroy_stream(b);
++                                            e
++                                        })
++                                    }).map_err(|e| {
+                                         let _ = gpu_ref.destroy_stream(a);
+                                         e
+                                     })
+@@ -1192,8 +1202,9 @@ impl IDispatcher for DispatcherComponent {
+                                     batch_results.push((ci, res));
+                                 }
+ 
+-                                let _ = gpu_ref.destroy_stream(streams[0]);
+-                                let _ = gpu_ref.destroy_stream(streams[1]);
++                                for s in &streams {
++                                    let _ = gpu_ref.destroy_stream(*s);
++                                }
+ 
+                                 batch_results
+                             });
+diff --git a/components/dispatcher/src/pipeline.rs b/components/dispatcher/src/pipeline.rs
+index bed224c..17b04ff 100644
+--- a/components/dispatcher/src/pipeline.rs
++++ b/components/dispatcher/src/pipeline.rs
+@@ -26,7 +26,7 @@ const READ_TIMEOUT_MS: u64 = 5000;
+ /// to avoid per-call `cudaHostAlloc`/`spdk_mem_register` overhead.
+ pub struct PipelineRing {
+     pub buffers: Vec<Arc<Mutex<DmaBuffer>>>,
+-    pub streams: [GpuStream; 2],
++    pub streams: [GpuStream; 4],
+     pub chunk_size: usize,
+ }
+ 
+@@ -50,18 +50,30 @@ impl PipelineRing {
+             let _ = gpu.destroy_stream(stream_a);
+             DispatcherError::IoError(format!("create_stream failed: {e}"))
+         })?;
++        let stream_c = gpu.create_stream().map_err(|e| {
++            let _ = gpu.destroy_stream(stream_a);
++            let _ = gpu.destroy_stream(stream_b);
++            DispatcherError::IoError(format!("create_stream failed: {e}"))
++        })?;
++        let stream_d = gpu.create_stream().map_err(|e| {
++            let _ = gpu.destroy_stream(stream_a);
++            let _ = gpu.destroy_stream(stream_b);
++            let _ = gpu.destroy_stream(stream_c);
++            DispatcherError::IoError(format!("create_stream failed: {e}"))
++        })?;
+ 
+         Ok(Self {
+             buffers,
+-            streams: [stream_a, stream_b],
++            streams: [stream_a, stream_b, stream_c, stream_d],
+             chunk_size,
+         })
+     }
+ 
+     /// Destroy CUDA streams. Buffers are freed on drop via their DmaBuffer free_fn.
+     pub fn destroy(self, gpu: &dyn IGpuServices) {
+-        let _ = gpu.destroy_stream(self.streams[0]);
+-        let _ = gpu.destroy_stream(self.streams[1]);
++        for s in &self.streams {
++            let _ = gpu.destroy_stream(*s);
++        }
+     }
+ }
+ 
+@@ -244,7 +256,7 @@ unsafe extern "C" fn noop_free(_ptr: *mut std::ffi::c_void) {}
+ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+     drive: &dyn IBlockDevice,
+     gpu: &dyn IGpuServices,
+-    streams: &[GpuStream; 2],
++    streams: &[GpuStream; 4],
+     channels: &ClientChannels,
+     mem_tier_ptr: *mut u8,
+     gpu_dst: *mut std::ffi::c_void,
+@@ -362,7 +374,7 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+         // NVMe read for seg_idx is complete — GPU H2D copy can start now.
+         let seg = &segments[seg_idx];
+         let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
+-        let current_stream = streams[stream_idx % 2];
++        let current_stream = streams[stream_idx % 4];
+ 
+         let guard = chunk_bufs[seg_idx].lock().unwrap();
+         gpu.dma_copy_to_device_async(
+@@ -376,14 +388,6 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+         })?;
+         drop(guard);
+         stream_idx += 1;
+-
+-        // Periodically sync to bound the GPU command queue depth.
+-        if stream_idx % 16 == 0 {
+-            gpu.stream_synchronize(streams[0])
+-                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+-            gpu.stream_synchronize(streams[1])
+-                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+-        }
+     }
+ 
+     // Sync both streams to ensure all GPU copies are complete.

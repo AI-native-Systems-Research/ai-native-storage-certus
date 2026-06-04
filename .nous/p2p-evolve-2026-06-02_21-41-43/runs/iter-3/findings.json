@@ -1,0 +1,33 @@
+{
+  "iteration": 3,
+  "bundle_ref": "runs/iter-3/bundle.yaml",
+  "arms": [
+    {
+      "arm_type": "h-main",
+      "predicted": "Direct NVMe→GPU cold lookup throughput will exceed baseline (~2.4 GB/s) by eliminating the H2D copy. Expected range: 3.0-5.5 GB/s. P99 latency will decrease from ~1.95ms to below 1.5ms.",
+      "observed": "Throughput: 2.41, 2.45, 2.41 GB/s (mean 2.42 GB/s). P99 latency: 1825, 1797, 1869 us (mean 1830 us). No improvement over baseline. 0 errors in throughput benchmark. Data integrity fails with same pre-existing pattern as baseline (batch cold-path bug unrelated to P2P).",
+      "status": "REFUTED",
+      "error_type": "direction",
+      "diagnostic_note": "The NVMe→GPU direct DMA via nvidia-peermem works correctly (spdk_mem_register succeeds, NVMe reads complete without error, data arrives at GPU). However, eliminating the H2D copy provides zero throughput benefit because the existing sliding-window pipeline already perfectly overlaps H2D copies with NVMe reads. The NVMe read bandwidth (~2.4 GB/s for random 4MiB reads from a single Gen4 drive) is the sole bottleneck — the H2D copy (which takes ~0.5ms at 8 GB/s PCIe bandwidth) is completely hidden behind NVMe I/O latency (~1.7ms per 4MiB read). Removing a fully-overlapped operation has zero effect on end-to-end throughput. The prediction assumed the H2D copy was on the critical path, but the sliding-window pattern ensures it never is."
+    },
+    {
+      "arm_type": "h-ablation",
+      "predicted": "Direct NVMe→GPU with DRAM backfill will show 10-25% lower throughput than h-main due to additional GPU→DRAM copy, but will still exceed baseline.",
+      "observed": "Throughput: 2.40, 2.46, 2.32 GB/s (mean 2.39 GB/s). P99 latency: 1900, 1878, 1943 us (mean 1907 us). Identical to baseline within measurement noise. The D2H backfill copy adds no measurable overhead.",
+      "status": "REFUTED",
+      "error_type": "direction",
+      "diagnostic_note": "The D2H backfill (cudaMemcpyAsync DeviceToHost after each NVMe chunk lands in GPU) adds negligible overhead because it too is overlapped with NVMe I/O by the sliding-window. The GPU's copy engine runs the D2H transfer asynchronously while the next NVMe read is in-flight. Since NVMe latency dominates, the D2H copy is fully hidden. This further confirms that the single-drive NVMe read bandwidth is the binding constraint."
+    },
+    {
+      "arm_type": "h-control-negative",
+      "predicted": "Baseline performance will remain stable at ~2.4 GB/s cold lookup throughput with ~1.95ms p99 latency.",
+      "observed": "Throughput: 2.49, 2.36, 2.32 GB/s (mean 2.39 GB/s). P99 latency: 2016, 1923, 1968 us (mean 1969 us). Consistent with historical baseline.",
+      "status": "CONFIRMED",
+      "error_type": null,
+      "diagnostic_note": "Baseline remains stable. The ~5% run-to-run variance is normal for NVMe workloads (thermal throttling, firmware GC, FTL state). Data integrity fails with the same batch-path bug present in all conditions (pre-existing issue unrelated to this experiment)."
+    }
+  ],
+  "experiment_valid": true,
+  "discrepancy_analysis": "The core prediction (that eliminating the H2D copy would improve throughput) is refuted because it misidentified the bottleneck. The sliding-window pipeline pattern (RP-2, validated in iter-2) already overlaps H2D copies with NVMe I/O, making the H2D copy zero-cost in terms of end-to-end latency. The true bottleneck is single-drive NVMe read bandwidth at ~2.4 GB/s (significantly below the theoretical 7 GB/s sequential read due to random 4MiB access pattern and SPDK overhead). No amount of data-path optimization (P2P, zero-copy, etc.) can exceed this ceiling with a single drive. The path to higher throughput is multi-drive parallelism, not path elimination.",
+  "dominant_component_pct": 100
+}

@@ -1,0 +1,74 @@
+======================================================================
+Certus Multi-Client Benchmark
+======================================================================
+  Server:            localhost:50051
+  Clients:           1
+  GPUs:              1
+  Block size:        4 MiB
+  Batch size:        10
+  Objects/batch:     16
+  Iterations:        10
+  Pool capacity:     512 objects (2048 MiB)
+  Total per client:  672 objects
+  Cold per client:   160 objects
+
+  Starting 1 client(s)...
+
+======================================================================
+Results (1 client(s), 4 MiB blocks)
+======================================================================
+
+  Latency per object (all clients combined):
+
+  Populate             avg=    396.4 us  p50=    357.5 us  p99=   1050.6 us  min=    310.4 us  max=   1050.6 us
+                       per-client= 10.58 GB/s  aggregate=  9.89 GB/s
+
+  Lookup (hot)         avg=    270.1 us  p50=    268.4 us  p99=    281.8 us  min=    263.6 us  max=    281.8 us
+                       per-client= 15.53 GB/s  aggregate= 15.31 GB/s
+
+  Lookup (cold)        avg=   1752.4 us  p50=   1757.1 us  p99=   1895.3 us  min=   1640.4 us  max=   1895.3 us
+                       per-client=  2.39 GB/s  aggregate=  2.39 GB/s
+
+  Cold/Hot ratio:    6.5x latency
+
+  Total wall time:   11.41s
+
+  Per-client breakdown:
+  Client   GPU   Hot avg (us)   Cold avg (us)  Errors  
+  -------------------------------------------------
+  0        0     270.1          1752.4         0       
+
+
+======================================================================
+Data Integrity Verification
+======================================================================
+  Block size:     4 MiB
+  Test objects:   4
+
+  Phase 1: Populating test objects with unique patterns... done
+  Phase 2: Verifying hot-path reads (memory-tier)... 4 OK, 0 FAIL
+  Phase 3: Waiting for write-through to complete... done
+  Phase 3: Evicting test objects from memory-tier (populating 513 eviction objects)... done
+  Phase 4: Verifying cold-path reads (SSD-tier, promoted)...
+  FAIL: cold-path integrity mismatch at key 75790469, first bad byte offset 0, matches key 75790472
+    expected[:16]=9b98a7bc228a09752bcad5cf570226c5
+    actual[:16]  =023545c29af85cbd68fe1853d635d9b9
+
+  FAIL: cold-path integrity mismatch at key 75790470, first bad byte offset 0, matches key 75790472
+    expected[:16]=d53a132241b1e36906bd3236f77c49c1
+    actual[:16]  =023545c29af85cbd68fe1853d635d9b9
+
+  FAIL: cold-path integrity mismatch at key 75790471, first bad byte offset 0, matches key 75790472
+    expected[:16]=e9ece0bf48b47d2529f90821a8656c7a
+    actual[:16]  =023545c29af85cbd68fe1853d635d9b9
+ 1 OK, 3 FAIL
+  Cleaning up... done
+
+  ==================================================
+  Integrity Results:
+    Hot path (memory-tier):  4/4
+    Cold path (SSD-tier):    1/4
+    Total:                   5/8
+  ==================================================
+
+  INTEGRITY CHECK FAILED (3 errors)

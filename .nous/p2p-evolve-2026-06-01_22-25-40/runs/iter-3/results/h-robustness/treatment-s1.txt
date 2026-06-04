@@ -1,0 +1,45 @@
+======================================================================
+Certus Multi-Client Benchmark
+======================================================================
+  Server:            localhost:50051
+  Clients:           1
+  GPUs:              1
+  Block size:        4 MiB
+  Batch size:        10
+  Objects/batch:     16
+  Iterations:        10
+  Pool capacity:     512 objects (2048 MiB)
+  Total per client:  672 objects
+  Cold per client:   160 objects
+
+  Starting 1 client(s)...
+
+  ERRORS (3):
+    - cold lookup iter 5 failed: SSD read (handle OpHandle(50979)): block device error: Read failed: async spdk_nvme_ns_cmd_read submit failed with rc=-12
+    - cold lookup iter 6 failed: SSD read (handle OpHandle(51523)): block device error: Read failed: async spdk_nvme_ns_cmd_read submit failed with rc=-12
+    - cold lookup iter 8 failed: SSD read (handle OpHandle(52515)): block device error: Read failed: async spdk_nvme_ns_cmd_read submit failed with rc=-12
+
+======================================================================
+Results (1 client(s), 4 MiB blocks)
+======================================================================
+
+  Latency per object (all clients combined):
+
+  Populate             avg=    387.9 us  p50=    370.7 us  p99=   1182.8 us  min=    247.9 us  max=   1182.8 us
+                       per-client= 10.81 GB/s  aggregate= 10.09 GB/s
+
+  Lookup (hot)         avg=    268.8 us  p50=    267.3 us  p99=    289.4 us  min=    262.1 us  max=    289.4 us
+                       per-client= 15.61 GB/s  aggregate= 15.26 GB/s
+
+  Lookup (cold)        avg=   1078.2 us  p50=   1058.0 us  p99=   1258.4 us  min=   1004.8 us  max=   1258.4 us
+                       per-client=  3.89 GB/s  aggregate=  3.88 GB/s
+
+  Cold/Hot ratio:    4.0x latency
+
+  Total wall time:   11.31s
+
+  Per-client breakdown:
+  Client   GPU   Hot avg (us)   Cold avg (us)  Errors  
+  -------------------------------------------------
+  0        0     268.8          1078.2         3       
+

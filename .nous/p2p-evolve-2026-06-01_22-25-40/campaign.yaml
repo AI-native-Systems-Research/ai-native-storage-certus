@@ -1,0 +1,53 @@
+research_question: 'The current SSD-to-GPU cold lookup achieves ~2.4 GB/s (single
+  drive, 4 MiB objects) against a raw NVMe ceiling of 5.4 GB/s. The current path bounces
+  through host DRAM using a ring of 8 DMA buffers and 2 CUDA streams. Can architectural
+  or configuration changes to the data transfer path significantly improve throughput
+  and reduce tail latency?
+
+  '
+run_id: p2p-evolve-control
+max_iterations: 3
+target_system:
+  name: "Certus Storage Engine \u2014 SSD-to-GPU Data Path Optimization"
+  description: "A storage server that moves data from NVMe SSDs to GPU memory for\
+    \ inference workloads. The cold lookup path currently reads NVMe SSD \u2192 host\
+    \ DRAM \u2192 GPU.\nHARDWARE: - NVMe Gen4 SSDs via SPDK (userspace driver, no\
+    \ kernel filesystem) - NVIDIA A30 GPU, PCIe Gen4 x16 - Kernel modules loaded:\
+    \ nvidia-peermem, gdrdrv - 2048 hugepages allocated, memlock unlimited, NVMe devices\
+    \ bound to VFIO\nSCORING: score = 0.60 * min(1.0, throughput_gbps / 12.0) + 0.40\
+    \ * min(1.0, 0.4 / p99_latency_ms) Hard constraints: build must succeed, data\
+    \ integrity must pass.\nBUILD & EVALUATION: - cargo build -p certus-server --release\
+    \ --features p2p - The p2p feature enables GPU-direct DMA buffer functions in\
+    \ gpu-services - Start server: ./target/release/certus-server --metadata-pci 0000:61:00.0\
+    \ --data-pci 0000:62:00.0 - Run benchmark: python3 apps/python/certus-api-bench.py\
+    \ --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 - Parse cold\
+    \ lookup: look for \"Lookup (cold)\" then \"per-client=X.XX GB/s\" - ALWAYS kill\
+    \ and restart server after code changes - Server takes ~3s to initialize. Wait\
+    \ for gRPC port 50051.\nCODEBASE: The gpu-services crate (components/gpu-services/src/)\
+    \ contains DMA buffer creation functions for various memory types. The dispatcher\
+    \ crate (components/dispatcher/src/) manages the data transfer. The interfaces\
+    \ crate defines DmaBuffer, GpuStream, etc.\nKEY FILES: - components/dispatcher/src/pipeline.rs\
+    \ \u2014 transfer loop - components/dispatcher/src/lib.rs \u2014 promote_and_serve()\
+    \ call site - components/gpu-services/src/dma.rs \u2014 DMA buffer creation functions\n"
+  observable_metrics:
+  - cold lookup throughput (GB/s) single drive, 1 client
+  - cold lookup p99 latency (ms)
+  - CPU utilization fraction
+  - data integrity (PASS/FAIL)
+  controllable_knobs:
+  - ring depth
+  - number of CUDA streams
+  - DMA buffer configuration
+  - transfer architecture
+  repo_path: /home/nara/certus/evolve_p2p/ai-native-storage-certus
+models:
+  design: aws/claude-opus-4-6
+  execute_analyze: aws/claude-opus-4-6
+prompts:
+  methodology_layer: prompts/methodology
+  domain_adapter_layer: null
+runtime:
+  target_repo: AI-native-Systems-Research/ai-native-storage-certus
+  target_commit: 2d92a761016ec23cd7b1cb765f285c5a22581c2a
+  nous_version: 0.1.0
+  started_at: '2026-06-02T05:25:41.363443+00:00'

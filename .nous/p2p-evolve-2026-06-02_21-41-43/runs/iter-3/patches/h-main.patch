@@ -1,0 +1,524 @@
+diff --git a/components/dispatcher/src/lib.rs b/components/dispatcher/src/lib.rs
+index 888a4e3..b5673e2 100644
+--- a/components/dispatcher/src/lib.rs
++++ b/components/dispatcher/src/lib.rs
+@@ -202,13 +202,21 @@ impl DispatcherComponent {
+     ) -> Result<(), DispatcherError> {
+         let total_bytes = ipc_handle.size as usize;
+ 
+-        // Evict if needed to make space.
+-        Self::evict_for_space(dm, mt, ipc_handle.size)?;
+-
+-        // Insert into memory-tier.
+-        let mem_ptr = mt.insert(key, ipc_handle.size).map_err(|e| {
+-            DispatcherError::AllocationFailed(format!("promote insert failed: {e}"))
+-        })?;
++        // For P2P direct without backfill, skip DRAM allocation entirely.
++        #[cfg(feature = "p2p")]
++        let skip_dram = std::env::var("P2P_DIRECT").is_ok()
++            && std::env::var("P2P_NO_BACKFILL").is_ok();
++        #[cfg(not(feature = "p2p"))]
++        let skip_dram = false;
++
++        let mem_ptr = if skip_dram {
++            std::ptr::null_mut()
++        } else {
++            Self::evict_for_space(dm, mt, ipc_handle.size)?;
++            mt.insert(key, ipc_handle.size).map_err(|e| {
++                DispatcherError::AllocationFailed(format!("promote insert failed: {e}"))
++            })?
++        };
+ 
+         // Read from SSD into memory-tier using pipelined reader.
+         let drives = self.data_drives.read();
+@@ -250,39 +258,80 @@ impl DispatcherComponent {
+             }
+         };
+ 
+-        // Zero-copy pipelined reader: NVMe → memory-tier slot → GPU (no intermediate ring copy).
+-        // SAFETY: mem_ptr is a valid, CUDA-pinned, SPDK-registered memory-tier slot.
+-        // ipc_handle.address is a valid GPU destination pointer.
+         let ring_guard = self.pipeline_ring.read();
+         let ring_ref = ring_guard
+             .as_ref()
+             .ok_or_else(|| DispatcherError::NotInitialized("pipeline ring not allocated".into()))?;
+-        unsafe {
+-            pipeline::pipelined_ssd_to_gpu_zero_copy(
+-                &*block_dev,
+-                &**gpu,
+-                &ring_ref.streams,
+-                channels,
+-                mem_ptr,
+-                ipc_handle.address as *mut std::ffi::c_void,
+-                start_lba,
+-                total_bytes,
+-                ring_ref.chunk_size,
+-                16,
+-            )?;
+-        }
+-        drop(ring_guard);
+-        drop(drives);
+ 
+-        // Update dispatch-map: remove old BlockDevice entry and create fresh MemoryTier.
+-        // Since we released the read ref before calling this method, we can remove
+-        // and re-register.
+-        let _ = dm.remove(key);
+-        dm.create_memory_tier_entry(key, mem_ptr, ipc_handle.size)
+-            .map_err(|e| DispatcherError::IoError(format!("promote re-register failed: {e}")))?;
+-        // Set the ssd_offset since data is still on SSD.
+-        let _ = dm.convert_to_storage(key, offset);
+-        let _ = dm.release_write(key);
++        #[cfg(feature = "p2p")]
++        let p2p_direct = std::env::var("P2P_DIRECT").is_ok();
++        #[cfg(not(feature = "p2p"))]
++        let p2p_direct = false;
++
++        if p2p_direct {
++            #[cfg(feature = "p2p")]
++            {
++                let no_backfill = std::env::var("P2P_NO_BACKFILL").is_ok();
++                let chunk_size = ring_ref.chunk_size;
++                let backfill = if no_backfill {
++                    None
++                } else {
++                    Some((mem_ptr, ring_ref.streams[0]))
++                };
++
++                unsafe {
++                    pipeline::pipelined_ssd_to_gpu_direct(
++                        &*block_dev,
++                        channels,
++                        ipc_handle.address as *mut std::ffi::c_void,
++                        start_lba,
++                        total_bytes,
++                        chunk_size,
++                        16,
++                        backfill,
++                    )?;
++                }
++                drop(ring_guard);
++                drop(drives);
++
++                if no_backfill {
++                    // No DRAM copy — entry stays as BlockDevice (future lookups re-read SSD).
++                    let _ = dm.release_write(key);
++                } else {
++                    let _ = dm.remove(key);
++                    dm.create_memory_tier_entry(key, mem_ptr, ipc_handle.size)
++                        .map_err(|e| {
++                            DispatcherError::IoError(format!("promote re-register failed: {e}"))
++                        })?;
++                    let _ = dm.convert_to_storage(key, offset);
++                    let _ = dm.release_write(key);
++                }
++            }
++        } else {
++            // Baseline: NVMe → memory-tier slot → GPU (zero-copy with H2D).
++            unsafe {
++                pipeline::pipelined_ssd_to_gpu_zero_copy(
++                    &*block_dev,
++                    &**gpu,
++                    &ring_ref.streams,
++                    channels,
++                    mem_ptr,
++                    ipc_handle.address as *mut std::ffi::c_void,
++                    start_lba,
++                    total_bytes,
++                    ring_ref.chunk_size,
++                    16,
++                )?;
++            }
++            drop(ring_guard);
++            drop(drives);
++
++            let _ = dm.remove(key);
++            dm.create_memory_tier_entry(key, mem_ptr, ipc_handle.size)
++                .map_err(|e| DispatcherError::IoError(format!("promote re-register failed: {e}")))?;
++            let _ = dm.convert_to_storage(key, offset);
++            let _ = dm.release_write(key);
++        }
+ 
+         Ok(())
+     }
+@@ -1137,6 +1186,15 @@ impl IDispatcher for DispatcherComponent {
+                                     }
+                                 };
+ 
++                                #[cfg(feature = "p2p")]
++                                let p2p_direct = std::env::var("P2P_DIRECT").is_ok();
++                                #[cfg(not(feature = "p2p"))]
++                                let p2p_direct = false;
++                                #[cfg(feature = "p2p")]
++                                let p2p_no_backfill = std::env::var("P2P_NO_BACKFILL").is_ok();
++                                #[cfg(not(feature = "p2p"))]
++                                let p2p_no_backfill = false;
++
+                                 for &ci in &indices {
+                                     let entry = &cold_ref[ci];
+                                     let ipc = IpcHandle {
+@@ -1146,45 +1204,104 @@ impl IDispatcher for DispatcherComponent {
+                                     let total_bytes = ipc.size as usize;
+ 
+                                     let res = (|| -> Result<(), DispatcherError> {
+-                                        Self::evict_for_space(dm_ref, mt_ref, ipc.size)?;
+-
+-                                        let mem_ptr =
+-                                            mt_ref.insert(entry.key, ipc.size).map_err(|e| {
+-                                                DispatcherError::AllocationFailed(format!(
+-                                                    "promote insert failed: {e}"
+-                                                ))
+-                                            })?;
+-
+                                         let start_lba = entry.offset / block_size as u64;
+ 
+-                                        let pipeline_result = unsafe {
+-                                            pipeline::pipelined_ssd_to_gpu_zero_copy(
+-                                                &*drive.block_dev_iface,
+-                                                &**gpu_ref,
+-                                                &streams,
+-                                                &channels,
+-                                                mem_ptr,
+-                                                ipc.address as *mut std::ffi::c_void,
+-                                                start_lba,
+-                                                total_bytes,
+-                                                chunk_size,
+-                                                queue_depth,
+-                                            )
+-                                        };
+-
+-                                        pipeline_result?;
+-
+-                                        let _ = dm_ref.remove(entry.key);
+-                                        dm_ref
+-                                            .create_memory_tier_entry(entry.key, mem_ptr, ipc.size)
+-                                            .map_err(|e| {
+-                                                DispatcherError::IoError(format!(
+-                                                    "promote re-register failed: {e}"
+-                                                ))
+-                                            })?;
+-                                        let _ =
+-                                            dm_ref.convert_to_storage(entry.key, entry.offset);
+-                                        let _ = dm_ref.release_write(entry.key);
++                                        if p2p_direct && p2p_no_backfill {
++                                            #[cfg(feature = "p2p")]
++                                            {
++                                                let pipeline_result = unsafe {
++                                                    pipeline::pipelined_ssd_to_gpu_direct(
++                                                        &*drive.block_dev_iface,
++                                                        &channels,
++                                                        ipc.address as *mut std::ffi::c_void,
++                                                        start_lba,
++                                                        total_bytes,
++                                                        chunk_size,
++                                                        queue_depth,
++                                                        None,
++                                                    )
++                                                };
++                                                pipeline_result?;
++                                                let _ = dm_ref.release_write(entry.key);
++                                            }
++                                        } else if p2p_direct {
++                                            #[cfg(feature = "p2p")]
++                                            {
++                                                Self::evict_for_space(dm_ref, mt_ref, ipc.size)?;
++                                                let mem_ptr =
++                                                    mt_ref.insert(entry.key, ipc.size).map_err(|e| {
++                                                        DispatcherError::AllocationFailed(format!(
++                                                            "promote insert failed: {e}"
++                                                        ))
++                                                    })?;
++
++                                                let pipeline_result = unsafe {
++                                                    pipeline::pipelined_ssd_to_gpu_direct(
++                                                        &*drive.block_dev_iface,
++                                                        &channels,
++                                                        ipc.address as *mut std::ffi::c_void,
++                                                        start_lba,
++                                                        total_bytes,
++                                                        chunk_size,
++                                                        queue_depth,
++                                                        Some((mem_ptr, streams[0])),
++                                                    )
++                                                };
++                                                pipeline_result?;
++
++                                                let _ = dm_ref.remove(entry.key);
++                                                dm_ref
++                                                    .create_memory_tier_entry(
++                                                        entry.key, mem_ptr, ipc.size,
++                                                    )
++                                                    .map_err(|e| {
++                                                        DispatcherError::IoError(format!(
++                                                            "promote re-register failed: {e}"
++                                                        ))
++                                                    })?;
++                                                let _ = dm_ref
++                                                    .convert_to_storage(entry.key, entry.offset);
++                                                let _ = dm_ref.release_write(entry.key);
++                                            }
++                                        } else {
++                                            Self::evict_for_space(dm_ref, mt_ref, ipc.size)?;
++                                            let mem_ptr =
++                                                mt_ref.insert(entry.key, ipc.size).map_err(|e| {
++                                                    DispatcherError::AllocationFailed(format!(
++                                                        "promote insert failed: {e}"
++                                                    ))
++                                                })?;
++                                            let pipeline_result = unsafe {
++                                                pipeline::pipelined_ssd_to_gpu_zero_copy(
++                                                    &*drive.block_dev_iface,
++                                                    &**gpu_ref,
++                                                    &streams,
++                                                    &channels,
++                                                    mem_ptr,
++                                                    ipc.address as *mut std::ffi::c_void,
++                                                    start_lba,
++                                                    total_bytes,
++                                                    chunk_size,
++                                                    queue_depth,
++                                                )
++                                            };
++
++                                            pipeline_result?;
++
++                                            let _ = dm_ref.remove(entry.key);
++                                            dm_ref
++                                                .create_memory_tier_entry(
++                                                    entry.key, mem_ptr, ipc.size,
++                                                )
++                                                .map_err(|e| {
++                                                    DispatcherError::IoError(format!(
++                                                        "promote re-register failed: {e}"
++                                                    ))
++                                                })?;
++                                            let _ = dm_ref
++                                                .convert_to_storage(entry.key, entry.offset);
++                                            let _ = dm_ref.release_write(entry.key);
++                                        }
+ 
+                                         Ok(())
+                                     })();
+diff --git a/components/dispatcher/src/pipeline.rs b/components/dispatcher/src/pipeline.rs
+index bed224c..8ae4a81 100644
+--- a/components/dispatcher/src/pipeline.rs
++++ b/components/dispatcher/src/pipeline.rs
+@@ -400,6 +400,219 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+     Ok(())
+ }
+ 
++/// Direct NVMe→GPU pipeline via nvidia-peermem.
++///
++/// Registers the GPU destination pointer with SPDK (`spdk_mem_register`), reads
++/// NVMe directly into GPU memory using a sliding-window pipeline, then unregisters.
++/// No DRAM allocation or H2D copy — a single PCIe traversal.
++///
++/// When `backfill` is `Some(...)`, after each chunk completes the NVMe read into GPU,
++/// a `cudaMemcpyAsync(DeviceToHost)` copies that chunk back to the DRAM pointer for
++/// warm-path caching (h-ablation condition).
++///
++/// # Safety
++///
++/// - `gpu_dst` must be a valid GPU device pointer (e.g. from IPC open) for at least `total_bytes`.
++/// - If `backfill` is provided, the DRAM pointer must be valid for `total_bytes`.
++#[cfg(feature = "p2p")]
++#[allow(clippy::too_many_arguments)]
++pub unsafe fn pipelined_ssd_to_gpu_direct(
++    drive: &dyn IBlockDevice,
++    channels: &ClientChannels,
++    gpu_dst: *mut std::ffi::c_void,
++    start_lba: u64,
++    total_bytes: usize,
++    chunk_size: usize,
++    max_queue_depth: usize,
++    backfill: Option<(*mut u8, GpuStream)>,
++) -> Result<(), DispatcherError> {
++    extern "C" {
++        fn spdk_mem_register(
++            vaddr: *mut std::ffi::c_void,
++            len: usize,
++        ) -> std::os::raw::c_int;
++        fn spdk_mem_unregister(
++            vaddr: *mut std::ffi::c_void,
++            len: usize,
++        ) -> std::os::raw::c_int;
++    }
++
++    // For D2H backfill (h-ablation).
++    #[allow(dead_code)]
++    extern "C" {
++        fn cudaMemcpyAsync(
++            dst: *mut std::ffi::c_void,
++            src: *const std::ffi::c_void,
++            count: usize,
++            kind: std::os::raw::c_int,
++            stream: *mut std::ffi::c_void,
++        ) -> std::os::raw::c_int;
++        fn cudaStreamSynchronize(stream: *mut std::ffi::c_void) -> std::os::raw::c_int;
++    }
++    const CUDA_MEMCPY_DEVICE_TO_HOST: std::os::raw::c_int = 2;
++
++    let block_size = drive.block_size() as usize;
++    let aligned_bytes = total_bytes.next_multiple_of(block_size);
++
++    // Register GPU destination memory with SPDK for NVMe DMA access.
++    let rc = unsafe { spdk_mem_register(gpu_dst, aligned_bytes) };
++    if rc != 0 {
++        return Err(DispatcherError::IoError(format!(
++            "spdk_mem_register on GPU ptr failed (rc={rc}). Is nvidia-peermem loaded?"
++        )));
++    }
++
++    let segments = io_segmenter::segment_io(
++        start_lba,
++        aligned_bytes,
++        chunk_size as u32,
++        block_size as u32,
++    );
++
++    if segments.is_empty() {
++        unsafe { spdk_mem_unregister(gpu_dst, aligned_bytes) };
++        return Ok(());
++    }
++
++    let num_chunks = segments.len();
++
++    // Create DmaBuffer wrappers for each chunk of the GPU destination.
++    let chunk_bufs: Vec<Arc<Mutex<DmaBuffer>>> = match segments
++        .iter()
++        .map(|seg| {
++            let ptr = unsafe { (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void };
++            let buf_size = seg.length.next_multiple_of(block_size);
++            let buf = unsafe { DmaBuffer::from_raw(ptr, buf_size, noop_free, -1) }
++                .map_err(|e| {
++                    DispatcherError::AllocationFailed(format!("DmaBuffer wrap GPU chunk: {e}"))
++                })?;
++            Ok(Arc::new(Mutex::new(buf)))
++        })
++        .collect::<Result<Vec<_>, DispatcherError>>()
++    {
++        Ok(bufs) => bufs,
++        Err(e) => {
++            unsafe { spdk_mem_unregister(gpu_dst, aligned_bytes) };
++            return Err(e);
++        }
++    };
++
++    let max_inflight = max_queue_depth.min(num_chunks);
++    let mut inflight: std::collections::VecDeque<usize> =
++        std::collections::VecDeque::with_capacity(max_inflight);
++
++    // Prime the sliding window.
++    for i in 0..max_inflight {
++        channels
++            .command_tx
++            .send(Command::ReadAsync {
++                ns_id: 1,
++                lba: segments[i].lba,
++                buf: Arc::clone(&chunk_bufs[i]),
++                timeout_ms: READ_TIMEOUT_MS,
++            })
++            .map_err(|e| {
++                unsafe { spdk_mem_unregister(gpu_dst, aligned_bytes) };
++                DispatcherError::IoError(format!("ReadAsync send #{i}: {e}"))
++            })?;
++        inflight.push_back(i);
++    }
++
++    let mut next_to_submit = max_inflight;
++    let mut backfill_count = 0usize;
++
++    // Sliding-window pipeline: NVMe reads land directly in GPU memory.
++    for _completed in 0..num_chunks {
++        let seg_idx = match channels.completion_rx.recv() {
++            Ok(Completion::ReadDone { handle, result }) => {
++                result.map_err(|e| {
++                    unsafe { spdk_mem_unregister(gpu_dst, aligned_bytes) };
++                    DispatcherError::IoError(format!("SSD read (handle {:?}): {e}", handle))
++                })?;
++                inflight.pop_front().unwrap()
++            }
++            Ok(Completion::Timeout { handle }) => {
++                unsafe { spdk_mem_unregister(gpu_dst, aligned_bytes) };
++                return Err(DispatcherError::IoError(format!(
++                    "NVMe read timeout (handle {:?})",
++                    handle
++                )));
++            }
++            Ok(other) => {
++                unsafe { spdk_mem_unregister(gpu_dst, aligned_bytes) };
++                return Err(DispatcherError::IoError(format!(
++                    "unexpected completion: {other:?}"
++                )));
++            }
++            Err(_) => {
++                unsafe { spdk_mem_unregister(gpu_dst, aligned_bytes) };
++                return Err(DispatcherError::IoError(
++                    "completion channel disconnected".into(),
++                ));
++            }
++        };
++
++        // Submit the next read immediately.
++        if next_to_submit < num_chunks {
++            channels
++                .command_tx
++                .send(Command::ReadAsync {
++                    ns_id: 1,
++                    lba: segments[next_to_submit].lba,
++                    buf: Arc::clone(&chunk_bufs[next_to_submit]),
++                    timeout_ms: READ_TIMEOUT_MS,
++                })
++                .map_err(|e| {
++                    unsafe { spdk_mem_unregister(gpu_dst, aligned_bytes) };
++                    DispatcherError::IoError(format!(
++                        "ReadAsync submit #{next_to_submit}: {e}"
++                    ))
++                })?;
++            inflight.push_back(next_to_submit);
++            next_to_submit += 1;
++        }
++
++        // Optionally backfill DRAM (h-ablation): GPU→DRAM copy.
++        if let Some((dram_ptr, stream)) = backfill {
++            let seg = &segments[seg_idx];
++            let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
++            let gpu_src = (gpu_dst as *mut u8).add(seg.buffer_offset) as *const std::ffi::c_void;
++            let dram_dst = dram_ptr.add(seg.buffer_offset) as *mut std::ffi::c_void;
++
++            unsafe {
++                cudaMemcpyAsync(
++                    dram_dst,
++                    gpu_src,
++                    copy_len,
++                    CUDA_MEMCPY_DEVICE_TO_HOST,
++                    stream.0,
++                );
++            }
++            backfill_count += 1;
++
++            // Periodically sync to bound the GPU copy queue depth.
++            if backfill_count % 16 == 0 {
++                unsafe { cudaStreamSynchronize(stream.0) };
++            }
++        }
++    }
++
++    // Final sync for backfill stream if used.
++    if let Some((_dram_ptr, stream)) = backfill {
++        unsafe { cudaStreamSynchronize(stream.0) };
++    }
++
++    // Unregister GPU memory from SPDK.
++    unsafe { spdk_mem_unregister(gpu_dst, aligned_bytes) };
++
++    // Forget all DmaBuffer wrappers (noop_free — GPU memory owned by IPC handle).
++    for buf in chunk_bufs {
++        std::mem::forget(Arc::try_unwrap(buf).ok());
++    }
++
++    Ok(())
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;

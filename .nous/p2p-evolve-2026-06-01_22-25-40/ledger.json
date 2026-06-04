@@ -1,0 +1,117 @@
+{
+  "iterations": [
+    {
+      "iteration": 0,
+      "family": "baseline",
+      "timestamp": "1970-01-01T00:00:00Z",
+      "candidate_id": "baseline",
+      "h_main_result": null,
+      "ablation_results": {},
+      "control_result": null,
+      "robustness_result": null,
+      "prediction_accuracy": null,
+      "principles_extracted": [],
+      "frontier_update": null
+    },
+    {
+      "iteration": 1,
+      "family": "pipeline-parallelism",
+      "timestamp": "2026-06-02T05:56:08.389472+00:00",
+      "candidate_id": "iter-1",
+      "h_main_result": "CONFIRMED",
+      "ablation_results": {
+        "ablation-0": "REFUTED"
+      },
+      "control_result": null,
+      "robustness_result": null,
+      "prediction_accuracy": {
+        "arms_correct": 1,
+        "arms_total": 3,
+        "accuracy_pct": 33.3
+      },
+      "principles_extracted": [
+        {
+          "id": "RP-1",
+          "action": "INSERT"
+        },
+        {
+          "id": "RP-2",
+          "action": "INSERT"
+        },
+        {
+          "id": "RP-3",
+          "action": "INSERT"
+        }
+      ],
+      "frontier_update": null
+    },
+    {
+      "iteration": 2,
+      "family": "gpu-sync-stall-elimination",
+      "timestamp": "2026-06-02T06:38:17.579075+00:00",
+      "candidate_id": "iter-2",
+      "h_main_result": "REFUTED",
+      "ablation_results": {
+        "ablation-0": "PARTIALLY_CONFIRMED"
+      },
+      "control_result": null,
+      "robustness_result": "PARTIALLY_CONFIRMED",
+      "prediction_accuracy": {
+        "arms_correct": 0,
+        "arms_total": 3,
+        "accuracy_pct": 0.0
+      },
+      "principles_extracted": [
+        {
+          "id": "RP-1",
+          "action": "INSERT"
+        },
+        {
+          "id": "RP-4",
+          "action": "INSERT"
+        },
+        {
+          "id": "RP-5",
+          "action": "INSERT"
+        }
+      ],
+      "frontier_update": null
+    },
+    {
+      "iteration": 3,
+      "family": "batch-path-queue-depth",
+      "timestamp": "2026-06-02T07:05:35.252814+00:00",
+      "candidate_id": "iter-3",
+      "h_main_result": "CONFIRMED",
+      "ablation_results": {
+        "ablation-0": "PARTIALLY_CONFIRMED"
+      },
+      "control_result": null,
+      "robustness_result": "PARTIALLY_CONFIRMED",
+      "prediction_accuracy": {
+        "arms_correct": 1,
+        "arms_total": 3,
+        "accuracy_pct": 33.3
+      },
+      "principles_extracted": [
+        {
+          "id": "RP-1",
+          "action": "INSERT"
+        },
+        {
+          "id": "RP-3",
+          "action": "INSERT"
+        },
+        {
+          "id": "RP-6",
+          "action": "INSERT"
+        },
+        {
+          "id": "RP-7",
+          "action": "INSERT"
+        }
+      ],
+      "frontier_update": null
+    }
+  ]
+}

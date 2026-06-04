@@ -1,0 +1,208 @@
+diff --git a/components/block-device-spdk-nvme/src/controller.rs b/components/block-device-spdk-nvme/src/controller.rs
+index 796338f..faade0f 100644
+--- a/components/block-device-spdk-nvme/src/controller.rs
++++ b/components/block-device-spdk-nvme/src/controller.rs
+@@ -155,7 +155,7 @@ impl NvmeController {
+             minor: 0,
+             tertiary: 0,
+         };
+-        let max_transfer_size = 131072; // 128KB default
++        let max_transfer_size = 524288; // 512KB
+ 
+         // Discover namespaces using available API.
+         let namespaces = Self::discover_namespaces(ctrlr_ptr);
+diff --git a/components/dispatcher/src/lib.rs b/components/dispatcher/src/lib.rs
+index 888a4e3..88e8d08 100644
+--- a/components/dispatcher/src/lib.rs
++++ b/components/dispatcher/src/lib.rs
+@@ -268,7 +268,7 @@ impl DispatcherComponent {
+                 start_lba,
+                 total_bytes,
+                 ring_ref.chunk_size,
+-                16,
++                64,
+             )?;
+         }
+         drop(ring_guard);
+@@ -1043,7 +1043,7 @@ impl IDispatcher for DispatcherComponent {
+         // Each thread gets its own NVMe queue pair and CUDA streams, enabling
+         // concurrent reads on the same physical drive.
+         if !cold_entries.is_empty() {
+-            const MAX_QUEUES_PER_DRIVE: usize = 2;
++            const MAX_QUEUES_PER_DRIVE: usize = 4;
+ 
+             let chunk_size = {
+                 let ring_guard = self.pipeline_ring.read();
+@@ -1088,7 +1088,7 @@ impl IDispatcher for DispatcherComponent {
+                             .chunks((entry_indices.len() + num_queues - 1) / num_queues)
+                             .collect();
+ 
+-                        let queue_depth = 16 / num_queues;
++                        let queue_depth = 64 / num_queues;
+ 
+                         for chunk in chunks {
+                             let dm_ref = &dm;
+@@ -1108,12 +1108,13 @@ impl IDispatcher for DispatcherComponent {
+                                             "connect_client failed: {e}"
+                                         ))
+                                     });
+-                                let streams_result = gpu_ref.create_stream().and_then(|a| {
+-                                    gpu_ref.create_stream().map(|b| [a, b]).map_err(|e| {
+-                                        let _ = gpu_ref.destroy_stream(a);
+-                                        e
+-                                    })
+-                                });
++                                let streams_result = (|| -> Result<[GpuStream; 4], String> {
++                                    let a = gpu_ref.create_stream()?;
++                                    let b = gpu_ref.create_stream().map_err(|e| { let _ = gpu_ref.destroy_stream(a); e })?;
++                                    let c = gpu_ref.create_stream().map_err(|e| { let _ = gpu_ref.destroy_stream(a); let _ = gpu_ref.destroy_stream(b); e })?;
++                                    let d = gpu_ref.create_stream().map_err(|e| { let _ = gpu_ref.destroy_stream(a); let _ = gpu_ref.destroy_stream(b); let _ = gpu_ref.destroy_stream(c); e })?;
++                                    Ok([a, b, c, d])
++                                })();
+ 
+                                 let mut batch_results: Vec<(usize, Result<(), DispatcherError>)> =
+                                     Vec::with_capacity(indices.len());
+@@ -1192,8 +1193,9 @@ impl IDispatcher for DispatcherComponent {
+                                     batch_results.push((ci, res));
+                                 }
+ 
+-                                let _ = gpu_ref.destroy_stream(streams[0]);
+-                                let _ = gpu_ref.destroy_stream(streams[1]);
++                                for s in &streams {
++                                    let _ = gpu_ref.destroy_stream(*s);
++                                }
+ 
+                                 batch_results
+                             });
+diff --git a/components/dispatcher/src/pipeline.rs b/components/dispatcher/src/pipeline.rs
+index bed224c..d85a8c4 100644
+--- a/components/dispatcher/src/pipeline.rs
++++ b/components/dispatcher/src/pipeline.rs
+@@ -15,7 +15,7 @@ use interfaces::{
+ use crate::io_segmenter;
+ 
+ /// Number of ring buffers for pipelined transfers.
+-pub const PIPELINE_RING_SIZE: usize = 8;
++pub const PIPELINE_RING_SIZE: usize = 32;
+ 
+ /// Timeout for async NVMe read operations (ms).
+ const READ_TIMEOUT_MS: u64 = 5000;
+@@ -26,7 +26,7 @@ const READ_TIMEOUT_MS: u64 = 5000;
+ /// to avoid per-call `cudaHostAlloc`/`spdk_mem_register` overhead.
+ pub struct PipelineRing {
+     pub buffers: Vec<Arc<Mutex<DmaBuffer>>>,
+-    pub streams: [GpuStream; 2],
++    pub streams: [GpuStream; 4],
+     pub chunk_size: usize,
+ }
+ 
+@@ -50,18 +50,30 @@ impl PipelineRing {
+             let _ = gpu.destroy_stream(stream_a);
+             DispatcherError::IoError(format!("create_stream failed: {e}"))
+         })?;
++        let stream_c = gpu.create_stream().map_err(|e| {
++            let _ = gpu.destroy_stream(stream_a);
++            let _ = gpu.destroy_stream(stream_b);
++            DispatcherError::IoError(format!("create_stream failed: {e}"))
++        })?;
++        let stream_d = gpu.create_stream().map_err(|e| {
++            let _ = gpu.destroy_stream(stream_a);
++            let _ = gpu.destroy_stream(stream_b);
++            let _ = gpu.destroy_stream(stream_c);
++            DispatcherError::IoError(format!("create_stream failed: {e}"))
++        })?;
+ 
+         Ok(Self {
+             buffers,
+-            streams: [stream_a, stream_b],
++            streams: [stream_a, stream_b, stream_c, stream_d],
+             chunk_size,
+         })
+     }
+ 
+     /// Destroy CUDA streams. Buffers are freed on drop via their DmaBuffer free_fn.
+     pub fn destroy(self, gpu: &dyn IGpuServices) {
+-        let _ = gpu.destroy_stream(self.streams[0]);
+-        let _ = gpu.destroy_stream(self.streams[1]);
++        for s in &self.streams {
++            let _ = gpu.destroy_stream(*s);
++        }
+     }
+ }
+ 
+@@ -172,7 +184,7 @@ pub unsafe fn pipelined_ssd_to_gpu(
+         for i in 0..batch_len {
+             let seg = &segments[chunk_idx + i];
+             let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
+-            let current_stream = streams[i % 2];
++            let current_stream = streams[i % streams.len()];
+ 
+             let guard = ring.buffers[i].lock().unwrap();
+ 
+@@ -204,17 +216,17 @@ pub unsafe fn pipelined_ssd_to_gpu(
+             drop(guard);
+         }
+ 
+-        // Sync both streams before reusing ring slots in the next batch.
+-        gpu.stream_synchronize(streams[0])
+-            .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+-        gpu.stream_synchronize(streams[1])
+-            .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
++        // Sync all streams before reusing ring slots in the next batch.
++        for s in streams.iter() {
++            gpu.stream_synchronize(*s)
++                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
++        }
+ 
+         chunk_idx = batch_end;
+     }
+ 
+-    // Sync both streams to ensure all GPU copies are complete.
+-    for s in streams {
++    // Sync all streams to ensure all GPU copies are complete.
++    for s in streams.iter() {
+         gpu.stream_synchronize(*s)
+             .map_err(|e| DispatcherError::IoError(format!("final stream_synchronize: {e}")))?;
+     }
+@@ -244,7 +256,7 @@ unsafe extern "C" fn noop_free(_ptr: *mut std::ffi::c_void) {}
+ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+     drive: &dyn IBlockDevice,
+     gpu: &dyn IGpuServices,
+-    streams: &[GpuStream; 2],
++    streams: &[GpuStream; 4],
+     channels: &ClientChannels,
+     mem_tier_ptr: *mut u8,
+     gpu_dst: *mut std::ffi::c_void,
+@@ -362,7 +374,7 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+         // NVMe read for seg_idx is complete — GPU H2D copy can start now.
+         let seg = &segments[seg_idx];
+         let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
+-        let current_stream = streams[stream_idx % 2];
++        let current_stream = streams[stream_idx % 4];
+ 
+         let guard = chunk_bufs[seg_idx].lock().unwrap();
+         gpu.dma_copy_to_device_async(
+@@ -378,16 +390,16 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+         stream_idx += 1;
+ 
+         // Periodically sync to bound the GPU command queue depth.
+-        if stream_idx % 16 == 0 {
+-            gpu.stream_synchronize(streams[0])
+-                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+-            gpu.stream_synchronize(streams[1])
+-                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
++        if stream_idx % 32 == 0 {
++            for s in streams.iter() {
++                gpu.stream_synchronize(*s)
++                    .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
++            }
+         }
+     }
+ 
+-    // Sync both streams to ensure all GPU copies are complete.
+-    for s in streams {
++    // Sync all streams to ensure all GPU copies are complete.
++    for s in streams.iter() {
+         gpu.stream_synchronize(*s)
+             .map_err(|e| DispatcherError::IoError(format!("final stream_synchronize: {e}")))?;
+     }

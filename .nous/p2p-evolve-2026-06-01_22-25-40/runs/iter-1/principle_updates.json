@@ -1,0 +1,44 @@
+[
+  {
+    "id": "RP-1",
+    "statement": "Increasing NVMe queue depth from 16 to 64 with 4 CUDA streams improves cold-lookup throughput by ~15% on Gen4 NVMe SSDs, yielding 4.5 GB/s on single-drive 4 MiB sequential reads.",
+    "confidence": "high",
+    "regime": "Single Gen4 NVMe drive, 4 MiB objects, 128 KiB chunk size, SPDK userspace driver, pipelined SSD→DRAM→GPU transfer",
+    "evidence": ["iteration-1-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "Deeper NVMe queue depth (QD64) keeps more I/O in-flight, hiding submission latency between command batches. Additional CUDA streams (4 vs 2) allow more GPU DMA operations to overlap with NVMe reads by reducing synchronization stalls at the stream sync points. The combination reduces pipeline idle time in both the NVMe and GPU DMA stages.",
+    "applicability_bounds": "Applies when chunk size provides sufficient segments for the pipeline (at least 32 segments per object). Does not apply to hot-path (memory-tier) lookups. Diminishing returns expected beyond QD64 for sequential access patterns on single drives.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-2",
+    "statement": "Increasing NVMe chunk size from 128 KiB to 512 KiB reduces cold-lookup throughput by ~5% because fewer pipeline segments reduce overlap opportunity in the sliding-window pipeline.",
+    "confidence": "high",
+    "regime": "4 MiB objects, QD16, pipelined sliding-window transfer, single Gen4 NVMe drive",
+    "evidence": ["iteration-1-h-ablation", "iteration-1-h-super-additivity"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "With 512 KiB chunks, a 4 MiB object has only 8 segments. The sliding-window pipeline can only keep min(QD, num_segments) operations in-flight. At 8 segments, the pipeline drains too quickly — there are not enough independent operations to fully overlap NVMe reads with GPU DMA copies. At 128 KiB (32 segments), the pipeline maintains steady-state overlap throughout the transfer. The per-command overhead reduction from fewer commands is smaller than the parallelism loss.",
+    "applicability_bounds": "Applies to 4 MiB objects specifically. For much larger objects (tens of MiB+), larger chunks might become beneficial since segment count would remain high. May not apply to purely sequential non-overlapped reads where per-command overhead dominates.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-3",
+    "statement": "Combining large chunks (512 KiB) with deep queues (QD64) across multiple threads can cause SPDK NVMe submission failures (ENOMEM/rc=-12) due to scatter-gather entry or queue pair resource exhaustion.",
+    "confidence": "medium",
+    "regime": "SPDK userspace NVMe driver, multiple queue threads per drive, large transfer sizes combined with high concurrency",
+    "evidence": ["iteration-1-h-super-additivity"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "SPDK allocates a fixed pool of scatter-gather entries per queue pair. With 512 KiB per command and QD64 across 4 threads, the total memory pressure per drive reaches 512 KiB * 16 per-thread-QD * 4 threads = 32 MiB of in-flight DMA buffers, which can exceed the SPDK queue pair's pre-allocated resource pool. The ENOMEM error occurs at spdk_nvme_ns_cmd_read submission time.",
+    "applicability_bounds": "Only observed intermittently (2 errors in 1 of 3 runs), suggesting it's a resource contention issue at peak submission rate rather than a hard limit. Reliable operation requires matching chunk size and queue depth to the SPDK queue pair resource pool size.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  }
+]

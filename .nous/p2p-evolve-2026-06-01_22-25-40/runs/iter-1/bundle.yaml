@@ -1,0 +1,49 @@
+metadata:
+  iteration: 1
+  family: "pipeline-parallelism"
+  research_question: "Can increasing NVMe queue depth, CUDA stream count, and chunk size in the cold-lookup pipeline significantly improve SSD-to-GPU throughput beyond the current ~2.4 GB/s (single drive, 4 MiB objects)?"
+
+# Arms chosen:
+# - h-main: Deeper NVMe queue + more CUDA streams (the primary mechanism hypothesis)
+# - h-ablation: Larger chunks only (isolates chunk-size contribution from queue depth)
+# - h-super-additivity: Combined changes (tests whether pipeline stages interact multiplicatively)
+# Skipped h-control-negative: The mechanism (NVMe queue depth saturation) is well-understood
+# from storage literature — a negative control would require artificially limiting hardware
+# which doesn't add scientific value in iteration 1.
+
+arms:
+  - type: h-main
+    prediction: "Increasing NVMe queue depth from 16 to 64 and CUDA streams from 2 to 4 will increase cold lookup throughput consistently above baseline, because the current QD16 leaves NVMe internal parallelism underutilized and 2 CUDA streams cannot fully overlap H2D copies with SSD reads."
+    mechanism: "NVMe SSDs achieve peak bandwidth only at high queue depths (typically QD32-128 for Gen4 drives). At QD16 with 128 KiB chunks, only 2 MB is in-flight — the drive completes the queue in ~0.37 ms but SPDK submission + completion processing adds ~50-100 us per batch, leaving dead time. QD64 keeps 8 MB in-flight, hiding submission overhead. Additional CUDA streams allow GPU DMA engine to process copies while the CPU handles NVMe completions, reducing pipeline stalls at the GPU sync points (currently every 16 ops with only 2 streams means frequent serialization)."
+    diagnostic: "If throughput does not improve: (1) check if the NVMe drive was already bandwidth-limited at QD16 (measure with fio --iodepth=16 vs --iodepth=64), (2) check if the bottleneck is actually PCIe bandwidth or CUDA stream scheduling overhead, (3) verify SPDK is actually submitting at the higher QD (inspect qpair depth via SPDK debug)."
+    code_changes:
+      - file: "components/dispatcher/src/pipeline.rs"
+        intent: "Change PIPELINE_RING_SIZE from 8 to 32. Expand streams array from [GpuStream; 2] to [GpuStream; 4] and create 4 streams in PipelineRing::new(). Update the stream sync interval from 16 to 32 in pipelined_ssd_to_gpu_zero_copy()."
+        rationale: "Ring size must accommodate the deeper queue depth (QD64 needs at least 64 slots but the zero-copy path uses memory-tier directly — ring size affects the non-zero-copy fallback). 4 streams enable 4x GPU DMA overlap. Larger sync interval reduces synchronization overhead."
+      - file: "components/dispatcher/src/lib.rs"
+        intent: "In promote_and_serve() change max_queue_depth from 16 to 64. In batch_lookup() change MAX_QUEUES_PER_DRIVE from 2 to 4 and queue_depth from 16/num_queues to 64/num_queues."
+        rationale: "These are the call sites that pass queue depth to the pipeline function. Increasing them allows more NVMe commands in-flight simultaneously."
+
+  - type: h-ablation
+    prediction: "Increasing chunk size from 128 KiB to 512 KiB (without changing queue depth or stream count) will produce a smaller but measurable throughput improvement above baseline, because larger NVMe commands reduce per-command overhead while maintaining the same queue depth."
+    mechanism: "Each NVMe command has fixed overhead: SPDK submission doorbell write, completion poll, ring buffer management. At 128 KiB per command, a 4 MiB object requires 32 commands. At 512 KiB, it requires only 8 commands — 4x fewer submissions for the same data, reducing CPU overhead. However, this alone doesn't increase in-flight bytes (QD16 * 512 KiB = 8 MB vs QD16 * 128 KiB = 2 MB), so it indirectly provides the same benefit as deeper queue depth through larger transfer units."
+    diagnostic: "If no improvement: the NVMe drive may not support 512 KiB transfers (check spdk_nvme_ctrlr_get_data()->mdts). If performance degrades: large transfers may exceed the NVMe controller's optimal transfer unit, causing internal fragmentation."
+    code_changes:
+      - file: "components/block-device-spdk-nvme/src/controller.rs"
+        intent: "Change the max_transfer_size default from 131072 (128 KiB) to 524288 (512 KiB) at line 158."
+        rationale: "This is where the chunk size used by the pipeline is ultimately determined. The pipeline ring allocates buffers of this size and the io_segmenter splits I/O at this boundary."
+
+  - type: h-super-additivity
+    prediction: "Combining QD64, 4 CUDA streams, and 512 KiB chunks will produce throughput exceeding the sum of individual improvements from h-main and h-ablation, because the combined configuration eliminates bottlenecks at multiple pipeline stages simultaneously — NVMe queue saturation, GPU DMA scheduling, and per-command overhead all improve together."
+    mechanism: "With QD64 and 512 KiB chunks, 32 MB is in-flight to the NVMe (vs 2 MB baseline). The NVMe internal flash parallelism is fully utilized. Simultaneously, 4 CUDA streams prevent the GPU DMA engine from ever being idle. The total data path becomes: NVMe reads at near-wire-rate (5+ GB/s) while GPU copies proceed in parallel on 4 streams. The limiting factor shifts from pipeline stalls to raw PCIe bandwidth."
+    diagnostic: "If not super-additive: the bottleneck has moved to a single chokepoint (likely PCIe Gen4 x4 on the NVMe side at ~7 GB/s theoretical). Measure CPU utilization — if near 100% on the poller core, the CPU is the bottleneck and the pipeline needs async completion handling."
+    code_changes:
+      - file: "components/dispatcher/src/pipeline.rs"
+        intent: "Same as h-main: PIPELINE_RING_SIZE=32, 4 CUDA streams, sync interval 32."
+        rationale: "Combined with larger chunks for maximum pipeline throughput."
+      - file: "components/dispatcher/src/lib.rs"
+        intent: "Same as h-main: max_queue_depth=64, MAX_QUEUES_PER_DRIVE=4."
+        rationale: "Deeper queue depth combined with larger chunks."
+      - file: "components/block-device-spdk-nvme/src/controller.rs"
+        intent: "Same as h-ablation: max_transfer_size=524288."
+        rationale: "Larger chunks combined with deeper queue."

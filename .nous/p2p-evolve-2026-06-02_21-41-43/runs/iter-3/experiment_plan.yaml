@@ -1,0 +1,43 @@
+metadata:
+  iteration: 3
+  bundle_ref: "runs/iter-3/bundle.yaml"
+
+setup:
+  - cmd: "cargo build -p certus-server --release --features p2p"
+
+arms:
+  - arm_id: "h-main"
+    conditions:
+      - name: "run-1"
+        cmd: "git checkout -- . && git apply /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/patches/h-main.patch && cargo build -p certus-server --release --features p2p && (P2P_DIRECT=1 P2P_NO_BACKFILL=1 ./target/release/certus-server --drive-count 1 --format &) && sleep 8 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/results/h-main/run-1.txt && kill $(pgrep -x certus-server)"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/results/h-main/run-1.txt"
+      - name: "run-2"
+        cmd: "(P2P_DIRECT=1 P2P_NO_BACKFILL=1 ./target/release/certus-server --drive-count 1 --format &) && sleep 8 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/results/h-main/run-2.txt && kill $(pgrep -x certus-server)"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/results/h-main/run-2.txt"
+      - name: "run-3"
+        cmd: "(P2P_DIRECT=1 P2P_NO_BACKFILL=1 ./target/release/certus-server --drive-count 1 --format &) && sleep 8 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/results/h-main/run-3.txt && kill $(pgrep -x certus-server)"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/results/h-main/run-3.txt"
+
+  - arm_id: "h-ablation"
+    conditions:
+      - name: "run-1"
+        cmd: "git checkout -- . && git apply /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/patches/h-ablation.patch && cargo build -p certus-server --release --features p2p && (P2P_DIRECT=1 ./target/release/certus-server --drive-count 1 --format &) && sleep 8 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/results/h-ablation/run-1.txt && kill $(pgrep -x certus-server)"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/results/h-ablation/run-1.txt"
+      - name: "run-2"
+        cmd: "(P2P_DIRECT=1 ./target/release/certus-server --drive-count 1 --format &) && sleep 8 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/results/h-ablation/run-2.txt && kill $(pgrep -x certus-server)"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/results/h-ablation/run-2.txt"
+      - name: "run-3"
+        cmd: "(P2P_DIRECT=1 ./target/release/certus-server --drive-count 1 --format &) && sleep 8 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/results/h-ablation/run-3.txt && kill $(pgrep -x certus-server)"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/results/h-ablation/run-3.txt"
+
+  - arm_id: "h-control-negative"
+    conditions:
+      - name: "run-1"
+        cmd: "git checkout -- . && cargo build -p certus-server --release --features p2p && (./target/release/certus-server --drive-count 1 --format &) && sleep 8 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/results/h-control-negative/run-1.txt && kill $(pgrep -x certus-server)"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/results/h-control-negative/run-1.txt"
+      - name: "run-2"
+        cmd: "(./target/release/certus-server --drive-count 1 --format &) && sleep 8 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/results/h-control-negative/run-2.txt && kill $(pgrep -x certus-server)"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/results/h-control-negative/run-2.txt"
+      - name: "run-3"
+        cmd: "(./target/release/certus-server --drive-count 1 --format &) && sleep 8 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/results/h-control-negative/run-3.txt && kill $(pgrep -x certus-server)"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-3/results/h-control-negative/run-3.txt"

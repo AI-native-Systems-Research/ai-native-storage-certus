@@ -1,0 +1,25 @@
+{
+  "iteration": 2,
+  "bundle_ref": "runs/iter-2/bundle.yaml",
+  "arms": [
+    {
+      "arm_type": "h-main",
+      "predicted": "Sliding-window P2P cold lookup throughput will be equal to or higher than baseline (~2.4 GB/s). P2P eliminates one PCIe crossing via NVMe→GPU BAR1 direct DMA.",
+      "observed": "P2P throughput: 0.01 GB/s (avg latency 337ms per 4 MiB object). Baseline: 2.37 GB/s (avg latency 1.75ms). P2P is ~140x slower than baseline. Root cause: cudaMemcpyAsync from BAR1 VA (GDRCopy-mapped GPU memory) uses CUDA's pageable memory path (~10ms per 128 KiB chunk) because CUDA does not recognize BAR1-mapped VAs as pinned memory. The NVMe→BAR1 DMA itself works correctly (integrity passes), but the staging→final copy is the bottleneck. D2D copies from dev_ptr also fail due to GPU L2 cache not being invalidated by external PCIe writes to BAR1.",
+      "status": "REFUTED",
+      "error_type": "regime",
+      "diagnostic_note": "The hypothesis assumed D2D copies from BAR1-backed dev_ptr would use GPU internal fabric at ~1.5 TB/s. In reality: (1) cudaMemcpyAsync(D2D) from dev_ptr reads stale GPU L2 cache (external PCIe writes don't invalidate it), causing data corruption. (2) The only correct path—cudaMemcpyAsync(H2D) from BAR1 VA—falls back to CUDA's pageable memory path because GDRCopy's gdr_map() creates mmap'd VAs not recognized by cudaHostRegister. This path requires kernel-level page pinning per transfer (~10ms/128KiB). (3) cudaHostRegister on BAR1 VA fails to improve performance (makes it worse). The fundamental issue: there is no efficient CUDA API to move data from externally-DMA'd BAR1 GPU memory to another GPU allocation."
+    },
+    {
+      "arm_type": "h-ablation",
+      "predicted": "P2P with DRAM backfill will show ~3-5% lower throughput than h-main due to additional memcpy from BAR1 to DRAM per chunk.",
+      "observed": "h-ablation throughput: 0.008 GB/s (avg latency 496ms per 4 MiB object). This is 47% slower than h-main (337ms). The backfill adds a CPU memcpy from BAR1 VA to DRAM (~160ms for 4 MiB, ~5ms per 128 KiB chunk). BAR1 reads from CPU are slow because they traverse PCIe with high per-access latency (GPU BAR1 is not cached by CPU).",
+      "status": "REFUTED",
+      "error_type": "magnitude",
+      "diagnostic_note": "The prediction of 3-5% overhead assumed D2H copies via CUDA DMA engine. The actual implementation uses CPU memcpy from BAR1 VA (because CUDA D2H from BAR1 is also slow). CPU reads from GPU BAR1 memory traverse PCIe with per-cacheline latency (~500ns), resulting in ~5ms per 128KiB read. This 47% overhead (vs h-main's already-slow baseline) is far larger than the predicted 3-5%."
+    }
+  ],
+  "experiment_valid": true,
+  "discrepancy_analysis": "Both arms show the P2P staging ring approach fails dramatically because there is no efficient path from BAR1-staged GPU memory to the final GPU destination. The core assumption—that cudaMemcpyAsync(D2D) from dev_ptr would work at GPU internal fabric speeds—is invalid due to GPU L2 cache coherence with external PCIe DMA. The only data-correct path (H2D from BAR1 VA) is ~140x slower than baseline due to CUDA's pageable memory handling. This is a hardware/driver limitation, not a software design issue. The sliding-window pattern works correctly (integrity passes) but cannot overcome the fundamental staging copy bottleneck.",
+  "dominant_component_pct": 99.5
+}

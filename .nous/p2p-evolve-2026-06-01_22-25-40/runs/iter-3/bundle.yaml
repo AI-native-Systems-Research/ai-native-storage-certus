@@ -1,0 +1,68 @@
+metadata:
+  iteration: 3
+  family: "batch-path-queue-depth"
+  research_question: "Can increasing the batch_lookup path's per-thread NVMe queue depth from 8 to 32-64 and expanding thread count from 2 to 4 recover the 21% throughput gain (RP-1) that was proven on the single-object path but never applied to the benchmark's actual code path?"
+
+arms:
+  - type: h-main
+    prediction: "Increasing MAX_QUEUES_PER_DRIVE to 4 and queue_depth budget to 128 (yielding QD32 per thread × 4 threads) with 4 CUDA streams will produce cold lookup throughput consistently above 4.5 GB/s on 2 drives — matching the iter-1 best achieved via single-object path modifications. The improvement mechanism is deeper NVMe pipeline fill (32 commands in-flight per thread vs. 8) combined with 4× thread parallelism reducing per-object serialization overhead."
+    mechanism: "The batch_lookup path at lib.rs:1091 divides a budget of 16 across num_queues threads, giving each thread only QD8. With 32 chunks per 4 MiB object (128 KiB each) and only 8 in-flight at once, the NVMe device's internal parallelism is heavily underutilized — the device supports QD256 (qpair.rs:141) but sees only 8 commands. Increasing to QD32 per thread fills the NVMe command queue 4× deeper, overlapping more read latencies. Adding 4 threads (up from 2) means 4 objects transfer concurrently per drive instead of 2 objects × 4 sequential, reducing total wall time. The actor at actor.rs:591 selects queue pairs by pending_ops count — with 4 threads × QD32 = 128 max pending, it selects the depth-256 hardware queue pair instead of depth-16, enabling the NVMe controller's internal command scheduling to optimize access patterns."
+    diagnostic: "If throughput does not improve despite deeper queues: (1) Check for NVMe ENOMEM errors — if the deeper queue exhausts scatter-gather entries, the actor will reject submissions. (2) Check whether the actor's single-threaded poll loop becomes the bottleneck — 128 pending operations means more completions to process per poll cycle. (3) Check if memory-tier allocation serialization (evict_for_space at lib.rs:1149) creates contention between 4 threads."
+    code_changes:
+      - file: "components/dispatcher/src/lib.rs"
+        intent: "Change MAX_QUEUES_PER_DRIVE from 2 to 4 at line 1046"
+        rationale: "Doubles thread parallelism per drive — 4 concurrent object transfers instead of 2"
+      - file: "components/dispatcher/src/lib.rs"
+        intent: "Change queue_depth calculation at line 1091 from '16 / num_queues' to '128 / num_queues' (yielding 32 per thread with 4 threads)"
+        rationale: "Deepens per-thread NVMe pipeline from QD8 to QD32, the primary throughput lever per RP-1"
+      - file: "components/dispatcher/src/lib.rs"
+        intent: "Expand per-thread stream creation at lines 1111-1116 from 2 streams to 4 streams (create 4 via chained create_stream calls, return [a, b, c, d])"
+        rationale: "4 CUDA streams allow interleaved H2D copies across more GPU DMA engines, reducing GPU-side serialization at higher chunk throughput"
+      - file: "components/dispatcher/src/pipeline.rs"
+        intent: "Change function signature at line 247 from 'streams: &[GpuStream; 2]' to 'streams: &[GpuStream; 4]'"
+        rationale: "Accept 4 streams from the expanded batch_lookup caller"
+      - file: "components/dispatcher/src/pipeline.rs"
+        intent: "Change stream rotation at line 365 from 'streams[stream_idx % 2]' to 'streams[stream_idx % 4]'"
+        rationale: "Distribute H2D copies across all 4 streams"
+      - file: "components/dispatcher/src/pipeline.rs"
+        intent: "Remove the mid-transfer sync block at lines 381-386 (the 'if stream_idx % 16 == 0' block)"
+        rationale: "RP-4/RP-5 confirmed sync has no throughput benefit; at QD32 it would block more frequently relative to NVMe completions"
+      - file: "components/dispatcher/src/pipeline.rs"
+        intent: "Update final sync at lines 389-393 to iterate over all 4 streams instead of just the 2-element slice"
+        rationale: "Ensure all 4 streams complete before returning"
+      - file: "components/dispatcher/src/lib.rs"
+        intent: "Update stream destruction at end of thread (around line 1195) to destroy all 4 streams"
+        rationale: "Clean up the 2 additional streams created per thread"
+      - file: "components/dispatcher/src/pipeline.rs"
+        intent: "Update PipelineRing struct at line 29 from [GpuStream; 2] to [GpuStream; 4], and update new() at lines 46-58 to create 4 streams, and destroy() at lines 62-65 to destroy 4 streams"
+        rationale: "The single-object promote_and_serve path also needs 4 streams to match the function signature change"
+      - file: "components/dispatcher/src/lib.rs"
+        intent: "Change max_queue_depth at line 271 from 16 to 64 for the single-object promote_and_serve path"
+        rationale: "Consistency with batch path — the function signature requires [GpuStream; 4] so both callers must provide it"
+
+  - type: h-ablation
+    prediction: "Increasing queue_depth budget to 128 while keeping MAX_QUEUES_PER_DRIVE=2 (yielding QD64 per thread × 2 threads) with 2 CUDA streams will produce cold lookup throughput above 4.0 GB/s but below h-main's result. Queue depth is the primary factor (per RP-1) but fewer threads mean more sequential object processing, limiting total overlap."
+    mechanism: "With QD64 per thread and 2 threads per drive, each thread has a deep NVMe pipeline (64 of 32 chunks in flight — effectively all chunks for 2 objects queued simultaneously). The actor selects the depth-64 queue pair. However, with only 2 threads per drive handling 8 objects (4 per thread sequentially), the GPU→NVMe overlap is limited to within-object pipelining only. The 4-thread h-main config additionally overlaps the tail of one object's transfer with the head of the next, since more objects are processed concurrently."
+    diagnostic: "If ablation matches h-main: thread count doesn't matter beyond 2 because QD64 already saturates the NVMe device from a single queue pair. If ablation matches baseline: the queue_depth parameter isn't propagating correctly to the actor's queue pair selection — check that pending_ops count is actually reaching 64."
+    code_changes:
+      - file: "components/dispatcher/src/lib.rs"
+        intent: "Change queue_depth calculation at line 1091 from '16 / num_queues' to '128 / num_queues' (yielding 64 per thread with 2 threads)"
+        rationale: "Tests queue depth increase in isolation without changing thread count"
+      - file: "components/dispatcher/src/pipeline.rs"
+        intent: "Remove the mid-transfer sync block at lines 381-386"
+        rationale: "Sync becomes more costly at QD64 since it blocks while 64 reads may complete"
+      - file: "components/dispatcher/src/lib.rs"
+        intent: "Change max_queue_depth at line 271 from 16 to 64 for the single-object path"
+        rationale: "Consistency — though the benchmark primarily uses the batch path"
+
+  - type: h-robustness
+    prediction: "The h-main configuration (QD32 × 4 threads, 4 streams) with a single NVMe drive will produce cold lookup throughput above 3.0 GB/s (vs 2.27 GB/s single-drive baseline) without NVMe submission errors, because 128 KiB chunks with QD32 per thread require only 32 × 128 KiB = 4 MiB of scatter-gather entries per thread — well within the device's resource limits (RP-3 was triggered by 512 KiB chunks)."
+    mechanism: "With a single drive, all 16 cold objects go to one device. With MAX_QUEUES_PER_DRIVE=4 and 16 objects, the system spawns 4 threads each handling 4 objects. Each thread runs QD32 on the shared actor. The single NVMe controller sees up to 128 concurrent commands total (4 × 32), which the depth-256 queue pair can handle. The QueuePairPool at qpair.rs:141 allocates a depth-256 queue pair, and io_queue_requests is set to depth×2=512 (qpair.rs:171), providing enough request tracker entries."
+    diagnostic: "If ENOMEM/rc=-12 errors appear: the NVMe controller's scatter-gather list or request tracker is exhausted. This would confirm RP-3 extends to 128 KiB at very high aggregate QD. If throughput is below 3.0 GB/s without errors: the single controller's internal parallelism saturates below QD128 total (perhaps around QD64-96), meaning the extra threads don't help beyond a point."
+
+# Arm selection rationale:
+# - h-main tests the combined optimal configuration (deep queues + more threads + more streams)
+# - h-ablation isolates queue depth from thread count to determine which factor dominates
+# - h-robustness tests single-drive safety (RP-3 risk) and scalability limits
+# - No h-control-negative needed: the baseline IS the negative control (QD8, 2 threads)
+# - No h-super-additivity needed: h-main already combines factors; h-ablation tests one factor in isolation

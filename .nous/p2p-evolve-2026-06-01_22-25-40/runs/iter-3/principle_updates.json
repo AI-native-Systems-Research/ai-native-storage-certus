@@ -1,0 +1,71 @@
+[
+  {
+    "id": "RP-1",
+    "statement": "Increasing per-thread NVMe queue depth from 8 to 64 on the batch_lookup path improves cold-lookup throughput by ~56% (3.63 \u2192 5.99 GB/s) on dual Gen4 NVMe SSDs with 4 MiB sequential reads at 128 KiB chunks. This is the single largest performance lever for the batch path, exceeding the previous 21% estimate which was based on the single-object path only.",
+    "confidence": "high",
+    "regime": "Batch cold lookups with 2 NVMe Gen4 SSDs, 128 KiB chunks, 4 MiB objects, 16 objects per batch. Single-client, 2 threads per drive (MAX_QUEUES_PER_DRIVE=2).",
+    "evidence": [
+      "iteration-1-h-main",
+      "iteration-3-h-main",
+      "iteration-3-h-ablation"
+    ],
+    "contradicts": [],
+    "extraction_iteration": 3,
+    "mechanism": "The batch_lookup path divides queue_depth_budget by num_queues to set per-thread NVMe command depth. At QD8 (budget=16, 2 threads), only 25% of a 4 MiB object's 32 chunks are in flight simultaneously. At QD64, all 32 chunks for 2 objects can be submitted before waiting for completions, saturating the NVMe controller's internal command scheduler. The actor selects the depth-64 hardware queue pair instead of depth-16, enabling the device's multi-die parallelism.",
+    "applicability_bounds": "Applies to batch path with 2+ drives. Single-drive configurations at aggregate QD128+ trigger ENOMEM (see RP-3 update). Maximum benefit already captured at QD64; going higher provides no additional gain.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-3",
+    "statement": "Aggregate NVMe queue depth above ~96-128 per single controller causes sporadic SPDK submission failures (ENOMEM/rc=-12) even at 128 KiB chunk sizes. The previous threshold observation (512 KiB + QD64) was a special case of a more general resource exhaustion boundary that depends on total concurrent commands, not just per-command size.",
+    "confidence": "high",
+    "regime": "Single NVMe Gen4 controller with 4 threads \u00d7 QD32 = aggregate QD128, 128 KiB chunks, 16 objects per batch.",
+    "evidence": [
+      "iteration-1-h-main",
+      "iteration-3-h-robustness"
+    ],
+    "contradicts": [],
+    "extraction_iteration": 3,
+    "mechanism": "The NVMe controller's scatter-gather entry pool or internal request tracker is finite. With 4 threads each submitting QD32 commands (each requiring scatter-gather entries for 128 KiB), the total pending commands (128) exhaust resources during burst submission windows where all 4 threads submit simultaneously. The SPDK queue pair depth-256 is sufficient in queue slots but the underlying NVMe controller firmware rejects commands when internal resources are full.",
+    "applicability_bounds": "Applies to single-controller configurations. With 2 drives (8 objects each, 2 threads each, QD64 per thread = 128 aggregate per drive), the same aggregate QD works fine \u2014 the hardware limit appears to be per-controller, and the actual boundary may be higher when commands don't arrive in a burst.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-6",
+    "statement": "Increasing thread count from 2 to 4 per drive (MAX_QUEUES_PER_DRIVE) while holding total aggregate queue depth constant at 128 reduces throughput by ~7% compared to 2 threads with deeper per-thread queues, due to NVMe actor poll-loop contention.",
+    "confidence": "medium",
+    "regime": "Batch cold lookups with 2 NVMe Gen4 SSDs, 128 KiB chunks, 4 MiB objects, 16 objects per batch. Comparing 4\u00d7QD32 vs 2\u00d7QD64 at same aggregate depth.",
+    "evidence": [
+      "iteration-3-h-main",
+      "iteration-3-h-ablation"
+    ],
+    "contradicts": [],
+    "extraction_iteration": 3,
+    "mechanism": "The NVMe block device actor runs a single-threaded poll loop (actor.rs) that multiplexes all client channels. With 4 threads, the actor processes 4 command channels and 4 completion channels vs 2, adding per-iteration overhead to the poll loop. Additionally, 4 threads create/destroy 4 CUDA streams each (vs 2), adding ~50% more GPU API overhead per batch. The NVMe controller receives the same aggregate QD128 in both cases, so device-side parallelism is identical \u2014 the difference is purely software overhead.",
+    "applicability_bounds": "Applies when the NVMe actor is the multiplexing bottleneck. If the actor were multi-threaded or if hardware queue pairs were used directly (bypassing the actor), the thread count penalty might disappear. The 7% penalty may also diminish with larger objects (more chunks) where per-thread pipeline latency hiding becomes more valuable.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-7",
+    "statement": "Expanding CUDA streams from 2 to 4 provides no measurable throughput benefit for batch cold lookups at 5-6 GB/s aggregate throughput, confirming that GPU DMA bandwidth is not the bottleneck at these throughput levels.",
+    "confidence": "medium",
+    "regime": "Batch cold lookups at 5-6 GB/s aggregate, PCIe Gen4 x16 GPU, 128 KiB H2D copies.",
+    "evidence": [
+      "iteration-3-h-main",
+      "iteration-3-h-ablation"
+    ],
+    "contradicts": [],
+    "extraction_iteration": 3,
+    "mechanism": "PCIe Gen4 x16 provides ~25 GB/s unidirectional bandwidth. At 6 GB/s aggregate throughput, the GPU DMA path is only 24% utilized. Two CUDA streams already provide sufficient H2D copy overlap since individual DMA copies (128 KiB) complete in ~5 us while NVMe reads take ~30 us \u2014 the GPU is always waiting for NVMe, not the reverse. Additional streams add creation/destruction overhead without enabling any additional overlap.",
+    "applicability_bounds": "May change if throughput exceeds ~12 GB/s (48% PCIe utilization) or if multiple clients drive concurrent DMA copies that could contend on the GPU's DMA engines. Also may change with larger chunk sizes where individual DMA latency matters more.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  }
+]

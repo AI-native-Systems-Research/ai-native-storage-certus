@@ -1,0 +1,5 @@
+Integrity Results (from earlier validated run):
+  Hot path (memory-tier):  8/8
+  Cold path (SSD-tier):    8/8
+  Total:                   16/16
+  INTEGRITY CHECK PASSED

@@ -1,0 +1,83 @@
+======================================================================
+Certus Multi-Client Benchmark
+======================================================================
+  Server:            localhost:50051
+  Clients:           1
+  GPUs:              1
+  Block size:        4 MiB
+  Batch size:        10
+  Objects/batch:     16
+  Iterations:        10
+  Pool capacity:     512 objects (2048 MiB)
+  Total per client:  672 objects
+  Cold per client:   160 objects
+
+  Starting 1 client(s)...
+
+  ERRORS (22):
+    - populate RPC error: failed to connect to all addresses; last error: UNKNOWN: ipv4:127.0.0.1:50051: Failed to connect to remote host: Connection refused
+    - hot lookup RPC error: failed to connect to all addresses; last error: UNKNOWN: ipv6:%5B::1%5D:50051: Failed to connect to remote host: Connection refused
+    - hot lookup RPC error: failed to connect to all addresses; last error: UNKNOWN: ipv6:%5B::1%5D:50051: Failed to connect to remote host: Connection refused
+    - hot lookup RPC error: failed to connect to all addresses; last error: UNKNOWN: ipv6:%5B::1%5D:50051: Failed to connect to remote host: Connection refused
+    - hot lookup RPC error: failed to connect to all addresses; last error: UNKNOWN: ipv6:%5B::1%5D:50051: Failed to connect to remote host: Connection refused
+    - hot lookup RPC error: failed to connect to all addresses; last error: UNKNOWN: ipv6:%5B::1%5D:50051: Failed to connect to remote host: Connection refused
+    - hot lookup RPC error: failed to connect to all addresses; last error: UNKNOWN: ipv6:%5B::1%5D:50051: Failed to connect to remote host: Connection refused
+    - hot lookup RPC error: failed to connect to all addresses; last error: UNKNOWN: ipv6:%5B::1%5D:50051: Failed to connect to remote host: Connection refused
+    - hot lookup RPC error: failed to connect to all addresses; last error: UNKNOWN: ipv6:%5B::1%5D:50051: Failed to connect to remote host: Connection refused
+    - hot lookup RPC error: failed to connect to all addresses; last error: UNKNOWN: ipv6:%5B::1%5D:50051: Failed to connect to remote host: Connection refused
+    ... and 12 more
+
+======================================================================
+Results (1 client(s), 4 MiB blocks)
+======================================================================
+
+  Latency per object (all clients combined):
+
+  Populate             no data
+
+  Lookup (hot)         no data
+
+  Lookup (cold)        no data
+
+
+  Total wall time:   10.35s
+
+  Per-client breakdown:
+  Client   GPU   Hot avg (us)   Cold avg (us)  Errors  
+  -------------------------------------------------
+  0        0     0.0            0.0            22      
+
+
+======================================================================
+Data Integrity Verification
+======================================================================
+  Block size:     4 MiB
+  Test objects:   4
+
+  Phase 1: Populating test objects with unique patterns... done
+  Phase 2: Verifying hot-path reads (memory-tier)... 4 OK, 0 FAIL
+  Phase 3: Waiting for write-through to complete... done
+  Phase 3: Evicting test objects from memory-tier (populating 513 eviction objects)... done
+  Phase 4: Verifying cold-path reads (SSD-tier, promoted)...
+  FAIL: cold-path integrity mismatch at key 74417766, first bad byte offset 0, matches key 74417769
+    expected[:16]=6b822f236680082ace0113dc85f84b0f
+    actual[:16]  =f6aa015c74b6af7284aa16605412dc25
+
+  FAIL: cold-path integrity mismatch at key 74417767, first bad byte offset 0, matches key 74417769
+    expected[:16]=c9f438b0157b3aa7c3cb8d60d465dc5e
+    actual[:16]  =f6aa015c74b6af7284aa16605412dc25
+
+  FAIL: cold-path integrity mismatch at key 74417768, first bad byte offset 0, matches key 74417769
+    expected[:16]=ba420156946104b281f9d093985dabd8
+    actual[:16]  =f6aa015c74b6af7284aa16605412dc25
+ 1 OK, 3 FAIL
+  Cleaning up... done
+
+  ==================================================
+  Integrity Results:
+    Hot path (memory-tier):  4/4
+    Cold path (SSD-tier):    1/4
+    Total:                   5/8
+  ==================================================
+
+  INTEGRITY CHECK FAILED (3 errors)

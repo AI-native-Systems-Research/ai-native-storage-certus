@@ -1,0 +1,541 @@
+diff --git a/components/dispatcher/src/lib.rs b/components/dispatcher/src/lib.rs
+index 888a4e3..74a2c4f 100644
+--- a/components/dispatcher/src/lib.rs
++++ b/components/dispatcher/src/lib.rs
+@@ -33,6 +33,11 @@ use spdk_env::ISPDKEnv;
+ 
+ use crate::background::{BackgroundEvictor, BackgroundWriter, EvictorConfig, WriteJob};
+ 
++#[cfg(feature = "p2p")]
++type P2pRingHolder = pipeline::PipelineRingP2P;
++#[cfg(not(feature = "p2p"))]
++type P2pRingHolder = ();
++
+ /// A pending store awaiting commit or cancel.
+ ///
+ /// Created by `prepare_store` and consumed by either `commit_store` (writes
+@@ -77,6 +82,7 @@ define_component! {
+             data_drives: RwLock<Vec<DataDrive>>,
+             pending_writes: Mutex<HashMap<CacheKey, PendingWrite>>,
+             pipeline_ring: RwLock<Option<pipeline::PipelineRing>>,
++            p2p_ring: RwLock<Option<P2pRingHolder>>,
+             warm_stream: AtomicU64,
+         },
+     }
+@@ -250,6 +256,67 @@ impl DispatcherComponent {
+             }
+         };
+ 
++        // P2P path: NVMe → GPU BAR1 → D2D to final GPU destination.
++        #[cfg(feature = "p2p")]
++        {
++            let p2p_guard = self.p2p_ring.read();
++            if let Some(ref p2p_ring) = *p2p_guard {
++                let no_backfill = std::env::var("P2P_NO_BACKFILL").is_ok();
++
++                if no_backfill {
++                    mt.remove(key).ok();
++
++                    unsafe {
++                        pipeline::pipelined_ssd_to_gpu_p2p(
++                            &*block_dev,
++                            &**gpu,
++                            p2p_ring,
++                            channels,
++                            std::ptr::null_mut(),
++                            ipc_handle.address as *mut std::ffi::c_void,
++                            start_lba,
++                            total_bytes,
++                            pipeline::PIPELINE_RING_SIZE,
++                            false,
++                        )?;
++                    }
++                    drop(p2p_guard);
++                    drop(drives);
++
++                    let _ = dm.remove(key);
++                    let _ = dm.recover_extent(key, offset, ipc_handle.size);
++                    let _ = dm.release_write(key);
++                    return Ok(());
++                } else {
++                    unsafe {
++                        pipeline::pipelined_ssd_to_gpu_p2p(
++                            &*block_dev,
++                            &**gpu,
++                            p2p_ring,
++                            channels,
++                            mem_ptr,
++                            ipc_handle.address as *mut std::ffi::c_void,
++                            start_lba,
++                            total_bytes,
++                            pipeline::PIPELINE_RING_SIZE,
++                            true,
++                        )?;
++                    }
++                    drop(p2p_guard);
++                    drop(drives);
++
++                    let _ = dm.remove(key);
++                    dm.create_memory_tier_entry(key, mem_ptr, ipc_handle.size)
++                        .map_err(|e| {
++                            DispatcherError::IoError(format!("promote re-register failed: {e}"))
++                        })?;
++                    let _ = dm.convert_to_storage(key, offset);
++                    let _ = dm.release_write(key);
++                    return Ok(());
++                }
++            }
++        }
++
+         // Zero-copy pipelined reader: NVMe → memory-tier slot → GPU (no intermediate ring copy).
+         // SAFETY: mem_ptr is a valid, CUDA-pinned, SPDK-registered memory-tier slot.
+         // ipc_handle.address is a valid GPU destination pointer.
+@@ -275,12 +342,9 @@ impl DispatcherComponent {
+         drop(drives);
+ 
+         // Update dispatch-map: remove old BlockDevice entry and create fresh MemoryTier.
+-        // Since we released the read ref before calling this method, we can remove
+-        // and re-register.
+         let _ = dm.remove(key);
+         dm.create_memory_tier_entry(key, mem_ptr, ipc_handle.size)
+             .map_err(|e| DispatcherError::IoError(format!("promote re-register failed: {e}")))?;
+-        // Set the ssd_offset since data is still on SSD.
+         let _ = dm.convert_to_storage(key, offset);
+         let _ = dm.release_write(key);
+ 
+@@ -701,6 +765,20 @@ impl IDispatcher for DispatcherComponent {
+                     }
+                 }
+ 
++                // P2P ring: GPU BAR1-mapped slots for NVMe→GPU direct DMA.
++                #[cfg(feature = "p2p")]
++                match pipeline::PipelineRingP2P::new(&*gpu, chunk_size) {
++                    Ok(ring) => {
++                        self.log_info("dispatcher: P2P ring allocated (GPU BAR1 + GDRCopy)");
++                        *self.p2p_ring.write() = Some(ring);
++                    }
++                    Err(e) => {
++                        self.log_info(&format!(
++                            "P2P ring allocation failed (non-fatal): {e:?}"
++                        ));
++                    }
++                }
++
+                 // Dedicated CUDA stream for warm-path DMA (avoids pipeline_ring lock).
+                 match gpu.create_stream() {
+                     Ok(stream) => {
+@@ -1039,11 +1117,13 @@ impl IDispatcher for DispatcherComponent {
+             }
+         }
+ 
+-        // Promote cold entries in parallel — multiple queue threads per drive.
+-        // Each thread gets its own NVMe queue pair and CUDA streams, enabling
+-        // concurrent reads on the same physical drive.
++        // Promote cold entries — when P2P ring is active, serialize to avoid
++        // ring slot contention; otherwise use multiple queue threads per drive.
+         if !cold_entries.is_empty() {
+-            const MAX_QUEUES_PER_DRIVE: usize = 2;
++            #[cfg(feature = "p2p")]
++            let max_queues: usize = if self.p2p_ring.read().is_some() { 1 } else { 2 };
++            #[cfg(not(feature = "p2p"))]
++            let max_queues: usize = 2;
+ 
+             let chunk_size = {
+                 let ring_guard = self.pipeline_ring.read();
+@@ -1072,6 +1152,12 @@ impl IDispatcher for DispatcherComponent {
+                     per_drive[drive_idx].push(ci);
+                 }
+ 
++                let _p2p_guard = self.p2p_ring.read();
++                #[cfg(feature = "p2p")]
++                let p2p_opt: Option<&pipeline::PipelineRingP2P> = _p2p_guard.as_ref();
++                #[cfg(not(feature = "p2p"))]
++                let p2p_opt: Option<&()> = None;
++
+                 std::thread::scope(|s| {
+                     let mut thread_handles: Vec<
+                         std::thread::ScopedJoinHandle<Vec<(usize, Result<(), DispatcherError>)>>,
+@@ -1083,7 +1169,7 @@ impl IDispatcher for DispatcherComponent {
+                         }
+ 
+                         // Split this drive's entries across multiple queue threads.
+-                        let num_queues = MAX_QUEUES_PER_DRIVE.min(entry_indices.len());
++                        let num_queues = max_queues.min(entry_indices.len());
+                         let chunks: Vec<&[usize]> = entry_indices
+                             .chunks((entry_indices.len() + num_queues - 1) / num_queues)
+                             .collect();
+@@ -1096,6 +1182,7 @@ impl IDispatcher for DispatcherComponent {
+                             let gpu_ref = &gpu;
+                             let drives_ref = &drives;
+                             let cold_ref = &cold_entries;
++                            let p2p_ref = p2p_opt;
+                             let indices = chunk.to_vec();
+ 
+                             let handle = s.spawn(move || {
+@@ -1146,6 +1233,73 @@ impl IDispatcher for DispatcherComponent {
+                                     let total_bytes = ipc.size as usize;
+ 
+                                     let res = (|| -> Result<(), DispatcherError> {
++                                        let start_lba = entry.offset / block_size as u64;
++
++                                        #[cfg(feature = "p2p")]
++                                        if let Some(p2p_ring) = p2p_ref {
++                                            let no_backfill = std::env::var("P2P_NO_BACKFILL").is_ok();
++
++                                            if no_backfill {
++                                                unsafe {
++                                                    pipeline::pipelined_ssd_to_gpu_p2p(
++                                                        &*drive.block_dev_iface,
++                                                        &**gpu_ref,
++                                                        p2p_ring,
++                                                        &channels,
++                                                        std::ptr::null_mut(),
++                                                        ipc.address as *mut std::ffi::c_void,
++                                                        start_lba,
++                                                        total_bytes,
++                                                        pipeline::PIPELINE_RING_SIZE,
++                                                        false,
++                                                    )?;
++                                                }
++                                                let _ = dm_ref.remove(entry.key);
++                                                let _ = dm_ref.recover_extent(
++                                                    entry.key,
++                                                    entry.offset,
++                                                    ipc.size,
++                                                );
++                                                let _ = dm_ref.release_write(entry.key);
++                                                return Ok(());
++                                            }
++
++                                            // Backfill mode: allocate DRAM slot.
++                                            Self::evict_for_space(dm_ref, mt_ref, ipc.size)?;
++                                            let mem_ptr = mt_ref.insert(entry.key, ipc.size).map_err(|e| {
++                                                DispatcherError::AllocationFailed(format!(
++                                                    "promote insert failed: {e}"
++                                                ))
++                                            })?;
++
++                                            unsafe {
++                                                pipeline::pipelined_ssd_to_gpu_p2p(
++                                                    &*drive.block_dev_iface,
++                                                    &**gpu_ref,
++                                                    p2p_ring,
++                                                    &channels,
++                                                    mem_ptr,
++                                                    ipc.address as *mut std::ffi::c_void,
++                                                    start_lba,
++                                                    total_bytes,
++                                                    pipeline::PIPELINE_RING_SIZE,
++                                                    true,
++                                                )?;
++                                            }
++
++                                            let _ = dm_ref.remove(entry.key);
++                                            dm_ref
++                                                .create_memory_tier_entry(entry.key, mem_ptr, ipc.size)
++                                                .map_err(|e| {
++                                                    DispatcherError::IoError(format!(
++                                                        "promote re-register failed: {e}"
++                                                    ))
++                                                })?;
++                                            let _ = dm_ref.convert_to_storage(entry.key, entry.offset);
++                                            let _ = dm_ref.release_write(entry.key);
++                                            return Ok(());
++                                        }
++
+                                         Self::evict_for_space(dm_ref, mt_ref, ipc.size)?;
+ 
+                                         let mem_ptr =
+@@ -1155,8 +1309,6 @@ impl IDispatcher for DispatcherComponent {
+                                                 ))
+                                             })?;
+ 
+-                                        let start_lba = entry.offset / block_size as u64;
+-
+                                         let pipeline_result = unsafe {
+                                             pipeline::pipelined_ssd_to_gpu_zero_copy(
+                                                 &*drive.block_dev_iface,
+diff --git a/components/dispatcher/src/pipeline.rs b/components/dispatcher/src/pipeline.rs
+index bed224c..5036860 100644
+--- a/components/dispatcher/src/pipeline.rs
++++ b/components/dispatcher/src/pipeline.rs
+@@ -400,6 +400,279 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+     Ok(())
+ }
+ 
++/// P2P ring slot: cudaMalloc'd GPU memory pinned via GDRCopy and mapped to BAR1.
++///
++/// `dev_ptr` is the CUDA device pointer (for cudaMemcpyAsync).
++/// `dma_buf` wraps the BAR1 mapping (for NVMe DMA targeting).
++#[cfg(feature = "p2p")]
++pub struct P2pRingSlot {
++    pub dev_ptr: *mut std::ffi::c_void,
++    pub dma_buf: DmaBuffer,
++}
++
++// SAFETY: dev_ptr is a GPU device pointer (process-global), dma_buf is BAR1-mapped.
++#[cfg(feature = "p2p")]
++unsafe impl Send for P2pRingSlot {}
++#[cfg(feature = "p2p")]
++unsafe impl Sync for P2pRingSlot {}
++
++/// Pre-allocated ring of P2P BAR1-mapped GPU buffers and CUDA streams.
++#[cfg(feature = "p2p")]
++pub struct PipelineRingP2P {
++    pub slots: Vec<P2pRingSlot>,
++    pub streams: [GpuStream; 2],
++    pub chunk_size: usize,
++}
++
++#[cfg(feature = "p2p")]
++impl PipelineRingP2P {
++    /// Allocate P2P ring slots: cudaMalloc + GDRCopy pin + BAR1 map + SPDK register.
++    pub fn new(gpu: &dyn IGpuServices, chunk_size: usize) -> Result<Self, DispatcherError> {
++        let mut slots: Vec<P2pRingSlot> = Vec::with_capacity(PIPELINE_RING_SIZE);
++
++        for i in 0..PIPELINE_RING_SIZE {
++            let mut dev_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
++            let rc = unsafe {
++                gpu_services::cuda_ffi::cudaMalloc(&mut dev_ptr, chunk_size)
++            };
++            if rc != gpu_services::cuda_ffi::CUDA_SUCCESS {
++                // Clean up already-allocated slots.
++                for slot in slots {
++                    unsafe { gpu_services::cuda_ffi::cudaFree(slot.dev_ptr) };
++                }
++                return Err(DispatcherError::AllocationFailed(format!(
++                    "cudaMalloc for P2P ring slot {i}: rc={rc}"
++                )));
++            }
++
++            let dma_buf =
++                gpu_services::dma::create_spdk_dma_buffer_from_gpu_bar(dev_ptr, chunk_size)
++                    .map_err(|e| {
++                        unsafe { gpu_services::cuda_ffi::cudaFree(dev_ptr) };
++                        DispatcherError::AllocationFailed(format!(
++                            "P2P ring slot {i} BAR1 map: {e}"
++                        ))
++                    })?;
++
++            slots.push(P2pRingSlot { dev_ptr, dma_buf });
++        }
++
++        let stream_a = gpu
++            .create_stream()
++            .map_err(|e| DispatcherError::IoError(format!("create_stream failed: {e}")))?;
++        let stream_b = gpu.create_stream().map_err(|e| {
++            let _ = gpu.destroy_stream(stream_a);
++            DispatcherError::IoError(format!("create_stream failed: {e}"))
++        })?;
++
++        Ok(Self {
++            slots,
++            streams: [stream_a, stream_b],
++            chunk_size,
++        })
++    }
++
++    pub fn destroy(self, gpu: &dyn IGpuServices) {
++        let _ = gpu.destroy_stream(self.streams[0]);
++        let _ = gpu.destroy_stream(self.streams[1]);
++        for slot in self.slots {
++            drop(slot.dma_buf);
++            unsafe { gpu_services::cuda_ffi::cudaFree(slot.dev_ptr) };
++        }
++    }
++}
++
++/// Sliding-window P2P pipeline: NVMe reads into GPU BAR1 ring slots, D2D copy to final GPU dest.
++///
++/// Mirrors the sliding-window structure of [`pipelined_ssd_to_gpu_zero_copy`]:
++/// primes a window of NVMe reads, then for each completion issues a D2D copy and
++/// submits the next read. D2D copies at ~1.5 TB/s complete in <0.1µs for 128 KiB,
++/// so ring slot reuse is never blocked.
++///
++/// When `backfill_dram` is true, also issues a D2H copy from the BAR1 slot to
++/// `mem_tier_ptr` for memory-tier cache coherence.
++///
++/// # Safety
++///
++/// - `gpu_dst` must be a valid GPU destination pointer for `total_bytes`.
++/// - If `backfill_dram`, `mem_tier_ptr` must be valid for writes of `total_bytes`.
++#[cfg(feature = "p2p")]
++#[allow(clippy::too_many_arguments)]
++pub unsafe fn pipelined_ssd_to_gpu_p2p(
++    drive: &dyn IBlockDevice,
++    gpu: &dyn IGpuServices,
++    ring: &PipelineRingP2P,
++    channels: &ClientChannels,
++    mem_tier_ptr: *mut u8,
++    gpu_dst: *mut std::ffi::c_void,
++    start_lba: u64,
++    total_bytes: usize,
++    max_queue_depth: usize,
++    backfill_dram: bool,
++) -> Result<(), DispatcherError> {
++    let block_size = drive.block_size() as usize;
++    let chunk_size = ring.chunk_size;
++    let aligned_bytes = total_bytes.next_multiple_of(block_size);
++
++    let segments = io_segmenter::segment_io(
++        start_lba,
++        aligned_bytes,
++        chunk_size as u32,
++        block_size as u32,
++    );
++
++    if segments.is_empty() {
++        return Ok(());
++    }
++
++    let num_chunks = segments.len();
++    let ring_size = ring.slots.len();
++    let streams = &ring.streams;
++
++    // Create noop-free DmaBuffer wrappers pointing to the BAR1 addresses of ring slots.
++    // NVMe will DMA into these. We must NOT free them (the PipelineRingP2P owns the buffers).
++    let slot_bufs: Vec<Arc<Mutex<DmaBuffer>>> = ring
++        .slots
++        .iter()
++        .map(|slot| {
++            let buf = unsafe {
++                DmaBuffer::from_raw(slot.dma_buf.as_ptr(), chunk_size, noop_free, -1)
++            }
++            .map_err(|e| {
++                DispatcherError::AllocationFailed(format!("DmaBuffer wrap P2P slot: {e}"))
++            })?;
++            Ok(Arc::new(Mutex::new(buf)))
++        })
++        .collect::<Result<Vec<_>, DispatcherError>>()?;
++
++    let max_inflight = max_queue_depth.min(num_chunks).min(ring_size);
++
++    let mut inflight: std::collections::VecDeque<usize> =
++        std::collections::VecDeque::with_capacity(max_inflight);
++
++    // Prime the sliding window.
++    for i in 0..max_inflight {
++        let slot_idx = i % ring_size;
++        channels
++            .command_tx
++            .send(Command::ReadAsync {
++                ns_id: 1,
++                lba: segments[i].lba,
++                buf: Arc::clone(&slot_bufs[slot_idx]),
++                timeout_ms: READ_TIMEOUT_MS,
++            })
++            .map_err(|e| DispatcherError::IoError(format!("ReadAsync send #{i}: {e}")))?;
++        inflight.push_back(i);
++    }
++
++    let mut next_to_submit = max_inflight;
++    let mut stream_idx = 0usize;
++
++    for _completed in 0..num_chunks {
++        // Wait for the oldest in-flight read.
++        let chunk_idx = match channels.completion_rx.recv() {
++            Ok(Completion::ReadDone { handle, result }) => {
++                result.map_err(|e| {
++                    DispatcherError::IoError(format!("SSD read (handle {:?}): {e}", handle))
++                })?;
++                inflight.pop_front().unwrap()
++            }
++            Ok(Completion::Timeout { handle }) => {
++                return Err(DispatcherError::IoError(format!(
++                    "NVMe read timeout (handle {:?})",
++                    handle
++                )));
++            }
++            Ok(other) => {
++                return Err(DispatcherError::IoError(format!(
++                    "unexpected completion: {other:?}"
++                )));
++            }
++            Err(_) => {
++                return Err(DispatcherError::IoError(
++                    "completion channel disconnected".into(),
++                ));
++            }
++        };
++
++        let slot_idx = chunk_idx % ring_size;
++        let seg = &segments[chunk_idx];
++        let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
++        let current_stream = streams[stream_idx % 2];
++
++        // Copy from BAR1 slot to final GPU destination via H2D.
++        // Using BAR1 VA as source (host-visible mapping of GPU memory) ensures
++        // we read the NVMe DMA data directly without GPU L2 cache coherence issues.
++        let dst = unsafe { (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void };
++        let bar_src = unsafe {
++            (ring.slots[slot_idx].dma_buf.as_ptr() as *const u8) as *const std::ffi::c_void
++        };
++        let rc = unsafe {
++            gpu_services::cuda_ffi::cudaMemcpyAsync(
++                dst,
++                bar_src,
++                copy_len,
++                gpu_services::cuda_ffi::CUDA_MEMCPY_HOST_TO_DEVICE,
++                current_stream.0 as gpu_services::cuda_ffi::CudaStream,
++            )
++        };
++        if rc != gpu_services::cuda_ffi::CUDA_SUCCESS {
++            return Err(DispatcherError::IoError(format!(
++                "cudaMemcpyAsync H2D (BAR1→GPU) failed: {}",
++                gpu_services::cuda_ffi::cuda_error_string(rc)
++            )));
++        }
++
++        // Optional DRAM backfill: copy BAR1 slot to memory-tier via CPU memcpy.
++        // BAR1 is host-visible so direct memcpy works and avoids CUDA stream overhead.
++        if backfill_dram && !mem_tier_ptr.is_null() {
++            unsafe {
++                std::ptr::copy_nonoverlapping(
++                    ring.slots[slot_idx].dma_buf.as_ptr() as *const u8,
++                    mem_tier_ptr.add(seg.buffer_offset),
++                    copy_len,
++                );
++            }
++        }
++
++        stream_idx += 1;
++
++        // Submit next read into the same ring slot (just freed by completion).
++        // cudaMemcpyAsync from pageable (BAR1) memory executes synchronously per
++        // CUDA semantics, so the slot data is already copied when we reach here.
++        if next_to_submit < num_chunks {
++            channels
++                .command_tx
++                .send(Command::ReadAsync {
++                    ns_id: 1,
++                    lba: segments[next_to_submit].lba,
++                    buf: Arc::clone(&slot_bufs[slot_idx]),
++                    timeout_ms: READ_TIMEOUT_MS,
++                })
++                .map_err(|e| {
++                    DispatcherError::IoError(format!(
++                        "ReadAsync submit #{next_to_submit}: {e}"
++                    ))
++                })?;
++            inflight.push_back(next_to_submit);
++            next_to_submit += 1;
++        }
++    }
++
++    // Final sync.
++    for s in streams {
++        gpu.stream_synchronize(*s)
++            .map_err(|e| DispatcherError::IoError(format!("final stream_synchronize: {e}")))?;
++    }
++
++    // Forget noop-free DmaBuffer wrappers.
++    for buf in slot_bufs {
++        std::mem::forget(Arc::try_unwrap(buf).ok());
++    }
++
++    Ok(())
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;

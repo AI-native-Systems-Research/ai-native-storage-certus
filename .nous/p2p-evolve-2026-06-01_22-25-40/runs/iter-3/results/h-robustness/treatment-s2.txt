@@ -1,0 +1,44 @@
+======================================================================
+Certus Multi-Client Benchmark
+======================================================================
+  Server:            localhost:50051
+  Clients:           1
+  GPUs:              1
+  Block size:        4 MiB
+  Batch size:        10
+  Objects/batch:     16
+  Iterations:        10
+  Pool capacity:     512 objects (2048 MiB)
+  Total per client:  672 objects
+  Cold per client:   160 objects
+
+  Starting 1 client(s)...
+
+  ERRORS (2):
+    - cold lookup iter 0 failed: SSD read (handle OpHandle(48258)): block device error: Read failed: async spdk_nvme_ns_cmd_read submit failed with rc=-12
+    - cold lookup iter 9 failed: SSD read (handle OpHandle(52835)): block device error: Read failed: async spdk_nvme_ns_cmd_read submit failed with rc=-12
+
+======================================================================
+Results (1 client(s), 4 MiB blocks)
+======================================================================
+
+  Latency per object (all clients combined):
+
+  Populate             avg=    381.8 us  p50=    368.2 us  p99=   1084.3 us  min=    239.8 us  max=   1084.3 us
+                       per-client= 10.99 GB/s  aggregate= 10.20 GB/s
+
+  Lookup (hot)         avg=    265.8 us  p50=    263.6 us  p99=    287.6 us  min=    251.6 us  max=    287.6 us
+                       per-client= 15.78 GB/s  aggregate= 15.56 GB/s
+
+  Lookup (cold)        avg=   1099.5 us  p50=   1071.4 us  p99=   1299.3 us  min=   1039.7 us  max=   1299.3 us
+                       per-client=  3.81 GB/s  aggregate=  3.80 GB/s
+
+  Cold/Hot ratio:    4.1x latency
+
+  Total wall time:   11.30s
+
+  Per-client breakdown:
+  Client   GPU   Hot avg (us)   Cold avg (us)  Errors  
+  -------------------------------------------------
+  0        0     265.8          1099.5         2       
+

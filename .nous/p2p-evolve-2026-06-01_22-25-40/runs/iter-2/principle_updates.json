@@ -1,0 +1,44 @@
+[
+  {
+    "id": "RP-4",
+    "statement": "Removing or relaxing periodic GPU stream synchronization (every 16 H2D copies) has no measurable throughput impact at low NVMe queue depths (QD16) because the GPU sync stall (~167 us) is not the pipeline bottleneck when the NVMe device is already underutilized with only 16 in-flight commands.",
+    "confidence": "high",
+    "regime": "QD16, 2 CUDA streams, 128 KiB chunks, 4 MiB objects (32 chunks), single-client, 2x Gen4 NVMe drives",
+    "evidence": ["iteration-2-h-main", "iteration-2-h-robustness"],
+    "contradicts": [],
+    "extraction_iteration": 2,
+    "mechanism": "At QD16, the sliding window can have at most 16 NVMe reads in flight. With 32 chunks per 4 MiB object, the sync fires once at stream_idx=16 (mid-object). However, removing this sync yields 3.76 GB/s vs baseline 3.78 GB/s — no improvement. The NVMe device's internal parallelism is already constrained by the shallow queue (only 16 commands visible to the drive's scheduler), so the ~167 us GPU stall doesn't create a meaningful pipeline bubble — the NVMe completions simply aren't arriving fast enough to be starved.",
+    "applicability_bounds": "Applies to QD<=16 configurations. At higher queue depths (QD64), the GPU sync overhead may become relatively more significant, though iter-2 h-ablation showed only marginal (+1.3%) benefit from sync removal on top of QD64+4 streams.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-5",
+    "statement": "At QD64 + 4 CUDA streams, removing the periodic GPU sync provides at most marginal throughput improvement (~1.3%, within measurement noise), confirming that NVMe queue depth and stream parallelism are the dominant factors for cold-lookup throughput, not GPU synchronization overhead.",
+    "confidence": "medium",
+    "regime": "QD64, 4 CUDA streams, 128 KiB chunks, 4 MiB objects, single-client, 2x Gen4 NVMe drives, ~4.5 GB/s throughput",
+    "evidence": ["iteration-2-h-ablation", "iteration-1-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 2,
+    "mechanism": "Iteration 1 achieved 4.53 GB/s with QD64+4 streams WITH the periodic sync. Iteration 2 h-ablation achieves 4.59 GB/s with the same config MINUS the sync — a delta of only +1.3% (0.06 GB/s). At QD64, the deeper NVMe queue ensures completions arrive fast enough to keep the pipeline busy even during a brief GPU sync stall. The sync at 16 copies takes ~167 us, during which the 64-deep NVMe queue still has ample completions buffered. Removing it yields minimal benefit because the NVMe queue never drains to empty during the stall.",
+    "applicability_bounds": "Applies to the 4.5 GB/s throughput regime on 2x Gen4 NVMe + A30 GPU. At higher drive counts or near-saturation throughput, the sync overhead might become relatively more significant. The sync can be safely removed (no correctness impact) but the performance benefit is negligible.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-1",
+    "statement": "Increasing NVMe queue depth from 16 to 64 with 4 CUDA streams improves cold-lookup throughput by ~21% on Gen4 NVMe SSDs, yielding 4.5-4.6 GB/s on dual-drive 4 MiB sequential reads. This is the single largest performance lever; GPU sync stall elimination adds at most 1% on top.",
+    "confidence": "high",
+    "regime": "2x Gen4 NVMe, 128 KiB chunks, 4 MiB objects, single-client, A30 GPU PCIe Gen4 x16",
+    "evidence": ["iteration-1-h-main", "iteration-2-h-ablation", "iteration-2-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 2,
+    "mechanism": "Deep NVMe queues (QD64) expose the drive's internal parallelism (multiple NAND dies, command reordering). Four CUDA streams distribute H2D copies across independent copy engines, preventing GPU-side serialization. Together these maximize NVMe→DRAM→GPU pipeline overlap. The periodic GPU sync (every 16 copies) creates only a brief stall (~167 us) that the deep NVMe queue masks — removing it adds negligible benefit.",
+    "applicability_bounds": "Saturates around QD64 for the current drive model. Further QD increases unlikely to help. The remaining gap to theoretical maximum (~5.4 GB/s per drive) may be due to SPDK polling overhead, channel contention in the completion path, or PCIe/IOMMU overhead.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  }
+]

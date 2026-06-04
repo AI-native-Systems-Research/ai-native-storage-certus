@@ -1,0 +1,87 @@
+metadata:
+  iteration: 1
+  bundle_ref: "runs/iter-1/bundle.yaml"
+  date: "2026-06-02"
+  system: "Certus Storage Engine — P2P GPUDirect Cold Lookup"
+
+setup:
+  - cmd: "ln -sf /home/nara/certus/evolve_p2p/ai-native-storage-certus/deps/spdk deps/spdk && ln -sf /home/nara/certus/evolve_p2p/ai-native-storage-certus/deps/spdk-build deps/spdk-build"
+    description: "Symlink SPDK dependencies from main repo"
+  - cmd: "cargo build -p certus-server --release --features p2p"
+    description: "Build the system (baseline)"
+
+arms:
+  - arm_id: "h-main"
+    conditions:
+      - name: "baseline-s1"
+        cmd: |
+          git checkout -- .
+          cargo build -p certus-server --release --features p2p
+          nohup ./target/release/certus-server --drive-count 1 --format > /tmp/server.log 2>&1 &
+          sleep 8
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 > /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-1/results/h-main/baseline-s1.txt 2>&1
+          kill %1; wait; sleep 2
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-1/results/h-main/baseline-s1.txt"
+      - name: "baseline-s2"
+        cmd: |
+          nohup ./target/release/certus-server --drive-count 1 --format > /tmp/server.log 2>&1 &
+          sleep 8
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 > /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-1/results/h-main/baseline-s2.txt 2>&1
+          kill %1; wait; sleep 2
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-1/results/h-main/baseline-s2.txt"
+      - name: "baseline-s3"
+        cmd: |
+          nohup ./target/release/certus-server --drive-count 1 --format > /tmp/server.log 2>&1 &
+          sleep 8
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 > /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-1/results/h-main/baseline-s3.txt 2>&1
+          kill %1; wait; sleep 2
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-1/results/h-main/baseline-s3.txt"
+      - name: "treatment-s1"
+        cmd: |
+          git checkout -- .
+          git apply /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-1/patches/h-main.patch
+          cargo build -p certus-server --release --features p2p
+          nohup ./target/release/certus-server --drive-count 1 --format > /tmp/server.log 2>&1 &
+          sleep 8
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 > /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-1/results/h-main/treatment-s1.txt 2>&1
+          kill %1; wait; sleep 2
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-1/results/h-main/treatment-s1.txt"
+      - name: "treatment-s2"
+        cmd: |
+          nohup ./target/release/certus-server --drive-count 1 --format > /tmp/server.log 2>&1 &
+          sleep 8
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 > /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-1/results/h-main/treatment-s2.txt 2>&1
+          kill %1; wait; sleep 2
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-1/results/h-main/treatment-s2.txt"
+      - name: "treatment-s3"
+        cmd: |
+          nohup ./target/release/certus-server --drive-count 1 --format > /tmp/server.log 2>&1 &
+          sleep 8
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 > /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-1/results/h-main/treatment-s3.txt 2>&1
+          kill %1; wait; sleep 2
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-1/results/h-main/treatment-s3.txt"
+
+  - arm_id: "h-ablation"
+    conditions:
+      - name: "treatment-s1"
+        cmd: |
+          P2P_NO_BACKFILL=1 nohup ./target/release/certus-server --drive-count 1 --format > /tmp/server.log 2>&1 &
+          sleep 8
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 > /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-1/results/h-ablation/treatment-s1.txt 2>&1
+          kill %1; wait; sleep 2
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-1/results/h-ablation/treatment-s1.txt"
+      - name: "treatment-s2"
+        cmd: |
+          P2P_NO_BACKFILL=1 nohup ./target/release/certus-server --drive-count 1 --format > /tmp/server.log 2>&1 &
+          sleep 8
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 > /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-1/results/h-ablation/treatment-s2.txt 2>&1
+          kill %1; wait; sleep 2
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-1/results/h-ablation/treatment-s2.txt"
+      - name: "treatment-s3"
+        cmd: |
+          P2P_NO_BACKFILL=1 nohup ./target/release/certus-server --drive-count 1 --format > /tmp/server.log 2>&1 &
+          sleep 8
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 > /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-1/results/h-ablation/treatment-s3.txt 2>&1
+          kill %1; wait; sleep 2
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-02_21-41-43/runs/iter-1/results/h-ablation/treatment-s3.txt"
+

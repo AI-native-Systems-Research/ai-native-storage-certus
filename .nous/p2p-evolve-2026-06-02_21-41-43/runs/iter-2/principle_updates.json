@@ -1,0 +1,58 @@
+[
+  {
+    "id": "RP-1",
+    "statement": "GPUDirect P2P (NVMe→GPU BAR1 DMA) with a staging ring buffer is dramatically slower than zero-copy DRAM (NVMe→pinned DRAM→async H2D) regardless of pipeline pattern, because there is no efficient CUDA path to move data from externally-DMA'd BAR1 GPU memory to another GPU allocation.",
+    "confidence": "high",
+    "regime": "GDRCopy BAR1 staging on NVIDIA A30 with CUDA runtime API. Applies to any NVMe→GPU BAR1→final-GPU pipeline where the final destination is IPC-opened memory that cannot be directly pinned by GDRCopy.",
+    "evidence": ["iteration-1-h-main", "iteration-2-h-main", "iteration-2-h-ablation"],
+    "contradicts": [],
+    "extraction_iteration": 2,
+    "mechanism": "NVMe DMA to GPU BAR1 works correctly via GDRCopy (gdr_pin_buffer + gdr_map + spdk_mem_register). However, transferring staged data to the final GPU destination fails at every approach: (1) cudaMemcpyAsync(D2D) from dev_ptr reads stale GPU L2 cache because external PCIe posted writes do not invalidate GPU L2. (2) cudaMemcpyAsync(H2D) from BAR1 VA uses CUDA's pageable memory path (kernel page-pinning per transfer, ~10ms/128KiB) because gdr_map'd VAs are not recognized as CUDA-registered host memory. (3) cudaHostRegister on BAR1 VA does not help (may make performance worse). The net result: P2P staging ring is ~140x slower than baseline DRAM path.",
+    "applicability_bounds": "Applies when: (a) the GPU destination is IPC-opened (cannot use gdr_pin_buffer on it), requiring staging, AND (b) GDRCopy's gdr_map is used for BAR1 access (which produces VAs incompatible with CUDA's pinning system). Does NOT apply if NVMe can DMA directly into the final GPU destination without staging (which requires gdr_pin_buffer on cudaMalloc-allocated memory in the same process).",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-2",
+    "statement": "Batch-based ring buffer pipelines (submit all → wait all → copy all → sync) are significantly slower than sliding-window pipelines (overlap reads with copies) for sequential NVMe-to-GPU transfers.",
+    "confidence": "high",
+    "regime": "Sequential NVMe reads with per-completion processing on SPDK userspace driver with CUDA async DMA.",
+    "evidence": ["iteration-1-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "Batch pipelines serialize read and copy phases, eliminating overlap. Sliding-window pipelines allow the next NVMe read to proceed while the current chunk is being copied, fully utilizing both NVMe and GPU DMA bandwidth simultaneously.",
+    "applicability_bounds": "Applies to pipelines where the copy (H2D) latency is comparable to NVMe read latency. If copy latency is negligible compared to read latency (e.g., < 1% of read time), batch and sliding-window converge.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-3",
+    "statement": "CPU memcpy from GPU BAR1 VA to DRAM adds approximately 47% overhead to the P2P cold path due to high per-access PCIe latency when reading GPU BAR1 memory from CPU.",
+    "confidence": "high",
+    "regime": "Reading GDRCopy BAR1-mapped GPU memory from CPU with memcpy (128 KiB chunks, NVIDIA A30, PCIe Gen4 x16).",
+    "evidence": ["iteration-2-h-ablation"],
+    "contradicts": [],
+    "extraction_iteration": 2,
+    "mechanism": "CPU reads from GPU BAR1 memory traverse PCIe with per-cacheline latency (~500ns per 64-byte line). For 128 KiB chunks, this results in ~5ms per chunk (vs ~10ms for the H2D CUDA copy that dominates h-main). The 47% overhead (496ms vs 337ms per 4 MiB object) is far larger than the originally predicted 3% because the prediction assumed CUDA DMA engine transfers (which are not available for BAR1 VA).",
+    "applicability_bounds": "Applies to CPU-initiated reads from GPU BAR1 memory (GDRCopy-mapped). Does not apply if GPU-side DMA (e.g., CE-initiated D2H) can be used, which would be much faster but is not available for BAR1 VA.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-4",
+    "statement": "External PCIe DMA writes to GPU BAR1 memory do not invalidate the GPU L2 cache; subsequent CUDA D2D copies from the dev_ptr associated with that BAR1 region read stale data.",
+    "confidence": "high",
+    "regime": "NVMe DMA via SPDK to GDRCopy-pinned GPU memory, followed by cudaMemcpy/cudaMemcpyAsync with CUDA_MEMCPY_DEVICE_TO_DEVICE on NVIDIA A30.",
+    "evidence": ["iteration-2-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 2,
+    "mechanism": "GDRCopy pins GPU memory and exposes BAR1 VA for external DMA. NVMe writes data via PCIe posted writes to the BAR1 physical address. The GPU L2 cache retains stale data for the corresponding dev_ptr lines because PCIe writes bypass GPU cache coherence (the GPU is not a coherent participant in the PCIe fabric for external writes). cudaMemcpy(D2D) reads from dev_ptr, hits L2, and returns stale/wrong data. This was observed as data integrity failures at non-aligned chunk boundaries.",
+    "applicability_bounds": "Applies to any scenario where external devices (NVMe, RDMA NICs) DMA into GPU BAR1 memory and a CUDA kernel or copy engine subsequently reads from the corresponding device pointer. May not apply if the GPU driver provides an explicit cache invalidation mechanism (none found in CUDA runtime API).",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  }
+]

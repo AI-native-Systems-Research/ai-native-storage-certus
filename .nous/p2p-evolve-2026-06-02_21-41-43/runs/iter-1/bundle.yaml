@@ -1,0 +1,43 @@
+metadata:
+  iteration: 1
+  family: "p2p-gpudirect-cold-lookup"
+  research_question: "Does NVMe→GPU BAR1 direct DMA (P2P via GDRCopy) improve cold lookup throughput and latency by eliminating the host DRAM bounce copy in the SSD→DRAM→GPU pipeline?"
+
+# Arms chosen:
+# - h-main: The core P2P implementation — tests whether direct NVMe→GPU DMA improves throughput.
+# - h-ablation: Removes the DRAM backfill step to isolate its overhead contribution. This tests
+#   whether the GPU→DRAM copy (needed for memory-tier cache coherence) is a significant bottleneck.
+# - h-control-negative omitted: There is no parameter regime where P2P should NOT help — it always
+#   removes a data copy. A negative control would require hardware without BAR1 access, which we
+#   cannot configure in software.
+
+arms:
+  - type: h-main
+    prediction: "P2P cold lookup throughput will be significantly higher than baseline (NVMe→DRAM→GPU). The improvement direction is positive because P2P eliminates the cudaMemcpyAsync H2D step (host DRAM → GPU) which currently serializes against NVMe read completions, halving the data movement through the PCIe bus for the GPU-bound copy."
+    mechanism: "The current pipeline reads NVMe→DRAM (PCIe Gen4 x4 NVMe link) then copies DRAM→GPU (PCIe Gen4 x16 CPU-GPU link). These operations are pipelined but the H2D copy still consumes PCIe bandwidth and adds latency per chunk. With P2P, NVMe DMA targets GPU BAR1 physical addresses directly — the NVMe controller writes through the IOMMU to GPU VRAM in a single hop. The device-to-device memcpy within the GPU (BAR1 staging → final destination) runs at GPU internal bandwidth (~1.5 TB/s on A30), which is negligible. Net effect: throughput is bounded only by the NVMe→GPU PCIe path, approaching the drive's sequential read ceiling."
+    diagnostic: "If throughput does not improve: (1) Check spdk_vtophys resolution of BAR1 addresses — if IOMMU mapping fails, DMA will error or corrupt. (2) Check that GDRCopy BAR1 mapping produces physically contiguous pages — fragmented mappings may force SPDK to split I/Os. (3) Profile to check if the bottleneck moved from H2D copy to something else (e.g., NVMe queue depth, IOMMU overhead, or GDRCopy setup latency per allocation)."
+    code_changes:
+      - file: "components/dispatcher/src/pipeline.rs"
+        intent: "Add a new function `pipelined_ssd_to_gpu_p2p` that allocates a ring of GPU BAR1 DMA buffers (via gpu_services::dma::create_spdk_dma_buffer_from_gpu_bar), issues NVMe reads targeting those BAR1 buffers, and after each read completes issues a device-to-device memcpy (cudaMemcpyDeviceToDevice) from the BAR1 staging slot to the final gpu_dst. Also add a background async copy from GPU back to the memory-tier DRAM slot (cudaMemcpyDeviceToHost async) for cache coherence."
+        rationale: "This is the core P2P pipeline — it replaces the DRAM intermediary with GPU BAR1 as the NVMe DMA target. The function mirrors the existing pipelined_ssd_to_gpu_zero_copy structure but targets GPU memory instead of host memory."
+      - file: "components/dispatcher/src/pipeline.rs"
+        intent: "Add a PipelineRingP2P struct analogous to PipelineRing but holding GPU BAR1 DMA buffers (created via create_spdk_dma_buffer_from_gpu_bar) and corresponding GPU device pointers for the device-to-device copy. Include a constructor that allocates the ring using cudaMalloc + GDRCopy pin + BAR map + SPDK register."
+        rationale: "Pre-allocating P2P ring buffers avoids per-call GDRCopy setup overhead (gdr_open/pin/map is expensive). Mirrors the existing PipelineRing pre-allocation pattern."
+      - file: "components/dispatcher/src/lib.rs"
+        intent: "In the dispatcher initialization (IDispatcher::initialize), when the p2p feature is enabled and gpu_services is available, allocate a PipelineRingP2P alongside the existing PipelineRing. In promote_and_serve and the batch_lookup cold path, call pipelined_ssd_to_gpu_p2p instead of pipelined_ssd_to_gpu_zero_copy when P2P ring is available."
+        rationale: "This wires the new P2P pipeline into the cold lookup hot path. Feature-gating ensures the baseline path remains unchanged when p2p is not compiled."
+      - file: "components/gpu-services/src/dma.rs"
+        intent: "Add a helper function `create_p2p_ring_buffer(gpu_ptr, size)` that wraps the existing create_spdk_dma_buffer_from_gpu_bar with the specific pattern needed by the pipeline ring: allocate GPU memory with cudaMalloc, pin+map via GDRCopy, register with SPDK, and return both the DmaBuffer (BAR1 VA for NVMe targeting) and the device pointer (for cudaMemcpy D2D)."
+        rationale: "Encapsulates the multi-step allocation needed for each P2P ring slot into a single call, reducing complexity in pipeline.rs."
+
+  - type: h-ablation
+    prediction: "P2P without memory-tier backfill will show slightly higher throughput than P2P with backfill (h-main), because eliminating the async GPU→DRAM copy removes one stream synchronization point and reduces PCIe contention. The difference should be small (the backfill is async and overlapped) but measurable."
+    mechanism: "The h-main arm copies data GPU→DRAM asynchronously to populate the memory-tier cache. This copy uses the GPU-to-CPU PCIe link and requires a stream sync before the memory-tier slot can be marked valid. Without this copy, the pipeline returns as soon as NVMe→GPU is complete. The ablation isolates the cost of maintaining cache coherence."
+    diagnostic: "If no difference from h-main: the backfill copy is fully overlapped with subsequent NVMe reads and adds no measurable latency. This would mean h-main's design is already optimal and the backfill is free."
+    code_changes:
+      - file: "components/dispatcher/src/pipeline.rs"
+        intent: "In pipelined_ssd_to_gpu_p2p, add a parameter `backfill_dram: bool`. When false, skip the GPU→DRAM async copy and the memory-tier slot population. The caller passes false for this ablation arm."
+        rationale: "Tests whether the DRAM backfill adds measurable overhead to the P2P path."
+      - file: "components/dispatcher/src/lib.rs"
+        intent: "Add a compile-time or runtime flag (e.g., environment variable P2P_NO_BACKFILL=1) that causes promote_and_serve to skip memory-tier insertion when using the P2P path. This means subsequent lookups of the same key will always hit SSD (no warm cache)."
+        rationale: "Allows running the ablation without separate compilation — just set an env var before starting the server."

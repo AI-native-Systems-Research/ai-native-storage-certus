@@ -1,0 +1,19 @@
+diff --git a/components/dispatcher/src/pipeline.rs b/components/dispatcher/src/pipeline.rs
+index bed224c..a407f42 100644
+--- a/components/dispatcher/src/pipeline.rs
++++ b/components/dispatcher/src/pipeline.rs
+@@ -376,14 +376,6 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
+         })?;
+         drop(guard);
+         stream_idx += 1;
+-
+-        // Periodically sync to bound the GPU command queue depth.
+-        if stream_idx % 16 == 0 {
+-            gpu.stream_synchronize(streams[0])
+-                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+-            gpu.stream_synchronize(streams[1])
+-                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+-        }
+     }
+ 
+     // Sync both streams to ensure all GPU copies are complete.

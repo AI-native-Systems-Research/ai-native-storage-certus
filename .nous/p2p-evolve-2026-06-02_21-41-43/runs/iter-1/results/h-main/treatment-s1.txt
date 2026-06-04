@@ -1,0 +1,40 @@
+======================================================================
+Certus Multi-Client Benchmark
+======================================================================
+  Server:            localhost:50051
+  Clients:           1
+  GPUs:              1
+  Block size:        4 MiB
+  Batch size:        10
+  Objects/batch:     16
+  Iterations:        10
+  Pool capacity:     512 objects (2048 MiB)
+  Total per client:  672 objects
+  Cold per client:   160 objects
+
+  Starting 1 client(s)...
+
+======================================================================
+Results (1 client(s), 4 MiB blocks)
+======================================================================
+
+  Latency per object (all clients combined):
+
+  Populate             avg=    386.7 us  p50=    369.0 us  p99=   1160.3 us  min=    252.9 us  max=   1160.3 us
+                       per-client= 10.85 GB/s  aggregate= 10.10 GB/s
+
+  Lookup (hot)         avg=    263.6 us  p50=    262.9 us  p99=    270.6 us  min=    256.1 us  max=    270.6 us
+                       per-client= 15.91 GB/s  aggregate= 15.69 GB/s
+
+  Lookup (cold)        avg=   2115.2 us  p50=   2109.8 us  p99=   2254.4 us  min=   1996.6 us  max=   2254.4 us
+                       per-client=  1.98 GB/s  aggregate=  1.98 GB/s
+
+  Cold/Hot ratio:    8.0x latency
+
+  Total wall time:   11.49s
+
+  Per-client breakdown:
+  Client   GPU   Hot avg (us)   Cold avg (us)  Errors  
+  -------------------------------------------------
+  0        0     263.6          2115.2         0       
+

@@ -1,0 +1,43 @@
+metadata:
+  iteration: 2
+  family: "gpu-sync-stall-elimination"
+  research_question: "Can removing or relaxing the periodic GPU stream synchronization (every 16 H2D copies) in the sliding-window pipeline improve cold lookup throughput by eliminating pipeline bubbles that starve the NVMe command queue?"
+
+# Arms chosen:
+# - h-main: Remove mid-transfer GPU sync (tests core hypothesis: sync creates pipeline bubble)
+# - h-ablation: QD64 + 4 streams + sync removal (tests compounding with iter-1 best config)
+# - h-robustness: Relax sync to every 64 (tests that benefit comes from eliminating per-object stalls)
+# Skipped h-control-negative: would need to ADD more syncs (e.g., every 4) which is artificial;
+#   the baseline already provides the "sync present" condition.
+# Skipped h-super-additivity: h-ablation already tests the combined effect.
+
+arms:
+  - type: h-main
+    prediction: "Removing the periodic stream_synchronize at pipeline.rs:381 will increase cold lookup throughput consistently above the baseline mean of 3.87 GB/s, because eliminating the ~167 us sync stall removes a pipeline bubble where NVMe completions go unprocessed and the device command queue drains."
+    mechanism: "The sliding-window pipeline processes NVMe completions sequentially in a single loop (pipeline.rs:315). Every 16 H2D copies (line 381), both CUDA streams are synchronized — blocking the thread for the duration of all outstanding GPU copies. During this block, NVMe completions queue in the channel but aren't consumed, and no new NVMe reads are submitted. The effective NVMe queue depth drops from max_queue_depth toward zero during the stall, reducing SSD utilization. With 32 chunks per 4 MiB object, one sync occurs mid-object. Removing it allows continuous NVMe→GPU overlap for the entire object transfer."
+    diagnostic: "If throughput does NOT improve: (1) The NVMe device may already be saturated at the current effective QD (i.e., the sync stall is short enough that NVMe completions don't drain). Check if the H2D bandwidth is actually the limiter — if 32 × 128 KiB = 4 MiB of GPU copies at 12 GB/s takes 333 us total and the NVMe reads take ~750 us total, the GPU copies complete within the NVMe window regardless. (2) The CUDA runtime may internally throttle async commands when the queue gets too deep, negating the benefit of removing explicit syncs."
+    code_changes:
+      - file: "components/dispatcher/src/pipeline.rs"
+        intent: "Remove the periodic GPU sync block at lines 381-386 (the `if stream_idx % 16 == 0 { ... }` block). Keep the final sync at lines 389-393 unchanged."
+        rationale: "This is the only mid-transfer sync point. Removing it allows all 32 H2D copies for a 4 MiB object to be submitted without blocking the NVMe completion loop. The final sync ensures all copies complete before returning."
+
+  - type: h-ablation
+    prediction: "Combining QD64 + 4 CUDA streams (iteration 1 winning config) with removal of mid-transfer GPU sync will produce cold lookup throughput consistently above the iteration 1 best of 4.53 GB/s, because deeper queues maintain higher effective NVMe utilization during any residual GPU scheduling overhead, and more streams distribute H2D copies across independent hardware copy engines."
+    mechanism: "With QD64, up to 64 NVMe reads can be in-flight simultaneously. Without the mid-transfer sync, the pipeline loop runs at maximum speed: each NVMe completion immediately triggers a GPU copy and a new NVMe submission. Four CUDA streams allow 4 independent H2D copy queues, further reducing any implicit GPU-side serialization. The NVMe device sees a continuously full command queue (bounded only by object size: 32 chunks for 4 MiB), maximizing internal parallelism."
+    diagnostic: "If throughput matches QD64+4streams (4.53 GB/s) but doesn't exceed it: the GPU sync stall at QD64 is already shorter because more NVMe completions are available to process after the sync (deeper queue = less drain). This would indicate the sync elimination primarily helps at lower QD. If throughput is worse: removing sync at high QD may overwhelm the GPU command queue or cause CUDA runtime backpressure that serializes submissions."
+    code_changes:
+      - file: "components/dispatcher/src/pipeline.rs"
+        intent: "Remove the periodic GPU sync block at lines 381-386. Also expand the streams array from [GpuStream; 2] to [GpuStream; 4] in the struct definition (line 29), update PipelineRing::new() to create 4 streams (lines 46-58), update stream selection from `% 2` to `% 4` at line 365, and update destroy() to destroy all 4 streams."
+        rationale: "Tests the combined effect of iteration 1's best pipeline config with sync stall removal."
+      - file: "components/dispatcher/src/lib.rs"
+        intent: "Change max_queue_depth from 16 to 64 at line 271 (promote_and_serve). Change MAX_QUEUES_PER_DRIVE from 2 to 4 at line 1046. Change queue_depth calculation at line 1091 to use 64 as the numerator. Update batch_lookup stream creation at line 1111-1116 to create 4 streams (array of 4) and pass them accordingly."
+        rationale: "Replicates the QD64 + 4 streams configuration from iteration 1's h-main that achieved 4.53 GB/s."
+
+  - type: h-robustness
+    prediction: "Changing the sync interval from 16 to 64 (pipeline.rs:381: `% 16` → `% 64`) will produce cold lookup throughput matching h-main's improvement, because a 4 MiB object with 128 KiB chunks produces only 32 H2D copies — below the new 64-copy threshold — so no mid-object sync occurs."
+    mechanism: "With a sync interval of 64, the first sync would trigger at the 64th H2D copy. Since a 4 MiB object has 32 chunks, no sync fires during a single object's transfer — identical behavior to full sync removal for this object size. This validates that the improvement comes specifically from eliminating per-object sync stalls, not from unbounded GPU queue growth across multiple objects processed sequentially."
+    diagnostic: "If throughput is lower than h-main (full removal): multiple objects may be processed sequentially through the same pipeline ring, accumulating stream_idx across objects such that the % 64 threshold fires mid-way through a later object. Check if stream_idx is reset between objects (it is local to the function — resets each call). If equal to h-main, the hypothesis is confirmed. If equal to baseline, the mechanism is wrong — the sync isn't the bottleneck."
+    code_changes:
+      - file: "components/dispatcher/src/pipeline.rs"
+        intent: "Change the sync interval condition at line 381 from `if stream_idx % 16 == 0` to `if stream_idx % 64 == 0`. No other changes."
+        rationale: "Minimal change that eliminates per-object syncs for 4 MiB objects (32 chunks < 64) while retaining a safety bound on GPU queue depth. If results match h-main, confirms the per-object stall is the bottleneck rather than long-term queue accumulation."

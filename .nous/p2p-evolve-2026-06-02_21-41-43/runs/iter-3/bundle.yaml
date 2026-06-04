@@ -1,0 +1,44 @@
+metadata:
+  iteration: 3
+  family: "p2p-direct-nvidia-peermem"
+  research_question: "Can NVMe reads be directed into the final GPU destination memory via spdk_mem_register + nvidia-peermem, bypassing DRAM entirely and achieving higher throughput than the baseline NVMe→DRAM→GPU path?"
+
+# Arms selected:
+# - h-main: Tests the core hypothesis (direct NVMe→GPU via nvidia-peermem)
+# - h-ablation: Tests whether DRAM backfill (D2H copy) adds unacceptable overhead
+# - h-control-negative: Baseline for comparison
+#
+# Rationale: h-main is the primary prediction. h-ablation tests whether we can
+# maintain the warm-path cache while still getting P2P benefits on cold path.
+# h-control-negative provides the direct comparison point.
+# No h-robustness because we need to first validate the mechanism works at all.
+
+arms:
+  - type: h-main
+    prediction: "Direct NVMe→GPU cold lookup throughput will exceed baseline (~2.4 GB/s) by eliminating the H2D copy. Expected range: 3.0-5.5 GB/s. P99 latency will decrease from ~1.95ms to below 1.5ms. The improvement comes from removing one full PCIe traversal (the DRAM→GPU H2D async copy) and the memory-tier allocation/eviction overhead."
+    mechanism: "nvidia-peermem kernel module exposes GPU device memory physical addresses to the IOMMU. When spdk_mem_register is called on a cudaMalloc/IPC-opened GPU pointer, SPDK's vtophys resolves it to the GPU BAR1 physical address via the kernel's nvidia_p2p_get_pages. NVMe DMA writes then flow through PCIe directly to GPU memory via posted writes. This is the same mechanism used by GPUDirect Storage (GDS) in cuFile — the NVMe controller writes directly to GPU memory through the PCIe fabric without any host CPU involvement. The baseline requires two PCIe traversals (NVMe→DRAM upstream + DRAM→GPU downstream); the P2P path requires only one (NVMe→GPU via posted PCIe write)."
+    diagnostic: "If throughput does NOT improve: (1) Check if spdk_mem_register succeeds on the IPC pointer — failure means nvidia-peermem can't translate it. (2) Profile whether registration/unregistration overhead dominates — if each spdk_mem_register takes >500us, amortization over 4MiB transfer (~1.7ms) will eat the gains. (3) Check if NVMe DMA to GPU memory achieves lower bandwidth than DMA to DRAM — some PCIe topologies add latency for GPU-targeted posted writes. (4) If integrity fails: nvidia-peermem may not support IPC-opened pointers (different from cudaMalloc in same process)."
+    code_changes:
+      - file: "components/dispatcher/src/pipeline.rs"
+        intent: "Add a new function `pipelined_ssd_to_gpu_direct` that mirrors `pipelined_ssd_to_gpu_zero_copy` but reads NVMe directly into the GPU destination pointer. The function: (1) calls spdk_mem_register on the gpu_dst pointer, (2) creates noop-free DmaBuffer wrappers for each chunk of gpu_dst (using io_segmenter segments), (3) runs the same sliding-window pipeline (VecDeque inflight, prime window, recv completion, submit next), (4) calls spdk_mem_unregister on completion. No H2D copies are issued. No CUDA streams are needed (NVMe DMA is the only data movement)."
+        rationale: "This function implements the core P2P mechanism. It reuses the proven sliding-window pattern from pipelined_ssd_to_gpu_zero_copy (validated at 2.4 GB/s) but targets GPU memory directly instead of DRAM. The spdk_mem_register/unregister wrapping the transfer is analogous to how prepare_memory_for_spdk works (gpu-services/src/lib.rs:333)."
+      - file: "components/dispatcher/src/lib.rs"
+        intent: "In promote_and_serve (line ~260) and batch_lookup cold path (line ~1160): when P2P_DIRECT env var is set, skip memory-tier allocation (mt.insert) and call pipelined_ssd_to_gpu_direct instead of pipelined_ssd_to_gpu_zero_copy. After the transfer, register the entry as BlockDevice-only in dispatch-map (don't create a MemoryTier entry since no DRAM copy exists). For h-ablation (P2P_DIRECT without P2P_NO_BACKFILL): also allocate memory-tier, and after the NVMe→GPU transfer completes, issue a GPU→DRAM copy (cudaMemcpy D2H) to populate the DRAM cache."
+        rationale: "This wires the new pipeline function into the dispatcher's cold lookup path. The env var approach allows easy A/B testing without code changes between conditions. The BlockDevice-only registration means subsequent lookups will re-read from SSD (acceptable for benchmarking the cold path)."
+
+  - type: h-ablation
+    prediction: "Direct NVMe→GPU with DRAM backfill (D2H copy after NVMe completes) will show 10-25% lower throughput than h-main due to the additional GPU→DRAM copy, but will still exceed baseline. The D2H copy uses the GPU's DMA engine (not CPU), so overhead is bounded by PCIe bandwidth for 4 MiB objects (~0.6ms at ~7 GB/s practical H2D). This makes the total path: NVMe→GPU (PCIe) + GPU→DRAM (PCIe) ≈ 2 PCIe traversals, same as baseline but potentially faster due to better pipelining (NVMe→GPU finishes before D2H starts)."
+    mechanism: "After each NVMe chunk lands in GPU memory, a cudaMemcpyAsync(D2H) copies it back to the DRAM memory-tier slot. This maintains the warm-path cache (future lookups serve from DRAM→GPU) while still getting the benefit of direct NVMe→GPU for the initial cold read. The D2H copy uses the GPU's copy engine, running asynchronously on a CUDA stream."
+    diagnostic: "If h-ablation is slower than baseline: the D2H copy from GPU device memory may serialize with the NVMe DMA (PCIe contention between incoming NVMe writes and outgoing D2H reads on the same PCIe link). Check if GPU→DRAM bandwidth drops when NVMe is actively writing to the same GPU."
+    code_changes:
+      - file: "components/dispatcher/src/pipeline.rs"
+        intent: "In pipelined_ssd_to_gpu_direct, add an optional `backfill_ptr` parameter (nullable). When non-null, after each NVMe chunk completes, issue cudaMemcpyAsync(DeviceToHost) from the GPU chunk to the corresponding offset in backfill_ptr (the DRAM memory-tier slot). Use a CUDA stream for async D2H. Sync the stream periodically (every ring_size completions) and at the end."
+        rationale: "This adds the DRAM backfill capability to the direct GPU path without changing the core NVMe→GPU mechanism. The backfill is purely additive — if it causes regression, we know the overhead comes from the D2H copy."
+      - file: "components/dispatcher/src/lib.rs"
+        intent: "When P2P_DIRECT is set but P2P_NO_BACKFILL is NOT set: allocate memory-tier slot, call pipelined_ssd_to_gpu_direct with backfill_ptr pointing to the memory-tier slot, then register as MemoryTier entry in dispatch-map."
+        rationale: "This creates the h-ablation condition — direct NVMe→GPU with DRAM cache maintenance."
+
+  - type: h-control-negative
+    prediction: "Baseline performance will remain stable at ~2.4 GB/s cold lookup throughput with ~1.95ms p99 latency, consistent with iter-1 and iter-2 measurements."
+    mechanism: "Unmodified pipelined_ssd_to_gpu_zero_copy: NVMe reads into CUDA-pinned DRAM (memory-tier slot), async H2D copies to GPU. Two PCIe traversals per chunk."
+    diagnostic: "If baseline deviates >10% from historical: check for background processes, thermal throttling, or NVMe wear state."

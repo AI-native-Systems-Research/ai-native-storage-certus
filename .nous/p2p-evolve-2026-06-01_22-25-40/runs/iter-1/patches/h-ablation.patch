@@ -1,0 +1,13 @@
+diff --git a/components/block-device-spdk-nvme/src/controller.rs b/components/block-device-spdk-nvme/src/controller.rs
+index 796338f..faade0f 100644
+--- a/components/block-device-spdk-nvme/src/controller.rs
++++ b/components/block-device-spdk-nvme/src/controller.rs
+@@ -155,7 +155,7 @@ impl NvmeController {
+             minor: 0,
+             tertiary: 0,
+         };
+-        let max_transfer_size = 131072; // 128KB default
++        let max_transfer_size = 524288; // 512KB
+ 
+         // Discover namespaces using available API.
+         let namespaces = Self::discover_namespaces(ctrlr_ptr);

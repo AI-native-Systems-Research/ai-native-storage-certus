@@ -1,0 +1,33 @@
+{
+  "iteration": 1,
+  "bundle_ref": "runs/iter-1/bundle.yaml",
+  "arms": [
+    {
+      "arm_type": "h-main",
+      "predicted": "Increasing NVMe queue depth from 16 to 64 and CUDA streams from 2 to 4 will increase cold lookup throughput consistently above baseline.",
+      "observed": "Cold lookup throughput increased from baseline mean 3.93 GB/s to 4.53 GB/s (+15.3%). Runs: 4.50, 4.59, 4.51 GB/s (all above baseline max of 3.97). p99 latency improved from 1231 us to 1129 us (-8.3%). Zero errors. Score improved from 0.327 to 0.369.",
+      "status": "CONFIRMED",
+      "error_type": null,
+      "diagnostic_note": "The 15.3% improvement is directionally correct but below the predicted >30%. The NVMe drive at QD16 with 128 KiB chunks already achieved 3.93 GB/s (73% of raw ceiling), suggesting the drive's internal parallelism was not as under-utilized at QD16 as hypothesized. The improvement is real but the drive may have an effective saturation around QD32 for sequential-ish access patterns."
+    },
+    {
+      "arm_type": "h-ablation",
+      "predicted": "Increasing chunk size from 128 KiB to 512 KiB (without changing queue depth or stream count) will produce a smaller but measurable throughput improvement above baseline.",
+      "observed": "Cold lookup throughput DECREASED from baseline mean 3.93 GB/s to 3.74 GB/s (-4.8%). Runs: 3.75, 3.77, 3.71 GB/s (all below baseline min of 3.90). p99 latency worsened from 1231 us to 1263 us. Zero errors.",
+      "status": "REFUTED",
+      "error_type": "direction",
+      "diagnostic_note": "Larger chunks hurt rather than helped. At QD16 with 512 KiB chunks, only 8 chunks cover a 4 MiB object — the pipeline has fewer segments to overlap. With only 8 in-flight at QD16, the sliding window is smaller (8 vs 32 at 128 KiB), reducing the opportunity for SSD-to-GPU overlap. The per-command overhead reduction (fewer commands) was more than offset by reduced pipeline parallelism (fewer independent operations to overlap). The NVMe controller may also internally fragment 512 KiB reads into multiple flash page reads, negating the expected overhead reduction."
+    },
+    {
+      "arm_type": "h-super-additivity",
+      "predicted": "Combining QD64, 4 CUDA streams, and 512 KiB chunks will produce throughput exceeding the sum of individual improvements from h-main and h-ablation.",
+      "observed": "Cold lookup throughput DECREASED from baseline mean 3.93 GB/s to 3.63 GB/s (-7.6%). Runs: 3.68, 3.63, 3.59 GB/s. One run had 2 NVMe I/O errors (rc=-12/ENOMEM: queue submission failed with 512 KiB at QD64). p99 latency worsened to 1297 us. Performance was WORSE than either individual change and worse than baseline.",
+      "status": "REFUTED",
+      "error_type": "direction",
+      "diagnostic_note": "The combination was anti-synergistic. With 512 KiB chunks and QD64, a 4 MiB object has only 8 segments total — far fewer than the 64 in-flight limit, so the deep queue cannot be utilized (effective QD is capped at 8). The ENOMEM errors (rc=-12) indicate the SPDK NVMe driver ran out of scatter-gather entries or queue pair resources when trying to submit large 512 KiB commands at high concurrency (multiple threads × QD16 per thread × 512 KiB). The 512 KiB chunk size is the dominant negative factor that overrides QD benefits."
+    }
+  ],
+  "experiment_valid": true,
+  "discrepancy_analysis": "h-main confirmed (QD64 + 4 streams helps), but magnitude was 15% vs predicted >30%. h-ablation and h-super-additivity were both refuted — larger chunks hurt throughput because they reduce pipeline parallelism (fewer segments to overlap in the sliding window) and can cause resource exhaustion at high QD. The key insight is that for 4 MiB objects, 128 KiB chunks provide 32 segments which allows effective pipelining, while 512 KiB chunks only provide 8 segments which starves the pipeline.",
+  "dominant_component_pct": null
+}

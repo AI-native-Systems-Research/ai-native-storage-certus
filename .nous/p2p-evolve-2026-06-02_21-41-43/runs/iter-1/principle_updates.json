@@ -1,0 +1,44 @@
+[
+  {
+    "id": "RP-1",
+    "statement": "GPUDirect P2P (NVMe→GPU BAR1 DMA) with a staging ring buffer is slower than zero-copy DRAM (NVMe→pinned DRAM→async H2D) when the DRAM path already reads directly into the final destination without intermediate copies.",
+    "confidence": "high",
+    "regime": "Single NVMe Gen4 drive, 128 KiB chunk size, 4 MiB objects, batch-based ring pipeline with 8 slots, A30 GPU PCIe Gen4 x16",
+    "evidence": ["iteration-1-h-main"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "The baseline zero-copy path reads NVMe directly into the DRAM memory-tier slot (the final CPU-side destination) then issues overlapped async H2D copies. This means DRAM writes are 'free' (they populate the cache simultaneously). The P2P path reads into BAR1 staging buffers then must issue D2D copies to the final GPU destination — adding a copy step rather than eliminating one. The batch-based approach (required to prevent ring slot reuse before D2D completion) further penalizes throughput by preventing NVMe read/GPU copy overlap.",
+    "applicability_bounds": "Applies when: (1) the CPU-side destination (memory-tier slot) must be populated anyway for caching, AND (2) the DRAM path can read NVMe directly into the final DRAM location (registered pinned memory). Does NOT apply if: the DRAM path requires an intermediate buffer copy (non-registered memory), or if the GPU destination can be the direct NVMe DMA target (no staging needed, proper alignment).",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-2",
+    "statement": "Batch-based ring buffer pipelines (submit all → wait all → copy all → sync) are significantly slower than sliding-window pipelines (overlap reads with copies) for sequential NVMe-to-GPU transfers.",
+    "confidence": "high",
+    "regime": "8-slot ring, 128 KiB chunks, 32 chunks per 4 MiB object, single NVMe queue pair",
+    "evidence": ["iteration-1-h-main", "iteration-1-h-ablation"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "With 8 ring slots and 32 chunks per object, the batch approach processes 4 batches with no overlap between read and copy phases within a batch. The sliding-window approach (baseline) overlaps H2D copies with subsequent NVMe reads using 16 in-flight commands, achieving higher NVMe utilization. The ~20% throughput difference (2.42 vs 1.97 GB/s) is attributable to this pipeline stall.",
+    "applicability_bounds": "Applies to any ring-buffer pipeline where reusing a slot before the previous consumer (GPU copy) completes forces batch synchronization. Could be mitigated with per-slot stream synchronization or larger ring sizes that guarantee a slot is reusable by the time it cycles back.",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  },
+  {
+    "id": "RP-3",
+    "statement": "The GPU→DRAM backfill copy (for memory-tier cache coherence) adds approximately 3% overhead to the P2P cold path when serialized on the same CUDA stream as the D2D copy.",
+    "confidence": "medium",
+    "regime": "128 KiB chunks, cudaMemcpyAsync D2H on same stream as D2D, A30 GPU",
+    "evidence": ["iteration-1-h-ablation"],
+    "contradicts": [],
+    "extraction_iteration": 1,
+    "mechanism": "The D2H backfill copy (128 KiB per chunk, GPU staging → DRAM) runs after the D2D copy on the same stream. Since both copies use the same PCIe link (GPU→CPU direction for D2H), they cannot overlap. The 3% overhead (2.01 vs 1.96 GB/s) indicates the backfill is a minor contributor compared to the batch pipeline stall.",
+    "applicability_bounds": "The overhead would be lower if the D2H copy ran on a separate stream (true overlap with subsequent D2D copies in the next batch). The overhead would be zero if the memory-tier slot were populated directly by NVMe (as in baseline).",
+    "superseded_by": null,
+    "category": "domain",
+    "status": "active"
+  }
+]

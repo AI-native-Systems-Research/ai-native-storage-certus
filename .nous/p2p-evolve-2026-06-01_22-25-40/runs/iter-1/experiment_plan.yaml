@@ -1,0 +1,154 @@
+metadata:
+  iteration: 1
+  bundle_ref: "runs/iter-1/bundle.yaml"
+  description: "Pipeline parallelism experiment: QD64 + 4 CUDA streams, 512 KiB chunks, and combined"
+
+setup:
+  - cmd: "cargo build -p certus-server --release"
+    description: "Build certus-server in release mode"
+
+
+arms:
+  - arm_id: "h-control"
+    conditions:
+      - name: "baseline-seed1"
+
+        cmd: |
+          pkill -f certus-server || true
+          sleep 1
+          cargo build -p certus-server --release
+          ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 &
+          sleep 5
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-control/run1.txt
+          pkill -f certus-server
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-control/run1.txt"
+      - name: "baseline-seed2"
+
+        cmd: |
+          pkill -f certus-server || true
+          sleep 1
+          cargo build -p certus-server --release
+          ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 &
+          sleep 5
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-control/run2.txt
+          pkill -f certus-server
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-control/run2.txt"
+      - name: "baseline-seed3"
+
+        cmd: |
+          pkill -f certus-server || true
+          sleep 1
+          cargo build -p certus-server --release
+          ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 &
+          sleep 5
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-control/run3.txt
+          pkill -f certus-server
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-control/run3.txt"
+
+  - arm_id: "h-main"
+    conditions:
+      - name: "treatment-seed1"
+
+        cmd: |
+          pkill -f certus-server || true
+          sleep 1
+          cargo build -p certus-server --release
+          ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 &
+          sleep 5
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-main/run1.txt
+          pkill -f certus-server
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-main/run1.txt"
+      - name: "treatment-seed2"
+
+        cmd: |
+          pkill -f certus-server || true
+          sleep 1
+          cargo build -p certus-server --release
+          ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 &
+          sleep 5
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-main/run2.txt
+          pkill -f certus-server
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-main/run2.txt"
+      - name: "treatment-seed3"
+
+        cmd: |
+          pkill -f certus-server || true
+          sleep 1
+          cargo build -p certus-server --release
+          ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 &
+          sleep 5
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-main/run3.txt
+          pkill -f certus-server
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-main/run3.txt"
+
+  - arm_id: "h-ablation"
+    conditions:
+      - name: "treatment-seed1"
+
+        cmd: |
+          pkill -f certus-server || true
+          sleep 1
+          cargo build -p certus-server --release
+          ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 &
+          sleep 5
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-ablation/run1.txt
+          pkill -f certus-server
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-ablation/run1.txt"
+      - name: "treatment-seed2"
+
+        cmd: |
+          pkill -f certus-server || true
+          sleep 1
+          cargo build -p certus-server --release
+          ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 &
+          sleep 5
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-ablation/run2.txt
+          pkill -f certus-server
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-ablation/run2.txt"
+      - name: "treatment-seed3"
+
+        cmd: |
+          pkill -f certus-server || true
+          sleep 1
+          cargo build -p certus-server --release
+          ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 &
+          sleep 5
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-ablation/run3.txt
+          pkill -f certus-server
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-ablation/run3.txt"
+
+  - arm_id: "h-super-additivity"
+    conditions:
+      - name: "treatment-seed1"
+
+        cmd: |
+          pkill -f certus-server || true
+          sleep 1
+          cargo build -p certus-server --release
+          ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 &
+          sleep 5
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-super-additivity/run1.txt
+          pkill -f certus-server
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-super-additivity/run1.txt"
+      - name: "treatment-seed2"
+
+        cmd: |
+          pkill -f certus-server || true
+          sleep 1
+          cargo build -p certus-server --release
+          ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 &
+          sleep 5
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-super-additivity/run2.txt
+          pkill -f certus-server
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-super-additivity/run2.txt"
+      - name: "treatment-seed3"
+
+        cmd: |
+          pkill -f certus-server || true
+          sleep 1
+          cargo build -p certus-server --release
+          ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 &
+          sleep 5
+          python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304 | tee /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-super-additivity/run3.txt
+          pkill -f certus-server
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-1/results/h-super-additivity/run3.txt"

@@ -1,0 +1,43 @@
+metadata:
+  iteration: 2
+  family: "p2p-sliding-window-pipeline"
+  research_question: "Can a sliding-window P2P pipeline (NVMe→GPU BAR1 with overlapped D2D copies) match or exceed the baseline zero-copy DRAM path by eliminating one PCIe crossing, given that iter-1's batch-based P2P was 19% slower due to lost pipeline overlap?"
+
+# Arms chosen:
+# - h-main: Sliding-window P2P pipeline — tests whether fixing the batch→sliding-window issue
+#   (RP-2) restores or exceeds baseline performance. This is the key correction from iter-1.
+# - h-ablation: Same P2P with DRAM backfill added — measures the cost of maintaining cache
+#   coherence (tests RP-3 under the new sliding-window regime).
+# - h-control-negative omitted: No software-controllable regime makes P2P sliding-window
+#   obviously worse (other than reverting to batch, which iter-1 already tested). The negative
+#   control would be iter-1's batch approach, but that's already in the findings.
+# - h-robustness omitted: Single-drive/single-client is the minimal isolation for mechanism
+#   validation. Multi-drive/multi-client can be tested in a future iteration.
+
+arms:
+  - type: h-main
+    prediction: "Sliding-window P2P cold lookup throughput will be equal to or higher than baseline. The baseline achieves ~2.4 GB/s with NVMe→DRAM (1 PCIe crossing) + H2D async (2nd PCIe crossing). P2P does NVMe→GPU BAR1 (1 PCIe crossing) + D2D on-GPU (no PCIe). With proper sliding-window overlap (not batch), the NVMe read rate is the sole bottleneck in both paths, but P2P eliminates PCIe contention from the H2D copy engine, which should yield measurable improvement in p99 latency."
+    mechanism: "The baseline sliding-window pipeline (pipelined_ssd_to_gpu_zero_copy, pipeline.rs:244) reads NVMe into DRAM then issues cudaMemcpyAsync H2D to GPU. The H2D copy traverses PCIe (host→device direction) competing with NVMe reads for upstream PCIe bandwidth (NVMe controller→root complex). With P2P, NVMe reads land directly in GPU BAR1 VRAM via a single PCIe posted write (NVMe controller→GPU endpoint). The subsequent D2D copy (cudaMemcpyAsync DeviceToDevice) runs entirely within the GPU's internal fabric (~1.5 TB/s on A30) completing in <0.1µs for 128 KiB — effectively zero-cost. The sliding-window structure ensures NVMe reads overlap with D2D copies: as each read completes, immediately issue D2D and submit the next read into the freed ring slot. With 8 ring slots and D2D completing 200x faster than NVMe reads (~22µs), ring slots are always available when needed."
+    diagnostic: "If throughput is NOT improved: (1) Check whether NVMe DMA to GPU BAR1 achieves the same throughput as to DRAM — PCIe posted writes to BAR1 may have different latency characteristics due to GPU TLB handling. (2) Check whether cudaMemcpyAsync D2D on BAR1-backed memory actually uses internal GPU bandwidth or falls back to a PCIe loopback path. (3) Verify the sliding-window is actually overlapping — add timing probes around read completion and D2D issue to confirm overlap. (4) If equal (not better): the NVMe controller is the sole bottleneck and PCIe contention from H2D was never significant at single-drive throughput levels (~5.9 GB/s vs 25 GB/s PCIe x16 capacity)."
+    code_changes:
+      - file: "components/dispatcher/src/pipeline.rs"
+        intent: "Replace the batch-based pipelined_ssd_to_gpu_p2p function with a sliding-window implementation. The new function should mirror the structure of pipelined_ssd_to_gpu_zero_copy (lines 244-401): use a VecDeque to track in-flight ring slot indices, prime the window with min(ring_size, num_chunks) NVMe reads, then for each completion: (1) pop the completed slot index, (2) issue cudaMemcpyAsync with CUDA_MEMCPY_DEVICE_TO_DEVICE from the slot's dev_ptr to gpu_dst+offset on stream[idx%2], (3) submit the next NVMe read into the freed slot, (4) periodically sync streams every ring_size completions to bound GPU command queue depth. After all chunks: final sync both streams. Forget noop-free DmaBuffer wrappers."
+        rationale: "The batch approach from iter-1 caused 19% regression (RP-2). The sliding-window overlaps NVMe reads with D2D copies, matching the baseline's overlap pattern. With D2D being ~200x faster than NVMe reads, ring slot reuse is never blocked."
+      - file: "components/dispatcher/src/lib.rs"
+        intent: "In promote_and_serve (line ~251), when the P2P ring is available: skip memory-tier allocation (mt.insert) and eviction, read directly via the P2P pipeline into gpu_dst, then register the entry as BlockDevice-only in the dispatch-map (no memory-tier entry). This eliminates the DRAM overhead entirely for the h-main condition."
+        rationale: "The h-main arm tests pure P2P without memory-tier involvement. Skipping mt.insert eliminates allocation overhead and avoids the need for DRAM backfill, isolating the P2P mechanism."
+      - file: "components/gpu-services/src/dma.rs"
+        intent: "Keep the existing create_p2p_ring_slot and P2pRingSlot from iter-1 (they work correctly). No changes needed to the allocation primitives."
+        rationale: "The P2P ring allocation from iter-1 was validated (integrity passed). Only the pipeline function structure needs to change."
+
+  - type: h-ablation
+    prediction: "Sliding-window P2P with DRAM backfill will show slightly lower throughput than h-main (by approximately 3-5%), because the D2H backfill copy adds one PCIe transfer per chunk (GPU→DRAM) serialized on the same stream as the D2D copy."
+    mechanism: "Adding a cudaMemcpyAsync(D2H) after each D2D copy serializes two operations on the same CUDA stream: D2D staging→final (internal, ~0.1µs) followed by D2H staging→DRAM (PCIe, ~11µs for 128KiB at 12 GB/s). This D2H copy traverses PCIe in the device→host direction. Because it's on the same stream, the next NVMe read into that ring slot cannot begin until both copies complete — this extends the effective slot occupancy from ~0.1µs (D2D only) to ~11µs. With 8 ring slots and NVMe reads taking ~22µs, the D2H copy can still be overlapped within the window, but it reduces the effective pipeline depth and may cause occasional stalls when reads complete faster than expected."
+    diagnostic: "If no difference from h-main: the D2H copy is fully hidden within the NVMe read latency (11µs D2H < 22µs NVMe read per slot). If larger than expected (>5%): the D2H copy is causing pipeline stalls due to ring slot unavailability — consider using a separate stream for backfill or increasing ring size."
+    code_changes:
+      - file: "components/dispatcher/src/pipeline.rs"
+        intent: "In the sliding-window P2P function, add a backfill_dram parameter (bool). When true, after issuing the D2D copy for a completed slot, also issue cudaMemcpyAsync(D2H) from the slot's dev_ptr to mem_tier_ptr+offset on the same stream. The caller in promote_and_serve passes true and allocates a memory-tier slot."
+        rationale: "Tests the overhead of maintaining cache coherence. Uses the same stream to serialize D2D and D2H, ensuring the ring slot isn't reused until both copies complete."
+      - file: "components/dispatcher/src/lib.rs"
+        intent: "In promote_and_serve, when P2P ring is available and P2P_NO_BACKFILL env var is NOT set: allocate memory-tier slot normally, call P2P pipeline with backfill=true, then register memory-tier entry in dispatch-map. When P2P_NO_BACKFILL IS set: skip memory-tier, call P2P with backfill=false."
+        rationale: "Allows selecting between h-main (no backfill) and h-ablation (with backfill) via environment variable, without recompilation."

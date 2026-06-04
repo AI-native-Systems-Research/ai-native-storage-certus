@@ -1,0 +1,53 @@
+metadata:
+  iteration: 2
+  bundle_ref: "runs/iter-2/bundle.yaml"
+
+setup:
+  - cmd: "cd /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous-experiments/iter-2-7678bae5 && cargo build -p certus-server --release"
+    description: "Build certus-server (baseline)"
+
+arms:
+  - arm_id: "h-main"
+    conditions:
+      - name: "baseline-seed1"
+        cmd: "cd /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous-experiments/iter-2-7678bae5 && git checkout -- . && cargo build -p certus-server --release && kill $(ps -ef | grep certus-server | grep -v grep | grep -v bash | awk '{print $2}') 2>/dev/null; sleep 3 && ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 & sleep 8 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-2/results/h-main/baseline-s1.txt"
+      - name: "baseline-seed2"
+        cmd: "kill $(ps -ef | grep certus-server | grep -v grep | grep -v bash | awk '{print $2}') 2>/dev/null; sleep 3 && ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 & sleep 8 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-2/results/h-main/baseline-s2.txt"
+      - name: "baseline-seed3"
+        cmd: "kill $(ps -ef | grep certus-server | grep -v grep | grep -v bash | awk '{print $2}') 2>/dev/null; sleep 3 && ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 & sleep 8 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-2/results/h-main/baseline-s3.txt"
+      - name: "treatment-seed1"
+        cmd: "kill $(ps -ef | grep certus-server | grep -v grep | grep -v bash | awk '{print $2}') 2>/dev/null; sleep 3 && cd /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous-experiments/iter-2-7678bae5 && git checkout -- . && git apply /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-2/patches/h-main.patch && cargo build -p certus-server --release && ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 & sleep 8 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-2/results/h-main/treatment-s1.txt"
+      - name: "treatment-seed2"
+        cmd: "kill $(ps -ef | grep certus-server | grep -v grep | grep -v bash | awk '{print $2}') 2>/dev/null; sleep 3 && ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 & sleep 8 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-2/results/h-main/treatment-s2.txt"
+      - name: "treatment-seed3"
+        cmd: "kill $(ps -ef | grep certus-server | grep -v grep | grep -v bash | awk '{print $2}') 2>/dev/null; sleep 3 && ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 & sleep 8 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-2/results/h-main/treatment-s3.txt"
+
+  - arm_id: "h-ablation"
+    conditions:
+      - name: "treatment-seed1"
+        cmd: "kill $(ps -ef | grep certus-server | grep -v grep | grep -v bash | awk '{print $2}') 2>/dev/null; sleep 3 && cd /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous-experiments/iter-2-7678bae5 && git checkout -- . && git apply /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-2/patches/h-ablation.patch && cargo build -p certus-server --release && ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 & sleep 8 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-2/results/h-ablation/treatment-s1.txt"
+      - name: "treatment-seed2"
+        cmd: "kill $(ps -ef | grep certus-server | grep -v grep | grep -v bash | awk '{print $2}') 2>/dev/null; sleep 3 && ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 & sleep 8 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-2/results/h-ablation/treatment-s2.txt"
+      - name: "treatment-seed3"
+        cmd: "kill $(ps -ef | grep certus-server | grep -v grep | grep -v bash | awk '{print $2}') 2>/dev/null; sleep 5 && ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 & sleep 8 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-2/results/h-ablation/treatment-s3.txt"
+
+  - arm_id: "h-robustness"
+    conditions:
+      - name: "treatment-seed1"
+        cmd: "kill $(ps -ef | grep certus-server | grep -v grep | grep -v bash | awk '{print $2}') 2>/dev/null; sleep 5 && cd /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous-experiments/iter-2-7678bae5 && git checkout -- . && git apply /home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-2/patches/h-robustness.patch && cargo build -p certus-server --release && ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 & sleep 8 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-2/results/h-robustness/treatment-s1.txt"
+      - name: "treatment-seed2"
+        cmd: "kill $(ps -ef | grep certus-server | grep -v grep | grep -v bash | awk '{print $2}') 2>/dev/null; sleep 8 && ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 & sleep 10 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-2/results/h-robustness/treatment-s2.txt"
+      - name: "treatment-seed3"
+        cmd: "kill $(ps -ef | grep certus-server | grep -v grep | grep -v bash | awk '{print $2}') 2>/dev/null; sleep 8 && ./target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 --format --poller-base-cpu 2 & sleep 10 && python3 apps/python/certus-api-bench.py --clients 1 --num-objects 16 --iterations 10 --block-size 4194304"
+        output: "/home/nara/certus/evolve_p2p/ai-native-storage-certus/.nous/p2p-evolve-2026-06-01_22-25-40/runs/iter-2/results/h-robustness/treatment-s3.txt"
