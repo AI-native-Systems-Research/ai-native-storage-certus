@@ -56,16 +56,23 @@ fn derive_symbol_name(dylib_filename: &str) -> String {
 
 /// Call the component factory on a loaded library to instantiate a component.
 ///
-/// The factory symbol name is derived from `dylib_filename`:
-/// `lib<name>.so` → `create_component_<name>`.
+/// If `explicit_symbol` is provided, uses it directly. Otherwise derives
+/// the symbol from `dylib_filename`: `lib<name>.so` → `create_component_<name>`.
 ///
 /// Catches panics from the factory function and converts them to errors.
 ///
 /// # Errors
 ///
 /// Returns an error if the symbol is not found or if the factory panics.
-pub fn create_component(library: &Library, dylib_filename: &str) -> Result<ComponentRef, String> {
-    let symbol_name = derive_symbol_name(dylib_filename);
+pub fn create_component(
+    library: &Library,
+    dylib_filename: &str,
+    explicit_symbol: Option<&str>,
+) -> Result<ComponentRef, String> {
+    let symbol_name = match explicit_symbol {
+        Some(s) => s.to_string(),
+        None => derive_symbol_name(dylib_filename),
+    };
 
     // SAFETY: The symbol has the Rust-ABI signature `fn() -> ComponentRef`.
     // We trust ABI compatibility (same toolchain) per project assumptions.

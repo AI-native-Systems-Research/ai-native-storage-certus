@@ -537,6 +537,13 @@ impl DispatcherComponent {
             .zip(extent_mgrs.into_iter())
             .enumerate()
         {
+            // Set DMA allocator on the extent-manager (SPDK-aware allocation).
+            let numa_node = ibd.numa_node();
+            let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
+                DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
+            });
+            iem.set_dma_alloc(dma_alloc);
+
             let sector_size = ibd.block_size();
             let num_sectors = ibd.num_sectors(1).unwrap_or(0);
             let data_disk_size = num_sectors * sector_size as u64;

@@ -60,6 +60,10 @@ pub struct ComponentSpec {
     /// Absolute path override (bypasses search_paths).
     pub path: Option<String>,
 
+    /// Factory symbol name override. If not set, derived from dylib filename.
+    /// Use when loading multiple component types from a single dylib.
+    pub symbol: Option<String>,
+
     /// Number of instances to create. Integer or "$variable_name".
     #[serde(default = "default_instances")]
     pub instances: InstanceCount,

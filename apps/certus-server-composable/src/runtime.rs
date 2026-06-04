@@ -163,7 +163,9 @@ pub fn initialize_stack(
             loaded.library
         };
 
-        let component = loader::create_component(&library, &comp_spec.dylib).map_err(|e| {
+        let component =
+            loader::create_component(&library, &comp_spec.dylib, comp_spec.symbol.as_deref())
+                .map_err(|e| {
             teardown_reverse(&live_components);
             format!("component '{}': {e}", instance_name)
         })?;
@@ -338,22 +340,38 @@ fn initialize_data_drives(
         ));
     }
 
-    // Get PCI addresses from config.
-    let pci_addrs = config
-        .server
-        .device_pci
-        .as_ref()
-        .ok_or("server.device_pci required when block-device components are configured")?;
-
-    if pci_addrs.len() < bd_instances.len() {
-        return Err(format!(
-            "not enough PCI addresses ({}) for {} block-device instances",
-            pci_addrs.len(),
-            bd_instances.len()
-        ));
-    }
+    // Resolve PCI addresses: use explicit list or auto-discover via SPDK.
+    let pci_addrs: Vec<String> = if let Some(addrs) = config.server.device_pci.as_ref() {
+        if addrs.len() < bd_instances.len() {
+            return Err(format!(
+                "not enough PCI addresses ({}) for {} block-device instances",
+                addrs.len(),
+                bd_instances.len()
+            ));
+        }
+        addrs.clone()
+    } else if let Some(count) = config.server.drive_count {
+        // Auto-discover via SPDK — need to init SPDK first (handled below).
+        vec!["__auto_discover__".to_string(); count]
+    } else {
+        return Err(
+            "server.device_pci or server.drive_count required when block-device components are configured"
+                .to_string(),
+        );
+    };
 
     // Initialize SPDK environment before block-device initialization.
+    // Use the dispatcher's internal spdk-env (same dylib, shared SPDK globals).
+    let dispatcher_comp = components
+        .iter()
+        .find(|c| c.name == "dispatcher")
+        .ok_or("no 'dispatcher' component found")?;
+    let dispatcher: Arc<dyn IDispatcher + Send + Sync> = unsafe {
+        query_by_name::<dyn IDispatcher + Send + Sync>(&*dispatcher_comp.component, "IDispatcher")
+    }
+    .ok_or("dispatcher does not provide IDispatcher")?;
+
+    // Initialize SPDK via the spdk-env component (shares globals with block-device in same dylib).
     if let Some(spdk_comp) = components.iter().find(|c| c.name == "spdk-env") {
         let spdk: Arc<dyn ISPDKEnv + Send + Sync> = unsafe {
             query_by_name::<dyn ISPDKEnv + Send + Sync>(&*spdk_comp.component, "ISPDKEnv")
@@ -363,6 +381,22 @@ fn initialize_data_drives(
             .map_err(|e| format!("SPDK environment init failed: {e}"))?;
         eprintln!("[certus-composable] SPDK environment initialized");
     }
+
+    // Resolve auto-discovered PCI addresses if needed.
+    let pci_addrs = if pci_addrs.first().map(|s| s.as_str()) == Some("__auto_discover__") {
+        // Need SPDK to discover devices. The block-device components share libdispatcher.so
+        // which has SPDK. We need to init SPDK via the dispatcher's internal spdk-env.
+        // Call initialize with drive_count to trigger auto-discovery internally,
+        // then get the addresses back.
+        // Simpler: use block-device's spdk_env receptacle (bound from dispatcher).
+        // For now, require explicit device_pci when using external block-devices.
+        return Err(
+            "server.device_pci must be specified when block-device components are loaded externally (drive_count auto-discovery not yet supported for external drives)"
+                .to_string(),
+        );
+    } else {
+        pci_addrs
+    };
 
     // Initialize GPU services.
     if let Some(gpu_comp) = components.iter().find(|c| c.name == "gpu-services") {
@@ -451,22 +485,7 @@ fn initialize_data_drives(
         }
         .ok_or_else(|| format!("'{bd_name}' does not provide IBlockDevice"))?;
 
-        let numa_node = ibd.numa_node();
-        let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
-            DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
-        });
-
-        let em_comp = components
-            .iter()
-            .find(|c| c.name == *em_name)
-            .ok_or_else(|| format!("extent-manager '{em_name}' not found"))?;
-
-        let iem: Arc<dyn IExtentManager + Send + Sync> = unsafe {
-            query_by_name::<dyn IExtentManager + Send + Sync>(&*em_comp.component, "IExtentManager")
-        }
-        .ok_or_else(|| format!("'{em_name}' does not provide IExtentManager"))?;
-
-        iem.set_dma_alloc(dma_alloc);
+        // DMA alloc is set by the dispatcher during add_data_drive (SPDK-aware).
     }
 
     // Register each (block-device, extent-manager) pair with the dispatcher.
