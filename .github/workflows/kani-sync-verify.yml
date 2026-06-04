@@ -70,7 +70,7 @@ jobs:
       # compilation). This step always runs — even on cache hits — so cargo-kani
       # can always find the toolchain regardless of cache state.
       - name: Install Rust nightly
-        run: rustup toolchain install nightly-2025-11-21 --no-self-update --profile minimal
+        run: rustup toolchain install nightly-2025-11-21 --no-self-update
 
       # Cache both the cargo-kani binary and the Kani toolchain directory
       # (~/.kani/) which contains CBMC and supporting tools (~1 GB).
@@ -81,7 +81,7 @@ jobs:
           path: |
             ~/.cargo/bin/cargo-kani
             ~/.kani/
-          key: kani-0.67.0-v4-${{ runner.os }}
+          key: kani-0.67.0-v5-${{ runner.os }}
 
       - name: Install Kani verifier
         id: kani-install
@@ -92,11 +92,16 @@ jobs:
           mkdir -p ~/.kani
           curl -sSL https://github.com/model-checking/kani/releases/download/kani-0.67.0/kani-0.67.0-x86_64-unknown-linux-gnu.tar.gz \
             | tar xz -C ~/.kani/
-          # 3. Create rust-toolchain-version — written by 'cargo kani setup'
-          #    but not included in the tarball.
-          echo "nightly-2025-11-21" > ~/.kani/kani-0.67.0/rust-toolchain-version
-          # 4. Install cargo-kani wrapper using the pinned nightly toolchain.
+          # 2. Install cargo-kani wrapper using the pinned nightly toolchain.
           cargo +nightly-2025-11-21 install kani-verifier --version 0.67.0 --locked
+
+      # Always runs (even on cache hit) — write the full toolchain triple so
+      # cargo-kani can construct ~/.rustup/toolchains/<triple>/bin/cargo correctly.
+      - name: Fix rust-toolchain-version
+        run: |
+          TOOLCHAIN=$(rustup toolchain list | grep "nightly-2025-11-21" | head -1 | awk '{print $1}')
+          echo "$TOOLCHAIN" > ~/.kani/kani-0.67.0/rust-toolchain-version
+          echo "rust-toolchain-version set to: $TOOLCHAIN"
 
       - name: Kani environment diagnostics
         run: |
@@ -110,6 +115,8 @@ jobs:
           which cargo-kani 2>/dev/null || ls ~/.cargo/bin/cargo-kani 2>/dev/null || echo "(not found)"
           echo "=== nightly cargo location ==="
           rustup run nightly-2025-11-21 which cargo 2>/dev/null || echo "(nightly cargo not found)"
+          echo "=== nightly toolchain bin/ contents ==="
+          ls ~/.rustup/toolchains/nightly-2025-11-21-x86_64-unknown-linux-gnu/bin/ 2>/dev/null || echo "(toolchain bin/ not found)"
 
       # Advisory: continue-on-error means failures show as warnings,
       # not as job failures, so this check never blocks PR merges.
