@@ -803,6 +803,73 @@ impl IDispatcher for DispatcherComponent {
         if use_external_drives {
             let drives = self.create_data_drives_from_external(&config)?;
             *self.data_drives.write() = drives;
+
+            // Rebuild dispatch-map from recovered extents when not formatting.
+            if !config.format_on_init {
+                let t0 = std::time::Instant::now();
+                let dm = self.dispatch_map.get().map_err(|_| {
+                    DispatcherError::NotInitialized("dispatch_map not bound".into())
+                })?;
+                let mut recovered: u64 = 0;
+                let drives_guard = self.data_drives.read();
+                for drive in drives_guard.iter() {
+                    drive.extent_mgr.for_each_extent(&mut |extent| {
+                        let _ = dm.recover_extent(extent.key, extent.offset, extent.size);
+                        recovered += 1;
+                    });
+                }
+                drop(drives_guard);
+                let elapsed = t0.elapsed();
+                self.log_info(&format!(
+                    "dispatcher: dispatch-map recovered {recovered} extents from disk ({elapsed:.2?})"
+                ));
+            }
+
+            // Pre-allocate pipeline ring and register memory-tier for GPU DMA.
+            if let Ok(gpu) = self.gpu_services.get() {
+                let chunk_size = {
+                    let dd = self.data_drives.read();
+                    dd.first()
+                        .map(|d| d.block_dev_iface.max_transfer_size() as usize)
+                        .unwrap_or(131072)
+                };
+                match pipeline::PipelineRing::new(&*gpu, chunk_size) {
+                    Ok(ring) => {
+                        *self.pipeline_ring.write() = Some(ring);
+                    }
+                    Err(e) => {
+                        self.log_info(&format!(
+                            "pipeline ring allocation failed (non-fatal): {e:?}"
+                        ));
+                    }
+                }
+                match gpu.create_stream() {
+                    Ok(stream) => {
+                        self.warm_stream.store(stream.0 as u64, Ordering::Release);
+                    }
+                    Err(e) => {
+                        self.log_info(&format!("warm stream allocation failed (non-fatal): {e}"));
+                    }
+                }
+                if let Ok(mt) = self.memory_tier.get() {
+                    if let Some((pool_ptr, pool_size)) = mt.pool_info() {
+                        match gpu.register_host_memory(pool_ptr as *mut std::ffi::c_void, pool_size)
+                        {
+                            Ok(()) => {
+                                self.log_info(&format!(
+                                    "dispatcher: registered memory-tier pool ({} MiB) for zero-copy DMA",
+                                    pool_size / (1024 * 1024)
+                                ));
+                            }
+                            Err(e) => {
+                                self.log_info(&format!(
+                                    "memory-tier pool registration failed (non-fatal): {e}"
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
         } else if self.spdk_env.is_connected() {
             let drives = self.create_data_drives(&config)?;
             *self.data_drives.write() = drives;
