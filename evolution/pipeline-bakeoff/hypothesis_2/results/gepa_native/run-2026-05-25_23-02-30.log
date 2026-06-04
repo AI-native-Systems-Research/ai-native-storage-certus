@@ -1,0 +1,14 @@
+23:02:31 [search.utils] Logging to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/gepa_native/output/logs/gepa_native_20260525_230231.log
+Error: [Errno 21] Is a directory: '/home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/initial_program_h3'
+Traceback (most recent call last):
+  File "/home/nara/certus/evo_frameworks/skydiscover/skydiscover/cli.py", line 238, in main_async
+    runner = Runner(
+             ^^^^^^^
+  File "/home/nara/certus/evo_frameworks/skydiscover/skydiscover/runner.py", line 60, in __init__
+    self._load_initial_program() if initial_program_path else None
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nara/certus/evo_frameworks/skydiscover/skydiscover/runner.py", line 392, in _load_initial_program
+    with open(self.initial_program_path, "r") as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+IsADirectoryError: [Errno 21] Is a directory: '/home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/initial_program_h3'
+Using search algorithm: gepa_native

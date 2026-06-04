@@ -68,12 +68,14 @@ SKYDISCOVER_FRAMEWORKS = [
     "adaevolve",
     "evox",
     "claude_code",
-    "gepa_native",
     "openevolve_native",
 ]
 
+# Frameworks that run natively (not through SkyDiscover)
+NATIVE_FRAMEWORKS = ["gepa_native"]
+
 # All frameworks in run order
-ALL_FRAMEWORKS = SKYDISCOVER_FRAMEWORKS + ["ksearch", "nous"]
+ALL_FRAMEWORKS = SKYDISCOVER_FRAMEWORKS + NATIVE_FRAMEWORKS + ["ksearch", "nous"]
 
 
 def timestamp():
@@ -95,6 +97,8 @@ def run_framework(name: str, iterations: int, eval_mode: str) -> dict:
 
     if name in SKYDISCOVER_FRAMEWORKS:
         cmd = _build_skydiscover_cmd(name, iterations, eval_mode, run_dir)
+    elif name in NATIVE_FRAMEWORKS:
+        cmd = _build_gepa_native_cmd(iterations, eval_mode, run_dir)
     elif name == "ksearch":
         cmd = _build_ksearch_cmd(iterations, eval_mode, run_dir)
     elif name == "nous":
@@ -195,6 +199,22 @@ def _build_skydiscover_cmd(search_algo: str, iterations: int, eval_mode: str,
         "--config", str(config_file),
         "-i", str(iters),
         "-o", str(run_dir / "output"),
+    ]
+
+    return cmd
+
+
+def _build_gepa_native_cmd(iterations: int, eval_mode: str, run_dir: Path) -> list[str]:
+    """Build native GEPA command (runs directly, not through SkyDiscover)."""
+    gepa_project = EVO_FRAMEWORKS_ROOT / "gepa"
+    runner_script = BAKEOFF_DIR / "run_gepa_native.py"
+
+    cmd = [
+        "uv", "run", "--project", str(gepa_project),
+        "python", str(runner_script),
+        "--iterations", str(iterations),
+        "--eval-mode", eval_mode,
+        "--run-dir", str(run_dir),
     ]
 
     return cmd

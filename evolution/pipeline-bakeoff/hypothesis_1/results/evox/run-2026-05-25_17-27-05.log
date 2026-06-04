@@ -1,0 +1,189 @@
+17:27:06 [search.utils] Logging to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/logs/evox_20260525_172706.log
+17:27:06 [runner] Runner ready: search=evox, program=/home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/initial_program.rs
+17:27:06 [llm] OpenAI LLM: aws/claude-opus-4-6
+17:27:06 WARNING [evaluator] cascade_evaluation is true but /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/evaluator/evaluate.py has no evaluate_stage1 — will fall back to direct evaluation
+17:27:06 [evaluator] Initialized evaluator with /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/evaluator/evaluate.py
+17:27:06 [default_discovery_controller] DiscoveryController initialized: num_context_programs=4
+17:27:06 [builder] Initialized guide LLM inside EvoxContextBuilder: aws/claude-opus-4-6
+17:27:06 [builder] Templates set: system=None, user=search_evolution_user_message
+17:27:06 [evaluator] Initialized evaluator with /home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/evox/database/search_strategy_evaluator.py
+17:27:06 [default_discovery_controller] DiscoveryController initialized: num_context_programs=2
+17:27:06 [search.evox] ======================================================================
+17:27:06 [search.evox] [EVOX CO-EVOLUTION SETUP]
+17:27:06 [search.evox] ----------------------------------------------------------------------
+17:27:06 [search.evox]   [SOLUTION EVOLUTION]
+17:27:06 [search.evox]     Initial search strategy file : /home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/evox/database/initial_search_strategy.py
+17:27:06 [search.evox]     Solution database class      : EvolvedProgramDatabase
+17:27:06 [search.evox]   [META EVOLUTION OF SEARCH STRATEGY]
+17:27:06 [search.evox]     Search strategy database class: SearchStrategyDatabase
+17:27:06 [search.evox]     Search strategy evaluator     : /home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/evox/database/search_strategy_evaluator.py
+17:27:06 [search.evox]     Search strategy config        : /home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/evox/config/search.yaml
+17:27:06 [search.evox] ======================================================================
+17:27:06 [runner] Adding initial program to database
+17:27:35 [evaluator] Evaluated program d025c7f1-6054-4ba0-8598-0e45f0075053 in 28.63s: combined_score=3.7000, artifacts={'feedback': "Cold lookup throughput: 3.700 GB/s | p50=1169µs p99=2805µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.5s | Files patched: ['pipeline.rs']"}
+17:27:35 [registry] Using search strategy from: /home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/evox/database/initial_search_strategy.py
+17:27:35 [base_database] Database has 1 programs, best program score is combined_score=3.7000, artifacts={'feedback': "Cold lookup throughput: 3.700 GB/s | p50=1169µs p99=2805µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.5s | Files patched: ['pipeline.rs']"}
+17:27:35 [search.evox] Switch if 2 iterations of stagnation detected
+17:27:35 [search.evox] Label generation: using guide_model = [aws/claude-opus-4-6]
+17:27:59 [search.evox] Generated variation operator labels (3180/2567 chars)
+17:28:58 [evaluator] Evaluated program 2f35745a-10a1-498f-a8d7-7732b6988946 in 28.63s: combined_score=3.9300, artifacts={'feedback': "Cold lookup throughput: 3.930 GB/s | p50=1004µs p99=3204µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.5s | Files patched: ['pipeline.rs']"}
+17:28:58 [default_discovery_controller] Iteration 1: Program 2f35745a-10a1-498f-a8d7-7732b6988946 (parent: d025c7f1-6054-4ba0-8598-0e45f0075053) completed in 58.86s (llm: 30.22s, eval: 28.64s)
+17:28:58 [default_discovery_controller] Metrics: combined_score=3.9300, artifacts={'feedback': "Cold lookup throughput: 3.930 GB/s | p50=1004µs p99=3204µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.5s | Files patched: ['pipeline.rs']"}
+17:28:58 [default_discovery_controller] 🌟 New best solution found at iteration 1
+17:29:46 [evaluator] Evaluated program d7728462-8389-4a31-a417-3734a8e51ed7 in 28.66s: combined_score=4.4700, artifacts={'feedback': "Cold lookup throughput: 4.470 GB/s | p50=853µs p99=2079µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.5s | Files patched: ['pipeline.rs']"}
+17:29:46 [default_discovery_controller] Iteration 2: Program d7728462-8389-4a31-a417-3734a8e51ed7 (parent: d025c7f1-6054-4ba0-8598-0e45f0075053) completed in 47.78s (llm: 19.12s, eval: 28.66s)
+17:29:46 [default_discovery_controller] Metrics: combined_score=4.4700, artifacts={'feedback': "Cold lookup throughput: 4.470 GB/s | p50=853µs p99=2079µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.5s | Files patched: ['pipeline.rs']"}
+17:29:46 [default_discovery_controller] 🌟 New best solution found at iteration 2
+17:30:37 [evaluator] Evaluated program dd35b76f-41e4-4d0e-bc85-d2bd7fae210f in 27.98s: combined_score=4.7500, artifacts={'feedback': "Cold lookup throughput: 4.750 GB/s | p50=787µs p99=2163µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 25.9s | Files patched: ['pipeline.rs']"}
+17:30:37 [default_discovery_controller] Iteration 3: Program dd35b76f-41e4-4d0e-bc85-d2bd7fae210f (parent: 2f35745a-10a1-498f-a8d7-7732b6988946) completed in 50.57s (llm: 22.60s, eval: 27.98s)
+17:30:37 [default_discovery_controller] Metrics: combined_score=4.7500, artifacts={'feedback': "Cold lookup throughput: 4.750 GB/s | p50=787µs p99=2163µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 25.9s | Files patched: ['pipeline.rs']"}
+17:30:37 [default_discovery_controller] 🌟 New best solution found at iteration 3
+17:31:28 [evaluator] Evaluated program b12436ca-aee9-4ca1-a1ff-8e9714988749 in 28.31s: combined_score=5.1300, artifacts={'feedback': "Cold lookup throughput: 5.130 GB/s | p50=745µs p99=1606µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.2s | Files patched: ['pipeline.rs']"}
+17:31:28 [default_discovery_controller] Iteration 4: Program b12436ca-aee9-4ca1-a1ff-8e9714988749 (parent: d7728462-8389-4a31-a417-3734a8e51ed7) completed in 51.32s (llm: 23.00s, eval: 28.31s)
+17:31:28 [default_discovery_controller] Metrics: combined_score=5.1300, artifacts={'feedback': "Cold lookup throughput: 5.130 GB/s | p50=745µs p99=1606µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.2s | Files patched: ['pipeline.rs']"}
+17:31:28 [default_discovery_controller] 🌟 New best solution found at iteration 4
+17:32:17 [evaluator] Evaluated program c64f0ed3-c569-459b-9688-5912b8ef05f6 in 28.61s: combined_score=3.9400, artifacts={'feedback': "Cold lookup throughput: 3.940 GB/s | p50=1080µs p99=2093µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.5s | Files patched: ['pipeline.rs']"}
+17:32:17 [default_discovery_controller] Iteration 5: Program c64f0ed3-c569-459b-9688-5912b8ef05f6 (parent: d7728462-8389-4a31-a417-3734a8e51ed7) completed in 49.11s (llm: 20.50s, eval: 28.61s)
+17:32:17 [default_discovery_controller] [CHECKPOINT] Checkpoint interval reached at iteration 5
+17:32:17 [base_database] Database has 6 programs, best program score is combined_score=5.1300, artifacts={'feedback': "Cold lookup throughput: 5.130 GB/s | p50=745µs p99=1606µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.2s | Files patched: ['pipeline.rs']"}
+17:32:17 [search.utils] [CHECKPOINT] Saved database with 6 programs to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/checkpoints/checkpoint_5
+17:32:17 [runner] Checkpoint 5: best=combined_score=5.1300, artifacts={'feedback': "Cold lookup throughput: 5.130 GB/s | p50=745µs p99=1606µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.2s | Files patched: ['pipeline.rs']"}
+17:32:17 [runner] Checkpoint saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/checkpoints/checkpoint_5
+17:32:17 [default_discovery_controller] Metrics: combined_score=3.9400, artifacts={'feedback': "Cold lookup throughput: 3.940 GB/s | p50=1080µs p99=2093µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.5s | Files patched: ['pipeline.rs']"}
+17:33:09 [evaluator] Evaluated program 295c0d64-e31a-4b14-b9bc-9081b8e1430d in 28.68s: combined_score=3.9700, artifacts={'feedback': "Cold lookup throughput: 3.970 GB/s | p50=848µs p99=2486µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.6s | Files patched: ['pipeline.rs']"}
+17:33:09 [default_discovery_controller] Iteration 6: Program 295c0d64-e31a-4b14-b9bc-9081b8e1430d (parent: c64f0ed3-c569-459b-9688-5912b8ef05f6) completed in 51.65s (llm: 22.97s, eval: 28.68s)
+17:33:09 [default_discovery_controller] Metrics: combined_score=3.9700, artifacts={'feedback': "Cold lookup throughput: 3.970 GB/s | p50=848µs p99=2486µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.6s | Files patched: ['pipeline.rs']"}
+17:33:09 [search.evox] Stagnation detected -> evolving search strategy (solution_iter=6)
+17:33:09 [search.evox] Search strategy score: combined=2.576000, improvement=1.430000, start=3.700000, end=5.130000, horizon=2
+17:33:48 [evaluator] Evaluated program 645f481d-e329-428a-873f-1f138f845eaa in 0.01s: validity=1.0000, combined_score=0.0000
+17:33:48 [search.evox] Saved labels to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/search/iteration_1/labels.yaml (3180/2567 chars)
+17:33:48 [search.evox] New search algorithm generated (iteration 1) - saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/search/iteration_1 (score pending)
+17:33:48 [search.evox] Switched to search algorithm 645f481d-e329-428a-873f-1f138f845eaa (7 programs migrated)
+17:34:51 [evaluator] Evaluated program b688b85e-c3cc-48f6-8568-09ed61c7dc9c in 28.23s: combined_score=3.7900, artifacts={'feedback': "Cold lookup throughput: 3.790 GB/s | p50=788µs p99=3246µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.1s | Files patched: ['pipeline.rs']"}
+17:34:51 [default_discovery_controller] Iteration 7: Program b688b85e-c3cc-48f6-8568-09ed61c7dc9c (parent: b12436ca-aee9-4ca1-a1ff-8e9714988749) completed in 62.39s (llm: 34.16s, eval: 28.23s)
+17:34:51 [default_discovery_controller] Metrics: combined_score=3.7900, artifacts={'feedback': "Cold lookup throughput: 3.790 GB/s | p50=788µs p99=3246µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.1s | Files patched: ['pipeline.rs']"}
+17:35:44 [evaluator] Evaluated program 787235d4-0d76-48f3-9cf2-de219353d470 in 28.71s: combined_score=4.1500, artifacts={'feedback': "Cold lookup throughput: 4.150 GB/s | p50=1283µs p99=1767µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.6s | Files patched: ['pipeline.rs']"}
+17:35:44 [default_discovery_controller] Iteration 8: Program 787235d4-0d76-48f3-9cf2-de219353d470 (parent: b12436ca-aee9-4ca1-a1ff-8e9714988749) completed in 53.02s (llm: 24.31s, eval: 28.71s)
+17:35:44 [default_discovery_controller] Metrics: combined_score=4.1500, artifacts={'feedback': "Cold lookup throughput: 4.150 GB/s | p50=1283µs p99=1767µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.6s | Files patched: ['pipeline.rs']"}
+17:35:44 [search.evox] Stagnation detected -> evolving search strategy (solution_iter=8)
+17:35:44 [search.evox] Search strategy score: combined=0.000000, improvement=0.000000, start=5.130000, end=5.130000, horizon=2
+17:35:44 [base_database] Database has 2 programs, best program score is combined_score=2.5760, window_start_iteration=0.0000, search_window_start_score=3.7000, search_window_end_score=5.1300, search_horizon=2.0000
+17:36:20 [evaluator] Evaluated program 5081f6a4-e1c0-4cd1-872c-693d8ec7a240 in 0.01s: validity=1.0000, combined_score=0.0000
+17:36:20 [search.evox] New search algorithm generated (iteration 2) - saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/search/iteration_2 (score pending)
+17:36:20 [search.evox] Switched to search algorithm 5081f6a4-e1c0-4cd1-872c-693d8ec7a240 (9 programs migrated)
+17:37:09 [evaluator] Evaluated program aa33484f-aee4-4098-81a3-be66f220eb3b in 28.45s: combined_score=5.2800, artifacts={'feedback': "Cold lookup throughput: 5.280 GB/s | p50=588µs p99=1733µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.3s | Files patched: ['pipeline.rs']"}
+17:37:09 [default_discovery_controller] Iteration 9: Program aa33484f-aee4-4098-81a3-be66f220eb3b (parent: 787235d4-0d76-48f3-9cf2-de219353d470) completed in 48.85s (llm: 20.40s, eval: 28.45s)
+17:37:09 [default_discovery_controller] Metrics: combined_score=5.2800, artifacts={'feedback': "Cold lookup throughput: 5.280 GB/s | p50=588µs p99=1733µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.3s | Files patched: ['pipeline.rs']"}
+17:37:09 [default_discovery_controller] 🌟 New best solution found at iteration 9
+17:37:56 [evaluator] Evaluated program cc6e9869-1aa7-46ae-a241-6a695eed5834 in 28.11s: combined_score=4.0600, artifacts={'feedback': "Cold lookup throughput: 4.060 GB/s | p50=1180µs p99=1961µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.0s | Files patched: ['pipeline.rs']"}
+17:37:56 [default_discovery_controller] Iteration 10: Program cc6e9869-1aa7-46ae-a241-6a695eed5834 (parent: 787235d4-0d76-48f3-9cf2-de219353d470) completed in 47.54s (llm: 19.43s, eval: 28.11s)
+17:37:56 [default_discovery_controller] [CHECKPOINT] Checkpoint interval reached at iteration 10
+17:37:56 [base_database] Database has 11 programs, best program score is combined_score=5.2800, artifacts={'feedback': "Cold lookup throughput: 5.280 GB/s | p50=588µs p99=1733µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.3s | Files patched: ['pipeline.rs']"}
+17:37:56 [search.utils] [CHECKPOINT] Saved database with 11 programs to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/checkpoints/checkpoint_10
+17:37:56 [runner] Checkpoint 10: best=combined_score=5.2800, artifacts={'feedback': "Cold lookup throughput: 5.280 GB/s | p50=588µs p99=1733µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.3s | Files patched: ['pipeline.rs']"}
+17:37:56 [runner] Checkpoint saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/checkpoints/checkpoint_10
+17:37:56 [default_discovery_controller] Metrics: combined_score=4.0600, artifacts={'feedback': "Cold lookup throughput: 4.060 GB/s | p50=1180µs p99=1961µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.0s | Files patched: ['pipeline.rs']"}
+17:39:00 [evaluator] Evaluated program 1e377a9a-8fd0-4694-b29e-bc71c0b617b4 in 27.48s: combined_score=4.4600, artifacts={'feedback': "Cold lookup throughput: 4.460 GB/s | p50=668µs p99=2075µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 25.4s | Files patched: ['pipeline.rs']"}
+17:39:00 [default_discovery_controller] Iteration 11: Program 1e377a9a-8fd0-4694-b29e-bc71c0b617b4 (parent: aa33484f-aee4-4098-81a3-be66f220eb3b) completed in 63.33s (llm: 35.85s, eval: 27.48s)
+17:39:00 [default_discovery_controller] Metrics: combined_score=4.4600, artifacts={'feedback': "Cold lookup throughput: 4.460 GB/s | p50=668µs p99=2075µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 25.4s | Files patched: ['pipeline.rs']"}
+17:39:00 [search.evox] Stagnation detected -> evolving search strategy (solution_iter=11)
+17:39:00 [search.evox] Search strategy score: combined=0.298384, improvement=0.150000, start=5.130000, end=5.280000, horizon=2
+17:39:00 [base_database] Database has 3 programs, best program score is combined_score=2.5760, window_start_iteration=0.0000, search_window_start_score=3.7000, search_window_end_score=5.1300, search_horizon=2.0000
+17:39:43 [evaluator] Evaluated program d2eff1ea-3315-4868-955f-525544c32b5b in 0.01s: validity=1.0000, combined_score=0.0000
+17:39:43 [search.evox] New search algorithm generated (iteration 3) - saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/search/iteration_3 (score pending)
+17:39:43 [search.evox] Switched to search algorithm d2eff1ea-3315-4868-955f-525544c32b5b (12 programs migrated)
+17:40:31 [evaluator] Evaluated program 19c19724-1ded-4c85-b6ee-31f5ee348447 in 28.06s: combined_score=3.9700, artifacts={'feedback': "Cold lookup throughput: 3.970 GB/s | p50=1237µs p99=1586µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 25.9s | Files patched: ['pipeline.rs']"}
+17:40:31 [default_discovery_controller] Iteration 12: Program 19c19724-1ded-4c85-b6ee-31f5ee348447 (parent: dd35b76f-41e4-4d0e-bc85-d2bd7fae210f) completed in 48.14s (llm: 20.07s, eval: 28.07s)
+17:40:31 [default_discovery_controller] Metrics: combined_score=3.9700, artifacts={'feedback': "Cold lookup throughput: 3.970 GB/s | p50=1237µs p99=1586µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 25.9s | Files patched: ['pipeline.rs']"}
+17:41:28 [evaluator] Evaluated program fa4aa29d-0565-4ed7-a365-6123188dee6e in 28.45s: combined_score=4.7800, artifacts={'feedback': "Cold lookup throughput: 4.780 GB/s | p50=992µs p99=1405µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.3s | Files patched: ['pipeline.rs']"}
+17:41:28 [default_discovery_controller] Iteration 13: Program fa4aa29d-0565-4ed7-a365-6123188dee6e (parent: aa33484f-aee4-4098-81a3-be66f220eb3b) completed in 57.17s (llm: 28.72s, eval: 28.45s)
+17:41:28 [default_discovery_controller] Metrics: combined_score=4.7800, artifacts={'feedback': "Cold lookup throughput: 4.780 GB/s | p50=992µs p99=1405µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.3s | Files patched: ['pipeline.rs']"}
+17:41:28 [search.evox] Stagnation detected -> evolving search strategy (solution_iter=13)
+17:41:28 [search.evox] Search strategy score: combined=0.000000, improvement=0.000000, start=5.280000, end=5.280000, horizon=2
+17:41:28 [base_database] Database has 4 programs, best program score is combined_score=2.5760, window_start_iteration=0.0000, search_window_start_score=3.7000, search_window_end_score=5.1300, search_horizon=2.0000
+17:42:09 [evaluator] Evaluated program bdef1c1a-2858-46f9-912d-b6a59896e1d0 in 0.01s: validity=0.0000, error=Failed to add or verify program: 'EvolvedProgramDatabase' object has no attribute 'best_program', combined_score=None
+17:42:09 WARNING [default_discovery_controller] Evaluation failed (attempt 1/3): validity=0, error=Failed to add or verify program: 'EvolvedProgramDatabase' object has no attribute 'best_program'
+17:42:13 [default_discovery_controller] Retry 2/3: rebuilding prompt with 1 failed attempt(s)
+17:42:13 [evaluator] Evaluated program b72540f1-d70a-406a-a42c-80443ce5f592 in 0.01s: validity=0.0000, error=Failed to add or verify program: 'EvolvedProgramDatabase' object has no attribute 'best_program', combined_score=None
+17:42:13 WARNING [default_discovery_controller] Evaluation failed (attempt 2/3): validity=0, error=Failed to add or verify program: 'EvolvedProgramDatabase' object has no attribute 'best_program'
+17:42:13 [default_discovery_controller] Retry 3/3: rebuilding prompt with 2 failed attempt(s)
+17:42:13 [evaluator] Evaluated program b5fc94d7-d98e-4cae-8808-505b39911a6c in 0.01s: validity=0.0000, error=Failed to add or verify program: 'EvolvedProgramDatabase' object has no attribute 'best_program', combined_score=None
+17:42:13 WARNING [default_discovery_controller] Evaluation failed (attempt 3/3): validity=0, error=Failed to add or verify program: 'EvolvedProgramDatabase' object has no attribute 'best_program'
+17:42:13 ERROR [default_discovery_controller] All 3 retry attempts failed. Final error: Failed to add or verify program: 'EvolvedProgramDatabase' object has no attribute 'best_program'
+17:42:13 WARNING [default_discovery_controller] Iteration 4 failed: Evaluator failed after 3 attempts: Failed to add or verify program: 'EvolvedProgramDatabase' object has no attribute 'best_program'
+17:42:13 WARNING [search.evox] Failed to generate search algorithm: Evaluator failed after 3 attempts: Failed to add or verify program: 'EvolvedProgramDatabase' object has no attribute 'best_program'
+17:43:15 [evaluator] Evaluated program d9fee5a6-ecf7-4cb3-b41d-c4d098c9fa57 in 28.76s: combined_score=4.3500, artifacts={'feedback': "Cold lookup throughput: 4.350 GB/s | p50=1213µs p99=1630µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.6s | Files patched: ['pipeline.rs']"}
+17:43:15 [default_discovery_controller] Iteration 14: Program d9fee5a6-ecf7-4cb3-b41d-c4d098c9fa57 (parent: d7728462-8389-4a31-a417-3734a8e51ed7) completed in 61.69s (llm: 32.93s, eval: 28.76s)
+17:43:15 [default_discovery_controller] Metrics: combined_score=4.3500, artifacts={'feedback': "Cold lookup throughput: 4.350 GB/s | p50=1213µs p99=1630µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.6s | Files patched: ['pipeline.rs']"}
+17:44:42 [evaluator] Evaluated program e5877a6c-489a-4afc-8c82-a783bd3919cd in 28.79s: combined_score=4.1000, artifacts={'feedback': "Cold lookup throughput: 4.100 GB/s | p50=1275µs p99=2189µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.7s | Files patched: ['pipeline.rs']"}
+17:44:42 [default_discovery_controller] Iteration 15: Program e5877a6c-489a-4afc-8c82-a783bd3919cd (parent: 1e377a9a-8fd0-4694-b29e-bc71c0b617b4) completed in 86.74s (llm: 57.94s, eval: 28.80s)
+17:44:42 [default_discovery_controller] [CHECKPOINT] Checkpoint interval reached at iteration 15
+17:44:42 [base_database] Database has 16 programs, best program score is combined_score=5.2800, artifacts={'feedback': "Cold lookup throughput: 5.280 GB/s | p50=588µs p99=1733µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.3s | Files patched: ['pipeline.rs']"}
+17:44:42 [search.utils] [CHECKPOINT] Saved database with 16 programs to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/checkpoints/checkpoint_15
+17:44:42 [runner] Checkpoint 15: best=combined_score=5.2800, artifacts={'feedback': "Cold lookup throughput: 5.280 GB/s | p50=588µs p99=1733µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.3s | Files patched: ['pipeline.rs']"}
+17:44:42 [runner] Checkpoint saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/checkpoints/checkpoint_15
+17:44:42 [default_discovery_controller] Metrics: combined_score=4.1000, artifacts={'feedback': "Cold lookup throughput: 4.100 GB/s | p50=1275µs p99=2189µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.7s | Files patched: ['pipeline.rs']"}
+17:44:42 [search.evox] Stagnation detected -> evolving search strategy (solution_iter=15)
+17:45:23 [evaluator] Evaluated program b46f2242-5de6-433b-8ed3-bbe7bc7a3554 in 0.01s: validity=1.0000, combined_score=0.0000
+17:45:23 [search.evox] New search algorithm generated (iteration 5) - saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/search/iteration_5 (score pending)
+17:45:23 [search.evox] Switched to search algorithm b46f2242-5de6-433b-8ed3-bbe7bc7a3554 (16 programs migrated)
+17:46:31 [evaluator] Evaluated program c899dfa9-1c46-4360-bf6f-796619fab43a in 28.75s: combined_score=4.5900, artifacts={'feedback': "Cold lookup throughput: 4.590 GB/s | p50=826µs p99=2298µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.6s | Files patched: ['pipeline.rs']"}
+17:46:31 [default_discovery_controller] Iteration 16: Program c899dfa9-1c46-4360-bf6f-796619fab43a (parent: b12436ca-aee9-4ca1-a1ff-8e9714988749) completed in 67.92s (llm: 39.17s, eval: 28.75s)
+17:46:31 [default_discovery_controller] Metrics: combined_score=4.5900, artifacts={'feedback': "Cold lookup throughput: 4.590 GB/s | p50=826µs p99=2298µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.6s | Files patched: ['pipeline.rs']"}
+17:47:41 [evaluator] Evaluated program 06fcecf6-bf0c-4994-bd1d-3bc8b679a666 in 28.50s: combined_score=3.5700, artifacts={'feedback': "Cold lookup throughput: 3.570 GB/s | p50=1489µs p99=1777µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.4s | Files patched: ['pipeline.rs']"}
+17:47:41 [default_discovery_controller] Iteration 17: Program 06fcecf6-bf0c-4994-bd1d-3bc8b679a666 (parent: e5877a6c-489a-4afc-8c82-a783bd3919cd) completed in 70.17s (llm: 41.67s, eval: 28.50s)
+17:47:41 [default_discovery_controller] Metrics: combined_score=3.5700, artifacts={'feedback': "Cold lookup throughput: 3.570 GB/s | p50=1489µs p99=1777µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.4s | Files patched: ['pipeline.rs']"}
+17:47:41 [search.evox] Stagnation detected -> evolving search strategy (solution_iter=17)
+17:47:41 [search.evox] Search strategy score: combined=0.000000, improvement=0.000000, start=5.280000, end=5.280000, horizon=2
+17:47:41 [base_database] Database has 5 programs, best program score is combined_score=2.5760, window_start_iteration=0.0000, search_window_start_score=3.7000, search_window_end_score=5.1300, search_horizon=2.0000
+17:48:12 [evaluator] Evaluated program c3ba9e19-c52c-412b-a769-2277bc338451 in 0.01s: validity=0.0000, error=Failed to add or verify program: 'EvolvedProgramDatabase' object has no attribute 'best_program', combined_score=None
+17:48:12 WARNING [default_discovery_controller] Evaluation failed (attempt 1/3): validity=0, error=Failed to add or verify program: 'EvolvedProgramDatabase' object has no attribute 'best_program'
+17:48:13 [default_discovery_controller] Retry 2/3: rebuilding prompt with 1 failed attempt(s)
+17:48:13 [evaluator] Evaluated program fccc9293-2098-4dc3-9c5e-a020ea330bcc in 0.00s: validity=0.0000, error=Failed to add or verify program: 'EvolvedProgramDatabase' object has no attribute 'best_program', combined_score=None
+17:48:13 WARNING [default_discovery_controller] Evaluation failed (attempt 2/3): validity=0, error=Failed to add or verify program: 'EvolvedProgramDatabase' object has no attribute 'best_program'
+17:48:13 [default_discovery_controller] Retry 3/3: rebuilding prompt with 2 failed attempt(s)
+17:48:13 [evaluator] Evaluated program 0c41eaf7-e954-4d12-97b7-cf420b7c7fbe in 0.00s: validity=0.0000, error=Failed to add or verify program: 'EvolvedProgramDatabase' object has no attribute 'best_program', combined_score=None
+17:48:13 WARNING [default_discovery_controller] Evaluation failed (attempt 3/3): validity=0, error=Failed to add or verify program: 'EvolvedProgramDatabase' object has no attribute 'best_program'
+17:48:13 ERROR [default_discovery_controller] All 3 retry attempts failed. Final error: Failed to add or verify program: 'EvolvedProgramDatabase' object has no attribute 'best_program'
+17:48:13 WARNING [default_discovery_controller] Iteration 6 failed: Evaluator failed after 3 attempts: Failed to add or verify program: 'EvolvedProgramDatabase' object has no attribute 'best_program'
+17:48:13 WARNING [search.evox] Failed to generate search algorithm: Evaluator failed after 3 attempts: Failed to add or verify program: 'EvolvedProgramDatabase' object has no attribute 'best_program'
+17:49:17 [evaluator] Evaluated program ec09bc76-96ce-4eee-9310-b1a83456e60d in 28.53s: combined_score=4.1100, artifacts={'feedback': "Cold lookup throughput: 4.110 GB/s | p50=1032µs p99=2102µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.4s | Files patched: ['pipeline.rs']"}
+17:49:17 [default_discovery_controller] Iteration 18: Program ec09bc76-96ce-4eee-9310-b1a83456e60d (parent: d9fee5a6-ecf7-4cb3-b41d-c4d098c9fa57) completed in 63.56s (llm: 35.02s, eval: 28.53s)
+17:49:17 [default_discovery_controller] Metrics: combined_score=4.1100, artifacts={'feedback': "Cold lookup throughput: 4.110 GB/s | p50=1032µs p99=2102µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.4s | Files patched: ['pipeline.rs']"}
+17:50:15 [evaluator] Evaluated program f247fb7d-c515-4cdd-bb2d-6efd314f641d in 28.60s: combined_score=3.9800, artifacts={'feedback': "Cold lookup throughput: 3.980 GB/s | p50=1017µs p99=2185µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.5s | Files patched: ['pipeline.rs']"}
+17:50:15 [default_discovery_controller] Iteration 19: Program f247fb7d-c515-4cdd-bb2d-6efd314f641d (parent: ec09bc76-96ce-4eee-9310-b1a83456e60d) completed in 58.31s (llm: 29.70s, eval: 28.60s)
+17:50:15 [default_discovery_controller] Metrics: combined_score=3.9800, artifacts={'feedback': "Cold lookup throughput: 3.980 GB/s | p50=1017µs p99=2185µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.5s | Files patched: ['pipeline.rs']"}
+17:50:15 [search.evox] Stagnation detected -> evolving search strategy (solution_iter=19)
+17:50:59 [evaluator] Evaluated program d2a76980-2c4e-4b3c-a4d7-8f96512ac9fd in 0.01s: validity=1.0000, combined_score=0.0000
+17:50:59 [search.evox] New search algorithm generated (iteration 7) - saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/search/iteration_7 (score pending)
+17:50:59 [search.evox] Switched to search algorithm d2a76980-2c4e-4b3c-a4d7-8f96512ac9fd (20 programs migrated)
+17:52:07 [evaluator] Evaluated program b4e9e09b-f0b9-41ce-8c05-8ff7a40b0ea0 in 28.76s: combined_score=4.0400, artifacts={'feedback': "Cold lookup throughput: 4.040 GB/s | p50=871µs p99=3411µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.6s | Files patched: ['pipeline.rs']"}
+17:52:07 [default_discovery_controller] Iteration 20: Program b4e9e09b-f0b9-41ce-8c05-8ff7a40b0ea0 (parent: aa33484f-aee4-4098-81a3-be66f220eb3b) completed in 67.82s (llm: 39.06s, eval: 28.76s)
+17:52:07 [default_discovery_controller] [CHECKPOINT] Checkpoint interval reached at iteration 20
+17:52:07 [base_database] Database has 21 programs, best program score is combined_score=5.2800, artifacts={'feedback': "Cold lookup throughput: 5.280 GB/s | p50=588µs p99=1733µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.3s | Files patched: ['pipeline.rs']"}
+17:52:07 [search.utils] [CHECKPOINT] Saved database with 21 programs to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/checkpoints/checkpoint_20
+17:52:07 [runner] Checkpoint 20: best=combined_score=5.2800, artifacts={'feedback': "Cold lookup throughput: 5.280 GB/s | p50=588µs p99=1733µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.3s | Files patched: ['pipeline.rs']"}
+17:52:07 [runner] Checkpoint saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/checkpoints/checkpoint_20
+17:52:07 [default_discovery_controller] Metrics: combined_score=4.0400, artifacts={'feedback': "Cold lookup throughput: 4.040 GB/s | p50=871µs p99=3411µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.6s | Files patched: ['pipeline.rs']"}
+17:52:07 [search.evox] Search strategy score: combined=0.000000, improvement=0.000000, start=5.280000, end=5.280000, horizon=2
+17:52:07 [base_database] Database has 6 programs, best program score is combined_score=2.5760, window_start_iteration=0.0000, search_window_start_score=3.7000, search_window_end_score=5.1300, search_horizon=2.0000
+17:52:07 [search.evox] [SOLUTION EVOLUTION] Evolution completed: evox
+17:52:07 [search.utils] [CHECKPOINT] Saved database with 21 programs to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/checkpoints/checkpoint_20
+17:52:07 [runner] Checkpoint 20: best=combined_score=5.2800, artifacts={'feedback': "Cold lookup throughput: 5.280 GB/s | p50=588µs p99=1733µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.3s | Files patched: ['pipeline.rs']"}
+17:52:07 [runner] Checkpoint saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/checkpoints/checkpoint_20
+17:52:35 [evaluator] Evaluated program aa33484f-aee4-4098-81a3-be66f220eb3b in 28.02s: combined_score=4.9000, artifacts={'feedback': "Cold lookup throughput: 4.900 GB/s | p50=493µs p99=1942µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 25.9s | Files patched: ['pipeline.rs']"}
+17:52:35 [runner] Test evaluation for best program: combined_score=4.9000, artifacts={'feedback': "Cold lookup throughput: 4.900 GB/s | p50=493µs p99=1942µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 25.9s | Files patched: ['pipeline.rs']"}
+17:52:35 [runner] Best program saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/best
+17:52:35 [runner] Discovery completed. Best: combined_score=5.2800, artifacts={'feedback': "Cold lookup throughput: 5.280 GB/s | p50=588µs p99=1733µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.3s | Files patched: ['pipeline.rs']"}, test_combined_score=4.9000, test_artifacts={'feedback': "Cold lookup throughput: 4.900 GB/s | p50=493µs p99=1942µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 25.9s | Files patched: ['pipeline.rs']"}
+17:52:35 [runner] Best program saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/best
+Using search algorithm: evox
+
+Discovery complete!
+Best program metrics:
+  combined_score: 5.2800
+  artifacts: {'feedback': "Cold lookup throughput: 5.280 GB/s | p50=588µs p99=1733µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.3s | Files patched: ['pipeline.rs']"}
+  test_combined_score: 4.9000
+  test_artifacts: {'feedback': "Cold lookup throughput: 4.900 GB/s | p50=493µs p99=1942µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 25.9s | Files patched: ['pipeline.rs']"}
+
+Latest checkpoint: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/checkpoints/checkpoint_20
+To resume: --checkpoint /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/checkpoints/checkpoint_20

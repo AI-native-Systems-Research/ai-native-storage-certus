@@ -1,0 +1,121 @@
+20:45:57 [search.utils] Logging to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/logs/evox_20260525_204557.log
+20:45:57 [runner] Runner ready: search=evox, program=/home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/initial_program.rs
+20:45:58 [llm] OpenAI LLM: aws/claude-opus-4-6
+20:45:58 WARNING [evaluator] cascade_evaluation is true but /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/evaluator/evaluate.py has no evaluate_stage1 — will fall back to direct evaluation
+20:45:58 [evaluator] Initialized evaluator with /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/evaluator/evaluate.py
+20:45:58 [default_discovery_controller] DiscoveryController initialized: num_context_programs=4
+20:45:58 [builder] Initialized guide LLM inside EvoxContextBuilder: aws/claude-opus-4-6
+20:45:58 [builder] Templates set: system=None, user=search_evolution_user_message
+20:45:58 [evaluator] Initialized evaluator with /home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/evox/database/search_strategy_evaluator.py
+20:45:58 [default_discovery_controller] DiscoveryController initialized: num_context_programs=2
+20:45:58 [search.evox] ======================================================================
+20:45:58 [search.evox] [EVOX CO-EVOLUTION SETUP]
+20:45:58 [search.evox] ----------------------------------------------------------------------
+20:45:58 [search.evox]   [SOLUTION EVOLUTION]
+20:45:58 [search.evox]     Initial search strategy file : /home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/evox/database/initial_search_strategy.py
+20:45:58 [search.evox]     Solution database class      : EvolvedProgramDatabase
+20:45:58 [search.evox]   [META EVOLUTION OF SEARCH STRATEGY]
+20:45:58 [search.evox]     Search strategy database class: SearchStrategyDatabase
+20:45:58 [search.evox]     Search strategy evaluator     : /home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/evox/database/search_strategy_evaluator.py
+20:45:58 [search.evox]     Search strategy config        : /home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/evox/config/search.yaml
+20:45:58 [search.evox] ======================================================================
+20:45:58 [runner] Adding initial program to database
+20:46:46 [evaluator] Evaluated program f4659d19-f31a-4a7e-88ae-7aa95bdfe6fc in 48.67s: combined_score=4.6375, artifacts={'feedback': "Mixed-size cold throughput:\n  1 MiB: 0.820 GB/s p50=1404µs\n  2 MiB: 1.980 GB/s p50=1016µs\n  4 MiB: 3.740 GB/s p50=1317µs\n  16 MiB: 12.010 GB/s p50=1326µs\n  Composite: 4.638 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 46.5s | Files patched: ['pipeline.rs']"}
+20:46:46 [registry] Using search strategy from: /home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/evox/database/initial_search_strategy.py
+20:46:46 [base_database] Database has 1 programs, best program score is combined_score=4.6375, artifacts={'feedback': "Mixed-size cold throughput:\n  1 MiB: 0.820 GB/s p50=1404µs\n  2 MiB: 1.980 GB/s p50=1016µs\n  4 MiB: 3.740 GB/s p50=1317µs\n  16 MiB: 12.010 GB/s p50=1326µs\n  Composite: 4.638 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 46.5s | Files patched: ['pipeline.rs']"}
+20:46:46 [search.evox] Switch if 1 iterations of stagnation detected
+20:46:46 [search.evox] Label generation: using guide_model = [aws/claude-opus-4-6]
+20:47:11 [search.evox] Generated variation operator labels (3251/2584 chars)
+20:48:26 [evaluator] Evaluated program 5f091842-49f2-4a73-9919-6e770a00eb72 in 48.72s: combined_score=3.8750, artifacts={'feedback': "Mixed-size cold throughput:\n  1 MiB: 0.830 GB/s p50=1403µs\n  2 MiB: 1.880 GB/s p50=1216µs\n  4 MiB: 4.020 GB/s p50=1077µs\n  16 MiB: 8.770 GB/s p50=1873µs\n  Composite: 3.875 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 46.6s | Files patched: ['pipeline.rs']"}
+20:48:26 [default_discovery_controller] Iteration 1: Program 5f091842-49f2-4a73-9919-6e770a00eb72 (parent: f4659d19-f31a-4a7e-88ae-7aa95bdfe6fc) completed in 75.07s (llm: 26.35s, eval: 48.73s)
+20:48:26 [default_discovery_controller] Metrics: combined_score=3.8750, artifacts={'feedback': "Mixed-size cold throughput:\n  1 MiB: 0.830 GB/s p50=1403µs\n  2 MiB: 1.880 GB/s p50=1216µs\n  4 MiB: 4.020 GB/s p50=1077µs\n  16 MiB: 8.770 GB/s p50=1873µs\n  Composite: 3.875 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 46.6s | Files patched: ['pipeline.rs']"}
+20:49:42 [evaluator] Evaluated program aa4e2b70-ea78-4594-8053-7110d8b8ac48 in 48.16s: combined_score=3.8775, artifacts={'feedback': "Mixed-size cold throughput:\n  1 MiB: 0.770 GB/s p50=1470µs\n  2 MiB: 1.940 GB/s p50=1018µs\n  4 MiB: 4.240 GB/s p50=874µs\n  16 MiB: 8.560 GB/s p50=2061µs\n  Composite: 3.878 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 46.0s | Files patched: ['pipeline.rs']"}
+20:49:42 [default_discovery_controller] Iteration 2: Program aa4e2b70-ea78-4594-8053-7110d8b8ac48 (parent: 5f091842-49f2-4a73-9919-6e770a00eb72) completed in 76.08s (llm: 27.92s, eval: 48.16s)
+20:49:42 [default_discovery_controller] Metrics: combined_score=3.8775, artifacts={'feedback': "Mixed-size cold throughput:\n  1 MiB: 0.770 GB/s p50=1470µs\n  2 MiB: 1.940 GB/s p50=1018µs\n  4 MiB: 4.240 GB/s p50=874µs\n  16 MiB: 8.560 GB/s p50=2061µs\n  Composite: 3.878 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 46.0s | Files patched: ['pipeline.rs']"}
+20:49:42 [search.evox] Stagnation detected -> evolving search strategy (solution_iter=2)
+20:49:42 [search.evox] Search strategy score: combined=0.000000, improvement=0.000000, start=4.637500, end=4.637500, horizon=1
+20:50:13 [evaluator] Evaluated program 5082ea8b-8217-4530-8ce0-238f963fadb3 in 0.01s: validity=1.0000, combined_score=0.0000
+20:50:13 [search.evox] Saved labels to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/search/iteration_1/labels.yaml (3251/2584 chars)
+20:50:13 [search.evox] New search algorithm generated (iteration 1) - saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/search/iteration_1 (score pending)
+20:50:13 [search.evox] Switched to search algorithm 5082ea8b-8217-4530-8ce0-238f963fadb3 (3 programs migrated)
+20:51:27 [evaluator] Evaluated program 21fffa15-b4b0-42b7-8e30-53cafcf3851a in 47.38s: combined_score=4.2450, artifacts={'feedback': "Mixed-size cold throughput:\n  1 MiB: 0.830 GB/s p50=1451µs\n  2 MiB: 1.970 GB/s p50=938µs\n  4 MiB: 4.870 GB/s p50=840µs\n  16 MiB: 9.310 GB/s p50=1860µs\n  Composite: 4.245 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 45.3s | Files patched: ['pipeline.rs']"}
+20:51:27 [default_discovery_controller] Iteration 3: Program 21fffa15-b4b0-42b7-8e30-53cafcf3851a (parent: f4659d19-f31a-4a7e-88ae-7aa95bdfe6fc) completed in 74.27s (llm: 26.89s, eval: 47.38s)
+20:51:27 [default_discovery_controller] Metrics: combined_score=4.2450, artifacts={'feedback': "Mixed-size cold throughput:\n  1 MiB: 0.830 GB/s p50=1451µs\n  2 MiB: 1.970 GB/s p50=938µs\n  4 MiB: 4.870 GB/s p50=840µs\n  16 MiB: 9.310 GB/s p50=1860µs\n  Composite: 4.245 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 45.3s | Files patched: ['pipeline.rs']"}
+20:51:27 [search.evox] Stagnation detected -> evolving search strategy (solution_iter=3)
+20:51:27 [search.evox] Search strategy score: combined=0.000000, improvement=0.000000, start=4.637500, end=4.637500, horizon=1
+20:51:27 [base_database] Database has 2 programs, best program score is combined_score=0.0000, window_start_iteration=0.0000, search_window_start_score=4.6375, search_window_end_score=4.6375, search_horizon=1.0000
+20:52:13 [evaluator] Evaluated program 5163463d-ebc5-4eb5-869f-02bc27a7f325 in 0.01s: validity=1.0000, combined_score=0.0000
+20:52:13 [search.evox] New search algorithm generated (iteration 2) - saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/search/iteration_2 (score pending)
+20:52:13 [search.evox] Switched to search algorithm 5163463d-ebc5-4eb5-869f-02bc27a7f325 (4 programs migrated)
+20:52:40 [evaluator] Evaluated program e67c21e5-7430-487d-a5bf-e2de953ef943 in 2.39s: combined_score=0.0000, artifacts={'feedback': 'Build failed:\n   Compiling dispatcher v1.0.0 (/home/nara/certus/ai-native-storage-certus/components/dispatcher)\nerror: unexpected closing delimiter: `}`\n   --> components/dispatcher/src/pipeline.rs:416:1\n    |\n265 | ) -> Result<(), DispatcherError> {\n    |                                  - this delimiter might not be properly closed...\n...\n402 |     }\n    |     - ...as it matches this but it has different indentation\n...\n416 | }\n    | ^ unexpected closing delimiter\n\nerror: could not compile `dispatcher` (lib) due to 1 previous error\n'}
+20:52:40 [default_discovery_controller] Iteration 4: Program e67c21e5-7430-487d-a5bf-e2de953ef943 (parent: f4659d19-f31a-4a7e-88ae-7aa95bdfe6fc) completed in 27.66s (llm: 25.27s, eval: 2.39s)
+20:52:40 [default_discovery_controller] Metrics: combined_score=0.0000, artifacts={'feedback': 'Build failed:\n   Compiling dispatcher v1.0.0 (/home/nara/certus/ai-native-storage-certus/components/dispatcher)\nerror: unexpected closing delimiter: `}`\n   --> components/dispatcher/src/pipeline.rs:416:1\n    |\n265 | ) -> Result<(), DispatcherError> {\n    |                                  - this delimiter might not be properly closed...\n...\n402 |     }\n    |     - ...as it matches this but it has different indentation\n...\n416 | }\n    | ^ unexpected closing delimiter\n\nerror: could not compile `dispatcher` (lib) due to 1 previous error\n'}
+20:52:40 [search.evox] Stagnation detected -> evolving search strategy (solution_iter=4)
+20:52:40 [search.evox] Search strategy score: combined=0.000000, improvement=0.000000, start=4.637500, end=4.637500, horizon=1
+20:52:40 [base_database] Database has 3 programs, best program score is combined_score=0.0000, window_start_iteration=0.0000, search_window_start_score=4.6375, search_window_end_score=4.6375, search_horizon=1.0000
+20:53:24 [evaluator] Evaluated program f9ccd3b8-8306-420c-ac2d-708ac247e720 in 0.01s: validity=1.0000, combined_score=0.0000
+20:53:24 [search.evox] New search algorithm generated (iteration 3) - saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/search/iteration_3 (score pending)
+20:53:24 [search.evox] Switched to search algorithm f9ccd3b8-8306-420c-ac2d-708ac247e720 (5 programs migrated)
+20:54:41 [evaluator] Evaluated program 764b8a75-2e70-4b77-aa06-7a0330900c19 in 48.04s: combined_score=4.7625, artifacts={'feedback': "Mixed-size cold throughput:\n  1 MiB: 0.830 GB/s p50=1311µs\n  2 MiB: 2.100 GB/s p50=1006µs\n  4 MiB: 4.610 GB/s p50=842µs\n  16 MiB: 11.510 GB/s p50=1621µs\n  Composite: 4.763 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 45.9s | Files patched: ['pipeline.rs']"}
+20:54:41 [default_discovery_controller] Iteration 5: Program 764b8a75-2e70-4b77-aa06-7a0330900c19 (parent: 21fffa15-b4b0-42b7-8e30-53cafcf3851a) completed in 77.14s (llm: 29.09s, eval: 48.04s)
+20:54:41 [default_discovery_controller] [CHECKPOINT] Checkpoint interval reached at iteration 5
+20:54:41 [base_database] Database has 6 programs, best program score is combined_score=4.7625, artifacts={'feedback': "Mixed-size cold throughput:\n  1 MiB: 0.830 GB/s p50=1311µs\n  2 MiB: 2.100 GB/s p50=1006µs\n  4 MiB: 4.610 GB/s p50=842µs\n  16 MiB: 11.510 GB/s p50=1621µs\n  Composite: 4.763 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 45.9s | Files patched: ['pipeline.rs']"}
+20:54:41 [search.utils] [CHECKPOINT] Saved database with 6 programs to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/checkpoints/checkpoint_5
+20:54:41 [runner] Checkpoint 5: best=combined_score=4.7625, artifacts={'feedback': "Mixed-size cold throughput:\n  1 MiB: 0.830 GB/s p50=1311µs\n  2 MiB: 2.100 GB/s p50=1006µs\n  4 MiB: 4.610 GB/s p50=842µs\n  16 MiB: 11.510 GB/s p50=1621µs\n  Composite: 4.763 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 45.9s | Files patched: ['pipeline.rs']"}
+20:54:41 [runner] Checkpoint saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/checkpoints/checkpoint_5
+20:54:41 [default_discovery_controller] Metrics: combined_score=4.7625, artifacts={'feedback': "Mixed-size cold throughput:\n  1 MiB: 0.830 GB/s p50=1311µs\n  2 MiB: 2.100 GB/s p50=1006µs\n  4 MiB: 4.610 GB/s p50=842µs\n  16 MiB: 11.510 GB/s p50=1621µs\n  Composite: 4.763 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 45.9s | Files patched: ['pipeline.rs']"}
+20:54:41 [default_discovery_controller] 🌟 New best solution found at iteration 5
+20:56:33 ERROR [evaluator] Program bf0d429e-d028-4965-b6a3-057ae13561c3 timed out after 90s (limit: 90s)
+20:56:33 WARNING [default_discovery_controller] Evaluation failed (attempt 1/3): validity=None, error=Evaluation failed (validity=0)
+20:56:33 [default_discovery_controller] Retry 2/3: rebuilding prompt with 1 failed attempt(s)
+20:57:49 [evaluator] Evaluated program 6f5cc934-cf69-45a5-8ff7-b1d0b0f53f23 in 48.65s: combined_score=4.4125, artifacts={'feedback': "Mixed-size cold throughput:\n  1 MiB: 0.810 GB/s p50=1414µs\n  2 MiB: 2.160 GB/s p50=770µs\n  4 MiB: 4.780 GB/s p50=708µs\n  16 MiB: 9.900 GB/s p50=1730µs\n  Composite: 4.413 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 46.5s | Files patched: ['pipeline.rs']"}
+20:57:49 [default_discovery_controller] Iteration 6: Program 6f5cc934-cf69-45a5-8ff7-b1d0b0f53f23 (parent: 764b8a75-2e70-4b77-aa06-7a0330900c19) completed in 187.75s (llm: 26.79s, eval: 48.65s)
+20:57:49 [default_discovery_controller] Metrics: combined_score=4.4125, artifacts={'feedback': "Mixed-size cold throughput:\n  1 MiB: 0.810 GB/s p50=1414µs\n  2 MiB: 2.160 GB/s p50=770µs\n  4 MiB: 4.780 GB/s p50=708µs\n  16 MiB: 9.900 GB/s p50=1730µs\n  Composite: 4.413 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 46.5s | Files patched: ['pipeline.rs']"}
+20:57:49 [search.evox] Stagnation detected -> evolving search strategy (solution_iter=6)
+20:57:49 [search.evox] Search strategy score: combined=0.341180, improvement=0.125000, start=4.637500, end=4.762500, horizon=1
+20:57:49 [search.evox] New best search score: 0.341180 (+0.341180)
+20:57:49 [base_database] Database has 4 programs, best program score is validity=1.0000, combined_score=0.3412, window_start_iteration=4.0000, search_window_start_score=4.6375, search_window_end_score=4.7625, search_horizon=1.0000
+20:58:24 [evaluator] Evaluated program e0e35eb2-aa6e-481f-85c4-a934665f0105 in 0.01s: validity=1.0000, combined_score=0.0000
+20:58:24 [search.evox] New search algorithm generated (iteration 4) - saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/search/iteration_4 (score pending)
+20:58:24 [search.evox] Switched to search algorithm e0e35eb2-aa6e-481f-85c4-a934665f0105 (7 programs migrated)
+20:59:03 [evaluator] Evaluated program 48cc9835-1d8c-49a0-8937-df3dbdf7481d in 2.61s: combined_score=0.0000, artifacts={'feedback': 'Build failed:\n   Compiling dispatcher v1.0.0 (/home/nara/certus/ai-native-storage-certus/components/dispatcher)\nerror: expected expression, found `==`\n   --> components/dispatcher/src/pipeline.rs:392:1\n    |\n392 | =======\n    | ^^ expected expression\n\nerror: could not compile `dispatcher` (lib) due to 1 previous error\n'}
+20:59:03 [default_discovery_controller] Iteration 8: Program 48cc9835-1d8c-49a0-8937-df3dbdf7481d (parent: 764b8a75-2e70-4b77-aa06-7a0330900c19) completed in 38.58s (llm: 35.97s, eval: 2.61s)
+20:59:03 [default_discovery_controller] Metrics: combined_score=0.0000, artifacts={'feedback': 'Build failed:\n   Compiling dispatcher v1.0.0 (/home/nara/certus/ai-native-storage-certus/components/dispatcher)\nerror: expected expression, found `==`\n   --> components/dispatcher/src/pipeline.rs:392:1\n    |\n392 | =======\n    | ^^ expected expression\n\nerror: could not compile `dispatcher` (lib) due to 1 previous error\n'}
+20:59:03 [search.evox] Stagnation detected -> evolving search strategy (solution_iter=8)
+20:59:03 [search.evox] Search strategy score: combined=0.000000, improvement=0.000000, start=4.762500, end=4.762500, horizon=1
+20:59:03 [base_database] Database has 5 programs, best program score is validity=1.0000, combined_score=0.3412, window_start_iteration=4.0000, search_window_start_score=4.6375, search_window_end_score=4.7625, search_horizon=1.0000
+20:59:50 [evaluator] Evaluated program a6aa8192-ec43-4034-a9f3-88eed501e586 in 0.01s: validity=1.0000, combined_score=0.0000
+20:59:50 [search.evox] New search algorithm generated (iteration 5) - saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/search/iteration_5 (score pending)
+20:59:50 [search.evox] Switched to search algorithm a6aa8192-ec43-4034-a9f3-88eed501e586 (8 programs migrated)
+21:01:54 ERROR [evaluator] Program 9c9d03b5-f07b-4bcd-96e2-bb7d0472c1d5 timed out after 90s (limit: 90s)
+21:01:54 WARNING [default_discovery_controller] Evaluation failed (attempt 1/3): validity=None, error=Evaluation failed (validity=0)
+21:01:54 [default_discovery_controller] Retry 2/3: rebuilding prompt with 1 failed attempt(s)
+21:03:53 ERROR [evaluator] Program e24a1742-1a6e-431d-8f7e-2a06dc2e4328 timed out after 90s (limit: 90s)
+21:03:53 WARNING [default_discovery_controller] Evaluation failed (attempt 2/3): validity=None, error=Evaluation failed (validity=0)
+21:03:53 [default_discovery_controller] Retry 3/3: rebuilding prompt with 2 failed attempt(s)
+21:05:54 ERROR [evaluator] Program f1c4f96b-4776-46ba-a684-339588aa5fa9 timed out after 90s (limit: 90s)
+21:05:54 WARNING [default_discovery_controller] Evaluation failed (attempt 3/3): validity=None, error=Evaluation failed (validity=0)
+21:05:54 ERROR [default_discovery_controller] All 3 retry attempts failed. Final error: Evaluation failed (validity=0)
+21:05:54 WARNING [search.evox] Iteration 9 failed (used 3 attempts): Evaluator failed after 3 attempts: Evaluation failed (validity=0)
+21:05:54 [search.evox] Search strategy score: combined=0.000000, improvement=0.000000, start=4.762500, end=4.762500, horizon=1
+21:05:54 [base_database] Database has 6 programs, best program score is validity=1.0000, combined_score=0.3412, window_start_iteration=4.0000, search_window_start_score=4.6375, search_window_end_score=4.7625, search_horizon=1.0000
+21:05:54 [search.evox] [SOLUTION EVOLUTION] Evolution completed: evox
+21:05:54 [search.utils] [CHECKPOINT] Saved database with 8 programs to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/checkpoints/checkpoint_10
+21:05:54 [runner] Checkpoint 10: best=combined_score=4.7625, artifacts={'feedback': "Mixed-size cold throughput:\n  1 MiB: 0.830 GB/s p50=1311µs\n  2 MiB: 2.100 GB/s p50=1006µs\n  4 MiB: 4.610 GB/s p50=842µs\n  16 MiB: 11.510 GB/s p50=1621µs\n  Composite: 4.763 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 45.9s | Files patched: ['pipeline.rs']"}
+21:05:54 [runner] Checkpoint saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/checkpoints/checkpoint_10
+21:06:19 [evaluator] Evaluated program 764b8a75-2e70-4b77-aa06-7a0330900c19 in 24.22s: combined_score=0.0000, artifacts={'feedback': 'Server failed to start within 15s. stderr: certus-server: metadata=0000:61:00.0, data=["0000:62:00.0"]\ncertus-server: initializing SPDK environment...\n[spdk-env] Pre-flight checks passed. Initializing SPDK/DPDK environment...\n[spdk-env] SPDK/DPDK environment initialized. Enumerating devices...\n'}
+21:06:19 [runner] Test evaluation for best program: combined_score=0.0000, artifacts={'feedback': 'Server failed to start within 15s. stderr: certus-server: metadata=0000:61:00.0, data=["0000:62:00.0"]\ncertus-server: initializing SPDK environment...\n[spdk-env] Pre-flight checks passed. Initializing SPDK/DPDK environment...\n[spdk-env] SPDK/DPDK environment initialized. Enumerating devices...\n'}
+21:06:19 [runner] Best program saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/best
+21:06:19 [runner] Discovery completed. Best: combined_score=4.7625, artifacts={'feedback': "Mixed-size cold throughput:\n  1 MiB: 0.830 GB/s p50=1311µs\n  2 MiB: 2.100 GB/s p50=1006µs\n  4 MiB: 4.610 GB/s p50=842µs\n  16 MiB: 11.510 GB/s p50=1621µs\n  Composite: 4.763 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 45.9s | Files patched: ['pipeline.rs']"}, test_combined_score=0.0000, test_artifacts={'feedback': 'Server failed to start within 15s. stderr: certus-server: metadata=0000:61:00.0, data=["0000:62:00.0"]\ncertus-server: initializing SPDK environment...\n[spdk-env] Pre-flight checks passed. Initializing SPDK/DPDK environment...\n[spdk-env] SPDK/DPDK environment initialized. Enumerating devices...\n'}
+21:06:19 [runner] Best program saved to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/best
+Using search algorithm: evox
+
+Discovery complete!
+Best program metrics:
+  combined_score: 4.7625
+  artifacts: {'feedback': "Mixed-size cold throughput:\n  1 MiB: 0.830 GB/s p50=1311µs\n  2 MiB: 2.100 GB/s p50=1006µs\n  4 MiB: 4.610 GB/s p50=842µs\n  16 MiB: 11.510 GB/s p50=1621µs\n  Composite: 4.763 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 45.9s | Files patched: ['pipeline.rs']"}
+  test_combined_score: 0.0000
+  test_artifacts: {'feedback': 'Server failed to start within 15s. stderr: certus-server: metadata=0000:61:00.0, data=["0000:62:00.0"]\ncertus-server: initializing SPDK environment...\n[spdk-env] Pre-flight checks passed. Initializing SPDK/DPDK environment...\n[spdk-env] SPDK/DPDK environment initialized. Enumerating devices...\n'}
+
+Latest checkpoint: /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/checkpoints/checkpoint_20
+To resume: --checkpoint /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/evox/output/checkpoints/checkpoint_20

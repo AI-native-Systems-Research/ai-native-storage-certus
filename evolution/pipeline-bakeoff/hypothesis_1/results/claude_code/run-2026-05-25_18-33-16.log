@@ -1,0 +1,18 @@
+18:33:17 [search.utils] Logging to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/results/claude_code/output/logs/claude_code_20260525_183317.log
+18:33:17 [runner] Runner ready: search=claude_code, program=/home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/initial_program.rs
+18:33:17 WARNING [evaluator] cascade_evaluation is true but /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/evaluator/evaluate.py has no evaluate_stage1 — will fall back to direct evaluation
+18:33:17 [evaluator] Initialized evaluator with /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/evaluator/evaluate.py
+18:33:17 [runner] Adding initial program to database
+18:33:46 [evaluator] Evaluated program 4aac2b09-e4ce-4174-b0f0-a2ea061fb7a3 in 28.65s: combined_score=4.0200, artifacts={'feedback': "Cold lookup throughput: 4.020 GB/s | p50=1099µs p99=2279µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.5s | Files patched: ['pipeline.rs']"}
+18:33:46 [base_database] Database has 1 programs, best program score is combined_score=4.0200, artifacts={'feedback': "Cold lookup throughput: 4.020 GB/s | p50=1099µs p99=2279µs\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 26.5s | Files patched: ['pipeline.rs']"}
+Error: claude_code only supports Claude models, got: 'aws/claude-opus-4-6'. Use a claude-* model name (e.g. claude-sonnet-4-6).
+Traceback (most recent call last):
+  File "/home/nara/certus/evo_frameworks/skydiscover/skydiscover/cli.py", line 255, in main_async
+    best_program = await runner.run(
+                   ^^^^^^^^^^^^^^^^^
+  File "/home/nara/certus/evo_frameworks/skydiscover/skydiscover/runner.py", line 175, in run
+    await self.discovery_controller.run_discovery(
+  File "/home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/claude_code/controller.py", line 166, in run_discovery
+    raise ValueError(
+ValueError: claude_code only supports Claude models, got: 'aws/claude-opus-4-6'. Use a claude-* model name (e.g. claude-sonnet-4-6).
+Using search algorithm: claude_code

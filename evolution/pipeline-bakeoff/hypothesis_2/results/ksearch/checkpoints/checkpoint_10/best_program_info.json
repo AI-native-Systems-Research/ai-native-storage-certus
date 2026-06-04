@@ -1,0 +1,15 @@
+{
+  "id": "99874481-3ce7-4998-bcaa-2390f6c80ed0",
+  "generation": 3,
+  "iteration": 4,
+  "current_iteration": 10,
+  "metrics": {
+    "combined_score": 6.2125,
+    "artifacts": {
+      "feedback": "Mixed-size cold throughput:\n  1 MiB: 0.790 GB/s p50=1348\u00b5s\n  2 MiB: 2.310 GB/s p50=920\u00b5s\n  4 MiB: 4.440 GB/s p50=850\u00b5s\n  16 MiB: 17.310 GB/s p50=852\u00b5s\n  Composite: 6.212 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 46.1s | Files patched: ['pipeline.rs']"
+    }
+  },
+  "language": "rust",
+  "timestamp": 1779770582.60339,
+  "saved_at": 1779771215.674342
+}

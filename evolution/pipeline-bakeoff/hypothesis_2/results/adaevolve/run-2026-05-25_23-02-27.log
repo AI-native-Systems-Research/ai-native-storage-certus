@@ -1,0 +1,29 @@
+Traceback (most recent call last):
+  File "/home/nara/certus/evo_frameworks/skydiscover/.venv/bin/skydiscover-run", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/nara/certus/evo_frameworks/skydiscover/skydiscover/cli.py", line 100, in main
+    return asyncio.run(main_async())
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib64/python3.12/asyncio/runners.py", line 195, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib64/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib64/python3.12/asyncio/base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/home/nara/certus/evo_frameworks/skydiscover/skydiscover/cli.py", line 121, in main_async
+    config = load_config(args.config)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nara/certus/evo_frameworks/skydiscover/skydiscover/config.py", line 822, in load_config
+    config = Config.from_yaml(config_path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nara/certus/evo_frameworks/skydiscover/skydiscover/config.py", line 652, in from_yaml
+    return cls.from_dict(config_dict)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nara/certus/evo_frameworks/skydiscover/skydiscover/config.py", line 714, in from_dict
+    config.evaluator = EvaluatorConfig(**config_dict["evaluator"])
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: EvaluatorConfig.__init__() got an unexpected keyword argument 'env'

@@ -1,0 +1,22 @@
+00:26:21 [search.utils] Logging to /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/results/evox/output/logs/evox_20260526_002621.log
+00:26:21 [runner] Runner ready: search=evox, program=/home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/hypothesis_3/initial_program.rs
+00:26:21 [llm] OpenAI LLM: aws/claude-opus-4-6
+00:26:21 WARNING [evaluator] cascade_evaluation is true but /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/evaluator/evaluate.py has no evaluate_stage1 — will fall back to direct evaluation
+00:26:21 [evaluator] Initialized evaluator with /home/nara/certus/ai-native-storage-certus/evolution/pipeline-bakeoff/evaluator/evaluate.py
+00:26:21 [default_discovery_controller] DiscoveryController initialized: num_context_programs=4
+00:26:21 [builder] Initialized guide LLM inside EvoxContextBuilder: aws/claude-opus-4-6
+00:26:21 [builder] Templates set: system=None, user=search_evolution_user_message
+00:26:21 [evaluator] Initialized evaluator with /home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/evox/database/search_strategy_evaluator.py
+00:26:21 [default_discovery_controller] DiscoveryController initialized: num_context_programs=2
+00:26:21 [search.evox] ======================================================================
+00:26:21 [search.evox] [EVOX CO-EVOLUTION SETUP]
+00:26:21 [search.evox] ----------------------------------------------------------------------
+00:26:21 [search.evox]   [SOLUTION EVOLUTION]
+00:26:21 [search.evox]     Initial search strategy file : /home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/evox/database/initial_search_strategy.py
+00:26:21 [search.evox]     Solution database class      : EvolvedProgramDatabase
+00:26:21 [search.evox]   [META EVOLUTION OF SEARCH STRATEGY]
+00:26:21 [search.evox]     Search strategy database class: SearchStrategyDatabase
+00:26:21 [search.evox]     Search strategy evaluator     : /home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/evox/database/search_strategy_evaluator.py
+00:26:21 [search.evox]     Search strategy config        : /home/nara/certus/evo_frameworks/skydiscover/skydiscover/search/evox/config/search.yaml
+00:26:21 [search.evox] ======================================================================
+00:26:21 [runner] Adding initial program to database

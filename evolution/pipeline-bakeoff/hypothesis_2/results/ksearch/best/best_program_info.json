@@ -1,0 +1,19 @@
+{
+  "id": "99874481-3ce7-4998-bcaa-2390f6c80ed0",
+  "generation": 3,
+  "iteration": 4,
+  "timestamp": 1779770582.60339,
+  "parent_id": "11bd912b-3e15-4576-b127-c6aa73dda580",
+  "metrics": {
+    "combined_score": 6.2125,
+    "artifacts": {
+      "feedback": "Mixed-size cold throughput:\n  1 MiB: 0.790 GB/s p50=1348\u00b5s\n  2 MiB: 2.310 GB/s p50=920\u00b5s\n  4 MiB: 4.440 GB/s p50=850\u00b5s\n  16 MiB: 17.310 GB/s p50=852\u00b5s\n  Composite: 6.212 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 46.1s | Files patched: ['pipeline.rs']"
+    },
+    "test_combined_score": 4.2525,
+    "test_artifacts": {
+      "feedback": "Mixed-size cold throughput:\n  1 MiB: 0.820 GB/s p50=1390\u00b5s\n  2 MiB: 1.880 GB/s p50=1032\u00b5s\n  4 MiB: 4.320 GB/s p50=914\u00b5s\n  16 MiB: 9.990 GB/s p50=1573\u00b5s\n  Composite: 4.253 GB/s\nIntegrity: 4 MiB cold lookup data verified (pattern=42, all correct)\n\nEval time: 46.0s | Files patched: ['pipeline.rs']"
+    }
+  },
+  "language": "rust",
+  "saved_at": 1779771263.8553026
+}
