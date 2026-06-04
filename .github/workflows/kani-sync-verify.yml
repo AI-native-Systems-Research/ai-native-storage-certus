@@ -117,6 +117,12 @@ jobs:
           rustup run nightly-2025-11-21 which cargo 2>/dev/null || echo "(nightly cargo not found)"
           echo "=== nightly toolchain bin/ contents ==="
           ls ~/.rustup/toolchains/nightly-2025-11-21-x86_64-unknown-linux-gnu/bin/ 2>/dev/null || echo "(toolchain bin/ not found)"
+          echo "=== test nightly cargo runs ==="
+          ~/.rustup/toolchains/nightly-2025-11-21-x86_64-unknown-linux-gnu/bin/cargo --version 2>&1 || echo "FAILED"
+          echo "=== rust-toolchain.toml in workspace ==="
+          cat rust-toolchain.toml 2>/dev/null || cat rust-toolchain 2>/dev/null || echo "(none found)"
+          echo "=== rust-toolchain-version final content ==="
+          cat ~/.kani/kani-0.67.0/rust-toolchain-version
 
       # Advisory: continue-on-error means failures show as warnings,
       # not as job failures, so this check never blocks PR merges.
@@ -124,7 +130,7 @@ jobs:
         id: kani-dispatch-map
         continue-on-error: true
         run: |
-          cargo kani --package dispatch-map
+          RUST_BACKTRACE=1 cargo kani --package dispatch-map
 
       - name: Run Kani harnesses — example-helloworld
         id: kani-helloworld
