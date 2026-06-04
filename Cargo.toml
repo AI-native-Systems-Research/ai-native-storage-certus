@@ -25,7 +25,9 @@ members = [
     "apps/gpu-show",
     "apps/certus-server",
     "apps/gpu-bb-vs-p2p",
-    "certus-connector"
+    "certus-connector",
+    "components/example-helloworld-dylib",
+    "apps/dynamic-loading-example"
 ]
 
 # SPDK crates require pre-built native libraries at deps/spdk-build/.
@@ -37,7 +39,9 @@ default-members = [
     "components/component-framework/crates/component-framework",
     "components/component-framework/examples",
     "components/example-helloworld",
+    "components/example-helloworld-dylib",
     "apps/helloworld-mainline",
+    "apps/dynamic-loading-example",
     "components/logger",
     "components/gpu-services"
 ]
@@ -69,3 +73,4 @@ extent-manager = { path = "components/extent-manager" }
 gpu-services = { path = "components/gpu-services" }
 certus-connector = { path = "certus-connector" }
 creusot-std = "0.12.0-dev"
+libloading = "0.8"

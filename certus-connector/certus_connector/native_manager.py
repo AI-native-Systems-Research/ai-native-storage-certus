@@ -98,7 +98,6 @@ class NativeCertusOffloadingManager(OffloadingManager):
             self._events.append(
                 OffloadingEvent(
                     keys=evicted_keys,
-                    block_size=0,
                     medium=CertusLoadStoreSpec.medium(),
                     removed=True,
                 )
