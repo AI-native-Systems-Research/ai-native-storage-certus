@@ -135,21 +135,21 @@ jobs:
         continue-on-error: true
         run: |
           unset CARGO RUSTUP_HOME CARGO_HOME
-          cargo kani --package dispatch-map
+          rustup run nightly-2025-11-21 cargo kani --package dispatch-map
 
       - name: Run Kani harnesses — example-helloworld
         id: kani-helloworld
         continue-on-error: true
         run: |
           unset CARGO RUSTUP_HOME CARGO_HOME
-          cargo kani --package example-helloworld
+          rustup run nightly-2025-11-21 cargo kani --package example-helloworld
 
       - name: Run Kani harnesses — component-core
         id: kani-component-core
         continue-on-error: true
         run: |
           unset CARGO RUSTUP_HOME CARGO_HOME
-          cargo kani --package component-core
+          rustup run nightly-2025-11-21 cargo kani --package component-core
 
       # Always push unstable-kani as long as the merge succeeded.
       - name: Push updated unstable-kani
