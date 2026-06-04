@@ -83,15 +83,16 @@ jobs:
           path: |
             ~/.cargo/bin/cargo-kani
             ~/.kani/
-          key: kani-0.67.0-v2-${{ runner.os }}
+          key: kani-0.67.0-v3-${{ runner.os }}
 
       - name: Install Kani verifier
         id: kani-install
         if: steps.kani-cache.outputs.cache-hit != 'true'
         continue-on-error: true
         run: |
-          cargo install kani-verifier --version 0.67.0 --locked
-          cargo kani setup
+          curl -sSL https://github.com/model-checking/kani/releases/download/kani-0.67.0/kani-0.67.0-x86_64-unknown-linux-gnu.tar.gz \
+            | tar xz
+          ./kani-0.67.0-x86_64-unknown-linux-gnu/setup.sh
 
       # Advisory: continue-on-error means failures show as warnings,
       # not as job failures, so this check never blocks PR merges.
@@ -119,13 +120,15 @@ jobs:
         continue-on-error: true
         run: git push origin unstable-kani
 
-      # Open an issue if any Kani harness failed — visibility without blocking.
+      # Open an issue only when a harness actually fails — not for install failures.
+      # This prevents the ~10 daily noise issues caused by build environment problems.
       - name: Open issue on Kani failure
         continue-on-error: true
         if: |
-          steps.kani-dispatch-map.outcome == 'failure' ||
-          steps.kani-helloworld.outcome == 'failure' ||
-          steps.kani-component-core.outcome == 'failure'
+          steps.kani-install.outcome == 'success' &&
+          (steps.kani-dispatch-map.outcome == 'failure' ||
+           steps.kani-helloworld.outcome == 'failure' ||
+           steps.kani-component-core.outcome == 'failure')
         uses: actions/github-script@v7
         with:
           script: |
