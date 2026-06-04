@@ -20,14 +20,14 @@ If any prerequisite is missing, inform the user and stop.
    pip install z3-solver
    ```
 
-2. Clone the Creusot repo into `certus/tools/creusot/creusot` (if not already cloned):
+2. Clone the Creusot repo into `tools/creusot/creusot` (if not already cloned):
    ```
-   git clone https://github.com/creusot-rs/creusot certus/tools/creusot/creusot
+   git clone https://github.com/creusot-rs/creusot tools/creusot/creusot
    ```
 
 3. Run the install script with `--external z3` (uses the pip-installed z3):
    ```
-   cd certus/tools/creusot/creusot && ./INSTALL --external z3
+   cd tools/creusot/creusot && ./INSTALL --external z3
    ```
    This installs cargo-creusot, creusot-rustc, Why3, why3find, Alt-Ergo, CVC4, and CVC5.
 
@@ -38,7 +38,7 @@ If any prerequisite is missing, inform the user and stop.
           ~/.local/share/creusot/_opam/lib/why3find/packages/creusot
    ```
 
-5. Add Creusot bin path to ~/.bash_profile:
+5. Add Creusot bin path to `~/.bash_profile`:
    ```
    export PATH="$HOME/.local/share/creusot/bin:$PATH"
    ```
@@ -47,13 +47,16 @@ If any prerequisite is missing, inform the user and stop.
    - Run `cargo creusot version` — should show version info for all components
    - Build and prove the test example:
      ```
-     cd certus/tools/creusot/creusot-test-example
+     cd tools/creusot/creusot-test-example
      cargo clean
      cargo creusot
      ```
-   - Confirm output shows "Proved (4 files) ✔"
-   - Note: `cargo clean` is required before the first `cargo creusot` run if `cargo build` was previously executed (stale artifacts block the Creusot translation pass)
+   - Confirm output shows `Proved (4 files) ✔`
+   - Note: `cargo clean` is required before the first `cargo creusot` run if `cargo build`
+     was previously executed (stale artifacts block the Creusot translation pass)
 
 ## Notes
-- Z3 4.16.0 (from pip) is newer than the recommended 4.15.3 — this produces a warning but works fine.
+- Z3 4.16.0 (from pip) is newer than the recommended 4.15 — produces a warning but works fine.
 - The `--external z3` flag tells Creusot to use the system z3 rather than downloading its own.
+- For proofs that SMT solvers cannot discharge (e.g. modular arithmetic with variable
+  divisors), Coq can be added as an additional prover — see `tools-creusot-coq-install`.
