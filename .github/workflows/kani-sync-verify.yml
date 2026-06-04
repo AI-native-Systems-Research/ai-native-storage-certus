@@ -90,13 +90,17 @@ jobs:
         if: steps.kani-cache.outputs.cache-hit != 'true'
         continue-on-error: true
         run: |
-          mkdir -p /tmp/kani-download
           curl -sSL https://github.com/model-checking/kani/releases/download/kani-0.67.0/kani-0.67.0-x86_64-unknown-linux-gnu.tar.gz \
-            | tar xz -C /tmp/kani-download
-          find /tmp/kani-download -name "setup.sh" | head -1 | xargs bash
-          # Ensure cargo-kani is in ~/.cargo/bin so subsequent steps can find it
-          find /tmp/kani-download -name "cargo-kani" -type f \
-            -exec install -m755 {} ~/.cargo/bin/ \;
+            -o /tmp/kani.tar.gz
+          mkdir -p /tmp/kani-release
+          tar xzf /tmp/kani.tar.gz -C /tmp/kani-release
+          KANI_DIR=$(find /tmp/kani-release -maxdepth 1 -mindepth 1 -type d | head -1)
+          echo "Kani dir: $KANI_DIR"
+          ls "$KANI_DIR/bin/"
+          mkdir -p ~/.cargo/bin
+          cp "$KANI_DIR/bin/cargo-kani" ~/.cargo/bin/cargo-kani
+          chmod +x ~/.cargo/bin/cargo-kani
+          cargo kani setup
 
       # Advisory: continue-on-error means failures show as warnings,
       # not as job failures, so this check never blocks PR merges.
