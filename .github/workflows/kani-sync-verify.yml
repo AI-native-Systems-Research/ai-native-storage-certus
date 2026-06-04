@@ -66,13 +66,11 @@ jobs:
             exit 1
           fi
 
-      # Kani requires a specific nightly toolchain. Pin to the version
-      # that matches the installed kani-verifier (see cache key below).
+      # Kani requires nightly-2025-11-21 at runtime (cargo metadata, harness
+      # compilation). This step always runs — even on cache hits — so cargo-kani
+      # can always find the toolchain regardless of cache state.
       - name: Install Rust nightly
-        continue-on-error: true
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly-2025-11-21
+        run: rustup toolchain install nightly-2025-11-21 --no-self-update --profile minimal
 
       # Cache both the cargo-kani binary and the Kani toolchain directory
       # (~/.kani/) which contains CBMC and supporting tools (~1 GB).
@@ -90,10 +88,7 @@ jobs:
         if: steps.kani-cache.outputs.cache-hit != 'true'
         continue-on-error: true
         run: |
-          # 1. Ensure nightly-2025-11-21 is installed — required by cargo-kani at
-          #    runtime to run 'cargo metadata' and compile harnesses.
-          rustup toolchain install nightly-2025-11-21 --no-self-update --profile minimal
-          # 2. Extract pre-built Kani backend tools (CBMC etc.) from GitHub release.
+          # 1. Extract pre-built Kani backend tools (CBMC etc.) from GitHub release.
           mkdir -p ~/.kani
           curl -sSL https://github.com/model-checking/kani/releases/download/kani-0.67.0/kani-0.67.0-x86_64-unknown-linux-gnu.tar.gz \
             | tar xz -C ~/.kani/
