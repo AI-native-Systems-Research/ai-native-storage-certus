@@ -369,7 +369,6 @@ impl DispatcherComponent {
         };
 
         if drives.is_empty() {
-            // No block devices: mark as converted with a synthetic offset.
             let block_offset = job.key * 4096;
             let _ = dm.convert_to_storage(job.key, block_offset);
             return;
@@ -410,8 +409,7 @@ impl DispatcherComponent {
 
         let block_offset = write_handle.extent_offset();
         let start_lba = block_offset / block_size as u64;
-
-        if Self::write_buffer_to_ssd(&**drive, &temp_buf, start_lba, total_bytes).is_err() {
+        if let Err(_e) = Self::write_buffer_to_ssd(&**drive, &temp_buf, start_lba, total_bytes) {
             let _ = dm.release_read(job.key);
             return; // write_handle drops → abort
         }
