@@ -130,7 +130,7 @@ jobs:
         id: kani-dispatch-map
         continue-on-error: true
         run: |
-          cargo kani --package dispatch-map
+          RUST_BACKTRACE=1 cargo kani --package dispatch-map
 
       - name: Run Kani harnesses — example-helloworld
         id: kani-helloworld
