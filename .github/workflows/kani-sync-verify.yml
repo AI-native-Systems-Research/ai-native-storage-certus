@@ -94,6 +94,9 @@ jobs:
           curl -sSL https://github.com/model-checking/kani/releases/download/kani-0.67.0/kani-0.67.0-x86_64-unknown-linux-gnu.tar.gz \
             | tar xz -C /tmp/kani-download
           find /tmp/kani-download -name "setup.sh" | head -1 | xargs bash
+          # Ensure cargo-kani is in ~/.cargo/bin so subsequent steps can find it
+          find /tmp/kani-download -name "cargo-kani" -type f \
+            -exec install -m755 {} ~/.cargo/bin/ \;
 
       # Advisory: continue-on-error means failures show as warnings,
       # not as job failures, so this check never blocks PR merges.
