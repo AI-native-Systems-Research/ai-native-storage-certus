@@ -90,9 +90,10 @@ jobs:
         if: steps.kani-cache.outputs.cache-hit != 'true'
         continue-on-error: true
         run: |
+          mkdir -p /tmp/kani-download
           curl -sSL https://github.com/model-checking/kani/releases/download/kani-0.67.0/kani-0.67.0-x86_64-unknown-linux-gnu.tar.gz \
-            | tar xz
-          ./kani-0.67.0-x86_64-unknown-linux-gnu/setup.sh
+            | tar xz -C /tmp/kani-download
+          find /tmp/kani-download -name "setup.sh" | head -1 | xargs bash
 
       # Advisory: continue-on-error means failures show as warnings,
       # not as job failures, so this check never blocks PR merges.
