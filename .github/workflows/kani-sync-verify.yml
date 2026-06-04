@@ -97,11 +97,15 @@ jobs:
 
       # Always runs (even on cache hit) — write the full toolchain triple so
       # cargo-kani can construct ~/.rustup/toolchains/<triple>/bin/cargo correctly.
-      - name: Fix rust-toolchain-version
+      - name: Fix Kani toolchain setup
         run: |
           TOOLCHAIN=$(rustup toolchain list | grep "nightly-2025-11-21" | head -1 | awk '{print $1}')
-          echo "$TOOLCHAIN" > ~/.kani/kani-0.67.0/rust-toolchain-version
-          echo "rust-toolchain-version set to: $TOOLCHAIN"
+          # Write WITHOUT trailing newline — strace showed \n was included in path lookup
+          printf "%s" "$TOOLCHAIN" > ~/.kani/kani-0.67.0/rust-toolchain-version
+          # Create toolchain/ symlink — this is what 'cargo kani setup' creates.
+          # Kani looks for cargo at ~/.kani/kani-VERSION/toolchain/bin/cargo.
+          ln -sfn "${HOME}/.rustup/toolchains/${TOOLCHAIN}" ~/.kani/kani-0.67.0/toolchain
+          echo "toolchain symlink: $(readlink ~/.kani/kani-0.67.0/toolchain)"
 
       - name: Kani environment diagnostics
         run: |
@@ -134,29 +138,19 @@ jobs:
         id: kani-dispatch-map
         continue-on-error: true
         run: |
-          NIGHTLY_CARGO="${HOME}/.rustup/toolchains/nightly-2025-11-21-x86_64-unknown-linux-gnu/bin/cargo"
-          strace -e trace=execve,stat,openat -f \
-            env CARGO="${NIGHTLY_CARGO}" RUSTUP_HOME="${HOME}/.rustup" CARGO_HOME="${HOME}/.cargo" \
-            "${HOME}/.cargo/bin/cargo-kani" kani --package dispatch-map 2>&1 \
-            | grep -E "ENOENT|execve.*cargo" | head -30 || true
-          CARGO="${NIGHTLY_CARGO}" \
-          RUSTUP_HOME="${HOME}/.rustup" \
-          CARGO_HOME="${HOME}/.cargo" \
-          "${HOME}/.cargo/bin/cargo-kani" kani --package dispatch-map
+          cargo kani --package dispatch-map
 
       - name: Run Kani harnesses — example-helloworld
         id: kani-helloworld
         continue-on-error: true
         run: |
-          unset CARGO RUSTUP_HOME CARGO_HOME
-          rustup run nightly-2025-11-21 cargo kani --package example-helloworld
+          cargo kani --package example-helloworld
 
       - name: Run Kani harnesses — component-core
         id: kani-component-core
         continue-on-error: true
         run: |
-          unset CARGO RUSTUP_HOME CARGO_HOME
-          rustup run nightly-2025-11-21 cargo kani --package component-core
+          cargo kani --package component-core
 
       # Always push unstable-kani as long as the merge succeeded.
       - name: Push updated unstable-kani
