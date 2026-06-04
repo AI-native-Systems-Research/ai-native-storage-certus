@@ -6,6 +6,7 @@
 
 mod binder;
 mod config;
+mod cuda_ffi;
 mod loader;
 mod resolver;
 mod runtime;
@@ -123,25 +124,29 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // 5. Find the dispatcher component for gRPC service.
-    let dispatcher_component = stack
+    let dispatcher_comp = stack
         .components
         .iter()
         .find(|c| c.name == "dispatcher")
-        .map(|c| c.component.attach())
         .ok_or("no component named 'dispatcher' found in stack")?;
 
-    start_grpc_server(cfg.server, dispatcher_component, stack)
+    let dispatcher: std::sync::Arc<dyn interfaces::IDispatcher + Send + Sync> = unsafe {
+        runtime::query_by_name_pub(&*dispatcher_comp.component, "IDispatcher")
+    }
+    .ok_or("dispatcher does not provide IDispatcher for gRPC service")?;
+
+    start_grpc_server(cfg.server, dispatcher, stack)
 }
 
 #[tokio::main]
 async fn start_grpc_server(
     server_config: config::ServerConfig,
-    dispatcher_component: component_core::component_ref::ComponentRef,
+    dispatcher: std::sync::Arc<dyn interfaces::IDispatcher + Send + Sync>,
     stack: runtime::ComponentStack,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let listen_addr = server_config.listen.as_deref().unwrap_or("0.0.0.0:50051");
 
-    let svc = DispatcherService::new(dispatcher_component.clone());
+    let svc = DispatcherService::new(dispatcher);
     let addr = listen_addr.parse()?;
 
     let mut server = Server::builder();

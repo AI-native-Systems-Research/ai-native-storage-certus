@@ -67,5 +67,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     std::env::set_var("PROTOC", &protoc);
     tonic_build::compile_protos("proto/dispatcher.proto")?;
+
+    // Link CUDA runtime for IPC handle management in the gRPC service.
+    println!("cargo:rustc-link-search=native=/usr/local/cuda/targets/x86_64-linux/lib");
+    println!("cargo:rustc-link-lib=dylib=cudart");
+
     Ok(())
 }

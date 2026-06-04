@@ -21,6 +21,16 @@ use interfaces::{
 ///
 /// SAFETY: The caller must ensure that `name` corresponds to the actual trait type `T`.
 /// This is safe when both the host and dylib share the same trait definition (same ABI).
+pub unsafe fn query_by_name_pub<T: Send + Sync + 'static + ?Sized>(
+    component: &dyn IUnknown,
+    name: &str,
+) -> Option<Arc<T>>
+where
+    Arc<T>: Any + Send + Sync,
+{
+    query_by_name(component, name)
+}
+
 unsafe fn query_by_name<T: Send + Sync + 'static + ?Sized>(
     component: &dyn IUnknown,
     name: &str,
