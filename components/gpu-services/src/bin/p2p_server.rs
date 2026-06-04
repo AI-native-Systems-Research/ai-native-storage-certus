@@ -14,7 +14,6 @@ use std::sync::{Arc, Mutex};
 
 use clap::{Parser, ValueEnum};
 
-use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent;
 use component_core::binding::bind;
 use component_core::iunknown::query;
 use component_core::query_interface;
@@ -22,7 +21,6 @@ use gpu_services::cuda_ffi;
 use gpu_services::dma::create_spdk_dma_buffer_from_gpu_bar;
 use gpu_services::GpuServicesComponent;
 use interfaces::{IBlockDevice, IGpuServices, ILogger};
-use spdk_env::SPDKEnvComponent;
 
 #[derive(Clone, Copy, ValueEnum)]
 enum TransferMode {
@@ -63,9 +61,11 @@ struct Cli {
 }
 
 struct ServerContext {
-    block_dev: Arc<BlockDeviceSpdkNvmeComponent>,
     #[allow(dead_code)]
-    spdk_env: Arc<SPDKEnvComponent>,
+    _block_dev: Arc<dyn component_core::IUnknown + Send + Sync>,
+    block_dev: Arc<dyn IBlockDevice + Send + Sync>,
+    #[allow(dead_code)]
+    spdk_env: Arc<dyn spdk_env::ISPDKEnv + Send + Sync>,
     #[allow(dead_code)]
     gpu_component: Arc<GpuServicesComponent>,
     #[allow(dead_code)]
@@ -130,8 +130,8 @@ fn initialize_stack(pci: Option<&str>) -> Result<ServerContext, String> {
     spdk_env::checks::check_vfio_available().map_err(|e| format!("VFIO: {e}"))?;
     spdk_env::checks::check_hugepages().map_err(|e| format!("hugepages: {e}"))?;
 
-    let spdk_env_comp = SPDKEnvComponent::new_default();
-    let block_dev = BlockDeviceSpdkNvmeComponent::new_default();
+    let spdk_env_comp = spdk_env::SPDKEnvComponent::new_default();
+    let block_dev = block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent::new_default();
     let logger = logger::LoggerComponent::new_default();
     let gpu_component = GpuServicesComponent::new_default();
 
@@ -212,8 +212,9 @@ fn initialize_stack(pci: Option<&str>) -> Result<ServerContext, String> {
     );
 
     Ok(ServerContext {
-        block_dev,
-        spdk_env: spdk_env_comp,
+        _block_dev: block_dev as Arc<dyn component_core::IUnknown + Send + Sync>,
+        block_dev: ibd,
+        spdk_env: spdk_env_comp as Arc<dyn spdk_env::ISPDKEnv + Send + Sync>,
         gpu_component,
         logger,
         sector_size: ns.sector_size as usize,
@@ -277,9 +278,7 @@ fn do_chunked_read(
 ) -> Result<(), String> {
     let sectors_per_chunk = chunk_size / ctx.sector_size;
 
-    let ibd = query::<dyn IBlockDevice + Send + Sync>(&*ctx.block_dev)
-        .ok_or("IBlockDevice query failed".to_string())?;
-    let channels = ibd
+    let channels = ctx.block_dev
         .connect_client()
         .map_err(|e| format!("connect_client: {e}"))?;
 
