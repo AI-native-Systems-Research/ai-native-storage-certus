@@ -83,26 +83,24 @@ jobs:
           path: |
             ~/.cargo/bin/cargo-kani
             ~/.kani/
-          key: kani-0.67.0-v3-${{ runner.os }}
+          key: kani-0.67.0-v4-${{ runner.os }}
 
       - name: Install Kani verifier
         id: kani-install
         if: steps.kani-cache.outputs.cache-hit != 'true'
         continue-on-error: true
         run: |
-          # Step 1: install cargo-kani (the Cargo subcommand wrapper) using the
-          # pinned nightly toolchain so it compiles against the right Rust version.
-          cargo +nightly-2025-11-21 install kani-verifier --version 0.67.0 --locked
-          # Step 2: instead of running 'cargo kani setup' (which downloads ~1GB),
-          # extract the pre-built CBMC and Kani backend tools from the GitHub release
-          # and place them where cargo-kani expects them (~/.kani/kani-0.67.0/bin).
-          # Extract the pre-built CBMC/Kani tools into ~/.kani/
+          # 1. Extract pre-built Kani backend tools (CBMC etc.) from GitHub release.
+          #    Done FIRST so the files exist even if cargo install below fails.
           mkdir -p ~/.kani
           curl -sSL https://github.com/model-checking/kani/releases/download/kani-0.67.0/kani-0.67.0-x86_64-unknown-linux-gnu.tar.gz \
             | tar xz -C ~/.kani/
-          # rust-toolchain-version is written by 'cargo kani setup' but is not
-          # in the tarball — create it manually with the pinned toolchain version.
+          # 2. Create rust-toolchain-version — written by 'cargo kani setup'
+          #    but not included in the tarball.
           echo "nightly-2025-11-21" > ~/.kani/kani-0.67.0/rust-toolchain-version
+          # 3. Install cargo-kani wrapper using the pinned nightly toolchain.
+          #    This is compiled from source; must use the same nightly as Kani.
+          cargo +nightly-2025-11-21 install kani-verifier --version 0.67.0 --locked
 
       # Advisory: continue-on-error means failures show as warnings,
       # not as job failures, so this check never blocks PR merges.
