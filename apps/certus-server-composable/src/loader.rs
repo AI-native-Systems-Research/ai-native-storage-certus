@@ -31,8 +31,26 @@ pub fn load_library(path: &Path) -> Result<LoadedLibrary, String> {
     // SAFETY: We trust the .so was built with the same compiler and links
     // against the same shared crates (component-core). ABI compatibility
     // is the operator's responsibility per project assumptions.
-    let library = unsafe { Library::new(path) }
-        .map_err(|e| format!("failed to load '{}': {e}", path.display()))?;
+    // Use RTLD_GLOBAL so SPDK/DPDK shared library symbols are visible
+    // across all loaded component dylibs (single SPDK process state).
+    // Use dlopen with RTLD_GLOBAL so SPDK/DPDK shared library symbols are
+    // visible across all loaded component dylibs (single SPDK process state).
+    let c_path = std::ffi::CString::new(path.to_str().unwrap_or(""))
+        .map_err(|_| format!("invalid path: {}", path.display()))?;
+    let handle = unsafe { libc::dlopen(c_path.as_ptr(), libc::RTLD_LAZY | libc::RTLD_GLOBAL) };
+    if handle.is_null() {
+        let err = unsafe { std::ffi::CStr::from_ptr(libc::dlerror()) };
+        return Err(format!(
+            "failed to load '{}': {}",
+            path.display(),
+            err.to_string_lossy()
+        ));
+    }
+    // SAFETY: handle is a valid dlopen result. Wrap in the unix-specific Library
+    // then convert to the cross-platform type.
+    let library = unsafe {
+        Library::from(libloading::os::unix::Library::from_raw(handle as *mut std::ffi::c_void))
+    };
 
     Ok(LoadedLibrary {
         library: Arc::new(library),

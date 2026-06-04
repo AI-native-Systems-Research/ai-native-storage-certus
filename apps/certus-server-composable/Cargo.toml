@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 component-core.workspace = true
 interfaces = { workspace = true, features = ["spdk"] }
+libc = "0.2"
 libloading.workspace = true
 
 serde = { version = "1", features = ["derive"] }
