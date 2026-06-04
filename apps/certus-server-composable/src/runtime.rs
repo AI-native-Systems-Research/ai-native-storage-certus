@@ -287,6 +287,17 @@ fn initialize_data_drives(
         });
 
     if bd_instances.is_empty() {
+        // Initialize SPDK if spdk-env component is present.
+        if let Some(spdk_comp) = components.iter().find(|c| c.name == "spdk-env") {
+            if let Some(spdk) = unsafe {
+                query_by_name::<dyn ISPDKEnv + Send + Sync>(&*spdk_comp.component, "ISPDKEnv")
+            } {
+                spdk.init()
+                    .map_err(|e| format!("SPDK environment init failed: {e}"))?;
+                eprintln!("[certus-composable] SPDK environment initialized");
+            }
+        }
+
         // No external block-devices: initialize dispatcher with data_pci_addrs from config.
         if let Some(dispatcher_comp) = components.iter().find(|c| c.name == "dispatcher") {
             if let Some(dispatcher) = unsafe {
@@ -296,12 +307,20 @@ fn initialize_data_drives(
                 )
             } {
                 let pci_addrs = config.server.device_pci.clone().unwrap_or_default();
+                if pci_addrs.is_empty() && config.server.drive_count.is_none() {
+                    return Err(
+                        "server.device_pci or server.drive_count must be specified in config"
+                            .to_string(),
+                    );
+                }
                 let format_on_init = config.server.format.unwrap_or(false);
+                let drive_count = config.server.drive_count;
                 dispatcher
                     .initialize(interfaces::DispatcherConfig {
                         data_pci_addrs: pci_addrs,
                         format_on_init,
                         poller_base_cpu: config.server.poller_base_cpu,
+                        drive_count,
                         ..Default::default()
                     })
                     .map_err(|e| format!("dispatcher initialize failed: {e}"))?;

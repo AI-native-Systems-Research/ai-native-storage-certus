@@ -57,6 +57,10 @@ pub struct DispatcherConfig {
     /// Set this to a dedicated core range to give each drive exclusive use of
     /// a core, which is required for SPDK busy-polling to achieve full bandwidth.
     pub poller_base_cpu: Option<usize>,
+    /// Auto-select the first N discovered NVMe drives.
+    /// Used when `data_pci_addrs` is empty — the dispatcher enumerates
+    /// available devices via SPDK and selects this many.
+    pub drive_count: Option<usize>,
 }
 
 impl Default for DispatcherConfig {
@@ -71,6 +75,7 @@ impl Default for DispatcherConfig {
             ssd_eviction_batch_size: 64,
             ssd_eviction_interval_secs: 5,
             poller_base_cpu: None,
+            drive_count: None,
         }
     }
 }

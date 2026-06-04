@@ -738,10 +738,42 @@ impl IDispatcher for DispatcherComponent {
 
         let use_external_drives = !self.external_block_devices.is_empty();
 
+        // Resolve PCI addresses: use explicit list, or auto-select from discovered devices.
+        let mut config = config;
         if config.data_pci_addrs.is_empty() && !use_external_drives {
-            return Err(DispatcherError::InvalidParameter(
-                "data_pci_addrs must not be empty (or use add_data_drive before initialize)".into(),
-            ));
+            if let Some(count) = config.drive_count {
+                if let Ok(spdk_env) = self.spdk_env.get() {
+                    const NVME_CLASS_CODE: u32 = 0x010802;
+                    let devices = spdk_env.devices();
+                    let mut nvme_devices: Vec<_> = devices
+                        .iter()
+                        .filter(|d| d.id.class_id == NVME_CLASS_CODE)
+                        .collect();
+                    nvme_devices.sort_by_key(|d| if d.numa_node == 0 { 0 } else { 1 });
+                    if nvme_devices.len() < count {
+                        return Err(DispatcherError::InvalidParameter(format!(
+                            "drive_count={count} but only {} NVMe device(s) discovered",
+                            nvme_devices.len()
+                        )));
+                    }
+                    config.data_pci_addrs = nvme_devices[..count]
+                        .iter()
+                        .map(|d| d.address.to_string())
+                        .collect();
+                    self.log_info(&format!(
+                        "dispatcher: auto-selected {} drive(s): {:?}",
+                        count, config.data_pci_addrs
+                    ));
+                } else {
+                    return Err(DispatcherError::InvalidParameter(
+                        "drive_count specified but spdk_env not bound".into(),
+                    ));
+                }
+            } else {
+                return Err(DispatcherError::InvalidParameter(
+                    "data_pci_addrs or drive_count must be specified (or use add_data_drive before initialize)".into(),
+                ));
+            }
         }
 
         // Create N block devices and N extent managers.
