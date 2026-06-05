@@ -10,16 +10,19 @@ use block_device_filesys::{
 };
 use interfaces::DmaBuffer;
 
-unsafe extern "C" fn heap_free(ptr: *mut std::ffi::c_void) {
-    // SAFETY: ptr was allocated via Vec→Box→into_raw.
-    let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, 0));
+unsafe extern "C" fn aligned_free(ptr: *mut std::ffi::c_void) {
+    libc::free(ptr);
 }
 
 fn alloc_dma_buffer(size: usize) -> DmaBuffer {
-    let data = vec![0u8; size];
-    let ptr = Box::into_raw(data.into_boxed_slice()) as *mut std::ffi::c_void;
-    // SAFETY: ptr is valid heap memory of `size` bytes.
-    unsafe { DmaBuffer::from_raw(ptr, size, heap_free, -1).unwrap() }
+    // SAFETY: posix_memalign returns 512-byte aligned memory required for O_DIRECT.
+    unsafe {
+        let mut ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+        let ret = libc::posix_memalign(&mut ptr, 512, size);
+        assert_eq!(ret, 0, "posix_memalign failed");
+        std::ptr::write_bytes(ptr as *mut u8, 0, size);
+        DmaBuffer::from_raw(ptr, size, aligned_free, -1).unwrap()
+    }
 }
 
 fn alloc_dma_buffer_with_data(data: &[u8]) -> DmaBuffer {
@@ -413,6 +416,106 @@ fn invalid_file_path_initialization_error() {
     let comp = BlockDeviceFilesysComponent::create("/nonexistent/path/dev.img", 4096, 256);
     let result = comp.initialize();
     assert!(result.is_err());
+}
+
+#[test]
+fn data_integrity_multi_block_patterns() {
+    let (comp, channels, _dir) = setup_component(4096, 256);
+    let block_size = 4096;
+    let num_test_blocks = 64u64;
+
+    // Write a unique pattern to each block: block N gets bytes [N, N, N, ...].
+    for lba in 0..num_test_blocks {
+        let pattern = (lba & 0xFF) as u8;
+        let data = vec![pattern; block_size];
+        let buf = alloc_dma_buffer_with_data(&data);
+        channels
+            .command_tx
+            .send(Command::WriteSync {
+                ns_id: 1,
+                lba,
+                buf: Arc::new(buf),
+            })
+            .unwrap();
+        let completion = channels.completion_rx.recv().unwrap();
+        assert!(
+            matches!(completion, Completion::WriteDone { result: Ok(()), .. }),
+            "write failed at lba {lba}"
+        );
+    }
+
+    // Read back every block and verify the pattern matches.
+    for lba in 0..num_test_blocks {
+        let expected_pattern = (lba & 0xFF) as u8;
+        let read_buf = alloc_dma_buffer(block_size);
+        let read_buf_arc = Arc::new(Mutex::new(read_buf));
+        channels
+            .command_tx
+            .send(Command::ReadSync {
+                ns_id: 1,
+                lba,
+                buf: Arc::clone(&read_buf_arc),
+            })
+            .unwrap();
+        let completion = channels.completion_rx.recv().unwrap();
+        assert!(
+            matches!(completion, Completion::ReadDone { result: Ok(()), .. }),
+            "read failed at lba {lba}"
+        );
+
+        let guard = read_buf_arc.lock().unwrap();
+        let slice = guard.as_slice();
+        for (i, &byte) in slice.iter().enumerate() {
+            assert_eq!(
+                byte, expected_pattern,
+                "data mismatch at lba {lba}, offset {i}: expected 0x{expected_pattern:02X}, got 0x{byte:02X}"
+            );
+        }
+    }
+
+    // Overwrite a subset (blocks 10..20) with a different pattern, verify
+    // both the overwritten range and the untouched blocks.
+    for lba in 10..20 {
+        let pattern = 0xFE_u8;
+        let data = vec![pattern; block_size];
+        let buf = alloc_dma_buffer_with_data(&data);
+        channels
+            .command_tx
+            .send(Command::WriteSync {
+                ns_id: 1,
+                lba,
+                buf: Arc::new(buf),
+            })
+            .unwrap();
+        let _ = channels.completion_rx.recv().unwrap();
+    }
+
+    for lba in 0..num_test_blocks {
+        let expected = if (10..20).contains(&lba) {
+            0xFE_u8
+        } else {
+            (lba & 0xFF) as u8
+        };
+        let read_buf = alloc_dma_buffer(block_size);
+        let read_buf_arc = Arc::new(Mutex::new(read_buf));
+        channels
+            .command_tx
+            .send(Command::ReadSync {
+                ns_id: 1,
+                lba,
+                buf: Arc::clone(&read_buf_arc),
+            })
+            .unwrap();
+        let _ = channels.completion_rx.recv().unwrap();
+
+        let guard = read_buf_arc.lock().unwrap();
+        assert!(
+            guard.as_slice().iter().all(|&b| b == expected),
+            "integrity check failed at lba {lba}: expected all 0x{expected:02X}"
+        );
+    }
+
+    comp.shutdown().unwrap();
 }
 
 #[test]

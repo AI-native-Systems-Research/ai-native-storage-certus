@@ -107,6 +107,8 @@ impl DeviceConfig {
 ///
 /// - If the file does not exist: creates it and pre-allocates to full size via fallocate.
 /// - If the file exists: verifies its size matches the expected total_bytes.
+/// - Opens with O_DIRECT to bypass the kernel page cache. Falls back to buffered IO
+///   on filesystems that do not support O_DIRECT (e.g., tmpfs).
 ///
 /// Returns an owned file descriptor on success.
 pub fn open_or_create_backing_file(cfg: &DeviceConfig) -> Result<OwnedFd, String> {
@@ -114,12 +116,7 @@ pub fn open_or_create_backing_file(cfg: &DeviceConfig) -> Result<OwnedFd, String
     let total = cfg.total_bytes();
 
     if path.exists() {
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .custom_flags(libc::O_DIRECT)
-            .open(path)
-            .map_err(|e| format!("failed to open {}: {e}", path.display()))?;
+        let file = try_open_direct(path, false)?;
 
         let meta = file
             .metadata()
@@ -151,14 +148,7 @@ pub fn open_or_create_backing_file(cfg: &DeviceConfig) -> Result<OwnedFd, String
             ));
         }
 
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .custom_flags(libc::O_DIRECT)
-            .open(path)
-            .map_err(|e| format!("failed to create {}: {e}", path.display()))?;
-
+        let file = try_open_direct(path, true)?;
         let raw_fd = file.into_raw_fd();
 
         // SAFETY: raw_fd is valid. fallocate pre-allocates disk space without writing.
@@ -173,6 +163,32 @@ pub fn open_or_create_backing_file(cfg: &DeviceConfig) -> Result<OwnedFd, String
 
         // SAFETY: raw_fd is valid from OpenOptions above.
         Ok(unsafe { OwnedFd::from_raw_fd(raw_fd) })
+    }
+}
+
+/// Try to open a file with O_DIRECT; fall back to buffered IO if the filesystem
+/// does not support direct IO (EINVAL).
+fn try_open_direct(path: &Path, create: bool) -> Result<std::fs::File, String> {
+    let mut opts = OpenOptions::new();
+    opts.read(true).write(true).custom_flags(libc::O_DIRECT);
+    if create {
+        opts.create_new(true);
+    }
+
+    match opts.open(path) {
+        Ok(f) => Ok(f),
+        Err(e) if e.raw_os_error() == Some(libc::EINVAL) => {
+            // O_DIRECT not supported on this filesystem — fall back.
+            let mut opts2 = OpenOptions::new();
+            opts2.read(true).write(true);
+            if create {
+                opts2.create_new(true);
+            }
+            opts2
+                .open(path)
+                .map_err(|e2| format!("failed to open {}: {e2}", path.display()))
+        }
+        Err(e) => Err(format!("failed to open {}: {e}", path.display())),
     }
 }
 
