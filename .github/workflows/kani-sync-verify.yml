@@ -41,7 +41,7 @@ jobs:
 
     steps:
       - name: Checkout unstable-kani
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
         with:
           ref: unstable-kani
           fetch-depth: 0
@@ -66,32 +66,162 @@ jobs:
             exit 1
           fi
 
-      # Kani requires a specific nightly toolchain. Pin to the version
-      # that matches the installed kani-verifier (see cache key below).
+      # Kani requires nightly-2025-11-21 at runtime (cargo metadata, harness
+      # compilation). This step always runs — even on cache hits — so cargo-kani
+      # can always find the toolchain regardless of cache state.
       - name: Install Rust nightly
-        continue-on-error: true
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly-2025-11-21
+        run: rustup toolchain install nightly-2025-11-21 --no-self-update
 
       # Cache both the cargo-kani binary and the Kani toolchain directory
       # (~/.kani/) which contains CBMC and supporting tools (~1 GB).
       - name: Cache Kani toolchain
         id: kani-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v4.2.2
         with:
           path: |
             ~/.cargo/bin/cargo-kani
             ~/.kani/
-          key: kani-0.67.0-v2-${{ runner.os }}
+          key: kani-0.67.0-v5-${{ runner.os }}
 
       - name: Install Kani verifier
         id: kani-install
         if: steps.kani-cache.outputs.cache-hit != 'true'
         continue-on-error: true
         run: |
-          cargo install kani-verifier --version 0.67.0 --locked
-          cargo kani setup
+          # 1. Extract pre-built Kani backend tools (CBMC etc.) from GitHub release.
+          mkdir -p ~/.kani
+          curl -sSL https://github.com/model-checking/kani/releases/download/kani-0.67.0/kani-0.67.0-x86_64-unknown-linux-gnu.tar.gz \
+            | tar xz -C ~/.kani/
+          # 2. Install cargo-kani wrapper using the pinned nightly toolchain.
+          cargo +nightly-2025-11-21 install kani-verifier --version 0.67.0 --locked
+
+      # Always runs (even on cache hit) — write the full toolchain triple and
+      # create the toolchain/ symlink that cargo-kani expects.
+      - name: Configure Kani toolchain
+        run: |
+          TOOLCHAIN=$(rustup toolchain list | grep "nightly-2025-11-21" | head -1 | awk '{print $1}')
+          printf "%s" "$TOOLCHAIN" > ~/.kani/kani-0.67.0/rust-toolchain-version
+          ln -sfn "${HOME}/.rustup/toolchains/${TOOLCHAIN}" ~/.kani/kani-0.67.0/toolchain
+
+      # spdk-sys build.rs runs bindgen on SPDK headers. Kani compiles the full
+      # workspace so this fires even for packages that don't use SPDK directly.
+      # Create minimal stub headers so bindgen can generate the FFI declarations
+      # without needing a real SPDK installation.
+      - name: Create SPDK stub headers for Kani workspace compilation
+        run: |
+          mkdir -p deps/spdk deps/spdk-build/include/spdk
+
+          # Minimal config.h — no ISA-L so the conditional link is skipped.
+          cat > deps/spdk-build/include/spdk/config.h << 'EOF'
+          /* Stub SPDK config header for Kani CI */
+          EOF
+
+          # All three wrapper.h includes in one stub file.
+          cat > deps/spdk-build/include/spdk/env.h << 'EOF'
+          #pragma once
+          #include <stddef.h>
+          #include <stdint.h>
+          #include <stdbool.h>
+          #define SPDK_MALLOC_DMA 1
+          #define SPDK_MALLOC_SHARE 2
+          struct spdk_pci_addr { uint32_t domain; uint8_t bus, dev, func; };
+          struct spdk_pci_id { uint16_t vendor_id, device_id, subvendor_id, subdevice_id; };
+          typedef struct spdk_pci_device spdk_pci_device;
+          typedef struct spdk_pci_driver spdk_pci_driver;
+          struct spdk_env_opts { char *name; };
+          void spdk_env_opts_init(struct spdk_env_opts *opts);
+          int  spdk_env_init(const struct spdk_env_opts *opts);
+          void spdk_env_fini(void);
+          void *spdk_zmalloc(size_t size, size_t align, uint64_t *phys_addr, int socket_id, uint32_t flags);
+          void  spdk_free(void *buf);
+          void *spdk_dma_zmalloc(size_t size, size_t align, uint64_t *phys_addr);
+          void  spdk_dma_free(void *buf);
+          typedef int (*spdk_pci_enum_cb)(void *ctx, spdk_pci_device *dev);
+          int spdk_pci_enumerate(spdk_pci_driver *driver, spdk_pci_enum_cb enum_cb, void *enum_ctx);
+          void spdk_pci_for_each_device(void *ctx, void (*fn)(void *ctx, spdk_pci_device *dev));
+          spdk_pci_driver *spdk_pci_get_driver(const char *name);
+          struct spdk_pci_addr spdk_pci_device_get_addr(spdk_pci_device *dev);
+          struct spdk_pci_id  spdk_pci_device_get_id(spdk_pci_device *dev);
+          uint16_t spdk_pci_device_get_domain(spdk_pci_device *dev);
+          uint8_t  spdk_pci_device_get_bus(spdk_pci_device *dev);
+          uint8_t  spdk_pci_device_get_dev(spdk_pci_device *dev);
+          uint8_t  spdk_pci_device_get_func(spdk_pci_device *dev);
+          uint16_t spdk_pci_device_get_vendor_id(spdk_pci_device *dev);
+          uint16_t spdk_pci_device_get_device_id(spdk_pci_device *dev);
+          uint16_t spdk_pci_device_get_subvendor_id(spdk_pci_device *dev);
+          uint16_t spdk_pci_device_get_subdevice_id(spdk_pci_device *dev);
+          int      spdk_pci_device_get_numa_id(spdk_pci_device *dev);
+          int      spdk_pci_device_get_serial_number(spdk_pci_device *dev, char *sn, size_t max_len);
+          EOF
+
+          printf '#pragma once\n#include "env.h"\n' > deps/spdk-build/include/spdk/env_dpdk.h
+
+          # Create empty stub .a files for all SPDK/DPDK libraries.
+          # Kani processes cargo:rustc-link-lib directives and fails if +whole-archive
+          # libraries are missing. Empty archives satisfy the linker search.
+          mkdir -p deps/spdk-build/lib
+          for lib in \
+            spdk_env_dpdk spdk_log spdk_util spdk_nvme spdk_trace spdk_dma \
+            spdk_keyring spdk_json spdk_jsonrpc spdk_rpc spdk_sock \
+            spdk_sock_posix spdk_thread \
+            rte_eal rte_kvargs rte_log rte_telemetry rte_argparse \
+            rte_mempool_ring rte_mempool rte_ring rte_bus_pci rte_bus_vdev \
+            rte_pci rte_power rte_timer rte_power_acpi rte_power_amd_pstate \
+            rte_power_cppc rte_power_intel_pstate rte_power_intel_uncore \
+            rte_power_kvm_vm rte_vhost rte_ethdev rte_meter rte_cryptodev \
+            rte_dmadev rte_hash rte_net rte_mbuf rte_rcu rte_cmdline rte_stack; do
+            ar rcs deps/spdk-build/lib/lib${lib}.a
+          done
+
+          cat > deps/spdk-build/include/spdk/nvme.h << 'EOF'
+          #pragma once
+          #include <stddef.h>
+          #include <stdint.h>
+          #include <stdbool.h>
+          typedef struct spdk_nvme_ctrlr spdk_nvme_ctrlr;
+          typedef struct spdk_nvme_ns    spdk_nvme_ns;
+          typedef struct spdk_nvme_qpair spdk_nvme_qpair;
+          struct spdk_nvme_ctrlr_opts  { uint32_t reserved[128]; };
+          struct spdk_nvme_ctrlr_data  { uint16_t vid; char mn[40]; char sn[20]; };
+          struct spdk_nvme_ns_data     { uint64_t nsze; uint32_t lbaf[16]; uint8_t flbas; };
+          struct spdk_nvme_cpl         { uint32_t cdw0; uint16_t sqhd, sqid, cid; uint16_t status; };
+          struct spdk_nvme_io_qpair_opts { uint32_t qsize; };
+          struct spdk_nvme_cmd         { uint32_t opc:8, fuse:2, rsvd1:4, psdt:2, cid:16; uint32_t nsid; uint64_t rsvd2; uint64_t mptr; uint64_t prp1, prp2; uint32_t cdw10, cdw11, cdw12, cdw13, cdw14, cdw15; };
+          struct spdk_nvme_ns_data_ext { struct spdk_nvme_ns_data data; };
+          struct spdk_nvme_format      { uint32_t ses:3, pil:1, pi:3, ms:1, lbaf:4, rsvd:20; };
+          struct spdk_nvme_ctrlr_list  { uint16_t num; uint16_t ctrlr_id[2047]; };
+          struct spdk_nvme_transport_id { char trstring[128]; char traddr[256]; };
+          #define SPDK_NVME_TRANSPORT_PCIE 0
+          typedef void (*spdk_nvme_probe_cb)(void *cb_ctx, const struct spdk_nvme_transport_id *trid, struct spdk_nvme_ctrlr_opts *opts);
+          typedef void (*spdk_nvme_attach_cb)(void *cb_ctx, const struct spdk_nvme_transport_id *trid, spdk_nvme_ctrlr *ctrlr, const struct spdk_nvme_ctrlr_opts *opts);
+          typedef void (*spdk_nvme_cmd_cb)(void *ctx, const struct spdk_nvme_cpl *cpl);
+          int spdk_nvme_probe(const struct spdk_nvme_transport_id *trid, void *cb_ctx, spdk_nvme_probe_cb probe_cb, spdk_nvme_attach_cb attach_cb, void *remove_cb);
+          int spdk_nvme_detach(spdk_nvme_ctrlr *ctrlr);
+          uint32_t spdk_nvme_ctrlr_get_num_ns(spdk_nvme_ctrlr *ctrlr);
+          spdk_nvme_ns *spdk_nvme_ctrlr_get_ns(spdk_nvme_ctrlr *ctrlr, uint32_t nsid);
+          spdk_nvme_qpair *spdk_nvme_ctrlr_alloc_io_qpair(spdk_nvme_ctrlr *ctrlr, const struct spdk_nvme_io_qpair_opts *opts, size_t opts_size);
+          int  spdk_nvme_ctrlr_free_io_qpair(spdk_nvme_qpair *qpair);
+          int  spdk_nvme_ctrlr_process_admin_completions(spdk_nvme_ctrlr *ctrlr);
+          void spdk_nvme_ctrlr_get_default_ctrlr_opts(struct spdk_nvme_ctrlr_opts *opts, size_t opts_size);
+          int  spdk_nvme_ctrlr_reset(spdk_nvme_ctrlr *ctrlr);
+          const struct spdk_nvme_ctrlr_data *spdk_nvme_ctrlr_get_data(spdk_nvme_ctrlr *ctrlr);
+          int  spdk_nvme_ctrlr_cmd_admin_raw(spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_cmd *cmd, void *buf, uint32_t len, spdk_nvme_cmd_cb cb_fn, void *cb_arg);
+          uint32_t spdk_nvme_ctrlr_create_ns(spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_ns_data *nsdata);
+          int  spdk_nvme_ctrlr_attach_ns(spdk_nvme_ctrlr *ctrlr, uint32_t nsid, struct spdk_nvme_ctrlr_list *payload);
+          int  spdk_nvme_ctrlr_delete_ns(spdk_nvme_ctrlr *ctrlr, uint32_t nsid);
+          int  spdk_nvme_ctrlr_format(spdk_nvme_ctrlr *ctrlr, uint32_t nsid, struct spdk_nvme_format *format);
+          uint16_t spdk_nvme_ctrlr_get_id(spdk_nvme_ctrlr *ctrlr);
+          bool     spdk_nvme_ns_is_active(spdk_nvme_ns *ns);
+          const struct spdk_nvme_ns_data *spdk_nvme_ns_get_data(spdk_nvme_ns *ns);
+          uint32_t spdk_nvme_ns_get_sector_size(spdk_nvme_ns *ns);
+          uint64_t spdk_nvme_ns_get_num_sectors(spdk_nvme_ns *ns);
+          uint64_t spdk_nvme_ns_get_size(spdk_nvme_ns *ns);
+          int spdk_nvme_ns_cmd_read(spdk_nvme_ns *ns, spdk_nvme_qpair *qpair, void *buf, uint64_t lba, uint32_t lba_count, spdk_nvme_cmd_cb cb_fn, void *cb_arg, uint32_t io_flags);
+          int spdk_nvme_ns_cmd_write(spdk_nvme_ns *ns, spdk_nvme_qpair *qpair, void *buf, uint64_t lba, uint32_t lba_count, spdk_nvme_cmd_cb cb_fn, void *cb_arg, uint32_t io_flags);
+          int spdk_nvme_ns_cmd_write_zeroes(spdk_nvme_ns *ns, spdk_nvme_qpair *qpair, uint64_t lba, uint32_t lba_count, spdk_nvme_cmd_cb cb_fn, void *cb_arg, uint32_t io_flags);
+          int spdk_nvme_ns_cmd_flush(spdk_nvme_ns *ns, spdk_nvme_qpair *qpair, spdk_nvme_cmd_cb cb_fn, void *cb_arg);
+          int32_t spdk_nvme_qpair_process_completions(spdk_nvme_qpair *qpair, uint32_t max_completions);
+          EOF
 
       # Advisory: continue-on-error means failures show as warnings,
       # not as job failures, so this check never blocks PR merges.
@@ -119,14 +249,16 @@ jobs:
         continue-on-error: true
         run: git push origin unstable-kani
 
-      # Open an issue if any Kani harness failed — visibility without blocking.
+      # Open an issue only when a harness actually fails — not for install failures.
+      # This prevents the ~10 daily noise issues caused by build environment problems.
       - name: Open issue on Kani failure
         continue-on-error: true
         if: |
-          steps.kani-dispatch-map.outcome == 'failure' ||
-          steps.kani-helloworld.outcome == 'failure' ||
-          steps.kani-component-core.outcome == 'failure'
-        uses: actions/github-script@v7
+          steps.kani-install.outcome == 'success' &&
+          (steps.kani-dispatch-map.outcome == 'failure' ||
+           steps.kani-helloworld.outcome == 'failure' ||
+           steps.kani-component-core.outcome == 'failure')
+        uses: actions/github-script@v7.0.1
         with:
           script: |
             const sha    = context.payload.after ?? context.sha;
