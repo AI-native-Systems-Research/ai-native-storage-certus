@@ -18,6 +18,7 @@ fn main() {
     println!("cargo:rustc-link-lib=rdmacm");
 
     // Compile C wrapper for inline ibverbs functions
+    println!("cargo:rerun-if-changed=src/wrapper.c");
     cc::Build::new()
         .file("src/wrapper.c")
         .include("/usr/include")

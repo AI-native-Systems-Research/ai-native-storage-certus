@@ -29,7 +29,13 @@ pub struct TestConfig {
 #[derive(Debug, Serialize)]
 pub struct TestResults {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub throughput: Option<ThroughputStats>,
+    pub write: Option<ThroughputStats>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read: Option<ThroughputStats>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub send: Option<ThroughputStats>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recv: Option<ThroughputStats>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latency: Option<LatencyStats>,
 }
@@ -38,8 +44,13 @@ pub fn print_device_info(name: &str, transport: &str, state: &str) {
     println!("    {} ({}) - {}", name, transport, state);
 }
 
-pub fn print_throughput_human(stats: &ThroughputStats, message_size: usize, iterations: u64) {
-    println!("\n=== RDMA Throughput Test (RDMA Write) ===");
+pub fn print_throughput_human(
+    stats: &ThroughputStats,
+    message_size: usize,
+    iterations: u64,
+    label: &str,
+) {
+    println!("\n=== RDMA Throughput Test ({}) ===", label);
     println!("  Message size: {} bytes", message_size);
     println!("  Iterations:   {}", iterations);
     println!("  Elapsed:      {:.3} s", stats.elapsed_seconds);

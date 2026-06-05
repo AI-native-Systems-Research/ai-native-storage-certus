@@ -3,6 +3,8 @@ mod ffi;
 mod latency;
 mod output;
 mod rdma;
+mod recv_bw;
+mod send_bw;
 mod server;
 mod stats;
 mod throughput;
@@ -16,7 +18,10 @@ use output::OutputFormat;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum TestType {
-    Throughput,
+    Write,
+    Read,
+    Send,
+    Recv,
     Latency,
     All,
 }
@@ -24,7 +29,10 @@ pub enum TestType {
 impl std::fmt::Display for TestType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TestType::Throughput => write!(f, "throughput"),
+            TestType::Write => write!(f, "write"),
+            TestType::Read => write!(f, "read"),
+            TestType::Send => write!(f, "send"),
+            TestType::Recv => write!(f, "recv"),
             TestType::Latency => write!(f, "latency"),
             TestType::All => write!(f, "all"),
         }
@@ -47,8 +55,8 @@ struct Cli {
     #[arg(short, long, global = true, default_value_t = 7471)]
     port: u16,
 
-    /// Message size in bytes
-    #[arg(short, long, global = true, default_value_t = 4096)]
+    /// Message size in bytes (supports K, M, G suffixes, e.g. 4K, 4M, 1G)
+    #[arg(short, long, global = true, default_value = "4K", value_parser = parse_size)]
     size: usize,
 
     /// Number of test iterations
@@ -82,6 +90,27 @@ enum Mode {
         #[arg(short, long)]
         address: String,
     },
+}
+
+fn parse_size(s: &str) -> Result<usize, String> {
+    let s = s.trim();
+    let (num, multiplier) = if let Some(n) = s.strip_suffix('G') {
+        (n, 1024 * 1024 * 1024)
+    } else if let Some(n) = s.strip_suffix('g') {
+        (n, 1024 * 1024 * 1024)
+    } else if let Some(n) = s.strip_suffix('M') {
+        (n, 1024 * 1024)
+    } else if let Some(n) = s.strip_suffix('m') {
+        (n, 1024 * 1024)
+    } else if let Some(n) = s.strip_suffix('K') {
+        (n, 1024)
+    } else if let Some(n) = s.strip_suffix('k') {
+        (n, 1024)
+    } else {
+        (s, 1)
+    };
+    let n: usize = num.parse().map_err(|e| format!("invalid size '{}': {}", s, e))?;
+    Ok(n * multiplier)
 }
 
 struct DeviceInfo {

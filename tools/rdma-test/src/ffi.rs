@@ -17,6 +17,7 @@ pub const IBV_QPS_RTS: c_int = 3;
 
 pub const IBV_WR_SEND: c_int = 0;
 pub const IBV_WR_RDMA_WRITE: c_int = 1;
+pub const IBV_WR_RDMA_READ: c_int = 2;
 
 pub const IBV_SEND_SIGNALED: c_int = 2;
 
@@ -162,6 +163,8 @@ pub struct ibv_send_wr {
     pub send_flags: c_int,
     pub imm_data: u32,
     pub wr: ibv_send_wr_union,
+    // qp_type union + bind union in the real struct
+    pub _tail: [u64; 8],
 }
 
 #[repr(C)]
@@ -205,12 +208,11 @@ pub struct ibv_wc {
 // rdma_cm types
 #[repr(C)]
 pub struct rdma_cm_id {
+    pub verbs: *mut ibv_context,
     pub channel: *mut rdma_event_channel,
     pub context: *mut c_void,
     pub qp: *mut ibv_qp,
-    pub verbs: *mut ibv_context,
-    pub pd: *mut ibv_pd,
-    // There are more fields but we access them through functions
+    // route, ps, port_num, event, cq channels, cq, srq, pd, qp_type follow
     _tail: [u8; 256],
 }
 
@@ -328,7 +330,43 @@ extern "C" {
         wc: *mut ibv_wc,
     ) -> c_int;
 
+    // Higher-level C helpers that construct proper structs
+    pub fn rdma_test_send_msg(
+        qp: *mut ibv_qp,
+        buf: *mut c_void,
+        len: u32,
+        lkey: u32,
+    ) -> c_int;
+    pub fn rdma_test_recv_msg(
+        qp: *mut ibv_qp,
+        buf: *mut c_void,
+        len: u32,
+        lkey: u32,
+    ) -> c_int;
+    pub fn rdma_test_rdma_write(
+        qp: *mut ibv_qp,
+        buf: *mut c_void,
+        len: u32,
+        lkey: u32,
+        remote_addr: u64,
+        rkey: u32,
+    ) -> c_int;
+    pub fn rdma_test_rdma_read(
+        qp: *mut ibv_qp,
+        buf: *mut c_void,
+        len: u32,
+        lkey: u32,
+        remote_addr: u64,
+        rkey: u32,
+    ) -> c_int;
+
     // RDMA CM functions
+    pub fn rdma_create_qp(
+        id: *mut rdma_cm_id,
+        pd: *mut ibv_pd,
+        qp_init_attr: *mut ibv_qp_init_attr,
+    ) -> c_int;
+    pub fn rdma_destroy_qp(id: *mut rdma_cm_id);
     pub fn rdma_create_event_channel() -> *mut rdma_event_channel;
     pub fn rdma_destroy_event_channel(channel: *mut rdma_event_channel);
     pub fn rdma_create_id(

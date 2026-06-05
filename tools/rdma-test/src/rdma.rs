@@ -36,7 +36,7 @@ impl Drop for RdmaConnection {
             if !self.cm_id.is_null() {
                 ffi::rdma_disconnect(self.cm_id);
                 if !self.qp.is_null() {
-                    ffi::ibv_destroy_qp(self.qp);
+                    ffi::rdma_destroy_qp(self.cm_id);
                 }
                 ffi::rdma_destroy_id(self.cm_id);
             }
@@ -112,39 +112,30 @@ impl RdmaConnection {
         &self,
         mr: &MemoryRegion,
         len: usize,
-        opcode: c_int,
+        _opcode: c_int,
         remote: Option<&RemoteMrInfo>,
     ) -> Result<()> {
-        let mut sge = ffi::ibv_sge {
-            addr: mr.addr(),
-            length: len as u32,
-            lkey: mr.lkey(),
-        };
-
-        let wr_union = if let Some(r) = remote {
-            ffi::ibv_send_wr_union {
-                rdma: ffi::ibv_send_wr_rdma {
-                    remote_addr: r.addr,
-                    rkey: r.rkey,
-                },
+        let ret = if let Some(r) = remote {
+            unsafe {
+                ffi::rdma_test_rdma_write(
+                    self.qp,
+                    mr.buf.as_ptr() as *mut c_void,
+                    len as u32,
+                    mr.lkey(),
+                    r.addr,
+                    r.rkey,
+                )
             }
         } else {
-            ffi::ibv_send_wr_union { _pad: [0; 3] }
+            unsafe {
+                ffi::rdma_test_send_msg(
+                    self.qp,
+                    mr.buf.as_ptr() as *mut c_void,
+                    len as u32,
+                    mr.lkey(),
+                )
+            }
         };
-
-        let mut wr = ffi::ibv_send_wr {
-            wr_id: 0,
-            next: ptr::null_mut(),
-            sg_list: &mut sge,
-            num_sge: 1,
-            opcode,
-            send_flags: ffi::IBV_SEND_SIGNALED,
-            imm_data: 0,
-            wr: wr_union,
-        };
-
-        let mut bad_wr: *mut ffi::ibv_send_wr = ptr::null_mut();
-        let ret = unsafe { ffi::rdma_test_post_send(self.qp, &mut wr, &mut bad_wr) };
         if ret != 0 {
             bail!("ibv_post_send failed: {}", ret);
         }
@@ -152,25 +143,42 @@ impl RdmaConnection {
     }
 
     pub fn post_recv_wr(&self, mr: &mut MemoryRegion) -> Result<()> {
-        let mut sge = ffi::ibv_sge {
-            addr: mr.addr(),
-            length: mr.len() as u32,
-            lkey: mr.lkey(),
+        let ret = unsafe {
+            ffi::rdma_test_recv_msg(
+                self.qp,
+                mr.buf.as_mut_ptr() as *mut c_void,
+                mr.len() as u32,
+                mr.lkey(),
+            )
         };
-
-        let mut wr = ffi::ibv_recv_wr {
-            wr_id: 0,
-            next: ptr::null_mut(),
-            sg_list: &mut sge,
-            num_sge: 1,
-        };
-
-        let mut bad_wr: *mut ffi::ibv_recv_wr = ptr::null_mut();
-        let ret = unsafe { ffi::rdma_test_post_recv(self.qp, &mut wr, &mut bad_wr) };
         if ret != 0 {
             bail!("ibv_post_recv failed: {}", ret);
         }
         Ok(())
+    }
+
+    pub fn drain_cq(&self) {
+        let mut wc = ffi::ibv_wc {
+            wr_id: 0,
+            status: 0,
+            opcode: 0,
+            vendor_err: 0,
+            byte_len: 0,
+            imm_data: 0,
+            qp_num: 0,
+            src_qp: 0,
+            wc_flags: 0,
+            pkey_index: 0,
+            slid: 0,
+            sl: 0,
+            dlid_path_bits: 0,
+        };
+        loop {
+            let ret = unsafe { ffi::rdma_test_poll_cq(self.cq, 1, &mut wc) };
+            if ret <= 0 {
+                break;
+            }
+        }
     }
 
     pub fn poll_completion(&self) -> Result<()> {
@@ -190,6 +198,9 @@ impl RdmaConnection {
             dlid_path_bits: 0,
         };
 
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(10);
+
         loop {
             let ret = unsafe { ffi::rdma_test_poll_cq(self.cq, 1, &mut wc) };
             if ret < 0 {
@@ -197,9 +208,17 @@ impl RdmaConnection {
             }
             if ret > 0 {
                 if wc.status != ffi::IBV_WC_SUCCESS {
-                    bail!("Work completion error: status={}", wc.status);
+                    bail!(
+                        "Work completion error: status={}, opcode={}, vendor_err={}",
+                        wc.status,
+                        wc.opcode,
+                        wc.vendor_err
+                    );
                 }
                 return Ok(());
+            }
+            if start.elapsed() > timeout {
+                bail!("poll_completion timed out after 10s");
             }
         }
     }
@@ -229,6 +248,28 @@ impl RdmaConnection {
 
     pub fn rdma_write(&self, mr: &MemoryRegion, len: usize, remote: &RemoteMrInfo) -> Result<()> {
         self.post_send_wr(mr, len, ffi::IBV_WR_RDMA_WRITE, Some(remote))?;
+        self.poll_completion_with_retry()
+    }
+
+    pub fn rdma_read(
+        &self,
+        mr: &mut MemoryRegion,
+        len: usize,
+        remote: &RemoteMrInfo,
+    ) -> Result<()> {
+        let ret = unsafe {
+            ffi::rdma_test_rdma_read(
+                self.qp,
+                mr.buf.as_mut_ptr() as *mut c_void,
+                len as u32,
+                mr.lkey(),
+                remote.addr,
+                remote.rkey,
+            )
+        };
+        if ret != 0 {
+            bail!("ibv_post_send (RDMA Read) failed: {}", ret);
+        }
         self.poll_completion_with_retry()
     }
 }
@@ -275,13 +316,14 @@ fn create_qp(
         sq_sig_all: 0,
     };
 
-    let qp = unsafe { ffi::ibv_create_qp(pd, &mut init_attr) };
-    if qp.is_null() {
-        bail!("ibv_create_qp failed");
+    let ret = unsafe { ffi::rdma_create_qp(cm_id, pd, &mut init_attr) };
+    if ret != 0 {
+        bail!("rdma_create_qp failed: {}", ret);
     }
 
-    unsafe {
-        (*cm_id).qp = qp;
+    let qp = unsafe { (*cm_id).qp };
+    if qp.is_null() {
+        bail!("rdma_create_qp returned success but QP is null");
     }
     Ok(qp)
 }
@@ -377,13 +419,15 @@ pub fn server_connect(addr: &str, port: u16) -> Result<RdmaConnection> {
 
     info!("Connection established (server)");
 
-    Ok(RdmaConnection {
+    let conn = RdmaConnection {
         cm_id,
         pd,
         cq,
         qp,
         channel,
-    })
+    };
+    conn.drain_cq();
+    Ok(conn)
 }
 
 pub fn client_connect(addr: &str, port: u16) -> Result<RdmaConnection> {
@@ -411,10 +455,17 @@ pub fn client_connect(addr: &str, port: u16) -> Result<RdmaConnection> {
 
     info!("Resolving address {}:{}", addr, port);
 
+    let mut src_sin = ffi::sockaddr_in {
+        sin_family: ffi::AF_INET,
+        sin_port: 0,
+        sin_addr: ffi::in_addr { s_addr: 0 },
+        sin_zero: [0; 8],
+    };
+
     let ret = unsafe {
         ffi::rdma_resolve_addr(
             cm_id,
-            ptr::null_mut(),
+            &mut src_sin as *mut ffi::sockaddr_in as *mut ffi::sockaddr,
             &mut sin as *mut ffi::sockaddr_in as *mut ffi::sockaddr,
             2000,
         )
@@ -477,16 +528,24 @@ pub fn client_connect(addr: &str, port: u16) -> Result<RdmaConnection> {
 
     info!("Connection established (client)");
 
-    Ok(RdmaConnection {
+    let conn = RdmaConnection {
         cm_id,
         pd,
         cq,
         qp,
         channel,
-    })
+    };
+    conn.drain_cq();
+    Ok(conn)
 }
 
 pub fn exchange_mr_info_server(conn: &RdmaConnection, mr: &MemoryRegion) -> Result<()> {
+    // Wait for client "ready" signal before sending MR info
+    // This ensures the client has posted its recv before we send
+    let mut ready_mr = conn.register_mr(4)?;
+    conn.recv_msg(&mut ready_mr)?;
+    debug!("Received ready signal from client");
+
     let info = RemoteMrInfo {
         addr: mr.addr(),
         rkey: mr.rkey(),
@@ -507,8 +566,17 @@ pub fn exchange_mr_info_server(conn: &RdmaConnection, mr: &MemoryRegion) -> Resu
 }
 
 pub fn exchange_mr_info_client(conn: &RdmaConnection) -> Result<RemoteMrInfo> {
+    // Post recv for MR info first, then signal server we're ready
     let mut recv_mr = conn.register_mr(std::mem::size_of::<RemoteMrInfo>())?;
-    conn.recv_msg(&mut recv_mr)?;
+    conn.post_recv_wr(&mut recv_mr)?;
+
+    // Send "ready" signal to server so it knows we have recv posted
+    let ready_mr = conn.register_mr(4)?;
+    conn.send_msg(&ready_mr, 4)?;
+    debug!("Sent ready signal to server");
+
+    // Now poll for the MR info recv completion
+    conn.poll_completion_with_retry()?;
 
     let info: RemoteMrInfo = unsafe { std::ptr::read(recv_mr.buf.as_ptr() as *const RemoteMrInfo) };
     Ok(info)
