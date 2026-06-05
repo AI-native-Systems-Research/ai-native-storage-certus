@@ -95,42 +95,13 @@ jobs:
           # 2. Install cargo-kani wrapper using the pinned nightly toolchain.
           cargo +nightly-2025-11-21 install kani-verifier --version 0.67.0 --locked
 
-      # Always runs (even on cache hit) — write the full toolchain triple so
-      # cargo-kani can construct ~/.rustup/toolchains/<triple>/bin/cargo correctly.
-      - name: Fix Kani toolchain setup
+      # Always runs (even on cache hit) — write the full toolchain triple and
+      # create the toolchain/ symlink that cargo-kani expects.
+      - name: Configure Kani toolchain
         run: |
           TOOLCHAIN=$(rustup toolchain list | grep "nightly-2025-11-21" | head -1 | awk '{print $1}')
-          # Write WITHOUT trailing newline — strace showed \n was included in path lookup
           printf "%s" "$TOOLCHAIN" > ~/.kani/kani-0.67.0/rust-toolchain-version
-          # Create toolchain/ symlink — this is what 'cargo kani setup' creates.
-          # Kani looks for cargo at ~/.kani/kani-VERSION/toolchain/bin/cargo.
           ln -sfn "${HOME}/.rustup/toolchains/${TOOLCHAIN}" ~/.kani/kani-0.67.0/toolchain
-          echo "toolchain symlink: $(readlink ~/.kani/kani-0.67.0/toolchain)"
-
-      - name: Kani environment diagnostics
-        run: |
-          echo "=== Installed toolchains ==="
-          rustup toolchain list
-          echo "=== ~/.kani/ contents ==="
-          ls ~/.kani/ 2>/dev/null || echo "(empty)"
-          echo "=== rust-toolchain-version ==="
-          cat ~/.kani/kani-0.67.0/rust-toolchain-version 2>/dev/null || echo "(not found)"
-          echo "=== cargo-kani location ==="
-          which cargo-kani 2>/dev/null || ls ~/.cargo/bin/cargo-kani 2>/dev/null || echo "(not found)"
-          echo "=== nightly cargo location ==="
-          rustup run nightly-2025-11-21 which cargo 2>/dev/null || echo "(nightly cargo not found)"
-          echo "=== nightly toolchain bin/ contents ==="
-          ls ~/.rustup/toolchains/nightly-2025-11-21-x86_64-unknown-linux-gnu/bin/ 2>/dev/null || echo "(toolchain bin/ not found)"
-          echo "=== test nightly cargo runs ==="
-          ~/.rustup/toolchains/nightly-2025-11-21-x86_64-unknown-linux-gnu/bin/cargo --version 2>&1 || echo "FAILED"
-          echo "=== rust-toolchain.toml in workspace ==="
-          cat rust-toolchain.toml 2>/dev/null || cat rust-toolchain 2>/dev/null || echo "(none found)"
-          echo "=== rust-toolchain-version final content ==="
-          cat ~/.kani/kani-0.67.0/rust-toolchain-version
-          echo "=== full ~/.kani/kani-0.67.0/ contents ==="
-          ls -la ~/.kani/kani-0.67.0/
-          echo "=== CARGO env var ==="
-          echo "CARGO=${CARGO}"
 
       # spdk-sys build.rs runs bindgen on SPDK headers. Kani compiles the full
       # workspace so this fires even for packages that don't use SPDK directly.
