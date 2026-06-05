@@ -1,0 +1,19 @@
+[package]
+name = "certus-server-fs"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Filesystem-backed Certus server for side-by-side benchmarking against certus-server"
+
+[dependencies]
+gpu-services = { workspace = true, features = ["gpu"] }
+
+tonic = { version = "0.12", features = ["tls"] }
+prost = "0.13"
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive"] }
+libc = "0.2"
+
+[build-dependencies]
+tonic-build = "0.12"
