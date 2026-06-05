@@ -835,6 +835,11 @@ impl IGpuServices for GpuServicesComponent {
 mod tests {
     use super::*;
     use component_core::query_interface;
+    use std::sync::Arc;
+
+    fn make_logger() -> Arc<dyn ILogger + Send + Sync> {
+        logger::LoggerComponent::new_default()
+    }
 
     #[test]
     fn test_provides_igpu_services() {
@@ -880,10 +885,8 @@ mod tests {
 
     #[test]
     fn test_initialize_with_logger() {
-        use std::sync::Arc;
         let component = GpuServicesComponent::new_default();
-        let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponent::new_default();
-        component.logger.connect(logger).unwrap();
+        component.logger.connect(make_logger()).unwrap();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         let _ = gpu.initialize();
     }
@@ -1068,10 +1071,8 @@ mod tests {
     #[cfg(all(feature = "gpu", feature = "spdk"))]
     #[test]
     fn test_prepare_memory_logs_with_logger() {
-        use std::sync::Arc;
         let component = GpuServicesComponent::new_default();
-        let logger_comp: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponent::new_default();
-        component.logger.connect(logger_comp).unwrap();
+        component.logger.connect(make_logger()).unwrap();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         if gpu.initialize().is_ok() {
             // With logger connected, invalid payload still returns error

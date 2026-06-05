@@ -25,10 +25,8 @@ use interfaces::{
     WriteHandle,
 };
 
-use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent;
 use component_core::binding::bind;
 use component_core::query_interface;
-use extent_manager::ExtentManager;
 use spdk_env::ISPDKEnv;
 
 use crate::background::{BackgroundEvictor, BackgroundWriter, EvictorConfig, WriteJob};
@@ -55,7 +53,8 @@ struct DataDrive {
     _block_dev: Arc<dyn component_core::IUnknown + Send + Sync>,
     block_dev_admin: Arc<dyn IBlockDeviceAdmin + Send + Sync>,
     block_dev_iface: Arc<dyn IBlockDevice + Send + Sync>,
-    extent_mgr: Arc<ExtentManager>,
+    _extent_mgr_component: Arc<dyn component_core::IUnknown + Send + Sync>,
+    extent_mgr: Arc<dyn IExtentManager + Send + Sync>,
     cached_channels: Option<ClientChannels>,
 }
 
@@ -351,7 +350,7 @@ impl DispatcherComponent {
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
         drives: &[Arc<dyn IBlockDevice + Send + Sync>],
-        extent_mgrs: &[Arc<ExtentManager>],
+        extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
         job: WriteJob,
     ) {
         // Get the memory-tier pointer without refreshing LRU — the write-through
@@ -395,14 +394,7 @@ impl DispatcherComponent {
         };
 
         // Allocate extent via the extent manager.
-        let em = &extent_mgrs[drive_idx % extent_mgrs.len()];
-        let iem = match query_interface!(em, IExtentManager) {
-            Some(i) => i,
-            None => {
-                let _ = dm.release_read(job.key);
-                return;
-            }
-        };
+        let iem = &extent_mgrs[drive_idx % extent_mgrs.len()];
         let write_handle = match iem.reserve_extent(job.key, aligned_bytes as u32) {
             Ok(wh) => wh,
             Err(_) => {
@@ -482,7 +474,7 @@ impl DispatcherComponent {
         ),
         DispatcherError,
     > {
-        let block_dev = BlockDeviceSpdkNvmeComponent::new_default();
+        let block_dev = block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent::new_default();
         block_dev
             .spdk_env
             .connect(Arc::clone(spdk_env))
@@ -538,7 +530,7 @@ impl DispatcherComponent {
             let (block_dev_component, admin, ibd) =
                 self.create_block_device(i, config.poller_base_cpu, &spdk_env, &logger, pci_addr, addr_str)?;
 
-            let extent_mgr = ExtentManager::new_inner();
+            let extent_mgr = extent_manager::ExtentManager::new_inner();
 
             let numa_node = ibd.numa_node();
             let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
@@ -567,11 +559,12 @@ impl DispatcherComponent {
                 ))
             })?;
 
-            let iem = query_interface!(extent_mgr, IExtentManager).ok_or_else(|| {
-                DispatcherError::IoError(format!(
-                    "failed to query IExtentManager for data drive {i}"
-                ))
-            })?;
+            let iem: Arc<dyn IExtentManager + Send + Sync> =
+                query_interface!(extent_mgr, IExtentManager).ok_or_else(|| {
+                    DispatcherError::IoError(format!(
+                        "failed to query IExtentManager for data drive {i}"
+                    ))
+                })?;
             let sector_size = ibd.block_size();
             let num_sectors = ibd.num_sectors(1).unwrap_or(0);
             let data_disk_size = num_sectors * sector_size as u64;
@@ -622,7 +615,8 @@ impl DispatcherComponent {
                 _block_dev: block_dev_component,
                 block_dev_admin: admin,
                 block_dev_iface: ibd,
-                extent_mgr,
+                _extent_mgr_component: extent_mgr as Arc<dyn component_core::IUnknown + Send + Sync>,
+                extent_mgr: iem,
                 cached_channels,
             });
         }
@@ -664,13 +658,7 @@ impl IDispatcher for DispatcherComponent {
                 let mut recovered: u64 = 0;
                 let drives_guard = self.data_drives.read();
                 for drive in drives_guard.iter() {
-                    let iem =
-                        query_interface!(drive.extent_mgr, IExtentManager).ok_or_else(|| {
-                            DispatcherError::IoError(
-                                "failed to query IExtentManager during recovery".into(),
-                            )
-                        })?;
-                    iem.for_each_extent(&mut |extent| {
+                    drive.extent_mgr.for_each_extent(&mut |extent| {
                         let _ = dm.recover_extent(extent.key, extent.offset, extent.size);
                         recovered += 1;
                     });
@@ -749,7 +737,7 @@ impl IDispatcher for DispatcherComponent {
             let dd = self.data_drives.read();
             dd.iter().map(|d| Arc::clone(&d.block_dev_iface)).collect()
         };
-        let bg_extent_mgrs: Vec<Arc<ExtentManager>> = {
+        let bg_extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>> = {
             let dd = self.data_drives.read();
             dd.iter().map(|d| Arc::clone(&d.extent_mgr)).collect()
         };
@@ -776,7 +764,7 @@ impl IDispatcher for DispatcherComponent {
                 .memory_tier
                 .get()
                 .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
-            let evictor_extent_mgrs: Vec<Arc<ExtentManager>> = {
+            let evictor_extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>> = {
                 let dd = self.data_drives.read();
                 dd.iter().map(|d| Arc::clone(&d.extent_mgr)).collect()
             };
@@ -822,12 +810,10 @@ impl IDispatcher for DispatcherComponent {
         {
             let drives = self.data_drives.read();
             for (i, drive) in drives.iter().enumerate() {
-                if let Some(iem) = query_interface!(drive.extent_mgr, IExtentManager) {
-                    if let Err(e) = iem.checkpoint() {
-                        self.log_error(&format!(
-                            "dispatcher: extent manager {i} checkpoint failed: {e}"
-                        ));
-                    }
+                if let Err(e) = drive.extent_mgr.checkpoint() {
+                    self.log_error(&format!(
+                        "dispatcher: extent manager {i} checkpoint failed: {e}"
+                    ));
                 }
             }
         }
@@ -1387,9 +1373,7 @@ impl IDispatcher for DispatcherComponent {
             let drives = self.data_drives.read();
             let idx = Self::drive_index(key, drives.len().max(1));
             if let Some(drive) = drives.get(idx) {
-                if let Some(iem) = query_interface!(drive.extent_mgr, IExtentManager) {
-                    let _ = iem.remove_extent(offset);
-                }
+                let _ = drive.extent_mgr.remove_extent(offset);
             }
         }
 
@@ -1531,7 +1515,7 @@ impl IDispatcher for DispatcherComponent {
             (4096, -1)
         };
 
-        let extent_mgrs: Vec<Arc<ExtentManager>> =
+        let extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>> =
             drives.iter().map(|d| Arc::clone(&d.extent_mgr)).collect();
         drop(drives);
 
@@ -1539,18 +1523,14 @@ impl IDispatcher for DispatcherComponent {
 
         // Reserve extent via extent manager (if available).
         let write_handle = if let Some(em) = extent_mgrs.get(drive_idx) {
-            if let Some(iem) = query_interface!(em, IExtentManager) {
-                match iem.reserve_extent(key, aligned_size as u32) {
-                    Ok(wh) => Some(wh),
-                    Err(e) => {
-                        let _ = dm.remove(key);
-                        return Err(DispatcherError::AllocationFailed(format!(
-                            "reserve_extent failed: {e}"
-                        )));
-                    }
+            match em.reserve_extent(key, aligned_size as u32) {
+                Ok(wh) => Some(wh),
+                Err(e) => {
+                    let _ = dm.remove(key);
+                    return Err(DispatcherError::AllocationFailed(format!(
+                        "reserve_extent failed: {e}"
+                    )));
                 }
-            } else {
-                None
             }
         } else {
             None

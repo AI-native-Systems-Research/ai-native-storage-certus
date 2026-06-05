@@ -6,8 +6,6 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use component_core::query_interface;
-use extent_manager::ExtentManager;
 use interfaces::{CacheKey, IDispatchMap, IExtentManager, ILogger, IMemoryTier, LookupResult};
 
 /// A job for the background writer to persist a staging buffer to SSD.
@@ -122,7 +120,7 @@ impl BackgroundEvictor {
     pub fn start(
         dm: Arc<dyn IDispatchMap + Send + Sync>,
         mt: Arc<dyn IMemoryTier + Send + Sync>,
-        extent_mgrs: Vec<Arc<ExtentManager>>,
+        extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>>,
         config: EvictorConfig,
         logger: Option<Arc<dyn ILogger + Send + Sync>>,
     ) -> Self {
@@ -160,7 +158,7 @@ impl BackgroundEvictor {
         shutdown: &AtomicBool,
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
-        extent_mgrs: &[Arc<ExtentManager>],
+        extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
         config: &EvictorConfig,
         logger: Option<&(dyn ILogger + Send + Sync)>,
     ) {
@@ -213,9 +211,7 @@ impl BackgroundEvictor {
                 // Free extent on the appropriate drive.
                 let drive_idx = key as usize % extent_mgrs.len().max(1);
                 if let Some(em) = extent_mgrs.get(drive_idx) {
-                    if let Some(iem) = query_interface!(em, IExtentManager) {
-                        let _ = iem.remove_extent(offset);
-                    }
+                    let _ = em.remove_extent(offset);
                 }
 
                 evicted += 1;
@@ -238,14 +234,12 @@ impl BackgroundEvictor {
         }
     }
 
-    pub(crate) fn compute_utilization(extent_mgrs: &[Arc<ExtentManager>]) -> (u64, u64) {
+    pub(crate) fn compute_utilization(extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>]) -> (u64, u64) {
         let mut total_used = 0u64;
         let mut total_cap = 0u64;
         for em in extent_mgrs {
-            if let Some(iem) = query_interface!(em, IExtentManager) {
-                total_used += iem.used_bytes();
-                total_cap += iem.capacity_bytes();
-            }
+            total_used += em.used_bytes();
+            total_cap += em.capacity_bytes();
         }
         (total_used, total_cap)
     }
