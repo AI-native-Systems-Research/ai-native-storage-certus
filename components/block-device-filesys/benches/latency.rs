@@ -4,10 +4,25 @@
 //! at varying queue depths.
 //!
 //! Run with: `cargo bench --bench latency`
+//!
+//! Set `BENCH_FILE_PATH` to use a specific backing file instead of a tempdir:
+//!   BENCH_FILE_PATH=/mnt/nvme/bench.img cargo bench --bench latency
+
+use std::path::PathBuf;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
 use interfaces::Command;
+
+fn bench_file_path(default_name: &str) -> (PathBuf, Option<tempfile::TempDir>) {
+    if let Ok(p) = std::env::var("BENCH_FILE_PATH") {
+        (PathBuf::from(p), None)
+    } else {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let path = dir.path().join(default_name);
+        (path, Some(dir))
+    }
+}
 
 /// Benchmark command construction at varying queue depths.
 fn command_construction_latency(c: &mut Criterion) {
@@ -36,8 +51,7 @@ fn sync_io_latency(c: &mut Criterion) {
     use interfaces::{DmaBuffer, IBlockDevice};
     use std::sync::{Arc, Mutex};
 
-    let dir = tempfile::tempdir().expect("failed to create temp dir");
-    let path = dir.path().join("bench-latency.img");
+    let (path, _dir) = bench_file_path("bench-latency.img");
     let path_str = path.to_str().unwrap();
 
     let comp = BlockDeviceFilesysComponent::create(path_str, 4096, 4096);
@@ -48,15 +62,12 @@ fn sync_io_latency(c: &mut Criterion) {
 
     // Write latency
     group.bench_function("write_4k", |b| {
-        let data = vec![0xABu8; 4096];
         let buf = unsafe {
-            DmaBuffer::from_raw(
-                Box::into_raw(data.into_boxed_slice()) as *mut std::ffi::c_void,
-                4096,
-                libc_free,
-                -1,
-            )
-            .unwrap()
+            let mut ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+            let ret = libc::posix_memalign(&mut ptr, 512, 4096);
+            assert_eq!(ret, 0, "posix_memalign failed");
+            std::ptr::write_bytes(ptr as *mut u8, 0xAB, 4096);
+            DmaBuffer::from_raw(ptr, 4096, libc_free, -1).unwrap()
         };
         let buf_arc = Arc::new(buf);
 
@@ -75,15 +86,12 @@ fn sync_io_latency(c: &mut Criterion) {
 
     // Read latency
     group.bench_function("read_4k", |b| {
-        let data = vec![0u8; 4096];
         let buf = unsafe {
-            DmaBuffer::from_raw(
-                Box::into_raw(data.into_boxed_slice()) as *mut std::ffi::c_void,
-                4096,
-                libc_free,
-                -1,
-            )
-            .unwrap()
+            let mut ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+            let ret = libc::posix_memalign(&mut ptr, 512, 4096);
+            assert_eq!(ret, 0, "posix_memalign failed");
+            std::ptr::write_bytes(ptr as *mut u8, 0, 4096);
+            DmaBuffer::from_raw(ptr, 4096, libc_free, -1).unwrap()
         };
         let buf_arc = Arc::new(Mutex::new(buf));
 

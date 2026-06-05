@@ -585,18 +585,35 @@ impl FilesysHandler {
 
         let offset = self.offset_for_lba(lba);
         let total_bytes = num_blocks as usize * self.config.block_size() as usize;
-        let zeros = vec![0u8; total_bytes];
         let fd = self.fd.as_raw_fd();
 
-        // SAFETY: fd is valid, zeros buffer is valid.
-        let ret = unsafe {
-            libc::pwrite(
-                fd,
-                zeros.as_ptr() as *const libc::c_void,
-                total_bytes,
-                offset as i64,
-            )
+        // SAFETY: posix_memalign returns a 512-byte-aligned pointer suitable for O_DIRECT.
+        let zeros_ptr = unsafe {
+            let mut ptr: *mut libc::c_void = std::ptr::null_mut();
+            let ret = libc::posix_memalign(&mut ptr, 512, total_bytes);
+            if ret != 0 {
+                self.send_completion(
+                    client_id,
+                    Completion::WriteZerosDone {
+                        handle,
+                        result: Err(NvmeBlockError::BlockDevice(
+                            interfaces::BlockDeviceError::WriteFailed(
+                                "posix_memalign failed".into(),
+                            ),
+                        )),
+                    },
+                );
+                return;
+            }
+            std::ptr::write_bytes(ptr as *mut u8, 0, total_bytes);
+            ptr
         };
+
+        // SAFETY: fd is valid, zeros_ptr is aligned and valid for total_bytes.
+        let ret = unsafe { libc::pwrite(fd, zeros_ptr, total_bytes, offset as i64) };
+
+        // SAFETY: zeros_ptr was allocated via posix_memalign.
+        unsafe { libc::free(zeros_ptr) };
 
         let result = if ret < 0 {
             Err(NvmeBlockError::BlockDevice(

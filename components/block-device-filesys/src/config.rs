@@ -1,6 +1,7 @@
 //! Device configuration and backing file management.
 
 use std::fs::OpenOptions;
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{FromRawFd, IntoRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
 
@@ -116,6 +117,7 @@ pub fn open_or_create_backing_file(cfg: &DeviceConfig) -> Result<OwnedFd, String
         let file = OpenOptions::new()
             .read(true)
             .write(true)
+            .custom_flags(libc::O_DIRECT)
             .open(path)
             .map_err(|e| format!("failed to open {}: {e}", path.display()))?;
 
@@ -153,6 +155,7 @@ pub fn open_or_create_backing_file(cfg: &DeviceConfig) -> Result<OwnedFd, String
             .read(true)
             .write(true)
             .create_new(true)
+            .custom_flags(libc::O_DIRECT)
             .open(path)
             .map_err(|e| format!("failed to create {}: {e}", path.display()))?;
 
