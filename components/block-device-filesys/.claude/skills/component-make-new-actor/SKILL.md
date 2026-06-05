@@ -24,8 +24,5 @@ Building the skeleton for component named $0 involves the following steps:
 
 9. Copy skills, except those named 'component-make-new' or 'component-make-new-factor' from .claude/skills into the new component directory's .claude/skills.
 
-10. Run 'specify init . --ai claude' in the component source directory.
-
-11. Run 'specify extension add spec-kit-sync --from https://github.com/bgervin/spec-kit-sync/archive/refs/heads/master.zip' in the component directory.
 
 

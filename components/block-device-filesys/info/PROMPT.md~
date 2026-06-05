@@ -1,0 +1,7 @@
+specify init . --ai claude
+
+Model: Claude Opus 4.6
+Add spec-kit-sync
+
+specify extension add spec-kit-sync --from https://github.com/bgervin/spec-kit-sync/archive/refs/heads/master.zip
+

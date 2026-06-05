@@ -15,6 +15,7 @@ members = [
     "apps/nvme-ns-manager",
     "apps/extent-benchmark",
     "components/block-device-spdk-nvme",
+    "components/block-device-filesys",
     "components/extent-manager",
     "components/logger",
     "components/dispatch-map",
