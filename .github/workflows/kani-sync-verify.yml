@@ -185,6 +185,23 @@ jobs:
 
           printf '#pragma once\n#include "env.h"\n' > deps/spdk-build/include/spdk/env_dpdk.h
 
+          # Create empty stub .a files for all SPDK/DPDK libraries.
+          # Kani processes cargo:rustc-link-lib directives and fails if +whole-archive
+          # libraries are missing. Empty archives satisfy the linker search.
+          mkdir -p deps/spdk-build/lib
+          for lib in \
+            spdk_env_dpdk spdk_log spdk_util spdk_nvme spdk_trace spdk_dma \
+            spdk_keyring spdk_json spdk_jsonrpc spdk_rpc spdk_sock \
+            spdk_sock_posix spdk_thread \
+            rte_eal rte_kvargs rte_log rte_telemetry rte_argparse \
+            rte_mempool_ring rte_mempool rte_ring rte_bus_pci rte_bus_vdev \
+            rte_pci rte_power rte_timer rte_power_acpi rte_power_amd_pstate \
+            rte_power_cppc rte_power_intel_pstate rte_power_intel_uncore \
+            rte_power_kvm_vm rte_vhost rte_ethdev rte_meter rte_cryptodev \
+            rte_dmadev rte_hash rte_net rte_mbuf rte_rcu rte_cmdline rte_stack; do
+            ar rcs deps/spdk-build/lib/lib${lib}.a
+          done
+
           cat > deps/spdk-build/include/spdk/nvme.h << 'EOF'
           #pragma once
           #include <stddef.h>
