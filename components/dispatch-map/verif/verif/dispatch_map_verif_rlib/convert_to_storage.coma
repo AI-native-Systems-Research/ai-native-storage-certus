@@ -1,12 +1,14 @@
-(* #"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 242 0 245 33 *)
+(* #"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 257 0 260 33 *)
 
-let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 258 24 258 25
-let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 259 26 259 27
-let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 259 8 259 27
-let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 234 11 234 34
-let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 235 10 235 35
-let%span slib'4 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 236 10 241 1
-let%span slib'5 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 47 16 47 58
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 273 24 273 25
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 274 26 274 27
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 274 8 274 27
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 236 11 236 34
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 237 10 237 35
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 238 10 243 1
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 245 10 248 1
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 251 10 256 1
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 47 16 47 58
 let%span sord = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 162 41 162 102
 let%span sord'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 168 41 168 99
 let%span sord'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 174 41 174 99
@@ -76,7 +78,7 @@ type t_DispatchMapError =
 type t_Result_unit_DispatchMapError = Ok () | Err t_DispatchMapError
 
 predicate inv_write_binary [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 46 0 46 50] (e: t_DispatchEntry) =
-  [%#slib'5] e.write_ref = (0: UInt32.t) \/ e.write_ref = (1: UInt32.t)
+  [%#slib'7] e.write_ref = (0: UInt32.t) \/ e.write_ref = (1: UInt32.t)
 
 type t_Ordering = Less | Equal | Greater
 
@@ -129,67 +131,82 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let convert_to_storage [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 242 0 245 33]
+let convert_to_storage [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 257 0 260 33]
   (entry: MutBorrow.t t_DispatchEntry) (new_offset: UInt64.t) (return (x: t_Result_unit_DispatchMapError)) =
 {[@stop_split] [@expl:convert_to_storage requires] [%#slib'2] inv_write_binary entry.current}
   (! bb0
   [ bb0 = s0
     [ s0 = MutBorrow.borrow_mut <t_Location> {entry.current.location}
         (fun (_bor: MutBorrow.t t_Location) ->
-          [ &_10 <- _bor ] [ &entry <- { entry with current = { entry.current with location = _bor.final } } ] s1)
+          [ &_14 <- _bor ] [ &entry <- { entry with current = { entry.current with location = _bor.final } } ] s1)
     | s1 = any
-      [ br0 (x0: UInt64.t) -> {_10.current = Staging x0} (! bb2)
-      | br1 (x0: UInt64.t) -> {_10.current = BlockDevice x0} (! bb4)
-      | br2 (x0: UInt64.t) (x1: UInt32.t) (x2: t_Option_u64) -> {_10.current = MemoryTier x0 x1 x2} (! bb5) ] ]
+      [ br0 (x0: UInt64.t) -> {_14.current = Staging x0} (! bb2)
+      | br1 (x0: UInt64.t) -> {_14.current = BlockDevice x0} (! bb4)
+      | br2 (x0: UInt64.t) (x1: UInt32.t) (x2: t_Option_u64) -> {_14.current = MemoryTier x0 x1 x2} (! bb5) ] ]
   | bb5 = s0
-    [ s0 = elim_MemoryTier {_10.current}
+    [ s0 = elim_MemoryTier {_14.current}
         (fun (rmem_handle: UInt64.t) (rsize: UInt32.t) (rssd_offset: t_Option_u64) ->
-          MutBorrow.borrow_final <t_Option_u64> {rssd_offset} {MutBorrow.inherit_id (MutBorrow.get_id _10) 2}
+          MutBorrow.borrow_final <t_Option_u64> {rssd_offset} {MutBorrow.inherit_id (MutBorrow.get_id _14) 2}
             (fun (_bor: MutBorrow.t t_Option_u64) ->
-              [ &ssd_offset <- _bor ] [ &_10 <- { _10 with current = MemoryTier rmem_handle rsize _bor.final } ] s1))
-    | s1 = [ &_15 <- Some new_offset ] s2
-    | s2 = [ &ssd_offset <- { ssd_offset with current = _15 } ] s3
+              [ &ssd_offset <- _bor ] [ &_14 <- { _14 with current = MemoryTier rmem_handle rsize _bor.final } ] s1))
+    | s1 = [ &_19 <- Some new_offset ] s2
+    | s2 = [ &ssd_offset <- { ssd_offset with current = _19 } ] s3
     | s3 = -{resolve_refmut_Option_u64 ssd_offset}- s4
-    | s4 = -{resolve_refmut_Location _10}- s5
+    | s4 = -{resolve_refmut_Location _14}- s5
     | s5 = bb7 ]
   | bb4 = s0
-    [ s0 = -{resolve_refmut_Location _10}- s1
+    [ s0 = -{resolve_refmut_Location _14}- s1
     | s1 = -{resolve_refmut_DispatchEntry entry}- s2
-    | s2 = [ &_18 <- InvalidState ] s3
-    | s3 = [ &_ret <- Err _18 ] s4
+    | s2 = [ &_22 <- InvalidState ] s3
+    | s3 = [ &_ret <- Err _22 ] s4
     | s4 = return {_ret} ]
   | bb2 = s0
-    [ s0 = -{resolve_refmut_Location _10}- s1
-    | s1 = [ &_12 <- BlockDevice new_offset ] s2
-    | s2 = [ &entry <- { entry with current = { entry.current with location = _12 } } ] s3
+    [ s0 = -{resolve_refmut_Location _14}- s1
+    | s1 = [ &_16 <- BlockDevice new_offset ] s2
+    | s2 = [ &entry <- { entry with current = { entry.current with location = _16 } } ] s3
     | s3 = bb7 ]
   | bb7 = s0
-    [ s0 = [ &_20 <- UInt32.gt entry.current.read_ref ([%#slib] (0: UInt32.t)) ] s1
-    | s1 = any [ br0 -> {_20 = false} (! bb9) | br1 -> {_20} (! bb8) ] ]
+    [ s0 = [ &_24 <- UInt32.gt entry.current.read_ref ([%#slib] (0: UInt32.t)) ] s1
+    | s1 = any [ br0 -> {_24 = false} (! bb9) | br1 -> {_24} (! bb8) ] ]
   | bb8 = s0
     [ s0 = UInt32.sub [%#slib'1] {entry.current.read_ref} {[%#slib'0] (1: UInt32.t)}
         (fun (_x: UInt32.t) -> [ &entry <- { entry with current = { entry.current with read_ref = _x } } ] s1)
     | s1 = -{resolve_refmut_DispatchEntry entry}- s2
     | s2 = bb10 ]
   | bb9 = s0 [ s0 = -{resolve_refmut_DispatchEntry entry}- s1 | s1 = bb10 ]
-  | bb10 = s0 [ s0 = [ &_ret <- Ok _22 ] s1 | s1 = return {_ret} ] ]
+  | bb10 = s0 [ s0 = [ &_ret <- Ok _26 ] s1 | s1 = return {_ret} ] ]
   [ & _ret: t_Result_unit_DispatchMapError = Any.any_l ()
   | & entry: MutBorrow.t t_DispatchEntry = entry
   | & new_offset: UInt64.t = new_offset
-  | & _10: MutBorrow.t t_Location = Any.any_l ()
-  | & _12: t_Location = Any.any_l ()
+  | & _14: MutBorrow.t t_Location = Any.any_l ()
+  | & _16: t_Location = Any.any_l ()
   | & ssd_offset: MutBorrow.t t_Option_u64 = Any.any_l ()
-  | & _15: t_Option_u64 = Any.any_l ()
-  | & _18: t_DispatchMapError = Any.any_l ()
-  | & _20: bool = Any.any_l ()
-  | & _22: () = Any.any_l () ])
+  | & _19: t_Option_u64 = Any.any_l ()
+  | & _22: t_DispatchMapError = Any.any_l ()
+  | & _24: bool = Any.any_l ()
+  | & _26: () = Any.any_l () ])
   [ return (result: t_Result_unit_DispatchMapError) ->
   {[@stop_split] [@expl:convert_to_storage ensures] ([@stop_split] [@expl:convert_to_storage ensures #0] [%#slib'3] inv_write_binary entry.final)
     /\ ([@stop_split] [@expl:convert_to_storage ensures #1] [%#slib'4] match result with
-      | Ok () -> entry.final.write_ref = entry.current.write_ref
-      /\ (entry.current.read_ref = (0: UInt32.t) -> entry.final.read_ref = (0: UInt32.t))
-      /\ (UInt32.gt entry.current.read_ref (0: UInt32.t)
-      -> entry.final.read_ref = UInt32.sub entry.current.read_ref (1: UInt32.t))
-      | Err _ -> entry.final.write_ref = entry.current.write_ref /\ entry.final.read_ref = entry.current.read_ref
+        | Ok () -> entry.final.write_ref = entry.current.write_ref
+        /\ (entry.current.read_ref = (0: UInt32.t) -> entry.final.read_ref = (0: UInt32.t))
+        /\ (UInt32.gt entry.current.read_ref (0: UInt32.t)
+        -> entry.final.read_ref = UInt32.sub entry.current.read_ref (1: UInt32.t))
+        | Err _ -> entry.final.write_ref = entry.current.write_ref /\ entry.final.read_ref = entry.current.read_ref
+        end)
+    /\ ([@stop_split] [@expl:convert_to_storage ensures #2] [%#slib'5] match entry.current.location with
+        | BlockDevice _ -> match result with
+          | Ok () -> false
+          | Err _ -> true
+          end
+        | _ -> match result with
+          | Ok () -> true
+          | Err _ -> false
+          end
+        end)
+    /\ ([@stop_split] [@expl:convert_to_storage ensures #3] [%#slib'6] match entry.current.location with
+      | MemoryTier _ _ _ -> entry.current.read_ref = (1: UInt32.t) /\ entry.current.write_ref = (0: UInt32.t)
+      -> entry.final.read_ref = (0: UInt32.t) /\ entry.final.write_ref = (0: UInt32.t)
+      | _ -> true
       end)}
     (! return {result}) ]

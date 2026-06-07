@@ -1,31 +1,32 @@
-(* #"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 428 0 428 53 *)
+(* #"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 507 0 507 53 *)
 
-let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 429 12 429 29
-let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 430 12 430 38
-let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 431 12 431 31
-let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 422 11 422 34
-let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 423 11 423 36
-let%span slib'4 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 424 11 424 37
-let%span slib'5 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 425 10 425 48
-let%span slib'6 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 426 10 426 50
-let%span slib'7 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 427 10 427 35
-let%span slib'8 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 160 11 160 36
-let%span slib'9 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 161 11 161 37
-let%span slib'10 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 162 10 162 36
-let%span slib'11 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 163 10 163 35
-let%span slib'12 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 164 10 164 35
-let%span slib'13 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 199 11 199 34
-let%span slib'14 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 200 11 200 36
-let%span slib'15 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 201 11 201 41
-let%span slib'16 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 202 10 202 36
-let%span slib'17 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 203 10 203 55
-let%span slib'18 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 204 10 204 35
-let%span slib'19 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 171 11 171 34
-let%span slib'20 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 172 11 172 35
-let%span slib'21 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 173 10 173 55
-let%span slib'22 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 174 10 174 50
-let%span slib'23 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 175 10 175 35
-let%span slib'24 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 47 16 47 58
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 508 12 508 29
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 509 12 509 38
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 510 12 510 31
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 501 11 501 34
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 502 11 502 36
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 503 11 503 37
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 504 10 504 48
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 505 10 505 50
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 506 10 506 35
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 161 11 161 36
+let%span slib'9 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 162 11 162 37
+let%span slib'10 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 163 10 163 36
+let%span slib'11 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 164 10 164 35
+let%span slib'12 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 165 10 165 35
+let%span slib'13 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 200 11 200 34
+let%span slib'14 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 201 11 201 36
+let%span slib'15 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 202 11 202 41
+let%span slib'16 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 203 10 203 36
+let%span slib'17 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 204 10 204 55
+let%span slib'18 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 205 10 205 35
+let%span slib'19 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 206 10 206 48
+let%span slib'20 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 172 11 172 34
+let%span slib'21 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 173 11 173 35
+let%span slib'22 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 174 10 174 55
+let%span slib'23 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 175 10 175 50
+let%span slib'24 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 176 10 176 35
+let%span slib'25 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 47 16 47 58
 let%span sord = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 162 41 162 102
 let%span sord'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 168 41 168 99
 let%span sord'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/ord.rs" 174 41 174 99
@@ -74,7 +75,7 @@ type t_DispatchMapError =
 type t_Result_unit_DispatchMapError = Ok () | Err t_DispatchMapError
 
 predicate inv_write_binary [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 46 0 46 50] (e: t_DispatchEntry) =
-  [%#slib'24] e.write_ref = (0: UInt32.t) \/ e.write_ref = (1: UInt32.t)
+  [%#slib'25] e.write_ref = (0: UInt32.t) \/ e.write_ref = (1: UInt32.t)
 
 let take_write (entry: MutBorrow.t t_DispatchEntry) (return (x: t_Result_unit_DispatchMapError)) =
 {[@stop_split] [@expl:take_write requires] ([@stop_split] [@expl:take_write requires #0] [%#slib'8] entry.current.read_ref
@@ -148,18 +149,19 @@ let downgrade_reference (entry: MutBorrow.t t_DispatchEntry) (return (x: t_Resul
       = (0: UInt32.t))
     /\ ([@stop_split] [@expl:downgrade_reference ensures #1] [%#slib'17] entry.final.read_ref
       = UInt32.add entry.current.read_ref (1: UInt32.t))
-    /\ ([@stop_split] [@expl:downgrade_reference ensures #2] [%#slib'18] inv_write_binary entry.final)}
+    /\ ([@stop_split] [@expl:downgrade_reference ensures #2] [%#slib'18] inv_write_binary entry.final)
+    /\ ([@stop_split] [@expl:downgrade_reference ensures #3] [%#slib'19] entry.final.location = entry.current.location)}
     (! return {result}) ]
 
 let release_read (entry: MutBorrow.t t_DispatchEntry) (return (x: t_Result_unit_DispatchMapError)) =
-{[@stop_split] [@expl:release_read requires] ([@stop_split] [@expl:release_read requires #0] [%#slib'19] inv_write_binary entry.current)
-  /\ ([@stop_split] [@expl:release_read requires #1] [%#slib'20] UInt32.gt entry.current.read_ref (0: UInt32.t))}
+{[@stop_split] [@expl:release_read requires] ([@stop_split] [@expl:release_read requires #0] [%#slib'20] inv_write_binary entry.current)
+  /\ ([@stop_split] [@expl:release_read requires #1] [%#slib'21] UInt32.gt entry.current.read_ref (0: UInt32.t))}
   any
   [ return (result: t_Result_unit_DispatchMapError) ->
-  {[@stop_split] [@expl:release_read ensures] ([@stop_split] [@expl:release_read ensures #0] [%#slib'21] entry.final.read_ref
+  {[@stop_split] [@expl:release_read ensures] ([@stop_split] [@expl:release_read ensures #0] [%#slib'22] entry.final.read_ref
       = UInt32.sub entry.current.read_ref (1: UInt32.t))
-    /\ ([@stop_split] [@expl:release_read ensures #1] [%#slib'22] entry.final.write_ref = entry.current.write_ref)
-    /\ ([@stop_split] [@expl:release_read ensures #2] [%#slib'23] inv_write_binary entry.final)}
+    /\ ([@stop_split] [@expl:release_read ensures #1] [%#slib'23] entry.final.write_ref = entry.current.write_ref)
+    /\ ([@stop_split] [@expl:release_read ensures #2] [%#slib'24] inv_write_binary entry.final)}
     (! return {result}) ]
 
 predicate resolve_refmut_DispatchEntry [@inline:trivial] (_1: MutBorrow.t t_DispatchEntry) = _1.final = _1.current
@@ -170,7 +172,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let roundtrip_downgrade [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 428 0 428 53]
+let roundtrip_downgrade [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 507 0 507 53]
   (entry: MutBorrow.t t_DispatchEntry) (return (x: ())) =
 {[@stop_split] [@expl:roundtrip_downgrade requires] ([@stop_split] [@expl:roundtrip_downgrade requires #0] [%#slib'2] inv_write_binary entry.current)
   /\ ([@stop_split] [@expl:roundtrip_downgrade requires #1] [%#slib'3] entry.current.read_ref = (0: UInt32.t))

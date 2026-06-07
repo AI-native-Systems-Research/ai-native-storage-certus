@@ -89,6 +89,7 @@ pub fn create_staging(size: u32, buffer_handle: u64, tsc: u64) -> DispatchEntry 
 #[ensures(result.read_ref == 0u32)]
 #[ensures(result.size_blocks > 0u32)]
 #[ensures(inv_write_binary(&result))]
+#[ensures(match result.location { Location::MemoryTier { ssd_offset: None, .. } => true, _ => false })]
 pub fn create_memory_tier_entry(mem_handle: u64, size: u32, tsc: u64) -> DispatchEntry {
     DispatchEntry {
         location: Location::MemoryTier {
@@ -202,6 +203,7 @@ pub fn release_write(entry: &mut DispatchEntry) -> Result<(), DispatchMapError> 
 #[ensures((^entry).write_ref == 0u32)]
 #[ensures((^entry).read_ref == (*entry).read_ref + 1u32)]
 #[ensures(inv_write_binary(&^entry))]
+#[ensures((^entry).location == (*entry).location)]
 pub fn downgrade_reference(entry: &mut DispatchEntry) -> Result<(), DispatchMapError> {
     if entry.write_ref == 0 {
         return Err(DispatchMapError::NoWriteReference);
@@ -238,6 +240,19 @@ pub fn check_removable(entry: &mut DispatchEntry) -> Result<(), DispatchMapError
         && ((*entry).read_ref == 0u32 ==> (^entry).read_ref == 0u32)
         && ((*entry).read_ref > 0u32 ==> (^entry).read_ref == (*entry).read_ref - 1u32),
     Err(_) => (^entry).write_ref == (*entry).write_ref && (^entry).read_ref == (*entry).read_ref,
+})]
+// Returns Ok when the entry is Staging or MemoryTier; Err only for BlockDevice.
+#[ensures(match (*entry).location {
+    Location::BlockDevice { .. } => match result { Ok(()) => false, Err(_) => true },
+    _ => match result { Ok(()) => true, Err(_) => false },
+})]
+// When called on a MemoryTier entry with exactly one reader and no writer:
+// both ref counts are zero after the call (write-through lifecycle safety).
+#[ensures(match (*entry).location {
+    Location::MemoryTier { .. } =>
+        (*entry).read_ref == 1u32 && (*entry).write_ref == 0u32
+        ==> (^entry).read_ref == 0u32 && (^entry).write_ref == 0u32,
+    _ => true,
 })]
 pub fn convert_to_storage(
     entry: &mut DispatchEntry,
@@ -378,6 +393,70 @@ pub fn lifecycle_lookup() -> DispatchEntry {
     let _ = release_write(&mut e);
     let _ = lookup(&mut e, 100);
     let _ = release_read(&mut e);
+    e
+}
+
+// ============================================================
+// System-level property from spec FR-003 / FR-004 / FR-005
+// ============================================================
+// Property: Write-through lifecycle safety — "write-before-evict"
+//
+// Derived from the Dispatcher Cache Interface specification:
+//   FR-003: populate creates a MemoryTier entry with write_ref=1
+//   FR-004: background writer downgrades write→read ref after GPU copy,
+//           then releases the read ref on write-through completion
+//   FR-005: entry remains in memory-tier after write-through
+//
+// The system-level invariant we prove:
+//   DURING write-through  → entry has active references → NOT evictable
+//   AFTER  write-through  → no active references       → IS evictable
+//
+// This closes the "write-before-evict" safety argument at the entry level:
+// an entry can only be cleanly evicted after its data is durably on SSD
+// and no reader holds a reference to it.
+
+/// Spec property (FR-003/FR-004/FR-005): an entry is not evictable during
+/// write-through and becomes evictable only after write-through completes.
+///
+/// Step 1 — populate: create_memory_tier_entry → write_ref=1, read_ref=0
+///          NOT evictable: write_ref > 0
+/// Step 2 — GPU copy done: downgrade_reference → write_ref=0, read_ref=1
+///          background writer holds the read ref during SSD write
+///          NOT evictable: read_ref > 0
+/// Step 3 — write-through done: convert_to_storage sets ssd_offset AND
+///          releases the read ref (decrements read_ref by 1)
+///          NOW evictable: read_ref=0, write_ref=0
+#[requires(size > 0u32)]
+#[requires(size@ + 4095 <= u32::MAX@)]
+#[ensures(no_active_refs(&result))]
+#[ensures(inv_write_binary(&result))]
+pub fn lifecycle_write_through_safety(
+    mem_handle: u64,
+    size: u32,
+    ssd_offset: u64,
+    tsc: u64,
+) -> DispatchEntry {
+    // Step 1: populate — entry created with write_ref=1 (not evictable)
+    let mut e = create_memory_tier_entry(mem_handle, size, tsc);
+
+    // Step 2: GPU DMA copy complete — background writer downgrades to read ref
+    // write_ref → 0, read_ref → 1.  Entry still NOT evictable: read_ref > 0.
+    let _ = downgrade_reference(&mut e);
+
+    // Bridge: establish the exact state before convert_to_storage.
+    // read_ref=1 (0+1), write_ref=0 (downgraded), location=MemoryTier (unchanged).
+    // These are the exact conditions the postcondition needs to fire.
+    proof_assert!(e.read_ref  == 1u32);
+    proof_assert!(e.write_ref == 0u32);
+    proof_assert!(match e.location { Location::MemoryTier { .. } => true, _ => false });
+
+    // Step 3: write-through completes — ssd_offset set, read ref released.
+    // Entry is MemoryTier so convert_to_storage returns Ok and decrements read_ref.
+    let r = convert_to_storage(&mut e, ssd_offset);
+    proof_assert!(match r { Ok(()) => true, Err(_) => false }); // MemoryTier → Ok
+    // From new postcondition: MemoryTier + read_ref=1 + write_ref=0 → no_active_refs
+    proof_assert!(e.read_ref == 0u32 && e.write_ref == 0u32);
+    // Now: read_ref=0, write_ref=0 → no_active_refs holds → IS evictable
     e
 }
 

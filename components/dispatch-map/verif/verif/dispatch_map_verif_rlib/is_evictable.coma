@@ -1,9 +1,9 @@
-(* #"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 295 0 295 50 *)
+(* #"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 310 0 310 50 *)
 
-let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 296 22 296 23
-let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 297 30 297 31
-let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 296 4 304 9
-let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 294 11 294 34
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 311 22 311 23
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 312 30 312 31
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 311 4 319 9
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 309 11 309 34
 let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 47 16 47 58
 
 use creusot.int.UInt64
@@ -38,7 +38,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let is_evictable [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 295 0 295 50]
+let is_evictable [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 310 0 310 50]
   (entry: t_DispatchEntry) (return (x: bool)) =
 {[@stop_split] [@expl:is_evictable requires] [%#slib'2] inv_write_binary entry}
   (! bb0
