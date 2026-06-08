@@ -1,6 +1,6 @@
 profile:
-  name: full
-  description: "Production profile with SPDK NVMe + GPU acceleration"
+  name: full-fs-block
+  description: "Profile that simulate block-device with filesystem"
 
 components:
   logger:
@@ -34,11 +34,11 @@ components:
     init_hook: init_memory_tier
 
   block_device:
-    crate: block-device-spdk-nvme
-    factory: "BlockDeviceSpdkNvmeComponent::new_default"
-    provides: [IBlockDevice, IBlockDeviceAdmin]
+    crate: block-device-filesys
+    factory: "BlockDeviceFilesysComponent::new_default"
+    provides: [IBlockDevice]
     kind: factory
-    receptacles: [spdk_env, logger]
+    receptacles: [logger]
 
   extent_manager:
     crate: extent-manager

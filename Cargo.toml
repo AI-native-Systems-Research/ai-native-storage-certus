@@ -64,6 +64,7 @@ interfaces = { path = "components/interfaces" }
 spdk-sys = { path = "components/spdk-sys" }
 spdk-env = { path = "components/spdk-env" }
 block-device-spdk-nvme = { path = "components/block-device-spdk-nvme" }
+block-device-filesys = { path = "components/block-device-filesys" }
 logger = { path = "components/logger" }
 dispatch-map = { path = "components/dispatch-map" }
 memory-tier = { path = "components/memory-tier" }

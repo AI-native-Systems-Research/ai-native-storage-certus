@@ -36,6 +36,10 @@ struct ComponentDecl {
     /// "factory" means this component is created N times at runtime (not a singleton).
     /// It generates a factory closure instead of a singleton instance.
     kind: Option<String>,
+    /// Receptacles that the factory-kind component needs wired.
+    /// Used to generate the correct factory closure body.
+    #[serde(default)]
+    receptacles: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -288,8 +292,19 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
             if *name == "block_device" {
                 writeln!(code, "    comp_dispatcher.set_block_device_factory(Box::new(|spdk_env, logger| {{").unwrap();
                 writeln!(code, "        let bd = {crate_ident}::{factory_call};").unwrap();
-                writeln!(code, "        bd.spdk_env.connect(std::sync::Arc::clone(spdk_env)).unwrap();").unwrap();
-                writeln!(code, "        bd.logger.connect(std::sync::Arc::clone(logger)).unwrap();").unwrap();
+                for recep in &decl.receptacles {
+                    match recep.as_str() {
+                        "spdk_env" => {
+                            writeln!(code, "        bd.spdk_env.connect(std::sync::Arc::clone(spdk_env)).unwrap();").unwrap();
+                        }
+                        "logger" => {
+                            writeln!(code, "        bd.logger.connect(std::sync::Arc::clone(logger)).unwrap();").unwrap();
+                        }
+                        _ => {
+                            panic!("unsupported block_device receptacle '{recep}' in profile");
+                        }
+                    }
+                }
                 writeln!(code, "        bd as std::sync::Arc<dyn component_core::IUnknown + Send + Sync>").unwrap();
                 writeln!(code, "    }}));").unwrap();
             } else if *name == "extent_manager" {

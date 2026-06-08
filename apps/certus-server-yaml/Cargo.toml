@@ -13,6 +13,7 @@ dispatcher.workspace = true
 dispatch-map.workspace = true
 memory-tier.workspace = true
 block-device-spdk-nvme.workspace = true
+block-device-filesys.workspace = true
 extent-manager.workspace = true
 spdk-env.workspace = true
 gpu-services = { workspace = true, features = ["gpu"] }
