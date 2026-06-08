@@ -179,6 +179,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let _ = stack.dispatcher.shutdown();
+    stack.spdk_env.fini();
     stack.logger.info("certus-server-yaml: shutdown complete");
 
     Ok(())

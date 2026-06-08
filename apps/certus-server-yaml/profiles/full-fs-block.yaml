@@ -83,3 +83,5 @@ exports:
     interface: ILogger
   - component: dispatcher
     interface: IDispatcher
+  - component: spdk_env
+    interface: ISPDKEnv

@@ -61,7 +61,7 @@ struct DataDrive {
 
 /// Factory function type for creating block device components.
 /// Receives SPDK env, logger, drive index, PCI address, and optional CPU pin.
-/// Returns a fully-initialized block device: (IUnknown holder, IBlockDevice).
+/// Returns a fully-initialized block device: (IUnknown holder, IBlockDevice, IBlockDeviceAdmin).
 /// The factory is responsible for calling initialize() internally.
 pub type BlockDeviceFactory = Box<
     dyn Fn(
@@ -74,6 +74,7 @@ pub type BlockDeviceFactory = Box<
             (
                 Arc<dyn component_core::IUnknown + Send + Sync>,
                 Arc<dyn IBlockDevice + Send + Sync>,
+                Arc<dyn IBlockDeviceAdmin + Send + Sync>,
             ),
             String,
         > + Send
@@ -524,13 +525,13 @@ impl DispatcherComponent {
     > {
         let factory_guard = self.block_device_factory.lock().unwrap();
         if let Some(ref factory) = *factory_guard {
-            let (block_dev, ibd) = factory(spdk_env, logger, i, pci_addr, poller_base_cpu)
+            let (block_dev, ibd, admin) = factory(spdk_env, logger, i, pci_addr, poller_base_cpu)
                 .map_err(|e| {
                     DispatcherError::IoError(format!(
                         "block device factory failed for drive {i}: {e}"
                     ))
                 })?;
-            Ok((block_dev, None, ibd))
+            Ok((block_dev, Some(admin), ibd))
         } else {
             drop(factory_guard);
             #[cfg(feature = "spdk-backend")]
@@ -955,11 +956,20 @@ impl IDispatcher for DispatcherComponent {
             }
         }
 
-        // Shut down block devices in reverse order
+        // Two-phase block device shutdown: signal all actors to stop first,
+        // then join threads. This prevents crashes from SPDK transport teardown
+        // invalidating memory that other actors are still actively polling.
         let drives = {
             let mut g = self.data_drives.write();
             std::mem::take(&mut *g)
         };
+        // Phase 1: Signal all actors to stop (closes channels, actors exit poll loops)
+        for drive in &drives {
+            if let Some(ref admin) = drive.block_dev_admin {
+                admin.signal_stop();
+            }
+        }
+        // Phase 2: Join actor threads (safe now that all actors have been signaled)
         for (i, drive) in drives.iter().enumerate().rev() {
             if let Some(ref admin) = drive.block_dev_admin {
                 if let Err(e) = admin.shutdown() {
@@ -967,6 +977,12 @@ impl IDispatcher for DispatcherComponent {
                         "dispatcher: failed to shut down data drive {i}: {e}"
                     ));
                 }
+            }
+        }
+        // Phase 3: Detach controllers (safe now that ALL actor threads have exited)
+        for drive in &drives {
+            if let Some(ref admin) = drive.block_dev_admin {
+                admin.detach_controller();
             }
         }
 
