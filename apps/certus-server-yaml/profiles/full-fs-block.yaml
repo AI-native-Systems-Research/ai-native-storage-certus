@@ -36,7 +36,7 @@ components:
   block_device:
     crate: block-device-filesys
     factory: "BlockDeviceFilesysComponent::new_default"
-    provides: [IBlockDevice]
+    provides: [IBlockDevice, IBlockDeviceAdmin]
     kind: factory
     receptacles: [logger]
 

@@ -455,6 +455,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|e| panic!("invalid YAML in '{manifest_path}': {e}"));
     validate_manifest(&manifest);
 
+    // Check that required features are enabled for the profile's crates
+    for (name, decl) in &manifest.components {
+        match decl.crate_name.as_str() {
+            "block-device-filesys" => {
+                if env::var("CARGO_FEATURE_FILESYS").is_err() {
+                    panic!(
+                        "profile '{profile}' uses block-device-filesys (component '{name}') \
+                         but the 'filesys' feature is not enabled.\n\
+                         Build with: CERTUS_PROFILE={profile} cargo build -p certus-server-yaml \
+                         --features filesys --no-default-features"
+                    );
+                }
+            }
+            "block-device-spdk-nvme" => {
+                if env::var("CARGO_FEATURE_SPDK").is_err() {
+                    panic!(
+                        "profile '{profile}' uses block-device-spdk-nvme (component '{name}') \
+                         but the 'spdk' feature is not enabled.\n\
+                         Build with: CERTUS_PROFILE={profile} cargo build -p certus-server-yaml \
+                         --features spdk"
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
     // 3. Generate composition code
     let composition_code = generate_composition(&manifest);
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());

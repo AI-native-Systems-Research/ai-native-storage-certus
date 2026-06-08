@@ -94,6 +94,7 @@ class ClientResult:
         self.cold_end = 0.0
         self.hot_objects = 0
         self.cold_objects = 0
+        self.cold_objects_success = 0
 
 
 def _make_pattern(key, block_size):
@@ -565,9 +566,11 @@ def run_client(
             resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=entries))
             t1 = time.perf_counter()
             failed = [r for r in resp.results if not r.success]
+            succeeded = len(resp.results) - len(failed)
+            result.cold_objects_success += succeeded
             if failed:
                 result.errors.append(
-                    f"cold lookup iter {iter_idx} failed: {failed[0].error_message}"
+                    f"cold lookup iter {iter_idx}: {len(failed)}/{len(resp.results)} failed: {failed[0].error_message}"
                 )
             result.cold_latencies.append((t1 - t0) / num_objects)
         except grpc.RpcError as e:
@@ -803,8 +806,15 @@ def main():
         hot_wall_agg = (hot_total_bytes / hot_elapsed / 1e9) if hot_elapsed > 0 else 0
     if active_cold:
         cold_elapsed = max(r.cold_end for r in active_cold) - min(r.cold_start for r in active_cold)
-        cold_total_bytes = sum(r.cold_objects for r in active_cold) * BLOCK_SIZE
+        cold_success = sum(r.cold_objects_success for r in active_cold)
+        cold_total_bytes = cold_success * BLOCK_SIZE
         cold_wall_agg = (cold_total_bytes / cold_elapsed / 1e9) if cold_elapsed > 0 else 0
+        cold_requested = sum(r.cold_objects for r in active_cold)
+        if cold_success < cold_requested:
+            cold_hit_pct = 100.0 * cold_success / cold_requested
+            print(f"  NOTE: cold lookup hit rate {cold_hit_pct:.1f}% ({cold_success}/{cold_requested} objects)")
+            print(f"        throughput reflects only successful reads from SSD")
+            print()
 
     print(f"\n{'='*70}")
     print(f"Results ({num_clients} client(s), {BLOCK_SIZE//(1024*1024)} MiB blocks)")
