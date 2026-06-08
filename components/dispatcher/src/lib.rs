@@ -615,7 +615,13 @@ impl DispatcherComponent {
                 self.create_block_device(i, config.poller_base_cpu, &spdk_env, &logger, pci_addr, addr_str)?;
 
             let numa_node = ibd.numa_node();
-            let dma_alloc: DmaAllocFn = if has_factory {
+            let spdk_available = self.spdk_env.is_connected();
+            let dma_alloc: DmaAllocFn = if spdk_available {
+                // SPDK path: use hugepage-backed DMA buffers
+                Arc::new(move |size, align, _numa| {
+                    DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
+                })
+            } else {
                 // Non-SPDK path: use posix_memalign for DMA buffers
                 unsafe extern "C" fn libc_free(p: *mut std::ffi::c_void) {
                     libc::free(p);
@@ -627,17 +633,12 @@ impl DispatcherComponent {
                     if ret != 0 || ptr.is_null() {
                         return Err(format!("posix_memalign failed ({size}, {align}): errno {ret}"));
                     }
-                    // Zero the buffer
                     unsafe { std::ptr::write_bytes(ptr as *mut u8, 0, size) };
                     // SAFETY: ptr is valid, non-null, allocated with posix_memalign
                     unsafe {
                         DmaBuffer::from_raw(ptr, size, libc_free, numa_node)
                             .map_err(|e| e.to_string())
                     }
-                })
-            } else {
-                Arc::new(move |size, align, _numa| {
-                    DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
                 })
             };
 
@@ -784,25 +785,9 @@ impl IDispatcher for DispatcherComponent {
                 ));
             }
 
-            // Pre-allocate pipeline ring for promote_and_serve (CUDA-pinned + SPDK-registered).
+            // Pre-allocate pipeline ring and register memory with SPDK.
+            // Only when SPDK is available — spdk_mem_register segfaults otherwise.
             if let Ok(gpu) = self.gpu_services.get() {
-                let chunk_size = {
-                    let dd = self.data_drives.read();
-                    dd.first()
-                        .map(|d| d.block_dev_iface.max_transfer_size() as usize)
-                        .unwrap_or(131072)
-                };
-                match pipeline::PipelineRing::new(&*gpu, chunk_size) {
-                    Ok(ring) => {
-                        *self.pipeline_ring.write() = Some(ring);
-                    }
-                    Err(e) => {
-                        self.log_info(&format!(
-                            "pipeline ring allocation failed (non-fatal): {e:?}"
-                        ));
-                    }
-                }
-
                 // Dedicated CUDA stream for warm-path DMA (avoids pipeline_ring lock).
                 match gpu.create_stream() {
                     Ok(stream) => {
@@ -813,22 +798,41 @@ impl IDispatcher for DispatcherComponent {
                     }
                 }
 
-                // Register memory-tier pool as CUDA-pinned + SPDK DMA-capable
-                // for zero-copy NVMe reads and async GPU transfers.
-                if let Ok(mt) = self.memory_tier.get() {
-                    if let Some((pool_ptr, pool_size)) = mt.pool_info() {
-                        match gpu.register_host_memory(pool_ptr as *mut std::ffi::c_void, pool_size)
-                        {
-                            Ok(()) => {
-                                self.log_info(&format!(
-                                    "dispatcher: registered memory-tier pool ({} MiB) for zero-copy DMA",
-                                    pool_size / (1024 * 1024)
-                                ));
-                            }
-                            Err(e) => {
-                                self.log_info(&format!(
-                                    "memory-tier pool registration failed (non-fatal): {e}"
-                                ));
+                if self.spdk_env.is_connected() {
+                    let chunk_size = {
+                        let dd = self.data_drives.read();
+                        dd.first()
+                            .map(|d| d.block_dev_iface.max_transfer_size() as usize)
+                            .unwrap_or(131072)
+                    };
+                    match pipeline::PipelineRing::new(&*gpu, chunk_size) {
+                        Ok(ring) => {
+                            *self.pipeline_ring.write() = Some(ring);
+                        }
+                        Err(e) => {
+                            self.log_info(&format!(
+                                "pipeline ring allocation failed (non-fatal): {e:?}"
+                            ));
+                        }
+                    }
+
+                    // Register memory-tier pool as CUDA-pinned + SPDK DMA-capable
+                    // for zero-copy NVMe reads and async GPU transfers.
+                    if let Ok(mt) = self.memory_tier.get() {
+                        if let Some((pool_ptr, pool_size)) = mt.pool_info() {
+                            match gpu.register_host_memory(pool_ptr as *mut std::ffi::c_void, pool_size)
+                            {
+                                Ok(()) => {
+                                    self.log_info(&format!(
+                                        "dispatcher: registered memory-tier pool ({} MiB) for zero-copy DMA",
+                                        pool_size / (1024 * 1024)
+                                    ));
+                                }
+                                Err(e) => {
+                                    self.log_info(&format!(
+                                        "memory-tier pool registration failed (non-fatal): {e}"
+                                    ));
+                                }
                             }
                         }
                     }
