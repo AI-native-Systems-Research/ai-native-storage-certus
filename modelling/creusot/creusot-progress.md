@@ -382,11 +382,13 @@ Target: `segment_io()` in `components/dispatcher/src/io_segmenter.rs`
 
 ---
 
-## Verification crate locations
+## Verification crate and tool locations
 
-| Crate | Path | Target |
-|---|---|---|
-| dispatch-map verification | `components/dispatch-map/verif/` | Entry lifecycle protocol |
-| segment_io verification | `tools/creusot/certus-segment-verif/` | I/O segmentation arithmetic |
+| Artefact | Path | Branch | Purpose |
+|---|---|---|---|
+| dispatch-map verification crate | `components/dispatch-map/verif/` | `unstable-creusot` | Entry lifecycle protocol proofs |
+| segment_io verification crate | `tools/creusot/certus-segment-verif/` | `unstable` and `unstable-creusot` | I/O segmentation arithmetic proofs |
+| Coq proof (LBA adjacency) | `tools/creusot/certus-segment-verif/coq/mod_sub_lemma.v` | `unstable` and `unstable-creusot` | Hand-written Coq proof for the modular arithmetic lemma |
+| Creusot installation | `tools/creusot/creusot/` | `unstable-creusot` | The Creusot tool itself |
 
-Branch: `unstable-creusot`
+The `tools/creusot/` directory on `unstable` serves as the **verification toolbox** — everything needed to understand and run the Creusot proofs, including the Coq proof artifact. The `unstable-creusot` branch additionally contains the dispatch-map verif crate and is the target for future Creusot CI automation.
