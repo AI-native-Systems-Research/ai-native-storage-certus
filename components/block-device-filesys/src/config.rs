@@ -170,7 +170,7 @@ pub fn open_or_create_backing_file(cfg: &DeviceConfig) -> Result<OwnedFd, String
 /// does not support direct IO (EINVAL).
 fn try_open_direct(path: &Path, create: bool) -> Result<std::fs::File, String> {
     let mut opts = OpenOptions::new();
-    opts.read(true).write(true).custom_flags(libc::O_DIRECT);
+    opts.read(true).write(true).custom_flags(libc::O_DIRECT | libc::O_SYNC);
     if create {
         opts.create_new(true);
     }
