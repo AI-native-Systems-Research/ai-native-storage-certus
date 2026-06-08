@@ -290,22 +290,41 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
             let factory_call = ensure_callable(&decl.factory);
 
             if *name == "block_device" {
-                writeln!(code, "    comp_dispatcher.set_block_device_factory(Box::new(|spdk_env, logger| {{").unwrap();
-                writeln!(code, "        let bd = {crate_ident}::{factory_call};").unwrap();
+                writeln!(code, "    comp_dispatcher.set_block_device_factory(Box::new(|spdk_env, logger, drive_idx, pci_addr, cpu_pin| {{").unwrap();
+                if decl.crate_name == "block-device-filesys" {
+                    // Filesys backend: create with file path derived from drive index
+                    writeln!(code, "        let path = format!(\"/tmp/certus-drive-{{}}.img\", drive_idx);").unwrap();
+                    writeln!(code, "        let bd = {crate_ident}::BlockDeviceFilesysComponent::create(&path, 4096, 1048576);").unwrap();
+                } else {
+                    writeln!(code, "        let bd = {crate_ident}::{factory_call};").unwrap();
+                }
                 for recep in &decl.receptacles {
                     match recep.as_str() {
                         "spdk_env" => {
-                            writeln!(code, "        bd.spdk_env.connect(std::sync::Arc::clone(spdk_env)).unwrap();").unwrap();
+                            writeln!(code, "        bd.spdk_env.connect(std::sync::Arc::clone(spdk_env)).map_err(|e| e.to_string())?;").unwrap();
                         }
                         "logger" => {
-                            writeln!(code, "        bd.logger.connect(std::sync::Arc::clone(logger)).unwrap();").unwrap();
+                            writeln!(code, "        bd.logger.connect(std::sync::Arc::clone(logger)).map_err(|e| e.to_string())?;").unwrap();
                         }
                         _ => {
                             panic!("unsupported block_device receptacle '{recep}' in profile");
                         }
                     }
                 }
-                writeln!(code, "        bd as std::sync::Arc<dyn component_core::IUnknown + Send + Sync>").unwrap();
+                if decl.crate_name == "block-device-spdk-nvme" {
+                    // SPDK backend: use IBlockDeviceAdmin for PCI-based init
+                    writeln!(code, "        let admin: std::sync::Arc<dyn interfaces::IBlockDeviceAdmin + Send + Sync> = component_core::query_interface!(bd, interfaces::IBlockDeviceAdmin)").unwrap();
+                    writeln!(code, "            .ok_or_else(|| \"failed to query IBlockDeviceAdmin\".to_string())?;").unwrap();
+                    writeln!(code, "        admin.set_pci_address(pci_addr);").unwrap();
+                    writeln!(code, "        if let Some(cpu) = cpu_pin {{ admin.set_actor_cpu(cpu + drive_idx); }}").unwrap();
+                    writeln!(code, "        admin.initialize().map_err(|e| e.to_string())?;").unwrap();
+                } else {
+                    // Non-SPDK backend: call initialize() directly on the component
+                    writeln!(code, "        bd.initialize().map_err(|e| e.to_string())?;").unwrap();
+                }
+                writeln!(code, "        let ibd: std::sync::Arc<dyn interfaces::IBlockDevice + Send + Sync> = component_core::query_interface!(bd, interfaces::IBlockDevice)").unwrap();
+                writeln!(code, "            .ok_or_else(|| \"failed to query IBlockDevice from factory component\".to_string())?;").unwrap();
+                writeln!(code, "        Ok((bd as std::sync::Arc<dyn component_core::IUnknown + Send + Sync>, ibd))").unwrap();
                 writeln!(code, "    }}));").unwrap();
             } else if *name == "extent_manager" {
                 writeln!(code, "    comp_dispatcher.set_extent_manager_factory(Box::new(|logger, dma_alloc| {{").unwrap();

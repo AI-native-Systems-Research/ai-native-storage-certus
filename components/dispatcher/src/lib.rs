@@ -7,6 +7,8 @@
 //! Provides the [`IDispatcher`] interface with receptacles for
 //! [`ILogger`], [`IDispatchMap`], and [`IMemoryTier`].
 
+#![allow(clippy::too_many_arguments)]
+
 mod background;
 pub mod io_segmenter;
 pub mod pipeline;
@@ -50,7 +52,7 @@ struct PendingWrite {
 #[allow(dead_code)]
 struct DataDrive {
     _block_dev: Arc<dyn component_core::IUnknown + Send + Sync>,
-    block_dev_admin: Arc<dyn IBlockDeviceAdmin + Send + Sync>,
+    block_dev_admin: Option<Arc<dyn IBlockDeviceAdmin + Send + Sync>>,
     block_dev_iface: Arc<dyn IBlockDevice + Send + Sync>,
     _extent_mgr_component: Arc<dyn component_core::IUnknown + Send + Sync>,
     extent_mgr: Arc<dyn IExtentManager + Send + Sync>,
@@ -58,14 +60,23 @@ struct DataDrive {
 }
 
 /// Factory function type for creating block device components.
-/// Receives SPDK env and logger so it can wire receptacles.
-/// Returns an `Arc<dyn IUnknown>` that provides `IBlockDevice` and `IBlockDeviceAdmin`.
+/// Receives SPDK env, logger, drive index, PCI address, and optional CPU pin.
+/// Returns a fully-initialized block device: (IUnknown holder, IBlockDevice).
+/// The factory is responsible for calling initialize() internally.
 pub type BlockDeviceFactory = Box<
     dyn Fn(
             &Arc<dyn ISPDKEnv + Send + Sync>,
             &Arc<dyn ILogger + Send + Sync>,
-        ) -> Arc<dyn component_core::IUnknown + Send + Sync>
-        + Send
+            usize,
+            PciAddress,
+            Option<usize>,
+        ) -> Result<
+            (
+                Arc<dyn component_core::IUnknown + Send + Sync>,
+                Arc<dyn IBlockDevice + Send + Sync>,
+            ),
+            String,
+        > + Send
         + Sync,
 >;
 
@@ -506,57 +517,58 @@ impl DispatcherComponent {
     ) -> Result<
         (
             Arc<dyn component_core::IUnknown + Send + Sync>,
-            Arc<dyn IBlockDeviceAdmin + Send + Sync>,
+            Option<Arc<dyn IBlockDeviceAdmin + Send + Sync>>,
             Arc<dyn IBlockDevice + Send + Sync>,
         ),
         DispatcherError,
     > {
-        let block_dev: Arc<dyn component_core::IUnknown + Send + Sync> = {
-            let factory_guard = self.block_device_factory.lock().unwrap();
-            if let Some(ref factory) = *factory_guard {
-                factory(spdk_env, logger)
-            } else {
-                let component = block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent::new_default();
-                component
-                    .spdk_env
-                    .connect(Arc::clone(spdk_env))
-                    .map_err(|e| {
-                        DispatcherError::IoError(format!("failed to wire spdk_env for data drive {i}: {e}"))
+        let factory_guard = self.block_device_factory.lock().unwrap();
+        if let Some(ref factory) = *factory_guard {
+            let (block_dev, ibd) = factory(spdk_env, logger, i, pci_addr, poller_base_cpu)
+                .map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "block device factory failed for drive {i}: {e}"
+                    ))
+                })?;
+            Ok((block_dev, None, ibd))
+        } else {
+            drop(factory_guard);
+            let component = block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent::new_default();
+            component
+                .spdk_env
+                .connect(Arc::clone(spdk_env))
+                .map_err(|e| {
+                    DispatcherError::IoError(format!("failed to wire spdk_env for data drive {i}: {e}"))
+                })?;
+            component.logger.connect(Arc::clone(logger)).map_err(|e| {
+                DispatcherError::IoError(format!("failed to wire logger for data drive {i}: {e}"))
+            })?;
+            let block_dev = component as Arc<dyn component_core::IUnknown + Send + Sync>;
+            let admin: Arc<dyn IBlockDeviceAdmin + Send + Sync> =
+                component_core::iunknown::query::<dyn IBlockDeviceAdmin + Send + Sync>(&*block_dev)
+                    .ok_or_else(|| {
+                        DispatcherError::IoError(format!(
+                            "failed to query IBlockDeviceAdmin for data drive {i}"
+                        ))
                     })?;
-                component.logger.connect(Arc::clone(logger)).map_err(|e| {
-                    DispatcherError::IoError(format!("failed to wire logger for data drive {i}: {e}"))
-                })?;
-                component as Arc<dyn component_core::IUnknown + Send + Sync>
+            admin.set_pci_address(pci_addr);
+            if let Some(base) = poller_base_cpu {
+                admin.set_actor_cpu(base + i);
             }
-        };
-        let admin: Arc<dyn IBlockDeviceAdmin + Send + Sync> =
-            component_core::iunknown::query::<dyn IBlockDeviceAdmin + Send + Sync>(&*block_dev)
-                .ok_or_else(|| {
-                    DispatcherError::IoError(format!(
-                        "failed to query IBlockDeviceAdmin for data drive {i}"
-                    ))
-                })?;
-        admin.set_pci_address(pci_addr);
-        if let Some(base) = poller_base_cpu {
-            admin.set_actor_cpu(base + i);
+            admin.initialize().map_err(|e| {
+                DispatcherError::IoError(format!(
+                    "failed to initialize block device at {addr_str}: {e}"
+                ))
+            })?;
+            let ibd: Arc<dyn IBlockDevice + Send + Sync> =
+                component_core::iunknown::query::<dyn IBlockDevice + Send + Sync>(&*block_dev)
+                    .ok_or_else(|| {
+                        DispatcherError::IoError(format!(
+                            "failed to query IBlockDevice for data drive {i}"
+                        ))
+                    })?;
+            Ok((block_dev, Some(admin), ibd))
         }
-        admin.initialize().map_err(|e| {
-            DispatcherError::IoError(format!(
-                "failed to initialize block device at {addr_str}: {e}"
-            ))
-        })?;
-        let ibd: Arc<dyn IBlockDevice + Send + Sync> =
-            component_core::iunknown::query::<dyn IBlockDevice + Send + Sync>(&*block_dev)
-                .ok_or_else(|| {
-                    DispatcherError::IoError(format!(
-                        "failed to query IBlockDevice for data drive {i}"
-                    ))
-                })?;
-        Ok((
-            block_dev,
-            admin,
-            ibd,
-        ))
     }
 
     fn create_data_drives(
@@ -898,14 +910,15 @@ impl IDispatcher for DispatcherComponent {
         // Shut down block devices in reverse order
         let drives = {
             let mut g = self.data_drives.write();
-            let taken = std::mem::take(&mut *g);
-            taken
+            std::mem::take(&mut *g)
         };
         for (i, drive) in drives.iter().enumerate().rev() {
-            if let Err(e) = drive.block_dev_admin.shutdown() {
-                self.log_error(&format!(
-                    "dispatcher: failed to shut down data drive {i}: {e}"
-                ));
+            if let Some(ref admin) = drive.block_dev_admin {
+                if let Err(e) = admin.shutdown() {
+                    self.log_error(&format!(
+                        "dispatcher: failed to shut down data drive {i}: {e}"
+                    ));
+                }
             }
         }
 
@@ -1117,6 +1130,7 @@ impl IDispatcher for DispatcherComponent {
                 }
 
                 std::thread::scope(|s| {
+                    #[allow(clippy::type_complexity)]
                     let mut thread_handles: Vec<
                         std::thread::ScopedJoinHandle<Vec<(usize, Result<(), DispatcherError>)>>,
                     > = Vec::new();
@@ -1129,7 +1143,7 @@ impl IDispatcher for DispatcherComponent {
                         // Split this drive's entries across multiple queue threads.
                         let num_queues = MAX_QUEUES_PER_DRIVE.min(entry_indices.len());
                         let chunks: Vec<&[usize]> = entry_indices
-                            .chunks((entry_indices.len() + num_queues - 1) / num_queues)
+                            .chunks(entry_indices.len().div_ceil(num_queues))
                             .collect();
 
                         let queue_depth = 16 / num_queues;
