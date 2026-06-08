@@ -178,7 +178,11 @@ fn try_open_direct(path: &Path, create: bool) -> Result<std::fs::File, String> {
     match opts.open(path) {
         Ok(f) => Ok(f),
         Err(e) if e.raw_os_error() == Some(libc::EINVAL) => {
-            // O_DIRECT not supported on this filesystem — fall back.
+            eprintln!(
+                "WARNING: O_DIRECT not supported on {} — falling back to buffered IO. \
+                 Benchmark results will be unreliable due to OS page cache.",
+                path.display()
+            );
             let mut opts2 = OpenOptions::new();
             opts2.read(true).write(true);
             if create {

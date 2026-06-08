@@ -170,6 +170,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .await?;
 
+    // Mask signals during shutdown to prevent a second Ctrl+C from killing the
+    // process mid-teardown (which would segfault as SPDK memory is freed while
+    // actor threads are still running).
+    unsafe {
+        libc::signal(libc::SIGINT, libc::SIG_IGN);
+        libc::signal(libc::SIGTERM, libc::SIG_IGN);
+    }
+
     let _ = stack.dispatcher.shutdown();
     stack.logger.info("certus-server-yaml: shutdown complete");
 

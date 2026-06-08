@@ -293,7 +293,7 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
                 writeln!(code, "    comp_dispatcher.set_block_device_factory(Box::new(|spdk_env, logger, drive_idx, pci_addr, cpu_pin| {{").unwrap();
                 if decl.crate_name == "block-device-filesys" {
                     // Filesys backend: create with file path derived from drive index
-                    writeln!(code, "        let path = format!(\"/tmp/certus-drive-{{}}.img\", drive_idx);").unwrap();
+                    writeln!(code, "        let path = format!(\"/ssd/certus-drive-{{}}.img\", drive_idx);").unwrap();
                     writeln!(code, "        let bd = {crate_ident}::BlockDeviceFilesysComponent::create(&path, 4096, 1048576);").unwrap();
                 } else {
                     writeln!(code, "        let bd = {crate_ident}::{factory_call};").unwrap();

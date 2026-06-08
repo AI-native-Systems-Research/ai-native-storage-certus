@@ -23,11 +23,13 @@ tonic = { version = "0.12", features = ["tls"] }
 prost = "0.13"
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
+libc = "0.2"
 
 [features]
 default = ["spdk"]
-spdk = ["dep:spdk-env", "dep:block-device-spdk-nvme", "dispatcher/spdk-backend"]
-filesys = ["dep:block-device-filesys"]
+spdk = ["spdk-mem", "dep:block-device-spdk-nvme", "dispatcher/spdk-backend"]
+spdk-mem = ["dep:spdk-env"]
+filesys = ["dep:block-device-filesys", "spdk-mem"]
 
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }
