@@ -25,6 +25,7 @@ tested, but mathematically guaranteed.
 | Exactly ceil(total / max_transfer_size) segments produced | segment_io | us |
 | 64-bit LBA arithmetic never overflows | segment_io | us |
 | LBA adjacency: seg[i].lba + seg[i].length/ss == seg[i+1].lba | segment_io | us+Coq |
+| **Write-through lifecycle safety: entry not evictable during write-through, becomes evictable after** | dispatch-map | us |
 
 ---
 
@@ -261,6 +262,61 @@ is the interface between two different proof systems.
 
 ---
 
+## System-level property proof: Write-through lifecycle safety
+
+### Origin: design specification
+
+This proof started not from code inspection but from a formal design document:
+
+**Source:** `components/dispatcher/specs/001-dispatcher-cache-interface/spec.md`
+
+The relevant requirements:
+- **FR-003**: `populate()` creates a MemoryTier entry with `write_ref=1`
+- **FR-004**: The background writer downgrades `write_ref` to a `read_ref` after GPU copy, holds that read reference during SSD write, then releases it on completion via `convert_to_storage`
+- **FR-005**: The entry remains in the memory-tier after write-through completes
+- **Edge case**: *"The background writer holds a read reference on each entry while write-through is in progress. The reference is released after write completes or fails."*
+
+The system-level invariant this implies: **an entry can only be cleanly evicted after its data is durably on SSD and no reference is held**. An entry being written through is never cleanly evictable.
+
+### What was proved
+
+The lifecycle proof `lifecycle_write_through_safety` in `components/dispatch-map/verif/src/lib.rs` traces the exact sequence the background writer follows and proves:
+
+| Step | Operation | State | Evictable? |
+|---|---|---|---|
+| populate | `create_memory_tier_entry` | write_ref=1, read_ref=0, ssd_offset=None | No — write_ref > 0 |
+| GPU copy done | `downgrade_reference` | write_ref=0, read_ref=1, ssd_offset=None | No — read_ref > 0 |
+| Write-through done | `convert_to_storage` | write_ref=0, read_ref=0, ssd_offset=Some | **Yes** |
+
+The postcondition proved: `no_active_refs(&result)` — both ref counts are zero after the full sequence.
+
+### Components involved
+
+- **Spec**: `components/dispatcher/specs/001-dispatcher-cache-interface/spec.md` (FR-003, FR-004, FR-005)
+- **Proof**: `components/dispatch-map/verif/src/lib.rs` — `lifecycle_write_through_safety` function
+- **Operations used**: `create_memory_tier_entry`, `downgrade_reference`, `convert_to_storage` — all previously verified by Daniel in the same crate
+- **Predicates used**: `no_active_refs`, `inv_write_binary` — existing logic predicates
+
+### New postconditions required
+
+Three existing functions needed additional postconditions to carry enough information through the proof chain — the SMT solver cannot chain what it cannot see:
+
+1. **`create_memory_tier_entry`** — added: location is `MemoryTier{ssd_offset: None}`. Without this, the solver did not know the structural type of the location field after creation.
+
+2. **`downgrade_reference`** — added: location is preserved (`(^entry).location == (*entry).location`). Without this, the solver could not confirm the entry was still MemoryTier before calling `convert_to_storage`.
+
+3. **`convert_to_storage`** — added: when called on a MemoryTier entry with `read_ref=1` and `write_ref=0`, both ref counts are zero after the call. This is the targeted postcondition that closes the final step of the proof.
+
+### Key lesson: system-level proofs require richer function specs
+
+The individual operations were already proved correct in isolation (by Daniel). But proving the SYSTEM-LEVEL property required strengthening their postconditions to expose information that individual callers never needed but the lifecycle proof did. This is a general pattern: operation-level proofs and system-level proofs have different informational requirements, and moving from one to the other often reveals gaps in the existing specs.
+
+### Coq was not needed
+
+Unlike the LBA adjacency proof, this property was fully discharged by the SMT solvers (alt-ergo, z3, cvc5, cvc4). The key was providing the right structural information about the `location` field — once the prover could case-split on the enum variant, the arithmetic (1-1=0) was trivial.
+
+---
+
 ## Verified properties — full detail
 
 ### dispatch-map/verif (`components/dispatch-map/verif/`)
@@ -307,6 +363,7 @@ is the interface between two different proof systems.
 | `lifecycle_cold_evicted_before_hot` | Cold entry (low TSC) always precedes hot entry |
 | `take_read_prevents_eviction` | After take_read, is_evictable is always false |
 | Size invariant | All creation paths guarantee size_blocks > 0 |
+| `lifecycle_write_through_safety` | **System-level (spec FR-003/FR-004/FR-005):** entry is NOT evictable during write-through; becomes evictable only after write-through completes and the background writer releases its read reference |
 
 ### certus-segment-verif (`tools/creusot/certus-segment-verif/`)
 
@@ -325,11 +382,13 @@ Target: `segment_io()` in `components/dispatcher/src/io_segmenter.rs`
 
 ---
 
-## Verification crate locations
+## Verification crate and tool locations
 
-| Crate | Path | Target |
-|---|---|---|
-| dispatch-map verification | `components/dispatch-map/verif/` | Entry lifecycle protocol |
-| segment_io verification | `tools/creusot/certus-segment-verif/` | I/O segmentation arithmetic |
+| Artefact | Path | Branch | Purpose |
+|---|---|---|---|
+| dispatch-map verification crate | `components/dispatch-map/verif/` | `unstable-creusot` | Entry lifecycle protocol proofs |
+| segment_io verification crate | `tools/creusot/certus-segment-verif/` | `unstable` and `unstable-creusot` | I/O segmentation arithmetic proofs |
+| Coq proof (LBA adjacency) | `tools/creusot/certus-segment-verif/coq/mod_sub_lemma.v` | `unstable` and `unstable-creusot` | Hand-written Coq proof for the modular arithmetic lemma |
+| Creusot installation | `tools/creusot/creusot/` | `unstable-creusot` | The Creusot tool itself |
 
-Branch: `unstable-creusot`
+The `tools/creusot/` directory on `unstable` serves as the **verification toolbox** — everything needed to understand and run the Creusot proofs, including the Coq proof artifact. The `unstable-creusot` branch additionally contains the dispatch-map verif crate and is the target for future Creusot CI automation.
