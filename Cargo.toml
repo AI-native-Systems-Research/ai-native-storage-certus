@@ -28,7 +28,8 @@ members = [
     "apps/gpu-bb-vs-p2p",
     "certus-connector",
     "components/example-helloworld-dylib",
-    "apps/dynamic-loading-example"
+    "apps/dynamic-loading-example",
+    "apps/certus-server-yaml"
 ]
 
 # SPDK crates require pre-built native libraries at deps/spdk-build/.

@@ -1,0 +1,72 @@
+profile:
+  name: full
+  description: "Production profile with SPDK NVMe + GPU acceleration"
+
+components:
+  logger:
+    crate: logger
+    factory: "LoggerComponent::new_default"
+    provides: [ILogger]
+
+  spdk_env:
+    crate: spdk-env
+    factory: "SPDKEnvComponent::new_default"
+    provides: [ISPDKEnv]
+    trait_path: spdk-env
+    init_hook: init_spdk_env
+
+  gpu:
+    crate: gpu-services
+    factory: "GpuServicesComponent::new_default"
+    provides: [IGpuServices]
+    init_hook: init_gpu
+
+  dispatch_map:
+    crate: dispatch-map
+    factory: "DispatchMapComponent::new(Default::default())"
+    provides: [IDispatchMap]
+    init_hook: init_dispatch_map
+
+  memory_tier:
+    crate: memory-tier
+    factory: "MemoryTierComponent::new_default"
+    provides: [IMemoryTier]
+    init_hook: init_memory_tier
+
+  dispatcher:
+    crate: dispatcher
+    factory: "DispatcherComponent::new_default"
+    provides: [IDispatcher]
+    init_hook: init_dispatcher
+
+wiring:
+  - target: gpu.logger
+    source: logger
+  - target: dispatch_map.logger
+    source: logger
+  - target: memory_tier.logger
+    source: logger
+  - target: dispatcher.logger
+    source: logger
+  - target: dispatcher.dispatch_map
+    source: dispatch_map
+  - target: dispatcher.memory_tier
+    source: memory_tier
+  - target: dispatcher.gpu_services
+    source: gpu
+  - target: dispatcher.spdk_env
+    source: spdk_env
+
+init_order:
+  - logger
+  - spdk_env
+  - gpu
+  - dispatch_map
+  - memory_tier
+  - dispatcher
+
+exports:
+  - component: logger
+    interface: ILogger
+  - component: dispatcher
+    interface: IDispatcher
