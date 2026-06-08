@@ -26,7 +26,6 @@ use interfaces::{
 };
 
 use component_core::binding::bind;
-use component_core::query_interface;
 use spdk_env::ISPDKEnv;
 
 use crate::background::{BackgroundEvictor, BackgroundWriter, EvictorConfig, WriteJob};
@@ -58,6 +57,30 @@ struct DataDrive {
     cached_channels: Option<ClientChannels>,
 }
 
+/// Factory function type for creating block device components.
+/// Receives SPDK env and logger so it can wire receptacles.
+/// Returns an `Arc<dyn IUnknown>` that provides `IBlockDevice` and `IBlockDeviceAdmin`.
+pub type BlockDeviceFactory = Box<
+    dyn Fn(
+            &Arc<dyn ISPDKEnv + Send + Sync>,
+            &Arc<dyn ILogger + Send + Sync>,
+        ) -> Arc<dyn component_core::IUnknown + Send + Sync>
+        + Send
+        + Sync,
+>;
+
+/// Factory function type for creating extent manager components.
+/// Receives logger and DMA allocator so it can wire receptacles.
+/// Returns an `Arc<dyn IUnknown>` that provides `IExtentManager`.
+pub type ExtentManagerFactory = Box<
+    dyn Fn(
+            &Arc<dyn ILogger + Send + Sync>,
+            DmaAllocFn,
+        ) -> Arc<dyn component_core::IUnknown + Send + Sync>
+        + Send
+        + Sync,
+>;
+
 define_component! {
     pub DispatcherComponent {
         version: "0.1.0",
@@ -77,6 +100,8 @@ define_component! {
             pending_writes: Mutex<HashMap<CacheKey, PendingWrite>>,
             pipeline_ring: RwLock<Option<pipeline::PipelineRing>>,
             warm_stream: AtomicU64,
+            block_device_factory: Mutex<Option<BlockDeviceFactory>>,
+            extent_manager_factory: Mutex<Option<ExtentManagerFactory>>,
         },
     }
 }
@@ -101,6 +126,18 @@ impl DispatcherComponent {
         if let Ok(logger) = self.logger.get() {
             logger.error(msg);
         }
+    }
+
+    /// Set a factory function for creating block device components.
+    /// When set, the dispatcher uses this instead of the hard-coded SPDK NVMe implementation.
+    pub fn set_block_device_factory(&self, factory: BlockDeviceFactory) {
+        *self.block_device_factory.lock().unwrap() = Some(factory);
+    }
+
+    /// Set a factory function for creating extent manager components.
+    /// When set, the dispatcher uses this instead of the hard-coded default.
+    pub fn set_extent_manager_factory(&self, factory: ExtentManagerFactory) {
+        *self.extent_manager_factory.lock().unwrap() = Some(factory);
     }
 
     fn drive_index(key: CacheKey, num_drives: usize) -> usize {
@@ -474,21 +511,31 @@ impl DispatcherComponent {
         ),
         DispatcherError,
     > {
-        let block_dev = block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent::new_default();
-        block_dev
-            .spdk_env
-            .connect(Arc::clone(spdk_env))
-            .map_err(|e| {
-                DispatcherError::IoError(format!("failed to wire spdk_env for data drive {i}: {e}"))
-            })?;
-        block_dev.logger.connect(Arc::clone(logger)).map_err(|e| {
-            DispatcherError::IoError(format!("failed to wire logger for data drive {i}: {e}"))
-        })?;
-        let admin = query_interface!(block_dev, IBlockDeviceAdmin).ok_or_else(|| {
-            DispatcherError::IoError(format!(
-                "failed to query IBlockDeviceAdmin for data drive {i}"
-            ))
-        })?;
+        let block_dev: Arc<dyn component_core::IUnknown + Send + Sync> = {
+            let factory_guard = self.block_device_factory.lock().unwrap();
+            if let Some(ref factory) = *factory_guard {
+                factory(spdk_env, logger)
+            } else {
+                let component = block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent::new_default();
+                component
+                    .spdk_env
+                    .connect(Arc::clone(spdk_env))
+                    .map_err(|e| {
+                        DispatcherError::IoError(format!("failed to wire spdk_env for data drive {i}: {e}"))
+                    })?;
+                component.logger.connect(Arc::clone(logger)).map_err(|e| {
+                    DispatcherError::IoError(format!("failed to wire logger for data drive {i}: {e}"))
+                })?;
+                component as Arc<dyn component_core::IUnknown + Send + Sync>
+            }
+        };
+        let admin: Arc<dyn IBlockDeviceAdmin + Send + Sync> =
+            component_core::iunknown::query::<dyn IBlockDeviceAdmin + Send + Sync>(&*block_dev)
+                .ok_or_else(|| {
+                    DispatcherError::IoError(format!(
+                        "failed to query IBlockDeviceAdmin for data drive {i}"
+                    ))
+                })?;
         admin.set_pci_address(pci_addr);
         if let Some(base) = poller_base_cpu {
             admin.set_actor_cpu(base + i);
@@ -498,11 +545,15 @@ impl DispatcherComponent {
                 "failed to initialize block device at {addr_str}: {e}"
             ))
         })?;
-        let ibd = query_interface!(block_dev, IBlockDevice).ok_or_else(|| {
-            DispatcherError::IoError(format!("failed to query IBlockDevice for data drive {i}"))
-        })?;
+        let ibd: Arc<dyn IBlockDevice + Send + Sync> =
+            component_core::iunknown::query::<dyn IBlockDevice + Send + Sync>(&*block_dev)
+                .ok_or_else(|| {
+                    DispatcherError::IoError(format!(
+                        "failed to query IBlockDevice for data drive {i}"
+                    ))
+                })?;
         Ok((
-            block_dev as Arc<dyn component_core::IUnknown + Send + Sync>,
+            block_dev,
             admin,
             ibd,
         ))
@@ -530,27 +581,33 @@ impl DispatcherComponent {
             let (block_dev_component, admin, ibd) =
                 self.create_block_device(i, config.poller_base_cpu, &spdk_env, &logger, pci_addr, addr_str)?;
 
-            let extent_mgr = extent_manager::ExtentManager::new_inner();
-
             let numa_node = ibd.numa_node();
             let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
                 DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
             });
-            extent_mgr.set_dma_alloc(dma_alloc);
 
-            extent_mgr
-                .logger
-                .connect(Arc::clone(&logger) as Arc<dyn ILogger + Send + Sync>)
-                .map_err(|e| {
-                    DispatcherError::IoError(format!(
-                        "failed to wire logger for extent manager {i}: {e}"
-                    ))
-                })?;
+            let extent_mgr: Arc<dyn component_core::IUnknown + Send + Sync> = {
+                let factory_guard = self.extent_manager_factory.lock().unwrap();
+                if let Some(ref factory) = *factory_guard {
+                    factory(&logger, dma_alloc)
+                } else {
+                    let em = extent_manager::ExtentManager::new_inner();
+                    em.set_dma_alloc(dma_alloc);
+                    em.logger
+                        .connect(Arc::clone(&logger) as Arc<dyn ILogger + Send + Sync>)
+                        .map_err(|e| {
+                            DispatcherError::IoError(format!(
+                                "failed to wire logger for extent manager {i}: {e}"
+                            ))
+                        })?;
+                    em as Arc<dyn component_core::IUnknown + Send + Sync>
+                }
+            };
 
             bind(
                 &*block_dev_component,
                 "IBlockDevice",
-                &*extent_mgr as &dyn component_core::IUnknown,
+                &*extent_mgr,
                 "metadata_device",
             )
             .map_err(|e| {
@@ -560,11 +617,12 @@ impl DispatcherComponent {
             })?;
 
             let iem: Arc<dyn IExtentManager + Send + Sync> =
-                query_interface!(extent_mgr, IExtentManager).ok_or_else(|| {
-                    DispatcherError::IoError(format!(
-                        "failed to query IExtentManager for data drive {i}"
-                    ))
-                })?;
+                component_core::iunknown::query::<dyn IExtentManager + Send + Sync>(&*extent_mgr)
+                    .ok_or_else(|| {
+                        DispatcherError::IoError(format!(
+                            "failed to query IExtentManager for data drive {i}"
+                        ))
+                    })?;
             let sector_size = ibd.block_size();
             let num_sectors = ibd.num_sectors(1).unwrap_or(0);
             let data_disk_size = num_sectors * sector_size as u64;
@@ -2296,6 +2354,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -2335,6 +2395,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
     }
 
@@ -2348,6 +2410,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher);
         assert!(d.is_some());
@@ -2363,6 +2427,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -2383,6 +2449,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -2404,6 +2472,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -2425,6 +2495,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.check(42);
@@ -2441,6 +2513,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.remove(42);
@@ -2457,6 +2531,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -2478,6 +2554,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         // Even though not initialized, zero-size check comes after init check.
@@ -2502,6 +2580,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -2517,6 +2597,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -2533,6 +2615,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         ));
 
         let handles: Vec<_> = (0..4)
@@ -2580,6 +2664,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.memory_tier.connect(mt).unwrap();
@@ -2606,6 +2692,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -2676,6 +2764,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -3000,6 +3090,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)

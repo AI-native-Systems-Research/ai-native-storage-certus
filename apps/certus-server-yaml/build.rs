@@ -33,6 +33,9 @@ struct ComponentDecl {
     /// Defaults to "interfaces" if not specified.
     trait_path: Option<String>,
     init_hook: Option<String>,
+    /// "factory" means this component is created N times at runtime (not a singleton).
+    /// It generates a factory closure instead of a singleton instance.
+    kind: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -136,6 +139,10 @@ fn ensure_callable(factory: &str) -> String {
     }
 }
 
+fn is_factory_kind(decl: &ComponentDecl) -> bool {
+    decl.kind.as_deref() == Some("factory")
+}
+
 fn generate_composition(manifest: &ProfileManifest) -> String {
     let mut code = String::new();
 
@@ -178,10 +185,13 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
     )
     .unwrap();
 
-    // --- Instantiation phase ---
+    // --- Instantiation phase (skip factory-kind components) ---
     writeln!(code, "    // --- Instantiate components ---").unwrap();
     for name in &manifest.init_order {
         let decl = &manifest.components[name];
+        if is_factory_kind(decl) {
+            continue;
+        }
         let crate_ident = rust_crate_ident(&decl.crate_name);
         let factory_call = ensure_callable(&decl.factory);
         writeln!(
@@ -190,9 +200,9 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
         )
         .unwrap();
     }
-    // Instantiate components not in init_order (those without hooks)
+    // Instantiate components not in init_order (those without hooks, skip factories)
     for (name, decl) in &manifest.components {
-        if !manifest.init_order.contains(name) {
+        if !manifest.init_order.contains(name) && !is_factory_kind(decl) {
             let crate_ident = rust_crate_ident(&decl.crate_name);
             let factory_call = ensure_callable(&decl.factory);
             writeln!(
@@ -204,9 +214,12 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
     }
     writeln!(code).unwrap();
 
-    // --- Query interfaces phase ---
+    // --- Query interfaces phase (skip factory-kind) ---
     writeln!(code, "    // --- Query interfaces ---").unwrap();
     for (name, decl) in &manifest.components {
+        if is_factory_kind(decl) {
+            continue;
+        }
         let trait_mod = decl
             .trait_path
             .as_deref()
@@ -259,10 +272,45 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
     }
     writeln!(code).unwrap();
 
+    // --- Factory injection phase (for kind: factory components) ---
+    let factory_components: Vec<(&String, &ComponentDecl)> = manifest
+        .components
+        .iter()
+        .filter(|(_, decl)| is_factory_kind(decl))
+        .collect();
+
+    if !factory_components.is_empty() {
+        writeln!(code, "    // --- Inject component factories ---").unwrap();
+        for (name, decl) in &factory_components {
+            let crate_ident = rust_crate_ident(&decl.crate_name);
+            let factory_call = ensure_callable(&decl.factory);
+
+            if *name == "block_device" {
+                writeln!(code, "    comp_dispatcher.set_block_device_factory(Box::new(|spdk_env, logger| {{").unwrap();
+                writeln!(code, "        let bd = {crate_ident}::{factory_call};").unwrap();
+                writeln!(code, "        bd.spdk_env.connect(std::sync::Arc::clone(spdk_env)).unwrap();").unwrap();
+                writeln!(code, "        bd.logger.connect(std::sync::Arc::clone(logger)).unwrap();").unwrap();
+                writeln!(code, "        bd as std::sync::Arc<dyn component_core::IUnknown + Send + Sync>").unwrap();
+                writeln!(code, "    }}));").unwrap();
+            } else if *name == "extent_manager" {
+                writeln!(code, "    comp_dispatcher.set_extent_manager_factory(Box::new(|logger, dma_alloc| {{").unwrap();
+                writeln!(code, "        let em = {crate_ident}::{factory_call};").unwrap();
+                writeln!(code, "        em.set_dma_alloc(dma_alloc);").unwrap();
+                writeln!(code, "        em.logger.connect(std::sync::Arc::clone(logger) as std::sync::Arc<dyn interfaces::ILogger + Send + Sync>).unwrap();").unwrap();
+                writeln!(code, "        em as std::sync::Arc<dyn component_core::IUnknown + Send + Sync>").unwrap();
+                writeln!(code, "    }}));").unwrap();
+            }
+        }
+        writeln!(code).unwrap();
+    }
+
     // --- Initialization phase ---
     writeln!(code, "    // --- Initialize (in declared order) ---").unwrap();
     for name in &manifest.init_order {
         let decl = &manifest.components[name];
+        if is_factory_kind(decl) {
+            continue;
+        }
         if let Some(hook) = &decl.init_hook {
             let iface = &decl.provides[0];
             let iface_var = format!(

@@ -33,6 +33,18 @@ components:
     provides: [IMemoryTier]
     init_hook: init_memory_tier
 
+  block_device:
+    crate: block-device-spdk-nvme
+    factory: "BlockDeviceSpdkNvmeComponent::new_default"
+    provides: [IBlockDevice, IBlockDeviceAdmin]
+    kind: factory
+
+  extent_manager:
+    crate: extent-manager
+    factory: "ExtentManager::new_inner"
+    provides: [IExtentManager]
+    kind: factory
+
   dispatcher:
     crate: dispatcher
     factory: "DispatcherComponent::new_default"
