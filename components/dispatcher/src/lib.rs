@@ -505,7 +505,7 @@ impl DispatcherComponent {
         })
     }
 
-    #[allow(clippy::type_complexity)]
+    #[allow(clippy::type_complexity, unused_variables)]
     fn create_block_device(
         &self,
         i: usize,
@@ -533,41 +533,50 @@ impl DispatcherComponent {
             Ok((block_dev, None, ibd))
         } else {
             drop(factory_guard);
-            let component = block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent::new_default();
-            component
-                .spdk_env
-                .connect(Arc::clone(spdk_env))
-                .map_err(|e| {
-                    DispatcherError::IoError(format!("failed to wire spdk_env for data drive {i}: {e}"))
+            #[cfg(feature = "spdk-backend")]
+            {
+                let component = block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent::new_default();
+                component
+                    .spdk_env
+                    .connect(Arc::clone(spdk_env))
+                    .map_err(|e| {
+                        DispatcherError::IoError(format!("failed to wire spdk_env for data drive {i}: {e}"))
+                    })?;
+                component.logger.connect(Arc::clone(logger)).map_err(|e| {
+                    DispatcherError::IoError(format!("failed to wire logger for data drive {i}: {e}"))
                 })?;
-            component.logger.connect(Arc::clone(logger)).map_err(|e| {
-                DispatcherError::IoError(format!("failed to wire logger for data drive {i}: {e}"))
-            })?;
-            let block_dev = component as Arc<dyn component_core::IUnknown + Send + Sync>;
-            let admin: Arc<dyn IBlockDeviceAdmin + Send + Sync> =
-                component_core::iunknown::query::<dyn IBlockDeviceAdmin + Send + Sync>(&*block_dev)
-                    .ok_or_else(|| {
-                        DispatcherError::IoError(format!(
-                            "failed to query IBlockDeviceAdmin for data drive {i}"
-                        ))
-                    })?;
-            admin.set_pci_address(pci_addr);
-            if let Some(base) = poller_base_cpu {
-                admin.set_actor_cpu(base + i);
+                let block_dev = component as Arc<dyn component_core::IUnknown + Send + Sync>;
+                let admin: Arc<dyn IBlockDeviceAdmin + Send + Sync> =
+                    component_core::iunknown::query::<dyn IBlockDeviceAdmin + Send + Sync>(&*block_dev)
+                        .ok_or_else(|| {
+                            DispatcherError::IoError(format!(
+                                "failed to query IBlockDeviceAdmin for data drive {i}"
+                            ))
+                        })?;
+                admin.set_pci_address(pci_addr);
+                if let Some(base) = poller_base_cpu {
+                    admin.set_actor_cpu(base + i);
+                }
+                admin.initialize().map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "failed to initialize block device at {addr_str}: {e}"
+                    ))
+                })?;
+                let ibd: Arc<dyn IBlockDevice + Send + Sync> =
+                    component_core::iunknown::query::<dyn IBlockDevice + Send + Sync>(&*block_dev)
+                        .ok_or_else(|| {
+                            DispatcherError::IoError(format!(
+                                "failed to query IBlockDevice for data drive {i}"
+                            ))
+                        })?;
+                Ok((block_dev, Some(admin), ibd))
             }
-            admin.initialize().map_err(|e| {
-                DispatcherError::IoError(format!(
-                    "failed to initialize block device at {addr_str}: {e}"
+            #[cfg(not(feature = "spdk-backend"))]
+            {
+                Err(DispatcherError::IoError(
+                    "no block device factory set and spdk-backend feature not enabled".into(),
                 ))
-            })?;
-            let ibd: Arc<dyn IBlockDevice + Send + Sync> =
-                component_core::iunknown::query::<dyn IBlockDevice + Send + Sync>(&*block_dev)
-                    .ok_or_else(|| {
-                        DispatcherError::IoError(format!(
-                            "failed to query IBlockDevice for data drive {i}"
-                        ))
-                    })?;
-            Ok((block_dev, Some(admin), ibd))
+            }
         }
     }
 
@@ -575,10 +584,22 @@ impl DispatcherComponent {
         &self,
         config: &DispatcherConfig,
     ) -> Result<Vec<DataDrive>, DispatcherError> {
-        let spdk_env = self
-            .spdk_env
-            .get()
-            .map_err(|_| DispatcherError::NotInitialized("spdk_env not bound".into()))?;
+        let has_factory = self.block_device_factory.lock().unwrap().is_some();
+        let spdk_env: Arc<dyn ISPDKEnv + Send + Sync> = match self.spdk_env.get() {
+            Ok(env) => env,
+            Err(_) if has_factory => {
+                // Factory handles device creation; use uninitialized stub as placeholder
+                use component_core::query_interface;
+                let stub = spdk_env::SPDKEnvComponent::new_default();
+                query_interface!(stub, ISPDKEnv)
+                    .expect("SPDKEnvComponent must provide ISPDKEnv")
+            }
+            Err(_) => {
+                return Err(DispatcherError::NotInitialized(
+                    "spdk_env not bound".into(),
+                ));
+            }
+        };
 
         let logger = self
             .logger
@@ -594,9 +615,31 @@ impl DispatcherComponent {
                 self.create_block_device(i, config.poller_base_cpu, &spdk_env, &logger, pci_addr, addr_str)?;
 
             let numa_node = ibd.numa_node();
-            let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
-                DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
-            });
+            let dma_alloc: DmaAllocFn = if has_factory {
+                // Non-SPDK path: use posix_memalign for DMA buffers
+                unsafe extern "C" fn libc_free(p: *mut std::ffi::c_void) {
+                    libc::free(p);
+                }
+                Arc::new(move |size, align, _numa| {
+                    let mut ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+                    // SAFETY: posix_memalign is safe with valid align (power of 2, multiple of sizeof(void*))
+                    let ret = unsafe { libc::posix_memalign(&mut ptr, align, size) };
+                    if ret != 0 || ptr.is_null() {
+                        return Err(format!("posix_memalign failed ({size}, {align}): errno {ret}"));
+                    }
+                    // Zero the buffer
+                    unsafe { std::ptr::write_bytes(ptr as *mut u8, 0, size) };
+                    // SAFETY: ptr is valid, non-null, allocated with posix_memalign
+                    unsafe {
+                        DmaBuffer::from_raw(ptr, size, libc_free, numa_node)
+                            .map_err(|e| e.to_string())
+                    }
+                })
+            } else {
+                Arc::new(move |size, align, _numa| {
+                    DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
+                })
+            };
 
             let extent_mgr: Arc<dyn component_core::IUnknown + Send + Sync> = {
                 let factory_guard = self.extent_manager_factory.lock().unwrap();
@@ -714,8 +757,9 @@ impl IDispatcher for DispatcherComponent {
         }
 
         // Create N block devices and N extent managers from config.
-        // If spdk_env is not connected, skip drive creation (memory-tier-only mode).
-        if self.spdk_env.is_connected() {
+        // Skip drive creation only in memory-tier-only mode (no spdk_env AND no factory).
+        let has_bd_factory = self.block_device_factory.lock().unwrap().is_some();
+        if self.spdk_env.is_connected() || has_bd_factory {
             let drives = self.create_data_drives(&config)?;
             *self.data_drives.write() = drives;
 

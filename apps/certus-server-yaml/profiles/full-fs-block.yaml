@@ -1,19 +1,12 @@
 profile:
   name: full-fs-block
-  description: "Profile that simulate block-device with filesystem"
+  description: "Profile that uses filesystem-backed block devices (no SPDK/NVMe)"
 
 components:
   logger:
     crate: logger
     factory: "LoggerComponent::new_default"
     provides: [ILogger]
-
-  spdk_env:
-    crate: spdk-env
-    factory: "SPDKEnvComponent::new_default"
-    provides: [ISPDKEnv]
-    trait_path: spdk-env
-    init_hook: init_spdk_env
 
   gpu:
     crate: gpu-services
@@ -67,12 +60,9 @@ wiring:
     source: memory_tier
   - target: dispatcher.gpu_services
     source: gpu
-  - target: dispatcher.spdk_env
-    source: spdk_env
 
 init_order:
   - logger
-  - spdk_env
   - gpu
   - dispatch_map
   - memory_tier

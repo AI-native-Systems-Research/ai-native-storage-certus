@@ -68,7 +68,7 @@ block-device-filesys = { path = "components/block-device-filesys" }
 logger = { path = "components/logger" }
 dispatch-map = { path = "components/dispatch-map" }
 memory-tier = { path = "components/memory-tier" }
-dispatcher = { path = "components/dispatcher" }
+dispatcher = { path = "components/dispatcher", default-features = false }
 extent-manager = { path = "components/extent-manager" }
 gpu-services = { path = "components/gpu-services" }
 certus-connector = { path = "certus-connector" }

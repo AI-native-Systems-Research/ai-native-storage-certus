@@ -9,13 +9,13 @@ publish = false
 interfaces = { workspace = true, features = ["spdk"] }
 component-framework.workspace = true
 component-core.workspace = true
-dispatcher.workspace = true
+dispatcher = { workspace = true, default-features = false }
 dispatch-map.workspace = true
 memory-tier.workspace = true
-block-device-spdk-nvme.workspace = true
-block-device-filesys.workspace = true
+block-device-spdk-nvme = { workspace = true, optional = true }
+block-device-filesys = { workspace = true, optional = true }
 extent-manager.workspace = true
-spdk-env.workspace = true
+spdk-env = { workspace = true, optional = true }
 gpu-services = { workspace = true, features = ["gpu"] }
 logger.workspace = true
 
@@ -23,6 +23,11 @@ tonic = { version = "0.12", features = ["tls"] }
 prost = "0.13"
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
+
+[features]
+default = ["spdk"]
+spdk = ["dep:spdk-env", "dep:block-device-spdk-nvme", "dispatcher/spdk-backend"]
+filesys = ["dep:block-device-filesys"]
 
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }
