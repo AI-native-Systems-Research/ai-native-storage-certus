@@ -21,6 +21,9 @@ service Dispatcher {
 
   // Clear all entries from the memory-tier cache pool.
   rpc ClearMemoryTier(ClearMemoryTierRequest) returns (ClearMemoryTierResponse);
+
+  // Flush all pending background write-through jobs to SSD and block until complete.
+  rpc FlushToSsd(FlushToSsdRequest) returns (FlushToSsdResponse);
 }
 
 // --- Common types ---
@@ -123,4 +126,13 @@ message ClearMemoryTierRequest {}
 
 message ClearMemoryTierResponse {
   uint64 entries_cleared = 1;
+}
+
+// --- FlushToSsd ---
+
+message FlushToSsdRequest {}
+
+message FlushToSsdResponse {
+  // Number of write jobs that were in-flight at the time flush was called.
+  uint64 jobs_flushed = 1;
 }

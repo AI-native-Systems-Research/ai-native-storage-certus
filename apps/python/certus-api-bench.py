@@ -366,6 +366,7 @@ def run_client(
     barrier,
     result,
     gpu_id=0,
+    skip_flush=False,
 ):
     """Single client worker: populate objects, then measure hot and cold lookups."""
 
@@ -458,12 +459,15 @@ def run_client(
     result.populate_end = t_pop_end
     result.populate_objects = total_objects
 
-    # Wait for background write-through to flush to SSD.
-    # All clients flush in parallel so use per-client volume, not total.
-    # Conservative 2 GB/s per SSD estimate.
-    per_client_flush_bytes = total_objects * BLOCK_SIZE
-    wt_wait = max(5.0, per_client_flush_bytes / (2 * 1024**3))
-    time.sleep(wt_wait)
+    # Flush background write-through to SSD and wait for completion.
+    # Client 0 issues the flush; all clients wait at the barrier.
+    barrier.wait()
+    if client_id == 0:
+        try:
+            stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
+        except grpc.RpcError as e:
+            result.errors.append(f"FlushToSsd failed: {e.details()}")
+    barrier.wait()
 
     # --- Phase 2: Hot lookups (memory-tier) ---
     # The last `num_objects` in the pool are still in DRAM.
@@ -518,35 +522,37 @@ def run_client(
     # Flush the SSD's internal DRAM cache by writing enough throwaway data
     # through the drive. Typical NVMe drives have 1-4 GB DRAM; writing 4 GB
     # of new data ensures the cold keys are evicted from the drive's cache.
-    flush_base = base_key + total_objects + 1_000_000
-    flush_count = 1024  # 1024 * 4 MiB = 4 GB per client
-    for batch_start in range(0, flush_count, batch_size):
-        batch_end = min(batch_start + batch_size, flush_count)
-        keys = [flush_base + i for i in range(batch_start, batch_end)]
-        entries = [
-            dispatcher_pb2.PopulateEntry(key=k, ipc_handle=populate_ipc)
-            for k in keys
-        ]
-        try:
-            stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=entries))
-        except grpc.RpcError:
-            pass
+    # Skip for O_DIRECT+O_SYNC backends (filesys) where writes are already durable.
+    if not skip_flush:
+        flush_base = base_key + total_objects + 1_000_000
+        flush_count = 1024  # 1024 * 4 MiB = 4 GB per client
+        for batch_start in range(0, flush_count, batch_size):
+            batch_end = min(batch_start + batch_size, flush_count)
+            keys = [flush_base + i for i in range(batch_start, batch_end)]
+            entries = [
+                dispatcher_pb2.PopulateEntry(key=k, ipc_handle=populate_ipc)
+                for k in keys
+            ]
+            try:
+                stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=entries))
+            except grpc.RpcError:
+                pass
 
-    # Wait for flush writes to complete through to SSD NAND.
-    # Clients flush in parallel; use per-client volume at ~3 GB/s.
-    flush_bytes = flush_count * BLOCK_SIZE
-    flush_wait = max(5.0, flush_bytes / (3 * 1024**3))
-    barrier.wait()
-    time.sleep(flush_wait)
+        # Wait for flush writes to complete through to SSD NAND.
+        # Clients flush in parallel; use per-client volume at ~3 GB/s.
+        flush_bytes = flush_count * BLOCK_SIZE
+        flush_wait = max(5.0, flush_bytes / (3 * 1024**3))
+        barrier.wait()
+        time.sleep(flush_wait)
 
-    # Clear memory-tier again (flush data filled it back up).
-    barrier.wait()
-    if client_id == 0:
-        try:
-            stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
-        except grpc.RpcError:
-            pass
-    barrier.wait()
+        # Clear memory-tier again (flush data filled it back up).
+        barrier.wait()
+        if client_id == 0:
+            try:
+                stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
+            except grpc.RpcError:
+                pass
+        barrier.wait()
 
     # Cold lookups use batched requests with SEPARATE IPC handles per key.
     # A shared IPC handle allows the server to skip SSD reads for entries whose
@@ -687,6 +693,11 @@ def main():
         default=16,
         help="Number of objects to verify in integrity check (default: 16)",
     )
+    parser.add_argument(
+        "--skip-flush",
+        action="store_true",
+        help="Skip SSD DRAM cache flush phase (use for O_DIRECT+O_SYNC backends like filesys)",
+    )
     args = parser.parse_args()
 
     global BLOCK_SIZE
@@ -756,6 +767,7 @@ def main():
                 barrier,
                 results[i],
                 gpu_id,
+                args.skip_flush,
             ),
             daemon=True,
         )

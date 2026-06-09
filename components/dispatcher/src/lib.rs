@@ -1811,6 +1811,21 @@ impl IDispatcher for DispatcherComponent {
         }
         Ok(count)
     }
+
+    fn flush_to_ssd(&self) -> Result<usize, DispatcherError> {
+        self.ensure_initialized()?;
+
+        // Block until the background writer has processed all enqueued jobs.
+        let flushed = if let Some(ref writer) = *self.bg_writer.lock().unwrap() {
+            let before = writer.in_flight();
+            writer.flush();
+            before
+        } else {
+            0
+        };
+
+        Ok(flushed)
+    }
 }
 
 #[cfg(test)]
