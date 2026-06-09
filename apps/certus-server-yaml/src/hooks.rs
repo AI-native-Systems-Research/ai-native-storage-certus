@@ -8,14 +8,24 @@ use std::sync::Arc;
 use interfaces::{
     DmaAllocFn, DmaBuffer, DispatcherConfig, IDispatchMap, IDispatcher, IGpuServices, IMemoryTier,
 };
-use spdk_env::ISPDKEnv;
 
 use crate::config::StackConfig;
 
+#[cfg(feature = "spdk")]
 const NVME_CLASS_CODE: u32 = 0x010802;
 
+#[cfg(feature = "spdk-mem")]
+#[allow(dead_code)]
+pub fn init_spdk_env_dma_only(
+    iface: &Arc<dyn spdk_env::ISPDKEnv + Send + Sync>,
+    _config: &StackConfig,
+) -> Result<(), String> {
+    iface.init().map_err(|e| format!("SPDK init failed: {e}"))
+}
+
+#[cfg(feature = "spdk")]
 pub fn init_spdk_env(
-    iface: &Arc<dyn ISPDKEnv + Send + Sync>,
+    iface: &Arc<dyn spdk_env::ISPDKEnv + Send + Sync>,
     config: &StackConfig,
 ) -> Result<(), String> {
     iface.init().map_err(|e| format!("SPDK init failed: {e}"))?;
@@ -99,7 +109,15 @@ pub fn init_dispatcher(
     iface: &Arc<dyn IDispatcher + Send + Sync>,
     config: &StackConfig,
 ) -> Result<(), String> {
-    let data_pci_addrs = config.resolved_pci_addrs.borrow().clone();
+    let mut data_pci_addrs = config.resolved_pci_addrs.borrow().clone();
+
+    // When SPDK is not used, generate placeholder addresses for the requested drive count.
+    if data_pci_addrs.is_empty() {
+        let count = config.drive_count.unwrap_or(1);
+        data_pci_addrs = (0..count)
+            .map(|i| format!("0000:00:0{i}.0"))
+            .collect();
+    }
 
     iface
         .initialize(DispatcherConfig {

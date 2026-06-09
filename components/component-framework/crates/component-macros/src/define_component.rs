@@ -313,8 +313,11 @@ pub(crate) fn expand(input: ComponentInput) -> TokenStream {
             __interface_info: ::std::vec::Vec<::component_core::interface::InterfaceInfo>,
             __receptacle_info: ::std::vec::Vec<::component_core::interface::ReceptacleInfo>,
             __version: &'static str,
-            #(#recep_field_defs,)*
+            // User fields are dropped before receptacles so that actor threads
+            // (held in user fields) are joined before dependencies (held in
+            // receptacles, e.g. spdk_env) are released.
             #(#user_field_defs,)*
+            #(#recep_field_defs,)*
         }
 
         #[cfg(creusot)]
@@ -331,8 +334,8 @@ pub(crate) fn expand(input: ComponentInput) -> TokenStream {
                     __interface_info: Vec::new(),
                     __receptacle_info: Vec::new(),
                     __version: #version,
-                    #(#recep_field_inits,)*
                     #(#user_field_inits,)*
+                    #(#recep_field_inits,)*
                 };
                 let self_arc = ::std::sync::Arc::new(component);
                 #init_method(&self_arc);
