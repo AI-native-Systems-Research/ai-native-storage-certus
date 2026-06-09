@@ -478,6 +478,16 @@ component_macros::define_interface! {
         /// # }
         /// ```
         fn clear_memory_tier(&self) -> Result<usize, DispatcherError>;
+
+        /// Flush all pending background write-through jobs to SSD and block until complete.
+        ///
+        /// Guarantees that every entry populated before this call has its data
+        /// persisted to the block device. After this returns, `clear_memory_tier`
+        /// will convert all memory-tier entries to BlockDevice state rather than
+        /// dropping them.
+        ///
+        /// Returns the number of entries that now have a valid SSD offset.
+        fn flush_to_ssd(&self) -> Result<usize, DispatcherError>;
     }
 }
 

@@ -39,8 +39,8 @@ use component_framework::define_component;
 use interfaces::ILogger;
 
 pub use interfaces::{
-    ClientChannels, Command, Completion, IBlockDevice, NamespaceInfo, NvmeBlockError, OpHandle,
-    TelemetrySnapshot,
+    ClientChannels, Command, Completion, IBlockDevice, IBlockDeviceAdmin, NamespaceInfo,
+    NvmeBlockError, OpHandle, TelemetrySnapshot,
 };
 
 use crate::actor::{ControlMessage, FilesysHandler};
@@ -54,7 +54,7 @@ const DEFAULT_RING_DEPTH: u32 = 128;
 define_component! {
     pub BlockDeviceFilesysComponent {
         version: "0.1.0",
-        provides: [IBlockDevice],
+        provides: [IBlockDevice, IBlockDeviceAdmin],
         receptacles: {
             logger: ILogger,
         },
@@ -201,6 +201,24 @@ impl BlockDeviceFilesysComponent {
         }
         Ok(())
     }
+}
+
+impl IBlockDeviceAdmin for BlockDeviceFilesysComponent {
+    fn set_pci_address(&self, _addr: interfaces::PciAddress) {}
+
+    fn set_actor_cpu(&self, _cpu: usize) {}
+
+    fn initialize(&self) -> Result<(), NvmeBlockError> {
+        self.initialize()
+    }
+
+    fn signal_stop(&self) {}
+
+    fn shutdown(&self) -> Result<(), NvmeBlockError> {
+        self.shutdown()
+    }
+
+    fn detach_controller(&self) {}
 }
 
 impl IBlockDevice for BlockDeviceFilesysComponent {

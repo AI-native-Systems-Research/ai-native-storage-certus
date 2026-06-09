@@ -9,7 +9,7 @@ publish = false
 interfaces = { workspace = true, features = ["spdk"] }
 component-framework.workspace = true
 component-core.workspace = true
-dispatcher.workspace = true
+dispatcher = { workspace = true, features = ["spdk-backend"] }
 dispatch-map.workspace = true
 memory-tier.workspace = true
 block-device-spdk-nvme.workspace = true

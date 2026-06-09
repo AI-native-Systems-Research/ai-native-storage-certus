@@ -45,7 +45,7 @@ pub(crate) mod tsc;
 mod actor;
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use component_core::actor::{Actor, ActorHandle};
 use component_core::channel::spsc::SpscChannel;
@@ -84,6 +84,7 @@ define_component! {
             actor_cpu: Mutex<Option<usize>>,
             controller_info: RwLock<Option<ControllerSnapshot>>,
             actor_handle: Mutex<Option<ActorHandle<ControlMessage>>>,
+            controller_park: Arc<Mutex<Option<NvmeController>>>,
             next_client_id: AtomicU64,
             telemetry_stats: Mutex<Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>>,
         },
@@ -185,15 +186,18 @@ impl BlockDeviceSpdkNvmeComponent {
         #[cfg(feature = "telemetry")]
         let telemetry = std::sync::Arc::new(crate::telemetry::TelemetryStats::new());
 
+        let park = Arc::clone(&self.controller_park);
+
         #[cfg(feature = "telemetry")]
         let handler = BlockDeviceHandler::with_telemetry(
             controller,
+            park,
             std::sync::Arc::clone(&telemetry),
             logger.clone(),
         );
 
         #[cfg(not(feature = "telemetry"))]
-        let handler = BlockDeviceHandler::new(controller, logger.clone());
+        let handler = BlockDeviceHandler::new(controller, park, logger.clone());
 
         // Store telemetry for snapshot queries (type-erased via Any).
         #[cfg(feature = "telemetry")]
@@ -348,6 +352,12 @@ impl IBlockDeviceAdmin for BlockDeviceSpdkNvmeComponent {
         self.initialize()
     }
 
+    fn signal_stop(&self) {
+        if let Some(handle) = self.actor_handle.lock().expect("actor_handle lock poisoned").as_mut() {
+            handle.signal_stop();
+        }
+    }
+
     fn shutdown(&self) -> Result<(), NvmeBlockError> {
         let maybe_handle = self
             .actor_handle
@@ -363,6 +373,10 @@ impl IBlockDeviceAdmin for BlockDeviceSpdkNvmeComponent {
             }
         }
         Ok(())
+    }
+
+    fn detach_controller(&self) {
+        let _ = self.controller_park.lock().unwrap().take();
     }
 }
 
@@ -518,6 +532,7 @@ mod shutdown_tests {
                 Mutex::new(None),
                 RwLock::new(None),
                 Mutex::new(None),
+                Arc::new(Mutex::new(None)),
                 AtomicU64::new(0),
                 Mutex::new(None),
             )
@@ -558,6 +573,7 @@ mod tests {
             Mutex::new(None),
             RwLock::new(None),
             Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
             Mutex::new(None),
         )
