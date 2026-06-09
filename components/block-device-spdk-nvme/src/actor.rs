@@ -202,8 +202,12 @@ struct ClientState {
 /// Owns the NVMe controller and manages client sessions. The actor runs
 /// on a dedicated thread pinned to the NUMA node of the NVMe controller.
 pub(crate) struct BlockDeviceHandler {
-    /// The attached NVMe controller.
-    controller: NvmeController,
+    /// The attached NVMe controller (taken out and parked during on_stop
+    /// so that detach happens after ALL actor threads have exited).
+    controller: Option<NvmeController>,
+    /// Shared parking slot: on_stop moves the controller here so it outlives
+    /// the actor thread and detach happens after ALL actors have exited.
+    controller_park: Arc<Mutex<Option<NvmeController>>>,
     /// Connected client sessions.
     clients: Vec<ClientState>,
     /// Monotonically increasing operation handle counter.
@@ -272,12 +276,14 @@ impl BlockDeviceHandler {
     #[allow(dead_code)]
     pub(crate) fn new(
         controller: NvmeController,
+        controller_park: Arc<Mutex<Option<NvmeController>>>,
         logger: Option<Arc<dyn ILogger + Send + Sync>>,
     ) -> Self {
         let tsc = TscClock::new();
         let now = tsc.now();
         Self {
-            controller,
+            controller: Some(controller),
+            controller_park,
             clients: Vec::new(),
             next_handle: 1,
             async_completions: Vec::new(),
@@ -296,13 +302,15 @@ impl BlockDeviceHandler {
     #[cfg(feature = "telemetry")]
     pub(crate) fn with_telemetry(
         controller: NvmeController,
+        controller_park: Arc<Mutex<Option<NvmeController>>>,
         telemetry: Arc<TelemetryStats>,
         logger: Option<Arc<dyn ILogger + Send + Sync>>,
     ) -> Self {
         let tsc = TscClock::new();
         let now = tsc.now();
         Self {
-            controller,
+            controller: Some(controller),
+            controller_park,
             clients: Vec::new(),
             next_handle: 1,
             async_completions: Vec::new(),
@@ -361,7 +369,7 @@ impl BlockDeviceHandler {
                             pending_ops,
                         } = &mut self.clients[i];
                         Self::dispatch_command(
-                            &mut self.controller,
+                            self.controller.as_mut().unwrap(),
                             session,
                             pending_ops,
                             &mut self.next_handle,
@@ -394,8 +402,9 @@ impl BlockDeviceHandler {
         }
 
         // Process SPDK qpair completions for async operations.
-        for qp_idx in 0..self.controller.qpairs.len() {
-            if let Some(qp) = self.controller.qpairs.get_mut(qp_idx) {
+        let ctrl = self.controller.as_mut().unwrap();
+        for qp_idx in 0..ctrl.qpairs.len() {
+            if let Some(qp) = ctrl.qpairs.get_mut(qp_idx) {
                 // SAFETY: queue pair pointer is valid while controller is alive.
                 let n = unsafe { qp.process_completions(0) };
                 if n > 0 {
@@ -476,9 +485,10 @@ impl BlockDeviceHandler {
         }
 
         // SAFETY: controller pointer is valid while actor is running.
-        let rc = unsafe { spdk_sys::spdk_nvme_ctrlr_reset(self.controller.as_ptr()) };
+        let ctrl = self.controller.as_mut().unwrap();
+        let rc = unsafe { spdk_sys::spdk_nvme_ctrlr_reset(ctrl.as_ptr()) };
         let result = if rc == 0 {
-            self.controller.refresh_namespaces();
+            ctrl.refresh_namespaces();
             Ok(())
         } else {
             Err(NvmeBlockError::BlockDevice(
@@ -1095,13 +1105,13 @@ impl BlockDeviceHandler {
     /// Get a reference to the controller.
     #[allow(dead_code)]
     pub(crate) fn controller(&self) -> &NvmeController {
-        &self.controller
+        self.controller.as_ref().unwrap()
     }
 
     /// Get a mutable reference to the controller.
     #[allow(dead_code)]
     pub(crate) fn controller_mut(&mut self) -> &mut NvmeController {
-        &mut self.controller
+        self.controller.as_mut().unwrap()
     }
 }
 
@@ -1153,8 +1163,9 @@ impl ActorHandler<ControlMessage> for BlockDeviceHandler {
         // Drain all in-flight SPDK operations so completion callbacks don't
         // fire after the handler (and its async_completions Vec) is dropped.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        for qp_idx in 0..self.controller.qpairs.len() {
-            if let Some(qp) = self.controller.qpairs.get_mut(qp_idx) {
+        let ctrl = self.controller.as_mut().unwrap();
+        for qp_idx in 0..ctrl.qpairs.len() {
+            if let Some(qp) = ctrl.qpairs.get_mut(qp_idx) {
                 while qp.in_flight() > 0 && std::time::Instant::now() < deadline {
                     unsafe {
                         qp.process_completions(0);
@@ -1180,6 +1191,12 @@ impl ActorHandler<ControlMessage> for BlockDeviceHandler {
             }
         }
         self.clients.clear();
+
+        // Park the controller so it outlives this thread. The caller will
+        // detach it after ALL actor threads have been joined.
+        if let Some(ctrl) = self.controller.take() {
+            *self.controller_park.lock().unwrap() = Some(ctrl);
+        }
     }
 }
 

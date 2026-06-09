@@ -12,7 +12,7 @@ component-macros.workspace = true
 interfaces = { workspace = true, features = ["spdk"] }
 gpu-services = { workspace = true, features = ["spdk", "gpu"] }
 spdk-env.workspace = true
-block-device-spdk-nvme.workspace = true
+block-device-spdk-nvme = { workspace = true, optional = true }
 extent-manager.workspace = true
 memory-tier.workspace = true
 libc = "0.2"
@@ -23,6 +23,8 @@ parking_lot = "0.12"
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
 
 [features]
+default = ["spdk-backend"]
+spdk-backend = ["dep:block-device-spdk-nvme"]
 hardware-test = []
 
 [dev-dependencies]
