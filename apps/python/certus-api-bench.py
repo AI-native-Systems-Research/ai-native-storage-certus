@@ -413,14 +413,14 @@ def run_client(
             dispatcher_pb2.IpcHandle(cuda_ipc_handle=handle_bytes, size=BLOCK_SIZE, gpu_device_id=gpu_id)
         )
 
-    # Memory-tier pool can hold MEMORY_TIER_SIZE / BLOCK_SIZE objects.
-    # For cold-path testing we need objects evicted to SSD.
-    # Strategy: populate enough objects to overflow the pool fraction this client owns,
-    # so the earliest keys get evicted to SSD.
+    # Memory-tier pool can hold MEMORY_TIER_SIZE / BLOCK_SIZE objects total.
+    # With num_clients concurrent clients each gets a fair share of the pool.
+    # For cold-path testing we populate enough objects to overflow this client's
+    # share so the earliest keys are written-through to SSD and evicted.
     pool_capacity = MEMORY_TIER_SIZE // BLOCK_SIZE
-    # We'll populate pool_capacity + cold objects so cold keys are evicted.
+    client_pool_share = max(1, pool_capacity // num_clients)
     cold_objects = num_objects * iterations
-    total_objects = pool_capacity + cold_objects
+    total_objects = client_pool_share + cold_objects
 
     # --- Phase 1: Populate ---
     barrier.wait()  # synchronize start across all clients
@@ -470,9 +470,9 @@ def run_client(
     barrier.wait()
 
     # --- Phase 2: Hot lookups (memory-tier) ---
-    # The last `num_objects` in the pool are still in DRAM.
+    # The last `num_objects` of this client's pool share are still in DRAM.
     hot_keys = [
-        base_key + cold_objects + pool_capacity - num_objects + i
+        base_key + cold_objects + client_pool_share - num_objects + i
         for i in range(num_objects)
     ]
 
@@ -720,8 +720,9 @@ def main():
         sys.exit(1)
 
     pool_capacity = MEMORY_TIER_SIZE // BLOCK_SIZE
+    client_pool_share = max(1, pool_capacity // num_clients)
     cold_per_client = num_objects * iterations
-    total_per_client = pool_capacity + cold_per_client
+    total_per_client = client_pool_share + cold_per_client
 
     print(f"{'='*70}")
     print(f"Certus Multi-Client Benchmark")
@@ -734,7 +735,7 @@ def main():
     print(f"  Objects/batch:     {num_objects}")
     print(f"  Iterations:        {iterations}")
     pool_mib = MEMORY_TIER_SIZE // (1024 * 1024)
-    print(f"  Pool capacity:     {pool_capacity} objects ({pool_mib} MiB)")
+    print(f"  Pool capacity:     {pool_capacity} objects ({pool_mib} MiB) / {client_pool_share} per client")
     print(f"  Total per client:  {total_per_client} objects")
     print(f"  Cold per client:   {cold_per_client} objects")
     print()
