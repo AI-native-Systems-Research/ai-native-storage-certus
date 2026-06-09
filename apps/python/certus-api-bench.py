@@ -671,6 +671,12 @@ def main():
         help="Block size (e.g. 4M, 128K, 1G). Defaults to 4M.",
     )
     parser.add_argument(
+        "--memory-tier-size",
+        type=parse_size,
+        default=None,
+        help="Server memory-tier pool size, must match --memory-tier-size passed to certus-server-yaml (e.g. 2G, 8G). Defaults to 2G.",
+    )
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=10,
@@ -701,9 +707,11 @@ def main():
     )
     args = parser.parse_args()
 
-    global BLOCK_SIZE
+    global BLOCK_SIZE, MEMORY_TIER_SIZE
     if args.block_size is not None:
         BLOCK_SIZE = args.block_size
+    if args.memory_tier_size is not None:
+        MEMORY_TIER_SIZE = args.memory_tier_size
 
     num_clients = args.clients
     num_objects = args.num_objects
