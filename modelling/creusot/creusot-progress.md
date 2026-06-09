@@ -380,6 +380,8 @@ Target: `segment_io()` in `components/dispatcher/src/io_segmenter.rs`
 | Exact segment count | result.len() = ceil(total_bytes / max_transfer_size) |
 | LBA adjacency | result[i].lba + result[i].length/ss = result[i+1].lba *(Coq-assisted)* |
 
+**Note on proof simplification:** The `src/lib.rs` proof was developed iteratively — properties were added one at a time, often with intermediate `proof_assert!` bridges and exploratory invariants. After the full proof was complete, a cleanup pass removed four sets of duplicate invariants/postconditions that had accumulated during debugging (duplicate LBA adjacency postcondition, duplicate `remaining % ss == 0` invariant, and two duplicate LBA loop invariants). The proof passed identically before and after — Creusot's coma cache detected no change in the discharged VCs. This illustrates a general pattern: **develop proofs incrementally, clean up when the proof is stable**. The cleaned version is the canonical one; the proof history is preserved in git.
+
 ---
 
 ## Verification crate and tool locations

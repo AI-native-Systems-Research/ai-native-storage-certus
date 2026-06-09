@@ -75,11 +75,6 @@ pub struct IoSegment {
         0 <= i && i + 1 < result@.len()
         ==> result@[i].lba@ + result@[i].length@ / sector_size@ == result@[i + 1].lba@
 )]
-#[ensures(
-    forall<i: Int>
-        0 <= i && i + 1 < result@.len()
-        ==> result@[i].lba@ + result@[i].length@ / sector_size@ == result@[i + 1].lba@
-)]
 pub fn segment_io(
     start_lba: u64,
     total_bytes: usize,
@@ -126,18 +121,6 @@ pub fn segment_io(
     #[invariant(remaining@ > 0 ==> buffer_offset@ == segments@.len() * mts@)]
     #[invariant(segments@.len() > 0 ==> (segments@.len() - 1) * mts@ < buffer_offset@)]
     #[invariant(buffer_offset@ <= segments@.len() * mts@)]
-    #[invariant(remaining@ % ss@ == 0)]
-    #[invariant(
-        forall<j: Int>
-            0 <= j && j + 1 < segments@.len()
-            ==> segments@[j].lba@ + segments@[j].length@ / ss@ == segments@[j + 1].lba@
-    )]
-    #[invariant(
-        segments@.len() > 0
-            ==> segments@[segments@.len() - 1].lba@
-                + segments@[segments@.len() - 1].length@ / ss@
-                == lba@
-    )]
     #[invariant(remaining@ % ss@ == 0)]
     #[invariant(
         forall<j: Int>
