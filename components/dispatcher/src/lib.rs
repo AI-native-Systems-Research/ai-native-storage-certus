@@ -1160,11 +1160,14 @@ impl IDispatcher for DispatcherComponent {
             }
         }
 
-        // Promote cold entries in parallel — multiple queue threads per drive.
-        // Each thread gets its own NVMe queue pair and CUDA streams, enabling
-        // concurrent reads on the same physical drive.
+        // Promote cold entries in parallel — one thread per cold entry per drive.
+        // Each thread gets its own NVMe queue pair and CUDA streams, so all
+        // cold entries for a drive are read concurrently rather than batched
+        // into a fixed small number of sequential groups.
         if !cold_entries.is_empty() {
-            const MAX_QUEUES_PER_DRIVE: usize = 2;
+            // Fixed pipeline depth per thread. Not divided by thread count so
+            // each thread independently saturates its NVMe queue pair.
+            const QUEUE_DEPTH_PER_THREAD: usize = 8;
 
             let chunk_size = {
                 let ring_guard = self.pipeline_ring.read();
@@ -1204,15 +1207,9 @@ impl IDispatcher for DispatcherComponent {
                             continue;
                         }
 
-                        // Split this drive's entries across multiple queue threads.
-                        let num_queues = MAX_QUEUES_PER_DRIVE.min(entry_indices.len());
-                        let chunks: Vec<&[usize]> = entry_indices
-                            .chunks(entry_indices.len().div_ceil(num_queues))
-                            .collect();
-
-                        let queue_depth = 16 / num_queues;
-
-                        for chunk in chunks {
+                        // One thread per cold entry — full parallelism across all
+                        // entries for this drive within a single batch_lookup call.
+                        for chunk in entry_indices.iter().map(std::slice::from_ref) {
                             let dm_ref = &dm;
                             let mt_ref = &mt;
                             let gpu_ref = &gpu;
@@ -1290,7 +1287,7 @@ impl IDispatcher for DispatcherComponent {
                                                 start_lba,
                                                 total_bytes,
                                                 chunk_size,
-                                                queue_depth,
+                                                QUEUE_DEPTH_PER_THREAD,
                                             )
                                         };
 
