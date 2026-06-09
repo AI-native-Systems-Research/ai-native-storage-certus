@@ -1,59 +1,55 @@
-(* #"/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 83 0 88 19 *)
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 78 0 83 19 *)
 
-let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 89 22 89 23
-let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 90 15 90 25
-let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 96 18 96 26
-let%span slib'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 97 18 97 25
-let%span slib'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 98 18 98 33
-let%span slib'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 99 18 99 41
-let%span slib'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 101 39 101 49
-let%span slib'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 103 28 103 34
-let%span slib'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 153 14 153 23
-let%span slib'8 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 154 22 154 23
-let%span slib'9 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 148 8 151 23
-let%span slib'10 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 143 8 145 87
-let%span slib'11 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 141 16 141 37
-let%span slib'12 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 136 8 139 23
-let%span slib'13 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 131 8 133 87
-let%span slib'14 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 129 16 129 37
-let%span slib'15 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 128 16 128 56
-let%span slib'16 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 127 16 127 85
-let%span slib'17 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 126 16 126 75
-let%span slib'18 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 121 8 124 33
-let%span slib'19 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 115 8 117 101
-let%span slib'20 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 112 16 112 33
-let%span slib'21 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 111 16 111 57
-let%span slib'22 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 109 16 109 58
-let%span slib'23 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 107 16 107 42
-let%span slib'24 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 106 16 106 59
-let%span slib'25 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 157 22 157 33
-let%span slib'26 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 160 22 160 40
-let%span slib'27 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 161 22 161 62
-let%span slib'28 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 162 22 162 62
-let%span slib'29 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 164 22 164 58
-let%span slib'30 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 165 8 169 10
-let%span slib'31 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 170 8 170 31
-let%span slib'32 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 171 15 171 28
-let%span slib'33 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 171 8 171 35
-let%span slib'34 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 172 8 172 27
-let%span slib'35 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 175 18 175 48
-let%span slib'36 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 176 18 176 85
-let%span slib'37 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 51 11 51 27
-let%span slib'38 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 52 11 52 33
-let%span slib'39 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 54 11 54 64
-let%span slib'40 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 56 11 56 49
-let%span slib'41 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 57 11 57 43
-let%span slib'42 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 58 10 58 50
-let%span slib'43 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 59 10 59 48
-let%span slib'44 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 62 4 64 91
-let%span slib'45 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 68 4 70 61
-let%span slib'46 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 74 4 76 86
-let%span slib'47 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 79 4 81 86
-let%span slib'48 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 35 11 35 17
-let%span slib'49 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 36 11 36 23
-let%span slib'50 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 37 11 37 23
-let%span slib'51 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 38 10 38 16
-let%span slib'52 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 40 16 40 35
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 84 22 84 23
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 85 15 85 25
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 91 18 91 26
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 92 18 92 25
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 93 18 93 33
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 94 18 94 41
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 96 39 96 49
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 98 28 98 34
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 136 14 136 23
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 137 22 137 23
+let%span slib'9 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 131 8 134 23
+let%span slib'10 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 126 8 128 87
+let%span slib'11 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 124 16 124 37
+let%span slib'12 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 123 16 123 56
+let%span slib'13 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 122 16 122 85
+let%span slib'14 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 121 16 121 75
+let%span slib'15 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 116 8 119 33
+let%span slib'16 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 110 8 112 101
+let%span slib'17 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 107 16 107 33
+let%span slib'18 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 106 16 106 57
+let%span slib'19 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 104 16 104 58
+let%span slib'20 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 102 16 102 42
+let%span slib'21 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 101 16 101 59
+let%span slib'22 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 140 22 140 33
+let%span slib'23 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 143 22 143 40
+let%span slib'24 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 144 22 144 62
+let%span slib'25 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 145 22 145 62
+let%span slib'26 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 147 22 147 58
+let%span slib'27 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 148 8 152 10
+let%span slib'28 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 153 8 153 31
+let%span slib'29 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 154 15 154 28
+let%span slib'30 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 154 8 154 35
+let%span slib'31 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 155 8 155 27
+let%span slib'32 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 158 18 158 48
+let%span slib'33 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 159 18 159 85
+let%span slib'34 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 51 11 51 27
+let%span slib'35 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 52 11 52 33
+let%span slib'36 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 54 11 54 64
+let%span slib'37 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 56 11 56 49
+let%span slib'38 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 57 11 57 43
+let%span slib'39 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 58 10 58 50
+let%span slib'40 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 59 10 59 48
+let%span slib'41 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 62 4 64 91
+let%span slib'42 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 68 4 70 61
+let%span slib'43 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 74 4 76 86
+let%span slib'44 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 35 11 35 17
+let%span slib'45 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 36 11 36 23
+let%span slib'46 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 37 11 37 23
+let%span slib'47 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 38 10 38 16
+let%span slib'48 = "/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 40 16 40 35
 let%span svec = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 102 18 102 36
 let%span svec'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 16 14 16 41
 let%span svec'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/vec.rs" 116 18 116 48
@@ -153,12 +149,12 @@ meta "rewrite_def" predicate well_founded_relation_usize
 constant const_MAX'0: UInt64.t = (18446744073709551615: UInt64.t)
 
 predicate lemma_mod_sub [#"/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 39 0 39 54] (a: UInt64.t) (b: UInt64.t) (n: UInt64.t) =
-  [%#slib'52] ComputerDivision.mod (UInt64.t'int a - UInt64.t'int b) (UInt64.t'int n) = 0
+  [%#slib'48] ComputerDivision.mod (UInt64.t'int a - UInt64.t'int b) (UInt64.t'int n) = 0
 
 axiom lemma_mod_sub_spec:
-  forall a: UInt64.t, b: UInt64.t, n: UInt64.t [lemma_mod_sub a b n]. ([%#slib'48] UInt64.t'int n > 0)
-    -> ([%#slib'49] ComputerDivision.mod (UInt64.t'int a) (UInt64.t'int n) = 0)
-    -> ([%#slib'50] ComputerDivision.mod (UInt64.t'int b) (UInt64.t'int n) = 0) -> ([%#slib'51] lemma_mod_sub a b n)
+  forall a: UInt64.t, b: UInt64.t, n: UInt64.t [lemma_mod_sub a b n]. ([%#slib'44] UInt64.t'int n > 0)
+    -> ([%#slib'45] ComputerDivision.mod (UInt64.t'int a) (UInt64.t'int n) = 0)
+    -> ([%#slib'46] ComputerDivision.mod (UInt64.t'int b) (UInt64.t'int n) = 0) -> ([%#slib'47] lemma_mod_sub a b n)
 
 let push_IoSegment (self_: MutBorrow.t t_Vec_IoSegment_Global) (v: t_IoSegment) (return (x: ())) = any
   [ return (result: ()) -> {[@stop_split] [@expl:push ensures] [%#svec'1] view_Vec_IoSegment_Global self_.final
@@ -169,23 +165,23 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let segment_io [#"/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 83 0 88 19]
+let segment_io [#"/home/cornel/ai-native-storage-certus/tools/creusot/certus-segment-verif/src/lib.rs" 78 0 83 19]
   (start_lba: UInt64.t) (total_bytes: UInt64.t) (max_transfer_size: UInt32.t) (sector_size: UInt32.t)
   (return (x: t_Vec_IoSegment_Global)) =
-{[@stop_split] [@expl:segment_io requires] ([@stop_split] [@expl:segment_io requires #0] [%#slib'37] UInt32.t'int sector_size
+{[@stop_split] [@expl:segment_io requires] ([@stop_split] [@expl:segment_io requires #0] [%#slib'34] UInt32.t'int sector_size
     > 0)
-  /\ ([@stop_split] [@expl:segment_io requires #1] [%#slib'38] UInt32.t'int max_transfer_size > 0)
-  /\ ([@stop_split] [@expl:segment_io requires #2] [%#slib'39] UInt64.t'int start_lba
+  /\ ([@stop_split] [@expl:segment_io requires #1] [%#slib'35] UInt32.t'int max_transfer_size > 0)
+  /\ ([@stop_split] [@expl:segment_io requires #2] [%#slib'36] UInt64.t'int start_lba
       + ComputerDivision.div (UInt64.t'int total_bytes) (UInt32.t'int sector_size)
     <= UInt64.t'int const_MAX'0)
-  /\ ([@stop_split] [@expl:segment_io requires #3] [%#slib'40] ComputerDivision.mod (UInt32.t'int max_transfer_size) (UInt32.t'int sector_size)
+  /\ ([@stop_split] [@expl:segment_io requires #3] [%#slib'37] ComputerDivision.mod (UInt32.t'int max_transfer_size) (UInt32.t'int sector_size)
     = 0)
-  /\ ([@stop_split] [@expl:segment_io requires #4] [%#slib'41] ComputerDivision.mod (UInt64.t'int total_bytes) (UInt32.t'int sector_size)
+  /\ ([@stop_split] [@expl:segment_io requires #4] [%#slib'38] ComputerDivision.mod (UInt64.t'int total_bytes) (UInt32.t'int sector_size)
   = 0)}
   (! bb0
   [ bb0 = s0
-    [ s0 = [ &_32 <- total_bytes = ([%#slib] (0: UInt64.t)) ] s1
-    | s1 = any [ br0 -> {_32 = false} (! bb2) | br1 -> {_32} (! bb1) ] ]
+    [ s0 = [ &_30 <- total_bytes = ([%#slib] (0: UInt64.t)) ] s1
+    | s1 = any [ br0 -> {_30 = false} (! bb2) | br1 -> {_30} (! bb1) ] ]
   | bb1 = s0
     [ s0 = new_IoSegment [%#slib'0] (fun (_x: t_Vec_IoSegment_Global) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ]
   | bb2 = s0
@@ -202,89 +198,77 @@ let segment_io [#"/home/cornel/ai-native-storage-certus/tools/creusot/certus-seg
     | s10 = bb4 ]
   | bb4 = bb4invariant
     [ bb4 = {[@expl:loop variant] well_founded_relation_usize variant_old_bb4 ([%#slib'7] remaining)} bb4invariant
-    | bb4invariant = {[@expl:loop invariant #0] [%#slib'24] UInt64.t'int buffer_offset'0 + UInt64.t'int remaining
+    | bb4invariant = {[@expl:loop invariant #0] [%#slib'21] UInt64.t'int buffer_offset'0 + UInt64.t'int remaining
       = UInt64.t'int total_bytes}
-      {[@expl:loop invariant #1] [%#slib'23] UInt64.t'int remaining <= UInt64.t'int total_bytes}
-      {[@expl:loop invariant #2] [%#slib'22] UInt64.t'int buffer_offset'0 > 0
+      {[@expl:loop invariant #1] [%#slib'20] UInt64.t'int remaining <= UInt64.t'int total_bytes}
+      {[@expl:loop invariant #2] [%#slib'19] UInt64.t'int buffer_offset'0 > 0
       -> Seq.length (view_Vec_IoSegment_Global segments) > 0}
-      {[@expl:loop invariant #3] [%#slib'21] UInt64.t'int lba'0
+      {[@expl:loop invariant #3] [%#slib'18] UInt64.t'int lba'0
       <= UInt64.t'int start_lba + ComputerDivision.div (UInt64.t'int buffer_offset'0) (UInt64.t'int ss)}
-      {[@expl:loop invariant #4] [%#slib'20] UInt64.t'int lba'0 <= UInt64.t'int const_MAX'0}
-      {[@expl:loop invariant #5] [%#slib'19] forall j: int. 0 <= j
+      {[@expl:loop invariant #4] [%#slib'17] UInt64.t'int lba'0 <= UInt64.t'int const_MAX'0}
+      {[@expl:loop invariant #5] [%#slib'16] forall j: int. 0 <= j
           /\ j + 1 < Seq.length (view_Vec_IoSegment_Global segments)
         -> UInt64.t'int (Seq.get (view_Vec_IoSegment_Global segments) j).buffer_offset
           + UInt64.t'int (Seq.get (view_Vec_IoSegment_Global segments) j).length
         = UInt64.t'int (Seq.get (view_Vec_IoSegment_Global segments) (j + 1)).buffer_offset}
-      {[@expl:loop invariant #6] [%#slib'18] Seq.length (view_Vec_IoSegment_Global segments) > 0
+      {[@expl:loop invariant #6] [%#slib'15] Seq.length (view_Vec_IoSegment_Global segments) > 0
       -> UInt64.t'int (Seq.get (view_Vec_IoSegment_Global segments) (Seq.length (view_Vec_IoSegment_Global segments)
           - 1)).buffer_offset
         + UInt64.t'int (Seq.get (view_Vec_IoSegment_Global segments) (Seq.length (view_Vec_IoSegment_Global segments)
         - 1)).length
       = UInt64.t'int buffer_offset'0}
-      {[@expl:loop invariant #7] [%#slib'17] UInt64.t'int remaining > 0
+      {[@expl:loop invariant #7] [%#slib'14] UInt64.t'int remaining > 0
       -> UInt64.t'int buffer_offset'0 = Seq.length (view_Vec_IoSegment_Global segments) * UInt64.t'int mts}
-      {[@expl:loop invariant #8] [%#slib'16] Seq.length (view_Vec_IoSegment_Global segments) > 0
+      {[@expl:loop invariant #8] [%#slib'13] Seq.length (view_Vec_IoSegment_Global segments) > 0
       -> (Seq.length (view_Vec_IoSegment_Global segments) - 1) * UInt64.t'int mts < UInt64.t'int buffer_offset'0}
-      {[@expl:loop invariant #9] [%#slib'15] UInt64.t'int buffer_offset'0
+      {[@expl:loop invariant #9] [%#slib'12] UInt64.t'int buffer_offset'0
       <= Seq.length (view_Vec_IoSegment_Global segments) * UInt64.t'int mts}
-      {[@expl:loop invariant #10] [%#slib'14] ComputerDivision.mod (UInt64.t'int remaining) (UInt64.t'int ss) = 0}
-      {[@expl:loop invariant #11] [%#slib'13] forall j: int. 0 <= j
+      {[@expl:loop invariant #10] [%#slib'11] ComputerDivision.mod (UInt64.t'int remaining) (UInt64.t'int ss) = 0}
+      {[@expl:loop invariant #11] [%#slib'10] forall j: int. 0 <= j
           /\ j + 1 < Seq.length (view_Vec_IoSegment_Global segments)
         -> UInt64.t'int (Seq.get (view_Vec_IoSegment_Global segments) j).lba
           + ComputerDivision.div (UInt64.t'int (Seq.get (view_Vec_IoSegment_Global segments) j).length) (UInt64.t'int ss)
         = UInt64.t'int (Seq.get (view_Vec_IoSegment_Global segments) (j + 1)).lba}
-      {[@expl:loop invariant #12] [%#slib'12] Seq.length (view_Vec_IoSegment_Global segments) > 0
-      -> UInt64.t'int (Seq.get (view_Vec_IoSegment_Global segments) (Seq.length (view_Vec_IoSegment_Global segments)
-          - 1)).lba
-        + ComputerDivision.div (UInt64.t'int (Seq.get (view_Vec_IoSegment_Global segments) (Seq.length (view_Vec_IoSegment_Global segments)
-        - 1)).length) (UInt64.t'int ss)
-      = UInt64.t'int lba'0}
-      {[@expl:loop invariant #13] [%#slib'11] ComputerDivision.mod (UInt64.t'int remaining) (UInt64.t'int ss) = 0}
-      {[@expl:loop invariant #14] [%#slib'10] forall j: int. 0 <= j
-          /\ j + 1 < Seq.length (view_Vec_IoSegment_Global segments)
-        -> UInt64.t'int (Seq.get (view_Vec_IoSegment_Global segments) j).lba
-          + ComputerDivision.div (UInt64.t'int (Seq.get (view_Vec_IoSegment_Global segments) j).length) (UInt64.t'int ss)
-        = UInt64.t'int (Seq.get (view_Vec_IoSegment_Global segments) (j + 1)).lba}
-      {[@expl:loop invariant #15] [%#slib'9] Seq.length (view_Vec_IoSegment_Global segments) > 0
+      {[@expl:loop invariant #12] [%#slib'9] Seq.length (view_Vec_IoSegment_Global segments) > 0
       -> UInt64.t'int (Seq.get (view_Vec_IoSegment_Global segments) (Seq.length (view_Vec_IoSegment_Global segments)
           - 1)).lba
         + ComputerDivision.div (UInt64.t'int (Seq.get (view_Vec_IoSegment_Global segments) (Seq.length (view_Vec_IoSegment_Global segments)
         - 1)).length) (UInt64.t'int ss)
       = UInt64.t'int lba'0}
       (! [ &variant_old_bb4 <- [%#slib'7] remaining ] s0)
-      [ s0 = [ &_117 <- UInt64.gt remaining ([%#slib'8] (0: UInt64.t)) ] s1
-      | s1 = any [ br0 -> {_117 = false} (! bb12) | br1 -> {_117} (! bb6) ] ]
+      [ s0 = [ &_105 <- UInt64.gt remaining ([%#slib'8] (0: UInt64.t)) ] s1
+      | s1 = any [ br0 -> {_105 = false} (! bb12) | br1 -> {_105} (! bb6) ] ]
       [ bb6 = s0
-        [ s0 = [ &_120 <- UInt64.lt remaining mts ] s1
-        | s1 = any [ br0 -> {_120 = false} (! bb8) | br1 -> {_120} (! bb7) ] ]
+        [ s0 = [ &_108 <- UInt64.lt remaining mts ] s1
+        | s1 = any [ br0 -> {_108 = false} (! bb8) | br1 -> {_108} (! bb7) ] ]
       | bb7 = s0 [ s0 = [ &length'0 <- remaining ] s1 | s1 = bb9 ]
       | bb8 = s0 [ s0 = [ &length'0 <- mts ] s1 | s1 = bb9 ]
       | bb9 = s0
-        [ s0 = {[@expl:assertion] [%#slib'25] UInt64.t'int length'0 > 0} s1
-        | s1 = {[@expl:assertion] [%#slib'26] ComputerDivision.mod (UInt64.t'int length'0) (UInt64.t'int ss) = 0} s2
-        | s2 = {[@expl:assertion] [%#slib'27] UInt64.t'int length'0 = UInt64.t'int mts
+        [ s0 = {[@expl:assertion] [%#slib'22] UInt64.t'int length'0 > 0} s1
+        | s1 = {[@expl:assertion] [%#slib'23] ComputerDivision.mod (UInt64.t'int length'0) (UInt64.t'int ss) = 0} s2
+        | s2 = {[@expl:assertion] [%#slib'24] UInt64.t'int length'0 = UInt64.t'int mts
           \/ UInt64.t'int remaining = UInt64.t'int length'0}
           s3
-        | s3 = {[@expl:assertion] [%#slib'28] UInt64.t'int buffer_offset'0
+        | s3 = {[@expl:assertion] [%#slib'25] UInt64.t'int buffer_offset'0
           = Seq.length (view_Vec_IoSegment_Global segments) * UInt64.t'int mts}
           s4
-        | s4 = {[@expl:assertion] [%#slib'29] lemma_mod_sub remaining length'0 ss} s5
-        | s5 = [ &_147 <- { buffer_offset = buffer_offset'0; lba = lba'0; length = length'0 } ] s6
+        | s4 = {[@expl:assertion] [%#slib'26] lemma_mod_sub remaining length'0 ss} s5
+        | s5 = [ &_135 <- { buffer_offset = buffer_offset'0; lba = lba'0; length = length'0 } ] s6
         | s6 = MutBorrow.borrow_mut <t_Vec_IoSegment_Global> {segments}
-            (fun (_bor: MutBorrow.t t_Vec_IoSegment_Global) -> [ &_146 <- _bor ] [ &segments <- _bor.final ] s7)
-        | s7 = push_IoSegment [%#slib'30] {_146} {_147} (fun (_x: ()) -> [ &_145 <- _x ] s8)
-        | s8 = UInt64.add [%#slib'31] {buffer_offset'0} {length'0} (fun (_x: UInt64.t) -> [ &buffer_offset'0 <- _x ] s9)
-        | s9 = [ &_155 <- ss ] s10
-        | s10 = [ &_156 <- _155 = ([%#slib'32] (0: UInt64.t)) ] s11
-        | s11 = {[@expl:division by zero] [%#slib'32] not _156} s12
-        | s12 = UInt64.div [%#slib'32] {length'0} {_155} (fun (_x: UInt64.t) -> [ &_153 <- _x ] s13)
-        | s13 = [ &_152 <- UInt64.of_int (UInt64.t'int _153) ] s14
-        | s14 = UInt64.add [%#slib'33] {lba'0} {_152} (fun (_x: UInt64.t) -> [ &lba'0 <- _x ] s15)
-        | s15 = UInt64.sub [%#slib'34] {remaining} {length'0} (fun (_x: UInt64.t) -> [ &remaining <- _x ] s16)
+            (fun (_bor: MutBorrow.t t_Vec_IoSegment_Global) -> [ &_134 <- _bor ] [ &segments <- _bor.final ] s7)
+        | s7 = push_IoSegment [%#slib'27] {_134} {_135} (fun (_x: ()) -> [ &_133 <- _x ] s8)
+        | s8 = UInt64.add [%#slib'28] {buffer_offset'0} {length'0} (fun (_x: UInt64.t) -> [ &buffer_offset'0 <- _x ] s9)
+        | s9 = [ &_143 <- ss ] s10
+        | s10 = [ &_144 <- _143 = ([%#slib'29] (0: UInt64.t)) ] s11
+        | s11 = {[@expl:division by zero] [%#slib'29] not _144} s12
+        | s12 = UInt64.div [%#slib'29] {length'0} {_143} (fun (_x: UInt64.t) -> [ &_141 <- _x ] s13)
+        | s13 = [ &_140 <- UInt64.of_int (UInt64.t'int _141) ] s14
+        | s14 = UInt64.add [%#slib'30] {lba'0} {_140} (fun (_x: UInt64.t) -> [ &lba'0 <- _x ] s15)
+        | s15 = UInt64.sub [%#slib'31] {remaining} {length'0} (fun (_x: UInt64.t) -> [ &remaining <- _x ] s16)
         | s16 = bb4 ] ] ]
   | bb12 = s0
-    [ s0 = {[@expl:assertion] [%#slib'35] UInt64.t'int buffer_offset'0 = UInt64.t'int total_bytes} s1
-    | s1 = {[@expl:assertion] [%#slib'36] Seq.length (view_Vec_IoSegment_Global segments) = 0
+    [ s0 = {[@expl:assertion] [%#slib'32] UInt64.t'int buffer_offset'0 = UInt64.t'int total_bytes} s1
+    | s1 = {[@expl:assertion] [%#slib'33] Seq.length (view_Vec_IoSegment_Global segments) = 0
       \/ (Seq.length (view_Vec_IoSegment_Global segments) - 1) * UInt64.t'int mts < UInt64.t'int total_bytes}
       s2
     | s2 = [ &_ret <- segments ] s3
@@ -294,43 +278,38 @@ let segment_io [#"/home/cornel/ai-native-storage-certus/tools/creusot/certus-seg
   | & total_bytes: UInt64.t = total_bytes
   | & max_transfer_size: UInt32.t = max_transfer_size
   | & sector_size: UInt32.t = sector_size
-  | & _32: bool = Any.any_l ()
+  | & _30: bool = Any.any_l ()
   | & mts: UInt64.t = Any.any_l ()
   | & ss: UInt64.t = Any.any_l ()
   | & segments: t_Vec_IoSegment_Global = Any.any_l ()
   | & remaining: UInt64.t = Any.any_l ()
   | & buffer_offset'0: UInt64.t = Any.any_l ()
   | & lba'0: UInt64.t = Any.any_l ()
-  | & _117: bool = Any.any_l ()
+  | & _105: bool = Any.any_l ()
   | & length'0: UInt64.t = Any.any_l ()
-  | & _120: bool = Any.any_l ()
-  | & _145: () = Any.any_l ()
-  | & _146: MutBorrow.t t_Vec_IoSegment_Global = Any.any_l ()
-  | & _147: t_IoSegment = Any.any_l ()
-  | & _152: UInt64.t = Any.any_l ()
-  | & _153: UInt64.t = Any.any_l ()
-  | & _155: UInt64.t = Any.any_l ()
-  | & _156: bool = Any.any_l ()
+  | & _108: bool = Any.any_l ()
+  | & _133: () = Any.any_l ()
+  | & _134: MutBorrow.t t_Vec_IoSegment_Global = Any.any_l ()
+  | & _135: t_IoSegment = Any.any_l ()
+  | & _140: UInt64.t = Any.any_l ()
+  | & _141: UInt64.t = Any.any_l ()
+  | & _143: UInt64.t = Any.any_l ()
+  | & _144: bool = Any.any_l ()
   | & variant_old_bb4: UInt64.t = Any.any_l () ])
   [ return (result: t_Vec_IoSegment_Global) ->
-  {[@stop_split] [@expl:segment_io ensures] ([@stop_split] [@expl:segment_io ensures #0] [%#slib'42] UInt64.t'int total_bytes
+  {[@stop_split] [@expl:segment_io ensures] ([@stop_split] [@expl:segment_io ensures #0] [%#slib'39] UInt64.t'int total_bytes
         = 0 -> Seq.length (view_Vec_IoSegment_Global result) = 0)
-    /\ ([@stop_split] [@expl:segment_io ensures #1] [%#slib'43] UInt64.t'int total_bytes > 0
+    /\ ([@stop_split] [@expl:segment_io ensures #1] [%#slib'40] UInt64.t'int total_bytes > 0
       -> Seq.length (view_Vec_IoSegment_Global result) > 0)
-    /\ ([@stop_split] [@expl:segment_io ensures #2] [%#slib'44] forall i: int. 0 <= i
+    /\ ([@stop_split] [@expl:segment_io ensures #2] [%#slib'41] forall i: int. 0 <= i
           /\ i + 1 < Seq.length (view_Vec_IoSegment_Global result)
         -> UInt64.t'int (Seq.get (view_Vec_IoSegment_Global result) i).buffer_offset
           + UInt64.t'int (Seq.get (view_Vec_IoSegment_Global result) i).length
         = UInt64.t'int (Seq.get (view_Vec_IoSegment_Global result) (i + 1)).buffer_offset)
-    /\ ([@stop_split] [@expl:segment_io ensures #3] [%#slib'45] UInt64.t'int total_bytes > 0
+    /\ ([@stop_split] [@expl:segment_io ensures #3] [%#slib'42] UInt64.t'int total_bytes > 0
       -> (Seq.length (view_Vec_IoSegment_Global result) - 1) * UInt32.t'int max_transfer_size < UInt64.t'int total_bytes
       /\ UInt64.t'int total_bytes <= Seq.length (view_Vec_IoSegment_Global result) * UInt32.t'int max_transfer_size)
-    /\ ([@stop_split] [@expl:segment_io ensures #4] [%#slib'46] forall i: int. 0 <= i
-          /\ i + 1 < Seq.length (view_Vec_IoSegment_Global result)
-        -> UInt64.t'int (Seq.get (view_Vec_IoSegment_Global result) i).lba
-          + ComputerDivision.div (UInt64.t'int (Seq.get (view_Vec_IoSegment_Global result) i).length) (UInt32.t'int sector_size)
-        = UInt64.t'int (Seq.get (view_Vec_IoSegment_Global result) (i + 1)).lba)
-    /\ ([@stop_split] [@expl:segment_io ensures #5] [%#slib'47] forall i: int. 0 <= i
+    /\ ([@stop_split] [@expl:segment_io ensures #4] [%#slib'43] forall i: int. 0 <= i
         /\ i + 1 < Seq.length (view_Vec_IoSegment_Global result)
       -> UInt64.t'int (Seq.get (view_Vec_IoSegment_Global result) i).lba
         + ComputerDivision.div (UInt64.t'int (Seq.get (view_Vec_IoSegment_Global result) i).length) (UInt32.t'int sector_size)

@@ -1,6 +1,6 @@
 {
   "fast": 0.2,
-  "time": 5,
+  "time": 1,
   "depth": 6,
   "packages": [ "creusot" ],
   "provers": [ "alt-ergo", "z3", "cvc5", "cvc4" ],
