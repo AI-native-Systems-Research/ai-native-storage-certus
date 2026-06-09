@@ -587,7 +587,8 @@ def run_client(
 
     # --- Cleanup ---
     all_cleanup_keys = list(range(base_key, base_key + total_objects))
-    all_cleanup_keys += list(range(flush_base, flush_base + flush_count))
+    if not skip_flush:
+        all_cleanup_keys += list(range(flush_base, flush_base + flush_count))
     for batch_start in range(0, len(all_cleanup_keys), batch_size):
         batch_end = min(batch_start + batch_size, len(all_cleanup_keys))
         try:
