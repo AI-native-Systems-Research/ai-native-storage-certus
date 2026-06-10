@@ -268,6 +268,17 @@ ALL   2 instance(s)     4      1.27 GB/s    8.15 GB/s    3.64 GB/s
   drive (look for `data drive 0 initialized at <bdf>, poller pinned to CPU N`
   followed by `listening on`).
 
+- **One endpoint reports `0.00 GB/s` for every phase**: its server failed to
+  bind its gRPC port (`bind() EADDRINUSE`) and the benchmark client got
+  connection-refused. The default ports (`50051+`) sit inside the Linux
+  ephemeral range (`/proc/sys/net/ipv4/ip_local_port_range`, typically
+  `32768-60999`), so a transient outbound connection from another process can
+  transiently occupy one. `launch-servers.sh` now skips in-use ports at launch
+  (logging `port N in use; instance i will use M instead`) and verifies each
+  server is *actually accepting connections* before declaring it ready, so this
+  should self-correct. Choose a base port below the ephemeral range
+  (`-p 9000`) to avoid the collision window entirely.
+
 - **Clients exit non-zero with `FlushToSsd failed`**: the SPDK-NVMe backend may
   not support the benchmark's explicit DRAM-cache flush. Throughput numbers are
   still valid (the cold path reads real SSD data); `run-benchmarks.sh` reports

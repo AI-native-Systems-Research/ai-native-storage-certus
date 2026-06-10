@@ -85,10 +85,19 @@ declare -A NODE_CORES=()
 log "Planning ${#BDFS[@]} instance(s):"
 printf '  %-3s %-14s %-5s %-6s %s\n' "IDX" "BDF" "NUMA" "PORT" "POLLER_CPU" >&2
 
+port_candidate=$BASE_PORT
 for i in "${!BDFS[@]}"; do
     bdf="${BDFS[$i]}"
     node="$(numa_of_bdf "$bdf")"
-    port=$((BASE_PORT + i))
+
+    # Pick the next free TCP port. The 50051+ defaults sit in the ephemeral
+    # range, so a port may be transiently held by an outbound connection;
+    # skipping occupied ports avoids a bind() EADDRINUSE crash at startup.
+    port="$(next_free_port "$port_candidate")"
+    if [[ "$port" -ne "$port_candidate" ]]; then
+        warn "port $port_candidate in use; instance $i will use $port instead"
+    fi
+    port_candidate=$((port + 1))
 
     # Cache the node's ordered core list once.
     if [[ -z "${NODE_CORES[$node]:-}" ]]; then
@@ -139,12 +148,15 @@ while IFS=$'\t' read -r i bdf node port core; do
     deadline=$((SECONDS + TIMEOUT))
     ready=0
     while [[ $SECONDS -lt $deadline ]]; do
-        if grep -q "listening on" "$logfile" 2>/dev/null; then ready=1; break; fi
-        # Genuine fatal: a Rust panic or a top-level "Error:" from main().
-        # NOTE: ignore benign SPDK probe noise -- every SPDK process enumerates
-        # all vfio devices and logs "Failed to open VFIO group" / "cannot be
-        # used" for the ones its sibling instances already hold.
-        if grep -qE "panicked|^Error:|[Ii]nit failed" "$logfile" 2>/dev/null; then break; fi
+        # Probe the actual TCP port -- certus-server logs "listening on" just
+        # *before* it binds, so the log line alone is a false positive if the
+        # subsequent bind() fails (e.g. EADDRINUSE).
+        if port_listening "$port"; then ready=1; break; fi
+        # Genuine fatal: a Rust panic, a top-level "Error:" from main(), or a
+        # bind failure. NOTE: ignore benign SPDK probe noise -- every SPDK
+        # process enumerates all vfio devices and logs "Failed to open VFIO
+        # group" / "cannot be used" for the ones its siblings already hold.
+        if grep -qE "panicked|^Error:|[Ii]nit failed|AddrInUse|Address already in use" "$logfile" 2>/dev/null; then break; fi
         sleep 0.5
     done
     if [[ $ready -eq 1 ]]; then
