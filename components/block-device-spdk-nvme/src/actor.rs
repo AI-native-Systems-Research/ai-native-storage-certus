@@ -22,6 +22,18 @@ use crate::namespace;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::TelemetryStats;
 
+/// Upper bound (milliseconds) on how long an async submit will keep draining
+/// completions and retrying after `-ENOMEM` before giving up.
+///
+/// On `-ENOMEM` the selected qpair's SPDK request pool is momentarily
+/// exhausted under concurrent load. The submit retry loop polls completions to
+/// free slots, so it normally succeeds within microseconds; this cap bounds how
+/// long the actor thread will spin in the pathological case (e.g. a hardware
+/// stall where no completion ever arrives). The effective backpressure window
+/// is `min(op.timeout_ms, this)`, replacing the old hardcoded 1 ms that turned
+/// transient saturation into spurious Read/Write failures.
+const SUBMIT_ENOMEM_MAX_BACKPRESSURE_MS: u64 = 1000;
+
 /// Entry produced by async SPDK completion callbacks.
 pub(crate) struct AsyncCompletionEntry {
     /// Client that submitted the operation.
@@ -627,8 +639,13 @@ impl BlockDeviceHandler {
                 let ctx_raw = Box::into_raw(ctx);
                 let mut rc;
                 const ENOMEM: i32 = -12;
-                // Retry for up to ~1ms (typical NVMe latency is 10-100us).
-                let deadline = tsc.deadline_from_ms(tsc.now(), 1);
+                // On -ENOMEM the qpair's request pool is momentarily exhausted.
+                // Keep draining completions and retrying up to the op's own
+                // timeout (capped) so transient saturation becomes brief
+                // backpressure instead of a spurious ReadFailed. The loop frees
+                // slots by polling completions, so it exits as soon as one frees.
+                let backpressure_ms = timeout_ms.min(SUBMIT_ENOMEM_MAX_BACKPRESSURE_MS).max(1);
+                let deadline = tsc.deadline_from_ms(tsc.now(), backpressure_ms);
 
                 loop {
                     let qp = controller
@@ -730,7 +747,11 @@ impl BlockDeviceHandler {
                 let ctx_raw = Box::into_raw(ctx);
                 let mut rc;
                 const ENOMEM: i32 = -12;
-                let deadline = tsc.deadline_from_ms(tsc.now(), 1);
+                // See the read path: retry on -ENOMEM up to the op's timeout
+                // (capped) instead of a fixed 1 ms, turning transient qpair
+                // saturation into brief backpressure rather than a WriteFailed.
+                let backpressure_ms = timeout_ms.min(SUBMIT_ENOMEM_MAX_BACKPRESSURE_MS).max(1);
+                let deadline = tsc.deadline_from_ms(tsc.now(), backpressure_ms);
 
                 loop {
                     let qp = controller
