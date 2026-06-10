@@ -195,7 +195,8 @@ IDX BDF            NUMA  PORT   POLLER_CPU
 ```
 
 The plan is written to `/tmp/certus-multi-instance/instances.tsv`; per-server
-logs are `srv-<i>.log` and per-client logs are `bench-<i>.log` in the same dir.
+logs are `srv-<i>.log` and per-client logs are `bench-<i>-<r>.log` (instance `i`,
+client replica `r`) in the same dir.
 
 ## `launch-servers.sh` options
 
@@ -212,14 +213,44 @@ BDF ...        Explicit NVMe PCI addresses (overrides auto-discovery)
 ## `run-benchmarks.sh` options
 
 ```
--s SESSION          tmux session name (only used to locate the run dir indirectly)
---no-gpu-affinity   Do not pin clients to GPUs round-robin
--- BENCH_ARGS...    Everything after -- is forwarded to certus-api-bench.py
+-s SESSION                      tmux session name
+-c N, --clients-per-server N    Launch N client *processes* per server (default 1)
+--gpu N                         Pin ALL clients to GPU N
+--no-gpu-affinity               Do not set CUDA_VISIBLE_DEVICES (clients use GPU 0)
+-- BENCH_ARGS...                Everything after -- is forwarded to certus-api-bench.py
 ```
 
-By default client `i` is pinned to GPU `i % <gpu count>` via
-`CUDA_VISIBLE_DEVICES`. Useful bench args: `--clients`, `--num-objects`,
-`--iterations`, `--block-size`, `--batch-size`, `--skip-flush`.
+**Clients per server.** `-c N` runs `N` separate benchmark *processes* against
+each server instance, so total clients launched = `instances x N`. Each
+instance's throughput is summed across its `N` processes (the `NCLI` column),
+and the `ALL` row sums every instance. This is distinct from the bench script's
+own `--clients`, which sets the number of *threads within* a single process —
+they compose, e.g. `-c 2 -- --clients 4` = 8 concurrent threads per server.
+
+**GPU selection** (via `CUDA_VISIBLE_DEVICES`):
+
+| Mode | Behaviour |
+|------|-----------|
+| *(default)* | Spread clients round-robin across GPUs (`launch_index % gpu_count`). |
+| `--gpu N` | Pin **every** client to GPU `N`. |
+| `--no-gpu-affinity` | Set nothing; every client falls back to GPU 0. |
+
+Useful forwarded bench args: `--clients`, `--num-objects`, `--iterations`,
+`--block-size`, `--batch-size`, `--skip-flush`.
+
+Example — 2 client processes per server, all on GPU 0:
+
+```bash
+./run-benchmarks.sh -c 2 --gpu 0 -- --clients 4 --num-objects 32 --block-size 4M
+```
+
+```
+IDX   ENDPOINT          NCLI   POPULATE      HOT          COLD
+0     localhost:50051   2      0.66 GB/s    4.81 GB/s    1.80 GB/s
+1     localhost:50052   2      0.61 GB/s    3.34 GB/s    1.84 GB/s
+---   ----------------  ----   ----------   ----------   ----------
+ALL   2 instance(s)     4      1.27 GB/s    8.15 GB/s    3.64 GB/s
+```
 
 ## Troubleshooting
 

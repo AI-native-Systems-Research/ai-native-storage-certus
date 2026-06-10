@@ -1,37 +1,52 @@
 #!/bin/bash
 #
-# run-benchmarks.sh - Run one certus-api-bench client per running server
-#                     instance (in parallel) and aggregate the results.
+# run-benchmarks.sh - Run one or more certus-api-bench clients per running
+#                     server instance (in parallel) and aggregate the results.
 #
-# Reads the instance map written by launch-servers.sh, fires a benchmark client
-# at each server's gRPC port concurrently, then parses the per-phase aggregate
-# throughput (Populate / Lookup hot / Lookup cold) from every client and prints
-# a per-instance breakdown plus the system-wide totals.
+# Reads the instance map written by launch-servers.sh and fires benchmark
+# client(s) at each server's gRPC port concurrently, then parses the per-phase
+# aggregate throughput (Populate / Lookup hot / Lookup cold) from every client,
+# sums each instance's clients together, and prints a per-instance breakdown
+# plus the system-wide totals.
 #
 # Usage:
-#   ./run-benchmarks.sh [-s SESSION] [--no-gpu-affinity] [-- BENCH_ARGS...]
+#   ./run-benchmarks.sh [-s SESSION] [-c N] [--no-gpu-affinity] [-- BENCH_ARGS...]
+#
+#   -c N, --clients-per-server N
+#       Launch N benchmark client *processes* against each server instance
+#       (default 1). This is distinct from the bench script's own --clients
+#       flag, which sets the number of threads *within* a single process; total
+#       concurrency per server = N processes x (forwarded --clients threads).
 #
 # Anything after `--` is forwarded verbatim to each certus-api-bench.py client,
-# e.g.  ./run-benchmarks.sh -- --clients 8 --num-objects 32 --iterations 20
+# e.g.  ./run-benchmarks.sh -c 2 -- --clients 8 --num-objects 32 --iterations 20
 #
-# GPU affinity: by default client i is pinned to GPU (i % num_gpus) via
-# CUDA_VISIBLE_DEVICES; pass --no-gpu-affinity to let every client use GPU 0.
+# GPU affinity (via CUDA_VISIBLE_DEVICES):
+#   default            spread clients round-robin across GPUs (launch_index % num_gpus)
+#   --gpu N            pin ALL clients to GPU N
+#   --no-gpu-affinity  set nothing; every client uses its default device (GPU 0)
 #
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config.sh"
 
 GPU_AFFINITY=1
+FIXED_GPU=""
+PER_SERVER=1
 declare -a BENCH_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -s) SESSION="$2"; shift 2 ;;
+        -c|--clients-per-server) PER_SERVER="$2"; shift 2 ;;
+        --gpu) FIXED_GPU="$2"; shift 2 ;;
         --no-gpu-affinity) GPU_AFFINITY=0; shift ;;
         --) shift; BENCH_ARGS=("$@"); break ;;
-        -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (use -- to pass benchmark args)" ;;
     esac
 done
 
+[[ "$PER_SERVER" =~ ^[0-9]+$ && "$PER_SERVER" -ge 1 ]] || die "-c must be a positive integer"
+[[ -z "$FIXED_GPU" || "$FIXED_GPU" =~ ^[0-9]+$ ]] || die "--gpu must be a non-negative integer"
 [[ -f "$INSTANCES_TSV" ]] || die "instance map $INSTANCES_TSV not found; run ./launch-servers.sh first"
 [[ -f "$BENCH_SCRIPT" ]] || die "benchmark script not found at $BENCH_SCRIPT"
 command -v "$PYTHON" >/dev/null || die "$PYTHON not found (set CERTUS_PYTHON)"
@@ -42,49 +57,62 @@ if [[ ${#BENCH_ARGS[@]} -eq 0 ]]; then
     warn "no benchmark args given; using defaults: ${BENCH_ARGS[*]}"
 fi
 
-# Detect GPU count for round-robin affinity.
+# Detect GPU count for round-robin affinity (only needed when spreading; a
+# fixed --gpu pin does not require enumeration).
 NUM_GPUS=0
-if [[ "$GPU_AFFINITY" == 1 ]] && command -v nvidia-smi >/dev/null; then
-    NUM_GPUS="$(nvidia-smi -L 2>/dev/null | wc -l)"
+if [[ "$GPU_AFFINITY" == 1 && -z "$FIXED_GPU" ]]; then
+    if command -v nvidia-smi >/dev/null; then
+        NUM_GPUS="$(nvidia-smi -L 2>/dev/null | wc -l)"
+    fi
+    [[ "$NUM_GPUS" -ge 1 ]] || { warn "no GPUs detected; clients will use default device"; GPU_AFFINITY=0; }
 fi
-[[ "$NUM_GPUS" -ge 1 ]] || GPU_AFFINITY=0
 
 BENCH_DIR="$(dirname "$BENCH_SCRIPT")"
 mapfile -t ROWS < "$INSTANCES_TSV"
 N=${#ROWS[@]}
 [[ $N -gt 0 ]] || die "instance map is empty"
 
-log "Running $N benchmark client(s) in parallel: ${BENCH_ARGS[*]}"
+TOTAL=$((N * PER_SERVER))
+log "Running $TOTAL client process(es) = $N instance(s) x $PER_SERVER per server: ${BENCH_ARGS[*]}"
 
-declare -a PIDS=()
-declare -a PORTS=()
-declare -a OUTS=()
+# Per-job (flat) tracking arrays.
+declare -a PIDS=() J_INST=() J_PORT=() J_OUT=()
+gpu_idx=0
 
 for row in "${ROWS[@]}"; do
     IFS=$'\t' read -r i bdf node port core <<< "$row"
-    out="$RUN_DIR/bench-$i.log"
-    PORTS+=("$port")
-    OUTS+=("$out")
+    for ((r = 0; r < PER_SERVER; r++)); do
+        out="$RUN_DIR/bench-$i-$r.log"
 
-    gpu_env=()
-    if [[ "$GPU_AFFINITY" == 1 ]]; then
-        gpu_env=(env "CUDA_VISIBLE_DEVICES=$((i % NUM_GPUS))")
-        log "  client $i -> localhost:$port (GPU $((i % NUM_GPUS)))"
-    else
-        log "  client $i -> localhost:$port"
-    fi
+        gpu_env=()
+        if [[ "$GPU_AFFINITY" == 1 ]]; then
+            if [[ -n "$FIXED_GPU" ]]; then
+                gpu="$FIXED_GPU"
+            else
+                gpu=$((gpu_idx % NUM_GPUS))
+            fi
+            gpu_env=(env "CUDA_VISIBLE_DEVICES=$gpu")
+            log "  instance $i client $r -> localhost:$port (GPU $gpu)"
+        else
+            log "  instance $i client $r -> localhost:$port"
+        fi
+        gpu_idx=$((gpu_idx + 1))
 
-    # Each client runs from the bench script's dir so its pb2 stubs import.
-    ( cd "$BENCH_DIR" && "${gpu_env[@]}" "$PYTHON" "$BENCH_SCRIPT" \
-        --server "localhost:$port" "${BENCH_ARGS[@]}" ) > "$out" 2>&1 &
-    PIDS+=("$!")
+        # Each client runs from the bench script's dir so its pb2 stubs import.
+        ( cd "$BENCH_DIR" && "${gpu_env[@]}" "$PYTHON" "$BENCH_SCRIPT" \
+            --server "localhost:$port" "${BENCH_ARGS[@]}" ) > "$out" 2>&1 &
+        PIDS+=("$!")
+        J_INST+=("$i")
+        J_PORT+=("$port")
+        J_OUT+=("$out")
+    done
 done
 
 # --- Wait for all clients ----------------------------------------------------
 fail=0
-for idx in "${!PIDS[@]}"; do
-    if ! wait "${PIDS[$idx]}"; then
-        warn "client $idx (port ${PORTS[$idx]}) exited non-zero -- see ${OUTS[$idx]}"
+for j in "${!PIDS[@]}"; do
+    if ! wait "${PIDS[$j]}"; then
+        warn "instance ${J_INST[$j]} client (port ${J_PORT[$j]}) exited non-zero -- see ${J_OUT[$j]}"
         fail=1
     fi
 done
@@ -103,29 +131,44 @@ parse_agg() {  # <logfile> <label>
         }
     ' "$1" 2>/dev/null
 }
+fadd() { awk -v a="$1" -v b="$2" 'BEGIN { printf "%.6f", a + b }'; }
+
+# Accumulate each client's throughput into its parent instance.
+declare -A INST_POP=() INST_HOT=() INST_COLD=() INST_PORT=() INST_NCLI=()
+for j in "${!J_OUT[@]}"; do
+    i="${J_INST[$j]}"
+    pop="$(parse_agg "${J_OUT[$j]}" "Populate")";       pop="${pop:-0}"
+    hot="$(parse_agg "${J_OUT[$j]}" "Lookup (hot)")";   hot="${hot:-0}"
+    cold="$(parse_agg "${J_OUT[$j]}" "Lookup (cold)")"; cold="${cold:-0}"
+    INST_PORT[$i]="${J_PORT[$j]}"
+    INST_NCLI[$i]=$(( ${INST_NCLI[$i]:-0} + 1 ))
+    INST_POP[$i]="$(fadd "${INST_POP[$i]:-0}" "$pop")"
+    INST_HOT[$i]="$(fadd "${INST_HOT[$i]:-0}" "$hot")"
+    INST_COLD[$i]="$(fadd "${INST_COLD[$i]:-0}" "$cold")"
+done
 
 log "Aggregating results..."
 echo
-printf '%-5s %-16s %12s %12s %12s\n' "IDX" "ENDPOINT" "POPULATE" "HOT" "COLD"
-printf '%-5s %-16s %12s %12s %12s\n' "---" "----------------" "------------" "------------" "------------"
+printf '%-5s %-16s %5s %12s %12s %12s\n' "IDX" "ENDPOINT" "NCLI" "POPULATE" "HOT" "COLD"
+printf '%-5s %-16s %5s %12s %12s %12s\n' "---" "----------------" "-----" "------------" "------------" "------------"
 
 sum_pop=0; sum_hot=0; sum_cold=0; counted=0
-for idx in "${!OUTS[@]}"; do
-    out="${OUTS[$idx]}"; port="${PORTS[$idx]}"
-    pop="$(parse_agg "$out" "Populate")"
-    hot="$(parse_agg "$out" "Lookup (hot)")"
-    cold="$(parse_agg "$out" "Lookup (cold)")"
-    pop="${pop:-0}"; hot="${hot:-0}"; cold="${cold:-0}"
-    printf '%-5s %-16s %9.2f GB/s %9.2f GB/s %9.2f GB/s\n' \
-        "$idx" "localhost:$port" "$pop" "$hot" "$cold"
-    read -r sum_pop sum_hot sum_cold <<< "$(awk -v a="$sum_pop" -v b="$sum_hot" -v c="$sum_cold" \
-        -v p="$pop" -v h="$hot" -v d="$cold" 'BEGIN{printf "%.6f %.6f %.6f", a+p, b+h, c+d}')"
+# Iterate instances in map order for deterministic output.
+for row in "${ROWS[@]}"; do
+    IFS=$'\t' read -r i bdf node port core <<< "$row"
+    [[ -n "${INST_PORT[$i]:-}" ]] || continue
+    pop="${INST_POP[$i]}"; hot="${INST_HOT[$i]}"; cold="${INST_COLD[$i]}"
+    printf '%-5s %-16s %5s %9.2f GB/s %9.2f GB/s %9.2f GB/s\n' \
+        "$i" "localhost:${INST_PORT[$i]}" "${INST_NCLI[$i]}" "$pop" "$hot" "$cold"
+    sum_pop="$(fadd "$sum_pop" "$pop")"
+    sum_hot="$(fadd "$sum_hot" "$hot")"
+    sum_cold="$(fadd "$sum_cold" "$cold")"
     counted=$((counted + 1))
 done
 
-printf '%-5s %-16s %12s %12s %12s\n' "---" "----------------" "------------" "------------" "------------"
-printf '%-5s %-16s %9.2f GB/s %9.2f GB/s %9.2f GB/s\n' \
-    "ALL" "$counted instance(s)" "$sum_pop" "$sum_hot" "$sum_cold"
+printf '%-5s %-16s %5s %12s %12s %12s\n' "---" "----------------" "-----" "------------" "------------" "------------"
+printf '%-5s %-16s %5s %9.2f GB/s %9.2f GB/s %9.2f GB/s\n' \
+    "ALL" "$counted instance(s)" "$TOTAL" "$sum_pop" "$sum_hot" "$sum_cold"
 echo
 log "Per-client logs: $RUN_DIR/bench-*.log"
 
