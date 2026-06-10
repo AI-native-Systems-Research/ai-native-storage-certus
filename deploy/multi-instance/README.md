@@ -51,6 +51,122 @@ tmux attach -t certus            # Ctrl-b n / Ctrl-b p to cycle windows
 ./stop-servers.sh
 ```
 
+## Compile and run (step by step)
+
+A complete walkthrough from a fresh checkout to aggregated results. All paths
+are relative to the repository root unless noted.
+
+### 1. Build SPDK (one-time, required by `certus-server`)
+
+`certus-server` links the userspace SPDK NVMe driver, so SPDK must be built and
+installed under `deps/spdk-build/` first:
+
+```bash
+deps/install_deps.sh                 # system packages (sudo; RHEL/Fedora)
+pip install -r deps/requirements.txt
+deps/build_spdk.sh                   # clone + build + install to deps/spdk-build/
+```
+
+You also need IOMMU + hugepages enabled and `memlock` unlimited (see the top
+level `README.md`). Verify hugepages are present:
+
+```bash
+grep Huge /proc/meminfo                # HugePages_Total should be > 0
+```
+
+### 2. Compile the server (release)
+
+```bash
+cargo build --release -p certus-server
+# produces target/release/certus-server
+```
+
+The launcher expects this binary; override its location with
+`CERTUS_SERVER_BIN` if you build elsewhere.
+
+### 3. Bind the NVMe SSDs to vfio-pci
+
+```bash
+scripts/spdk-scripts/bind_vfio.sh
+scripts/spdk-scripts/show_spdk_devices.sh        # list bound drives + NUMA node
+```
+
+`show_spdk_devices.sh` is also what the launcher's discovery mirrors — every
+NVMe controller bound to `vfio-pci` becomes one server instance.
+
+### 4. Install the benchmark client deps
+
+```bash
+pip install -r apps/python/requirements.txt      # grpcio, protobuf
+pip install torch                                # match your CUDA version
+```
+
+The client uses CUDA (`torch.cuda` + cudaIpc handles), so a working NVIDIA GPU
+and driver are required. If `apps/python/dispatcher_pb2.py` is missing,
+regenerate the stubs with `apps/python/generate_pb.sh`.
+
+### 5. Launch the servers
+
+```bash
+cd deploy/multi-instance
+
+# All discovered SSDs, formatting on-disk state fresh:
+./launch-servers.sh --format
+
+# ...or just the first 2 drives, recovering existing data:
+./launch-servers.sh -n 2
+```
+
+Expected output (2-drive example):
+
+```
+[multi] Planning 2 instance(s):
+  IDX BDF            NUMA  PORT   POLLER_CPU
+  0   0000:61:00.0   0     50051  1
+  1   0000:62:00.0   0     50052  2
+[multi] Launching servers in tmux session 'certus' (logs in /tmp/certus-multi-instance)
+[multi] Waiting for servers to come up...
+[multi]   srv0 (port 50051, 0000:61:00.0) ready
+[multi]   srv1 (port 50052, 0000:62:00.0) ready
+[multi] All 2 server(s) ready.
+```
+
+Watch a server live with `tmux attach -t certus` (one window per instance), or
+tail a log: `tail -f /tmp/certus-multi-instance/srv-0.log`.
+
+### 6. Run the benchmark and read the results
+
+Everything after `--` is forwarded to `certus-api-bench.py`:
+
+```bash
+./run-benchmarks.sh -- --clients 4 --num-objects 32 --iterations 10 --block-size 4M
+```
+
+One client runs per server (GPU round-robin), and the per-phase aggregate
+throughput is summed across instances:
+
+```
+IDX   ENDPOINT          POPULATE      HOT          COLD
+0     localhost:50051   0.33 GB/s    10.42 GB/s    2.14 GB/s
+1     localhost:50052   0.30 GB/s     3.14 GB/s    1.87 GB/s
+---   ----------------  -----------  -----------   -----------
+ALL   2 instance(s)     0.63 GB/s    13.56 GB/s    4.01 GB/s
+```
+
+`POPULATE` is write throughput, `HOT` is memory-tier (DRAM) read throughput,
+`COLD` is SSD-tier read throughput. The `ALL` row is the system-wide total. Full
+per-client output is kept in `/tmp/certus-multi-instance/bench-<i>.log`.
+
+> If clients exit non-zero with `FlushToSsd failed`, add `--skip-flush` to the
+> forwarded args — see [Troubleshooting](#troubleshooting).
+
+### 7. Tear down
+
+```bash
+./stop-servers.sh                # graceful SIGTERM, then kill the tmux session
+./stop-servers.sh --purge-logs   # also delete /tmp/certus-multi-instance
+```
+
 ## How instances are assigned
 
 For instance `i` (SSD `i` in discovery order, sorted by NUMA node then BDF):
