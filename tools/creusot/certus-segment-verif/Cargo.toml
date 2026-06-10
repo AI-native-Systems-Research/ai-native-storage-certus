@@ -1,0 +1,13 @@
+[package]
+name = "certus-segment-verif"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+creusot-std = { path = "../../creusot/creusot/creusot-std" }
+
+[workspace]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(creusot)'] }

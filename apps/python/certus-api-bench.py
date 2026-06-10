@@ -94,6 +94,7 @@ class ClientResult:
         self.cold_end = 0.0
         self.hot_objects = 0
         self.cold_objects = 0
+        self.cold_objects_success = 0
 
 
 def _make_pattern(key, block_size):
@@ -365,6 +366,7 @@ def run_client(
     barrier,
     result,
     gpu_id=0,
+    skip_flush=False,
 ):
     """Single client worker: populate objects, then measure hot and cold lookups."""
 
@@ -411,14 +413,14 @@ def run_client(
             dispatcher_pb2.IpcHandle(cuda_ipc_handle=handle_bytes, size=BLOCK_SIZE, gpu_device_id=gpu_id)
         )
 
-    # Memory-tier pool can hold MEMORY_TIER_SIZE / BLOCK_SIZE objects.
-    # For cold-path testing we need objects evicted to SSD.
-    # Strategy: populate enough objects to overflow the pool fraction this client owns,
-    # so the earliest keys get evicted to SSD.
+    # Memory-tier pool can hold MEMORY_TIER_SIZE / BLOCK_SIZE objects total.
+    # With num_clients concurrent clients each gets a fair share of the pool.
+    # For cold-path testing we populate enough objects to overflow this client's
+    # share so the earliest keys are written-through to SSD and evicted.
     pool_capacity = MEMORY_TIER_SIZE // BLOCK_SIZE
-    # We'll populate pool_capacity + cold objects so cold keys are evicted.
+    client_pool_share = max(1, pool_capacity // num_clients)
     cold_objects = num_objects * iterations
-    total_objects = pool_capacity + cold_objects
+    total_objects = client_pool_share + cold_objects
 
     # --- Phase 1: Populate ---
     barrier.wait()  # synchronize start across all clients
@@ -457,17 +459,20 @@ def run_client(
     result.populate_end = t_pop_end
     result.populate_objects = total_objects
 
-    # Wait for background write-through to flush to SSD.
-    # All clients flush in parallel so use per-client volume, not total.
-    # Conservative 2 GB/s per SSD estimate.
-    per_client_flush_bytes = total_objects * BLOCK_SIZE
-    wt_wait = max(5.0, per_client_flush_bytes / (2 * 1024**3))
-    time.sleep(wt_wait)
+    # Flush background write-through to SSD and wait for completion.
+    # Client 0 issues the flush; all clients wait at the barrier.
+    barrier.wait()
+    if client_id == 0:
+        try:
+            stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
+        except grpc.RpcError as e:
+            result.errors.append(f"FlushToSsd failed: {e.details()}")
+    barrier.wait()
 
     # --- Phase 2: Hot lookups (memory-tier) ---
-    # The last `num_objects` in the pool are still in DRAM.
+    # The last `num_objects` of this client's pool share are still in DRAM.
     hot_keys = [
-        base_key + cold_objects + pool_capacity - num_objects + i
+        base_key + cold_objects + client_pool_share - num_objects + i
         for i in range(num_objects)
     ]
 
@@ -517,35 +522,37 @@ def run_client(
     # Flush the SSD's internal DRAM cache by writing enough throwaway data
     # through the drive. Typical NVMe drives have 1-4 GB DRAM; writing 4 GB
     # of new data ensures the cold keys are evicted from the drive's cache.
-    flush_base = base_key + total_objects + 1_000_000
-    flush_count = 1024  # 1024 * 4 MiB = 4 GB per client
-    for batch_start in range(0, flush_count, batch_size):
-        batch_end = min(batch_start + batch_size, flush_count)
-        keys = [flush_base + i for i in range(batch_start, batch_end)]
-        entries = [
-            dispatcher_pb2.PopulateEntry(key=k, ipc_handle=populate_ipc)
-            for k in keys
-        ]
-        try:
-            stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=entries))
-        except grpc.RpcError:
-            pass
+    # Skip for O_DIRECT+O_SYNC backends (filesys) where writes are already durable.
+    if not skip_flush:
+        flush_base = base_key + total_objects + 1_000_000
+        flush_count = 1024  # 1024 * 4 MiB = 4 GB per client
+        for batch_start in range(0, flush_count, batch_size):
+            batch_end = min(batch_start + batch_size, flush_count)
+            keys = [flush_base + i for i in range(batch_start, batch_end)]
+            entries = [
+                dispatcher_pb2.PopulateEntry(key=k, ipc_handle=populate_ipc)
+                for k in keys
+            ]
+            try:
+                stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=entries))
+            except grpc.RpcError:
+                pass
 
-    # Wait for flush writes to complete through to SSD NAND.
-    # Clients flush in parallel; use per-client volume at ~3 GB/s.
-    flush_bytes = flush_count * BLOCK_SIZE
-    flush_wait = max(5.0, flush_bytes / (3 * 1024**3))
-    barrier.wait()
-    time.sleep(flush_wait)
+        # Wait for flush writes to complete through to SSD NAND.
+        # Clients flush in parallel; use per-client volume at ~3 GB/s.
+        flush_bytes = flush_count * BLOCK_SIZE
+        flush_wait = max(5.0, flush_bytes / (3 * 1024**3))
+        barrier.wait()
+        time.sleep(flush_wait)
 
-    # Clear memory-tier again (flush data filled it back up).
-    barrier.wait()
-    if client_id == 0:
-        try:
-            stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
-        except grpc.RpcError:
-            pass
-    barrier.wait()
+        # Clear memory-tier again (flush data filled it back up).
+        barrier.wait()
+        if client_id == 0:
+            try:
+                stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
+            except grpc.RpcError:
+                pass
+        barrier.wait()
 
     # Cold lookups use batched requests with SEPARATE IPC handles per key.
     # A shared IPC handle allows the server to skip SSD reads for entries whose
@@ -565,9 +572,11 @@ def run_client(
             resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=entries))
             t1 = time.perf_counter()
             failed = [r for r in resp.results if not r.success]
+            succeeded = len(resp.results) - len(failed)
+            result.cold_objects_success += succeeded
             if failed:
                 result.errors.append(
-                    f"cold lookup iter {iter_idx} failed: {failed[0].error_message}"
+                    f"cold lookup iter {iter_idx}: {len(failed)}/{len(resp.results)} failed: {failed[0].error_message}"
                 )
             result.cold_latencies.append((t1 - t0) / num_objects)
         except grpc.RpcError as e:
@@ -578,7 +587,8 @@ def run_client(
 
     # --- Cleanup ---
     all_cleanup_keys = list(range(base_key, base_key + total_objects))
-    all_cleanup_keys += list(range(flush_base, flush_base + flush_count))
+    if not skip_flush:
+        all_cleanup_keys += list(range(flush_base, flush_base + flush_count))
     for batch_start in range(0, len(all_cleanup_keys), batch_size):
         batch_end = min(batch_start + batch_size, len(all_cleanup_keys))
         try:
@@ -684,6 +694,11 @@ def main():
         default=16,
         help="Number of objects to verify in integrity check (default: 16)",
     )
+    parser.add_argument(
+        "--skip-flush",
+        action="store_true",
+        help="Skip SSD DRAM cache flush phase (use for O_DIRECT+O_SYNC backends like filesys)",
+    )
     args = parser.parse_args()
 
     global BLOCK_SIZE
@@ -705,8 +720,9 @@ def main():
         sys.exit(1)
 
     pool_capacity = MEMORY_TIER_SIZE // BLOCK_SIZE
+    client_pool_share = max(1, pool_capacity // num_clients)
     cold_per_client = num_objects * iterations
-    total_per_client = pool_capacity + cold_per_client
+    total_per_client = client_pool_share + cold_per_client
 
     print(f"{'='*70}")
     print(f"Certus Multi-Client Benchmark")
@@ -719,7 +735,7 @@ def main():
     print(f"  Objects/batch:     {num_objects}")
     print(f"  Iterations:        {iterations}")
     pool_mib = MEMORY_TIER_SIZE // (1024 * 1024)
-    print(f"  Pool capacity:     {pool_capacity} objects ({pool_mib} MiB)")
+    print(f"  Pool capacity:     {pool_capacity} objects ({pool_mib} MiB) / {client_pool_share} per client")
     print(f"  Total per client:  {total_per_client} objects")
     print(f"  Cold per client:   {cold_per_client} objects")
     print()
@@ -753,6 +769,7 @@ def main():
                 barrier,
                 results[i],
                 gpu_id,
+                args.skip_flush,
             ),
             daemon=True,
         )
@@ -803,8 +820,15 @@ def main():
         hot_wall_agg = (hot_total_bytes / hot_elapsed / 1e9) if hot_elapsed > 0 else 0
     if active_cold:
         cold_elapsed = max(r.cold_end for r in active_cold) - min(r.cold_start for r in active_cold)
-        cold_total_bytes = sum(r.cold_objects for r in active_cold) * BLOCK_SIZE
+        cold_success = sum(r.cold_objects_success for r in active_cold)
+        cold_total_bytes = cold_success * BLOCK_SIZE
         cold_wall_agg = (cold_total_bytes / cold_elapsed / 1e9) if cold_elapsed > 0 else 0
+        cold_requested = sum(r.cold_objects for r in active_cold)
+        if cold_success < cold_requested:
+            cold_hit_pct = 100.0 * cold_success / cold_requested
+            print(f"  NOTE: cold lookup hit rate {cold_hit_pct:.1f}% ({cold_success}/{cold_requested} objects)")
+            print(f"        throughput reflects only successful reads from SSD")
+            print()
 
     print(f"\n{'='*70}")
     print(f"Results ({num_clients} client(s), {BLOCK_SIZE//(1024*1024)} MiB blocks)")

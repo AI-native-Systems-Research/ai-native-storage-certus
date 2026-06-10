@@ -1,0 +1,186 @@
+//! Certus gRPC Server — YAML-Composed
+//!
+//! Drop-in replacement for certus-server whose component graph is
+//! declared in a YAML profile manifest and assembled at compile time
+//! by build.rs code generation.
+
+mod config;
+mod hooks;
+mod service;
+
+// Include the generated composition code (build_stack + ComponentStack).
+include!(concat!(env!("OUT_DIR"), "/composition.rs"));
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+use clap::Parser;
+use tonic::transport::{Identity, Server, ServerTlsConfig};
+
+use config::StackConfig;
+use service::DispatcherService;
+
+/// Certus gRPC server (YAML-composed) exposing the IDispatcher interface.
+#[derive(Parser)]
+#[command(
+    name = "certus-server-yaml",
+    about = "Certus dispatcher gRPC server — compile-time composed via YAML profiles"
+)]
+struct Cli {
+    /// PCI address(es) of NVMe device(s) — may be specified multiple times.
+    /// Mutually exclusive with --drive-count.
+    #[arg(long = "device-pci")]
+    device_pci: Vec<String>,
+
+    /// Use the first N discovered NVMe drives (alternative to --device-pci).
+    #[arg(long = "drive-count", conflicts_with = "device_pci")]
+    drive_count: Option<usize>,
+
+    /// gRPC listen address
+    #[arg(long = "listen", default_value = "0.0.0.0:50051")]
+    listen: String,
+
+    /// Memory-tier pool size (e.g. 256M, 1G, 512K). Defaults to 2G.
+    #[arg(long = "memory-tier-size", value_parser = parse_size)]
+    memory_tier_size: Option<usize>,
+
+    /// Format extent managers on startup (destroys existing data).
+    #[arg(long = "format")]
+    format: bool,
+
+    /// Path to TLS certificate file (enables TLS when provided with --tls-key)
+    #[arg(long = "tls-cert")]
+    tls_cert: Option<String>,
+
+    /// Path to TLS private key file (enables TLS when provided with --tls-cert)
+    #[arg(long = "tls-key")]
+    tls_key: Option<String>,
+
+    /// Pin each NVMe poller thread to a dedicated CPU core.
+    #[arg(long = "poller-base-cpu")]
+    poller_base_cpu: Option<usize>,
+}
+
+fn parse_size(s: &str) -> Result<usize, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("empty size string".into());
+    }
+    let (num_str, multiplier) = match s.as_bytes().last() {
+        Some(b'K' | b'k') => (&s[..s.len() - 1], 1024usize),
+        Some(b'M' | b'm') => (&s[..s.len() - 1], 1024 * 1024),
+        Some(b'G' | b'g') => (&s[..s.len() - 1], 1024 * 1024 * 1024),
+        _ => (s, 1usize),
+    };
+    let num: usize = num_str
+        .parse()
+        .map_err(|_| format!("invalid size number: '{num_str}'"))?;
+    num.checked_mul(multiplier)
+        .ok_or_else(|| format!("size overflow: '{s}'"))
+}
+
+fn validate_pci_address(addr: &str) -> Result<(), String> {
+    let parts: Vec<&str> = addr.split(':').collect();
+    if parts.len() != 3 {
+        return Err(format!(
+            "invalid PCI address format '{addr}': expected DDDD:BB:DD.F"
+        ));
+    }
+    u32::from_str_radix(parts[0], 16)
+        .map_err(|_| format!("invalid PCI domain in '{addr}'"))?;
+    u8::from_str_radix(parts[1], 16)
+        .map_err(|_| format!("invalid PCI bus in '{addr}'"))?;
+    let dev_func: Vec<&str> = parts[2].split('.').collect();
+    if dev_func.len() != 2 {
+        return Err(format!(
+            "invalid PCI dev.func in '{addr}': expected DD.F"
+        ));
+    }
+    u8::from_str_radix(dev_func[0], 16)
+        .map_err(|_| format!("invalid PCI device in '{addr}'"))?;
+    u8::from_str_radix(dev_func[1], 16)
+        .map_err(|_| format!("invalid PCI function in '{addr}'"))?;
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cli = Cli::parse();
+
+    // Validate PCI addresses
+    for addr in &cli.device_pci {
+        validate_pci_address(addr).map_err(Box::<dyn std::error::Error>::from)?;
+    }
+    if cli.device_pci.is_empty() && cli.drive_count.is_none() {
+        return Err("either --device-pci or --drive-count must be specified".into());
+    }
+
+    const DEFAULT_MEMORY_TIER_SIZE: usize = 2 * 1024 * 1024 * 1024; // 2 GiB
+
+    let stack_config = StackConfig {
+        device_pci: cli.device_pci.clone(),
+        drive_count: cli.drive_count,
+        memory_tier_size: cli.memory_tier_size.unwrap_or(DEFAULT_MEMORY_TIER_SIZE),
+        format: cli.format,
+        poller_base_cpu: cli.poller_base_cpu,
+        resolved_pci_addrs: std::cell::RefCell::new(Vec::new()),
+    };
+
+    // Build the component stack from the YAML-generated composition
+    let stack = build_stack(&stack_config)?;
+
+    let logger = &stack.logger;
+    logger.info(&format!(
+        "certus-server-yaml: composed from profile, devices={:?}",
+        cli.device_pci
+    ));
+    logger.info(&format!(
+        "certus-server-yaml: memory-tier-size={} MiB",
+        stack_config.memory_tier_size / (1024 * 1024)
+    ));
+
+    let svc = DispatcherService::new(Arc::clone(&stack.dispatcher));
+    let addr = cli.listen.parse()?;
+
+    // Build server with optional TLS
+    let mut server = Server::builder();
+    if let (Some(cert_path), Some(key_path)) = (&cli.tls_cert, &cli.tls_key) {
+        let cert = tokio::fs::read(cert_path).await?;
+        let key = tokio::fs::read(key_path).await?;
+        let identity = Identity::from_pem(cert, key);
+        server = server.tls_config(ServerTlsConfig::new().identity(identity))?;
+        logger.info("certus-server-yaml: TLS enabled");
+    }
+
+    logger.info(&format!("certus-server-yaml: listening on {addr}"));
+
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    let flag_clone = Arc::clone(&shutdown_flag);
+
+    server
+        .add_service(service::dispatcher_server(svc))
+        .serve_with_shutdown(addr, async move {
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut sigterm = signal(SignalKind::terminate()).expect("failed to register SIGTERM");
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {},
+                _ = sigterm.recv() => {},
+            }
+            flag_clone.store(true, Ordering::Release);
+        })
+        .await?;
+
+    // Mask signals during shutdown to prevent a second Ctrl+C from killing the
+    // process mid-teardown (which would segfault as SPDK memory is freed while
+    // actor threads are still running).
+    unsafe {
+        libc::signal(libc::SIGINT, libc::SIG_IGN);
+        libc::signal(libc::SIGTERM, libc::SIG_IGN);
+    }
+
+    let _ = stack.dispatcher.shutdown();
+    stack.spdk_env.fini();
+    stack.logger.info("certus-server-yaml: shutdown complete");
+
+    Ok(())
+}
