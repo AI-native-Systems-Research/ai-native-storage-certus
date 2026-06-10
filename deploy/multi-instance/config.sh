@@ -95,6 +95,35 @@ server_pids() {
     done
 }
 
+# True (0) if any local TCP socket currently occupies port $1 -- in any state
+# (LISTEN, ESTABLISHED, TIME_WAIT, ...). The default gRPC ports (50051+) fall
+# inside the Linux ephemeral range (see /proc/sys/net/ipv4/ip_local_port_range),
+# so a transient outbound connection can steal one and make the server's bind()
+# fail with EADDRINUSE -- this lets us pick a port that is actually free.
+port_in_use() {  # <port>
+    # Capture first, then grep from a here-string: a piped `grep -q` would exit
+    # on the first match and SIGPIPE `ss`, which under `set -o pipefail` reports
+    # the pipeline as failed even on a match.
+    local addrs
+    addrs="$(ss -tanH 2>/dev/null | awk '{print $4}')" || true
+    grep -qE "(^|[:.])$1\$" <<< "$addrs"
+}
+
+# Echo the first free TCP port >= $1.
+next_free_port() {  # <start_port>
+    local p="$1"
+    while port_in_use "$p"; do p=$((p + 1)); done
+    echo "$p"
+}
+
+# True (0) if a TCP listener on localhost:$1 accepts a connection right now.
+# This is the authoritative readiness signal -- certus-server logs "listening
+# on" just *before* the bind, so the log line alone can be a false positive.
+port_listening() {  # <port>
+    (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null && { exec 3>&-; return 0; }
+    return 1
+}
+
 # Map each NVIDIA GPU to its NUMA node. Emits one "<numa_node>\t<gpu_index>" line
 # per GPU (numa -1 normalized to 0). Empty if nvidia-smi is unavailable.
 gpu_numa_map() {
