@@ -111,6 +111,20 @@ N=${#ROWS[@]}
 [[ $N -gt 0 ]] || die "instance map is empty"
 
 TOTAL=$((N * PER_SERVER))
+
+# Pre-flight: a server that failed to start (e.g. out of hugepages) leaves its
+# port unreachable; without this check the client just yields a misleading
+# 0.00 GB/s. Warn up front so the cause is obvious.
+down=0
+for row in "${ROWS[@]}"; do
+    IFS=$'\t' read -r i bdf node port core <<< "$row"
+    if ! port_listening "$port"; then
+        warn "instance $i endpoint localhost:$port NOT reachable -- server likely failed to start (see $RUN_DIR/srv-$i.log)"
+        down=$((down + 1))
+    fi
+done
+[[ $down -eq 0 ]] || warn "$down of $N endpoint(s) unreachable; their results will be reported as FAILED"
+
 log "Running $TOTAL client process(es) = $N instance(s) x $PER_SERVER per server: ${BENCH_ARGS[*]}"
 
 # Per-job (flat) tracking arrays.
@@ -171,13 +185,17 @@ parse_agg() {  # <logfile> <label>
 }
 fadd() { awk -v a="$1" -v b="$2" 'BEGIN { printf "%.6f", a + b }'; }
 
-# Accumulate each client's throughput into its parent instance.
-declare -A INST_POP=() INST_HOT=() INST_COLD=() INST_PORT=() INST_NCLI=()
+# Accumulate each client's throughput into its parent instance. Track whether
+# any replica produced parseable data: an instance with none (server down /
+# connection refused) is reported as FAILED rather than a misleading 0.00.
+declare -A INST_POP=() INST_HOT=() INST_COLD=() INST_PORT=() INST_NCLI=() INST_DATA=()
 for j in "${!J_OUT[@]}"; do
     i="${J_INST[$j]}"
-    pop="$(parse_agg "${J_OUT[$j]}" "Populate")";       pop="${pop:-0}"
-    hot="$(parse_agg "${J_OUT[$j]}" "Lookup (hot)")";   hot="${hot:-0}"
-    cold="$(parse_agg "${J_OUT[$j]}" "Lookup (cold)")"; cold="${cold:-0}"
+    pop_raw="$(parse_agg "${J_OUT[$j]}" "Populate")"
+    hot_raw="$(parse_agg "${J_OUT[$j]}" "Lookup (hot)")"
+    cold_raw="$(parse_agg "${J_OUT[$j]}" "Lookup (cold)")"
+    [[ -n "${pop_raw}${hot_raw}${cold_raw}" ]] && INST_DATA[$i]=1
+    pop="${pop_raw:-0}"; hot="${hot_raw:-0}"; cold="${cold_raw:-0}"
     INST_PORT[$i]="${J_PORT[$j]}"
     INST_NCLI[$i]=$(( ${INST_NCLI[$i]:-0} + 1 ))
     INST_POP[$i]="$(fadd "${INST_POP[$i]:-0}" "$pop")"
@@ -190,11 +208,21 @@ echo
 printf '%-5s %-16s %5s %12s %12s %12s\n' "IDX" "ENDPOINT" "NCLI" "POPULATE" "HOT" "COLD"
 printf '%-5s %-16s %5s %12s %12s %12s\n' "---" "----------------" "-----" "------------" "------------" "------------"
 
-sum_pop=0; sum_hot=0; sum_cold=0; counted=0
+sum_pop=0; sum_hot=0; sum_cold=0; counted=0; failed=0
 # Iterate instances in map order for deterministic output.
 for row in "${ROWS[@]}"; do
     IFS=$'\t' read -r i bdf node port core <<< "$row"
     [[ -n "${INST_PORT[$i]:-}" ]] || continue
+    if [[ "${INST_DATA[$i]:-0}" != 1 ]]; then
+        # No parseable throughput from any replica: distinguish "unreachable"
+        # (connection refused in the client log) from generic "no data".
+        reason="no data"
+        grep -q "Connection refused" "$RUN_DIR/bench-$i-0.log" 2>/dev/null && reason="unreachable"
+        printf '%-5s %-16s %5s %14s %14s %14s   (%s)\n' \
+            "$i" "localhost:${INST_PORT[$i]}" "${INST_NCLI[$i]}" "FAILED" "FAILED" "FAILED" "$reason"
+        failed=$((failed + 1)); fail=1
+        continue
+    fi
     pop="${INST_POP[$i]}"; hot="${INST_HOT[$i]}"; cold="${INST_COLD[$i]}"
     printf '%-5s %-16s %5s %9.2f GB/s %9.2f GB/s %9.2f GB/s\n' \
         "$i" "localhost:${INST_PORT[$i]}" "${INST_NCLI[$i]}" "$pop" "$hot" "$cold"
@@ -206,8 +234,11 @@ done
 
 printf '%-5s %-16s %5s %12s %12s %12s\n' "---" "----------------" "-----" "------------" "------------" "------------"
 printf '%-5s %-16s %5s %9.2f GB/s %9.2f GB/s %9.2f GB/s\n' \
-    "ALL" "$counted instance(s)" "$TOTAL" "$sum_pop" "$sum_hot" "$sum_cold"
+    "ALL" "$counted ok$([[ $failed -gt 0 ]] && echo " / $failed FAILED")" "$TOTAL" "$sum_pop" "$sum_hot" "$sum_cold"
 echo
+if [[ $failed -gt 0 ]]; then
+    warn "$failed of $N endpoint(s) produced no data -- servers down or unreachable. Check $RUN_DIR/srv-*.log"
+fi
 log "Per-client logs: $RUN_DIR/bench-*.log"
 
 exit "$fail"
