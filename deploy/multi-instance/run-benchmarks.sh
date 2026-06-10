@@ -22,7 +22,10 @@
 # e.g.  ./run-benchmarks.sh -c 2 -- --clients 8 --num-objects 32 --iterations 20
 #
 # GPU affinity (via CUDA_VISIBLE_DEVICES):
-#   default            spread clients round-robin across GPUs (launch_index % num_gpus)
+#   default            pick a GPU in the SAME NUMA zone as the server instance
+#                      (round-robin among that node's GPUs); falls back to a
+#                      global round-robin if a node has no local GPU
+#   --gpu-spread       spread clients round-robin across ALL GPUs (ignore NUMA)
 #   --gpu N            pin ALL clients to GPU N
 #   --no-gpu-affinity  set nothing; every client uses its default device (GPU 0)
 #
@@ -30,6 +33,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config.sh"
 
 GPU_AFFINITY=1
+GPU_MODE="numa"          # numa | spread | fixed
 FIXED_GPU=""
 PER_SERVER=1
 declare -a BENCH_ARGS=()
@@ -37,10 +41,11 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -s) SESSION="$2"; shift 2 ;;
         -c|--clients-per-server) PER_SERVER="$2"; shift 2 ;;
-        --gpu) FIXED_GPU="$2"; shift 2 ;;
+        --gpu) FIXED_GPU="$2"; GPU_MODE="fixed"; shift 2 ;;
+        --gpu-spread) GPU_MODE="spread"; shift ;;
         --no-gpu-affinity) GPU_AFFINITY=0; shift ;;
         --) shift; BENCH_ARGS=("$@"); break ;;
-        -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
         *) die "unknown option: $1 (use -- to pass benchmark args)" ;;
     esac
 done
@@ -57,15 +62,48 @@ if [[ ${#BENCH_ARGS[@]} -eq 0 ]]; then
     warn "no benchmark args given; using defaults: ${BENCH_ARGS[*]}"
 fi
 
-# Detect GPU count for round-robin affinity (only needed when spreading; a
-# fixed --gpu pin does not require enumeration).
-NUM_GPUS=0
-if [[ "$GPU_AFFINITY" == 1 && -z "$FIXED_GPU" ]]; then
-    if command -v nvidia-smi >/dev/null; then
-        NUM_GPUS="$(nvidia-smi -L 2>/dev/null | wc -l)"
+# Enumerate GPUs and their NUMA nodes (needed for numa/spread modes; a fixed
+# --gpu pin does not require enumeration).
+declare -A NODE_GPUS=()       # numa node -> space-separated GPU indices
+declare -a ALL_GPUS=()        # all GPU indices, ascending
+if [[ "$GPU_AFFINITY" == 1 && "$GPU_MODE" != "fixed" ]]; then
+    while IFS=$'\t' read -r gn gi; do
+        [[ -n "$gi" ]] || continue
+        NODE_GPUS[$gn]="${NODE_GPUS[$gn]:-}${NODE_GPUS[$gn]:+ }$gi"
+    done < <(gpu_numa_map)
+    mapfile -t ALL_GPUS < <(gpu_numa_map | cut -f2 | sort -n)
+    if [[ ${#ALL_GPUS[@]} -lt 1 ]]; then
+        warn "no GPUs detected; clients will use default device"
+        GPU_AFFINITY=0
+    elif [[ "$GPU_MODE" == "numa" && ${#ALL_GPUS[@]} -eq 1 ]]; then
+        # Only one GPU: NUMA locality is moot, every client uses it.
+        GPU_MODE="spread"
     fi
-    [[ "$NUM_GPUS" -ge 1 ]] || { warn "no GPUs detected; clients will use default device"; GPU_AFFINITY=0; }
 fi
+
+# Pick the GPU for a client on the given NUMA node. Round-robins among the GPUs
+# local to that node (numa mode), or across all GPUs (spread / fallback).
+declare -A NODE_GPU_CURSOR=()
+warned_no_local_gpu=0
+pick_gpu() {  # <numa_node>  -> echoes GPU index
+    local node="$1" gpu
+    if [[ "$GPU_MODE" == "numa" ]]; then
+        local -a local_gpus=()
+        read -ra local_gpus <<< "${NODE_GPUS[$node]:-}"
+        if [[ ${#local_gpus[@]} -gt 0 ]]; then
+            local cur="${NODE_GPU_CURSOR[$node]:-0}"
+            gpu="${local_gpus[$((cur % ${#local_gpus[@]}))]}"
+            NODE_GPU_CURSOR[$node]=$((cur + 1))
+            echo "$gpu"; return
+        fi
+        if [[ "$warned_no_local_gpu" == 0 ]]; then
+            warn "no GPU local to NUMA node $node; falling back to global round-robin"
+            warned_no_local_gpu=1
+        fi
+    fi
+    # spread mode or numa fallback: global round-robin over all GPUs.
+    echo "${ALL_GPUS[$((gpu_idx % ${#ALL_GPUS[@]}))]}"
+}
 
 BENCH_DIR="$(dirname "$BENCH_SCRIPT")"
 mapfile -t ROWS < "$INSTANCES_TSV"
@@ -86,15 +124,15 @@ for row in "${ROWS[@]}"; do
 
         gpu_env=()
         if [[ "$GPU_AFFINITY" == 1 ]]; then
-            if [[ -n "$FIXED_GPU" ]]; then
+            if [[ "$GPU_MODE" == "fixed" ]]; then
                 gpu="$FIXED_GPU"
             else
-                gpu=$((gpu_idx % NUM_GPUS))
+                gpu="$(pick_gpu "$node")"
             fi
             gpu_env=(env "CUDA_VISIBLE_DEVICES=$gpu")
-            log "  instance $i client $r -> localhost:$port (GPU $gpu)"
+            log "  instance $i (NUMA $node) client $r -> localhost:$port (GPU $gpu)"
         else
-            log "  instance $i client $r -> localhost:$port"
+            log "  instance $i (NUMA $node) client $r -> localhost:$port"
         fi
         gpu_idx=$((gpu_idx + 1))
 

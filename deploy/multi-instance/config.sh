@@ -95,6 +95,24 @@ server_pids() {
     done
 }
 
+# Map each NVIDIA GPU to its NUMA node. Emits one "<numa_node>\t<gpu_index>" line
+# per GPU (numa -1 normalized to 0). Empty if nvidia-smi is unavailable.
+gpu_numa_map() {
+    command -v nvidia-smi >/dev/null || return 0
+    local idx bus dom rest bdf n
+    while IFS=, read -r idx bus; do
+        idx="${idx//[[:space:]]/}"; bus="${bus//[[:space:]]/}"
+        [[ -n "$idx" ]] || continue
+        # nvidia-smi pads the PCI domain to 8 hex digits (00000000:41:00.0);
+        # sysfs uses 4 (0000:41:00.0). Take the last 4 of the domain.
+        dom="${bus%%:*}"; rest="${bus#*:}"
+        bdf="${dom: -4}:${rest}"; bdf="${bdf,,}"
+        n="$(cat "/sys/bus/pci/devices/${bdf}/numa_node" 2>/dev/null || echo -1)"
+        [[ "$n" == "-1" ]] && n=0
+        printf '%s\t%s\n' "$n" "$idx"
+    done < <(nvidia-smi --query-gpu=index,pci.bus_id --format=csv,noheader 2>/dev/null)
+}
+
 # Discover all NVMe controllers currently bound to vfio-pci, one BDF per line,
 # ordered by (numa_node, bdf) so node-0 drives come first.
 discover_nvme_bdfs() {

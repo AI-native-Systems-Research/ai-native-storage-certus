@@ -215,6 +215,7 @@ BDF ...        Explicit NVMe PCI addresses (overrides auto-discovery)
 ```
 -s SESSION                      tmux session name
 -c N, --clients-per-server N    Launch N client *processes* per server (default 1)
+--gpu-spread                    Round-robin clients across ALL GPUs (ignore NUMA)
 --gpu N                         Pin ALL clients to GPU N
 --no-gpu-affinity               Do not set CUDA_VISIBLE_DEVICES (clients use GPU 0)
 -- BENCH_ARGS...                Everything after -- is forwarded to certus-api-bench.py
@@ -231,9 +232,15 @@ they compose, e.g. `-c 2 -- --clients 4` = 8 concurrent threads per server.
 
 | Mode | Behaviour |
 |------|-----------|
-| *(default)* | Spread clients round-robin across GPUs (`launch_index % gpu_count`). |
+| *(default)* | **NUMA-local**: each client uses a GPU in the same NUMA zone as its server instance, round-robin among that node's GPUs. Falls back to global round-robin if a node has no local GPU (and collapses to "use the only GPU" on single-GPU hosts). |
+| `--gpu-spread` | Round-robin across **all** GPUs, ignoring NUMA (`launch_index % gpu_count`). |
 | `--gpu N` | Pin **every** client to GPU `N`. |
 | `--no-gpu-affinity` | Set nothing; every client falls back to GPU 0. |
+
+GPU→NUMA mapping is read from sysfs (`/sys/bus/pci/devices/<gpu_bdf>/numa_node`)
+via `nvidia-smi`. On the reference box GPU 0 is on NUMA 0 and GPU 1 on NUMA 1,
+so node-0 SSDs (`61–64`) drive GPU 0 and node-1 SSDs (`c1–c4`) drive GPU 1 —
+keeping the gRPC client, server, poller, and GPU all on one socket.
 
 Useful forwarded bench args: `--clients`, `--num-objects`, `--iterations`,
 `--block-size`, `--batch-size`, `--skip-flush`.
