@@ -58,6 +58,19 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
     die "tmux session '$SESSION' already exists; run ./stop-servers.sh -s $SESSION first"
 fi
 
+# Orphaned servers from a prior run (no session, but processes still alive) hold
+# hugepages and ports, which makes fresh instances fail to start -- surfacing as
+# all-zero benchmark results. Warn loudly so the user can clean up first.
+existing="$(server_pids || true)"
+if [[ -n "$existing" ]]; then
+    warn "found existing certus-server process(es) not managed by this session:"
+    while read -r epid; do
+        [[ -n "$epid" ]] || continue
+        warn "  pid $epid $(tr '\0' ' ' < "/proc/$epid/cmdline" 2>/dev/null | grep -oE '\--listen [0-9.]+:[0-9]+')"
+    done <<< "$existing"
+    warn "  they may hold hugepages/ports and cause new instances to fail; run ./stop-servers.sh if unexpected"
+fi
+
 # --- Select devices ----------------------------------------------------------
 declare -a BDFS=()
 if [[ ${#EXPLICIT_BDFS[@]} -gt 0 ]]; then
