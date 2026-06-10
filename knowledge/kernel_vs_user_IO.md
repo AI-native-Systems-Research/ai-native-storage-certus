@@ -26,6 +26,31 @@ Performance comparison for an 8 NVMe SSD array under inference-style workloads.
 | P99 | ~14 us | ~35 us | ~60 us |
 | P99.99 | ~20 us | ~80 us | ~200–500 us |
 
+## Throughput (4MiB sequential read, QD=32 per device)
+
+| Metric | SPDK | io_uring | O_DIRECT (libaio) |
+|--------|------|----------|-------------------|
+| Per-device BW | ~6.8–7.0 GB/s | ~6.5–6.8 GB/s | ~6.0–6.5 GB/s |
+| 8-device aggregate BW | ~54–56 GB/s | ~50–54 GB/s | ~46–50 GB/s |
+| Per-device IOPS | ~1.7–1.75K | ~1.6–1.7K | ~1.5–1.6K |
+
+## Latency (4MiB sequential read, QD=1)
+
+| Metric | SPDK | io_uring | O_DIRECT (libaio) |
+|--------|------|----------|-------------------|
+| Average | ~570–600 us | ~590–640 us | ~620–680 us |
+| P99 | ~620–650 us | ~680–750 us | ~750–900 us |
+| P99.9 | ~650–700 us | ~750–900 us | ~900–1400 us |
+
+### Notes on 4MiB I/O behavior
+
+At 4MiB, the NVMe controller splits each command into multiple internal flash reads (~128–256KiB granularity). Media transfer time dominates (~500+ us), so the kernel overhead gap narrows significantly compared to 4KiB:
+
+- **Throughput gap narrows to ~8–15%** (vs ~30–50% at 4KiB) because media time dwarfs software overhead.
+- **Latency gap narrows in absolute terms** but SPDK still wins at the tail — the kernel block layer adds jitter from bio splitting, bounce buffers on misaligned requests, and IRQ batching at large transfer sizes.
+- **CPU efficiency**: SPDK completes 4MiB I/Os with fewer CPU cycles per byte (no bio chain allocation, no kernel copy for scatter-gather setup). At 8 devices saturating PCIe bandwidth, this frees 1–2 cores vs O_DIRECT.
+- **PCIe becomes the bottleneck**: 8 Gen4 x4 devices share PCIe lanes. At 4MiB sequential reads, all three approaches can saturate the PCIe root complex (~64 GB/s for Gen4 x16 CPU link), at which point the I/O framework matters less than topology.
+
 ## Overhead Characteristics
 
 | | SPDK | io_uring | O_DIRECT (libaio) |
