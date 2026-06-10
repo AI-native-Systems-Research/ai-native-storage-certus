@@ -284,106 +284,100 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
         })
         .collect::<Result<Vec<_>, DispatcherError>>()?;
 
-    let max_inflight = max_queue_depth.min(num_chunks);
-
-    // Track in-flight segment indices in submission order (FIFO queue).
-    // Each NVMe completion is matched to the oldest outstanding segment,
-    // which is valid because a single NVMe queue pair completes in FIFO order.
-    let mut inflight: std::collections::VecDeque<usize> =
-        std::collections::VecDeque::with_capacity(max_inflight);
-
-    // Prime the sliding window.
-    for i in 0..max_inflight {
-        channels
-            .command_tx
-            .send(Command::ReadAsync {
-                ns_id: 1,
-                lba: segments[i].lba,
-                buf: Arc::clone(&chunk_bufs[i]),
-                timeout_ms: READ_TIMEOUT_MS,
-            })
-            .map_err(|e| DispatcherError::IoError(format!("ReadAsync send #{i}: {e}")))?;
-        inflight.push_back(i);
-    }
-
-    let mut next_to_submit = max_inflight;
+    // Process chunks in batches bounded by the device/channel queue depth.
+    //
+    // IMPORTANT: a completion does NOT tell us *which* segment finished. The
+    // `OpHandle` it carries is assigned by the actor and is unknown to us at
+    // submission time, reads are spread across multiple NVMe queue pairs, and
+    // NVMe permits out-of-order completion even within a single queue pair — so
+    // completion order is unrelated to submission order. We must therefore NOT
+    // correlate the i-th completion with the i-th submitted segment (doing so
+    // copies a buffer whose read has not yet landed → cold-path data corruption).
+    //
+    // Each segment's data is DMA'd directly into its own distinct memory-tier
+    // slice (`chunk_bufs[i]`), so once *all* reads in a batch have completed,
+    // every buffer in the batch holds valid data regardless of completion order.
+    // We wait for the whole batch, then issue the GPU H2D copies. This mirrors
+    // the order-independent batch barrier in the sibling `pipelined_ssd_to_gpu`.
+    let batch_size = max_queue_depth.min(num_chunks).max(1);
+    let mut chunk_idx = 0;
     let mut stream_idx = 0usize;
 
-    // Sliding-window pipeline: as each NVMe read completes, immediately issue
-    // the GPU H2D copy for that segment and submit the next read.  This overlaps
-    // SSD I/O with GPU DMA instead of serialising them in two phases.
-    for _completed in 0..num_chunks {
-        // Wait for the oldest in-flight read to finish.
-        let seg_idx = match channels.completion_rx.recv() {
-            Ok(Completion::ReadDone { handle, result }) => {
-                result.map_err(|e| {
-                    DispatcherError::IoError(format!("SSD read (handle {:?}): {e}", handle))
-                })?;
-                inflight.pop_front().unwrap()
-            }
-            Ok(Completion::Timeout { handle }) => {
-                return Err(DispatcherError::IoError(format!(
-                    "NVMe read timeout (handle {:?})",
-                    handle
-                )));
-            }
-            Ok(other) => {
-                return Err(DispatcherError::IoError(format!(
-                    "unexpected completion: {other:?}"
-                )));
-            }
-            Err(_) => {
-                return Err(DispatcherError::IoError(
-                    "completion channel disconnected".into(),
-                ));
-            }
-        };
+    while chunk_idx < num_chunks {
+        let batch_end = (chunk_idx + batch_size).min(num_chunks);
+        let batch_len = batch_end - chunk_idx;
 
-        // Submit the next read immediately so SSD I/O overlaps with the GPU
-        // copy we're about to issue.
-        if next_to_submit < num_chunks {
+        // Submit all reads in this batch into their distinct buffers.
+        for i in chunk_idx..batch_end {
             channels
                 .command_tx
                 .send(Command::ReadAsync {
                     ns_id: 1,
-                    lba: segments[next_to_submit].lba,
-                    buf: Arc::clone(&chunk_bufs[next_to_submit]),
+                    lba: segments[i].lba,
+                    buf: Arc::clone(&chunk_bufs[i]),
                     timeout_ms: READ_TIMEOUT_MS,
                 })
-                .map_err(|e| {
-                    DispatcherError::IoError(format!(
-                        "ReadAsync submit #{next_to_submit}: {e}"
-                    ))
-                })?;
-            inflight.push_back(next_to_submit);
-            next_to_submit += 1;
+                .map_err(|e| DispatcherError::IoError(format!("ReadAsync send #{i}: {e}")))?;
         }
 
-        // NVMe read for seg_idx is complete — GPU H2D copy can start now.
-        let seg = &segments[seg_idx];
-        let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
-        let current_stream = streams[stream_idx % 2];
-
-        let guard = chunk_bufs[seg_idx].lock().unwrap();
-        gpu.dma_copy_to_device_async(
-            &guard,
-            unsafe { (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void },
-            copy_len,
-            current_stream,
-        )
-        .map_err(|e| {
-            DispatcherError::IoError(format!("GPU async DMA copy (seg {seg_idx}) failed: {e}"))
-        })?;
-        drop(guard);
-        stream_idx += 1;
-
-        // Periodically sync to bound the GPU command queue depth.
-        if stream_idx % 16 == 0 {
-            gpu.stream_synchronize(streams[0])
-                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
-            gpu.stream_synchronize(streams[1])
-                .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+        // Wait for ALL reads in this batch to complete. The completion-to-segment
+        // mapping is irrelevant here: each datum has already landed in its own
+        // buffer, so we only need to know that every read in the batch is done.
+        for _ in 0..batch_len {
+            match channels.completion_rx.recv() {
+                Ok(Completion::ReadDone { handle, result }) => {
+                    result.map_err(|e| {
+                        DispatcherError::IoError(format!("SSD read (handle {:?}): {e}", handle))
+                    })?;
+                }
+                Ok(Completion::Timeout { handle }) => {
+                    return Err(DispatcherError::IoError(format!(
+                        "NVMe read timeout (handle {:?})",
+                        handle
+                    )));
+                }
+                Ok(other) => {
+                    return Err(DispatcherError::IoError(format!(
+                        "unexpected completion: {other:?}"
+                    )));
+                }
+                Err(_) => {
+                    return Err(DispatcherError::IoError(
+                        "completion channel disconnected".into(),
+                    ));
+                }
+            }
         }
+
+        // Every buffer in [chunk_idx, batch_end) now holds valid data — issue
+        // the async GPU H2D copies across both streams.
+        for i in chunk_idx..batch_end {
+            let seg = &segments[i];
+            let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
+            let current_stream = streams[stream_idx % 2];
+
+            let guard = chunk_bufs[i].lock().unwrap();
+            gpu.dma_copy_to_device_async(
+                &guard,
+                unsafe { (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void },
+                copy_len,
+                current_stream,
+            )
+            .map_err(|e| {
+                DispatcherError::IoError(format!("GPU async DMA copy (seg {i}) failed: {e}"))
+            })?;
+            drop(guard);
+            stream_idx += 1;
+        }
+
+        // Sync both streams to bound the GPU command queue depth before the
+        // next batch reuses the streams.
+        gpu.stream_synchronize(streams[0])
+            .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+        gpu.stream_synchronize(streams[1])
+            .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
+
+        chunk_idx = batch_end;
     }
 
     // Sync both streams to ensure all GPU copies are complete.
