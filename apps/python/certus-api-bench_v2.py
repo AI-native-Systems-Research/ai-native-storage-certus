@@ -394,17 +394,19 @@ def run_client(
         cuda_ipc_handle=populate_handle_bytes, size=BLOCK_SIZE, gpu_device_id=gpu_id
     )
 
-    lookup_tensor = torch.zeros(
-        BLOCK_SIZE // 4, dtype=torch.float32, device=cuda_device
-    )
-    lookup_handle_bytes = _get_cuda_ipc_handle(lookup_tensor.data_ptr())
-    lookup_ipc = dispatcher_pb2.IpcHandle(
-        cuda_ipc_handle=lookup_handle_bytes, size=BLOCK_SIZE, gpu_device_id=gpu_id
-    )
+    # Separate GPU buffers for lookups — one per key in the batch.
+    # A shared IPC handle allows the server to coalesce DMA writes to the
+    # same destination, producing artificially low latencies. Distinct buffers
+    # force a real H2D transfer per object.
+    hot_lookup_ptrs = []
+    hot_lookup_ipcs = []
+    for _ in range(num_objects):
+        ptr, handle_bytes = _cuda_alloc(BLOCK_SIZE)
+        hot_lookup_ptrs.append(ptr)
+        hot_lookup_ipcs.append(
+            dispatcher_pb2.IpcHandle(cuda_ipc_handle=handle_bytes, size=BLOCK_SIZE, gpu_device_id=gpu_id)
+        )
 
-    # Separate GPU buffers for cold lookups — one per key in the batch.
-    # A shared IPC handle allows the server to skip SSD reads for entries whose
-    # data will be overwritten, so cold measurements require distinct buffers.
     cold_lookup_ptrs = []
     cold_lookup_ipcs = []
     for _ in range(num_objects):
@@ -480,7 +482,8 @@ def run_client(
 
     # Warmup
     entries = [
-        dispatcher_pb2.LookupEntry(key=k, ipc_handle=lookup_ipc) for k in hot_keys
+        dispatcher_pb2.LookupEntry(key=k, ipc_handle=hot_lookup_ipcs[i])
+        for i, k in enumerate(hot_keys)
     ]
     try:
         stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=entries))
@@ -490,23 +493,37 @@ def run_client(
     barrier.wait()  # synchronize hot-lookup start
     result.hot_start = time.perf_counter()
 
-    for _ in range(iterations):
-        entries = [
-            dispatcher_pb2.LookupEntry(key=k, ipc_handle=lookup_ipc)
-            for k in hot_keys
-        ]
-        try:
-            t0 = time.perf_counter()
-            resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=entries))
-            t1 = time.perf_counter()
-            failed = [r for r in resp.results if not r.success]
-            if failed:
-                result.errors.append(
-                    f"hot lookup failed: {failed[0].error_message}"
-                )
-            result.hot_latencies.append((t1 - t0) / num_objects)
-        except grpc.RpcError as e:
-            result.errors.append(f"hot lookup RPC error: {e.details()}")
+    # Pipelined hot lookups: keep pipeline_depth RPCs in flight.
+    in_flight = []
+    next_to_send = 0
+    completed = 0
+
+    while completed < iterations:
+        while next_to_send < iterations and len(in_flight) < pipeline_depth:
+            entries = [
+                dispatcher_pb2.LookupEntry(key=k, ipc_handle=hot_lookup_ipcs[i])
+                for i, k in enumerate(hot_keys)
+            ]
+            req = dispatcher_pb2.BatchLookupRequest(entries=entries)
+            future = stub.Lookup.future(req)
+            in_flight.append((next_to_send, future, time.perf_counter()))
+            next_to_send += 1
+
+        if in_flight:
+            iter_idx, future, t_submit = in_flight.pop(0)
+            try:
+                resp = future.result()
+                _libcudart.cudaDeviceSynchronize()
+                t_done = time.perf_counter()
+                failed = [r for r in resp.results if not r.success]
+                if failed:
+                    result.errors.append(
+                        f"hot lookup failed: {failed[0].error_message}"
+                    )
+                result.hot_latencies.append((t_done - t_submit) / num_objects)
+            except grpc.RpcError as e:
+                result.errors.append(f"hot lookup RPC error: {e.details()}")
+            completed += 1
 
     result.hot_end = time.perf_counter()
     result.hot_objects = num_objects * iterations
@@ -568,7 +585,6 @@ def run_client(
 
     # --- Cleanup ---
     all_cleanup_keys = list(range(base_key, base_key + total_objects))
-    all_cleanup_keys += list(range(flush_base, flush_base + flush_count))
     for batch_start in range(0, len(all_cleanup_keys), batch_size):
         batch_end = min(batch_start + batch_size, len(all_cleanup_keys))
         try:
@@ -576,7 +592,9 @@ def run_client(
         except grpc.RpcError:
             pass
 
-    # Free cold lookup GPU buffers.
+    # Free lookup GPU buffers.
+    for ptr in hot_lookup_ptrs:
+        _cuda_free(ptr)
     for ptr in cold_lookup_ptrs:
         _cuda_free(ptr)
 
@@ -599,7 +617,11 @@ def print_stats(label, all_latencies, num_clients, wall_aggregate_gbps=None):
     mn = min(all_latencies)
     mx = max(all_latencies)
 
-    tp_per_client = BLOCK_SIZE / avg if avg > 0 else 0
+    # Per-client throughput derived from wall-clock aggregate (accounts for pipelining).
+    if wall_aggregate_gbps is not None and num_clients > 0:
+        tp_per_client = wall_aggregate_gbps / num_clients
+    else:
+        tp_per_client = BLOCK_SIZE / avg / 1e9 if avg > 0 else 0
 
     print(
         f"  {label:<20} "
@@ -612,7 +634,7 @@ def print_stats(label, all_latencies, num_clients, wall_aggregate_gbps=None):
     agg_str = f"{wall_aggregate_gbps:>6.2f}" if wall_aggregate_gbps is not None else "  N/A "
     print(
         f"  {'':20} "
-        f"per-client={tp_per_client/1e9:>6.2f} GB/s  "
+        f"per-client={tp_per_client:>6.2f} GB/s  "
         f"aggregate={agg_str} GB/s"
     )
 
