@@ -143,12 +143,13 @@ fn async_read_write_completions() {
             lba: 0,
             buf: write_buf_arc,
             timeout_ms: 5000,
+            tag: 0,
         })
         .unwrap();
 
     let completion = channels.completion_rx.recv().unwrap();
     match completion {
-        Completion::WriteDone { handle, result } => {
+        Completion::WriteDone { handle, result, .. } => {
             assert!(result.is_ok());
             assert_eq!(handle.0, 1); // First operation gets handle 1
         }
@@ -166,12 +167,13 @@ fn async_read_write_completions() {
             lba: 0,
             buf: Arc::clone(&read_buf_arc),
             timeout_ms: 5000,
+            tag: 0,
         })
         .unwrap();
 
     let completion = channels.completion_rx.recv().unwrap();
     match completion {
-        Completion::ReadDone { handle, result } => {
+        Completion::ReadDone { handle, result, .. } => {
             assert!(result.is_ok());
             assert_eq!(handle.0, 2);
         }

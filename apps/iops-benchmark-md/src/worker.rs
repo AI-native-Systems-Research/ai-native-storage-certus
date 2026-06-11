@@ -207,12 +207,14 @@ impl Worker {
                 lba,
                 buf: Arc::clone(&self.read_bufs[bs_idx][slot]),
                 timeout_ms,
+                tag: 0,
             },
             (IoMode::Async, false) => Command::WriteAsync {
                 ns_id: self.ns_id,
                 lba,
                 buf: Arc::clone(&self.write_bufs[bs_idx][slot]),
                 timeout_ms,
+                tag: 0,
             },
             (IoMode::Sync, true) => Command::ReadSync {
                 ns_id: self.ns_id,
