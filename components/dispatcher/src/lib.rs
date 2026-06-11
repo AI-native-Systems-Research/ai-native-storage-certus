@@ -30,7 +30,7 @@ use interfaces::{
 use component_core::binding::bind;
 use spdk_env::ISPDKEnv;
 
-use crate::background::{BackgroundEvictor, BackgroundWriter, EvictorConfig, WriteJob};
+use crate::background::{BackgroundEvictor, EvictorConfig, ParallelBackgroundWriter, WriteJob};
 
 /// A pending store awaiting commit or cancel.
 ///
@@ -106,7 +106,7 @@ define_component! {
         },
         fields: {
             initialized: AtomicBool,
-            bg_writer: Mutex<Option<BackgroundWriter>>,
+            bg_writer: Mutex<Option<ParallelBackgroundWriter>>,
             bg_evictor: Mutex<Option<BackgroundEvictor>>,
             data_drives: RwLock<Vec<DataDrive>>,
             pending_writes: Mutex<HashMap<CacheKey, PendingWrite>>,
@@ -861,14 +861,16 @@ impl IDispatcher for DispatcherComponent {
             dd.iter().map(|d| Arc::clone(&d.extent_mgr)).collect()
         };
 
-        let writer = BackgroundWriter::start(move |job: WriteJob| {
-            Self::process_write_job(
-                &dm_for_writer,
-                &mt_for_writer,
-                &bg_drives,
-                &bg_extent_mgrs,
-                job,
-            );
+        let num_writer_drives = bg_drives.len().max(1);
+        let writer = ParallelBackgroundWriter::start(num_writer_drives, |drive_idx| {
+            let dm = Arc::clone(&dm_for_writer);
+            let mt = Arc::clone(&mt_for_writer);
+            let drives = bg_drives.clone();
+            let extent_mgrs = bg_extent_mgrs.clone();
+            let _ = drive_idx;
+            move |job: WriteJob| {
+                Self::process_write_job(&dm, &mt, &drives, &extent_mgrs, job);
+            }
         });
 
         *self.bg_writer.lock().unwrap() = Some(writer);

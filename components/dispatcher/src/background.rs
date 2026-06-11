@@ -32,7 +32,16 @@ impl BackgroundWriter {
     ///
     /// The thread drains `WriteJob`s from the channel until the shutdown
     /// flag is set and the channel is empty.
-    pub fn start<F>(mut process_job: F) -> Self
+    #[cfg(test)]
+    pub fn start<F>(process_job: F) -> Self
+    where
+        F: FnMut(WriteJob) + Send + 'static,
+    {
+        Self::start_named(0, process_job)
+    }
+
+    /// Start a named background writer thread (used by `ParallelBackgroundWriter`).
+    pub(crate) fn start_named<F>(drive_idx: usize, mut process_job: F) -> Self
     where
         F: FnMut(WriteJob) + Send + 'static,
     {
@@ -44,7 +53,7 @@ impl BackgroundWriter {
         let in_flight_clone = Arc::clone(&in_flight);
 
         let handle = thread::Builder::new()
-            .name("dispatcher-bg-writer".into())
+            .name(format!("dispatcher-bg-writer-{drive_idx}"))
             .spawn(move || {
                 Self::worker_loop(&shutdown_clone, &receiver, &in_flight_clone, &mut process_job);
             })
@@ -76,6 +85,7 @@ impl BackgroundWriter {
     ///
     /// Jobs enqueued concurrently by other threads after this call begins are
     /// not guaranteed to be complete when this returns.
+    #[cfg(test)]
     pub fn flush(&self) {
         while self.in_flight.load(std::sync::atomic::Ordering::Acquire) > 0 {
             std::thread::sleep(Duration::from_millis(5));
@@ -128,6 +138,70 @@ impl Drop for BackgroundWriter {
         if self.handle.is_some() {
             self.shutdown();
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Parallel Background Writer (one thread per drive)
+// ---------------------------------------------------------------------------
+
+/// A pool of per-drive `BackgroundWriter` threads.
+///
+/// Routes each `WriteJob` to the writer responsible for its target drive,
+/// enabling concurrent write-through across multiple NVMe devices.
+pub struct ParallelBackgroundWriter {
+    writers: Vec<BackgroundWriter>,
+    num_drives: usize,
+}
+
+impl ParallelBackgroundWriter {
+    /// Start one writer thread per drive.
+    ///
+    /// `make_processor(drive_idx)` is called once per drive to produce the
+    /// job-processing closure for that drive's dedicated thread.
+    pub fn start<F>(num_drives: usize, make_processor: impl Fn(usize) -> F) -> Self
+    where
+        F: FnMut(WriteJob) + Send + 'static,
+    {
+        let writers = (0..num_drives)
+            .map(|idx| BackgroundWriter::start_named(idx, make_processor(idx)))
+            .collect();
+
+        Self { writers, num_drives }
+    }
+
+    /// Enqueue a write job, routing to the writer for its target drive.
+    pub fn enqueue(&self, job: WriteJob) -> Result<(), WriteJob> {
+        let idx = job.device_index % self.num_drives;
+        self.writers[idx].enqueue(job)
+    }
+
+    /// Total number of jobs in-flight across all drive writers.
+    pub fn in_flight(&self) -> usize {
+        self.writers.iter().map(|w| w.in_flight()).sum()
+    }
+
+    /// Block until all per-drive queues are drained.
+    pub fn flush(&self) {
+        loop {
+            if self.writers.iter().all(|w| w.in_flight() == 0) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// Shutdown all per-drive writer threads, draining remaining jobs.
+    pub fn shutdown(&mut self) {
+        for writer in &mut self.writers {
+            writer.shutdown();
+        }
+    }
+}
+
+impl Drop for ParallelBackgroundWriter {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
