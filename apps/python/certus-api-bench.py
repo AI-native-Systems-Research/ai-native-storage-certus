@@ -539,16 +539,15 @@ def run_client(
             except grpc.RpcError:
                 pass
 
-        # Synchronously flush all background write-through to SSD.
-        barrier.wait()
-        if client_id == 0:
-            try:
-                stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
-            except grpc.RpcError:
-                pass
+        # All clients synchronously flush write-through, then barrier.
+        try:
+            stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
+        except grpc.RpcError:
+            pass
         barrier.wait()
         if writes_settle > 0:
             time.sleep(writes_settle)
+        barrier.wait()
 
         # Clear memory-tier again (flush data filled it back up).
         barrier.wait()

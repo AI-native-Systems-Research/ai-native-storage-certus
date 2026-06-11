@@ -460,14 +460,16 @@ def run_client(
     result.populate_end = t_pop_end
     result.populate_objects = total_objects
 
-    # Synchronously flush all background write-through to SSD, then wait
-    # an additional settle period for NVMe internal operations to quiesce.
+    # All clients synchronously flush background write-through, then barrier
+    # to ensure every client's writes are on SSD before proceeding.
     try:
         stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
     except grpc.RpcError:
         pass
+    barrier.wait()
     if writes_settle > 0:
         time.sleep(writes_settle)
+    barrier.wait()
 
     # --- Phase 2: Hot lookups (memory-tier) ---
     # The last `num_objects` in the pool are still in DRAM.
@@ -536,13 +538,12 @@ def run_client(
         except grpc.RpcError:
             pass
 
-    # Synchronously wait for all background write-through to complete.
-    barrier.wait()
-    if client_id == 0:
-        try:
-            stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
-        except grpc.RpcError:
-            pass
+    # All clients synchronously flush write-through from the SSD-DRAM-eviction
+    # populate above, then barrier to ensure all writes are committed to NAND.
+    try:
+        stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
+    except grpc.RpcError:
+        pass
     barrier.wait()
 
     # Clear memory-tier again (flush data filled it back up).
