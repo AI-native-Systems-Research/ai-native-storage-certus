@@ -14,6 +14,7 @@ dispatch-map.workspace = true
 memory-tier.workspace = true
 block-device-spdk-nvme = { workspace = true, optional = true }
 block-device-filesys = { workspace = true, optional = true }
+block-device-kernel = { workspace = true, optional = true }
 extent-manager.workspace = true
 spdk-env = { workspace = true, optional = true }
 gpu-services = { workspace = true, features = ["gpu"] }
@@ -30,6 +31,7 @@ default = ["spdk"]
 spdk = ["spdk-mem", "dep:block-device-spdk-nvme", "dispatcher/spdk-backend"]
 spdk-mem = ["dep:spdk-env"]
 filesys = ["dep:block-device-filesys", "spdk-mem"]
+kernel = ["dep:block-device-kernel", "spdk-mem"]
 
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }

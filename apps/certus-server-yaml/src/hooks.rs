@@ -23,6 +23,15 @@ pub fn init_spdk_env_dma_only(
     iface.init().map_err(|e| format!("SPDK init failed: {e}"))
 }
 
+#[cfg(feature = "spdk-mem")]
+#[allow(dead_code)]
+pub fn init_spdk_env_stub(
+    _iface: &Arc<dyn spdk_env::ISPDKEnv + Send + Sync>,
+    _config: &StackConfig,
+) -> Result<(), String> {
+    Ok(())
+}
+
 #[cfg(feature = "spdk")]
 pub fn init_spdk_env(
     iface: &Arc<dyn spdk_env::ISPDKEnv + Send + Sync>,
