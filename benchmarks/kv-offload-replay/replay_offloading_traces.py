@@ -3,51 +3,49 @@
 
 Reads JSONL traces produced by tracing_offloading_manager.TracingOffloadingManager
 (manager trace) and TracingOffloadingHandler (handler trace), merges them by
-timestamp, and replays the interleaved event stream against pluggable targets.
+timestamp, and replays the interleaved event stream against a storage connector.
 
-Manager targets (--target):
+Connectors (--connector):
 
-  simple-lru    pure-Python LRU cache, no external deps. Default.
-  cpu-manager   vLLM's CPUOffloadingManager (lazy-imported).
-  certus-connector  Real Certus SPDK+NVMe engine via certus_native.
-  fs-backend    Real llmd_fs_backend: SharedStorageOffloadingManager.
-
-Handler targets (--handler-target):
-
-  certus-connector  Real Certus GPU→NVMe transfers via SPDK.
-  fs-backend        Real llmd_fs_backend StorageOffloadingHandlers.
+  cpu      vLLM's CPUOffloadingManager — in-memory DRAM. Default.
+  fs       NVMe via llmd_fs_backend (XFS mount).
+  certus   CXL DRAM via certus_native (SPDK + vfio-pci).
 
 Usage:
-  # Default: LRU manager + certus handler
   python replay_offloading_traces.py \
-      --manager-trace offloading_mgr_*.jsonl \
-      --handler-trace offloading_handler_*.jsonl \
-      --handler-target certus-connector
+      --manager-trace traces/500convs-64g.mgr.jsonl.gz \
+      --handler-trace traces/500convs-64g.handler.jsonl.gz \
+      --connector cpu --num-blocks 32768
 
-  # LRU manager + fs-backend handler
   python replay_offloading_traces.py \
-      --manager-trace offloading_mgr_*.jsonl \
-      --handler-trace offloading_handler_*.jsonl \
-      --handler-target fs-backend \
-      --handler-target-args '{"root_dir": "/mnt/fs-backend-bench/replay"}'
+      --manager-trace traces/500convs-64g.mgr.jsonl.gz \
+      --handler-trace traces/500convs-64g.handler.jsonl.gz \
+      --connector fs --num-blocks 32768
 
-  # Pure I/O saturation benchmark (no manager, write-all then read-all)
   python replay_offloading_traces.py \
-      --bulk-io \
-      --handler-trace offloading_handler_*.jsonl \
-      --handler-target certus-connector
+      --manager-trace traces/500convs-64g.mgr.jsonl.gz \
+      --handler-trace traces/500convs-64g.handler.jsonl.gz \
+      --connector certus --num-blocks 32768
 """
 
 from __future__ import annotations
 
 import argparse
 import glob
+import gzip
 import importlib
 import json
 import sys
 from collections import Counter, OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
+
+
+def open_trace(path: Path):
+    """Open a trace file, transparently handling .gz compression."""
+    if path.suffix == ".gz":
+        return gzip.open(path, "rt")
+    return open(path)
 
 
 # ── Target protocol + built-in implementations ─────────────────────────────
@@ -1150,182 +1148,6 @@ def _make_certus_shared_targets(extra_config: dict | None = None,
     return _MgrW(), _HandlerW()
 
 
-# ── Bulk-IO replay ────────────────────────────────────────────────────────
-
-def replay_bulk_io(handler_trace_path: Path, handler_target,
-                     per_block_bytes: int | None = None) -> dict:
-    """Bulk I/O saturation benchmark: extract block sizes from the handler
-    trace, write all blocks, then read them all back. No manager, no
-    interleaving. Pure I/O throughput + latency measurement.
-    """
-    import time as _time
-
-    if per_block_bytes is None:
-        per_block_bytes = getattr(handler_target, "per_block_bytes", 131072)
-
-    # Parse trace to get the sequence of transfer sizes
-    write_jobs: list[int] = []  # n_blocks per write
-    read_jobs: list[int] = []   # n_blocks per read
-    for line in open(handler_trace_path):
-        if not line.strip():
-            continue
-        r = json.loads(line)
-        if r["method"] != "transfer_async":
-            continue
-        n = len(r["src"].get("block_ids", []))
-        if r.get("transfer_type", "").startswith("GPU"):
-            write_jobs.append(n)
-        else:
-            read_jobs.append(n)
-
-    total_write_blocks = sum(write_jobs)
-    total_read_blocks = sum(read_jobs)
-
-    # ── Phase 1: Write all blocks ─────────────────────────────────────
-    pending: set[int] = set()
-    submit_times: dict[int, float] = {}
-    done_times: dict[int, float] = {}
-    bytes_per_job: dict[int, int] = {}
-
-    def drain(block: bool = False, timeout_s: float = 120.0):
-        deadline = _time.perf_counter() + timeout_s
-        while True:
-            results = handler_target.get_finished() or []
-            now = _time.perf_counter()
-            for r in results:
-                jid = r.job_id if hasattr(r, "job_id") else r[0]
-                if jid in pending:
-                    pending.discard(jid)
-                    done_times[jid] = now
-            if not block or not pending:
-                return
-            if _time.perf_counter() > deadline:
-                return
-            _time.sleep(0.0001)
-
-    jid = 0
-    write_failures = 0
-    t_write_start = _time.perf_counter()
-    for n_blocks in write_jobs:
-        submit_times[jid] = _time.perf_counter()
-        ok = handler_target.transfer_async(jid, n_blocks, "out")
-        if ok:
-            pending.add(jid)
-            bytes_per_job[jid] = n_blocks * per_block_bytes
-        else:
-            write_failures += 1
-            submit_times.pop(jid, None)
-        jid += 1
-        # Drain periodically to avoid unbounded queue
-        if len(pending) > 256:
-            drain(block=False)
-
-    # Drain all remaining writes
-    if pending:
-        if hasattr(handler_target, "wait"):
-            handler_target.wait(set(pending))
-            now = _time.perf_counter()
-            for j in list(pending):
-                done_times[j] = now
-            pending.clear()
-        else:
-            drain(block=True)
-    t_write_end = _time.perf_counter()
-
-    write_wall = t_write_end - t_write_start
-    write_bytes = sum(bytes_per_job.values())
-    write_latencies = sorted((done_times[j] - submit_times[j]) * 1000
-                             for j in submit_times if j in done_times)
-
-    # ── Phase 2: Read all blocks back ─────────────────────────────────
-    read_submit_times: dict[int, float] = {}
-    read_done_times: dict[int, float] = {}
-    read_bytes_per_job: dict[int, int] = {}
-    read_failures = 0
-    pending.clear()
-
-    t_read_start = _time.perf_counter()
-    for n_blocks in read_jobs:
-        read_submit_times[jid] = _time.perf_counter()
-        ok = handler_target.transfer_async(jid, n_blocks, "in")
-        if ok:
-            pending.add(jid)
-            read_bytes_per_job[jid] = n_blocks * per_block_bytes
-        else:
-            read_failures += 1
-            read_submit_times.pop(jid, None)
-        jid += 1
-        if len(pending) > 256:
-            drain(block=False)
-
-    if pending:
-        if hasattr(handler_target, "wait"):
-            handler_target.wait(set(pending))
-            now = _time.perf_counter()
-            for j in list(pending):
-                read_done_times[j] = now
-            pending.clear()
-        else:
-            drain(block=True)
-    t_read_end = _time.perf_counter()
-
-    read_wall = t_read_end - t_read_start
-    read_bytes = sum(read_bytes_per_job.values())
-    read_latencies = sorted((read_done_times[j] - read_submit_times[j]) * 1000
-                            for j in read_submit_times if j in read_done_times)
-
-    if hasattr(handler_target, "shutdown"):
-        try:
-            handler_target.shutdown()
-        except Exception:
-            pass
-
-    def pct(samples, q):
-        if not samples:
-            return 0.0
-        return samples[min(len(samples) - 1, int(len(samples) * q))]
-
-    nw = len(write_latencies)
-    nr = len(read_latencies)
-
-    return {
-        "mode": "bulk-io",
-        "per_block_bytes": per_block_bytes,
-        "write": {
-            "jobs": len(write_jobs),
-            "failures": write_failures,
-            "total_blocks": total_write_blocks,
-            "total_bytes": write_bytes,
-            "wall_s": write_wall,
-            "throughput_mbps": (write_bytes / (1 << 20)) / write_wall if write_wall else 0.0,
-            "latency_ms": {
-                "count": nw,
-                "mean": sum(write_latencies) / nw if nw else 0.0,
-                "p50": pct(write_latencies, 0.5),
-                "p95": pct(write_latencies, 0.95),
-                "p99": pct(write_latencies, 0.99),
-                "max": write_latencies[-1] if nw else 0.0,
-            },
-        },
-        "read": {
-            "jobs": len(read_jobs),
-            "failures": read_failures,
-            "total_blocks": total_read_blocks,
-            "total_bytes": read_bytes,
-            "wall_s": read_wall,
-            "throughput_mbps": (read_bytes / (1 << 20)) / read_wall if read_wall else 0.0,
-            "latency_ms": {
-                "count": nr,
-                "mean": sum(read_latencies) / nr if nr else 0.0,
-                "p50": pct(read_latencies, 0.5),
-                "p95": pct(read_latencies, 0.95),
-                "p99": pct(read_latencies, 0.99),
-                "max": read_latencies[-1] if nr else 0.0,
-            },
-        },
-    }
-
-
 # ── Interleaved replay ────────────────────────────────────────────────────
 
 def replay_interleaved(mgr_path: Path, handler_path: Path,
@@ -1345,13 +1167,13 @@ def replay_interleaved(mgr_path: Path, handler_path: Path,
 
     # Load and tag events
     events = []
-    for line in open(mgr_path):
+    for line in open_trace(mgr_path):
         if not line.strip():
             continue
         r = json.loads(line)
         r["_source"] = "mgr"
         events.append((r["ts"], 0, r))
-    for line in open(handler_path):
+    for line in open_trace(handler_path):
         if not line.strip():
             continue
         r = json.loads(line)
@@ -1568,141 +1390,54 @@ def replay_interleaved(mgr_path: Path, handler_path: Path,
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--manager-trace", type=str, default=None,
-                    help="path to offloading_mgr_*.jsonl (glob ok)")
-    ap.add_argument("--handler-trace", type=str, default=None,
-                    help="path to offloading_handler_*.jsonl (glob ok)")
-    ap.add_argument("--target", default="simple-lru",
-                    help="'simple-lru' (default, no vLLM), 'cpu-manager' "
-                         "(vLLM's CPUOffloadingManager), or 'module:Class'")
-    ap.add_argument("--target-args", type=str, default="{}",
-                    help="JSON dict of kwargs merged into the target "
-                         "constructor (overrides --num-blocks/--policy/--block-size)")
+    ap.add_argument("--manager-trace", type=str, required=True,
+                    help="path to offloading_mgr_*.jsonl[.gz] (glob ok)")
+    ap.add_argument("--handler-trace", type=str, required=True,
+                    help="path to offloading_handler_*.jsonl[.gz] (glob ok)")
+    ap.add_argument("--connector", default="cpu",
+                    choices=["cpu", "fs", "certus"],
+                    help="storage backend: cpu (DRAM), fs (NVMe), certus (CXL)")
+    ap.add_argument("--connector-args", type=str, default="{}",
+                    help="JSON dict of extra kwargs for the connector "
+                         "(e.g. root_dir, per_block_bytes, dram_cache_bytes)")
     ap.add_argument("--num-blocks", type=int, default=16384,
-                    help="capacity (blocks) — passed as num_blocks kwarg")
+                    help="capacity (blocks) for the offload tier")
     ap.add_argument("--policy", default="lru",
-                    help="eviction policy — passed as policy kwarg (cpu-manager)")
+                    help="eviction policy (cpu/fs connectors)")
     ap.add_argument("--block-size", type=int, default=16)
-    ap.add_argument("--handler-target", default=None,
-                    help="drive a real worker for the handler trace. One of "
-                         "'fs-backend', 'certus-connector', or 'module:Class'.")
-    ap.add_argument("--handler-target-args", type=str, default="{}",
-                    help="JSON dict of kwargs for the handler target "
-                         "(e.g. root_dir, per_block_bytes, engine_config)")
-    ap.add_argument("--bulk-io", action="store_true",
-                    help="pure I/O saturation benchmark: write all blocks "
-                         "then read all back, no manager, no interleaving")
     ap.add_argument("--output-json", type=Path, default=None)
     args = ap.parse_args()
 
-    target_args = {
-        "num_blocks": args.num_blocks,
-        "block_size": args.block_size,
-        "policy": args.policy,
-    }
-    target_args.update(json.loads(args.target_args))
-
-    report: dict = {}
-
-    if args.bulk_io:
-        assert args.handler_trace, "--bulk-io requires --handler-trace"
-        assert args.handler_target, "--bulk-io requires --handler-target"
-        h_paths = [Path(p) for p in glob.glob(args.handler_trace)]
-        assert len(h_paths) == 1, f"ambiguous handler trace: {h_paths}"
-        print(f"[replay] bulk-io mode", file=sys.stderr)
-        print(f"[replay] handler trace: {h_paths[0]}", file=sys.stderr)
-
-        if args.handler_target == "certus-connector":
-            extra = json.loads(args.handler_target_args)
-            if not extra.get("dram_cache_bytes"):
-                extra["dram_cache_bytes"] = 4 * (1 << 30)
-            mgr_target, handler_target = _make_certus_shared_targets(
-                extra_config=extra,
-                gpu_block_size=args.block_size)
-            # Pre-register all write keys via prepare_store so the engine
-            # allocates space before open-loop writes
-            print(f"[replay] pre-registering keys with certus manager...",
-                  file=sys.stderr)
-            key_counter = 0
-            for line in open(h_paths[0]):
-                if not line.strip():
-                    continue
-                r = json.loads(line)
-                if r["method"] == "transfer_async" and r.get("transfer_type", "").startswith("GPU"):
-                    n = len(r["src"].get("block_ids", []))
-                    fake_keys = [f"{key_counter + i:016x}" for i in range(n)]
-                    key_counter += n
-                    mgr_target.prepare_store(fake_keys)
-            print(f"[replay] pre-registered {key_counter} keys", file=sys.stderr)
-        elif args.handler_target == "cpu-manager":
-            mgr_target, handler_target = _make_cpu_shared_targets(
-                gpu_block_size=args.block_size,
-                num_gpu_blocks=args.num_blocks)
-        else:
-            h_args = json.loads(args.handler_target_args)
-            handler_target = load_handler_target(args.handler_target, h_args)
-
-        print(f"[replay] handler target: {args.handler_target}", file=sys.stderr)
-        report = replay_bulk_io(h_paths[0], handler_target)
-
-        W = report["write"]
-        R = report["read"]
-        print(f"\n=== bulk-io replay ===")
-        print(f"  per_block_bytes: {report['per_block_bytes']}")
-        print(f"  WRITE: {W['jobs']} jobs, {W['total_blocks']} blocks, "
-              f"{W['total_bytes']/(1<<20):.1f} MiB")
-        print(f"    wall={W['wall_s']:.3f}s  throughput={W['throughput_mbps']:.1f} MB/s"
-              f"  failures={W['failures']}")
-        print(f"    latency p50={W['latency_ms']['p50']:.2f}ms  "
-              f"p95={W['latency_ms']['p95']:.2f}ms  "
-              f"p99={W['latency_ms']['p99']:.2f}ms  "
-              f"max={W['latency_ms']['max']:.2f}ms")
-        print(f"  READ: {R['jobs']} jobs, {R['total_blocks']} blocks, "
-              f"{R['total_bytes']/(1<<20):.1f} MiB")
-        print(f"    wall={R['wall_s']:.3f}s  throughput={R['throughput_mbps']:.1f} MB/s"
-              f"  failures={R['failures']}")
-        print(f"    latency p50={R['latency_ms']['p50']:.2f}ms  "
-              f"p95={R['latency_ms']['p95']:.2f}ms  "
-              f"p99={R['latency_ms']['p99']:.2f}ms  "
-              f"max={R['latency_ms']['max']:.2f}ms")
-
-        if args.output_json:
-            args.output_json.write_text(json.dumps(report, indent=2))
-            print(f"\n[replay] wrote {args.output_json}", file=sys.stderr)
-        return
-
-    # Default mode: interleaved trace replay
-    assert args.manager_trace, "requires --manager-trace"
-    assert args.handler_trace, "requires --handler-trace"
-    assert args.handler_target, "requires --handler-target"
     mgr_paths = [Path(p) for p in glob.glob(args.manager_trace)]
     h_paths = [Path(p) for p in glob.glob(args.handler_trace)]
     assert len(mgr_paths) == 1, f"ambiguous manager trace: {mgr_paths}"
     assert len(h_paths) == 1, f"ambiguous handler trace: {h_paths}"
     print(f"[replay] manager trace: {mgr_paths[0]}", file=sys.stderr)
     print(f"[replay] handler trace: {h_paths[0]}", file=sys.stderr)
-    print(f"[replay] target: {args.target} {target_args}", file=sys.stderr)
+    print(f"[replay] connector: {args.connector}", file=sys.stderr)
 
-    if args.target == "certus-connector" and args.handler_target == "certus-connector":
-        extra = json.loads(args.target_args)
-        extra.update(json.loads(args.handler_target_args))
-        print(f"[replay] using shared certus engine for mgr+handler",
-              file=sys.stderr)
-        mgr_target, handler_target = _make_certus_shared_targets(
-            extra_config=extra or None,
-            gpu_block_size=args.block_size)
-    elif args.target == "cpu-manager" and args.handler_target == "cpu-manager":
-        print(f"[replay] using shared CPU spec for mgr+handler",
-              file=sys.stderr)
+    extra = json.loads(args.connector_args)
+
+    if args.connector == "cpu":
         mgr_target, handler_target = _make_cpu_shared_targets(
             gpu_block_size=args.block_size,
             num_gpu_blocks=args.num_blocks)
-    else:
-        mgr_target = load_target(args.target, target_args)
-        h_args = json.loads(args.handler_target_args)
-        print(f"[replay] handler target: {args.handler_target} {h_args}",
-              file=sys.stderr)
-        handler_target = load_handler_target(args.handler_target, h_args)
+    elif args.connector == "certus":
+        if not extra.get("dram_cache_bytes"):
+            extra["dram_cache_bytes"] = 4 * (1 << 30)
+        mgr_target, handler_target = _make_certus_shared_targets(
+            extra_config=extra or None,
+            gpu_block_size=args.block_size)
+    elif args.connector == "fs":
+        target_args = {
+            "num_blocks": args.num_blocks,
+            "block_size": args.block_size,
+            "policy": args.policy,
+        }
+        mgr_target = load_target("cpu-manager", target_args)
+        h_args = {"root_dir": "/mnt/fs-backend-bench", "per_block_bytes": 2097152}
+        h_args.update(extra)
+        handler_target = load_handler_target("fs-backend", h_args)
     report = replay_interleaved(
         mgr_paths[0], h_paths[0], mgr_target, handler_target)
 
