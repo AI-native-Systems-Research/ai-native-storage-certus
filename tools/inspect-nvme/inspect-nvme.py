@@ -171,16 +171,17 @@ class NvmeInspector:
         if intervals is None:
             intervals = [0, 5, 10, 15, 20, 30, 45, 60, 90, 120]
 
-        # Phase 1: Establish baseline read latency on a quiet drive.
-        # Use 4 MiB reads to match Certus cold-path object size.
-        print("  Measuring baseline read latency (quiet drive, 4 MiB)...", end="", flush=True)
-        run_fio(self.ns, rw="randread", bs="4M", runtime="3", qdepth=1)
+        # Phase 1: Establish baseline read throughput on a quiet drive.
+        # Use 4 MiB reads at high QD to saturate the drive, matching Certus cold-path.
+        print("  Measuring baseline read throughput (quiet drive, 4 MiB, QD=32)...", end="", flush=True)
+        run_fio(self.ns, rw="randread", bs="4M", runtime="3", qdepth=32)
         result_baseline = run_fio(
-            self.ns, rw="randread", bs="4M", runtime="5", qdepth=1,
+            self.ns, rw="randread", bs="4M", runtime="5", qdepth=32,
         )
-        lat_baseline = extract_lat_us(result_baseline, "read")
-        baseline_us = lat_baseline["avg"] if lat_baseline else 500
-        print(f" {baseline_us:.0f} us")
+        baseline_mbps = 0
+        if result_baseline and "jobs" in result_baseline:
+            baseline_mbps = result_baseline["jobs"][0].get("read", {}).get("bw", 0) / 1024  # KiB/s → MiB/s
+        print(f" {baseline_mbps:.0f} MiB/s")
 
         # Phase 2: Random writes to trigger GC/write-folding.
         # Uses random 4 MiB writes to scatter dirty pages across NAND erase blocks,
@@ -208,39 +209,42 @@ class NvmeInspector:
             else:
                 print(f"  Sampling at {wait_target_s}s...", end="", flush=True)
 
-            # Brief measurement burst (1s, 4 MiB reads) to match Certus workload.
+            # Brief measurement burst (2s, 4 MiB reads, QD=32) measuring throughput.
             actual_idle = time.time() - t_write_done
             result = run_fio(
-                self.ns, rw="randread", bs="4M", runtime="1",
-                qdepth=1,
+                self.ns, rw="randread", bs="4M", runtime="2",
+                qdepth=32,
             )
+            mbps = 0
             lat = extract_lat_us(result, "read")
-            avg = lat["avg"] if lat else 0
+            if result and "jobs" in result:
+                mbps = result["jobs"][0].get("read", {}).get("bw", 0) / 1024
             measurements.append({
                 "target_s": wait_target_s,
                 "idle_s": round(actual_idle, 1),
-                "avg_us": avg,
-                "p99_us": lat["p99"] if lat else 0,
+                "mbps": mbps,
+                "avg_us": lat["avg"] if lat else 0,
             })
-            ratio = avg / baseline_us if baseline_us > 0 else 0
-            marker = "" if ratio < 1.2 else f" ({ratio:.1f}x baseline)"
-            print(f" {avg:.0f} us{marker}")
+            pct = (mbps / baseline_mbps * 100) if baseline_mbps > 0 else 0
+            marker = "" if pct >= 80 else f" ({pct:.0f}% of baseline)"
+            print(f" {mbps:.0f} MiB/s{marker}")
 
-        # Find settle point: first measurement within 20% of baseline where
-        # all subsequent measurements are also within 20% of baseline.
-        threshold = baseline_us * 1.2
+        # Find settle point: first measurement where throughput reaches 80% of
+        # baseline and stays there for all subsequent measurements.
+        threshold_mbps = baseline_mbps * 0.8
         recommended = intervals[-1]  # default to longest interval
         for i, m in enumerate(measurements):
-            if m["avg_us"] <= 0:
+            if m["mbps"] <= 0:
                 continue
-            if m["avg_us"] <= threshold:
-                rest = [mm["avg_us"] for mm in measurements[i:] if mm["avg_us"] > 0]
-                if all(v <= threshold for v in rest):
+            if m["mbps"] >= threshold_mbps:
+                rest = [mm["mbps"] for mm in measurements[i:] if mm["mbps"] > 0]
+                if all(v >= threshold_mbps for v in rest):
                     recommended = m["target_s"]
                     break
 
         result = {
-            "baseline_us": baseline_us,
+            "baseline_mbps": baseline_mbps,
+            "threshold_mbps": threshold_mbps,
             "measurements": measurements,
             "recommended_gc_settle_s": recommended,
         }
@@ -473,20 +477,20 @@ class NvmeInspector:
             lines.append(sub)
             lines.append("GC Settle Time")
             lines.append(sub)
-            baseline = gc.get("baseline_us", 0)
-            lines.append(f"Baseline read latency (quiet drive): {baseline:,.0f} us")
-            threshold = baseline * 1.2
-            lines.append(f"Settle threshold (120% of baseline): {threshold:,.0f} us")
+            baseline = gc.get("baseline_mbps", 0)
+            threshold = gc.get("threshold_mbps", 0)
+            lines.append(f"Baseline read throughput (quiet drive): {baseline:,.0f} MiB/s")
+            lines.append(f"Settle threshold (80% of baseline):     {threshold:,.0f} MiB/s")
             lines.append("")
-            lines.append("Post-write read latency (4 MiB random, QD=1):")
+            lines.append("Post-write read throughput (4 MiB random, QD=32):")
             for m in gc["measurements"]:
-                ratio = m["avg_us"] / baseline if baseline > 0 else 0
+                pct = (m["mbps"] / baseline * 100) if baseline > 0 else 0
                 marker = ""
-                if m["avg_us"] > 0 and m["avg_us"] <= threshold:
+                if m["mbps"] >= threshold:
                     marker = "  <-- settled"
-                elif ratio > 1:
-                    marker = f"  ({ratio:.1f}x baseline)"
-                lines.append(f"  {m['target_s']:>2}s after write:  {m['avg_us']:>8,.0f} us{marker}")
+                else:
+                    marker = f"  ({pct:.0f}% of baseline)"
+                lines.append(f"  {m['target_s']:>3}s after write:  {m['mbps']:>8,.0f} MiB/s{marker}")
             lines.append(f"\nRecommended --gc-settle: {gc['recommended_gc_settle_s']}s")
             lines.append("")
 
