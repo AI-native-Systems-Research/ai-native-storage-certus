@@ -19,7 +19,7 @@ CONFIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$CONFIG_DIR/../.." && pwd)"
 
 SERVER_BIN="${CERTUS_SERVER_BIN:-$REPO_ROOT/target/release/certus-server}"
-BENCH_SCRIPT="${CERTUS_BENCH_SCRIPT:-$REPO_ROOT/apps/python/certus-api-bench_v2.py}"
+BENCH_SCRIPT="${CERTUS_BENCH_SCRIPT:-$REPO_ROOT/apps/python/certus-api-bench.py}"
 PYTHON="${CERTUS_PYTHON:-python3.12}"
 
 # --- Tunables (override via environment) -------------------------------------
