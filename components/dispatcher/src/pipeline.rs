@@ -486,12 +486,15 @@ pub unsafe fn pipelined_multi_object_zero_copy(
 
     let max_segments_per_obj = all_objs.iter().map(|o| o.segments.len()).max().unwrap_or(0);
 
+
     // Submit initial batch up to max_queue_depth.
     let submit_limit = max_queue_depth.min(work.len());
     let mut submitted = 0usize;
     let mut completed = 0usize;
     let mut stream_idx = 0usize;
 
+    #[cfg(feature = "pipeline-telemetry")]
+    let t_submit_start = std::time::Instant::now();
     while submitted < submit_limit {
         let (obj_idx, seg_idx) = work[submitted];
         let obj = &all_objs[obj_idx];
@@ -515,11 +518,25 @@ pub unsafe fn pipelined_multi_object_zero_copy(
         }
         submitted += 1;
     }
+    #[cfg(feature = "pipeline-telemetry")]
+    let t_initial_submit = t_submit_start.elapsed();
+    #[cfg(feature = "pipeline-telemetry")]
+    let mut t_recv_ns: u64 = 0;
+    #[cfg(feature = "pipeline-telemetry")]
+    let mut t_gpu_ns: u64 = 0;
+    #[cfg(feature = "pipeline-telemetry")]
+    let mut t_sync_ns: u64 = 0;
+    #[cfg(feature = "pipeline-telemetry")]
+    let mut t_resub_ns: u64 = 0;
 
-    // Process completions — issue GPU DMA on each, submit next read.
     while completed < work.len() {
+        #[cfg(feature = "pipeline-telemetry")]
+        let t0 = std::time::Instant::now();
         match channels.completion_rx.recv() {
             Ok(Completion::ReadDone { tag, result, .. }) => {
+                #[cfg(feature = "pipeline-telemetry")]
+                { t_recv_ns += t0.elapsed().as_nanos() as u64; }
+
                 let obj_idx = (tag as usize) / max_segments_per_obj;
                 let seg_idx = (tag as usize) % max_segments_per_obj;
 
@@ -528,43 +545,53 @@ pub unsafe fn pipelined_multi_object_zero_copy(
                         "SSD read obj={obj_idx} seg={seg_idx}: {e}"
                     )));
                     completed += 1;
-                    continue;
+                } else {
+                    completed += 1;
+
+                    #[cfg(feature = "pipeline-telemetry")]
+                    let tg = std::time::Instant::now();
+                    let job = &jobs[obj_idx];
+                    let obj = &all_objs[obj_idx];
+                    let seg = &obj.segments[seg_idx];
+                    let copy_len =
+                        seg.length.min(job.total_bytes.saturating_sub(seg.buffer_offset));
+                    let current_stream = streams[stream_idx % 2];
+
+                    let guard = obj.chunk_bufs[seg_idx].lock().unwrap();
+                    let dma_result = gpu.dma_copy_to_device_async(
+                        &guard,
+                        unsafe {
+                            (job.gpu_dst as *mut u8).add(seg.buffer_offset)
+                                as *mut std::ffi::c_void
+                        },
+                        copy_len,
+                        current_stream,
+                    );
+                    drop(guard);
+
+                    if let Err(e) = dma_result {
+                        results[obj_idx] = Err(DispatcherError::IoError(format!(
+                            "GPU DMA obj={obj_idx} seg={seg_idx}: {e}"
+                        )));
+                    }
+                    #[cfg(feature = "pipeline-telemetry")]
+                    { t_gpu_ns += tg.elapsed().as_nanos() as u64; }
+
+                    stream_idx += 1;
+
+                    if stream_idx % PIPELINE_RING_SIZE == 0 {
+                        #[cfg(feature = "pipeline-telemetry")]
+                        let ts = std::time::Instant::now();
+                        let _ = gpu.stream_synchronize(streams[0]);
+                        let _ = gpu.stream_synchronize(streams[1]);
+                        #[cfg(feature = "pipeline-telemetry")]
+                        { t_sync_ns += ts.elapsed().as_nanos() as u64; }
+                    }
                 }
 
-                let job = &jobs[obj_idx];
-                let obj = &all_objs[obj_idx];
-                let seg = &obj.segments[seg_idx];
-                let copy_len = seg.length.min(job.total_bytes.saturating_sub(seg.buffer_offset));
-                let current_stream = streams[stream_idx % 2];
-
-                let guard = obj.chunk_bufs[seg_idx].lock().unwrap();
-                let dma_result = gpu.dma_copy_to_device_async(
-                    &guard,
-                    unsafe {
-                        (job.gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void
-                    },
-                    copy_len,
-                    current_stream,
-                );
-                drop(guard);
-
-                if let Err(e) = dma_result {
-                    results[obj_idx] = Err(DispatcherError::IoError(format!(
-                        "GPU DMA obj={obj_idx} seg={seg_idx}: {e}"
-                    )));
-                }
-
-                stream_idx += 1;
-                completed += 1;
-
-                // Periodic stream sync to bound GPU queue.
-                if completed % PIPELINE_RING_SIZE == 0 {
-                    let _ = gpu.stream_synchronize(streams[0]);
-                    let _ = gpu.stream_synchronize(streams[1]);
-                }
-
-                // Submit next read.
                 if submitted < work.len() {
+                    #[cfg(feature = "pipeline-telemetry")]
+                    let tr = std::time::Instant::now();
                     let (next_obj, next_seg) = work[submitted];
                     let next_obj_data = &all_objs[next_obj];
                     let next_tag = (next_obj * max_segments_per_obj + next_seg) as u64;
@@ -577,10 +604,11 @@ pub unsafe fn pipelined_multi_object_zero_copy(
                         tag: next_tag,
                     });
                     submitted += 1;
+                    #[cfg(feature = "pipeline-telemetry")]
+                    { t_resub_ns += tr.elapsed().as_nanos() as u64; }
                 }
             }
             Ok(Completion::Timeout { handle }) => {
-                // Mark all remaining as failed.
                 for r in results.iter_mut() {
                     if r.is_ok() {
                         *r = Err(DispatcherError::IoError(format!(
@@ -605,8 +633,25 @@ pub unsafe fn pipelined_multi_object_zero_copy(
     }
 
     // Final stream sync.
+    #[cfg(feature = "pipeline-telemetry")]
+    let ts_final = std::time::Instant::now();
     let _ = gpu.stream_synchronize(streams[0]);
     let _ = gpu.stream_synchronize(streams[1]);
+    #[cfg(feature = "pipeline-telemetry")]
+    {
+        let t_final_sync_ns = ts_final.elapsed().as_nanos() as u64;
+        eprintln!(
+            "[pipeline-perf] jobs={} segs={} submit={:.2}ms recv_wait={:.2}ms gpu_dma={:.2}ms sync={:.2}ms resub={:.2}ms final_sync={:.2}ms",
+            num_jobs,
+            total_segments,
+            t_initial_submit.as_secs_f64() * 1000.0,
+            t_recv_ns as f64 / 1_000_000.0,
+            t_gpu_ns as f64 / 1_000_000.0,
+            t_sync_ns as f64 / 1_000_000.0,
+            t_resub_ns as f64 / 1_000_000.0,
+            t_final_sync_ns as f64 / 1_000_000.0,
+        );
+    }
 
     // Forget DmaBuffer wrappers (memory-tier owns the allocation).
     for obj in all_objs {

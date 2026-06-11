@@ -1260,6 +1260,8 @@ impl IDispatcher for DispatcherComponent {
                                 };
 
                                 // Prepare all cold entries for multi-object pipeline.
+                                #[cfg(feature = "pipeline-telemetry")]
+                                let t_prep_start = std::time::Instant::now();
                                 let mut jobs: Vec<pipeline::ColdReadJob> =
                                     Vec::with_capacity(indices.len());
                                 let mut job_ci: Vec<usize> = Vec::with_capacity(indices.len());
@@ -1295,9 +1297,13 @@ impl IDispatcher for DispatcherComponent {
                                         }
                                     }
                                 }
+                                #[cfg(feature = "pipeline-telemetry")]
+                                let t_prep_done = t_prep_start.elapsed();
 
                                 // Run all prepared jobs through the multi-object pipeline.
                                 if !jobs.is_empty() {
+                                    #[cfg(feature = "pipeline-telemetry")]
+                                    let t_pipeline_start = std::time::Instant::now();
                                     let pipeline_results = unsafe {
                                         pipeline::pipelined_multi_object_zero_copy(
                                             &*drive.block_dev_iface,
@@ -1309,7 +1315,11 @@ impl IDispatcher for DispatcherComponent {
                                             queue_depth,
                                         )
                                     };
+                                    #[cfg(feature = "pipeline-telemetry")]
+                                    let t_pipeline_done = t_pipeline_start.elapsed();
 
+                                    #[cfg(feature = "pipeline-telemetry")]
+                                    let t_finalize_start = std::time::Instant::now();
                                     // Finalize each job's dispatch-map state.
                                     for (job_idx, result) in pipeline_results.into_iter().enumerate()
                                     {
@@ -1341,6 +1351,19 @@ impl IDispatcher for DispatcherComponent {
                                             Err(e) => Err(e),
                                         };
                                         batch_results.push((ci, res));
+                                    }
+                                    #[cfg(feature = "pipeline-telemetry")]
+                                    {
+                                        let t_finalize_done = t_finalize_start.elapsed();
+                                        eprintln!(
+                                            "[cold-perf] drive={} jobs={} segs={} prep={:.1}ms pipeline={:.1}ms finalize={:.1}ms",
+                                            drive_idx,
+                                            jobs.len(),
+                                            jobs.len() * 32,
+                                            t_prep_done.as_secs_f64() * 1000.0,
+                                            t_pipeline_done.as_secs_f64() * 1000.0,
+                                            t_finalize_done.as_secs_f64() * 1000.0,
+                                        );
                                     }
                                 }
 
