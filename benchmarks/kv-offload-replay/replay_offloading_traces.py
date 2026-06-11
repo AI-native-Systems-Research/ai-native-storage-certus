@@ -13,18 +13,15 @@ Connectors (--connector):
 
 Usage:
   python replay_offloading_traces.py \
-      --manager-trace traces/500convs-64g.mgr.jsonl.gz \
-      --handler-trace traces/500convs-64g.handler.jsonl.gz \
+      --trace traces/sharegpt-multiturn/500convs-64g \
       --connector cpu --num-blocks 32768
 
   python replay_offloading_traces.py \
-      --manager-trace traces/500convs-64g.mgr.jsonl.gz \
-      --handler-trace traces/500convs-64g.handler.jsonl.gz \
+      --trace traces/sharegpt-multiturn/500convs-64g \
       --connector fs --num-blocks 32768
 
   python replay_offloading_traces.py \
-      --manager-trace traces/500convs-64g.mgr.jsonl.gz \
-      --handler-trace traces/500convs-64g.handler.jsonl.gz \
+      --trace traces/sharegpt-multiturn/500convs-64g \
       --connector certus --num-blocks 32768
 """
 
@@ -1388,12 +1385,34 @@ def replay_interleaved(mgr_path: Path, handler_path: Path,
 
 # ── CLI ────────────────────────────────────────────────────────────────────
 
+def _resolve_trace(prefix: str) -> tuple[Path, Path]:
+    """Resolve a trace prefix to (mgr_path, handler_path).
+
+    Accepts: a prefix like 'traces/sharegpt-multiturn/500convs-64g'
+    and finds <prefix>.mgr.jsonl[.gz] and <prefix>.handler.jsonl[.gz].
+    """
+    base = Path(prefix)
+    for ext in (".mgr.jsonl.gz", ".mgr.jsonl"):
+        candidate = Path(str(base) + ext)
+        if candidate.exists():
+            mgr = candidate
+            break
+    else:
+        raise FileNotFoundError(f"no manager trace found for prefix {prefix}")
+    for ext in (".handler.jsonl.gz", ".handler.jsonl"):
+        candidate = Path(str(base) + ext)
+        if candidate.exists():
+            handler = candidate
+            break
+    else:
+        raise FileNotFoundError(f"no handler trace found for prefix {prefix}")
+    return mgr, handler
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--manager-trace", type=str, required=True,
-                    help="path to offloading_mgr_*.jsonl[.gz] (glob ok)")
-    ap.add_argument("--handler-trace", type=str, required=True,
-                    help="path to offloading_handler_*.jsonl[.gz] (glob ok)")
+    ap.add_argument("--trace", type=str, required=True,
+                    help="trace prefix (e.g. traces/sharegpt-multiturn/500convs-64g)")
     ap.add_argument("--connector", default="cpu",
                     choices=["cpu", "fs", "certus"],
                     help="storage backend: cpu (DRAM), fs (NVMe), certus (CXL)")
@@ -1408,12 +1427,9 @@ def main():
     ap.add_argument("--output-json", type=Path, default=None)
     args = ap.parse_args()
 
-    mgr_paths = [Path(p) for p in glob.glob(args.manager_trace)]
-    h_paths = [Path(p) for p in glob.glob(args.handler_trace)]
-    assert len(mgr_paths) == 1, f"ambiguous manager trace: {mgr_paths}"
-    assert len(h_paths) == 1, f"ambiguous handler trace: {h_paths}"
-    print(f"[replay] manager trace: {mgr_paths[0]}", file=sys.stderr)
-    print(f"[replay] handler trace: {h_paths[0]}", file=sys.stderr)
+    mgr_path, h_path = _resolve_trace(args.trace)
+    print(f"[replay] manager trace: {mgr_path}", file=sys.stderr)
+    print(f"[replay] handler trace: {h_path}", file=sys.stderr)
     print(f"[replay] connector: {args.connector}", file=sys.stderr)
 
     extra = json.loads(args.connector_args)
@@ -1439,7 +1455,7 @@ def main():
         h_args.update(extra)
         handler_target = load_handler_target("fs-backend", h_args)
     report = replay_interleaved(
-        mgr_paths[0], h_paths[0], mgr_target, handler_target)
+        mgr_path, h_path, mgr_target, handler_target)
 
     # Print summary
     M = report["manager"]

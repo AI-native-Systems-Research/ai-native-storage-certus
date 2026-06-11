@@ -157,8 +157,7 @@ If the backend argument is omitted or `all`, run replay against all three backen
 **cpu:**
 ```bash
 python replay_offloading_traces.py \
-  --manager-trace traces/sharegpt-multiturn/500convs-64g.mgr.jsonl.gz \
-  --handler-trace traces/sharegpt-multiturn/500convs-64g.handler.jsonl.gz \
+  --trace traces/sharegpt-multiturn/500convs-64g \
   --connector cpu --num-blocks 32768 \
   --output-json results/replay_cpu.json
 ```
@@ -166,8 +165,7 @@ python replay_offloading_traces.py \
 **fs:**
 ```bash
 python replay_offloading_traces.py \
-  --manager-trace traces/sharegpt-multiturn/500convs-64g.mgr.jsonl.gz \
-  --handler-trace traces/sharegpt-multiturn/500convs-64g.handler.jsonl.gz \
+  --trace traces/sharegpt-multiturn/500convs-64g \
   --connector fs --num-blocks 32768 \
   --output-json results/replay_fs.json
 ```
@@ -176,16 +174,16 @@ python replay_offloading_traces.py \
 ```bash
 python certus_server.py --data-pci 0000:61:00.0 --meta-pci 0000:62:00.0 &
 python replay_offloading_traces.py \
-  --manager-trace traces/sharegpt-multiturn/500convs-64g.mgr.jsonl.gz \
-  --handler-trace traces/sharegpt-multiturn/500convs-64g.handler.jsonl.gz \
+  --trace traces/sharegpt-multiturn/500convs-64g \
   --connector certus --num-blocks 32768 \
   --output-json results/replay_certus.json
 ```
 
-Gzipped traces (`.jsonl.gz`) are handled transparently — no decompression needed.
+The `--trace` argument is a prefix — the script finds `<prefix>.mgr.jsonl[.gz]` and `<prefix>.handler.jsonl[.gz]` automatically.
 
 ### Key parameters
 
+- `--trace` — trace prefix (e.g. `traces/sharegpt-multiturn/500convs-64g`).
 - `--connector` — storage backend: `cpu`, `fs`, or `certus`.
 - `--connector-args` — JSON dict of extra kwargs (e.g. `'{"root_dir": "/mnt/other", "per_block_bytes": 4194304}'`).
 - `--num-blocks` — capacity of the offload tier in blocks. Compute from meta.json: `cpu_offload_bytes / per_block_bytes`.
