@@ -37,12 +37,6 @@ define_interface! {
         /// and discover VFIO-attached devices.
         fn init(&self) -> Result<(), SpdkEnvError>;
 
-        /// Initialize the SPDK/DPDK environment for DMA allocation only.
-        /// Skips VFIO checks and device enumeration — only hugepages are
-        /// required. Use when block devices are managed by the kernel (not SPDK)
-        /// but SPDK's hugepage-backed DMA allocator is still needed.
-        fn init_dma_only(&self) -> Result<(), SpdkEnvError>;
-
         /// Tear down the SPDK/DPDK environment explicitly.
         ///
         /// Must be called after all NVMe controllers have been detached and all
@@ -75,10 +69,6 @@ define_component! {
 impl ISPDKEnv for SPDKEnvComponent {
     fn init(&self) -> Result<(), SpdkEnvError> {
         env::do_init(self)
-    }
-
-    fn init_dma_only(&self) -> Result<(), SpdkEnvError> {
-        env::do_init_dma_only(self)
     }
 
     fn fini(&self) {

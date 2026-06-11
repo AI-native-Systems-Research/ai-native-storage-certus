@@ -33,34 +33,6 @@ pub(crate) fn do_init(comp: &SPDKEnvComponent) -> Result<(), SpdkEnvError> {
     result
 }
 
-/// DMA-only initialization: skip VFIO, skip device enumeration.
-/// Only checks hugepages and initializes the SPDK memory subsystem.
-pub(crate) fn do_init_dma_only(comp: &SPDKEnvComponent) -> Result<(), SpdkEnvError> {
-    if SPDK_ENV_ACTIVE
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
-    {
-        return Err(SpdkEnvError::AlreadyInitialized(
-            "SPDK environment already active in this process (singleton constraint).".into(),
-        ));
-    }
-
-    let result = (|| -> Result<(), SpdkEnvError> {
-        checks::check_hugepages()?;
-        eprintln!("[spdk-env] DMA-only mode: hugepages OK, initializing SPDK memory subsystem...");
-        init_spdk_env()?;
-        eprintln!("[spdk-env] SPDK memory subsystem initialized (DMA-only, no device enumeration).");
-        comp.initialized
-            .store(true, std::sync::atomic::Ordering::Release);
-        Ok(())
-    })();
-
-    if result.is_err() {
-        SPDK_ENV_ACTIVE.store(false, Ordering::Release);
-    }
-    result
-}
-
 /// Inner initialization that runs after singleton flag is acquired.
 fn do_init_inner(comp: &SPDKEnvComponent) -> Result<(), SpdkEnvError> {
     // 3. Pre-flight checks.
