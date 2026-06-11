@@ -16,6 +16,7 @@ members = [
     "apps/extent-benchmark",
     "components/block-device-spdk-nvme",
     "components/block-device-filesys",
+    "components/block-device-kernel",
     "components/extent-manager",
     "components/logger",
     "components/dispatch-map",
@@ -65,6 +66,7 @@ spdk-sys = { path = "components/spdk-sys" }
 spdk-env = { path = "components/spdk-env" }
 block-device-spdk-nvme = { path = "components/block-device-spdk-nvme" }
 block-device-filesys = { path = "components/block-device-filesys" }
+block-device-kernel = { path = "components/block-device-kernel" }
 logger = { path = "components/logger" }
 dispatch-map = { path = "components/dispatch-map" }
 memory-tier = { path = "components/memory-tier" }
