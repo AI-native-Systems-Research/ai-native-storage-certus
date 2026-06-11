@@ -127,6 +127,8 @@ done
 
 log "Running $TOTAL client process(es) = $N instance(s) x $PER_SERVER per server: ${BENCH_ARGS[*]}"
 
+T_BENCH_START="$(date +%s.%N)"
+
 # Per-job (flat) tracking arrays.
 declare -a PIDS=() J_INST=() J_PORT=() J_OUT=()
 gpu_idx=0
@@ -169,6 +171,9 @@ for j in "${!PIDS[@]}"; do
     fi
 done
 
+T_BENCH_END="$(date +%s.%N)"
+BENCH_WALL="$(awk "BEGIN{printf \"%.3f\", $T_BENCH_END - $T_BENCH_START}")"
+
 # --- Parse aggregate throughput per phase ------------------------------------
 # Mirrors bench_devices_sweep.py: locate the stats line for a phase label, then
 # read the "aggregate=<X> GB/s" value on the following line.
@@ -182,6 +187,18 @@ parse_agg() {  # <logfile> <label>
             print (n + 0); exit
         }
     ' "$1" 2>/dev/null
+}
+# Parse "Total wall time: <X>s" from a bench log.
+parse_wall_time() {  # <logfile>
+    awk '/Total wall time:/ { sub(/.*: */, ""); sub(/s.*/, ""); print ($0 + 0); exit }' "$1" 2>/dev/null
+}
+# Parse "Total per client: <N> objects" from a bench log.
+parse_total_objects() {  # <logfile>
+    awk '/Total per client:/ { for(i=1;i<=NF;i++) if($i+0>0){print $i+0; exit} }' "$1" 2>/dev/null
+}
+# Parse "Block size: <N> MiB" from a bench log.
+parse_block_mib() {  # <logfile>
+    awk '/Block size:/ { for(i=1;i<=NF;i++) if($i ~ /^[0-9]+$/ && $(i+1)=="MiB"){print $i+0; exit} }' "$1" 2>/dev/null
 }
 fadd() { awk -v a="$1" -v b="$2" 'BEGIN { printf "%.6f", a + b }'; }
 
@@ -234,7 +251,33 @@ done
 
 printf '%-5s %-16s %5s %12s %12s %12s\n' "---" "----------------" "-----" "------------" "------------" "------------"
 printf '%-5s %-16s %5s %9.2f GB/s %9.2f GB/s %9.2f GB/s\n' \
-    "ALL" "$counted ok$([[ $failed -gt 0 ]] && echo " / $failed FAILED")" "$TOTAL" "$sum_pop" "$sum_hot" "$sum_cold"
+    "SUM" "$counted ok$([[ $failed -gt 0 ]] && echo " / $failed FAILED")" "$TOTAL" "$sum_pop" "$sum_hot" "$sum_cold"
+
+# Compute effective system throughput from wall-clock elapsed time.
+# Instances sharing a GPU cannot exceed its PCIe bandwidth; the SUM above
+# overcounts in that case. EFFECTIVE = total bytes / wall-clock (all phases
+# sequential within each client, but clients run concurrently).
+total_objs=0; block_mib=4
+for j in "${!J_OUT[@]}"; do
+    objs="$(parse_total_objects "${J_OUT[$j]}")"
+    bm="$(parse_block_mib "${J_OUT[$j]}")"
+    [[ -n "$objs" ]] && total_objs=$((total_objs + objs))
+    [[ -n "$bm" ]] && block_mib="$bm"
+done
+if [[ "$total_objs" -gt 0 && "$(awk "BEGIN{print ($BENCH_WALL > 0)}")" == 1 ]]; then
+    total_gib="$(awk "BEGIN{printf \"%.6f\", $total_objs * $block_mib / 1024}")"
+    eff_gbps="$(awk "BEGIN{printf \"%.2f\", $total_gib / $BENCH_WALL}")"
+    printf '%-5s %-16s %5s %38s\n' \
+        "EFF" "wall=${BENCH_WALL}s" "" "${eff_gbps} GB/s effective (all phases, wall-clock)"
+fi
+
+# Flag if SUM hot exceeds plausible GPU PCIe bandwidth (~32 GB/s per GPU).
+gpu_bw_limit=32
+if awk "BEGIN{exit !($sum_hot > $gpu_bw_limit)}" 2>/dev/null; then
+    warn "SUM hot lookup ($(printf '%.1f' "$sum_hot") GB/s) exceeds single-GPU PCIe bandwidth (~${gpu_bw_limit} GB/s)."
+    warn "Per-instance numbers reflect pipelined throughput with shared GPU contention."
+    warn "Use CERTUS_BENCH_SCRIPT=.../certus-api-bench.py for sequential (non-pipelined) measurement."
+fi
 echo
 if [[ $failed -gt 0 ]]; then
     warn "$failed of $N endpoint(s) produced no data -- servers down or unreachable. Check $RUN_DIR/srv-*.log"
