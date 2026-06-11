@@ -187,31 +187,32 @@ class NvmeInspector:
         print(" done.")
 
         # Phase 3: Measure read latency at increasing intervals after write completes.
-        # Track actual wall-clock time, not just sleep time (fio itself takes time).
+        # The drive is left truly idle between samples — no reads during the wait.
+        # Each sample is a short 1s burst to minimize interference with GC.
         measurements = []
         t_write_done = time.time()
 
         for wait_target_s in intervals:
-            # Sleep until we reach the target elapsed time since write completed.
+            # Sleep truly idle until the target time.
             elapsed = time.time() - t_write_done
             remaining = wait_target_s - elapsed
             if remaining > 0:
-                print(f"  Waiting until {wait_target_s}s mark...", end="", flush=True)
+                print(f"  Idle wait until {wait_target_s}s...", end="", flush=True)
                 time.sleep(remaining)
             else:
-                print(f"  At {wait_target_s}s mark...", end="", flush=True)
+                print(f"  Sampling at {wait_target_s}s...", end="", flush=True)
 
-            print(" measuring...", end="", flush=True)
+            # Brief measurement burst (1s) to minimize GC interference from reads.
+            actual_idle = time.time() - t_write_done
             result = run_fio(
-                self.ns, rw="randread", bs="128k", runtime="3",
+                self.ns, rw="randread", bs="128k", runtime="1",
                 qdepth=1,
             )
             lat = extract_lat_us(result, "read")
             avg = lat["avg"] if lat else 0
-            actual_elapsed = time.time() - t_write_done
             measurements.append({
                 "target_s": wait_target_s,
-                "actual_elapsed_s": round(actual_elapsed, 1),
+                "idle_s": round(actual_idle, 1),
                 "avg_us": avg,
                 "p99_us": lat["p99"] if lat else 0,
             })
