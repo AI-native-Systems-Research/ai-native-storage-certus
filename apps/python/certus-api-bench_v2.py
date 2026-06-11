@@ -604,7 +604,11 @@ def print_stats(label, all_latencies, num_clients, wall_aggregate_gbps=None):
     mn = min(all_latencies)
     mx = max(all_latencies)
 
-    tp_per_client = BLOCK_SIZE / avg if avg > 0 else 0
+    # Per-client throughput derived from wall-clock aggregate (accounts for pipelining).
+    if wall_aggregate_gbps is not None and num_clients > 0:
+        tp_per_client = wall_aggregate_gbps / num_clients
+    else:
+        tp_per_client = BLOCK_SIZE / avg / 1e9 if avg > 0 else 0
 
     print(
         f"  {label:<20} "
@@ -617,7 +621,7 @@ def print_stats(label, all_latencies, num_clients, wall_aggregate_gbps=None):
     agg_str = f"{wall_aggregate_gbps:>6.2f}" if wall_aggregate_gbps is not None else "  N/A "
     print(
         f"  {'':20} "
-        f"per-client={tp_per_client/1e9:>6.2f} GB/s  "
+        f"per-client={tp_per_client:>6.2f} GB/s  "
         f"aggregate={agg_str} GB/s"
     )
 
