@@ -182,9 +182,14 @@ class NvmeInspector:
         baseline_us = lat_baseline["avg"] if lat_baseline else 500
         print(f" {baseline_us:.0f} us")
 
-        # Phase 2: Sustained write to trigger GC/write-folding.
-        print(f"  Writing {write_gb} GiB to trigger GC pressure...", end="", flush=True)
-        run_fio(self.ns, rw="write", bs="4M", size=f"{write_gb}G", qdepth=32)
+        # Phase 2: Random writes to trigger GC/write-folding.
+        # Uses random 4 MiB writes to scatter dirty pages across NAND erase blocks,
+        # matching the Certus populate pattern (keys hash to random LBAs).
+        # Multiple jobs simulate concurrent client pressure.
+        print(f"  Random-writing {write_gb} GiB (4 MiB, QD=32, 4 jobs) to trigger GC...",
+              end="", flush=True)
+        run_fio(self.ns, rw="randwrite", bs="4M", size=f"{int(write_gb // 4)}G",
+                qdepth=32, numjobs=4)
         print(" done.")
 
         # Phase 3: Measure read latency at increasing intervals after write completes.
