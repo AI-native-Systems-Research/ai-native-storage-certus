@@ -162,57 +162,78 @@ class NvmeInspector:
         return info
 
     def measure_gc_settle(self, write_gb=2, intervals=None):
-        """Write heavily, then measure read latency at intervals to find GC settle time."""
+        """Measure how long after sustained writes until read latency stabilizes.
+
+        This models the Certus benchmark scenario: populate writes fill the SSD,
+        then cold reads must wait for internal GC/write-folding to complete before
+        achieving steady-state read latency.
+        """
         if intervals is None:
             intervals = [0, 5, 10, 15, 20, 30, 45, 60]
 
-        print(f"  Writing {write_gb} GiB to trigger GC...", end="", flush=True)
-        # Sequential write to fill SSD write buffer
+        # Phase 1: Establish baseline read latency on a quiet drive.
+        print("  Measuring baseline read latency (quiet drive)...", end="", flush=True)
+        run_fio(self.ns, rw="randread", bs="128k", runtime="3", qdepth=1)
+        result_baseline = run_fio(
+            self.ns, rw="randread", bs="128k", runtime="5", qdepth=1,
+        )
+        lat_baseline = extract_lat_us(result_baseline, "read")
+        baseline_us = lat_baseline["avg"] if lat_baseline else 500
+        print(f" {baseline_us:.0f} us")
+
+        # Phase 2: Sustained write to trigger GC/write-folding.
+        print(f"  Writing {write_gb} GiB to trigger GC pressure...", end="", flush=True)
         run_fio(self.ns, rw="write", bs="4M", size=f"{write_gb}G", qdepth=32)
         print(" done.")
 
+        # Phase 3: Measure read latency at increasing intervals after write completes.
+        # Track actual wall-clock time, not just sleep time (fio itself takes time).
         measurements = []
-        for wait_s in intervals:
-            if wait_s > 0:
-                print(f"  Waiting {wait_s}s...", end="", flush=True)
-                time.sleep(wait_s - (intervals[intervals.index(wait_s) - 1] if intervals.index(wait_s) > 0 else 0))
-                print(" measuring...", end="", flush=True)
-            else:
-                print("  Measuring immediately...", end="", flush=True)
+        t_write_done = time.time()
 
+        for wait_target_s in intervals:
+            # Sleep until we reach the target elapsed time since write completed.
+            elapsed = time.time() - t_write_done
+            remaining = wait_target_s - elapsed
+            if remaining > 0:
+                print(f"  Waiting until {wait_target_s}s mark...", end="", flush=True)
+                time.sleep(remaining)
+            else:
+                print(f"  At {wait_target_s}s mark...", end="", flush=True)
+
+            print(" measuring...", end="", flush=True)
             result = run_fio(
                 self.ns, rw="randread", bs="128k", runtime="3",
-                qdepth=1, offset="0",
+                qdepth=1,
             )
             lat = extract_lat_us(result, "read")
             avg = lat["avg"] if lat else 0
-            measurements.append({"elapsed_s": wait_s, "avg_us": avg, "p99_us": lat["p99"] if lat else 0})
-            print(f" {avg:.0f} us")
+            actual_elapsed = time.time() - t_write_done
+            measurements.append({
+                "target_s": wait_target_s,
+                "actual_elapsed_s": round(actual_elapsed, 1),
+                "avg_us": avg,
+                "p99_us": lat["p99"] if lat else 0,
+            })
+            ratio = avg / baseline_us if baseline_us > 0 else 0
+            marker = "" if ratio < 1.2 else f" ({ratio:.1f}x baseline)"
+            print(f" {avg:.0f} us{marker}")
 
-        # Find settle point: the earliest time at which latency is within 10%
-        # of the tail minimum (last 3 measurements) and stays there.
-        avgs = [m["avg_us"] for m in measurements if m["avg_us"] > 0]
-        if len(avgs) >= 3:
-            tail_min = min(avgs[-3:])
-            threshold = tail_min * 1.1
-            # Scan forward: find first point where latency drops below threshold
-            # and all subsequent points are also below threshold.
-            recommended = measurements[-1]["elapsed_s"]
-            for i, m in enumerate(measurements):
-                if m["avg_us"] <= 0:
-                    continue
-                if m["avg_us"] <= threshold:
-                    # Check all remaining are also stable
-                    rest = [mm["avg_us"] for mm in measurements[i:] if mm["avg_us"] > 0]
-                    if all(v <= threshold for v in rest):
-                        recommended = m["elapsed_s"]
-                        break
-        elif avgs:
-            recommended = measurements[-1]["elapsed_s"]
-        else:
-            recommended = 30
+        # Find settle point: first measurement within 20% of baseline where
+        # all subsequent measurements are also within 20% of baseline.
+        threshold = baseline_us * 1.2
+        recommended = intervals[-1]  # default to longest interval
+        for i, m in enumerate(measurements):
+            if m["avg_us"] <= 0:
+                continue
+            if m["avg_us"] <= threshold:
+                rest = [mm["avg_us"] for mm in measurements[i:] if mm["avg_us"] > 0]
+                if all(v <= threshold for v in rest):
+                    recommended = m["target_s"]
+                    break
 
         result = {
+            "baseline_us": baseline_us,
             "measurements": measurements,
             "recommended_gc_settle_s": recommended,
         }
@@ -420,13 +441,20 @@ class NvmeInspector:
             lines.append(sub)
             lines.append("GC Settle Time")
             lines.append(sub)
+            baseline = gc.get("baseline_us", 0)
+            lines.append(f"Baseline read latency (quiet drive): {baseline:,.0f} us")
+            threshold = baseline * 1.2
+            lines.append(f"Settle threshold (120% of baseline): {threshold:,.0f} us")
+            lines.append("")
             lines.append("Post-write read latency (128 KiB random, QD=1):")
-            min_lat = min((m["avg_us"] for m in gc["measurements"] if m["avg_us"] > 0), default=0)
             for m in gc["measurements"]:
+                ratio = m["avg_us"] / baseline if baseline > 0 else 0
                 marker = ""
-                if m["avg_us"] > 0 and m["avg_us"] <= min_lat * 1.1:
-                    marker = "  <-- stable"
-                lines.append(f"  {m['elapsed_s']:>2}s after write:  {m['avg_us']:>8,.0f} us{marker}")
+                if m["avg_us"] > 0 and m["avg_us"] <= threshold:
+                    marker = "  <-- settled"
+                elif ratio > 1:
+                    marker = f"  ({ratio:.1f}x baseline)"
+                lines.append(f"  {m['target_s']:>2}s after write:  {m['avg_us']:>8,.0f} us{marker}")
             lines.append(f"\nRecommended --gc-settle: {gc['recommended_gc_settle_s']}s")
             lines.append("")
 
