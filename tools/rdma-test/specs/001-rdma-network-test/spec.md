@@ -109,6 +109,55 @@ A user runs the tool on a machine where RDMA may not be properly configured. The
 - **FR-012**: System MUST retry failed RDMA connections up to 3 times before aborting, and report partial results if any measurements were collected before failure.
 - **FR-013**: System server MUST handle exactly one client session and exit upon completion; no multi-client or concurrent stream support.
 
+## Implementation Details
+
+### FR-007: SSH Launch Script
+
+**Location**: `tools/rdma-test/scripts/launch.sh` (106 lines)
+
+**Status**: ✅ Production-ready
+
+**Synopsis**: Automates remote server/client launch across two SSH-accessible hosts without manual terminal management.
+
+**Usage**:
+```bash
+./scripts/launch.sh <server-host> <client-host> [options]
+```
+
+**Arguments**:
+- `<server-host>`: Hostname or IP of server node (SSH-accessible)
+- `<client-host>`: Hostname or IP of client node (SSH-accessible)
+- `[options]`: Arbitrary options forwarded to both server and client (e.g., `--test throughput --message-size 65536 --iterations 10000`)
+
+**Environment Variables**:
+- `RDMA_TEST_BIN`: Path to compiled rdma-test binary (default: `./target/release/rdma-test`)
+- `RDMA_TEST_PORT`: Server listen port (default: `50000`)
+- `RDMA_TEST_STARTUP_DELAY`: Delay after server launch before client starts (seconds, default: `2`)
+
+**Behavior**:
+1. Starts server process on `<server-host>` in background
+2. Waits for server to be ready (health check with timeout)
+3. Spawns client on `<client-host>` connected to `<server-host>`
+4. Collects and displays client output
+5. Cleans up on exit (kills remote server, trap handler for signals)
+
+**Error Handling**:
+- If server fails to start, script reports error and exits without launching client
+- Connection failures are logged with diagnostic info
+- Both stdout and stderr from remote processes are captured and displayed
+
+**Example Invocations**:
+```bash
+# Throughput test with default settings
+./scripts/launch.sh node1.example.com node2.example.com --test throughput
+
+# Latency test with custom message size and warmup
+./scripts/launch.sh node1 node2 --test latency --message-size 1024 --warmup 100
+
+# Custom iterations and JSON output
+./scripts/launch.sh node1 node2 --iterations 50000 --output json
+```
+
 ### Key Entities
 
 - **RDMA Device**: A network interface card capable of RDMA operations, identified by name (e.g., mlx5_0), with attributes including transport type (IB/RoCE) and port state.
