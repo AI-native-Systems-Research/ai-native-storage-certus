@@ -367,7 +367,7 @@ def run_client(
     result,
     gpu_id=0,
     pipeline_depth=4,
-    gc_settle=30.0,
+    writes_settle=30.0,
 ):
     """Single client worker: populate objects, then measure hot and cold lookups."""
 
@@ -460,12 +460,12 @@ def run_client(
     result.populate_end = t_pop_end
     result.populate_objects = total_objects
 
-    # Wait for background write-through to flush to SSD, then allow NVMe GC
-    # to settle. Without GC settle, cold-read latency is inflated by internal
-    # SSD garbage collection triggered by the populate writes.
+    # Wait for background write-through to drain to SSD. Without this settle
+    # period, cold-read latency is inflated by the background writer competing
+    # for actor channel and NVMe qpair bandwidth.
     per_client_flush_bytes = total_objects * BLOCK_SIZE
     wt_wait = max(5.0, per_client_flush_bytes / (2 * 1024**3))
-    settle_wait = max(wt_wait, gc_settle)
+    settle_wait = max(wt_wait, writes_settle)
     time.sleep(settle_wait)
 
     # --- Phase 2: Hot lookups (memory-tier) ---
@@ -711,10 +711,10 @@ def main():
         "Keeps multiple requests in flight like iperf -P to saturate the GPU PCIe link.",
     )
     parser.add_argument(
-        "--gc-settle",
+        "--writes-settle",
         type=float,
         default=30.0,
-        help="Seconds to wait after populate for NVMe GC to settle (default: 30). "
+        help="Seconds to wait after populate for write-through to drain (default: 30). "
         "Set to 0 to skip.",
     )
     args = parser.parse_args()
@@ -788,7 +788,7 @@ def main():
                 results[i],
                 gpu_id,
                 pipeline_depth,
-                args.gc_settle,
+                args.writes_settle,
             ),
             daemon=True,
         )

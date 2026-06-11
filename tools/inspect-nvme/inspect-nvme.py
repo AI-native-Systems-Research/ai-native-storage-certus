@@ -196,7 +196,7 @@ class NvmeInspector:
         print(" done.")
 
         # Phase 3: Measure sustained write throughput to compute drain time.
-        # The Certus benchmark's --gc-settle parameter primarily waits for the
+        # The Certus benchmark's --writes-settle parameter waits for the
         # background write-through thread to finish flushing populated objects to
         # SSD. The recommended settle time is:
         #   settle = populated_data / sustained_write_throughput
@@ -503,7 +503,7 @@ class NvmeInspector:
             lines.append(f"  Raw drive write throughput:          {gc.get('sustained_write_mbps', 0):,.0f} MiB/s")
             lines.append(f"  Actor-mediated effective rate (~5%): {gc.get('effective_write_mbps', 0):,.0f} MiB/s")
             lines.append(f"  Estimated drain time:                {gc.get('drain_time_s', 0):.1f}s")
-            lines.append(f"\nRecommended --gc-settle: {gc['recommended_gc_settle_s']}s")
+            lines.append(f"\nRecommended --writes-settle: {gc['recommended_gc_settle_s']}s")
             lines.append("")
 
         # Power States
@@ -578,7 +578,7 @@ class NvmeInspector:
         lines.append("Summary")
         lines.append(sep)
         if gc:
-            lines.append(f"Recommended --gc-settle:     {gc['recommended_gc_settle_s']}s")
+            lines.append(f"Recommended --writes-settle:     {gc['recommended_gc_settle_s']}s")
         if ps and ps["power_state_transitions_at_s"]:
             lines.append(f"APST action:                 Disable for benchmarks")
         elif ps:

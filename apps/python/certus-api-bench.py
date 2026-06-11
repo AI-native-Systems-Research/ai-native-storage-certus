@@ -367,7 +367,7 @@ def run_client(
     result,
     gpu_id=0,
     skip_flush=False,
-    gc_settle=30.0,
+    writes_settle=30.0,
 ):
     """Single client worker: populate objects, then measure hot and cold lookups."""
 
@@ -539,11 +539,11 @@ def run_client(
             except grpc.RpcError:
                 pass
 
-        # Wait for flush writes to complete through to SSD NAND, then allow
-        # NVMe GC to settle for consistent cold-read latency measurements.
+        # Wait for write-through to drain to SSD for consistent cold-read
+        # latency measurements.
         flush_bytes = flush_count * BLOCK_SIZE
         flush_wait = max(5.0, flush_bytes / (3 * 1024**3))
-        settle_wait = max(flush_wait, gc_settle)
+        settle_wait = max(flush_wait, writes_settle)
         barrier.wait()
         time.sleep(settle_wait)
 
@@ -702,10 +702,10 @@ def main():
         help="Skip SSD DRAM cache flush phase (use for O_DIRECT+O_SYNC backends like filesys)",
     )
     parser.add_argument(
-        "--gc-settle",
+        "--writes-settle",
         type=float,
         default=30.0,
-        help="Seconds to wait after populate for NVMe GC to settle (default: 30). "
+        help="Seconds to wait after populate for write-through to drain (default: 30). "
         "Set to 0 to skip.",
     )
     args = parser.parse_args()
@@ -779,7 +779,7 @@ def main():
                 results[i],
                 gpu_id,
                 args.skip_flush,
-                args.gc_settle,
+                args.writes_settle,
             ),
             daemon=True,
         )
