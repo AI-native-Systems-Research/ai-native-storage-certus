@@ -422,8 +422,20 @@ impl DispatcherComponent {
         while mt.used() + needed as usize > mt.capacity() {
             attempts += 1;
             if attempts > MAX_ATTEMPTS {
+                static WARNED: std::sync::atomic::AtomicBool =
+                    std::sync::atomic::AtomicBool::new(false);
+                if !WARNED.swap(true, Ordering::Relaxed) {
+                    const GIB: f64 = (1024 * 1024 * 1024) as f64;
+                    eprintln!(
+                        "WARNING: memory-tier exhausted (used={:.2} GiB, capacity={:.2} GiB, needed={:.2} GiB). \
+                         Increase --memory-tier-size or reduce concurrent load.",
+                        mt.used() as f64 / GIB,
+                        mt.capacity() as f64 / GIB,
+                        needed as f64 / GIB,
+                    );
+                }
                 return Err(DispatcherError::AllocationFailed(
-                    "memory-tier full: eviction did not free enough space".into(),
+                    "memory-tier pool full after eviction".into(),
                 ));
             }
 
