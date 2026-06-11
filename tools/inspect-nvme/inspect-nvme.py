@@ -315,8 +315,33 @@ class NvmeInspector:
         self.results["write_cache"] = result
         return result
 
+    def reset_controller(self):
+        """Issue a controller reset to invalidate all internal DRAM caches."""
+        sysfs_reset = f"/sys/class/nvme/{os.path.basename(self.ctrl)}/reset_controller"
+        if os.path.exists(sysfs_reset):
+            try:
+                with open(sysfs_reset, "w") as f:
+                    f.write("1")
+                time.sleep(2)
+                return True
+            except OSError:
+                pass
+        # Fallback to nvme-cli
+        result = run_cmd(["nvme", "reset", self.ctrl], check=False)
+        if result is not None:
+            time.sleep(2)
+            return True
+        return False
+
     def check_read_cache(self):
         """Detect DRAM read cache by comparing repeated reads of a small region vs full-device random."""
+        # Reset controller to invalidate any stale DRAM cache state.
+        print("  Resetting controller to clear DRAM caches...", end="", flush=True)
+        if self.reset_controller():
+            print(" done.")
+        else:
+            print(" failed (continuing without reset).")
+
         # Phase 1: Read a small region (16 MiB) repeatedly to warm the drive's DRAM cache.
         # Then measure latency of reads within that cached region.
         cache_region = "16M"
