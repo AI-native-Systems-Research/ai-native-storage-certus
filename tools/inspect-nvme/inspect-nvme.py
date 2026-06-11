@@ -189,16 +189,26 @@ class NvmeInspector:
             measurements.append({"elapsed_s": wait_s, "avg_us": avg, "p99_us": lat["p99"] if lat else 0})
             print(f" {avg:.0f} us")
 
-        # Find settle point (within 10% of minimum)
+        # Find settle point: the earliest time at which latency is within 10%
+        # of the tail minimum (last 3 measurements) and stays there.
         avgs = [m["avg_us"] for m in measurements if m["avg_us"] > 0]
-        if avgs:
-            min_lat = min(avgs)
-            settle_time = 0
-            for m in measurements:
-                if m["avg_us"] > 0 and m["avg_us"] <= min_lat * 1.1:
-                    settle_time = m["elapsed_s"]
-                    break
-            recommended = settle_time
+        if len(avgs) >= 3:
+            tail_min = min(avgs[-3:])
+            threshold = tail_min * 1.1
+            # Scan forward: find first point where latency drops below threshold
+            # and all subsequent points are also below threshold.
+            recommended = measurements[-1]["elapsed_s"]
+            for i, m in enumerate(measurements):
+                if m["avg_us"] <= 0:
+                    continue
+                if m["avg_us"] <= threshold:
+                    # Check all remaining are also stable
+                    rest = [mm["avg_us"] for mm in measurements[i:] if mm["avg_us"] > 0]
+                    if all(v <= threshold for v in rest):
+                        recommended = m["elapsed_s"]
+                        break
+        elif avgs:
+            recommended = measurements[-1]["elapsed_s"]
         else:
             recommended = 30
 
