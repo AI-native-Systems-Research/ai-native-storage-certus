@@ -437,16 +437,8 @@ fn setup_dispatcher(
         query_interface!(dispatcher, IDispatcher).ok_or("IDispatcher query failed")?;
 
     // Use first device for metadata only; remaining device(s) for data.
-    // This avoids using a small metadata NVMe as a data drive (its slab_size
-    // may be too small for large extents).
-    let (metadata_addr, data_addrs) = if actual_addrs.len() > 1 {
-        (actual_addrs[0].clone(), actual_addrs[1..].to_vec())
-    } else {
-        (actual_addrs[0].clone(), actual_addrs.clone())
-    };
     let config = DispatcherConfig {
-        metadata_pci_addr: metadata_addr,
-        data_pci_addrs: data_addrs,
+        data_pci_addrs: actual_addrs,
         max_cache_entries: 0,
         ..Default::default()
     };
