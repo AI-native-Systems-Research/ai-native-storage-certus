@@ -30,7 +30,7 @@ def run_cmd(args, check=True, capture=True):
 
 
 def run_fio(device, rw, bs, size=None, runtime=None, qdepth=1,
-            numjobs=1, direct=True, fsync=0, offset=None):
+            numjobs=1, direct=True, fsync=0, offset=None, rwmixread=70):
     """Run fio and return parsed JSON results."""
     cmd = [
         "fio", "--name=test", f"--filename={device}",
@@ -49,6 +49,8 @@ def run_fio(device, rw, bs, size=None, runtime=None, qdepth=1,
         cmd.append(f"--fsync={fsync}")
     if offset:
         cmd.append(f"--offset={offset}")
+    if "rw" in rw or "randrw" in rw:
+        cmd.append(f"--rwmixread={rwmixread}")
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if result.returncode != 0:
@@ -193,15 +195,44 @@ class NvmeInspector:
                 qdepth=32, numjobs=4)
         print(" done.")
 
-        # Phase 3: Measure read latency at increasing intervals after write completes.
-        # The drive is left truly idle between samples — no reads during the wait.
-        # Each sample is a short 1s burst to minimize interference with GC.
+        # Phase 3: Measure read throughput while background writes continue.
+        # This models the Certus scenario: the background write-through thread
+        # continuously flushes data to SSD while cold reads are in progress.
+        # We run concurrent random writes during each measurement to simulate
+        # the write pressure, then also measure after writes stop to find
+        # when throughput recovers.
         measurements = []
         t_write_done = time.time()
 
+        # Phase 3a: Read throughput UNDER sustained write pressure.
+        # fio mixed workload: 70% read, 30% write (simulates write-through + cold reads).
+        print("  Measuring read throughput under write pressure (mixed 70/30)...", end="", flush=True)
+        result_mixed = run_fio(
+            self.ns, rw="randrw", bs="4M", runtime="10",
+            qdepth=32,
+        )
+        mixed_mbps = 0
+        if result_mixed and "jobs" in result_mixed:
+            mixed_mbps = result_mixed["jobs"][0].get("read", {}).get("bw", 0) / 1024
+        print(f" {mixed_mbps:.0f} MiB/s")
+        measurements.append({
+            "target_s": 0,
+            "phase": "under_write_pressure",
+            "mbps": mixed_mbps,
+            "avg_us": 0,
+        })
+
+        # Phase 3b: Stop writes, measure read throughput recovery at intervals.
+        # Additional write burst to ensure GC is fully triggered.
+        print(f"  Final write burst (16 GiB random) to maximize GC backlog...", end="", flush=True)
+        run_fio(self.ns, rw="randwrite", bs="4M", size="4G", qdepth=32, numjobs=4)
+        print(" done.")
+
+        t_writes_stopped = time.time()
         for wait_target_s in intervals:
-            # Sleep truly idle until the target time.
-            elapsed = time.time() - t_write_done
+            if wait_target_s == 0:
+                continue  # already measured under pressure
+            elapsed = time.time() - t_writes_stopped
             remaining = wait_target_s - elapsed
             if remaining > 0:
                 print(f"  Idle wait until {wait_target_s}s...", end="", flush=True)
@@ -209,8 +240,7 @@ class NvmeInspector:
             else:
                 print(f"  Sampling at {wait_target_s}s...", end="", flush=True)
 
-            # Brief measurement burst (2s, 4 MiB reads, QD=32) measuring throughput.
-            actual_idle = time.time() - t_write_done
+            actual_idle = time.time() - t_writes_stopped
             result = run_fio(
                 self.ns, rw="randread", bs="4M", runtime="2",
                 qdepth=32,
@@ -221,6 +251,7 @@ class NvmeInspector:
                 mbps = result["jobs"][0].get("read", {}).get("bw", 0) / 1024
             measurements.append({
                 "target_s": wait_target_s,
+                "phase": "post_write",
                 "idle_s": round(actual_idle, 1),
                 "mbps": mbps,
                 "avg_us": lat["avg"] if lat else 0,
@@ -229,15 +260,16 @@ class NvmeInspector:
             marker = "" if pct >= 80 else f" ({pct:.0f}% of baseline)"
             print(f" {mbps:.0f} MiB/s{marker}")
 
-        # Find settle point: first measurement where throughput reaches 80% of
-        # baseline and stays there for all subsequent measurements.
+        # Find settle point: first post-write measurement where throughput reaches
+        # 80% of baseline and stays there for all subsequent measurements.
         threshold_mbps = baseline_mbps * 0.8
         recommended = intervals[-1]  # default to longest interval
-        for i, m in enumerate(measurements):
+        post_write = [m for m in measurements if m.get("phase") == "post_write"]
+        for i, m in enumerate(post_write):
             if m["mbps"] <= 0:
                 continue
             if m["mbps"] >= threshold_mbps:
-                rest = [mm["mbps"] for mm in measurements[i:] if mm["mbps"] > 0]
+                rest = [mm["mbps"] for mm in post_write[i:] if mm["mbps"] > 0]
                 if all(v >= threshold_mbps for v in rest):
                     recommended = m["target_s"]
                     break
@@ -482,15 +514,22 @@ class NvmeInspector:
             lines.append(f"Baseline read throughput (quiet drive): {baseline:,.0f} MiB/s")
             lines.append(f"Settle threshold (80% of baseline):     {threshold:,.0f} MiB/s")
             lines.append("")
-            lines.append("Post-write read throughput (4 MiB random, QD=32):")
-            for m in gc["measurements"]:
+            # Under-pressure measurement
+            under_pressure = [m for m in gc["measurements"] if m.get("phase") == "under_write_pressure"]
+            if under_pressure:
+                pct = (under_pressure[0]["mbps"] / baseline * 100) if baseline > 0 else 0
+                lines.append(f"Read throughput under active writes:    {under_pressure[0]['mbps']:,.0f} MiB/s ({pct:.0f}% of baseline)")
+            lines.append("")
+            lines.append("Post-write recovery (4 MiB random read, QD=32):")
+            post_write = [m for m in gc["measurements"] if m.get("phase") == "post_write"]
+            for m in post_write:
                 pct = (m["mbps"] / baseline * 100) if baseline > 0 else 0
                 marker = ""
                 if m["mbps"] >= threshold:
                     marker = "  <-- settled"
                 else:
                     marker = f"  ({pct:.0f}% of baseline)"
-                lines.append(f"  {m['target_s']:>3}s after write:  {m['mbps']:>8,.0f} MiB/s{marker}")
+                lines.append(f"  {m['target_s']:>3}s after writes stop:  {m['mbps']:>6,.0f} MiB/s{marker}")
             lines.append(f"\nRecommended --gc-settle: {gc['recommended_gc_settle_s']}s")
             lines.append("")
 
