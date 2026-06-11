@@ -617,12 +617,6 @@ def print_stats(label, all_latencies, num_clients, wall_aggregate_gbps=None):
     mn = min(all_latencies)
     mx = max(all_latencies)
 
-    # Per-client throughput derived from wall-clock aggregate (accounts for pipelining).
-    if wall_aggregate_gbps is not None and num_clients > 0:
-        tp_per_client = wall_aggregate_gbps / num_clients
-    else:
-        tp_per_client = BLOCK_SIZE / avg / 1e9 if avg > 0 else 0
-
     print(
         f"  {label:<20} "
         f"avg={avg*1e6:>9.1f} us  "
@@ -631,12 +625,15 @@ def print_stats(label, all_latencies, num_clients, wall_aggregate_gbps=None):
         f"min={mn*1e6:>9.1f} us  "
         f"max={mx*1e6:>9.1f} us"
     )
-    agg_str = f"{wall_aggregate_gbps:>6.2f}" if wall_aggregate_gbps is not None else "  N/A "
-    print(
-        f"  {'':20} "
-        f"per-client={tp_per_client:>6.2f} GB/s  "
-        f"aggregate={agg_str} GB/s"
-    )
+    # Throughput from wall-clock measurement (total bytes / elapsed time).
+    if wall_aggregate_gbps is not None:
+        tp_per_client = wall_aggregate_gbps / max(num_clients, 1)
+        warn = " (!)" if wall_aggregate_gbps > 32 else ""
+        print(
+            f"  {'':20} "
+            f"per-client={tp_per_client:>6.2f} GB/s  "
+            f"aggregate={wall_aggregate_gbps:>6.2f} GB/s{warn}"
+        )
 
 
 def main():
@@ -835,6 +832,11 @@ def main():
         cold_total_bytes = sum(r.cold_objects for r in active_cold) * BLOCK_SIZE
         cold_wall_agg = (cold_total_bytes / cold_elapsed / 1e9) if cold_elapsed > 0 else 0
 
+    # Wall-clock elapsed times for reporting
+    pop_elapsed_s = (max(r.populate_end for r in active_pop) - min(r.populate_start for r in active_pop)) if active_pop else 0
+    hot_elapsed_s = (max(r.hot_end for r in active_hot) - min(r.hot_start for r in active_hot)) if active_hot else 0
+    cold_elapsed_s = (max(r.cold_end for r in active_cold) - min(r.cold_start for r in active_cold)) if active_cold else 0
+
     print(f"\n{'='*70}")
     print(f"Results ({num_clients} client(s), {BLOCK_SIZE//(1024*1024)} MiB blocks)")
     print(f"{'='*70}")
@@ -842,10 +844,16 @@ def main():
     print("  Latency per object (all clients combined):")
     print()
     print_stats("Populate", all_populate, num_clients, pop_wall_agg)
+    if pop_elapsed_s > 0:
+        print(f"  {'':20} wall={pop_elapsed_s*1000:.1f} ms")
     print()
     print_stats("Lookup (hot)", all_hot, num_clients, hot_wall_agg)
+    if hot_elapsed_s > 0:
+        print(f"  {'':20} wall={hot_elapsed_s*1000:.1f} ms")
     print()
     print_stats("Lookup (cold)", all_cold, num_clients, cold_wall_agg)
+    if cold_elapsed_s > 0:
+        print(f"  {'':20} wall={cold_elapsed_s*1000:.1f} ms")
     print()
 
     if all_hot and all_cold:
