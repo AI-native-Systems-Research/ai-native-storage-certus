@@ -268,7 +268,8 @@ impl KernelHandler {
         self.send_completion(client_id, Completion::ReadDone { handle, tag: 0, result });
     }
 
-    /// Submit a write + fsync via io_uring and block until completion.
+    /// Submit a write via io_uring and block until completion.
+    /// Durability is guaranteed by O_DSYNC on the fd — no separate fsync needed.
     fn handle_write_sync(&mut self, client_id: u64, ns_id: u32, lba: u64, buf: Arc<DmaBuffer>) {
         let handle = self.next_op_handle();
         let buf_len = buf.len();
@@ -293,19 +294,11 @@ impl KernelHandler {
         let write_sqe = opcode::Write::new(fd, ptr, buf_len as u32)
             .offset(offset)
             .build()
-            .user_data(handle.0)
-            .flags(io_uring::squeue::Flags::IO_LINK);
+            .user_data(handle.0);
 
-        let fsync_sqe = opcode::Fsync::new(fd)
-            .flags(io_uring::types::FsyncFlags::DATASYNC)
-            .build()
-            .user_data(handle.0 | (1 << 63));
-
-        // SAFETY: SQEs are valid and fd is valid.
+        // SAFETY: SQE is valid and fd is valid.
         unsafe {
-            let mut sq = self.ring.submission();
-            if sq.push(&write_sqe).is_err() {
-                drop(sq);
+            if self.ring.submission().push(&write_sqe).is_err() {
                 self.send_completion(
                     client_id,
                     Completion::WriteDone {
@@ -318,16 +311,11 @@ impl KernelHandler {
                 );
                 return;
             }
-            let _ = sq.push(&fsync_sqe);
         }
 
-        // Wait for both the write and fsync CQEs
-        self.ring.submit_and_wait(2).ok();
+        self.ring.submit_and_wait(1).ok();
 
         let result = self.wait_for_cqe(handle.0);
-
-        // Drain the fsync CQE
-        self.drain_fsync_cqe(handle.0);
 
         #[cfg(feature = "telemetry")]
         if result.is_ok() {
@@ -453,19 +441,11 @@ impl KernelHandler {
         let write_sqe = opcode::Write::new(fd, ptr, buf_len as u32)
             .offset(offset)
             .build()
-            .user_data(handle.0)
-            .flags(io_uring::squeue::Flags::IO_LINK);
+            .user_data(handle.0);
 
-        let fsync_sqe = opcode::Fsync::new(fd)
-            .flags(io_uring::types::FsyncFlags::DATASYNC)
-            .build()
-            .user_data(handle.0 | (1 << 63));
-
-        // SAFETY: SQEs are valid and fd is valid.
+        // SAFETY: SQE is valid and fd is valid. O_DSYNC on the fd guarantees durability.
         unsafe {
-            let mut sq = self.ring.submission();
-            if sq.push(&write_sqe).is_err() {
-                drop(sq);
+            if self.ring.submission().push(&write_sqe).is_err() {
                 self.send_completion(
                     client_id,
                     Completion::WriteDone {
@@ -477,11 +457,6 @@ impl KernelHandler {
                     },
                 );
                 return;
-            }
-            if sq.push(&fsync_sqe).is_err() {
-                if let Some(ref log) = self.logger {
-                    log.warn("failed to push fsync SQE, write may not be durable");
-                }
             }
         }
 
@@ -552,19 +527,11 @@ impl KernelHandler {
             opcode::Write::new(fd, zeros_ptr as *const u8, total_bytes as u32)
                 .offset(offset)
                 .build()
-                .user_data(handle.0)
-                .flags(io_uring::squeue::Flags::IO_LINK);
+                .user_data(handle.0);
 
-        let fsync_sqe = opcode::Fsync::new(fd)
-            .flags(io_uring::types::FsyncFlags::DATASYNC)
-            .build()
-            .user_data(handle.0 | (1 << 63));
-
-        // SAFETY: SQEs are valid and fd + zeros_ptr are valid.
+        // SAFETY: SQE is valid, fd + zeros_ptr are valid. O_DSYNC guarantees durability.
         unsafe {
-            let mut sq = self.ring.submission();
-            if sq.push(&write_sqe).is_err() {
-                drop(sq);
+            if self.ring.submission().push(&write_sqe).is_err() {
                 libc::free(zeros_ptr);
                 self.send_completion(
                     client_id,
@@ -577,13 +544,11 @@ impl KernelHandler {
                 );
                 return;
             }
-            let _ = sq.push(&fsync_sqe);
         }
 
-        self.ring.submit_and_wait(2).ok();
+        self.ring.submit_and_wait(1).ok();
 
         let result = self.wait_for_cqe(handle.0);
-        self.drain_fsync_cqe(handle.0);
 
         // SAFETY: zeros_ptr was allocated via posix_memalign.
         unsafe { libc::free(zeros_ptr) };
@@ -697,22 +662,6 @@ impl KernelHandler {
 
             self.ring.submit_and_wait(1).ok();
         }
-    }
-
-    /// Drain any fsync CQE associated with a handle.
-    fn drain_fsync_cqe(&mut self, key: u64) {
-        let fsync_key = key | (1 << 63);
-        let mut found = false;
-        {
-            let cq = self.ring.completion();
-            for cqe in cq {
-                if cqe.user_data() == fsync_key {
-                    found = true;
-                    break;
-                }
-            }
-        }
-        let _ = found;
     }
 
     fn harvest_completions(&mut self) {

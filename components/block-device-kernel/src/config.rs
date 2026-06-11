@@ -155,7 +155,8 @@ fn query_device_size(path: &Path, block_size: u32) -> Result<u64, String> {
 /// Open a block device with O_DIRECT for direct IO.
 ///
 /// The path must be a block device accessible by the current user.
-/// Opens with O_DIRECT to bypass the kernel page cache.
+/// Opens with O_DIRECT to bypass the kernel page cache, then drops
+/// any stale cached pages via `posix_fadvise(POSIX_FADV_DONTNEED)`.
 pub fn open_block_device(cfg: &DeviceConfig) -> Result<OwnedFd, String> {
     let path = cfg.device_path();
 
@@ -164,11 +165,31 @@ pub fn open_block_device(cfg: &DeviceConfig) -> Result<OwnedFd, String> {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
-        .custom_flags(libc::O_DIRECT)
+        .custom_flags(libc::O_DIRECT | libc::O_DSYNC)
         .open(path)
         .map_err(|e| format!("failed to open block device {}: {e}", path.display()))?;
 
     let raw_fd = file.into_raw_fd();
+
+    // Verify O_DIRECT is actually set on the fd.
+    // SAFETY: raw_fd is valid.
+    let flags = unsafe { libc::fcntl(raw_fd, libc::F_GETFL) };
+    if flags < 0 || (flags & libc::O_DIRECT) == 0 {
+        unsafe { libc::close(raw_fd) };
+        return Err(format!(
+            "O_DIRECT not active on {} (flags=0x{:x})",
+            path.display(),
+            flags
+        ));
+    }
+
+    // Drop any stale page-cache pages for this device so reads cannot
+    // be served from a prior buffered-IO session.
+    // SAFETY: raw_fd is valid, range covers entire device.
+    unsafe {
+        libc::posix_fadvise(raw_fd, 0, 0, libc::POSIX_FADV_DONTNEED);
+    }
+
     // SAFETY: raw_fd is valid, we just obtained it from File::into_raw_fd.
     Ok(unsafe { OwnedFd::from_raw_fd(raw_fd) })
 }
