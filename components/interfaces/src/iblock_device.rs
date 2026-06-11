@@ -211,6 +211,8 @@ pub enum Command {
         buf: Arc<Mutex<DmaBuffer>>,
         /// Timeout in milliseconds.
         timeout_ms: u64,
+        /// Caller-assigned tag echoed back in [`Completion::ReadDone`].
+        tag: u64,
     },
     /// Asynchronous write with timeout.
     WriteAsync {
@@ -222,6 +224,8 @@ pub enum Command {
         buf: Arc<DmaBuffer>,
         /// Timeout in milliseconds.
         timeout_ms: u64,
+        /// Caller-assigned tag echoed back in [`Completion::WriteDone`].
+        tag: u64,
     },
     /// Write zeros to a range of blocks.
     WriteZeros {
@@ -293,6 +297,8 @@ pub enum Completion {
     ReadDone {
         /// Operation handle.
         handle: OpHandle,
+        /// Caller-assigned tag from the corresponding [`Command::ReadAsync`].
+        tag: u64,
         /// Result of the read.
         result: Result<(), NvmeBlockError>,
     },
@@ -300,6 +306,8 @@ pub enum Completion {
     WriteDone {
         /// Operation handle.
         handle: OpHandle,
+        /// Caller-assigned tag from the corresponding [`Command::WriteAsync`].
+        tag: u64,
         /// Result of the write.
         result: Result<(), NvmeBlockError>,
     },

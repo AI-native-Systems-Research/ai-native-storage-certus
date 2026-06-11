@@ -26,6 +26,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
 default = ["spdk-backend"]
 spdk-backend = ["dep:block-device-spdk-nvme"]
 hardware-test = []
+pipeline-telemetry = []
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
