@@ -169,7 +169,7 @@ class NvmeInspector:
         achieving steady-state read latency.
         """
         if intervals is None:
-            intervals = [0, 5, 10, 15, 20, 30, 45, 60]
+            intervals = [0, 5, 10, 15, 20, 30, 45, 60, 90, 120]
 
         # Phase 1: Establish baseline read latency on a quiet drive.
         print("  Measuring baseline read latency (quiet drive)...", end="", flush=True)
@@ -593,8 +593,8 @@ def main():
         "  sudo python3 inspect-nvme.py /dev/nvme4n1 --json --output report.json\n",
     )
     parser.add_argument("device", help="NVMe device path (e.g., /dev/nvme4n1)")
-    parser.add_argument("--gc-write-gb", type=float, default=2.0,
-                        help="GiB to write for GC settle test (default: 2)")
+    parser.add_argument("--gc-write-gb", type=float, default=128.0,
+                        help="GiB to write for GC settle test (default: 128)")
     parser.add_argument("--skip-gc", action="store_true",
                         help="Skip GC settle time test")
     parser.add_argument("--skip-power", action="store_true",
