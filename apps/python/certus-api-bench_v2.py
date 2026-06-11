@@ -493,37 +493,28 @@ def run_client(
     barrier.wait()  # synchronize hot-lookup start
     result.hot_start = time.perf_counter()
 
-    # Pipelined hot lookups: keep pipeline_depth RPCs in flight.
-    in_flight = []
-    next_to_send = 0
-    completed = 0
-
-    while completed < iterations:
-        while next_to_send < iterations and len(in_flight) < pipeline_depth:
-            entries = [
-                dispatcher_pb2.LookupEntry(key=k, ipc_handle=hot_lookup_ipcs[i])
-                for i, k in enumerate(hot_keys)
-            ]
-            req = dispatcher_pb2.BatchLookupRequest(entries=entries)
-            future = stub.Lookup.future(req)
-            in_flight.append((next_to_send, future, time.perf_counter()))
-            next_to_send += 1
-
-        if in_flight:
-            iter_idx, future, t_submit = in_flight.pop(0)
-            try:
-                resp = future.result()
-                _libcudart.cudaDeviceSynchronize()
-                t_done = time.perf_counter()
-                failed = [r for r in resp.results if not r.success]
-                if failed:
-                    result.errors.append(
-                        f"hot lookup failed: {failed[0].error_message}"
-                    )
-                result.hot_latencies.append((t_done - t_submit) / num_objects)
-            except grpc.RpcError as e:
-                result.errors.append(f"hot lookup RPC error: {e.details()}")
-            completed += 1
+    # Hot lookups are sequential (not pipelined): the server's stream_synchronize
+    # completes the DMA before responding, so sequential RPCs measure real H2D
+    # throughput. Pipelining hot lookups inflates numbers by overlapping gRPC
+    # round-trips that share a single GPU PCIe link.
+    for _ in range(iterations):
+        entries = [
+            dispatcher_pb2.LookupEntry(key=k, ipc_handle=hot_lookup_ipcs[i])
+            for i, k in enumerate(hot_keys)
+        ]
+        try:
+            t0 = time.perf_counter()
+            resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=entries))
+            _libcudart.cudaDeviceSynchronize()
+            t1 = time.perf_counter()
+            failed = [r for r in resp.results if not r.success]
+            if failed:
+                result.errors.append(
+                    f"hot lookup failed: {failed[0].error_message}"
+                )
+            result.hot_latencies.append((t1 - t0) / num_objects)
+        except grpc.RpcError as e:
+            result.errors.append(f"hot lookup RPC error: {e.details()}")
 
     result.hot_end = time.perf_counter()
     result.hot_objects = num_objects * iterations
