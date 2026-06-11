@@ -252,27 +252,9 @@ impl DispatcherComponent {
             io_segmenter::segment_io(start_lba, aligned_bytes, max_transfer, block_size as u32);
 
         for seg in &segments {
-            // Try SPDK-backed DMA buffer first; fall back to posix_memalign.
-            let seg_buf = DmaBuffer::new(seg.length, block_size, Some(numa_node))
-                .or_else(|_| {
-                    unsafe extern "C" fn libc_free_seg(p: *mut std::ffi::c_void) {
-                        libc::free(p);
-                    }
-                    let mut ptr: *mut std::ffi::c_void = std::ptr::null_mut();
-                    // SAFETY: posix_memalign with block_size alignment for O_DIRECT.
-                    let ret = unsafe { libc::posix_memalign(&mut ptr, block_size, seg.length) };
-                    if ret != 0 || ptr.is_null() {
-                        return Err(format!("posix_memalign({}, {}) failed: errno {ret}",
-                            seg.length, block_size));
-                    }
-                    unsafe { std::ptr::write_bytes(ptr as *mut u8, 0, seg.length) };
-                    // SAFETY: ptr is valid, non-null, allocated with posix_memalign.
-                    unsafe { DmaBuffer::from_raw(ptr, seg.length, libc_free_seg, numa_node) }
-                        .map_err(|e| e.to_string())
-                })
-                .map_err(|e| {
-                    DispatcherError::AllocationFailed(format!("DMA segment buffer: {e}"))
-                })?;
+            let seg_buf = DmaBuffer::new(seg.length, block_size, Some(numa_node)).map_err(|e| {
+                DispatcherError::AllocationFailed(format!("DMA segment buffer: {e}"))
+            })?;
 
             let copy_len = seg
                 .length

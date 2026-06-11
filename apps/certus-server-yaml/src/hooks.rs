@@ -20,7 +20,9 @@ pub fn init_spdk_env_dma_only(
     iface: &Arc<dyn spdk_env::ISPDKEnv + Send + Sync>,
     _config: &StackConfig,
 ) -> Result<(), String> {
-    iface.init().map_err(|e| format!("SPDK init failed: {e}"))
+    iface
+        .init_dma_only()
+        .map_err(|e| format!("SPDK DMA-only init failed: {e}"))
 }
 
 #[cfg(feature = "spdk-mem")]

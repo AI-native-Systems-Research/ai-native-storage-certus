@@ -1,12 +1,19 @@
 profile:
   name: full-kernel-block
-  description: "Profile that uses kernel block devices via io_uring (no SPDK/NVMe userspace)"
+  description: "Profile that uses kernel block devices via io_uring with SPDK hugepage DMA"
 
 components:
   logger:
     crate: logger
     factory: "LoggerComponent::new_default"
     provides: [ILogger]
+
+  spdk_env:
+    crate: spdk-env
+    factory: "SPDKEnvComponent::new_default"
+    provides: [ISPDKEnv]
+    trait_path: spdk-env
+    init_hook: init_spdk_env_dma_only
 
   gpu:
     crate: gpu-services
@@ -60,9 +67,12 @@ wiring:
     source: memory_tier
   - target: dispatcher.gpu_services
     source: gpu
+  - target: dispatcher.spdk_env
+    source: spdk_env
 
 init_order:
   - logger
+  - spdk_env
   - gpu
   - dispatch_map
   - memory_tier
@@ -73,3 +83,5 @@ exports:
     interface: ILogger
   - component: dispatcher
     interface: IDispatcher
+  - component: spdk_env
+    interface: ISPDKEnv
