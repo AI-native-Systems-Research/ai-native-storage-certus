@@ -156,6 +156,63 @@ impl DispatcherComponent {
         key as usize % num_drives
     }
 
+    /// Compute per-drive CPU assignments based on NUMA topology.
+    ///
+    /// For each PCI address, looks up the device's NUMA node from SPDK's
+    /// device list, then assigns CPUs round-robin from that node's available
+    /// cores. Returns `None` for any drive whose NUMA node can't be resolved
+    /// (the block device component will fall back to its own NUMA heuristic).
+    fn compute_numa_cpu_assignments(
+        spdk_env: &Arc<dyn ISPDKEnv + Send + Sync>,
+        pci_addrs: &[String],
+        logger: &Arc<dyn ILogger + Send + Sync>,
+    ) -> Vec<Option<usize>> {
+        use std::collections::HashMap;
+
+        let topo = match component_core::numa::NumaTopology::discover() {
+            Ok(t) => t,
+            Err(_) => {
+                logger.warn("dispatcher: NUMA topology unavailable, poller CPUs will not be pinned");
+                return vec![None; pci_addrs.len()];
+            }
+        };
+
+        let devices = spdk_env.devices();
+        let device_map: HashMap<String, i32> = devices
+            .iter()
+            .map(|d| (d.address.to_string(), d.numa_node))
+            .collect();
+
+        // Track next available CPU index per NUMA node for round-robin.
+        let mut node_cpu_idx: HashMap<usize, usize> = HashMap::new();
+
+        pci_addrs
+            .iter()
+            .map(|addr| {
+                let numa_node = device_map.get(addr).copied().unwrap_or(-1);
+                if numa_node < 0 {
+                    return None;
+                }
+                let node_id = numa_node as usize;
+                let node = match topo.node(node_id) {
+                    Some(n) => n,
+                    None => return None,
+                };
+                let cpus: Vec<usize> = node.cpus().iter().collect();
+                if cpus.is_empty() {
+                    return None;
+                }
+                let idx = node_cpu_idx.entry(node_id).or_insert(0);
+                let cpu = cpus[*idx % cpus.len()];
+                *idx += 1;
+                logger.info(&format!(
+                    "dispatcher: auto-pinning poller for {addr} to CPU {cpu} (NUMA node {node_id})"
+                ));
+                Some(cpu)
+            })
+            .collect()
+    }
+
     fn ensure_initialized(&self) -> Result<(), DispatcherError> {
         if !self.initialized.load(Ordering::Acquire) {
             return Err(DispatcherError::NotInitialized(
@@ -510,7 +567,7 @@ impl DispatcherComponent {
     fn create_block_device(
         &self,
         i: usize,
-        poller_base_cpu: Option<usize>,
+        poller_cpu: Option<usize>,
         spdk_env: &Arc<dyn ISPDKEnv + Send + Sync>,
         logger: &Arc<dyn ILogger + Send + Sync>,
         pci_addr: PciAddress,
@@ -525,7 +582,9 @@ impl DispatcherComponent {
     > {
         let factory_guard = self.block_device_factory.lock().unwrap();
         if let Some(ref factory) = *factory_guard {
-            let (block_dev, ibd, admin) = factory(spdk_env, logger, i, pci_addr, poller_base_cpu)
+            // Factory still uses the base-cpu convention for backward compatibility.
+            let base = poller_cpu.map(|c| c.saturating_sub(i));
+            let (block_dev, ibd, admin) = factory(spdk_env, logger, i, pci_addr, base)
                 .map_err(|e| {
                     DispatcherError::IoError(format!(
                         "block device factory failed for drive {i}: {e}"
@@ -555,8 +614,8 @@ impl DispatcherComponent {
                             ))
                         })?;
                 admin.set_pci_address(pci_addr);
-                if let Some(base) = poller_base_cpu {
-                    admin.set_actor_cpu(base + i);
+                if let Some(cpu) = poller_cpu {
+                    admin.set_actor_cpu(cpu);
                 }
                 admin.initialize().map_err(|e| {
                     DispatcherError::IoError(format!(
@@ -607,13 +666,28 @@ impl DispatcherComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("logger not bound".into()))?;
 
+        // Compute per-drive poller CPU assignments.
+        // When poller_base_cpu is set, drive i gets base + i (existing behavior).
+        // When None, assign CPUs round-robin from each drive's NUMA node.
+        let per_drive_cpu: Vec<Option<usize>> = if config.poller_base_cpu.is_some() {
+            config
+                .data_pci_addrs
+                .iter()
+                .enumerate()
+                .map(|(i, _)| config.poller_base_cpu.map(|base| base + i))
+                .collect()
+        } else {
+            Self::compute_numa_cpu_assignments(&spdk_env, &config.data_pci_addrs, &logger)
+        };
+
         let mut drives = Vec::with_capacity(config.data_pci_addrs.len());
 
         for (i, addr_str) in config.data_pci_addrs.iter().enumerate() {
             let pci_addr = Self::parse_pci_addr(addr_str)?;
 
+            let poller_cpu = per_drive_cpu.get(i).copied().flatten();
             let (block_dev_component, admin, ibd) =
-                self.create_block_device(i, config.poller_base_cpu, &spdk_env, &logger, pci_addr, addr_str)?;
+                self.create_block_device(i, poller_cpu, &spdk_env, &logger, pci_addr, addr_str)?;
 
             let numa_node = ibd.numa_node();
             let spdk_available = self.spdk_env.is_connected();
