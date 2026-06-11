@@ -239,6 +239,26 @@ echo
 if [[ $failed -gt 0 ]]; then
     warn "$failed of $N endpoint(s) produced no data -- servers down or unreachable. Check $RUN_DIR/srv-*.log"
 fi
+
+# Check server logs for memory-tier exhaustion warnings.
+mt_exhausted=0
+for row in "${ROWS[@]}"; do
+    IFS=$'\t' read -r i bdf node port core <<< "$row"
+    srvlog="$RUN_DIR/srv-$i.log"
+    if [[ -f "$srvlog" ]] && grep -q "memory-tier exhausted" "$srvlog"; then
+        mt_exhausted=$((mt_exhausted + 1))
+        if [[ $mt_exhausted -eq 1 ]]; then
+            echo
+            warn "MEMORY-TIER EXHAUSTED on one or more instances:"
+        fi
+        warn "  instance $i ($srvlog): $(grep 'memory-tier exhausted' "$srvlog" | head -1)"
+    fi
+done
+if [[ $mt_exhausted -gt 0 ]]; then
+    warn "Throughput results may be degraded. Increase --memory-tier-size or reduce load."
+    fail=1
+fi
+
 log "Per-client logs: $RUN_DIR/bench-*.log"
 
 exit "$fail"
