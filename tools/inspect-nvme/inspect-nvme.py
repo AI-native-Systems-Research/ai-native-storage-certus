@@ -294,6 +294,69 @@ class NvmeInspector:
         self.results["write_cache"] = result
         return result
 
+    def check_read_cache(self):
+        """Detect DRAM read cache by comparing repeated reads of a small region vs full-device random."""
+        # Phase 1: Read a small region (16 MiB) repeatedly to warm the drive's DRAM cache.
+        # Then measure latency of reads within that cached region.
+        cache_region = "16M"
+        print(f"  Warming DRAM cache ({cache_region} region, sequential reads)...", end="", flush=True)
+        run_fio(self.ns, rw="read", bs="128k", size=cache_region, qdepth=32)
+        run_fio(self.ns, rw="read", bs="128k", size=cache_region, qdepth=32)
+        print(" done.")
+
+        print("  Measuring cached-region read latency (128 KiB, QD=1)...", end="", flush=True)
+        result_cached = run_fio(
+            self.ns, rw="randread", bs="128k", size=cache_region,
+            runtime="3", qdepth=1,
+        )
+        lat_cached = extract_lat_us(result_cached, "read")
+        print(f" {lat_cached['avg']:.0f} us" if lat_cached else " failed")
+
+        # Phase 2: Random reads across the full device (far exceeds any DRAM cache).
+        print("  Measuring full-device read latency (128 KiB, QD=1)...", end="", flush=True)
+        result_full = run_fio(
+            self.ns, rw="randread", bs="128k",
+            runtime="3", qdepth=1,
+        )
+        lat_full = extract_lat_us(result_full, "read")
+        print(f" {lat_full['avg']:.0f} us" if lat_full else " failed")
+
+        # Phase 3: Read a large region sequentially then re-read to detect cache eviction.
+        # If the 16 MiB region is now slower, it was evicted from DRAM cache.
+        print("  Evicting cache (256 MiB sequential read)...", end="", flush=True)
+        run_fio(self.ns, rw="read", bs="128k", size="256M", qdepth=32)
+        print(" done.")
+
+        print("  Re-measuring original region (post-eviction)...", end="", flush=True)
+        result_evicted = run_fio(
+            self.ns, rw="randread", bs="128k", size=cache_region,
+            runtime="3", qdepth=1,
+        )
+        lat_evicted = extract_lat_us(result_evicted, "read")
+        print(f" {lat_evicted['avg']:.0f} us" if lat_evicted else " failed")
+
+        cached_avg = lat_cached["avg"] if lat_cached else 0
+        full_avg = lat_full["avg"] if lat_full else 0
+        evicted_avg = lat_evicted["avg"] if lat_evicted else 0
+
+        # A drive with effective DRAM read cache shows: cached << full ≈ evicted
+        has_read_cache = (
+            cached_avg > 0 and full_avg > 0
+            and full_avg > cached_avg * 1.5
+        )
+        cache_speedup = full_avg / cached_avg if cached_avg > 0 else 0
+
+        result = {
+            "cached_region_us": cached_avg,
+            "full_device_us": full_avg,
+            "post_eviction_us": evicted_avg,
+            "cache_speedup": cache_speedup,
+            "has_read_cache": has_read_cache,
+            "estimated_cache_size": "< 16 MiB" if not has_read_cache else ">= 16 MiB",
+        }
+        self.results["read_cache"] = result
+        return result
+
     def read_latency_profile(self, queue_depths=None):
         """Measure steady-state read latency at various queue depths."""
         if queue_depths is None:
@@ -403,6 +466,23 @@ class NvmeInspector:
                     lines.append(f"  Ratio:         {wc['cache_ratio']:.1f}x (fsync/no-fsync)")
             lines.append("")
 
+        # Read Cache
+        rc = self.results.get("read_cache")
+        if rc:
+            lines.append(sub)
+            lines.append("DRAM Read Cache")
+            lines.append(sub)
+            lines.append(f"Read latency (128 KiB random, QD=1):")
+            lines.append(f"  Cached region (16 MiB): {rc['cached_region_us']:>8,.0f} us")
+            lines.append(f"  Full device:            {rc['full_device_us']:>8,.0f} us")
+            lines.append(f"  Post-eviction:          {rc['post_eviction_us']:>8,.0f} us")
+            if rc["has_read_cache"]:
+                lines.append(f"\n  DRAM read cache detected: {rc['cache_speedup']:.1f}x speedup for cached data")
+                lines.append(f"  Estimated cache coverage: {rc['estimated_cache_size']}")
+            else:
+                lines.append(f"\n  No significant DRAM read cache effect detected")
+            lines.append("")
+
         # Read Latency Profile
         rp = self.results.get("read_profile")
         if rp:
@@ -430,6 +510,11 @@ class NvmeInspector:
         if wc:
             lines.append(f"Write cache:                 {'Enabled' if wc['vwc_enabled'] else 'Disabled'}"
                          + (f" (writes ACK from DRAM, {wc['cache_ratio']:.0f}x faster)" if wc.get("cache_ratio") and wc["cache_ratio"] > 2 else ""))
+        if rc:
+            if rc["has_read_cache"]:
+                lines.append(f"Read cache:                  Active ({rc['cache_speedup']:.1f}x for hot data)")
+            else:
+                lines.append(f"Read cache:                  Not detected")
         if rp:
             # Find optimal QD (lowest p99 that's within 20% of QD=1 avg)
             qd1_avg = next((m["avg"] for m in rp if m["queue_depth"] == 1), 0)
@@ -463,6 +548,8 @@ def main():
                         help="Skip power state behavior test")
     parser.add_argument("--skip-cache", action="store_true",
                         help="Skip write cache test")
+    parser.add_argument("--skip-read-cache", action="store_true",
+                        help="Skip DRAM read cache detection test")
     parser.add_argument("--skip-profile", action="store_true",
                         help="Skip read latency profile")
     parser.add_argument("--json", action="store_true",
@@ -491,7 +578,7 @@ def main():
     print("=" * 70)
     print()
 
-    print("[1/5] Identifying device...")
+    print("[1/6] Identifying device...")
     inspector.identify()
     info = inspector.results["identify"]
     print(f"  Model: {info.get('model', 'unknown')}")
@@ -500,35 +587,43 @@ def main():
     print()
 
     if not args.skip_gc:
-        print("[2/5] Measuring GC settle time...")
+        print("[2/6] Measuring GC settle time...")
         inspector.measure_gc_settle(write_gb=args.gc_write_gb)
         print()
     else:
-        print("[2/5] GC settle test: skipped")
+        print("[2/6] GC settle test: skipped")
         print()
 
     if not args.skip_power:
-        print("[3/5] Measuring power state behavior...")
+        print("[3/6] Measuring power state behavior...")
         inspector.measure_power_states()
         print()
     else:
-        print("[3/5] Power state test: skipped")
+        print("[3/6] Power state test: skipped")
         print()
 
     if not args.skip_cache:
-        print("[4/5] Checking write cache behavior...")
+        print("[4/6] Checking write cache behavior...")
         inspector.check_write_cache()
         print()
     else:
-        print("[4/5] Write cache test: skipped")
+        print("[4/6] Write cache test: skipped")
+        print()
+
+    if not args.skip_read_cache:
+        print("[5/6] Detecting DRAM read cache...")
+        inspector.check_read_cache()
+        print()
+    else:
+        print("[5/6] DRAM read cache test: skipped")
         print()
 
     if not args.skip_profile:
-        print("[5/5] Read latency profile...")
+        print("[6/6] Read latency profile...")
         inspector.read_latency_profile()
         print()
     else:
-        print("[5/5] Read latency profile: skipped")
+        print("[6/6] Read latency profile: skipped")
         print()
 
     # Generate output
