@@ -172,10 +172,11 @@ class NvmeInspector:
             intervals = [0, 5, 10, 15, 20, 30, 45, 60, 90, 120]
 
         # Phase 1: Establish baseline read latency on a quiet drive.
-        print("  Measuring baseline read latency (quiet drive)...", end="", flush=True)
-        run_fio(self.ns, rw="randread", bs="128k", runtime="3", qdepth=1)
+        # Use 4 MiB reads to match Certus cold-path object size.
+        print("  Measuring baseline read latency (quiet drive, 4 MiB)...", end="", flush=True)
+        run_fio(self.ns, rw="randread", bs="4M", runtime="3", qdepth=1)
         result_baseline = run_fio(
-            self.ns, rw="randread", bs="128k", runtime="5", qdepth=1,
+            self.ns, rw="randread", bs="4M", runtime="5", qdepth=1,
         )
         lat_baseline = extract_lat_us(result_baseline, "read")
         baseline_us = lat_baseline["avg"] if lat_baseline else 500
@@ -202,10 +203,10 @@ class NvmeInspector:
             else:
                 print(f"  Sampling at {wait_target_s}s...", end="", flush=True)
 
-            # Brief measurement burst (1s) to minimize GC interference from reads.
+            # Brief measurement burst (1s, 4 MiB reads) to match Certus workload.
             actual_idle = time.time() - t_write_done
             result = run_fio(
-                self.ns, rw="randread", bs="128k", runtime="1",
+                self.ns, rw="randread", bs="4M", runtime="1",
                 qdepth=1,
             )
             lat = extract_lat_us(result, "read")
@@ -472,7 +473,7 @@ class NvmeInspector:
             threshold = baseline * 1.2
             lines.append(f"Settle threshold (120% of baseline): {threshold:,.0f} us")
             lines.append("")
-            lines.append("Post-write read latency (128 KiB random, QD=1):")
+            lines.append("Post-write read latency (4 MiB random, QD=1):")
             for m in gc["measurements"]:
                 ratio = m["avg_us"] / baseline if baseline > 0 else 0
                 marker = ""
