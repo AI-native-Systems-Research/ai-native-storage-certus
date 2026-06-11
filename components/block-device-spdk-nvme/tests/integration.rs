@@ -1139,6 +1139,7 @@ fn sc002_timeout_accuracy() {
             lba: 0,
             buf: rbuf,
             timeout_ms,
+            tag: 0,
         })
         .expect("send async read");
 
