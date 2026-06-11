@@ -394,17 +394,19 @@ def run_client(
         cuda_ipc_handle=populate_handle_bytes, size=BLOCK_SIZE, gpu_device_id=gpu_id
     )
 
-    lookup_tensor = torch.zeros(
-        BLOCK_SIZE // 4, dtype=torch.float32, device=cuda_device
-    )
-    lookup_handle_bytes = _get_cuda_ipc_handle(lookup_tensor.data_ptr())
-    lookup_ipc = dispatcher_pb2.IpcHandle(
-        cuda_ipc_handle=lookup_handle_bytes, size=BLOCK_SIZE, gpu_device_id=gpu_id
-    )
+    # Separate GPU buffers for lookups — one per key in the batch.
+    # A shared IPC handle allows the server to coalesce DMA writes to the
+    # same destination, producing artificially low latencies. Distinct buffers
+    # force a real H2D transfer per object.
+    hot_lookup_ptrs = []
+    hot_lookup_ipcs = []
+    for _ in range(num_objects):
+        ptr, handle_bytes = _cuda_alloc(BLOCK_SIZE)
+        hot_lookup_ptrs.append(ptr)
+        hot_lookup_ipcs.append(
+            dispatcher_pb2.IpcHandle(cuda_ipc_handle=handle_bytes, size=BLOCK_SIZE, gpu_device_id=gpu_id)
+        )
 
-    # Separate GPU buffers for cold lookups — one per key in the batch.
-    # A shared IPC handle allows the server to skip SSD reads for entries whose
-    # data will be overwritten, so cold measurements require distinct buffers.
     cold_lookup_ptrs = []
     cold_lookup_ipcs = []
     for _ in range(num_objects):
@@ -480,7 +482,8 @@ def run_client(
 
     # Warmup
     entries = [
-        dispatcher_pb2.LookupEntry(key=k, ipc_handle=lookup_ipc) for k in hot_keys
+        dispatcher_pb2.LookupEntry(key=k, ipc_handle=hot_lookup_ipcs[i])
+        for i, k in enumerate(hot_keys)
     ]
     try:
         stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=entries))
@@ -492,12 +495,13 @@ def run_client(
 
     for _ in range(iterations):
         entries = [
-            dispatcher_pb2.LookupEntry(key=k, ipc_handle=lookup_ipc)
-            for k in hot_keys
+            dispatcher_pb2.LookupEntry(key=k, ipc_handle=hot_lookup_ipcs[i])
+            for i, k in enumerate(hot_keys)
         ]
         try:
             t0 = time.perf_counter()
             resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=entries))
+            _libcudart.cudaDeviceSynchronize()
             t1 = time.perf_counter()
             failed = [r for r in resp.results if not r.success]
             if failed:
@@ -568,7 +572,6 @@ def run_client(
 
     # --- Cleanup ---
     all_cleanup_keys = list(range(base_key, base_key + total_objects))
-    all_cleanup_keys += list(range(flush_base, flush_base + flush_count))
     for batch_start in range(0, len(all_cleanup_keys), batch_size):
         batch_end = min(batch_start + batch_size, len(all_cleanup_keys))
         try:
@@ -576,7 +579,9 @@ def run_client(
         except grpc.RpcError:
             pass
 
-    # Free cold lookup GPU buffers.
+    # Free lookup GPU buffers.
+    for ptr in hot_lookup_ptrs:
+        _cuda_free(ptr)
     for ptr in cold_lookup_ptrs:
         _cuda_free(ptr)
 
