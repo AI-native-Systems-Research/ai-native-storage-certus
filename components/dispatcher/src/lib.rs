@@ -153,7 +153,14 @@ impl DispatcherComponent {
     }
 
     fn drive_index(key: CacheKey, num_drives: usize) -> usize {
-        key as usize % num_drives
+        // splitmix64 finalizer: distributes sequential keys uniformly.
+        let mut h = key;
+        h ^= h >> 30;
+        h = h.wrapping_mul(0xbf58476d1ce4e5b9);
+        h ^= h >> 27;
+        h = h.wrapping_mul(0x94d049bb133111eb);
+        h ^= h >> 31;
+        h as usize % num_drives
     }
 
     /// Compute per-drive CPU assignments based on NUMA topology.
