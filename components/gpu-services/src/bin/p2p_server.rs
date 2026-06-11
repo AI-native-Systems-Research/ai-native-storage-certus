@@ -290,6 +290,7 @@ fn do_chunked_read(
             lba: base_lba + (i as u64 * sectors_per_chunk as u64),
             buf: Arc::clone(buf),
             timeout_ms: 5000,
+            tag: 0,
         })
         .collect();
 

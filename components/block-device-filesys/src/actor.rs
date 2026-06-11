@@ -162,16 +162,18 @@ impl FilesysHandler {
                 lba,
                 buf,
                 timeout_ms,
+                tag,
             } => {
-                self.handle_read_async(client_id, ns_id, lba, buf, timeout_ms);
+                self.handle_read_async(client_id, ns_id, lba, buf, timeout_ms, tag);
             }
             Command::WriteAsync {
                 ns_id,
                 lba,
                 buf,
                 timeout_ms,
+                tag,
             } => {
-                self.handle_write_async(client_id, ns_id, lba, buf, timeout_ms);
+                self.handle_write_async(client_id, ns_id, lba, buf, timeout_ms, tag);
             }
             Command::WriteZeros {
                 ns_id,
@@ -228,6 +230,7 @@ impl FilesysHandler {
                 client_id,
                 Completion::ReadDone {
                     handle,
+                    tag: 0,
                     result: Err(e),
                 },
             );
@@ -265,7 +268,7 @@ impl FilesysHandler {
             self.telemetry.record_op(0, buf_len as u64);
         }
 
-        self.send_completion(client_id, Completion::ReadDone { handle, result });
+        self.send_completion(client_id, Completion::ReadDone { handle, tag: 0, result });
     }
 
     fn handle_write_sync(&mut self, client_id: u64, ns_id: u32, lba: u64, buf: Arc<DmaBuffer>) {
@@ -278,6 +281,7 @@ impl FilesysHandler {
                 client_id,
                 Completion::WriteDone {
                     handle,
+                    tag: 0,
                     result: Err(e),
                 },
             );
@@ -325,7 +329,7 @@ impl FilesysHandler {
             self.telemetry.record_op(0, buf_len as u64);
         }
 
-        self.send_completion(client_id, Completion::WriteDone { handle, result });
+        self.send_completion(client_id, Completion::WriteDone { handle, tag: 0, result });
     }
 
     fn handle_read_async(
@@ -335,6 +339,7 @@ impl FilesysHandler {
         lba: u64,
         buf: Arc<std::sync::Mutex<DmaBuffer>>,
         _timeout_ms: u64,
+        _tag: u64,
     ) {
         let handle = self.next_op_handle();
         let buf_len = {
@@ -348,6 +353,7 @@ impl FilesysHandler {
                 client_id,
                 Completion::ReadDone {
                     handle,
+                    tag: 0,
                     result: Err(e),
                 },
             );
@@ -375,6 +381,7 @@ impl FilesysHandler {
                         client_id,
                         Completion::ReadDone {
                             handle,
+                    tag: 0,
                             result: Err(NvmeBlockError::NotInitialized(
                                 "io_uring submission queue full".into(),
                             )),
@@ -436,7 +443,7 @@ impl FilesysHandler {
                 self.telemetry.record_op(0, buf_len as u64);
             }
 
-            self.send_completion(client_id, Completion::ReadDone { handle, result });
+            self.send_completion(client_id, Completion::ReadDone { handle, tag: 0, result });
         }
     }
 
@@ -447,6 +454,7 @@ impl FilesysHandler {
         lba: u64,
         buf: Arc<DmaBuffer>,
         _timeout_ms: u64,
+        _tag: u64,
     ) {
         let handle = self.next_op_handle();
         let buf_len = buf.len();
@@ -457,6 +465,7 @@ impl FilesysHandler {
                 client_id,
                 Completion::WriteDone {
                     handle,
+                    tag: 0,
                     result: Err(e),
                 },
             );
@@ -489,6 +498,7 @@ impl FilesysHandler {
                         client_id,
                         Completion::WriteDone {
                             handle,
+                    tag: 0,
                             result: Err(NvmeBlockError::NotInitialized(
                                 "io_uring submission queue full".into(),
                             )),
@@ -565,7 +575,7 @@ impl FilesysHandler {
                 self.telemetry.record_op(0, buf_len as u64);
             }
 
-            self.send_completion(client_id, Completion::WriteDone { handle, result });
+            self.send_completion(client_id, Completion::WriteDone { handle, tag: 0, result });
         }
     }
 
@@ -714,11 +724,13 @@ impl FilesysHandler {
                 let completion = if op.is_read {
                     Completion::ReadDone {
                         handle: op.handle,
+                    tag: 0,
                         result,
                     }
                 } else {
                     Completion::WriteDone {
                         handle: op.handle,
+                    tag: 0,
                         result,
                     }
                 };

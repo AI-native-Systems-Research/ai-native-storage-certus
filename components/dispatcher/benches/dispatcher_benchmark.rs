@@ -395,6 +395,15 @@ impl IMemoryTier for BenchMemoryTier {
         let pool = self.pool.lock().unwrap();
         Some((pool.as_ptr() as *mut u8, pool.len()))
     }
+    fn peek(&self, _key: CacheKey) -> Option<(*mut u8, u32)> {
+        None
+    }
+    fn oldest_keys(&self, _n: usize) -> Vec<CacheKey> {
+        Vec::new()
+    }
+    fn clear(&self) -> Result<usize, MemoryTierError> {
+        Ok(0)
+    }
 }
 
 // ===========================================================================
@@ -419,7 +428,6 @@ fn setup_dispatcher() -> (Arc<dyn IDispatcher + Send + Sync>, Arc<BenchDispatchM
 
     let d: Arc<dyn IDispatcher + Send + Sync> = query_interface!(c, IDispatcher).unwrap();
     d.initialize(DispatcherConfig {
-        metadata_pci_addr: "0000:01:00.0".to_string(),
         data_pci_addrs: vec!["0000:02:00.0".to_string()],
         max_cache_entries: 0, // disable eviction for benchmarks
         ..Default::default()

@@ -168,6 +168,7 @@ fn process_command(cmd: Command, state: &Arc<Mutex<MockState>>, handle: OpHandle
             }
             Completion::ReadDone {
                 handle,
+                tag: 0,
                 result: Ok(()),
             }
         }
@@ -177,6 +178,7 @@ fn process_command(cmd: Command, state: &Arc<Mutex<MockState>>, handle: OpHandle
             if s.fault_config.fail_all_writes {
                 return Completion::WriteDone {
                     handle,
+                    tag: 0,
                     result: Err(NvmeBlockError::BlockDevice(
                         interfaces::BlockDeviceError::WriteFailed("fault injected".into()),
                     )),
@@ -187,6 +189,7 @@ fn process_command(cmd: Command, state: &Arc<Mutex<MockState>>, handle: OpHandle
                 if s.write_count >= n {
                     return Completion::WriteDone {
                         handle,
+                        tag: 0,
                         result: Err(NvmeBlockError::BlockDevice(
                             interfaces::BlockDeviceError::WriteFailed(format!(
                                 "fault after {n} writes",
@@ -204,6 +207,7 @@ fn process_command(cmd: Command, state: &Arc<Mutex<MockState>>, handle: OpHandle
 
             Completion::WriteDone {
                 handle,
+                tag: 0,
                 result: Ok(()),
             }
         }
