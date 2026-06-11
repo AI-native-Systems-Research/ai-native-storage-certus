@@ -539,13 +539,16 @@ def run_client(
             except grpc.RpcError:
                 pass
 
-        # Wait for write-through to drain to SSD for consistent cold-read
-        # latency measurements.
-        flush_bytes = flush_count * BLOCK_SIZE
-        flush_wait = max(5.0, flush_bytes / (3 * 1024**3))
-        settle_wait = max(flush_wait, writes_settle)
+        # Synchronously flush all background write-through to SSD.
         barrier.wait()
-        time.sleep(settle_wait)
+        if client_id == 0:
+            try:
+                stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
+            except grpc.RpcError:
+                pass
+        barrier.wait()
+        if writes_settle > 0:
+            time.sleep(writes_settle)
 
         # Clear memory-tier again (flush data filled it back up).
         barrier.wait()

@@ -460,13 +460,14 @@ def run_client(
     result.populate_end = t_pop_end
     result.populate_objects = total_objects
 
-    # Wait for background write-through to drain to SSD. Without this settle
-    # period, cold-read latency is inflated by the background writer competing
-    # for actor channel and NVMe qpair bandwidth.
-    per_client_flush_bytes = total_objects * BLOCK_SIZE
-    wt_wait = max(5.0, per_client_flush_bytes / (2 * 1024**3))
-    settle_wait = max(wt_wait, writes_settle)
-    time.sleep(settle_wait)
+    # Synchronously flush all background write-through to SSD, then wait
+    # an additional settle period for NVMe internal operations to quiesce.
+    try:
+        stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
+    except grpc.RpcError:
+        pass
+    if writes_settle > 0:
+        time.sleep(writes_settle)
 
     # --- Phase 2: Hot lookups (memory-tier) ---
     # The last `num_objects` in the pool are still in DRAM.
@@ -535,12 +536,14 @@ def run_client(
         except grpc.RpcError:
             pass
 
-    # Wait for flush writes to complete through to SSD NAND.
-    # Clients flush in parallel; use per-client volume at ~3 GB/s.
-    flush_bytes = flush_count * BLOCK_SIZE
-    flush_wait = max(5.0, flush_bytes / (3 * 1024**3))
+    # Synchronously wait for all background write-through to complete.
     barrier.wait()
-    time.sleep(flush_wait)
+    if client_id == 0:
+        try:
+            stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
+        except grpc.RpcError:
+            pass
+    barrier.wait()
 
     # Clear memory-tier again (flush data filled it back up).
     barrier.wait()
