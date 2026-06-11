@@ -460,13 +460,16 @@ def run_client(
     result.populate_end = t_pop_end
     result.populate_objects = total_objects
 
-    # Wait for background write-through to drain to SSD. Without this settle
-    # period, cold-read latency is inflated by the background writer competing
-    # for actor channel and NVMe qpair bandwidth.
-    per_client_flush_bytes = total_objects * BLOCK_SIZE
-    wt_wait = max(5.0, per_client_flush_bytes / (2 * 1024**3))
-    settle_wait = max(wt_wait, writes_settle)
-    time.sleep(settle_wait)
+    # All clients synchronously flush background write-through, then barrier
+    # to ensure every client's writes are on SSD before proceeding.
+    try:
+        stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
+    except grpc.RpcError:
+        pass
+    barrier.wait()
+    if writes_settle > 0:
+        time.sleep(writes_settle)
+    barrier.wait()
 
     # --- Phase 2: Hot lookups (memory-tier) ---
     # The last `num_objects` in the pool are still in DRAM.
@@ -510,45 +513,13 @@ def run_client(
 
     # --- Phase 3: Cold lookups (SSD-tier) ---
     # Clear the server's memory-tier so lookups must go to SSD.
+    # The initial FlushToSsd after populate already ensured all data is on NAND.
     barrier.wait()
     if client_id == 0:
         try:
             stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
         except grpc.RpcError as e:
             result.errors.append(f"ClearMemoryTier failed: {e.details()}")
-    barrier.wait()
-
-    # Flush the SSD's internal DRAM cache by writing enough throwaway data
-    # through the drive. Typical NVMe drives have 1-4 GB DRAM; writing 4 GB
-    # of new data ensures the cold keys are evicted from the drive's cache.
-    flush_base = base_key + total_objects + 1_000_000
-    flush_count = 1024  # 1024 * 4 MiB = 4 GB per client
-    for batch_start in range(0, flush_count, batch_size):
-        batch_end = min(batch_start + batch_size, flush_count)
-        keys = [flush_base + i for i in range(batch_start, batch_end)]
-        entries = [
-            dispatcher_pb2.PopulateEntry(key=k, ipc_handle=populate_ipc)
-            for k in keys
-        ]
-        try:
-            stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=entries))
-        except grpc.RpcError:
-            pass
-
-    # Wait for flush writes to complete through to SSD NAND.
-    # Clients flush in parallel; use per-client volume at ~3 GB/s.
-    flush_bytes = flush_count * BLOCK_SIZE
-    flush_wait = max(5.0, flush_bytes / (3 * 1024**3))
-    barrier.wait()
-    time.sleep(flush_wait)
-
-    # Clear memory-tier again (flush data filled it back up).
-    barrier.wait()
-    if client_id == 0:
-        try:
-            stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
-        except grpc.RpcError:
-            pass
     barrier.wait()
 
     # Cold lookups use batched requests with SEPARATE IPC handles per key.
