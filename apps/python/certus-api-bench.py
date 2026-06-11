@@ -512,6 +512,7 @@ def run_client(
 
     # --- Phase 3: Cold lookups (SSD-tier) ---
     # Clear the server's memory-tier so lookups must go to SSD.
+    # The initial FlushToSsd after populate already ensured all data is on NAND.
     barrier.wait()
     if client_id == 0:
         try:
@@ -519,42 +520,6 @@ def run_client(
         except grpc.RpcError as e:
             result.errors.append(f"ClearMemoryTier failed: {e.details()}")
     barrier.wait()
-
-    # Flush the SSD's internal DRAM cache by writing enough throwaway data
-    # through the drive. Typical NVMe drives have 1-4 GB DRAM; writing 4 GB
-    # of new data ensures the cold keys are evicted from the drive's cache.
-    # Skip for O_DIRECT+O_SYNC backends (filesys) where writes are already durable.
-    if not skip_flush:
-        flush_base = base_key + total_objects + 1_000_000
-        flush_count = 1024  # 1024 * 4 MiB = 4 GB per client
-        for batch_start in range(0, flush_count, batch_size):
-            batch_end = min(batch_start + batch_size, flush_count)
-            keys = [flush_base + i for i in range(batch_start, batch_end)]
-            entries = [
-                dispatcher_pb2.PopulateEntry(key=k, ipc_handle=populate_ipc)
-                for k in keys
-            ]
-            try:
-                stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=entries))
-            except grpc.RpcError:
-                pass
-
-        # Wait for write-through to drain to SSD for consistent cold-read
-        # latency measurements.
-        flush_bytes = flush_count * BLOCK_SIZE
-        flush_wait = max(5.0, flush_bytes / (3 * 1024**3))
-        settle_wait = max(flush_wait, writes_settle)
-        barrier.wait()
-        time.sleep(settle_wait)
-
-        # Clear memory-tier again (flush data filled it back up).
-        barrier.wait()
-        if client_id == 0:
-            try:
-                stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
-            except grpc.RpcError:
-                pass
-        barrier.wait()
 
     # Cold lookups use batched requests with SEPARATE IPC handles per key.
     # A shared IPC handle allows the server to skip SSD reads for entries whose
