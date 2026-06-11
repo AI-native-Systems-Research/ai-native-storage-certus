@@ -554,7 +554,8 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p_offset(
     let streams = &p2p_ring.streams;
 
     // Sliding-window pipeline with the P2P ring as NVMe DMA targets.
-    let effective_qd = ring_size.min(num_chunks);
+    // Cap at 16 to avoid qpair saturation under multi-client concurrency.
+    let effective_qd = ring_size.min(num_chunks).min(16);
 
     // Prime: submit initial async reads into ring slots (offset by ring_offset).
     for i in 0..effective_qd {
