@@ -1210,7 +1210,7 @@ impl IDispatcher for DispatcherComponent {
                             .chunks(entry_indices.len().div_ceil(num_queues))
                             .collect();
 
-                        let queue_depth = 16 / num_queues;
+                        let queue_depth = 128;
 
                         for chunk in chunks {
                             let dm_ref = &dm;
@@ -1259,59 +1259,112 @@ impl IDispatcher for DispatcherComponent {
                                     }
                                 };
 
+                                // Prepare all cold entries for multi-object pipeline.
+                                #[cfg(feature = "pipeline-telemetry")]
+                                let t_prep_start = std::time::Instant::now();
+                                let mut jobs: Vec<pipeline::ColdReadJob> =
+                                    Vec::with_capacity(indices.len());
+                                let mut job_ci: Vec<usize> = Vec::with_capacity(indices.len());
+                                let mut mem_ptrs: Vec<*mut u8> = Vec::with_capacity(indices.len());
+
                                 for &ci in &indices {
                                     let entry = &cold_ref[ci];
-                                    let ipc = IpcHandle {
-                                        address: entry.ipc_handle_addr,
-                                        size: entry.ipc_handle_size,
-                                    };
-                                    let total_bytes = ipc.size as usize;
+                                    let ipc_size = entry.ipc_handle_size;
 
-                                    let res = (|| -> Result<(), DispatcherError> {
-                                        Self::evict_for_space(dm_ref, mt_ref, ipc.size)?;
-
-                                        let mem_ptr =
-                                            mt_ref.insert(entry.key, ipc.size).map_err(|e| {
-                                                DispatcherError::AllocationFailed(format!(
-                                                    "promote insert failed: {e}"
-                                                ))
-                                            })?;
-
-                                        let start_lba = entry.offset / block_size as u64;
-
-                                        let pipeline_result = unsafe {
-                                            pipeline::pipelined_ssd_to_gpu_zero_copy(
-                                                &*drive.block_dev_iface,
-                                                &**gpu_ref,
-                                                &streams,
-                                                &channels,
-                                                mem_ptr,
-                                                ipc.address as *mut std::ffi::c_void,
-                                                start_lba,
-                                                total_bytes,
-                                                chunk_size,
-                                                queue_depth,
-                                            )
-                                        };
-
-                                        pipeline_result?;
-
-                                        let _ = dm_ref.remove(entry.key);
-                                        dm_ref
-                                            .create_memory_tier_entry(entry.key, mem_ptr, ipc.size)
-                                            .map_err(|e| {
-                                                DispatcherError::IoError(format!(
-                                                    "promote re-register failed: {e}"
-                                                ))
-                                            })?;
-                                        let _ =
-                                            dm_ref.convert_to_storage(entry.key, entry.offset);
-                                        let _ = dm_ref.release_write(entry.key);
-
-                                        Ok(())
+                                    let prep = (|| -> Result<*mut u8, DispatcherError> {
+                                        Self::evict_for_space(dm_ref, mt_ref, ipc_size)?;
+                                        mt_ref.insert(entry.key, ipc_size).map_err(|e| {
+                                            DispatcherError::AllocationFailed(format!(
+                                                "promote insert failed: {e}"
+                                            ))
+                                        })
                                     })();
 
-                                    batch_results.push((ci, res));
+                                    match prep {
+                                        Ok(mem_ptr) => {
+                                            jobs.push(pipeline::ColdReadJob {
+                                                mem_ptr,
+                                                gpu_dst: entry.ipc_handle_addr
+                                                    as *mut std::ffi::c_void,
+                                                start_lba: entry.offset / block_size as u64,
+                                                total_bytes: ipc_size as usize,
+                                            });
+                                            job_ci.push(ci);
+                                            mem_ptrs.push(mem_ptr);
+                                        }
+                                        Err(e) => {
+                                            batch_results.push((ci, Err(e)));
+                                        }
+                                    }
+                                }
+                                #[cfg(feature = "pipeline-telemetry")]
+                                let t_prep_done = t_prep_start.elapsed();
+
+                                // Run all prepared jobs through the multi-object pipeline.
+                                if !jobs.is_empty() {
+                                    #[cfg(feature = "pipeline-telemetry")]
+                                    let t_pipeline_start = std::time::Instant::now();
+                                    let pipeline_results = unsafe {
+                                        pipeline::pipelined_multi_object_zero_copy(
+                                            &*drive.block_dev_iface,
+                                            &**gpu_ref,
+                                            &streams,
+                                            &channels,
+                                            &jobs,
+                                            chunk_size,
+                                            queue_depth,
+                                        )
+                                    };
+                                    #[cfg(feature = "pipeline-telemetry")]
+                                    let t_pipeline_done = t_pipeline_start.elapsed();
+
+                                    #[cfg(feature = "pipeline-telemetry")]
+                                    let t_finalize_start = std::time::Instant::now();
+                                    // Finalize each job's dispatch-map state.
+                                    for (job_idx, result) in pipeline_results.into_iter().enumerate()
+                                    {
+                                        let ci = job_ci[job_idx];
+                                        let entry = &cold_ref[ci];
+                                        let res = match result {
+                                            Ok(()) => {
+                                                let _ = dm_ref.remove(entry.key);
+                                                let create_res = dm_ref
+                                                    .create_memory_tier_entry(
+                                                        entry.key,
+                                                        mem_ptrs[job_idx],
+                                                        entry.ipc_handle_size,
+                                                    )
+                                                    .map_err(|e| {
+                                                        DispatcherError::IoError(format!(
+                                                            "promote re-register failed: {e}"
+                                                        ))
+                                                    });
+                                                if create_res.is_ok() {
+                                                    let _ = dm_ref.convert_to_storage(
+                                                        entry.key,
+                                                        entry.offset,
+                                                    );
+                                                    let _ = dm_ref.release_write(entry.key);
+                                                }
+                                                create_res
+                                            }
+                                            Err(e) => Err(e),
+                                        };
+                                        batch_results.push((ci, res));
+                                    }
+                                    #[cfg(feature = "pipeline-telemetry")]
+                                    {
+                                        let t_finalize_done = t_finalize_start.elapsed();
+                                        eprintln!(
+                                            "[cold-perf] drive={} jobs={} segs={} prep={:.1}ms pipeline={:.1}ms finalize={:.1}ms",
+                                            drive_idx,
+                                            jobs.len(),
+                                            jobs.len() * 32,
+                                            t_prep_done.as_secs_f64() * 1000.0,
+                                            t_pipeline_done.as_secs_f64() * 1000.0,
+                                            t_finalize_done.as_secs_f64() * 1000.0,
+                                        );
+                                    }
                                 }
 
                                 let _ = gpu_ref.destroy_stream(streams[0]);

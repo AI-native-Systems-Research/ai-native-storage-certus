@@ -187,6 +187,8 @@ unsafe extern "C" fn async_completion_cb(
 pub(crate) struct PendingOp {
     /// Component-assigned operation handle.
     pub handle: u64,
+    /// Caller-assigned tag echoed back in the completion.
+    pub tag: u64,
     /// Timeout deadline (TSC ticks).
     pub deadline: u64,
     /// Index of the queue pair used for this operation.
@@ -238,6 +240,8 @@ pub(crate) struct BlockDeviceHandler {
     pub telemetry: Arc<TelemetryStats>,
     /// Last time `check_timeouts()` was called (TSC ticks), throttled to ~1ms.
     last_timeout_check: u64,
+    /// Rotating start index for fair client polling (prevents HOL blocking).
+    poll_start_idx: usize,
     /// Low-overhead TSC clock for hot-path timing.
     tsc: TscClock,
     /// Optional logger from the component's ILogger receptacle.
@@ -305,6 +309,7 @@ impl BlockDeviceHandler {
             #[cfg(feature = "telemetry")]
             telemetry: Arc::new(TelemetryStats::new()),
             last_timeout_check: now,
+            poll_start_idx: 0,
             tsc,
             logger,
         }
@@ -331,6 +336,7 @@ impl BlockDeviceHandler {
             timeout_scratch: Vec::new(),
             telemetry,
             last_timeout_check: now,
+            poll_start_idx: 0,
             tsc,
             logger,
         }
@@ -362,15 +368,33 @@ impl BlockDeviceHandler {
     /// them silently per FR-019. Returns `true` if any commands or
     /// completions were processed.
     fn poll_clients(&mut self) -> bool {
+        const MAX_COMMANDS_PER_CLIENT_PER_POLL: usize = 4;
+
         let mut did_work = false;
-        let mut i = 0;
-        while i < self.clients.len() {
+        let num_clients = self.clients.len();
+        let start = if num_clients > 0 {
+            self.poll_start_idx % num_clients
+        } else {
+            0
+        };
+        if num_clients > 0 {
+            self.poll_start_idx = self.poll_start_idx.wrapping_add(1);
+        }
+
+        let mut i = start;
+        let mut visited = 0;
+        while visited < num_clients {
             let mut disconnected = false;
+            let mut drained = 0usize;
             loop {
+                if drained >= MAX_COMMANDS_PER_CLIENT_PER_POLL {
+                    break;
+                }
                 let client = &mut self.clients[i];
                 match client.session.ingress_rx.try_recv() {
                     Ok(cmd) => {
                         did_work = true;
+                        drained += 1;
                         if matches!(cmd, Command::ControllerReset) {
                             let client_id = self.clients[i].session.id;
                             self.handle_controller_reset(client_id);
@@ -408,8 +432,16 @@ impl BlockDeviceHandler {
                     self.clients[i].session.id
                 ));
                 self.clients.swap_remove(i);
+                // Don't advance i; swap_remove put a new client here.
+                // But we need to adjust num_clients for iteration bounds.
+                visited += 1;
+                if self.clients.is_empty() {
+                    break;
+                }
+                i %= self.clients.len();
             } else {
-                i += 1;
+                visited += 1;
+                i = (i + 1) % self.clients.len();
             }
         }
 
@@ -435,9 +467,9 @@ impl BlockDeviceHandler {
             {
                 // If the handle was already removed (aborted or timed out),
                 // silently discard the completion.
-                if client.pending_ops.remove(&entry.handle).is_none() {
+                let Some(pending) = client.pending_ops.remove(&entry.handle) else {
                     continue;
-                }
+                };
 
                 #[cfg(feature = "telemetry")]
                 if entry.result.is_ok() {
@@ -447,11 +479,13 @@ impl BlockDeviceHandler {
                 let completion = if entry.is_read {
                     Completion::ReadDone {
                         handle: OpHandle(entry.handle),
+                        tag: pending.tag,
                         result: entry.result,
                     }
                 } else {
                     Completion::WriteDone {
                         handle: OpHandle(entry.handle),
+                        tag: pending.tag,
                         result: entry.result,
                     }
                 };
@@ -562,6 +596,7 @@ impl BlockDeviceHandler {
 
                 let _ = session.callback_tx.send(Completion::ReadDone {
                     handle: OpHandle(handle),
+                    tag: 0,
                     result,
                 });
             }
@@ -584,6 +619,7 @@ impl BlockDeviceHandler {
 
                 let _ = session.callback_tx.send(Completion::WriteDone {
                     handle: OpHandle(handle),
+                    tag: 0,
                     result,
                 });
             }
@@ -592,6 +628,7 @@ impl BlockDeviceHandler {
                 lba,
                 buf,
                 timeout_ms,
+                tag,
             } => {
                 let handle = *next_handle;
                 *next_handle += 1;
@@ -601,6 +638,7 @@ impl BlockDeviceHandler {
                 if let Err(e) = validation {
                     let _ = session.callback_tx.send(Completion::ReadDone {
                         handle: OpHandle(handle),
+                        tag,
                         result: Err(e),
                     });
                     return;
@@ -615,6 +653,7 @@ impl BlockDeviceHandler {
                     handle,
                     PendingOp {
                         handle,
+                        tag,
                         deadline: tsc.deadline_from_ms(now, timeout_ms),
                         qpair_idx: qp_idx,
                         read_buf: Some(buf.clone()),
@@ -682,6 +721,7 @@ impl BlockDeviceHandler {
                     pending_ops.remove(&handle);
                     let _ = session.callback_tx.send(Completion::ReadDone {
                         handle: OpHandle(handle),
+                        tag,
                         result: Err(NvmeBlockError::BlockDevice(
                             interfaces::BlockDeviceError::ReadFailed(format!(
                                 "async spdk_nvme_ns_cmd_read submit failed with rc={rc}"
@@ -701,6 +741,7 @@ impl BlockDeviceHandler {
                 lba,
                 buf,
                 timeout_ms,
+                tag,
             } => {
                 let handle = *next_handle;
                 *next_handle += 1;
@@ -710,6 +751,7 @@ impl BlockDeviceHandler {
                 if let Err(e) = validation {
                     let _ = session.callback_tx.send(Completion::WriteDone {
                         handle: OpHandle(handle),
+                        tag,
                         result: Err(e),
                     });
                     return;
@@ -723,6 +765,7 @@ impl BlockDeviceHandler {
                     handle,
                     PendingOp {
                         handle,
+                        tag,
                         deadline: tsc.deadline_from_ms(now, timeout_ms),
                         qpair_idx: qp_idx,
                         read_buf: None,
@@ -788,6 +831,7 @@ impl BlockDeviceHandler {
                     pending_ops.remove(&handle);
                     let _ = session.callback_tx.send(Completion::WriteDone {
                         handle: OpHandle(handle),
+                        tag,
                         result: Err(NvmeBlockError::BlockDevice(
                             interfaces::BlockDeviceError::WriteFailed(format!(
                                 "async spdk_nvme_ns_cmd_write submit failed with rc={rc}"
@@ -1230,6 +1274,7 @@ mod tests {
         let tsc = TscClock::new();
         let op = PendingOp {
             handle: 42,
+            tag: 0,
             deadline: tsc.deadline_from_ms(tsc.now(), 5000),
             qpair_idx: 0,
             read_buf: None,

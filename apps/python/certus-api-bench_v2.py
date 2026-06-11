@@ -367,6 +367,7 @@ def run_client(
     result,
     gpu_id=0,
     pipeline_depth=4,
+    writes_settle=30.0,
 ):
     """Single client worker: populate objects, then measure hot and cold lookups."""
 
@@ -459,12 +460,13 @@ def run_client(
     result.populate_end = t_pop_end
     result.populate_objects = total_objects
 
-    # Wait for background write-through to flush to SSD.
-    # All clients flush in parallel so use per-client volume, not total.
-    # Conservative 2 GB/s per SSD estimate.
+    # Wait for background write-through to drain to SSD. Without this settle
+    # period, cold-read latency is inflated by the background writer competing
+    # for actor channel and NVMe qpair bandwidth.
     per_client_flush_bytes = total_objects * BLOCK_SIZE
     wt_wait = max(5.0, per_client_flush_bytes / (2 * 1024**3))
-    time.sleep(wt_wait)
+    settle_wait = max(wt_wait, writes_settle)
+    time.sleep(settle_wait)
 
     # --- Phase 2: Hot lookups (memory-tier) ---
     # The last `num_objects` in the pool are still in DRAM.
@@ -708,6 +710,13 @@ def main():
         help="Concurrent RPCs in flight per client (default: 4). "
         "Keeps multiple requests in flight like iperf -P to saturate the GPU PCIe link.",
     )
+    parser.add_argument(
+        "--writes-settle",
+        type=float,
+        default=30.0,
+        help="Seconds to wait after populate for write-through to drain (default: 30). "
+        "Set to 0 to skip.",
+    )
     args = parser.parse_args()
 
     global BLOCK_SIZE
@@ -779,6 +788,7 @@ def main():
                 results[i],
                 gpu_id,
                 pipeline_depth,
+                args.writes_settle,
             ),
             daemon=True,
         )

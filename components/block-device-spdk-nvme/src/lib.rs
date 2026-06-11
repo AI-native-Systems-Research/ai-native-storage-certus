@@ -65,7 +65,7 @@ use crate::controller::NvmeController;
 use interfaces::IBlockDeviceAdmin;
 
 /// Channel capacity for per-client SPSC channels.
-const CLIENT_CHANNEL_CAPACITY: usize = 64;
+const CLIENT_CHANNEL_CAPACITY: usize = 256;
 
 // SPDK NVMe block device component.
 //
