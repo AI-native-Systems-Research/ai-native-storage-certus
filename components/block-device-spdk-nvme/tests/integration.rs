@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use block_device_spdk_nvme::{BlockDeviceSpdkNvmeComponent, IBlockDevice};
 use component_core::binding::bind;
 use component_core::iunknown::{query, IUnknown};
-use logger::LoggerComponent;
+use interfaces::ILogger;
 use spdk_env::SPDKEnvComponent;
 
 /// Create a fully-wired component set without initializing SPDK.
@@ -24,17 +24,17 @@ use spdk_env::SPDKEnvComponent;
 fn wire_components() -> (
     Arc<BlockDeviceSpdkNvmeComponent>,
     Arc<SPDKEnvComponent>,
-    Arc<LoggerComponent>,
+    Arc<dyn ILogger + Send + Sync>,
 ) {
     let spdk_env = SPDKEnvComponent::new_default();
     let block_dev = BlockDeviceSpdkNvmeComponent::new_default();
-    let logger = LoggerComponent::new_default();
+    let logger = logger::LoggerComponent::new_default();
 
     bind(&*spdk_env, "ISPDKEnv", &*block_dev, "spdk_env")
         .expect("failed to bind spdk_env receptacle");
     bind(&*logger, "ILogger", &*block_dev, "logger").expect("failed to bind logger receptacle");
 
-    (block_dev, spdk_env, logger)
+    (block_dev, spdk_env, logger as Arc<dyn ILogger + Send + Sync>)
 }
 
 /// Result of a successful SPDK hardware initialization.
@@ -48,7 +48,7 @@ struct SpdkHardwareContext {
     #[allow(dead_code)]
     spdk_env: Arc<SPDKEnvComponent>,
     #[allow(dead_code)]
-    logger: Arc<LoggerComponent>,
+    logger: Arc<dyn ILogger + Send + Sync>,
 }
 
 // SAFETY: The component Arcs are Send+Sync (they use internal Mutex/RwLock).
@@ -455,6 +455,7 @@ fn sync_write_async_read_roundtrip() {
             lba: 3,
             buf: Arc::clone(&read_buf),
             timeout_ms: 5000,
+            tag: 0,
         })
         .expect("send ReadAsync failed");
 
@@ -749,6 +750,7 @@ fn multi_client_independent_streams() {
                             lba,
                             buf: awbuf,
                             timeout_ms: 5000,
+                            tag: 0,
                         })
                         .expect("send WriteAsync failed");
 
@@ -771,6 +773,7 @@ fn multi_client_independent_streams() {
                             lba,
                             buf: Arc::clone(&arbuf),
                             timeout_ms: 5000,
+            tag: 0,
                         })
                         .expect("send ReadAsync failed");
 
@@ -1136,6 +1139,7 @@ fn sc002_timeout_accuracy() {
             lba: 0,
             buf: rbuf,
             timeout_ms,
+            tag: 0,
         })
         .expect("send async read");
 

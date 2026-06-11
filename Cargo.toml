@@ -15,6 +15,7 @@ members = [
     "apps/nvme-ns-manager",
     "apps/extent-benchmark",
     "components/block-device-spdk-nvme",
+    "components/block-device-filesys",
     "components/extent-manager",
     "components/logger",
     "components/dispatch-map",
@@ -27,7 +28,8 @@ members = [
     "apps/gpu-bb-vs-p2p",
     "certus-connector",
     "components/example-helloworld-dylib",
-    "apps/dynamic-loading-example"
+    "apps/dynamic-loading-example",
+    "apps/certus-server-yaml"
 ]
 
 # SPDK crates require pre-built native libraries at deps/spdk-build/.
@@ -62,10 +64,11 @@ interfaces = { path = "components/interfaces" }
 spdk-sys = { path = "components/spdk-sys" }
 spdk-env = { path = "components/spdk-env" }
 block-device-spdk-nvme = { path = "components/block-device-spdk-nvme" }
+block-device-filesys = { path = "components/block-device-filesys" }
 logger = { path = "components/logger" }
 dispatch-map = { path = "components/dispatch-map" }
 memory-tier = { path = "components/memory-tier" }
-dispatcher = { path = "components/dispatcher" }
+dispatcher = { path = "components/dispatcher", default-features = false }
 extent-manager = { path = "components/extent-manager" }
 gpu-services = { path = "components/gpu-services" }
 certus-connector = { path = "certus-connector" }

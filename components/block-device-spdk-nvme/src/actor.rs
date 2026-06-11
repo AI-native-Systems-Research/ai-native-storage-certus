@@ -22,6 +22,18 @@ use crate::namespace;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::TelemetryStats;
 
+/// Upper bound (milliseconds) on how long an async submit will keep draining
+/// completions and retrying after `-ENOMEM` before giving up.
+///
+/// On `-ENOMEM` the selected qpair's SPDK request pool is momentarily
+/// exhausted under concurrent load. The submit retry loop polls completions to
+/// free slots, so it normally succeeds within microseconds; this cap bounds how
+/// long the actor thread will spin in the pathological case (e.g. a hardware
+/// stall where no completion ever arrives). The effective backpressure window
+/// is `min(op.timeout_ms, this)`, replacing the old hardcoded 1 ms that turned
+/// transient saturation into spurious Read/Write failures.
+const SUBMIT_ENOMEM_MAX_BACKPRESSURE_MS: u64 = 1000;
+
 /// Entry produced by async SPDK completion callbacks.
 pub(crate) struct AsyncCompletionEntry {
     /// Client that submitted the operation.
@@ -175,6 +187,8 @@ unsafe extern "C" fn async_completion_cb(
 pub(crate) struct PendingOp {
     /// Component-assigned operation handle.
     pub handle: u64,
+    /// Caller-assigned tag echoed back in the completion.
+    pub tag: u64,
     /// Timeout deadline (TSC ticks).
     pub deadline: u64,
     /// Index of the queue pair used for this operation.
@@ -202,8 +216,12 @@ struct ClientState {
 /// Owns the NVMe controller and manages client sessions. The actor runs
 /// on a dedicated thread pinned to the NUMA node of the NVMe controller.
 pub(crate) struct BlockDeviceHandler {
-    /// The attached NVMe controller.
-    controller: NvmeController,
+    /// The attached NVMe controller (taken out and parked during on_stop
+    /// so that detach happens after ALL actor threads have exited).
+    controller: Option<NvmeController>,
+    /// Shared parking slot: on_stop moves the controller here so it outlives
+    /// the actor thread and detach happens after ALL actors have exited.
+    controller_park: Arc<Mutex<Option<NvmeController>>>,
     /// Connected client sessions.
     clients: Vec<ClientState>,
     /// Monotonically increasing operation handle counter.
@@ -222,6 +240,8 @@ pub(crate) struct BlockDeviceHandler {
     pub telemetry: Arc<TelemetryStats>,
     /// Last time `check_timeouts()` was called (TSC ticks), throttled to ~1ms.
     last_timeout_check: u64,
+    /// Rotating start index for fair client polling (prevents HOL blocking).
+    poll_start_idx: usize,
     /// Low-overhead TSC clock for hot-path timing.
     tsc: TscClock,
     /// Optional logger from the component's ILogger receptacle.
@@ -272,12 +292,14 @@ impl BlockDeviceHandler {
     #[allow(dead_code)]
     pub(crate) fn new(
         controller: NvmeController,
+        controller_park: Arc<Mutex<Option<NvmeController>>>,
         logger: Option<Arc<dyn ILogger + Send + Sync>>,
     ) -> Self {
         let tsc = TscClock::new();
         let now = tsc.now();
         Self {
-            controller,
+            controller: Some(controller),
+            controller_park,
             clients: Vec::new(),
             next_handle: 1,
             async_completions: Vec::new(),
@@ -287,6 +309,7 @@ impl BlockDeviceHandler {
             #[cfg(feature = "telemetry")]
             telemetry: Arc::new(TelemetryStats::new()),
             last_timeout_check: now,
+            poll_start_idx: 0,
             tsc,
             logger,
         }
@@ -296,13 +319,15 @@ impl BlockDeviceHandler {
     #[cfg(feature = "telemetry")]
     pub(crate) fn with_telemetry(
         controller: NvmeController,
+        controller_park: Arc<Mutex<Option<NvmeController>>>,
         telemetry: Arc<TelemetryStats>,
         logger: Option<Arc<dyn ILogger + Send + Sync>>,
     ) -> Self {
         let tsc = TscClock::new();
         let now = tsc.now();
         Self {
-            controller,
+            controller: Some(controller),
+            controller_park,
             clients: Vec::new(),
             next_handle: 1,
             async_completions: Vec::new(),
@@ -311,6 +336,7 @@ impl BlockDeviceHandler {
             timeout_scratch: Vec::new(),
             telemetry,
             last_timeout_check: now,
+            poll_start_idx: 0,
             tsc,
             logger,
         }
@@ -342,15 +368,33 @@ impl BlockDeviceHandler {
     /// them silently per FR-019. Returns `true` if any commands or
     /// completions were processed.
     fn poll_clients(&mut self) -> bool {
+        const MAX_COMMANDS_PER_CLIENT_PER_POLL: usize = 4;
+
         let mut did_work = false;
-        let mut i = 0;
-        while i < self.clients.len() {
+        let num_clients = self.clients.len();
+        let start = if num_clients > 0 {
+            self.poll_start_idx % num_clients
+        } else {
+            0
+        };
+        if num_clients > 0 {
+            self.poll_start_idx = self.poll_start_idx.wrapping_add(1);
+        }
+
+        let mut i = start;
+        let mut visited = 0;
+        while visited < num_clients {
             let mut disconnected = false;
+            let mut drained = 0usize;
             loop {
+                if drained >= MAX_COMMANDS_PER_CLIENT_PER_POLL {
+                    break;
+                }
                 let client = &mut self.clients[i];
                 match client.session.ingress_rx.try_recv() {
                     Ok(cmd) => {
                         did_work = true;
+                        drained += 1;
                         if matches!(cmd, Command::ControllerReset) {
                             let client_id = self.clients[i].session.id;
                             self.handle_controller_reset(client_id);
@@ -361,7 +405,7 @@ impl BlockDeviceHandler {
                             pending_ops,
                         } = &mut self.clients[i];
                         Self::dispatch_command(
-                            &mut self.controller,
+                            self.controller.as_mut().unwrap(),
                             session,
                             pending_ops,
                             &mut self.next_handle,
@@ -388,14 +432,23 @@ impl BlockDeviceHandler {
                     self.clients[i].session.id
                 ));
                 self.clients.swap_remove(i);
+                // Don't advance i; swap_remove put a new client here.
+                // But we need to adjust num_clients for iteration bounds.
+                visited += 1;
+                if self.clients.is_empty() {
+                    break;
+                }
+                i %= self.clients.len();
             } else {
-                i += 1;
+                visited += 1;
+                i = (i + 1) % self.clients.len();
             }
         }
 
         // Process SPDK qpair completions for async operations.
-        for qp_idx in 0..self.controller.qpairs.len() {
-            if let Some(qp) = self.controller.qpairs.get_mut(qp_idx) {
+        let ctrl = self.controller.as_mut().unwrap();
+        for qp_idx in 0..ctrl.qpairs.len() {
+            if let Some(qp) = ctrl.qpairs.get_mut(qp_idx) {
                 // SAFETY: queue pair pointer is valid while controller is alive.
                 let n = unsafe { qp.process_completions(0) };
                 if n > 0 {
@@ -414,9 +467,9 @@ impl BlockDeviceHandler {
             {
                 // If the handle was already removed (aborted or timed out),
                 // silently discard the completion.
-                if client.pending_ops.remove(&entry.handle).is_none() {
+                let Some(pending) = client.pending_ops.remove(&entry.handle) else {
                     continue;
-                }
+                };
 
                 #[cfg(feature = "telemetry")]
                 if entry.result.is_ok() {
@@ -426,11 +479,13 @@ impl BlockDeviceHandler {
                 let completion = if entry.is_read {
                     Completion::ReadDone {
                         handle: OpHandle(entry.handle),
+                        tag: pending.tag,
                         result: entry.result,
                     }
                 } else {
                     Completion::WriteDone {
                         handle: OpHandle(entry.handle),
+                        tag: pending.tag,
                         result: entry.result,
                     }
                 };
@@ -476,9 +531,10 @@ impl BlockDeviceHandler {
         }
 
         // SAFETY: controller pointer is valid while actor is running.
-        let rc = unsafe { spdk_sys::spdk_nvme_ctrlr_reset(self.controller.as_ptr()) };
+        let ctrl = self.controller.as_mut().unwrap();
+        let rc = unsafe { spdk_sys::spdk_nvme_ctrlr_reset(ctrl.as_ptr()) };
         let result = if rc == 0 {
-            self.controller.refresh_namespaces();
+            ctrl.refresh_namespaces();
             Ok(())
         } else {
             Err(NvmeBlockError::BlockDevice(
@@ -540,6 +596,7 @@ impl BlockDeviceHandler {
 
                 let _ = session.callback_tx.send(Completion::ReadDone {
                     handle: OpHandle(handle),
+                    tag: 0,
                     result,
                 });
             }
@@ -562,6 +619,7 @@ impl BlockDeviceHandler {
 
                 let _ = session.callback_tx.send(Completion::WriteDone {
                     handle: OpHandle(handle),
+                    tag: 0,
                     result,
                 });
             }
@@ -570,6 +628,7 @@ impl BlockDeviceHandler {
                 lba,
                 buf,
                 timeout_ms,
+                tag,
             } => {
                 let handle = *next_handle;
                 *next_handle += 1;
@@ -579,6 +638,7 @@ impl BlockDeviceHandler {
                 if let Err(e) = validation {
                     let _ = session.callback_tx.send(Completion::ReadDone {
                         handle: OpHandle(handle),
+                        tag,
                         result: Err(e),
                     });
                     return;
@@ -593,6 +653,7 @@ impl BlockDeviceHandler {
                     handle,
                     PendingOp {
                         handle,
+                        tag,
                         deadline: tsc.deadline_from_ms(now, timeout_ms),
                         qpair_idx: qp_idx,
                         read_buf: Some(buf.clone()),
@@ -617,8 +678,13 @@ impl BlockDeviceHandler {
                 let ctx_raw = Box::into_raw(ctx);
                 let mut rc;
                 const ENOMEM: i32 = -12;
-                // Retry for up to ~1ms (typical NVMe latency is 10-100us).
-                let deadline = tsc.deadline_from_ms(tsc.now(), 1);
+                // On -ENOMEM the qpair's request pool is momentarily exhausted.
+                // Keep draining completions and retrying up to the op's own
+                // timeout (capped) so transient saturation becomes brief
+                // backpressure instead of a spurious ReadFailed. The loop frees
+                // slots by polling completions, so it exits as soon as one frees.
+                let backpressure_ms = timeout_ms.min(SUBMIT_ENOMEM_MAX_BACKPRESSURE_MS).max(1);
+                let deadline = tsc.deadline_from_ms(tsc.now(), backpressure_ms);
 
                 loop {
                     let qp = controller
@@ -655,6 +721,7 @@ impl BlockDeviceHandler {
                     pending_ops.remove(&handle);
                     let _ = session.callback_tx.send(Completion::ReadDone {
                         handle: OpHandle(handle),
+                        tag,
                         result: Err(NvmeBlockError::BlockDevice(
                             interfaces::BlockDeviceError::ReadFailed(format!(
                                 "async spdk_nvme_ns_cmd_read submit failed with rc={rc}"
@@ -674,6 +741,7 @@ impl BlockDeviceHandler {
                 lba,
                 buf,
                 timeout_ms,
+                tag,
             } => {
                 let handle = *next_handle;
                 *next_handle += 1;
@@ -683,6 +751,7 @@ impl BlockDeviceHandler {
                 if let Err(e) = validation {
                     let _ = session.callback_tx.send(Completion::WriteDone {
                         handle: OpHandle(handle),
+                        tag,
                         result: Err(e),
                     });
                     return;
@@ -696,6 +765,7 @@ impl BlockDeviceHandler {
                     handle,
                     PendingOp {
                         handle,
+                        tag,
                         deadline: tsc.deadline_from_ms(now, timeout_ms),
                         qpair_idx: qp_idx,
                         read_buf: None,
@@ -720,7 +790,11 @@ impl BlockDeviceHandler {
                 let ctx_raw = Box::into_raw(ctx);
                 let mut rc;
                 const ENOMEM: i32 = -12;
-                let deadline = tsc.deadline_from_ms(tsc.now(), 1);
+                // See the read path: retry on -ENOMEM up to the op's timeout
+                // (capped) instead of a fixed 1 ms, turning transient qpair
+                // saturation into brief backpressure rather than a WriteFailed.
+                let backpressure_ms = timeout_ms.min(SUBMIT_ENOMEM_MAX_BACKPRESSURE_MS).max(1);
+                let deadline = tsc.deadline_from_ms(tsc.now(), backpressure_ms);
 
                 loop {
                     let qp = controller
@@ -757,6 +831,7 @@ impl BlockDeviceHandler {
                     pending_ops.remove(&handle);
                     let _ = session.callback_tx.send(Completion::WriteDone {
                         handle: OpHandle(handle),
+                        tag,
                         result: Err(NvmeBlockError::BlockDevice(
                             interfaces::BlockDeviceError::WriteFailed(format!(
                                 "async spdk_nvme_ns_cmd_write submit failed with rc={rc}"
@@ -1095,13 +1170,13 @@ impl BlockDeviceHandler {
     /// Get a reference to the controller.
     #[allow(dead_code)]
     pub(crate) fn controller(&self) -> &NvmeController {
-        &self.controller
+        self.controller.as_ref().unwrap()
     }
 
     /// Get a mutable reference to the controller.
     #[allow(dead_code)]
     pub(crate) fn controller_mut(&mut self) -> &mut NvmeController {
-        &mut self.controller
+        self.controller.as_mut().unwrap()
     }
 }
 
@@ -1153,8 +1228,9 @@ impl ActorHandler<ControlMessage> for BlockDeviceHandler {
         // Drain all in-flight SPDK operations so completion callbacks don't
         // fire after the handler (and its async_completions Vec) is dropped.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        for qp_idx in 0..self.controller.qpairs.len() {
-            if let Some(qp) = self.controller.qpairs.get_mut(qp_idx) {
+        let ctrl = self.controller.as_mut().unwrap();
+        for qp_idx in 0..ctrl.qpairs.len() {
+            if let Some(qp) = ctrl.qpairs.get_mut(qp_idx) {
                 while qp.in_flight() > 0 && std::time::Instant::now() < deadline {
                     unsafe {
                         qp.process_completions(0);
@@ -1180,6 +1256,12 @@ impl ActorHandler<ControlMessage> for BlockDeviceHandler {
             }
         }
         self.clients.clear();
+
+        // Park the controller so it outlives this thread. The caller will
+        // detach it after ALL actor threads have been joined.
+        if let Some(ctrl) = self.controller.take() {
+            *self.controller_park.lock().unwrap() = Some(ctrl);
+        }
     }
 }
 
@@ -1192,6 +1274,7 @@ mod tests {
         let tsc = TscClock::new();
         let op = PendingOp {
             handle: 42,
+            tag: 0,
             deadline: tsc.deadline_from_ms(tsc.now(), 5000),
             qpair_idx: 0,
             read_buf: None,

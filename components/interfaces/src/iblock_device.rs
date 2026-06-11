@@ -211,6 +211,8 @@ pub enum Command {
         buf: Arc<Mutex<DmaBuffer>>,
         /// Timeout in milliseconds.
         timeout_ms: u64,
+        /// Caller-assigned tag echoed back in [`Completion::ReadDone`].
+        tag: u64,
     },
     /// Asynchronous write with timeout.
     WriteAsync {
@@ -222,6 +224,8 @@ pub enum Command {
         buf: Arc<DmaBuffer>,
         /// Timeout in milliseconds.
         timeout_ms: u64,
+        /// Caller-assigned tag echoed back in [`Completion::WriteDone`].
+        tag: u64,
     },
     /// Write zeros to a range of blocks.
     WriteZeros {
@@ -293,6 +297,8 @@ pub enum Completion {
     ReadDone {
         /// Operation handle.
         handle: OpHandle,
+        /// Caller-assigned tag from the corresponding [`Command::ReadAsync`].
+        tag: u64,
         /// Result of the read.
         result: Result<(), NvmeBlockError>,
     },
@@ -300,6 +306,8 @@ pub enum Completion {
     WriteDone {
         /// Operation handle.
         handle: OpHandle,
+        /// Caller-assigned tag from the corresponding [`Command::WriteAsync`].
+        tag: u64,
         /// Result of the write.
         result: Result<(), NvmeBlockError>,
     },
@@ -445,11 +453,28 @@ define_interface! {
         /// Initialize the component and start its actor thread.
         fn initialize(&self) -> Result<(), NvmeBlockError>;
 
+        /// Signal the actor thread to stop without joining it.
+        ///
+        /// This closes the actor's command channel so its poll loop exits.
+        /// Call [`shutdown`] afterward to join the thread and release the
+        /// NVMe controller. Use this to stop all actors before detaching
+        /// any controllers — avoids crashes from SPDK transport teardown
+        /// invalidating memory that other actors are still polling.
+        fn signal_stop(&self);
+
         /// Shutdown the component: stop the actor and join its thread.
         ///
         /// This ensures no actor threads are executing SPDK code when the
         /// global SPDK/DPDK environment is torn down.
         fn shutdown(&self) -> Result<(), NvmeBlockError>;
+
+        /// Explicitly detach the NVMe controller from SPDK.
+        ///
+        /// Must be called AFTER [`shutdown`] has joined the actor thread.
+        /// This drops the parked controller, calling `spdk_nvme_detach`.
+        /// Required because the component leaks (Arc cycle from
+        /// `define_component!`), so Drop never fires.
+        fn detach_controller(&self);
     }
 }
 

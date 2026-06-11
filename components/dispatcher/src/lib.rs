@@ -7,6 +7,8 @@
 //! Provides the [`IDispatcher`] interface with receptacles for
 //! [`ILogger`], [`IDispatchMap`], and [`IMemoryTier`].
 
+#![allow(clippy::too_many_arguments)]
+
 mod background;
 pub mod io_segmenter;
 pub mod pipeline;
@@ -25,13 +27,10 @@ use interfaces::{
     WriteHandle,
 };
 
-use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent;
 use component_core::binding::bind;
-use component_core::query_interface;
-use extent_manager::ExtentManager;
 use spdk_env::ISPDKEnv;
 
-use crate::background::{BackgroundEvictor, BackgroundWriter, EvictorConfig, WriteJob};
+use crate::background::{BackgroundEvictor, EvictorConfig, ParallelBackgroundWriter, WriteJob};
 
 /// A pending store awaiting commit or cancel.
 ///
@@ -53,11 +52,46 @@ struct PendingWrite {
 #[allow(dead_code)]
 struct DataDrive {
     _block_dev: Arc<dyn component_core::IUnknown + Send + Sync>,
-    block_dev_admin: Arc<dyn IBlockDeviceAdmin + Send + Sync>,
+    block_dev_admin: Option<Arc<dyn IBlockDeviceAdmin + Send + Sync>>,
     block_dev_iface: Arc<dyn IBlockDevice + Send + Sync>,
-    extent_mgr: Arc<ExtentManager>,
+    _extent_mgr_component: Arc<dyn component_core::IUnknown + Send + Sync>,
+    extent_mgr: Arc<dyn IExtentManager + Send + Sync>,
     cached_channels: Option<ClientChannels>,
 }
+
+/// Factory function type for creating block device components.
+/// Receives SPDK env, logger, drive index, PCI address, and optional CPU pin.
+/// Returns a fully-initialized block device: (IUnknown holder, IBlockDevice, IBlockDeviceAdmin).
+/// The factory is responsible for calling initialize() internally.
+pub type BlockDeviceFactory = Box<
+    dyn Fn(
+            &Arc<dyn ISPDKEnv + Send + Sync>,
+            &Arc<dyn ILogger + Send + Sync>,
+            usize,
+            PciAddress,
+            Option<usize>,
+        ) -> Result<
+            (
+                Arc<dyn component_core::IUnknown + Send + Sync>,
+                Arc<dyn IBlockDevice + Send + Sync>,
+                Arc<dyn IBlockDeviceAdmin + Send + Sync>,
+            ),
+            String,
+        > + Send
+        + Sync,
+>;
+
+/// Factory function type for creating extent manager components.
+/// Receives logger and DMA allocator so it can wire receptacles.
+/// Returns an `Arc<dyn IUnknown>` that provides `IExtentManager`.
+pub type ExtentManagerFactory = Box<
+    dyn Fn(
+            &Arc<dyn ILogger + Send + Sync>,
+            DmaAllocFn,
+        ) -> Arc<dyn component_core::IUnknown + Send + Sync>
+        + Send
+        + Sync,
+>;
 
 define_component! {
     pub DispatcherComponent {
@@ -72,12 +106,14 @@ define_component! {
         },
         fields: {
             initialized: AtomicBool,
-            bg_writer: Mutex<Option<BackgroundWriter>>,
+            bg_writer: Mutex<Option<ParallelBackgroundWriter>>,
             bg_evictor: Mutex<Option<BackgroundEvictor>>,
             data_drives: RwLock<Vec<DataDrive>>,
             pending_writes: Mutex<HashMap<CacheKey, PendingWrite>>,
             pipeline_ring: RwLock<Option<pipeline::PipelineRing>>,
             warm_stream: AtomicU64,
+            block_device_factory: Mutex<Option<BlockDeviceFactory>>,
+            extent_manager_factory: Mutex<Option<ExtentManagerFactory>>,
         },
     }
 }
@@ -104,8 +140,84 @@ impl DispatcherComponent {
         }
     }
 
+    /// Set a factory function for creating block device components.
+    /// When set, the dispatcher uses this instead of the hard-coded SPDK NVMe implementation.
+    pub fn set_block_device_factory(&self, factory: BlockDeviceFactory) {
+        *self.block_device_factory.lock().unwrap() = Some(factory);
+    }
+
+    /// Set a factory function for creating extent manager components.
+    /// When set, the dispatcher uses this instead of the hard-coded default.
+    pub fn set_extent_manager_factory(&self, factory: ExtentManagerFactory) {
+        *self.extent_manager_factory.lock().unwrap() = Some(factory);
+    }
+
     fn drive_index(key: CacheKey, num_drives: usize) -> usize {
-        key as usize % num_drives
+        // splitmix64 finalizer: distributes sequential keys uniformly.
+        let mut h = key;
+        h ^= h >> 30;
+        h = h.wrapping_mul(0xbf58476d1ce4e5b9);
+        h ^= h >> 27;
+        h = h.wrapping_mul(0x94d049bb133111eb);
+        h ^= h >> 31;
+        h as usize % num_drives
+    }
+
+    /// Compute per-drive CPU assignments based on NUMA topology.
+    ///
+    /// For each PCI address, looks up the device's NUMA node from SPDK's
+    /// device list, then assigns CPUs round-robin from that node's available
+    /// cores. Returns `None` for any drive whose NUMA node can't be resolved
+    /// (the block device component will fall back to its own NUMA heuristic).
+    fn compute_numa_cpu_assignments(
+        spdk_env: &Arc<dyn ISPDKEnv + Send + Sync>,
+        pci_addrs: &[String],
+        logger: &Arc<dyn ILogger + Send + Sync>,
+    ) -> Vec<Option<usize>> {
+        use std::collections::HashMap;
+
+        let topo = match component_core::numa::NumaTopology::discover() {
+            Ok(t) => t,
+            Err(_) => {
+                logger.warn("dispatcher: NUMA topology unavailable, poller CPUs will not be pinned");
+                return vec![None; pci_addrs.len()];
+            }
+        };
+
+        let devices = spdk_env.devices();
+        let device_map: HashMap<String, i32> = devices
+            .iter()
+            .map(|d| (d.address.to_string(), d.numa_node))
+            .collect();
+
+        // Track next available CPU index per NUMA node for round-robin.
+        let mut node_cpu_idx: HashMap<usize, usize> = HashMap::new();
+
+        pci_addrs
+            .iter()
+            .map(|addr| {
+                let numa_node = device_map.get(addr).copied().unwrap_or(-1);
+                if numa_node < 0 {
+                    return None;
+                }
+                let node_id = numa_node as usize;
+                let node = match topo.node(node_id) {
+                    Some(n) => n,
+                    None => return None,
+                };
+                let cpus: Vec<usize> = node.cpus().iter().collect();
+                if cpus.is_empty() {
+                    return None;
+                }
+                let idx = node_cpu_idx.entry(node_id).or_insert(0);
+                let cpu = cpus[*idx % cpus.len()];
+                *idx += 1;
+                logger.info(&format!(
+                    "dispatcher: auto-pinning poller for {addr} to CPU {cpu} (NUMA node {node_id})"
+                ));
+                Some(cpu)
+            })
+            .collect()
     }
 
     fn ensure_initialized(&self) -> Result<(), DispatcherError> {
@@ -310,8 +422,20 @@ impl DispatcherComponent {
         while mt.used() + needed as usize > mt.capacity() {
             attempts += 1;
             if attempts > MAX_ATTEMPTS {
+                static WARNED: std::sync::atomic::AtomicBool =
+                    std::sync::atomic::AtomicBool::new(false);
+                if !WARNED.swap(true, Ordering::Relaxed) {
+                    const GIB: f64 = (1024 * 1024 * 1024) as f64;
+                    eprintln!(
+                        "WARNING: memory-tier exhausted (used={:.2} GiB, capacity={:.2} GiB, needed={:.2} GiB). \
+                         Increase --memory-tier-size or reduce concurrent load.",
+                        mt.used() as f64 / GIB,
+                        mt.capacity() as f64 / GIB,
+                        needed as f64 / GIB,
+                    );
+                }
                 return Err(DispatcherError::AllocationFailed(
-                    "memory-tier full: eviction did not free enough space".into(),
+                    "memory-tier pool full after eviction".into(),
                 ));
             }
 
@@ -351,7 +475,7 @@ impl DispatcherComponent {
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
         drives: &[Arc<dyn IBlockDevice + Send + Sync>],
-        extent_mgrs: &[Arc<ExtentManager>],
+        extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
         job: WriteJob,
     ) {
         // Get the memory-tier pointer without refreshing LRU — the write-through
@@ -395,14 +519,7 @@ impl DispatcherComponent {
         };
 
         // Allocate extent via the extent manager.
-        let em = &extent_mgrs[drive_idx % extent_mgrs.len()];
-        let iem = match query_interface!(em, IExtentManager) {
-            Some(i) => i,
-            None => {
-                let _ = dm.release_read(job.key);
-                return;
-            }
-        };
+        let iem = &extent_mgrs[drive_idx % extent_mgrs.len()];
         let write_handle = match iem.reserve_extent(job.key, aligned_bytes as u32) {
             Ok(wh) => wh,
             Err(_) => {
@@ -465,11 +582,11 @@ impl DispatcherComponent {
         })
     }
 
-    #[allow(clippy::type_complexity)]
+    #[allow(clippy::type_complexity, unused_variables)]
     fn create_block_device(
         &self,
         i: usize,
-        poller_base_cpu: Option<usize>,
+        poller_cpu: Option<usize>,
         spdk_env: &Arc<dyn ISPDKEnv + Send + Sync>,
         logger: &Arc<dyn ILogger + Send + Sync>,
         pci_addr: PciAddress,
@@ -477,88 +594,170 @@ impl DispatcherComponent {
     ) -> Result<
         (
             Arc<dyn component_core::IUnknown + Send + Sync>,
-            Arc<dyn IBlockDeviceAdmin + Send + Sync>,
+            Option<Arc<dyn IBlockDeviceAdmin + Send + Sync>>,
             Arc<dyn IBlockDevice + Send + Sync>,
         ),
         DispatcherError,
     > {
-        let block_dev = BlockDeviceSpdkNvmeComponent::new_default();
-        block_dev
-            .spdk_env
-            .connect(Arc::clone(spdk_env))
-            .map_err(|e| {
-                DispatcherError::IoError(format!("failed to wire spdk_env for data drive {i}: {e}"))
-            })?;
-        block_dev.logger.connect(Arc::clone(logger)).map_err(|e| {
-            DispatcherError::IoError(format!("failed to wire logger for data drive {i}: {e}"))
-        })?;
-        let admin = query_interface!(block_dev, IBlockDeviceAdmin).ok_or_else(|| {
-            DispatcherError::IoError(format!(
-                "failed to query IBlockDeviceAdmin for data drive {i}"
-            ))
-        })?;
-        admin.set_pci_address(pci_addr);
-        if let Some(base) = poller_base_cpu {
-            admin.set_actor_cpu(base + i);
+        let factory_guard = self.block_device_factory.lock().unwrap();
+        if let Some(ref factory) = *factory_guard {
+            // Factory still uses the base-cpu convention for backward compatibility.
+            let base = poller_cpu.map(|c| c.saturating_sub(i));
+            let (block_dev, ibd, admin) = factory(spdk_env, logger, i, pci_addr, base)
+                .map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "block device factory failed for drive {i}: {e}"
+                    ))
+                })?;
+            Ok((block_dev, Some(admin), ibd))
+        } else {
+            drop(factory_guard);
+            #[cfg(feature = "spdk-backend")]
+            {
+                let component = block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent::new_default();
+                component
+                    .spdk_env
+                    .connect(Arc::clone(spdk_env))
+                    .map_err(|e| {
+                        DispatcherError::IoError(format!("failed to wire spdk_env for data drive {i}: {e}"))
+                    })?;
+                component.logger.connect(Arc::clone(logger)).map_err(|e| {
+                    DispatcherError::IoError(format!("failed to wire logger for data drive {i}: {e}"))
+                })?;
+                let block_dev = component as Arc<dyn component_core::IUnknown + Send + Sync>;
+                let admin: Arc<dyn IBlockDeviceAdmin + Send + Sync> =
+                    component_core::iunknown::query::<dyn IBlockDeviceAdmin + Send + Sync>(&*block_dev)
+                        .ok_or_else(|| {
+                            DispatcherError::IoError(format!(
+                                "failed to query IBlockDeviceAdmin for data drive {i}"
+                            ))
+                        })?;
+                admin.set_pci_address(pci_addr);
+                if let Some(cpu) = poller_cpu {
+                    admin.set_actor_cpu(cpu);
+                }
+                admin.initialize().map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "failed to initialize block device at {addr_str}: {e}"
+                    ))
+                })?;
+                let ibd: Arc<dyn IBlockDevice + Send + Sync> =
+                    component_core::iunknown::query::<dyn IBlockDevice + Send + Sync>(&*block_dev)
+                        .ok_or_else(|| {
+                            DispatcherError::IoError(format!(
+                                "failed to query IBlockDevice for data drive {i}"
+                            ))
+                        })?;
+                Ok((block_dev, Some(admin), ibd))
+            }
+            #[cfg(not(feature = "spdk-backend"))]
+            {
+                Err(DispatcherError::IoError(
+                    "no block device factory set and spdk-backend feature not enabled".into(),
+                ))
+            }
         }
-        admin.initialize().map_err(|e| {
-            DispatcherError::IoError(format!(
-                "failed to initialize block device at {addr_str}: {e}"
-            ))
-        })?;
-        let ibd = query_interface!(block_dev, IBlockDevice).ok_or_else(|| {
-            DispatcherError::IoError(format!("failed to query IBlockDevice for data drive {i}"))
-        })?;
-        Ok((
-            block_dev as Arc<dyn component_core::IUnknown + Send + Sync>,
-            admin,
-            ibd,
-        ))
     }
 
     fn create_data_drives(
         &self,
         config: &DispatcherConfig,
     ) -> Result<Vec<DataDrive>, DispatcherError> {
-        let spdk_env = self
-            .spdk_env
-            .get()
-            .map_err(|_| DispatcherError::NotInitialized("spdk_env not bound".into()))?;
+        let has_factory = self.block_device_factory.lock().unwrap().is_some();
+        let spdk_env: Arc<dyn ISPDKEnv + Send + Sync> = match self.spdk_env.get() {
+            Ok(env) => env,
+            Err(_) if has_factory => {
+                // Factory handles device creation; use uninitialized stub as placeholder
+                use component_core::query_interface;
+                let stub = spdk_env::SPDKEnvComponent::new_default();
+                query_interface!(stub, ISPDKEnv)
+                    .expect("SPDKEnvComponent must provide ISPDKEnv")
+            }
+            Err(_) => {
+                return Err(DispatcherError::NotInitialized(
+                    "spdk_env not bound".into(),
+                ));
+            }
+        };
 
         let logger = self
             .logger
             .get()
             .map_err(|_| DispatcherError::NotInitialized("logger not bound".into()))?;
 
+        // Compute per-drive poller CPU assignments.
+        // When poller_base_cpu is set, drive i gets base + i (existing behavior).
+        // When None, assign CPUs round-robin from each drive's NUMA node.
+        let per_drive_cpu: Vec<Option<usize>> = if config.poller_base_cpu.is_some() {
+            config
+                .data_pci_addrs
+                .iter()
+                .enumerate()
+                .map(|(i, _)| config.poller_base_cpu.map(|base| base + i))
+                .collect()
+        } else {
+            Self::compute_numa_cpu_assignments(&spdk_env, &config.data_pci_addrs, &logger)
+        };
+
         let mut drives = Vec::with_capacity(config.data_pci_addrs.len());
 
         for (i, addr_str) in config.data_pci_addrs.iter().enumerate() {
             let pci_addr = Self::parse_pci_addr(addr_str)?;
 
+            let poller_cpu = per_drive_cpu.get(i).copied().flatten();
             let (block_dev_component, admin, ibd) =
-                self.create_block_device(i, config.poller_base_cpu, &spdk_env, &logger, pci_addr, addr_str)?;
-
-            let extent_mgr = ExtentManager::new_inner();
+                self.create_block_device(i, poller_cpu, &spdk_env, &logger, pci_addr, addr_str)?;
 
             let numa_node = ibd.numa_node();
-            let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
-                DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
-            });
-            extent_mgr.set_dma_alloc(dma_alloc);
+            let spdk_available = self.spdk_env.is_connected();
+            let dma_alloc: DmaAllocFn = if spdk_available {
+                // SPDK path: use hugepage-backed DMA buffers
+                Arc::new(move |size, align, _numa| {
+                    DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
+                })
+            } else {
+                // Non-SPDK path: use posix_memalign for DMA buffers
+                unsafe extern "C" fn libc_free(p: *mut std::ffi::c_void) {
+                    libc::free(p);
+                }
+                Arc::new(move |size, align, _numa| {
+                    let mut ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+                    // SAFETY: posix_memalign is safe with valid align (power of 2, multiple of sizeof(void*))
+                    let ret = unsafe { libc::posix_memalign(&mut ptr, align, size) };
+                    if ret != 0 || ptr.is_null() {
+                        return Err(format!("posix_memalign failed ({size}, {align}): errno {ret}"));
+                    }
+                    unsafe { std::ptr::write_bytes(ptr as *mut u8, 0, size) };
+                    // SAFETY: ptr is valid, non-null, allocated with posix_memalign
+                    unsafe {
+                        DmaBuffer::from_raw(ptr, size, libc_free, numa_node)
+                            .map_err(|e| e.to_string())
+                    }
+                })
+            };
 
-            extent_mgr
-                .logger
-                .connect(Arc::clone(&logger) as Arc<dyn ILogger + Send + Sync>)
-                .map_err(|e| {
-                    DispatcherError::IoError(format!(
-                        "failed to wire logger for extent manager {i}: {e}"
-                    ))
-                })?;
+            let extent_mgr: Arc<dyn component_core::IUnknown + Send + Sync> = {
+                let factory_guard = self.extent_manager_factory.lock().unwrap();
+                if let Some(ref factory) = *factory_guard {
+                    factory(&logger, dma_alloc)
+                } else {
+                    let em = extent_manager::ExtentManager::new_inner();
+                    em.set_dma_alloc(dma_alloc);
+                    em.logger
+                        .connect(Arc::clone(&logger) as Arc<dyn ILogger + Send + Sync>)
+                        .map_err(|e| {
+                            DispatcherError::IoError(format!(
+                                "failed to wire logger for extent manager {i}: {e}"
+                            ))
+                        })?;
+                    em as Arc<dyn component_core::IUnknown + Send + Sync>
+                }
+            };
 
             bind(
                 &*block_dev_component,
                 "IBlockDevice",
-                &*extent_mgr as &dyn component_core::IUnknown,
+                &*extent_mgr,
                 "metadata_device",
             )
             .map_err(|e| {
@@ -567,11 +766,13 @@ impl DispatcherComponent {
                 ))
             })?;
 
-            let iem = query_interface!(extent_mgr, IExtentManager).ok_or_else(|| {
-                DispatcherError::IoError(format!(
-                    "failed to query IExtentManager for data drive {i}"
-                ))
-            })?;
+            let iem: Arc<dyn IExtentManager + Send + Sync> =
+                component_core::iunknown::query::<dyn IExtentManager + Send + Sync>(&*extent_mgr)
+                    .ok_or_else(|| {
+                        DispatcherError::IoError(format!(
+                            "failed to query IExtentManager for data drive {i}"
+                        ))
+                    })?;
             let sector_size = ibd.block_size();
             let num_sectors = ibd.num_sectors(1).unwrap_or(0);
             let data_disk_size = num_sectors * sector_size as u64;
@@ -622,7 +823,8 @@ impl DispatcherComponent {
                 _block_dev: block_dev_component,
                 block_dev_admin: admin,
                 block_dev_iface: ibd,
-                extent_mgr,
+                _extent_mgr_component: extent_mgr as Arc<dyn component_core::IUnknown + Send + Sync>,
+                extent_mgr: iem,
                 cached_channels,
             });
         }
@@ -650,8 +852,9 @@ impl IDispatcher for DispatcherComponent {
         }
 
         // Create N block devices and N extent managers from config.
-        // If spdk_env is not connected, skip drive creation (memory-tier-only mode).
-        if self.spdk_env.is_connected() {
+        // Skip drive creation only in memory-tier-only mode (no spdk_env AND no factory).
+        let has_bd_factory = self.block_device_factory.lock().unwrap().is_some();
+        if self.spdk_env.is_connected() || has_bd_factory {
             let drives = self.create_data_drives(&config)?;
             *self.data_drives.write() = drives;
 
@@ -664,13 +867,7 @@ impl IDispatcher for DispatcherComponent {
                 let mut recovered: u64 = 0;
                 let drives_guard = self.data_drives.read();
                 for drive in drives_guard.iter() {
-                    let iem =
-                        query_interface!(drive.extent_mgr, IExtentManager).ok_or_else(|| {
-                            DispatcherError::IoError(
-                                "failed to query IExtentManager during recovery".into(),
-                            )
-                        })?;
-                    iem.for_each_extent(&mut |extent| {
+                    drive.extent_mgr.for_each_extent(&mut |extent| {
                         let _ = dm.recover_extent(extent.key, extent.offset, extent.size);
                         recovered += 1;
                     });
@@ -682,25 +879,9 @@ impl IDispatcher for DispatcherComponent {
                 ));
             }
 
-            // Pre-allocate pipeline ring for promote_and_serve (CUDA-pinned + SPDK-registered).
+            // Pre-allocate pipeline ring and register memory with SPDK.
+            // Only when SPDK is available — spdk_mem_register segfaults otherwise.
             if let Ok(gpu) = self.gpu_services.get() {
-                let chunk_size = {
-                    let dd = self.data_drives.read();
-                    dd.first()
-                        .map(|d| d.block_dev_iface.max_transfer_size() as usize)
-                        .unwrap_or(131072)
-                };
-                match pipeline::PipelineRing::new(&*gpu, chunk_size) {
-                    Ok(ring) => {
-                        *self.pipeline_ring.write() = Some(ring);
-                    }
-                    Err(e) => {
-                        self.log_info(&format!(
-                            "pipeline ring allocation failed (non-fatal): {e:?}"
-                        ));
-                    }
-                }
-
                 // Dedicated CUDA stream for warm-path DMA (avoids pipeline_ring lock).
                 match gpu.create_stream() {
                     Ok(stream) => {
@@ -711,22 +892,41 @@ impl IDispatcher for DispatcherComponent {
                     }
                 }
 
-                // Register memory-tier pool as CUDA-pinned + SPDK DMA-capable
-                // for zero-copy NVMe reads and async GPU transfers.
-                if let Ok(mt) = self.memory_tier.get() {
-                    if let Some((pool_ptr, pool_size)) = mt.pool_info() {
-                        match gpu.register_host_memory(pool_ptr as *mut std::ffi::c_void, pool_size)
-                        {
-                            Ok(()) => {
-                                self.log_info(&format!(
-                                    "dispatcher: registered memory-tier pool ({} MiB) for zero-copy DMA",
-                                    pool_size / (1024 * 1024)
-                                ));
-                            }
-                            Err(e) => {
-                                self.log_info(&format!(
-                                    "memory-tier pool registration failed (non-fatal): {e}"
-                                ));
+                if self.spdk_env.is_connected() {
+                    let chunk_size = {
+                        let dd = self.data_drives.read();
+                        dd.first()
+                            .map(|d| d.block_dev_iface.max_transfer_size() as usize)
+                            .unwrap_or(131072)
+                    };
+                    match pipeline::PipelineRing::new(&*gpu, chunk_size) {
+                        Ok(ring) => {
+                            *self.pipeline_ring.write() = Some(ring);
+                        }
+                        Err(e) => {
+                            self.log_info(&format!(
+                                "pipeline ring allocation failed (non-fatal): {e:?}"
+                            ));
+                        }
+                    }
+
+                    // Register memory-tier pool as CUDA-pinned + SPDK DMA-capable
+                    // for zero-copy NVMe reads and async GPU transfers.
+                    if let Ok(mt) = self.memory_tier.get() {
+                        if let Some((pool_ptr, pool_size)) = mt.pool_info() {
+                            match gpu.register_host_memory(pool_ptr as *mut std::ffi::c_void, pool_size)
+                            {
+                                Ok(()) => {
+                                    self.log_info(&format!(
+                                        "dispatcher: registered memory-tier pool ({} MiB) for zero-copy DMA",
+                                        pool_size / (1024 * 1024)
+                                    ));
+                                }
+                                Err(e) => {
+                                    self.log_info(&format!(
+                                        "memory-tier pool registration failed (non-fatal): {e}"
+                                    ));
+                                }
                             }
                         }
                     }
@@ -749,19 +949,21 @@ impl IDispatcher for DispatcherComponent {
             let dd = self.data_drives.read();
             dd.iter().map(|d| Arc::clone(&d.block_dev_iface)).collect()
         };
-        let bg_extent_mgrs: Vec<Arc<ExtentManager>> = {
+        let bg_extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>> = {
             let dd = self.data_drives.read();
             dd.iter().map(|d| Arc::clone(&d.extent_mgr)).collect()
         };
 
-        let writer = BackgroundWriter::start(move |job: WriteJob| {
-            Self::process_write_job(
-                &dm_for_writer,
-                &mt_for_writer,
-                &bg_drives,
-                &bg_extent_mgrs,
-                job,
-            );
+        let num_writer_drives = bg_drives.len().max(1);
+        let writer = ParallelBackgroundWriter::start(num_writer_drives, |drive_idx| {
+            let dm = Arc::clone(&dm_for_writer);
+            let mt = Arc::clone(&mt_for_writer);
+            let drives = bg_drives.clone();
+            let extent_mgrs = bg_extent_mgrs.clone();
+            let _ = drive_idx;
+            move |job: WriteJob| {
+                Self::process_write_job(&dm, &mt, &drives, &extent_mgrs, job);
+            }
         });
 
         *self.bg_writer.lock().unwrap() = Some(writer);
@@ -776,7 +978,7 @@ impl IDispatcher for DispatcherComponent {
                 .memory_tier
                 .get()
                 .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
-            let evictor_extent_mgrs: Vec<Arc<ExtentManager>> = {
+            let evictor_extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>> = {
                 let dd = self.data_drives.read();
                 dd.iter().map(|d| Arc::clone(&d.extent_mgr)).collect()
             };
@@ -822,12 +1024,10 @@ impl IDispatcher for DispatcherComponent {
         {
             let drives = self.data_drives.read();
             for (i, drive) in drives.iter().enumerate() {
-                if let Some(iem) = query_interface!(drive.extent_mgr, IExtentManager) {
-                    if let Err(e) = iem.checkpoint() {
-                        self.log_error(&format!(
-                            "dispatcher: extent manager {i} checkpoint failed: {e}"
-                        ));
-                    }
+                if let Err(e) = drive.extent_mgr.checkpoint() {
+                    self.log_error(&format!(
+                        "dispatcher: extent manager {i} checkpoint failed: {e}"
+                    ));
                 }
             }
         }
@@ -851,17 +1051,33 @@ impl IDispatcher for DispatcherComponent {
             }
         }
 
-        // Shut down block devices in reverse order
+        // Two-phase block device shutdown: signal all actors to stop first,
+        // then join threads. This prevents crashes from SPDK transport teardown
+        // invalidating memory that other actors are still actively polling.
         let drives = {
             let mut g = self.data_drives.write();
-            let taken = std::mem::take(&mut *g);
-            taken
+            std::mem::take(&mut *g)
         };
+        // Phase 1: Signal all actors to stop (closes channels, actors exit poll loops)
+        for drive in &drives {
+            if let Some(ref admin) = drive.block_dev_admin {
+                admin.signal_stop();
+            }
+        }
+        // Phase 2: Join actor threads (safe now that all actors have been signaled)
         for (i, drive) in drives.iter().enumerate().rev() {
-            if let Err(e) = drive.block_dev_admin.shutdown() {
-                self.log_error(&format!(
-                    "dispatcher: failed to shut down data drive {i}: {e}"
-                ));
+            if let Some(ref admin) = drive.block_dev_admin {
+                if let Err(e) = admin.shutdown() {
+                    self.log_error(&format!(
+                        "dispatcher: failed to shut down data drive {i}: {e}"
+                    ));
+                }
+            }
+        }
+        // Phase 3: Detach controllers (safe now that ALL actor threads have exited)
+        for drive in &drives {
+            if let Some(ref admin) = drive.block_dev_admin {
+                admin.detach_controller();
             }
         }
 
@@ -1073,6 +1289,7 @@ impl IDispatcher for DispatcherComponent {
                 }
 
                 std::thread::scope(|s| {
+                    #[allow(clippy::type_complexity)]
                     let mut thread_handles: Vec<
                         std::thread::ScopedJoinHandle<Vec<(usize, Result<(), DispatcherError>)>>,
                     > = Vec::new();
@@ -1085,10 +1302,10 @@ impl IDispatcher for DispatcherComponent {
                         // Split this drive's entries across multiple queue threads.
                         let num_queues = MAX_QUEUES_PER_DRIVE.min(entry_indices.len());
                         let chunks: Vec<&[usize]> = entry_indices
-                            .chunks((entry_indices.len() + num_queues - 1) / num_queues)
+                            .chunks(entry_indices.len().div_ceil(num_queues))
                             .collect();
 
-                        let queue_depth = 16 / num_queues;
+                        let queue_depth = 128;
 
                         for chunk in chunks {
                             let dm_ref = &dm;
@@ -1137,59 +1354,112 @@ impl IDispatcher for DispatcherComponent {
                                     }
                                 };
 
+                                // Prepare all cold entries for multi-object pipeline.
+                                #[cfg(feature = "pipeline-telemetry")]
+                                let t_prep_start = std::time::Instant::now();
+                                let mut jobs: Vec<pipeline::ColdReadJob> =
+                                    Vec::with_capacity(indices.len());
+                                let mut job_ci: Vec<usize> = Vec::with_capacity(indices.len());
+                                let mut mem_ptrs: Vec<*mut u8> = Vec::with_capacity(indices.len());
+
                                 for &ci in &indices {
                                     let entry = &cold_ref[ci];
-                                    let ipc = IpcHandle {
-                                        address: entry.ipc_handle_addr,
-                                        size: entry.ipc_handle_size,
-                                    };
-                                    let total_bytes = ipc.size as usize;
+                                    let ipc_size = entry.ipc_handle_size;
 
-                                    let res = (|| -> Result<(), DispatcherError> {
-                                        Self::evict_for_space(dm_ref, mt_ref, ipc.size)?;
-
-                                        let mem_ptr =
-                                            mt_ref.insert(entry.key, ipc.size).map_err(|e| {
-                                                DispatcherError::AllocationFailed(format!(
-                                                    "promote insert failed: {e}"
-                                                ))
-                                            })?;
-
-                                        let start_lba = entry.offset / block_size as u64;
-
-                                        let pipeline_result = unsafe {
-                                            pipeline::pipelined_ssd_to_gpu_zero_copy(
-                                                &*drive.block_dev_iface,
-                                                &**gpu_ref,
-                                                &streams,
-                                                &channels,
-                                                mem_ptr,
-                                                ipc.address as *mut std::ffi::c_void,
-                                                start_lba,
-                                                total_bytes,
-                                                chunk_size,
-                                                queue_depth,
-                                            )
-                                        };
-
-                                        pipeline_result?;
-
-                                        let _ = dm_ref.remove(entry.key);
-                                        dm_ref
-                                            .create_memory_tier_entry(entry.key, mem_ptr, ipc.size)
-                                            .map_err(|e| {
-                                                DispatcherError::IoError(format!(
-                                                    "promote re-register failed: {e}"
-                                                ))
-                                            })?;
-                                        let _ =
-                                            dm_ref.convert_to_storage(entry.key, entry.offset);
-                                        let _ = dm_ref.release_write(entry.key);
-
-                                        Ok(())
+                                    let prep = (|| -> Result<*mut u8, DispatcherError> {
+                                        Self::evict_for_space(dm_ref, mt_ref, ipc_size)?;
+                                        mt_ref.insert(entry.key, ipc_size).map_err(|e| {
+                                            DispatcherError::AllocationFailed(format!(
+                                                "promote insert failed: {e}"
+                                            ))
+                                        })
                                     })();
 
-                                    batch_results.push((ci, res));
+                                    match prep {
+                                        Ok(mem_ptr) => {
+                                            jobs.push(pipeline::ColdReadJob {
+                                                mem_ptr,
+                                                gpu_dst: entry.ipc_handle_addr
+                                                    as *mut std::ffi::c_void,
+                                                start_lba: entry.offset / block_size as u64,
+                                                total_bytes: ipc_size as usize,
+                                            });
+                                            job_ci.push(ci);
+                                            mem_ptrs.push(mem_ptr);
+                                        }
+                                        Err(e) => {
+                                            batch_results.push((ci, Err(e)));
+                                        }
+                                    }
+                                }
+                                #[cfg(feature = "pipeline-telemetry")]
+                                let t_prep_done = t_prep_start.elapsed();
+
+                                // Run all prepared jobs through the multi-object pipeline.
+                                if !jobs.is_empty() {
+                                    #[cfg(feature = "pipeline-telemetry")]
+                                    let t_pipeline_start = std::time::Instant::now();
+                                    let pipeline_results = unsafe {
+                                        pipeline::pipelined_multi_object_zero_copy(
+                                            &*drive.block_dev_iface,
+                                            &**gpu_ref,
+                                            &streams,
+                                            &channels,
+                                            &jobs,
+                                            chunk_size,
+                                            queue_depth,
+                                        )
+                                    };
+                                    #[cfg(feature = "pipeline-telemetry")]
+                                    let t_pipeline_done = t_pipeline_start.elapsed();
+
+                                    #[cfg(feature = "pipeline-telemetry")]
+                                    let t_finalize_start = std::time::Instant::now();
+                                    // Finalize each job's dispatch-map state.
+                                    for (job_idx, result) in pipeline_results.into_iter().enumerate()
+                                    {
+                                        let ci = job_ci[job_idx];
+                                        let entry = &cold_ref[ci];
+                                        let res = match result {
+                                            Ok(()) => {
+                                                let _ = dm_ref.remove(entry.key);
+                                                let create_res = dm_ref
+                                                    .create_memory_tier_entry(
+                                                        entry.key,
+                                                        mem_ptrs[job_idx],
+                                                        entry.ipc_handle_size,
+                                                    )
+                                                    .map_err(|e| {
+                                                        DispatcherError::IoError(format!(
+                                                            "promote re-register failed: {e}"
+                                                        ))
+                                                    });
+                                                if create_res.is_ok() {
+                                                    let _ = dm_ref.convert_to_storage(
+                                                        entry.key,
+                                                        entry.offset,
+                                                    );
+                                                    let _ = dm_ref.release_write(entry.key);
+                                                }
+                                                create_res
+                                            }
+                                            Err(e) => Err(e),
+                                        };
+                                        batch_results.push((ci, res));
+                                    }
+                                    #[cfg(feature = "pipeline-telemetry")]
+                                    {
+                                        let t_finalize_done = t_finalize_start.elapsed();
+                                        eprintln!(
+                                            "[cold-perf] drive={} jobs={} segs={} prep={:.1}ms pipeline={:.1}ms finalize={:.1}ms",
+                                            drive_idx,
+                                            jobs.len(),
+                                            jobs.len() * 32,
+                                            t_prep_done.as_secs_f64() * 1000.0,
+                                            t_pipeline_done.as_secs_f64() * 1000.0,
+                                            t_finalize_done.as_secs_f64() * 1000.0,
+                                        );
+                                    }
                                 }
 
                                 let _ = gpu_ref.destroy_stream(streams[0]);
@@ -1387,9 +1657,7 @@ impl IDispatcher for DispatcherComponent {
             let drives = self.data_drives.read();
             let idx = Self::drive_index(key, drives.len().max(1));
             if let Some(drive) = drives.get(idx) {
-                if let Some(iem) = query_interface!(drive.extent_mgr, IExtentManager) {
-                    let _ = iem.remove_extent(offset);
-                }
+                let _ = drive.extent_mgr.remove_extent(offset);
             }
         }
 
@@ -1531,7 +1799,7 @@ impl IDispatcher for DispatcherComponent {
             (4096, -1)
         };
 
-        let extent_mgrs: Vec<Arc<ExtentManager>> =
+        let extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>> =
             drives.iter().map(|d| Arc::clone(&d.extent_mgr)).collect();
         drop(drives);
 
@@ -1539,18 +1807,14 @@ impl IDispatcher for DispatcherComponent {
 
         // Reserve extent via extent manager (if available).
         let write_handle = if let Some(em) = extent_mgrs.get(drive_idx) {
-            if let Some(iem) = query_interface!(em, IExtentManager) {
-                match iem.reserve_extent(key, aligned_size as u32) {
-                    Ok(wh) => Some(wh),
-                    Err(e) => {
-                        let _ = dm.remove(key);
-                        return Err(DispatcherError::AllocationFailed(format!(
-                            "reserve_extent failed: {e}"
-                        )));
-                    }
+            match em.reserve_extent(key, aligned_size as u32) {
+                Ok(wh) => Some(wh),
+                Err(e) => {
+                    let _ = dm.remove(key);
+                    return Err(DispatcherError::AllocationFailed(format!(
+                        "reserve_extent failed: {e}"
+                    )));
                 }
-            } else {
-                None
             }
         } else {
             None
@@ -1694,6 +1958,21 @@ impl IDispatcher for DispatcherComponent {
             count += 1;
         }
         Ok(count)
+    }
+
+    fn flush_to_ssd(&self) -> Result<usize, DispatcherError> {
+        self.ensure_initialized()?;
+
+        // Block until the background writer has processed all enqueued jobs.
+        let flushed = if let Some(ref writer) = *self.bg_writer.lock().unwrap() {
+            let before = writer.in_flight();
+            writer.flush();
+            before
+        } else {
+            0
+        };
+
+        Ok(flushed)
     }
 }
 
@@ -2316,6 +2595,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -2355,6 +2636,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
     }
 
@@ -2368,6 +2651,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher);
         assert!(d.is_some());
@@ -2383,6 +2668,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -2403,6 +2690,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -2424,6 +2713,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -2445,6 +2736,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.check(42);
@@ -2461,6 +2754,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.remove(42);
@@ -2477,6 +2772,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -2498,6 +2795,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         // Even though not initialized, zero-size check comes after init check.
@@ -2522,6 +2821,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -2537,6 +2838,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -2553,6 +2856,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         ));
 
         let handles: Vec<_> = (0..4)
@@ -2600,6 +2905,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.memory_tier.connect(mt).unwrap();
@@ -2626,6 +2933,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -2696,6 +3005,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -3020,6 +3331,8 @@ mod tests {
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
