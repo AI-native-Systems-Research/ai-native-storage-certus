@@ -67,6 +67,12 @@ component_macros::define_interface! {
         /// Returns the evicted key, or `None` if the pool is empty.
         fn evict_lru(&self) -> Option<CacheKey>;
 
+        /// Evict the least-recently-used entry from the same shard as `key`.
+        ///
+        /// This ensures the freed space is allocatable by a subsequent `insert(key, ...)`.
+        /// Returns the evicted key, or `None` if the target shard is empty.
+        fn evict_lru_for_key(&self, key: CacheKey) -> Option<CacheKey>;
+
         /// Peek at the N oldest keys without removing them.
         fn oldest_keys(&self, n: usize) -> Vec<CacheKey>;
 

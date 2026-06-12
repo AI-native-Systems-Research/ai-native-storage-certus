@@ -153,6 +153,10 @@ impl IMemoryTier for NoopMemoryTier {
         None
     }
 
+    fn evict_lru_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+        None
+    }
+
     fn remove(&self, _key: CacheKey) -> Result<(), MemoryTierError> {
         Err(MemoryTierError::KeyNotFound(0))
     }

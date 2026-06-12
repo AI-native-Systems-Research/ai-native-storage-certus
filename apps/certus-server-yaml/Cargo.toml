@@ -10,6 +10,7 @@ interfaces = { workspace = true, features = ["spdk"] }
 component-framework.workspace = true
 component-core.workspace = true
 dispatcher = { workspace = true, default-features = false }
+dispatcher-p2p = { workspace = true, default-features = false, optional = true }
 dispatch-map.workspace = true
 memory-tier.workspace = true
 block-device-spdk-nvme = { workspace = true, optional = true }
@@ -31,7 +32,7 @@ default = ["spdk"]
 spdk = ["spdk-mem", "dep:block-device-spdk-nvme", "dispatcher/spdk-backend"]
 spdk-mem = ["dep:spdk-env"]
 filesys = ["dep:block-device-filesys", "spdk-mem"]
-kernel = ["dep:block-device-kernel", "spdk-mem"]
+p2p-native = ["dep:dispatcher-p2p", "spdk", "gpu-services/p2p", "dispatcher-p2p/spdk-backend"]
 
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }
