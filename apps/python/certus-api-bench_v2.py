@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Multi-client throughput and latency benchmark for the Certus gRPC Dispatcher (v2).
 
-Same as certus-api-bench.py but with pipelined concurrent gRPC requests.
-Difference: cold lookups use gRPC futures (stub.Lookup.future()) to keep
---pipeline-depth RPCs in flight simultaneously, like iperf -P. This saturates
-the server's GPU PCIe link which sequential RPCs cannot fill alone.
+Both hot and cold lookups use pipelined gRPC futures (stub.Lookup.future()) to
+keep --pipeline-depth RPCs in flight simultaneously, like iperf -P. This
+saturates the server's GPU PCIe link which sequential RPCs cannot fill alone.
+Use --sequential-hot for per-request latency measurement on the hot path.
 
 Usage:
     python certus-api-bench_v2.py --clients 1 --num-objects 64 --pipeline-depth 4
@@ -29,7 +29,10 @@ import dispatcher_pb2_grpc
 assert torch.cuda.is_available(), "CUDA GPU required"
 
 BLOCK_SIZE = 4 * 1024 * 1024  # 4 MiB (default, overridden by --block-size)
-MEMORY_TIER_SIZE = 2 * 1024 * 1024 * 1024  # 2 GiB (default, overridden by --memory-tier-size)
+# TODO: query server for actual pool size instead of requiring manual --memory-tier-size.
+# For multi-client runs, set this to HALF the server's --memory-tier-size so that
+# total objects across all clients fits within the real pool without cross-client eviction.
+MEMORY_TIER_SIZE = 2 * 1024 * 1024 * 1024  # 2 GiB default (half of typical 4G server)
 
 
 def parse_size(s):
@@ -368,6 +371,7 @@ def run_client(
     gpu_id=0,
     pipeline_depth=4,
     writes_settle=30.0,
+    sequential_hot=False,
 ):
     """Single client worker: populate objects, then measure hot and cold lookups."""
 
@@ -416,14 +420,14 @@ def run_client(
             dispatcher_pb2.IpcHandle(cuda_ipc_handle=handle_bytes, size=BLOCK_SIZE, gpu_device_id=gpu_id)
         )
 
-    # Memory-tier pool can hold MEMORY_TIER_SIZE / BLOCK_SIZE objects.
-    # For cold-path testing we need objects evicted to SSD.
-    # Strategy: populate enough objects to overflow the pool fraction this client owns,
+    # Memory-tier pool can hold MEMORY_TIER_SIZE / BLOCK_SIZE objects total.
+    # With num_clients concurrent clients each gets a fair share of the pool.
+    # Strategy: populate enough objects to overflow this client's share,
     # so the earliest keys get evicted to SSD.
     pool_capacity = MEMORY_TIER_SIZE // BLOCK_SIZE
-    # We'll populate pool_capacity + cold objects so cold keys are evicted.
+    client_pool_share = max(1, pool_capacity // num_clients)
     cold_objects = num_objects * iterations
-    total_objects = pool_capacity + cold_objects
+    total_objects = client_pool_share + cold_objects
 
     # --- Phase 1: Populate ---
     barrier.wait()  # synchronize start across all clients
@@ -474,9 +478,9 @@ def run_client(
     barrier.wait()
 
     # --- Phase 2: Hot lookups (memory-tier) ---
-    # The last `num_objects` in the pool are still in DRAM.
+    # The last `num_objects` in this client's pool share are still in DRAM.
     hot_keys = [
-        base_key + cold_objects + pool_capacity - num_objects + i
+        base_key + cold_objects + client_pool_share - num_objects + i
         for i in range(num_objects)
     ]
 
@@ -493,28 +497,56 @@ def run_client(
     barrier.wait()  # synchronize hot-lookup start
     result.hot_start = time.perf_counter()
 
-    # Hot lookups are sequential (not pipelined): the server's stream_synchronize
-    # completes the DMA before responding, so sequential RPCs measure real H2D
-    # throughput. Pipelining hot lookups inflates numbers by overlapping gRPC
-    # round-trips that share a single GPU PCIe link.
-    for _ in range(iterations):
-        entries = [
-            dispatcher_pb2.LookupEntry(key=k, ipc_handle=hot_lookup_ipcs[i])
-            for i, k in enumerate(hot_keys)
-        ]
-        try:
-            t0 = time.perf_counter()
-            resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=entries))
-            _libcudart.cudaDeviceSynchronize()
-            t1 = time.perf_counter()
-            failed = [r for r in resp.results if not r.success]
-            if failed:
-                result.errors.append(
-                    f"hot lookup failed: {failed[0].error_message}"
-                )
-            result.hot_latencies.append((t1 - t0) / num_objects)
-        except grpc.RpcError as e:
-            result.errors.append(f"hot lookup RPC error: {e.details()}")
+    if sequential_hot:
+        for _ in range(iterations):
+            entries = [
+                dispatcher_pb2.LookupEntry(key=k, ipc_handle=hot_lookup_ipcs[i])
+                for i, k in enumerate(hot_keys)
+            ]
+            try:
+                t0 = time.perf_counter()
+                resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=entries))
+                _libcudart.cudaDeviceSynchronize()
+                t1 = time.perf_counter()
+                failed = [r for r in resp.results if not r.success]
+                if failed:
+                    result.errors.append(
+                        f"hot lookup failed: {failed[0].error_message}"
+                    )
+                result.hot_latencies.append((t1 - t0) / num_objects)
+            except grpc.RpcError as e:
+                result.errors.append(f"hot lookup RPC error: {e.details()}")
+    else:
+        in_flight = []
+        next_to_send = 0
+        completed = 0
+
+        while completed < iterations:
+            while next_to_send < iterations and len(in_flight) < pipeline_depth:
+                entries = [
+                    dispatcher_pb2.LookupEntry(key=k, ipc_handle=hot_lookup_ipcs[i])
+                    for i, k in enumerate(hot_keys)
+                ]
+                req = dispatcher_pb2.BatchLookupRequest(entries=entries)
+                future = stub.Lookup.future(req)
+                in_flight.append((next_to_send, future, time.perf_counter()))
+                next_to_send += 1
+
+            if in_flight:
+                iter_idx, future, t_submit = in_flight.pop(0)
+                try:
+                    resp = future.result()
+                    _libcudart.cudaDeviceSynchronize()
+                    t_done = time.perf_counter()
+                    failed = [r for r in resp.results if not r.success]
+                    if failed:
+                        result.errors.append(
+                            f"hot lookup failed: {failed[0].error_message}"
+                        )
+                    result.hot_latencies.append((t_done - t_submit) / num_objects)
+                except grpc.RpcError as e:
+                    result.errors.append(f"hot lookup RPC error: {e.details()}")
+                completed += 1
 
     result.hot_end = time.perf_counter()
     result.hot_objects = num_objects * iterations
@@ -698,11 +730,27 @@ def main():
         help="Seconds to wait after populate for write-through to drain (default: 30). "
         "Set to 0 to skip.",
     )
+    parser.add_argument(
+        "--memory-tier-size",
+        type=parse_size,
+        default=None,
+        help="Memory-tier pool size assumption (e.g. 4G, 2G). For multi-client runs, "
+        "set to HALF the server's --memory-tier-size to avoid cross-client eviction. "
+        "Defaults to 2G.",
+    )
+    parser.add_argument(
+        "--sequential-hot",
+        action="store_true",
+        help="Use sequential (non-pipelined) RPCs for hot lookups. "
+        "Measures per-request latency instead of throughput.",
+    )
     args = parser.parse_args()
 
-    global BLOCK_SIZE
+    global BLOCK_SIZE, MEMORY_TIER_SIZE
     if args.block_size is not None:
         BLOCK_SIZE = args.block_size
+    if args.memory_tier_size is not None:
+        MEMORY_TIER_SIZE = args.memory_tier_size
 
     num_clients = args.clients
     num_objects = args.num_objects
@@ -719,8 +767,9 @@ def main():
         sys.exit(1)
 
     pool_capacity = MEMORY_TIER_SIZE // BLOCK_SIZE
+    client_pool_share = max(1, pool_capacity // num_clients)
     cold_per_client = num_objects * iterations
-    total_per_client = pool_capacity + cold_per_client
+    total_per_client = client_pool_share + cold_per_client
 
     print(f"{'='*70}")
     print(f"Certus Multi-Client Benchmark")
@@ -733,7 +782,7 @@ def main():
     print(f"  Objects/batch:     {num_objects}")
     print(f"  Iterations:        {iterations}")
     pool_mib = MEMORY_TIER_SIZE // (1024 * 1024)
-    print(f"  Pool capacity:     {pool_capacity} objects ({pool_mib} MiB)")
+    print(f"  Pool capacity:     {pool_capacity} objects ({pool_mib} MiB) / {client_pool_share} per client")
     print(f"  Total per client:  {total_per_client} objects")
     print(f"  Cold per client:   {cold_per_client} objects")
     print()
@@ -770,6 +819,7 @@ def main():
                 gpu_id,
                 pipeline_depth,
                 args.writes_settle,
+                args.sequential_hot,
             ),
             daemon=True,
         )
