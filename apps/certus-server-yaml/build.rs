@@ -290,12 +290,28 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
             let factory_call = ensure_callable(&decl.factory);
 
             if *name == "block_device" {
-                writeln!(code, "    comp_dispatcher.set_block_device_factory(Box::new(|spdk_env, logger, drive_idx, pci_addr, cpu_pin| {{").unwrap();
-                if decl.crate_name == "block-device-filesys" {
-                    // Filesys backend: create with file path derived from drive index
-                    writeln!(code, "        let path = format!(\"/ssd/certus-drive-{{}}.img\", drive_idx);").unwrap();
+                if decl.crate_name == "block-device-kernel" {
+                    // Kernel backend: capture device_paths from config for runtime indexing
+                    writeln!(code, "    let __device_paths = config.device_paths.clone();").unwrap();
+                    writeln!(code, "    comp_dispatcher.set_block_device_factory(Box::new(move |spdk_env, logger, drive_idx, pci_addr, cpu_pin| {{").unwrap();
+                    writeln!(code, "        let path = if drive_idx < __device_paths.len() {{").unwrap();
+                    writeln!(code, "            __device_paths[drive_idx].clone()").unwrap();
+                    writeln!(code, "        }} else {{").unwrap();
+                    writeln!(code, "            format!(\"/dev/nvme{{}}n1\", drive_idx)").unwrap();
+                    writeln!(code, "        }};").unwrap();
+                    writeln!(code, "        let bd = {crate_ident}::BlockDeviceKernelComponent::create(&path, 4096, 0);").unwrap();
+                } else if decl.crate_name == "block-device-filesys" {
+                    // Filesys backend: capture device_paths from config for runtime indexing
+                    writeln!(code, "    let __device_paths = config.device_paths.clone();").unwrap();
+                    writeln!(code, "    comp_dispatcher.set_block_device_factory(Box::new(move |spdk_env, logger, drive_idx, pci_addr, cpu_pin| {{").unwrap();
+                    writeln!(code, "        let path = if drive_idx < __device_paths.len() {{").unwrap();
+                    writeln!(code, "            __device_paths[drive_idx].clone()").unwrap();
+                    writeln!(code, "        }} else {{").unwrap();
+                    writeln!(code, "            format!(\"/ssd/certus-drive-{{}}.img\", drive_idx)").unwrap();
+                    writeln!(code, "        }};").unwrap();
                     writeln!(code, "        let bd = {crate_ident}::BlockDeviceFilesysComponent::create(&path, 4096, 4194304);").unwrap();
                 } else {
+                    writeln!(code, "    comp_dispatcher.set_block_device_factory(Box::new(|spdk_env, logger, drive_idx, pci_addr, cpu_pin| {{").unwrap();
                     writeln!(code, "        let bd = {crate_ident}::{factory_call};").unwrap();
                 }
                 for recep in &decl.receptacles {
@@ -318,6 +334,9 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
                     writeln!(code, "        admin.set_pci_address(pci_addr);").unwrap();
                     writeln!(code, "        if let Some(cpu) = cpu_pin {{ admin.set_actor_cpu(cpu + drive_idx); }}").unwrap();
                     writeln!(code, "        admin.initialize().map_err(|e| e.to_string())?;").unwrap();
+                } else if decl.crate_name == "block-device-kernel" {
+                    // Kernel block device backend: initialize via io_uring
+                    writeln!(code, "        bd.initialize().map_err(|e| e.to_string())?;").unwrap();
                 } else {
                     // Non-SPDK backend: call initialize() directly on the component
                     writeln!(code, "        bd.initialize().map_err(|e| e.to_string())?;").unwrap();
@@ -475,6 +494,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                          but the 'spdk' feature is not enabled.\n\
                          Build with: CERTUS_PROFILE={profile} cargo build -p certus-server-yaml \
                          --features spdk"
+                    );
+                }
+            }
+            "block-device-kernel" => {
+                if env::var("CARGO_FEATURE_KERNEL").is_err() {
+                    panic!(
+                        "profile '{profile}' uses block-device-kernel (component '{name}') \
+                         but the 'kernel' feature is not enabled.\n\
+                         Build with: CERTUS_PROFILE={profile} cargo build -p certus-server-yaml \
+                         --features kernel --no-default-features"
                     );
                 }
             }

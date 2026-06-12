@@ -32,6 +32,11 @@ struct Cli {
     #[arg(long = "device-pci")]
     device_pci: Vec<String>,
 
+    /// Linux block device path(s) — may be specified multiple times.
+    /// Use with the kernel block device backend (e.g., /dev/nvme0n1, /dev/md127).
+    #[arg(long = "device-path")]
+    device_path: Vec<String>,
+
     /// Use the first N discovered NVMe drives (alternative to --device-pci).
     #[arg(long = "drive-count", conflicts_with = "device_pci")]
     drive_count: Option<usize>,
@@ -59,6 +64,10 @@ struct Cli {
     /// Pin each NVMe poller thread to a dedicated CPU core.
     #[arg(long = "poller-base-cpu")]
     poller_base_cpu: Option<usize>,
+
+    /// Maximum eviction attempts before failing with pool-full error.
+    #[arg(long = "max-eviction-attempts", default_value_t = 2048)]
+    max_eviction_attempts: usize,
 }
 
 fn parse_size(s: &str) -> Result<usize, String> {
@@ -111,18 +120,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for addr in &cli.device_pci {
         validate_pci_address(addr).map_err(Box::<dyn std::error::Error>::from)?;
     }
-    if cli.device_pci.is_empty() && cli.drive_count.is_none() {
-        return Err("either --device-pci or --drive-count must be specified".into());
+    if cli.device_pci.is_empty() && cli.drive_count.is_none() && cli.device_path.is_empty() {
+        return Err(
+            "one of --device-pci, --drive-count, or --device-path must be specified".into(),
+        );
     }
 
     const DEFAULT_MEMORY_TIER_SIZE: usize = 2 * 1024 * 1024 * 1024; // 2 GiB
 
     let stack_config = StackConfig {
         device_pci: cli.device_pci.clone(),
+        device_paths: cli.device_path.clone(),
         drive_count: cli.drive_count,
         memory_tier_size: cli.memory_tier_size.unwrap_or(DEFAULT_MEMORY_TIER_SIZE),
         format: cli.format,
         poller_base_cpu: cli.poller_base_cpu,
+        max_eviction_attempts: cli.max_eviction_attempts,
         resolved_pci_addrs: std::cell::RefCell::new(Vec::new()),
     };
 
