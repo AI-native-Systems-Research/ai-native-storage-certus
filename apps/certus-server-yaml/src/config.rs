@@ -12,5 +12,6 @@ pub struct StackConfig {
     pub memory_tier_size: usize,
     pub format: bool,
     pub poller_base_cpu: Option<usize>,
+    pub max_eviction_attempts: usize,
     pub resolved_pci_addrs: RefCell<Vec<String>>,
 }
