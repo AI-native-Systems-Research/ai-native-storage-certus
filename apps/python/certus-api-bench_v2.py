@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Multi-client throughput and latency benchmark for the Certus gRPC Dispatcher (v2).
 
-Same as certus-api-bench.py but with pipelined concurrent gRPC requests.
-Difference: cold lookups use gRPC futures (stub.Lookup.future()) to keep
---pipeline-depth RPCs in flight simultaneously, like iperf -P. This saturates
-the server's GPU PCIe link which sequential RPCs cannot fill alone.
+Both hot and cold lookups use pipelined gRPC futures (stub.Lookup.future()) to
+keep --pipeline-depth RPCs in flight simultaneously, like iperf -P. This
+saturates the server's GPU PCIe link which sequential RPCs cannot fill alone.
+Use --sequential-hot for per-request latency measurement on the hot path.
 
 Usage:
     python certus-api-bench_v2.py --clients 1 --num-objects 64 --pipeline-depth 4
@@ -368,6 +368,7 @@ def run_client(
     gpu_id=0,
     pipeline_depth=4,
     writes_settle=30.0,
+    sequential_hot=False,
 ):
     """Single client worker: populate objects, then measure hot and cold lookups."""
 
@@ -493,28 +494,56 @@ def run_client(
     barrier.wait()  # synchronize hot-lookup start
     result.hot_start = time.perf_counter()
 
-    # Hot lookups are sequential (not pipelined): the server's stream_synchronize
-    # completes the DMA before responding, so sequential RPCs measure real H2D
-    # throughput. Pipelining hot lookups inflates numbers by overlapping gRPC
-    # round-trips that share a single GPU PCIe link.
-    for _ in range(iterations):
-        entries = [
-            dispatcher_pb2.LookupEntry(key=k, ipc_handle=hot_lookup_ipcs[i])
-            for i, k in enumerate(hot_keys)
-        ]
-        try:
-            t0 = time.perf_counter()
-            resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=entries))
-            _libcudart.cudaDeviceSynchronize()
-            t1 = time.perf_counter()
-            failed = [r for r in resp.results if not r.success]
-            if failed:
-                result.errors.append(
-                    f"hot lookup failed: {failed[0].error_message}"
-                )
-            result.hot_latencies.append((t1 - t0) / num_objects)
-        except grpc.RpcError as e:
-            result.errors.append(f"hot lookup RPC error: {e.details()}")
+    if sequential_hot:
+        for _ in range(iterations):
+            entries = [
+                dispatcher_pb2.LookupEntry(key=k, ipc_handle=hot_lookup_ipcs[i])
+                for i, k in enumerate(hot_keys)
+            ]
+            try:
+                t0 = time.perf_counter()
+                resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=entries))
+                _libcudart.cudaDeviceSynchronize()
+                t1 = time.perf_counter()
+                failed = [r for r in resp.results if not r.success]
+                if failed:
+                    result.errors.append(
+                        f"hot lookup failed: {failed[0].error_message}"
+                    )
+                result.hot_latencies.append((t1 - t0) / num_objects)
+            except grpc.RpcError as e:
+                result.errors.append(f"hot lookup RPC error: {e.details()}")
+    else:
+        in_flight = []
+        next_to_send = 0
+        completed = 0
+
+        while completed < iterations:
+            while next_to_send < iterations and len(in_flight) < pipeline_depth:
+                entries = [
+                    dispatcher_pb2.LookupEntry(key=k, ipc_handle=hot_lookup_ipcs[i])
+                    for i, k in enumerate(hot_keys)
+                ]
+                req = dispatcher_pb2.BatchLookupRequest(entries=entries)
+                future = stub.Lookup.future(req)
+                in_flight.append((next_to_send, future, time.perf_counter()))
+                next_to_send += 1
+
+            if in_flight:
+                iter_idx, future, t_submit = in_flight.pop(0)
+                try:
+                    resp = future.result()
+                    _libcudart.cudaDeviceSynchronize()
+                    t_done = time.perf_counter()
+                    failed = [r for r in resp.results if not r.success]
+                    if failed:
+                        result.errors.append(
+                            f"hot lookup failed: {failed[0].error_message}"
+                        )
+                    result.hot_latencies.append((t_done - t_submit) / num_objects)
+                except grpc.RpcError as e:
+                    result.errors.append(f"hot lookup RPC error: {e.details()}")
+                completed += 1
 
     result.hot_end = time.perf_counter()
     result.hot_objects = num_objects * iterations
@@ -701,11 +730,26 @@ def main():
         help="Seconds to wait after populate for write-through to drain (default: 30). "
         "Set to 0 to skip.",
     )
+    parser.add_argument(
+        "--memory-tier-size",
+        type=parse_size,
+        default=None,
+        help="Memory-tier pool size (e.g. 4G, 2G). Must match server --memory-tier-size. "
+        "Defaults to 4G.",
+    )
+    parser.add_argument(
+        "--sequential-hot",
+        action="store_true",
+        help="Use sequential (non-pipelined) RPCs for hot lookups. "
+        "Measures per-request latency instead of throughput.",
+    )
     args = parser.parse_args()
 
-    global BLOCK_SIZE
+    global BLOCK_SIZE, MEMORY_TIER_SIZE
     if args.block_size is not None:
         BLOCK_SIZE = args.block_size
+    if args.memory_tier_size is not None:
+        MEMORY_TIER_SIZE = args.memory_tier_size
 
     num_clients = args.clients
     num_objects = args.num_objects
@@ -773,6 +817,7 @@ def main():
                 gpu_id,
                 pipeline_depth,
                 args.writes_settle,
+                args.sequential_hot,
             ),
             daemon=True,
         )
