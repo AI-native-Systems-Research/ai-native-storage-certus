@@ -695,7 +695,7 @@ pub unsafe fn pipelined_multi_object_zero_copy(
 #[allow(clippy::too_many_arguments)]
 pub unsafe fn pipelined_ssd_to_gpu_p2p(
     drive: &dyn IBlockDevice,
-    gpu: &dyn IGpuServices,
+    _gpu: &dyn IGpuServices,
     ring: &crate::p2p_ring::P2pRing,
     partition: &crate::p2p_ring::ThreadPartition,
     channels: &ClientChannels,
@@ -703,6 +703,8 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
     start_lba: u64,
     total_bytes: usize,
 ) -> Result<(), DispatcherError> {
+    use gpu_services::cuda_ffi;
+
     let block_size = drive.block_size() as usize;
     let chunk_size = ring.slot_size;
     let aligned_bytes = total_bytes.next_multiple_of(block_size);
@@ -720,111 +722,37 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
 
     let num_chunks = segments.len();
     let streams = ring.streams();
-    let effective_qd = partition.effective_qd;
     let ring_offset = partition.ring_offset;
+    let ring_size = partition.effective_qd.min(num_chunks);
+    let effective_qd = ring_size.min(16);
 
-    // Use the pre-allocated BAR1-mapped ring buffers directly.
-    let slot_bufs: Vec<&Arc<Mutex<DmaBuffer>>> = (0..effective_qd)
-        .map(|i| ring.slot(ring_offset + i))
-        .collect();
-
-    let submit_limit = effective_qd.min(num_chunks);
-    let mut submitted = 0usize;
-    let mut completed = 0usize;
-
-    // Prime the pipeline.
-    while submitted < submit_limit {
-        let slot_idx = submitted % effective_qd;
+    // Prime: submit initial async reads into ring slots.
+    for i in 0..effective_qd {
+        let slot = ring_offset + (i % ring_size);
         channels
             .command_tx
             .send(Command::ReadAsync {
                 ns_id: 1,
-                lba: segments[submitted].lba,
-                buf: Arc::clone(slot_bufs[slot_idx]),
+                lba: segments[i].lba,
+                buf: Arc::clone(ring.slot(slot)),
                 timeout_ms: READ_TIMEOUT_MS,
-                tag: submitted as u64,
+                tag: 0,
             })
-            .map_err(|e| {
-                DispatcherError::IoError(format!("P2P ReadAsync send #{submitted}: {e}"))
-            })?;
-        submitted += 1;
+            .map_err(|e| DispatcherError::IoError(format!("P2P ReadAsync send #{i}: {e}")))?;
     }
 
-    // Process completions.
-    while completed < num_chunks {
+    let mut next_to_submit = effective_qd;
+
+    for completed in 0..num_chunks {
         match channels.completion_rx.recv() {
-            Ok(Completion::ReadDone { tag, result, .. }) => {
+            Ok(Completion::ReadDone { result, .. }) => {
                 result.map_err(|e| {
-                    DispatcherError::IoError(format!("P2P SSD read (seg {}): {e}", tag))
+                    DispatcherError::IoError(format!("P2P SSD read #{completed}: {e}"))
                 })?;
-
-                let seg_idx = tag as usize;
-                let seg = &segments[seg_idx];
-                let copy_len = seg
-                    .length
-                    .min(total_bytes.saturating_sub(seg.buffer_offset));
-                let current_stream = streams[completed % 2];
-                let slot_idx = seg_idx % effective_qd;
-
-                // D2D copy: GPU ring slot → client GPU destination.
-                let src_dev_ptr = unsafe {
-                    (ring.dev_ptrs[ring_offset + slot_idx] as *const u8) as *const std::ffi::c_void
-                };
-                let dst_ptr = unsafe {
-                    (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void
-                };
-                let err = unsafe {
-                    gpu_services::cuda_ffi::cudaMemcpyAsync(
-                        dst_ptr,
-                        src_dev_ptr,
-                        copy_len,
-                        gpu_services::cuda_ffi::CUDA_MEMCPY_DEVICE_TO_DEVICE,
-                        current_stream.0,
-                    )
-                };
-                if err != gpu_services::cuda_ffi::CUDA_SUCCESS {
-                    return Err(DispatcherError::IoError(format!(
-                        "P2P D2D cudaMemcpyAsync (seg {seg_idx}) failed: {}",
-                        gpu_services::cuda_ffi::cuda_error_string(err)
-                    )));
-                }
-
-                completed += 1;
-
-                // Sync both streams periodically to ensure slots are safe to recycle.
-                if completed % (effective_qd / 2).max(1) == 0 {
-                    gpu.stream_synchronize(streams[0]).map_err(|e| {
-                        DispatcherError::IoError(format!("P2P stream_sync[0]: {e}"))
-                    })?;
-                    gpu.stream_synchronize(streams[1]).map_err(|e| {
-                        DispatcherError::IoError(format!("P2P stream_sync[1]: {e}"))
-                    })?;
-                }
-
-                // Submit next read into recycled slot.
-                if submitted < num_chunks {
-                    let next_slot = submitted % effective_qd;
-                    channels
-                        .command_tx
-                        .send(Command::ReadAsync {
-                            ns_id: 1,
-                            lba: segments[submitted].lba,
-                            buf: Arc::clone(slot_bufs[next_slot]),
-                            timeout_ms: READ_TIMEOUT_MS,
-                            tag: submitted as u64,
-                        })
-                        .map_err(|e| {
-                            DispatcherError::IoError(format!(
-                                "P2P ReadAsync resend #{submitted}: {e}"
-                            ))
-                        })?;
-                    submitted += 1;
-                }
             }
             Ok(Completion::Timeout { handle }) => {
                 return Err(DispatcherError::IoError(format!(
-                    "P2P NVMe read timeout (handle {:?})",
-                    handle
+                    "P2P NVMe read timeout (handle {:?})", handle
                 )));
             }
             Ok(other) => {
@@ -838,12 +766,58 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
                 ));
             }
         }
-    }
 
-    // Final sync both streams.
-    for s in streams {
-        gpu.stream_synchronize(*s)
-            .map_err(|e| DispatcherError::IoError(format!("P2P final sync: {e}")))?;
+        let slot = ring_offset + (completed % ring_size);
+        let seg = &segments[completed];
+        let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
+        let current_stream = streams[completed % 2];
+
+        // D2D async copy: GPU staging ring slot → final GPU destination.
+        let err = cuda_ffi::cudaMemcpyAsync(
+            (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void,
+            ring.dev_ptrs[slot] as *const std::ffi::c_void,
+            copy_len,
+            cuda_ffi::CUDA_MEMCPY_DEVICE_TO_DEVICE,
+            current_stream.0,
+        );
+        if err != cuda_ffi::CUDA_SUCCESS {
+            return Err(DispatcherError::IoError(format!(
+                "P2P D2D cudaMemcpyAsync #{completed}: {}",
+                cuda_ffi::cuda_error_string(err)
+            )));
+        }
+
+        // Submit next NVMe read. Sync streams before recycling slots.
+        if next_to_submit < num_chunks {
+            if completed >= ring_size && completed % (ring_size / 2).max(1) == 0 {
+                for s in streams {
+                    let err = cuda_ffi::cudaStreamSynchronize(s.0);
+                    if err != cuda_ffi::CUDA_SUCCESS {
+                        return Err(DispatcherError::IoError(format!(
+                            "P2P cudaStreamSynchronize: {}",
+                            cuda_ffi::cuda_error_string(err)
+                        )));
+                    }
+                }
+            }
+
+            let next_slot = ring_offset + (next_to_submit % ring_size);
+            channels
+                .command_tx
+                .send(Command::ReadAsync {
+                    ns_id: 1,
+                    lba: segments[next_to_submit].lba,
+                    buf: Arc::clone(ring.slot(next_slot)),
+                    timeout_ms: READ_TIMEOUT_MS,
+                    tag: 0,
+                })
+                .map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "P2P ReadAsync submit #{next_to_submit}: {e}"
+                    ))
+                })?;
+            next_to_submit += 1;
+        }
     }
 
     Ok(())
