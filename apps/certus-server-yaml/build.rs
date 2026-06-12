@@ -290,16 +290,28 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
             let factory_call = ensure_callable(&decl.factory);
 
             if *name == "block_device" {
-                writeln!(code, "    comp_dispatcher.set_block_device_factory(Box::new(|spdk_env, logger, drive_idx, pci_addr, cpu_pin| {{").unwrap();
-                if decl.crate_name == "block-device-filesys" {
-                    // Filesys backend: create with file path derived from drive index
-                    writeln!(code, "        let path = format!(\"/ssd/certus-drive-{{}}.img\", drive_idx);").unwrap();
-                    writeln!(code, "        let bd = {crate_ident}::BlockDeviceFilesysComponent::create(&path, 4096, 4194304);").unwrap();
-                } else if decl.crate_name == "block-device-kernel" {
-                    // Kernel block device backend: use /dev/nvmeXn1 indexed by drive
-                    writeln!(code, "        let path = format!(\"/dev/nvme{{}}n1\", drive_idx);").unwrap();
+                if decl.crate_name == "block-device-kernel" {
+                    // Kernel backend: capture device_paths from config for runtime indexing
+                    writeln!(code, "    let __device_paths = config.device_paths.clone();").unwrap();
+                    writeln!(code, "    comp_dispatcher.set_block_device_factory(Box::new(move |spdk_env, logger, drive_idx, pci_addr, cpu_pin| {{").unwrap();
+                    writeln!(code, "        let path = if drive_idx < __device_paths.len() {{").unwrap();
+                    writeln!(code, "            __device_paths[drive_idx].clone()").unwrap();
+                    writeln!(code, "        }} else {{").unwrap();
+                    writeln!(code, "            format!(\"/dev/nvme{{}}n1\", drive_idx)").unwrap();
+                    writeln!(code, "        }};").unwrap();
                     writeln!(code, "        let bd = {crate_ident}::BlockDeviceKernelComponent::create(&path, 4096, 0);").unwrap();
+                } else if decl.crate_name == "block-device-filesys" {
+                    // Filesys backend: capture device_paths from config for runtime indexing
+                    writeln!(code, "    let __device_paths = config.device_paths.clone();").unwrap();
+                    writeln!(code, "    comp_dispatcher.set_block_device_factory(Box::new(move |spdk_env, logger, drive_idx, pci_addr, cpu_pin| {{").unwrap();
+                    writeln!(code, "        let path = if drive_idx < __device_paths.len() {{").unwrap();
+                    writeln!(code, "            __device_paths[drive_idx].clone()").unwrap();
+                    writeln!(code, "        }} else {{").unwrap();
+                    writeln!(code, "            format!(\"/ssd/certus-drive-{{}}.img\", drive_idx)").unwrap();
+                    writeln!(code, "        }};").unwrap();
+                    writeln!(code, "        let bd = {crate_ident}::BlockDeviceFilesysComponent::create(&path, 4096, 4194304);").unwrap();
                 } else {
+                    writeln!(code, "    comp_dispatcher.set_block_device_factory(Box::new(|spdk_env, logger, drive_idx, pci_addr, cpu_pin| {{").unwrap();
                     writeln!(code, "        let bd = {crate_ident}::{factory_call};").unwrap();
                 }
                 for recep in &decl.receptacles {
