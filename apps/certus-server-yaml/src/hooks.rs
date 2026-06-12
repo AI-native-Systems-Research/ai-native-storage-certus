@@ -122,7 +122,11 @@ pub fn init_dispatcher(
 
     // When SPDK is not used, generate placeholder addresses for the requested drive count.
     if data_pci_addrs.is_empty() {
-        let count = config.drive_count.unwrap_or(1);
+        let count = if !config.device_paths.is_empty() {
+            config.device_paths.len()
+        } else {
+            config.drive_count.unwrap_or(1)
+        };
         data_pci_addrs = (0..count)
             .map(|i| format!("0000:00:0{i}.0"))
             .collect();
