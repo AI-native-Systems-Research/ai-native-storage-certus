@@ -7,6 +7,7 @@ use std::cell::RefCell;
 /// generated composition code passes `&StackConfig` (shared ref) to all hooks.
 pub struct StackConfig {
     pub device_pci: Vec<String>,
+    pub device_paths: Vec<String>,
     pub drive_count: Option<usize>,
     pub memory_tier_size: usize,
     pub format: bool,
