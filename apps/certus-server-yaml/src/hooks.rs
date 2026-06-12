@@ -137,6 +137,7 @@ pub fn init_dispatcher(
             data_pci_addrs,
             format_on_init: config.format,
             poller_base_cpu: config.poller_base_cpu,
+            max_eviction_attempts: config.max_eviction_attempts,
             ..Default::default()
         })
         .map_err(|e| format!("Dispatcher init failed: {e}"))

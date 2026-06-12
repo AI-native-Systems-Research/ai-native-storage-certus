@@ -64,6 +64,10 @@ struct Cli {
     /// Pin each NVMe poller thread to a dedicated CPU core.
     #[arg(long = "poller-base-cpu")]
     poller_base_cpu: Option<usize>,
+
+    /// Maximum eviction attempts before failing with pool-full error.
+    #[arg(long = "max-eviction-attempts", default_value_t = 2048)]
+    max_eviction_attempts: usize,
 }
 
 fn parse_size(s: &str) -> Result<usize, String> {
@@ -131,6 +135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         memory_tier_size: cli.memory_tier_size.unwrap_or(DEFAULT_MEMORY_TIER_SIZE),
         format: cli.format,
         poller_base_cpu: cli.poller_base_cpu,
+        max_eviction_attempts: cli.max_eviction_attempts,
         resolved_pci_addrs: std::cell::RefCell::new(Vec::new()),
     };
 
