@@ -8,7 +8,7 @@
 use std::sync::{Arc, Mutex};
 
 use interfaces::{
-    ClientChannels, Command, Completion, DmaBuffer, DispatcherError, GpuStream, IBlockDevice,
+    ClientChannels, Command, Completion, DispatcherError, DmaBuffer, GpuStream, IBlockDevice,
     IGpuServices,
 };
 
@@ -144,10 +144,7 @@ pub unsafe fn pipelined_ssd_to_gpu(
             match channels.completion_rx.recv() {
                 Ok(Completion::ReadDone { handle, result, .. }) => {
                     result.map_err(|e| {
-                        DispatcherError::IoError(format!(
-                            "SSD read (handle {:?}): {e}",
-                            handle
-                        ))
+                        DispatcherError::IoError(format!("SSD read (handle {:?}): {e}", handle))
                     })?;
                 }
                 Ok(Completion::Timeout { handle }) => {
@@ -172,7 +169,9 @@ pub unsafe fn pipelined_ssd_to_gpu(
         // All reads for this batch are complete. Process in order.
         for i in 0..batch_len {
             let seg = &segments[chunk_idx + i];
-            let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
+            let copy_len = seg
+                .length
+                .min(total_bytes.saturating_sub(seg.buffer_offset));
             let current_stream = streams[i % 2];
 
             let guard = ring.buffers[i].lock().unwrap();
@@ -277,8 +276,8 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
         .map(|seg| {
             let ptr = unsafe { mem_tier_ptr.add(seg.buffer_offset) as *mut std::ffi::c_void };
             let buf_size = seg.length.next_multiple_of(block_size);
-            let buf = unsafe { DmaBuffer::from_raw(ptr, buf_size, noop_free, -1) }
-                .map_err(|e| {
+            let buf =
+                unsafe { DmaBuffer::from_raw(ptr, buf_size, noop_free, -1) }.map_err(|e| {
                     DispatcherError::AllocationFailed(format!("DmaBuffer wrap chunk: {e}"))
                 })?;
             Ok(Arc::new(Mutex::new(buf)))
@@ -304,9 +303,7 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
                 timeout_ms: READ_TIMEOUT_MS,
                 tag: submitted as u64,
             })
-            .map_err(|e| {
-                DispatcherError::IoError(format!("ReadAsync send #{submitted}: {e}"))
-            })?;
+            .map_err(|e| DispatcherError::IoError(format!("ReadAsync send #{submitted}: {e}")))?;
         submitted += 1;
     }
 
@@ -314,22 +311,26 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
     // segment immediately, then submit the next read if any remain.
     while completed < num_chunks {
         match channels.completion_rx.recv() {
-            Ok(Completion::ReadDone { handle, tag, result }) => {
+            Ok(Completion::ReadDone {
+                handle,
+                tag,
+                result,
+            }) => {
                 result.map_err(|e| {
                     DispatcherError::IoError(format!("SSD read (handle {:?}): {e}", handle))
                 })?;
 
                 let seg_idx = tag as usize;
                 let seg = &segments[seg_idx];
-                let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
+                let copy_len = seg
+                    .length
+                    .min(total_bytes.saturating_sub(seg.buffer_offset));
                 let current_stream = streams[completed % 2];
 
                 let guard = chunk_bufs[seg_idx].lock().unwrap();
                 gpu.dma_copy_to_device_async(
                     &guard,
-                    unsafe {
-                        (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void
-                    },
+                    unsafe { (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void },
                     copy_len,
                     current_stream,
                 )
@@ -469,7 +470,10 @@ pub unsafe fn pipelined_multi_object_zero_copy(
             .collect();
 
         total_segments += segments.len();
-        all_objs.push(ObjSegments { segments, chunk_bufs });
+        all_objs.push(ObjSegments {
+            segments,
+            chunk_bufs,
+        });
     }
 
     if total_segments == 0 {
@@ -485,7 +489,6 @@ pub unsafe fn pipelined_multi_object_zero_copy(
     }
 
     let max_segments_per_obj = all_objs.iter().map(|o| o.segments.len()).max().unwrap_or(0);
-
 
     // Submit initial batch up to max_queue_depth.
     let submit_limit = max_queue_depth.min(work.len());
@@ -535,7 +538,9 @@ pub unsafe fn pipelined_multi_object_zero_copy(
         match channels.completion_rx.recv() {
             Ok(Completion::ReadDone { tag, result, .. }) => {
                 #[cfg(feature = "pipeline-telemetry")]
-                { t_recv_ns += t0.elapsed().as_nanos() as u64; }
+                {
+                    t_recv_ns += t0.elapsed().as_nanos() as u64;
+                }
 
                 let obj_idx = (tag as usize) / max_segments_per_obj;
                 let seg_idx = (tag as usize) % max_segments_per_obj;
@@ -553,16 +558,16 @@ pub unsafe fn pipelined_multi_object_zero_copy(
                     let job = &jobs[obj_idx];
                     let obj = &all_objs[obj_idx];
                     let seg = &obj.segments[seg_idx];
-                    let copy_len =
-                        seg.length.min(job.total_bytes.saturating_sub(seg.buffer_offset));
+                    let copy_len = seg
+                        .length
+                        .min(job.total_bytes.saturating_sub(seg.buffer_offset));
                     let current_stream = streams[stream_idx % 2];
 
                     let guard = obj.chunk_bufs[seg_idx].lock().unwrap();
                     let dma_result = gpu.dma_copy_to_device_async(
                         &guard,
                         unsafe {
-                            (job.gpu_dst as *mut u8).add(seg.buffer_offset)
-                                as *mut std::ffi::c_void
+                            (job.gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void
                         },
                         copy_len,
                         current_stream,
@@ -575,7 +580,9 @@ pub unsafe fn pipelined_multi_object_zero_copy(
                         )));
                     }
                     #[cfg(feature = "pipeline-telemetry")]
-                    { t_gpu_ns += tg.elapsed().as_nanos() as u64; }
+                    {
+                        t_gpu_ns += tg.elapsed().as_nanos() as u64;
+                    }
 
                     stream_idx += 1;
 
@@ -585,7 +592,9 @@ pub unsafe fn pipelined_multi_object_zero_copy(
                         let _ = gpu.stream_synchronize(streams[0]);
                         let _ = gpu.stream_synchronize(streams[1]);
                         #[cfg(feature = "pipeline-telemetry")]
-                        { t_sync_ns += ts.elapsed().as_nanos() as u64; }
+                        {
+                            t_sync_ns += ts.elapsed().as_nanos() as u64;
+                        }
                     }
                 }
 
@@ -605,7 +614,9 @@ pub unsafe fn pipelined_multi_object_zero_copy(
                     });
                     submitted += 1;
                     #[cfg(feature = "pipeline-telemetry")]
-                    { t_resub_ns += tr.elapsed().as_nanos() as u64; }
+                    {
+                        t_resub_ns += tr.elapsed().as_nanos() as u64;
+                    }
                 }
             }
             Ok(Completion::Timeout { handle }) => {

@@ -180,7 +180,8 @@ impl DispatcherComponent {
         let topo = match component_core::numa::NumaTopology::discover() {
             Ok(t) => t,
             Err(_) => {
-                logger.warn("dispatcher: NUMA topology unavailable, poller CPUs will not be pinned");
+                logger
+                    .warn("dispatcher: NUMA topology unavailable, poller CPUs will not be pinned");
                 return vec![None; pci_addrs.len()];
             }
         };
@@ -221,6 +222,8 @@ impl DispatcherComponent {
             .collect()
     }
 
+    /// Check if the dispatcher has been initialized.
+    /// Returns error if not yet initialized (component not wired or initialize() not called).
     fn ensure_initialized(&self) -> Result<(), DispatcherError> {
         if !self.initialized.load(Ordering::Acquire) {
             return Err(DispatcherError::NotInitialized(
@@ -301,6 +304,14 @@ impl DispatcherComponent {
     }
 
     /// Promote an SSD-resident entry back into the memory-tier and serve to GPU.
+    ///
+    /// This is called when a lookup hits an entry that has been evicted from DRAM but
+    /// persists on SSD. It performs a pipelined cold read:
+    /// 1. Evict if needed to make space in memory-tier
+    /// 2. Insert into memory-tier (allocates DRAM slot)
+    /// 3. Read from SSD using pipelined chunked I/O while simultaneously streaming
+    ///    chunks from DRAM→GPU to pipeline the I/O and reduce latency
+    /// 4. Update dispatch-map to mark entry as in memory-tier
     ///
     /// Uses pipelined chunked reads: SSD→DRAM (memory-tier) while streaming
     /// chunks from DRAM→GPU.
@@ -407,17 +418,20 @@ impl DispatcherComponent {
     /// dispatch-map. If write-through hasn't completed (no ssd_offset), the
     /// dispatch-map entry is removed entirely so lookups get NotExist rather
     /// than a dangling memory-tier pointer.
+    ///
+    /// Strategy: Under high concurrency (many threads promoting cold entries simultaneously),
+    /// scanning many candidates per attempt causes severe MT lock contention because
+    /// oldest_keys(N) holds the lock while scanning N entries. Use a tiny scan
+    /// window and prefer blind LRU as the primary fast path — one O(1) lock
+    /// acquisition per iteration keeps contention proportional to thread count.
+    /// Every 8th attempt probes a small batch for a clean eviction (write-through complete),
+    /// while other iterations fall through to blind LRU to minimize lock hold time.
     fn evict_for_space(
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
         needed: u32,
         max_attempts: usize,
     ) -> Result<(), DispatcherError> {
-        // Under high concurrency (many threads promoting cold entries simultaneously),
-        // scanning many candidates per attempt causes severe MT lock contention because
-        // oldest_keys(N) holds the lock while scanning N entries.  Use a tiny scan
-        // window and prefer blind LRU as the primary fast path — one O(1) lock
-        // acquisition per iteration keeps contention proportional to thread count.
         const MAX_SCAN: usize = 4;
 
         let mut attempts = 0usize;
@@ -473,6 +487,11 @@ impl DispatcherComponent {
         Ok(())
     }
 
+    /// Background write-through job: copy from memory-tier to SSD persistent storage.
+    ///
+    /// This is called by the background writer thread pool to asynchronously persist
+    /// data from the DRAM memory-tier to the SSD block device. The data becomes
+    /// available for recovery/promotion even if the entry is evicted from DRAM.
     fn process_write_job(
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
@@ -605,8 +624,8 @@ impl DispatcherComponent {
         if let Some(ref factory) = *factory_guard {
             // Factory still uses the base-cpu convention for backward compatibility.
             let base = poller_cpu.map(|c| c.saturating_sub(i));
-            let (block_dev, ibd, admin) = factory(spdk_env, logger, i, pci_addr, base)
-                .map_err(|e| {
+            let (block_dev, ibd, admin) =
+                factory(spdk_env, logger, i, pci_addr, base).map_err(|e| {
                     DispatcherError::IoError(format!(
                         "block device factory failed for drive {i}: {e}"
                     ))
@@ -621,19 +640,25 @@ impl DispatcherComponent {
                     .spdk_env
                     .connect(Arc::clone(spdk_env))
                     .map_err(|e| {
-                        DispatcherError::IoError(format!("failed to wire spdk_env for data drive {i}: {e}"))
+                        DispatcherError::IoError(format!(
+                            "failed to wire spdk_env for data drive {i}: {e}"
+                        ))
                     })?;
                 component.logger.connect(Arc::clone(logger)).map_err(|e| {
-                    DispatcherError::IoError(format!("failed to wire logger for data drive {i}: {e}"))
+                    DispatcherError::IoError(format!(
+                        "failed to wire logger for data drive {i}: {e}"
+                    ))
                 })?;
                 let block_dev = component as Arc<dyn component_core::IUnknown + Send + Sync>;
                 let admin: Arc<dyn IBlockDeviceAdmin + Send + Sync> =
-                    component_core::iunknown::query::<dyn IBlockDeviceAdmin + Send + Sync>(&*block_dev)
-                        .ok_or_else(|| {
-                            DispatcherError::IoError(format!(
-                                "failed to query IBlockDeviceAdmin for data drive {i}"
-                            ))
-                        })?;
+                    component_core::iunknown::query::<dyn IBlockDeviceAdmin + Send + Sync>(
+                        &*block_dev,
+                    )
+                    .ok_or_else(|| {
+                        DispatcherError::IoError(format!(
+                            "failed to query IBlockDeviceAdmin for data drive {i}"
+                        ))
+                    })?;
                 admin.set_pci_address(pci_addr);
                 if let Some(cpu) = poller_cpu {
                     admin.set_actor_cpu(cpu);
@@ -672,13 +697,10 @@ impl DispatcherComponent {
                 // Factory handles device creation; use uninitialized stub as placeholder
                 use component_core::query_interface;
                 let stub = spdk_env::SPDKEnvComponent::new_default();
-                query_interface!(stub, ISPDKEnv)
-                    .expect("SPDKEnvComponent must provide ISPDKEnv")
+                query_interface!(stub, ISPDKEnv).expect("SPDKEnvComponent must provide ISPDKEnv")
             }
             Err(_) => {
-                return Err(DispatcherError::NotInitialized(
-                    "spdk_env not bound".into(),
-                ));
+                return Err(DispatcherError::NotInitialized("spdk_env not bound".into()));
             }
         };
 
@@ -727,7 +749,9 @@ impl DispatcherComponent {
                     // SAFETY: posix_memalign is safe with valid align (power of 2, multiple of sizeof(void*))
                     let ret = unsafe { libc::posix_memalign(&mut ptr, align, size) };
                     if ret != 0 || ptr.is_null() {
-                        return Err(format!("posix_memalign failed ({size}, {align}): errno {ret}"));
+                        return Err(format!(
+                            "posix_memalign failed ({size}, {align}): errno {ret}"
+                        ));
                     }
                     unsafe { std::ptr::write_bytes(ptr as *mut u8, 0, size) };
                     // SAFETY: ptr is valid, non-null, allocated with posix_memalign
@@ -771,10 +795,10 @@ impl DispatcherComponent {
             let iem: Arc<dyn IExtentManager + Send + Sync> =
                 component_core::iunknown::query::<dyn IExtentManager + Send + Sync>(&*extent_mgr)
                     .ok_or_else(|| {
-                        DispatcherError::IoError(format!(
-                            "failed to query IExtentManager for data drive {i}"
-                        ))
-                    })?;
+                    DispatcherError::IoError(format!(
+                        "failed to query IExtentManager for data drive {i}"
+                    ))
+                })?;
             let sector_size = ibd.block_size();
             let num_sectors = ibd.num_sectors(1).unwrap_or(0);
             let data_disk_size = num_sectors * sector_size as u64;
@@ -812,7 +836,8 @@ impl DispatcherComponent {
                 })?;
             }
 
-            let cpu_msg = config.poller_base_cpu
+            let cpu_msg = config
+                .poller_base_cpu
                 .map(|base| format!(", poller pinned to CPU {}", base + i))
                 .unwrap_or_default();
             self.log_info(&format!(
@@ -825,7 +850,8 @@ impl DispatcherComponent {
                 _block_dev: block_dev_component,
                 block_dev_admin: admin,
                 block_dev_iface: ibd,
-                _extent_mgr_component: extent_mgr as Arc<dyn component_core::IUnknown + Send + Sync>,
+                _extent_mgr_component: extent_mgr
+                    as Arc<dyn component_core::IUnknown + Send + Sync>,
                 extent_mgr: iem,
                 cached_channels,
             });
@@ -837,6 +863,18 @@ impl DispatcherComponent {
 
 impl IDispatcher for DispatcherComponent {
     fn initialize(&self, config: DispatcherConfig) -> Result<(), DispatcherError> {
+        // Initialize the dispatcher: set up all data drives, background workers,
+        // and GPU integration. This must be called once before any cache operations.
+        //
+        // Flow:
+        // 1. Verify required receptacles are wired (dispatch_map, memory_tier)
+        // 2. Create N block device + extent manager pairs for data drives
+        // 3. Recover dispatch-map from SSD extents (if not formatting)
+        // 4. Set up GPU streams and pipeline rings for pipelined I/O
+        // 5. Register memory-tier pool with GPU for zero-copy DMA
+        // 6. Start background writer thread pool for write-through
+        // 7. Start background SSD evictor (optional)
+
         self.log_info("dispatcher: initializing");
 
         self.max_eviction_attempts
@@ -919,7 +957,8 @@ impl IDispatcher for DispatcherComponent {
                     // for zero-copy NVMe reads and async GPU transfers.
                     if let Ok(mt) = self.memory_tier.get() {
                         if let Some((pool_ptr, pool_size)) = mt.pool_info() {
-                            match gpu.register_host_memory(pool_ptr as *mut std::ffi::c_void, pool_size)
+                            match gpu
+                                .register_host_memory(pool_ptr as *mut std::ffi::c_void, pool_size)
                             {
                                 Ok(()) => {
                                     self.log_info(&format!(
@@ -1013,6 +1052,21 @@ impl IDispatcher for DispatcherComponent {
     }
 
     fn shutdown(&self) -> Result<(), DispatcherError> {
+        // Gracefully shut down the dispatcher in a coordinated sequence:
+        //
+        // 1. Stop background threads (evictor, writer)
+        // 2. Clear pending writes
+        // 3. Checkpoint all extent managers to persist metadata
+        // 4. Unregister memory-tier pool from GPU/SPDK
+        // 5. Destroy GPU streams and pipeline ring
+        // 6. Three-phase block device teardown:
+        //    - Phase 1: Signal all actors to stop (close channels, exit poll loops)
+        //    - Phase 2: Join actor threads (safe once signaled)
+        //    - Phase 3: Detach controllers (safe after all threads exit)
+        //
+        // The ordering is critical to avoid use-after-free bugs and crashes from
+        // SPDK transport teardown invalidating memory that other threads are polling.
+
         self.log_info("dispatcher: shutting down");
 
         if let Some(mut evictor) = self.bg_evictor.lock().unwrap().take() {
@@ -1104,10 +1158,7 @@ impl IDispatcher for DispatcherComponent {
         Ok(())
     }
 
-    fn batch_lookup(
-        &self,
-        entries: &[(CacheKey, IpcHandle)],
-    ) -> Vec<Result<(), DispatcherError>> {
+    fn batch_lookup(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> {
         if entries.is_empty() {
             return Vec::new();
         }
@@ -1159,6 +1210,8 @@ impl IDispatcher for DispatcherComponent {
 
         for (i, (key, ipc_handle)) in entries.iter().enumerate() {
             let key = *key;
+
+            // Lookup key in hash table
             match dm.lookup(key) {
                 Ok(lookup_result) => match lookup_result {
                     LookupResult::NotExist => {
@@ -1208,16 +1261,17 @@ impl IDispatcher for DispatcherComponent {
                             });
                             match temp_buf {
                                 Ok(buf) => {
-                                    let r = gpu.dma_copy_to_device(
-                                        &buf,
-                                        ipc_handle.address as *mut std::ffi::c_void,
-                                        copy_size,
-                                    )
-                                    .map_err(|e| {
-                                        DispatcherError::IoError(format!(
-                                            "GPU DMA copy (memory-tier→device) failed: {e}"
-                                        ))
-                                    });
+                                    let r = gpu
+                                        .dma_copy_to_device(
+                                            &buf,
+                                            ipc_handle.address as *mut std::ffi::c_void,
+                                            copy_size,
+                                        )
+                                        .map_err(|e| {
+                                            DispatcherError::IoError(format!(
+                                                "GPU DMA copy (memory-tier→device) failed: {e}"
+                                            ))
+                                        });
                                     std::mem::forget(buf);
                                     r
                                 }
@@ -1278,12 +1332,19 @@ impl IDispatcher for DispatcherComponent {
                 let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
                 for entry in &cold_entries {
                     Self::evict_for_space(&dm, &mt, entry.ipc_handle_size, max_attempts).ok();
-                    let res = mt.insert(entry.key, entry.ipc_handle_size).map(|mem_ptr| {
-                        let _ = dm.create_memory_tier_entry(entry.key, mem_ptr, entry.ipc_handle_size);
-                        let _ = dm.release_write(entry.key);
-                    }).map_err(|e| {
-                        DispatcherError::AllocationFailed(format!("promote insert failed: {e}"))
-                    });
+                    let res = mt
+                        .insert(entry.key, entry.ipc_handle_size)
+                        .map(|mem_ptr| {
+                            let _ = dm.create_memory_tier_entry(
+                                entry.key,
+                                mem_ptr,
+                                entry.ipc_handle_size,
+                            );
+                            let _ = dm.release_write(entry.key);
+                        })
+                        .map_err(|e| {
+                            DispatcherError::AllocationFailed(format!("promote insert failed: {e}"))
+                        });
                     results[entry.idx] = Some(res);
                 }
             } else {
@@ -1498,6 +1559,14 @@ impl IDispatcher for DispatcherComponent {
         key: CacheKey,
         ipc_handle: IpcHandle,
     ) -> Result<GpuStream, DispatcherError> {
+        // Asynchronous lookup: initiate data transfer from cache to GPU device.
+        // Returns a CUDA stream handle if the operation is async, null stream if sync.
+        //
+        // Fast paths:
+        // - MemoryTier (warm data): direct DMA copy from DRAM to GPU (async via dedicated stream)
+        // - Staging: immediate DMA copy from temp buffer to GPU (sync)
+        // - BlockDevice (cold data): promote from SSD to DRAM to GPU (pipelined, sync completion)
+
         self.ensure_initialized()?;
 
         let dm = self
@@ -1609,6 +1678,8 @@ impl IDispatcher for DispatcherComponent {
     }
 
     fn check(&self, key: CacheKey) -> Result<bool, DispatcherError> {
+        // Check whether a key exists in the cache (fast path that doesn't transfer data).
+        // Returns true if the entry exists in any location (memory-tier, staging, or SSD).
         self.ensure_initialized()?;
 
         let dm = self
@@ -1630,6 +1701,8 @@ impl IDispatcher for DispatcherComponent {
     }
 
     fn remove(&self, key: CacheKey) -> Result<(), DispatcherError> {
+        // Remove entry from all storage tiers (memory-tier, dispatch-map, and SSD).
+        // Must wait for any active write-through to complete before removing from SSD.
         self.ensure_initialized()?;
 
         let dm = self
@@ -1672,6 +1745,19 @@ impl IDispatcher for DispatcherComponent {
     }
 
     fn populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError> {
+        // Populate writes data from GPU device memory into the cache system.
+        //
+        // Flow:
+        // 1. Evict from memory-tier if needed to make space
+        // 2. Allocate a slot in the memory-tier
+        // 3. DMA copy from GPU to the memory-tier slot
+        // 4. Register in dispatch-map as memory-tier entry
+        // 5. Downgrade to read reference for background writer
+        // 6. Enqueue background write-through to SSD
+        //
+        // The entry becomes immediately available for read operations (lookup)
+        // while write-through to SSD happens in the background.
+
         self.ensure_initialized()?;
 
         if ipc_handle.size == 0 {
@@ -1774,6 +1860,16 @@ impl IDispatcher for DispatcherComponent {
     }
 
     fn prepare_store(&self, key: CacheKey, size: u32) -> Result<Arc<DmaBuffer>, DispatcherError> {
+        // Prepare a direct write (store) path for application-generated data.
+        //
+        // This allows applications to:
+        // 1. Call prepare_store(key, size) to get a DMA buffer
+        // 2. Write data directly into the buffer
+        // 3. Call commit_store(key) to finalize and persist to SSD
+        //
+        // The entry is registered in dispatch-map immediately (visible to lookups)
+        // and persisted to SSD on commit, bypassing the populate/background-write path.
+
         self.ensure_initialized()?;
         self.log_info(&format!("dispatcher: prepare_store key={key} size={size}"));
 
@@ -1871,6 +1967,11 @@ impl IDispatcher for DispatcherComponent {
     }
 
     fn commit_store(&self, key: CacheKey) -> Result<(), DispatcherError> {
+        // Finalize a direct write (store) prepared with prepare_store.
+        //
+        // This writes the buffer to SSD synchronously and commits the extent
+        // so the entry becomes persistent and recoverable. The entry is immediately
+        // available for lookups after this call.
         self.ensure_initialized()?;
         self.log_info(&format!("dispatcher: commit_store key={key}"));
 
@@ -1913,6 +2014,10 @@ impl IDispatcher for DispatcherComponent {
     }
 
     fn cancel_store(&self, key: CacheKey) -> Result<(), DispatcherError> {
+        // Cancel a direct write (store) prepared with prepare_store.
+        //
+        // This releases the reserved SSD extent (via WriteHandle drop triggering abort)
+        // and removes the dispatch-map entry, making the key unavailable.
         self.ensure_initialized()?;
         self.log_info(&format!("dispatcher: cancel_store key={key}"));
 
@@ -1935,6 +2040,7 @@ impl IDispatcher for DispatcherComponent {
     }
 
     fn touch(&self, key: CacheKey) -> Result<(), DispatcherError> {
+        // Mark an entry as recently accessed to prevent eviction (refresh LRU).
         self.ensure_initialized()?;
 
         let dm = self
@@ -1946,6 +2052,8 @@ impl IDispatcher for DispatcherComponent {
     }
 
     fn clear_memory_tier(&self) -> Result<usize, DispatcherError> {
+        // Force-evict all entries from the memory-tier, transitioning them to SSD storage.
+        // Used for memory pressure situations or explicit cache flush operations.
         self.ensure_initialized()?;
 
         let dm = self
@@ -1969,6 +2077,9 @@ impl IDispatcher for DispatcherComponent {
     }
 
     fn flush_to_ssd(&self) -> Result<usize, DispatcherError> {
+        // Synchronously flush all pending write-through jobs to SSD.
+        // Blocks until all enqueued background writes have completed.
+        // Returns the number of write jobs that were in-flight.
         self.ensure_initialized()?;
 
         // Block until the background writer has processed all enqueued jobs.
