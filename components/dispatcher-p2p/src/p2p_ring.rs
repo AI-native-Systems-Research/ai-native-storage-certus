@@ -6,6 +6,10 @@
 //!
 //! The ring is partitioned across threads for lock-free concurrent access.
 
+use std::sync::{Arc, Mutex};
+
+use gpu_services::cuda_ffi;
+use gpu_services::dma::create_spdk_dma_buffer_from_gpu_bar;
 use interfaces::{DmaBuffer, GpuStream, IGpuServices};
 
 /// Total number of staging slots in the P2P ring.
@@ -20,26 +24,46 @@ const MAX_QD_PER_THREAD: usize = 16;
 /// SPDK DMA registration, enabling NVMe controllers to write directly
 /// into GPU memory without host DRAM bounce.
 pub struct P2pRing {
-    slots: Vec<DmaBuffer>,
-    streams: [GpuStream; 2],
+    pub ring_bufs: Vec<Arc<Mutex<DmaBuffer>>>,
+    pub dev_ptrs: Vec<*mut std::ffi::c_void>,
+    pub streams: [GpuStream; 2],
     pub slot_size: usize,
 }
 
+unsafe impl Send for P2pRing {}
+unsafe impl Sync for P2pRing {}
+
 impl P2pRing {
-    /// Attempt to allocate the P2P staging ring.
+    /// Allocate a P2P ring with GDRCopy BAR1-mapped GPU staging buffers.
     ///
     /// Returns `None` if GDRCopy/BAR1 is unavailable or GPU memory is
     /// insufficient. Cleans up any partial allocations on failure.
     pub fn new(gpu: &dyn IGpuServices, slot_size: usize) -> Option<Self> {
-        let mut slots: Vec<DmaBuffer> = Vec::with_capacity(P2P_RING_SLOTS);
+        let mut dev_ptrs: Vec<*mut std::ffi::c_void> = Vec::with_capacity(P2P_RING_SLOTS);
+        let mut ring_bufs: Vec<Arc<Mutex<DmaBuffer>>> = Vec::with_capacity(P2P_RING_SLOTS);
 
         for _i in 0..P2P_RING_SLOTS {
-            match gpu.allocate_pinned_dma_buffer(slot_size) {
-                Ok(buf) => slots.push(buf),
+            let mut dev_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+            let err = unsafe { cuda_ffi::cudaMalloc(&mut dev_ptr, slot_size) };
+            if err != cuda_ffi::CUDA_SUCCESS {
+                drop(ring_bufs);
+                for p in &dev_ptrs {
+                    unsafe { cuda_ffi::cudaFree(*p) };
+                }
+                return None;
+            }
+
+            match create_spdk_dma_buffer_from_gpu_bar(dev_ptr, slot_size) {
+                Ok(buf) => {
+                    dev_ptrs.push(dev_ptr);
+                    ring_bufs.push(Arc::new(Mutex::new(buf)));
+                }
                 Err(_) => {
-                    // Partial allocation — clean up already-allocated slots.
-                    // DmaBuffer Drop handles deallocation.
-                    drop(slots);
+                    unsafe { cuda_ffi::cudaFree(dev_ptr) };
+                    drop(ring_bufs);
+                    for p in &dev_ptrs {
+                        unsafe { cuda_ffi::cudaFree(*p) };
+                    }
                     return None;
                 }
             }
@@ -48,7 +72,10 @@ impl P2pRing {
         let stream_a = match gpu.create_stream() {
             Ok(s) => s,
             Err(_) => {
-                drop(slots);
+                drop(ring_bufs);
+                for p in &dev_ptrs {
+                    unsafe { cuda_ffi::cudaFree(*p) };
+                }
                 return None;
             }
         };
@@ -57,33 +84,40 @@ impl P2pRing {
             Ok(s) => s,
             Err(_) => {
                 let _ = gpu.destroy_stream(stream_a);
-                drop(slots);
+                drop(ring_bufs);
+                for p in &dev_ptrs {
+                    unsafe { cuda_ffi::cudaFree(*p) };
+                }
                 return None;
             }
         };
 
         Some(Self {
-            slots,
+            ring_bufs,
+            dev_ptrs,
             streams: [stream_a, stream_b],
             slot_size,
         })
     }
 
-    /// Destroy CUDA streams. Slot buffers are freed via DmaBuffer::drop.
+    /// Destroy CUDA streams and free GPU allocations.
     pub fn destroy(self, gpu: &dyn IGpuServices) {
         let _ = gpu.destroy_stream(self.streams[0]);
         let _ = gpu.destroy_stream(self.streams[1]);
-        // slots are freed on drop
+        drop(self.ring_bufs);
+        for p in &self.dev_ptrs {
+            unsafe { cuda_ffi::cudaFree(*p) };
+        }
     }
 
-    /// Get a reference to the slot at `index`.
-    pub fn slot(&self, index: usize) -> &DmaBuffer {
-        &self.slots[index]
+    /// Get a reference to the slot DmaBuffer at `index`.
+    pub fn slot(&self, index: usize) -> &Arc<Mutex<DmaBuffer>> {
+        &self.ring_bufs[index]
     }
 
-    /// Get the device pointer for a slot (for D2D copy source).
+    /// Get the GPU device pointer for a slot (for D2D copy source).
     pub fn slot_ptr(&self, index: usize) -> *const std::ffi::c_void {
-        self.slots[index].as_ptr()
+        self.dev_ptrs[index]
     }
 
     /// Get the alternating CUDA streams.
@@ -93,7 +127,7 @@ impl P2pRing {
 
     /// Total number of slots.
     pub fn total_slots(&self) -> usize {
-        self.slots.len()
+        self.ring_bufs.len()
     }
 }
 

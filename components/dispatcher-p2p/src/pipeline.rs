@@ -723,17 +723,10 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
     let effective_qd = partition.effective_qd;
     let ring_offset = partition.ring_offset;
 
-    // Create DmaBuffer wrappers around P2P ring slots for NVMe read commands.
-    // These use noop_free since the P2P ring owns the GPU memory.
-    let slot_bufs: Vec<Arc<Mutex<DmaBuffer>>> = (0..effective_qd)
-        .map(|i| {
-            let slot_idx = ring_offset + i;
-            let ptr = ring.slot_ptr(slot_idx) as *mut std::ffi::c_void;
-            let buf = unsafe { DmaBuffer::from_raw(ptr, chunk_size, noop_free, -1) }
-                .map_err(|e| DispatcherError::AllocationFailed(format!("P2P slot wrap: {e}")))?;
-            Ok(Arc::new(Mutex::new(buf)))
-        })
-        .collect::<Result<Vec<_>, DispatcherError>>()?;
+    // Use the pre-allocated BAR1-mapped ring buffers directly.
+    let slot_bufs: Vec<&Arc<Mutex<DmaBuffer>>> = (0..effective_qd)
+        .map(|i| ring.slot(ring_offset + i))
+        .collect();
 
     let submit_limit = effective_qd.min(num_chunks);
     let mut submitted = 0usize;
@@ -747,7 +740,7 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
             .send(Command::ReadAsync {
                 ns_id: 1,
                 lba: segments[submitted].lba,
-                buf: Arc::clone(&slot_bufs[slot_idx]),
+                buf: Arc::clone(slot_bufs[slot_idx]),
                 timeout_ms: READ_TIMEOUT_MS,
                 tag: submitted as u64,
             })
@@ -773,18 +766,28 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
                 let current_stream = streams[completed % 2];
                 let slot_idx = seg_idx % effective_qd;
 
-                // D2D copy: P2P ring slot → client GPU destination.
-                let guard = slot_bufs[slot_idx].lock().unwrap();
-                gpu.dma_copy_to_device_async(
-                    &guard,
-                    unsafe { (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void },
-                    copy_len,
-                    current_stream,
-                )
-                .map_err(|e| {
-                    DispatcherError::IoError(format!("P2P D2D copy (seg {seg_idx}) failed: {e}"))
-                })?;
-                drop(guard);
+                // D2D copy: GPU ring slot → client GPU destination.
+                let src_dev_ptr = unsafe {
+                    (ring.dev_ptrs[ring_offset + slot_idx] as *const u8) as *const std::ffi::c_void
+                };
+                let dst_ptr = unsafe {
+                    (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void
+                };
+                let err = unsafe {
+                    gpu_services::cuda_ffi::cudaMemcpyAsync(
+                        dst_ptr,
+                        src_dev_ptr,
+                        copy_len,
+                        gpu_services::cuda_ffi::CUDA_MEMCPY_DEVICE_TO_DEVICE,
+                        current_stream.0,
+                    )
+                };
+                if err != gpu_services::cuda_ffi::CUDA_SUCCESS {
+                    return Err(DispatcherError::IoError(format!(
+                        "P2P D2D cudaMemcpyAsync (seg {seg_idx}) failed: {}",
+                        gpu_services::cuda_ffi::cuda_error_string(err)
+                    )));
+                }
 
                 completed += 1;
 
@@ -806,7 +809,7 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
                         .send(Command::ReadAsync {
                             ns_id: 1,
                             lba: segments[submitted].lba,
-                            buf: Arc::clone(&slot_bufs[next_slot]),
+                            buf: Arc::clone(slot_bufs[next_slot]),
                             timeout_ms: READ_TIMEOUT_MS,
                             tag: submitted as u64,
                         })
@@ -841,11 +844,6 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
     for s in streams {
         gpu.stream_synchronize(*s)
             .map_err(|e| DispatcherError::IoError(format!("P2P final sync: {e}")))?;
-    }
-
-    // Forget DmaBuffer wrappers (P2P ring owns the GPU memory).
-    for buf in slot_bufs {
-        std::mem::forget(Arc::try_unwrap(buf).ok());
     }
 
     Ok(())
