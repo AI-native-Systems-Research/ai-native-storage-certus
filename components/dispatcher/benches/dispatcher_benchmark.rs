@@ -378,6 +378,9 @@ impl IMemoryTier for BenchMemoryTier {
     fn evict_lru(&self) -> Option<CacheKey> {
         None
     }
+    fn evict_lru_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+        None
+    }
     fn remove(&self, _key: CacheKey) -> Result<(), MemoryTierError> {
         Ok(())
     }
