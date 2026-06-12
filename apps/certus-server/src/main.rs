@@ -61,6 +61,10 @@ struct Cli {
     /// (e.g. --poller-base-cpu 2 for drives on NUMA 0 with 4 drives → cores 2,3,4,5).
     #[arg(long = "poller-base-cpu")]
     poller_base_cpu: Option<usize>,
+
+    /// Maximum eviction attempts before failing with pool-full error.
+    #[arg(long = "max-eviction-attempts", default_value_t = 2048)]
+    max_eviction_attempts: usize,
 }
 
 fn parse_size(s: &str) -> Result<usize, String> {
@@ -112,6 +116,7 @@ fn initialize_component_stack(
     memory_tier_size: usize,
     format: bool,
     poller_base_cpu: Option<usize>,
+    max_eviction_attempts: usize,
 ) -> Result<(Arc<dyn IDispatcher + Send + Sync>, Arc<dyn ILogger + Send + Sync>, Vec<String>), String> {
     let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponent::new_default();
 
@@ -247,6 +252,7 @@ fn initialize_component_stack(
             data_pci_addrs: device_pci_addrs.clone(),
             format_on_init: format,
             poller_base_cpu,
+            max_eviction_attempts,
             ..Default::default()
         })
         .map_err(|e| format!("Dispatcher init failed: {e}"))?;
@@ -280,6 +286,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool_size = cli.memory_tier_size.unwrap_or(DEFAULT_MEMORY_TIER_SIZE);
     let (dispatcher, logger, device_pci) = initialize_component_stack(
         &device_pci, cli.drive_count, pool_size, cli.format, cli.poller_base_cpu,
+        cli.max_eviction_attempts,
     )?;
 
     logger.info(&format!("certus-server: devices={:?}", device_pci));
