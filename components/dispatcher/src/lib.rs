@@ -405,6 +405,10 @@ impl DispatcherComponent {
     /// dispatch-map. If write-through hasn't completed (no ssd_offset), the
     /// dispatch-map entry is removed entirely so lookups get NotExist rather
     /// than a dangling memory-tier pointer.
+    // NOTE: This only handles global capacity pressure. If keys are heavily skewed
+    // to one shard (e.g., all keys ≡ 0 mod 16), the target shard can fill while
+    // global used() < capacity(). In that case insert() will return PoolFull after
+    // this function succeeds. Acceptable for now — real workloads distribute evenly.
     fn evict_for_space(
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
