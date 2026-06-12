@@ -1305,7 +1305,7 @@ impl IDispatcher for DispatcherP2pComponent {
         if !cold_entries.is_empty() {
             const MAX_QUEUES_PER_DRIVE: usize = 2;
 
-            let chunk_size = {
+            let _chunk_size = {
                 let ring_guard = self.pipeline_ring.read();
                 ring_guard.as_ref().map_or(131072, |r| r.chunk_size)
             };
@@ -1367,7 +1367,7 @@ impl IDispatcher for DispatcherP2pComponent {
                             .chunks(entry_indices.len().div_ceil(num_queues))
                             .collect();
 
-                        let queue_depth = 64 / num_queues;
+                        let _queue_depth = 64 / num_queues;
 
                         for chunk in chunks {
                             let dm_ref = &dm;
