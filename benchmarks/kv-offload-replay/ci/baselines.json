@@ -1,0 +1,5 @@
+{
+  "certus": {"throughput_mbps": 305.0, "hit_ratio": 0.7028, "tolerance_pct": 15},
+  "cpu":    {"throughput_mbps": 20932.0, "hit_ratio": 0.9804, "tolerance_pct": 10},
+  "fs":     {"throughput_mbps": 5773.0, "hit_ratio": 0.0, "tolerance_pct": 10}
+}
