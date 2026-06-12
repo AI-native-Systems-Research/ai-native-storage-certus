@@ -1152,6 +1152,11 @@ impl IDispatcher for DispatcherComponent {
 
         let mut cold_entries: Vec<ColdEntry> = Vec::new();
 
+        // Indices of entries whose async DMA was issued on the warm stream
+        // and need a single deferred stream_synchronize after the loop.
+        let mut deferred_warm: Vec<(usize, CacheKey)> = Vec::new();
+        let raw_stream = self.warm_stream.load(Ordering::Acquire);
+
         for (i, (key, ipc_handle)) in entries.iter().enumerate() {
             let key = *key;
             match dm.lookup(key) {
@@ -1167,27 +1172,25 @@ impl IDispatcher for DispatcherComponent {
                     }
                     LookupResult::MemoryTier { pointer, size } => {
                         let copy_size = (ipc_handle.size as usize).min(size as usize);
-                        let raw = self.warm_stream.load(Ordering::Acquire);
-                        let res = if raw != 0 {
-                            let s = GpuStream(raw as *mut std::ffi::c_void);
-                            gpu.memcpy_h2d_async(
+                        if raw_stream != 0 {
+                            let s = GpuStream(raw_stream as *mut std::ffi::c_void);
+                            match gpu.memcpy_h2d_async(
                                 pointer as *const std::ffi::c_void,
                                 ipc_handle.address as *mut std::ffi::c_void,
                                 copy_size,
                                 s,
-                            )
-                            .map_err(|e| {
-                                DispatcherError::IoError(format!(
-                                    "GPU DMA copy (memory-tier→device) failed: {e}"
-                                ))
-                            })
-                            .and_then(|_| {
-                                gpu.stream_synchronize(s).map_err(|e| {
-                                    DispatcherError::IoError(format!(
-                                        "stream_synchronize failed: {e}"
-                                    ))
-                                })
-                            })
+                            ) {
+                                Ok(()) => {
+                                    // Defer sync — keep read lock held until stream completes.
+                                    deferred_warm.push((i, key));
+                                }
+                                Err(e) => {
+                                    let _ = dm.release_read(key);
+                                    results[i] = Some(Err(DispatcherError::IoError(format!(
+                                        "GPU DMA copy (memory-tier→device) failed: {e}"
+                                    ))));
+                                }
+                            }
                         } else {
                             let aligned = copy_size.next_multiple_of(4096).max(4096);
                             let temp_buf = unsafe {
@@ -1201,7 +1204,7 @@ impl IDispatcher for DispatcherComponent {
                             .map_err(|e| {
                                 DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}"))
                             });
-                            match temp_buf {
+                            let res = match temp_buf {
                                 Ok(buf) => {
                                     let r = gpu.dma_copy_to_device(
                                         &buf,
@@ -1217,11 +1220,11 @@ impl IDispatcher for DispatcherComponent {
                                     r
                                 }
                                 Err(e) => Err(e),
-                            }
-                        };
-                        let _ = dm.release_read(key);
-                        mt.touch(key);
-                        results[i] = Some(res);
+                            };
+                            let _ = dm.release_read(key);
+                            mt.touch(key);
+                            results[i] = Some(res);
+                        }
                     }
                     LookupResult::Staging { buffer } => {
                         let res = gpu
@@ -1252,6 +1255,20 @@ impl IDispatcher for DispatcherComponent {
                 Err(_) => {
                     results[i] = Some(Err(DispatcherError::KeyNotFound(key)));
                 }
+            }
+        }
+
+        // Batch-synchronize all deferred warm-stream DMA copies with a single
+        // stream_synchronize call, then release read locks and touch LRU.
+        if !deferred_warm.is_empty() {
+            let s = GpuStream(raw_stream as *mut std::ffi::c_void);
+            let sync_result = gpu.stream_synchronize(s).map_err(|e| {
+                DispatcherError::IoError(format!("stream_synchronize failed: {e}"))
+            });
+            for (idx, key) in &deferred_warm {
+                let _ = dm.release_read(*key);
+                mt.touch(*key);
+                results[*idx] = Some(sync_result.clone());
             }
         }
 
