@@ -440,6 +440,10 @@ impl IMemoryTier for MockMemoryTier {
         Some(key)
     }
 
+    fn evict_lru_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+        self.evict_lru()
+    }
+
     fn remove(&self, key: CacheKey) -> Result<(), MemoryTierError> {
         let mut inner = self.inner.lock().unwrap();
         inner

@@ -284,6 +284,24 @@ impl IMemoryTier for MemoryTierComponent {
         None
     }
 
+    fn evict_lru_for_key(&self, key: CacheKey) -> Option<CacheKey> {
+        let state = self.state.read().unwrap();
+        if !state.initialized.load(Ordering::Acquire) {
+            return None;
+        }
+
+        let shard_idx = Self::shard_for_key(key);
+        let mut shard = state.shards[shard_idx].lock().unwrap();
+        if let Some(evicted_key) = shard.lru.pop_front() {
+            if let Some(slot) = shard.slots.remove(&evicted_key) {
+                shard.allocator.deallocate(slot.offset, slot.size as usize);
+            }
+            Some(evicted_key)
+        } else {
+            None
+        }
+    }
+
     fn remove(&self, key: CacheKey) -> Result<(), MemoryTierError> {
         let state = self.state.read().unwrap();
         if !state.initialized.load(Ordering::Acquire) {
