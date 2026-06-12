@@ -2663,6 +2663,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
+            AtomicUsize::new(2048),
         );
         let d = query_interface!(c, IDispatcher);
         assert!(d.is_some());
@@ -2680,6 +2681,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
+            AtomicUsize::new(2048),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -2702,6 +2704,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
+            AtomicUsize::new(2048),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -2725,6 +2728,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
+            AtomicUsize::new(2048),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -2748,6 +2752,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
+            AtomicUsize::new(2048),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.check(42);
@@ -2766,6 +2771,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
+            AtomicUsize::new(2048),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.remove(42);
@@ -2784,6 +2790,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
+            AtomicUsize::new(2048),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -2807,6 +2814,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
+            AtomicUsize::new(2048),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         // Even though not initialized, zero-size check comes after init check.
@@ -2833,6 +2841,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
+            AtomicUsize::new(2048),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -2850,6 +2859,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
+            AtomicUsize::new(2048),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -2868,6 +2878,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
+            AtomicUsize::new(2048),
         ));
 
         let handles: Vec<_> = (0..4)
