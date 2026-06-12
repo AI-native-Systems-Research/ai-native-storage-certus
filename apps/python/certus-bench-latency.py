@@ -305,18 +305,17 @@ def main():
     print("Summary")
     print("=" * 70)
     batch_mib = num_objects * block_size / (1024 * 1024)
-    print(f"  {'Phase':<16} {'Batch Latency':>14} {'p99':>10} {'Per-Object':>12} {'Throughput':>12}")
-    print(f"  {'-'*16} {'-'*14} {'-'*10} {'-'*12} {'-'*12}")
+    print(f"  {'Phase':<16} {'Per-Object avg':>14} {'p99':>10} {'Throughput':>12}")
+    print(f"  {'-'*16} {'-'*14} {'-'*10} {'-'*12}")
     for label, lats in [("Populate", pop_latencies),
                         ("Hot Lookup", hot_latencies),
                         ("Cold Lookup", cold_latencies)]:
         if lats:
-            avg_us = statistics.mean(lats)
+            avg_us = statistics.mean(lats) / num_objects
             sorted_lats = sorted(lats)
-            p99_us = sorted_lats[min(int(len(sorted_lats) * 0.99), len(sorted_lats) - 1)]
-            per_obj_us = avg_us / num_objects
-            gbps = (num_objects * block_size) / (avg_us / 1e6) / (1024**3)
-            print(f"  {label:<16} {avg_us:>10.0f} us {p99_us:>7.0f} us {per_obj_us:>9.0f} us {gbps:>9.2f} GB/s")
+            p99_us = sorted_lats[min(int(len(sorted_lats) * 0.99), len(sorted_lats) - 1)] / num_objects
+            gbps = (num_objects * block_size) / (statistics.mean(lats) / 1e6) / (1024**3)
+            print(f"  {label:<16} {avg_us:>10.0f} us {p99_us:>7.0f} us {gbps:>9.2f} GB/s")
         else:
             print(f"  {label:<16} {'no data':>14}")
     print()
