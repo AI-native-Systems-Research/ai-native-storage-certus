@@ -29,7 +29,7 @@ import dispatcher_pb2_grpc
 assert torch.cuda.is_available(), "CUDA GPU required"
 
 BLOCK_SIZE = 4 * 1024 * 1024  # 4 MiB (default, overridden by --block-size)
-MEMORY_TIER_SIZE = 2 * 1024 * 1024 * 1024  # 2 GiB (default, overridden by --memory-tier-size)
+MEMORY_TIER_SIZE = 4 * 1024 * 1024 * 1024  # 4 GiB (must match server --memory-tier-size)
 
 
 def parse_size(s):

@@ -315,7 +315,7 @@ impl DispatcherComponent {
         let total_bytes = ipc_handle.size as usize;
 
         // Evict if needed to make space.
-        Self::evict_for_space(dm, mt, ipc_handle.size)?;
+        Self::evict_for_space(dm, mt, ipc_handle.size, key)?;
 
         // Insert into memory-tier.
         let mem_ptr = mt.insert(key, ipc_handle.size).map_err(|e| {
@@ -409,6 +409,7 @@ impl DispatcherComponent {
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
         needed: u32,
+        target_key: CacheKey,
     ) -> Result<(), DispatcherError> {
         // Under high concurrency (many threads promoting cold entries simultaneously),
         // scanning many candidates per attempt causes severe MT lock contention because
@@ -457,10 +458,9 @@ impl DispatcherComponent {
                     }
                 }
                 None => {
-                    // Blind LRU: O(1) under the MT lock. Data loss is acceptable
-                    // under pressure; entries still in flight on SSD are removed
-                    // from the dispatch-map so stale lookups get NotExist.
-                    if let Some(evicted_key) = mt.evict_lru() {
+                    // Targeted LRU: evict from the same shard as target_key so the
+                    // freed space is usable by the subsequent insert(target_key, ...).
+                    if let Some(evicted_key) = mt.evict_lru_for_key(target_key) {
                         if dm.convert_memory_tier_to_block(evicted_key).is_err() {
                             let _ = dm.remove(evicted_key);
                         }
@@ -1271,7 +1271,7 @@ impl IDispatcher for DispatcherComponent {
 
             if num_drives == 0 {
                 for entry in &cold_entries {
-                    Self::evict_for_space(&dm, &mt, entry.ipc_handle_size).ok();
+                    Self::evict_for_space(&dm, &mt, entry.ipc_handle_size, entry.key).ok();
                     let res = mt.insert(entry.key, entry.ipc_handle_size).map(|mem_ptr| {
                         let _ = dm.create_memory_tier_entry(entry.key, mem_ptr, entry.ipc_handle_size);
                         let _ = dm.release_write(entry.key);
@@ -1367,7 +1367,7 @@ impl IDispatcher for DispatcherComponent {
                                     let ipc_size = entry.ipc_handle_size;
 
                                     let prep = (|| -> Result<*mut u8, DispatcherError> {
-                                        Self::evict_for_space(dm_ref, mt_ref, ipc_size)?;
+                                        Self::evict_for_space(dm_ref, mt_ref, ipc_size, entry.key)?;
                                         mt_ref.insert(entry.key, ipc_size).map_err(|e| {
                                             DispatcherError::AllocationFailed(format!(
                                                 "promote insert failed: {e}"
@@ -1684,7 +1684,7 @@ impl IDispatcher for DispatcherComponent {
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
         // Evict from memory-tier if needed to make space.
-        Self::evict_for_space(&dm, &mt, ipc_handle.size)?;
+        Self::evict_for_space(&dm, &mt, ipc_handle.size, key)?;
 
         // Allocate a slot in the memory-tier.
         let mem_ptr = mt.insert(key, ipc_handle.size).map_err(|e| match e {
@@ -2104,6 +2104,10 @@ mod tests {
             let aligned = (slot.size as usize).next_multiple_of(4096);
             inner.used = inner.used.saturating_sub(aligned);
             Some(key)
+        }
+
+        fn evict_lru_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+            self.evict_lru()
         }
 
         fn remove(&self, key: CacheKey) -> Result<(), MemoryTierError> {
@@ -3293,7 +3297,7 @@ mod tests {
         }
 
         // Pool is now full (16384 used). Trying to add 4096 more should evict.
-        DispatcherComponent::evict_for_space(&dm, &mt, 4096).unwrap();
+        DispatcherComponent::evict_for_space(&dm, &mt, 4096, 100).unwrap();
 
         // At least one entry was evicted from memory-tier.
         assert!(mt.used() + 4096 <= mt.capacity());
@@ -3311,7 +3315,7 @@ mod tests {
         dm.release_write(0).unwrap();
 
         // Plenty of space, no eviction needed.
-        DispatcherComponent::evict_for_space(&dm, &mt, 4096).unwrap();
+        DispatcherComponent::evict_for_space(&dm, &mt, 4096, 100).unwrap();
 
         assert!(mt.contains(0), "entry should not be evicted");
     }
