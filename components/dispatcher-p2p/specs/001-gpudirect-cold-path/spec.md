@@ -26,19 +26,18 @@ A client application requests data that has been evicted from DRAM to NVMe SSD. 
 
 ---
 
-### User Story 2 - Fallback to DRAM When P2P Unavailable (Priority: P2)
+### User Story 2 - Fail Fast When P2P Unavailable (Priority: P2)
 
-When the P2P staging ring cannot be initialized (missing kernel modules, insufficient GPU memory), the system falls back to reading cold data via host DRAM and completes the lookup without error.
+When the P2P staging ring cannot be initialized (missing gdrdrv/nvidia-peermem kernel modules, insufficient GPU memory), the server MUST fail at startup rather than silently degrading. Use the `full.yaml` profile (standard dispatcher) for DRAM-only deployments.
 
-**Why this priority**: Ensures the component is deployable on hardware without P2P support, rather than failing entirely.
+**Why this priority**: Silent degradation to DRAM defeats the purpose of selecting the P2P profile. Explicit failure prevents misdiagnosis.
 
-**Independent Test**: Simulate P2P ring initialization failure, issue cold lookups, verify they complete correctly via the DRAM path.
+**Independent Test**: Remove gdrdrv module, start server with full-p2p profile, verify it panics during initialization.
 
 **Acceptance Scenarios**:
 
-1. **Given** a system where P2P initialization fails, **When** the component starts, **Then** it selects the DRAM fallback path and logs the reason.
-2. **Given** the DRAM fallback is active, **When** a client requests a cold entry, **Then** data arrives correctly at the client GPU destination.
-3. **Given** partial resource allocation before failure, **When** fallback is triggered, **Then** all partially allocated resources are released.
+1. **Given** a system where P2P initialization fails, **When** the component starts, **Then** it panics with a diagnostic message directing the operator to use the full.yaml profile.
+2. **Given** partial resource allocation before failure, **When** initialization fails, **Then** all partially allocated GPU memory is freed before the panic.
 
 ---
 
@@ -68,7 +67,7 @@ The system's end-to-end performance (P2P path vs DRAM path) can be measured usin
 **Acceptance Scenarios**:
 
 1. **Given** a deployed system with the P2P path active, **When** the benchmark tool runs a cold-heavy workload, **Then** throughput and latency numbers are reported.
-2. **Given** a deployed system with the DRAM fallback active, **When** the same benchmark runs, **Then** comparable throughput and latency numbers are reported for comparison.
+2. **Given** the standard dispatcher (full.yaml) deployed on the same hardware, **When** the same benchmark runs, **Then** comparable throughput numbers are reported for comparison against the P2P path.
 
 ---
 
@@ -85,11 +84,11 @@ The system's end-to-end performance (P2P path vs DRAM path) can be measured usin
 
 - **FR-001**: System MUST read evicted data from SSD directly into GPU staging buffers, bypassing host DRAM.
 - **FR-002**: System MUST copy data from staging buffers to the client's GPU destination.
-- **FR-003**: System MUST pre-allocate a fixed ring of GPU staging buffers at initialization, shared across all cold lookup threads.
-- **FR-004**: System MUST partition the staging ring for concurrent thread access to prevent conflicts.
-- **FR-005**: System MUST pipeline SSD reads with GPU copies, submitting the next read as each prior read completes.
-- **FR-006**: System MUST fall back to the DRAM path when P2P ring initialization fails.
-- **FR-007**: System MUST determine the path (P2P vs DRAM) once at initialization; the decision is immutable for the component's lifetime.
+- **FR-003**: System MUST pre-allocate a fixed ring of 64 GPU staging buffers at initialization via `cudaMalloc` + GDRCopy BAR1 mapping (`gdr_pin_buffer` + `gdr_map`) + `spdk_mem_register`. Each slot is 128 KiB (MDTS). The ring is shared across all cold lookup threads.
+- **FR-004**: System MUST partition the staging ring for concurrent thread access using `ThreadPartition` (non-overlapping slot ranges, effective QD capped at 16 per thread to prevent NVMe qpair saturation).
+- **FR-005**: System MUST pipeline SSD reads with D2D GPU copies using FIFO completion ordering (no tags). Stream synchronization occurs only when recycling ring slots (not on every completion). No final stream sync — caller is responsible for ensuring completion.
+- **FR-006**: System MUST panic at startup if the P2P ring cannot be initialized (GDRCopy unavailable, GPU memory insufficient). No DRAM fallback — use the `full.yaml` profile (standard dispatcher) for DRAM-only deployments.
+- **FR-007**: The P2P ring is allocated once at initialization and is immutable for the component's lifetime. There is no runtime path selection.
 - **FR-008**: System MUST implement the same interface as the standard dispatcher, serving as a drop-in replacement.
 - **FR-009**: System MUST promote successfully read cold entries back to DRAM after completing the read.
 - **FR-010**: System MUST release all staging resources on shutdown with no leaks.
@@ -110,8 +109,8 @@ The system's end-to-end performance (P2P path vs DRAM path) can be measured usin
 - **SC-002**: Hot-path throughput shows no measurable regression compared to the standard dispatcher.
 - **SC-003**: The system handles 4+ concurrent clients performing cold lookups without data corruption or deadlock.
 - **SC-004**: All staging resources are fully released on shutdown with zero leaks.
-- **SC-005**: End-to-end throughput is measurable and comparable between the P2P path and the DRAM fallback path using the pipelined benchmark tool.
-- **SC-006**: Fallback path selection completes during initialization with diagnostic logging when P2P is unavailable.
+- **SC-005**: End-to-end throughput is measurable and comparable between the P2P path (full-p2p.yaml) and the DRAM path (full.yaml) using the pipelined benchmark tool.
+- **SC-006**: Initialization panics with a clear diagnostic when P2P ring allocation fails (GDRCopy/BAR1 unavailable).
 
 ## Assumptions
 
