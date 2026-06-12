@@ -29,7 +29,10 @@ import dispatcher_pb2_grpc
 assert torch.cuda.is_available(), "CUDA GPU required"
 
 BLOCK_SIZE = 4 * 1024 * 1024  # 4 MiB (default, overridden by --block-size)
-MEMORY_TIER_SIZE = 4 * 1024 * 1024 * 1024  # 4 GiB (must match server --memory-tier-size)
+# TODO: query server for actual pool size instead of requiring manual --memory-tier-size.
+# For multi-client runs, set this to HALF the server's --memory-tier-size so that
+# total objects across all clients fits within the real pool without cross-client eviction.
+MEMORY_TIER_SIZE = 2 * 1024 * 1024 * 1024  # 2 GiB default (half of typical 4G server)
 
 
 def parse_size(s):
@@ -734,8 +737,9 @@ def main():
         "--memory-tier-size",
         type=parse_size,
         default=None,
-        help="Memory-tier pool size (e.g. 4G, 2G). Must match server --memory-tier-size. "
-        "Defaults to 4G.",
+        help="Memory-tier pool size assumption (e.g. 4G, 2G). For multi-client runs, "
+        "set to HALF the server's --memory-tier-size to avoid cross-client eviction. "
+        "Defaults to 2G.",
     )
     parser.add_argument(
         "--sequential-hot",
