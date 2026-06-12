@@ -15,7 +15,7 @@ pub mod pipeline;
 
 use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -114,6 +114,7 @@ define_component! {
             warm_stream: AtomicU64,
             block_device_factory: Mutex<Option<BlockDeviceFactory>>,
             extent_manager_factory: Mutex<Option<ExtentManagerFactory>>,
+            max_eviction_attempts: AtomicUsize,
         },
     }
 }
@@ -315,7 +316,8 @@ impl DispatcherComponent {
         let total_bytes = ipc_handle.size as usize;
 
         // Evict if needed to make space.
-        Self::evict_for_space(dm, mt, ipc_handle.size)?;
+        let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
+        Self::evict_for_space(dm, mt, ipc_handle.size, max_attempts)?;
 
         // Insert into memory-tier.
         let mem_ptr = mt.insert(key, ipc_handle.size).map_err(|e| {
@@ -409,6 +411,7 @@ impl DispatcherComponent {
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
         needed: u32,
+        max_attempts: usize,
     ) -> Result<(), DispatcherError> {
         // Under high concurrency (many threads promoting cold entries simultaneously),
         // scanning many candidates per attempt causes severe MT lock contention because
@@ -416,12 +419,11 @@ impl DispatcherComponent {
         // window and prefer blind LRU as the primary fast path — one O(1) lock
         // acquisition per iteration keeps contention proportional to thread count.
         const MAX_SCAN: usize = 4;
-        const MAX_ATTEMPTS: usize = 512;
 
         let mut attempts = 0usize;
         while mt.used() + needed as usize > mt.capacity() {
             attempts += 1;
-            if attempts > MAX_ATTEMPTS {
+            if attempts > max_attempts {
                 static WARNED: std::sync::atomic::AtomicBool =
                     std::sync::atomic::AtomicBool::new(false);
                 if !WARNED.swap(true, Ordering::Relaxed) {
@@ -836,6 +838,9 @@ impl DispatcherComponent {
 impl IDispatcher for DispatcherComponent {
     fn initialize(&self, config: DispatcherConfig) -> Result<(), DispatcherError> {
         self.log_info("dispatcher: initializing");
+
+        self.max_eviction_attempts
+            .store(config.max_eviction_attempts, Ordering::Relaxed);
 
         self.dispatch_map
             .get()
@@ -1270,8 +1275,9 @@ impl IDispatcher for DispatcherComponent {
             let num_drives = drives.len();
 
             if num_drives == 0 {
+                let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
                 for entry in &cold_entries {
-                    Self::evict_for_space(&dm, &mt, entry.ipc_handle_size).ok();
+                    Self::evict_for_space(&dm, &mt, entry.ipc_handle_size, max_attempts).ok();
                     let res = mt.insert(entry.key, entry.ipc_handle_size).map(|mem_ptr| {
                         let _ = dm.create_memory_tier_entry(entry.key, mem_ptr, entry.ipc_handle_size);
                         let _ = dm.release_write(entry.key);
@@ -1307,6 +1313,7 @@ impl IDispatcher for DispatcherComponent {
 
                         let queue_depth = 128;
 
+                        let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
                         for chunk in chunks {
                             let dm_ref = &dm;
                             let mt_ref = &mt;
@@ -1367,7 +1374,7 @@ impl IDispatcher for DispatcherComponent {
                                     let ipc_size = entry.ipc_handle_size;
 
                                     let prep = (|| -> Result<*mut u8, DispatcherError> {
-                                        Self::evict_for_space(dm_ref, mt_ref, ipc_size)?;
+                                        Self::evict_for_space(dm_ref, mt_ref, ipc_size, max_attempts)?;
                                         mt_ref.insert(entry.key, ipc_size).map_err(|e| {
                                             DispatcherError::AllocationFailed(format!(
                                                 "promote insert failed: {e}"
@@ -1684,7 +1691,8 @@ impl IDispatcher for DispatcherComponent {
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
         // Evict from memory-tier if needed to make space.
-        Self::evict_for_space(&dm, &mt, ipc_handle.size)?;
+        let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
+        Self::evict_for_space(&dm, &mt, ipc_handle.size, max_attempts)?;
 
         // Allocate a slot in the memory-tier.
         let mem_ptr = mt.insert(key, ipc_handle.size).map_err(|e| match e {
@@ -2597,6 +2605,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
+            AtomicUsize::new(2048),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -2638,6 +2647,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
+            AtomicUsize::new(2048),
         );
     }
 
@@ -2907,6 +2917,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
+            AtomicUsize::new(2048),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.memory_tier.connect(mt).unwrap();
@@ -2935,6 +2946,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
+            AtomicUsize::new(2048),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -3007,6 +3019,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
+            AtomicUsize::new(2048),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -3293,7 +3306,7 @@ mod tests {
         }
 
         // Pool is now full (16384 used). Trying to add 4096 more should evict.
-        DispatcherComponent::evict_for_space(&dm, &mt, 4096).unwrap();
+        DispatcherComponent::evict_for_space(&dm, &mt, 4096, 2048).unwrap();
 
         // At least one entry was evicted from memory-tier.
         assert!(mt.used() + 4096 <= mt.capacity());
@@ -3311,7 +3324,7 @@ mod tests {
         dm.release_write(0).unwrap();
 
         // Plenty of space, no eviction needed.
-        DispatcherComponent::evict_for_space(&dm, &mt, 4096).unwrap();
+        DispatcherComponent::evict_for_space(&dm, &mt, 4096, 2048).unwrap();
 
         assert!(mt.contains(0), "entry should not be evicted");
     }
@@ -3333,6 +3346,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
+            AtomicUsize::new(2048),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)

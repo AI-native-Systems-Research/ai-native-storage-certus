@@ -57,6 +57,9 @@ pub struct DispatcherConfig {
     /// Set this to a dedicated core range to give each drive exclusive use of
     /// a core, which is required for SPDK busy-polling to achieve full bandwidth.
     pub poller_base_cpu: Option<usize>,
+    /// Maximum eviction attempts before returning AllocationFailed.
+    /// Default: 2048.
+    pub max_eviction_attempts: usize,
 }
 
 impl Default for DispatcherConfig {
@@ -71,6 +74,7 @@ impl Default for DispatcherConfig {
             ssd_eviction_batch_size: 64,
             ssd_eviction_interval_secs: 5,
             poller_base_cpu: None,
+            max_eviction_attempts: 2048,
         }
     }
 }
