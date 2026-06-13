@@ -1276,7 +1276,7 @@ impl IDispatcher for DispatcherComponent {
             if num_drives == 0 {
                 let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
                 for entry in &cold_entries {
-                    Self::evict_for_space(&dm, &mt, entry.ipc_handle_size, entry.key, 512).ok();
+                    Self::evict_for_space(&dm, &mt, entry.ipc_handle_size, entry.key, max_attempts).ok();
                     let res = mt.insert(entry.key, entry.ipc_handle_size).map(|mem_ptr| {
                         let _ = dm.create_memory_tier_entry(entry.key, mem_ptr, entry.ipc_handle_size);
                         let _ = dm.release_write(entry.key);
@@ -1373,7 +1373,7 @@ impl IDispatcher for DispatcherComponent {
                                     let ipc_size = entry.ipc_handle_size;
 
                                     let prep = (|| -> Result<*mut u8, DispatcherError> {
-                                        Self::evict_for_space(dm_ref, mt_ref, ipc_size, entry.key, 512)?;
+                                        Self::evict_for_space(dm_ref, mt_ref, ipc_size, entry.key, max_attempts)?;
                                         mt_ref.insert(entry.key, ipc_size).map_err(|e| {
                                             DispatcherError::AllocationFailed(format!(
                                                 "promote insert failed: {e}"
