@@ -5,6 +5,8 @@
 //! CLI-provided PCI addresses.
 
 mod service;
+#[cfg(feature = "otel")]
+mod telemetry;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -65,6 +67,15 @@ struct Cli {
     /// Maximum eviction attempts before failing with pool-full error.
     #[arg(long = "max-eviction-attempts", default_value_t = 2048)]
     max_eviction_attempts: usize,
+
+    /// OpenTelemetry OTLP endpoint (e.g. "http://localhost:4317").
+    /// Enables metrics export when set. Requires --features otel.
+    #[arg(long = "otel-endpoint")]
+    otel_endpoint: Option<String>,
+
+    /// Service name reported in OpenTelemetry metrics.
+    #[arg(long = "otel-service-name", default_value = "certus-server")]
+    otel_service_name: String,
 }
 
 fn parse_size(s: &str) -> Result<usize, String> {
@@ -300,7 +311,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         logger.info("certus-server: recovering extents from disk (use --format for clean slate)");
     }
 
-    let svc = DispatcherService::new(Arc::clone(&dispatcher));
+    #[cfg(feature = "otel")]
+    let svc = {
+        let svc = DispatcherService::new(Arc::clone(&dispatcher));
+        if let Some(ref endpoint) = cli.otel_endpoint {
+            let metrics = telemetry::Metrics::init(endpoint, &cli.otel_service_name)?;
+            logger.info(&format!("certus-server: OTel metrics exporting to {endpoint}"));
+            svc.with_metrics(metrics)
+        } else {
+            svc
+        }
+    };
+
+    #[cfg(not(feature = "otel"))]
+    let svc = {
+        if cli.otel_endpoint.is_some() {
+            logger.warn(
+                "certus-server: --otel-endpoint specified but binary not compiled with --features otel"
+            );
+        }
+        DispatcherService::new(Arc::clone(&dispatcher))
+    };
 
     let addr = cli.listen.parse()?;
 
