@@ -7,7 +7,6 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -121,14 +120,16 @@ impl FileStore {
 
     fn populate(&self, key: u64, data: &[u8]) -> Result<(), String> {
         let path = self.key_path(key);
-        let mut file = fs::OpenOptions::new()
+        let file = fs::OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
-            .custom_flags(libc::O_DSYNC)
             .open(&path)
             .map_err(|e| format!("file create failed: {e}"))?;
-        file.write_all(data).map_err(|e| format!("file write failed: {e}"))?;
+        let mut writer = std::io::BufWriter::new(file);
+        writer.write_all(data).map_err(|e| format!("file write failed: {e}"))?;
+        let file = writer.into_inner().map_err(|e| format!("flush failed: {e}"))?;
+        file.sync_all().map_err(|e| format!("fsync failed: {e}"))?;
 
         // Insert into cache
         self.cache_insert(key, data.to_vec());
