@@ -1,6 +1,6 @@
 # Drift Report: dispatcher-p2p (001-gpudirect-cold-path)
 
-**Generated**: 2026-06-12  
+**Generated**: 2026-06-15  
 **Spec**: `components/dispatcher-p2p/specs/001-gpudirect-cold-path/spec.md`  
 **Implementation**: `components/dispatcher-p2p/src/` (lib.rs, pipeline.rs, p2p_ring.rs)
 
@@ -8,8 +8,21 @@
 
 | Status | Count |
 |--------|-------|
-| Aligned | 10 |
-| Resolved this session | 4 |
+| Aligned | 11 |
+| Drifted (minor) | 1 |
+| Resolved prior session | 4 |
+
+## Current Drift
+
+### DRIFT-A: P2P ring failure panics on first cold lookup, not at startup (Severity: Minor)
+
+**Spec says** (FR-006): "System MUST panic at startup if the P2P ring cannot be initialized"
+
+**Code does** (lib.rs:965-978): Init logs warning and continues. First cold lookup panics via `expect()` (lib.rs:1450).
+
+**Impact**: Hot-only workloads proceed without P2P hardware; cold lookup triggers panic. Current behavior is arguably more flexible for testing.
+
+**Recommendation**: Accept current behavior and update FR-006 to: "System MUST panic on first cold lookup if the P2P ring was not initialized. Initialization logs a warning but does not fail, allowing hot-only testing without P2P hardware."
 
 ## Changes Applied (2026-06-12)
 

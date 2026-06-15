@@ -6,16 +6,12 @@
 //! read from NVMe and delivered to the client's GPU. This module implements
 //! three progressively optimized pipeline strategies:
 //!
-//! 1. **`pipelined_ssd_to_gpu`** — Ring-buffer pipeline. NVMe reads into pre-
-//!    allocated ring buffers, then CPU memcpy to memory-tier + async GPU DMA.
-//!    Used for single-object reads when the PipelineRing is available.
-//!
-//! 2. **`pipelined_ssd_to_gpu_zero_copy`** — Zero-copy single-object pipeline.
+//! 1. **`pipelined_ssd_to_gpu_zero_copy`** — Zero-copy single-object pipeline.
 //!    NVMe reads directly into the CUDA-pinned memory-tier slot (no intermediate
 //!    ring buffer, no CPU memcpy). Each completed segment is immediately DMA'd
-//!    to GPU while the next NVMe read is in flight.
+//!    to GPU while the next NVMe read is in flight. Used by single-key `lookup()`.
 //!
-//! 3. **`pipelined_multi_object_zero_copy`** — Multi-object zero-copy pipeline.
+//! 2. **`pipelined_multi_object_zero_copy`** — Multi-object zero-copy pipeline.
 //!    Processes N objects concurrently on the same NVMe queue, interleaving
 //!    segments from different objects to hide per-object NVMe latency. Used by
 //!    `batch_lookup` for parallel cold promotion of multiple keys.
@@ -56,35 +52,23 @@ use interfaces::{
 
 use crate::io_segmenter;
 
-/// Number of ring buffers for pipelined transfers.
+/// Number of GPU DMA copies before a periodic stream synchronization.
 pub const PIPELINE_RING_SIZE: usize = 8;
 
 /// Timeout for async NVMe read operations (ms).
 const READ_TIMEOUT_MS: u64 = 5000;
 
-/// Pre-allocated ring of CUDA-pinned + SPDK-registered DMA buffers and CUDA streams.
+/// Pre-allocated dual CUDA streams and chunk size for pipelined SSD→GPU transfers.
 ///
-/// Constructed once and reused across multiple `pipelined_ssd_to_gpu` calls
-/// to avoid per-call `cudaHostAlloc`/`spdk_mem_register` overhead.
+/// Constructed once at dispatcher init and reused across all cold-path reads.
 pub struct PipelineRing {
-    pub buffers: Vec<Arc<Mutex<DmaBuffer>>>,
     pub streams: [GpuStream; 2],
     pub chunk_size: usize,
 }
 
 impl PipelineRing {
-    /// Allocate a new pipeline ring with CUDA-pinned, SPDK-registered buffers.
+    /// Allocate CUDA streams for pipeline use.
     pub fn new(gpu: &dyn IGpuServices, chunk_size: usize) -> Result<Self, DispatcherError> {
-        let buffers: Vec<Arc<Mutex<DmaBuffer>>> = (0..PIPELINE_RING_SIZE)
-            .map(|_| {
-                gpu.allocate_pinned_dma_buffer(chunk_size)
-                    .map(|b| Arc::new(Mutex::new(b)))
-                    .map_err(|e| {
-                        DispatcherError::AllocationFailed(format!("pipeline ring buffer: {e}"))
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
         let stream_a = gpu
             .create_stream()
             .map_err(|e| DispatcherError::IoError(format!("create_stream failed: {e}")))?;
@@ -94,175 +78,16 @@ impl PipelineRing {
         })?;
 
         Ok(Self {
-            buffers,
             streams: [stream_a, stream_b],
             chunk_size,
         })
     }
 
-    /// Destroy CUDA streams. Buffers are freed on drop via their DmaBuffer free_fn.
+    /// Destroy CUDA streams.
     pub fn destroy(self, gpu: &dyn IGpuServices) {
         let _ = gpu.destroy_stream(self.streams[0]);
         let _ = gpu.destroy_stream(self.streams[1]);
     }
-}
-
-/// Pipeline-read from SSD into a memory-tier slot while streaming chunks to GPU.
-///
-/// Uses a pre-allocated [`PipelineRing`] to avoid per-call allocation overhead.
-///
-/// Algorithm (mirrors gpu-bb-vs-p2p benchmark):
-/// 1. Prime the ring with `min(ring_size, num_chunks)` async NVMe reads
-/// 2. For each completion:
-///    a. memcpy ring buffer → memory-tier slot (CPU, immediate)
-///    b. Issue cudaMemcpyAsync on stream[completed % 2]
-///    c. Sync stream[(completed+1) % 2] (previous copy) — frees that ring slot
-///    d. Resubmit next NVMe read into the freed slot
-/// 3. Sync both streams
-///
-/// # Safety
-///
-/// - `mem_tier_ptr` must be valid for writes of at least `total_bytes` (aligned up to block size).
-/// - `gpu_dst` must be a valid GPU destination pointer for `total_bytes`.
-pub unsafe fn pipelined_ssd_to_gpu(
-    drive: &dyn IBlockDevice,
-    gpu: &dyn IGpuServices,
-    ring: &PipelineRing,
-    mem_tier_ptr: *mut u8,
-    gpu_dst: *mut std::ffi::c_void,
-    start_lba: u64,
-    total_bytes: usize,
-) -> Result<(), DispatcherError> {
-    let block_size = drive.block_size() as usize;
-    let chunk_size = ring.chunk_size;
-    let aligned_bytes = total_bytes.next_multiple_of(block_size);
-
-    let channels: ClientChannels = drive
-        .connect_client()
-        .map_err(|e| DispatcherError::IoError(format!("connect_client failed: {e}")))?;
-
-    let segments = io_segmenter::segment_io(
-        start_lba,
-        aligned_bytes,
-        chunk_size as u32,
-        block_size as u32,
-    );
-
-    if segments.is_empty() {
-        return Ok(());
-    }
-
-    let num_chunks = segments.len();
-    let ring_size = ring.buffers.len().min(num_chunks);
-    let streams = &ring.streams;
-
-    // Process chunks in batches of ring_size. Each batch submits reads into
-    // distinct ring slots, waits for all to complete (order-independent since
-    // each slot is unique within the batch), then copies to memory-tier and GPU.
-    let mut chunk_idx = 0;
-
-    while chunk_idx < num_chunks {
-        let batch_end = (chunk_idx + ring_size).min(num_chunks);
-        let batch_len = batch_end - chunk_idx;
-
-        // Submit this batch's reads into ring slots.
-        for i in 0..batch_len {
-            channels
-                .command_tx
-                .send(Command::ReadAsync {
-                    ns_id: 1,
-                    lba: segments[chunk_idx + i].lba,
-                    buf: Arc::clone(&ring.buffers[i]),
-                    timeout_ms: READ_TIMEOUT_MS,
-                    tag: 0,
-                })
-                .map_err(|e| {
-                    DispatcherError::IoError(format!("ReadAsync send #{}: {e}", chunk_idx + i))
-                })?;
-        }
-
-        // Wait for all reads in this batch to complete.
-        for _i in 0..batch_len {
-            match channels.completion_rx.recv() {
-                Ok(Completion::ReadDone { handle, result, .. }) => {
-                    result.map_err(|e| {
-                        DispatcherError::IoError(format!(
-                            "SSD read (handle {:?}): {e}",
-                            handle
-                        ))
-                    })?;
-                }
-                Ok(Completion::Timeout { handle }) => {
-                    return Err(DispatcherError::IoError(format!(
-                        "NVMe read timeout (handle {:?})",
-                        handle
-                    )));
-                }
-                Ok(other) => {
-                    return Err(DispatcherError::IoError(format!(
-                        "unexpected completion: {other:?}"
-                    )));
-                }
-                Err(_) => {
-                    return Err(DispatcherError::IoError(
-                        "completion channel disconnected".into(),
-                    ));
-                }
-            }
-        }
-
-        // All reads for this batch are complete. Process in order.
-        for i in 0..batch_len {
-            let seg = &segments[chunk_idx + i];
-            let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
-            let current_stream = streams[i % 2];
-
-            let guard = ring.buffers[i].lock().unwrap();
-
-            // memcpy ring buffer → memory-tier slot.
-            if copy_len > 0 {
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        guard.as_ptr() as *const u8,
-                        mem_tier_ptr.add(seg.buffer_offset),
-                        copy_len,
-                    );
-                }
-            }
-
-            // Async DMA copy ring buffer → GPU.
-            gpu.dma_copy_to_device_async(
-                &guard,
-                unsafe { (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void },
-                copy_len,
-                current_stream,
-            )
-            .map_err(|e| {
-                DispatcherError::IoError(format!(
-                    "GPU async DMA copy #{} failed: {e}",
-                    chunk_idx + i
-                ))
-            })?;
-
-            drop(guard);
-        }
-
-        // Sync both streams before reusing ring slots in the next batch.
-        gpu.stream_synchronize(streams[0])
-            .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
-        gpu.stream_synchronize(streams[1])
-            .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
-
-        chunk_idx = batch_end;
-    }
-
-    // Sync both streams to ensure all GPU copies are complete.
-    for s in streams {
-        gpu.stream_synchronize(*s)
-            .map_err(|e| DispatcherError::IoError(format!("final stream_synchronize: {e}")))?;
-    }
-
-    Ok(())
 }
 
 /// No-op free function for DmaBuffer wrappers over memory-tier regions.
