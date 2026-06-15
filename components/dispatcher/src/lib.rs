@@ -1,11 +1,61 @@
-//! Dispatcher component for the Certus storage system.
+//! Dispatcher component — the central data-plane orchestrator for Certus.
 //!
-//! Orchestrates cache operations (populate, lookup, check, remove) using
-//! a DRAM memory-tier with LRU eviction and write-through to SSD.
-//! Coordinates N data block devices with N extent managers for persistent storage.
+//! # Architecture
 //!
-//! Provides the [`IDispatcher`] interface with receptacles for
-//! [`ILogger`], [`IDispatchMap`], and [`IMemoryTier`].
+//! The dispatcher sits between gRPC clients and the storage/GPU subsystems,
+//! implementing all cache operations: populate, lookup, check, remove, touch.
+//!
+//! ```text
+//! ┌──────────┐     gRPC      ┌────────────┐
+//! │ Client   │──────────────▶│ Dispatcher  │
+//! │ (GPU app)│◀──────────────│            │
+//! └──────────┘               └─────┬──────┘
+//!                                  │
+//!                 ┌────────────────┼────────────────┐
+//!                 │                │                │
+//!          ┌──────▼──────┐  ┌─────▼─────┐  ┌──────▼──────┐
+//!          │ DispatchMap │  │ MemoryTier│  │ BlockDevice │
+//!          │ (key→loc)   │  │ (DRAM LRU)│  │ (NVMe SSD)  │
+//!          └─────────────┘  └───────────┘  └─────────────┘
+//! ```
+//!
+//! # Data paths
+//!
+//! **Populate** (GPU → DRAM → SSD):
+//! 1. Open client GPU IPC handle
+//! 2. Allocate memory-tier slot - evict existing by LRU to make space if needed.
+//! 3. `cudaMemcpy` D2H from GPU into memory-tier
+//! 4. Background writer asynchronously flushes to SSD via extent manager
+//!
+//! **Hot Lookup** (DRAM → GPU):
+//! 1. `DispatchMap::lookup(key)` → `MemoryTier { pointer }`
+//! 2. `cudaMemcpyAsync` H2D from memory-tier to client GPU (multi-stream)
+//! 3. Single `stream_synchronize` after all copies in the batch
+//!
+//! **Cold Lookup** (SSD → DRAM → GPU):
+//! 1. `DispatchMap::lookup(key)` → `BlockDevice { offset }`
+//! 2. Evict LRU entries from memory-tier to make space
+//! 3. Insert new slot in memory-tier
+//! 4. Pipelined NVMe reads directly into memory-tier (zero-copy)
+//! 5. Async H2D DMA to client GPU (overlapped with reads)
+//!
+//! # Threading model
+//!
+//! - gRPC requests arrive on tokio async runtime → `spawn_blocking`
+//! - Hot path: runs on the blocking thread, multi-stream GPU DMA
+//! - Cold path: `std::thread::scope` spawns per-drive queue threads
+//!   (up to 2 per NVMe drive) for parallel SSD reads
+//! - Background writer: separate thread pool for staging → SSD flush
+//!
+//! # Key design decisions
+//!
+//! - **Zero-copy cold path**: memory-tier pool is co-registered with SPDK
+//!   (`spdk_mem_register`) and CUDA (`cudaHostRegister`), so NVMe DMA and
+//!   GPU DMA both operate on the same pinned memory without CPU copies.
+//! - **Multi-stream hot path**: 4 CUDA streams distribute H2D copies
+//!   round-robin so the GPU can overlap transfers on its copy engines.
+//! - **Configurable eviction**: `max_eviction_attempts` controls how hard
+//!   the dispatcher tries to free memory-tier space before giving up.
 
 #![allow(clippy::too_many_arguments)]
 
@@ -180,7 +230,8 @@ impl DispatcherComponent {
         let topo = match component_core::numa::NumaTopology::discover() {
             Ok(t) => t,
             Err(_) => {
-                logger.warn("dispatcher: NUMA topology unavailable, poller CPUs will not be pinned");
+                logger
+                    .warn("dispatcher: NUMA topology unavailable, poller CPUs will not be pinned");
                 return vec![None; pci_addrs.len()];
             }
         };
@@ -407,6 +458,15 @@ impl DispatcherComponent {
     /// dispatch-map. If write-through hasn't completed (no ssd_offset), the
     /// dispatch-map entry is removed entirely so lookups get NotExist rather
     /// than a dangling memory-tier pointer.
+    /// Evict entries from memory-tier until `needed` bytes are free.
+    ///
+    /// Strategy: alternate between blind O(1) LRU eviction (fast path) and
+    /// small-batch candidate scanning (every 8th attempt) to find cleanly
+    /// evictable entries (write-through complete). Gives up after
+    /// `max_attempts` iterations to avoid unbounded stalls.
+    ///
+    /// Evicted entries transition from MemoryTier → BlockDevice in the
+    /// dispatch-map (data remains on SSD from the prior write-through).
     // NOTE: This only handles global capacity pressure. If keys are heavily skewed
     // to one shard (e.g., all keys ≡ 0 mod 16), the target shard can fill while
     // global used() < capacity(). In that case insert() will return PoolFull after
@@ -604,8 +664,8 @@ impl DispatcherComponent {
         if let Some(ref factory) = *factory_guard {
             // Factory still uses the base-cpu convention for backward compatibility.
             let base = poller_cpu.map(|c| c.saturating_sub(i));
-            let (block_dev, ibd, admin) = factory(spdk_env, logger, i, pci_addr, base)
-                .map_err(|e| {
+            let (block_dev, ibd, admin) =
+                factory(spdk_env, logger, i, pci_addr, base).map_err(|e| {
                     DispatcherError::IoError(format!(
                         "block device factory failed for drive {i}: {e}"
                     ))
@@ -620,19 +680,25 @@ impl DispatcherComponent {
                     .spdk_env
                     .connect(Arc::clone(spdk_env))
                     .map_err(|e| {
-                        DispatcherError::IoError(format!("failed to wire spdk_env for data drive {i}: {e}"))
+                        DispatcherError::IoError(format!(
+                            "failed to wire spdk_env for data drive {i}: {e}"
+                        ))
                     })?;
                 component.logger.connect(Arc::clone(logger)).map_err(|e| {
-                    DispatcherError::IoError(format!("failed to wire logger for data drive {i}: {e}"))
+                    DispatcherError::IoError(format!(
+                        "failed to wire logger for data drive {i}: {e}"
+                    ))
                 })?;
                 let block_dev = component as Arc<dyn component_core::IUnknown + Send + Sync>;
                 let admin: Arc<dyn IBlockDeviceAdmin + Send + Sync> =
-                    component_core::iunknown::query::<dyn IBlockDeviceAdmin + Send + Sync>(&*block_dev)
-                        .ok_or_else(|| {
-                            DispatcherError::IoError(format!(
-                                "failed to query IBlockDeviceAdmin for data drive {i}"
-                            ))
-                        })?;
+                    component_core::iunknown::query::<dyn IBlockDeviceAdmin + Send + Sync>(
+                        &*block_dev,
+                    )
+                    .ok_or_else(|| {
+                        DispatcherError::IoError(format!(
+                            "failed to query IBlockDeviceAdmin for data drive {i}"
+                        ))
+                    })?;
                 admin.set_pci_address(pci_addr);
                 if let Some(cpu) = poller_cpu {
                     admin.set_actor_cpu(cpu);
@@ -671,13 +737,10 @@ impl DispatcherComponent {
                 // Factory handles device creation; use uninitialized stub as placeholder
                 use component_core::query_interface;
                 let stub = spdk_env::SPDKEnvComponent::new_default();
-                query_interface!(stub, ISPDKEnv)
-                    .expect("SPDKEnvComponent must provide ISPDKEnv")
+                query_interface!(stub, ISPDKEnv).expect("SPDKEnvComponent must provide ISPDKEnv")
             }
             Err(_) => {
-                return Err(DispatcherError::NotInitialized(
-                    "spdk_env not bound".into(),
-                ));
+                return Err(DispatcherError::NotInitialized("spdk_env not bound".into()));
             }
         };
 
@@ -726,7 +789,9 @@ impl DispatcherComponent {
                     // SAFETY: posix_memalign is safe with valid align (power of 2, multiple of sizeof(void*))
                     let ret = unsafe { libc::posix_memalign(&mut ptr, align, size) };
                     if ret != 0 || ptr.is_null() {
-                        return Err(format!("posix_memalign failed ({size}, {align}): errno {ret}"));
+                        return Err(format!(
+                            "posix_memalign failed ({size}, {align}): errno {ret}"
+                        ));
                     }
                     unsafe { std::ptr::write_bytes(ptr as *mut u8, 0, size) };
                     // SAFETY: ptr is valid, non-null, allocated with posix_memalign
@@ -770,10 +835,10 @@ impl DispatcherComponent {
             let iem: Arc<dyn IExtentManager + Send + Sync> =
                 component_core::iunknown::query::<dyn IExtentManager + Send + Sync>(&*extent_mgr)
                     .ok_or_else(|| {
-                        DispatcherError::IoError(format!(
-                            "failed to query IExtentManager for data drive {i}"
-                        ))
-                    })?;
+                    DispatcherError::IoError(format!(
+                        "failed to query IExtentManager for data drive {i}"
+                    ))
+                })?;
             let sector_size = ibd.block_size();
             let num_sectors = ibd.num_sectors(1).unwrap_or(0);
             let data_disk_size = num_sectors * sector_size as u64;
@@ -811,7 +876,8 @@ impl DispatcherComponent {
                 })?;
             }
 
-            let cpu_msg = config.poller_base_cpu
+            let cpu_msg = config
+                .poller_base_cpu
                 .map(|base| format!(", poller pinned to CPU {}", base + i))
                 .unwrap_or_default();
             self.log_info(&format!(
@@ -824,7 +890,8 @@ impl DispatcherComponent {
                 _block_dev: block_dev_component,
                 block_dev_admin: admin,
                 block_dev_iface: ibd,
-                _extent_mgr_component: extent_mgr as Arc<dyn component_core::IUnknown + Send + Sync>,
+                _extent_mgr_component: extent_mgr
+                    as Arc<dyn component_core::IUnknown + Send + Sync>,
                 extent_mgr: iem,
                 cached_channels,
             });
@@ -835,6 +902,16 @@ impl DispatcherComponent {
 }
 
 impl IDispatcher for DispatcherComponent {
+    /// Initialize the dispatcher with N drives, CUDA streams, and background workers.
+    ///
+    /// Sequence:
+    /// 1. Create N block devices + N extent managers via factories
+    /// 2. Recover dispatch-map from on-disk extents (if not formatting)
+    /// 3. Allocate warm CUDA streams for hot-path DMA
+    /// 4. Allocate PipelineRing streams for cold-path DMA
+    /// 5. Register memory-tier pool with CUDA + SPDK for zero-copy DMA
+    /// 6. Start background write-through workers (one per drive)
+    /// 7. Start background SSD evictor (if threshold configured)
     fn initialize(&self, config: DispatcherConfig) -> Result<(), DispatcherError> {
         self.log_info("dispatcher: initializing");
 
@@ -918,7 +995,8 @@ impl IDispatcher for DispatcherComponent {
                     // for zero-copy NVMe reads and async GPU transfers.
                     if let Ok(mt) = self.memory_tier.get() {
                         if let Some((pool_ptr, pool_size)) = mt.pool_info() {
-                            match gpu.register_host_memory(pool_ptr as *mut std::ffi::c_void, pool_size)
+                            match gpu
+                                .register_host_memory(pool_ptr as *mut std::ffi::c_void, pool_size)
                             {
                                 Ok(()) => {
                                     self.log_info(&format!(
@@ -1103,10 +1181,21 @@ impl IDispatcher for DispatcherComponent {
         Ok(())
     }
 
-    fn batch_lookup(
-        &self,
-        entries: &[(CacheKey, IpcHandle)],
-    ) -> Vec<Result<(), DispatcherError>> {
+    /// Batch lookup — the primary benchmark path for multi-key retrieval.
+    ///
+    /// Two-phase design:
+    /// 1. **Classification loop**: for each key, query dispatch-map:
+    ///    - MemoryTier hit → issue async H2D DMA (round-robin across 4 streams)
+    ///    - BlockDevice hit → collect into cold_entries for phase 2
+    ///    - NotExist/Staging → handle inline
+    ///    After the loop, synchronize all warm streams once.
+    ///
+    /// 2. **Cold promotion** (if any BlockDevice hits):
+    ///    - Group cold entries by drive index
+    ///    - Spawn per-drive queue threads (up to 2 per drive)
+    ///    - Each thread: evict → insert memory-tier slot → pipelined NVMe reads
+    ///      directly into memory-tier → async H2D DMA to GPU
+    fn batch_lookup(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> {
         if entries.is_empty() {
             return Vec::new();
         }
@@ -1207,16 +1296,17 @@ impl IDispatcher for DispatcherComponent {
                             });
                             match temp_buf {
                                 Ok(buf) => {
-                                    let r = gpu.dma_copy_to_device(
-                                        &buf,
-                                        ipc_handle.address as *mut std::ffi::c_void,
-                                        copy_size,
-                                    )
-                                    .map_err(|e| {
-                                        DispatcherError::IoError(format!(
-                                            "GPU DMA copy (memory-tier→device) failed: {e}"
-                                        ))
-                                    });
+                                    let r = gpu
+                                        .dma_copy_to_device(
+                                            &buf,
+                                            ipc_handle.address as *mut std::ffi::c_void,
+                                            copy_size,
+                                        )
+                                        .map_err(|e| {
+                                            DispatcherError::IoError(format!(
+                                                "GPU DMA copy (memory-tier→device) failed: {e}"
+                                            ))
+                                        });
                                     std::mem::forget(buf);
                                     r
                                 }
@@ -1276,13 +1366,21 @@ impl IDispatcher for DispatcherComponent {
             if num_drives == 0 {
                 let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
                 for entry in &cold_entries {
-                    Self::evict_for_space(&dm, &mt, entry.ipc_handle_size, entry.key, max_attempts).ok();
-                    let res = mt.insert(entry.key, entry.ipc_handle_size).map(|mem_ptr| {
-                        let _ = dm.create_memory_tier_entry(entry.key, mem_ptr, entry.ipc_handle_size);
-                        let _ = dm.release_write(entry.key);
-                    }).map_err(|e| {
-                        DispatcherError::AllocationFailed(format!("promote insert failed: {e}"))
-                    });
+                    Self::evict_for_space(&dm, &mt, entry.ipc_handle_size, entry.key, max_attempts)
+                        .ok();
+                    let res = mt
+                        .insert(entry.key, entry.ipc_handle_size)
+                        .map(|mem_ptr| {
+                            let _ = dm.create_memory_tier_entry(
+                                entry.key,
+                                mem_ptr,
+                                entry.ipc_handle_size,
+                            );
+                            let _ = dm.release_write(entry.key);
+                        })
+                        .map_err(|e| {
+                            DispatcherError::AllocationFailed(format!("promote insert failed: {e}"))
+                        });
                     results[entry.idx] = Some(res);
                 }
             } else {
@@ -1670,6 +1768,11 @@ impl IDispatcher for DispatcherComponent {
         Ok(())
     }
 
+    /// Ingest a new cache entry from GPU memory.
+    ///
+    /// Flow: evict if needed → allocate memory-tier slot → cudaMemcpy D2H
+    /// from client GPU → register in dispatch-map → enqueue background
+    /// write-through to SSD.
     fn populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
 

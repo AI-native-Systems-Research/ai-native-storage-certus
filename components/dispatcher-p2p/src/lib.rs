@@ -1,11 +1,38 @@
-//! Dispatcher component for the Certus storage system.
+//! Dispatcher-P2P — GPU-direct cold-path variant of the Certus dispatcher.
 //!
-//! Orchestrates cache operations (populate, lookup, check, remove) using
-//! a DRAM memory-tier with LRU eviction and write-through to SSD.
-//! Coordinates N data block devices with N extent managers for persistent storage.
+//! # Difference from `dispatcher`
 //!
-//! Provides the [`IDispatcher`] interface with receptacles for
-//! [`ILogger`], [`IDispatchMap`], and [`IMemoryTier`].
+//! This crate is a fork of the base dispatcher that adds a GPUDirect P2P cold
+//! path: instead of reading SSD → DRAM memory-tier → GPU (two DMA hops), it
+//! reads SSD → GPU BAR1 staging ring → GPU VRAM (single PCIe hop for the data,
+//! with GDRCopy-mapped BAR1 buffers registered with SPDK for NVMe DMA).
+//!
+//! ```text
+//! Base dispatcher cold path:      NVMe SSD ──DMA──▶ DRAM ──DMA──▶ GPU
+//! P2P dispatcher cold path:       NVMe SSD ──DMA──▶ GPU BAR1 ──copy──▶ GPU VRAM
+//! ```
+//!
+//! The hot path (DRAM → GPU) is identical to the base dispatcher.
+//!
+//! # Architecture
+//!
+//! Same component-framework shape as the base dispatcher:
+//! - Implements `IDispatcher` interface
+//! - Receptacles: `ILogger`, `IDispatchMap`, `IMemoryTier`, `IGpuServices`, `ISPDKEnv`
+//! - Factory-based block device and extent manager creation
+//!
+//! Additional module: `p2p_ring` — manages GPU-resident BAR1 staging buffers
+//! for NVMe-to-GPU direct DMA.
+//!
+//! # When to use
+//!
+//! Use this dispatcher when the system has:
+//! - GPUs with accessible BAR1 memory (large-BAR enabled in BIOS)
+//! - GDRCopy installed (`libgdrapi.so`)
+//! - NVMe drives on the same PCIe root complex as the GPU (same-socket)
+//!
+//! The P2P path avoids the DRAM bounce for cold reads, reducing cold-path
+//! latency and freeing memory bandwidth for other operations.
 
 #![allow(clippy::too_many_arguments)]
 

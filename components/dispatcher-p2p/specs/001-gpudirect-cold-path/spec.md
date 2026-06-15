@@ -36,7 +36,7 @@ When the P2P staging ring cannot be initialized (missing gdrdrv/nvidia-peermem k
 
 **Acceptance Scenarios**:
 
-1. **Given** a system where P2P initialization fails, **When** the component starts, **Then** it panics with a diagnostic message directing the operator to use the full.yaml profile.
+1. **Given** a system where P2P initialization fails, **When** the component starts, **Then** it logs a diagnostic warning. On the first cold lookup attempt, it panics with a message directing the operator to use the full.yaml profile.
 2. **Given** partial resource allocation before failure, **When** initialization fails, **Then** all partially allocated GPU memory is freed before the panic.
 
 ---
@@ -87,7 +87,7 @@ The system's end-to-end performance (P2P path vs DRAM path) can be measured usin
 - **FR-003**: System MUST pre-allocate a fixed ring of 64 GPU staging buffers at initialization via `cudaMalloc` + GDRCopy BAR1 mapping (`gdr_pin_buffer` + `gdr_map`) + `spdk_mem_register`. Each slot is 128 KiB (MDTS). The ring is shared across all cold lookup threads.
 - **FR-004**: System MUST partition the staging ring for concurrent thread access using `ThreadPartition` (non-overlapping slot ranges, effective QD capped at 16 per thread to prevent NVMe qpair saturation).
 - **FR-005**: System MUST pipeline SSD reads with D2D GPU copies using FIFO completion ordering (no tags). Stream synchronization occurs only when recycling ring slots (not on every completion). No final stream sync — caller is responsible for ensuring completion.
-- **FR-006**: System MUST panic at startup if the P2P ring cannot be initialized (GDRCopy unavailable, GPU memory insufficient). No DRAM fallback — use the `full.yaml` profile (standard dispatcher) for DRAM-only deployments.
+- **FR-006**: System MUST panic on first cold lookup if the P2P ring was not initialized (GDRCopy unavailable, GPU memory insufficient). Initialization logs a diagnostic warning but does not fail, allowing hot-only testing without P2P hardware. No DRAM fallback for cold reads — use the `full.yaml` profile (standard dispatcher) for DRAM-only deployments.
 - **FR-007**: The P2P ring is allocated once at initialization and is immutable for the component's lifetime. There is no runtime path selection.
 - **FR-008**: System MUST implement the same interface as the standard dispatcher, serving as a drop-in replacement.
 - **FR-009**: System MUST promote successfully read cold entries back to DRAM after completing the read.
