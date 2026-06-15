@@ -368,7 +368,6 @@ def run_client(
     gpu_id=0,
     skip_flush=False,
     writes_settle=30.0,
-    skip_populate=False,
 ):
     """Single client worker: populate objects, then measure hot and cold lookups."""
 
@@ -429,54 +428,49 @@ def run_client(
     # --- Phase 1: Populate ---
     barrier.wait()  # synchronize start across all clients
 
-    if not skip_populate:
-        t_pop_start = time.perf_counter()
-        for batch_start in range(0, total_objects, batch_size):
-            batch_end = min(batch_start + batch_size, total_objects)
-            keys = [base_key + i for i in range(batch_start, batch_end)]
-            # Write unique data per batch (seeded by first key in batch)
-            torch.manual_seed(keys[0])
-            populate_tensor.copy_(
-                torch.randint(0, 256, (BLOCK_SIZE // 4,), dtype=torch.float32, device=cuda_device)
+    t_pop_start = time.perf_counter()
+    for batch_start in range(0, total_objects, batch_size):
+        batch_end = min(batch_start + batch_size, total_objects)
+        keys = [base_key + i for i in range(batch_start, batch_end)]
+        # Write unique data per batch (seeded by first key in batch)
+        torch.manual_seed(keys[0])
+        populate_tensor.copy_(
+            torch.randint(0, 256, (BLOCK_SIZE // 4,), dtype=torch.float32, device=cuda_device)
+        )
+        entries = [
+            dispatcher_pb2.PopulateEntry(key=k, ipc_handle=populate_ipc)
+            for k in keys
+        ]
+        try:
+            t0 = time.perf_counter()
+            resp = stub.Populate(
+                dispatcher_pb2.BatchPopulateRequest(entries=entries)
             )
-            entries = [
-                dispatcher_pb2.PopulateEntry(key=k, ipc_handle=populate_ipc)
-                for k in keys
-            ]
-            try:
-                t0 = time.perf_counter()
-                resp = stub.Populate(
-                    dispatcher_pb2.BatchPopulateRequest(entries=entries)
+            t1 = time.perf_counter()
+            failed = [r for r in resp.results if not r.success]
+            if failed:
+                result.errors.append(
+                    f"populate batch failed: {failed[0].error_message}"
                 )
-                t1 = time.perf_counter()
-                failed = [r for r in resp.results if not r.success]
-                if failed:
-                    result.errors.append(
-                        f"populate batch failed: {failed[0].error_message}"
-                    )
-                    break
-                result.populate_latencies.append((t1 - t0) / len(keys))
-            except grpc.RpcError as e:
-                result.errors.append(f"populate RPC error: {e.details()}")
                 break
-        t_pop_end = time.perf_counter()
-        result.populate_start = t_pop_start
-        result.populate_end = t_pop_end
-        result.populate_objects = total_objects
+            result.populate_latencies.append((t1 - t0) / len(keys))
+        except grpc.RpcError as e:
+            result.errors.append(f"populate RPC error: {e.details()}")
+            break
+    t_pop_end = time.perf_counter()
+    result.populate_start = t_pop_start
+    result.populate_end = t_pop_end
+    result.populate_objects = total_objects
 
-        # Flush background write-through to SSD and wait for completion.
-        # Client 0 issues the flush; all clients wait at the barrier.
-        barrier.wait()
-        if client_id == 0:
-            try:
-                stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
-            except grpc.RpcError as e:
-                result.errors.append(f"FlushToSsd failed: {e.details()}")
-        barrier.wait()
-    else:
-        # Skip populate — data already exists from a prior round.
-        barrier.wait()
-        barrier.wait()
+    # Flush background write-through to SSD and wait for completion.
+    # Client 0 issues the flush; all clients wait at the barrier.
+    barrier.wait()
+    if client_id == 0:
+        try:
+            stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
+        except grpc.RpcError as e:
+            result.errors.append(f"FlushToSsd failed: {e.details()}")
+    barrier.wait()
 
     # --- Phase 2: Hot lookups (memory-tier) ---
     # The last `num_objects` of this client's pool share are still in DRAM.
@@ -743,11 +737,10 @@ def main():
 
     while True:
         round_num += 1
-        skip_populate = continuous and round_num > 1
 
-        if continuous:
+        if continuous and round_num > 1:
             print(f"\n{'='*70}")
-            print(f"  Round {round_num}" + (" (lookup only)" if skip_populate else ""))
+            print(f"  Round {round_num}")
             print(f"{'='*70}")
 
         barrier = threading.Barrier(num_clients)
@@ -775,7 +768,6 @@ def main():
                     gpu_id,
                     args.skip_flush,
                     args.writes_settle,
-                    skip_populate,
                 ),
                 daemon=True,
             )
@@ -841,9 +833,8 @@ def main():
         print()
         print("  Latency per object (all clients combined):")
         print()
-        if not skip_populate:
-            print_stats("Populate", all_populate, num_clients, pop_wall_agg)
-            print()
+        print_stats("Populate", all_populate, num_clients, pop_wall_agg)
+        print()
         print_stats("Lookup (hot)", all_hot, num_clients, hot_wall_agg)
         print()
         print_stats("Lookup (cold)", all_cold, num_clients, cold_wall_agg)
