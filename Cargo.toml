@@ -13,6 +13,7 @@ members = [
     "apps/iops-benchmark",
     "apps/iops-benchmark-md",
     "apps/nvme-ns-manager",
+    "apps/nvme-bar1-bench",
     "apps/extent-benchmark",
     "components/block-device-spdk-nvme",
     "components/block-device-filesys",
