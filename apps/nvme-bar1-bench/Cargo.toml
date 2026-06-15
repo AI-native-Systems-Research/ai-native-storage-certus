@@ -1,0 +1,18 @@
+[package]
+name = "nvme-bar1-bench"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+block-device-spdk-nvme.workspace = true
+component-core.workspace = true
+component-framework.workspace = true
+interfaces = { workspace = true, features = ["spdk"] }
+spdk-env.workspace = true
+spdk-sys.workspace = true
+gpu-services = { workspace = true, features = ["p2p"] }
+logger.workspace = true
+clap = { version = "4", features = ["derive"] }
+libc = "0.2"
