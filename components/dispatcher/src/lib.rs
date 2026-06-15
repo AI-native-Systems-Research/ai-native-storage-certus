@@ -1,11 +1,61 @@
-//! Dispatcher component for the Certus storage system.
+//! Dispatcher component — the central data-plane orchestrator for Certus.
 //!
-//! Orchestrates cache operations (populate, lookup, check, remove) using
-//! a DRAM memory-tier with LRU eviction and write-through to SSD.
-//! Coordinates N data block devices with N extent managers for persistent storage.
+//! # Architecture
 //!
-//! Provides the [`IDispatcher`] interface with receptacles for
-//! [`ILogger`], [`IDispatchMap`], and [`IMemoryTier`].
+//! The dispatcher sits between gRPC clients and the storage/GPU subsystems,
+//! implementing all cache operations: populate, lookup, check, remove, touch.
+//!
+//! ```text
+//! ┌──────────┐     gRPC      ┌────────────┐
+//! │ Client   │──────────────▶│ Dispatcher  │
+//! │ (GPU app)│◀──────────────│            │
+//! └──────────┘               └─────┬──────┘
+//!                                  │
+//!                 ┌────────────────┼────────────────┐
+//!                 │                │                │
+//!          ┌──────▼──────┐  ┌─────▼─────┐  ┌──────▼──────┐
+//!          │ DispatchMap  │  │ MemoryTier│  │ BlockDevice │
+//!          │ (key→loc)   │  │ (DRAM LRU)│  │ (NVMe SSD)  │
+//!          └─────────────┘  └───────────┘  └─────────────┘
+//! ```
+//!
+//! # Data paths
+//!
+//! **Populate** (GPU → DRAM → SSD):
+//! 1. Open client GPU IPC handle
+//! 2. Allocate memory-tier slot
+//! 3. `cudaMemcpy` D2H from GPU into memory-tier
+//! 4. Background writer asynchronously flushes to SSD via extent manager
+//!
+//! **Hot Lookup** (DRAM → GPU):
+//! 1. `DispatchMap::lookup(key)` → `MemoryTier { pointer }`
+//! 2. `cudaMemcpyAsync` H2D from memory-tier to client GPU (multi-stream)
+//! 3. Single `stream_synchronize` after all copies in the batch
+//!
+//! **Cold Lookup** (SSD → DRAM → GPU):
+//! 1. `DispatchMap::lookup(key)` → `BlockDevice { offset }`
+//! 2. Evict LRU entries from memory-tier to make space
+//! 3. Insert new slot in memory-tier
+//! 4. Pipelined NVMe reads directly into memory-tier (zero-copy)
+//! 5. Async H2D DMA to client GPU (overlapped with reads)
+//!
+//! # Threading model
+//!
+//! - gRPC requests arrive on tokio async runtime → `spawn_blocking`
+//! - Hot path: runs on the blocking thread, multi-stream GPU DMA
+//! - Cold path: `std::thread::scope` spawns per-drive queue threads
+//!   (up to 2 per NVMe drive) for parallel SSD reads
+//! - Background writer: separate thread pool for staging → SSD flush
+//!
+//! # Key design decisions
+//!
+//! - **Zero-copy cold path**: memory-tier pool is co-registered with SPDK
+//!   (`spdk_mem_register`) and CUDA (`cudaHostRegister`), so NVMe DMA and
+//!   GPU DMA both operate on the same pinned memory without CPU copies.
+//! - **Multi-stream hot path**: 4 CUDA streams distribute H2D copies
+//!   round-robin so the GPU can overlap transfers on its copy engines.
+//! - **Configurable eviction**: `max_eviction_attempts` controls how hard
+//!   the dispatcher tries to free memory-tier space before giving up.
 
 #![allow(clippy::too_many_arguments)]
 
@@ -407,6 +457,15 @@ impl DispatcherComponent {
     /// dispatch-map. If write-through hasn't completed (no ssd_offset), the
     /// dispatch-map entry is removed entirely so lookups get NotExist rather
     /// than a dangling memory-tier pointer.
+    /// Evict entries from memory-tier until `needed` bytes are free.
+    ///
+    /// Strategy: alternate between blind O(1) LRU eviction (fast path) and
+    /// small-batch candidate scanning (every 8th attempt) to find cleanly
+    /// evictable entries (write-through complete). Gives up after
+    /// `max_attempts` iterations to avoid unbounded stalls.
+    ///
+    /// Evicted entries transition from MemoryTier → BlockDevice in the
+    /// dispatch-map (data remains on SSD from the prior write-through).
     // NOTE: This only handles global capacity pressure. If keys are heavily skewed
     // to one shard (e.g., all keys ≡ 0 mod 16), the target shard can fill while
     // global used() < capacity(). In that case insert() will return PoolFull after
@@ -835,6 +894,16 @@ impl DispatcherComponent {
 }
 
 impl IDispatcher for DispatcherComponent {
+    /// Initialize the dispatcher with N drives, CUDA streams, and background workers.
+    ///
+    /// Sequence:
+    /// 1. Create N block devices + N extent managers via factories
+    /// 2. Recover dispatch-map from on-disk extents (if not formatting)
+    /// 3. Allocate warm CUDA streams for hot-path DMA
+    /// 4. Allocate PipelineRing streams for cold-path DMA
+    /// 5. Register memory-tier pool with CUDA + SPDK for zero-copy DMA
+    /// 6. Start background write-through workers (one per drive)
+    /// 7. Start background SSD evictor (if threshold configured)
     fn initialize(&self, config: DispatcherConfig) -> Result<(), DispatcherError> {
         self.log_info("dispatcher: initializing");
 
@@ -1103,6 +1172,20 @@ impl IDispatcher for DispatcherComponent {
         Ok(())
     }
 
+    /// Batch lookup — the primary benchmark path for multi-key retrieval.
+    ///
+    /// Two-phase design:
+    /// 1. **Classification loop**: for each key, query dispatch-map:
+    ///    - MemoryTier hit → issue async H2D DMA (round-robin across 4 streams)
+    ///    - BlockDevice hit → collect into cold_entries for phase 2
+    ///    - NotExist/Staging → handle inline
+    ///    After the loop, synchronize all warm streams once.
+    ///
+    /// 2. **Cold promotion** (if any BlockDevice hits):
+    ///    - Group cold entries by drive index
+    ///    - Spawn per-drive queue threads (up to 2 per drive)
+    ///    - Each thread: evict → insert memory-tier slot → pipelined NVMe reads
+    ///      directly into memory-tier → async H2D DMA to GPU
     fn batch_lookup(
         &self,
         entries: &[(CacheKey, IpcHandle)],
@@ -1670,6 +1753,11 @@ impl IDispatcher for DispatcherComponent {
         Ok(())
     }
 
+    /// Ingest a new cache entry from GPU memory.
+    ///
+    /// Flow: evict if needed → allocate memory-tier slot → cudaMemcpy D2H
+    /// from client GPU → register in dispatch-map → enqueue background
+    /// write-through to SSD.
     fn populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
 
