@@ -368,6 +368,7 @@ def run_client(
     gpu_id=0,
     skip_flush=False,
     writes_settle=30.0,
+    skip_populate=False,
 ):
     """Single client worker: populate objects, then measure hot and cold lookups."""
 
@@ -428,49 +429,54 @@ def run_client(
     # --- Phase 1: Populate ---
     barrier.wait()  # synchronize start across all clients
 
-    t_pop_start = time.perf_counter()
-    for batch_start in range(0, total_objects, batch_size):
-        batch_end = min(batch_start + batch_size, total_objects)
-        keys = [base_key + i for i in range(batch_start, batch_end)]
-        # Write unique data per batch (seeded by first key in batch)
-        torch.manual_seed(keys[0])
-        populate_tensor.copy_(
-            torch.randint(0, 256, (BLOCK_SIZE // 4,), dtype=torch.float32, device=cuda_device)
-        )
-        entries = [
-            dispatcher_pb2.PopulateEntry(key=k, ipc_handle=populate_ipc)
-            for k in keys
-        ]
-        try:
-            t0 = time.perf_counter()
-            resp = stub.Populate(
-                dispatcher_pb2.BatchPopulateRequest(entries=entries)
+    if not skip_populate:
+        t_pop_start = time.perf_counter()
+        for batch_start in range(0, total_objects, batch_size):
+            batch_end = min(batch_start + batch_size, total_objects)
+            keys = [base_key + i for i in range(batch_start, batch_end)]
+            # Write unique data per batch (seeded by first key in batch)
+            torch.manual_seed(keys[0])
+            populate_tensor.copy_(
+                torch.randint(0, 256, (BLOCK_SIZE // 4,), dtype=torch.float32, device=cuda_device)
             )
-            t1 = time.perf_counter()
-            failed = [r for r in resp.results if not r.success]
-            if failed:
-                result.errors.append(
-                    f"populate batch failed: {failed[0].error_message}"
+            entries = [
+                dispatcher_pb2.PopulateEntry(key=k, ipc_handle=populate_ipc)
+                for k in keys
+            ]
+            try:
+                t0 = time.perf_counter()
+                resp = stub.Populate(
+                    dispatcher_pb2.BatchPopulateRequest(entries=entries)
                 )
+                t1 = time.perf_counter()
+                failed = [r for r in resp.results if not r.success]
+                if failed:
+                    result.errors.append(
+                        f"populate batch failed: {failed[0].error_message}"
+                    )
+                    break
+                result.populate_latencies.append((t1 - t0) / len(keys))
+            except grpc.RpcError as e:
+                result.errors.append(f"populate RPC error: {e.details()}")
                 break
-            result.populate_latencies.append((t1 - t0) / len(keys))
-        except grpc.RpcError as e:
-            result.errors.append(f"populate RPC error: {e.details()}")
-            break
-    t_pop_end = time.perf_counter()
-    result.populate_start = t_pop_start
-    result.populate_end = t_pop_end
-    result.populate_objects = total_objects
+        t_pop_end = time.perf_counter()
+        result.populate_start = t_pop_start
+        result.populate_end = t_pop_end
+        result.populate_objects = total_objects
 
-    # Flush background write-through to SSD and wait for completion.
-    # Client 0 issues the flush; all clients wait at the barrier.
-    barrier.wait()
-    if client_id == 0:
-        try:
-            stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
-        except grpc.RpcError as e:
-            result.errors.append(f"FlushToSsd failed: {e.details()}")
-    barrier.wait()
+        # Flush background write-through to SSD and wait for completion.
+        # Client 0 issues the flush; all clients wait at the barrier.
+        barrier.wait()
+        if client_id == 0:
+            try:
+                stub.FlushToSsd(dispatcher_pb2.FlushToSsdRequest())
+            except grpc.RpcError as e:
+                result.errors.append(f"FlushToSsd failed: {e.details()}")
+        barrier.wait()
+    else:
+        # Skip populate — data already exists from a prior round.
+        barrier.wait()
+        barrier.wait()
 
     # --- Phase 2: Hot lookups (memory-tier) ---
     # The last `num_objects` of this client's pool share are still in DRAM.
@@ -678,6 +684,12 @@ def main():
         help="Seconds to wait after populate for write-through to drain (default: 30). "
         "Set to 0 to skip.",
     )
+    parser.add_argument(
+        "--continuous",
+        action="store_true",
+        help="Run continuously in a loop. Populate runs once on the first round; "
+        "subsequent rounds repeat only the lookup phases. Ctrl-C to stop.",
+    )
     args = parser.parse_args()
 
     global BLOCK_SIZE
@@ -726,137 +738,150 @@ def main():
         for i in range(num_clients)
     ]
 
-    barrier = threading.Barrier(num_clients)
-    results = [ClientResult(i) for i in range(num_clients)]
-    threads = []
+    continuous = args.continuous
+    round_num = 0
 
-    print(f"  Starting {num_clients} client(s)...")
-    t_total_start = time.perf_counter()
+    while True:
+        round_num += 1
+        skip_populate = continuous and round_num > 1
 
-    for i in range(num_clients):
-        gpu_id = i % num_gpus
-        t = threading.Thread(
-            target=run_client,
-            args=(
-                i,
-                args.server,
-                num_objects,
-                iterations,
-                base_keys[i],
-                num_clients,
-                batch_size,
-                barrier,
-                results[i],
-                gpu_id,
-                args.skip_flush,
-                args.writes_settle,
-            ),
-            daemon=True,
-        )
-        threads.append(t)
-        t.start()
+        if continuous:
+            print(f"\n{'='*70}")
+            print(f"  Round {round_num}" + (" (lookup only)" if skip_populate else ""))
+            print(f"{'='*70}")
 
-    for t in threads:
-        t.join()
+        barrier = threading.Barrier(num_clients)
+        results = [ClientResult(i) for i in range(num_clients)]
+        threads = []
 
-    t_total_end = time.perf_counter()
+        if round_num == 1:
+            print(f"  Starting {num_clients} client(s)...")
+        t_total_start = time.perf_counter()
 
-    # Collect errors
-    all_errors = []
-    for r in results:
-        all_errors.extend(r.errors)
+        for i in range(num_clients):
+            gpu_id = i % num_gpus
+            t = threading.Thread(
+                target=run_client,
+                args=(
+                    i,
+                    args.server,
+                    num_objects,
+                    iterations,
+                    base_keys[i],
+                    num_clients,
+                    batch_size,
+                    barrier,
+                    results[i],
+                    gpu_id,
+                    args.skip_flush,
+                    args.writes_settle,
+                    skip_populate,
+                ),
+                daemon=True,
+            )
+            threads.append(t)
+            t.start()
 
-    if all_errors:
-        print(f"\n  ERRORS ({len(all_errors)}):")
-        for e in all_errors[:10]:
-            print(f"    - {e}")
-        if len(all_errors) > 10:
-            print(f"    ... and {len(all_errors) - 10} more")
+        for t in threads:
+            t.join()
 
-    # Aggregate latencies across all clients
-    all_populate = []
-    all_hot = []
-    all_cold = []
-    for r in results:
-        all_populate.extend(r.populate_latencies)
-        all_hot.extend(r.hot_latencies)
-        all_cold.extend(r.cold_latencies)
+        t_total_end = time.perf_counter()
 
-    # Compute true wall-clock aggregate throughput:
-    # total bytes transferred by ALL clients / elapsed wall time (first start to last end)
-    pop_wall_agg = None
-    hot_wall_agg = None
-    cold_wall_agg = None
-    active_pop = [r for r in results if r.populate_objects > 0]
-    active_hot = [r for r in results if r.hot_objects > 0]
-    active_cold = [r for r in results if r.cold_objects > 0]
-    if active_pop:
-        pop_elapsed = max(r.populate_end for r in active_pop) - min(r.populate_start for r in active_pop)
-        pop_total_bytes = sum(r.populate_objects for r in active_pop) * BLOCK_SIZE
-        pop_wall_agg = (pop_total_bytes / pop_elapsed / 1e9) if pop_elapsed > 0 else 0
-    if active_hot:
-        hot_elapsed = max(r.hot_end for r in active_hot) - min(r.hot_start for r in active_hot)
-        hot_total_bytes = sum(r.hot_objects for r in active_hot) * BLOCK_SIZE
-        hot_wall_agg = (hot_total_bytes / hot_elapsed / 1e9) if hot_elapsed > 0 else 0
-    if active_cold:
-        cold_elapsed = max(r.cold_end for r in active_cold) - min(r.cold_start for r in active_cold)
-        cold_success = sum(r.cold_objects_success for r in active_cold)
-        cold_total_bytes = cold_success * BLOCK_SIZE
-        cold_wall_agg = (cold_total_bytes / cold_elapsed / 1e9) if cold_elapsed > 0 else 0
-        cold_requested = sum(r.cold_objects for r in active_cold)
-        if cold_success < cold_requested:
-            cold_hit_pct = 100.0 * cold_success / cold_requested
-            print(f"  NOTE: cold lookup hit rate {cold_hit_pct:.1f}% ({cold_success}/{cold_requested} objects)")
-            print(f"        throughput reflects only successful reads from SSD")
+        # Collect errors
+        all_errors = []
+        for r in results:
+            all_errors.extend(r.errors)
+
+        if all_errors:
+            print(f"\n  ERRORS ({len(all_errors)}):")
+            for e in all_errors[:10]:
+                print(f"    - {e}")
+            if len(all_errors) > 10:
+                print(f"    ... and {len(all_errors) - 10} more")
+
+        # Aggregate latencies across all clients
+        all_populate = []
+        all_hot = []
+        all_cold = []
+        for r in results:
+            all_populate.extend(r.populate_latencies)
+            all_hot.extend(r.hot_latencies)
+            all_cold.extend(r.cold_latencies)
+
+        # Compute true wall-clock aggregate throughput:
+        pop_wall_agg = None
+        hot_wall_agg = None
+        cold_wall_agg = None
+        active_pop = [r for r in results if r.populate_objects > 0]
+        active_hot = [r for r in results if r.hot_objects > 0]
+        active_cold = [r for r in results if r.cold_objects > 0]
+        if active_pop:
+            pop_elapsed = max(r.populate_end for r in active_pop) - min(r.populate_start for r in active_pop)
+            pop_total_bytes = sum(r.populate_objects for r in active_pop) * BLOCK_SIZE
+            pop_wall_agg = (pop_total_bytes / pop_elapsed / 1e9) if pop_elapsed > 0 else 0
+        if active_hot:
+            hot_elapsed = max(r.hot_end for r in active_hot) - min(r.hot_start for r in active_hot)
+            hot_total_bytes = sum(r.hot_objects for r in active_hot) * BLOCK_SIZE
+            hot_wall_agg = (hot_total_bytes / hot_elapsed / 1e9) if hot_elapsed > 0 else 0
+        if active_cold:
+            cold_elapsed = max(r.cold_end for r in active_cold) - min(r.cold_start for r in active_cold)
+            cold_success = sum(r.cold_objects_success for r in active_cold)
+            cold_total_bytes = cold_success * BLOCK_SIZE
+            cold_wall_agg = (cold_total_bytes / cold_elapsed / 1e9) if cold_elapsed > 0 else 0
+            cold_requested = sum(r.cold_objects for r in active_cold)
+            if cold_success < cold_requested:
+                cold_hit_pct = 100.0 * cold_success / cold_requested
+                print(f"  NOTE: cold lookup hit rate {cold_hit_pct:.1f}% ({cold_success}/{cold_requested} objects)")
+                print(f"        throughput reflects only successful reads from SSD")
+                print()
+
+        print(f"\n{'='*70}")
+        print(f"Results ({num_clients} client(s), {BLOCK_SIZE//(1024*1024)} MiB blocks, round {round_num})")
+        print(f"{'='*70}")
+        print()
+        print("  Latency per object (all clients combined):")
+        print()
+        if not skip_populate:
+            print_stats("Populate", all_populate, num_clients, pop_wall_agg)
             print()
+        print_stats("Lookup (hot)", all_hot, num_clients, hot_wall_agg)
+        print()
+        print_stats("Lookup (cold)", all_cold, num_clients, cold_wall_agg)
+        print()
 
-    print(f"\n{'='*70}")
-    print(f"Results ({num_clients} client(s), {BLOCK_SIZE//(1024*1024)} MiB blocks)")
-    print(f"{'='*70}")
-    print()
-    print("  Latency per object (all clients combined):")
-    print()
-    print_stats("Populate", all_populate, num_clients, pop_wall_agg)
-    print()
-    print_stats("Lookup (hot)", all_hot, num_clients, hot_wall_agg)
-    print()
-    print_stats("Lookup (cold)", all_cold, num_clients, cold_wall_agg)
-    print()
+        if all_hot and all_cold:
+            hot_avg = statistics.mean(all_hot)
+            cold_avg = statistics.mean(all_cold)
+            if hot_avg > 0:
+                print(f"  Cold/Hot ratio:    {cold_avg/hot_avg:.1f}x latency")
 
-    if all_hot and all_cold:
-        hot_avg = statistics.mean(all_hot)
-        cold_avg = statistics.mean(all_cold)
-        if hot_avg > 0:
+        print(f"\n  Total wall time:   {t_total_end - t_total_start:.2f}s")
+
+        # Per-client summary
+        print(f"\n  Per-client breakdown:")
+        print(
+            f"  {'Client':<8} {'GPU':<5} {'Hot avg (us)':<14} {'Cold avg (us)':<14} {'Errors':<8}"
+        )
+        print(f"  {'-'*49}")
+        for r in results:
+            gpu_id = r.client_id % num_gpus
+            hot_avg = statistics.mean(r.hot_latencies) * 1e6 if r.hot_latencies else 0
+            cold_avg = (
+                statistics.mean(r.cold_latencies) * 1e6 if r.cold_latencies else 0
+            )
             print(
-                f"  Cold/Hot ratio:    {cold_avg/hot_avg:.1f}x latency"
+                f"  {r.client_id:<8} {gpu_id:<5} {hot_avg:<14.1f} {cold_avg:<14.1f} {len(r.errors):<8}"
             )
 
-    print(f"\n  Total wall time:   {t_total_end - t_total_start:.2f}s")
+        print()
 
-    # Per-client summary
-    print(f"\n  Per-client breakdown:")
-    print(
-        f"  {'Client':<8} {'GPU':<5} {'Hot avg (us)':<14} {'Cold avg (us)':<14} {'Errors':<8}"
-    )
-    print(f"  {'-'*49}")
-    for r in results:
-        gpu_id = r.client_id % num_gpus
-        hot_avg = statistics.mean(r.hot_latencies) * 1e6 if r.hot_latencies else 0
-        cold_avg = (
-            statistics.mean(r.cold_latencies) * 1e6 if r.cold_latencies else 0
-        )
-        print(
-            f"  {r.client_id:<8} {gpu_id:<5} {hot_avg:<14.1f} {cold_avg:<14.1f} {len(r.errors):<8}"
-        )
+        # --- Integrity verification (optional, first round only) ---
+        integrity_ok = True
+        if args.verify_integrity and round_num == 1:
+            integrity_ok = run_integrity_check(args.server, args.integrity_objects)
 
-    print()
-
-    # --- Integrity verification (optional) ---
-    integrity_ok = True
-    if args.verify_integrity:
-        integrity_ok = run_integrity_check(args.server, args.integrity_objects)
-
-    sys.exit(1 if (all_errors or not integrity_ok) else 0)
+        if not continuous:
+            sys.exit(1 if (all_errors or not integrity_ok) else 0)
 
 
 if __name__ == "__main__":
