@@ -343,6 +343,7 @@ drive-0=61:00.0, drive-1=62:00.0, drive-2=63:00.0, drive-3=64:00.0, drive-4=c1:0
 
 ## 11. Summary Table
 
+### Raw hardware paths
 | Data Path | Peak BW (GB/s) | Limiting Factor | Notes |
 |-----------|----------------|-----------------|-------|
 | NVMe → Host (1 drive) | 5.94 | Drive Gen4 x4 link | 75% of 7.88 GB/s theoretical |
@@ -352,63 +353,106 @@ drive-0=61:00.0, drive-1=62:00.0, drive-2=63:00.0, drive-3=64:00.0, drive-4=c1:0
 | NVMe → Host (7 drives) | 39.35 | 7× Gen4 x4 | ~71% of 55.1 GB/s theoretical |
 | Host → GPU 0 (H2D 1-stream) | 23.99 | GPU PCIe x16 + NUMA | 76% of 31.51 GB/s theoretical |
 | Host → GPU 1 (H2D 1-stream) | 26.65 | GPU PCIe x16 | 84.6% of 31.51 GB/s theoretical |
-| Host → GPU 0 (H2D 4-stream) | 24.02 | PCIe saturation | Minimal gain from multi-stream |
-| Host → GPU 1 (H2D 4-stream) | 26.68 | PCIe saturation | Minimal gain from multi-stream |
 | GPU 0 → Host (D2H) | 16.53 | PCIe read amplification | Expected asymmetry |
 | GPU 1 → Host (D2H) | 14.00 | PCIe read amplification | Expected asymmetry |
-| GPU 0 D2D (1-stream, 8 MiB) | 407.77 | HBM2e internal bus | Not a bottleneck |
-| GPU 0 D2D (2-stream, peak) | 510.41 | HBM2e internal bus | Not a bottleneck |
-| GPU 1 D2D (2-stream, peak) | 527.50 | HBM2e internal bus | Not a bottleneck |
-| GDRCopy CPU→BAR1 write | 11.78 | BAR1 WC mapping | Diagnostic only; not on data path |
+| GPU D2D (sustained, 1-stream) | 408–419 | HBM2e internal bus | Not a bottleneck |
+| GDRCopy CPU→BAR1 write | 11.78 | BAR1 WC mapping | Diagnostic only |
 | GDRCopy CPU←BAR1 read | 0.020 | Uncacheable PCIe reads | Not on data path |
-| NVMe DMA → BAR1, GPU 0 (1 drive) | 4.09 | Drive x4 link | 0% overhead |
-| NVMe DMA → BAR1, GPU 0 (4 drives) | 18.59 | GPU 0 BAR1 contention | 18% overhead |
-| NVMe DMA → BAR1, GPU 0 (6 drives) | 21.37 | GPU 0 BAR1 saturated | 37% overhead; ceiling hit |
-| NVMe DMA → BAR1, GPU 1 (4 drives) | 21.69 | Near-linear | 4% overhead — GPU 1 preferred |
-| NVMe DMA → BAR1, GPU 1 (3 same-NUMA) | 16.52 | Drive count limited | 3% overhead — best topology |
-| GDS NVMe → GPU | N/A | nvidia_fs not loaded | — |
-| Host RAM same-NUMA (sustained) | 18.02 | Memory controller | 256 MiB; true DRAM ceiling |
-| Host RAM cross-NUMA (sustained) | 11.15 | Infinity Fabric | 64 MiB; IF bandwidth |
+| Host RAM same-NUMA (sustained) | 18.02 | Memory controller | True DRAM ceiling |
+| Host RAM cross-NUMA (sustained) | 11.15 | Infinity Fabric | Inter-socket |
+
+### Dispatcher warm path — both `dispatcher` and `dispatcher-p2p`
+```
+warm:  Memory-Tier (DRAM) ──H2D DMA──▶ GPU
+```
+Both components share the same warm path: a `memcpy_h2d_async` from a CUDA-pinned DRAM
+memory-tier slot. `dispatcher-p2p` uses a dedicated `warm_stream` for this; `dispatcher`
+uses its own stream pool. The ceiling is identical — purely H2D PCIe bandwidth.
+
+| Path | Ceiling (GB/s) | Bound by |
+|------|---------------|----------|
+| warm → GPU 1 | **26.68** | H2D PCIe x16 (GPU 1 NUMA-local) |
+| warm → GPU 0 | **24.00** | H2D PCIe x16 (GPU 0 cross-NUMA penalty) |
+
+### Dispatcher cold path — `dispatcher` only (memory-tier DRAM bounce)
+```
+cold:  NVMe ──DMA──▶ Memory-Tier (DRAM) ──H2D DMA──▶ GPU
+```
+| Path | Drives | Ceiling (GB/s) | Bound by | Notes |
+|------|--------|---------------|----------|-------|
+| cold → GPU 1 | 1 | **5.94** | NVMe x4 link | H2D (26.68) has ample headroom |
+| cold → GPU 1 | 4 | **22.12** | NVMe (4× x4) | H2D ceiling not yet reached |
+| cold → GPU 1 | 6 | **26.68** | H2D PCIe x16 | NVMe (33.66) exceeds H2D; H2D caps it |
+| cold → GPU 0 | 6 | **24.00** | H2D PCIe x16 | GPU 0 H2D ceiling is lower |
+
+### Dispatcher-P2P paths (component: `dispatcher-p2p` — direct BAR1, no DRAM bounce)
+```
+cold:  NVMe ──DMA──▶ BAR1 (GDRCopy-mapped GPU memory)
+```
+| Path | Drives | Ceiling (GB/s) | Bound by | Notes |
+|------|--------|---------------|----------|-------|
+| P2P cold → GPU 1 | 1 | **4.09** | NVMe x4 link | 0% BAR1 overhead |
+| P2P cold → GPU 1 | 3 (c1–c3, same NUMA) | **16.52** | NVMe aggregate | 3% overhead — best topology |
+| P2P cold → GPU 1 | 4 | **21.69** | NVMe / BAR1 | 4% overhead |
+| P2P cold → GPU 0 | 4 | **18.59** | BAR1 contention | 18% overhead (worse NUMA) |
+| P2P cold → GPU 0 | 6 | **21.37** | BAR1 saturated | 37% overhead; adding drives gains nothing |
+
+### Comparison: dispatcher cold vs dispatcher-p2p cold at 4 drives
+| | dispatcher cold | dispatcher-p2p cold |
+|--|----------------|---------------------|
+| Route | NVMe → DRAM → H2D → GPU | NVMe → BAR1 → GPU |
+| Ceiling (GPU 1) | **22.12 GB/s** | **21.69 GB/s** |
+| Difference | +0.43 GB/s (+2%) | — |
+| DRAM bounce | Yes (extra memcpy stage) | No |
+| Latency | Higher (two stages) | Lower (single stage) |
+
+At 4 drives the two paths are essentially tied on throughput (~22 GB/s).
+The dispatcher-p2p advantage is lower latency (no DRAM intermediate); the
+dispatcher advantage is that it scales past 4 drives before hitting a ceiling
+(H2D cap at 6 drives = 26.68 GB/s vs BAR1 saturated at ~21 GB/s).
 
 ---
 
 ## 12. Observations and Recommendations
 
-### P2P Cold Path
+### Which dispatcher wins at scale?
 
-The practical P2P ceiling on this node is determined by BAR1 saturation, not NVMe throughput:
+| Drive count | dispatcher cold ceiling | dispatcher-p2p cold ceiling | Winner |
+|-------------|------------------------|-----------------------------|--------|
+| 1 | 5.94 GB/s | 4.09 GB/s | dispatcher (+45%) |
+| 4 | 22.12 GB/s | 21.69 GB/s | tie (~2%) |
+| 6 | 26.68 GB/s | ~21 GB/s (saturated) | **dispatcher (+27%)** |
+| 7 | 26.68 GB/s | ~21 GB/s (saturated) | **dispatcher (+27%)** |
 
-- **GPU 0 BAR1 ceiling: ~21 GB/s** (saturates above 4–5 drives)
-- **GPU 1 BAR1 ceiling: ~22 GB/s** (4% overhead at 4 drives, better NUMA locality)
-- **Recommended target GPU: GPU 1 (a1:00.0)** — 4× lower overhead than GPU 0 at 4-drive scale
+- **dispatcher-p2p** is better for latency-sensitive workloads at 3–4 drives (no DRAM bounce, lowest overhead).
+- **dispatcher** scales better beyond 4 drives — H2D ceiling (26.68 GB/s) is higher than BAR1 saturation (~21 GB/s).
+- **GPU 1 (a1:00.0)** is the preferred target for both dispatchers — better NUMA placement gives 2.7 GB/s more H2D and 3 GB/s less BAR1 overhead vs GPU 0.
 
-### Optimal Drive Configuration
+### dispatcher-p2p BAR1 saturation
 
-| Goal | Recommendation |
-|------|---------------|
-| Lowest overhead | 3 drives (c1–c3) → GPU 1: 2.9% overhead, 16.5 GB/s |
-| Maximum P2P throughput | 4 drives (any) → GPU 1: 21.7 GB/s, 4% overhead |
-| Beyond 4 drives | Diminishing returns; BAR1 saturates near 21–22 GB/s |
+BAR1 saturates at ~21 GB/s on both GPUs regardless of drive count above 4–5 drives.
+The GPU memory controller cannot sustain more concurrent DMA streams.
+Adding drives beyond 4 in P2P mode wastes NVMe capacity without throughput gain.
 
-### Memory-Tier Hot Path
+### dispatcher cold path crossover point
 
-- Route host→GPU transfers to **GPU 1** for best bandwidth (26.7 GB/s vs 24.0 GB/s)
-- Single-stream H2D is adequate — multi-stream adds <0.1 GB/s above 8 MiB transfers
-- H2D ceiling (26.7 GB/s) is 3× higher than 4-drive BAR1 ceiling (21.7 GB/s)
+At 4 drives: NVMe (22.12 GB/s) < H2D (26.68 GB/s) — NVMe is the bottleneck.  
+At 6 drives: NVMe (33.66 GB/s) > H2D (26.68 GB/s) — H2D becomes the bottleneck.  
+**Crossover is between 4 and 6 drives** (~4.5 drives at 5.94 GB/s/drive ÷ 26.68 GB/s cap).
 
-### D2D Staging Copy Is Not a Bottleneck
+### D2D staging copy is not a bottleneck
 
-GPU internal D2D bandwidth (~410 GB/s sustained) is 20× faster than the NVMe→BAR1 input rate.
-The staging ring copy from BAR1 region → final GPU destination adds negligible latency.
+GPU internal D2D (~410 GB/s sustained) is 20× faster than any NVMe input rate.
+The BAR1 staging ring → final GPU destination copy adds negligible latency.
 
-### Scaling Table
+### Scaling table (4-drive configuration)
 
-| Drive Count | NVMe raw ceiling | BAR1 @ GPU 0 | BAR1 @ GPU 1 |
-|-------------|-----------------|--------------|--------------|
-| 1 | 5.9 GB/s | 4.1 GB/s | 4.1 GB/s |
-| 4 | 23.6 GB/s | 18.6 GB/s | 21.7 GB/s |
-| 6 | 35.4 GB/s | **~21 GB/s (saturated)** | ~22 GB/s |
-| 7 | 41.3 GB/s | **~21 GB/s (saturated)** | ~22 GB/s |
+| Drive count | NVMe raw | dispatcher cold | dispatcher-p2p cold |
+|-------------|---------|----------------|---------------------|
+| 1 | 5.94 GB/s | 5.94 GB/s | 4.09 GB/s |
+| 4 | 22.12 GB/s | 22.12 GB/s | 21.69 GB/s |
+| 6 | 33.66 GB/s | **26.68 GB/s** (H2D cap) | **~21 GB/s** (BAR1 sat.) |
+| 7 | 39.35 GB/s | **26.68 GB/s** (H2D cap) | **~21 GB/s** (BAR1 sat.) |
 
 ---
 

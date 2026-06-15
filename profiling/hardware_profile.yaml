@@ -150,26 +150,46 @@ topology:
   note: "All device-to-device paths traverse Infinity Fabric. NUMA locality (same-socket) reduces overhead."
 
 # Derived ceilings for use by investigator/evaluator
+#
+# Dispatcher paths (components/dispatcher — memory-tier DRAM bounce):
+#   warm:  Memory-Tier (DRAM) --H2D DMA--> GPU
+#   cold:  NVMe --DMA--> Memory-Tier (DRAM) --H2D DMA--> GPU   [two-stage pipeline]
+#
+# Dispatcher-P2P paths (components/dispatcher-p2p — direct BAR1):
+#   cold:  NVMe --DMA--> BAR1 (GDRCopy-mapped GPU memory)       [single-stage]
+#
 ceilings:
-  # P2P cold path: NVMe DMA → BAR1 → GPU
-  # Best topology: drives c1-c3 (NUMA 1) → GPU 1 (NUMA 1)
-  p2p_cold_3drive_same_numa_gbps: 16.52   # c1-c3 → gpu1
-  p2p_cold_4drive_gbps: 21.69             # 61-64 → gpu1 (best 4-drive result)
-  p2p_cold_4drive_gpu0_gbps: 18.59        # 61-64 → gpu0 (higher overhead)
-  p2p_cold_6drive_gbps: 21.37             # 61-64+c1-c2 → gpu0 (BAR1 saturated)
-  # Memory-tier hot path: host → GPU
-  memory_tier_hot_gbps: 22.86             # gpu1 H2D, 4 MiB, 1-stream
-  memory_tier_hot_peak_gbps: 26.68        # gpu1 H2D, 256 MiB, 4-stream
-  memory_tier_hot_gpu0_gbps: 22.01        # gpu0 H2D, 4 MiB, 1-stream
-  memory_tier_hot_gpu0_peak_gbps: 24.00   # gpu0 H2D, 64 MiB, 4-stream
-  # NVMe raw (SPDK perf, no BAR1)
+  # --- dispatcher warm path: data already in DRAM memory-tier, H2D is the only stage ---
+  dispatcher_warm_4m_gbps: 22.86          # gpu1 H2D, 4 MiB, 1-stream (typical chunk size)
+  dispatcher_warm_peak_gbps: 26.68        # gpu1 H2D, 256 MiB, 4-stream (asymptotic)
+  dispatcher_warm_gpu0_4m_gbps: 22.01     # gpu0 H2D, 4 MiB, 1-stream
+  dispatcher_warm_gpu0_peak_gbps: 24.00   # gpu0 H2D, 64 MiB, 4-stream
+
+  # --- dispatcher cold path: NVMe → DRAM → H2D (binding stage = NVMe at 4 drives) ---
+  # Ceiling = min(nvme_raw, h2d_peak). NVMe is always the bottleneck at ≤4 drives.
+  dispatcher_cold_1drive_gbps: 5.94       # NVMe-bound (5.94 << 26.68 H2D)
+  dispatcher_cold_4drive_gbps: 22.12      # NVMe-bound (22.12 << 26.68 H2D)
+  dispatcher_cold_6drive_gbps: 26.68      # H2D-bound (33.66 NVMe > 26.68 H2D) — gpu1
+  dispatcher_cold_6drive_gpu0_gbps: 24.00 # H2D-bound — gpu0
+
+  # --- dispatcher-p2p cold path: NVMe DMA → BAR1 (single stage, no DRAM bounce) ---
+  # Ceiling = measured nvme-bar1-bench BAR1 result (includes PCIe overhead).
+  p2p_cold_1drive_gbps: 4.09             # c1:00.0 → gpu1 (or any 1 drive)
+  p2p_cold_3drive_same_numa_gbps: 16.52  # c1-c3 → gpu1 (best topology)
+  p2p_cold_4drive_gbps: 21.69            # 61-64 → gpu1 (best 4-drive result)
+  p2p_cold_4drive_gpu0_gbps: 18.59       # 61-64 → gpu0 (higher overhead)
+  p2p_cold_6drive_gbps: 21.37            # 61-64+c1-c2 → gpu0 (BAR1 saturated)
+
+  # --- NVMe raw (SPDK perf, no GPU overhead) ---
   nvme_raw_1drive_gbps: 5.94
   nvme_raw_4drive_gbps: 22.12
   nvme_raw_6drive_gbps: 33.66
   nvme_raw_7drive_gbps: 39.35
-  # D2D (GPU internal; not a bottleneck)
+
+  # --- D2D (GPU internal staging copy; not a bottleneck for either dispatcher) ---
   gpu0_d2d_sustained_gbps: 407.77
   gpu1_d2d_sustained_gbps: 419.46
-  # Host RAM
+
+  # --- Host RAM ---
   host_ram_same_numa_gbps: 18.02
   host_ram_cross_numa_gbps: 11.15
