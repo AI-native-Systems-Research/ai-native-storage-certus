@@ -1,18 +1,18 @@
 # Drift Report: Dispatcher Cache Interface (001-dispatcher-cache-interface)
 
-**Generated**: 2026-06-12  
+**Generated**: 2026-06-15  
 **Spec**: `components/dispatcher/specs/001-dispatcher-cache-interface/spec.md`  
 **Implementation**: `components/dispatcher/src/` (lib.rs, pipeline.rs, io_segmenter.rs, background.rs)  
 **Interface**: `components/interfaces/src/idispatcher.rs`, `components/interfaces/src/imemory_tier.rs`  
-**Prior run**: 2026-05-29
+**Prior run**: 2026-06-12
 
 ## Summary
 
 | Status | Count |
 |--------|-------|
-| Aligned | 36 |
-| Drifted (behavioral) | 1 |
-| Drifted (omission from spec) | 1 |
+| Aligned | 33 |
+| Drifted (behavioral) | 3 |
+| Drifted (omission from spec) | 3 |
 
 ## Drift Items
 
@@ -54,9 +54,73 @@ Evicts the LRU entry from the same shard as `key`, ensuring the freed space is a
 
 ---
 
+---
+
+### DRIFT-C: `max_eviction_attempts` now configurable (Severity: Minor)
+
+**Spec refs**: FR-024, FR-033, User Story 7 (scenario 5)  
+**Severity**: Minor — behavioral improvement, backward-compatible
+
+**Spec says** (FR-024): "The loop is bounded by MAX_ATTEMPTS=512"  
+**Spec says** (US7-5): "evict_for_space iterates MAX_ATTEMPTS=512 times"
+
+**Code does**: `max_eviction_attempts` is a configurable field in `DispatcherConfig` (default 2048). Stored as `AtomicUsize` on the component, loaded at each call site.
+
+**Required spec update**:
+- FR-024: Replace hardcoded 512 with "configurable via `DispatcherConfig::max_eviction_attempts` (default 2048)"
+- FR-033: Add `max_eviction_attempts: usize` to the DispatcherConfig field list
+- US7 scenario 5: Update 512 → `max_eviction_attempts` (default 2048)
+
+---
+
+### DRIFT-D: Multi-stream warm pool replaces single warm_stream (Severity: Moderate)
+
+**Spec refs**: FR-037, FR-039  
+**Severity**: Moderate — architectural change for throughput
+
+**Spec says** (FR-037): "pre-allocate a dedicated CUDA stream (`warm_stream`) ... stored as an `AtomicU64` and loaded without a mutex"
+
+**Code does**: Allocates **4 CUDA streams** stored as `RwLock<Vec<u64>>`. `batch_lookup` distributes H2D copies round-robin across streams. Single `lookup` uses `streams[0]`.
+
+**Required spec update**:
+- FR-037: Replace single stream with "pool of N warm CUDA streams (default 4)" stored in `RwLock<Vec<u64>>`. Describe round-robin distribution in batch_lookup.
+
+---
+
+### DRIFT-E: Ring-buffer fallback pipeline removed (Severity: Moderate)
+
+**Spec refs**: FR-019, FR-034, Key Entities (Pipelined Reader)  
+**Severity**: Moderate — removes fallback path
+
+**Spec says** (FR-019): "A ring-buffer fallback path (`pipelined_ssd_to_gpu`) exists for when the memory-tier pool is not registered for DMA"  
+**Spec says** (FR-034): "Registration failure ... MUST NOT be fatal (the system falls back to the ring-buffer pipeline path)"
+
+**Code does**: `pipelined_ssd_to_gpu` function and `PipelineRing::buffers` field have been deleted. Only zero-copy paths remain. `PipelineRing` now holds only streams + chunk_size.
+
+**Required spec update**:
+- FR-019: Remove ring-buffer fallback language
+- FR-034: Registration failure should now be considered a warning (no fallback available)
+- Key Entities "Pipelined Reader": Remove fallback description
+
+---
+
+### DRIFT-F: Deferred batch synchronization in batch_lookup hot path (Severity: Minor)
+
+**Spec refs**: FR-039  
+**Severity**: Minor — performance optimization, semantically equivalent
+
+**Spec says** (FR-039): "serves MemoryTier and Staging hits inline (same as single-entry `lookup`)"
+
+**Code does**: Issues all `memcpy_h2d_async` calls across warm streams without synchronizing, then calls `stream_synchronize` once per used stream after all copies are issued. Read locks and LRU touches are deferred until after sync.
+
+**Required spec update**:
+- FR-039: Add note that hot-path entries use deferred batch synchronization for throughput
+
+---
+
 ## Previously Resolved Drift
 
-All items from the 2026-05-29 run (DRIFT-A through DRIFT-G in that report) were resolved via BACKFILL proposals applied to the spec. Those changes remain aligned.
+All items from the 2026-05-29 and 2026-06-12 runs (DRIFT-A through DRIFT-B in the prior report) remain as documented above — spec updates are pending.
 
 ---
 
@@ -64,7 +128,8 @@ All items from the 2026-05-29 run (DRIFT-A through DRIFT-G in that report) were 
 
 All of the following are aligned between spec and code:
 
-- FR-001 through FR-023 (core interface and operations)
+- FR-001 through FR-018 (core interface and operations)
+- FR-020 through FR-023 (prepare/commit/cancel/touch)
 - FR-025 (format_on_init recovery)
-- FR-028 through FR-039 (promote, evictor, CUDA registration, batch_lookup)
-- User Stories 1-11 (except eviction algorithm details in US7)
+- FR-028 through FR-036, FR-038 (promote, evictor, CUDA registration, clear)
+- User Stories 1-6, 8-11 (except eviction details in US7)
