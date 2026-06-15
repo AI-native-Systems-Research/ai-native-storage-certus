@@ -1,9 +1,51 @@
-//! Ring-buffer pipelined reader for SSD→DRAM→GPU transfers.
+//! Pipelined SSD→DRAM→GPU transfer engine for the cold lookup path.
 //!
-//! Uses async NVMe reads with multiple in-flight commands and dual CUDA
-//! streams to overlap SSD I/O with GPU DMA copies. Each completed chunk
-//! is memcpy'd to the memory-tier slot (CPU) and simultaneously queued
-//! for async H2D transfer to the GPU destination.
+//! # Overview
+//!
+//! When a cache miss occurs (key is on SSD, not in memory-tier), data must be
+//! read from NVMe and delivered to the client's GPU. This module implements
+//! three progressively optimized pipeline strategies:
+//!
+//! 1. **`pipelined_ssd_to_gpu`** — Ring-buffer pipeline. NVMe reads into pre-
+//!    allocated ring buffers, then CPU memcpy to memory-tier + async GPU DMA.
+//!    Used for single-object reads when the PipelineRing is available.
+//!
+//! 2. **`pipelined_ssd_to_gpu_zero_copy`** — Zero-copy single-object pipeline.
+//!    NVMe reads directly into the CUDA-pinned memory-tier slot (no intermediate
+//!    ring buffer, no CPU memcpy). Each completed segment is immediately DMA'd
+//!    to GPU while the next NVMe read is in flight.
+//!
+//! 3. **`pipelined_multi_object_zero_copy`** — Multi-object zero-copy pipeline.
+//!    Processes N objects concurrently on the same NVMe queue, interleaving
+//!    segments from different objects to hide per-object NVMe latency. Used by
+//!    `batch_lookup` for parallel cold promotion of multiple keys.
+//!
+//! # Data flow (cold path)
+//!
+//! ```text
+//! ┌─────────┐  ReadAsync   ┌───────────────────┐  cudaMemcpyAsync  ┌──────────┐
+//! │ NVMe SSD│─────DMA──────▶ Memory-Tier Pool   │───────H2D─────────▶ GPU VRAM │
+//! │         │              │ (CUDA+SPDK pinned) │                   │          │
+//! └─────────┘              └───────────────────┘                   └──────────┘
+//!       ▲                         │
+//!       │ submit next read        │ on each completion
+//!       └─────────────────────────┘
+//! ```
+//!
+//! # Key design decisions
+//!
+//! - **NVMe queue depth saturation**: keeps `max_queue_depth` reads in flight at
+//!   all times via a sliding-window submit/complete loop.
+//! - **Dual CUDA streams**: alternates GPU DMA copies between two streams so
+//!   the GPU copy engine can overlap transfers.
+//! - **Periodic stream sync**: every 8 completions, both streams are synchronized
+//!   to bound GPU-side queue depth and prevent unbounded memory pressure.
+//! - **Tag-based completion routing**: each NVMe read carries a tag encoding
+//!   `(object_index, segment_index)` so out-of-order completions are routed to
+//!   the correct memory-tier offset and GPU destination.
+//! - **Zero-copy via SPDK+CUDA co-registration**: the memory-tier pool is both
+//!   `spdk_mem_register`'d (NVMe can DMA into it) and `cudaHostRegister`'d (GPU
+//!   can DMA from it), eliminating all CPU-side data copies.
 
 use std::sync::{Arc, Mutex};
 
@@ -476,7 +518,9 @@ pub unsafe fn pipelined_multi_object_zero_copy(
         return results;
     }
 
-    // Build a flat list of (obj_idx, seg_idx) work items.
+    // Flatten all segments into a single work queue ordered by object then segment.
+    // The tag encoding `obj_idx * max_segments_per_obj + seg_idx` lets us decode
+    // which object and segment completed from each NVMe ReadDone event.
     let mut work: Vec<(usize, usize)> = Vec::with_capacity(total_segments);
     for (obj_idx, obj) in all_objs.iter().enumerate() {
         for seg_idx in 0..obj.segments.len() {
@@ -529,6 +573,11 @@ pub unsafe fn pipelined_multi_object_zero_copy(
     #[cfg(feature = "pipeline-telemetry")]
     let mut t_resub_ns: u64 = 0;
 
+    // Main pipeline loop: for each NVMe completion —
+    //   1. Decode tag → (object_idx, segment_idx)
+    //   2. Issue async H2D GPU DMA from memory-tier slot to client GPU
+    //   3. Sync both CUDA streams every PIPELINE_RING_SIZE completions
+    //   4. Submit the next NVMe read to keep the queue saturated
     while completed < work.len() {
         #[cfg(feature = "pipeline-telemetry")]
         let t0 = std::time::Instant::now();
