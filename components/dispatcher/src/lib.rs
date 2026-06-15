@@ -2739,6 +2739,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -2781,6 +2782,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
     }
 
@@ -2797,6 +2799,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher);
         assert!(d.is_some());
@@ -2815,6 +2818,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -2838,6 +2842,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -2862,6 +2867,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -2886,6 +2892,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.check(42);
@@ -2905,6 +2912,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.remove(42);
@@ -2924,6 +2932,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -2948,6 +2957,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         // Even though not initialized, zero-size check comes after init check.
@@ -2975,6 +2985,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -2993,6 +3004,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -3012,6 +3024,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         ));
 
         let handles: Vec<_> = (0..4)
@@ -3062,6 +3075,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.memory_tier.connect(mt).unwrap();
@@ -3091,6 +3105,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -3164,6 +3179,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -3491,6 +3507,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
