@@ -342,26 +342,76 @@ Write the report with:
 5. Summary table (see below)
 6. Observations and recommendations
 
-Summary table format:
+The summary must contain **four sub-tables**:
+
+**Sub-table 1 — Raw hardware paths** (measured primitives, no dispatcher logic):
 ```
 | Data Path                         | Peak BW (GB/s) | Limiting Factor              | Notes |
-|-----------------------------------|-----------------|------------------------------|-------|
-| NVMe → Host (1 drive)            | X.XX            | Drive PCIe x4                |       |
-| NVMe → Host (4 drives)           | XX.XX           | Aggregate / lcore            |       |
-| NVMe → Host (6 drives)           | XX.XX           | Aggregate / lcore            |       |
-| Host → GPU (cudaMemcpy H2D)      | XX.XX           | GPU PCIe x16, single stream  |       |
-| GPU → Host (cudaMemcpy D2H)      | XX.XX           | GPU PCIe x16                 |       |
-| GPU D2D (1 stream)               | XX.XX           | HBM/internal bus             |       |
-| GPU D2D (4 streams)              | XX.XX           | HBM/internal bus             |       |
-| GDRCopy CPU→BAR1 write           | XX.XX           | BAR1 write combining         |       |
-| GDRCopy CPU←BAR1 read            | X.XX            | BAR1 uncacheable read        |       |
-| NVMe DMA → BAR1 (P2P, 1 drive)  | X.XX            | Drive x4                     |       |
-| NVMe DMA → BAR1 (P2P, 4 drives) | XX.XX           | BAR1 contention / GPU MC     |       |
-| NVMe DMA → BAR1 (P2P, 6 drives) | XX.XX           | BAR1 saturation              |       |
-| GDS NVMe → GPU (if available)    | XX.XX or N/A    | True hardware P2P DMA        |       |
-| Host RAM (same-NUMA memcpy)      | XX.XX           | Memory controller            |       |
-| Host RAM (cross-NUMA memcpy)     | XX.XX           | Inter-socket link            |       |
+|-----------------------------------|----------------|------------------------------|-------|
+| NVMe → Host (1 drive)            |                | Drive PCIe x4                |       |
+| NVMe → Host (4 drives)           |                | 4× PCIe x4 aggregate         |       |
+| NVMe → Host (6/7 drives)         |                | N× PCIe x4 aggregate         |       |
+| Host → GPU N (H2D 1-stream)      |                | GPU PCIe x16                 |       |
+| Host → GPU N (H2D peak)          |                | GPU PCIe x16                 |       |
+| GPU N → Host (D2H)               |                | PCIe read amplification      |       |
+| GPU D2D (1-stream sustained)     |                | HBM internal bus             |       |
+| GDRCopy CPU→BAR1 write           |                | BAR1 write-combining         |       |
+| GDRCopy CPU←BAR1 read            |                | BAR1 uncacheable reads       |       |
+| Host RAM same-NUMA (sustained)   |                | Memory controller            |       |
+| Host RAM cross-NUMA (sustained)  |                | Inter-socket link            |       |
+| GDS NVMe → GPU                   | N/A or XX.XX   | nvidia_fs / true P2P DMA     |       |
 ```
+
+**Sub-table 2 — `dispatcher` warm path** (both `dispatcher` and `dispatcher-p2p` share this):
+```
+Route: Memory-Tier (CUDA-pinned DRAM) ──H2D DMA──▶ GPU
+Both components use memcpy_h2d_async from a DRAM memory-tier slot for warm hits.
+Ceiling = H2D PCIe bandwidth (NVMe not involved).
+
+| GPU | Ceiling (GB/s) | Bound by        |
+|-----|----------------|-----------------|
+| 0   |                | H2D PCIe x16    |
+| 1   |                | H2D PCIe x16    |
+```
+
+**Sub-table 3 — `dispatcher` cold path** (NVMe → DRAM bounce → H2D):
+```
+Route: NVMe ──DMA──▶ Memory-Tier (DRAM) ──H2D DMA──▶ GPU
+Two-stage pipeline. Ceiling = min(NVMe_aggregate, H2D). Crossover point where H2D
+becomes the cap = H2D_ceiling / per_drive_bandwidth drives.
+
+| Drives | GPU | Ceiling (GB/s) | Bound by                          |
+|--------|-----|----------------|-----------------------------------|
+| 1      | N   |                | NVMe x4                           |
+| 4      | N   |                | NVMe aggregate (if < H2D ceiling) |
+| 6      | N   |                | H2D PCIe x16 or NVMe aggregate    |
+```
+
+**Sub-table 4 — `dispatcher-p2p` cold path** (NVMe → BAR1 direct):
+```
+Route: NVMe ──DMA──▶ BAR1 (GDRCopy-mapped GPU memory)
+Single-stage. Ceiling = nvme-bar1-bench BAR1 result (includes PCIe + BAR1 overhead).
+BAR1 saturates around 21–22 GB/s on A30; adding drives beyond that point yields no gain.
+
+| Drives | GPU | BAR1 ceiling (GB/s) | BAR1 overhead vs host-ram | Notes          |
+|--------|-----|---------------------|--------------------------|----------------|
+| 1      | N   |                     | ~0%                      |                |
+| 4      | 0   |                     | measured %               | cross-NUMA     |
+| 4      | 1   |                     | measured %               | topology-best  |
+| 6      | N   |                     | measured %               | saturated?     |
+```
+
+After the four sub-tables, add a **crossover comparison**:
+```
+| Drive count | dispatcher cold ceiling | dispatcher-p2p cold ceiling | Winner        |
+|-------------|------------------------|-----------------------------|---------------|
+| 1           |                        |                             |               |
+| 4           |                        |                             | ~tie or one   |
+| 6           |                        |                             | dispatcher or p2p |
+```
+This exposes the key insight: at low drive counts dispatcher-p2p may win on latency
+(single-stage, no DRAM bounce) but at high drive counts dispatcher wins on throughput
+(H2D cap > BAR1 saturation ceiling).
 
 ### 2. Machine-readable profile: `<output-dir>/hardware_profile.yaml`
 
@@ -443,21 +493,65 @@ topology:
   gpu0_same_root_drives: ["c1:00.0", "c2:00.0"]
   gpu1_same_root_drives: ["61:00.0", "62:00.0", "63:00.0", "64:00.0"]
 
-# Derived ceilings for use by investigator/evaluator
+# Derived ceilings — keyed by Certus dispatcher path, for investigator/evaluator
+#
+# Certus has two dispatchers, each with a warm and cold path:
+#
+#   dispatcher (memory-tier DRAM bounce):
+#     warm:  Memory-Tier (DRAM) ──H2D──▶ GPU           ceiling = H2D bandwidth
+#     cold:  NVMe ──DMA──▶ Memory-Tier ──H2D──▶ GPU    ceiling = min(NVMe_agg, H2D)
+#
+#   dispatcher-p2p (direct BAR1, no DRAM):
+#     warm:  Memory-Tier (DRAM) ──H2D──▶ GPU           ceiling = H2D bandwidth (same as above)
+#     cold:  NVMe ──DMA──▶ BAR1 (GPU)                  ceiling = bar1 result from nvme-bar1-bench
+#
 ceilings:
-  p2p_cold_4drive_gbps: <bar1.gpuX.bar1_4drive_gbps for same-root GPU>
-  p2p_cold_6drive_gbps: <bar1.gpuX.bar1_6drive_gbps>
-  memory_tier_hot_gbps: <gpuX.h2d_4m_gbps>
-  memory_tier_hot_peak_gbps: <gpuX.h2d_peak_gbps>
+  # --- warm path (shared by both dispatchers) ---
+  # Ceiling = H2D bandwidth; pick best GPU for each.
+  warm_gpu0_gbps: <gpus.gpu0.h2d_4m_1stream_gbps>     # typical chunk size, 1 stream
+  warm_gpu0_peak_gbps: <gpus.gpu0.h2d_peak_gbps>       # asymptotic at large transfers
+  warm_gpu1_gbps: <gpus.gpu1.h2d_4m_1stream_gbps>
+  warm_gpu1_peak_gbps: <gpus.gpu1.h2d_peak_gbps>
+
+  # --- dispatcher cold path: NVMe → DRAM → H2D ---
+  # Ceiling = min(nvme.raw_read_gbps.N_drive, warm_gpuX_peak_gbps).
+  # Crossover point (drives where H2D becomes binding) = h2d_peak / per_drive_bw.
+  # Compute and record: if nvme_Ndrive < h2d_peak → NVMe-bound; else → H2D-bound.
+  dispatcher_cold_1drive_gbps: <min(nvme.raw_read_gbps.1_drive, warm_gpuX_peak_gbps)>
+  dispatcher_cold_4drive_gbps: <min(nvme.raw_read_gbps.4_drive, warm_gpuX_peak_gbps)>
+  dispatcher_cold_6drive_gbps: <min(nvme.raw_read_gbps.6_drive, warm_gpuX_peak_gbps)>
+  dispatcher_cold_bottleneck_at_4drive: <"nvme" or "h2d">
+  dispatcher_cold_bottleneck_at_6drive: <"nvme" or "h2d">
+  dispatcher_cold_crossover_drives: <computed: h2d_peak_gbps / per_drive_gbps>
+
+  # --- dispatcher-p2p cold path: NVMe → BAR1 ---
+  # Ceiling = measured nvme-bar1-bench BAR1 result (best topology per GPU).
+  # Report per GPU so investigator can pick topology-correct value.
+  p2p_cold_1drive_gbps: <bar1.gpuX.bar1_1drive_gbps>
+  p2p_cold_4drive_gpu0_gbps: <bar1.gpu0.bar1_4drive_gbps>
+  p2p_cold_4drive_gpu1_gbps: <bar1.gpu1.bar1_4drive_gbps>
+  p2p_cold_6drive_gbps: <bar1.gpuX.bar1_6drive_gbps>   # note which GPU
+  p2p_cold_bar1_saturated: <true if adding drives past N yields <5% gain>
+
+  # --- NVMe raw (no GPU overhead, reference) ---
+  nvme_raw_1drive_gbps: <nvme.raw_read_gbps.1_drive>
   nvme_raw_4drive_gbps: <nvme.raw_read_gbps.4_drive>
+  nvme_raw_6drive_gbps: <nvme.raw_read_gbps.6_drive>
+
+  # --- D2D (GPU internal; not a bottleneck for either dispatcher) ---
+  gpu_d2d_sustained_gbps: <gpus.gpuX.d2d_1stream_gbps at 8 MiB>
+
+  # --- Host RAM ---
+  host_ram_same_numa_gbps: <host_ram.same_numa_gbps>
+  host_ram_cross_numa_gbps: <host_ram.cross_numa_gbps>
 ```
 
-The `ceilings` section provides the ready-to-use values for:
-- **Rule-based investigator**: compare `certus_measured / ceiling` to diagnose bottleneck
-- **Evaluation function**: `efficiency = certus_throughput / relevant_ceiling`
+The `ceilings` section is consumed by:
+- **Rule-based investigator**: `efficiency = certus_measured / ceiling[relevant_path]`
+- **Evaluation function**: pick the ceiling matching the active dispatch mode and drive count
 
-Only populate `ceilings` entries where the corresponding measurements succeeded.
-Use the same-root GPU/drive pairing for P2P ceilings (topology-correct).
+Only populate entries where measurements succeeded. Use topology-correct GPU/drive pairings
+(same-NUMA where available). Omit rather than estimate for skipped paths.
 
 ## Notes for Portability
 
