@@ -128,7 +128,7 @@ fn initialize_component_stack(
     format: bool,
     poller_base_cpu: Option<usize>,
     max_eviction_attempts: usize,
-) -> Result<(Arc<dyn IDispatcher + Send + Sync>, Arc<dyn ILogger + Send + Sync>, Vec<String>), String> {
+) -> Result<(Arc<dyn IDispatcher + Send + Sync>, Arc<dyn ILogger + Send + Sync>, Vec<String>, Arc<dispatcher::DispatcherComponent>), String> {
     let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponent::new_default();
 
     logger.info("certus-server: initializing SPDK environment...");
@@ -269,7 +269,7 @@ fn initialize_component_stack(
         .map_err(|e| format!("Dispatcher init failed: {e}"))?;
 
     logger.info("certus-server: component stack initialized");
-    Ok((dispatcher, logger, device_pci_addrs))
+    Ok((dispatcher, logger, device_pci_addrs, disp_comp))
 }
 
 fn resolve_device_addresses(cli: &Cli) -> Result<Vec<String>, String> {
@@ -295,7 +295,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     const DEFAULT_MEMORY_TIER_SIZE: usize = 2 * 1024 * 1024 * 1024; // 2 GiB
     let pool_size = cli.memory_tier_size.unwrap_or(DEFAULT_MEMORY_TIER_SIZE);
-    let (dispatcher, logger, device_pci) = initialize_component_stack(
+    let (dispatcher, logger, device_pci, disp_comp) = initialize_component_stack(
         &device_pci, cli.drive_count, pool_size, cli.format, cli.poller_base_cpu,
         cli.max_eviction_attempts,
     )?;
@@ -317,6 +317,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(ref endpoint) = cli.otel_endpoint {
             let metrics = telemetry::Metrics::init(endpoint, &cli.otel_service_name)?;
             logger.info(&format!("certus-server: OTel metrics exporting to {endpoint}"));
+            disp_comp.set_pipeline_metrics(Arc::new(metrics.pipeline.clone()));
             svc.with_metrics(metrics)
         } else {
             svc
@@ -330,6 +331,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "certus-server: --otel-endpoint specified but binary not compiled with --features otel"
             );
         }
+        let _ = &disp_comp;
         DispatcherService::new(Arc::clone(&dispatcher))
     };
 
