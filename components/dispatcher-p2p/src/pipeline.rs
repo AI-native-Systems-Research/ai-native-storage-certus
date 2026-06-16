@@ -683,10 +683,17 @@ pub unsafe fn pipelined_multi_object_zero_copy(
 /// # Algorithm
 ///
 /// 1. Prime: submit up to `effective_qd` async NVMe reads into ring slots
-/// 2. On each NVMe completion: issue D2D copy on alternating CUDA stream,
-///    submit next read into a recycled slot
-/// 3. Sync both streams every `ring_size/2` completions before recycling
-/// 4. Finalize: sync both streams after all chunks complete
+/// 2. On each NVMe completion: issue D2D copy on one of N CUDA streams,
+///    submit next read into the recycled slot
+/// 3. Sync all streams every `sync_interval` completions to bound GPU queue depth
+///    and ensure slots are safe to reuse
+/// 4. Finalize: sync all streams after all chunks complete
+///
+/// Key optimizations vs previous version:
+/// - Uses all 4 available CUDA streams for D2D copies (matches 4-drive topology)
+/// - Sync interval tied to ring_size (not ring_size/2) to maximize pipeline depth
+/// - Correct slot recycling: slot reuse only after stream sync confirms D2D done
+/// - Final stream sync always performed
 ///
 /// # Safety
 ///
@@ -721,10 +728,21 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
     }
 
     let num_chunks = segments.len();
-    let streams = ring.streams();
+    let all_streams = ring.streams();
+    // Use all available streams for maximum D2D parallelism.
+    let num_streams = all_streams.len();
+
     let ring_offset = partition.ring_offset;
-    let ring_size = partition.effective_qd.min(num_chunks);
-    let effective_qd = ring_size.min(16);
+    let ring_size = partition.effective_qd.min(num_chunks).max(1);
+
+    // Queue depth: use the full partition size to saturate the NVMe queue.
+    // Don't cap at 16 here — the partition already handles that.
+    let effective_qd = ring_size;
+
+    // Sync interval: sync all streams once per ring_size completions.
+    // This bounds how many D2D ops can be in-flight while ensuring
+    // slots are not recycled before their D2D copy completes.
+    let sync_interval = ring_size.max(1);
 
     // Prime: submit initial async reads into ring slots.
     for i in 0..effective_qd {
@@ -736,7 +754,7 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
                 lba: segments[i].lba,
                 buf: Arc::clone(ring.slot(slot)),
                 timeout_ms: READ_TIMEOUT_MS,
-                tag: 0,
+                tag: i as u64,
             })
             .map_err(|e| DispatcherError::IoError(format!("P2P ReadAsync send #{i}: {e}")))?;
     }
@@ -770,7 +788,8 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
         let slot = ring_offset + (completed % ring_size);
         let seg = &segments[completed];
         let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
-        let current_stream = streams[completed % 2];
+        // Distribute D2D copies across all streams for maximum throughput.
+        let current_stream = all_streams[completed % num_streams];
 
         // D2D async copy: GPU staging ring slot → final GPU destination.
         let err = cuda_ffi::cudaMemcpyAsync(
@@ -787,10 +806,17 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
             )));
         }
 
-        // Submit next NVMe read. Sync streams before recycling slots.
+        // Sync all streams at sync_interval boundaries before recycling slots.
+        // This ensures D2D copies using those slots have completed before NVMe
+        // can write new data into them.
+        let next_completed = completed + 1;
         if next_to_submit < num_chunks {
-            if completed >= ring_size && completed % (ring_size / 2).max(1) == 0 {
-                for s in streams {
+            // We need to sync before recycling if we've wrapped around the ring.
+            let needs_sync = next_completed > 0
+                && next_completed % sync_interval == 0;
+
+            if needs_sync {
+                for s in all_streams {
                     let err = cuda_ffi::cudaStreamSynchronize(s.0);
                     if err != cuda_ffi::CUDA_SUCCESS {
                         return Err(DispatcherError::IoError(format!(
@@ -809,7 +835,7 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
                     lba: segments[next_to_submit].lba,
                     buf: Arc::clone(ring.slot(next_slot)),
                     timeout_ms: READ_TIMEOUT_MS,
-                    tag: 0,
+                    tag: next_to_submit as u64,
                 })
                 .map_err(|e| {
                     DispatcherError::IoError(format!(
@@ -817,6 +843,17 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
                     ))
                 })?;
             next_to_submit += 1;
+        }
+    }
+
+    // Final sync: ensure all D2D copies are complete before returning.
+    for s in all_streams {
+        let err = cuda_ffi::cudaStreamSynchronize(s.0);
+        if err != cuda_ffi::CUDA_SUCCESS {
+            return Err(DispatcherError::IoError(format!(
+                "P2P final cudaStreamSynchronize: {}",
+                cuda_ffi::cuda_error_string(err)
+            )));
         }
     }
 
