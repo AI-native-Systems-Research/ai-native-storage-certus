@@ -1,0 +1,27 @@
+MODEL = starvation_freedom.pml
+PAN   = pan
+CC    = cc
+CFLAGS = -O2
+DEPTH = 200000
+
+.PHONY: all safety liveness clean
+
+all: safety
+
+safety: $(PAN)
+	./$(PAN) -m$(DEPTH)
+
+liveness: $(PAN)-live
+	./$(PAN)-live -l -m$(DEPTH)
+
+$(PAN): pan.c
+	$(CC) $(CFLAGS) -DSAFETY -o $@ $<
+
+$(PAN)-live: pan.c
+	$(CC) $(CFLAGS) -DNP -o $@ $<
+
+pan.c: $(MODEL)
+	spin -a $<
+
+clean:
+	rm -f $(PAN) $(PAN)-live pan.* *.trail
