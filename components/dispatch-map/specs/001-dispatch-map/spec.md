@@ -193,6 +193,7 @@ The dispatcher's eviction logic needs to determine whether a specific memory-tie
 - **FR-020**: The `initialize()` method MUST be an explicit public API call (not implicitly called during construction). It rebuilds the map from extent manager state via `IExtentManager::for_each_extent` when an extent manager is bound. When no `IExtentManager` is bound, it returns `Ok(())` with an empty map.
 - **FR-021**: When `convert_to_storage` is called on a `MemoryTier` entry, it MUST set the `ssd_offset` field rather than transitioning to `BlockDevice` location.
 - **FR-022**: System MUST provide `is_evictable(key)` that returns `true` if and only if: the key exists in the map, the entry is in `MemoryTier` state with `ssd_offset: Some(_)` (write-through complete), and both `read_ref == 0` and `write_ref == 0` (no active references). Returns `false` for non-existent keys, non-MemoryTier entries, MemoryTier entries without `ssd_offset`, or entries with any active references.
+- **FR-023**: System MUST provide `entry_size(key)` that returns the stored size of an entry in bytes (`size_blocks * 4096`) without acquiring any reference. MUST return `KeyNotFound` if the key does not exist. Used by the dispatcher's `promote_to_memory_tier` to determine memory-tier allocation size for SSD-resident entries.
 
 ### Key Entities
 

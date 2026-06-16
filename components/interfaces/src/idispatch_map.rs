@@ -134,6 +134,11 @@ component_macros::define_interface! {
         /// Update the timestamp for `key` without taking any reference.
         fn touch(&self, key: CacheKey) -> Result<(), DispatchMapError>;
 
+        /// Return the stored size of an entry in bytes.
+        ///
+        /// Does not acquire any reference. Returns `KeyNotFound` if absent.
+        fn entry_size(&self, key: CacheKey) -> Result<u32, DispatchMapError>;
+
         /// Return up to `n` keys with the oldest timestamps (lowest TSC values).
         fn oldest_keys(&self, n: usize) -> Vec<CacheKey>;
 

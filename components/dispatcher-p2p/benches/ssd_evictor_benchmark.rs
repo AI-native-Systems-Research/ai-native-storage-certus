@@ -96,6 +96,10 @@ impl IDispatchMap for EvictorBenchMap {
         Ok(())
     }
 
+    fn entry_size(&self, _key: CacheKey) -> Result<u32, DispatchMapError> {
+        Ok(4096)
+    }
+
     fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
         let inner = self.inner.lock().unwrap();
         inner.keys().copied().take(n).collect()
