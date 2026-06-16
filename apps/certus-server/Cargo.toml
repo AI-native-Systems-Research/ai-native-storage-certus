@@ -5,6 +5,14 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+default = []
+otel = [
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+]
+
 [dependencies]
 interfaces = { workspace = true, features = ["spdk"] }
 component-framework.workspace = true
@@ -22,6 +30,11 @@ tonic = { version = "0.12", features = ["tls"] }
 prost = "0.13"
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
+
+# OpenTelemetry (optional, enabled via --features otel)
+opentelemetry = { version = "0.27", optional = true }
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio", "metrics"], optional = true }
+opentelemetry-otlp = { version = "0.27", features = ["metrics", "grpc-tonic"], optional = true }
 
 [build-dependencies]
 tonic-build = "0.12"

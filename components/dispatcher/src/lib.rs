@@ -7,12 +7,12 @@
 //!
 //! ```text
 //! ┌──────────┐     gRPC      ┌────────────┐
-//! │ Client   │──────────────▶│ Dispatcher  │
+//! │ Client   │──────────────▶│ Dispatcher │
 //! │ (GPU app)│◀──────────────│            │
 //! └──────────┘               └─────┬──────┘
 //!                                  │
-//!                 ┌────────────────┼────────────────┐
-//!                 │                │                │
+//!                 ┌────────────────┼──────────────┐
+//!                 │                │              │
 //!          ┌──────▼──────┐  ┌─────▼─────┐  ┌──────▼──────┐
 //!          │ DispatchMap │  │ MemoryTier│  │ BlockDevice │
 //!          │ (key→loc)   │  │ (DRAM LRU)│  │ (NVMe SSD)  │
@@ -61,6 +61,7 @@
 
 mod background;
 pub mod io_segmenter;
+pub mod metrics;
 pub mod pipeline;
 
 use parking_lot::RwLock;
@@ -80,6 +81,7 @@ use interfaces::{
 use component_core::binding::bind;
 use spdk_env::ISPDKEnv;
 
+pub use crate::metrics::PipelineMetrics;
 use crate::background::{BackgroundEvictor, EvictorConfig, ParallelBackgroundWriter, WriteJob};
 
 /// A pending store awaiting commit or cancel.
@@ -165,6 +167,7 @@ define_component! {
             block_device_factory: Mutex<Option<BlockDeviceFactory>>,
             extent_manager_factory: Mutex<Option<ExtentManagerFactory>>,
             max_eviction_attempts: AtomicUsize,
+            pipeline_metrics: RwLock<Option<Arc<dyn PipelineMetrics>>>,
         },
     }
 }
@@ -201,6 +204,12 @@ impl DispatcherComponent {
     /// When set, the dispatcher uses this instead of the hard-coded default.
     pub fn set_extent_manager_factory(&self, factory: ExtentManagerFactory) {
         *self.extent_manager_factory.lock().unwrap() = Some(factory);
+    }
+
+    /// Attach a pipeline metrics reporter for observability.
+    /// When set, internal data-path stages report timing through this trait.
+    pub fn set_pipeline_metrics(&self, m: Arc<dyn PipelineMetrics>) {
+        *self.pipeline_metrics.write() = Some(m);
     }
 
     fn drive_index(key: CacheKey, num_drives: usize) -> usize {
@@ -1260,6 +1269,7 @@ impl IDispatcher for DispatcherComponent {
                     }
                     LookupResult::MemoryTier { pointer, size } => {
                         let copy_size = (ipc_handle.size as usize).min(size as usize);
+                        let t_hot = std::time::Instant::now();
                         let raw = self.warm_stream.load(Ordering::Acquire);
                         let res = if raw != 0 {
                             let s = GpuStream(raw as *mut std::ffi::c_void);
@@ -1313,6 +1323,9 @@ impl IDispatcher for DispatcherComponent {
                                 Err(e) => Err(e),
                             }
                         };
+                        if let Some(ref m) = *self.pipeline_metrics.read() {
+                            m.record_hot_gpu_dma(t_hot.elapsed().as_micros() as f64);
+                        }
                         let _ = dm.release_read(key);
                         mt.touch(key);
                         results[i] = Some(res);
@@ -1459,8 +1472,9 @@ impl IDispatcher for DispatcherComponent {
                                 };
 
                                 // Prepare all cold entries for multi-object pipeline.
-                                #[cfg(feature = "pipeline-telemetry")]
                                 let t_prep_start = std::time::Instant::now();
+                                #[cfg(feature = "pipeline-telemetry")]
+                                let _ = t_prep_start;
                                 let mut jobs: Vec<pipeline::ColdReadJob> =
                                     Vec::with_capacity(indices.len());
                                 let mut job_ci: Vec<usize> = Vec::with_capacity(indices.len());
@@ -1496,13 +1510,13 @@ impl IDispatcher for DispatcherComponent {
                                         }
                                     }
                                 }
-                                #[cfg(feature = "pipeline-telemetry")]
                                 let t_prep_done = t_prep_start.elapsed();
 
                                 // Run all prepared jobs through the multi-object pipeline.
                                 if !jobs.is_empty() {
-                                    #[cfg(feature = "pipeline-telemetry")]
                                     let t_pipeline_start = std::time::Instant::now();
+                                    let pm = self.pipeline_metrics.read();
+                                    let pm_ref = pm.as_deref();
                                     let pipeline_results = unsafe {
                                         pipeline::pipelined_multi_object_zero_copy(
                                             &*drive.block_dev_iface,
@@ -1512,12 +1526,11 @@ impl IDispatcher for DispatcherComponent {
                                             &jobs,
                                             chunk_size,
                                             queue_depth,
+                                            pm_ref,
                                         )
                                     };
-                                    #[cfg(feature = "pipeline-telemetry")]
                                     let t_pipeline_done = t_pipeline_start.elapsed();
 
-                                    #[cfg(feature = "pipeline-telemetry")]
                                     let t_finalize_start = std::time::Instant::now();
                                     // Finalize each job's dispatch-map state.
                                     for (job_idx, result) in pipeline_results.into_iter().enumerate()
@@ -1551,18 +1564,21 @@ impl IDispatcher for DispatcherComponent {
                                         };
                                         batch_results.push((ci, res));
                                     }
+                                    let t_finalize_done = t_finalize_start.elapsed();
                                     #[cfg(feature = "pipeline-telemetry")]
-                                    {
-                                        let t_finalize_done = t_finalize_start.elapsed();
-                                        eprintln!(
-                                            "[cold-perf] drive={} jobs={} segs={} prep={:.1}ms pipeline={:.1}ms finalize={:.1}ms",
-                                            drive_idx,
-                                            jobs.len(),
-                                            jobs.len() * 32,
-                                            t_prep_done.as_secs_f64() * 1000.0,
-                                            t_pipeline_done.as_secs_f64() * 1000.0,
-                                            t_finalize_done.as_secs_f64() * 1000.0,
-                                        );
+                                    eprintln!(
+                                        "[cold-perf] drive={} jobs={} segs={} prep={:.1}ms pipeline={:.1}ms finalize={:.1}ms",
+                                        drive_idx,
+                                        jobs.len(),
+                                        jobs.len() * 32,
+                                        t_prep_done.as_secs_f64() * 1000.0,
+                                        t_pipeline_done.as_secs_f64() * 1000.0,
+                                        t_finalize_done.as_secs_f64() * 1000.0,
+                                    );
+                                    if let Some(ref m) = *self.pipeline_metrics.read() {
+                                        m.record_cold_prep(t_prep_done.as_micros() as f64);
+                                        m.record_cold_total(drive_idx, t_pipeline_done.as_micros() as f64);
+                                        m.record_cold_finalize(t_finalize_done.as_micros() as f64);
                                     }
                                 }
 
@@ -1775,6 +1791,7 @@ impl IDispatcher for DispatcherComponent {
     /// write-through to SSD.
     fn populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
+        let t_total = std::time::Instant::now();
 
         if ipc_handle.size == 0 {
             return Err(DispatcherError::InvalidParameter(
@@ -1793,6 +1810,7 @@ impl IDispatcher for DispatcherComponent {
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
         // Evict from memory-tier if needed to make space.
+        let t_alloc = std::time::Instant::now();
         let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
         Self::evict_for_space(&dm, &mt, ipc_handle.size, key, max_attempts)?;
 
@@ -1804,6 +1822,7 @@ impl IDispatcher for DispatcherComponent {
             }
             other => DispatcherError::AllocationFailed(other.to_string()),
         })?;
+        let alloc_us = t_alloc.elapsed().as_micros() as f64;
 
         // Create a temporary DmaBuffer wrapping the memory-tier slot for GPU DMA.
         let aligned_size = (ipc_handle.size as usize).next_multiple_of(4096);
@@ -1827,6 +1846,7 @@ impl IDispatcher for DispatcherComponent {
             .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
 
         // DMA copy from GPU to memory-tier slot.
+        let t_d2h = std::time::Instant::now();
         gpu.dma_copy_to_host(
             ipc_handle.address as *const std::ffi::c_void,
             &temp_buf,
@@ -1836,6 +1856,7 @@ impl IDispatcher for DispatcherComponent {
             let _ = mt.remove(key);
             DispatcherError::IoError(format!("GPU DMA copy failed: {e}"))
         })?;
+        let d2h_us = t_d2h.elapsed().as_micros() as f64;
 
         // Don't let the noop-free wrapper be dropped (it would call noop_free, which is fine,
         // but let's be explicit).
@@ -1870,6 +1891,12 @@ impl IDispatcher for DispatcherComponent {
                 size: ipc_handle.size,
                 device_index: Self::drive_index(key, num_drives),
             });
+        }
+
+        if let Some(ref m) = *self.pipeline_metrics.read() {
+            m.record_populate_alloc(alloc_us);
+            m.record_populate_gpu_d2h(d2h_us);
+            m.record_populate_total(t_total.elapsed().as_micros() as f64);
         }
 
         Ok(())
@@ -2871,6 +2898,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -2913,6 +2941,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
     }
 
@@ -2929,6 +2958,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher);
         assert!(d.is_some());
@@ -2947,6 +2977,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -2970,6 +3001,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -2994,6 +3026,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -3018,6 +3051,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.check(42);
@@ -3037,6 +3071,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.remove(42);
@@ -3056,6 +3091,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -3080,6 +3116,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         // Even though not initialized, zero-size check comes after init check.
@@ -3107,6 +3144,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -3125,6 +3163,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -3144,6 +3183,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         ));
 
         let handles: Vec<_> = (0..4)
@@ -3194,6 +3234,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.memory_tier.connect(mt).unwrap();
@@ -3223,6 +3264,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -3296,6 +3338,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -3623,6 +3666,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             AtomicUsize::new(2048),
+            RwLock::new(None),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
