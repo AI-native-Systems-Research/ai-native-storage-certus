@@ -1,6 +1,6 @@
 # Drift Report: dispatcher-p2p (001-gpudirect-cold-path)
 
-**Generated**: 2026-06-15  
+**Generated**: 2026-06-16  
 **Spec**: `components/dispatcher-p2p/specs/001-gpudirect-cold-path/spec.md`  
 **Implementation**: `components/dispatcher-p2p/src/` (lib.rs, pipeline.rs, p2p_ring.rs)
 
@@ -10,6 +10,7 @@
 |--------|-------|
 | Aligned | 11 |
 | Drifted (minor) | 1 |
+| Drifted (unspecced) | 1 |
 | Resolved prior session | 4 |
 
 ## Current Drift
@@ -23,6 +24,18 @@
 **Impact**: Hot-only workloads proceed without P2P hardware; cold lookup triggers panic. Current behavior is arguably more flexible for testing.
 
 **Recommendation**: Accept current behavior and update FR-006 to: "System MUST panic on first cold lookup if the P2P ring was not initialized. Initialization logs a warning but does not fail, allowing hot-only testing without P2P hardware."
+
+### DRIFT-B: New `promote_to_memory_tier` method unspecced (Severity: Moderate)
+
+**Spec says** (FR-008): "System MUST implement the same interface as the standard dispatcher, serving as a drop-in replacement."
+
+**Code does**: Implements `promote_to_memory_tier(keys)` matching the standard dispatcher (same algorithm: classify by state, read cold entries from SSD into memory-tier via `pipelined_ssd_to_dram_only`, update dispatch-map). Also adds `pipelined_ssd_to_dram_only` and `pipelined_multi_ssd_to_dram_only` to the p2p pipeline module.
+
+**Impact**: FR-008 implicitly requires this (drop-in replacement), but the feature should be explicitly noted since it adds new pipeline functions to the P2P codebase.
+
+**Recommendation**: Since FR-008 already mandates interface parity, no spec change strictly required. Optionally add a note that the DRAM-only promote path does NOT use P2P (it writes to DRAM, not GPU staging).
+
+---
 
 ## Changes Applied (2026-06-12)
 

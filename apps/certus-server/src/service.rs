@@ -470,17 +470,30 @@ impl Dispatcher for DispatcherService {
         let _t0 = std::time::Instant::now();
 
         let dispatcher = Arc::clone(&self.dispatcher);
-        let results = tokio::task::spawn_blocking(move || {
-            req.keys
-                .iter()
-                .map(|&key| match dispatcher.touch(key) {
-                    Ok(()) => success_result(key),
-                    Err(e) => error_result(key, &e),
-                })
-                .collect::<Vec<_>>()
+        let promote = req.promote;
+        let keys = req.keys;
+
+        let results = tokio::task::spawn_blocking({
+            let dispatcher = Arc::clone(&dispatcher);
+            let keys = keys.clone();
+            move || {
+                keys.iter()
+                    .map(|&key| match dispatcher.touch(key) {
+                        Ok(()) => success_result(key),
+                        Err(e) => error_result(key, &e),
+                    })
+                    .collect::<Vec<_>>()
+            }
         })
         .await
         .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+
+        if promote {
+            tokio::task::spawn_blocking(move || {
+                dispatcher.promote_to_memory_tier(&keys);
+            });
+        }
 
         #[cfg(feature = "otel")]
         if let Some(ref m) = self.metrics {

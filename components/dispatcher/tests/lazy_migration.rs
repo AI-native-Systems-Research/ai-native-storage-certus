@@ -196,6 +196,15 @@ impl IDispatchMap for MockDispatchMap {
         }
     }
 
+    fn entry_size(&self, key: CacheKey) -> Result<u32, DispatchMapError> {
+        let inner = self.inner.lock().unwrap();
+        if inner.entries.contains_key(&key) {
+            Ok(4096)
+        } else {
+            Err(DispatchMapError::KeyNotFound(key))
+        }
+    }
+
     fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
         let inner = self.inner.lock().unwrap();
         inner.entries.keys().copied().take(n).collect()

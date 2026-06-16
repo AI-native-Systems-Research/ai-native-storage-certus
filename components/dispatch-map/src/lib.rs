@@ -363,6 +363,15 @@ impl IDispatchMap for DispatchMapComponent {
         Ok(())
     }
 
+    fn entry_size(&self, key: CacheKey) -> Result<u32, DispatchMapError> {
+        let inner = self.state.inner.lock().unwrap();
+        let entry = inner
+            .entries
+            .get(&key)
+            .ok_or(DispatchMapError::KeyNotFound(key))?;
+        Ok(entry.size_blocks * 4096)
+    }
+
     fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
         let inner = self.state.inner.lock().unwrap();
         let mut entries: Vec<(CacheKey, u64)> = inner
