@@ -118,9 +118,39 @@ Evicts the LRU entry from the same shard as `key`, ensuring the freed space is a
 
 ---
 
+### DRIFT-G: New `promote_to_memory_tier` method unspecced (Severity: Moderate)
+
+**Spec refs**: None (new feature)  
+**Severity**: Moderate — new interface method and pipeline functions not covered by spec
+
+**Spec says**: FR-001 lists the IDispatcher interface methods; `promote_to_memory_tier` is not included.
+
+**Code does** (`lib.rs:2050`, `idispatcher.rs`):
+- New `fn promote_to_memory_tier(&self, keys: &[CacheKey])` on IDispatcher
+- Best-effort, fire-and-forget: promotes SSD-resident (BlockDevice) entries to memory-tier without GPU DMA
+- For each key: queries dispatch-map state, reads from SSD into a new memory-tier slot using `pipelined_ssd_to_dram_only`, updates dispatch-map
+- Keys in MemoryTier/Staging get a timestamp refresh; missing keys are skipped
+- Errors logged via ILogger but not propagated
+
+**New pipeline functions** (`pipeline.rs`):
+- `pipelined_ssd_to_dram_only`: single-object NVMe read pipeline without GPU DMA
+- `pipelined_multi_ssd_to_dram_only` + `DramPromoteJob`: multi-object batch variant
+
+**gRPC integration** (`service.rs`):
+- `BatchTouchRequest` proto gains `bool promote = 2` field
+- When promote=true, handler touches keys synchronously, then spawns detached `tokio::task::spawn_blocking` calling `promote_to_memory_tier`
+
+**Required spec update**:
+- FR-001: Add `promote_to_memory_tier` to the IDispatcher method list
+- Add new FR-040: "System MUST provide `promote_to_memory_tier(keys)` that asynchronously promotes SSD-resident entries to the memory-tier without GPU DMA. For each key in BlockDevice state, reads data from SSD into a new memory-tier slot and updates the dispatch-map. Keys in other states get a timestamp refresh. This is a best-effort operation; errors are logged but not propagated."
+- Add new FR-041: "The pipeline module MUST provide `pipelined_ssd_to_dram_only` and `pipelined_multi_ssd_to_dram_only` functions that perform pipelined NVMe reads into memory-tier slots without GPU DMA. Same NVMe queue depth saturation as FR-019 but no CUDA streams or GPU copies."
+- Add User Story covering the promote-touch use case
+
+---
+
 ## Previously Resolved Drift
 
-All items from the 2026-05-29 and 2026-06-12 runs (DRIFT-A through DRIFT-B in the prior report) remain as documented above — spec updates are pending.
+All items from the 2026-05-29 and 2026-06-12 runs (DRIFT-A through DRIFT-F in the prior report) remain as documented above — spec updates are pending.
 
 ---
 
@@ -128,7 +158,7 @@ All items from the 2026-05-29 and 2026-06-12 runs (DRIFT-A through DRIFT-B in th
 
 All of the following are aligned between spec and code:
 
-- FR-001 through FR-018 (core interface and operations)
+- FR-001 through FR-018 (core interface and operations, except promote_to_memory_tier addition)
 - FR-020 through FR-023 (prepare/commit/cancel/touch)
 - FR-025 (format_on_init recovery)
 - FR-028 through FR-036, FR-038 (promote, evictor, CUDA registration, clear)
