@@ -1966,6 +1966,151 @@ impl IDispatcher for DispatcherP2pComponent {
         dm.touch(key).map_err(|_| DispatcherError::KeyNotFound(key))
     }
 
+    fn promote_to_memory_tier(&self, keys: &[CacheKey]) {
+        let Ok(()) = self.ensure_initialized() else {
+            return;
+        };
+
+        let Ok(dm) = self.dispatch_map.get() else {
+            return;
+        };
+        let Ok(mt) = self.memory_tier.get() else {
+            return;
+        };
+        let logger = self.logger.get().ok();
+
+        struct ColdEntry {
+            key: CacheKey,
+            offset: u64,
+            size: u32,
+        }
+
+        let mut cold_entries: Vec<ColdEntry> = Vec::new();
+
+        for &key in keys {
+            match dm.lookup(key) {
+                Ok(LookupResult::BlockDevice { offset }) => {
+                    let _ = dm.release_read(key);
+                    match dm.entry_size(key) {
+                        Ok(size) => cold_entries.push(ColdEntry { key, offset, size }),
+                        Err(_) => {}
+                    }
+                }
+                Ok(LookupResult::MemoryTier { .. }) => {
+                    let _ = dm.release_read(key);
+                    let _ = dm.touch(key);
+                    mt.touch(key);
+                }
+                Ok(LookupResult::Staging { .. }) => {
+                    let _ = dm.release_read(key);
+                    let _ = dm.touch(key);
+                }
+                _ => {}
+            }
+        }
+
+        if cold_entries.is_empty() {
+            return;
+        }
+
+        let drives = self.data_drives.read();
+        let num_drives = drives.len();
+
+        if num_drives == 0 {
+            for entry in &cold_entries {
+                if Self::evict_for_space(&dm, &mt, entry.size, entry.key).is_err() {
+                    continue;
+                }
+                match mt.insert(entry.key, entry.size) {
+                    Ok(mem_ptr) => {
+                        let _ = dm.remove(entry.key);
+                        let _ = dm.create_memory_tier_entry(entry.key, mem_ptr, entry.size);
+                        let _ = dm.convert_to_storage(entry.key, entry.offset);
+                        let _ = dm.release_write(entry.key);
+                    }
+                    Err(_) => {}
+                }
+            }
+            return;
+        }
+
+        let chunk_size = {
+            let ring_guard = self.pipeline_ring.read();
+            ring_guard.as_ref().map_or(131072, |r| r.chunk_size)
+        };
+
+        let mut per_drive: Vec<Vec<usize>> = vec![Vec::new(); num_drives];
+        for (i, entry) in cold_entries.iter().enumerate() {
+            let drive_idx = Self::drive_index(entry.key, num_drives);
+            per_drive[drive_idx].push(i);
+        }
+
+        std::thread::scope(|s| {
+            for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
+                if entry_indices.is_empty() {
+                    continue;
+                }
+
+                let drive = &drives[drive_idx];
+                let channels = match &drive.cached_channels {
+                    Some(ch) => ch,
+                    None => continue,
+                };
+                let block_dev = Arc::clone(&drive.block_dev_iface);
+                let dm = &dm;
+                let mt = &mt;
+                let cold = &cold_entries;
+                let logger = &logger;
+
+                s.spawn(move || {
+                    for &ci in entry_indices {
+                        let entry = &cold[ci];
+                        let block_size = block_dev.block_size() as u64;
+                        let start_lba = entry.offset / block_size;
+
+                        if Self::evict_for_space(dm, mt, entry.size, entry.key).is_err() {
+                            continue;
+                        }
+
+                        let mem_ptr = match mt.insert(entry.key, entry.size) {
+                            Ok(ptr) => ptr,
+                            Err(_) => continue,
+                        };
+
+                        // SAFETY: mem_ptr is a valid SPDK-registered memory-tier slot.
+                        let result = unsafe {
+                            pipeline::pipelined_ssd_to_dram_only(
+                                &*block_dev,
+                                channels,
+                                mem_ptr,
+                                start_lba,
+                                entry.size as usize,
+                                chunk_size,
+                                16,
+                            )
+                        };
+
+                        if let Err(e) = result {
+                            let _ = mt.remove(entry.key);
+                            if let Some(ref log) = logger {
+                                log.debug(&format!(
+                                    "promote_to_memory_tier: SSD read failed for key {}: {e}",
+                                    entry.key
+                                ));
+                            }
+                            continue;
+                        }
+
+                        let _ = dm.remove(entry.key);
+                        let _ = dm.create_memory_tier_entry(entry.key, mem_ptr, entry.size);
+                        let _ = dm.convert_to_storage(entry.key, entry.offset);
+                        let _ = dm.release_write(entry.key);
+                    }
+                });
+            }
+        });
+    }
+
     fn clear_memory_tier(&self) -> Result<usize, DispatcherError> {
         self.ensure_initialized()?;
 
@@ -2398,6 +2543,15 @@ mod tests {
             let inner = self.inner.lock().unwrap();
             if inner.entries.contains_key(&key) {
                 Ok(())
+            } else {
+                Err(DispatchMapError::KeyNotFound(key))
+            }
+        }
+
+        fn entry_size(&self, key: CacheKey) -> Result<u32, DispatchMapError> {
+            let inner = self.inner.lock().unwrap();
+            if inner.entries.contains_key(&key) {
+                Ok(4096)
             } else {
                 Err(DispatchMapError::KeyNotFound(key))
             }

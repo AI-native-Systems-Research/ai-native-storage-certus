@@ -1,6 +1,6 @@
 # Spec Drift Report
 
-Generated: 2026-05-21
+Generated: 2026-06-16
 Project: dispatch-map v0
 
 ## Summary
@@ -67,7 +67,9 @@ Project: dispatch-map v0
 
 | Feature | Location | Lines | Suggested Spec |
 |---------|----------|-------|----------------|
-| `entry_size()` public helper function for benchmarks | src/lib.rs | ~4 | Not needed in spec (test/bench utility) |
+| `entry_size(key)` | src/lib.rs:366 | 7 | 001-dispatch-map (FR-023) |
+
+**`entry_size(key)`**: Returns the stored entry size in bytes (`size_blocks * 4096`) without acquiring any reference. Returns `KeyNotFound` if absent. Used by `promote_to_memory_tier` in the dispatcher to determine memory-tier allocation size for SSD-resident entries without requiring an IPC handle.
 
 ## Recommendations
 
@@ -76,3 +78,5 @@ Project: dispatch-map v0
 2. **FR-018 pointer/size types**: Update the spec to match the implementation's more idiomatic types (`*mut u8` instead of `u64`, `u32` instead of `usize`), or update implementation to match the spec. The `*mut u8` approach is safer in Rust (no pointer-to-integer roundtrip needed). Recommend updating the spec.
 
 3. **SC-004 entry size**: The spec's current language is permissive ("varies by variant"). No action needed unless a hard size constraint is desired.
+
+4. **New FR-023 needed**: Add spec coverage for `entry_size(key)` method — "System MUST provide `entry_size(key)` that returns the stored size of an entry in bytes (`size_blocks * 4096`) without acquiring any reference. MUST return `KeyNotFound` if the key does not exist."
