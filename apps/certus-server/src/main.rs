@@ -5,6 +5,8 @@
 //! CLI-provided PCI addresses.
 
 mod service;
+#[cfg(feature = "otel")]
+mod telemetry;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -65,6 +67,15 @@ struct Cli {
     /// Maximum eviction attempts before failing with pool-full error.
     #[arg(long = "max-eviction-attempts", default_value_t = 2048)]
     max_eviction_attempts: usize,
+
+    /// OpenTelemetry OTLP endpoint (e.g. "http://localhost:4317").
+    /// Enables metrics export when set. Requires --features otel.
+    #[arg(long = "otel-endpoint")]
+    otel_endpoint: Option<String>,
+
+    /// Service name reported in OpenTelemetry metrics.
+    #[arg(long = "otel-service-name", default_value = "certus-server")]
+    otel_service_name: String,
 }
 
 fn parse_size(s: &str) -> Result<usize, String> {
@@ -117,7 +128,7 @@ fn initialize_component_stack(
     format: bool,
     poller_base_cpu: Option<usize>,
     max_eviction_attempts: usize,
-) -> Result<(Arc<dyn IDispatcher + Send + Sync>, Arc<dyn ILogger + Send + Sync>, Vec<String>), String> {
+) -> Result<(Arc<dyn IDispatcher + Send + Sync>, Arc<dyn ILogger + Send + Sync>, Vec<String>, Arc<dispatcher::DispatcherComponent>), String> {
     let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponent::new_default();
 
     logger.info("certus-server: initializing SPDK environment...");
@@ -258,7 +269,7 @@ fn initialize_component_stack(
         .map_err(|e| format!("Dispatcher init failed: {e}"))?;
 
     logger.info("certus-server: component stack initialized");
-    Ok((dispatcher, logger, device_pci_addrs))
+    Ok((dispatcher, logger, device_pci_addrs, disp_comp))
 }
 
 fn resolve_device_addresses(cli: &Cli) -> Result<Vec<String>, String> {
@@ -284,7 +295,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     const DEFAULT_MEMORY_TIER_SIZE: usize = 2 * 1024 * 1024 * 1024; // 2 GiB
     let pool_size = cli.memory_tier_size.unwrap_or(DEFAULT_MEMORY_TIER_SIZE);
-    let (dispatcher, logger, device_pci) = initialize_component_stack(
+    let (dispatcher, logger, device_pci, disp_comp) = initialize_component_stack(
         &device_pci, cli.drive_count, pool_size, cli.format, cli.poller_base_cpu,
         cli.max_eviction_attempts,
     )?;
@@ -300,7 +311,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         logger.info("certus-server: recovering extents from disk (use --format for clean slate)");
     }
 
-    let svc = DispatcherService::new(Arc::clone(&dispatcher));
+    #[cfg(feature = "otel")]
+    let svc = {
+        let svc = DispatcherService::new(Arc::clone(&dispatcher));
+        if let Some(ref endpoint) = cli.otel_endpoint {
+            let metrics = telemetry::Metrics::init(endpoint, &cli.otel_service_name)?;
+            logger.info(&format!("certus-server: OTel metrics exporting to {endpoint}"));
+            disp_comp.set_pipeline_metrics(Arc::new(metrics.pipeline.clone()));
+            svc.with_metrics(metrics)
+        } else {
+            svc
+        }
+    };
+
+    #[cfg(not(feature = "otel"))]
+    let svc = {
+        if cli.otel_endpoint.is_some() {
+            logger.warn(
+                "certus-server: --otel-endpoint specified but binary not compiled with --features otel"
+            );
+        }
+        let _ = &disp_comp;
+        DispatcherService::new(Arc::clone(&dispatcher))
+    };
 
     let addr = cli.listen.parse()?;
 
