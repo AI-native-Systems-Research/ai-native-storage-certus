@@ -131,7 +131,7 @@ When the memory-tier pool does not have enough space for a new entry, the dispat
 
 ### User Story 8 - Touch (Refresh Eviction Priority) (Priority: P3)
 
-A client wants to indicate that a cache entry is still in use without performing any data transfer. The client calls `touch(key)` to refresh the entry's eviction timestamp via the dispatch map, preventing it from being selected as a victim.
+A client wants to indicate that a cache entry is still in use without performing any data transfer. The client calls `touch(key)` to refresh the entry's eviction timestamp in the dispatch map and its LRU position in the memory-tier (if resident), preventing it from being selected as a victim by either the SSD evictor or the memory-tier capacity evictor.
 
 **Why this priority**: Touch enables efficient LRU-style eviction policies without the overhead of a full lookup (which involves DMA).
 
@@ -139,7 +139,7 @@ A client wants to indicate that a cache entry is still in use without performing
 
 **Acceptance Scenarios**:
 
-1. **Given** a cache entry exists for the key, **When** `touch(key)` is called, **Then** the entry's timestamp is refreshed in the dispatch map and the call returns success. No DMA or memory-tier operations occur.
+1. **Given** a cache entry exists for the key, **When** `touch(key)` is called, **Then** the entry's timestamp is refreshed in the dispatch map and its memory-tier LRU position is updated (if resident in DRAM). No DMA operations occur.
 2. **Given** no cache entry exists for the key, **When** `touch(key)` is called, **Then** `KeyNotFound` error is returned.
 
 ---
@@ -258,7 +258,7 @@ A client application submits a batch of cache keys to `batch_lookup`. For entrie
 - **FR-020**: The `prepare_store(key, size)` method MUST run eviction if the cache is over capacity, reserve an extent on the target data drive, register the key in the dispatch map, and return a DMA buffer for the caller to write into. MUST return `AlreadyExists` if the key exists, `AllocationFailed` if extent reservation fails, `InvalidParameter` if size is 0.
 - **FR-021**: The `commit_store(key)` method MUST write the pending DMA buffer contents to SSD using MDTS-aware segmented I/O, publish the extent metadata, and transition the dispatch map entry to block-device state. MUST return `KeyNotFound` if no pending write exists.
 - **FR-022**: The `cancel_store(key)` method MUST drop the pending write (aborting the extent reservation via WriteHandle destructor) and remove the dispatch map entry. MUST return `KeyNotFound` if no pending write exists.
-- **FR-023**: The `touch(key)` method MUST update the entry's eviction timestamp in the dispatch map without performing any DMA transfer or acquiring any reference. MUST return `KeyNotFound` if the key does not exist.
+- **FR-023**: The `touch(key)` method MUST update the entry's eviction timestamp in the dispatch map AND refresh the memory-tier LRU position (if the entry is memory-tier resident) without performing any DMA transfer or acquiring any dispatch-map reference. MUST return `KeyNotFound` if the key does not exist.
 - **FR-024**: Eviction in v1 is purely capacity-based within the memory-tier pool. When the pool is full, `evict_for_space(dm, mt, needed, target_key, max_attempts)` uses a sparse-probe plus shard-targeted-LRU-primary algorithm optimized for concurrent access: the primary path on most iterations calls `IMemoryTier::evict_lru_for_key(target_key)` which evicts the LRU entry from the same shard as `target_key` (the memory-tier uses 16 shards, keyed by `key % 16`; shard-targeted eviction guarantees the freed space is allocatable by the subsequent `insert(target_key, ...)`); on every 8th iteration a small clean-eviction probe queries `IMemoryTier::oldest_keys(MAX_SCAN=4)` and checks each via `IDispatchMap::is_evictable(key)` (write-through complete, no active references), preferring a clean candidate when found. Clean evictions call `mt.remove(key)` + `convert_memory_tier_to_block`; shard-targeted LRU evictions call `evict_lru_for_key(target_key)` and remove the dispatch-map entry if BlockDevice transition fails (data loss accepted). The loop is bounded by `max_attempts` (configurable via `DispatcherConfig::max_eviction_attempts`, default 2048); if space cannot be freed within that limit, `AllocationFailed` is returned. Count-based TSC eviction (from v0) is NOT used in v1.
 - **FR-025**: The `DispatcherConfig` MUST support a `format_on_init` flag (default true). When false, extent managers are not reformatted on initialization, preserving on-disk data from previous sessions. Additionally, when `format_on_init=false`, after recovering all extent managers, the dispatcher MUST reconstruct the dispatch map by iterating each extent manager's allocated extents via `IExtentManager::for_each_extent` and calling `IDispatchMap::recover_extent(key, offset, size)` for each. This restores the full cache index from persisted SSD metadata. The number of recovered extents and elapsed time SHOULD be logged.
 - **FR-026**: ~~REMOVED~~ *(superseded 2026-05-21)* — Block device version selection is no longer required. The implementation hardcodes a single block device component; there is no version multiplexing.
@@ -304,7 +304,7 @@ A client application submits a batch of cache keys to `batch_lookup`. For entrie
 - **SC-007**: The dispatcher supports N independent data block devices and extent managers operating in parallel, with key-based drive selection.
 - **SC-008**: The prepare_store/commit_store workflow successfully persists data to SSD and makes it retrievable via lookup.
 - **SC-009**: Capacity-based eviction correctly removes LRU entries from the memory-tier when the pool is full, transitioning them to BlockDevice state.
-- **SC-010**: The touch operation refreshes an entry's dispatch-map timestamp without performing DMA.
+- **SC-010**: The touch operation refreshes an entry's dispatch-map timestamp and memory-tier LRU position without performing DMA.
 - **SC-011**: Entries evicted from memory-tier but present on SSD can be promoted back via the pipelined reader on subsequent lookup.
 - **SC-012**: The pipelined reader correctly transfers MDTS-sized chunks from SSD to both memory-tier and GPU using the sliding-window approach (overlapping NVMe reads with GPU H2D copies via FIFO queue pair), producing correct data under the FIFO NVMe completion ordering assumption.
 - **SC-013**: The background SSD evictor removes the oldest BlockDevice entries when SSD utilization exceeds the configured threshold, freeing extents until utilization drops below the low-water mark.
