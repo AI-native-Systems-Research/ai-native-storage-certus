@@ -465,6 +465,17 @@ component_macros::define_interface! {
         /// ```
         fn touch(&self, key: CacheKey) -> Result<(), DispatcherError>;
 
+        /// Promote SSD-resident entries to the memory-tier without GPU DMA.
+        ///
+        /// For each key in `BlockDevice` state, reads data from SSD into a new
+        /// memory-tier slot and updates the dispatch-map. Keys in `MemoryTier`
+        /// or `Staging` state get a timestamp refresh. Missing keys are skipped.
+        ///
+        /// This is a best-effort, fire-and-forget operation intended to be called
+        /// from a background task. Errors on individual keys are logged but not
+        /// propagated.
+        fn promote_to_memory_tier(&self, keys: &[CacheKey]);
+
         /// Evict all entries from the memory-tier, demoting them to block-device-backed.
         ///
         /// Entries whose write-through has completed are converted to block-device
