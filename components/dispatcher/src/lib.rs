@@ -2071,7 +2071,13 @@ impl IDispatcher for DispatcherComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
 
-        dm.touch(key).map_err(|_| DispatcherError::KeyNotFound(key))
+        dm.touch(key).map_err(|_| DispatcherError::KeyNotFound(key))?;
+
+        if let Ok(mt) = self.memory_tier.get() {
+            mt.touch(key);
+        }
+
+        Ok(())
     }
 
     fn promote_to_memory_tier(&self, keys: &[CacheKey]) {
