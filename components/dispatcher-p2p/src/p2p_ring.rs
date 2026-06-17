@@ -5,6 +5,9 @@
 //! mapped to BAR1 via GDRCopy, and registered with SPDK for direct NVMe DMA.
 //!
 //! The ring is partitioned across threads for lock-free concurrent access.
+//!
+//! With 4 drives and MAX_QUEUES_PER_DRIVE=1, each drive gets 16 slots and
+//! 16 queue depth — sufficient to saturate PCIe bandwidth per drive.
 
 use std::sync::{Arc, Mutex};
 
@@ -15,8 +18,16 @@ use interfaces::{DmaBuffer, GpuStream, IGpuServices};
 /// Total number of staging slots in the P2P ring.
 pub const P2P_RING_SLOTS: usize = 64;
 
-/// Maximum effective queue depth per thread (prevents NVMe qpair saturation).
+/// Maximum effective queue depth per thread.
+/// With 4 drives × 1 thread each = 4 threads, each gets 16 slots.
+/// 16 in-flight NVMe reads per drive is sufficient to hide NVMe latency
+/// and saturate BAR1 bandwidth at full PCIe line rate.
 const MAX_QD_PER_THREAD: usize = 16;
+
+/// Number of CUDA streams per P2P ring.
+/// More streams allow more D2D copies to be in-flight simultaneously,
+/// hiding PCIe latency for D2D transfers. 4 streams matches 4-drive topology.
+const NUM_STREAMS: usize = 4;
 
 /// Pre-allocated ring of GPU-resident staging buffers for P2P NVMe reads.
 ///
@@ -26,7 +37,7 @@ const MAX_QD_PER_THREAD: usize = 16;
 pub struct P2pRing {
     pub ring_bufs: Vec<Arc<Mutex<DmaBuffer>>>,
     pub dev_ptrs: Vec<*mut std::ffi::c_void>,
-    pub streams: [GpuStream; 2],
+    pub streams: Vec<GpuStream>,
     pub slot_size: usize,
 }
 
@@ -69,41 +80,56 @@ impl P2pRing {
             }
         }
 
-        let stream_a = match gpu.create_stream() {
-            Ok(s) => s,
-            Err(_) => {
-                drop(ring_bufs);
-                for p in &dev_ptrs {
-                    unsafe { cuda_ffi::cudaFree(*p) };
+        // Allocate NUM_STREAMS CUDA streams for maximum D2D parallelism.
+        let mut streams: Vec<GpuStream> = Vec::with_capacity(NUM_STREAMS);
+        for i in 0..NUM_STREAMS {
+            match gpu.create_stream() {
+                Ok(s) => streams.push(s),
+                Err(_) => {
+                    // Clean up already-created streams.
+                    for s in &streams {
+                        let _ = gpu.destroy_stream(*s);
+                    }
+                    // Fall back to 2 streams if we can't get NUM_STREAMS.
+                    // This is non-fatal but reduces D2D parallelism.
+                    if i >= 2 {
+                        // Keep what we have if we at least have 2.
+                        break;
+                    }
+                    drop(ring_bufs);
+                    for p in &dev_ptrs {
+                        unsafe { cuda_ffi::cudaFree(*p) };
+                    }
+                    return None;
                 }
-                return None;
             }
-        };
+        }
 
-        let stream_b = match gpu.create_stream() {
-            Ok(s) => s,
-            Err(_) => {
-                let _ = gpu.destroy_stream(stream_a);
-                drop(ring_bufs);
-                for p in &dev_ptrs {
-                    unsafe { cuda_ffi::cudaFree(*p) };
-                }
-                return None;
+        // Ensure we have at least 2 streams.
+        if streams.len() < 2 {
+            for s in &streams {
+                let _ = gpu.destroy_stream(*s);
             }
-        };
+            drop(ring_bufs);
+            for p in &dev_ptrs {
+                unsafe { cuda_ffi::cudaFree(*p) };
+            }
+            return None;
+        }
 
         Some(Self {
             ring_bufs,
             dev_ptrs,
-            streams: [stream_a, stream_b],
+            streams,
             slot_size,
         })
     }
 
     /// Destroy CUDA streams and free GPU allocations.
     pub fn destroy(self, gpu: &dyn IGpuServices) {
-        let _ = gpu.destroy_stream(self.streams[0]);
-        let _ = gpu.destroy_stream(self.streams[1]);
+        for s in &self.streams {
+            let _ = gpu.destroy_stream(*s);
+        }
         drop(self.ring_bufs);
         for p in &self.dev_ptrs {
             unsafe { cuda_ffi::cudaFree(*p) };
@@ -120,8 +146,8 @@ impl P2pRing {
         self.dev_ptrs[index]
     }
 
-    /// Get the alternating CUDA streams.
-    pub fn streams(&self) -> &[GpuStream; 2] {
+    /// Get all CUDA streams.
+    pub fn streams(&self) -> &[GpuStream] {
         &self.streams
     }
 
