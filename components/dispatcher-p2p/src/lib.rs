@@ -60,6 +60,14 @@ use spdk_env::ISPDKEnv;
 
 use crate::background::{BackgroundEvictor, EvictorConfig, ParallelBackgroundWriter, WriteJob};
 
+/// Maximum number of queue threads per drive for cold-path processing.
+/// With 4 drives, using 1 thread per drive gives each thread the full
+/// 16-slot partition (MAX_QD_PER_THREAD), maximizing per-drive queue depth.
+/// Using 2 threads per drive halves the effective QD to 8, which is still
+/// sufficient but adds thread coordination overhead.
+/// Set to 1 to maximize per-thread queue depth and minimize ring fragmentation.
+const MAX_QUEUES_PER_DRIVE: usize = 1;
+
 /// A pending store awaiting commit or cancel.
 ///
 /// Created by `prepare_store` and consumed by either `commit_store` (writes
@@ -396,6 +404,7 @@ impl DispatcherP2pComponent {
         let p2p_guard = self.p2p_ring.read();
         if let Some(ref p2p) = *p2p_guard {
             // SAFETY: ipc_handle.address is a valid GPU destination pointer.
+            // Single-threaded promote: use partition 0 of 1 to get all 16 slots.
             let partition = p2p_ring::ThreadPartition::new(0, 1);
             unsafe {
                 pipeline::pipelined_ssd_to_gpu_p2p(
@@ -965,9 +974,10 @@ impl IDispatcher for DispatcherP2pComponent {
                     match p2p_ring::P2pRing::new(&*gpu, chunk_size) {
                         Some(ring) => {
                             self.log_info(&format!(
-                                "dispatcher: P2P ring initialized ({} slots, {} KiB each)",
+                                "dispatcher: P2P ring initialized ({} slots, {} KiB each, {} streams)",
                                 p2p_ring::P2P_RING_SLOTS,
-                                chunk_size / 1024
+                                chunk_size / 1024,
+                                ring.streams().len(),
                             ));
                             *self.p2p_ring.write() = Some(ring);
                         }
@@ -1326,17 +1336,10 @@ impl IDispatcher for DispatcherP2pComponent {
             }
         }
 
-        // Promote cold entries in parallel — multiple queue threads per drive.
-        // Each thread gets its own NVMe queue pair and CUDA streams, enabling
-        // concurrent reads on the same physical drive.
+        // Promote cold entries in parallel — one queue thread per drive.
+        // With MAX_QUEUES_PER_DRIVE=1 and 4 drives, each thread gets the full
+        // 16-slot ring partition, maximizing per-drive NVMe queue depth.
         if !cold_entries.is_empty() {
-            const MAX_QUEUES_PER_DRIVE: usize = 2;
-
-            let _chunk_size = {
-                let ring_guard = self.pipeline_ring.read();
-                ring_guard.as_ref().map_or(131072, |r| r.chunk_size)
-            };
-
             let drives = self.data_drives.read();
             let num_drives = drives.len();
 
@@ -1376,10 +1379,12 @@ impl IDispatcher for DispatcherP2pComponent {
                     > = Vec::new();
 
                     let mut thread_counter = 0usize;
+                    // Total threads = one per non-empty drive (MAX_QUEUES_PER_DRIVE=1).
+                    // This gives each thread the maximum ring partition size (16 slots).
                     let total_threads = per_drive
                         .iter()
                         .filter(|e| !e.is_empty())
-                        .map(|e| MAX_QUEUES_PER_DRIVE.min(e.len()))
+                        .map(|_| MAX_QUEUES_PER_DRIVE)
                         .sum::<usize>()
                         .max(1);
 
@@ -1388,13 +1393,12 @@ impl IDispatcher for DispatcherP2pComponent {
                             continue;
                         }
 
-                        // Split this drive's entries across multiple queue threads.
+                        // With MAX_QUEUES_PER_DRIVE=1, one thread handles all entries
+                        // for this drive, getting the full ring partition.
                         let num_queues = MAX_QUEUES_PER_DRIVE.min(entry_indices.len());
                         let chunks: Vec<&[usize]> = entry_indices
                             .chunks(entry_indices.len().div_ceil(num_queues))
                             .collect();
-
-                        let _queue_depth = 64 / num_queues;
 
                         for chunk in chunks {
                             let dm_ref = &dm;
@@ -1416,40 +1420,26 @@ impl IDispatcher for DispatcherP2pComponent {
                                             "connect_client failed: {e}"
                                         ))
                                     });
-                                let streams_result = gpu_ref.create_stream().and_then(|a| {
-                                    gpu_ref.create_stream().map(|b| [a, b]).map_err(|e| {
-                                        let _ = gpu_ref.destroy_stream(a);
-                                        e
-                                    })
-                                });
 
                                 let mut batch_results: Vec<(usize, Result<(), DispatcherError>)> =
                                     Vec::with_capacity(indices.len());
 
-                                let (channels, streams) = match (channels, streams_result) {
-                                    (Ok(ch), Ok(st)) => (ch, st),
-                                    (Err(e), _) => {
+                                let channels = match channels {
+                                    Ok(ch) => ch,
+                                    Err(e) => {
                                         for &ci in &indices {
                                             batch_results.push((ci, Err(e.clone())));
-                                        }
-                                        return batch_results;
-                                    }
-                                    (_, Err(e)) => {
-                                        let err = DispatcherError::IoError(format!(
-                                            "create_stream failed: {e}"
-                                        ));
-                                        for &ci in &indices {
-                                            batch_results.push((ci, Err(err.clone())));
                                         }
                                         return batch_results;
                                     }
                                 };
 
                                 // P2P path: SSD → BAR1 ring → D2D → client GPU.
-                                // After P2P read, promote entry back to memory-tier for future hot lookups.
                                 let p2p = p2p_ref.expect(
                                     "dispatcher-p2p requires P2P ring; use full.yaml profile for DRAM path"
                                 );
+                                // With total_threads = num_non_empty_drives, each thread
+                                // gets a non-overlapping 16-slot partition of the 64-slot ring.
                                 let partition = p2p_ring::ThreadPartition::new(
                                     my_thread_idx,
                                     total_threads,
@@ -1490,9 +1480,6 @@ impl IDispatcher for DispatcherP2pComponent {
                                     })();
                                     batch_results.push((ci, res));
                                 }
-
-                                let _ = gpu_ref.destroy_stream(streams[0]);
-                                let _ = gpu_ref.destroy_stream(streams[1]);
 
                                 batch_results
                             });
