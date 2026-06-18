@@ -266,7 +266,7 @@ impl DispatcherComponent {
                     Some(n) => n,
                     None => return None,
                 };
-                let cpus: Vec<usize> = node.cpus().iter().collect();
+                let cpus: Vec<usize> = node.cpus().iter().filter(|&c| c >= 2).collect();
                 if cpus.is_empty() {
                     return None;
                 }
