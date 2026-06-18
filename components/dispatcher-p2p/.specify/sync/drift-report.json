@@ -1,0 +1,145 @@
+{
+  "generated": "2026-06-18",
+  "component": "dispatcher-p2p",
+  "specs_analyzed": 1,
+  "requirements": {
+    "total": 13,
+    "aligned": 12,
+    "drifted": 1,
+    "not_implemented": 0
+  },
+  "unspecced_code": 5,
+  "findings": [
+    {
+      "req_id": "FR-001",
+      "spec": "001-gpudirect-cold-path",
+      "status": "aligned",
+      "description": "System MUST read evicted data from SSD directly into GPU staging buffers, bypassing host DRAM.",
+      "location": "src/pipeline.rs:703-861",
+      "notes": "pipelined_ssd_to_gpu_p2p reads NVMe directly into P2P ring GPU BAR1 slots via ReadAsync commands"
+    },
+    {
+      "req_id": "FR-002",
+      "spec": "001-gpudirect-cold-path",
+      "status": "aligned",
+      "description": "System MUST copy data from staging buffers to the client's GPU destination.",
+      "location": "src/pipeline.rs:795-807",
+      "notes": "D2D cudaMemcpyAsync from ring slot dev_ptr to gpu_dst with CUDA_MEMCPY_DEVICE_TO_DEVICE"
+    },
+    {
+      "req_id": "FR-003",
+      "spec": "001-gpudirect-cold-path",
+      "status": "aligned",
+      "description": "System MUST pre-allocate a fixed ring of 64 GPU staging buffers at initialization via cudaMalloc + GDRCopy BAR1 mapping + spdk_mem_register. Each slot is 128 KiB (MDTS). The ring is shared across all cold lookup threads.",
+      "location": "src/p2p_ring.rs:19,52-126",
+      "notes": "P2P_RING_SLOTS=64, cudaMalloc + create_spdk_dma_buffer_from_gpu_bar per slot, 4 CUDA streams allocated. Slot size is parameterized from drive MDTS."
+    },
+    {
+      "req_id": "FR-004",
+      "spec": "001-gpudirect-cold-path",
+      "status": "aligned",
+      "description": "System MUST partition the staging ring for concurrent thread access using ThreadPartition (non-overlapping slot ranges, effective QD capped at 16 per thread).",
+      "location": "src/p2p_ring.rs:160-181",
+      "notes": "ThreadPartition::new divides ring evenly, caps at MAX_QD_PER_THREAD=16. Unit tests verify non-overlapping partitions for 1-8 threads."
+    },
+    {
+      "req_id": "FR-005",
+      "spec": "001-gpudirect-cold-path",
+      "status": "aligned",
+      "description": "System MUST pipeline SSD reads with D2D GPU copies using FIFO completion ordering. D2D copies distributed round-robin across 4 CUDA streams. Stream sync at ring partition wrap. Final sync after all chunks.",
+      "location": "src/pipeline.rs:703-861",
+      "notes": "FIFO ordering via sequential completion loop, round-robin stream selection (completed % num_streams), sync at sync_interval boundaries, final stream sync loop at end."
+    },
+    {
+      "req_id": "FR-006",
+      "spec": "001-gpudirect-cold-path",
+      "status": "aligned",
+      "description": "System MUST panic on first cold lookup if the P2P ring was not initialized. Initialization logs diagnostic but does not fail. No DRAM fallback for cold reads.",
+      "location": "src/lib.rs:974-989,1438-1439",
+      "notes": "Initialization logs warning when P2pRing::new returns None. batch_lookup uses expect() on p2p_ref which panics on first cold lookup when ring is absent."
+    },
+    {
+      "req_id": "FR-007",
+      "spec": "001-gpudirect-cold-path",
+      "status": "aligned",
+      "description": "The P2P ring is allocated once at initialization and is immutable for the component's lifetime. There is no runtime path selection.",
+      "location": "src/lib.rs:149,974",
+      "notes": "p2p_ring field is RwLock<Option<P2pRing>> set once in initialize(), never modified until shutdown."
+    },
+    {
+      "req_id": "FR-008",
+      "spec": "001-gpudirect-cold-path",
+      "status": "aligned",
+      "description": "System MUST implement the same interface as the standard dispatcher, serving as a drop-in replacement.",
+      "location": "src/lib.rs:132-155,896-2138",
+      "notes": "define_component! provides [IDispatcher]. All IDispatcher trait methods (initialize, shutdown, lookup, batch_lookup, lookup_async, check, remove, populate, prepare_store, commit_store, cancel_store, touch, promote_to_memory_tier, clear_memory_tier, flush_to_ssd) are implemented."
+    },
+    {
+      "req_id": "FR-009",
+      "spec": "001-gpudirect-cold-path",
+      "status": "aligned",
+      "description": "System MUST promote successfully read cold entries back to DRAM after completing the read.",
+      "location": "src/lib.rs:1452-1478",
+      "notes": "After pipelined_ssd_to_gpu_p2p succeeds, code inserts into memory-tier (mt.insert), removes old dispatch-map entry, and creates a new memory-tier entry with convert_to_storage."
+    },
+    {
+      "req_id": "FR-010",
+      "spec": "001-gpudirect-cold-path",
+      "status": "aligned",
+      "description": "System MUST release all staging resources on shutdown with no leaks.",
+      "location": "src/lib.rs:1089-1170",
+      "notes": "shutdown() destroys warm stream, takes and destroys P2P ring (ring.destroy frees CUDA streams and cudaFree's dev_ptrs), destroys pipeline ring, two-phase block device shutdown with signal_stop/join/detach."
+    },
+    {
+      "req_id": "FR-011",
+      "spec": "001-gpudirect-cold-path",
+      "status": "aligned",
+      "description": "System MUST handle read failures gracefully without corrupting ring state or affecting other in-flight operations.",
+      "location": "src/pipeline.rs:766-786",
+      "notes": "P2P pipeline returns Err on ReadDone failure or Timeout; ring slots are not resubmitted after error; other in-flight lookups in batch_lookup proceed independently per thread."
+    },
+    {
+      "req_id": "FR-012",
+      "spec": "001-gpudirect-cold-path",
+      "status": "drifted",
+      "description": "System MUST support end-to-end performance measurement using the existing pipelined benchmark tool.",
+      "location": null,
+      "notes": "Minor drift: No in-component benchmark integration code. The component implements IDispatcher which the external certus-api-bench_v2.py tool exercises. A benches/ directory exists in the component but contains no P2P-specific benchmark. The requirement is satisfied at the system level, not within component source."
+    },
+    {
+      "req_id": "FR-013",
+      "spec": "001-gpudirect-cold-path",
+      "status": "aligned",
+      "description": "System MUST implement promote_to_memory_tier(keys) to asynchronously read cold entries from NVMe into the memory-tier without GPU involvement.",
+      "location": "src/lib.rs:1956-2099",
+      "notes": "promote_to_memory_tier groups keys by drive, spawns one thread per drive, calls pipelined_ssd_to_dram_only for each entry. No P2P ring involvement. Updates dispatch-map after successful read."
+    }
+  ],
+  "unspecced_code_details": [
+    {
+      "feature": "Background write-through to SSD (ParallelBackgroundWriter)",
+      "location": "src/background.rs:1-210",
+      "description": "Per-drive background writer threads that persist memory-tier entries to SSD asynchronously after populate(). Enables write-through without blocking the hot path."
+    },
+    {
+      "feature": "Background SSD evictor (BackgroundEvictor)",
+      "location": "src/background.rs:220-393",
+      "description": "Periodic thread that monitors SSD utilization across extent managers and evicts cold entries when a configurable threshold is exceeded."
+    },
+    {
+      "feature": "Direct-write path (prepare_store / commit_store / cancel_store)",
+      "location": "src/lib.rs:1784-1943",
+      "description": "Two-phase write API: caller gets a DMA buffer via prepare_store, fills it, then commits or cancels. Bypasses the populate->background-write path for bulk ingest."
+    },
+    {
+      "feature": "IO segmentation (MDTS-aware splitting)",
+      "location": "src/io_segmenter.rs:1-142",
+      "description": "Splits large transfers into segments respecting NVMe maximum transfer size. Used by all read/write paths."
+    },
+    {
+      "feature": "Pipeline zero-copy and multi-object variants",
+      "location": "src/pipeline.rs:244-675",
+      "description": "Additional pipeline functions (pipelined_ssd_to_gpu_zero_copy, pipelined_multi_object_zero_copy, pipelined_multi_ssd_to_dram_only) that serve the DRAM fallback path and batch operations."
+    }
+  ]
+}

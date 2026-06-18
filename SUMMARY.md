@@ -1,103 +1,121 @@
 # Certus Codebase Summary
 
-Generated: 2026-05-22
+Generated: 2026-06-18
 
-## Total Lines by Language
+## Overall SLOC by Language
 
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Language              Files        Lines         Code     Comments       Blanks
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Python                  965       281915       233736        15639        32540
- C++ Header               16        51642        36411         8828         6403
- Rust                    194        44777        36746         2055         5976
- C++                      39        23785        18471         1496         3818
- JSON                    641        14710        14701            0            9
- YAML                    132         9563         7475          963         1125
- C                         8         3901         2849          516          536
- Shell                    78         4090         2776          644          670
- JavaScript               10         2754         2427          176          151
- CSS                       3         1243         1164           22           57
- TOML                     33          898          768           11          119
- CUDA                      1          796          647           44          105
- Other                   484        16628         8944         5782         1897
- Markdown                275        81135            0        49201        31934
- Plain Text              132        16447            0        14965         1482
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Total                  2604       556408       366935       101576        87897
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
+| Language | Files | Code | Comments | Blanks | Total Lines |
+|----------|-------|------|----------|--------|-------------|
+| **Rust** | 228 | 52,832 | 2,508 | 8,276 | 63,616 |
+| Python | 41 | 9,799 | 538 | 1,659 | 11,996 |
+| JSON | 10 | 7,398 | 0 | 0 | 7,398 |
+| C | 10 | 2,980 | 522 | 553 | 4,055 |
+| C++ | 6 | 2,886 | 493 | 729 | 4,108 |
+| Shell | 49 | 2,680 | 585 | 494 | 3,759 |
+| YAML | 24 | 1,179 | 52 | 147 | 1,378 |
+| CUDA | 3 | 817 | 46 | 123 | 986 |
+| TOML | 40 | 834 | 12 | 131 | 977 |
+| Markdown (docs) | 269 | — | 80,176 | 59,752 | 139,928 |
+| **Total** | **727** | **87,678** | **105,304** | **75,823** | **268,805** |
 
-## Rust Component Breakdown
+## Rust Breakdown (Primary Language)
 
-| Component | Code | Tests | Total |
-|-----------|------|-------|-------|
-| tools/creusot (vendored) | 64,214 | 729 | 64,943 |
-| component-framework/crates | 5,013 | 3,875 | 8,888 |
-| gpu-services/src | 1,990 | 192 | 2,182 |
-| block-device-spdk-nvme/src | 1,870 | 472 | 2,342 |
-| extent-manager/src | 1,778 | 355 | 2,133 |
-| dispatcher/src | 1,541 | 1,350 | 2,891 |
-| dispatcher/benches | 1,632 | 0 | 1,632 |
-| interfaces/src | 1,032 | 146 | 1,178 |
-| apps/iops-benchmark-md/src | 1,219 | 314 | 1,533 |
-| apps/iops-benchmark/src | 929 | 298 | 1,227 |
-| apps/extent-benchmark/src | 629 | 0 | 629 |
-| apps/gpu-bb-vs-p2p/src | 579 | 0 | 579 |
-| apps/certus-server/src | 551 | 0 | 551 |
-| certus-connector/src/engine.rs | 535 | 0 | 535 |
-| dispatch-map/src | 456 | 324 | 780 |
-| gpu-services/benches | 418 | 0 | 418 |
-| memory-tier/src | 365 | 312 | 677 |
-| spdk-env/src | 349 | 607 | 956 |
-| apps/nvme-ns-manager/src | 315 | 0 | 315 |
-| logger/src | 135 | 170 | 305 |
+| Metric | Value |
+|--------|-------|
+| Total Rust code lines | 52,832 |
+| Doc comments (in Rust) | 5,822 |
+| Inline comments | 2,508 |
+| Test code (est.) | ~16,300 |
+| Production code (est.) | ~36,500 |
+| Test-to-code ratio | ~0.45 |
+| Comment-to-code ratio | ~0.16 |
 
-## Complexity Metrics
+## Component Breakdown (Rust, by code lines)
 
-### Top 15 Largest Source Files (non-test, project code)
+| Component | Code | Tests | Total | Test % |
+|-----------|------|-------|-------|--------|
+| component-framework | 5,034 | 3,875 | 8,909 | 43% |
+| dispatcher-p2p | 2,781 | 1,917 | 4,698 | 41% |
+| dispatcher | 2,471 | 1,936 | 4,407 | 44% |
+| gpu-services | 1,989 | 192 | 2,181 | 9% |
+| block-device-spdk-nvme | 1,972 | 475 | 2,447 | 19% |
+| extent-manager | 1,828 | 359 | 2,187 | 16% |
+| block-device-filesys | 1,181 | 96 | 1,277 | 8% |
+| block-device-kernel | 1,162 | 91 | 1,253 | 7% |
+| interfaces | 1,062 | 145 | 1,207 | 12% |
+| dispatch-map | 503 | 324 | 827 | 39% |
+| memory-tier | 496 | 286 | 782 | 37% |
+| spdk-env | 356 | 607 | 963 | 63% |
+| logger | 135 | 170 | 305 | 56% |
+
+## Applications (Rust)
+
+| App | Code | Tests | Total |
+|-----|------|-------|-------|
+| iops-benchmark-md | 1,221 | 314 | 1,535 |
+| certus-server | 953 | 0 | 953 |
+| iops-benchmark | 931 | 298 | 1,229 |
+| certus-server-yaml | 724 | 0 | 724 |
+| extent-benchmark | 630 | 0 | 630 |
+| gpu-bb-vs-p2p | 581 | 0 | 581 |
+| nvme-bar1-bench | 502 | 0 | 502 |
+| baseline-generalized-fs | 420 | 0 | 420 |
+| nvme-ns-manager | 315 | 0 | 315 |
+
+## Benchmarks (Rust, dedicated bench files)
+
+| Component | Bench Lines |
+|-----------|-------------|
+| dispatcher-p2p | 1,730 |
+| dispatcher | 1,710 |
+| gpu-services | 418 |
+| block-device-spdk-nvme | 350 |
+| block-device-filesys | 193 |
+| block-device-kernel | 176 |
+| extent-manager | 110 |
+| dispatch-map | 108 |
+| logger | 69 |
+
+## Complexity Indicators
+
+### Largest Source Files
 
 | File | Lines |
 |------|-------|
-| components/dispatcher/src/lib.rs | 2,609 |
-| components/component-framework/crates/component-core/src/actor.rs | 1,261 |
-| components/block-device-spdk-nvme/src/actor.rs | 1,164 |
-| components/gpu-services/src/lib.rs | 1,083 |
+| `components/dispatcher/src/lib.rs` | 3,992 |
+| `components/dispatcher-p2p/src/lib.rs` | 3,747 |
+| `components/block-device-spdk-nvme/src/actor.rs` | 1,286 |
+| `components/component-framework/.../actor.rs` | 1,273 |
+| `components/dispatcher-p2p/src/pipeline.rs` | 1,155 |
+| `components/gpu-services/src/lib.rs` | 1,084 |
 
-### Top Files by Function/Method Count (project code)
+### Highest Function Count
 
-| File | Fns |
-|------|-----|
-| components/dispatcher/src/lib.rs | 123 |
-| components/component-framework/crates/component-core/src/actor.rs | 61 |
-| components/dispatcher/tests/lazy_migration.rs | 60 |
-| components/dispatcher/benches/dispatcher_benchmark.rs | 60 |
+| File | Functions |
+|------|-----------|
+| `components/dispatcher/src/lib.rs` | 142 |
+| `components/dispatcher-p2p/src/lib.rs` | 137 |
+| `components/component-framework/.../actor.rs` | 62 |
+
+### Deepest Nesting
+
+| File | Max Depth |
+|------|-----------|
+| `apps/certus-server-yaml/build.rs` | 16 |
+| `components/dispatcher/src/lib.rs` | 14 |
+| `components/dispatcher-p2p/src/lib.rs` | 12 |
 
 ### Unsafe Usage
 
-- Files containing unsafe: **100**
-- Total unsafe occurrences: **690**
-
-### Deepest Nesting (project code, top 5)
-
-| File | Depth |
-|------|-------|
-| components/extent-manager/src/lib.rs | 9 |
-| components/dispatcher/src/lib.rs | 9 |
-| components/component-framework/crates/component-core/src/actor.rs | 9 |
+- **125 files** contain `unsafe` blocks
+- **989 total** `unsafe` occurrences
+- Concentrated in: SPDK FFI bindings, io_uring operations, CUDA interop, DMA buffer management
 
 ## Key Ratios
 
-- **Code : Tests** — ~60:40 in core components (strong test coverage)
-- **Comments** — 5.3% of Rust lines (lean, consistent with project style)
-- **Unsafe** — 690 occurrences across 100 files (concentrated in SPDK/CUDA FFI layers)
-- **Total code across all languages**: 366,935 lines
-
-## Complexity Hotspots (project code only, excluding vendored tools/creusot)
-
-| Metric | File | Value |
-|--------|------|-------|
-| Largest file | dispatcher/src/lib.rs | 2,609 lines |
-| Most functions | dispatcher/src/lib.rs | 123 fns |
-| Deepest nesting | extent-manager/src/lib.rs | depth 9 |
-| Deepest nesting | dispatcher/src/lib.rs | depth 9 |
+| Ratio | Value | Assessment |
+|-------|-------|------------|
+| Test / Production code | 0.45 | Good coverage |
+| Comments / Code | 0.16 | Concise, relies on naming |
+| Docs (markdown) / Code | 1.6x | Heavily documented |
+| Unsafe density | 989 / 52,832 = 1.9% | Reasonable for systems code |
