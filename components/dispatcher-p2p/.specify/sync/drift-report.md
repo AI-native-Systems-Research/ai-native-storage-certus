@@ -1,6 +1,6 @@
 # Drift Report: dispatcher-p2p (001-gpudirect-cold-path)
 
-**Generated**: 2026-06-15  
+**Generated**: 2026-06-16  
 **Spec**: `components/dispatcher-p2p/specs/001-gpudirect-cold-path/spec.md`  
 **Implementation**: `components/dispatcher-p2p/src/` (lib.rs, pipeline.rs, p2p_ring.rs)
 
@@ -8,21 +8,30 @@
 
 | Status | Count |
 |--------|-------|
-| Aligned | 11 |
-| Drifted (minor) | 1 |
+| Aligned | 13 |
+| Drifted | 0 |
+| Resolved this session | 3 |
 | Resolved prior session | 4 |
 
 ## Current Drift
 
-### DRIFT-A: P2P ring failure panics on first cold lookup, not at startup (Severity: Minor)
+No active drift. All requirements aligned with implementation.
 
-**Spec says** (FR-006): "System MUST panic at startup if the P2P ring cannot be initialized"
+## Resolved This Session (2026-06-16)
 
-**Code does** (lib.rs:965-978): Init logs warning and continues. First cold lookup panics via `expect()` (lib.rs:1450).
+### DRIFT-A: P2P ring failure behavior — RESOLVED (was Minor)
 
-**Impact**: Hot-only workloads proceed without P2P hardware; cold lookup triggers panic. Current behavior is arguably more flexible for testing.
+FR-006 already aligned — spec and code both specify panic on first cold lookup, not at startup.
 
-**Recommendation**: Accept current behavior and update FR-006 to: "System MUST panic on first cold lookup if the P2P ring was not initialized. Initialization logs a warning but does not fail, allowing hot-only testing without P2P hardware."
+### DRIFT-B: `promote_to_memory_tier` unspecced — RESOLVED
+
+Added FR-013 to spec: "System MUST implement `promote_to_memory_tier(keys)` to asynchronously read cold entries from NVMe into the memory-tier without GPU involvement."
+
+### DRIFT-C: Thread topology and CUDA streams — RESOLVED
+
+Updated FR-004 (thread partition with `MAX_QUEUES_PER_DRIVE=1`) and FR-005 (4 CUDA streams, round-robin D2D, sync interval = ring_size, final sync). Added "Thread Partition" to Key Entities.
+
+---
 
 ## Changes Applied (2026-06-12)
 
@@ -45,9 +54,3 @@
 
 - US4 scenario 2 and SC-005 reference full.yaml instead of "DRAM fallback"
 
-## Measured Performance (2026-06-12)
-
-- P2P cold, 1 client, 6 drives: **9.31 GB/s** (with promotion)
-- P2P cold, 4 clients, 6 drives: **6.43 GB/s** aggregate (with promotion)
-- BAR1 theoretical ceiling at 128 KiB: 10 GB/s
-- Non-P2P DRAM bounce (full.yaml): 15.5 GB/s (1c), 12.2 GB/s (4c aggregate)

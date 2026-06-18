@@ -1,18 +1,20 @@
 # Drift Report: Dispatcher Cache Interface (001-dispatcher-cache-interface)
 
-**Generated**: 2026-06-15  
+**Generated**: 2026-06-16  
 **Spec**: `components/dispatcher/specs/001-dispatcher-cache-interface/spec.md`  
 **Implementation**: `components/dispatcher/src/` (lib.rs, pipeline.rs, io_segmenter.rs, background.rs)  
 **Interface**: `components/interfaces/src/idispatcher.rs`, `components/interfaces/src/imemory_tier.rs`  
-**Prior run**: 2026-06-12
+**Prior run**: 2026-06-15
 
 ## Summary
 
 | Status | Count |
 |--------|-------|
-| Aligned | 33 |
+| Aligned | 34 |
 | Drifted (behavioral) | 3 |
-| Drifted (omission from spec) | 3 |
+| Drifted (omission from spec) | 2 |
+| Resolved since last run | 1 (DRIFT-G) |
+| New drift | 1 (DRIFT-H) |
 
 ## Drift Items
 
@@ -118,9 +120,44 @@ Evicts the LRU entry from the same shard as `key`, ensuring the freed space is a
 
 ---
 
+### ~~DRIFT-G~~: RESOLVED — `promote_to_memory_tier` now specced as FR-040/FR-041
+
+Previously unspecced. Now fully covered by FR-040 and FR-041 added to spec. No further action needed.
+
+---
+
+### DRIFT-H: `touch()` now also refreshes Memory Tier LRU (Severity: Moderate)
+
+**Spec refs**: FR-023, User Story 8 (acceptance scenario 1), SC-010  
+**Severity**: Moderate — spec explicitly prohibits memory-tier operations but implementation now includes them
+
+**Spec says** (FR-023): "The `touch(key)` method MUST update the entry's eviction timestamp in the dispatch map without performing any DMA transfer or acquiring any reference."  
+**Spec says** (US8 scenario 1): "No DMA or memory-tier operations occur."  
+**Spec says** (SC-010): "The touch operation refreshes an entry's dispatch-map timestamp without performing DMA."
+
+**Code does** (`lib.rs:2066-2080`):
+```rust
+fn touch(&self, key: CacheKey) -> Result<(), DispatcherError> {
+    // ... dm.touch(key) ...
+    if let Ok(mt) = self.memory_tier.get() {
+        mt.touch(key);
+    }
+    Ok(())
+}
+```
+
+**Why the code changed**: The eviction algorithm (FR-024) uses `mt.evict_lru_for_key(target_key)` as the primary eviction mechanism. This relies on the Memory Tier's internal LRU ordering, NOT the dispatch-map timestamp. Without `mt.touch(key)`, a `touch()`ed entry retains its old LRU position in the memory-tier and can be evicted from DRAM despite being recently accessed. The spec's goal ("preventing it from being selected as a victim" — User Story 8) is only achievable if both data structures are refreshed. Note: `mt.touch(key)` is metadata-only (updates an LRU timestamp); it performs no DMA, no memory copy, and acquires no dispatch-map reference.
+
+**Required spec update**:
+- FR-023: "The `touch(key)` method MUST update the entry's eviction timestamp in the dispatch map AND refresh the memory-tier LRU position (if the entry is memory-tier resident) without performing any DMA transfer or acquiring any dispatch-map reference."
+- US8 scenario 1: "the entry's timestamp is refreshed in the dispatch map and its memory-tier LRU position is updated (if resident in DRAM). No DMA operations occur."
+- SC-010: "The touch operation refreshes an entry's dispatch-map timestamp and memory-tier LRU position without performing DMA."
+
+---
+
 ## Previously Resolved Drift
 
-All items from the 2026-05-29 and 2026-06-12 runs (DRIFT-A through DRIFT-B in the prior report) remain as documented above — spec updates are pending.
+All items from the 2026-05-29 and 2026-06-12 runs (DRIFT-A through DRIFT-F in the prior report) remain as documented above — spec updates are pending.
 
 ---
 
@@ -129,7 +166,7 @@ All items from the 2026-05-29 and 2026-06-12 runs (DRIFT-A through DRIFT-B in th
 All of the following are aligned between spec and code:
 
 - FR-001 through FR-018 (core interface and operations)
-- FR-020 through FR-023 (prepare/commit/cancel/touch)
+- FR-020 through FR-022 (prepare/commit/cancel)
 - FR-025 (format_on_init recovery)
-- FR-028 through FR-036, FR-038 (promote, evictor, CUDA registration, clear)
-- User Stories 1-6, 8-11 (except eviction details in US7)
+- FR-028 through FR-036, FR-038 through FR-041 (promote, evictor, CUDA registration, clear, promote_to_memory_tier, DRAM-only pipelines)
+- User Stories 1-6, 9-11 (except eviction details in US7, touch details in US8)

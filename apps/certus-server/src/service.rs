@@ -8,6 +8,9 @@ use tonic::{Request, Response, Status};
 use gpu_services::cuda_ffi;
 use interfaces::{DispatcherError, IDispatcher, IpcHandle};
 
+#[cfg(feature = "otel")]
+use crate::telemetry::Metrics;
+
 pub mod proto {
     tonic::include_proto!("certus.dispatcher.v1");
 }
@@ -40,6 +43,8 @@ type IpcCache = Arc<Mutex<HashMap<[u8; 64], IpcCacheEntry>>>;
 pub struct DispatcherService {
     dispatcher: Arc<dyn IDispatcher + Send + Sync>,
     ipc_cache: IpcCache,
+    #[cfg(feature = "otel")]
+    metrics: Option<Metrics>,
 }
 
 impl DispatcherService {
@@ -47,7 +52,15 @@ impl DispatcherService {
         Self {
             dispatcher,
             ipc_cache: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(feature = "otel")]
+            metrics: None,
         }
+    }
+
+    #[cfg(feature = "otel")]
+    pub fn with_metrics(mut self, metrics: Metrics) -> Self {
+        self.metrics = Some(metrics);
+        self
     }
 }
 
@@ -172,6 +185,8 @@ impl Dispatcher for DispatcherService {
         let req = request.into_inner();
         let keys: Vec<u64> = req.entries.iter().map(|e| e.key).collect();
         check_duplicate_keys(&keys)?;
+        #[cfg(feature = "otel")]
+        let _t0 = std::time::Instant::now();
 
         let dispatcher = Arc::clone(&self.dispatcher);
         let cache = Arc::clone(&self.ipc_cache);
@@ -249,6 +264,12 @@ impl Dispatcher for DispatcherService {
         .await
         .map_err(|e| Status::internal(format!("task join error: {e}")))?;
 
+        #[cfg(feature = "otel")]
+        if let Some(ref m) = self.metrics {
+            let errors = results.iter().filter(|r| !r.success).count() as u64;
+            m.record_op("populate", results.len() as u64, errors, _t0.elapsed().as_micros() as f64);
+        }
+
         Ok(Response::new(BatchPopulateResponse { results }))
     }
 
@@ -259,6 +280,8 @@ impl Dispatcher for DispatcherService {
         let req = request.into_inner();
         let keys: Vec<u64> = req.entries.iter().map(|e| e.key).collect();
         check_duplicate_keys(&keys)?;
+        #[cfg(feature = "otel")]
+        let _t0 = std::time::Instant::now();
 
         let dispatcher = Arc::clone(&self.dispatcher);
         let cache = Arc::clone(&self.ipc_cache);
@@ -364,6 +387,12 @@ impl Dispatcher for DispatcherService {
         .await
         .map_err(|e| Status::internal(format!("task join error: {e}")))?;
 
+        #[cfg(feature = "otel")]
+        if let Some(ref m) = self.metrics {
+            let errors = results.iter().filter(|r| !r.success).count() as u64;
+            m.record_op("lookup", results.len() as u64, errors, _t0.elapsed().as_micros() as f64);
+        }
+
         Ok(Response::new(BatchLookupResponse { results }))
     }
 
@@ -373,8 +402,11 @@ impl Dispatcher for DispatcherService {
     ) -> Result<Response<BatchCheckResponse>, Status> {
         let req = request.into_inner();
         check_duplicate_keys(&req.keys)?;
+        #[cfg(feature = "otel")]
+        let _t0 = std::time::Instant::now();
 
         let dispatcher = Arc::clone(&self.dispatcher);
+        let batch_len = req.keys.len() as u64;
         let results = tokio::task::spawn_blocking(move || {
             req.keys
                 .iter()
@@ -387,6 +419,13 @@ impl Dispatcher for DispatcherService {
         .await
         .map_err(|e| Status::internal(format!("task join error: {e}")))?;
 
+        #[cfg(feature = "otel")]
+        if let Some(ref m) = self.metrics {
+            m.record_op("check", batch_len, 0, _t0.elapsed().as_micros() as f64);
+        }
+        #[cfg(not(feature = "otel"))]
+        let _ = batch_len;
+
         Ok(Response::new(BatchCheckResponse { results }))
     }
 
@@ -396,6 +435,8 @@ impl Dispatcher for DispatcherService {
     ) -> Result<Response<BatchRemoveResponse>, Status> {
         let req = request.into_inner();
         check_duplicate_keys(&req.keys)?;
+        #[cfg(feature = "otel")]
+        let _t0 = std::time::Instant::now();
 
         let dispatcher = Arc::clone(&self.dispatcher);
         let results = tokio::task::spawn_blocking(move || {
@@ -410,6 +451,12 @@ impl Dispatcher for DispatcherService {
         .await
         .map_err(|e| Status::internal(format!("task join error: {e}")))?;
 
+        #[cfg(feature = "otel")]
+        if let Some(ref m) = self.metrics {
+            let errors = results.iter().filter(|r| !r.success).count() as u64;
+            m.record_op("remove", results.len() as u64, errors, _t0.elapsed().as_micros() as f64);
+        }
+
         Ok(Response::new(BatchRemoveResponse { results }))
     }
 
@@ -419,19 +466,40 @@ impl Dispatcher for DispatcherService {
     ) -> Result<Response<BatchTouchResponse>, Status> {
         let req = request.into_inner();
         check_duplicate_keys(&req.keys)?;
+        #[cfg(feature = "otel")]
+        let _t0 = std::time::Instant::now();
 
         let dispatcher = Arc::clone(&self.dispatcher);
-        let results = tokio::task::spawn_blocking(move || {
-            req.keys
-                .iter()
-                .map(|&key| match dispatcher.touch(key) {
-                    Ok(()) => success_result(key),
-                    Err(e) => error_result(key, &e),
-                })
-                .collect::<Vec<_>>()
+        let promote = req.promote;
+        let keys = req.keys;
+
+        let results = tokio::task::spawn_blocking({
+            let dispatcher = Arc::clone(&dispatcher);
+            let keys = keys.clone();
+            move || {
+                keys.iter()
+                    .map(|&key| match dispatcher.touch(key) {
+                        Ok(()) => success_result(key),
+                        Err(e) => error_result(key, &e),
+                    })
+                    .collect::<Vec<_>>()
+            }
         })
         .await
         .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+
+        if promote {
+            tokio::task::spawn_blocking(move || {
+                dispatcher.promote_to_memory_tier(&keys);
+            });
+        }
+
+        #[cfg(feature = "otel")]
+        if let Some(ref m) = self.metrics {
+            let errors = results.iter().filter(|r| !r.success).count() as u64;
+            m.record_op("touch", results.len() as u64, errors, _t0.elapsed().as_micros() as f64);
+        }
 
         Ok(Response::new(BatchTouchResponse { results }))
     }
@@ -448,6 +516,11 @@ impl Dispatcher for DispatcherService {
         .map_err(|e| Status::internal(format!("task join error: {e}")))?
         .map_err(|e| Status::internal(format!("clear_memory_tier failed: {e}")))?;
 
+        #[cfg(feature = "otel")]
+        if let Some(ref m) = self.metrics {
+            m.entries_cleared.add(entries_cleared as u64, &[]);
+        }
+
         Ok(Response::new(ClearMemoryTierResponse {
             entries_cleared: entries_cleared as u64,
         }))
@@ -462,6 +535,11 @@ impl Dispatcher for DispatcherService {
             .await
             .map_err(|e| Status::internal(format!("task join error: {e}")))?
             .map_err(|e| Status::internal(format!("flush_to_ssd failed: {e}")))?;
+
+        #[cfg(feature = "otel")]
+        if let Some(ref m) = self.metrics {
+            m.jobs_flushed.add(jobs_flushed as u64, &[]);
+        }
 
         Ok(Response::new(FlushToSsdResponse {
             jobs_flushed: jobs_flushed as u64,

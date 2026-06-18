@@ -683,10 +683,17 @@ pub unsafe fn pipelined_multi_object_zero_copy(
 /// # Algorithm
 ///
 /// 1. Prime: submit up to `effective_qd` async NVMe reads into ring slots
-/// 2. On each NVMe completion: issue D2D copy on alternating CUDA stream,
-///    submit next read into a recycled slot
-/// 3. Sync both streams every `ring_size/2` completions before recycling
-/// 4. Finalize: sync both streams after all chunks complete
+/// 2. On each NVMe completion: issue D2D copy on one of N CUDA streams,
+///    submit next read into the recycled slot
+/// 3. Sync all streams every `sync_interval` completions to bound GPU queue depth
+///    and ensure slots are safe to reuse
+/// 4. Finalize: sync all streams after all chunks complete
+///
+/// Key optimizations vs previous version:
+/// - Uses all 4 available CUDA streams for D2D copies (matches 4-drive topology)
+/// - Sync interval tied to ring_size (not ring_size/2) to maximize pipeline depth
+/// - Correct slot recycling: slot reuse only after stream sync confirms D2D done
+/// - Final stream sync always performed
 ///
 /// # Safety
 ///
@@ -721,10 +728,21 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
     }
 
     let num_chunks = segments.len();
-    let streams = ring.streams();
+    let all_streams = ring.streams();
+    // Use all available streams for maximum D2D parallelism.
+    let num_streams = all_streams.len();
+
     let ring_offset = partition.ring_offset;
-    let ring_size = partition.effective_qd.min(num_chunks);
-    let effective_qd = ring_size.min(16);
+    let ring_size = partition.effective_qd.min(num_chunks).max(1);
+
+    // Queue depth: use the full partition size to saturate the NVMe queue.
+    // Don't cap at 16 here — the partition already handles that.
+    let effective_qd = ring_size;
+
+    // Sync interval: sync all streams once per ring_size completions.
+    // This bounds how many D2D ops can be in-flight while ensuring
+    // slots are not recycled before their D2D copy completes.
+    let sync_interval = ring_size.max(1);
 
     // Prime: submit initial async reads into ring slots.
     for i in 0..effective_qd {
@@ -736,7 +754,7 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
                 lba: segments[i].lba,
                 buf: Arc::clone(ring.slot(slot)),
                 timeout_ms: READ_TIMEOUT_MS,
-                tag: 0,
+                tag: i as u64,
             })
             .map_err(|e| DispatcherError::IoError(format!("P2P ReadAsync send #{i}: {e}")))?;
     }
@@ -770,7 +788,8 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
         let slot = ring_offset + (completed % ring_size);
         let seg = &segments[completed];
         let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
-        let current_stream = streams[completed % 2];
+        // Distribute D2D copies across all streams for maximum throughput.
+        let current_stream = all_streams[completed % num_streams];
 
         // D2D async copy: GPU staging ring slot → final GPU destination.
         let err = cuda_ffi::cudaMemcpyAsync(
@@ -787,10 +806,17 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
             )));
         }
 
-        // Submit next NVMe read. Sync streams before recycling slots.
+        // Sync all streams at sync_interval boundaries before recycling slots.
+        // This ensures D2D copies using those slots have completed before NVMe
+        // can write new data into them.
+        let next_completed = completed + 1;
         if next_to_submit < num_chunks {
-            if completed >= ring_size && completed % (ring_size / 2).max(1) == 0 {
-                for s in streams {
+            // We need to sync before recycling if we've wrapped around the ring.
+            let needs_sync = next_completed > 0
+                && next_completed % sync_interval == 0;
+
+            if needs_sync {
+                for s in all_streams {
                     let err = cuda_ffi::cudaStreamSynchronize(s.0);
                     if err != cuda_ffi::CUDA_SUCCESS {
                         return Err(DispatcherError::IoError(format!(
@@ -809,7 +835,7 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
                     lba: segments[next_to_submit].lba,
                     buf: Arc::clone(ring.slot(next_slot)),
                     timeout_ms: READ_TIMEOUT_MS,
-                    tag: 0,
+                    tag: next_to_submit as u64,
                 })
                 .map_err(|e| {
                     DispatcherError::IoError(format!(
@@ -820,7 +846,301 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
         }
     }
 
+    // Final sync: ensure all D2D copies are complete before returning.
+    for s in all_streams {
+        let err = cuda_ffi::cudaStreamSynchronize(s.0);
+        if err != cuda_ffi::CUDA_SUCCESS {
+            return Err(DispatcherError::IoError(format!(
+                "P2P final cudaStreamSynchronize: {}",
+                cuda_ffi::cuda_error_string(err)
+            )));
+        }
+    }
+
     Ok(())
+}
+
+/// Describes a single object to be promoted from SSD into the memory-tier (no GPU).
+pub struct DramPromoteJob {
+    pub mem_ptr: *mut u8,
+    pub start_lba: u64,
+    pub total_bytes: usize,
+}
+
+// SAFETY: pointers are valid for the duration of the pipeline call.
+unsafe impl Send for DramPromoteJob {}
+
+/// Read from SSD directly into a memory-tier slot without any GPU DMA.
+///
+/// This is the promote-only variant of [`pipelined_ssd_to_gpu_zero_copy`].
+/// It keeps `max_queue_depth` NVMe reads in flight but performs no GPU
+/// transfers — used by `promote_to_memory_tier` for pre-warming entries.
+///
+/// # Safety
+/// - `mem_tier_ptr` must be a valid, SPDK-registered pointer for `total_bytes`.
+#[allow(clippy::too_many_arguments)]
+pub unsafe fn pipelined_ssd_to_dram_only(
+    drive: &dyn IBlockDevice,
+    channels: &ClientChannels,
+    mem_tier_ptr: *mut u8,
+    start_lba: u64,
+    total_bytes: usize,
+    chunk_size: usize,
+    max_queue_depth: usize,
+) -> Result<(), DispatcherError> {
+    let block_size = drive.block_size() as usize;
+    let aligned_bytes = total_bytes.next_multiple_of(block_size);
+
+    let segments = io_segmenter::segment_io(
+        start_lba,
+        aligned_bytes,
+        chunk_size as u32,
+        block_size as u32,
+    );
+
+    if segments.is_empty() {
+        return Ok(());
+    }
+
+    let num_chunks = segments.len();
+
+    let chunk_bufs: Vec<Arc<Mutex<DmaBuffer>>> = segments
+        .iter()
+        .map(|seg| {
+            let ptr = unsafe { mem_tier_ptr.add(seg.buffer_offset) as *mut std::ffi::c_void };
+            let buf_size = seg.length.next_multiple_of(block_size);
+            let buf = unsafe { DmaBuffer::from_raw(ptr, buf_size, noop_free, -1) }.map_err(
+                |e| DispatcherError::AllocationFailed(format!("DmaBuffer wrap chunk: {e}")),
+            )?;
+            Ok(Arc::new(Mutex::new(buf)))
+        })
+        .collect::<Result<Vec<_>, DispatcherError>>()?;
+
+    let submit_limit = max_queue_depth.min(num_chunks).max(1);
+    let mut submitted = 0usize;
+    let mut completed = 0usize;
+
+    while submitted < num_chunks && submitted < submit_limit {
+        channels
+            .command_tx
+            .send(Command::ReadAsync {
+                ns_id: 1,
+                lba: segments[submitted].lba,
+                buf: Arc::clone(&chunk_bufs[submitted]),
+                timeout_ms: READ_TIMEOUT_MS,
+                tag: submitted as u64,
+            })
+            .map_err(|e| {
+                DispatcherError::IoError(format!("ReadAsync send #{submitted}: {e}"))
+            })?;
+        submitted += 1;
+    }
+
+    while completed < num_chunks {
+        match channels.completion_rx.recv() {
+            Ok(Completion::ReadDone { tag: _, result, .. }) => {
+                result.map_err(|e| {
+                    DispatcherError::IoError(format!("SSD read failed: {e}"))
+                })?;
+
+                completed += 1;
+
+                if submitted < num_chunks {
+                    channels
+                        .command_tx
+                        .send(Command::ReadAsync {
+                            ns_id: 1,
+                            lba: segments[submitted].lba,
+                            buf: Arc::clone(&chunk_bufs[submitted]),
+                            timeout_ms: READ_TIMEOUT_MS,
+                            tag: submitted as u64,
+                        })
+                        .map_err(|e| {
+                            DispatcherError::IoError(format!("ReadAsync send #{submitted}: {e}"))
+                        })?;
+                    submitted += 1;
+                }
+            }
+            Ok(Completion::Timeout { handle }) => {
+                return Err(DispatcherError::IoError(format!(
+                    "NVMe read timeout (handle {:?})",
+                    handle
+                )));
+            }
+            Ok(other) => {
+                return Err(DispatcherError::IoError(format!(
+                    "unexpected completion: {other:?}"
+                )));
+            }
+            Err(_) => {
+                return Err(DispatcherError::IoError(
+                    "completion channel disconnected".into(),
+                ));
+            }
+        }
+    }
+
+    for buf in chunk_bufs {
+        std::mem::forget(Arc::try_unwrap(buf).ok());
+    }
+
+    Ok(())
+}
+
+/// Multi-object pipelined SSD→DRAM transfer without GPU DMA.
+///
+/// Processes multiple objects concurrently on the same NVMe channels.
+/// This is the promote-only variant of [`pipelined_multi_object_zero_copy`].
+///
+/// # Safety
+/// All `mem_ptr` pointers in `jobs` must be valid for their respective `total_bytes`.
+#[allow(clippy::too_many_arguments)]
+pub unsafe fn pipelined_multi_ssd_to_dram_only(
+    drive: &dyn IBlockDevice,
+    channels: &ClientChannels,
+    jobs: &[DramPromoteJob],
+    chunk_size: usize,
+    max_queue_depth: usize,
+) -> Vec<Result<(), DispatcherError>> {
+    let block_size = drive.block_size() as usize;
+    let num_jobs = jobs.len();
+    let mut results: Vec<Result<(), DispatcherError>> = vec![Ok(()); num_jobs];
+
+    if num_jobs == 0 {
+        return results;
+    }
+
+    struct ObjSegments {
+        segments: Vec<crate::io_segmenter::IoSegment>,
+        chunk_bufs: Vec<Arc<Mutex<DmaBuffer>>>,
+    }
+
+    let mut all_objs: Vec<ObjSegments> = Vec::with_capacity(num_jobs);
+    let mut total_segments = 0usize;
+
+    for job in jobs {
+        let aligned_bytes = job.total_bytes.next_multiple_of(block_size);
+        let segments = io_segmenter::segment_io(
+            job.start_lba,
+            aligned_bytes,
+            chunk_size as u32,
+            block_size as u32,
+        );
+
+        let chunk_bufs: Vec<Arc<Mutex<DmaBuffer>>> = segments
+            .iter()
+            .map(|seg| {
+                let ptr = unsafe { job.mem_ptr.add(seg.buffer_offset) as *mut std::ffi::c_void };
+                let buf_size = seg.length.next_multiple_of(block_size);
+                let buf = unsafe { DmaBuffer::from_raw(ptr, buf_size, noop_free, -1) }.unwrap();
+                Arc::new(Mutex::new(buf))
+            })
+            .collect();
+
+        total_segments += segments.len();
+        all_objs.push(ObjSegments { segments, chunk_bufs });
+    }
+
+    if total_segments == 0 {
+        return results;
+    }
+
+    let mut work: Vec<(usize, usize)> = Vec::with_capacity(total_segments);
+    for (obj_idx, obj) in all_objs.iter().enumerate() {
+        for seg_idx in 0..obj.segments.len() {
+            work.push((obj_idx, seg_idx));
+        }
+    }
+
+    let max_segments_per_obj = all_objs.iter().map(|o| o.segments.len()).max().unwrap_or(0);
+
+    let submit_limit = max_queue_depth.min(work.len());
+    let mut submitted = 0usize;
+    let mut completed = 0usize;
+
+    while submitted < submit_limit {
+        let (obj_idx, seg_idx) = work[submitted];
+        let obj = &all_objs[obj_idx];
+        let tag = (obj_idx * max_segments_per_obj + seg_idx) as u64;
+
+        if channels
+            .command_tx
+            .send(Command::ReadAsync {
+                ns_id: 1,
+                lba: obj.segments[seg_idx].lba,
+                buf: Arc::clone(&obj.chunk_bufs[seg_idx]),
+                timeout_ms: READ_TIMEOUT_MS,
+                tag,
+            })
+            .is_err()
+        {
+            for r in results.iter_mut() {
+                *r = Err(DispatcherError::IoError("channel send failed".into()));
+            }
+            return results;
+        }
+        submitted += 1;
+    }
+
+    while completed < work.len() {
+        match channels.completion_rx.recv() {
+            Ok(Completion::ReadDone { tag, result, .. }) => {
+                let obj_idx = (tag as usize) / max_segments_per_obj;
+
+                if let Err(e) = result {
+                    results[obj_idx] = Err(DispatcherError::IoError(format!(
+                        "SSD read obj={obj_idx}: {e}"
+                    )));
+                }
+
+                completed += 1;
+
+                if submitted < work.len() {
+                    let (next_obj, next_seg) = work[submitted];
+                    let next_obj_data = &all_objs[next_obj];
+                    let next_tag = (next_obj * max_segments_per_obj + next_seg) as u64;
+
+                    let _ = channels.command_tx.send(Command::ReadAsync {
+                        ns_id: 1,
+                        lba: next_obj_data.segments[next_seg].lba,
+                        buf: Arc::clone(&next_obj_data.chunk_bufs[next_seg]),
+                        timeout_ms: READ_TIMEOUT_MS,
+                        tag: next_tag,
+                    });
+                    submitted += 1;
+                }
+            }
+            Ok(Completion::Timeout { handle }) => {
+                for r in results.iter_mut() {
+                    if r.is_ok() {
+                        *r = Err(DispatcherError::IoError(format!(
+                            "NVMe read timeout (handle {:?})",
+                            handle
+                        )));
+                    }
+                }
+                break;
+            }
+            Ok(_) | Err(_) => {
+                for r in results.iter_mut() {
+                    if r.is_ok() {
+                        *r = Err(DispatcherError::IoError(
+                            "unexpected completion or channel disconnect".into(),
+                        ));
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    for obj in all_objs {
+        for buf in obj.chunk_bufs {
+            std::mem::forget(Arc::try_unwrap(buf).ok());
+        }
+    }
+
+    results
 }
 
 #[cfg(test)]

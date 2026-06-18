@@ -60,6 +60,14 @@ use spdk_env::ISPDKEnv;
 
 use crate::background::{BackgroundEvictor, EvictorConfig, ParallelBackgroundWriter, WriteJob};
 
+/// Maximum number of queue threads per drive for cold-path processing.
+/// With 4 drives, using 1 thread per drive gives each thread the full
+/// 16-slot partition (MAX_QD_PER_THREAD), maximizing per-drive queue depth.
+/// Using 2 threads per drive halves the effective QD to 8, which is still
+/// sufficient but adds thread coordination overhead.
+/// Set to 1 to maximize per-thread queue depth and minimize ring fragmentation.
+const MAX_QUEUES_PER_DRIVE: usize = 1;
+
 /// A pending store awaiting commit or cancel.
 ///
 /// Created by `prepare_store` and consumed by either `commit_store` (writes
@@ -396,6 +404,7 @@ impl DispatcherP2pComponent {
         let p2p_guard = self.p2p_ring.read();
         if let Some(ref p2p) = *p2p_guard {
             // SAFETY: ipc_handle.address is a valid GPU destination pointer.
+            // Single-threaded promote: use partition 0 of 1 to get all 16 slots.
             let partition = p2p_ring::ThreadPartition::new(0, 1);
             unsafe {
                 pipeline::pipelined_ssd_to_gpu_p2p(
@@ -965,9 +974,10 @@ impl IDispatcher for DispatcherP2pComponent {
                     match p2p_ring::P2pRing::new(&*gpu, chunk_size) {
                         Some(ring) => {
                             self.log_info(&format!(
-                                "dispatcher: P2P ring initialized ({} slots, {} KiB each)",
+                                "dispatcher: P2P ring initialized ({} slots, {} KiB each, {} streams)",
                                 p2p_ring::P2P_RING_SLOTS,
-                                chunk_size / 1024
+                                chunk_size / 1024,
+                                ring.streams().len(),
                             ));
                             *self.p2p_ring.write() = Some(ring);
                         }
@@ -1326,17 +1336,10 @@ impl IDispatcher for DispatcherP2pComponent {
             }
         }
 
-        // Promote cold entries in parallel — multiple queue threads per drive.
-        // Each thread gets its own NVMe queue pair and CUDA streams, enabling
-        // concurrent reads on the same physical drive.
+        // Promote cold entries in parallel — one queue thread per drive.
+        // With MAX_QUEUES_PER_DRIVE=1 and 4 drives, each thread gets the full
+        // 16-slot ring partition, maximizing per-drive NVMe queue depth.
         if !cold_entries.is_empty() {
-            const MAX_QUEUES_PER_DRIVE: usize = 2;
-
-            let _chunk_size = {
-                let ring_guard = self.pipeline_ring.read();
-                ring_guard.as_ref().map_or(131072, |r| r.chunk_size)
-            };
-
             let drives = self.data_drives.read();
             let num_drives = drives.len();
 
@@ -1376,10 +1379,12 @@ impl IDispatcher for DispatcherP2pComponent {
                     > = Vec::new();
 
                     let mut thread_counter = 0usize;
+                    // Total threads = one per non-empty drive (MAX_QUEUES_PER_DRIVE=1).
+                    // This gives each thread the maximum ring partition size (16 slots).
                     let total_threads = per_drive
                         .iter()
                         .filter(|e| !e.is_empty())
-                        .map(|e| MAX_QUEUES_PER_DRIVE.min(e.len()))
+                        .map(|_| MAX_QUEUES_PER_DRIVE)
                         .sum::<usize>()
                         .max(1);
 
@@ -1388,13 +1393,12 @@ impl IDispatcher for DispatcherP2pComponent {
                             continue;
                         }
 
-                        // Split this drive's entries across multiple queue threads.
+                        // With MAX_QUEUES_PER_DRIVE=1, one thread handles all entries
+                        // for this drive, getting the full ring partition.
                         let num_queues = MAX_QUEUES_PER_DRIVE.min(entry_indices.len());
                         let chunks: Vec<&[usize]> = entry_indices
                             .chunks(entry_indices.len().div_ceil(num_queues))
                             .collect();
-
-                        let _queue_depth = 64 / num_queues;
 
                         for chunk in chunks {
                             let dm_ref = &dm;
@@ -1416,40 +1420,26 @@ impl IDispatcher for DispatcherP2pComponent {
                                             "connect_client failed: {e}"
                                         ))
                                     });
-                                let streams_result = gpu_ref.create_stream().and_then(|a| {
-                                    gpu_ref.create_stream().map(|b| [a, b]).map_err(|e| {
-                                        let _ = gpu_ref.destroy_stream(a);
-                                        e
-                                    })
-                                });
 
                                 let mut batch_results: Vec<(usize, Result<(), DispatcherError>)> =
                                     Vec::with_capacity(indices.len());
 
-                                let (channels, streams) = match (channels, streams_result) {
-                                    (Ok(ch), Ok(st)) => (ch, st),
-                                    (Err(e), _) => {
+                                let channels = match channels {
+                                    Ok(ch) => ch,
+                                    Err(e) => {
                                         for &ci in &indices {
                                             batch_results.push((ci, Err(e.clone())));
-                                        }
-                                        return batch_results;
-                                    }
-                                    (_, Err(e)) => {
-                                        let err = DispatcherError::IoError(format!(
-                                            "create_stream failed: {e}"
-                                        ));
-                                        for &ci in &indices {
-                                            batch_results.push((ci, Err(err.clone())));
                                         }
                                         return batch_results;
                                     }
                                 };
 
                                 // P2P path: SSD → BAR1 ring → D2D → client GPU.
-                                // After P2P read, promote entry back to memory-tier for future hot lookups.
                                 let p2p = p2p_ref.expect(
                                     "dispatcher-p2p requires P2P ring; use full.yaml profile for DRAM path"
                                 );
+                                // With total_threads = num_non_empty_drives, each thread
+                                // gets a non-overlapping 16-slot partition of the 64-slot ring.
                                 let partition = p2p_ring::ThreadPartition::new(
                                     my_thread_idx,
                                     total_threads,
@@ -1490,9 +1480,6 @@ impl IDispatcher for DispatcherP2pComponent {
                                     })();
                                     batch_results.push((ci, res));
                                 }
-
-                                let _ = gpu_ref.destroy_stream(streams[0]);
-                                let _ = gpu_ref.destroy_stream(streams[1]);
 
                                 batch_results
                             });
@@ -1966,6 +1953,151 @@ impl IDispatcher for DispatcherP2pComponent {
         dm.touch(key).map_err(|_| DispatcherError::KeyNotFound(key))
     }
 
+    fn promote_to_memory_tier(&self, keys: &[CacheKey]) {
+        let Ok(()) = self.ensure_initialized() else {
+            return;
+        };
+
+        let Ok(dm) = self.dispatch_map.get() else {
+            return;
+        };
+        let Ok(mt) = self.memory_tier.get() else {
+            return;
+        };
+        let logger = self.logger.get().ok();
+
+        struct ColdEntry {
+            key: CacheKey,
+            offset: u64,
+            size: u32,
+        }
+
+        let mut cold_entries: Vec<ColdEntry> = Vec::new();
+
+        for &key in keys {
+            match dm.lookup(key) {
+                Ok(LookupResult::BlockDevice { offset }) => {
+                    let _ = dm.release_read(key);
+                    match dm.entry_size(key) {
+                        Ok(size) => cold_entries.push(ColdEntry { key, offset, size }),
+                        Err(_) => {}
+                    }
+                }
+                Ok(LookupResult::MemoryTier { .. }) => {
+                    let _ = dm.release_read(key);
+                    let _ = dm.touch(key);
+                    mt.touch(key);
+                }
+                Ok(LookupResult::Staging { .. }) => {
+                    let _ = dm.release_read(key);
+                    let _ = dm.touch(key);
+                }
+                _ => {}
+            }
+        }
+
+        if cold_entries.is_empty() {
+            return;
+        }
+
+        let drives = self.data_drives.read();
+        let num_drives = drives.len();
+
+        if num_drives == 0 {
+            for entry in &cold_entries {
+                if Self::evict_for_space(&dm, &mt, entry.size, entry.key).is_err() {
+                    continue;
+                }
+                match mt.insert(entry.key, entry.size) {
+                    Ok(mem_ptr) => {
+                        let _ = dm.remove(entry.key);
+                        let _ = dm.create_memory_tier_entry(entry.key, mem_ptr, entry.size);
+                        let _ = dm.convert_to_storage(entry.key, entry.offset);
+                        let _ = dm.release_write(entry.key);
+                    }
+                    Err(_) => {}
+                }
+            }
+            return;
+        }
+
+        let chunk_size = {
+            let ring_guard = self.pipeline_ring.read();
+            ring_guard.as_ref().map_or(131072, |r| r.chunk_size)
+        };
+
+        let mut per_drive: Vec<Vec<usize>> = vec![Vec::new(); num_drives];
+        for (i, entry) in cold_entries.iter().enumerate() {
+            let drive_idx = Self::drive_index(entry.key, num_drives);
+            per_drive[drive_idx].push(i);
+        }
+
+        std::thread::scope(|s| {
+            for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
+                if entry_indices.is_empty() {
+                    continue;
+                }
+
+                let drive = &drives[drive_idx];
+                let channels = match &drive.cached_channels {
+                    Some(ch) => ch,
+                    None => continue,
+                };
+                let block_dev = Arc::clone(&drive.block_dev_iface);
+                let dm = &dm;
+                let mt = &mt;
+                let cold = &cold_entries;
+                let logger = &logger;
+
+                s.spawn(move || {
+                    for &ci in entry_indices {
+                        let entry = &cold[ci];
+                        let block_size = block_dev.block_size() as u64;
+                        let start_lba = entry.offset / block_size;
+
+                        if Self::evict_for_space(dm, mt, entry.size, entry.key).is_err() {
+                            continue;
+                        }
+
+                        let mem_ptr = match mt.insert(entry.key, entry.size) {
+                            Ok(ptr) => ptr,
+                            Err(_) => continue,
+                        };
+
+                        // SAFETY: mem_ptr is a valid SPDK-registered memory-tier slot.
+                        let result = unsafe {
+                            pipeline::pipelined_ssd_to_dram_only(
+                                &*block_dev,
+                                channels,
+                                mem_ptr,
+                                start_lba,
+                                entry.size as usize,
+                                chunk_size,
+                                16,
+                            )
+                        };
+
+                        if let Err(e) = result {
+                            let _ = mt.remove(entry.key);
+                            if let Some(ref log) = logger {
+                                log.debug(&format!(
+                                    "promote_to_memory_tier: SSD read failed for key {}: {e}",
+                                    entry.key
+                                ));
+                            }
+                            continue;
+                        }
+
+                        let _ = dm.remove(entry.key);
+                        let _ = dm.create_memory_tier_entry(entry.key, mem_ptr, entry.size);
+                        let _ = dm.convert_to_storage(entry.key, entry.offset);
+                        let _ = dm.release_write(entry.key);
+                    }
+                });
+            }
+        });
+    }
+
     fn clear_memory_tier(&self) -> Result<usize, DispatcherError> {
         self.ensure_initialized()?;
 
@@ -2398,6 +2530,15 @@ mod tests {
             let inner = self.inner.lock().unwrap();
             if inner.entries.contains_key(&key) {
                 Ok(())
+            } else {
+                Err(DispatchMapError::KeyNotFound(key))
+            }
+        }
+
+        fn entry_size(&self, key: CacheKey) -> Result<u32, DispatchMapError> {
+            let inner = self.inner.lock().unwrap();
+            if inner.entries.contains_key(&key) {
+                Ok(4096)
             } else {
                 Err(DispatchMapError::KeyNotFound(key))
             }

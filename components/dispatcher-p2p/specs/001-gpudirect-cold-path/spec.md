@@ -85,8 +85,8 @@ The system's end-to-end performance (P2P path vs DRAM path) can be measured usin
 - **FR-001**: System MUST read evicted data from SSD directly into GPU staging buffers, bypassing host DRAM.
 - **FR-002**: System MUST copy data from staging buffers to the client's GPU destination.
 - **FR-003**: System MUST pre-allocate a fixed ring of 64 GPU staging buffers at initialization via `cudaMalloc` + GDRCopy BAR1 mapping (`gdr_pin_buffer` + `gdr_map`) + `spdk_mem_register`. Each slot is 128 KiB (MDTS). The ring is shared across all cold lookup threads.
-- **FR-004**: System MUST partition the staging ring for concurrent thread access using `ThreadPartition` (non-overlapping slot ranges, effective QD capped at 16 per thread to prevent NVMe qpair saturation).
-- **FR-005**: System MUST pipeline SSD reads with D2D GPU copies using FIFO completion ordering (no tags). Stream synchronization occurs only when recycling ring slots (not on every completion). No final stream sync — caller is responsible for ensuring completion.
+- **FR-004**: System MUST partition the staging ring for concurrent thread access using `ThreadPartition` (non-overlapping slot ranges, effective QD capped at 16 per thread to prevent NVMe qpair saturation). With `MAX_QUEUES_PER_DRIVE=1`, the ring is partitioned into one 16-slot region per drive, maximizing per-drive NVMe queue depth.
+- **FR-005**: System MUST pipeline SSD reads with D2D GPU copies using FIFO completion ordering. D2D copies are distributed round-robin across 4 CUDA streams for maximum PCIe overlap. Stream synchronization occurs once per ring partition wrap (sync interval = ring_size) to bound GPU queue depth and ensure slots are safe to reuse. A final stream sync is performed after all chunks complete.
 - **FR-006**: System MUST panic on first cold lookup if the P2P ring was not initialized (GDRCopy unavailable, GPU memory insufficient). Initialization logs a diagnostic warning but does not fail, allowing hot-only testing without P2P hardware. No DRAM fallback for cold reads — use the `full.yaml` profile (standard dispatcher) for DRAM-only deployments.
 - **FR-007**: The P2P ring is allocated once at initialization and is immutable for the component's lifetime. There is no runtime path selection.
 - **FR-008**: System MUST implement the same interface as the standard dispatcher, serving as a drop-in replacement.
@@ -94,11 +94,13 @@ The system's end-to-end performance (P2P path vs DRAM path) can be measured usin
 - **FR-010**: System MUST release all staging resources on shutdown with no leaks.
 - **FR-011**: System MUST handle read failures gracefully without corrupting ring state or affecting other in-flight operations.
 - **FR-012**: System MUST support end-to-end performance measurement using the existing pipelined benchmark tool.
+- **FR-013**: System MUST implement `promote_to_memory_tier(keys)` to asynchronously read cold entries from NVMe into the memory-tier without GPU involvement, enabling future lookups to take the hot DRAM→GPU path. This uses the `pipelined_ssd_to_dram_only` pipeline function (one thread per drive, no P2P ring involvement).
 
 ### Key Entities
 
-- **Staging Ring**: A fixed-size collection of GPU-resident buffer slots shared across cold lookup threads. Allocated once at initialization.
-- **Ring Slot**: An individual buffer within the staging ring. Holds one chunk during transfer. Recyclable after the copy to the client destination completes.
+- **Staging Ring**: A fixed-size collection of 64 GPU-resident buffer slots shared across cold lookup threads. Allocated once at initialization. Includes 4 pre-allocated CUDA streams for D2D copies.
+- **Ring Slot**: An individual buffer within the staging ring. Holds one chunk during transfer. Recyclable after stream sync confirms the D2D copy from that slot has completed.
+- **Thread Partition**: A non-overlapping slice of the ring assigned to one cold-path thread. With `MAX_QUEUES_PER_DRIVE=1` and 4 drives, each partition is 16 slots.
 - **Dispatch Map**: Routing table indicating whether a lookup key resides in DRAM (hot) or on SSD (cold).
 
 ## Success Criteria *(mandatory)*
