@@ -6,6 +6,11 @@ by comparing lookup latency before and after promotion. A successful
 promotion should make subsequent lookups significantly faster (memory-tier
 hit vs. SSD cold read).
 
+Additionally verifies data integrity: each object is populated with a
+unique per-key byte pattern. Both cold retrievals (from SSD) and warm
+retrievals (post-promote, from memory tier) are checked to ensure the
+data matches the original pattern byte-for-byte.
+
 Usage:
     python test-promote.py --server localhost:50051 --block-size 2M --num-objects 10
 """
@@ -13,6 +18,7 @@ Usage:
 import argparse
 import ctypes
 import os
+import random
 import statistics
 import sys
 import time
@@ -38,6 +44,7 @@ _libcudart.cudaMemcpy.restype = ctypes.c_int
 _libcudart.cudaMemcpy.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
 _libcudart.cudaDeviceSynchronize.restype = ctypes.c_int
 _CUDA_MEMCPY_H2D = 1
+_CUDA_MEMCPY_D2H = 2
 
 
 def cuda_alloc(size):
@@ -59,6 +66,21 @@ def cuda_free(dev_ptr):
 def gpu_write(dev_ptr, data):
     buf = (ctypes.c_ubyte * len(data)).from_buffer_copy(data)
     _libcudart.cudaMemcpy(dev_ptr, ctypes.byref(buf), len(data), _CUDA_MEMCPY_H2D)
+
+
+def gpu_read(dev_ptr, size):
+    """Copy bytes from GPU device memory back to host."""
+    buf = (ctypes.c_ubyte * size)()
+    err = _libcudart.cudaMemcpy(ctypes.byref(buf), dev_ptr, size, _CUDA_MEMCPY_D2H)
+    if err != 0:
+        raise RuntimeError(f"cudaMemcpy D2H failed: {err}")
+    return bytes(buf)
+
+
+def make_pattern(key, block_size):
+    """Create a deterministic byte pattern unique to a given key."""
+    rng = random.Random(key)
+    return bytes(rng.getrandbits(8) for _ in range(block_size))
 
 
 def parse_size(s):
@@ -118,9 +140,13 @@ def main():
         lookup_ptrs.append(ptr)
         lookup_handles.append(handle)
 
-    # Fill populate buffers
-    pattern = bytes(0xAB for _ in range(block_size))
-    for ptr in pop_ptrs:
+    keys = [base_key + i for i in range(num_objects)]
+
+    # Fill populate buffers with unique per-key patterns
+    patterns = []
+    for i, ptr in enumerate(pop_ptrs):
+        pattern = make_pattern(keys[i], block_size)
+        patterns.append(pattern)
         gpu_write(ptr, pattern)
 
     # Connect
@@ -132,8 +158,6 @@ def main():
         ],
     )
     stub = dispatcher_pb2_grpc.DispatcherStub(channel)
-
-    keys = [base_key + i for i in range(num_objects)]
 
     # --- Phase 1: Populate ---
     print("  Populating objects...")
@@ -165,11 +189,12 @@ def main():
     print("  Clearing memory tier...")
     stub.ClearMemoryTier(dispatcher_pb2.ClearMemoryTierRequest())
 
-    # --- Phase 4: Measure cold lookup latency ---
-    # Each cold lookup also promotes the entry, so use different keys per iteration
-    # to get a true cold measurement, OR just take the first iteration.
+    # --- Phase 4: Measure cold lookup latency + integrity ---
+    # Each cold lookup also promotes the entry, so clear before each iteration.
     print("  Measuring cold lookup latency (first access from SSD)...")
     cold_latencies = []
+    cold_integrity_pass = 0
+    cold_integrity_fail = 0
     for it in range(args.iterations):
         # Clear before each cold measurement to ensure entries are on SSD
         if it > 0:
@@ -193,12 +218,34 @@ def main():
         if failed == 0:
             cold_latencies.append((t1 - t0) * 1e6)
 
+        # Verify data integrity on last successful cold iteration
+        if it == args.iterations - 1 and failed == 0:
+            for i, k in enumerate(keys):
+                actual = gpu_read(lookup_ptrs[i], block_size)
+                expected = make_pattern(k, block_size)
+                if actual == expected:
+                    cold_integrity_pass += 1
+                else:
+                    cold_integrity_fail += 1
+                    first_bad = next(
+                        (j for j in range(len(actual)) if actual[j] != expected[j]),
+                        "?",
+                    )
+                    print(
+                        f"    INTEGRITY FAIL (cold): key={k}, "
+                        f"first mismatch at byte {first_bad}"
+                    )
+
     if not cold_latencies:
         print("  ERROR: all cold lookups failed")
         sys.exit(1)
 
     cold_avg = statistics.mean(cold_latencies)
     print(f"    Cold lookup avg: {cold_avg:.0f} us")
+    print(
+        f"    Cold integrity:  {cold_integrity_pass} pass, "
+        f"{cold_integrity_fail} fail"
+    )
 
     # --- Phase 5: Clear memory tier again (re-cold for promote test) ---
     print("  Clearing memory tier again...")
@@ -238,7 +285,9 @@ def main():
     _libcudart.cudaDeviceSynchronize()
 
     warm_latencies = []
-    for _ in range(args.iterations):
+    warm_integrity_pass = 0
+    warm_integrity_fail = 0
+    for it in range(args.iterations):
         req = dispatcher_pb2.BatchLookupRequest(entries=lookup_entries)
         t0 = time.perf_counter()
         resp = stub.Lookup(req)
@@ -248,12 +297,34 @@ def main():
         if failed == 0:
             warm_latencies.append((t1 - t0) * 1e6)
 
+        # Verify data integrity on last successful warm iteration
+        if it == args.iterations - 1 and failed == 0:
+            for i, k in enumerate(keys):
+                actual = gpu_read(lookup_ptrs[i], block_size)
+                expected = make_pattern(k, block_size)
+                if actual == expected:
+                    warm_integrity_pass += 1
+                else:
+                    warm_integrity_fail += 1
+                    first_bad = next(
+                        (j for j in range(len(actual)) if actual[j] != expected[j]),
+                        "?",
+                    )
+                    print(
+                        f"    INTEGRITY FAIL (warm): key={k}, "
+                        f"first mismatch at byte {first_bad}"
+                    )
+
     if not warm_latencies:
         print("  ERROR: all warm lookups failed")
         sys.exit(1)
 
     warm_avg = statistics.mean(warm_latencies)
     print(f"    Warm lookup avg: {warm_avg:.0f} us")
+    print(
+        f"    Warm integrity:  {warm_integrity_pass} pass, "
+        f"{warm_integrity_fail} fail"
+    )
 
     # --- Phase 9: Results ---
     print()
@@ -267,6 +338,11 @@ def main():
     print(f"  Ratio (warm/cold): {ratio:.3f}")
     print(f"  Speedup:           {speedup:.1f}x")
     print()
+    print("  Data Integrity:")
+    print(f"    Cold path: {cold_integrity_pass}/{num_objects} correct")
+    print(f"    Warm path: {warm_integrity_pass}/{num_objects} correct")
+    integrity_ok = (cold_integrity_fail == 0 and warm_integrity_fail == 0)
+    print()
 
     # --- Phase 10: Cleanup ---
     print("  Cleaning up...")
@@ -279,8 +355,13 @@ def main():
     channel.close()
 
     # --- Verdict ---
-    if ratio < args.threshold:
+    if not integrity_ok:
+        print(f"  FAIL: data integrity errors detected")
+        print(f"        Cold: {cold_integrity_fail} corrupted, Warm: {warm_integrity_fail} corrupted")
+        sys.exit(1)
+    elif ratio < args.threshold:
         print(f"  PASS: promotion reduced lookup latency (ratio={ratio:.3f} < {args.threshold})")
+        print(f"        Data integrity verified for both hot and cold paths.")
         sys.exit(0)
     else:
         print(f"  FAIL: warm lookup not fast enough (ratio={ratio:.3f} >= {args.threshold})")
