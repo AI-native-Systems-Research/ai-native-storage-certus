@@ -1,61 +1,158 @@
 {
-  "generated": "2026-05-05T00:00:00Z",
-  "project": "SPDK Env",
-  "summary": {
-    "specs_analyzed": 2,
-    "requirements_checked": 15,
-    "aligned": 11,
-    "drifted": 2,
-    "not_implemented": 2,
-    "unspecced_features": 0
+  "generated": "2026-06-18",
+  "component": "spdk-env",
+  "specs_analyzed": 2,
+  "requirements": {
+    "total": 18,
+    "aligned": 14,
+    "drifted": 3,
+    "not_implemented": 1
   },
-  "specs": [
+  "unspecced_code": 2,
+  "findings": [
     {
-      "id": "001-spdk-vfio-env",
-      "title": "SPDK VFIO Env (template)",
-      "aligned": [],
-      "drifted": [],
-      "not_implemented": []
+      "req_id": "FR-001",
+      "spec": "002-spdk-env-vfio-init",
+      "status": "aligned",
+      "description": "Rust lib crate using define_component! and define_interface! macros from component-framework",
+      "location": "src/lib.rs:30-67",
+      "notes": "Both macros used correctly to define SPDKEnvComponent and ISPDKEnv"
     },
     {
-      "id": "002-spdk-env-vfio-init",
-      "title": "SPDK/DPDK Environment Component with VFIO Device Iteration",
-      "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006",
-        "FR-008", "FR-009", "FR-011", "FR-012", "FR-013", "FR-014", "FR-015"
-      ],
-      "drifted": [
-        {
-          "requirement": "FR-007",
-          "spec_text": "MUST use framework's logging actor via receptacle; init() MUST fail if logger not connected",
-          "actual": "Uses eprintln! with no logger receptacle defined in component",
-          "location": "src/lib.rs",
-          "severity": "high"
-        },
-        {
-          "requirement": "FR-010",
-          "spec_text": "Test example must wire logger before calling init()",
-          "actual": "Example exists but cannot wire logger because receptacle doesn't exist",
-          "location": "examples/spdk-env-example.rs",
-          "severity": "low"
-        }
-      ],
-      "not_implemented": [
-        {
-          "requirement": "FR-007",
-          "spec_text": "Logger receptacle definition",
-          "actual": "No receptacles block in define_component!",
-          "severity": "high"
-        },
-        {
-          "requirement": "FR-010",
-          "spec_text": "Logger wiring in example",
-          "actual": "Blocked by missing logger receptacle",
-          "severity": "low"
-        }
-      ]
+      "req_id": "FR-002",
+      "spec": "002-spdk-env-vfio-init",
+      "status": "aligned",
+      "description": "ISPDKEnv interface with init(), devices(), device_count(), is_initialized()",
+      "location": "src/lib.rs:34-56",
+      "notes": "All specified methods present plus fini() (unspecced addition)"
+    },
+    {
+      "req_id": "FR-003",
+      "spec": "002-spdk-env-vfio-init",
+      "status": "aligned",
+      "description": "SPDK/DPDK environments initialized in init(), not during construction",
+      "location": "src/env.rs:17-34",
+      "notes": "Constructor sets empty state; init() performs all initialization"
+    },
+    {
+      "req_id": "FR-004",
+      "spec": "002-spdk-env-vfio-init",
+      "status": "aligned",
+      "description": "Verifies /dev/vfio and vfio-pci kernel module before initialization",
+      "location": "src/checks.rs:16-38",
+      "notes": "Checks both /dev/vfio directory and /sys/bus/pci/drivers/vfio-pci"
+    },
+    {
+      "req_id": "FR-005",
+      "spec": "002-spdk-env-vfio-init",
+      "status": "aligned",
+      "description": "Checks R/W permissions on /dev/vfio, /dev/vfio/vfio, and IOMMU group files with specific error messages",
+      "location": "src/checks.rs:44-148",
+      "notes": "Reports specific path, uid, gid, mode, and remediation hints (udev rules, group membership)"
+    },
+    {
+      "req_id": "FR-006",
+      "spec": "002-spdk-env-vfio-init",
+      "status": "aligned",
+      "description": "Enumerates NVMe devices via spdk_pci_enumerate with NVMe PCI driver; provides BDF, vendor/device IDs, class ID, NUMA node, device type; callback returns non-zero to avoid attaching",
+      "location": "src/env.rs:113-185",
+      "notes": "Callback returns 1 (non-zero) preserving devices for later spdk_nvme_probe"
+    },
+    {
+      "req_id": "FR-007",
+      "spec": "002-spdk-env-vfio-init",
+      "status": "drifted",
+      "description": "System uses eprintln! for diagnostics; no logger receptacle; component has no receptacles",
+      "location": "src/env.rs:43-55",
+      "notes": "eprintln! usage and absence of receptacles are aligned. However the code adds an unspecced fini() method to the interface, which is not covered by this or any other requirement."
+    },
+    {
+      "req_id": "FR-008",
+      "spec": "002-spdk-env-vfio-init",
+      "status": "aligned",
+      "description": "Operates without root when /dev/vfio has appropriate user-level access",
+      "location": "src/checks.rs:78-148",
+      "notes": "Permission checks use getuid/getegid for user-level verification"
+    },
+    {
+      "req_id": "FR-009",
+      "spec": "002-spdk-env-vfio-init",
+      "status": "aligned",
+      "description": "Returns empty device list (not an error) when no devices are bound",
+      "location": "src/env.rs:115",
+      "notes": "enumerate_devices returns Ok(Vec) which may be empty"
+    },
+    {
+      "req_id": "FR-010",
+      "spec": "002-spdk-env-vfio-init",
+      "status": "drifted",
+      "description": "Test example (main.rs binary) that instantiates component, wires logger, calls init(), queries ISPDKEnv, prints devices",
+      "location": "examples/spdk-env-example.rs",
+      "notes": "Example exists as Cargo example (not main.rs binary target). Does not wire logger (consistent with FR-007 stating no logger receptacle exists, but contradicts this requirement's wording). Spec has internal inconsistency."
+    },
+    {
+      "req_id": "FR-011",
+      "spec": "002-spdk-env-vfio-init",
+      "status": "aligned",
+      "description": "Plain procedural component (not an actor); does not spawn threads or manage message queues",
+      "location": "src/lib.rs",
+      "notes": "No actor infrastructure, no thread spawning, no message queues"
+    },
+    {
+      "req_id": "FR-012",
+      "spec": "002-spdk-env-vfio-init",
+      "status": "aligned",
+      "description": "Properly clean up SPDK/DPDK resources when component is dropped",
+      "location": "src/lib.rs:100-107",
+      "notes": "Drop impl calls do_fini() which calls spdk_env_fini() and clears singleton flag"
+    },
+    {
+      "req_id": "FR-013",
+      "spec": "002-spdk-env-vfio-init",
+      "status": "aligned",
+      "description": "Checks hugepage availability and reports clear error if not configured",
+      "location": "src/checks.rs:154-175",
+      "notes": "Checks both 2MB and 1GB hugepage pools; error includes allocation command hint"
+    },
+    {
+      "req_id": "FR-014",
+      "spec": "002-spdk-env-vfio-init",
+      "status": "aligned",
+      "description": "Singleton semantics via process-global AtomicBool; second init() returns error; flag cleared on failure and on Drop",
+      "location": "src/env.rs:11,19-33,188-200",
+      "notes": "SPDK_ENV_ACTIVE uses compare_exchange; cleared in error path (line 33) and in do_fini() (line 199)"
+    },
+    {
+      "req_id": "FR-015",
+      "spec": "002-spdk-env-vfio-init",
+      "status": "not_implemented",
+      "description": "Skip devices that cannot be probed (in use by another process), log warning for each, return only successfully probed devices",
+      "location": null,
+      "notes": "enumerate_devices() does not attempt to probe/claim devices (returns 1 from callback to avoid attaching). There is no mechanism to detect if a device is in use by another process. All visible devices are returned unconditionally."
+    },
+    {
+      "req_id": "FR-016",
+      "spec": "002-spdk-env-vfio-init",
+      "status": "aligned",
+      "description": "ISPDKEnv provides is_initialized() -> bool",
+      "location": "src/lib.rs:54,95-97",
+      "notes": "Method defined in interface and implemented"
+    },
+    {
+      "req_id": "FR-017",
+      "spec": "002-spdk-env-vfio-init",
+      "status": "aligned",
+      "description": "ISPDKEnv provides device_count() -> usize",
+      "location": "src/lib.rs:51,88-93",
+      "notes": "Method defined in interface and implemented without cloning the device vector"
+    },
+    {
+      "req_id": "FR-018",
+      "spec": "002-spdk-env-vfio-init",
+      "status": "drifted",
+      "description": "ISPDKEnv defined in BOTH spdk-env crate and shared interfaces crate; both must stay in sync",
+      "location": "src/lib.rs:34-56 and components/interfaces/src/ispdk_env.rs:1-28",
+      "notes": "Definitions are currently in sync (same 5 methods) but no compile-time enforcement exists. A change in one will not break the other until a downstream consumer triggers a type mismatch."
     }
-  ],
-  "unspecced": [],
-  "conflicts": []
+  ]
 }

@@ -232,10 +232,14 @@ by a verification read-back.
   tracks state in an internal `HashSet<usize>`; unpin releases
   tracking. `pin_memory` is idempotent (no-op if already pinned), and
   `unpin_memory` returns an error if the pointer is not in the pinned
-  set. As an optimization, `pin_memory` MAY skip re-verification
-  (via `cudaPointerGetAttributes`) for pointers already present in
-  the verified set, since verification is a prerequisite in the
-  standard IPC workflow.
+  set. For IPC-imported memory, `unpin_memory` removes internal
+  tracking only — CUDA unregistration is not needed since the memory
+  was registered in the originating process. For locally-pinned memory,
+  full CUDA unregistration is performed. As an optimization,
+  `pin_memory` MAY skip re-verification (via
+  `cudaPointerGetAttributes`) for pointers already present in the
+  verified set, since verification is a prerequisite in the standard
+  IPC workflow.
 - **FR-006**: Component MUST create a `GpuDmaBuffer` (as defined in
   `interfaces`) from a valid, verified, and pinned IPC handle. The
   `GpuDmaBuffer` wraps the GPU device pointer with custom free

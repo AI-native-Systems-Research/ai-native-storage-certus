@@ -105,15 +105,15 @@ A developer integrates the SPDKEnv component with other Certus components via th
 - **FR-007**: System uses `eprintln!` for diagnostic output (initialization progress, warnings). There is no logger receptacle; the component has no receptacles.
 - **FR-008**: System MUST operate without root permissions when /dev/vfio directories have appropriate user-level access configured.
 - **FR-009**: System MUST return an empty device list (not an error) when VFIO is properly configured but no devices are bound.
-- **FR-010**: System MUST include a test example (main.rs binary) that instantiates the component, wires the logger, calls `init()`, queries ISPDKEnv, and prints discovered devices.
+- **FR-010**: System MUST include a test example (main.rs binary) that instantiates the component, calls `init()`, queries ISPDKEnv, and prints discovered devices. (No logger wiring is required — the component uses `eprintln!` for diagnostics per FR-007.)
 - **FR-011**: System MUST be a plain procedural component (not an actor) that does not spawn its own threads or manage message queues.
 - **FR-012**: System MUST properly clean up SPDK/DPDK resources when the component is dropped.
 - **FR-013**: System MUST check for hugepage availability (required by DPDK) and report a clear error if hugepages are not configured.
 - **FR-014**: System MUST enforce singleton semantics via a process-global `AtomicBool` — only one SPDK environment instance may be active per process. A second call to `init()` on a new instance MUST return an error. The flag is cleared on failure (allowing retry) and on Drop.
-- **FR-015**: System MUST skip devices that cannot be probed (e.g., in use by another process), log a warning for each skipped device, and return only successfully probed devices.
+- **FR-015**: System MUST skip devices that cannot be probed (e.g., in use by another process), log a warning for each skipped device, and return only successfully probed devices. (Future: not yet implemented. Currently all matching devices are claimed; user must ensure exclusive access via system configuration.)
 - **FR-016**: The `ISPDKEnv` interface MUST provide `is_initialized() -> bool` to check whether the environment has been successfully initialized.
 - **FR-017**: The `ISPDKEnv` interface MUST provide `device_count() -> usize` to query the number of discovered devices without cloning the device vector.
-- **FR-018**: The `ISPDKEnv` interface is defined in BOTH the `spdk-env` crate (locally via `define_interface!`) AND the shared `interfaces` crate — both definitions must stay in sync.
+- **FR-018**: The `ISPDKEnv` interface is defined in the shared `interfaces` crate. The `spdk-env` crate imports and implements this interface rather than redefining it locally.
 
 ### Key Entities
 
@@ -140,5 +140,5 @@ A developer integrates the SPDKEnv component with other Certus components via th
 - Hugepage configuration is performed externally (e.g., via kernel boot parameters or sysctl).
 - The component links against SPDK/DPDK C libraries via Rust FFI (bindgen or manual bindings).
 - The component-framework crate is available as a workspace dependency.
-- The logging receptacle pattern follows the framework convention: the caller constructs a log actor and connects it to the component's receptacle before calling `init()`.
+- The component uses `eprintln!` for all diagnostic output. There is no logging receptacle; the component has no receptacles.
 - SPDK environment initialization is process-global; the component enforces this via singleton semantics.
