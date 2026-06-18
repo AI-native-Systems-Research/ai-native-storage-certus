@@ -146,17 +146,29 @@ Three layers:
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-Per-method breakdown:
+#### Manager
 
-| `native_manager.py` calls | `CertusEngine` method | Rust component work | Status |
+| API function | Class | CertusEngine call | Certus component function |
 |---|---|---|---|
-| `lookup(keys)` | `batch_check(keys)` | `dispatcher.check()` per key | **Done** |
-| `prepare_store(keys)` | `prepare_store(keys)` | Filters cached keys, evicts LRU via `dispatcher.remove()` when over watermark, returns `None` if can't free enough | **Done** |
-| `complete_store(keys, ok)` | `complete_store(keys, ok)` | On failure: `dispatcher.remove()` per key. On success: no-op (entry already readable after `populate`). | **Done** |
-| `touch(keys)` | `touch(keys)` | Dispatch-map: update threshold LRU ordering | **Done** |
-| `prepare_load(keys)` | `prepare_load(keys)` | Dispatch-map: `lookup()` (increments `read_ref`, blocks eviction, returns storage offset) | **Done** |
-| `complete_load(keys)` | `complete_load(keys)` | Dispatch-map: `release_read()` (decrements `read_ref`) | **Done** |
-| `shutdown()` | `shutdown()` | `dispatcher.shutdown()` + `gpu.shutdown()` | **Done** |
+| `lookup(keys)` | `NativeCertusOffloadingManager` | `batch_check(int_keys)` | `dispatcher.check(key)` per key |
+| `prepare_store(keys)` | `NativeCertusOffloadingManager` | `prepare_store(int_keys)` | Filters cached keys via `dispatcher.check(key)`, evicts LRU via `dispatch_map.oldest_keys()` + `dispatcher.remove(key)` when over watermark, returns `None` if can't free enough |
+| `complete_store(keys, success)` | `NativeCertusOffloadingManager` | `complete_store(int_keys, success)` | On failure: `dispatcher.remove(key)` per key. On success: no-op (entry already readable after `populate`). |
+| `prepare_load(keys)` | `NativeCertusOffloadingManager` | `prepare_load(int_keys)` | `dispatch_map.lookup(key)` per key (increments `read_ref`, blocks eviction, returns storage offset) |
+| `complete_load(keys)` | `NativeCertusOffloadingManager` | `complete_load(int_keys)` | `dispatch_map.release_read(key)` per key (decrements `read_ref`) |
+| `touch(keys)` | `NativeCertusOffloadingManager` | `touch(int_keys)` | `dispatcher.touch(key)` per key — updates LRU ordering |
+| `take_events()` | `NativeCertusOffloadingManager` | — | — (Python-side event buffer) |
+| `shutdown()` | `NativeCertusOffloadingManager` | `shutdown()` | `dispatcher.shutdown()` + `gpu_services.shutdown()` |
+
+#### Handler
+
+| API function | Class | CertusEngine call | Certus component function |
+|---|---|---|---|
+| `transfer_async(job_id, spec)` | `GpuToCertusHandler` | `store_async(job_id, gpu_block_ids, keys)` | `dispatcher.populate(key, ipc_handle)` per block |
+| `transfer_async(job_id, spec)` | `CertusToGpuHandler` | `load_async(job_id, gpu_block_ids, keys)` | `dispatcher.lookup(key, ipc_handle)` per block |
+| `get_finished()` | `GpuToCertusHandler` | `poll_completions()` | Jobs map drain (completed flag check) |
+| `get_finished()` | `CertusToGpuHandler` | `poll_completions()` | Jobs map drain (completed flag check) |
+| `wait(job_ids)` | `GpuToCertusHandler` | `wait_job(jid)` | Spin-wait on job completed flag |
+| `wait(job_ids)` | `CertusToGpuHandler` | `wait_job(jid)` | Spin-wait on job completed flag |
 
 ### How eviction works
 
