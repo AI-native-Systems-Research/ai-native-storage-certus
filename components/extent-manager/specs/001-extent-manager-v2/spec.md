@@ -324,7 +324,7 @@ again to verify the old slot is now reusable.
   most two actual checkpoint I/O operations execute regardless of
   how many callers request one.
 - **FR-016**: A background thread MUST call `checkpoint()` at a
-  configurable interval (default 300 seconds / 5 minutes).
+  configurable interval (default 30 seconds).
 - **FR-017**: Recovery MUST attempt the active checkpoint copy first;
   if it is unreadable (CRC failure, media error), recovery MUST fall
   back to the inactive copy.
@@ -354,7 +354,9 @@ again to verify the old slot is now reusable.
   (`parking_lot::RwLock`). Hot-path operations MUST only acquire the
   target region's lock.
 - **FR-024**: The component MUST be Send + Sync and safe for
-  concurrent use from multiple threads.
+  concurrent use from multiple threads. This is a recommended practice
+  but not enforced at compile time; the types compose correctly for
+  Send+Sync.
 
 #### Crash Safety
 
@@ -374,13 +376,16 @@ again to verify the old slot is now reusable.
 - **FR-029**: The component MUST provide a `set_dma_alloc(alloc)` method
   for overriding the DMA memory allocator.
 - **FR-030**: The component MAY support a `volatile_write_cache` feature
-  gate that controls whether flush calls are issued to the metadata device.
+  gate that controls whether `BlockDeviceClient::flush()` calls are issued
+  to the metadata device. (Future: not yet implemented; the feature gate
+  is reserved for future use).
 
 #### Capacity Reporting
 
 - **FR-031**: The component MUST provide a `used_bytes()` method on
   IExtentManager that returns the total number of bytes currently
-  allocated (sum of all published extent sizes).
+  allocated at slab-level buddy allocation granularity (i.e., the sum
+  of slab capacities for all allocated slabs, not per-extent byte sums).
 - **FR-032**: The component MUST provide a `capacity_bytes()` method on
   IExtentManager that returns the total data device capacity in bytes
   as configured during `format()`.
@@ -396,7 +401,7 @@ again to verify the old slot is now reusable.
 #### Test Infrastructure
 
 - **FR-034**: The component MUST provide a fault injection test
-  infrastructure behind a `test-only` feature gate. This infrastructure
+  infrastructure behind a `testing` feature gate. This infrastructure
   allows tests to simulate I/O failures on the metadata block device
   (e.g., injecting errors into checkpoint writes or superblock reads)
   to verify crash-safety and recovery behavior under failure conditions.
@@ -422,7 +427,7 @@ again to verify the old slot is now reusable.
 - **Superblock**: On-disk header at LBA 0 of the metadata device
   (4096 bytes). Contains format parameters, active checkpoint
   indicator, checkpoint region layout, sequence number, and CRC32.
-  Magic: `0x4345_5254_5553_5635` ("CERTUSV5"), version 5.
+  Magic: `0x4345_5254_5553_5634` ("CERTUSV4"), version 6.
 - **Checkpoint Region**: Contiguous CRC32-protected blob on the
   metadata device. Two copies alternate; the superblock records which
   is active. Encodes the slab table and key vectors for all regions.
@@ -473,8 +478,8 @@ Where:
 
 | Offset | Size | Field |
 |--------|------|-------|
-| 0 | 8 | magic (`0x4345_5254_5553_5635` = "CERTUSV5") |
-| 8 | 4 | version (5) |
+| 0 | 8 | magic (`0x4345_5254_5553_5634` = "CERTUSV4") |
+| 8 | 4 | version (6) |
 | 12 | 8 | data_disk_size |
 | 20 | 4 | sector_size |
 | 24 | 8 | slab_size |
@@ -487,8 +492,9 @@ Where:
 | 64 | 8 | checkpoint_region_size |
 | 72 | 8 | instance_id |
 | 80 | 4 | metadata_disk_ns_id |
-| 84 | 4 | CRC32 of bytes 0-83 |
-| 88 | 4008 | zero padding |
+| 84 | 8 | data_start_offset |
+| 92 | 4 | CRC32 of bytes 0-91 |
+| 96 | 4000 | zero padding |
 
 ### Checkpoint Region Header (16 bytes)
 
