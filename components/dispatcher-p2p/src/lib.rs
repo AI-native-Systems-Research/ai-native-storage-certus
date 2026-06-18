@@ -1497,7 +1497,7 @@ impl IDispatcher for DispatcherP2pComponent {
                         for chunk in chunks {
                             let dm_ref = &dm;
                             let _mt_ref = &mt;
-                            let gpu_ref = &gpu;
+                            let _gpu_ref = &gpu;
                             let drives_ref = &drives;
                             let cold_ref = &cold_entries;
                             let indices = chunk.to_vec();
@@ -1539,30 +1539,35 @@ impl IDispatcher for DispatcherP2pComponent {
                                     total_threads,
                                 );
                                 let mut backfill_keys: Vec<(CacheKey, usize)> = Vec::new();
-                                for &ci in &indices {
+
+                                // Build multi-object job list for interleaved P2P pipeline.
+                                let jobs: Vec<pipeline::P2pColdJob> = indices.iter().map(|&ci| {
                                     let entry = &cold_ref[ci];
-                                    let ipc_size = entry.ipc_handle_size;
+                                    pipeline::P2pColdJob {
+                                        gpu_dst: entry.ipc_handle_addr as *mut std::ffi::c_void,
+                                        start_lba: entry.offset / block_size as u64,
+                                        total_bytes: entry.ipc_handle_size as usize,
+                                    }
+                                }).collect();
 
-                                    let res = (|| -> Result<(), DispatcherError> {
-                                        unsafe {
-                                            pipeline::pipelined_ssd_to_gpu_p2p(
-                                                &*drive.block_dev_iface,
-                                                &**gpu_ref,
-                                                p2p,
-                                                &partition,
-                                                &channels,
-                                                entry.ipc_handle_addr as *mut std::ffi::c_void,
-                                                entry.offset / block_size as u64,
-                                                ipc_size as usize,
-                                            )?;
-                                        }
+                                let pipeline_results = unsafe {
+                                    pipeline::pipelined_multi_object_p2p(
+                                        &*drive.block_dev_iface,
+                                        p2p,
+                                        &partition,
+                                        &channels,
+                                        &jobs,
+                                    )
+                                };
 
-                                        // Client served. Release write lock, leave as BlockDevice.
+                                for (job_idx, result) in pipeline_results.into_iter().enumerate() {
+                                    let ci = indices[job_idx];
+                                    let entry = &cold_ref[ci];
+                                    if result.is_ok() {
                                         let _ = dm_ref.release_write(entry.key);
                                         backfill_keys.push((entry.key, drive_idx));
-                                        Ok(())
-                                    })();
-                                    batch_results.push((ci, res));
+                                    }
+                                    batch_results.push((ci, result));
                                 }
 
                                 (batch_results, backfill_keys)
