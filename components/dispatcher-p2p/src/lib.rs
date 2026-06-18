@@ -1080,6 +1080,9 @@ impl IDispatcher for DispatcherP2pComponent {
                 let channels = drive.connect_client().expect("backfill connect_client");
                 let block_size = drive.block_size() as u64;
                 move |job: DramBackfillJob| {
+                    // Throttle: avoid competing with active P2P cold reads for NVMe bandwidth.
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+
                     let start_lba = {
                         let lookup = dm.lookup(job.key);
                         match lookup {
