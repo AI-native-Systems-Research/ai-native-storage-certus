@@ -58,7 +58,10 @@ use interfaces::{
 use component_core::binding::bind;
 use spdk_env::ISPDKEnv;
 
-use crate::background::{BackgroundEvictor, EvictorConfig, ParallelBackgroundWriter, WriteJob};
+use crate::background::{
+    BackgroundEvictor, DramBackfillJob, DramBackfillWorker, EvictorConfig,
+    ParallelBackgroundWriter, WriteJob,
+};
 
 /// Maximum number of queue threads per drive for cold-path processing.
 /// With 4 drives, using 1 thread per drive gives each thread the full
@@ -144,6 +147,7 @@ define_component! {
             initialized: AtomicBool,
             bg_writer: Mutex<Option<ParallelBackgroundWriter>>,
             bg_evictor: Mutex<Option<BackgroundEvictor>>,
+            bg_backfill: Mutex<Option<DramBackfillWorker>>,
             data_drives: RwLock<Vec<DataDrive>>,
             pending_writes: Mutex<HashMap<CacheKey, PendingWrite>>,
             pipeline_ring: RwLock<Option<pipeline::PipelineRing>>,
@@ -352,18 +356,14 @@ impl DispatcherP2pComponent {
     ) -> Result<(), DispatcherError> {
         let total_bytes = ipc_handle.size as usize;
 
-        // Evict if needed to make space.
-        Self::evict_for_space(dm, mt, ipc_handle.size, key)?;
-
-        // Insert into memory-tier.
-        let mem_ptr = mt.insert(key, ipc_handle.size).map_err(|e| {
-            DispatcherError::AllocationFailed(format!("promote insert failed: {e}"))
-        })?;
-
         // Read from SSD into memory-tier using pipelined reader.
         let drives = self.data_drives.read();
         if drives.is_empty() {
             // No hardware: just copy zeros to GPU (test/staging-only mode).
+            Self::evict_for_space(dm, mt, ipc_handle.size, key)?;
+            let mem_ptr = mt.insert(key, ipc_handle.size).map_err(|e| {
+                DispatcherError::AllocationFailed(format!("promote insert failed: {e}"))
+            })?;
             let aligned = total_bytes.next_multiple_of(4096).max(4096);
             let temp_buf = unsafe {
                 DmaBuffer::from_raw(mem_ptr as *mut std::ffi::c_void, aligned, noop_free, -1)
@@ -375,7 +375,6 @@ impl DispatcherP2pComponent {
                 total_bytes,
             );
             std::mem::forget(temp_buf);
-            // Register promoted entry in dispatch-map.
             let _ = dm.create_memory_tier_entry(key, mem_ptr, ipc_handle.size);
             let _ = dm.release_write(key);
             return result.map_err(|e| {
@@ -389,7 +388,6 @@ impl DispatcherP2pComponent {
         let start_lba = offset / block_size as u64;
         let block_dev = Arc::clone(&drive.block_dev_iface);
 
-        // Use cached channels if available, otherwise create new ones.
         let channels = match &drive.cached_channels {
             Some(ch) => ch,
             None => {
@@ -403,8 +401,6 @@ impl DispatcherP2pComponent {
         // Choose P2P path (NVMe → GPU BAR1 → D2D) or DRAM path (NVMe → DRAM → H2D).
         let p2p_guard = self.p2p_ring.read();
         if let Some(ref p2p) = *p2p_guard {
-            // SAFETY: ipc_handle.address is a valid GPU destination pointer.
-            // Single-threaded promote: use partition 0 of 1 to get all 16 slots.
             let partition = p2p_ring::ThreadPartition::new(0, 1);
             unsafe {
                 pipeline::pipelined_ssd_to_gpu_p2p(
@@ -419,10 +415,25 @@ impl DispatcherP2pComponent {
                 )?;
             }
             drop(p2p_guard);
+            drop(drives);
+
+            // Client is served. Release write lock — key stays as BlockDevice.
+            // Enqueue async DRAM backfill so future hot lookups work.
+            let _ = dm.release_write(key);
+            if let Some(ref backfill) = *self.bg_backfill.lock().unwrap() {
+                let _ = backfill.enqueue(DramBackfillJob {
+                    key,
+                    drive_index: idx,
+                });
+            }
         } else {
             drop(p2p_guard);
-            // Fallback: DRAM zero-copy pipelined reader.
-            // SAFETY: mem_ptr is a valid, CUDA-pinned, SPDK-registered memory-tier slot.
+            // DRAM path: allocate memory-tier slot, read NVMe→DRAM, then H2D to GPU.
+            Self::evict_for_space(dm, mt, ipc_handle.size, key)?;
+            let mem_ptr = mt.insert(key, ipc_handle.size).map_err(|e| {
+                DispatcherError::AllocationFailed(format!("promote insert failed: {e}"))
+            })?;
+
             let ring_guard = self.pipeline_ring.read();
             let ring_ref = ring_guard.as_ref().ok_or_else(|| {
                 DispatcherError::NotInitialized("pipeline ring not allocated".into())
@@ -442,18 +453,15 @@ impl DispatcherP2pComponent {
                 )?;
             }
             drop(ring_guard);
-        }
-        drop(drives);
+            drop(drives);
 
-        // Update dispatch-map: remove old BlockDevice entry and create fresh MemoryTier.
-        // Since we released the read ref before calling this method, we can remove
-        // and re-register.
-        let _ = dm.remove(key);
-        dm.create_memory_tier_entry(key, mem_ptr, ipc_handle.size)
-            .map_err(|e| DispatcherError::IoError(format!("promote re-register failed: {e}")))?;
-        // Set the ssd_offset since data is still on SSD.
-        let _ = dm.convert_to_storage(key, offset);
-        let _ = dm.release_write(key);
+            // DRAM is filled — register as MemoryTier immediately.
+            let _ = dm.remove(key);
+            dm.create_memory_tier_entry(key, mem_ptr, ipc_handle.size)
+                .map_err(|e| DispatcherError::IoError(format!("promote re-register failed: {e}")))?;
+            let _ = dm.convert_to_storage(key, offset);
+            let _ = dm.release_write(key);
+        }
 
         Ok(())
     }
@@ -1047,6 +1055,85 @@ impl IDispatcher for DispatcherP2pComponent {
 
         *self.bg_writer.lock().unwrap() = Some(writer);
 
+        // Start background DRAM backfill worker (async NVMe→DRAM after P2P cold reads).
+        let num_backfill_drives = bg_drives.len();
+        if num_backfill_drives > 0 {
+            let dm_for_backfill = self
+                .dispatch_map
+                .get()
+                .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+            let mt_for_backfill = self
+                .memory_tier
+                .get()
+                .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+            let backfill_drives = bg_drives.clone();
+
+            let chunk_size = {
+                let ring_guard = self.pipeline_ring.read();
+                ring_guard.as_ref().map_or(131072, |r| r.chunk_size)
+            };
+
+            let backfill = DramBackfillWorker::start(num_backfill_drives, |drive_idx| {
+                let dm = Arc::clone(&dm_for_backfill);
+                let mt = Arc::clone(&mt_for_backfill);
+                let drive = Arc::clone(&backfill_drives[drive_idx]);
+                let channels = drive.connect_client().expect("backfill connect_client");
+                let block_size = drive.block_size() as u64;
+                move |job: DramBackfillJob| {
+                    let start_lba = {
+                        let lookup = dm.lookup(job.key);
+                        match lookup {
+                            Ok(LookupResult::BlockDevice { offset }) => {
+                                let _ = dm.release_read(job.key);
+                                offset / block_size
+                            }
+                            Ok(LookupResult::MemoryTier { .. }) => {
+                                let _ = dm.release_read(job.key);
+                                return; // Already promoted, nothing to do
+                            }
+                            _ => return,
+                        }
+                    };
+
+                    let size = match dm.entry_size(job.key) {
+                        Ok(s) => s,
+                        Err(_) => return,
+                    };
+
+                    if Self::evict_for_space(&dm, &mt, size, job.key).is_err() {
+                        return;
+                    }
+
+                    let mem_ptr = match mt.insert(job.key, size) {
+                        Ok(ptr) => ptr,
+                        Err(_) => return,
+                    };
+
+                    let result = unsafe {
+                        pipeline::pipelined_ssd_to_dram_only(
+                            &*drive,
+                            &channels,
+                            mem_ptr,
+                            start_lba,
+                            size as usize,
+                            chunk_size,
+                            16,
+                        )
+                    };
+
+                    if result.is_ok() {
+                        let _ = dm.remove(job.key);
+                        let _ = dm.create_memory_tier_entry(job.key, mem_ptr, size);
+                        let _ = dm.convert_to_storage(job.key, start_lba * block_size);
+                        let _ = dm.release_write(job.key);
+                    } else {
+                        let _ = mt.remove(job.key);
+                    }
+                }
+            });
+            *self.bg_backfill.lock().unwrap() = Some(backfill);
+        }
+
         // Start background SSD evictor if drives exist and threshold is configured.
         if config.ssd_eviction_threshold > 0.0 {
             let dm_for_evictor = self
@@ -1095,6 +1182,10 @@ impl IDispatcher for DispatcherP2pComponent {
 
         if let Some(mut writer) = self.bg_writer.lock().unwrap().take() {
             writer.shutdown();
+        }
+
+        if let Some(mut backfill) = self.bg_backfill.lock().unwrap().take() {
+            backfill.shutdown();
         }
 
         self.pending_writes.lock().unwrap().clear();
@@ -1375,7 +1466,7 @@ impl IDispatcher for DispatcherP2pComponent {
                 std::thread::scope(|s| {
                     #[allow(clippy::type_complexity)]
                     let mut thread_handles: Vec<
-                        std::thread::ScopedJoinHandle<Vec<(usize, Result<(), DispatcherError>)>>,
+                        std::thread::ScopedJoinHandle<(Vec<(usize, Result<(), DispatcherError>)>, Vec<(CacheKey, usize)>)>,
                     > = Vec::new();
 
                     let mut thread_counter = 0usize;
@@ -1402,7 +1493,7 @@ impl IDispatcher for DispatcherP2pComponent {
 
                         for chunk in chunks {
                             let dm_ref = &dm;
-                            let mt_ref = &mt;
+                            let _mt_ref = &mt;
                             let gpu_ref = &gpu;
                             let drives_ref = &drives;
                             let cold_ref = &cold_entries;
@@ -1430,7 +1521,7 @@ impl IDispatcher for DispatcherP2pComponent {
                                         for &ci in &indices {
                                             batch_results.push((ci, Err(e.clone())));
                                         }
-                                        return batch_results;
+                                        return (batch_results, Vec::new());
                                     }
                                 };
 
@@ -1444,18 +1535,12 @@ impl IDispatcher for DispatcherP2pComponent {
                                     my_thread_idx,
                                     total_threads,
                                 );
+                                let mut backfill_keys: Vec<(CacheKey, usize)> = Vec::new();
                                 for &ci in &indices {
                                     let entry = &cold_ref[ci];
                                     let ipc_size = entry.ipc_handle_size;
 
                                     let res = (|| -> Result<(), DispatcherError> {
-                                        Self::evict_for_space(dm_ref, mt_ref, ipc_size, entry.key)?;
-                                        let mem_ptr = mt_ref.insert(entry.key, ipc_size).map_err(|e| {
-                                            DispatcherError::AllocationFailed(format!(
-                                                "promote insert failed: {e}"
-                                            ))
-                                        })?;
-
                                         unsafe {
                                             pipeline::pipelined_ssd_to_gpu_p2p(
                                                 &*drive.block_dev_iface,
@@ -1469,19 +1554,15 @@ impl IDispatcher for DispatcherP2pComponent {
                                             )?;
                                         }
 
-                                        let _ = dm_ref.remove(entry.key);
-                                        dm_ref.create_memory_tier_entry(entry.key, mem_ptr, ipc_size)
-                                            .map_err(|e| DispatcherError::IoError(format!(
-                                                "promote re-register failed: {e}"
-                                            )))?;
-                                        let _ = dm_ref.convert_to_storage(entry.key, entry.offset);
+                                        // Client served. Release write lock, leave as BlockDevice.
                                         let _ = dm_ref.release_write(entry.key);
+                                        backfill_keys.push((entry.key, drive_idx));
                                         Ok(())
                                     })();
                                     batch_results.push((ci, res));
                                 }
 
-                                batch_results
+                                (batch_results, backfill_keys)
                             });
 
                             thread_handles.push(handle);
@@ -1489,10 +1570,20 @@ impl IDispatcher for DispatcherP2pComponent {
                     }
 
                     // Collect results from all threads.
+                    let mut all_backfill_keys: Vec<(CacheKey, usize)> = Vec::new();
                     for handle in thread_handles {
-                        let batch_results = handle.join().unwrap_or_else(|_| Vec::new());
+                        let (batch_results, backfill_keys) =
+                            handle.join().unwrap_or_else(|_| (Vec::new(), Vec::new()));
                         for (ci, res) in batch_results {
                             results[cold_entries[ci].idx] = Some(res);
+                        }
+                        all_backfill_keys.extend(backfill_keys);
+                    }
+
+                    // Enqueue async DRAM backfill for all P2P-served keys.
+                    if let Some(ref backfill) = *self.bg_backfill.lock().unwrap() {
+                        for (key, drive_index) in all_backfill_keys {
+                            let _ = backfill.enqueue(DramBackfillJob { key, drive_index });
                         }
                     }
                 });
@@ -2765,6 +2856,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             Mutex::new(HashMap::new()),
             RwLock::new(None),
@@ -2807,6 +2899,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             Mutex::new(HashMap::new()),
             RwLock::new(None),
@@ -2821,6 +2914,7 @@ mod tests {
     fn query_idispatcher() {
         let c = DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
@@ -2839,6 +2933,7 @@ mod tests {
     fn initialize_without_receptacles_fails() {
         let c = DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
@@ -2862,6 +2957,7 @@ mod tests {
     fn initialize_with_empty_pci_addrs_fails() {
         let c = DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
@@ -2888,6 +2984,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             Mutex::new(HashMap::new()),
             RwLock::new(None),
@@ -2912,6 +3009,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             Mutex::new(HashMap::new()),
             RwLock::new(None),
@@ -2931,6 +3029,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             Mutex::new(HashMap::new()),
             RwLock::new(None),
@@ -2948,6 +3047,7 @@ mod tests {
     fn populate_before_initialize_fails() {
         let c = DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
@@ -2972,6 +3072,7 @@ mod tests {
     fn populate_with_zero_size_fails() {
         let c = DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
@@ -3001,6 +3102,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             Mutex::new(HashMap::new()),
             RwLock::new(None),
@@ -3017,6 +3119,7 @@ mod tests {
     fn double_shutdown_succeeds() {
         let c = DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
@@ -3036,6 +3139,7 @@ mod tests {
     fn concurrent_pre_init_calls_from_multiple_threads() {
         let c = Arc::new(DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
@@ -3088,6 +3192,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             Mutex::new(HashMap::new()),
             RwLock::new(None),
@@ -3115,6 +3220,7 @@ mod tests {
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
         let c = DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
@@ -3188,6 +3294,7 @@ mod tests {
             Arc::new(MockMemoryTier::with_fail_insert(1024 * 1024));
         let c = DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
@@ -3515,6 +3622,7 @@ mod tests {
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(8192));
         let c = DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),

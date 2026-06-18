@@ -216,6 +216,88 @@ impl Drop for ParallelBackgroundWriter {
 }
 
 // ---------------------------------------------------------------------------
+// DRAM Backfill Worker (async memory-tier population after P2P cold reads)
+// ---------------------------------------------------------------------------
+
+/// A job to backfill a DRAM memory-tier slot with data from SSD.
+///
+/// After a P2P cold read delivers data directly to the client GPU, the DRAM
+/// slot remains empty. This job triggers a background NVMe→DRAM read so that
+/// subsequent hot lookups can serve from DRAM.
+pub struct DramBackfillJob {
+    pub key: CacheKey,
+    pub drive_index: usize,
+}
+
+/// Per-drive background worker that reads SSD data into DRAM memory-tier slots.
+pub struct DramBackfillWorker {
+    writers: Vec<BackgroundWriter>,
+    num_drives: usize,
+}
+
+impl DramBackfillWorker {
+    pub fn start<F>(num_drives: usize, make_processor: impl Fn(usize) -> F) -> Self
+    where
+        F: FnMut(DramBackfillJob) + Send + 'static,
+    {
+        let writers = (0..num_drives)
+            .map(|idx| {
+                BackgroundWriter::start_named(idx, {
+                    let mut proc = make_processor(idx);
+                    move |wj: WriteJob| {
+                        let job = DramBackfillJob {
+                            key: wj.key,
+                            drive_index: wj.device_index,
+                        };
+                        proc(job);
+                    }
+                })
+            })
+            .collect();
+
+        Self {
+            writers,
+            num_drives,
+        }
+    }
+
+    pub fn enqueue(&self, job: DramBackfillJob) -> Result<(), ()> {
+        let idx = job.drive_index % self.num_drives;
+        let write_job = WriteJob {
+            key: job.key,
+            size: 0,
+            device_index: job.drive_index,
+        };
+        self.writers[idx].enqueue(write_job).map_err(|_| ())
+    }
+
+    pub fn in_flight(&self) -> usize {
+        self.writers.iter().map(|w| w.in_flight()).sum()
+    }
+
+    pub fn flush(&self) {
+        loop {
+            if self.writers.iter().all(|w| w.in_flight() == 0) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    pub fn shutdown(&mut self) {
+        for writer in &mut self.writers {
+            writer.shutdown();
+        }
+    }
+}
+
+impl Drop for DramBackfillWorker {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Background SSD Evictor
 // ---------------------------------------------------------------------------
 
