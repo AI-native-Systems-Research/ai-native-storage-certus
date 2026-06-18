@@ -1057,7 +1057,8 @@ impl IDispatcher for DispatcherP2pComponent {
 
         // Start background DRAM backfill worker (async NVMe→DRAM after P2P cold reads).
         let num_backfill_drives = bg_drives.len();
-        if num_backfill_drives > 0 {
+        let backfill_delay_ms = config.backfill_delay_ms;
+        if num_backfill_drives > 0 && backfill_delay_ms > 0 {
             let dm_for_backfill = self
                 .dispatch_map
                 .get()
@@ -1080,8 +1081,7 @@ impl IDispatcher for DispatcherP2pComponent {
                 let channels = drive.connect_client().expect("backfill connect_client");
                 let block_size = drive.block_size() as u64;
                 move |job: DramBackfillJob| {
-                    // Throttle: avoid competing with active P2P cold reads for NVMe bandwidth.
-                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    std::thread::sleep(std::time::Duration::from_millis(backfill_delay_ms));
 
                     let start_lba = {
                         let lookup = dm.lookup(job.key);
