@@ -93,7 +93,7 @@ The system's end-to-end performance (P2P path vs DRAM path) can be measured usin
 - **FR-009**: System MUST promote successfully read cold entries back to DRAM after completing the read.
 - **FR-010**: System MUST release all staging resources on shutdown with no leaks.
 - **FR-011**: System MUST handle read failures gracefully without corrupting ring state or affecting other in-flight operations.
-- **FR-012**: System MUST support end-to-end performance measurement using the existing pipelined benchmark tool.
+- **FR-012**: Performance measurement is handled by external benchmarking tools (e.g., `certus-api-bench_v2.py`) rather than built-in hooks, to avoid instrumentation overhead in the production path.
 - **FR-013**: System MUST implement `promote_to_memory_tier(keys)` to asynchronously read cold entries from NVMe into the memory-tier without GPU involvement, enabling future lookups to take the hot DRAM→GPU path. This uses the `pipelined_ssd_to_dram_only` pipeline function (one thread per drive, no P2P ring involvement).
 
 ### Key Entities
