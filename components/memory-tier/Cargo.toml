@@ -11,3 +11,6 @@ component-core.workspace = true
 component-macros.workspace = true
 interfaces = { workspace = true, features = ["spdk"] }
 libc = "0.2"
+
+[dev-dependencies]
+eviction-policy-lru.workspace = true

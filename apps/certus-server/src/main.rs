@@ -16,8 +16,8 @@ use tonic::transport::{Identity, Server, ServerTlsConfig};
 
 use component_core::query_interface;
 use interfaces::{
-    DmaAllocFn, DmaBuffer, DispatcherConfig, IDispatchMap, IDispatcher, IGpuServices, ILogger,
-    IMemoryTier, PciAddress,
+    DmaAllocFn, DmaBuffer, DispatcherConfig, IDispatchMap, IDispatcher, IEvictionPolicy,
+    IGpuServices, ILogger, IMemoryTier, PciAddress,
 };
 
 use service::DispatcherService;
@@ -178,6 +178,16 @@ fn initialize_component_stack(
         query_interface!(gpu_comp, IGpuServices).ok_or("failed to query IGpuServices")?;
     gpu.initialize().map_err(|e| format!("GPU init failed: {e}"))?;
 
+    // --- Create eviction policy ---
+    let ep_comp = eviction_policy_lru::EvictionPolicyLruComponent::new_default();
+    ep_comp
+        .logger
+        .connect(Arc::clone(&logger))
+        .map_err(|e| format!("eviction-policy logger bind: {e}"))?;
+    let eviction_policy: Arc<dyn IEvictionPolicy + Send + Sync> =
+        query_interface!(ep_comp, IEvictionPolicy)
+            .ok_or("failed to query IEvictionPolicy")?;
+
     // --- Create dispatch map ---
     logger.info("certus-server: initializing dispatch map...");
     let dm_comp = dispatch_map::DispatchMapComponent::new(
@@ -187,6 +197,10 @@ fn initialize_component_stack(
         .logger
         .connect(Arc::clone(&logger))
         .map_err(|e| format!("dispatch map logger bind: {e}"))?;
+    dm_comp
+        .eviction_policy
+        .connect(Arc::clone(&eviction_policy))
+        .map_err(|e| format!("dispatch map eviction_policy bind: {e}"))?;
 
     let dm: Arc<dyn IDispatchMap + Send + Sync> =
         query_interface!(dm_comp, IDispatchMap).ok_or("failed to query IDispatchMap")?;
@@ -204,6 +218,10 @@ fn initialize_component_stack(
         .logger
         .connect(Arc::clone(&logger))
         .map_err(|e| format!("memory-tier logger bind: {e}"))?;
+    mt_comp
+        .eviction_policy
+        .connect(Arc::clone(&eviction_policy))
+        .map_err(|e| format!("memory-tier eviction_policy bind: {e}"))?;
     let mt: Arc<dyn IMemoryTier + Send + Sync> =
         query_interface!(mt_comp, IMemoryTier).ok_or("failed to query IMemoryTier")?;
     mt.initialize(memory_tier_size)
