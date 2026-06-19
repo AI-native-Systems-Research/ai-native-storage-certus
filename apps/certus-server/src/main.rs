@@ -17,7 +17,7 @@ use tonic::transport::{Identity, Server, ServerTlsConfig};
 use component_core::query_interface;
 use interfaces::{
     DmaAllocFn, DmaBuffer, DispatcherConfig, IDispatchMap, IDispatcher, IEvictionPolicy,
-    IGpuServices, ILogger, IMemoryTier, PciAddress,
+    IGpuServices, ILogger, IMemoryTier, IRemoteLookup, PciAddress,
 };
 
 use service::DispatcherService;
@@ -249,6 +249,15 @@ fn initialize_component_stack(
         }
     }
 
+    // --- Create remote lookup ---
+    let rl_comp = remote_lookup::RemoteLookupComponent::new();
+    rl_comp
+        .logger
+        .connect(Arc::clone(&logger))
+        .map_err(|e| format!("failed to bind remote_lookup logger: {e}"))?;
+    let remote_lookup: Arc<dyn IRemoteLookup + Send + Sync> =
+        query_interface!(rl_comp, IRemoteLookup).ok_or("failed to query IRemoteLookup")?;
+
     // --- Create dispatcher ---
     logger.info("certus-server: initializing dispatcher...");
     let disp_comp = dispatcher::DispatcherComponent::new_default();
@@ -272,6 +281,10 @@ fn initialize_component_stack(
         .logger
         .connect(Arc::clone(&logger))
         .map_err(|e| format!("failed to bind logger: {e}"))?;
+    disp_comp
+        .remote_lookup
+        .connect(Arc::clone(&remote_lookup))
+        .map_err(|e| format!("failed to bind remote_lookup: {e}"))?;
 
     let dispatcher: Arc<dyn IDispatcher + Send + Sync> =
         query_interface!(disp_comp, IDispatcher).ok_or("failed to query IDispatcher")?;
