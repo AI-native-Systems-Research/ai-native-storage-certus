@@ -8,6 +8,7 @@
 
 mod idispatch_map;
 mod idispatcher;
+mod ieviction_policy;
 mod igpu_services;
 mod igreeter;
 mod ilogger;
@@ -29,6 +30,11 @@ pub use igpu_services::GpuDmaBuffer;
 pub use igpu_services::GpuIpcHandle;
 pub use igpu_services::GpuStream;
 pub use igpu_services::IGpuServices;
+pub use ieviction_policy::EvictionHandle;
+pub use ieviction_policy::EvictionKey;
+pub use ieviction_policy::EvictionPolicyError;
+pub use ieviction_policy::IEvictionPolicy;
+pub use ieviction_policy::PoolId;
 pub use igreeter::IGreeter;
 pub use ilogger::ILogger;
 pub use imemory_tier::MemoryTierError;

@@ -11,8 +11,8 @@ use pyo3::types::PyDict;
 
 use component_core::query_interface;
 use interfaces::{
-    CacheKey, DispatcherConfig, DmaAllocFn, DmaBuffer, IDispatchMap, IDispatcher, IGpuServices,
-    ILogger, IpcHandle, LookupResult,
+    CacheKey, DispatcherConfig, DmaAllocFn, DmaBuffer, IDispatchMap, IDispatcher, IEvictionPolicy,
+    IGpuServices, ILogger, IpcHandle, LookupResult,
 };
 
 use crate::keys;
@@ -111,6 +111,12 @@ impl EngineInner {
         gpu.initialize()
             .map_err(|e| PyRuntimeError::new_err(format!("GPU init failed: {e}")))?;
 
+        // --- Create eviction policy ---
+        let ep_comp = eviction_policy_lru::EvictionPolicyLruComponent::new_default();
+        let eviction_policy: Arc<dyn IEvictionPolicy + Send + Sync> =
+            query_interface!(ep_comp, IEvictionPolicy)
+                .ok_or_else(|| PyRuntimeError::new_err("failed to query IEvictionPolicy"))?;
+
         // --- Create dispatch map (no persistence — starts fresh each time) ---
         let dm_comp =
             dispatch_map::DispatchMapComponent::new(dispatch_map::DispatchMapState::default());
@@ -118,6 +124,10 @@ impl EngineInner {
             .logger
             .connect(Arc::clone(&log) as Arc<dyn ILogger + Send + Sync>)
             .map_err(|e| PyRuntimeError::new_err(format!("failed to wire logger for dispatch map: {e}")))?;
+        dm_comp
+            .eviction_policy
+            .connect(Arc::clone(&eviction_policy))
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire eviction_policy for dispatch map: {e}")))?;
         let dm: Arc<dyn IDispatchMap + Send + Sync> = query_interface!(dm_comp, IDispatchMap)
             .ok_or_else(|| PyRuntimeError::new_err("failed to query IDispatchMap"))?;
         let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {

@@ -19,6 +19,7 @@ component-framework.workspace = true
 component-core.workspace = true
 dispatcher = { workspace = true, features = ["spdk-backend"] }
 dispatch-map.workspace = true
+eviction-policy-lru.workspace = true
 memory-tier.workspace = true
 block-device-spdk-nvme.workspace = true
 extent-manager.workspace = true
