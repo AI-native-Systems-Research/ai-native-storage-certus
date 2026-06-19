@@ -1,0 +1,105 @@
+# Build and test all default workspace members on every push and pull request.
+#
+# Covers:
+#   - component-core, component-macros, component-framework
+#   - example-helloworld, example-helloworld-dylib
+#   - helloworld-mainline, dynamic-loading-example
+#   - logger, gpu-services (no-feature build)
+#
+# SPDK-dependent crates (spdk-sys, spdk-env, block-device-spdk-nvme,
+# extent-manager, iops-benchmark, extent-benchmark) require pre-built
+# native libs and are intentionally excluded from this workflow.
+
+name: Rust — build and test
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build-and-test:
+    name: Build and test (default members)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: rust-${{ runner.os }}-
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Lint (clippy)
+        run: cargo clippy -- -D warnings
+
+      - name: Build
+        run: cargo build
+
+      - name: Test
+        # Run single-threaded: component actors use OS threads; parallel
+        # test harness can race on shared NUMA topology probes on CI runners.
+        run: cargo test --all -- --test-threads 1
+
+  python-certus-connector:
+    name: Python — certus-connector unit tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: pip install pytest
+
+      - name: Run certus-connector tests
+        # Tests run without vllm/torch/SPDK — all external deps are mocked.
+        run: |
+          python -m pytest certus-connector/tests/ -v
+
+  python-kv-offload-regression:
+    name: Python — kv-offload-replay regression check tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: pip install pytest
+
+      - name: Run regression check tests
+        run: |
+          python -m pytest benchmarks/kv-offload-replay/ci/test_regression_check.py -v
