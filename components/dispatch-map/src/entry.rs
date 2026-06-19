@@ -35,5 +35,5 @@ pub(crate) struct DispatchEntry {
     pub read_ref: u32,
     pub write_ref: u32,
     /// Handle into the eviction policy's LRU ordering.
-    pub lru_handle: EvictionHandle,
+    pub eviction_handle: EvictionHandle,
 }

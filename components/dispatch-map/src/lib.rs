@@ -96,7 +96,7 @@ impl IDispatchMap for DispatchMapComponent {
         let mut count: u64 = 0;
 
         em.for_each_extent(&mut |extent| {
-            let lru_handle = ep.track(pool_id, extent.key).unwrap();
+            let eviction_handle = ep.track(pool_id, extent.key).unwrap();
             let entry = DispatchEntry {
                 location: Location::BlockDevice {
                     offset: extent.offset,
@@ -104,7 +104,7 @@ impl IDispatchMap for DispatchMapComponent {
                 size_blocks: extent.size,
                 read_ref: 0,
                 write_ref: 0,
-                lru_handle,
+                eviction_handle,
             };
             inner.entries.insert(extent.key, entry);
             count += 1;
@@ -141,7 +141,7 @@ impl IDispatchMap for DispatchMapComponent {
         let buf = alloc_fn(byte_size, 4096, None).map_err(DispatchMapError::AllocationFailed)?;
         let buffer = Arc::new(buf);
 
-        let lru_handle = ep.track(pool_id, key).unwrap();
+        let eviction_handle = ep.track(pool_id, key).unwrap();
         let entry = DispatchEntry {
             location: Location::Staging {
                 buffer: Arc::clone(&buffer),
@@ -149,7 +149,7 @@ impl IDispatchMap for DispatchMapComponent {
             size_blocks: size,
             read_ref: 0,
             write_ref: 1,
-            lru_handle,
+            eviction_handle,
         };
 
         inner.entries.insert(key, entry);
@@ -185,7 +185,7 @@ impl IDispatchMap for DispatchMapComponent {
             .read_ref
             .checked_add(1)
             .ok_or(DispatchMapError::RefCountOverflow(key))?;
-        let handle = entry.lru_handle;
+        let handle = entry.eviction_handle;
 
         let result = match &entry.location {
             Location::Staging { buffer } => LookupResult::Staging {
@@ -372,7 +372,7 @@ impl IDispatchMap for DispatchMapComponent {
             return Err(DispatchMapError::ActiveReferences(key));
         }
 
-        let handle = entry.lru_handle;
+        let handle = entry.eviction_handle;
         inner.entries.remove(&key);
 
         if let Ok(ep) = self.eviction_policy.get() {
@@ -392,7 +392,7 @@ impl IDispatchMap for DispatchMapComponent {
             .entries
             .get(&key)
             .ok_or(DispatchMapError::KeyNotFound(key))?;
-        let handle = entry.lru_handle;
+        let handle = entry.eviction_handle;
         drop(inner);
         if let Ok(ep) = self.eviction_policy.get() {
             let _ = ep.touch(handle);
@@ -436,7 +436,7 @@ impl IDispatchMap for DispatchMapComponent {
             return Err(DispatchMapError::AlreadyExists(key));
         }
 
-        let lru_handle = ep.track(pool_id, key).unwrap();
+        let eviction_handle = ep.track(pool_id, key).unwrap();
         let entry = DispatchEntry {
             location: Location::MemoryTier {
                 pointer,
@@ -446,7 +446,7 @@ impl IDispatchMap for DispatchMapComponent {
             size_blocks: size.div_ceil(4096),
             read_ref: 0,
             write_ref: 1,
-            lru_handle,
+            eviction_handle,
         };
 
         inner.entries.insert(key, entry);
@@ -529,13 +529,13 @@ impl IDispatchMap for DispatchMapComponent {
         if inner.entries.contains_key(&key) {
             return Err(DispatchMapError::AlreadyExists(key));
         }
-        let lru_handle = ep.track(pool_id, key).unwrap();
+        let eviction_handle = ep.track(pool_id, key).unwrap();
         let entry = DispatchEntry {
             location: Location::BlockDevice { offset },
             size_blocks,
             read_ref: 0,
             write_ref: 0,
-            lru_handle,
+            eviction_handle,
         };
         inner.entries.insert(key, entry);
         Ok(())

@@ -31,7 +31,7 @@ const NUM_SHARDS: usize = 16;
 struct Slot {
     offset: usize,
     size: u32,
-    lru_handle: EvictionHandle,
+    eviction_handle: EvictionHandle,
 }
 
 struct Shard {
@@ -210,13 +210,13 @@ impl IMemoryTier for MemoryTierComponent {
             .ok_or(MemoryTierError::PoolFull)?;
 
         let pool_id = state.pool_ids[shard_idx];
-        let lru_handle = ep.track(pool_id, key).unwrap();
+        let eviction_handle = ep.track(pool_id, key).unwrap();
         shard.slots.insert(
             key,
             Slot {
                 offset: local_offset,
                 size,
-                lru_handle,
+                eviction_handle,
             },
         );
 
@@ -238,7 +238,7 @@ impl IMemoryTier for MemoryTierComponent {
         let global_offset = shard_idx * state.shard_size + slot.offset;
         let ptr = unsafe { state.pool_ptr.add(global_offset) };
         let size = slot.size;
-        let handle = slot.lru_handle;
+        let handle = slot.eviction_handle;
         drop(shard);
         let _ = ep.touch(handle);
         Some((ptr, size))
@@ -332,7 +332,7 @@ impl IMemoryTier for MemoryTierComponent {
             .slots
             .remove(&key)
             .ok_or(MemoryTierError::KeyNotFound(key))?;
-        let _ = ep.remove(slot.lru_handle);
+        let _ = ep.remove(slot.eviction_handle);
         shard.allocator.deallocate(slot.offset, slot.size as usize);
         Ok(())
     }
@@ -347,7 +347,7 @@ impl IMemoryTier for MemoryTierComponent {
         let shard_idx = Self::shard_for_key(key);
         let shard = state.shards[shard_idx].lock().unwrap();
         if let Some(slot) = shard.slots.get(&key) {
-            let handle = slot.lru_handle;
+            let handle = slot.eviction_handle;
             drop(shard);
             let _ = ep.touch(handle);
         }
