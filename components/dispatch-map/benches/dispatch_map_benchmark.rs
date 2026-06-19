@@ -3,7 +3,7 @@ use std::sync::Arc;
 use component_core::query_interface;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, measurement::WallTime};
 use dispatch_map::{DispatchMapComponent, DispatchMapState};
-use interfaces::{DmaAllocFn, DmaBuffer, IDispatchMap};
+use interfaces::{DmaAllocFn, DmaBuffer, IDispatchMap, IEvictionPolicy};
 
 fn mock_dma_alloc() -> DmaAllocFn {
     Arc::new(|size, _align, _numa| {
@@ -35,8 +35,17 @@ unsafe extern "C" fn mock_free(ptr: *mut std::ffi::c_void) {
     }
 }
 
-fn bench_lookup_no_contention(c: &mut Criterion) {
+fn setup_bench_component() -> Arc<DispatchMapComponent> {
+    let ep_comp = eviction_policy_lru::EvictionPolicyLruComponent::new_default();
+    let ep: Arc<dyn IEvictionPolicy + Send + Sync> =
+        query_interface!(ep_comp, IEvictionPolicy).unwrap();
     let comp = DispatchMapComponent::new(DispatchMapState::new());
+    comp.eviction_policy.connect(ep).unwrap();
+    comp
+}
+
+fn bench_lookup_no_contention(c: &mut Criterion) {
+    let comp = setup_bench_component();
     let dm = query_interface!(comp, IDispatchMap).unwrap();
     dm.set_dma_alloc(mock_dma_alloc());
 
@@ -53,7 +62,7 @@ fn bench_lookup_no_contention(c: &mut Criterion) {
 }
 
 fn bench_ref_ops_throughput(c: &mut Criterion) {
-    let comp = DispatchMapComponent::new(DispatchMapState::new());
+    let comp = setup_bench_component();
     let dm = query_interface!(comp, IDispatchMap).unwrap();
     dm.set_dma_alloc(mock_dma_alloc());
 
@@ -76,7 +85,7 @@ fn bench_ref_ops_throughput(c: &mut Criterion) {
 }
 
 fn bench_lru_lookup(c: &mut Criterion<WallTime>) {
-    let comp = DispatchMapComponent::new(DispatchMapState::new());
+    let comp = setup_bench_component();
     let dm = query_interface!(comp, IDispatchMap).unwrap();
     dm.set_dma_alloc(mock_dma_alloc());
 

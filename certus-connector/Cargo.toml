@@ -20,6 +20,7 @@ component-core = { path = "../components/component-framework/crates/component-co
 dispatcher = { path = "../components/dispatcher" }
 logger = { path = "../components/logger" }
 dispatch-map = { path = "../components/dispatch-map" }
+eviction-policy-lru = { path = "../components/eviction-policy-lru" }
 block-device-spdk-nvme = { path = "../components/block-device-spdk-nvme" }
 extent-manager = { path = "../components/extent-manager" }
 spdk-env = { path = "../components/spdk-env" }

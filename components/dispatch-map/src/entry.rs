@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use interfaces::DmaBuffer;
+use interfaces::{DmaBuffer, EvictionHandle};
 
 /// Represents where extent data currently resides.
 #[derive(Debug)]
@@ -26,23 +26,6 @@ pub(crate) enum Location {
 unsafe impl Send for Location {}
 unsafe impl Sync for Location {}
 
-/// Read the CPU timestamp counter via RDTSC.
-#[inline(always)]
-pub(crate) fn rdtsc() -> u64 {
-    #[cfg(target_arch = "x86_64")]
-    unsafe {
-        core::arch::x86_64::_rdtsc()
-    }
-    #[cfg(target_arch = "x86")]
-    unsafe {
-        core::arch::x86::_rdtsc()
-    }
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "x86")))]
-    {
-        0
-    }
-}
-
 /// Per-key metadata stored in the dispatch map.
 #[derive(Debug)]
 pub(crate) struct DispatchEntry {
@@ -51,6 +34,6 @@ pub(crate) struct DispatchEntry {
     pub size_blocks: u32,
     pub read_ref: u32,
     pub write_ref: u32,
-    /// Timestamp counter value — set on creation, updated on lookup.
-    pub tsc: u64,
+    /// Handle into the eviction policy's LRU ordering.
+    pub eviction_handle: EvictionHandle,
 }
