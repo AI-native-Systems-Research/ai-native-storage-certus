@@ -60,6 +60,11 @@ pub struct DispatcherConfig {
     /// Maximum eviction attempts before returning AllocationFailed.
     /// Default: 2048.
     pub max_eviction_attempts: usize,
+    /// Delay in milliseconds between DRAM backfill jobs after P2P cold reads.
+    /// Throttles background NVMe→DRAM reads to avoid contending with active
+    /// P2P cold reads for drive bandwidth.
+    /// Default: 10. Set to 0 to disable backfill entirely.
+    pub backfill_delay_ms: u64,
 }
 
 impl Default for DispatcherConfig {
@@ -75,6 +80,7 @@ impl Default for DispatcherConfig {
             ssd_eviction_interval_secs: 5,
             poller_base_cpu: None,
             max_eviction_attempts: 2048,
+            backfill_delay_ms: 10,
         }
     }
 }
