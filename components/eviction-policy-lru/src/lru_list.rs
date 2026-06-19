@@ -1,10 +1,10 @@
 //! Index-based doubly-linked list for O(1) LRU operations.
 
-use interfaces::EvictionKey;
+use interfaces::CacheKey;
 
 #[derive(Debug)]
 struct Node {
-    key: EvictionKey,
+    key: CacheKey,
     prev: Option<u32>,
     next: Option<u32>,
     active: bool,
@@ -34,7 +34,7 @@ impl LruList {
     }
 
     /// Insert a key at the back (most recently used). Returns the node index.
-    pub fn push_back(&mut self, key: EvictionKey) -> u32 {
+    pub fn push_back(&mut self, key: CacheKey) -> u32 {
         let idx = if let Some(free_idx) = self.free.pop() {
             self.nodes[free_idx as usize] = Node {
                 key,
@@ -96,7 +96,7 @@ impl LruList {
     }
 
     /// Remove and return the front node (least recently used).
-    pub fn pop_front(&mut self) -> Option<EvictionKey> {
+    pub fn pop_front(&mut self) -> Option<CacheKey> {
         let head_idx = self.head?;
         let key = self.nodes[head_idx as usize].key;
         self.remove(head_idx);
@@ -104,7 +104,7 @@ impl LruList {
     }
 
     /// Return up to `n` keys starting from the front (oldest).
-    pub fn peek_front_n(&self, n: usize) -> Vec<EvictionKey> {
+    pub fn peek_front_n(&self, n: usize) -> Vec<CacheKey> {
         let mut result = Vec::with_capacity(n);
         let mut current = self.head;
         while let Some(idx) = current {
@@ -304,6 +304,6 @@ mod tests {
         lru.push_back(30);
         assert_eq!(lru.peek_front_n(2), vec![10, 20]);
         assert_eq!(lru.peek_front_n(5), vec![10, 20, 30]);
-        assert_eq!(lru.peek_front_n(0), Vec::<EvictionKey>::new());
+        assert_eq!(lru.peek_front_n(0), Vec::<CacheKey>::new());
     }
 }

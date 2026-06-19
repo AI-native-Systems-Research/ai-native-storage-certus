@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use crate::idispatch_map::CacheKey;
+
 /// Opaque handle returned by `track()`, used for O(1) touch/remove.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EvictionHandle {
@@ -26,8 +28,6 @@ impl EvictionHandle {
 /// Identifier for an independent eviction tracking pool.
 pub type PoolId = u32;
 
-/// Key type tracked by the eviction policy (same underlying type as CacheKey).
-pub type EvictionKey = u64;
 
 /// Errors returned by `IEvictionPolicy` operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,7 +56,7 @@ component_macros::define_interface! {
 
         /// Register a key in the pool, marking it as most-recently-used.
         /// Returns a handle for O(1) touch/remove.
-        fn track(&self, pool: PoolId, key: EvictionKey) -> Result<EvictionHandle, EvictionPolicyError>;
+        fn track(&self, pool: PoolId, key: CacheKey) -> Result<EvictionHandle, EvictionPolicyError>;
 
         /// Mark the entry as most-recently-used (O(1)).
         fn touch(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError>;
@@ -65,10 +65,10 @@ component_macros::define_interface! {
         fn remove(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError>;
 
         /// Remove and return the least-recently-used key from the pool (O(1)).
-        fn pop_oldest(&self, pool: PoolId) -> Option<EvictionKey>;
+        fn pop_oldest(&self, pool: PoolId) -> Option<CacheKey>;
 
         /// Return up to `n` oldest keys from the pool without removing them (O(n)).
-        fn peek_oldest(&self, pool: PoolId, n: usize) -> Vec<EvictionKey>;
+        fn peek_oldest(&self, pool: PoolId, n: usize) -> Vec<CacheKey>;
 
         /// Return the number of tracked entries in the pool.
         fn len(&self, pool: PoolId) -> usize;

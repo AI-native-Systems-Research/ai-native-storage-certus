@@ -10,7 +10,7 @@ use std::sync::{Mutex, RwLock};
 
 use component_framework::define_component;
 use interfaces::{
-    EvictionHandle, EvictionKey, EvictionPolicyError, IEvictionPolicy, ILogger, PoolId,
+    EvictionHandle, CacheKey, EvictionPolicyError, IEvictionPolicy, ILogger, PoolId,
 };
 
 use crate::lru_list::LruList;
@@ -53,7 +53,7 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
     fn track(
         &self,
         pool: PoolId,
-        key: EvictionKey,
+        key: CacheKey,
     ) -> Result<EvictionHandle, EvictionPolicyError> {
         let state = self.state.read().unwrap();
         let pool_mutex = state.pools.get(pool as usize).ok_or_else(|| {
@@ -99,14 +99,14 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
         Ok(())
     }
 
-    fn pop_oldest(&self, pool: PoolId) -> Option<EvictionKey> {
+    fn pop_oldest(&self, pool: PoolId) -> Option<CacheKey> {
         let state = self.state.read().unwrap();
         let pool_mutex = state.pools.get(pool as usize)?;
         let mut pool_guard = pool_mutex.lock().unwrap();
         pool_guard.lru.pop_front()
     }
 
-    fn peek_oldest(&self, pool: PoolId, n: usize) -> Vec<EvictionKey> {
+    fn peek_oldest(&self, pool: PoolId, n: usize) -> Vec<CacheKey> {
         let state = self.state.read().unwrap();
         match state.pools.get(pool as usize) {
             Some(pool_mutex) => {
@@ -270,7 +270,7 @@ mod tests {
 
         assert!(ep.track(99, 1).is_err());
         assert_eq!(ep.pop_oldest(99), None);
-        assert_eq!(ep.peek_oldest(99, 5), Vec::<EvictionKey>::new());
+        assert_eq!(ep.peek_oldest(99, 5), Vec::<CacheKey>::new());
         assert_eq!(ep.len(99), 0);
     }
 
