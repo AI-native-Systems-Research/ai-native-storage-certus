@@ -44,6 +44,9 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
         state.pools.push(Mutex::new(Pool {
             lru: LruList::new(),
         }));
+        if let Ok(logger) = self.logger.get() {
+            logger.debug(&format!("eviction-policy-lru: created pool {id}"));
+        }
         id
     }
 
@@ -53,10 +56,12 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
         key: EvictionKey,
     ) -> Result<EvictionHandle, EvictionPolicyError> {
         let state = self.state.read().unwrap();
-        let pool_mutex = state
-            .pools
-            .get(pool as usize)
-            .ok_or(EvictionPolicyError::InvalidPool(pool))?;
+        let pool_mutex = state.pools.get(pool as usize).ok_or_else(|| {
+            if let Ok(logger) = self.logger.get() {
+                logger.warn(&format!("eviction-policy-lru: track on invalid pool {pool}"));
+            }
+            EvictionPolicyError::InvalidPool(pool)
+        })?;
         let mut pool_guard = pool_mutex.lock().unwrap();
         let index = pool_guard.lru.push_back(key);
         Ok(EvictionHandle::new(pool, index))
@@ -64,10 +69,15 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
 
     fn touch(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError> {
         let state = self.state.read().unwrap();
-        let pool_mutex = state
-            .pools
-            .get(handle.pool_id() as usize)
-            .ok_or(EvictionPolicyError::InvalidPool(handle.pool_id()))?;
+        let pool_mutex = state.pools.get(handle.pool_id() as usize).ok_or_else(|| {
+            if let Ok(logger) = self.logger.get() {
+                logger.warn(&format!(
+                    "eviction-policy-lru: touch on invalid pool {}",
+                    handle.pool_id()
+                ));
+            }
+            EvictionPolicyError::InvalidPool(handle.pool_id())
+        })?;
         let mut pool_guard = pool_mutex.lock().unwrap();
         pool_guard.lru.move_to_back(handle.index());
         Ok(())
@@ -75,10 +85,15 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
 
     fn remove(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError> {
         let state = self.state.read().unwrap();
-        let pool_mutex = state
-            .pools
-            .get(handle.pool_id() as usize)
-            .ok_or(EvictionPolicyError::InvalidPool(handle.pool_id()))?;
+        let pool_mutex = state.pools.get(handle.pool_id() as usize).ok_or_else(|| {
+            if let Ok(logger) = self.logger.get() {
+                logger.warn(&format!(
+                    "eviction-policy-lru: remove on invalid pool {}",
+                    handle.pool_id()
+                ));
+            }
+            EvictionPolicyError::InvalidPool(handle.pool_id())
+        })?;
         let mut pool_guard = pool_mutex.lock().unwrap();
         pool_guard.lru.remove(handle.index());
         Ok(())

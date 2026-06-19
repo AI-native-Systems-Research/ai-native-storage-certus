@@ -1,0 +1,73 @@
+{
+  "generated": "2026-06-19T00:00:00Z",
+  "project": "eviction-policy-lru",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 15,
+    "aligned": 12,
+    "drifted": 3,
+    "not_implemented": 0,
+    "unspecced_features": 1
+  },
+  "specs": [
+    {
+      "id": "001-lru-eviction-policy",
+      "title": "LRU Eviction Policy Component",
+      "aligned": [
+        "FR-001",
+        "FR-002",
+        "FR-003",
+        "FR-004",
+        "FR-005",
+        "FR-006",
+        "FR-007",
+        "FR-008",
+        "FR-011",
+        "NFR-001",
+        "NFR-002",
+        "NFR-003"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-009",
+          "spec_text": "Operations on an invalid PoolId MUST return EvictionPolicyError::InvalidPool",
+          "actual": "Only Result-returning methods (track, touch, remove) report InvalidPool. pop_oldest returns None, peek_oldest returns empty Vec, len returns 0, clear_pool no-ops.",
+          "location": "src/lib.rs:87-123",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "FR-010",
+          "spec_text": "remove and move_to_back on an already-removed entry MUST be idempotent",
+          "actual": "Public API uses 'touch', not 'move_to_back'. Behavior is correct (idempotent) but spec uses wrong method name.",
+          "location": "src/lib.rs:65-74",
+          "severity": "minor"
+        },
+        {
+          "requirement": "NFR-004",
+          "spec_text": "Component MUST conform to Certus component model with receptacle for ILogger",
+          "actual": "ILogger receptacle is declared but never used — no log calls exist in the implementation.",
+          "location": "src/lib.rs:32",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": [],
+      "success_criteria_drift": [
+        {
+          "criterion": "SC-001",
+          "spec_text": "All 8 unit tests in lib.rs and 12 unit tests in lru_list.rs pass",
+          "actual": "9 tests in lib.rs and 13 tests in lru_list.rs (22 total)",
+          "severity": "minor"
+        }
+      ]
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "ILogger receptacle (declared, unused)",
+      "location": "src/lib.rs:32",
+      "lines": 1,
+      "suggested_action": "Add logging or remove unused receptacle"
+    }
+  ],
+  "conflicts": []
+}
