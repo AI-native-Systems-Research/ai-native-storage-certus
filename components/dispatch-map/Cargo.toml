@@ -16,6 +16,7 @@ interfaces = { workspace = true, features = ["spdk"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+eviction-policy-lru.workspace = true
 
 [[bench]]
 name = "dispatch_map_benchmark"

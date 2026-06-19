@@ -24,23 +24,38 @@ use component_framework::define_component;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_millis(2000);
 use interfaces::{
-    CacheKey, DispatchMapError, DmaAllocFn, DmaBuffer, IDispatchMap, IExtentManager, ILogger,
-    LookupResult,
+    CacheKey, DispatchMapError, DmaAllocFn, DmaBuffer, IDispatchMap, IEvictionPolicy,
+    IExtentManager, ILogger, LookupResult,
 };
 
-use crate::entry::{rdtsc, DispatchEntry, Location};
+use crate::entry::{DispatchEntry, Location};
 
 define_component! {
     pub DispatchMapComponent {
-        version: "0.1.0",
+        version: "0.2.0",
         provides: [IDispatchMap],
         receptacles: {
             logger: ILogger,
             extent_manager: IExtentManager,
+            eviction_policy: IEvictionPolicy,
         },
         fields: {
             state: DispatchMapState,
         },
+    }
+}
+
+impl DispatchMapComponent {
+    /// Get or create the eviction pool. Creates on first call (during initialize).
+    fn get_pool_id(&self) -> interfaces::PoolId {
+        let mut pool_id = self.state.pool_id.lock().unwrap();
+        if let Some(id) = *pool_id {
+            return id;
+        }
+        let ep = self.eviction_policy.get().unwrap();
+        let id = ep.create_pool();
+        *pool_id = Some(id);
+        id
     }
 }
 
@@ -58,6 +73,11 @@ impl IDispatchMap for DispatchMapComponent {
     /// counts, restoring the map to a consistent view of committed storage.
     /// If no extent manager is bound, starts with an empty map.
     fn initialize(&self) -> Result<(), DispatchMapError> {
+        let pool_id = self.get_pool_id();
+        let ep = self.eviction_policy.get().map_err(|_| {
+            DispatchMapError::NotInitialized("eviction_policy receptacle not connected".into())
+        })?;
+
         let em = match self.extent_manager.get() {
             Ok(em) => em,
             Err(_) => {
@@ -75,9 +95,8 @@ impl IDispatchMap for DispatchMapComponent {
         let mut inner = self.state.inner.lock().unwrap();
         let mut count: u64 = 0;
 
-        // Walk all persisted extents and rebuild the in-memory dispatch entries.
-        // Staging buffers are not recovered — only committed block-device locations.
         em.for_each_extent(&mut |extent| {
+            let eviction_handle = ep.track(pool_id, extent.key).unwrap();
             let entry = DispatchEntry {
                 location: Location::BlockDevice {
                     offset: extent.offset,
@@ -85,7 +104,7 @@ impl IDispatchMap for DispatchMapComponent {
                 size_blocks: extent.size,
                 read_ref: 0,
                 write_ref: 0,
-                tsc: rdtsc(),
+                eviction_handle,
             };
             inner.entries.insert(extent.key, entry);
             count += 1;
@@ -110,6 +129,9 @@ impl IDispatchMap for DispatchMapComponent {
                 .ok_or_else(|| DispatchMapError::NotInitialized("DMA allocator not set".into()))?
         };
 
+        let pool_id = self.get_pool_id();
+        let ep = self.eviction_policy.get().unwrap();
+
         let mut inner = self.state.inner.lock().unwrap();
         if inner.entries.contains_key(&key) {
             return Err(DispatchMapError::AlreadyExists(key));
@@ -119,6 +141,7 @@ impl IDispatchMap for DispatchMapComponent {
         let buf = alloc_fn(byte_size, 4096, None).map_err(DispatchMapError::AllocationFailed)?;
         let buffer = Arc::new(buf);
 
+        let eviction_handle = ep.track(pool_id, key).unwrap();
         let entry = DispatchEntry {
             location: Location::Staging {
                 buffer: Arc::clone(&buffer),
@@ -126,7 +149,7 @@ impl IDispatchMap for DispatchMapComponent {
             size_blocks: size,
             read_ref: 0,
             write_ref: 1,
-            tsc: rdtsc(),
+            eviction_handle,
         };
 
         inner.entries.insert(key, entry);
@@ -162,7 +185,7 @@ impl IDispatchMap for DispatchMapComponent {
             .read_ref
             .checked_add(1)
             .ok_or(DispatchMapError::RefCountOverflow(key))?;
-        entry.tsc = rdtsc();
+        let handle = entry.eviction_handle;
 
         let result = match &entry.location {
             Location::Staging { buffer } => LookupResult::Staging {
@@ -174,6 +197,11 @@ impl IDispatchMap for DispatchMapComponent {
                 size: *size,
             },
         };
+
+        drop(inner);
+        if let Ok(ep) = self.eviction_policy.get() {
+            let _ = ep.touch(handle);
+        }
 
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: lookup key {key} → {result:?}"));
@@ -344,7 +372,12 @@ impl IDispatchMap for DispatchMapComponent {
             return Err(DispatchMapError::ActiveReferences(key));
         }
 
+        let handle = entry.eviction_handle;
         inner.entries.remove(&key);
+
+        if let Ok(ep) = self.eviction_policy.get() {
+            let _ = ep.remove(handle);
+        }
 
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: removed key {key}"));
@@ -354,12 +387,16 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn touch(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        let mut inner = self.state.inner.lock().unwrap();
+        let inner = self.state.inner.lock().unwrap();
         let entry = inner
             .entries
-            .get_mut(&key)
+            .get(&key)
             .ok_or(DispatchMapError::KeyNotFound(key))?;
-        entry.tsc = rdtsc();
+        let handle = entry.eviction_handle;
+        drop(inner);
+        if let Ok(ep) = self.eviction_policy.get() {
+            let _ = ep.touch(handle);
+        }
         Ok(())
     }
 
@@ -373,14 +410,12 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
-        let inner = self.state.inner.lock().unwrap();
-        let mut entries: Vec<(CacheKey, u64)> = inner
-            .entries
-            .iter()
-            .map(|(&key, entry)| (key, entry.tsc))
-            .collect();
-        entries.sort_unstable_by_key(|&(_, tsc)| tsc);
-        entries.into_iter().take(n).map(|(key, _)| key).collect()
+        let pool_id = self.get_pool_id();
+        if let Ok(ep) = self.eviction_policy.get() {
+            ep.peek_oldest(pool_id, n)
+        } else {
+            Vec::new()
+        }
     }
 
     fn create_memory_tier_entry(
@@ -393,21 +428,25 @@ impl IDispatchMap for DispatchMapComponent {
             return Err(DispatchMapError::InvalidSize);
         }
 
+        let pool_id = self.get_pool_id();
+        let ep = self.eviction_policy.get().unwrap();
+
         let mut inner = self.state.inner.lock().unwrap();
         if inner.entries.contains_key(&key) {
             return Err(DispatchMapError::AlreadyExists(key));
         }
 
+        let eviction_handle = ep.track(pool_id, key).unwrap();
         let entry = DispatchEntry {
             location: Location::MemoryTier {
                 pointer,
                 size,
                 ssd_offset: None,
             },
-            size_blocks: size.div_ceil(4096) as u32,
+            size_blocks: size.div_ceil(4096),
             read_ref: 0,
             write_ref: 1,
-            tsc: rdtsc(),
+            eviction_handle,
         };
 
         inner.entries.insert(key, entry);
@@ -483,16 +522,20 @@ impl IDispatchMap for DispatchMapComponent {
         offset: u64,
         size_blocks: u32,
     ) -> Result<(), DispatchMapError> {
+        let pool_id = self.get_pool_id();
+        let ep = self.eviction_policy.get().unwrap();
+
         let mut inner = self.state.inner.lock().unwrap();
         if inner.entries.contains_key(&key) {
             return Err(DispatchMapError::AlreadyExists(key));
         }
+        let eviction_handle = ep.track(pool_id, key).unwrap();
         let entry = DispatchEntry {
             location: Location::BlockDevice { offset },
             size_blocks,
             read_ref: 0,
             write_ref: 0,
-            tsc: rdtsc(),
+            eviction_handle,
         };
         inner.entries.insert(key, entry);
         Ok(())
@@ -649,7 +692,12 @@ mod tests {
     }
 
     fn setup_component() -> Arc<DispatchMapComponent> {
+        let ep_comp = eviction_policy_lru::EvictionPolicyLruComponent::new_default();
+        let ep: Arc<dyn IEvictionPolicy + Send + Sync> =
+            query_interface!(ep_comp, IEvictionPolicy).unwrap();
+
         let c = DispatchMapComponent::new(DispatchMapState::new());
+        c.eviction_policy.connect(ep).unwrap();
         let dm = query_interface!(c, IDispatchMap).unwrap();
         dm.set_dma_alloc(mock_dma_alloc());
         c
