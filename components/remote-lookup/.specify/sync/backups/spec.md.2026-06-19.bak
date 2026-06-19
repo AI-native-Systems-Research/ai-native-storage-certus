@@ -4,7 +4,7 @@
 
 **Created**: 2026-06-19
 
-**Status**: Synced (2026-06-19)
+**Status**: Draft
 
 **Input**: User description: "The component is a placeholder for performing remote lookups to other nodes running Certus on the same network. The component has an ILogger receptacle. The IRemoteLookup interface should support the batch_lookup function with the same parameters as IDispatch export. For the moment, the lookup implementation should only output some logging statement--this is a placeholder."
 
@@ -20,9 +20,9 @@ A Certus node receives a batch of cache key lookups intended for remote nodes on
 
 **Acceptance Scenarios**:
 
-1. **Given** the component is instantiated, **When** `batch_lookup` is called with N entries, **Then** N results are returned in the same positional order as the input entries.
-2. **Given** the component is instantiated, **When** `batch_lookup` is called, **Then** a log statement is emitted for each entry in the batch via the `ILogger` receptacle.
-3. **Given** the component is instantiated, **When** `join_cluster` is called with an endpoint string, **Then** the call returns `Ok(())` and a log message is emitted.
+1. **Given** the component is connected, **When** `batch_lookup` is called with N entries, **Then** N results are returned in the same positional order as the input entries.
+2. **Given** the component is connected, **When** `batch_lookup` is called, **Then** a log statement is emitted for each entry in the batch via the `ILogger` receptacle.
+3. **Given** the component is not connected, **When** `batch_lookup` is called, **Then** all results return a `NotConnected` error.
 
 ---
 
@@ -51,20 +51,18 @@ The `batch_lookup` method on `IRemoteLookup` MUST accept the same parameter type
 
 - **FR-001**: The `IRemoteLookup` interface MUST expose a `batch_lookup` method with signature `fn batch_lookup(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), RemoteLookupError>>`.
 - **FR-002**: The `batch_lookup` method MUST return one `Result` per input entry, preserving positional order.
-- **FR-003**: Each entry in `batch_lookup` MUST produce a log message via the `ILogger` receptacle (placeholder behavior). If the ILogger receptacle is not bound, logging is silently skipped.
+- **FR-003**: When connected, each entry in `batch_lookup` MUST produce a log message via the `ILogger` receptacle (placeholder behavior).
 - **FR-004**: When connected, the placeholder implementation MUST return `Err(RemoteLookupError::NotFound)` for each entry (no actual network I/O).
-- **FR-005**: The `batch_lookup` method MUST be callable at any time after component instantiation. No connection precondition is required.
+- **FR-005**: When not connected, `batch_lookup` MUST return `Err(RemoteLookupError::NotConnected)` for every entry.
 - **FR-006**: When called with an empty slice, `batch_lookup` MUST return an empty `Vec`.
 - **FR-007**: The interface definition MUST reside in `components/interfaces/src/iremote_lookup.rs`.
 - **FR-008**: The component MUST expose functionality only through the `IRemoteLookup` interface — no public functions outside the interface.
-- **FR-009**: The `IRemoteLookup` interface MUST expose a `join_cluster` method with signature `fn join_cluster(&self, endpoint: &str) -> Result<(), RemoteLookupError>`. The placeholder implementation MUST log the endpoint and return `Ok(())`.
-- **FR-010**: The `IRemoteLookup` interface MUST expose a `leave_cluster` method with signature `fn leave_cluster(&self) -> Result<(), RemoteLookupError>`. The placeholder implementation MUST log the call and return `Ok(())`.
 
 ### Key Entities
 
 - **CacheKey**: Integer type alias used as the lookup key (same as used in `IDispatcher`).
 - **IpcHandle**: Opaque handle describing client GPU memory for DMA transfers (address + size).
-- **RemoteLookupError**: Error enum covering `NotFound` and `TransportError` variants.
+- **RemoteLookupError**: Error enum covering `NotConnected`, `NotFound`, and `TransportError` variants.
 
 ## Success Criteria *(mandatory)*
 
