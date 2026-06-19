@@ -13,6 +13,7 @@ mod igpu_services;
 mod igreeter;
 mod ilogger;
 mod imemory_tier;
+mod iremote_lookup;
 
 pub use idispatch_map::CacheKey;
 pub use idispatch_map::DispatchMapError;
@@ -36,6 +37,8 @@ pub use ieviction_policy::IEvictionPolicy;
 pub use ieviction_policy::PoolId;
 pub use igreeter::IGreeter;
 pub use ilogger::ILogger;
+pub use iremote_lookup::IRemoteLookup;
+pub use iremote_lookup::RemoteLookupError;
 pub use imemory_tier::MemoryTierError;
 #[cfg(feature = "spdk")]
 pub use imemory_tier::IMemoryTier;
