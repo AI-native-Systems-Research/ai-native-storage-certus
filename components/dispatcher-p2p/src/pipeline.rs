@@ -860,6 +860,233 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
     Ok(())
 }
 
+/// Describes a single object to be read from SSD via P2P into a client GPU destination.
+pub struct P2pColdJob {
+    pub gpu_dst: *mut std::ffi::c_void,
+    pub start_lba: u64,
+    pub total_bytes: usize,
+}
+
+// SAFETY: gpu_dst is a CUDA device pointer valid across threads.
+unsafe impl Send for P2pColdJob {}
+
+/// Multi-object P2P pipeline: interleaves segments from N objects across the BAR1
+/// ring for maximum NVMe queue utilization. Each completion is tag-decoded to route
+/// the D2D copy to the correct client GPU destination.
+#[allow(clippy::too_many_arguments)]
+pub unsafe fn pipelined_multi_object_p2p(
+    drive: &dyn IBlockDevice,
+    ring: &crate::p2p_ring::P2pRing,
+    partition: &crate::p2p_ring::ThreadPartition,
+    channels: &ClientChannels,
+    jobs: &[P2pColdJob],
+) -> Vec<Result<(), DispatcherError>> {
+    use gpu_services::cuda_ffi;
+
+    let num_jobs = jobs.len();
+    let mut results: Vec<Result<(), DispatcherError>> = vec![Ok(()); num_jobs];
+
+    if num_jobs == 0 {
+        return results;
+    }
+
+    let block_size = drive.block_size() as usize;
+    let chunk_size = ring.slot_size;
+    let all_streams = ring.streams();
+    let num_streams = all_streams.len();
+
+    let ring_offset = partition.ring_offset;
+    let ring_size = partition.effective_qd;
+
+    // Segment all objects upfront.
+    struct ObjSegments {
+        segments: Vec<crate::io_segmenter::IoSegment>,
+    }
+
+    let mut all_objs: Vec<ObjSegments> = Vec::with_capacity(num_jobs);
+    let mut total_segments = 0usize;
+
+    for job in jobs {
+        let aligned_bytes = job.total_bytes.next_multiple_of(block_size);
+        let segments = crate::io_segmenter::segment_io(
+            job.start_lba,
+            aligned_bytes,
+            chunk_size as u32,
+            block_size as u32,
+        );
+        total_segments += segments.len();
+        all_objs.push(ObjSegments { segments });
+    }
+
+    if total_segments == 0 {
+        return results;
+    }
+
+    // Flatten into work queue with tag encoding.
+    let mut work: Vec<(usize, usize)> = Vec::with_capacity(total_segments);
+    for (obj_idx, obj) in all_objs.iter().enumerate() {
+        for seg_idx in 0..obj.segments.len() {
+            work.push((obj_idx, seg_idx));
+        }
+    }
+
+    let max_segments_per_obj = all_objs.iter().map(|o| o.segments.len()).max().unwrap_or(0);
+    let effective_qd = ring_size.min(total_segments).max(1);
+    let sync_interval = ring_size.max(1);
+
+    // Prime: submit initial reads.
+    let mut submitted = 0usize;
+    let mut completed = 0usize;
+
+    while submitted < effective_qd {
+        let (obj_idx, seg_idx) = work[submitted];
+        let slot = ring_offset + (submitted % ring_size);
+        let tag = (obj_idx * max_segments_per_obj + seg_idx) as u64;
+
+        if channels
+            .command_tx
+            .send(Command::ReadAsync {
+                ns_id: 1,
+                lba: all_objs[obj_idx].segments[seg_idx].lba,
+                buf: Arc::clone(ring.slot(slot)),
+                timeout_ms: READ_TIMEOUT_MS,
+                tag,
+            })
+            .is_err()
+        {
+            for r in &mut results {
+                *r = Err(DispatcherError::IoError("channel send failed".into()));
+            }
+            return results;
+        }
+        submitted += 1;
+    }
+
+    // Main pipeline loop.
+    while completed < total_segments {
+        match channels.completion_rx.recv() {
+            Ok(Completion::ReadDone { tag, result, .. }) => {
+                let obj_idx = (tag as usize) / max_segments_per_obj;
+                let seg_idx = (tag as usize) % max_segments_per_obj;
+
+                if let Err(e) = result {
+                    results[obj_idx] = Err(DispatcherError::IoError(format!(
+                        "P2P SSD read obj={obj_idx} seg={seg_idx}: {e}"
+                    )));
+                    completed += 1;
+                } else {
+                    completed += 1;
+
+                    let job = &jobs[obj_idx];
+                    let seg = &all_objs[obj_idx].segments[seg_idx];
+                    let copy_len = seg.length.min(job.total_bytes.saturating_sub(seg.buffer_offset));
+                    let slot = ring_offset + ((completed - 1) % ring_size);
+                    let current_stream = all_streams[(completed - 1) % num_streams];
+
+                    // D2D async copy: BAR1 ring slot → client GPU destination.
+                    let err = cuda_ffi::cudaMemcpyAsync(
+                        (job.gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void,
+                        ring.dev_ptrs[slot] as *const std::ffi::c_void,
+                        copy_len,
+                        cuda_ffi::CUDA_MEMCPY_DEVICE_TO_DEVICE,
+                        current_stream.0,
+                    );
+                    if err != cuda_ffi::CUDA_SUCCESS {
+                        results[obj_idx] = Err(DispatcherError::IoError(format!(
+                            "P2P D2D cudaMemcpyAsync obj={obj_idx} seg={seg_idx}: {}",
+                            cuda_ffi::cuda_error_string(err)
+                        )));
+                    }
+
+                    // Sync before recycling slots.
+                    if completed % sync_interval == 0 && submitted < total_segments {
+                        for s in all_streams {
+                            let err = cuda_ffi::cudaStreamSynchronize(s.0);
+                            if err != cuda_ffi::CUDA_SUCCESS {
+                                results[obj_idx] = Err(DispatcherError::IoError(format!(
+                                    "P2P cudaStreamSynchronize: {}",
+                                    cuda_ffi::cuda_error_string(err)
+                                )));
+                            }
+                        }
+                    }
+
+                    // Submit next read.
+                    if submitted < total_segments {
+                        let (next_obj, next_seg) = work[submitted];
+                        let next_slot = ring_offset + (submitted % ring_size);
+                        let next_tag = (next_obj * max_segments_per_obj + next_seg) as u64;
+
+                        if channels
+                            .command_tx
+                            .send(Command::ReadAsync {
+                                ns_id: 1,
+                                lba: all_objs[next_obj].segments[next_seg].lba,
+                                buf: Arc::clone(ring.slot(next_slot)),
+                                timeout_ms: READ_TIMEOUT_MS,
+                                tag: next_tag,
+                            })
+                            .is_err()
+                        {
+                            for r in &mut results {
+                                if r.is_ok() {
+                                    *r = Err(DispatcherError::IoError("channel send failed".into()));
+                                }
+                            }
+                            break;
+                        }
+                        submitted += 1;
+                    }
+                }
+            }
+            Ok(Completion::Timeout { handle }) => {
+                return results.into_iter().map(|r| {
+                    if r.is_ok() {
+                        Err(DispatcherError::IoError(format!("P2P NVMe timeout (handle {:?})", handle)))
+                    } else {
+                        r
+                    }
+                }).collect();
+            }
+            Ok(other) => {
+                return results.into_iter().map(|r| {
+                    if r.is_ok() {
+                        Err(DispatcherError::IoError(format!("P2P unexpected completion: {other:?}")))
+                    } else {
+                        r
+                    }
+                }).collect();
+            }
+            Err(_) => {
+                return results.into_iter().map(|r| {
+                    if r.is_ok() {
+                        Err(DispatcherError::IoError("P2P completion channel disconnected".into()))
+                    } else {
+                        r
+                    }
+                }).collect();
+            }
+        }
+    }
+
+    // Final sync.
+    for s in all_streams {
+        let err = cuda_ffi::cudaStreamSynchronize(s.0);
+        if err != cuda_ffi::CUDA_SUCCESS {
+            for r in &mut results {
+                if r.is_ok() {
+                    *r = Err(DispatcherError::IoError(format!(
+                        "P2P final cudaStreamSynchronize: {}",
+                        cuda_ffi::cuda_error_string(err)
+                    )));
+                }
+            }
+        }
+    }
+
+    results
+}
+
 /// Describes a single object to be promoted from SSD into the memory-tier (no GPU).
 pub struct DramPromoteJob {
     pub mem_ptr: *mut u8,
