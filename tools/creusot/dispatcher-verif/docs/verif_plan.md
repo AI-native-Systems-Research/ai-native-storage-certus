@@ -60,6 +60,7 @@ Use these as Creusot contract templates in Rust (`#[requires]`, `#[ensures]`).
 4. `lookup(key, ...)`:
    - Requires: initialized.
    - Ensures on miss: `KeyNotFound`, state unchanged.
+   - Ensures on size mismatch for existing key: `InvalidParameter`, no copy side effects, and state unchanged.
    - Ensures on MemoryTier hit: key remains MemoryTier; timestamp monotonic non-decreasing.
    - Ensures on BlockDevice success: key transitions to MemoryTier.
    - Ensures on Staging hit: key remains valid entry.
