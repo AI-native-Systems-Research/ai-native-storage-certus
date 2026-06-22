@@ -32,6 +32,7 @@ members = [
     "certus-connector",
     "components/example-helloworld-dylib",
     "components/eviction-policy-lru",
+    "components/remote-lookup",
     "apps/dynamic-loading-example",
     "apps/certus-server-yaml",
     "apps/baseline-generalized-fs"
@@ -51,7 +52,8 @@ default-members = [
     "apps/dynamic-loading-example",
     "components/logger",
     "components/gpu-services",
-    "components/eviction-policy-lru"
+    "components/eviction-policy-lru",
+    "components/remote-lookup"
 ]
 
 resolver = "2"
@@ -83,6 +85,7 @@ dispatcher-p2p = { path = "components/dispatcher-p2p", default-features = false 
 extent-manager = { path = "components/extent-manager" }
 gpu-services = { path = "components/gpu-services" }
 eviction-policy-lru = { path = "components/eviction-policy-lru" }
+remote-lookup = { path = "components/remote-lookup" }
 certus-connector = { path = "certus-connector" }
 creusot-std = "0.12.0-dev"
 libloading = "0.8"

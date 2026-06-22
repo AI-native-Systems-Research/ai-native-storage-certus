@@ -43,9 +43,11 @@ Generated: 2026-06-18
 | block-device-filesys | 1,181 | 96 | 1,277 | 8% |
 | block-device-kernel | 1,162 | 91 | 1,253 | 7% |
 | interfaces | 1,062 | 145 | 1,207 | 12% |
+| eviction-policy-lru | 520 | 310 | 830 | 37% |
 | dispatch-map | 503 | 324 | 827 | 39% |
 | memory-tier | 496 | 286 | 782 | 37% |
 | spdk-env | 356 | 607 | 963 | 63% |
+| remote-lookup | 180 | 120 | 300 | 40% |
 | logger | 135 | 170 | 305 | 56% |
 
 ## Applications (Rust)
