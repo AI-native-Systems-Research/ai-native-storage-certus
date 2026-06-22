@@ -83,6 +83,32 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
         Ok(())
     }
 
+    fn batch_touch(&self, handles: &[EvictionHandle]) -> Result<(), EvictionPolicyError> {
+        if handles.is_empty() {
+            return Ok(());
+        }
+        let state = self.state.read().unwrap();
+        let mut current_pool_id = handles[0].pool_id();
+        let pool_mutex = state.pools.get(current_pool_id as usize).ok_or(
+            EvictionPolicyError::InvalidPool(current_pool_id),
+        )?;
+        let mut pool_guard = pool_mutex.lock().unwrap();
+        pool_guard.lru.move_to_back(handles[0].index());
+
+        for handle in &handles[1..] {
+            if handle.pool_id() != current_pool_id {
+                drop(pool_guard);
+                current_pool_id = handle.pool_id();
+                let pm = state.pools.get(current_pool_id as usize).ok_or(
+                    EvictionPolicyError::InvalidPool(current_pool_id),
+                )?;
+                pool_guard = pm.lock().unwrap();
+            }
+            pool_guard.lru.move_to_back(handle.index());
+        }
+        Ok(())
+    }
+
     fn remove(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError> {
         let state = self.state.read().unwrap();
         let pool_mutex = state.pools.get(handle.pool_id() as usize).ok_or_else(|| {

@@ -405,7 +405,7 @@ impl MockMemoryTier {
 }
 
 impl IMemoryTier for MockMemoryTier {
-    fn initialize(&self, _pool_size: usize) -> Result<(), MemoryTierError> {
+    fn initialize(&self, _pool_size: usize, _numa_node: Option<i32>) -> Result<(), MemoryTierError> {
         Ok(())
     }
 
@@ -463,6 +463,7 @@ impl IMemoryTier for MockMemoryTier {
     }
 
     fn touch(&self, _key: CacheKey) {}
+    fn batch_touch(&self, _keys: &[CacheKey]) {}
 
     fn contains(&self, key: CacheKey) -> bool {
         self.inner.lock().unwrap().slots.contains_key(&key)
@@ -487,6 +488,10 @@ impl IMemoryTier for MockMemoryTier {
         inner.slots.clear();
         inner.next_offset = 0;
         Ok(count)
+    }
+
+    fn is_dma_capable(&self) -> bool {
+        false
     }
 }
 

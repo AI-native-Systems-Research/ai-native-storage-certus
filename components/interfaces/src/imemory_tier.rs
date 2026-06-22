@@ -43,7 +43,12 @@ impl std::error::Error for MemoryTierError {}
 component_macros::define_interface! {
     pub IMemoryTier {
         /// Initialize the memory-tier pool with the given size in bytes.
-        fn initialize(&self, pool_size: usize) -> Result<(), MemoryTierError>;
+        ///
+        /// If `numa_node` is `Some(node)` with `node >= 0`, the pool is bound to
+        /// that NUMA node via `mbind(MPOL_BIND)`. If binding fails, the pool is
+        /// still usable with default memory policy (FR-019 fallback).
+        /// Pass `None` to use the kernel's default placement.
+        fn initialize(&self, pool_size: usize, numa_node: Option<i32>) -> Result<(), MemoryTierError>;
 
         /// Allocate a slot for `key` of `size` bytes and return a pointer to it.
         ///
@@ -82,6 +87,10 @@ component_macros::define_interface! {
         /// Update the LRU position for `key` without returning data.
         fn touch(&self, key: CacheKey);
 
+        /// Update LRU positions for multiple keys in a single batched operation.
+        /// Amortizes lock acquisition over the batch for hot-path throughput.
+        fn batch_touch(&self, keys: &[CacheKey]);
+
         /// Check whether a slot exists for `key`.
         fn contains(&self, key: CacheKey) -> bool;
 
@@ -93,6 +102,10 @@ component_macros::define_interface! {
 
         /// Return the base pointer and size of the pool for CUDA host registration.
         fn pool_info(&self) -> Option<(*mut u8, usize)>;
+
+        /// Returns `true` when the pool is backed by SPDK hugepages and pointers
+        /// from `insert`/`get` can be used directly for NVMe DMA without staging.
+        fn is_dma_capable(&self) -> bool;
 
         /// Remove all entries from the pool, freeing all slots.
         ///

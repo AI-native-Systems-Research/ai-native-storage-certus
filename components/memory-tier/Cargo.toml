@@ -5,12 +5,16 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+spdk = ["dep:spdk-sys"]
+
 [dependencies]
 component-framework.workspace = true
 component-core.workspace = true
 component-macros.workspace = true
 interfaces = { workspace = true, features = ["spdk"] }
 libc = "0.2"
+spdk-sys = { workspace = true, optional = true }
 
 [dev-dependencies]
 eviction-policy-lru.workspace = true

@@ -415,7 +415,7 @@ fn setup_dispatcher(
     mt_comp.eviction_policy.connect(Arc::clone(&ep)).unwrap();
     let imt = query_interface!(mt_comp, IMemoryTier)
         .ok_or("IMemoryTier query failed")?;
-    imt.initialize(MEMORY_TIER_POOL_SIZE)
+    imt.initialize(MEMORY_TIER_POOL_SIZE, None)
         .map_err(|e| format!("memory-tier init: {e:?}"))?;
     eprintln!(
         "  Memory-tier: {} MiB pool",
