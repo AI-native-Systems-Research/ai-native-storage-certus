@@ -51,8 +51,8 @@ use component_framework::define_component;
 use interfaces::{
     CacheKey, ClientChannels, Command, Completion, DispatcherConfig, DispatcherError, DmaAllocFn,
     DmaBuffer, FormatParams, GpuStream, IBlockDevice, IBlockDeviceAdmin, IDispatchMap, IDispatcher,
-    IExtentManager, IGpuServices, ILogger, IMemoryTier, IpcHandle, LookupResult, PciAddress,
-    WriteHandle,
+    IExtentManager, IGpuServices, ILogger, IMemoryTier, IRemoteLookup, IpcHandle, LookupResult,
+    PciAddress, WriteHandle,
 };
 
 use component_core::binding::bind;
@@ -142,6 +142,7 @@ define_component! {
             gpu_services: IGpuServices,
             spdk_env: ISPDKEnv,
             memory_tier: IMemoryTier,
+            remote_lookup: IRemoteLookup,
         },
         fields: {
             initialized: AtomicBool,
@@ -1172,6 +1173,10 @@ impl IDispatcher for DispatcherP2pComponent {
 
         self.initialized.store(true, Ordering::Release);
 
+        if let Ok(rl) = self.remote_lookup.get() {
+            let _ = rl.join_cluster("certus://local-cluster");
+        }
+
         self.log_info("dispatcher: initialized");
         Ok(())
     }
@@ -1256,6 +1261,10 @@ impl IDispatcher for DispatcherP2pComponent {
             if let Some(ref admin) = drive.block_dev_admin {
                 admin.detach_controller();
             }
+        }
+
+        if let Ok(rl) = self.remote_lookup.get() {
+            let _ = rl.leave_cluster();
         }
 
         self.initialized.store(false, Ordering::Release);
@@ -1595,6 +1604,39 @@ impl IDispatcher for DispatcherP2pComponent {
                         }
                     }
                 });
+            }
+        }
+
+        // --- Remote lookup for entries not found locally ---
+        if let Ok(rl) = self.remote_lookup.get() {
+            let not_found: Vec<usize> = results
+                .iter()
+                .enumerate()
+                .filter_map(|(i, r)| match r {
+                    Some(Err(DispatcherError::KeyNotFound(_))) => Some(i),
+                    _ => None,
+                })
+                .collect();
+
+            if !not_found.is_empty() {
+                let remote_entries: Vec<(CacheKey, IpcHandle)> = not_found
+                    .iter()
+                    .map(|&i| {
+                        let (key, handle) = &entries[i];
+                        (*key, IpcHandle {
+                            address: handle.address,
+                            size: handle.size,
+                        })
+                    })
+                    .collect();
+
+                let remote_results = rl.batch_lookup(&remote_entries);
+
+                for (pos, remote_res) in not_found.iter().zip(remote_results.into_iter()) {
+                    results[*pos] = Some(remote_res.map_err(|e| {
+                        DispatcherError::IoError(format!("remote lookup: {e}"))
+                    }));
+                }
             }
         }
 
