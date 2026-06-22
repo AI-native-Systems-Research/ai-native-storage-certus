@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Multi-client throughput and latency benchmark for the Certus gRPC Dispatcher (v2).
 
-Same as certus-api-bench.py but with pipelined concurrent gRPC requests.
-Difference: cold lookups use gRPC futures (stub.Lookup.future()) to keep
---pipeline-depth RPCs in flight simultaneously, like iperf -P. This saturates
-the server's GPU PCIe link which sequential RPCs cannot fill alone.
+Both hot and cold lookups use pipelined gRPC futures (stub.Lookup.future()) to
+keep --pipeline-depth RPCs in flight simultaneously, like iperf -P. This
+saturates the server's GPU PCIe link which sequential RPCs cannot fill alone.
+Use --sequential-hot for per-request latency measurement on the hot path.
 
 Usage:
     python certus-api-bench_v2.py --clients 1 --num-objects 64 --pipeline-depth 4
@@ -29,7 +29,10 @@ import dispatcher_pb2_grpc
 assert torch.cuda.is_available(), "CUDA GPU required"
 
 BLOCK_SIZE = 4 * 1024 * 1024  # 4 MiB (default, overridden by --block-size)
-MEMORY_TIER_SIZE = 2 * 1024 * 1024 * 1024  # 2 GiB (default, overridden by --memory-tier-size)
+# TODO: query server for actual pool size instead of requiring manual --memory-tier-size.
+# For multi-client runs, set this to HALF the server's --memory-tier-size so that
+# total objects across all clients fits within the real pool without cross-client eviction.
+MEMORY_TIER_SIZE = 2 * 1024 * 1024 * 1024  # 2 GiB default (half of typical 4G server)
 
 
 def parse_size(s):
@@ -368,6 +371,7 @@ def run_client(
     gpu_id=0,
     pipeline_depth=4,
     writes_settle=30.0,
+    sequential_hot=False,
 ):
     """Single client worker: populate objects, then measure hot and cold lookups."""
 
@@ -416,14 +420,14 @@ def run_client(
             dispatcher_pb2.IpcHandle(cuda_ipc_handle=handle_bytes, size=BLOCK_SIZE, gpu_device_id=gpu_id)
         )
 
-    # Memory-tier pool can hold MEMORY_TIER_SIZE / BLOCK_SIZE objects.
-    # For cold-path testing we need objects evicted to SSD.
-    # Strategy: populate enough objects to overflow the pool fraction this client owns,
+    # Memory-tier pool can hold MEMORY_TIER_SIZE / BLOCK_SIZE objects total.
+    # With num_clients concurrent clients each gets a fair share of the pool.
+    # Strategy: populate enough objects to overflow this client's share,
     # so the earliest keys get evicted to SSD.
     pool_capacity = MEMORY_TIER_SIZE // BLOCK_SIZE
-    # We'll populate pool_capacity + cold objects so cold keys are evicted.
+    client_pool_share = max(1, pool_capacity // num_clients)
     cold_objects = num_objects * iterations
-    total_objects = pool_capacity + cold_objects
+    total_objects = client_pool_share + cold_objects
 
     # --- Phase 1: Populate ---
     barrier.wait()  # synchronize start across all clients
@@ -474,9 +478,9 @@ def run_client(
     barrier.wait()
 
     # --- Phase 2: Hot lookups (memory-tier) ---
-    # The last `num_objects` in the pool are still in DRAM.
+    # The last `num_objects` in this client's pool share are still in DRAM.
     hot_keys = [
-        base_key + cold_objects + pool_capacity - num_objects + i
+        base_key + cold_objects + client_pool_share - num_objects + i
         for i in range(num_objects)
     ]
 
@@ -493,28 +497,56 @@ def run_client(
     barrier.wait()  # synchronize hot-lookup start
     result.hot_start = time.perf_counter()
 
-    # Hot lookups are sequential (not pipelined): the server's stream_synchronize
-    # completes the DMA before responding, so sequential RPCs measure real H2D
-    # throughput. Pipelining hot lookups inflates numbers by overlapping gRPC
-    # round-trips that share a single GPU PCIe link.
-    for _ in range(iterations):
-        entries = [
-            dispatcher_pb2.LookupEntry(key=k, ipc_handle=hot_lookup_ipcs[i])
-            for i, k in enumerate(hot_keys)
-        ]
-        try:
-            t0 = time.perf_counter()
-            resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=entries))
-            _libcudart.cudaDeviceSynchronize()
-            t1 = time.perf_counter()
-            failed = [r for r in resp.results if not r.success]
-            if failed:
-                result.errors.append(
-                    f"hot lookup failed: {failed[0].error_message}"
-                )
-            result.hot_latencies.append((t1 - t0) / num_objects)
-        except grpc.RpcError as e:
-            result.errors.append(f"hot lookup RPC error: {e.details()}")
+    if sequential_hot:
+        for _ in range(iterations):
+            entries = [
+                dispatcher_pb2.LookupEntry(key=k, ipc_handle=hot_lookup_ipcs[i])
+                for i, k in enumerate(hot_keys)
+            ]
+            try:
+                t0 = time.perf_counter()
+                resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=entries))
+                _libcudart.cudaDeviceSynchronize()
+                t1 = time.perf_counter()
+                failed = [r for r in resp.results if not r.success]
+                if failed:
+                    result.errors.append(
+                        f"hot lookup failed: {failed[0].error_message}"
+                    )
+                result.hot_latencies.append((t1 - t0) / num_objects)
+            except grpc.RpcError as e:
+                result.errors.append(f"hot lookup RPC error: {e.details()}")
+    else:
+        in_flight = []
+        next_to_send = 0
+        completed = 0
+
+        while completed < iterations:
+            while next_to_send < iterations and len(in_flight) < pipeline_depth:
+                entries = [
+                    dispatcher_pb2.LookupEntry(key=k, ipc_handle=hot_lookup_ipcs[i])
+                    for i, k in enumerate(hot_keys)
+                ]
+                req = dispatcher_pb2.BatchLookupRequest(entries=entries)
+                future = stub.Lookup.future(req)
+                in_flight.append((next_to_send, future, time.perf_counter()))
+                next_to_send += 1
+
+            if in_flight:
+                iter_idx, future, t_submit = in_flight.pop(0)
+                try:
+                    resp = future.result()
+                    _libcudart.cudaDeviceSynchronize()
+                    t_done = time.perf_counter()
+                    failed = [r for r in resp.results if not r.success]
+                    if failed:
+                        result.errors.append(
+                            f"hot lookup failed: {failed[0].error_message}"
+                        )
+                    result.hot_latencies.append((t_done - t_submit) / num_objects)
+                except grpc.RpcError as e:
+                    result.errors.append(f"hot lookup RPC error: {e.details()}")
+                completed += 1
 
     result.hot_end = time.perf_counter()
     result.hot_objects = num_objects * iterations
@@ -608,12 +640,6 @@ def print_stats(label, all_latencies, num_clients, wall_aggregate_gbps=None):
     mn = min(all_latencies)
     mx = max(all_latencies)
 
-    # Per-client throughput derived from wall-clock aggregate (accounts for pipelining).
-    if wall_aggregate_gbps is not None and num_clients > 0:
-        tp_per_client = wall_aggregate_gbps / num_clients
-    else:
-        tp_per_client = BLOCK_SIZE / avg / 1e9 if avg > 0 else 0
-
     print(
         f"  {label:<20} "
         f"avg={avg*1e6:>9.1f} us  "
@@ -622,12 +648,15 @@ def print_stats(label, all_latencies, num_clients, wall_aggregate_gbps=None):
         f"min={mn*1e6:>9.1f} us  "
         f"max={mx*1e6:>9.1f} us"
     )
-    agg_str = f"{wall_aggregate_gbps:>6.2f}" if wall_aggregate_gbps is not None else "  N/A "
-    print(
-        f"  {'':20} "
-        f"per-client={tp_per_client:>6.2f} GB/s  "
-        f"aggregate={agg_str} GB/s"
-    )
+    # Throughput from wall-clock measurement (total bytes / elapsed time).
+    if wall_aggregate_gbps is not None:
+        tp_per_client = wall_aggregate_gbps / max(num_clients, 1)
+        warn = " (!)" if wall_aggregate_gbps > 32 else ""
+        print(
+            f"  {'':20} "
+            f"per-client={tp_per_client:>6.2f} GB/s  "
+            f"aggregate={wall_aggregate_gbps:>6.2f} GB/s{warn}"
+        )
 
 
 def main():
@@ -701,11 +730,33 @@ def main():
         help="Seconds to wait after populate for write-through to drain (default: 30). "
         "Set to 0 to skip.",
     )
+    parser.add_argument(
+        "--memory-tier-size",
+        type=parse_size,
+        default=None,
+        help="Memory-tier pool size assumption (e.g. 4G, 2G). For multi-client runs, "
+        "set to HALF the server's --memory-tier-size to avoid cross-client eviction. "
+        "Defaults to 2G.",
+    )
+    parser.add_argument(
+        "--sequential-hot",
+        action="store_true",
+        help="Use sequential (non-pipelined) RPCs for hot lookups. "
+        "Measures per-request latency instead of throughput.",
+    )
+    parser.add_argument(
+        "--continuous",
+        action="store_true",
+        help="Run continuously in a loop. Populate runs once on the first round; "
+        "subsequent rounds repeat only the lookup phases. Ctrl-C to stop.",
+    )
     args = parser.parse_args()
 
-    global BLOCK_SIZE
+    global BLOCK_SIZE, MEMORY_TIER_SIZE
     if args.block_size is not None:
         BLOCK_SIZE = args.block_size
+    if args.memory_tier_size is not None:
+        MEMORY_TIER_SIZE = args.memory_tier_size
 
     num_clients = args.clients
     num_objects = args.num_objects
@@ -722,8 +773,9 @@ def main():
         sys.exit(1)
 
     pool_capacity = MEMORY_TIER_SIZE // BLOCK_SIZE
+    client_pool_share = max(1, pool_capacity // num_clients)
     cold_per_client = num_objects * iterations
-    total_per_client = pool_capacity + cold_per_client
+    total_per_client = client_pool_share + cold_per_client
 
     print(f"{'='*70}")
     print(f"Certus Multi-Client Benchmark")
@@ -736,7 +788,7 @@ def main():
     print(f"  Objects/batch:     {num_objects}")
     print(f"  Iterations:        {iterations}")
     pool_mib = MEMORY_TIER_SIZE // (1024 * 1024)
-    print(f"  Pool capacity:     {pool_capacity} objects ({pool_mib} MiB)")
+    print(f"  Pool capacity:     {pool_capacity} objects ({pool_mib} MiB) / {client_pool_share} per client")
     print(f"  Total per client:  {total_per_client} objects")
     print(f"  Cold per client:   {cold_per_client} objects")
     print()
@@ -748,131 +800,153 @@ def main():
         for i in range(num_clients)
     ]
 
-    barrier = threading.Barrier(num_clients)
-    results = [ClientResult(i) for i in range(num_clients)]
-    threads = []
-
-    print(f"  Starting {num_clients} client(s)...")
-    t_total_start = time.perf_counter()
-
+    continuous = args.continuous
+    round_num = 0
     pipeline_depth = args.pipeline_depth
-    for i in range(num_clients):
-        gpu_id = i % num_gpus
-        t = threading.Thread(
-            target=run_client,
-            args=(
-                i,
-                args.server,
-                num_objects,
-                iterations,
-                base_keys[i],
-                num_clients,
-                batch_size,
-                barrier,
-                results[i],
-                gpu_id,
-                pipeline_depth,
-                args.writes_settle,
-            ),
-            daemon=True,
+
+    while True:
+        round_num += 1
+
+        if continuous and round_num > 1:
+            print(f"\n{'='*70}")
+            print(f"  Round {round_num}")
+            print(f"{'='*70}")
+
+        barrier = threading.Barrier(num_clients)
+        results = [ClientResult(i) for i in range(num_clients)]
+        threads = []
+
+        if round_num == 1:
+            print(f"  Starting {num_clients} client(s)...")
+        t_total_start = time.perf_counter()
+
+        for i in range(num_clients):
+            gpu_id = i % num_gpus
+            t = threading.Thread(
+                target=run_client,
+                args=(
+                    i,
+                    args.server,
+                    num_objects,
+                    iterations,
+                    base_keys[i],
+                    num_clients,
+                    batch_size,
+                    barrier,
+                    results[i],
+                    gpu_id,
+                    pipeline_depth,
+                    args.writes_settle,
+                    args.sequential_hot,
+                ),
+                daemon=True,
+            )
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+
+        t_total_end = time.perf_counter()
+
+        # Collect errors
+        all_errors = []
+        for r in results:
+            all_errors.extend(r.errors)
+
+        if all_errors:
+            print(f"\n  ERRORS ({len(all_errors)}):")
+            for e in all_errors[:10]:
+                print(f"    - {e}")
+            if len(all_errors) > 10:
+                print(f"    ... and {len(all_errors) - 10} more")
+
+        # Aggregate latencies across all clients
+        all_populate = []
+        all_hot = []
+        all_cold = []
+        for r in results:
+            all_populate.extend(r.populate_latencies)
+            all_hot.extend(r.hot_latencies)
+            all_cold.extend(r.cold_latencies)
+
+        # Compute true wall-clock aggregate throughput:
+        pop_wall_agg = None
+        hot_wall_agg = None
+        cold_wall_agg = None
+        active_pop = [r for r in results if r.populate_objects > 0]
+        active_hot = [r for r in results if r.hot_objects > 0]
+        active_cold = [r for r in results if r.cold_objects > 0]
+        if active_pop:
+            pop_elapsed = max(r.populate_end for r in active_pop) - min(r.populate_start for r in active_pop)
+            pop_total_bytes = sum(r.populate_objects for r in active_pop) * BLOCK_SIZE
+            pop_wall_agg = (pop_total_bytes / pop_elapsed / 1e9) if pop_elapsed > 0 else 0
+        if active_hot:
+            hot_elapsed = max(r.hot_end for r in active_hot) - min(r.hot_start for r in active_hot)
+            hot_total_bytes = sum(r.hot_objects for r in active_hot) * BLOCK_SIZE
+            hot_wall_agg = (hot_total_bytes / hot_elapsed / 1e9) if hot_elapsed > 0 else 0
+        if active_cold:
+            cold_elapsed = max(r.cold_end for r in active_cold) - min(r.cold_start for r in active_cold)
+            cold_total_bytes = sum(r.cold_objects for r in active_cold) * BLOCK_SIZE
+            cold_wall_agg = (cold_total_bytes / cold_elapsed / 1e9) if cold_elapsed > 0 else 0
+
+        # Wall-clock elapsed times for reporting
+        pop_elapsed_s = (max(r.populate_end for r in active_pop) - min(r.populate_start for r in active_pop)) if active_pop else 0
+        hot_elapsed_s = (max(r.hot_end for r in active_hot) - min(r.hot_start for r in active_hot)) if active_hot else 0
+        cold_elapsed_s = (max(r.cold_end for r in active_cold) - min(r.cold_start for r in active_cold)) if active_cold else 0
+
+        print(f"\n{'='*70}")
+        print(f"Results ({num_clients} client(s), {BLOCK_SIZE//(1024*1024)} MiB blocks, round {round_num})")
+        print(f"{'='*70}")
+        print()
+        print("  Latency per object (all clients combined):")
+        print()
+        print_stats("Populate", all_populate, num_clients, pop_wall_agg)
+        if pop_elapsed_s > 0:
+            print(f"  {'':20} wall={pop_elapsed_s*1000:.1f} ms")
+        print()
+        print_stats("Lookup (hot)", all_hot, num_clients, hot_wall_agg)
+        if hot_elapsed_s > 0:
+            print(f"  {'':20} wall={hot_elapsed_s*1000:.1f} ms")
+        print()
+        print_stats("Lookup (cold)", all_cold, num_clients, cold_wall_agg)
+        if cold_elapsed_s > 0:
+            print(f"  {'':20} wall={cold_elapsed_s*1000:.1f} ms")
+        print()
+
+        if all_hot and all_cold:
+            hot_avg = statistics.mean(all_hot)
+            cold_avg = statistics.mean(all_cold)
+            if hot_avg > 0:
+                print(f"  Cold/Hot ratio:    {cold_avg/hot_avg:.1f}x latency")
+
+        print(f"\n  Total wall time:   {t_total_end - t_total_start:.2f}s")
+
+        # Per-client summary
+        print(f"\n  Per-client breakdown:")
+        print(
+            f"  {'Client':<8} {'GPU':<5} {'Hot avg (us)':<14} {'Cold avg (us)':<14} {'Errors':<8}"
         )
-        threads.append(t)
-        t.start()
-
-    for t in threads:
-        t.join()
-
-    t_total_end = time.perf_counter()
-
-    # Collect errors
-    all_errors = []
-    for r in results:
-        all_errors.extend(r.errors)
-
-    if all_errors:
-        print(f"\n  ERRORS ({len(all_errors)}):")
-        for e in all_errors[:10]:
-            print(f"    - {e}")
-        if len(all_errors) > 10:
-            print(f"    ... and {len(all_errors) - 10} more")
-
-    # Aggregate latencies across all clients
-    all_populate = []
-    all_hot = []
-    all_cold = []
-    for r in results:
-        all_populate.extend(r.populate_latencies)
-        all_hot.extend(r.hot_latencies)
-        all_cold.extend(r.cold_latencies)
-
-    # Compute true wall-clock aggregate throughput:
-    # total bytes transferred by ALL clients / elapsed wall time (first start to last end)
-    pop_wall_agg = None
-    hot_wall_agg = None
-    cold_wall_agg = None
-    active_pop = [r for r in results if r.populate_objects > 0]
-    active_hot = [r for r in results if r.hot_objects > 0]
-    active_cold = [r for r in results if r.cold_objects > 0]
-    if active_pop:
-        pop_elapsed = max(r.populate_end for r in active_pop) - min(r.populate_start for r in active_pop)
-        pop_total_bytes = sum(r.populate_objects for r in active_pop) * BLOCK_SIZE
-        pop_wall_agg = (pop_total_bytes / pop_elapsed / 1e9) if pop_elapsed > 0 else 0
-    if active_hot:
-        hot_elapsed = max(r.hot_end for r in active_hot) - min(r.hot_start for r in active_hot)
-        hot_total_bytes = sum(r.hot_objects for r in active_hot) * BLOCK_SIZE
-        hot_wall_agg = (hot_total_bytes / hot_elapsed / 1e9) if hot_elapsed > 0 else 0
-    if active_cold:
-        cold_elapsed = max(r.cold_end for r in active_cold) - min(r.cold_start for r in active_cold)
-        cold_total_bytes = sum(r.cold_objects for r in active_cold) * BLOCK_SIZE
-        cold_wall_agg = (cold_total_bytes / cold_elapsed / 1e9) if cold_elapsed > 0 else 0
-
-    print(f"\n{'='*70}")
-    print(f"Results ({num_clients} client(s), {BLOCK_SIZE//(1024*1024)} MiB blocks)")
-    print(f"{'='*70}")
-    print()
-    print("  Latency per object (all clients combined):")
-    print()
-    print_stats("Populate", all_populate, num_clients, pop_wall_agg)
-    print()
-    print_stats("Lookup (hot)", all_hot, num_clients, hot_wall_agg)
-    print()
-    print_stats("Lookup (cold)", all_cold, num_clients, cold_wall_agg)
-    print()
-
-    if all_hot and all_cold:
-        hot_avg = statistics.mean(all_hot)
-        cold_avg = statistics.mean(all_cold)
-        if hot_avg > 0:
+        print(f"  {'-'*49}")
+        for r in results:
+            gpu_id = r.client_id % num_gpus
+            hot_avg = statistics.mean(r.hot_latencies) * 1e6 if r.hot_latencies else 0
+            cold_avg = (
+                statistics.mean(r.cold_latencies) * 1e6 if r.cold_latencies else 0
+            )
             print(
-                f"  Cold/Hot ratio:    {cold_avg/hot_avg:.1f}x latency"
+                f"  {r.client_id:<8} {gpu_id:<5} {hot_avg:<14.1f} {cold_avg:<14.1f} {len(r.errors):<8}"
             )
 
-    print(f"\n  Total wall time:   {t_total_end - t_total_start:.2f}s")
+        print()
 
-    # Per-client summary
-    print(f"\n  Per-client breakdown:")
-    print(
-        f"  {'Client':<8} {'GPU':<5} {'Hot avg (us)':<14} {'Cold avg (us)':<14} {'Errors':<8}"
-    )
-    print(f"  {'-'*49}")
-    for r in results:
-        gpu_id = r.client_id % num_gpus
-        hot_avg = statistics.mean(r.hot_latencies) * 1e6 if r.hot_latencies else 0
-        cold_avg = (
-            statistics.mean(r.cold_latencies) * 1e6 if r.cold_latencies else 0
-        )
-        print(
-            f"  {r.client_id:<8} {gpu_id:<5} {hot_avg:<14.1f} {cold_avg:<14.1f} {len(r.errors):<8}"
-        )
+        # --- Integrity verification (optional, first round only) ---
+        integrity_ok = True
+        if args.verify_integrity and round_num == 1:
+            integrity_ok = run_integrity_check(args.server, args.integrity_objects)
 
-    print()
-
-    # --- Integrity verification (optional) ---
-    integrity_ok = True
-    if args.verify_integrity:
-        integrity_ok = run_integrity_check(args.server, args.integrity_objects)
-
-    sys.exit(1 if (all_errors or not integrity_ok) else 0)
+        if not continuous:
+            sys.exit(1 if (all_errors or not integrity_ok) else 0)
 
 
 if __name__ == "__main__":

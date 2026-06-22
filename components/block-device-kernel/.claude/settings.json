@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash *)",
+      "Read(//home/dwaddington/ai-native-storage-certus/components/block-device-kernel/**)",
+      "Read(//home/dwaddington/ai-native-storage-certus/components/component-framework/**)",
+      "Read(//home/dwaddington/ai-native-storage-certus/components/interfaces/**)",
+      "Read(//home/dwaddington/ai-native-storage-certus/components/logger/**)",
+      "Bash(cargo build *)",
+      "Bash(cargo test *)",
+      "Bash(cargo fmt *)",
+      "Bash(cargo bench *)",
+      "Bash(cargo clippy *)",
+      "Bash(cargo doc *)",
+      "Bash(cargo check *)",
+      "Bash(cargo metadata *)",
+      "Bash(cargo run *)"
+    ]
+  }
+}

@@ -57,6 +57,14 @@ pub struct DispatcherConfig {
     /// Set this to a dedicated core range to give each drive exclusive use of
     /// a core, which is required for SPDK busy-polling to achieve full bandwidth.
     pub poller_base_cpu: Option<usize>,
+    /// Maximum eviction attempts before returning AllocationFailed.
+    /// Default: 2048.
+    pub max_eviction_attempts: usize,
+    /// Delay in milliseconds between DRAM backfill jobs after P2P cold reads.
+    /// Throttles background NVMe→DRAM reads to avoid contending with active
+    /// P2P cold reads for drive bandwidth.
+    /// Default: 10. Set to 0 to disable backfill entirely.
+    pub backfill_delay_ms: u64,
 }
 
 impl Default for DispatcherConfig {
@@ -71,6 +79,8 @@ impl Default for DispatcherConfig {
             ssd_eviction_batch_size: 64,
             ssd_eviction_interval_secs: 5,
             poller_base_cpu: None,
+            max_eviction_attempts: 2048,
+            backfill_delay_ms: 10,
         }
     }
 }
@@ -460,6 +470,17 @@ component_macros::define_interface! {
         /// # }
         /// ```
         fn touch(&self, key: CacheKey) -> Result<(), DispatcherError>;
+
+        /// Promote SSD-resident entries to the memory-tier without GPU DMA.
+        ///
+        /// For each key in `BlockDevice` state, reads data from SSD into a new
+        /// memory-tier slot and updates the dispatch-map. Keys in `MemoryTier`
+        /// or `Staging` state get a timestamp refresh. Missing keys are skipped.
+        ///
+        /// This is a best-effort, fire-and-forget operation intended to be called
+        /// from a background task. Errors on individual keys are logged but not
+        /// propagated.
+        fn promote_to_memory_tier(&self, keys: &[CacheKey]);
 
         /// Evict all entries from the memory-tier, demoting them to block-device-backed.
         ///

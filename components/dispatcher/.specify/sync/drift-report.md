@@ -1,181 +1,77 @@
-# Drift Report: Dispatcher Cache Interface (001-dispatcher-cache-interface)
-
-**Generated**: 2026-05-29  
-**Spec**: `components/dispatcher/specs/001-dispatcher-cache-interface/spec.md`  
-**Implementation**: `components/dispatcher/src/` (lib.rs, pipeline.rs, io_segmenter.rs, background.rs)  
-**Interface**: `components/interfaces/src/idispatcher.rs`  
-**Prior run**: 2026-05-28 (this run reflects incremental analysis)
+# Spec Drift Report
+Generated: 2026-06-18
+Project: dispatcher
 
 ## Summary
+| Category | Count |
+|----------|-------|
+| Specs Analyzed | 1 |
+| Requirements Checked | 39 |
+| Aligned | 36 (92%) |
+| Drifted | 3 (8%) |
+| Not Implemented | 0 (0%) |
+| Unspecced Code | 2 |
 
-| Status | Count |
-|--------|-------|
-| Aligned | 31 |
-| Drifted (behavioral) | 3 |
-| Drifted (omission from spec) | 4 |
-| Unspecced features | 1 |
+Note: FR-026 and FR-027 are marked REMOVED in the spec and excluded from analysis.
 
-All spec requirements are implemented. No missing features. Several behavioral and documentation gaps exist between spec and code.
+## Detailed Findings
+### Spec: 001-dispatcher-cache-interface - Dispatcher Cache Interface (Memory-Tier Architecture)
 
----
+#### Aligned
+- FR-001: IDispatcher interface defined in shared interfaces crate with all required methods (initialize, shutdown, lookup, lookup_async, batch_lookup, check, remove, populate, prepare_store, commit_store, cancel_store, touch, promote_to_memory_tier, clear_memory_tier, flush_to_ssd) → `components/interfaces/src/idispatcher.rs:153-506`
+- FR-002: DispatcherError enum covers all failure modes (NotInitialized, KeyNotFound, AlreadyExists, AllocationFailed, IoError, Timeout, InvalidParameter) → `components/interfaces/src/idispatcher.rs:119-134`
+- FR-003: populate() allocates memory-tier via insert(), DMA copies via dma_copy_to_host, registers via create_memory_tier_entry, enqueues write-through, runs evict_for_space → `src/lib.rs:1792-1903`
+- FR-004: Background writer reads via peek() (no LRU refresh) and writes to SSD via extent manager, calls convert_to_storage → `src/lib.rs:544-617`
+- FR-005: Memory-tier entry remains accessible after write-through (no slot free on write completion) → `src/lib.rs:614-616`
+- FR-006: lookup() queries dispatch map, handles MemoryTier (memcpy_h2d_async + touch LRU), BlockDevice (promote_and_serve), Staging (DMA from buffer). Uses warm stream with fallback to sync dma_copy_to_device → `src/lib.rs:1609-1722`
+- FR-007: lookup returns KeyNotFound when key not in dispatch map → `src/lib.rs:1639,1720-1721`
+- FR-008: check() returns bool without data transfer → `src/lib.rs:1724-1743`
+- FR-009: remove() frees memory-tier slot, frees extent via extent manager, removes dispatch map entry → `src/lib.rs:1745-1785`
+- FR-010: Uses define_component! macro exposing only IDispatcher → `src/lib.rs:148-173`
+- FR-011: Receptacles for ILogger, IDispatchMap, IGpuServices, ISPDKEnv, IMemoryTier declared. DispatcherConfig includes poller_base_cpu field. set_actor_cpu called when set → `src/lib.rs:148-173`, `interfaces/src/idispatcher.rs:59`
+- FR-012: initialize() validates dispatch_map and memory_tier bound before proceeding → `src/lib.rs:930-936`
+- FR-013: Dispatch map uses appropriate locking (trait-level contract enforced by IDispatchMap) → architecture
+- FR-014: shutdown() drains background writer, checkpoints all extent managers, shuts down block devices in reverse → `src/lib.rs:1101-1177`
+- FR-015: N block devices coordinated with N extent managers, each EM stores metadata on its own data device → `src/lib.rs:832-847`
+- FR-016: Passes data_disk_size and computed FormatParams to each extent manager → `src/lib.rs:851-879`
+- FR-017: Background writer silently drops failed jobs → `src/lib.rs:592-607`
+- FR-018: remove() does not block on write-through → `src/lib.rs:1745-1785`
+- FR-019: I/O segmented via io_segmenter respecting MDTS. Pipeline uses sliding window with tag-based completion routing. Periodic stream sync every PIPELINE_RING_SIZE=8 commands. batch_lookup uses 16/num_queues per thread → `src/pipeline.rs`, `src/io_segmenter.rs`
+- FR-020: prepare_store validates size>0, AlreadyExists for duplicates, registers in dispatch map, reserves extent, returns DMA buffer → `src/lib.rs:1905-1999`
+- FR-021: commit_store writes buffer to SSD with MDTS segmentation, publishes extent, transitions to block-device state → `src/lib.rs:2002-2041`
+- FR-022: cancel_store drops PendingWrite (WriteHandle aborts), removes dispatch map entry → `src/lib.rs:2044-2064`
+- FR-023: touch() updates dispatch map timestamp AND refreshes memory-tier LRU without DMA → `src/lib.rs:2066-2080`
+- FR-024: evict_for_space uses sparse-probe + shard-targeted LRU (evict_lru_for_key). Every 8th attempt probes oldest_keys(4) + is_evictable. Bounded by max_attempts (configurable, default 2048). Returns AllocationFailed on exhaustion → `src/lib.rs:483-542`
+- FR-025: format_on_init flag supported. When false, extent managers recovered; dispatch map reconstructed via for_each_extent + recover_extent. Count and elapsed time logged → `src/lib.rs:950-969`
+- FR-028: On BlockDevice lookup, re-inserts to memory-tier and re-registers as MemoryTier with ssd_offset preserved → `src/lib.rs:451-459`
+- FR-029: Background SSD evictor started if threshold > 0.0 and drives configured. Joined during shutdown() → `src/lib.rs:1062-1093,1104-1106`
+- FR-030: Evictor checks combined utilization. Interval configurable via ssd_eviction_interval_secs → `src/background.rs:270-283,342-349`
+- FR-031: Evictor evicts BlockDevice entries using oldest_keys(batch_size), stops below low_watermark → `src/background.rs:295-330`
+- FR-032: Evictor skips MemoryTier entries. dm.remove() failure handled gracefully → `src/background.rs:361-366,312-313`
+- FR-033: DispatcherConfig includes all required fields with correct defaults → `interfaces/src/idispatcher.rs:30-79`
+- FR-034: initialize() calls register_host_memory on memory-tier pool. Caches ClientChannels per drive → `src/lib.rs:1003-1023,896`
+- FR-035: shutdown() calls unregister_host_memory before memory-tier teardown → `src/lib.rs:1127-1131`
+- FR-038: clear_memory_tier() evicts all via evict_lru() loop, transitions to BlockDevice or removes on failure, returns count. IMemoryTier provides clear() → `src/lib.rs:2233-2254`
+- FR-040: promote_to_memory_tier() implemented — BlockDevice entries read via pipelined_ssd_to_dram_only; MemoryTier/Staging entries get timestamp refresh; missing keys skipped. Errors logged not propagated → `src/lib.rs:2083-2231`
+- FR-041: pipelined_ssd_to_dram_only and pipelined_multi_ssd_to_dram_only both implemented in pipeline.rs → `src/pipeline.rs:551-815`
 
-## Critical / Behavioral Drift
+#### Drifted
+- FR-036: Spec says "The synchronous lookup method MUST delegate to lookup_async internally and call stream_synchronize before returning". Code correctly delegates lookup to lookup_async (line 1181-1190). However, spec also says "pre-allocate a pool of warm CUDA streams (default 4) stored as RwLock<Vec<u64>>". Code allocates only ONE warm stream stored as AtomicU64. The spec describes multi-stream round-robin distribution for batch_lookup; actual code uses a single stream for lookup_async and creates fresh per-thread streams for cold promotion.
+  - Location: src/lib.rs:977-982 (single stream), AtomicU64 warm_stream field
+  - Severity: moderate
+  - Notes: FR-036 synchronous delegation is correct. FR-037 stream pool is the issue — single stream vs pool of 4.
 
-### DRIFT-A: `evict_for_space` algorithm diverges significantly from spec description
+- FR-037: Spec says "MUST pre-allocate a pool of warm CUDA streams (default 4)" stored as RwLock<Vec<u64>> and used by lookup_async (first stream) and batch_lookup (round-robin across all streams). Code allocates a SINGLE warm stream stored as AtomicU64 (not a pool of 4). batch_lookup hot path uses the same single warm_stream. Multi-stream distribution as described in spec is not implemented.
+  - Location: src/lib.rs:977-982 (single stream creation), line 1273 (single warm_stream load in batch_lookup)
+  - Severity: moderate
 
-**Spec refs**: FR-024, User Story 7, Clarification 2026-05-22, Edge Cases  
-**Severity**: Significant — the spec's stated algorithm is materially different from the code
+- FR-039: Spec says batch_lookup hot entries should issue memcpy_h2d_async round-robin across warm stream pool "WITHOUT synchronizing per-key — all async copies are issued first, then all used streams are synchronized once at the end (deferred batch sync)". Code synchronizes per-key for hot entries in batch_lookup (stream_synchronize at line 1289 inside the per-entry MemoryTier branch). Hot entries do NOT benefit from deferred batch sync as specified.
+  - Location: src/lib.rs:1286-1292 (per-key sync instead of deferred batch sync)
+  - Severity: moderate
 
-**Spec says** (FR-024 and clarifications):
-- Phase 1: query `oldest_keys(MAX_SCAN=128)` for LRU candidates, check each via `is_evictable(key)`, pick the first evictable entry, evict it via `mt.remove()` + `convert_memory_tier_to_block`.
-- Phase 2 (fallback): only if no evictable candidate found, call `evict_lru()` blindly.
-- This two-phase logic repeats until `used + needed <= capacity`.
+#### Not Implemented
+(none)
 
-**Implementation does** (lib.rs lines 296-348):
-- Uses `MAX_SCAN=4` (not 128).
-- The clean eviction probe (`oldest_keys` + `is_evictable`) only fires on every **8th iteration** (`attempts % 8 == 0`), not on every pass.
-- The primary path in all other iterations immediately falls through to blind LRU.
-- Adds a `MAX_ATTEMPTS=512` guard: if the loop does not free enough space in 512 iterations, returns `Err(AllocationFailed(...))`. This error case is not described in the spec.
-
-**Code comment rationale** (lines 305-307):
-> Under high concurrency (many threads promoting cold entries simultaneously), scanning many candidates per attempt causes severe MT lock contention because oldest_keys(N) holds the lock while scanning N entries. Use a tiny scan window and prefer blind LRU as the primary fast path.
-
-**Required spec update**: FR-024 must be rewritten. The two-phase-per-iteration model is wrong. The actual algorithm prefers speed/concurrency over data-safety. The 512-attempt limit and `AllocationFailed` return from eviction must also be documented.
-
----
-
-### DRIFT-B: `pipelined_ssd_to_gpu_zero_copy` uses a sliding window, not two sequential phases
-
-**Spec refs**: FR-019, User Story 9 (acceptance scenario 1), Clarification 2026-05-08, SC-012  
-**Severity**: Moderate — the spec's correctness argument relies on a model that is not how the code works
-
-**Spec says**: Phase 1 issues up to 16 concurrent NVMe reads into **unique** offsets of the memory-tier slot, completing **all reads before Phase 2**. Phase 2 issues GPU H2D copies in segment order. The two-phase design is explicitly justified as tolerating out-of-order NVMe completions since each chunk targets a unique address.
-
-**Implementation does** (pipeline.rs lines 244-401):
-- Uses a sliding window (VecDeque `inflight`). As each NVMe read completes, the implementation **immediately** issues the GPU H2D copy for that segment AND submits the next NVMe read — in the same loop iteration. There are no two distinct phases.
-- The implementation assumes FIFO NVMe queue completion order (`inflight.pop_front()`) to associate each completion with the oldest in-flight segment. Out-of-order completions would yield incorrect results (the spec's stated concern).
-- Adds a periodic stream sync every 16 GPU commands to bound command queue depth — not mentioned in spec.
-
-**Correctness note**: The sliding window implementation is faster (overlaps SSD I/O with GPU DMA) but relies on FIFO queue semantics rather than the two-phase isolation the spec describes. The spec's safety argument for out-of-order NVMe is not preserved by the implementation.
-
-**Required spec update**: FR-019 and the clarification for `pipelined_ssd_to_gpu_zero_copy` must be rewritten to describe the sliding window algorithm and document the FIFO queue assumption.
-
----
-
-### DRIFT-C: `batch_lookup` MemoryTier path uses `warm_stream` with inline sync (beyond FR-037 scope)
-
-**Spec refs**: FR-037, FR-039  
-**Severity**: Minor
-
-**Spec says**: FR-037 states `warm_stream` is used by `lookup_async`. FR-039 says `batch_lookup` serves MemoryTier hits inline (same as single-entry lookup).
-
-**Implementation does**: `batch_lookup` loads `warm_stream` (AtomicU64) and calls `memcpy_h2d_async` followed by `stream_synchronize` inline for each MemoryTier hit (lib.rs lines 954-975). This is consistent with the intent but the spec only attributes `warm_stream` to `lookup_async`.
-
-**Required spec update**: FR-037 should note that `batch_lookup` also uses `warm_stream` for MemoryTier hits to avoid the DmaBuffer wrapping overhead.
-
----
-
-## Omission Drift (features in code not documented in spec)
-
-### DRIFT-D: Dispatch-map recovery on `format_on_init=false` is unspecified
-
-**Spec ref**: FR-025  
-**Severity**: Moderate — this is significant operator-facing behavior
-
-**Spec says** (FR-025): "When false, extent managers are not reformatted on initialization, preserving on-disk data from previous sessions." No further recovery behavior is described.
-
-**Implementation does** (lib.rs lines 659-683): When `format_on_init=false`, after recovering extent managers, the code iterates all extents via `iem.for_each_extent()` and calls `dm.recover_extent(key, offset, size)` to rebuild the dispatch map from on-disk extent metadata. Timing is logged. This restores the full cache index from persisted SSD data.
-
-**Required spec update**: FR-025 must document that the dispatch map is reconstructed from extent metadata during non-format initialization. This is a key operator-observable behavior for restart persistence scenarios.
-
----
-
-### DRIFT-E: `shutdown` checkpoints extent managers (unspecified)
-
-**Spec refs**: User Story 5 scenario 3, FR-014  
-**Severity**: Minor
-
-**Spec says**: Shutdown "drains all pending write-through jobs, block devices are shut down in reverse order, resources released."
-
-**Implementation does** (lib.rs lines 821-833): After draining the background writer and evictor, calls `iem.checkpoint()` on each extent manager before block device teardown. This persists extent manager metadata to SSD at shutdown.
-
-**Required spec update**: User Story 5 scenario 3 and FR-014 should mention extent manager checkpointing as part of the shutdown sequence.
-
----
-
-### DRIFT-F: `evict_for_space` returns `AllocationFailed` from the eviction loop itself
-
-**Spec refs**: FR-024, Edge Cases  
-**Severity**: Minor
-
-**Spec says** (Edge Cases): "When memory-tier insertion fails during populate (pool full after eviction attempt), populate returns an `AllocationFailed` error." The spec frames `AllocationFailed` as arising from `mt.insert()` failure, not from the eviction loop.
-
-**Implementation does**: `evict_for_space` itself returns `Err(DispatcherError::AllocationFailed(...))` after `MAX_ATTEMPTS=512` without freeing enough space (lib.rs lines 311-314). Both code paths surface as `AllocationFailed` to the caller, but the trigger condition (eviction loop exhaustion vs. allocation failure) differs. This is related to DRIFT-A.
-
----
-
-### DRIFT-G: `poller_base_cpu` config field is unspecified
-
-**Spec refs**: FR-011, User Story 5  
-**Severity**: Minor
-
-**Spec says**: DispatcherConfig and initialization are described without mention of CPU affinity for NVMe pollers.
-
-**Implementation does** (lib.rs lines 501-503, 612-616): `DispatcherConfig.poller_base_cpu: Option<usize>` pins each NVMe block device actor to `base + i` CPU core via `admin.set_actor_cpu()`. This is a performance-critical configuration for NUMA-aware NVMe polling.
-
-**Required spec update**: FR-011 or a new FR should document `poller_base_cpu` and its effect on NVMe poller CPU affinity.
-
----
-
-## Previously Resolved Drift (from 2026-05-21/28 run)
-
-The following items were identified in prior runs and are confirmed resolved in the spec:
-
-| Item | Resolution |
-|------|-----------|
-| FR-026 (BlockDeviceVersion) | Marked REMOVED in spec |
-| FR-027 (ExtentManagerVersion) | Marked REMOVED in spec |
-| FR-036 (lookup_async) | Added to spec |
-| FR-037 (warm_stream) | Added to spec |
-| FR-038 (clear_memory_tier) | Added to spec |
-| FR-039 (batch_lookup) | Added to spec, User Story 11 added |
-| US5-S4 (data_pci_addrs always required) | Clarified in spec |
-
----
-
-## Items Correctly Implemented and Correctly Specified
-
-All of the following are aligned between spec and code:
-
-- FR-003 (populate path, evict+insert+DMA+register+enqueue)
-- FR-004 (write-through uses peek(), not get())
-- FR-005 (memory-tier slot not freed after write-through)
-- FR-006 (lookup dispatch: MemoryTier/BlockDevice/Staging)
-- FR-007 (KeyNotFound for missing entries)
-- FR-008 (check — no data transfer)
-- FR-009 (remove — frees MT slot, dispatch entry, SSD extent)
-- FR-010 (define_component! macro usage)
-- FR-011 (receptacles: logger, dispatch_map, gpu_services, spdk_env, memory_tier)
-- FR-012 (validate dispatch_map and memory_tier at initialize)
-- FR-013 (RwLock on dispatch map operations)
-- FR-014 (shutdown drains background operations)
-- FR-015 (N block devices, N extent managers)
-- FR-016 (FormatParams computed from disk geometry)
-- FR-017 (write-through failure silently drops job)
-- FR-018 (remove does not block on write-through)
-- FR-020 (prepare_store: evict, reserve extent, return DmaBuffer)
-- FR-021 (commit_store: MDTS I/O, publish, convert_to_storage)
-- FR-022 (cancel_store: drop PendingWrite → WriteHandle abort, remove DM entry)
-- FR-023 (touch delegates to dm.touch)
-- FR-028 (promote re-registers as MemoryTier with original ssd_offset)
-- FR-029 (SSD evictor started only when threshold > 0.0 and drives exist)
-- FR-030 (evictor interval configurable via ssd_eviction_interval_secs)
-- FR-031 (evictor stops at low_watermark)
-- FR-032 (evictor skips MemoryTier entries; remove failure is graceful)
-- FR-033 (all evictor config fields present in DispatcherConfig)
-- FR-034 (register_host_memory at init, non-fatal on failure)
-- FR-035 (unregister_host_memory in shutdown before teardown)
-- FR-036 (lookup delegates to lookup_async + stream_synchronize)
-- FR-037 (warm_stream pre-allocated, used for lock-free MemoryTier H2D)
-- FR-038 (clear_memory_tier loops evict_lru, converts/removes each entry)
-- FR-039 (batch_lookup: classify, inline hot, parallel cold per drive, merge results)
+## Unspecced Code
+- **flush_to_ssd()**: Method on IDispatcher interface that blocks until all background write-through jobs complete. Defined in the interface and implemented, but no FR-* requirement covers it. → `src/lib.rs:2256-2269`, `interfaces/src/idispatcher.rs:497-505`
+- **PipelineMetrics trait and instrumentation**: Comprehensive timing instrumentation (record_cold_ssd_read, record_hot_gpu_dma, record_populate_alloc, etc.) integrated throughout lib.rs and pipeline.rs. No FR-* covers observability or metrics. → `src/metrics.rs:1-48`, call sites throughout `src/lib.rs` and `src/pipeline.rs`

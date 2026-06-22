@@ -181,6 +181,15 @@ impl IDispatchMap for BenchDispatchMap {
         }
     }
 
+    fn entry_size(&self, key: CacheKey) -> Result<u32, DispatchMapError> {
+        let inner = self.inner.lock().unwrap();
+        if inner.contains_key(&key) {
+            Ok(4096)
+        } else {
+            Err(DispatchMapError::KeyNotFound(key))
+        }
+    }
+
     fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
         let inner = self.inner.lock().unwrap();
         inner.keys().copied().take(n).collect()
@@ -364,7 +373,7 @@ impl BenchMemoryTier {
 }
 
 impl IMemoryTier for BenchMemoryTier {
-    fn initialize(&self, _pool_size: usize) -> Result<(), MemoryTierError> {
+    fn initialize(&self, _pool_size: usize, _numa_node: Option<i32>) -> Result<(), MemoryTierError> {
         Ok(())
     }
     fn insert(&self, _key: CacheKey, _size: u32) -> Result<*mut u8, MemoryTierError> {
@@ -378,10 +387,14 @@ impl IMemoryTier for BenchMemoryTier {
     fn evict_lru(&self) -> Option<CacheKey> {
         None
     }
+    fn evict_lru_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+        None
+    }
     fn remove(&self, _key: CacheKey) -> Result<(), MemoryTierError> {
         Ok(())
     }
     fn touch(&self, _key: CacheKey) {}
+    fn batch_touch(&self, _keys: &[CacheKey]) {}
     fn contains(&self, _key: CacheKey) -> bool {
         false
     }
@@ -403,6 +416,9 @@ impl IMemoryTier for BenchMemoryTier {
     }
     fn clear(&self) -> Result<usize, MemoryTierError> {
         Ok(0)
+    }
+    fn is_dma_capable(&self) -> bool {
+        false
     }
 }
 

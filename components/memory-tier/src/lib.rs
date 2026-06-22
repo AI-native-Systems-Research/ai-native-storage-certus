@@ -7,20 +7,21 @@
 //! Internally sharded into 16 independent partitions to reduce lock
 //! contention under concurrent access from multiple dispatcher threads.
 //!
-//! Provides the [`IMemoryTier`] interface with a receptacle for [`ILogger`].
+//! Provides the [`IMemoryTier`] interface with receptacles for [`ILogger`]
+//! and [`IEvictionPolicy`].
 
 mod allocator;
-mod lru;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, RwLock};
 
 use component_framework::define_component;
-use interfaces::{CacheKey, ILogger, IMemoryTier, MemoryTierError};
+use interfaces::{
+    CacheKey, EvictionHandle, IEvictionPolicy, ILogger, IMemoryTier, MemoryTierError, PoolId,
+};
 
 use crate::allocator::FreeList;
-use crate::lru::LruList;
 
 /// Default memory-tier pool size (256 MiB).
 pub const DEFAULT_POOL_SIZE: usize = 256 * 1024 * 1024;
@@ -30,12 +31,11 @@ const NUM_SHARDS: usize = 16;
 struct Slot {
     offset: usize,
     size: u32,
-    lru_index: usize,
+    eviction_handle: EvictionHandle,
 }
 
 struct Shard {
     allocator: FreeList,
-    lru: LruList,
     slots: HashMap<CacheKey, Slot>,
 }
 
@@ -47,14 +47,16 @@ struct MemoryTierState {
     pool_size: usize,
     shard_size: usize,
     shards: Vec<Mutex<Shard>>,
+    pool_ids: [PoolId; NUM_SHARDS],
     evict_counter: AtomicUsize,
     initialized: AtomicBool,
+    spdk_allocated: bool,
 }
 
-// SAFETY: pool_ptr points to mmap'd memory accessible from any thread.
+// SAFETY: pool_ptr points to mmap'd or SPDK-allocated memory accessible from any thread.
 // Per-shard Mutex serializes shard access. Immutable fields (pool_ptr,
-// pool_size, shard_size) are only written during initialize() which is
-// protected by the component-level Mutex.
+// pool_size, shard_size, spdk_allocated) are only written during initialize()
+// which is protected by the component-level Mutex.
 unsafe impl Send for MemoryTierState {}
 unsafe impl Sync for MemoryTierState {}
 
@@ -65,29 +67,44 @@ impl Default for MemoryTierState {
             pool_size: 0,
             shard_size: 0,
             shards: Vec::new(),
+            pool_ids: [0; NUM_SHARDS],
             evict_counter: AtomicUsize::new(0),
             initialized: AtomicBool::new(false),
+            spdk_allocated: false,
         }
     }
 }
 
 impl Drop for MemoryTierState {
     fn drop(&mut self) {
-        if !self.pool_ptr.is_null() {
-            unsafe {
-                libc::munmap(self.pool_ptr as *mut libc::c_void, self.pool_size);
-            }
-            self.pool_ptr = std::ptr::null_mut();
+        if self.pool_ptr.is_null() {
+            return;
         }
+        #[cfg(feature = "spdk")]
+        if self.spdk_allocated {
+            if interfaces::is_spdk_env_active() {
+                unsafe {
+                    spdk_sys::spdk_free(self.pool_ptr as *mut std::ffi::c_void);
+                }
+            }
+            // If SPDK already shut down, leak intentionally (same as DmaBuffer).
+            self.pool_ptr = std::ptr::null_mut();
+            return;
+        }
+        unsafe {
+            libc::munmap(self.pool_ptr as *mut libc::c_void, self.pool_size);
+        }
+        self.pool_ptr = std::ptr::null_mut();
     }
 }
 
 define_component! {
     pub MemoryTierComponent {
-        version: "0.1.0",
+        version: "0.2.0",
         provides: [IMemoryTier],
         receptacles: {
             logger: ILogger,
+            eviction_policy: IEvictionPolicy,
         },
         fields: {
             state: RwLock<MemoryTierState>,
@@ -102,26 +119,14 @@ impl MemoryTierComponent {
         }
     }
 
-    #[inline]
-    fn shard_for_key(key: CacheKey) -> usize {
-        key as usize % NUM_SHARDS
+    fn log_warn(&self, msg: &str) {
+        if let Ok(logger) = self.logger.get() {
+            logger.warn(msg);
+        }
     }
 
-}
-
-impl IMemoryTier for MemoryTierComponent {
-    fn initialize(&self, pool_size: usize) -> Result<(), MemoryTierError> {
-        if pool_size == 0 {
-            return Err(MemoryTierError::InvalidSize);
-        }
-
-        let mut state = self.state.write().unwrap();
-        if state.initialized.load(Ordering::Relaxed) {
-            return Err(MemoryTierError::AllocationFailed(
-                "already initialized".into(),
-            ));
-        }
-
+    /// Fallback pool allocation via mmap (used when SPDK is unavailable).
+    fn alloc_mmap(&self, pool_size: usize, numa_node: Option<i32>) -> Result<*mut u8, MemoryTierError> {
         let ptr = unsafe {
             libc::mmap(
                 std::ptr::null_mut(),
@@ -152,21 +157,116 @@ impl IMemoryTier for MemoryTierComponent {
             ptr
         };
 
+        // Bind pool to the target NUMA node if specified.
+        if let Some(node) = numa_node {
+            if node >= 0 {
+                let node_id = node as usize;
+                let mut nodemask: libc::c_ulong = 0;
+                if node_id < (std::mem::size_of::<libc::c_ulong>() * 8) {
+                    nodemask = 1 << node_id;
+                }
+                // SAFETY: ptr is a valid mmap'd region. mbind binds pages to a NUMA node.
+                let rc = unsafe {
+                    libc::syscall(
+                        libc::SYS_mbind,
+                        ptr,
+                        pool_size,
+                        libc::MPOL_BIND,
+                        &nodemask as *const libc::c_ulong,
+                        node_id + 2,
+                        0u32,
+                    )
+                };
+                if rc == 0 {
+                    self.log_info(&format!(
+                        "memory-tier: pool bound to NUMA node {node_id}"
+                    ));
+                } else {
+                    self.log_warn(&format!(
+                        "memory-tier: mbind to NUMA node {node_id} failed (errno={}), \
+                         using default memory policy",
+                        std::io::Error::last_os_error()
+                    ));
+                }
+            }
+        }
+
+        Ok(ptr as *mut u8)
+    }
+
+    #[inline]
+    fn shard_for_key(key: CacheKey) -> usize {
+        key as usize % NUM_SHARDS
+    }
+}
+
+impl IMemoryTier for MemoryTierComponent {
+    fn initialize(&self, pool_size: usize, numa_node: Option<i32>) -> Result<(), MemoryTierError> {
+        if pool_size == 0 {
+            return Err(MemoryTierError::InvalidSize);
+        }
+
+        let ep = self.eviction_policy.get().map_err(|_| {
+            MemoryTierError::NotInitialized("eviction_policy receptacle not connected".into())
+        })?;
+
+        let mut state = self.state.write().unwrap();
+        if state.initialized.load(Ordering::Relaxed) {
+            return Err(MemoryTierError::AllocationFailed(
+                "already initialized".into(),
+            ));
+        }
+
+        // Allocate pool: prefer SPDK hugepages (DMA-ready, NUMA-local) when available.
+        #[cfg(feature = "spdk")]
+        let (ptr, spdk_allocated) = if interfaces::is_spdk_env_active() {
+            const SPDK_MALLOC_DMA: u32 = 0x01;
+            let node_id = numa_node.unwrap_or(-1);
+            // SAFETY: spdk_zmalloc returns hugepage-backed, zero-initialized memory or NULL.
+            let p = unsafe {
+                spdk_sys::spdk_zmalloc(
+                    pool_size,
+                    4096,
+                    std::ptr::null_mut(),
+                    node_id,
+                    SPDK_MALLOC_DMA,
+                )
+            };
+            if p.is_null() {
+                return Err(MemoryTierError::AllocationFailed(
+                    "spdk_zmalloc failed (insufficient hugepages?)".into(),
+                ));
+            }
+            self.log_info(&format!(
+                "memory-tier: allocated from SPDK hugepages (NUMA node {})",
+                node_id
+            ));
+            (p as *mut u8, true)
+        } else {
+            (self.alloc_mmap(pool_size, numa_node)?, false)
+        };
+
+        #[cfg(not(feature = "spdk"))]
+        let (ptr, spdk_allocated) = (self.alloc_mmap(pool_size, numa_node)?, false);
+
         let shard_size = pool_size / NUM_SHARDS;
         let mut shards = Vec::with_capacity(NUM_SHARDS);
-        for _ in 0..NUM_SHARDS {
+        let mut pool_ids = [0u32; NUM_SHARDS];
+        for pool_id in pool_ids.iter_mut() {
+            *pool_id = ep.create_pool();
             shards.push(Mutex::new(Shard {
                 allocator: FreeList::new(shard_size),
-                lru: LruList::new(),
                 slots: HashMap::new(),
             }));
         }
 
-        state.pool_ptr = ptr as *mut u8;
+        state.pool_ptr = ptr;
         state.pool_size = pool_size;
         state.shard_size = shard_size;
         state.shards = shards;
+        state.pool_ids = pool_ids;
         state.evict_counter = AtomicUsize::new(0);
+        state.spdk_allocated = spdk_allocated;
         state.initialized.store(true, Ordering::Release);
 
         self.log_info(&format!(
@@ -187,6 +287,7 @@ impl IMemoryTier for MemoryTierComponent {
             return Err(MemoryTierError::NotInitialized("pool not initialized".into()));
         }
 
+        let ep = self.eviction_policy.get().unwrap();
         let shard_idx = Self::shard_for_key(key);
         let mut shard = state.shards[shard_idx].lock().unwrap();
 
@@ -199,13 +300,14 @@ impl IMemoryTier for MemoryTierComponent {
             .allocate(size as usize)
             .ok_or(MemoryTierError::PoolFull)?;
 
-        let lru_index = shard.lru.push_back(key);
+        let pool_id = state.pool_ids[shard_idx];
+        let eviction_handle = ep.track(pool_id, key).unwrap();
         shard.slots.insert(
             key,
             Slot {
                 offset: local_offset,
                 size,
-                lru_index,
+                eviction_handle,
             },
         );
 
@@ -220,14 +322,16 @@ impl IMemoryTier for MemoryTierComponent {
             return None;
         }
 
+        let ep = self.eviction_policy.get().unwrap();
         let shard_idx = Self::shard_for_key(key);
-        let mut shard = state.shards[shard_idx].lock().unwrap();
+        let shard = state.shards[shard_idx].lock().unwrap();
         let slot = shard.slots.get(&key)?;
         let global_offset = shard_idx * state.shard_size + slot.offset;
         let ptr = unsafe { state.pool_ptr.add(global_offset) };
         let size = slot.size;
-        let lru_index = slot.lru_index;
-        shard.lru.move_to_back(lru_index);
+        let handle = slot.eviction_handle;
+        drop(shard);
+        let _ = ep.touch(handle);
         Some((ptr, size))
     }
 
@@ -251,11 +355,11 @@ impl IMemoryTier for MemoryTierComponent {
             return Vec::new();
         }
 
+        let ep = self.eviction_policy.get().unwrap();
         let per_shard = (n / NUM_SHARDS).max(1);
         let mut keys = Vec::with_capacity(n);
-        for shard_mutex in &state.shards {
-            let shard = shard_mutex.lock().unwrap();
-            keys.extend(shard.lru.peek_front_n(per_shard));
+        for pool_id in &state.pool_ids {
+            keys.extend(ep.peek_oldest(*pool_id, per_shard));
             if keys.len() >= n {
                 break;
             }
@@ -270,11 +374,13 @@ impl IMemoryTier for MemoryTierComponent {
             return None;
         }
 
+        let ep = self.eviction_policy.get().unwrap();
         let start = state.evict_counter.fetch_add(1, Ordering::Relaxed) % NUM_SHARDS;
         for i in 0..NUM_SHARDS {
             let idx = (start + i) % NUM_SHARDS;
-            let mut shard = state.shards[idx].lock().unwrap();
-            if let Some(key) = shard.lru.pop_front() {
+            let pool_id = state.pool_ids[idx];
+            if let Some(key) = ep.pop_oldest(pool_id) {
+                let mut shard = state.shards[idx].lock().unwrap();
                 if let Some(slot) = shard.slots.remove(&key) {
                     shard.allocator.deallocate(slot.offset, slot.size as usize);
                 }
@@ -284,19 +390,40 @@ impl IMemoryTier for MemoryTierComponent {
         None
     }
 
+    fn evict_lru_for_key(&self, key: CacheKey) -> Option<CacheKey> {
+        let state = self.state.read().unwrap();
+        if !state.initialized.load(Ordering::Acquire) {
+            return None;
+        }
+
+        let ep = self.eviction_policy.get().unwrap();
+        let shard_idx = Self::shard_for_key(key);
+        let pool_id = state.pool_ids[shard_idx];
+        if let Some(evicted_key) = ep.pop_oldest(pool_id) {
+            let mut shard = state.shards[shard_idx].lock().unwrap();
+            if let Some(slot) = shard.slots.remove(&evicted_key) {
+                shard.allocator.deallocate(slot.offset, slot.size as usize);
+            }
+            Some(evicted_key)
+        } else {
+            None
+        }
+    }
+
     fn remove(&self, key: CacheKey) -> Result<(), MemoryTierError> {
         let state = self.state.read().unwrap();
         if !state.initialized.load(Ordering::Acquire) {
             return Err(MemoryTierError::NotInitialized("pool not initialized".into()));
         }
 
+        let ep = self.eviction_policy.get().unwrap();
         let shard_idx = Self::shard_for_key(key);
         let mut shard = state.shards[shard_idx].lock().unwrap();
         let slot = shard
             .slots
             .remove(&key)
             .ok_or(MemoryTierError::KeyNotFound(key))?;
-        shard.lru.remove(slot.lru_index);
+        let _ = ep.remove(slot.eviction_handle);
         shard.allocator.deallocate(slot.offset, slot.size as usize);
         Ok(())
     }
@@ -307,12 +434,37 @@ impl IMemoryTier for MemoryTierComponent {
             return;
         }
 
+        let ep = self.eviction_policy.get().unwrap();
         let shard_idx = Self::shard_for_key(key);
-        let mut shard = state.shards[shard_idx].lock().unwrap();
+        let shard = state.shards[shard_idx].lock().unwrap();
         if let Some(slot) = shard.slots.get(&key) {
-            let idx = slot.lru_index;
-            shard.lru.move_to_back(idx);
+            let handle = slot.eviction_handle;
+            drop(shard);
+            let _ = ep.touch(handle);
         }
+    }
+
+    fn batch_touch(&self, keys: &[CacheKey]) {
+        if keys.is_empty() {
+            return;
+        }
+        let state = self.state.read().unwrap();
+        if !state.initialized.load(Ordering::Acquire) {
+            return;
+        }
+        let ep = match self.eviction_policy.get() {
+            Ok(ep) => ep,
+            Err(_) => return,
+        };
+        let mut handles = Vec::with_capacity(keys.len());
+        for &key in keys {
+            let shard_idx = Self::shard_for_key(key);
+            let shard = state.shards[shard_idx].lock().unwrap();
+            if let Some(slot) = shard.slots.get(&key) {
+                handles.push(slot.eviction_handle);
+            }
+        }
+        let _ = ep.batch_touch(&handles);
     }
 
     fn contains(&self, key: CacheKey) -> bool {
@@ -356,27 +508,39 @@ impl IMemoryTier for MemoryTierComponent {
         if !state.initialized.load(Ordering::Acquire) {
             return Err(MemoryTierError::NotInitialized("pool not initialized".into()));
         }
+        let ep = self.eviction_policy.get().unwrap();
         let mut count = 0;
-        for shard_mutex in &state.shards {
+        for (i, shard_mutex) in state.shards.iter().enumerate() {
             let mut shard = shard_mutex.lock().unwrap();
             count += shard.slots.len();
             shard.slots.clear();
-            shard.lru = LruList::new();
             shard.allocator = FreeList::new(state.shard_size);
+            ep.clear_pool(state.pool_ids[i]);
         }
         Ok(count)
+    }
+
+    fn is_dma_capable(&self) -> bool {
+        let state = self.state.read().unwrap();
+        state.spdk_allocated
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use component_core::query_interface;
 
-    fn setup() -> std::sync::Arc<MemoryTierComponent> {
+    fn setup() -> Arc<MemoryTierComponent> {
+        let ep_comp = eviction_policy_lru::EvictionPolicyLruComponent::new_default();
+        let ep: Arc<dyn IEvictionPolicy + Send + Sync> =
+            query_interface!(ep_comp, IEvictionPolicy).unwrap();
+
         let c = MemoryTierComponent::new(RwLock::new(MemoryTierState::default()));
+        c.eviction_policy.connect(ep).unwrap();
         let mt = query_interface!(c, IMemoryTier).unwrap();
-        mt.initialize(64 * 4096).unwrap();
+        mt.initialize(64 * 4096, None).unwrap();
         c
     }
 
@@ -384,7 +548,7 @@ mod tests {
     fn initialize_twice_fails() {
         let c = setup();
         let mt = query_interface!(c, IMemoryTier).unwrap();
-        assert!(mt.initialize(4096).is_err());
+        assert!(mt.initialize(4096, None).is_err());
     }
 
     #[test]
