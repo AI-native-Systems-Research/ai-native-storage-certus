@@ -166,6 +166,7 @@ impl IMemoryTier for NoopMemoryTier {
     }
 
     fn touch(&self, _key: CacheKey) {}
+    fn batch_touch(&self, _keys: &[CacheKey]) {}
 
     fn contains(&self, _key: CacheKey) -> bool {
         false

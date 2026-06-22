@@ -2441,6 +2441,7 @@ mod tests {
         }
 
         fn touch(&self, _key: CacheKey) {}
+        fn batch_touch(&self, _keys: &[CacheKey]) {}
 
         fn contains(&self, key: CacheKey) -> bool {
             self.inner.lock().unwrap().slots.contains_key(&key)

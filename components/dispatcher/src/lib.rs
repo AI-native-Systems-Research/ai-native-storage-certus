@@ -1281,6 +1281,7 @@ impl IDispatcher for DispatcherComponent {
         unsafe impl Sync for ColdEntry {}
 
         let mut cold_entries: Vec<ColdEntry> = Vec::new();
+        let mut deferred_touch_keys: Vec<CacheKey> = Vec::new();
 
         for (i, (key, ipc_handle)) in entries.iter().enumerate() {
             let key = *key;
@@ -1311,13 +1312,6 @@ impl IDispatcher for DispatcherComponent {
                                 DispatcherError::IoError(format!(
                                     "GPU DMA copy (memory-tier→device) failed: {e}"
                                 ))
-                            })
-                            .and_then(|_| {
-                                gpu.stream_synchronize(s).map_err(|e| {
-                                    DispatcherError::IoError(format!(
-                                        "stream_synchronize failed: {e}"
-                                    ))
-                                })
                             })
                         } else {
                             let aligned = copy_size.next_multiple_of(4096).max(4096);
@@ -1355,7 +1349,7 @@ impl IDispatcher for DispatcherComponent {
                             m.record_hot_gpu_dma(t_hot.elapsed().as_micros() as f64);
                         }
                         let _ = dm.release_read(key);
-                        mt.touch(key);
+                        deferred_touch_keys.push(key);
                         results[i] = Some(res);
                     }
                     LookupResult::Staging { buffer } => {
@@ -1388,6 +1382,18 @@ impl IDispatcher for DispatcherComponent {
                     results[i] = Some(Err(DispatcherError::KeyNotFound(key)));
                 }
             }
+        }
+
+        // Batched stream sync: wait for all submitted async DMA copies at once.
+        if !deferred_touch_keys.is_empty() {
+            let raw = self.warm_stream.load(Ordering::Acquire);
+            if raw != 0 {
+                let s = GpuStream(raw as *mut std::ffi::c_void);
+                if let Err(e) = gpu.stream_synchronize(s) {
+                    self.log_info(&format!("batch stream_synchronize failed: {e}"));
+                }
+            }
+            mt.batch_touch(&deferred_touch_keys);
         }
 
         // Promote cold entries in parallel — multiple queue threads per drive.
@@ -2477,6 +2483,7 @@ mod tests {
         }
 
         fn touch(&self, _key: CacheKey) {}
+        fn batch_touch(&self, _keys: &[CacheKey]) {}
 
         fn contains(&self, key: CacheKey) -> bool {
             self.inner.lock().unwrap().slots.contains_key(&key)

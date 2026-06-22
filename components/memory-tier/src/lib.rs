@@ -444,6 +444,29 @@ impl IMemoryTier for MemoryTierComponent {
         }
     }
 
+    fn batch_touch(&self, keys: &[CacheKey]) {
+        if keys.is_empty() {
+            return;
+        }
+        let state = self.state.read().unwrap();
+        if !state.initialized.load(Ordering::Acquire) {
+            return;
+        }
+        let ep = match self.eviction_policy.get() {
+            Ok(ep) => ep,
+            Err(_) => return,
+        };
+        let mut handles = Vec::with_capacity(keys.len());
+        for &key in keys {
+            let shard_idx = Self::shard_for_key(key);
+            let shard = state.shards[shard_idx].lock().unwrap();
+            if let Some(slot) = shard.slots.get(&key) {
+                handles.push(slot.eviction_handle);
+            }
+        }
+        let _ = ep.batch_touch(&handles);
+    }
+
     fn contains(&self, key: CacheKey) -> bool {
         let state = self.state.read().unwrap();
         if !state.initialized.load(Ordering::Acquire) {

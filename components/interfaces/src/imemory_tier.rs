@@ -87,6 +87,10 @@ component_macros::define_interface! {
         /// Update the LRU position for `key` without returning data.
         fn touch(&self, key: CacheKey);
 
+        /// Update LRU positions for multiple keys in a single batched operation.
+        /// Amortizes lock acquisition over the batch for hot-path throughput.
+        fn batch_touch(&self, keys: &[CacheKey]);
+
         /// Check whether a slot exists for `key`.
         fn contains(&self, key: CacheKey) -> bool;
 
