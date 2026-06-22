@@ -194,6 +194,10 @@ impl IMemoryTier for NoopMemoryTier {
     fn clear(&self) -> Result<usize, MemoryTierError> {
         Ok(0)
     }
+
+    fn is_dma_capable(&self) -> bool {
+        false
+    }
 }
 
 // ===========================================================================

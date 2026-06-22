@@ -488,6 +488,10 @@ impl IMemoryTier for MockMemoryTier {
         inner.next_offset = 0;
         Ok(count)
     }
+
+    fn is_dma_capable(&self) -> bool {
+        false
+    }
 }
 
 // ---------------------------------------------------------------------------

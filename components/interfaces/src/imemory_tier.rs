@@ -99,6 +99,10 @@ component_macros::define_interface! {
         /// Return the base pointer and size of the pool for CUDA host registration.
         fn pool_info(&self) -> Option<(*mut u8, usize)>;
 
+        /// Returns `true` when the pool is backed by SPDK hugepages and pointers
+        /// from `insert`/`get` can be used directly for NVMe DMA without staging.
+        fn is_dma_capable(&self) -> bool;
+
         /// Remove all entries from the pool, freeing all slots.
         ///
         /// Returns the number of entries that were cleared.

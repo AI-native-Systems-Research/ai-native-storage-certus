@@ -50,12 +50,13 @@ struct MemoryTierState {
     pool_ids: [PoolId; NUM_SHARDS],
     evict_counter: AtomicUsize,
     initialized: AtomicBool,
+    spdk_allocated: bool,
 }
 
-// SAFETY: pool_ptr points to mmap'd memory accessible from any thread.
+// SAFETY: pool_ptr points to mmap'd or SPDK-allocated memory accessible from any thread.
 // Per-shard Mutex serializes shard access. Immutable fields (pool_ptr,
-// pool_size, shard_size) are only written during initialize() which is
-// protected by the component-level Mutex.
+// pool_size, shard_size, spdk_allocated) are only written during initialize()
+// which is protected by the component-level Mutex.
 unsafe impl Send for MemoryTierState {}
 unsafe impl Sync for MemoryTierState {}
 
@@ -69,18 +70,31 @@ impl Default for MemoryTierState {
             pool_ids: [0; NUM_SHARDS],
             evict_counter: AtomicUsize::new(0),
             initialized: AtomicBool::new(false),
+            spdk_allocated: false,
         }
     }
 }
 
 impl Drop for MemoryTierState {
     fn drop(&mut self) {
-        if !self.pool_ptr.is_null() {
-            unsafe {
-                libc::munmap(self.pool_ptr as *mut libc::c_void, self.pool_size);
-            }
-            self.pool_ptr = std::ptr::null_mut();
+        if self.pool_ptr.is_null() {
+            return;
         }
+        #[cfg(feature = "spdk")]
+        if self.spdk_allocated {
+            if interfaces::is_spdk_env_active() {
+                unsafe {
+                    spdk_sys::spdk_free(self.pool_ptr as *mut std::ffi::c_void);
+                }
+            }
+            // If SPDK already shut down, leak intentionally (same as DmaBuffer).
+            self.pool_ptr = std::ptr::null_mut();
+            return;
+        }
+        unsafe {
+            libc::munmap(self.pool_ptr as *mut libc::c_void, self.pool_size);
+        }
+        self.pool_ptr = std::ptr::null_mut();
     }
 }
 
@@ -111,30 +125,8 @@ impl MemoryTierComponent {
         }
     }
 
-    #[inline]
-    fn shard_for_key(key: CacheKey) -> usize {
-        key as usize % NUM_SHARDS
-    }
-
-}
-
-impl IMemoryTier for MemoryTierComponent {
-    fn initialize(&self, pool_size: usize, numa_node: Option<i32>) -> Result<(), MemoryTierError> {
-        if pool_size == 0 {
-            return Err(MemoryTierError::InvalidSize);
-        }
-
-        let ep = self.eviction_policy.get().map_err(|_| {
-            MemoryTierError::NotInitialized("eviction_policy receptacle not connected".into())
-        })?;
-
-        let mut state = self.state.write().unwrap();
-        if state.initialized.load(Ordering::Relaxed) {
-            return Err(MemoryTierError::AllocationFailed(
-                "already initialized".into(),
-            ));
-        }
-
+    /// Fallback pool allocation via mmap (used when SPDK is unavailable).
+    fn alloc_mmap(&self, pool_size: usize, numa_node: Option<i32>) -> Result<*mut u8, MemoryTierError> {
         let ptr = unsafe {
             libc::mmap(
                 std::ptr::null_mut(),
@@ -181,8 +173,8 @@ impl IMemoryTier for MemoryTierComponent {
                         pool_size,
                         libc::MPOL_BIND,
                         &nodemask as *const libc::c_ulong,
-                        node_id + 2, // maxnode: must be > highest node bit + 1
-                        0u32,        // flags
+                        node_id + 2,
+                        0u32,
                     )
                 };
                 if rc == 0 {
@@ -199,6 +191,64 @@ impl IMemoryTier for MemoryTierComponent {
             }
         }
 
+        Ok(ptr as *mut u8)
+    }
+
+    #[inline]
+    fn shard_for_key(key: CacheKey) -> usize {
+        key as usize % NUM_SHARDS
+    }
+}
+
+impl IMemoryTier for MemoryTierComponent {
+    fn initialize(&self, pool_size: usize, numa_node: Option<i32>) -> Result<(), MemoryTierError> {
+        if pool_size == 0 {
+            return Err(MemoryTierError::InvalidSize);
+        }
+
+        let ep = self.eviction_policy.get().map_err(|_| {
+            MemoryTierError::NotInitialized("eviction_policy receptacle not connected".into())
+        })?;
+
+        let mut state = self.state.write().unwrap();
+        if state.initialized.load(Ordering::Relaxed) {
+            return Err(MemoryTierError::AllocationFailed(
+                "already initialized".into(),
+            ));
+        }
+
+        // Allocate pool: prefer SPDK hugepages (DMA-ready, NUMA-local) when available.
+        #[cfg(feature = "spdk")]
+        let (ptr, spdk_allocated) = if interfaces::is_spdk_env_active() {
+            const SPDK_MALLOC_DMA: u32 = 0x01;
+            let node_id = numa_node.unwrap_or(-1);
+            // SAFETY: spdk_zmalloc returns hugepage-backed, zero-initialized memory or NULL.
+            let p = unsafe {
+                spdk_sys::spdk_zmalloc(
+                    pool_size,
+                    4096,
+                    std::ptr::null_mut(),
+                    node_id,
+                    SPDK_MALLOC_DMA,
+                )
+            };
+            if p.is_null() {
+                return Err(MemoryTierError::AllocationFailed(
+                    "spdk_zmalloc failed (insufficient hugepages?)".into(),
+                ));
+            }
+            self.log_info(&format!(
+                "memory-tier: allocated from SPDK hugepages (NUMA node {})",
+                node_id
+            ));
+            (p as *mut u8, true)
+        } else {
+            (self.alloc_mmap(pool_size, numa_node)?, false)
+        };
+
+        #[cfg(not(feature = "spdk"))]
+        let (ptr, spdk_allocated) = (self.alloc_mmap(pool_size, numa_node)?, false);
+
         let shard_size = pool_size / NUM_SHARDS;
         let mut shards = Vec::with_capacity(NUM_SHARDS);
         let mut pool_ids = [0u32; NUM_SHARDS];
@@ -210,12 +260,13 @@ impl IMemoryTier for MemoryTierComponent {
             }));
         }
 
-        state.pool_ptr = ptr as *mut u8;
+        state.pool_ptr = ptr;
         state.pool_size = pool_size;
         state.shard_size = shard_size;
         state.shards = shards;
         state.pool_ids = pool_ids;
         state.evict_counter = AtomicUsize::new(0);
+        state.spdk_allocated = spdk_allocated;
         state.initialized.store(true, Ordering::Release);
 
         self.log_info(&format!(
@@ -444,6 +495,11 @@ impl IMemoryTier for MemoryTierComponent {
             ep.clear_pool(state.pool_ids[i]);
         }
         Ok(count)
+    }
+
+    fn is_dma_capable(&self) -> bool {
+        let state = self.state.read().unwrap();
+        state.spdk_allocated
     }
 }
 
