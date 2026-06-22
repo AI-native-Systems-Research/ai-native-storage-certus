@@ -1,0 +1,68 @@
+{
+  "generated": "2026-06-19T19:30:00Z",
+  "based_on": "drift-report from 2026-06-19",
+  "summary": {
+    "backfill": 5,
+    "align": 0,
+    "human_decision": 0,
+    "new_specs": 0,
+    "remove": 0
+  },
+  "proposals": [
+    {
+      "id": 1,
+      "spec": "001-remote-lookup-placeholder",
+      "requirement": "FR-003",
+      "direction": "BACKFILL",
+      "current_spec": "When connected, each entry in batch_lookup MUST produce a log message via the ILogger receptacle",
+      "current_code": "Logging is unconditional — no connection state exists",
+      "proposed_text": "Each entry in `batch_lookup` MUST produce a log message via the `ILogger` receptacle (placeholder behavior). If the ILogger receptacle is not bound, logging is silently skipped.",
+      "confidence": "HIGH",
+      "status": "approved"
+    },
+    {
+      "id": 2,
+      "spec": "001-remote-lookup-placeholder",
+      "requirement": "FR-005",
+      "direction": "BACKFILL",
+      "current_spec": "When not connected, batch_lookup MUST return Err(RemoteLookupError::NotConnected) for every entry",
+      "current_code": "NotConnected variant removed. No connection state.",
+      "proposed_text": "The `batch_lookup` method MUST be callable at any time after component instantiation. No connection precondition is required.",
+      "confidence": "HIGH",
+      "status": "approved"
+    },
+    {
+      "id": 3,
+      "spec": "001-remote-lookup-placeholder",
+      "requirement": "FR-008",
+      "direction": "BACKFILL",
+      "current_spec": "Component MUST expose functionality only through the IRemoteLookup interface",
+      "current_code": "join_cluster and leave_cluster are interface methods (compliant)",
+      "proposed_text": null,
+      "confidence": "HIGH",
+      "status": "approved"
+    },
+    {
+      "id": 4,
+      "spec": "001-remote-lookup-placeholder",
+      "requirement": "FR-009",
+      "direction": "BACKFILL",
+      "current_spec": null,
+      "current_code": "join_cluster method on IRemoteLookup interface",
+      "proposed_text": "The `IRemoteLookup` interface MUST expose a `join_cluster` method with signature `fn join_cluster(&self, endpoint: &str) -> Result<(), RemoteLookupError>`. The placeholder implementation MUST log the endpoint and return `Ok(())`.",
+      "confidence": "HIGH",
+      "status": "approved"
+    },
+    {
+      "id": 5,
+      "spec": "001-remote-lookup-placeholder",
+      "requirement": "FR-010",
+      "direction": "BACKFILL",
+      "current_spec": null,
+      "current_code": "leave_cluster method on IRemoteLookup interface",
+      "proposed_text": "The `IRemoteLookup` interface MUST expose a `leave_cluster` method with signature `fn leave_cluster(&self) -> Result<(), RemoteLookupError>`. The placeholder implementation MUST log the call and return `Ok(())`.",
+      "confidence": "HIGH",
+      "status": "approved"
+    }
+  ]
+}

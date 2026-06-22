@@ -51,6 +51,11 @@ components:
     provides: [IExtentManager]
     kind: factory
 
+  remote_lookup:
+    crate: remote-lookup
+    factory: "RemoteLookupComponent::new"
+    provides: [IRemoteLookup]
+
   dispatcher:
     crate: dispatcher-p2p
     factory: "DispatcherP2pComponent::new_default"
@@ -80,6 +85,10 @@ wiring:
     source: gpu
   - target: dispatcher.spdk_env
     source: spdk_env
+  - target: remote_lookup.logger
+    source: logger
+  - target: dispatcher.remote_lookup
+    source: remote_lookup
 
 init_order:
   - logger
@@ -88,6 +97,7 @@ init_order:
   - eviction_policy
   - dispatch_map
   - memory_tier
+  - remote_lookup
   - dispatcher
 
 exports:
