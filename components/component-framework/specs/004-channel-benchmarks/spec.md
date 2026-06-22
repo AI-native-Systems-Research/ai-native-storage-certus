@@ -84,7 +84,7 @@ As a framework developer, I want to benchmark channels across different producer
 - **FR-012**: The benchmark suite MUST test at least two different message sizes (small fixed-size and larger variable-size) to reveal serialization and memory-copy costs.
 - **FR-013**: The benchmark suite MUST test at least two different queue capacities to reveal back-pressure and cache behavior.
 - **FR-014**: All third-party channel components MUST have unit tests verifying send/receive correctness, binding enforcement, and channel closure semantics.
-- **FR-015**: All third-party channel components MUST have doc tests on public types.
+- **FR-015**: All third-party channel components MUST have documentation examples on public types. Third-party backends expose their native construction API rather than the `split()` convenience method used by built-in channels. Documentation examples are provided on all public types.
 - **FR-016**: The benchmark suite MUST produce results that are directly comparable across backends (same message count, same thread counts, same measurement methodology).
 
 ### Key Entities

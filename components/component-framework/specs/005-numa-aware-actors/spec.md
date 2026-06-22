@@ -79,7 +79,7 @@ A developer learning the framework runs a self-contained example that demonstrat
 - What happens when the OS denies the affinity-set request (e.g., insufficient privileges)? The framework MUST propagate the OS error as a descriptive error to the caller.
 - What happens when a CPU is offline? The framework MUST detect offline CPUs and exclude them from topology results; pinning to an offline CPU MUST return an error.
 - What happens when topology information is unavailable (e.g., a VM that hides NUMA details)? The framework MUST fall back to reporting a single NUMA node containing all CPUs.
-- What happens when an actor is deactivated and reactivated with a different CPU affinity? The new affinity MUST apply to the newly spawned thread.
+- What happens when an actor is deactivated and reactivated with a different CPU affinity? (Note: Actor is consumed on activation; re-use requires new construction. This is by design for ownership safety.)
 
 ## Requirements *(mandatory)*
 
@@ -87,7 +87,7 @@ A developer learning the framework runs a self-contained example that demonstrat
 
 **Thread Pinning**:
 
-- **FR-001**: The framework MUST allow specifying a CPU affinity set (one or more CPU IDs) when creating an actor, and MUST allow changing the affinity while the actor is idle (between activation cycles).
+- **FR-001**: The framework MUST allow specifying a CPU affinity set (one or more CPU IDs) when creating an actor. CPU affinity is configurable before activation via `set_cpu_affinity()`. Actors are single-use; re-activation requires constructing a new Actor instance.
 - **FR-002**: When an actor is activated, its dedicated thread MUST be pinned to the specified CPU affinity set before the message loop begins.
 - **FR-003**: If no CPU affinity is specified, the actor MUST behave identically to the current implementation (no pinning, full backward compatibility).
 - **FR-004**: The framework MUST validate CPU IDs against the system's available CPUs and return an error for invalid IDs before spawning the thread.
@@ -166,4 +166,4 @@ A developer learning the framework runs a self-contained example that demonstrat
 ### Session 2026-03-31
 
 - Q: Should NUMA-awareness include memory allocation in addition to thread pinning? → A: Yes — thread pinning + general NUMA-local allocator for all actor-owned data (handler state, channel buffers, internal buffers).
-- Q: Should CPU affinity be fixed at creation or changeable? → A: Mutable between activations. Affinity can be changed while the actor is idle (not running), applied on next activation.
+- Q: Should CPU affinity be fixed at creation or changeable? → A: Configurable before activation via `set_cpu_affinity()`. Actors are single-use (consumed on activation); re-use requires constructing a new Actor instance.

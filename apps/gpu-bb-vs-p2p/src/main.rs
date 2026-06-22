@@ -241,6 +241,7 @@ fn pipelined_transfer(
                 lba: (i as u64) * (sectors_per_chunk as u64),
                 buf: Arc::clone(&ring_bufs[slot]),
                 timeout_ms: 5000,
+                tag: 0,
             })
             .map_err(|e| format!("ReadAsync send #{i}: {e}"))?;
     }
@@ -307,6 +308,7 @@ fn pipelined_transfer(
                     lba: (next_to_submit as u64) * (sectors_per_chunk as u64),
                     buf: Arc::clone(&ring_bufs[slot]),
                     timeout_ms: 5000,
+                    tag: 0,
                 })
                 .map_err(|e| format!("ReadAsync send #{next_to_submit}: {e}"))?;
             next_to_submit += 1;

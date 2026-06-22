@@ -1,57 +1,338 @@
 {
-  "report_date": "2026-05-28",
-  "spec": "components/dispatcher/specs/001-dispatcher-cache-interface/spec.md",
-  "implementation": [
-    "components/dispatcher/src/lib.rs",
-    "components/dispatcher/src/pipeline.rs",
-    "components/dispatcher/src/io_segmenter.rs",
-    "components/dispatcher/src/background.rs"
-  ],
-  "interface": "components/interfaces/src/idispatcher.rs",
-  "summary": {
-    "aligned": 29,
-    "drifted": 5,
-    "not_implemented": 0,
-    "unspecced_features": 1
+  "generated": "2026-06-18",
+  "component": "dispatcher",
+  "specs_analyzed": 1,
+  "requirements": {
+    "total": 39,
+    "aligned": 36,
+    "drifted": 3,
+    "not_implemented": 0
   },
-  "specs": [
+  "unspecced_code": 2,
+  "findings": [
     {
-      "id": "001-dispatcher-cache-interface",
-      "title": "Dispatcher Cache Interface (Memory-Tier Architecture)",
-      "aligned": ["FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014", "FR-015", "FR-016", "FR-017", "FR-018", "FR-020", "FR-021", "FR-022", "FR-023", "FR-024", "FR-025", "FR-028", "FR-029", "FR-030", "FR-031", "FR-032", "FR-033", "FR-034", "FR-035", "FR-036", "FR-037", "FR-038"],
-      "drifted": [
-        {
-          "requirement": "FR-001",
-          "spec_text": "System MUST define an IDispatcher interface providing initialize, shutdown, lookup, lookup_async, check, remove, populate, prepare_store, commit_store, cancel_store, and touch methods.",
-          "actual": "Interface additionally includes batch_lookup(entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> for parallel cold promotion",
-          "location": "components/interfaces/src/idispatcher.rs:266",
-          "severity": "moderate"
-        },
-        {
-          "requirement": "FR-019",
-          "spec_text": "Phase 1 issues up to 16 concurrent NVMe reads directly into unique offsets of the memory-tier slot",
-          "actual": "Pipeline accepts max_queue_depth parameter; single-entry path uses 16, batch path uses 16/num_queues (8 with 2 queues/drive) to prevent NVMe submission queue overflow",
-          "location": "components/dispatcher/src/pipeline.rs:244",
-          "severity": "minor"
-        },
-        {
-          "requirement": "User Story 9",
-          "spec_text": "promote_and_serve promotes a single cold entry sequentially via pipelined reader",
-          "actual": "batch_lookup additionally promotes multiple cold entries concurrently with per-drive parallelism (std::thread::scope) and multi-queue threads (MAX_QUEUES_PER_DRIVE=2)",
-          "location": "components/dispatcher/src/lib.rs:1024-1190",
-          "severity": "moderate"
-        }
-      ],
-      "not_implemented": []
+      "req_id": "FR-001",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "IDispatcher interface defined with all required methods",
+      "location": "components/interfaces/src/idispatcher.rs:153-506",
+      "notes": "All methods present: initialize, shutdown, lookup, lookup_async, batch_lookup, check, remove, populate, prepare_store, commit_store, cancel_store, touch, promote_to_memory_tier, clear_memory_tier, flush_to_ssd"
+    },
+    {
+      "req_id": "FR-002",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "DispatcherError covers all failure modes",
+      "location": "components/interfaces/src/idispatcher.rs:119-134",
+      "notes": "NotInitialized, KeyNotFound, AlreadyExists, AllocationFailed, IoError, Timeout, InvalidParameter"
+    },
+    {
+      "req_id": "FR-003",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "populate() allocates memory-tier slot, DMA copies from GPU, registers in dispatch map, enqueues write-through, evicts if needed",
+      "location": "src/lib.rs:1792-1903",
+      "notes": null
+    },
+    {
+      "req_id": "FR-004",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "Background writer uses peek() (no LRU refresh) and writes to SSD via extent manager",
+      "location": "src/lib.rs:544-617",
+      "notes": "process_write_job calls mt.peek() then writes via segmented I/O"
+    },
+    {
+      "req_id": "FR-005",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "Memory-tier entry remains accessible after write-through completion",
+      "location": "src/lib.rs:614-616",
+      "notes": "Only calls convert_to_storage; never removes from memory-tier on write completion"
+    },
+    {
+      "req_id": "FR-006",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "lookup() handles MemoryTier (memcpy_h2d_async + touch), BlockDevice (promote_and_serve), Staging (DMA)",
+      "location": "src/lib.rs:1609-1722",
+      "notes": "Uses warm stream with fallback to sync dma_copy_to_device"
+    },
+    {
+      "req_id": "FR-007",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "lookup returns KeyNotFound when key does not exist",
+      "location": "src/lib.rs:1639",
+      "notes": null
+    },
+    {
+      "req_id": "FR-008",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "check() returns bool without data transfer",
+      "location": "src/lib.rs:1724-1743",
+      "notes": null
+    },
+    {
+      "req_id": "FR-009",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "remove() frees memory-tier slot, extent, and dispatch map entry",
+      "location": "src/lib.rs:1745-1785",
+      "notes": null
+    },
+    {
+      "req_id": "FR-010",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "Uses define_component! macro exposing only IDispatcher",
+      "location": "src/lib.rs:148-173",
+      "notes": null
+    },
+    {
+      "req_id": "FR-011",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "Receptacles for ILogger, IDispatchMap, IGpuServices, ISPDKEnv, IMemoryTier. DispatcherConfig includes poller_base_cpu",
+      "location": "src/lib.rs:148-173",
+      "notes": "set_actor_cpu called when poller_cpu is set"
+    },
+    {
+      "req_id": "FR-012",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "initialize() validates dispatch_map and memory_tier before proceeding",
+      "location": "src/lib.rs:930-936",
+      "notes": null
+    },
+    {
+      "req_id": "FR-013",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "Appropriate locking via IDispatchMap trait contract",
+      "location": null,
+      "notes": "Thread safety enforced by trait design (Send+Sync bounds)"
+    },
+    {
+      "req_id": "FR-014",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "shutdown() drains writer, checkpoints extent managers, shuts down block devices in reverse",
+      "location": "src/lib.rs:1101-1177",
+      "notes": "Two-phase shutdown: signal all actors, then join"
+    },
+    {
+      "req_id": "FR-015",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "N block devices with N extent managers, each EM on its own data device",
+      "location": "src/lib.rs:832-847",
+      "notes": null
+    },
+    {
+      "req_id": "FR-016",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "Passes data_disk_size and computed FormatParams to each extent manager format()",
+      "location": "src/lib.rs:851-879",
+      "notes": null
+    },
+    {
+      "req_id": "FR-017",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "Background writer silently drops failed jobs",
+      "location": "src/lib.rs:592-607",
+      "notes": "Returns early on extent allocation or I/O failure"
+    },
+    {
+      "req_id": "FR-018",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "remove() does not block on write-through",
+      "location": "src/lib.rs:1745-1785",
+      "notes": "No flush call before removal"
+    },
+    {
+      "req_id": "FR-019",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "I/O segmented via io_segmenter respecting MDTS. Pipeline uses sliding window with tag-based completion routing. Periodic sync every PIPELINE_RING_SIZE=8. batch_lookup uses 16/num_queues per thread",
+      "location": "src/pipeline.rs:1-530",
+      "notes": "Both zero-copy single and multi-object variants implemented"
+    },
+    {
+      "req_id": "FR-020",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "prepare_store validates size>0, AlreadyExists, registers in dispatch map, reserves extent, returns DMA buffer",
+      "location": "src/lib.rs:1905-1999",
+      "notes": null
+    },
+    {
+      "req_id": "FR-021",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "commit_store writes buffer with MDTS segmentation, publishes extent, transitions to block-device state",
+      "location": "src/lib.rs:2002-2041",
+      "notes": null
+    },
+    {
+      "req_id": "FR-022",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "cancel_store drops PendingWrite (auto-abort), removes dispatch map entry",
+      "location": "src/lib.rs:2044-2064",
+      "notes": null
+    },
+    {
+      "req_id": "FR-023",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "touch() updates dispatch map timestamp AND refreshes memory-tier LRU without DMA",
+      "location": "src/lib.rs:2066-2080",
+      "notes": "Spec was updated to include memory-tier LRU refresh (see spec FR-023 text)"
+    },
+    {
+      "req_id": "FR-024",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "evict_for_space uses sparse-probe + shard-targeted LRU (evict_lru_for_key). Every 8th attempt probes oldest_keys(4) + is_evictable. Bounded by configurable max_attempts (default 2048)",
+      "location": "src/lib.rs:483-542",
+      "notes": null
+    },
+    {
+      "req_id": "FR-025",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "format_on_init flag; when false, recovers extent managers and reconstructs dispatch map via for_each_extent",
+      "location": "src/lib.rs:950-969",
+      "notes": "Logs count and elapsed time"
+    },
+    {
+      "req_id": "FR-028",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "On BlockDevice lookup, re-inserts to memory-tier and re-registers as MemoryTier with ssd_offset preserved",
+      "location": "src/lib.rs:451-459",
+      "notes": null
+    },
+    {
+      "req_id": "FR-029",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "Background SSD evictor started if threshold > 0.0 and drives configured; joined during shutdown()",
+      "location": "src/lib.rs:1062-1093",
+      "notes": null
+    },
+    {
+      "req_id": "FR-030",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "Evictor checks combined SSD utilization with configurable interval",
+      "location": "src/background.rs:270-283",
+      "notes": null
+    },
+    {
+      "req_id": "FR-031",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "Evictor evicts BlockDevice entries using oldest_keys(batch_size), stops below low_watermark",
+      "location": "src/background.rs:295-330",
+      "notes": null
+    },
+    {
+      "req_id": "FR-032",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "Evictor skips MemoryTier entries; dm.remove() failure handled gracefully",
+      "location": "src/background.rs:361-366",
+      "notes": null
+    },
+    {
+      "req_id": "FR-033",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "DispatcherConfig includes all required fields with correct defaults",
+      "location": "components/interfaces/src/idispatcher.rs:30-79",
+      "notes": "ssd_eviction_threshold=0.9, low_watermark=0.8, batch_size=64, interval_secs=5, max_eviction_attempts=2048"
+    },
+    {
+      "req_id": "FR-034",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "initialize() calls register_host_memory on memory-tier pool; caches ClientChannels per drive",
+      "location": "src/lib.rs:1003-1023",
+      "notes": "Registration failure logged as warning"
+    },
+    {
+      "req_id": "FR-035",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "shutdown() calls unregister_host_memory before memory-tier teardown",
+      "location": "src/lib.rs:1127-1131",
+      "notes": null
+    },
+    {
+      "req_id": "FR-036",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "lookup_async returns GpuStream; synchronous lookup delegates to lookup_async + stream_synchronize",
+      "location": "src/lib.rs:1180-1191",
+      "notes": "For non-memory-tier paths a null stream is returned"
+    },
+    {
+      "req_id": "FR-037",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "drifted",
+      "description": "Spec requires pool of 4 warm CUDA streams stored as RwLock<Vec<u64>>. Code allocates single stream stored as AtomicU64",
+      "location": "src/lib.rs:977-982",
+      "notes": "Single warm stream instead of multi-stream pool. batch_lookup creates per-thread streams for cold path but does not use pre-allocated pool for hot path round-robin distribution as specified."
+    },
+    {
+      "req_id": "FR-038",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "clear_memory_tier() evicts all via evict_lru() loop, transitions to BlockDevice or removes on failure, returns count",
+      "location": "src/lib.rs:2233-2254",
+      "notes": "IMemoryTier trait also provides clear() method"
+    },
+    {
+      "req_id": "FR-039",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "drifted",
+      "description": "Spec requires deferred batch sync for hot entries (issue all async copies first, synchronize all streams once at end). Code synchronizes per-key in the hot path",
+      "location": "src/lib.rs:1286-1292",
+      "notes": "Per-key stream_synchronize in MemoryTier branch of batch_lookup prevents the throughput benefit of deferred batch synchronization"
+    },
+    {
+      "req_id": "FR-040",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "promote_to_memory_tier() reads BlockDevice entries via pipelined_ssd_to_dram_only, refreshes MemoryTier/Staging timestamps, silently skips missing keys",
+      "location": "src/lib.rs:2083-2231",
+      "notes": "Errors logged via ILogger but not propagated"
+    },
+    {
+      "req_id": "FR-041",
+      "spec": "001-dispatcher-cache-interface",
+      "status": "aligned",
+      "description": "pipelined_ssd_to_dram_only and pipelined_multi_ssd_to_dram_only both implemented",
+      "location": "src/pipeline.rs:551-815",
+      "notes": "promote_to_memory_tier uses single-object variant per-entry; multi variant exists but unused currently"
     }
   ],
-  "unspecced": [
+  "unspecced_findings": [
     {
-      "feature": "batch_lookup with parallel per-drive multi-queue cold promotion",
-      "location": "components/dispatcher/src/lib.rs:865-1190",
-      "lines": 325,
-      "suggested_spec": "New FR + User Story 11"
+      "feature": "flush_to_ssd() method",
+      "location": "src/lib.rs:2256-2269",
+      "description": "Blocks until all background write-through jobs complete. Defined in IDispatcher interface but has no corresponding FR-* requirement."
+    },
+    {
+      "feature": "PipelineMetrics trait and instrumentation",
+      "location": "src/metrics.rs:1-48",
+      "description": "Comprehensive timing instrumentation for cold/hot/populate paths. No FR-* covers observability or metrics collection."
     }
-  ],
-  "conflicts": []
+  ]
 }

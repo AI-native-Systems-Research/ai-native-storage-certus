@@ -181,6 +181,15 @@ impl IDispatchMap for BenchDispatchMap {
         }
     }
 
+    fn entry_size(&self, key: CacheKey) -> Result<u32, DispatchMapError> {
+        let inner = self.inner.lock().unwrap();
+        if inner.contains_key(&key) {
+            Ok(4096)
+        } else {
+            Err(DispatchMapError::KeyNotFound(key))
+        }
+    }
+
     fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
         let inner = self.inner.lock().unwrap();
         inner.keys().copied().take(n).collect()
@@ -364,7 +373,7 @@ impl BenchMemoryTier {
 }
 
 impl IMemoryTier for BenchMemoryTier {
-    fn initialize(&self, _pool_size: usize) -> Result<(), MemoryTierError> {
+    fn initialize(&self, _pool_size: usize, _numa_node: Option<i32>) -> Result<(), MemoryTierError> {
         Ok(())
     }
     fn insert(&self, _key: CacheKey, _size: u32) -> Result<*mut u8, MemoryTierError> {
@@ -378,10 +387,14 @@ impl IMemoryTier for BenchMemoryTier {
     fn evict_lru(&self) -> Option<CacheKey> {
         None
     }
+    fn evict_lru_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+        None
+    }
     fn remove(&self, _key: CacheKey) -> Result<(), MemoryTierError> {
         Ok(())
     }
     fn touch(&self, _key: CacheKey) {}
+    fn batch_touch(&self, _keys: &[CacheKey]) {}
     fn contains(&self, _key: CacheKey) -> bool {
         false
     }
@@ -394,6 +407,18 @@ impl IMemoryTier for BenchMemoryTier {
     fn pool_info(&self) -> Option<(*mut u8, usize)> {
         let pool = self.pool.lock().unwrap();
         Some((pool.as_ptr() as *mut u8, pool.len()))
+    }
+    fn peek(&self, _key: CacheKey) -> Option<(*mut u8, u32)> {
+        None
+    }
+    fn oldest_keys(&self, _n: usize) -> Vec<CacheKey> {
+        Vec::new()
+    }
+    fn clear(&self) -> Result<usize, MemoryTierError> {
+        Ok(0)
+    }
+    fn is_dma_capable(&self) -> bool {
+        false
     }
 }
 
@@ -419,7 +444,6 @@ fn setup_dispatcher() -> (Arc<dyn IDispatcher + Send + Sync>, Arc<BenchDispatchM
 
     let d: Arc<dyn IDispatcher + Send + Sync> = query_interface!(c, IDispatcher).unwrap();
     d.initialize(DispatcherConfig {
-        metadata_pci_addr: "0000:01:00.0".to_string(),
         data_pci_addrs: vec!["0000:02:00.0".to_string()],
         max_cache_entries: 0, // disable eviction for benchmarks
         ..Default::default()

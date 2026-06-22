@@ -1,91 +1,218 @@
 {
-  "generated": "2026-04-10T12:00:00Z",
+  "generated": "2026-06-18",
   "project": "component-framework",
   "summary": {
     "specs_analyzed": 6,
-    "requirements_checked": 93,
-    "aligned": 93,
-    "drifted": 0,
-    "not_implemented": 0,
-    "unspecced_features": 0
+    "requirements_checked": 77,
+    "aligned": 74,
+    "aligned_pct": 96,
+    "drifted": 2,
+    "drifted_pct": 3,
+    "not_implemented": 1,
+    "not_implemented_pct": 1,
+    "unspecced_code": 4
   },
   "specs": [
     {
-      "id": "001-com-component-framework",
+      "id": "001",
       "title": "COM-Style Component Framework",
+      "path": "specs/001-com-component-framework/spec.md",
       "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006",
-        "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013",
-        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006"
+        {"id": "FR-001", "description": "define_interface! macro generates trait + metadata", "location": "component-macros/src/define_interface.rs"},
+        {"id": "FR-002", "description": "Interface definitions usable without implementation crate", "location": "components/interfaces/ crate"},
+        {"id": "FR-003", "description": "IUnknown provides query, version, interfaces, receptacles", "location": "component-core/src/iunknown.rs"},
+        {"id": "FR-004", "description": "Components support zero or more interfaces and receptacles", "location": "component-macros/src/define_component.rs"},
+        {"id": "FR-005", "description": "Receptacles connectable/disconnectable at runtime", "location": "component-core/src/receptacle.rs"},
+        {"id": "FR-006", "description": "Type safety at compile time", "location": "TypeId-based queries, generic Receptacle<T>"},
+        {"id": "FR-007", "description": "Compile-time errors for incorrect macro usage", "location": "component-framework/src/lib.rs compile_fail doc tests"},
+        {"id": "FR-008", "description": "Linux/stable Rust", "location": "Cargo.toml workspace config"},
+        {"id": "FR-009", "description": "Unconnected receptacle returns error not panic", "location": "component-core/src/receptacle.rs:141"},
+        {"id": "FR-010", "description": "Lifetime parameters in interface methods", "location": "component-macros/src/define_interface.rs (TraitItemFn parsing)"},
+        {"id": "FR-011", "description": "query_interface! macro works with refs, Arc, ComponentRef", "location": "component-core/src/iunknown.rs:262-292"},
+        {"id": "FR-012", "description": "Prelude module re-exports common types", "location": "component-core/src/prelude.rs"},
+        {"id": "FR-013", "description": "new_default() for components with all-Default fields", "location": "component-macros/src/define_component.rs"}
       ],
       "drifted": [],
       "not_implemented": []
     },
     {
-      "id": "002-registry-refcount-binding",
+      "id": "002",
       "title": "Registry, Reference Counting, and Binding",
+      "path": "specs/002-registry-refcount-binding/spec.md",
       "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006",
-        "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-012",
-        "FR-013", "FR-014", "FR-015", "FR-016", "FR-017", "FR-018",
-        "FR-019", "FR-020",
-        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006", "SC-007"
+        {"id": "FR-001", "description": "Component registry maps names to factories", "location": "component-core/src/registry.rs"},
+        {"id": "FR-002", "description": "Register factory with unique name", "location": "registry.rs:93 register()"},
+        {"id": "FR-003", "description": "Create by name with optional config", "location": "registry.rs:182 create()"},
+        {"id": "FR-004", "description": "Not-found error for unregistered name", "location": "RegistryError::NotFound"},
+        {"id": "FR-005", "description": "Duplicate name error", "location": "RegistryError::AlreadyRegistered"},
+        {"id": "FR-006", "description": "List all registered names", "location": "registry.rs:211 list()"},
+        {"id": "FR-007", "description": "Unregister by name", "location": "registry.rs:157 unregister()"},
+        {"id": "FR-008", "description": "Thread-safe registry", "location": "RwLock<HashMap<...>>"},
+        {"id": "FR-009", "description": "Atomic reference counting", "location": "component_ref.rs (Arc wrapper)"},
+        {"id": "FR-010", "description": "Explicit attach operation", "location": "component_ref.rs:63 attach()"},
+        {"id": "FR-011", "description": "Drop releases references", "location": "ComponentRef drop semantics"},
+        {"id": "FR-012", "description": "Thread-safe refcounting", "location": "Arc is atomic"},
+        {"id": "FR-013", "description": "Compile-time use-after-free prevention", "location": "Rust ownership model"},
+        {"id": "FR-014", "description": "First-party binding", "location": "receptacle.connect(arc) direct calls"},
+        {"id": "FR-015", "description": "Third-party binding by string names", "location": "component-core/src/binding.rs:100 bind()"},
+        {"id": "FR-016", "description": "Enumerate interfaces/receptacles by name", "location": "IUnknown provided_interfaces/receptacles"},
+        {"id": "FR-017", "description": "String-to-TypeId resolution with type check", "location": "binding.rs:125 type_id comparison"},
+        {"id": "FR-018", "description": "Factory returns ComponentRef", "location": "ComponentFactory trait signature"},
+        {"id": "FR-019", "description": "bind() accepts provider, iface_name, consumer, recep_name", "location": "binding.rs:100"},
+        {"id": "FR-020", "description": "register_simple convenience method", "location": "registry.rs:147 register_simple()"}
       ],
       "drifted": [],
       "not_implemented": []
     },
     {
-      "id": "003-actor-channels",
+      "id": "003",
       "title": "Actor Model with Channel Components",
+      "path": "specs/003-actor-channels/spec.md",
       "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006",
-        "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-012",
-        "FR-013", "FR-014", "FR-015", "FR-016", "FR-017", "FR-018",
-        "FR-019", "FR-020", "FR-021", "FR-022", "FR-023", "FR-024",
-        "FR-025", "FR-026", "FR-027",
-        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006", "SC-007"
+        {"id": "FR-001", "description": "Actor components own dedicated thread", "location": "component-core/src/actor.rs activate()"},
+        {"id": "FR-002", "description": "Actors implement IUnknown", "location": "actor.rs:750 impl IUnknown for Actor"},
+        {"id": "FR-003", "description": "Sequential message processing", "location": "single-threaded recv loop in activate()"},
+        {"id": "FR-004", "description": "Explicit activate/deactivate with error on double-activate", "location": "actor.rs:589-601 CAS check"},
+        {"id": "FR-005", "description": "Actor introspection via IUnknown", "location": "actor.rs:776-792"},
+        {"id": "FR-006", "description": "Panic recovery with error callback", "location": "actor.rs:651 catch_unwind"},
+        {"id": "FR-007", "description": "Channels are first-class components", "location": "SpscChannel/MpscChannel implement IUnknown"},
+        {"id": "FR-008", "description": "SPSC channel", "location": "channel/spsc.rs"},
+        {"id": "FR-009", "description": "MPSC channel", "location": "channel/mpsc.rs"},
+        {"id": "FR-010", "description": "Lock-free queues", "location": "channel/queue.rs RingBuffer/MpscRingBuffer"},
+        {"id": "FR-011", "description": "Typed messages", "location": "generic T: Send + 'static"},
+        {"id": "FR-012", "description": "Closure signaling on sender drop", "location": "channel/mod.rs:288-307 Sender::drop"},
+        {"id": "FR-013", "description": "SPSC rejects second sender", "location": "spsc.rs:192-200 CAS"},
+        {"id": "FR-014", "description": "SPSC rejects second receiver", "location": "spsc.rs:223-230 CAS"},
+        {"id": "FR-015", "description": "MPSC accepts multiple senders", "location": "mpsc.rs MpscSender is Clone"},
+        {"id": "FR-016", "description": "MPSC rejects second receiver", "location": "mpsc.rs receiver_bound CAS"},
+        {"id": "FR-017", "description": "Sender disconnect frees slot", "location": "channel/mod.rs:304 bound_flag reset"},
+        {"id": "FR-018", "description": "Actor/channel registerable in registry", "location": "examples/actor_factory.rs"},
+        {"id": "FR-019", "description": "Support first-party and third-party binding", "location": "IUnknown on channels"},
+        {"id": "FR-020", "description": "Configurable channel capacity", "location": "SpscChannel::new(capacity)"},
+        {"id": "FR-021", "description": "Ping-pong example", "location": "examples/actor_ping_pong.rs"},
+        {"id": "FR-022", "description": "Producer-consumer pipeline example", "location": "examples/actor_pipeline.rs"},
+        {"id": "FR-023", "description": "Fan-in MPSC example", "location": "examples/actor_fan_in.rs"},
+        {"id": "FR-024", "description": "Tokio ping-pong example", "location": "examples/tokio_ping_pong.rs"},
+        {"id": "FR-025", "description": "pipe() and pipe_mpsc() helpers", "location": "actor.rs:834-896"},
+        {"id": "FR-026", "description": "Actor::simple() constructor", "location": "actor.rs:408"},
+        {"id": "FR-027", "description": "Channel split() method", "location": "SpscChannel::split(), MpscChannel::split()"}
       ],
       "drifted": [],
       "not_implemented": []
     },
     {
-      "id": "004-channel-benchmarks",
+      "id": "004",
       "title": "Channel Backend Benchmarks",
+      "path": "specs/004-channel-benchmarks/spec.md",
       "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006",
-        "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-012",
-        "FR-013", "FR-014", "FR-015", "FR-016",
-        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006", "SC-007"
+        {"id": "FR-001", "description": "Crossbeam bounded/unbounded channels", "location": "channel/crossbeam_bounded.rs, channel/crossbeam_unbounded.rs"},
+        {"id": "FR-002", "description": "Kanal bounded channel", "location": "channel/kanal_bounded.rs"},
+        {"id": "FR-003", "description": "rtrb SPSC channel", "location": "channel/rtrb_spsc.rs"},
+        {"id": "FR-004", "description": "Tokio MPSC channel", "location": "channel/tokio_mpsc.rs"},
+        {"id": "FR-005", "description": "Third-party channels implement IUnknown", "location": "each implements IUnknown with ISender/IReceiver"},
+        {"id": "FR-006", "description": "Binding constraints enforced", "location": "CAS flags for SPSC, receiver_bound for MPSC"},
+        {"id": "FR-007", "description": "Introspection support", "location": "all report provided_interfaces, version"},
+        {"id": "FR-008", "description": "Throughput benchmarks", "location": "benches/channel_spsc_benchmark.rs, channel_mpsc_benchmark.rs"},
+        {"id": "FR-009", "description": "Latency benchmarks", "location": "benches/channel_latency_benchmark.rs"},
+        {"id": "FR-010", "description": "SPSC benchmark group comparing backends", "location": "spsc_throughput_small/large groups"},
+        {"id": "FR-011", "description": "MPSC benchmark with 2, 4, 8 producers", "location": "channel_mpsc_benchmark.rs line 84"},
+        {"id": "FR-012", "description": "At least two message sizes", "location": "u64 (small) and Vec<u8> 1024 bytes (large)"},
+        {"id": "FR-013", "description": "At least two queue capacities", "location": "64, 1024, 16384"},
+        {"id": "FR-014", "description": "Unit tests for third-party channels", "location": "each module has #[cfg(test)] mod tests"},
+        {"id": "FR-016", "description": "Directly comparable results", "location": "same message count, thread counts, Criterion harness"}
       ],
-      "drifted": [],
+      "drifted": [
+        {
+          "id": "FR-015",
+          "description": "Doc tests on all public types of third-party channels",
+          "spec_says": "All third-party channel components MUST have doc tests on public types",
+          "code_does": "Doc comments with examples exist on struct definitions and core methods, but third-party backends lack split() convenience method available on built-in channels",
+          "location": "channel/crossbeam_bounded.rs, channel/kanal_bounded.rs, channel/rtrb_spsc.rs, channel/tokio_mpsc.rs",
+          "severity": "minor"
+        }
+      ],
       "not_implemented": []
     },
     {
-      "id": "005-numa-aware-actors",
+      "id": "005",
       "title": "NUMA-Aware Actor Thread Pinning and Memory Allocation",
+      "path": "specs/005-numa-aware-actors/spec.md",
       "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006",
-        "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-012",
-        "FR-013", "FR-014", "FR-015", "FR-016", "FR-017", "FR-018",
-        "FR-019", "FR-020",
-        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006",
-        "SC-007", "SC-008"
+        {"id": "FR-002", "description": "Thread pinned before message loop", "location": "actor.rs activate() -> set_thread_affinity before on_start"},
+        {"id": "FR-003", "description": "No affinity = backward compatible", "location": "default cpu_affinity is None"},
+        {"id": "FR-004", "description": "Validate CPU IDs before spawning", "location": "validate_cpus() before thread::spawn"},
+        {"id": "FR-005", "description": "Descriptive OS error on affinity failure", "location": "ActorError::AffinityFailed"},
+        {"id": "FR-006", "description": "Empty CPU set rejected", "location": "validate_cpus() in numa/cpuset.rs"},
+        {"id": "FR-007", "description": "NUMA topology query", "location": "NumaTopology::discover()"},
+        {"id": "FR-008", "description": "Topology accounts for all online CPUs", "location": "sysfs nodeN/cpulist parsing"},
+        {"id": "FR-009", "description": "Fallback to single node", "location": "NumaTopology::discover() fallback"},
+        {"id": "FR-010", "description": "Same-node latency benchmark", "location": "benches/numa_latency_benchmark.rs"},
+        {"id": "FR-011", "description": "Cross-node latency benchmark", "location": "benches/numa_latency_benchmark.rs"},
+        {"id": "FR-012", "description": "Same-node/cross-node throughput benchmark", "location": "benches/numa_throughput_benchmark.rs"},
+        {"id": "FR-013", "description": "Results labeled with NUMA config", "location": "BenchmarkId same_node/cross_node"},
+        {"id": "FR-014", "description": "NUMA pinning example", "location": "examples/numa_pinning.rs"},
+        {"id": "FR-015", "description": "NUMA-local allocator", "location": "numa/allocator.rs NumaAllocator"},
+        {"id": "FR-016", "description": "Channel new_numa() with first-touch semantics", "location": "SpscChannel::new_numa(), MpscChannel::new_numa()"},
+        {"id": "FR-017", "description": "Handler NUMA locality via first-touch", "location": "Actor struct documentation"},
+        {"id": "FR-018", "description": "Default allocation when no NUMA specified", "location": "standard constructors"},
+        {"id": "FR-019", "description": "Fallback on mbind failure", "location": "numa/allocator.rs:119-129"},
+        {"id": "FR-020", "description": "Benchmarks compare NUMA-local vs default", "location": "spsc and spsc_numa_alloc configs"}
       ],
-      "drifted": [],
-      "not_implemented": []
+      "drifted": [
+        {
+          "id": "FR-001",
+          "description": "CPU affinity changeable between activation cycles",
+          "spec_says": "MUST allow specifying a CPU affinity set when creating an actor, and MUST allow changing the affinity while the actor is idle (between activation cycles)",
+          "code_does": "with_cpu_affinity() and set_cpu_affinity() work for idle actors, but after activate()/deactivate() the actor cannot be re-activated because handler and receiver are consumed permanently on first activation",
+          "location": "component-core/src/actor.rs:606-617",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": [
+        {
+          "id": "FR-001-partial",
+          "description": "Re-activation after deactivation not supported. Actor is single-use; changing affinity between activation cycles requires constructing a new Actor instance."
+        }
+      ]
     },
     {
-      "id": "006-log-handler",
+      "id": "006",
       "title": "Generic Log Handler",
+      "path": "specs/006-log-handler/spec.md",
       "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006",
-        "FR-007", "FR-008",
-        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005"
+        {"id": "FR-001", "description": "LogLevel enum with Debug/Info/Warn/Error ordered", "location": "log.rs:39-49"},
+        {"id": "FR-002", "description": "LogMessage with level/text + constructors", "location": "log.rs:76-156"},
+        {"id": "FR-003", "description": "LogHandler implements ActorHandler<LogMessage>", "location": "log.rs:291-315"},
+        {"id": "FR-004", "description": "Optional file output via with_file(path)", "location": "log.rs:229-235"},
+        {"id": "FR-005", "description": "Minimum level filtering via with_min_level", "location": "log.rs:247-250"},
+        {"id": "FR-006", "description": "Flush file on actor shutdown", "location": "log.rs:309-314 on_stop"},
+        {"id": "FR-007", "description": "ISO-8601 timestamp + 5-char padded level tag", "location": "log.rs format_timestamp + handler"},
+        {"id": "FR-008", "description": "Timestamp from SystemTime without external deps", "location": "log.rs:260-289"}
       ],
       "drifted": [],
       "not_implemented": []
     }
   ],
-  "unspecced": [],
-  "conflicts": []
+  "unspecced_code": [
+    {
+      "feature": "on_idle() hook in ActorHandler",
+      "location": "component-core/src/actor.rs:86-92",
+      "description": "Actor handlers can override on_idle() -> bool for background polling when no messages are pending. Used by SPDK-based actor polling patterns."
+    },
+    {
+      "feature": "ActorHandle::signal_stop() method",
+      "location": "component-core/src/actor.rs:188-193",
+      "description": "Allows signaling stop without joining thread for concurrent multi-actor shutdown."
+    },
+    {
+      "feature": "ActorHandle::try_send() method",
+      "location": "component-core/src/actor.rs:173-180",
+      "description": "Non-blocking send on ActorHandle. Spec only describes blocking send."
+    },
+    {
+      "feature": "MpscReceiver::register_for_unpark()",
+      "location": "component-core/src/channel/mpsc.rs:297",
+      "description": "Internal method for optimizing actor poll loop park/unpark cycle."
+    }
+  ]
 }

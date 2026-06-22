@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use interfaces::{CacheKey, DmaAllocFn, DmaBuffer};
+use interfaces::{CacheKey, DmaAllocFn, DmaBuffer, PoolId};
 
 use crate::entry::DispatchEntry;
 
@@ -22,6 +22,7 @@ pub struct DispatchMapState {
     pub(crate) inner: Mutex<Inner>,
     pub(crate) condvar: Condvar,
     pub(crate) dma_alloc: Mutex<Option<DmaAllocFn>>,
+    pub(crate) pool_id: Mutex<Option<PoolId>>,
 }
 
 impl Default for DispatchMapState {
@@ -38,6 +39,7 @@ impl DispatchMapState {
             }),
             condvar: Condvar::new(),
             dma_alloc: Mutex::new(Some(default_dma_alloc())),
+            pool_id: Mutex::new(None),
         }
     }
 

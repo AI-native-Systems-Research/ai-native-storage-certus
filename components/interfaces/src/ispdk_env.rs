@@ -8,6 +8,13 @@ define_interface! {
         /// and discover VFIO-attached devices.
         fn init(&self) -> Result<(), SpdkEnvError>;
 
+        /// Tear down the SPDK/DPDK environment explicitly.
+        ///
+        /// Must be called after all NVMe controllers have been detached and all
+        /// DMA buffers freed. This prevents DPDK atexit handlers from accessing
+        /// freed resources on process exit.
+        fn fini(&self);
+
         /// Return all successfully probed VFIO-attached devices.
         fn devices(&self) -> Vec<VfioDevice>;
 
