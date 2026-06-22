@@ -137,6 +137,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         poller_base_cpu: cli.poller_base_cpu,
         max_eviction_attempts: cli.max_eviction_attempts,
         resolved_pci_addrs: std::cell::RefCell::new(Vec::new()),
+        resolved_numa_node: std::cell::RefCell::new(None),
     };
 
     // Build the component stack from the YAML-generated composition

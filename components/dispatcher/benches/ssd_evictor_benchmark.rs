@@ -141,7 +141,7 @@ impl IDispatchMap for EvictorBenchMap {
 struct NoopMemoryTier;
 
 impl IMemoryTier for NoopMemoryTier {
-    fn initialize(&self, _pool_size: usize) -> Result<(), MemoryTierError> {
+    fn initialize(&self, _pool_size: usize, _numa_node: Option<i32>) -> Result<(), MemoryTierError> {
         Ok(())
     }
 
@@ -166,6 +166,7 @@ impl IMemoryTier for NoopMemoryTier {
     }
 
     fn touch(&self, _key: CacheKey) {}
+    fn batch_touch(&self, _keys: &[CacheKey]) {}
 
     fn contains(&self, _key: CacheKey) -> bool {
         false
@@ -193,6 +194,10 @@ impl IMemoryTier for NoopMemoryTier {
 
     fn clear(&self) -> Result<usize, MemoryTierError> {
         Ok(0)
+    }
+
+    fn is_dma_capable(&self) -> bool {
+        false
     }
 }
 

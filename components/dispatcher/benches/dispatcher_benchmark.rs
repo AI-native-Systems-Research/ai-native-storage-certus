@@ -373,7 +373,7 @@ impl BenchMemoryTier {
 }
 
 impl IMemoryTier for BenchMemoryTier {
-    fn initialize(&self, _pool_size: usize) -> Result<(), MemoryTierError> {
+    fn initialize(&self, _pool_size: usize, _numa_node: Option<i32>) -> Result<(), MemoryTierError> {
         Ok(())
     }
     fn insert(&self, _key: CacheKey, _size: u32) -> Result<*mut u8, MemoryTierError> {
@@ -394,6 +394,7 @@ impl IMemoryTier for BenchMemoryTier {
         Ok(())
     }
     fn touch(&self, _key: CacheKey) {}
+    fn batch_touch(&self, _keys: &[CacheKey]) {}
     fn contains(&self, _key: CacheKey) -> bool {
         false
     }
@@ -415,6 +416,9 @@ impl IMemoryTier for BenchMemoryTier {
     }
     fn clear(&self) -> Result<usize, MemoryTierError> {
         Ok(0)
+    }
+    fn is_dma_capable(&self) -> bool {
+        false
     }
 }
 

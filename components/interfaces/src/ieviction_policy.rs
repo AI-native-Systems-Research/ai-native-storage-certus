@@ -61,6 +61,10 @@ component_macros::define_interface! {
         /// Mark the entry as most-recently-used (O(1)).
         fn touch(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError>;
 
+        /// Mark multiple entries as most-recently-used in a single lock acquisition.
+        /// Amortizes lock overhead over the batch for hot-path throughput.
+        fn batch_touch(&self, handles: &[EvictionHandle]) -> Result<(), EvictionPolicyError>;
+
         /// Stop tracking the entry (O(1) removal from the ordering).
         fn remove(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError>;
 
