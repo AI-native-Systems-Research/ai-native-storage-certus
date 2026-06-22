@@ -41,6 +41,11 @@ pipeline {
         sh '. ~/.cargo/env ; sleep 3; cargo r -r -p iops-benchmark -- --pci-addr 0000:86:00.0'
       }
     }
+    stage('Install Python Dependencies') {
+      steps {
+        sh 'pip3 install -r apps/python/requirements.txt'
+      }
+    }
     stage('Integration Test: test-promote') {
       steps {
         script {
