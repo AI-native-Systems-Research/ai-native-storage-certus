@@ -62,6 +62,16 @@ pub fn init_spdk_env(
             .collect()
     };
 
+    // Resolve NUMA node of the first selected drive for memory-tier placement.
+    let numa_node = addrs.first().and_then(|first_addr| {
+        iface
+            .devices()
+            .iter()
+            .find(|d| d.address.to_string() == *first_addr)
+            .map(|d| d.numa_node)
+    });
+    *config.resolved_numa_node.borrow_mut() = numa_node;
+
     *config.resolved_pci_addrs.borrow_mut() = addrs;
     Ok(())
 }
@@ -90,8 +100,9 @@ pub fn init_memory_tier(
     iface: &Arc<dyn IMemoryTier + Send + Sync>,
     config: &StackConfig,
 ) -> Result<(), String> {
+    let numa_node = *config.resolved_numa_node.borrow();
     iface
-        .initialize(config.memory_tier_size)
+        .initialize(config.memory_tier_size, numa_node)
         .map_err(|e| format!("MemoryTier init failed: {e}"))?;
 
     // Register the memory-tier pool with CUDA for pinned DMA transfers.

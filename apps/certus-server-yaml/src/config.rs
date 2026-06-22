@@ -14,4 +14,6 @@ pub struct StackConfig {
     pub poller_base_cpu: Option<usize>,
     pub max_eviction_attempts: usize,
     pub resolved_pci_addrs: RefCell<Vec<String>>,
+    /// NUMA node of the first selected drive (populated by init_spdk_env).
+    pub resolved_numa_node: RefCell<Option<i32>>,
 }

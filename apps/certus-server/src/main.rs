@@ -224,7 +224,16 @@ fn initialize_component_stack(
         .map_err(|e| format!("memory-tier eviction_policy bind: {e}"))?;
     let mt: Arc<dyn IMemoryTier + Send + Sync> =
         query_interface!(mt_comp, IMemoryTier).ok_or("failed to query IMemoryTier")?;
-    mt.initialize(memory_tier_size)
+
+    // Bind memory-tier pool to the NUMA node of the first selected drive.
+    let mt_numa_node: Option<i32> = device_pci_addrs.first().and_then(|first_addr| {
+        spdk_iface
+            .devices()
+            .iter()
+            .find(|d| d.address.to_string() == *first_addr)
+            .map(|d| d.numa_node)
+    });
+    mt.initialize(memory_tier_size, mt_numa_node)
         .map_err(|e| format!("MemoryTier init failed: {e}"))?;
 
     // Register the memory-tier pool with CUDA for pinned DMA transfers.

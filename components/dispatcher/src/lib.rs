@@ -2392,7 +2392,7 @@ mod tests {
     }
 
     impl IMemoryTier for MockMemoryTier {
-        fn initialize(&self, _pool_size: usize) -> Result<(), MemoryTierError> {
+        fn initialize(&self, _pool_size: usize, _numa_node: Option<i32>) -> Result<(), MemoryTierError> {
             Ok(())
         }
 

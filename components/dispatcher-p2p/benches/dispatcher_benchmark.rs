@@ -373,7 +373,7 @@ impl BenchMemoryTier {
 }
 
 impl IMemoryTier for BenchMemoryTier {
-    fn initialize(&self, _pool_size: usize) -> Result<(), MemoryTierError> {
+    fn initialize(&self, _pool_size: usize, _numa_node: Option<i32>) -> Result<(), MemoryTierError> {
         Ok(())
     }
     fn insert(&self, _key: CacheKey, _size: u32) -> Result<*mut u8, MemoryTierError> {

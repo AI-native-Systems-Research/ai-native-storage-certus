@@ -105,6 +105,12 @@ impl MemoryTierComponent {
         }
     }
 
+    fn log_warn(&self, msg: &str) {
+        if let Ok(logger) = self.logger.get() {
+            logger.warn(msg);
+        }
+    }
+
     #[inline]
     fn shard_for_key(key: CacheKey) -> usize {
         key as usize % NUM_SHARDS
@@ -113,7 +119,7 @@ impl MemoryTierComponent {
 }
 
 impl IMemoryTier for MemoryTierComponent {
-    fn initialize(&self, pool_size: usize) -> Result<(), MemoryTierError> {
+    fn initialize(&self, pool_size: usize, numa_node: Option<i32>) -> Result<(), MemoryTierError> {
         if pool_size == 0 {
             return Err(MemoryTierError::InvalidSize);
         }
@@ -158,6 +164,40 @@ impl IMemoryTier for MemoryTierComponent {
         } else {
             ptr
         };
+
+        // Bind pool to the target NUMA node if specified.
+        if let Some(node) = numa_node {
+            if node >= 0 {
+                let node_id = node as usize;
+                let mut nodemask: libc::c_ulong = 0;
+                if node_id < (std::mem::size_of::<libc::c_ulong>() * 8) {
+                    nodemask = 1 << node_id;
+                }
+                // SAFETY: ptr is a valid mmap'd region. mbind binds pages to a NUMA node.
+                let rc = unsafe {
+                    libc::syscall(
+                        libc::SYS_mbind,
+                        ptr,
+                        pool_size,
+                        libc::MPOL_BIND,
+                        &nodemask as *const libc::c_ulong,
+                        node_id + 2, // maxnode: must be > highest node bit + 1
+                        0u32,        // flags
+                    )
+                };
+                if rc == 0 {
+                    self.log_info(&format!(
+                        "memory-tier: pool bound to NUMA node {node_id}"
+                    ));
+                } else {
+                    self.log_warn(&format!(
+                        "memory-tier: mbind to NUMA node {node_id} failed (errno={}), \
+                         using default memory policy",
+                        std::io::Error::last_os_error()
+                    ));
+                }
+            }
+        }
 
         let shard_size = pool_size / NUM_SHARDS;
         let mut shards = Vec::with_capacity(NUM_SHARDS);
@@ -421,7 +461,7 @@ mod tests {
         let c = MemoryTierComponent::new(RwLock::new(MemoryTierState::default()));
         c.eviction_policy.connect(ep).unwrap();
         let mt = query_interface!(c, IMemoryTier).unwrap();
-        mt.initialize(64 * 4096).unwrap();
+        mt.initialize(64 * 4096, None).unwrap();
         c
     }
 
@@ -429,7 +469,7 @@ mod tests {
     fn initialize_twice_fails() {
         let c = setup();
         let mt = query_interface!(c, IMemoryTier).unwrap();
-        assert!(mt.initialize(4096).is_err());
+        assert!(mt.initialize(4096, None).is_err());
     }
 
     #[test]

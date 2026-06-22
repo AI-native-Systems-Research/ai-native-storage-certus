@@ -43,7 +43,12 @@ impl std::error::Error for MemoryTierError {}
 component_macros::define_interface! {
     pub IMemoryTier {
         /// Initialize the memory-tier pool with the given size in bytes.
-        fn initialize(&self, pool_size: usize) -> Result<(), MemoryTierError>;
+        ///
+        /// If `numa_node` is `Some(node)` with `node >= 0`, the pool is bound to
+        /// that NUMA node via `mbind(MPOL_BIND)`. If binding fails, the pool is
+        /// still usable with default memory policy (FR-019 fallback).
+        /// Pass `None` to use the kernel's default placement.
+        fn initialize(&self, pool_size: usize, numa_node: Option<i32>) -> Result<(), MemoryTierError>;
 
         /// Allocate a slot for `key` of `size` bytes and return a pointer to it.
         ///
