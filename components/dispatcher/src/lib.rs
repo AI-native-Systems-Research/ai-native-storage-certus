@@ -294,12 +294,15 @@ impl DispatcherComponent {
     /// Write `buffer` contents to SSD using MDTS-aware segmented I/O.
     ///
     /// Splits the write into segments that respect the drive's maximum transfer
-    /// size, allocates per-segment DMA buffers, and issues synchronous writes.
+    /// size. When `source_is_dma` is true, wraps slices of the source buffer
+    /// directly for NVMe writes (zero-copy). Otherwise allocates per-segment
+    /// staging buffers and copies into them.
     fn write_buffer_to_ssd(
         drive: &dyn IBlockDevice,
         buffer: &DmaBuffer,
         start_lba: u64,
         total_bytes: usize,
+        source_is_dma: bool,
     ) -> Result<(), DispatcherError> {
         let block_size = drive.block_size() as usize;
         let max_transfer = drive.max_transfer_size();
@@ -314,22 +317,34 @@ impl DispatcherComponent {
             io_segmenter::segment_io(start_lba, aligned_bytes, max_transfer, block_size as u32);
 
         for seg in &segments {
-            let seg_buf = DmaBuffer::new(seg.length, block_size, Some(numa_node)).map_err(|e| {
-                DispatcherError::AllocationFailed(format!("DMA segment buffer: {e}"))
-            })?;
+            let seg_buf = if source_is_dma {
+                // Zero-copy: source buffer is SPDK-allocated, wrap the slice directly.
+                // SAFETY: buffer pointer + offset is valid for seg.length bytes and DMA-capable.
+                let ptr = unsafe {
+                    (buffer.as_ptr() as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void
+                };
+                unsafe { DmaBuffer::from_raw(ptr, seg.length, noop_free, numa_node) }.map_err(
+                    |e| DispatcherError::AllocationFailed(format!("DmaBuffer wrap segment: {e}")),
+                )?
+            } else {
+                let staging = DmaBuffer::new(seg.length, block_size, Some(numa_node)).map_err(
+                    |e| DispatcherError::AllocationFailed(format!("DMA segment buffer: {e}")),
+                )?;
 
-            let copy_len = seg
-                .length
-                .min(total_bytes.saturating_sub(seg.buffer_offset));
-            if copy_len > 0 {
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        (buffer.as_ptr() as *const u8).add(seg.buffer_offset),
-                        seg_buf.as_ptr() as *mut u8,
-                        copy_len,
-                    );
+                let copy_len = seg
+                    .length
+                    .min(total_bytes.saturating_sub(seg.buffer_offset));
+                if copy_len > 0 {
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                            (buffer.as_ptr() as *const u8).add(seg.buffer_offset),
+                            staging.as_ptr() as *mut u8,
+                            copy_len,
+                        );
+                    }
                 }
-            }
+                staging
+            };
 
             let seg_buf = Arc::new(seg_buf);
             channels
@@ -357,6 +372,7 @@ impl DispatcherComponent {
                     ));
                 }
             }
+
         }
         Ok(())
     }
@@ -602,7 +618,10 @@ impl DispatcherComponent {
         let block_offset = write_handle.extent_offset();
         let start_lba = block_offset / block_size as u64;
 
-        if Self::write_buffer_to_ssd(&**drive, &temp_buf, start_lba, total_bytes).is_err() {
+        let dma_capable = mt.is_dma_capable();
+        if Self::write_buffer_to_ssd(&**drive, &temp_buf, start_lba, total_bytes, dma_capable)
+            .is_err()
+        {
             let _ = dm.release_read(job.key);
             return; // write_handle drops → abort
         }
@@ -1262,6 +1281,7 @@ impl IDispatcher for DispatcherComponent {
         unsafe impl Sync for ColdEntry {}
 
         let mut cold_entries: Vec<ColdEntry> = Vec::new();
+        let mut deferred_touch_keys: Vec<CacheKey> = Vec::new();
 
         for (i, (key, ipc_handle)) in entries.iter().enumerate() {
             let key = *key;
@@ -1292,13 +1312,6 @@ impl IDispatcher for DispatcherComponent {
                                 DispatcherError::IoError(format!(
                                     "GPU DMA copy (memory-tier→device) failed: {e}"
                                 ))
-                            })
-                            .and_then(|_| {
-                                gpu.stream_synchronize(s).map_err(|e| {
-                                    DispatcherError::IoError(format!(
-                                        "stream_synchronize failed: {e}"
-                                    ))
-                                })
                             })
                         } else {
                             let aligned = copy_size.next_multiple_of(4096).max(4096);
@@ -1336,7 +1349,7 @@ impl IDispatcher for DispatcherComponent {
                             m.record_hot_gpu_dma(t_hot.elapsed().as_micros() as f64);
                         }
                         let _ = dm.release_read(key);
-                        mt.touch(key);
+                        deferred_touch_keys.push(key);
                         results[i] = Some(res);
                     }
                     LookupResult::Staging { buffer } => {
@@ -1369,6 +1382,18 @@ impl IDispatcher for DispatcherComponent {
                     results[i] = Some(Err(DispatcherError::KeyNotFound(key)));
                 }
             }
+        }
+
+        // Batched stream sync: wait for all submitted async DMA copies at once.
+        if !deferred_touch_keys.is_empty() {
+            let raw = self.warm_stream.load(Ordering::Acquire);
+            if raw != 0 {
+                let s = GpuStream(raw as *mut std::ffi::c_void);
+                if let Err(e) = gpu.stream_synchronize(s) {
+                    self.log_info(&format!("batch stream_synchronize failed: {e}"));
+                }
+            }
+            mt.batch_touch(&deferred_touch_keys);
         }
 
         // Promote cold entries in parallel — multiple queue threads per drive.
@@ -2065,7 +2090,7 @@ impl IDispatcher for DispatcherComponent {
         let start_lba = block_offset / block_size as u64;
         let total_bytes = pending.size as usize;
 
-        Self::write_buffer_to_ssd(&*block_dev_iface, &pending.buffer, start_lba, total_bytes)?;
+        Self::write_buffer_to_ssd(&*block_dev_iface, &pending.buffer, start_lba, total_bytes, true)?;
 
         // Data written — publish extent and register in dispatch map.
         let _ = pending.write_handle.publish();
@@ -2392,7 +2417,7 @@ mod tests {
     }
 
     impl IMemoryTier for MockMemoryTier {
-        fn initialize(&self, _pool_size: usize) -> Result<(), MemoryTierError> {
+        fn initialize(&self, _pool_size: usize, _numa_node: Option<i32>) -> Result<(), MemoryTierError> {
             Ok(())
         }
 
@@ -2458,6 +2483,7 @@ mod tests {
         }
 
         fn touch(&self, _key: CacheKey) {}
+        fn batch_touch(&self, _keys: &[CacheKey]) {}
 
         fn contains(&self, key: CacheKey) -> bool {
             self.inner.lock().unwrap().slots.contains_key(&key)
@@ -2482,6 +2508,10 @@ mod tests {
             inner.slots.clear();
             inner.used = 0;
             Ok(count)
+        }
+
+        fn is_dma_capable(&self) -> bool {
+            false
         }
     }
 
