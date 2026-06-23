@@ -43,6 +43,7 @@ pub struct EngineInner {
     dispatch_map: Arc<dyn IDispatchMap + Send + Sync>,
     gpu_services: Arc<dyn IGpuServices + Send + Sync>,
     gpu_block_size: u64,
+    gpu_base_ptr: u64,
     max_cache_entries: usize,
     eviction_watermark: usize,
     entry_count: AtomicU64,
@@ -77,6 +78,16 @@ impl EngineInner {
 
         let dram_cache_bytes: u64 = config
             .get_item("dram_cache_bytes")?
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(0);
+
+        let numa_node: i32 = config
+            .get_item("numa_node")?
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(-1);
+
+        let gpu_base_ptr: u64 = config
+            .get_item("gpu_base_ptr")?
             .and_then(|v| v.extract().ok())
             .unwrap_or(0);
 
@@ -130,8 +141,9 @@ impl EngineInner {
             .map_err(|e| PyRuntimeError::new_err(format!("failed to wire eviction_policy for dispatch map: {e}")))?;
         let dm: Arc<dyn IDispatchMap + Send + Sync> = query_interface!(dm_comp, IDispatchMap)
             .ok_or_else(|| PyRuntimeError::new_err("failed to query IDispatchMap"))?;
+        let numa_opt = if numa_node >= 0 { Some(numa_node as u32) } else { None };
         let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
-            DmaBuffer::new(size, align, None).map_err(|e| e.to_string())
+            DmaBuffer::new(size, align, numa_opt).map_err(|e| e.to_string())
         });
         dm.set_dma_alloc(dma_alloc);
         dm.initialize()
@@ -178,6 +190,7 @@ impl EngineInner {
             dispatch_map: dm,
             gpu_services: gpu,
             gpu_block_size,
+            gpu_base_ptr,
             max_cache_entries,
             eviction_watermark,
             entry_count: AtomicU64::new(0),
@@ -390,24 +403,33 @@ impl EngineInner {
         }
 
         // Execute store: for each block, create an IpcHandle pointing at the
-        // GPU memory region and call dispatcher.populate().
+        // absolute GPU device address and call dispatcher.populate().
         let mut all_ok = true;
         for (i, key) in cache_keys.iter().enumerate() {
             let block_id = gpu_block_ids[i];
-            let offset = block_id * self.gpu_block_size;
+            let gpu_ptr = self.gpu_base_ptr + block_id * self.gpu_block_size;
 
-            // IpcHandle points to GPU memory at the computed offset.
-            // The dispatcher will DMA from this address into its staging buffer.
             let handle = IpcHandle {
-                address: offset as *mut u8,
+                address: gpu_ptr as *mut u8,
                 size: self.gpu_block_size as u32,
             };
 
-            if let Err(_e) = self.dispatcher.populate(*key, handle) {
-                all_ok = false;
-                break;
+            match self.dispatcher.populate(*key, handle) {
+                Ok(()) => {
+                    self.entry_count.fetch_add(1, Ordering::Release);
+                }
+                Err(e) => {
+                    let msg = format!("{e:?}");
+                    if msg.contains("already exists") || msg.contains("AlreadyExists") {
+                        // Prefix caching TOCTOU: block was stored between
+                        // prepare_store and store_async. Treat as success.
+                        continue;
+                    }
+                    eprintln!("[certus] store_async populate failed key={key} block_id={block_id}: {msg}");
+                    all_ok = false;
+                    break;
+                }
             }
-            self.entry_count.fetch_add(1, Ordering::Release);
         }
 
         job.completed.store(true, Ordering::Release);
@@ -442,18 +464,19 @@ impl EngineInner {
         }
 
         // Execute load: for each block, create an IpcHandle pointing at the
-        // destination GPU memory and call dispatcher.lookup().
+        // absolute GPU device address and call dispatcher.lookup().
         let mut all_ok = true;
         for (i, key) in cache_keys.iter().enumerate() {
             let block_id = gpu_block_ids[i];
-            let offset = block_id * self.gpu_block_size;
+            let gpu_ptr = self.gpu_base_ptr + block_id * self.gpu_block_size;
 
             let handle = IpcHandle {
-                address: offset as *mut u8,
+                address: gpu_ptr as *mut u8,
                 size: self.gpu_block_size as u32,
             };
 
-            if let Err(_e) = self.dispatcher.lookup(*key, handle) {
+            if let Err(e) = self.dispatcher.lookup(*key, handle) {
+                eprintln!("[certus] load_async lookup failed key={key} block_id={block_id}: {e:?}");
                 all_ok = false;
                 break;
             }
