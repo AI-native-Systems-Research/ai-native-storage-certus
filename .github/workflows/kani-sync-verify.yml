@@ -243,6 +243,12 @@ jobs:
         run: |
           cargo kani --package component-core
 
+      - name: Run Kani harnesses — eviction-policy-lru
+        id: kani-eviction-policy-lru
+        continue-on-error: true
+        run: |
+          cargo kani --package eviction-policy-lru
+
       # Always push unstable-kani as long as the merge succeeded.
       - name: Push updated unstable-kani
         if: steps.merge.outputs.merged == 'true'
@@ -257,7 +263,8 @@ jobs:
           steps.kani-install.outcome == 'success' &&
           (steps.kani-dispatch-map.outcome == 'failure' ||
            steps.kani-helloworld.outcome == 'failure' ||
-           steps.kani-component-core.outcome == 'failure')
+           steps.kani-component-core.outcome == 'failure' ||
+           steps.kani-eviction-policy-lru.outcome == 'failure')
         uses: actions/github-script@v7.0.1
         with:
           script: |

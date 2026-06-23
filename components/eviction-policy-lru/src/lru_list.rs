@@ -307,3 +307,35 @@ mod tests {
         assert_eq!(lru.peek_front_n(0), Vec::<CacheKey>::new());
     }
 }
+
+// Kani harness: peek_front_n must not panic for any value of n,
+// including usize::MAX (the value passed by the eviction path to mean
+// "return all candidates"). Without the cap, Vec::with_capacity(usize::MAX)
+// panics unconditionally (capacity overflow). Brian Hatfield (PR #270)
+// fixed this with n.min(self.len). This harness regresses it.
+#[cfg(kani)]
+mod verification {
+    use super::*;
+
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn verify_peek_front_n_no_panic() {
+        let n: usize = kani::any();  // Kani will try usize::MAX among all values
+
+        let mut lru = LruList::new();
+        // Populate with a small number of entries (bounded by unwind limit)
+        let num_entries: u8 = kani::any();
+        kani::assume(num_entries <= 3);
+        for i in 0..num_entries as u64 {
+            lru.push_back(i);
+        }
+
+        // Must not panic for any n, including usize::MAX
+        let result = lru.peek_front_n(n);
+
+        // Result must never exceed the number of entries in the list
+        assert!(result.len() <= num_entries as usize);
+        // Result must never exceed the requested n
+        assert!(result.len() <= n);
+    }
+}
