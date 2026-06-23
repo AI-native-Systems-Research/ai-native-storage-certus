@@ -108,6 +108,51 @@ cargo run -p remote-request-handler --release --bin test-client -- \
 
 Both binaries can also run on the same RDMA-capable host (loopback over the RDMA interface).
 
+### End-to-End Test with certus-server-yaml (requires RDMA + GPU)
+
+Start certus-server-yaml with the full-remote profile:
+
+```bash
+CERTUS_PROFILE=full-remote cargo build -p certus-server-yaml --release
+
+target/release/certus-server-yaml --device-path /dev/null --rdma-port 18515
+```
+
+Run the Python end-to-end test (populates cache via gRPC, lookups via RDMA):
+
+```bash
+cd apps/python
+python3 test-remote.py \
+    --grpc-server localhost:50051 \
+    --rdma-server 10.0.0.100 \
+    --rdma-port 18515 \
+    --object-size 4M \
+    --batch-size 16 \
+    --iterations 5 \
+    --check-integrity
+```
+
+`test-remote.py` options:
+
+| Parameter          | Default            | Description                              |
+| ------------------ | ------------------ | ---------------------------------------- |
+| `--grpc-server`    | `localhost:50051`  | gRPC endpoint for cache populate         |
+| `--rdma-server`    | `localhost`        | RDMA handler address                     |
+| `--rdma-port`      | `18515`            | RDMA handler port                        |
+| `--object-size`    | `4M`               | Size per cache object (e.g. 128K, 4M, 1G)|
+| `--batch-size`     | `16`               | Entries per RDMA lookup batch            |
+| `--iterations`     | `10`               | Number of RDMA lookup iterations         |
+| `--check-integrity`| disabled           | Verify all lookups resolve successfully  |
+| `--gpu-device`     | `0`                | CUDA device ordinal for populate         |
+
+Example output:
+
+```
+Phase 1: Populate (gRPC):   80/80 objects, 0.015 GB/s
+Phase 2: Lookup (RDMA):     282.6 us/batch, 17.7 us/entry, 221.004 GB/s
+Phase 3: Integrity Check:   [✓] PASS: All 80 lookups succeeded
+```
+
 ## Profile / Benchmark
 
 The test client reports per-batch and per-entry latency:
@@ -115,8 +160,8 @@ The test client reports per-batch and per-entry latency:
 ```bash
 # Throughput test: max batch size, many iterations, release mode
 cargo run -p remote-request-handler --release --bin test-client -- \
-    --addr 18515 \
-    --batch-size 64 --iterations 10000 <handler-ip >--port
+    --addr <handler-ip> --port 18515 \
+    --batch-size 64 --iterations 10000
 ```
 
 Example output on ConnectX-6 (loopback):
