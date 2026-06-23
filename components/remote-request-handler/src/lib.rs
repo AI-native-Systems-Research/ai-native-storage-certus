@@ -1,7 +1,16 @@
 //! Remote request handler component for the Certus storage system.
 //!
-//! Handles incoming cache lookup requests from peer Certus nodes,
-//! resolving them against the local dispatcher.
+//! Handles incoming RDMA-based cache lookup requests from peer Certus nodes,
+//! resolving them against the local dispatcher and writing results directly
+//! into the caller's remote memory via RDMA Write.
+//!
+//! # Architecture
+//!
+//! - **listener**: Async connection listener polling rdma_cm events
+//! - **session**: Per-connection state machine (handshake → active → close)
+//! - **protocol**: Protobuf message encode/decode (RequestMessage/ResponseMessage)
+//! - **rdma**: RDMA resource management abstractions (QP, MR, CQ)
+//! - **telemetry**: Optional metrics (feature-gated)
 //!
 //! # Examples
 //!
@@ -11,6 +20,13 @@
 //! let handler = RemoteRequestHandlerComponent::new();
 //! // Bind logger and dispatcher receptacles before use.
 //! ```
+
+pub mod ffi;
+pub mod listener;
+pub mod protocol;
+pub mod rdma;
+pub mod session;
+pub mod telemetry;
 
 use component_framework::define_component;
 use interfaces::{

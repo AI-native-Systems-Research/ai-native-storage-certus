@@ -5,8 +5,34 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+default = []
+telemetry = []
+integration-test = []
+
 [dependencies]
 component-framework.workspace = true
 component-core.workspace = true
 component-macros.workspace = true
 interfaces = { workspace = true, features = ["spdk"] }
+
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "macros", "time"] }
+prost = "0.13"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+
+[build-dependencies]
+prost-build = "0.13"
+cc = "1"
+pkg-config = "0.3"
+
+[[bin]]
+name = "test-client"
+path = "src/bin/test_client.rs"
+
+[[bin]]
+name = "handler-server"
+path = "src/bin/handler_server.rs"
