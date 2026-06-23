@@ -674,31 +674,8 @@ mod tests {
     }
 }
 
-// Kani harness: Vec::with_capacity(n) in oldest_keys() (line 360) panics
-// when n = usize::MAX (capacity overflow). Same class of bug as
-// eviction-policy-lru PR #270. MemoryTierComponent requires the full
-// component framework to initialize, so this harness tests the pattern
-// directly to document the risk.
-#[cfg(kani)]
-mod verification {
-    use super::*;
-
-    /// Reproduces the capacity-overflow pattern from oldest_keys().
-    /// oldest_keys() does Vec::with_capacity(n) before checking list size.
-    /// When n = usize::MAX (passed by eviction path), this panics.
-    #[kani::proof]
-    #[kani::unwind(1)]
-    fn verify_vec_with_capacity_no_panic() {
-        let n: usize = kani::any(); // Kani will try usize::MAX
-
-        // Mirror of the bug: cap at a known safe bound before allocating.
-        // Without the cap, Vec::with_capacity(usize::MAX) panics.
-        let actual_len: usize = kani::any();
-        kani::assume(actual_len <= 1024); // simulate a bounded list
-
-        // Safe version (the fix): cap n at actual_len
-        let capacity = n.min(actual_len);
-        let v: Vec<u64> = Vec::with_capacity(capacity);
-        assert!(v.capacity() <= actual_len);
-    }
-}
+// BUG: oldest_keys() at line 360 does Vec::with_capacity(n) without
+// capping at the actual list length. When n = usize::MAX (passed by the
+// eviction path meaning "return all candidates") this panics with
+// capacity overflow. Same class of bug as eviction-policy-lru PR #270.
+// Fix needed: Vec::with_capacity(n.min(actual_entry_count)).
