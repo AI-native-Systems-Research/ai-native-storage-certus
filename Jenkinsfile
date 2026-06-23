@@ -41,5 +41,32 @@ pipeline {
         sh '. ~/.cargo/env ; sleep 3; cargo r -r -p iops-benchmark -- --pci-addr 0000:86:00.0'
       }
     }
+    stage('Install Python Dependencies') {
+      steps {
+        sh 'pip3 install -r apps/python/requirements.txt'
+      }
+    }
+    stage('Integration Tests') {
+      steps {
+        script {
+          sh '. ~/.cargo/env ; cargo r -r -p certus-server -- --device-pci 0000:86:00.0 --format &'
+          sh 'for i in $(seq 1 60); do nc -z localhost 50051 && break || sleep 2; done'
+
+          def output1 = sh(script: 'cd apps/python && python3 test-promote.py', returnStdout: true).trim()
+          echo output1
+          if (!output1.contains('PASS')) {
+            sh 'pkill -f certus-server || true'
+            error("test-promote.py did not output PASS")
+          }
+
+          def output2 = sh(script: 'cd apps/python && python3 test-tier-batch.py', returnStdout: true).trim()
+          echo output2
+          sh 'pkill -f certus-server || true'
+          if (!output2.contains('PASS: All tiers returned expected results')) {
+            error("test-tier-batch.py did not output expected PASS message")
+          }
+        }
+      }
+    }
   }
 }
