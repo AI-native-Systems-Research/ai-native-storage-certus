@@ -12,7 +12,7 @@ Requires:
 
 Usage:
     python test-remote.py --grpc-server localhost:50051 --rdma-server 10.0.0.100 --rdma-port 18515
-    python test-remote.py --check-integrity --num-objects 16
+    python test-remote.py --check-integrity --object-size 4M --batch-size 16 --iterations 5
 """
 
 import argparse
@@ -142,6 +142,8 @@ def populate_cache(stub, keys, block_size, gpu_device):
         )
         if resp.results[0].success:
             populated += 1
+        elif "already exists" in resp.results[0].error_message:
+            populated += 1  # key is already in cache, counts as available
         else:
             failed += 1
             print(
@@ -262,15 +264,9 @@ def main():
         help="RDMA handler port [default: 18515]",
     )
     parser.add_argument(
-        "--num-objects",
-        type=int,
-        default=64,
-        help="Number of cache entries to populate [default: 64]",
-    )
-    parser.add_argument(
-        "--block-size",
+        "--object-size",
         default="4M",
-        help="Block size per entry (e.g. 4M, 128K) [default: 4M]",
+        help="Object size per cache entry (e.g. 4M, 128K, 1G) [default: 4M]",
     )
     parser.add_argument(
         "--batch-size",
@@ -302,17 +298,17 @@ def main():
     )
 
     args = parser.parse_args()
-    block_size = parse_size(args.block_size)
+    object_size = parse_size(args.object_size)
 
     print("=" * 70)
     print("Certus Remote Request Test")
     print("=" * 70)
     print(f"  gRPC server:    {args.grpc_server}")
     print(f"  RDMA server:    {args.rdma_server}:{args.rdma_port}")
-    print(f"  Objects:        {args.num_objects}")
-    print(f"  Block size:     {block_size // 1024} KiB")
+    print(f"  Object size:    {object_size // (1024*1024)} MiB")
     print(f"  Batch size:     {args.batch_size}")
     print(f"  Iterations:     {args.iterations}")
+    print(f"  Total objects:  {args.batch_size * args.iterations}")
     print(f"  Integrity:      {'enabled' if args.check_integrity else 'disabled'}")
     print()
 
@@ -330,8 +326,11 @@ def main():
     print("Phase 1: Populate cache via gRPC")
     print("-" * 70)
 
-    base_key = random.randint(1_000_000, 9_000_000)
-    keys = list(range(base_key, base_key + args.num_objects))
+    # Keys must match what the test-client generates:
+    # key = (iter * batch_size) + i + 1, for iter in 0..iterations, i in 0..batch_size
+    # So we populate keys 1 through (batch_size * iterations) to cover all lookups.
+    num_to_populate = args.batch_size * args.iterations
+    keys = list(range(1, num_to_populate + 1))
 
     channel = grpc.insecure_channel(
         args.grpc_server,
@@ -344,21 +343,19 @@ def main():
 
     try:
         populated, failed, elapsed = populate_cache(
-            stub, keys, block_size, args.gpu_device
+            stub, keys, object_size, args.gpu_device
         )
     except grpc.RpcError as e:
         print(f"  ERROR: gRPC connection failed: {e.details()}")
         sys.exit(1)
 
+    populate_bytes = populated * object_size
+    populate_gbs = populate_bytes / (1024**3) / elapsed if elapsed > 0 else 0
     print(f"  Populated: {populated} objects ({failed} failed) in {elapsed:.3f}s")
-    print(
-        f"  Throughput: {populated * block_size / (1024*1024) / elapsed:.1f} MiB/s"
-        if elapsed > 0
-        else ""
-    )
+    print(f"  Throughput: {populate_gbs:.3f} GB/s")
     print()
 
-    if failed > 0 and failed == args.num_objects:
+    if failed > 0 and failed == num_to_populate:
         print("ERROR: All populates failed. Is the server running?")
         sys.exit(1)
 
@@ -376,11 +373,17 @@ def main():
         sys.exit(1)
 
     if "elapsed_ms" in results:
+        total_entries = results["total_entries"]
+        elapsed_s = results["elapsed_ms"] / 1000.0
+        lookup_bytes = total_entries * object_size
+        lookup_gbs = lookup_bytes / (1024**3) / elapsed_s if elapsed_s > 0 else 0
         print(f"  Completed: {results['iterations']} iterations, "
-              f"{results['total_entries']} total entries")
+              f"{total_entries} total entries")
         print(f"  Time: {results['elapsed_ms']:.3f} ms")
         print(f"  Latency: {results['us_per_batch']:.1f} us/batch, "
               f"{results['us_per_entry']:.1f} us/entry")
+        print(f"  Throughput: {lookup_gbs:.3f} GB/s "
+              f"({total_entries} x {object_size // (1024*1024)} MiB)")
     if "server_batches" in results:
         print(f"  Server confirmed: {results['server_batches']} batches processed")
     print()
@@ -409,11 +412,12 @@ def main():
     print("=" * 70)
     print("Summary")
     print("=" * 70)
-    print(f"  Populate (gRPC): {populated}/{args.num_objects} objects OK")
+    print(f"  Object size:     {object_size // (1024*1024)} MiB")
+    print(f"  Populate (gRPC): {populated}/{num_to_populate} objects, {populate_gbs:.3f} GB/s")
     if "us_per_batch" in results:
         print(
             f"  Lookup (RDMA):   {results['us_per_batch']:.1f} us/batch, "
-            f"{results['us_per_entry']:.1f} us/entry"
+            f"{results['us_per_entry']:.1f} us/entry, {lookup_gbs:.3f} GB/s"
         )
     print(f"  Status:          {'PASS' if populated > 0 and results['success'] else 'FAIL'}")
     print()
