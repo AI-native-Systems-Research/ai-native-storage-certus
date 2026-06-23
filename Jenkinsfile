@@ -46,29 +46,23 @@ pipeline {
         sh 'pip3 install -r apps/python/requirements.txt'
       }
     }
-    stage('Integration Test: test-promote') {
+    stage('Integration Tests') {
       steps {
         script {
           sh '. ~/.cargo/env ; cargo r -r -p certus-server -- --device-pci 0000:86:00.0 --format &'
           sh 'for i in $(seq 1 60); do nc -z localhost 50051 && break || sleep 2; done'
-          def output = sh(script: 'cd apps/python && python3 test-promote.py', returnStdout: true).trim()
-          echo output
-          sh 'pkill -f certus-server || true'
-          if (!output.contains('PASS')) {
+
+          def output1 = sh(script: 'cd apps/python && python3 test-promote.py', returnStdout: true).trim()
+          echo output1
+          if (!output1.contains('PASS')) {
+            sh 'pkill -f certus-server || true'
             error("test-promote.py did not output PASS")
           }
-        }
-      }
-    }
-    stage('Integration Test: test-tier-batch') {
-      steps {
-        script {
-          sh '. ~/.cargo/env ; cargo r -r -p certus-server -- --device-pci 0000:86:00.0 --format &'
-          sh 'for i in $(seq 1 60); do nc -z localhost 50051 && break || sleep 2; done'
-          def output = sh(script: 'cd apps/python && python3 test-tier-batch.py', returnStdout: true).trim()
-          echo output
+
+          def output2 = sh(script: 'cd apps/python && python3 test-tier-batch.py', returnStdout: true).trim()
+          echo output2
           sh 'pkill -f certus-server || true'
-          if (!output.contains('PASS: All tiers returned expected results')) {
+          if (!output2.contains('PASS: All tiers returned expected results')) {
             error("test-tier-batch.py did not output expected PASS message")
           }
         }
