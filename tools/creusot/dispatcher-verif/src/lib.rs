@@ -38,6 +38,12 @@ pub struct Cache2 {
     pub k1: KeySlot,
 }
 
+pub struct Cache3 {
+    pub k0: KeySlot,
+    pub k1: KeySlot,
+    pub k2: KeySlot,
+}
+
 pub struct RecoverExtent {
     pub key_present: bool,
     pub offset: u64,
@@ -119,10 +125,24 @@ pub fn wf_cache2(c: Cache2) -> bool {
 }
 
 #[logic]
+pub fn wf_cache3(c: Cache3) -> bool {
+    pearlite! { slot_state_wf(c.k0) && slot_state_wf(c.k1) && slot_state_wf(c.k2) }
+}
+
+#[logic]
 pub fn memory_tier_count2(c: Cache2) -> Int {
     pearlite! {
         (if key_in_memory_tier(c.k0) { 1 } else { 0 })
         + (if key_in_memory_tier(c.k1) { 1 } else { 0 })
+    }
+}
+
+#[logic]
+pub fn memory_tier_count3(c: Cache3) -> Int {
+    pearlite! {
+        (if key_in_memory_tier(c.k0) { 1 } else { 0 })
+        + (if key_in_memory_tier(c.k1) { 1 } else { 0 })
+        + (if key_in_memory_tier(c.k2) { 1 } else { 0 })
     }
 }
 
@@ -941,6 +961,35 @@ pub fn clear_memory_tier2(m: Model, c: Cache2) -> (Model, usize, Cache2) {
     }
     if out.k1.present && matches!(out.k1.state, EntryState::MemoryTier) {
         out.k1.state = EntryState::BlockDevice;
+        count += 1;
+    }
+    (m, count, out)
+}
+
+// Covers: P24, P25, P30 (strengthening beyond Cache2 with 3-key bounded form)
+#[requires(wf_model(m))]
+#[requires(wf_cache3(c))]
+#[ensures(wf_model(result.0))]
+#[ensures(wf_cache3(result.2))]
+#[ensures(m.initialized ==> !key_in_memory_tier(result.2.k0) && !key_in_memory_tier(result.2.k1) && !key_in_memory_tier(result.2.k2))]
+#[ensures(m.initialized ==> result.1@ == memory_tier_count3(c))]
+pub fn clear_memory_tier3(m: Model, c: Cache3) -> (Model, usize, Cache3) {
+    if !m.initialized {
+        return (m, 0, c);
+    }
+    let mut out = c;
+    let mut count = 0usize;
+
+    if out.k0.present && matches!(out.k0.state, EntryState::MemoryTier) {
+        out.k0.state = EntryState::BlockDevice;
+        count += 1;
+    }
+    if out.k1.present && matches!(out.k1.state, EntryState::MemoryTier) {
+        out.k1.state = EntryState::BlockDevice;
+        count += 1;
+    }
+    if out.k2.present && matches!(out.k2.state, EntryState::MemoryTier) {
+        out.k2.state = EntryState::BlockDevice;
         count += 1;
     }
     (m, count, out)

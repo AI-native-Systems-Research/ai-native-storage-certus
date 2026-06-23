@@ -45,7 +45,7 @@ Status labels:
 | 27 | Recovery soundness (`recover_extent`) | `recover_extent` | Covered | Recovered extent transitions to present entry with matching `(offset,size_blocks)`. |
 | 28 | Drive mapping determinism (`key % num_drives`) | `drive_index` | Covered | Direct formula + contract. |
 | 29 | Threshold/watermark comparison consistency | `watermark_order_valid` | Partial | Minimal relation encoded; real config semantics are richer. |
-| 30 | Global exclusive-state invariant (all keys) | `slot_state_wf`, `wf_cache2`, `clear_memory_tier2` | Covered (bounded) | Covered for two-key bounded model (`Cache2`), not yet unbounded map-level proof. |
+| 30 | Global exclusive-state invariant (all keys) | `slot_state_wf`, `wf_cache2`, `wf_cache3`, `clear_memory_tier2`, `clear_memory_tier3` | Covered (bounded) | Strengthened from 2-key to 3-key bounded model (`Cache2` + `Cache3`), still not yet unbounded map-level proof. |
 | 31 | Global reference/state consistency invariant | `remove_with_ref_guard`, `ref_state_consistent` | Partial | Added guard model: removal fails with `InvalidState` when active references exist; this is a local scaffold, not yet full map-level reference accounting. |
 
 ## Plain-English Legend: What Each Function Means
