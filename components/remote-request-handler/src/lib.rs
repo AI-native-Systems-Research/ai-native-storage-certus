@@ -25,6 +25,7 @@ pub mod ffi;
 pub mod listener;
 pub mod protocol;
 pub mod rdma;
+pub mod serve;
 pub mod session;
 pub mod telemetry;
 

@@ -68,6 +68,10 @@ struct Cli {
     /// Maximum eviction attempts before failing with pool-full error.
     #[arg(long = "max-eviction-attempts", default_value_t = 2048)]
     max_eviction_attempts: usize,
+
+    /// RDMA listener port for remote request handler (full-remote profile).
+    #[arg(long = "rdma-port", default_value_t = 18515)]
+    rdma_port: u16,
 }
 
 fn parse_size(s: &str) -> Result<usize, String> {
@@ -153,6 +157,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         stack_config.memory_tier_size / (1024 * 1024)
     ));
 
+    // Start RDMA remote-request-handler listener in background
+    let rdma_port = cli.rdma_port;
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = remote_request_handler::serve::run_blocking("0.0.0.0", rdma_port) {
+            eprintln!("remote-request-handler: listener failed: {e}");
+        }
+    });
+    logger.info(&format!(
+        "certus-server-yaml: RDMA remote-request-handler on port {rdma_port}"
+    ));
+
     let svc = DispatcherService::new(Arc::clone(&stack.dispatcher));
     let addr = cli.listen.parse()?;
 
@@ -196,5 +211,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     stack.spdk_env.fini();
     stack.logger.info("certus-server-yaml: shutdown complete");
 
-    Ok(())
+    // Force exit — the RDMA listener's blocking accept loop (spawn_blocking)
+    // holds a thread that can't be interrupted, preventing tokio runtime shutdown.
+    std::process::exit(0);
 }
