@@ -157,16 +157,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         stack_config.memory_tier_size / (1024 * 1024)
     ));
 
-    // Start RDMA remote-request-handler listener in background
+    // Start RDMA remote-request-handler listener in background (optional: port 0 = disabled)
     let rdma_port = cli.rdma_port;
-    tokio::task::spawn_blocking(move || {
-        if let Err(e) = remote_request_handler::serve::run_blocking("0.0.0.0", rdma_port) {
-            eprintln!("remote-request-handler: listener failed: {e}");
-        }
-    });
-    logger.info(&format!(
-        "certus-server-yaml: RDMA remote-request-handler on port {rdma_port}"
-    ));
+    if rdma_port > 0 {
+        let dispatcher = Arc::clone(&stack.dispatcher);
+        let resolver: Arc<remote_request_handler::serve::Resolver> = Arc::new(move |key| {
+            match dispatcher.check(key) {
+                Ok(true) => Some(vec![]),
+                _ => None,
+            }
+        });
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) =
+                remote_request_handler::serve::run_blocking("0.0.0.0", rdma_port, Some(resolver))
+            {
+                eprintln!("remote-request-handler: listener failed: {e}");
+            }
+        });
+        logger.info(&format!(
+            "certus-server-yaml: RDMA remote-request-handler on port {rdma_port}"
+        ));
+    } else {
+        logger.info("certus-server-yaml: RDMA remote-request-handler disabled (port=0)");
+    }
 
     let svc = DispatcherService::new(Arc::clone(&stack.dispatcher));
     let addr = cli.listen.parse()?;
