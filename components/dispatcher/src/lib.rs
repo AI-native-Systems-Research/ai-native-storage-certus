@@ -936,7 +936,14 @@ impl IDispatcher for DispatcherComponent {
                         )));
                     }
                     LookupResult::MemoryTier { pointer, size } => {
-                        let copy_size = (ipc_handle.size as usize).min(size as usize);
+                        if ipc_handle.size != size {
+                            let _ = dm.release_read(key);
+                            results[i] = Some(Err(DispatcherError::InvalidParameter(
+                                "size mismatch on lookup".into(),
+                            )));
+                            continue;
+                        }
+                        let copy_size = size as usize;
                         let raw = self.warm_stream.load(Ordering::Acquire);
                         let res = if raw != 0 {
                             let s = GpuStream(raw as *mut std::ffi::c_void);
@@ -1240,7 +1247,13 @@ impl IDispatcher for DispatcherComponent {
                         ))
                     }
                     LookupResult::MemoryTier { pointer, size } => {
-                        let copy_size = (ipc_handle.size as usize).min(size as usize);
+                        if ipc_handle.size != size {
+                            let _ = dm.release_read(key);
+                            return Err(DispatcherError::InvalidParameter(
+                                "size mismatch on lookup".into(),
+                            ));
+                        }
+                        let copy_size = size as usize;
 
                         // Use dedicated warm stream (lock-free AtomicU64 load).
                         let raw = self.warm_stream.load(Ordering::Acquire);
@@ -2783,6 +2796,26 @@ mod tests {
         let mut buf2 = vec![0u8; 4096];
         let err = d.lookup(1, make_handle(&mut buf2));
         assert!(matches!(err, Err(DispatcherError::InvalidParameter(_))));
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn lookup_memory_tier_size_mismatch_returns_invalid_parameter_no_copy() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+
+        let mut src = vec![0xABu8; 4096];
+        d.populate(1, make_handle(&mut src)).unwrap();
+
+        let mut dst = vec![0xCDu8; 4096];
+        let bad_handle = IpcHandle {
+            address: dst.as_mut_ptr(),
+            size: 2048,
+        };
+        let err = d.lookup(1, bad_handle);
+        assert!(matches!(err, Err(DispatcherError::InvalidParameter(_))));
+        // Verify no partial copy occurred.
+        assert_eq!(dst[0], 0xCD);
         d.shutdown().unwrap();
     }
 
