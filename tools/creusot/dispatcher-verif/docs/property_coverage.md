@@ -26,26 +26,27 @@ Status labels:
 | 8 | MemoryTier lookup keeps key and refreshes timestamp/touch | `lookup`, `touch` | Partial | Presence behavior covered; timestamp refresh is represented by separate `touch`, not fully coupled to `lookup`. |
 | 9 | BlockDevice lookup promotes to MemoryTier | `lookup` | Covered | Success on `BlockDevice` changes state to `MemoryTier`. |
 | 10 | Staging lookup compatibility | `lookup` | Partial | `Staging` variant exists in model, but no staging-specific branch semantics beyond generic success. |
-| 11 | `remove` success => key absent | `remove` | Covered | Postcondition enforces absent key on success. |
-| 12 | `remove` miss => `KeyNotFound`, no mutation | `remove` | Covered | Miss path explicitly preserved. |
-| 13 | `touch` updates timestamp only, miss => `KeyNotFound` | `touch` | Partial | Timestamp monotonicity and miss behavior covered; "only timestamp changes" is approximated, not fully constrained field-by-field. |
-| 14 | Eviction attempts bounded by 512 | `evict_for_space` | Covered | Contract and loop invariants enforce bound. |
-| 15 | Eviction success implies capacity condition | `evict_for_space` | Covered | `Ok` postcondition enforces `used+needed <= capacity`. |
-| 16 | Eviction failure implies capacity not achieved | `evict_for_space` | Covered | `AllocationFailed` postcondition enforces capacity still insufficient. |
-| 17 | Clean eviction = MemoryTier -> BlockDevice | `clean_evict` | Covered | Explicit clean-eviction predicate and transition contract. |
-| 18 | Blind fallback failure removes key | `blind_evict_with_fallback` | Covered | Conversion failure path enforces removal (`present=false`). |
-| 19 | `prepare_store(size=0)` => `InvalidParameter` + no mutation | `prepare_store` | Covered | Explicit size check and contract. |
-| 20 | Pending-write protocol lifecycle | `prepare_store`, `commit_store`, `cancel_store` | Covered | Protocol states represented (`PendingWrite` consumed by commit/cancel). |
-| 21 | Commit success => BlockDevice + pending cleared | `commit_store` | Covered | State transition postconditions encoded. |
-| 22 | Cancel success => key removed + pending cleared | `cancel_store` | Covered | Success path clears presence/pending. |
-| 23 | Commit/cancel without pending => `KeyNotFound` + unchanged | `commit_store`, `cancel_store` | Covered | Miss path contracts preserve slot. |
-| 24 | `clear_memory_tier` leaves no MemoryTier entries | `clear_memory_tier`, `clear_memory_tier2` | Covered | Bounded multi-key variant (`Cache2`) proves no MemoryTier entries remain after clear. |
-| 25 | `clear_memory_tier` returned count matches removed entries | `clear_memory_tier`, `clear_memory_tier2` | Covered | `clear_memory_tier2` proves count equals pre-clear memory-tier count in bounded multi-key model. |
-| 26 | Recovery soundness (`recover_extent`) | `recover_extent` | Covered | Recovered extent transitions to present entry with matching `(offset,size_blocks)`. |
-| 27 | Drive mapping determinism (`key % num_drives`) | `drive_index` | Covered | Direct formula + contract. |
-| 28 | Threshold/watermark comparison consistency | `watermark_order_valid` | Partial | Minimal relation encoded; real config semantics are richer. |
-| 29 | Global exclusive-state invariant (all keys) | `slot_state_wf`, `wf_cache2`, `clear_memory_tier2` | Covered (bounded) | Covered for two-key bounded model (`Cache2`), not yet unbounded map-level proof. |
-| 30 | Global reference/state consistency invariant | N/A | Not covered | Reference counters/read-write ownership not modeled yet. |
+| 11 | Lookup size-match contract (`InvalidParameter` on mismatch, no partial copy/state mutation) | `lookup` | Covered | `lookup` now checks `requested_size` against stored `slot.size`; mismatch returns `InvalidParameter` with unchanged state. |
+| 12 | `remove` success => key absent | `remove` | Covered | Postcondition enforces absent key on success. |
+| 13 | `remove` miss => `KeyNotFound`, no mutation | `remove` | Covered | Miss path explicitly preserved. |
+| 14 | `touch` updates timestamp only, miss => `KeyNotFound` | `touch` | Partial | Timestamp monotonicity and miss behavior covered; "only timestamp changes" is approximated, not fully constrained field-by-field. |
+| 15 | Eviction attempts bounded by 512 | `evict_for_space` | Covered | Contract and loop invariants enforce bound. |
+| 16 | Eviction success implies capacity condition | `evict_for_space` | Covered | `Ok` postcondition enforces `used+needed <= capacity`. |
+| 17 | Eviction failure implies capacity not achieved | `evict_for_space` | Covered | `AllocationFailed` postcondition enforces capacity still insufficient. |
+| 18 | Clean eviction = MemoryTier -> BlockDevice | `clean_evict` | Covered | Explicit clean-eviction predicate and transition contract. |
+| 19 | Blind fallback failure removes key | `blind_evict_with_fallback` | Covered | Conversion failure path enforces removal (`present=false`). |
+| 20 | `prepare_store(size=0)` => `InvalidParameter` + no mutation | `prepare_store` | Covered | Explicit size check and contract. |
+| 21 | Pending-write protocol lifecycle | `prepare_store`, `commit_store`, `cancel_store` | Covered | Protocol states represented (`PendingWrite` consumed by commit/cancel). |
+| 22 | Commit success => BlockDevice + pending cleared | `commit_store` | Covered | State transition postconditions encoded. |
+| 23 | Cancel success => key removed + pending cleared | `cancel_store` | Covered | Success path clears presence/pending. |
+| 24 | Commit/cancel without pending => `KeyNotFound` + unchanged | `commit_store`, `cancel_store` | Covered | Miss path contracts preserve slot. |
+| 25 | `clear_memory_tier` leaves no MemoryTier entries | `clear_memory_tier`, `clear_memory_tier2` | Covered | Bounded multi-key variant (`Cache2`) proves no MemoryTier entries remain after clear. |
+| 26 | `clear_memory_tier` returned count matches removed entries | `clear_memory_tier`, `clear_memory_tier2` | Covered | `clear_memory_tier2` proves count equals pre-clear memory-tier count in bounded multi-key model. |
+| 27 | Recovery soundness (`recover_extent`) | `recover_extent` | Covered | Recovered extent transitions to present entry with matching `(offset,size_blocks)`. |
+| 28 | Drive mapping determinism (`key % num_drives`) | `drive_index` | Covered | Direct formula + contract. |
+| 29 | Threshold/watermark comparison consistency | `watermark_order_valid` | Partial | Minimal relation encoded; real config semantics are richer. |
+| 30 | Global exclusive-state invariant (all keys) | `slot_state_wf`, `wf_cache2`, `clear_memory_tier2` | Covered (bounded) | Covered for two-key bounded model (`Cache2`), not yet unbounded map-level proof. |
+| 31 | Global reference/state consistency invariant | `remove_with_ref_guard`, `ref_state_consistent` | Partial | Added guard model: removal fails with `InvalidState` when active references exist; this is a local scaffold, not yet full map-level reference accounting. |
 
 ## Plain-English Legend: What Each Function Means
 
@@ -126,7 +127,7 @@ So "single-key" means local per-key correctness; "multi-key" means global cache 
 
 ## Recommended Next Matrix Update
 
-After moving from bounded `Cache2` to an unbounded map model, re-evaluate row 29 and especially row 30 for full global coverage.
+After moving from bounded `Cache2` to an unbounded map model, re-evaluate row 30 and especially row 31 for full global coverage.
 
 ## Next Phases, Steps, and Final Goal
 

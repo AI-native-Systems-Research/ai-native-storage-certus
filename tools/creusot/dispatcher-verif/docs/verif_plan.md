@@ -162,7 +162,7 @@ These are used across `populate`, `prepare_store`, `remove`, `touch`, `commit`, 
 
 The first-pass verification is considered complete when:
 
-1. All 30 core properties from `first_properties.md` are mapped to either:
+1. All 31 core properties from `first_properties.md` are mapped to either:
    - a proven API contract, or
    - a proven global invariant/lemma.
 2. No admitted proof (`#[trusted]` / unchecked assumptions) remains for core transition logic.

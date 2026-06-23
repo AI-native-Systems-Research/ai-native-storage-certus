@@ -29,6 +29,10 @@ pub struct KeySlot {
     pub ts: u64,
 }
 
+pub struct RefCounters {
+    pub active_readers: u32,
+}
+
 pub struct Cache2 {
     pub k0: KeySlot,
     pub k1: KeySlot,
@@ -102,6 +106,11 @@ pub fn slot_state_wf(slot: KeySlot) -> bool {
             && !key_in_block_device(slot)
             && !key_in_pending_write(slot)
     }
+}
+
+#[logic]
+pub fn ref_state_consistent(slot: KeySlot, refs: RefCounters) -> bool {
+    pearlite! { !slot.present ==> refs.active_readers@ == 0 }
 }
 
 #[logic]
@@ -199,7 +208,7 @@ pub fn touch(m: Model, slot: KeySlot) -> (Model, Result<(), OpError>, KeySlot) {
     (m, Ok(()), out)
 }
 
-// Covers: P11, P12, P2 (remove success/miss; NotInitialized pre-init)
+// Covers: P12, P13, P2 (remove success/miss; NotInitialized pre-init)
 #[requires(wf_model(m))]
 #[ensures(wf_model(result.0))]
 #[ensures(result.0.used@ == m.used@ && result.0.capacity@ == m.capacity@ && result.0.initialized == m.initialized)]
@@ -329,6 +338,35 @@ pub fn cancel_store(m: Model, slot: KeySlot) -> (Model, Result<(), OpError>, Key
     (m, Ok(()), out)
 }
 
+// Covers: P31 (partial) reference/state consistency guard.
+#[requires(slot_state_wf(slot))]
+#[requires(ref_state_consistent(slot, refs))]
+#[ensures(slot_state_wf(result.1))]
+#[ensures(ref_state_consistent(result.1, result.2))]
+#[ensures(
+    refs.active_readers@ > 0
+        ==> match result.0 { Err(OpError::InvalidState) => true, _ => false }
+)]
+#[ensures(
+    refs.active_readers@ > 0
+        ==> same_slot(result.1, slot) && result.2.active_readers@ == refs.active_readers@
+)]
+#[ensures(
+    refs.active_readers@ == 0 && slot.present
+        ==> match result.0 { Ok(()) => !result.1.present, _ => false }
+)]
+pub fn remove_with_ref_guard(slot: KeySlot, refs: RefCounters) -> (Result<(), OpError>, KeySlot, RefCounters) {
+    if refs.active_readers > 0 {
+        return (Err(OpError::InvalidState), slot, refs);
+    }
+    if !slot.present {
+        return (Err(OpError::KeyNotFound), slot, refs);
+    }
+    let mut out = slot;
+    out.present = false;
+    (Ok(()), out, refs)
+}
+
 // Covers: P3, P4, P5, P2 (populate uniqueness/insert/failure atomicity)
 #[requires(wf_model(m))]
 #[ensures(wf_model(result.0))]
@@ -388,7 +426,7 @@ pub fn populate(m: Model, slot: KeySlot, size: usize) -> (Model, Result<(), OpEr
     (out_model, Ok(()), out)
 }
 
-// Covers: P7, P9, P10 (partial), P2 (lookup miss/promotion/init gate)
+// Covers: P7, P8 (partial), P9, P10 (partial), P11, P2 (lookup miss/promotion/init gate)
 #[requires(wf_model(m))]
 #[ensures(wf_model(result.0))]
 #[ensures(
@@ -396,6 +434,16 @@ pub fn populate(m: Model, slot: KeySlot, size: usize) -> (Model, Result<(), OpEr
         Err(OpError::KeyNotFound) => same_slot(result.2, slot),
         _ => true,
     }
+)]
+#[ensures(
+    match result.1 {
+        Err(OpError::InvalidParameter) => same_slot(result.2, slot),
+        _ => true,
+    }
+)]
+#[ensures(
+    m.initialized && slot.present && slot.size@ != requested_size@
+        ==> match result.1 { Err(OpError::InvalidParameter) => true, _ => false }
 )]
 #[ensures(
     match result.1 {
@@ -409,12 +457,15 @@ pub fn populate(m: Model, slot: KeySlot, size: usize) -> (Model, Result<(), OpEr
         _ => true,
     }
 )]
-pub fn lookup(m: Model, slot: KeySlot) -> (Model, Result<(), OpError>, KeySlot) {
+pub fn lookup(m: Model, slot: KeySlot, requested_size: usize) -> (Model, Result<(), OpError>, KeySlot) {
     if !m.initialized {
         return (m, Err(OpError::NotInitialized), slot);
     }
     if !slot.present {
         return (m, Err(OpError::KeyNotFound), slot);
+    }
+    if slot.size != requested_size {
+        return (m, Err(OpError::InvalidParameter), slot);
     }
     if matches!(slot.state, EntryState::BlockDevice) {
         let mut out = slot;
