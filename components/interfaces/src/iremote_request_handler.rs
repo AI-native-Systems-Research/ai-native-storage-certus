@@ -11,9 +11,8 @@ use crate::idispatch_map::CacheKey;
 
 /// A zero-copy reference to cached data in the memory-tier pool.
 ///
-/// The pointer is valid until `release_lookup(key)` is called. Holding this
-/// reference prevents eviction of the entry.
-///
+/// The pointer is valid until `release_lookup(key)` is called.
+/// The underlying cache entry remains pinned (not evictable) until it is released.
 /// # Safety
 ///
 /// The caller must not dereference `ptr` after calling `release_lookup(key)`.
