@@ -479,6 +479,9 @@ impl EngineInner {
     }
 
     /// Submit async NVMe/DRAM→GPU transfer (load).
+    ///
+    /// Issues non-blocking H2D DMA via `lookup_async`. Completion is detected
+    /// by `poll_completions` via stream synchronization (same stream as stores).
     pub fn load_async(&self, job_id: u64, gpu_block_ids: &[u64], keys: &[u64]) -> PyResult<bool> {
         self.ensure_init()?;
 
@@ -490,22 +493,8 @@ impl EngineInner {
 
         let cache_keys = keys::to_cache_keys(keys);
 
-        let job = Arc::new(TransferJob {
-            kind: JobKind::Load,
-            keys: cache_keys.clone(),
-            gpu_block_ids: gpu_block_ids.to_vec(),
-            completed: AtomicBool::new(false),
-            success: AtomicBool::new(false),
-            stream: Mutex::new(None),
-        });
-
-        {
-            let mut jobs = self.jobs.lock().unwrap();
-            jobs.insert(job_id, Arc::clone(&job));
-        }
-
-        // Execute load: for each block, create an IpcHandle pointing at the
-        // absolute GPU device address and call dispatcher.lookup().
+        // Issue async DMA for each block BEFORE inserting into the jobs map.
+        let mut last_stream: Option<GpuStream> = None;
         let mut all_ok = true;
         for (i, key) in cache_keys.iter().enumerate() {
             let block_id = gpu_block_ids[i];
@@ -516,24 +505,43 @@ impl EngineInner {
                 size: self.gpu_block_size as u32,
             };
 
-            if let Err(e) = self.dispatcher.lookup(*key, handle) {
-                eprintln!("[certus] load_async lookup failed key={key} block_id={block_id}: {e:?}");
-                all_ok = false;
-                break;
+            match self.dispatcher.lookup_async(*key, handle) {
+                Ok(stream) => {
+                    if !stream.0.is_null() {
+                        last_stream = Some(stream);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[certus] load_async lookup_async failed key={key} block_id={block_id}: {e:?}");
+                    all_ok = false;
+                    break;
+                }
             }
         }
 
-        job.completed.store(true, Ordering::Release);
-        job.success.store(all_ok, Ordering::Release);
+        let completed = !all_ok || last_stream.is_none();
+        let job = Arc::new(TransferJob {
+            kind: JobKind::Load,
+            keys: cache_keys.clone(),
+            gpu_block_ids: gpu_block_ids.to_vec(),
+            completed: AtomicBool::new(completed),
+            success: AtomicBool::new(all_ok),
+            stream: Mutex::new(last_stream),
+        });
+
+        {
+            let mut jobs = self.jobs.lock().unwrap();
+            jobs.insert(job_id, Arc::clone(&job));
+        }
 
         Ok(all_ok)
     }
 
     /// Poll for completed transfers. Returns list of (job_id, success).
     ///
-    /// For store jobs with in-flight DMA, polls the CUDA stream via
-    /// `stream_query`. On completion, calls `populate_finalize` for each
-    /// key to register entries in the dispatch-map and enqueue SSD writes.
+    /// Both stores and loads share the same CUDA stream. A single
+    /// `stream_synchronize` covers all in-flight DMA in both directions.
+    /// Store jobs additionally need `populate_finalize` to register entries.
     pub fn poll_completions(&self) -> PyResult<Vec<(u64, bool)>> {
         self.ensure_init()?;
         let mut completions = Vec::new();
@@ -549,7 +557,6 @@ impl EngineInner {
         if !in_flight_ids.is_empty() {
             // All jobs share the same CUDA stream. Synchronize it once —
             // this blocks until ALL pending DMA ops complete (typically sub-ms).
-            // Then finalize all in-flight jobs.
             let stream_ptr = {
                 let first_job = jobs.get(&in_flight_ids[0]).unwrap();
                 first_job.stream.lock().unwrap().take()
@@ -565,23 +572,25 @@ impl EngineInner {
             for id in &in_flight_ids {
                 let job = jobs.get(id).unwrap();
                 let mut all_ok = true;
-                for key in &job.keys {
-                    match self.dispatcher.populate_finalize(*key) {
-                        Ok(()) => {
-                            self.entry_count.fetch_add(1, Ordering::Release);
-                        }
-                        Err(interfaces::DispatcherError::KeyNotFound(_)) => {
-                            // Key completed synchronously or was AlreadyExists — not pending.
-                        }
-                        Err(interfaces::DispatcherError::AlreadyExists(_)) => {
-                            // Already registered — idempotent.
-                        }
-                        Err(e) => {
-                            eprintln!("[certus] populate_finalize failed key={key}: {e:?}");
-                            all_ok = false;
+
+                // Store jobs need populate_finalize to register in dispatch-map.
+                // Load jobs are already committed — just need the stream sync.
+                if job.kind == JobKind::Store {
+                    for key in &job.keys {
+                        match self.dispatcher.populate_finalize(*key) {
+                            Ok(()) => {
+                                self.entry_count.fetch_add(1, Ordering::Release);
+                            }
+                            Err(interfaces::DispatcherError::KeyNotFound(_)) => {}
+                            Err(interfaces::DispatcherError::AlreadyExists(_)) => {}
+                            Err(e) => {
+                                eprintln!("[certus] populate_finalize failed key={key}: {e:?}");
+                                all_ok = false;
+                            }
                         }
                     }
                 }
+
                 job.completed.store(true, Ordering::Release);
                 job.success.store(all_ok, Ordering::Release);
             }
@@ -632,16 +641,17 @@ impl EngineInner {
                 return Ok(());
             }
 
-            // DMA complete — finalize all keys.
             let mut all_ok = true;
-            for key in &job.keys {
-                match self.dispatcher.populate_finalize(*key) {
-                    Ok(()) => {
-                        self.entry_count.fetch_add(1, Ordering::Release);
-                    }
-                    Err(e) => {
-                        eprintln!("[certus] wait_job populate_finalize failed key={key}: {e:?}");
-                        all_ok = false;
+            if job.kind == JobKind::Store {
+                for key in &job.keys {
+                    match self.dispatcher.populate_finalize(*key) {
+                        Ok(()) => {
+                            self.entry_count.fetch_add(1, Ordering::Release);
+                        }
+                        Err(e) => {
+                            eprintln!("[certus] wait_job populate_finalize failed key={key}: {e:?}");
+                            all_ok = false;
+                        }
                     }
                 }
             }
