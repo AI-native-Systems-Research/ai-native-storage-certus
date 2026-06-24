@@ -3082,6 +3082,44 @@ mod tests {
         d.shutdown().unwrap();
     }
 
+    #[test]
+    fn prepare_then_commit_consumes_pending_once() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let key = 1234;
+
+        let _buf = d.prepare_store(key, 4096).unwrap();
+        assert!(c.pending_writes.lock().unwrap().contains_key(&key));
+
+        assert!(d.commit_store(key).is_ok());
+        assert!(!c.pending_writes.lock().unwrap().contains_key(&key));
+
+        // Consumed exactly once: second commit must fail.
+        let err = d.commit_store(key);
+        assert!(matches!(err, Err(DispatcherError::KeyNotFound(k)) if k == key));
+
+        d.shutdown().unwrap();
+    }
+
+    #[test]
+    fn prepare_then_cancel_consumes_pending_once() {
+        let (c, _dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+        let key = 1235;
+
+        let _buf = d.prepare_store(key, 4096).unwrap();
+        assert!(c.pending_writes.lock().unwrap().contains_key(&key));
+
+        assert!(d.cancel_store(key).is_ok());
+        assert!(!c.pending_writes.lock().unwrap().contains_key(&key));
+
+        // Consumed exactly once: second cancel must fail.
+        let err = d.cancel_store(key);
+        assert!(matches!(err, Err(DispatcherError::KeyNotFound(k)) if k == key));
+
+        d.shutdown().unwrap();
+    }
+
     // -----------------------------------------------------------------------
     // Background SSD Evictor tests
     // -----------------------------------------------------------------------
