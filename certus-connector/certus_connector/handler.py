@@ -26,28 +26,6 @@ from certus_connector._instrument import COUNTERS
 from certus_connector.mediums import CertusLoadStoreSpec
 
 
-# ── Mock engine for testing without SPDK/CUDA ──
-
-
-class MockCertusEngine:
-    """In-memory mock matching CertusEngine's interface. No hardware needed."""
-
-    def store_async(self, job_id: int, gpu_block_ids: list[int], keys: list[int]) -> bool:
-        return True
-
-    def load_async(self, job_id: int, gpu_block_ids: list[int], keys: list[int]) -> bool:
-        return True
-
-    def poll_completions(self) -> list[tuple[int, bool]]:
-        return []
-
-    def wait_job(self, job_id: int) -> None:
-        pass
-
-    def shutdown(self) -> None:
-        pass
-
-
 # ── Completion routing ──
 
 
