@@ -11,8 +11,8 @@ use pyo3::types::PyDict;
 
 use component_core::query_interface;
 use interfaces::{
-    CacheKey, DispatcherConfig, DmaAllocFn, DmaBuffer, GpuStream, IDispatchMap, IDispatcher,
-    IEvictionPolicy, IGpuServices, ILogger, IMemoryTier, IpcHandle, LookupResult,
+    CacheKey, DispatcherConfig, DispatcherError, DmaAllocFn, DmaBuffer, GpuStream, IDispatchMap,
+    IDispatcher, IEvictionPolicy, IGpuServices, ILogger, IMemoryTier, IpcHandle, LookupResult,
 };
 
 use crate::keys;
@@ -234,6 +234,14 @@ impl EngineInner {
         Ok(())
     }
 
+    /// Set the GPU KV cache base pointer and stride (called after vLLM allocates GPU tensors).
+    pub fn set_gpu_base_ptr(&mut self, ptr: u64, stride: u64) {
+        self.gpu_base_ptr = ptr;
+        if stride > 0 {
+            self.gpu_block_size = stride;
+        }
+    }
+
     // ─── Manager-level operations ──────────────────────────────────────
 
     /// Return count of consecutive keys (from the start) that are cached.
@@ -419,22 +427,8 @@ impl EngineInner {
 
         let cache_keys = keys::to_cache_keys(keys);
 
-        let job = Arc::new(TransferJob {
-            kind: JobKind::Store,
-            keys: cache_keys.clone(),
-            gpu_block_ids: gpu_block_ids.to_vec(),
-            completed: AtomicBool::new(false),
-            success: AtomicBool::new(false),
-            stream: Mutex::new(None),
-        });
-
-        {
-            let mut jobs = self.jobs.lock().unwrap();
-            jobs.insert(job_id, Arc::clone(&job));
-        }
-
-        // Issue async DMA for each block. All copies share the same CUDA stream
-        // so a single stream_query covers all of them.
+        // Issue async DMA for each block BEFORE inserting into the jobs map.
+        // This avoids a race where poll_completions sees the job with stream=None.
         let mut last_stream: Option<GpuStream> = None;
         let mut all_ok = true;
         for (i, key) in cache_keys.iter().enumerate() {
@@ -451,7 +445,6 @@ impl EngineInner {
                     if !stream.0.is_null() {
                         last_stream = Some(stream);
                     } else {
-                        // Null stream = completed synchronously (fallback path).
                         self.entry_count.fetch_add(1, Ordering::Release);
                     }
                 }
@@ -467,13 +460,19 @@ impl EngineInner {
             }
         }
 
-        if !all_ok || last_stream.is_none() {
-            // Either failed or all completed synchronously.
-            job.completed.store(true, Ordering::Release);
-            job.success.store(all_ok, Ordering::Release);
-        } else {
-            // DMA is in-flight — store the stream for poll_completions.
-            *job.stream.lock().unwrap() = last_stream;
+        let completed = !all_ok || last_stream.is_none();
+        let job = Arc::new(TransferJob {
+            kind: JobKind::Store,
+            keys: cache_keys.clone(),
+            gpu_block_ids: gpu_block_ids.to_vec(),
+            completed: AtomicBool::new(completed),
+            success: AtomicBool::new(all_ok),
+            stream: Mutex::new(last_stream),
+        });
+
+        {
+            let mut jobs = self.jobs.lock().unwrap();
+            jobs.insert(job_id, Arc::clone(&job));
         }
 
         Ok(all_ok)
@@ -539,9 +538,8 @@ impl EngineInner {
         self.ensure_init()?;
         let mut completions = Vec::new();
         let mut jobs = self.jobs.lock().unwrap();
-        eprintln!("[certus] poll_completions called, {} jobs in map", jobs.len());
 
-        // First pass: check in-flight store jobs for stream completion.
+        // Collect in-flight jobs (not yet completed).
         let in_flight_ids: Vec<u64> = jobs
             .iter()
             .filter(|(_, job)| !job.completed.load(Ordering::Acquire))
@@ -549,47 +547,43 @@ impl EngineInner {
             .collect();
 
         if !in_flight_ids.is_empty() {
-            eprintln!("[certus] poll_completions: {} in-flight jobs", in_flight_ids.len());
-        }
+            // All jobs share the same CUDA stream. Synchronize it once —
+            // this blocks until ALL pending DMA ops complete (typically sub-ms).
+            // Then finalize all in-flight jobs.
+            let stream_ptr = {
+                let first_job = jobs.get(&in_flight_ids[0]).unwrap();
+                first_job.stream.lock().unwrap().take()
+            };
 
-        for id in &in_flight_ids {
-            let job = jobs.get(id).unwrap();
-            let stream_opt = { job.stream.lock().unwrap().take() };
-
-            if stream_opt.is_none() {
-                eprintln!("[certus] poll job={id}: stream is None, completed={}", job.completed.load(Ordering::Acquire));
-                continue;
+            if let Some(stream) = stream_ptr {
+                if let Err(e) = self.gpu_services.stream_synchronize(stream) {
+                    eprintln!("[certus] stream_synchronize failed: {e}");
+                }
             }
 
-            if let Some(stream) = stream_opt {
-                match self.gpu_services.stream_query(stream) {
-                    Ok(true) => {
-                        // DMA complete — finalize all keys.
-                        let mut all_ok = true;
-                        for key in &job.keys {
-                            match self.dispatcher.populate_finalize(*key) {
-                                Ok(()) => {
-                                    self.entry_count.fetch_add(1, Ordering::Release);
-                                }
-                                Err(e) => {
-                                    eprintln!("[certus] populate_finalize failed key={key}: {e:?}");
-                                    all_ok = false;
-                                }
-                            }
+            // Stream is synchronized — finalize all in-flight jobs.
+            for id in &in_flight_ids {
+                let job = jobs.get(id).unwrap();
+                let mut all_ok = true;
+                for key in &job.keys {
+                    match self.dispatcher.populate_finalize(*key) {
+                        Ok(()) => {
+                            self.entry_count.fetch_add(1, Ordering::Release);
                         }
-                        job.completed.store(true, Ordering::Release);
-                        job.success.store(all_ok, Ordering::Release);
-                    }
-                    Ok(false) => {
-                        // Still in-flight — put the stream back.
-                        *job.stream.lock().unwrap() = Some(stream);
-                    }
-                    Err(e) => {
-                        eprintln!("[certus] stream_query failed: {e}");
-                        job.completed.store(true, Ordering::Release);
-                        job.success.store(false, Ordering::Release);
+                        Err(interfaces::DispatcherError::KeyNotFound(_)) => {
+                            // Key completed synchronously or was AlreadyExists — not pending.
+                        }
+                        Err(interfaces::DispatcherError::AlreadyExists(_)) => {
+                            // Already registered — idempotent.
+                        }
+                        Err(e) => {
+                            eprintln!("[certus] populate_finalize failed key={key}: {e:?}");
+                            all_ok = false;
+                        }
                     }
                 }
+                job.completed.store(true, Ordering::Release);
+                job.success.store(all_ok, Ordering::Release);
             }
         }
 

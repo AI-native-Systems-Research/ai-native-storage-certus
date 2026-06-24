@@ -1,16 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
-"""OffloadingHandlers for Certus: parallel DMA via ThreadPoolExecutor.
+"""OffloadingHandlers for Certus NVMe offloading.
 
-Each handler submits store_async/load_async calls through a thread pool
-(GIL released in Rust via py.allow_threads). A shared CompletionDispatcher
-routes poll_completions() results to the correct handler.
+Handlers call non-blocking store_async/load_async directly (DMA issued
+without waiting). A shared CompletionDispatcher routes poll_completions()
+results to the correct handler.
 """
 
 from __future__ import annotations
 
 import time
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,12 +29,18 @@ from certus_connector.mediums import CertusLoadStoreSpec
 
 
 class CompletionDispatcher:
-    """Routes poll_completions() results to the handler that owns each job."""
+    """Routes poll_completions() results to the handler that owns each job.
+
+    Completions are buffered per-type so that a poll triggered by one handler
+    doesn't lose completions belonging to the other.
+    """
 
     def __init__(self, engine: Any):
         self._engine = engine
         self._store_jobs: set[int] = set()
         self._load_jobs: set[int] = set()
+        self._store_buf: dict[int, bool] = {}
+        self._load_buf: dict[int, bool] = {}
 
     def register_store(self, job_id: int) -> None:
         self._store_jobs.add(job_id)
@@ -43,21 +48,30 @@ class CompletionDispatcher:
     def register_load(self, job_id: int) -> None:
         self._load_jobs.add(job_id)
 
-    def poll(self) -> tuple[dict[int, bool], dict[int, bool]]:
-        """Poll engine and split completions into (store_map, load_map)."""
+    def _drain(self) -> None:
+        """Drain engine completions into per-type buffers."""
         raw = self._engine.poll_completions()
-        stores: dict[int, bool] = {}
-        loads: dict[int, bool] = {}
         for job_id, success in raw:
             if job_id in self._store_jobs:
                 self._store_jobs.discard(job_id)
-                stores[job_id] = success
+                self._store_buf[job_id] = success
             elif job_id in self._load_jobs:
                 self._load_jobs.discard(job_id)
-                loads[job_id] = success
-        if raw:
-            print(f"[DISP] poll -> {len(stores)} stores, {len(loads)} loads completed (pending: {len(self._store_jobs)}s/{len(self._load_jobs)}l)", flush=True)
-        return stores, loads
+                self._load_buf[job_id] = success
+
+    def poll_stores(self) -> dict[int, bool]:
+        """Return buffered store completions (drains engine first)."""
+        self._drain()
+        result = self._store_buf
+        self._store_buf = {}
+        return result
+
+    def poll_loads(self) -> dict[int, bool]:
+        """Return buffered load completions (drains engine first)."""
+        self._drain()
+        result = self._load_buf
+        self._load_buf = {}
+        return result
 
 
 # ── Handler implementations ──
@@ -79,24 +93,12 @@ class GpuToCertusHandler(OffloadingHandler):
         engine: Any,
         block_size_bytes: int,
         dispatcher: CompletionDispatcher,
-        max_workers: int = 8,
     ):
         self._engine = engine
         self._block_size_bytes = block_size_bytes
         self._dispatcher = dispatcher
-        self._pool = ThreadPoolExecutor(max_workers=max_workers)
         self._pending: deque[PendingJob] = deque()
         self._transfer_type: TransferType = ("GPU", "Certus")
-
-    def _do_store(self, job_id: int, gpu_block_ids: list, keys: list):
-        print(f"[STORE] _do_store ENTER job={job_id}", flush=True)
-        try:
-            result = self._engine.store_async(job_id, gpu_block_ids, keys)
-            print(f"[STORE] _do_store EXIT job={job_id} result={result}", flush=True)
-            return result
-        except Exception as e:
-            print(f"[STORE] _do_store EXCEPTION job={job_id}: {e}", flush=True)
-            raise
 
     def transfer_async(self, job_id: int, spec: TransferSpec) -> bool:
         src_spec, dst_spec = spec
@@ -106,9 +108,8 @@ class GpuToCertusHandler(OffloadingHandler):
         gpu_block_ids = list(src_spec.block_ids)
         keys = [loc.nvme_slab for loc in dst_spec.locations]
 
-        print(f"[STORE] transfer_async job={job_id} blocks={len(gpu_block_ids)}", flush=True)
         self._dispatcher.register_store(job_id)
-        self._pool.submit(self._do_store, job_id, gpu_block_ids, keys)
+        self._engine.store_async(job_id, gpu_block_ids, keys)
         self._pending.append(PendingJob(
             job_id=job_id,
             start_time=time.monotonic(),
@@ -120,7 +121,7 @@ class GpuToCertusHandler(OffloadingHandler):
 
     def get_finished(self) -> list[TransferResult]:
         results: list[TransferResult] = []
-        store_completions, _ = self._dispatcher.poll()
+        store_completions = self._dispatcher.poll_stores()
         now = time.monotonic()
         if self._pending and not store_completions:
             head = self._pending[0]
@@ -159,12 +160,10 @@ class CertusToGpuHandler(OffloadingHandler):
         engine: Any,
         block_size_bytes: int,
         dispatcher: CompletionDispatcher,
-        max_workers: int = 8,
     ):
         self._engine = engine
         self._block_size_bytes = block_size_bytes
         self._dispatcher = dispatcher
-        self._pool = ThreadPoolExecutor(max_workers=max_workers)
         self._pending: deque[PendingJob] = deque()
         self._transfer_type: TransferType = ("Certus", "GPU")
 
@@ -176,9 +175,8 @@ class CertusToGpuHandler(OffloadingHandler):
         gpu_block_ids = list(dst_spec.block_ids)
         keys = [loc.nvme_slab for loc in src_spec.locations]
 
-        print(f"[LOAD] transfer_async job={job_id} blocks={len(gpu_block_ids)}", flush=True)
         self._dispatcher.register_load(job_id)
-        self._pool.submit(self._engine.load_async, job_id, gpu_block_ids, keys)
+        self._engine.load_async(job_id, gpu_block_ids, keys)
         self._pending.append(PendingJob(
             job_id=job_id,
             start_time=time.monotonic(),
@@ -190,7 +188,7 @@ class CertusToGpuHandler(OffloadingHandler):
 
     def get_finished(self) -> list[TransferResult]:
         results: list[TransferResult] = []
-        _, load_completions = self._dispatcher.poll()
+        load_completions = self._dispatcher.poll_loads()
         now = time.monotonic()
         if self._pending and not load_completions:
             head = self._pending[0]

@@ -138,6 +138,11 @@ impl CertusEngine {
         self.inner.wait_job(job_id)
     }
 
+    /// Set the GPU KV cache base pointer and stride (called after vLLM allocates GPU tensors).
+    fn set_gpu_base_ptr(&mut self, ptr: u64, stride: u64) {
+        self.inner.set_gpu_base_ptr(ptr, stride);
+    }
+
     /// Shut down the engine, releasing all resources.
     fn shutdown(&self) -> PyResult<()> {
         self.inner.shutdown()

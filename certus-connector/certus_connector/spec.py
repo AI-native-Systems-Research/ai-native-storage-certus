@@ -99,6 +99,12 @@ class CertusOffloadingSpec(OffloadingSpec):
         start_reporter()
         engine = self._get_engine()
         if self._gpu_to_certus is None:
+            # Extract GPU KV cache base pointer and set on engine.
+            gpu_base_ptr, gpu_stride = self._extract_gpu_ptrs(kv_caches)
+            engine.set_gpu_base_ptr(gpu_base_ptr, gpu_stride)
+            print(f"[certus-spec] GPU base_ptr=0x{gpu_base_ptr:x} stride={gpu_stride}",
+                  flush=True)
+
             dispatcher = CompletionDispatcher(engine)
             self._gpu_to_certus = GpuToCertusHandler(
                 engine=engine,
@@ -112,3 +118,10 @@ class CertusOffloadingSpec(OffloadingSpec):
             )
         yield GPULoadStoreSpec, CertusLoadStoreSpec, self._gpu_to_certus
         yield CertusLoadStoreSpec, GPULoadStoreSpec, self._certus_to_gpu
+
+    @staticmethod
+    def _extract_gpu_ptrs(kv_caches) -> tuple[int, int]:
+        """Extract GPU base pointer and stride (bytes) from the first KV cache tensor."""
+        tensor = kv_caches.tensors[0].tensor
+        stride_bytes = tensor.stride(0) * tensor.element_size()
+        return tensor.data_ptr(), stride_bytes
