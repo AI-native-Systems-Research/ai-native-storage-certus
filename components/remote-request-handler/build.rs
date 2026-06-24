@@ -67,7 +67,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Compile protobuf
     let protoc = find_protoc().unwrap_or_else(|| {
-        panic!("protoc not found. Install protoc (e.g., apt install protobuf-compiler) or set PROTOC=/path/to/protoc");
+        eprintln!("cargo:warning=protoc not found, downloading...");
+        download_protoc()
     });
     env::set_var("PROTOC", &protoc);
     prost_build::compile_protos(&["proto/remote_request.proto"], &["proto/"])?;
