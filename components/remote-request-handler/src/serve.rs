@@ -5,6 +5,7 @@ use std::os::raw::c_int;
 use std::sync::Arc;
 
 use anyhow::Result;
+use interfaces::ILogger;
 use prost::Message;
 
 use crate::ffi;
@@ -18,7 +19,11 @@ const MSG_BUF_SIZE: usize = 8192;
 /// Resolver function type: given a CacheKey, returns Some(data) if found, None otherwise.
 pub type Resolver = dyn Fn(u64) -> Option<Vec<u8>> + Send + Sync;
 
-fn handle_session(conn: RdmaConnection, resolver: &Arc<Resolver>) -> Result<()> {
+fn handle_session(
+    conn: RdmaConnection,
+    resolver: &Arc<Resolver>,
+    logger: &Arc<dyn ILogger + Send + Sync>,
+) -> Result<()> {
     let session = Session::new(SessionConfig {
         protocol_version: PROTOCOL_VERSION,
         max_batch_size: MAX_BATCH_SIZE,
@@ -98,11 +103,11 @@ fn speed_to_string(speed: u8, width: u8) -> String {
     let lane_gbps = match speed {
         1 => 2.5,
         2 => 5.0,
-        4 => 10.0,  // FDR10
-        8 => 10.0,  // EDR (10 Gbps per lane)
-        16 => 14.0, // HDR (14 Gbps per lane after encoding)
-        32 => 25.0, // NDR
-        64 => 50.0, // XDR
+        4 => 10.0,
+        8 => 10.0,
+        16 => 14.0,
+        32 => 25.0,
+        64 => 50.0,
         _ => 0.0,
     };
     let lanes = match width {
@@ -117,19 +122,19 @@ fn speed_to_string(speed: u8, width: u8) -> String {
     format!("{:.0} Gb/s ({} x {:.1} Gb/s)", total_gbps, lanes, lane_gbps)
 }
 
-fn log_rdma_devices() {
-    // SAFETY: ibv_get_device_list is safe to call with a valid pointer.
+fn log_rdma_devices(logger: &dyn ILogger) {
     let mut num_devices: c_int = 0;
+    // SAFETY: ibv_get_device_list is safe to call with a valid pointer.
     let dev_list = unsafe { ffi::ibv_get_device_list(&mut num_devices) };
     if dev_list.is_null() || num_devices == 0 {
-        eprintln!("[remote-request-handler] No RDMA devices found");
+        logger.warn("remote-request-handler: no RDMA devices found");
         return;
     }
 
-    eprintln!(
-        "[remote-request-handler] Found {} RDMA device(s):",
+    logger.info(&format!(
+        "remote-request-handler: found {} RDMA device(s)",
         num_devices
-    );
+    ));
 
     for i in 0..num_devices as isize {
         // SAFETY: dev_list is valid and contains num_devices entries.
@@ -152,7 +157,7 @@ fn log_rdma_devices() {
         // SAFETY: dev is valid.
         let ctx = unsafe { ffi::ibv_open_device(dev) };
         if ctx.is_null() {
-            eprintln!("  {}: (failed to open)", name);
+            logger.warn(&format!("remote-request-handler: {}: failed to open", name));
             continue;
         }
 
@@ -193,12 +198,15 @@ fn log_rdma_devices() {
             let mtu = mtu_to_bytes(port_attr.active_mtu);
             let speed = speed_to_string(port_attr.active_speed, port_attr.active_width);
 
-            eprintln!(
-                "  {}: {} | {} | MTU {} | {}",
+            logger.info(&format!(
+                "remote-request-handler:   {}: {} | {} | MTU {} | {}",
                 name, state_str, link_str, mtu, speed
-            );
+            ));
         } else {
-            eprintln!("  {}: (failed to query port)", name);
+            logger.warn(&format!(
+                "remote-request-handler: {}: failed to query port",
+                name
+            ));
         }
 
         // SAFETY: ctx was opened successfully.
@@ -214,36 +222,43 @@ fn log_rdma_devices() {
 ///
 /// If `resolver` is None, all lookups return "not found" (standalone test mode).
 /// If `resolver` is Some, each CacheKey is resolved via the provided function.
-pub fn run_blocking(addr: &str, port: u16, resolver: Option<Arc<Resolver>>) -> Result<()> {
+///
+/// `logger` is used for all diagnostic output.
+pub fn run_blocking(
+    addr: &str,
+    port: u16,
+    resolver: Option<Arc<Resolver>>,
+    logger: Arc<dyn ILogger + Send + Sync>,
+) -> Result<()> {
     let resolver = resolver.unwrap_or_else(|| Arc::new(|_| None));
 
-    log_rdma_devices();
+    log_rdma_devices(logger.as_ref());
 
-    eprintln!(
-        "[remote-request-handler] Binding RDMA listener on {}:{}...",
+    logger.info(&format!(
+        "remote-request-handler: binding RDMA listener on {}:{}",
         addr, port
-    );
+    ));
     let listener = RdmaListener::bind(addr, port)?;
-    eprintln!(
-        "[remote-request-handler] Listener ready (protocol_version={}, max_batch_size={})",
+    logger.info(&format!(
+        "remote-request-handler: listener ready (protocol_version={}, max_batch_size={})",
         PROTOCOL_VERSION, MAX_BATCH_SIZE
-    );
+    ));
 
     loop {
         match listener.accept() {
             Ok(conn) => {
-                eprintln!("[remote-request-handler] Session accepted");
-                match handle_session(conn, &resolver) {
+                logger.info("remote-request-handler: session accepted");
+                match handle_session(conn, &resolver, &logger) {
                     Ok(()) => {
-                        eprintln!("[remote-request-handler] Session closed normally");
+                        logger.info("remote-request-handler: session closed normally");
                     }
                     Err(e) => {
-                        eprintln!("[remote-request-handler] Session error: {e}");
+                        logger.warn(&format!("remote-request-handler: session error: {e}"));
                     }
                 }
             }
             Err(e) => {
-                eprintln!("[remote-request-handler] Accept error: {e}");
+                logger.error(&format!("remote-request-handler: accept error: {e}"));
                 break;
             }
         }

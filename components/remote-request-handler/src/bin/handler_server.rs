@@ -4,8 +4,28 @@
 //! (resolving via a stub dispatcher that always returns "not found"),
 //! and handles close requests.
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use clap::Parser;
+use interfaces::ILogger;
+
+struct StderrLogger;
+
+impl ILogger for StderrLogger {
+    fn error(&self, msg: &str) {
+        eprintln!("ERROR {msg}");
+    }
+    fn warn(&self, msg: &str) {
+        eprintln!("WARN  {msg}");
+    }
+    fn info(&self, msg: &str) {
+        eprintln!("INFO  {msg}");
+    }
+    fn debug(&self, msg: &str) {
+        eprintln!("DEBUG {msg}");
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "handler-server", about = "RDMA remote request handler server (standalone)")]
@@ -22,13 +42,11 @@ struct Args {
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    println!(
-        "Remote Request Handler Server (standalone)\n\
-         ===========================================\n\
-         Listening on: {}:{}\n\
-         Dispatcher:   none (all lookups return not-found)\n",
+    let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(StderrLogger);
+    logger.info(&format!(
+        "Remote Request Handler Server (standalone) — {}:{}",
         args.addr, args.port
-    );
+    ));
 
-    remote_request_handler::serve::run_blocking(&args.addr, args.port, None)
+    remote_request_handler::serve::run_blocking(&args.addr, args.port, None, logger)
 }
