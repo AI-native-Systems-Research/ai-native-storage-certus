@@ -73,7 +73,7 @@ If the profile can use `--device-path /dev/null` (no real SSD needed), use that 
   ```
 - Start the server:
   ```bash
-  target/release/certus-server-yaml $DEVICE_FLAGS --format &
+  target/release/certus-server-yaml $DEVICE_FLAGS --format --memory-tier-size 4G &
   SERVER_PID=$!
   sleep 5
   ```
@@ -86,7 +86,8 @@ If the profile can use `--device-path /dev/null` (no real SSD needed), use that 
       --iterations 20 \
       --block-size 4M \
       --batch-size 16 \
-      --pipeline-depth 4
+      --pipeline-depth 4 \
+      --memory-tier-size 2G
   ```
 - Capture the full output (including throughput numbers) to `CURRENT_RESULTS`
 - Stop the server:
@@ -104,13 +105,13 @@ If the profile can use `--device-path /dev/null` (no real SSD needed), use that 
   ```bash
   CERTUS_PROFILE=$PROFILE cargo build -p certus-server-yaml --release $FEATURES
   ```
-- Start the server (same device flags):
+- Start the server (same device flags and memory-tier size):
   ```bash
-  target/release/certus-server-yaml $DEVICE_FLAGS --format &
+  target/release/certus-server-yaml $DEVICE_FLAGS --format --memory-tier-size 4G &
   SERVER_PID=$!
   sleep 5
   ```
-- Run the same benchmark with identical parameters
+- Run the same benchmark with identical parameters (including `--memory-tier-size 2G`)
 - Capture output to `COMPARE_RESULTS`
 - Stop the server
 
