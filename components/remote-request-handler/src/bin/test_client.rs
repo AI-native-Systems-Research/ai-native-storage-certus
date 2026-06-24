@@ -2,6 +2,7 @@
 //!
 //! Connects to a running handler, performs a version handshake,
 //! executes configurable batched lookups, and disconnects cleanly.
+//! Optionally verifies data integrity via CRC32.
 
 use anyhow::{bail, Result};
 use clap::Parser;
@@ -12,7 +13,6 @@ use remote_request_handler::rdma;
 
 const PROTOCOL_VERSION: u32 = 1;
 const MSG_BUF_SIZE: usize = 8192;
-const RESULT_BUF_SIZE: usize = 4096;
 
 #[derive(Parser, Debug)]
 #[command(name = "test-client", about = "Test client for remote-request-handler")]
@@ -36,6 +36,18 @@ struct Args {
     /// Client identifier (for telemetry/logging on the server).
     #[arg(long, default_value = "test-client")]
     client_id: String,
+
+    /// Result buffer size per entry in bytes (should match object size on server).
+    #[arg(long, default_value_t = 4 * 1024 * 1024)]
+    result_buf_size: usize,
+
+    /// Verify data integrity via CRC32 after each batch.
+    #[arg(long)]
+    verify: bool,
+
+    /// Expected fill byte for verification (default 0xAB from cudaMemset).
+    #[arg(long, default_value_t = 0xAB)]
+    expected_fill: u8,
 }
 
 fn main() -> Result<()> {
@@ -47,8 +59,16 @@ fn main() -> Result<()> {
          Target: {}:{}\n\
          Batch size: {} entries\n\
          Iterations: {}\n\
+         Result buf: {} bytes\n\
+         Verify: {}\n\
          Client ID: {}\n",
-        args.addr, args.port, args.batch_size, args.iterations, args.client_id
+        args.addr,
+        args.port,
+        args.batch_size,
+        args.iterations,
+        args.result_buf_size,
+        if args.verify { "CRC32" } else { "disabled" },
+        args.client_id
     );
 
     // Connect to the handler via RDMA
@@ -60,10 +80,10 @@ fn main() -> Result<()> {
     let mut send_mr = conn.register_mr(MSG_BUF_SIZE)?;
     let mut recv_mr = conn.register_mr(MSG_BUF_SIZE)?;
 
-    // Register per-entry result buffers (where the handler would RDMA Write results)
+    // Register per-entry result buffers
     let mut result_mrs: Vec<rdma::MemoryRegion> = Vec::new();
     for _ in 0..args.batch_size {
-        result_mrs.push(conn.register_mr(RESULT_BUF_SIZE)?);
+        result_mrs.push(conn.register_mr(args.result_buf_size)?);
     }
 
     // --- Handshake ---
@@ -76,7 +96,6 @@ fn main() -> Result<()> {
     send_mr.buf[..encoded.len()].copy_from_slice(&encoded);
     conn.send_msg(&send_mr, encoded.len())?;
 
-    // Receive handshake response
     let nbytes = conn.recv_msg(&mut recv_mr)?;
     let response = proto::ResponseMessage::decode(&recv_mr.buf[..nbytes])?;
     match response.payload {
@@ -99,15 +118,25 @@ fn main() -> Result<()> {
     // --- Batch Lookups ---
     let start = std::time::Instant::now();
     let mut total_entries = 0u64;
+    let mut total_bytes_written = 0u64;
+    let mut crc_errors = 0u64;
+    let mut crc_pass = 0u64;
 
     for iter in 0..args.iterations {
+        // Clear result buffers before each batch (to detect actual writes)
+        if args.verify {
+            for mr in &mut result_mrs {
+                mr.buf.fill(0);
+            }
+        }
+
         // Build batch request with result buffer addresses
         let entries: Vec<proto::LookupEntry> = (0..args.batch_size)
             .map(|i| proto::LookupEntry {
                 cache_key: (iter as u64) * (args.batch_size as u64) + (i as u64) + 1,
                 remote_addr: result_mrs[i as usize].addr(),
                 rkey: result_mrs[i as usize].rkey(),
-                max_size: RESULT_BUF_SIZE as u32,
+                max_size: args.result_buf_size as u32,
             })
             .collect();
 
@@ -129,6 +158,35 @@ fn main() -> Result<()> {
                 let err_count = l.results.len() - ok_count;
                 total_entries += l.results.len() as u64;
 
+                for (i, result) in l.results.iter().enumerate() {
+                    if result.success {
+                        total_bytes_written += result.bytes_written as u64;
+                    }
+
+                    // CRC verification
+                    if args.verify && result.success && result.bytes_written > 0 {
+                        let data = &result_mrs[i].buf[..result.bytes_written as usize];
+                        let crc = crc32fast::hash(data);
+
+                        // Compute expected CRC for the fill pattern
+                        let expected_data =
+                            vec![args.expected_fill; result.bytes_written as usize];
+                        let expected_crc = crc32fast::hash(&expected_data);
+
+                        if crc == expected_crc {
+                            crc_pass += 1;
+                        } else {
+                            crc_errors += 1;
+                            if crc_errors <= 5 {
+                                eprintln!(
+                                    "  CRC MISMATCH key={}: got 0x{:08X}, expected 0x{:08X} ({} bytes)",
+                                    result.cache_key, crc, expected_crc, result.bytes_written
+                                );
+                            }
+                        }
+                    }
+                }
+
                 if args.iterations <= 10 {
                     println!(
                         "  Batch {}: {} ok, {} not_found/error",
@@ -141,11 +199,12 @@ fn main() -> Result<()> {
     }
 
     let elapsed = start.elapsed();
+    let elapsed_s = elapsed.as_secs_f64();
     println!(
         "\nCompleted {} iterations ({} total entries) in {:.3}ms",
         args.iterations,
         total_entries,
-        elapsed.as_secs_f64() * 1000.0
+        elapsed_s * 1000.0
     );
     if args.iterations > 0 {
         println!(
@@ -153,6 +212,28 @@ fn main() -> Result<()> {
             elapsed.as_micros() as f64 / args.iterations as f64,
             elapsed.as_micros() as f64 / total_entries as f64,
         );
+    }
+    if total_bytes_written > 0 {
+        let throughput_gbs = total_bytes_written as f64 / (1024.0 * 1024.0 * 1024.0) / elapsed_s;
+        println!(
+            "Data transferred: {:.1} MiB, throughput: {:.3} GB/s",
+            total_bytes_written as f64 / (1024.0 * 1024.0),
+            throughput_gbs
+        );
+    }
+
+    // CRC summary
+    if args.verify {
+        println!("\nCRC32 Verification:");
+        println!("  Pass: {}", crc_pass);
+        println!("  Fail: {}", crc_errors);
+        if crc_errors > 0 {
+            println!("  STATUS: FAIL");
+        } else if crc_pass > 0 {
+            println!("  STATUS: PASS");
+        } else {
+            println!("  STATUS: NO DATA (all lookups returned not-found)");
+        }
     }
 
     // --- Close ---
@@ -173,8 +254,6 @@ fn main() -> Result<()> {
         _ => bail!("Expected close response"),
     }
 
-    println!("Disconnecting...");
-    drop(conn);
     println!("Done.");
 
     Ok(())
