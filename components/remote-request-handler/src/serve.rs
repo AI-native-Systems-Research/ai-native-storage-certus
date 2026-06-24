@@ -35,10 +35,21 @@ pub type Resolver = dyn Fn(u64) -> Option<ResolvedEntry> + Send + Sync;
 /// Release callback: called after RDMA Write completes to release the read reference.
 pub type ReleaseCallback = dyn Fn(u64) + Send + Sync;
 
+/// Memory pool descriptor for pre-registration.
+pub struct PoolRegion {
+    pub base: *mut u8,
+    pub size: usize,
+}
+
+// SAFETY: Pool is a long-lived mmap region valid for the process lifetime.
+unsafe impl Send for PoolRegion {}
+unsafe impl Sync for PoolRegion {}
+
 fn handle_session(
     conn: &RdmaConnection,
     resolver: &Arc<Resolver>,
     release: &Arc<ReleaseCallback>,
+    pool: &Option<Arc<PoolRegion>>,
     logger: &Arc<dyn ILogger + Send + Sync>,
 ) -> Result<()> {
     let session = Session::new(SessionConfig {
@@ -48,6 +59,13 @@ fn handle_session(
 
     let mut recv_mr = conn.register_mr(MSG_BUF_SIZE)?;
     let mut send_mr = conn.register_mr(MSG_BUF_SIZE)?;
+
+    // Pre-register the memory-tier pool as one large MR for the session lifetime.
+    let pool_mr = if let Some(ref p) = pool {
+        Some(conn.register_existing_mr(p.base, p.size)?)
+    } else {
+        None
+    };
 
     loop {
         let nbytes = conn.recv_msg(&mut recv_mr)?;
@@ -80,7 +98,8 @@ fn handle_session(
                     };
                     protocol::lookup_response(error_resp)
                 } else {
-                    let results = process_batch_with_rdma_write(conn, req, resolver, release);
+                    let results =
+                        process_batch_with_rdma_write(conn, req, resolver, release, &pool_mr);
                     let resp = proto::BatchLookupResponse {
                         batch_id: req.batch_id,
                         results,
@@ -123,6 +142,7 @@ fn process_batch_with_rdma_write(
     req: &proto::BatchLookupRequest,
     resolver: &Arc<Resolver>,
     release: &Arc<ReleaseCallback>,
+    pool_mr: &Option<crate::rdma::MemoryRegion>,
 ) -> Vec<proto::EntryResult> {
     req.entries
         .iter()
@@ -131,18 +151,30 @@ fn process_batch_with_rdma_write(
                 Some(resolved) => {
                     let write_len = (resolved.size).min(entry.max_size) as usize;
 
-                    // Register the memory-tier pointer, RDMA Write, then deregister
-                    let result = (|| -> Result<u32> {
-                        let local_mr =
-                            conn.register_existing_mr(resolved.ptr, write_len)?;
-                        conn.rdma_write(
-                            &local_mr,
+                    let result = if let Some(ref pmr) = pool_mr {
+                        // Fast path: use pre-registered pool MR (no reg/dereg per entry)
+                        conn.rdma_write_from_pool(
+                            pmr,
+                            resolved.ptr,
                             write_len,
                             entry.remote_addr,
                             entry.rkey,
-                        )?;
-                        Ok(write_len as u32)
-                    })();
+                        )
+                        .map(|()| write_len as u32)
+                    } else {
+                        // Fallback: register per entry (slow path)
+                        (|| -> Result<u32> {
+                            let local_mr =
+                                conn.register_existing_mr(resolved.ptr, write_len)?;
+                            conn.rdma_write(
+                                &local_mr,
+                                write_len,
+                                entry.remote_addr,
+                                entry.rkey,
+                            )?;
+                            Ok(write_len as u32)
+                        })()
+                    };
 
                     // Release the read reference regardless of write success
                     release(entry.cache_key);
@@ -309,12 +341,14 @@ fn log_rdma_devices(logger: &dyn ILogger) {
 ///
 /// - `resolver`: returns a pointer+size to cached data for a given key (holds read ref)
 /// - `release`: called after RDMA Write completes to release the read reference
+/// - `pool`: memory-tier pool region for pre-registration (avoids per-entry MR reg/dereg)
 /// - If `resolver` is None, all lookups return "not found" (standalone test mode)
 pub fn run_blocking(
     addr: &str,
     port: u16,
     resolver: Option<Arc<Resolver>>,
     release: Option<Arc<ReleaseCallback>>,
+    pool: Option<Arc<PoolRegion>>,
     logger: Arc<dyn ILogger + Send + Sync>,
 ) -> Result<()> {
     let resolver = resolver.unwrap_or_else(|| Arc::new(|_| None));
@@ -332,11 +366,18 @@ pub fn run_blocking(
         PROTOCOL_VERSION, MAX_BATCH_SIZE
     ));
 
+    if pool.is_some() {
+        logger.info(&format!(
+            "remote-request-handler: memory-tier pool pre-registration enabled ({} MiB)",
+            pool.as_ref().unwrap().size / (1024 * 1024)
+        ));
+    }
+
     loop {
         match listener.accept() {
             Ok(conn) => {
                 logger.info("remote-request-handler: session accepted");
-                match handle_session(&conn, &resolver, &release, &logger) {
+                match handle_session(&conn, &resolver, &release, &pool, &logger) {
                     Ok(()) => {
                         logger.info("remote-request-handler: session closed normally");
                     }

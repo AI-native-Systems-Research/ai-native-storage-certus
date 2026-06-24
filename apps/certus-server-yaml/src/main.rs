@@ -185,6 +185,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let _ = dm_release.release_read(key);
             });
 
+        // Get memory-tier pool for pre-registration (avoids per-entry MR reg/dereg)
+        use interfaces::IMemoryTier;
+        let pool = stack.memory_tier.pool_info().map(|(base, size)| {
+            Arc::new(remote_request_handler::serve::PoolRegion { base, size })
+        });
+
         let rdma_logger = Arc::clone(&stack.logger)
             as Arc<dyn interfaces::ILogger + Send + Sync>;
         tokio::task::spawn_blocking(move || {
@@ -193,6 +199,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 rdma_port,
                 Some(resolver),
                 Some(release),
+                pool,
                 rdma_logger,
             ) {
                 eprintln!("remote-request-handler: listener failed: {e}");

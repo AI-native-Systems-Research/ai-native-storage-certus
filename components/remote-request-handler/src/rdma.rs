@@ -248,6 +248,34 @@ impl RdmaConnection {
         self.poll_completion_with_retry()
     }
 
+    /// Perform an RDMA Write from an offset within a pre-registered MR.
+    /// `local_addr` must be within the bounds of `pool_mr`.
+    pub fn rdma_write_from_pool(
+        &self,
+        pool_mr: &MemoryRegion,
+        local_addr: *const u8,
+        len: usize,
+        remote_addr: u64,
+        rkey: u32,
+    ) -> Result<()> {
+        // SAFETY: local_addr is within the pool_mr's registered region,
+        // verified by the caller (pointer from memory-tier pool).
+        let ret = unsafe {
+            ffi::rdma_test_rdma_write(
+                self.qp,
+                local_addr as *mut c_void,
+                len as u32,
+                pool_mr.lkey(),
+                remote_addr,
+                rkey,
+            )
+        };
+        if ret != 0 {
+            bail!("ibv_post_send (RDMA_WRITE pool) failed: {}", ret);
+        }
+        self.poll_completion_with_retry()
+    }
+
     /// Poll for a recv completion, returning the number of bytes received.
     fn poll_completion_bytes(&self) -> Result<usize> {
         let mut wc = ffi::ibv_wc {

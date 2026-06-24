@@ -119,3 +119,5 @@ exports:
     interface: ISPDKEnv
   - component: dispatch_map
     interface: IDispatchMap
+  - component: memory_tier
+    interface: IMemoryTier

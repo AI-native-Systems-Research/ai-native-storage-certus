@@ -48,5 +48,7 @@ fn main() -> Result<()> {
         args.addr, args.port
     ));
 
-    remote_request_handler::serve::run_blocking(&args.addr, args.port, None, None, logger)
+    remote_request_handler::serve::run_blocking(
+        &args.addr, args.port, None, None, None, logger,
+    )
 }
