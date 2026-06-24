@@ -105,7 +105,7 @@ impl LruList {
 
     /// Return up to `n` keys starting from the front (oldest).
     pub fn peek_front_n(&self, n: usize) -> Vec<CacheKey> {
-        let mut result = Vec::with_capacity(n);
+        let mut result = Vec::with_capacity(n.min(self.len as usize));
         let mut current = self.head;
         while let Some(idx) = current {
             if result.len() >= n {
