@@ -160,6 +160,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start RDMA remote-request-handler listener in background (optional: port 0 = disabled)
     let rdma_port = cli.rdma_port;
     if rdma_port > 0 {
+        logger.info("remote-request-handler: initializing");
         let dispatcher = Arc::clone(&stack.dispatcher);
         let resolver: Arc<remote_request_handler::serve::Resolver> = Arc::new(move |key| {
             match dispatcher.check(key) {
@@ -220,6 +221,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         libc::signal(libc::SIGTERM, libc::SIG_IGN);
     }
 
+    logger.info("remote-request-handler: shutting down");
     let _ = stack.dispatcher.shutdown();
     stack.spdk_env.fini();
     stack.logger.info("certus-server-yaml: shutdown complete");
