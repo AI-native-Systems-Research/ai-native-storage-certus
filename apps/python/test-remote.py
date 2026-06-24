@@ -375,14 +375,15 @@ def main():
     if "elapsed_ms" in results:
         total_entries = results["total_entries"]
         elapsed_s = results["elapsed_ms"] / 1000.0
-        lookup_bytes = total_entries * object_size
-        lookup_gbs = lookup_bytes / (1024**3) / elapsed_s if elapsed_s > 0 else 0
         print(f"  Completed: {results['iterations']} iterations, "
               f"{total_entries} total entries")
         print(f"  Time: {results['elapsed_ms']:.3f} ms")
         print(f"  Latency: {results['us_per_batch']:.1f} us/batch, "
               f"{results['us_per_entry']:.1f} us/entry")
-        print(f"  Throughput: {lookup_gbs:.3f} GB/s "
+        # Throughput is only meaningful once RDMA Write transfers actual object data.
+        # For now the handler confirms existence only (no payload transfer).
+        lookup_gbs = total_entries * object_size / (1024**3) / elapsed_s if elapsed_s > 0 else 0
+        print(f"  Peak throughput (if data transferred): {lookup_gbs:.3f} GB/s "
               f"({total_entries} x {object_size // (1024*1024)} MiB)")
     if "server_batches" in results:
         print(f"  Server confirmed: {results['server_batches']} batches processed")
@@ -417,7 +418,7 @@ def main():
     if "us_per_batch" in results:
         print(
             f"  Lookup (RDMA):   {results['us_per_batch']:.1f} us/batch, "
-            f"{results['us_per_entry']:.1f} us/entry, {lookup_gbs:.3f} GB/s"
+            f"{results['us_per_entry']:.1f} us/entry"
         )
     print(f"  Status:          {'PASS' if populated > 0 and results['success'] else 'FAIL'}")
     print()
