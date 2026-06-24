@@ -136,7 +136,11 @@ fn handle_session(
     Ok(())
 }
 
-/// Process a batch lookup with actual RDMA Write of data to remote memory.
+/// Process a batch lookup with pipelined RDMA Writes.
+///
+/// All writes except the last are posted unsignaled (no CQE). The last write
+/// is signaled — polling its completion guarantees all prior writes are done
+/// (InfiniBand ordering guarantee on RC QPs).
 fn process_batch_with_rdma_write(
     conn: &RdmaConnection,
     req: &proto::BatchLookupRequest,
@@ -144,15 +148,19 @@ fn process_batch_with_rdma_write(
     release: &Arc<ReleaseCallback>,
     pool_mr: &Option<crate::rdma::MemoryRegion>,
 ) -> Vec<proto::EntryResult> {
-    req.entries
-        .iter()
-        .map(|entry| {
-            match resolver(entry.cache_key) {
-                Some(resolved) => {
-                    let write_len = (resolved.size).min(entry.max_size) as usize;
+    let n = req.entries.len();
+    let mut results: Vec<proto::EntryResult> = Vec::with_capacity(n);
+    let mut pending_writes = 0usize;
 
-                    let result = if let Some(ref pmr) = pool_mr {
-                        // Fast path: use pre-registered pool MR (no reg/dereg per entry)
+    for (i, entry) in req.entries.iter().enumerate() {
+        match resolver(entry.cache_key) {
+            Some(resolved) => {
+                let write_len = (resolved.size).min(entry.max_size) as usize;
+                let is_last_write = i == n - 1;
+
+                let post_result = if let Some(ref pmr) = pool_mr {
+                    if is_last_write || pending_writes >= 62 {
+                        // Signaled write — generates CQE, guarantees all prior complete
                         conn.rdma_write_from_pool(
                             pmr,
                             resolved.ptr,
@@ -160,52 +168,80 @@ fn process_batch_with_rdma_write(
                             entry.remote_addr,
                             entry.rkey,
                         )
-                        .map(|()| write_len as u32)
                     } else {
-                        // Fallback: register per entry (slow path)
-                        (|| -> Result<u32> {
-                            let local_mr =
-                                conn.register_existing_mr(resolved.ptr, write_len)?;
-                            conn.rdma_write(
-                                &local_mr,
-                                write_len,
-                                entry.remote_addr,
-                                entry.rkey,
-                            )?;
-                            Ok(write_len as u32)
-                        })()
-                    };
+                        // Unsignaled write — no CQE, pipelined
+                        conn.post_rdma_write_unsignaled(
+                            pmr,
+                            resolved.ptr,
+                            write_len,
+                            entry.remote_addr,
+                            entry.rkey,
+                        )
+                    }
+                } else {
+                    // No pool MR: fallback to per-entry registration (always signaled)
+                    (|| -> Result<()> {
+                        let local_mr = conn.register_existing_mr(resolved.ptr, write_len)?;
+                        conn.rdma_write(&local_mr, write_len, entry.remote_addr, entry.rkey)
+                    })()
+                };
 
-                    // Release the read reference regardless of write success
-                    release(entry.cache_key);
+                release(entry.cache_key);
 
-                    match result {
-                        Ok(bytes_written) => proto::EntryResult {
+                match post_result {
+                    Ok(()) => {
+                        pending_writes += 1;
+                        results.push(proto::EntryResult {
                             cache_key: entry.cache_key,
                             success: true,
-                            bytes_written,
+                            bytes_written: write_len as u32,
                             error_code: proto::ErrorCode::Unspecified as i32,
                             error_message: String::new(),
-                        },
-                        Err(e) => proto::EntryResult {
+                        });
+                    }
+                    Err(e) => {
+                        results.push(proto::EntryResult {
                             cache_key: entry.cache_key,
                             success: false,
                             bytes_written: 0,
                             error_code: proto::ErrorCode::RdmaWriteFailed as i32,
                             error_message: e.to_string(),
-                        },
+                        });
                     }
                 }
-                None => proto::EntryResult {
+            }
+            None => {
+                // Key not found — if there are pending unsignaled writes and this is the
+                // last entry, we need a signaled fence to flush them.
+                if i == n - 1 && pending_writes > 0 {
+                    if let Some(ref pmr) = pool_mr {
+                        // Post a zero-length signaled write as a fence (flush prior writes)
+                        let _ = conn.rdma_write_from_pool(
+                            pmr,
+                            pmr.addr() as *const u8,
+                            0,
+                            entry.remote_addr,
+                            entry.rkey,
+                        );
+                    }
+                }
+
+                results.push(proto::EntryResult {
                     cache_key: entry.cache_key,
                     success: false,
                     bytes_written: 0,
                     error_code: proto::ErrorCode::KeyNotFound as i32,
                     error_message: "key not found".into(),
-                },
+                });
             }
-        })
-        .collect()
+        }
+    }
+
+    // If the last entry was a successful write, completion was already polled
+    // (signaled). If not (e.g., last entry was not-found but prior entries had
+    // unsignaled writes), we handled it with a fence above.
+
+    results
 }
 
 fn mtu_to_bytes(mtu: u32) -> u32 {

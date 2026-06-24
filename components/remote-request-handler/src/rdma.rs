@@ -250,6 +250,7 @@ impl RdmaConnection {
 
     /// Perform an RDMA Write from an offset within a pre-registered MR.
     /// `local_addr` must be within the bounds of `pool_mr`.
+    /// Blocks until completion (signaled).
     pub fn rdma_write_from_pool(
         &self,
         pool_mr: &MemoryRegion,
@@ -258,8 +259,7 @@ impl RdmaConnection {
         remote_addr: u64,
         rkey: u32,
     ) -> Result<()> {
-        // SAFETY: local_addr is within the pool_mr's registered region,
-        // verified by the caller (pointer from memory-tier pool).
+        // SAFETY: local_addr is within the pool_mr's registered region.
         let ret = unsafe {
             ffi::rdma_test_rdma_write(
                 self.qp,
@@ -274,6 +274,34 @@ impl RdmaConnection {
             bail!("ibv_post_send (RDMA_WRITE pool) failed: {}", ret);
         }
         self.poll_completion_with_retry()
+    }
+
+    /// Post an RDMA Write from the pool MR without waiting for completion (unsignaled).
+    /// The write is queued but no CQE is generated. Use `poll_completion` on
+    /// a subsequent signaled write to ensure all prior unsignaled writes complete.
+    pub fn post_rdma_write_unsignaled(
+        &self,
+        pool_mr: &MemoryRegion,
+        local_addr: *const u8,
+        len: usize,
+        remote_addr: u64,
+        rkey: u32,
+    ) -> Result<()> {
+        // SAFETY: local_addr is within the pool_mr's registered region.
+        let ret = unsafe {
+            ffi::rdma_test_rdma_write_unsignaled(
+                self.qp,
+                local_addr as *mut c_void,
+                len as u32,
+                pool_mr.lkey(),
+                remote_addr,
+                rkey,
+            )
+        };
+        if ret != 0 {
+            bail!("ibv_post_send (RDMA_WRITE unsignaled) failed: {}", ret);
+        }
+        Ok(())
     }
 
     /// Poll for a recv completion, returning the number of bytes received.

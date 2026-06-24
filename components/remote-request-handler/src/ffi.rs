@@ -334,6 +334,14 @@ extern "C" {
         remote_addr: u64,
         rkey: u32,
     ) -> c_int;
+    pub fn rdma_test_rdma_write_unsignaled(
+        qp: *mut ibv_qp,
+        buf: *mut c_void,
+        len: u32,
+        lkey: u32,
+        remote_addr: u64,
+        rkey: u32,
+    ) -> c_int;
     pub fn rdma_test_rdma_read(
         qp: *mut ibv_qp,
         buf: *mut c_void,
