@@ -77,6 +77,8 @@ class CompletionDispatcher:
             elif job_id in self._load_jobs:
                 self._load_jobs.discard(job_id)
                 loads[job_id] = success
+        if raw:
+            print(f"[DISP] poll -> {len(stores)} stores, {len(loads)} loads completed (pending: {len(self._store_jobs)}s/{len(self._load_jobs)}l)", flush=True)
         return stores, loads
 
 
@@ -108,6 +110,16 @@ class GpuToCertusHandler(OffloadingHandler):
         self._pending: deque[PendingJob] = deque()
         self._transfer_type: TransferType = ("GPU", "Certus")
 
+    def _do_store(self, job_id: int, gpu_block_ids: list, keys: list):
+        print(f"[STORE] _do_store ENTER job={job_id}", flush=True)
+        try:
+            result = self._engine.store_async(job_id, gpu_block_ids, keys)
+            print(f"[STORE] _do_store EXIT job={job_id} result={result}", flush=True)
+            return result
+        except Exception as e:
+            print(f"[STORE] _do_store EXCEPTION job={job_id}: {e}", flush=True)
+            raise
+
     def transfer_async(self, job_id: int, spec: TransferSpec) -> bool:
         src_spec, dst_spec = spec
         assert isinstance(src_spec, GPULoadStoreSpec)
@@ -116,8 +128,9 @@ class GpuToCertusHandler(OffloadingHandler):
         gpu_block_ids = list(src_spec.block_ids)
         keys = [loc.nvme_slab for loc in dst_spec.locations]
 
+        print(f"[STORE] transfer_async job={job_id} blocks={len(gpu_block_ids)}", flush=True)
         self._dispatcher.register_store(job_id)
-        self._pool.submit(self._engine.store_async, job_id, gpu_block_ids, keys)
+        self._pool.submit(self._do_store, job_id, gpu_block_ids, keys)
         self._pending.append(PendingJob(
             job_id=job_id,
             start_time=time.monotonic(),
@@ -131,6 +144,11 @@ class GpuToCertusHandler(OffloadingHandler):
         results: list[TransferResult] = []
         store_completions, _ = self._dispatcher.poll()
         now = time.monotonic()
+        if self._pending and not store_completions:
+            head = self._pending[0]
+            age = now - head.start_time
+            if age > 5.0:
+                print(f"[STORE] get_finished STALL: oldest job={head.job_id} age={age:.1f}s, {len(self._pending)} pending, poll returned 0", flush=True)
         while self._pending and self._pending[0].job_id in store_completions:
             job = self._pending.popleft()
             success = store_completions.pop(job.job_id)
@@ -146,6 +164,8 @@ class GpuToCertusHandler(OffloadingHandler):
             COUNTERS.store_blocks_completed += job.num_blocks
             COUNTERS.store_total_bytes += nbytes
             COUNTERS.store_latencies.append(elapsed * 1000)
+        if results:
+            print(f"[STORE] get_finished -> {len(results)} done, {len(self._pending)} pending", flush=True)
         return results
 
     def wait(self, job_ids: set[int]) -> None:
@@ -178,6 +198,7 @@ class CertusToGpuHandler(OffloadingHandler):
         gpu_block_ids = list(dst_spec.block_ids)
         keys = [loc.nvme_slab for loc in src_spec.locations]
 
+        print(f"[LOAD] transfer_async job={job_id} blocks={len(gpu_block_ids)}", flush=True)
         self._dispatcher.register_load(job_id)
         self._pool.submit(self._engine.load_async, job_id, gpu_block_ids, keys)
         self._pending.append(PendingJob(
@@ -193,6 +214,11 @@ class CertusToGpuHandler(OffloadingHandler):
         results: list[TransferResult] = []
         _, load_completions = self._dispatcher.poll()
         now = time.monotonic()
+        if self._pending and not load_completions:
+            head = self._pending[0]
+            age = now - head.start_time
+            if age > 5.0:
+                print(f"[LOAD] get_finished STALL: oldest job={head.job_id} age={age:.1f}s, {len(self._pending)} pending, poll returned 0", flush=True)
         while self._pending and self._pending[0].job_id in load_completions:
             job = self._pending.popleft()
             success = load_completions.pop(job.job_id)
@@ -208,6 +234,8 @@ class CertusToGpuHandler(OffloadingHandler):
             COUNTERS.load_blocks_completed += job.num_blocks
             COUNTERS.load_total_bytes += nbytes
             COUNTERS.load_latencies.append(elapsed * 1000)
+        if results:
+            print(f"[LOAD] get_finished -> {len(results)} done, {len(self._pending)} pending", flush=True)
         return results
 
     def wait(self, job_ids: set[int]) -> None:

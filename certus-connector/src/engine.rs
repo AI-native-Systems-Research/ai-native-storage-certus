@@ -12,7 +12,7 @@ use pyo3::types::PyDict;
 use component_core::query_interface;
 use interfaces::{
     CacheKey, DispatcherConfig, DmaAllocFn, DmaBuffer, GpuStream, IDispatchMap, IDispatcher,
-    IEvictionPolicy, IGpuServices, ILogger, IpcHandle, LookupResult,
+    IEvictionPolicy, IGpuServices, ILogger, IMemoryTier, IpcHandle, LookupResult,
 };
 
 use crate::keys;
@@ -154,6 +154,24 @@ impl EngineInner {
         dm.initialize()
             .map_err(|e| PyRuntimeError::new_err(format!("DispatchMap init failed: {e}")))?;
 
+        // --- Create memory tier ---
+        let mt_comp = memory_tier::MemoryTierComponent::new_default();
+        mt_comp
+            .eviction_policy
+            .connect(Arc::clone(&eviction_policy))
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire eviction_policy for memory-tier: {e}")))?;
+        let memory_tier: Arc<dyn IMemoryTier + Send + Sync> =
+            query_interface!(mt_comp, IMemoryTier)
+                .ok_or_else(|| PyRuntimeError::new_err("failed to query IMemoryTier"))?;
+        let mt_pool_size = if dram_cache_bytes > 0 {
+            dram_cache_bytes as usize
+        } else {
+            memory_tier::DEFAULT_POOL_SIZE
+        };
+        memory_tier
+            .initialize(mt_pool_size, numa_opt)
+            .map_err(|e| PyRuntimeError::new_err(format!("MemoryTier init failed: {e}")))?;
+
         // --- Create dispatcher ---
         let disp_comp = dispatcher::DispatcherComponent::new_default();
         disp_comp
@@ -172,6 +190,10 @@ impl EngineInner {
             .spdk_env
             .connect(Arc::clone(&spdk_iface))
             .map_err(|e| PyRuntimeError::new_err(format!("failed to bind spdk_env: {e}")))?;
+        disp_comp
+            .memory_tier
+            .connect(Arc::clone(&memory_tier))
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to bind memory_tier: {e}")))?;
 
         let dispatcher: Arc<dyn IDispatcher + Send + Sync> =
             query_interface!(disp_comp, IDispatcher)
@@ -517,6 +539,7 @@ impl EngineInner {
         self.ensure_init()?;
         let mut completions = Vec::new();
         let mut jobs = self.jobs.lock().unwrap();
+        eprintln!("[certus] poll_completions called, {} jobs in map", jobs.len());
 
         // First pass: check in-flight store jobs for stream completion.
         let in_flight_ids: Vec<u64> = jobs
@@ -525,9 +548,18 @@ impl EngineInner {
             .map(|(id, _)| *id)
             .collect();
 
+        if !in_flight_ids.is_empty() {
+            eprintln!("[certus] poll_completions: {} in-flight jobs", in_flight_ids.len());
+        }
+
         for id in &in_flight_ids {
             let job = jobs.get(id).unwrap();
             let stream_opt = { job.stream.lock().unwrap().take() };
+
+            if stream_opt.is_none() {
+                eprintln!("[certus] poll job={id}: stream is None, completed={}", job.completed.load(Ordering::Acquire));
+                continue;
+            }
 
             if let Some(stream) = stream_opt {
                 match self.gpu_services.stream_query(stream) {

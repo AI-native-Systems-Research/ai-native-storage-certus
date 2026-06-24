@@ -42,8 +42,12 @@ def _try_native_engine(extra_config: dict):
             "data_pci_addrs": extra_config.get("data_pci_addrs", []),
             "metadata_pci_addr": extra_config.get("metadata_pci_addr", ""),
             "gpu_block_size": int(extra_config.get("slab_size_bytes", 131072)),
+            "slab_size_bytes": int(extra_config.get("slab_size_bytes", 131072)),
+            "dram_cache_bytes": int(extra_config.get("dram_cache_bytes", 0)),
+            "numa_node": int(extra_config.get("numa_node", -1)),
         })
-    except (ImportError, RuntimeError):
+    except (ImportError, RuntimeError) as e:
+        print(f"[CERTUS] Native engine init failed: {e}", flush=True)
         return None
 
 
@@ -129,16 +133,21 @@ class CertusOffloadingSpec(OffloadingSpec):
         kv_caches,
         attn_backends=None,
     ) -> Iterator[tuple[type[LoadStoreSpec], type[LoadStoreSpec], OffloadingHandler]]:
+        from certus_connector._instrument import start_reporter
+        from certus_connector.handler import CompletionDispatcher
+        start_reporter()
         engine = self._get_engine()
         if self._gpu_to_certus is None:
+            dispatcher = CompletionDispatcher(engine)
             self._gpu_to_certus = GpuToCertusHandler(
                 engine=engine,
                 block_size_bytes=self._slab_size_bytes,
+                dispatcher=dispatcher,
             )
-        if self._certus_to_gpu is None:
             self._certus_to_gpu = CertusToGpuHandler(
                 engine=engine,
                 block_size_bytes=self._slab_size_bytes,
+                dispatcher=dispatcher,
             )
         yield GPULoadStoreSpec, CertusLoadStoreSpec, self._gpu_to_certus
         yield CertusLoadStoreSpec, GPULoadStoreSpec, self._certus_to_gpu
