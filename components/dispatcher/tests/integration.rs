@@ -130,6 +130,9 @@ impl IGpuServices for MockGpuServices {
     fn create_stream(&self) -> Result<GpuStream, String> {
         Ok(GpuStream(0x1 as *mut std::ffi::c_void))
     }
+    fn stream_query(&self, _stream: GpuStream) -> Result<bool, String> {
+        Ok(true)
+    }
     fn destroy_stream(&self, _stream: GpuStream) -> Result<(), String> {
         Ok(())
     }
@@ -149,6 +152,30 @@ impl IGpuServices for MockGpuServices {
         Ok(())
     }
     fn memcpy_h2d_async(
+        &self,
+        src: *const std::ffi::c_void,
+        dst: *mut std::ffi::c_void,
+        size: usize,
+        _stream: GpuStream,
+    ) -> Result<(), String> {
+        unsafe {
+            std::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, size);
+        }
+        Ok(())
+    }
+    fn dma_copy_to_host_async(
+        &self,
+        src: *const std::ffi::c_void,
+        dst: &DmaBuffer,
+        size: usize,
+        _stream: GpuStream,
+    ) -> Result<(), String> {
+        unsafe {
+            std::ptr::copy_nonoverlapping(src as *const u8, dst.as_ptr() as *mut u8, size);
+        }
+        Ok(())
+    }
+    fn memcpy_d2h_async(
         &self,
         src: *const std::ffi::c_void,
         dst: *mut std::ffi::c_void,

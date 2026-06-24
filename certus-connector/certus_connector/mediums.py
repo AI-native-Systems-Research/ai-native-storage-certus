@@ -12,6 +12,8 @@ from vllm.v1.kv_offload.abstract import LoadStoreSpec
 class BlockLocation:
     nvme_slab: int | None = None
     dram_slot: int | None = None
+    dram_ptr: int = 0
+    size: int = 0
 
 
 class CertusLoadStoreSpec(LoadStoreSpec):

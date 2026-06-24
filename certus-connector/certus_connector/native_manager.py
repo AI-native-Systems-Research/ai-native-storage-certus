@@ -54,36 +54,45 @@ class NativeCertusOffloadingManager(OffloadingManager):
         self._engine = engine
         self._events: list[OffloadingEvent] = []
 
-    def lookup(self, keys: Iterable[OffloadKey]) -> int | None:
-        int_keys = _keys_to_u64s(keys)
-        return self._engine.batch_check(int_keys)
+    def lookup(self, key: OffloadKey, req_context=None) -> bool | None:
+        int_key = _key_to_u64(key)
+        count = self._engine.batch_check([int_key])
+        result = count > 0
+        print(f"[MGR] lookup key={int_key} -> {result}", flush=True)
+        return result
 
-    def prepare_load(self, keys: Iterable[OffloadKey]) -> LoadStoreSpec:
+    def prepare_load(self, keys: Iterable[OffloadKey], req_context=None) -> LoadStoreSpec:
         int_keys = _keys_to_u64s(keys)
-        self._engine.prepare_load(int_keys)
-        # Store the original keys (not offsets) — the handler passes these to
-        # load_async(), which calls dispatcher.lookup(key) to re-discover the
-        # block location internally (DRAM vs NVMe) and perform the DMA.
-        locations = [BlockLocation(nvme_slab=k, dram_slot=None) for k in int_keys]
+        print(f"[MGR] prepare_load n={len(int_keys)}", flush=True)
+        results = self._engine.prepare_load(int_keys)
+        locations = [
+            BlockLocation(nvme_slab=k, dram_ptr=ptr, size=sz)
+            for k, (ptr, sz) in zip(int_keys, results)
+        ]
         return CertusLoadStoreSpec(locations)
 
     def touch(self, keys: Iterable[OffloadKey]) -> None:
         int_keys = _keys_to_u64s(keys)
+        print(f"[MGR] touch n={len(int_keys)}", flush=True)
         self._engine.touch(int_keys)
 
     def complete_load(self, keys: Iterable[OffloadKey]) -> None:
         int_keys = _keys_to_u64s(keys)
+        print(f"[MGR] complete_load n={len(int_keys)}", flush=True)
         self._engine.complete_load(int_keys)
 
-    def prepare_store(self, keys: Iterable[OffloadKey]) -> PrepareStoreOutput | None:
+    def prepare_store(self, keys: Iterable[OffloadKey], req_context=None) -> PrepareStoreOutput | None:
         keys_list = list(keys)
         int_keys = _keys_to_u64s(keys_list)
+        print(f"[MGR] prepare_store n={len(int_keys)}", flush=True)
 
         result = self._engine.prepare_store(int_keys)
         if result is None:
+            print(f"[MGR] prepare_store -> None (rejected)", flush=True)
             return None
 
         to_store_ints, evicted_ints = result
+        print(f"[MGR] prepare_store -> store={len(to_store_ints)} evict={len(evicted_ints)}", flush=True)
 
         to_store_keys = [keys_list[int_keys.index(k)] for k in to_store_ints]
         evicted_keys = [
@@ -111,6 +120,7 @@ class NativeCertusOffloadingManager(OffloadingManager):
 
     def complete_store(self, keys: Iterable[OffloadKey], success: bool = True) -> None:
         int_keys = _keys_to_u64s(keys)
+        print(f"[MGR] complete_store n={len(int_keys)} success={success}", flush=True)
         self._engine.complete_store(int_keys, success)
 
     def take_events(self) -> Iterable[OffloadingEvent]:
