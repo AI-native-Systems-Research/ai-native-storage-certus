@@ -70,6 +70,8 @@ struct Cli {
     max_eviction_attempts: usize,
 
     /// RDMA listener port for remote request handler (full-remote profile).
+    /// Requires --features rdma. Set to 0 to disable.
+    #[cfg(feature = "rdma")]
     #[arg(long = "rdma-port", default_value_t = 18515)]
     rdma_port: u16,
 }
@@ -158,58 +160,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     // Start RDMA remote-request-handler listener in background (optional: port 0 = disabled)
-    let rdma_port = cli.rdma_port;
-    if rdma_port > 0 {
-        logger.info("remote-request-handler: initializing");
+    #[cfg(feature = "rdma")]
+    {
+        let rdma_port = cli.rdma_port;
+        if rdma_port > 0 {
+            logger.info("remote-request-handler: initializing");
 
-        // Resolver: look up key in dispatch-map, return pointer to memory-tier data
-        let dm_resolve = Arc::clone(&stack.dispatch_map);
-        let resolver: Arc<remote_request_handler::serve::Resolver> = Arc::new(move |key| {
-            use interfaces::IDispatchMap;
-            match dm_resolve.lookup(key) {
-                Ok(interfaces::LookupResult::MemoryTier { pointer, size }) => {
-                    Some(remote_request_handler::serve::ResolvedEntry {
-                        ptr: pointer as *const u8,
-                        size,
-                    })
-                }
-                _ => None,
-            }
-        });
+            let dm_resolve = Arc::clone(&stack.dispatch_map);
+            let resolver: Arc<remote_request_handler::serve::Resolver> =
+                Arc::new(move |key| {
+                    use interfaces::IDispatchMap;
+                    match dm_resolve.lookup(key) {
+                        Ok(interfaces::LookupResult::MemoryTier { pointer, size }) => {
+                            Some(remote_request_handler::serve::ResolvedEntry {
+                                ptr: pointer as *const u8,
+                                size,
+                            })
+                        }
+                        _ => None,
+                    }
+                });
 
-        // Release callback: release the read reference after RDMA Write completes
-        let dm_release = Arc::clone(&stack.dispatch_map);
-        let release: Arc<remote_request_handler::serve::ReleaseCallback> =
-            Arc::new(move |key| {
-                use interfaces::IDispatchMap;
-                let _ = dm_release.release_read(key);
+            let dm_release = Arc::clone(&stack.dispatch_map);
+            let release: Arc<remote_request_handler::serve::ReleaseCallback> =
+                Arc::new(move |key| {
+                    use interfaces::IDispatchMap;
+                    let _ = dm_release.release_read(key);
+                });
+
+            use interfaces::IMemoryTier;
+            let pool = stack.memory_tier.pool_info().map(|(base, size)| {
+                Arc::new(remote_request_handler::serve::PoolRegion { base, size })
             });
 
-        // Get memory-tier pool for pre-registration (avoids per-entry MR reg/dereg)
-        use interfaces::IMemoryTier;
-        let pool = stack.memory_tier.pool_info().map(|(base, size)| {
-            Arc::new(remote_request_handler::serve::PoolRegion { base, size })
-        });
-
-        let rdma_logger = Arc::clone(&stack.logger)
-            as Arc<dyn interfaces::ILogger + Send + Sync>;
-        tokio::task::spawn_blocking(move || {
-            if let Err(e) = remote_request_handler::serve::run_blocking(
-                "0.0.0.0",
-                rdma_port,
-                Some(resolver),
-                Some(release),
-                pool,
-                rdma_logger,
-            ) {
-                eprintln!("remote-request-handler: listener failed: {e}");
-            }
-        });
-        logger.info(&format!(
-            "certus-server-yaml: RDMA remote-request-handler on port {rdma_port}"
-        ));
-    } else {
-        logger.info("certus-server-yaml: RDMA remote-request-handler disabled (port=0)");
+            let rdma_logger = Arc::clone(&stack.logger)
+                as Arc<dyn interfaces::ILogger + Send + Sync>;
+            tokio::task::spawn_blocking(move || {
+                if let Err(e) = remote_request_handler::serve::run_blocking(
+                    "0.0.0.0",
+                    rdma_port,
+                    Some(resolver),
+                    Some(release),
+                    pool,
+                    rdma_logger,
+                ) {
+                    eprintln!("remote-request-handler: listener failed: {e}");
+                }
+            });
+            logger.info(&format!(
+                "certus-server-yaml: RDMA remote-request-handler on port {rdma_port}"
+            ));
+        } else {
+            logger.info("certus-server-yaml: RDMA remote-request-handler disabled (port=0)");
+        }
     }
 
     let svc = DispatcherService::new(Arc::clone(&stack.dispatcher));
@@ -251,6 +254,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         libc::signal(libc::SIGTERM, libc::SIG_IGN);
     }
 
+    #[cfg(feature = "rdma")]
     logger.info("remote-request-handler: shutting down");
     let _ = stack.dispatcher.shutdown();
     stack.spdk_env.fini();
