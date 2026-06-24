@@ -1,6 +1,5 @@
 #include <infiniband/verbs.h>
-#include <string.h>
-
+#include <stdint.h>
 int rdma_test_post_send(struct ibv_qp *qp, struct ibv_send_wr *wr,
                         struct ibv_send_wr **bad_wr) {
     return ibv_post_send(qp, wr, bad_wr);

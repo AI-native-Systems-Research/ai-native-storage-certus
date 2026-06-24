@@ -107,8 +107,8 @@ init_order:
   - dispatch_map
   - memory_tier
   - remote_lookup
-  - remote_request_handler
   - dispatcher
+  - remote_request_handler
 
 exports:
   - component: logger
