@@ -188,16 +188,11 @@ class CertusOffloadingManager(OffloadingManager):
 
     # ── OffloadingManager interface ──
 
-    def lookup(self, keys: Iterable[OffloadKey]) -> int | None:
-        hit_count = 0
-        for key in keys:
-            block = self._blocks.get(key)
-            if block is None or not block.is_ready:
-                break
-            hit_count += 1
-        return hit_count
+    def lookup(self, key: OffloadKey, req_context=None) -> bool | None:
+        block = self._blocks.get(key)
+        return block is not None and block.is_ready
 
-    def prepare_load(self, keys: Iterable[OffloadKey]) -> LoadStoreSpec:
+    def prepare_load(self, keys: Iterable[OffloadKey], req_context=None) -> LoadStoreSpec:
         locations: list[BlockLocation] = []
         for key in keys:
             block = self._blocks.get(key)
@@ -230,7 +225,7 @@ class CertusOffloadingManager(OffloadingManager):
             assert block.ref_cnt > 0
             block.ref_cnt -= 1
 
-    def prepare_store(self, keys: Iterable[OffloadKey]) -> PrepareStoreOutput | None:
+    def prepare_store(self, keys: Iterable[OffloadKey], req_context=None) -> PrepareStoreOutput | None:
         keys_list = list(keys)
 
         # Filter already-stored
@@ -276,7 +271,6 @@ class CertusOffloadingManager(OffloadingManager):
         if evicted_keys and self._events is not None:
             self._events.append(OffloadingEvent(
                 keys=evicted_keys,
-                block_size=0,
                 medium=CertusLoadStoreSpec.medium(),
                 removed=True,
             ))
@@ -307,7 +301,6 @@ class CertusOffloadingManager(OffloadingManager):
         if stored_keys and self._events is not None:
             self._events.append(OffloadingEvent(
                 keys=stored_keys,
-                block_size=0,
                 medium=CertusLoadStoreSpec.medium(),
                 removed=False,
             ))

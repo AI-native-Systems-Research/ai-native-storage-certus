@@ -100,6 +100,20 @@ struct PendingWrite {
     drive_idx: usize,
 }
 
+/// State held between `populate_async` and `populate_finalize`.
+struct PendingPopulate {
+    /// Pointer to the memory-tier slot (owned by memory-tier, not us).
+    mem_ptr: *mut u8,
+    /// Original data size in bytes.
+    size: u32,
+}
+
+// SAFETY: mem_ptr points into the memory-tier pool which is process-global
+// and lives for the dispatcher's lifetime. Access is serialized by the
+// populate_async → populate_finalize protocol.
+unsafe impl Send for PendingPopulate {}
+unsafe impl Sync for PendingPopulate {}
+
 /// Holds one (block-device, extent-manager) pair for a data drive.
 #[allow(dead_code)]
 struct DataDrive {
@@ -163,6 +177,7 @@ define_component! {
             bg_evictor: Mutex<Option<BackgroundEvictor>>,
             data_drives: RwLock<Vec<DataDrive>>,
             pending_writes: Mutex<HashMap<CacheKey, PendingWrite>>,
+            pending_populates: Mutex<HashMap<CacheKey, PendingPopulate>>,
             pipeline_ring: RwLock<Option<pipeline::PipelineRing>>,
             warm_stream: AtomicU64,
             block_device_factory: Mutex<Option<BlockDeviceFactory>>,
@@ -1969,6 +1984,179 @@ impl IDispatcher for DispatcherComponent {
         Ok(())
     }
 
+    fn populate_async(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<GpuStream, DispatcherError> {
+        self.ensure_initialized()?;
+
+        if ipc_handle.size == 0 {
+            return Err(DispatcherError::InvalidParameter(
+                "IPC handle size must be > 0".into(),
+            ));
+        }
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
+        Self::evict_for_space(&dm, &mt, ipc_handle.size, key, max_attempts)?;
+
+        let mem_ptr = mt.insert(key, ipc_handle.size).map_err(|e| match e {
+            interfaces::MemoryTierError::AlreadyExists(k) => DispatcherError::AlreadyExists(k),
+            interfaces::MemoryTierError::PoolFull => {
+                DispatcherError::AllocationFailed("memory-tier pool full after eviction".into())
+            }
+            other => DispatcherError::AllocationFailed(other.to_string()),
+        })?;
+
+        let aligned_size = (ipc_handle.size as usize).next_multiple_of(4096);
+        // SAFETY: mem_ptr is valid for aligned_size bytes, owned by memory-tier.
+        let temp_buf = unsafe {
+            DmaBuffer::from_raw(
+                mem_ptr as *mut std::ffi::c_void,
+                aligned_size,
+                noop_free,
+                -1,
+            )
+        }
+        .map_err(|e| {
+            let _ = mt.remove(key);
+            DispatcherError::AllocationFailed(format!("DmaBuffer wrap failed: {e}"))
+        })?;
+
+        let gpu = self
+            .gpu_services
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
+
+        // Get the warm stream for async DMA.
+        let raw = self.warm_stream.load(Ordering::Acquire);
+        if raw == 0 {
+            // No stream available — fall back to sync populate path.
+            gpu.dma_copy_to_host(
+                ipc_handle.address as *const std::ffi::c_void,
+                &temp_buf,
+                ipc_handle.size as usize,
+            )
+            .map_err(|e| {
+                let _ = mt.remove(key);
+                DispatcherError::IoError(format!("GPU DMA copy failed: {e}"))
+            })?;
+            std::mem::forget(temp_buf);
+
+            // No async in-flight — register immediately.
+            dm.create_memory_tier_entry(key, mem_ptr, ipc_handle.size)
+                .map_err(|e| match e {
+                    interfaces::DispatchMapError::AlreadyExists(k) => {
+                        let _ = mt.remove(key);
+                        DispatcherError::AlreadyExists(k)
+                    }
+                    other => {
+                        let _ = mt.remove(key);
+                        DispatcherError::IoError(other.to_string())
+                    }
+                })?;
+            dm.downgrade_reference(key)
+                .map_err(|e| DispatcherError::IoError(e.to_string()))?;
+
+            let num_drives = {
+                let dd = self.data_drives.read();
+                dd.len().max(1)
+            };
+            let guard = self.bg_writer.lock().unwrap();
+            if let Some(ref writer) = *guard {
+                let _ = writer.enqueue(WriteJob {
+                    key,
+                    size: ipc_handle.size,
+                    device_index: Self::drive_index(key, num_drives),
+                });
+            }
+
+            return Ok(GpuStream(std::ptr::null_mut()));
+        }
+
+        let stream = GpuStream(raw as *mut std::ffi::c_void);
+
+        // Issue async D2H DMA copy.
+        gpu.dma_copy_to_host_async(
+            ipc_handle.address as *const std::ffi::c_void,
+            &temp_buf,
+            ipc_handle.size as usize,
+            stream,
+        )
+        .map_err(|e| {
+            let _ = mt.remove(key);
+            DispatcherError::IoError(format!("GPU async DMA copy failed: {e}"))
+        })?;
+
+        std::mem::forget(temp_buf);
+
+        // Stash state for populate_finalize.
+        self.pending_populates.lock().unwrap().insert(
+            key,
+            PendingPopulate {
+                mem_ptr,
+                size: ipc_handle.size,
+            },
+        );
+
+        Ok(stream)
+    }
+
+    fn populate_finalize(&self, key: CacheKey) -> Result<(), DispatcherError> {
+        let pending = self
+            .pending_populates
+            .lock()
+            .unwrap()
+            .remove(&key)
+            .ok_or(DispatcherError::KeyNotFound(key))?;
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        dm.create_memory_tier_entry(key, pending.mem_ptr, pending.size)
+            .map_err(|e| match e {
+                interfaces::DispatchMapError::AlreadyExists(k) => {
+                    let _ = mt.remove(key);
+                    DispatcherError::AlreadyExists(k)
+                }
+                other => {
+                    let _ = mt.remove(key);
+                    DispatcherError::IoError(other.to_string())
+                }
+            })?;
+
+        dm.downgrade_reference(key)
+            .map_err(|e| DispatcherError::IoError(e.to_string()))?;
+
+        let num_drives = {
+            let dd = self.data_drives.read();
+            dd.len().max(1)
+        };
+        let guard = self.bg_writer.lock().unwrap();
+        if let Some(ref writer) = *guard {
+            let _ = writer.enqueue(WriteJob {
+                key,
+                size: pending.size,
+                device_index: Self::drive_index(key, num_drives),
+            });
+        }
+
+        Ok(())
+    }
+
     fn prepare_store(&self, key: CacheKey, size: u32) -> Result<Arc<DmaBuffer>, DispatcherError> {
         self.ensure_initialized()?;
         self.log_info(&format!("dispatcher: prepare_store key={key} size={size}"));
@@ -2910,6 +3098,9 @@ mod tests {
         fn create_stream(&self) -> Result<GpuStream, String> {
             Ok(GpuStream(0x1 as *mut std::ffi::c_void))
         }
+        fn stream_query(&self, _stream: GpuStream) -> Result<bool, String> {
+            Ok(true)
+        }
         fn destroy_stream(&self, _stream: GpuStream) -> Result<(), String> {
             Ok(())
         }
@@ -2930,6 +3121,30 @@ mod tests {
             Ok(())
         }
         fn memcpy_h2d_async(
+            &self,
+            src: *const std::ffi::c_void,
+            dst: *mut std::ffi::c_void,
+            size: usize,
+            _stream: GpuStream,
+        ) -> Result<(), String> {
+            unsafe {
+                std::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, size);
+            }
+            Ok(())
+        }
+        fn dma_copy_to_host_async(
+            &self,
+            src: *const std::ffi::c_void,
+            dst: &DmaBuffer,
+            size: usize,
+            _stream: GpuStream,
+        ) -> Result<(), String> {
+            unsafe {
+                std::ptr::copy_nonoverlapping(src as *const u8, dst.as_ptr() as *mut u8, size);
+            }
+            Ok(())
+        }
+        fn memcpy_d2h_async(
             &self,
             src: *const std::ffi::c_void,
             dst: *mut std::ffi::c_void,
@@ -2970,6 +3185,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3014,6 +3230,7 @@ mod tests {
             Mutex::new(None),
             RwLock::new(Vec::new()),
             Mutex::new(HashMap::new()),
+            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3030,6 +3247,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3049,6 +3267,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3073,6 +3292,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3099,6 +3319,7 @@ mod tests {
             Mutex::new(None),
             RwLock::new(Vec::new()),
             Mutex::new(HashMap::new()),
+            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3124,6 +3345,7 @@ mod tests {
             Mutex::new(None),
             RwLock::new(Vec::new()),
             Mutex::new(HashMap::new()),
+            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3144,6 +3366,7 @@ mod tests {
             Mutex::new(None),
             RwLock::new(Vec::new()),
             Mutex::new(HashMap::new()),
+            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3163,6 +3386,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3188,6 +3412,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3217,6 +3442,7 @@ mod tests {
             Mutex::new(None),
             RwLock::new(Vec::new()),
             Mutex::new(HashMap::new()),
+            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3235,6 +3461,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3255,6 +3482,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3307,6 +3535,7 @@ mod tests {
             Mutex::new(None),
             RwLock::new(Vec::new()),
             Mutex::new(HashMap::new()),
+            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3336,6 +3565,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3410,6 +3640,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3738,6 +3969,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
+            Mutex::new(HashMap::new()),
             Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
