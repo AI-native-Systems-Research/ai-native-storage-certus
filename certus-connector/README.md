@@ -19,8 +19,7 @@ CertusOffloadingSpec (OffloadingSpec)       ← OUR plugin entry point
   │  creates ONE shared CertusEngine instance:
   │
   ├─ get_manager() → OffloadingManager     ← allocation / eviction decisions
-  │     ├─ NativeCertusOffloadingManager       (production, wraps CertusEngine)
-  │     └─ CertusOffloadingManager             (mock, pure Python for testing)
+  │     └─ NativeCertusOffloadingManager       (wraps CertusEngine)
   │
   └─ get_handlers() → OffloadingHandler    ← actual GPU ↔ storage DMA
         ├─ GpuToCertusHandler(engine)          (store: GPU → DRAM staging → NVMe)
@@ -58,14 +57,14 @@ The dispatcher internally creates NVMe block devices and extent managers during 
 | `src/engine.rs` | Wires the Rust component stack (creates, connects, initializes) |
 | `src/keys.rs` | OffloadKey (u64) to CacheKey mapping |
 | `certus_connector/spec.py` | `CertusOffloadingSpec` — vLLM OffloadingSpec implementation |
-| `certus_connector/manager.py` | Mock manager (pure Python, for testing without hardware) |
+| `certus_connector/manager.py` | Python-only OffloadingManager (unused, retained as reference) |
 | `certus_connector/native_manager.py` | Production manager (thin proxy to `certus_native.CertusEngine`) |
 | `certus_connector/handler.py` | Transfer handlers (GPU ↔ Certus I/O) |
 | `certus_connector/mediums.py` | `CertusLoadStoreSpec` medium definition |
 
 ## Build
 
-Requires SPDK and CUDA for full native build. Without hardware, the mock manager path works for development/testing.
+Requires SPDK and CUDA. The native engine is mandatory — there is no mock fallback.
 
 ```bash
 # Python tests (no hardware needed)
@@ -92,7 +91,6 @@ cargo check -p certus-connector
 }
 ```
 
-Set `"use_native": false` to force the mock manager (for testing without hardware).
 
 ## OffloadingManager semantics (native path contract)
 
