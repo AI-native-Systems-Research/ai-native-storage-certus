@@ -32,17 +32,23 @@ from certus_connector.mediums import CertusLoadStoreSpec
 from certus_connector.native_manager import NativeCertusOffloadingManager
 
 
-def _create_native_engine(extra_config: dict):
-    """Create a certus_native.CertusEngine. Raises on failure."""
-    import certus_native
-    return certus_native.CertusEngine({
-        "data_pci_addrs": extra_config.get("data_pci_addrs", []),
-        "metadata_pci_addr": extra_config.get("metadata_pci_addr", ""),
-        "gpu_block_size": int(extra_config.get("slab_size_bytes", 131072)),
-        "slab_size_bytes": int(extra_config.get("slab_size_bytes", 131072)),
-        "dram_cache_bytes": int(extra_config.get("dram_cache_bytes", 0)),
-        "numa_node": int(extra_config.get("numa_node", -1)),
-    })
+_ENGINE_SINGLETON = None
+
+
+def _get_or_create_engine(extra_config: dict):
+    """Process-level singleton — SPDK can only init once per process."""
+    global _ENGINE_SINGLETON
+    if _ENGINE_SINGLETON is None:
+        import certus_native
+        _ENGINE_SINGLETON = certus_native.CertusEngine({
+            "data_pci_addrs": extra_config.get("data_pci_addrs", []),
+            "metadata_pci_addr": extra_config.get("metadata_pci_addr", ""),
+            "gpu_block_size": int(extra_config.get("slab_size_bytes", 131072)),
+            "slab_size_bytes": int(extra_config.get("slab_size_bytes", 131072)),
+            "dram_cache_bytes": int(extra_config.get("dram_cache_bytes", 0)),
+            "numa_node": int(extra_config.get("numa_node", -1)),
+        })
+    return _ENGINE_SINGLETON
 
 
 class CertusOffloadingSpec(OffloadingSpec):
@@ -72,9 +78,9 @@ class CertusOffloadingSpec(OffloadingSpec):
         self._certus_to_gpu: CertusToGpuHandler | None = None
 
     def _get_engine(self):
-        """Get the engine for handlers — same instance used by the manager."""
+        """Get the engine — process-level singleton shared across spec instances."""
         if self._native_engine is None:
-            self._native_engine = _create_native_engine(self.extra_config)
+            self._native_engine = _get_or_create_engine(self.extra_config)
         return self._native_engine
 
     def get_manager(self) -> OffloadingManager:
