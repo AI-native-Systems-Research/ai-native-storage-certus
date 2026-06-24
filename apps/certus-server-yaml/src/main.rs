@@ -159,6 +159,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         stack_config.memory_tier_size / (1024 * 1024)
     ));
 
+    // RDMA listener shutdown handle (used during graceful shutdown)
+    #[cfg(feature = "rdma")]
+    let mut rdma_shutdown_handle: Option<Arc<remote_request_handler::rdma::RdmaListener>> = None;
+
     // Start RDMA remote-request-handler listener in background (optional: port 0 = disabled)
     #[cfg(feature = "rdma")]
     {
@@ -213,18 +217,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let rdma_logger = Arc::clone(&stack.logger)
                 as Arc<dyn interfaces::ILogger + Send + Sync>;
+
+            let rdma_listener = remote_request_handler::serve::bind_listener(
+                "0.0.0.0",
+                rdma_port,
+                logger.as_ref(),
+            )
+            .map_err(|e| format!("remote-request-handler: bind failed: {e}"))?;
+
+            rdma_shutdown_handle = Some(Arc::clone(&rdma_listener));
             tokio::task::spawn_blocking(move || {
-                let log = Arc::clone(&rdma_logger);
-                if let Err(e) = remote_request_handler::serve::run_blocking(
-                    "0.0.0.0",
-                    rdma_port,
+                remote_request_handler::serve::serve_loop(
+                    &rdma_listener,
                     Some(resolver),
                     Some(release),
                     pool,
                     rdma_logger,
-                ) {
-                    log.error(&format!("remote-request-handler: listener failed: {e}"));
-                }
+                );
             });
             logger.info(&format!(
                 "certus-server-yaml: RDMA remote-request-handler on port {rdma_port}"
@@ -273,13 +282,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         libc::signal(libc::SIGTERM, libc::SIG_IGN);
     }
 
+    // Shut down RDMA listener (unblocks the accept loop)
     #[cfg(feature = "rdma")]
-    logger.info("remote-request-handler: shutting down");
+    if let Some(ref handle) = rdma_shutdown_handle {
+        logger.info("remote-request-handler: shutting down");
+        handle.shutdown();
+    }
+
     let _ = stack.dispatcher.shutdown();
     stack.spdk_env.fini();
     stack.logger.info("certus-server-yaml: shutdown complete");
 
-    // Force exit — the RDMA listener's blocking accept loop (spawn_blocking)
-    // holds a thread that can't be interrupted, preventing tokio runtime shutdown.
-    std::process::exit(0);
+    Ok(())
 }

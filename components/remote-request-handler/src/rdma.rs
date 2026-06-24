@@ -496,19 +496,28 @@ fn create_qp(
 
 /// Listen for RDMA connections on the given address and port.
 /// Returns a listener handle (channel + listen_id) that can accept connections.
+///
+/// Call `shutdown()` from another thread to unblock a pending `accept()` and
+/// allow the serve loop to exit gracefully.
 pub struct RdmaListener {
     channel: *mut ffi::rdma_event_channel,
     listen_id: *mut ffi::rdma_cm_id,
+    shutdown: std::sync::atomic::AtomicBool,
 }
 
-// SAFETY: RdmaListener is used from the listener task only.
+// SAFETY: RdmaListener is used from the listener task only (accept is single-threaded).
+// shutdown is AtomicBool (safe for cross-thread signaling).
 unsafe impl Send for RdmaListener {}
+unsafe impl Sync for RdmaListener {}
 
 impl Drop for RdmaListener {
     fn drop(&mut self) {
         // SAFETY: Both pointers were allocated by rdma-core.
+        // listen_id may already be destroyed by shutdown().
         unsafe {
-            if !self.listen_id.is_null() {
+            if !self.listen_id.is_null()
+                && !self.shutdown.load(std::sync::atomic::Ordering::Acquire)
+            {
                 ffi::rdma_destroy_id(self.listen_id);
             }
             if !self.channel.is_null() {
@@ -569,10 +578,35 @@ impl RdmaListener {
             bail!("rdma_listen failed: {}", ret);
         }
 
-        Ok(RdmaListener { channel, listen_id })
+        Ok(RdmaListener {
+            channel,
+            listen_id,
+            shutdown: std::sync::atomic::AtomicBool::new(false),
+        })
+    }
+
+    /// Signal the listener to stop. Destroys the listen ID which unblocks
+    /// any pending `accept()` call (rdma_get_cm_event returns error).
+    /// Safe to call from another thread.
+    pub fn shutdown(&self) {
+        self.shutdown
+            .store(true, std::sync::atomic::Ordering::Release);
+        // SAFETY: Destroying the listen_id causes rdma_get_cm_event to
+        // return an error, unblocking the accept loop.
+        unsafe {
+            if !self.listen_id.is_null() {
+                ffi::rdma_destroy_id(self.listen_id);
+            }
+        }
+    }
+
+    /// Returns true if shutdown has been signaled.
+    pub fn is_shutdown(&self) -> bool {
+        self.shutdown.load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Wait for and accept one incoming connection. Blocking call.
+    /// Returns Err if the listener has been shut down.
     pub fn accept(&self) -> Result<RdmaConnection> {
         let event = wait_for_event(self.channel, ffi::RDMA_CM_EVENT_CONNECT_REQUEST)?;
         // SAFETY: event is valid after wait_for_event success.

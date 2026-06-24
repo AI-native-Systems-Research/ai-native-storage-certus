@@ -379,34 +379,45 @@ fn log_rdma_devices(logger: &dyn ILogger) {
     unsafe { ffi::ibv_free_device_list(dev_list) };
 }
 
-/// Run the RDMA handler server with data transfer via RDMA Write.
+/// Bind the RDMA listener and return a handle for shutdown.
 ///
-/// - `resolver`: returns a pointer+size to cached data for a given key (holds read ref)
-/// - `release`: called after RDMA Write completes to release the read reference
-/// - `pool`: memory-tier pool region for pre-registration (avoids per-entry MR reg/dereg)
-/// - If `resolver` is None, all lookups return "not found" (standalone test mode)
-pub fn run_blocking(
+/// Call `serve_loop` with the returned listener to start accepting connections.
+/// Call `listener.shutdown()` from another thread to unblock `serve_loop`.
+pub fn bind_listener(
     addr: &str,
     port: u16,
-    resolver: Option<Arc<Resolver>>,
-    release: Option<Arc<ReleaseCallback>>,
-    pool: Option<Arc<PoolRegion>>,
-    logger: Arc<dyn ILogger + Send + Sync>,
-) -> Result<()> {
-    let resolver = resolver.unwrap_or_else(|| Arc::new(|_| None));
-    let release: Arc<ReleaseCallback> = release.unwrap_or_else(|| Arc::new(|_| {}));
-
-    log_rdma_devices(logger.as_ref());
+    logger: &dyn ILogger,
+) -> Result<Arc<RdmaListener>> {
+    log_rdma_devices(logger);
 
     logger.info(&format!(
         "remote-request-handler: binding RDMA listener on {}:{}",
         addr, port
     ));
-    let listener = RdmaListener::bind(addr, port)?;
+    let listener = Arc::new(RdmaListener::bind(addr, port)?);
     logger.info(&format!(
         "remote-request-handler: listener ready (protocol_version={}, max_batch_size={})",
         PROTOCOL_VERSION, MAX_BATCH_SIZE
     ));
+
+    Ok(listener)
+}
+
+/// Run the accept loop. Blocks until `listener.shutdown()` is called or an error occurs.
+///
+/// - `resolver`: returns a pointer+size to cached data for a given key (holds read ref)
+/// - `release`: called after RDMA Write completes to release the read reference
+/// - `pool`: memory-tier pool region for pre-registration (avoids per-entry MR reg/dereg)
+/// - If `resolver` is None, all lookups return "not found" (standalone test mode)
+pub fn serve_loop(
+    listener: &Arc<RdmaListener>,
+    resolver: Option<Arc<Resolver>>,
+    release: Option<Arc<ReleaseCallback>>,
+    pool: Option<Arc<PoolRegion>>,
+    logger: Arc<dyn ILogger + Send + Sync>,
+) {
+    let resolver = resolver.unwrap_or_else(|| Arc::new(|_| None));
+    let release: Arc<ReleaseCallback> = release.unwrap_or_else(|| Arc::new(|_| {}));
 
     if pool.is_some() {
         logger.info(&format!(
@@ -428,12 +439,29 @@ pub fn run_blocking(
                     }
                 }
             }
+            Err(_) if listener.is_shutdown() => {
+                logger.info("remote-request-handler: listener shut down");
+                break;
+            }
             Err(e) => {
                 logger.error(&format!("remote-request-handler: accept error: {e}"));
                 break;
             }
         }
     }
+}
 
+/// Convenience: bind + serve in one call (for standalone binaries).
+/// Blocks until an error occurs. No graceful shutdown support.
+pub fn run_blocking(
+    addr: &str,
+    port: u16,
+    resolver: Option<Arc<Resolver>>,
+    release: Option<Arc<ReleaseCallback>>,
+    pool: Option<Arc<PoolRegion>>,
+    logger: Arc<dyn ILogger + Send + Sync>,
+) -> Result<()> {
+    let listener = bind_listener(addr, port, logger.as_ref())?;
+    serve_loop(&listener, resolver, release, pool, logger);
     Ok(())
 }
