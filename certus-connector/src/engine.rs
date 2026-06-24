@@ -338,31 +338,62 @@ impl EngineInner {
         Ok(())
     }
 
-    /// Pin blocks for reading (protect from eviction) and return their
-    /// storage offsets. Assumes all keys are already stored and ready.
+    /// Pin blocks for reading and return DRAM pointers for H2D DMA.
     ///
-    /// Uses `dispatch_map.lookup()` which atomically increments `read_ref`
-    /// and returns the block location. Blocks with `read_ref > 0` cannot
-    /// be evicted or removed.
-    /// Caller MUST call `complete_load` when DMA is done.
-    pub fn prepare_load(&self, keys: &[u64]) -> PyResult<Vec<u64>> {
+    /// For MemoryTier keys: takes read_ref, returns pointer directly.
+    /// For BlockDevice keys: promotes to memory-tier (NVMe→DRAM), then
+    /// takes read_ref on the new MemoryTier entry.
+    ///
+    /// Returns Vec<(dram_ptr, size)> for each key. Caller MUST call
+    /// `complete_load` when GPU DMA is done to release read_refs.
+    pub fn prepare_load(&self, keys: &[u64]) -> PyResult<Vec<(u64, u32)>> {
         self.ensure_init()?;
         let cache_keys = keys::to_cache_keys(keys);
-        let mut offsets = Vec::with_capacity(cache_keys.len());
 
+        // First pass: identify which keys need NVMe→DRAM promotion.
+        let mut needs_promote: Vec<CacheKey> = Vec::new();
+        for key in &cache_keys {
+            match self.dispatch_map.lookup(*key) {
+                Ok(LookupResult::BlockDevice { .. }) => {
+                    let _ = self.dispatch_map.release_read(*key);
+                    needs_promote.push(*key);
+                }
+                Ok(_) => {
+                    let _ = self.dispatch_map.release_read(*key);
+                }
+                Err(_) => {}
+            }
+        }
+
+        // Promote cold keys (NVMe→DRAM). This is synchronous but batched
+        // across drives internally.
+        if !needs_promote.is_empty() {
+            self.dispatcher.promote_to_memory_tier(&needs_promote);
+        }
+
+        // Second pass: take read_refs and collect DRAM pointers.
+        let mut results = Vec::with_capacity(cache_keys.len());
         for (i, key) in cache_keys.iter().enumerate() {
             match self.dispatch_map.lookup(*key) {
-                Ok(LookupResult::BlockDevice { offset }) => {
-                    offsets.push(offset);
+                Ok(LookupResult::MemoryTier { pointer, size }) => {
+                    results.push((pointer as u64, size));
                 }
-                Ok(LookupResult::MemoryTier { .. }) => {
-                    offsets.push(*key);
+                Ok(LookupResult::Staging { buffer }) => {
+                    let ptr = buffer.as_ptr() as u64;
+                    let size = buffer.len() as u32;
+                    results.push((ptr, size));
                 }
-                Ok(LookupResult::Staging { .. }) => {
-                    offsets.push(*key);
+                Ok(LookupResult::BlockDevice { .. }) => {
+                    // Promotion failed for this key — rollback and error.
+                    let _ = self.dispatch_map.release_read(*key);
+                    for prev_key in &cache_keys[..i] {
+                        let _ = self.dispatch_map.release_read(*prev_key);
+                    }
+                    return Err(PyRuntimeError::new_err(format!(
+                        "prepare_load: key {key} still on BlockDevice after promotion"
+                    )));
                 }
                 Ok(LookupResult::NotExist) => {
-                    // Rollback: release reads we already took
                     for prev_key in &cache_keys[..i] {
                         let _ = self.dispatch_map.release_read(*prev_key);
                     }
@@ -379,7 +410,6 @@ impl EngineInner {
                     )));
                 }
                 Err(e) => {
-                    // Rollback: release reads we already took
                     for prev_key in &cache_keys[..i] {
                         let _ = self.dispatch_map.release_read(*prev_key);
                     }
@@ -390,7 +420,7 @@ impl EngineInner {
             }
         }
 
-        Ok(offsets)
+        Ok(results)
     }
 
     /// Unpin blocks after load DMA completes. Decrements `read_ref` so
@@ -400,17 +430,67 @@ impl EngineInner {
         let cache_keys = keys::to_cache_keys(keys);
 
         for key in &cache_keys {
-            self.dispatch_map.release_read(*key).map_err(|e| {
-                PyRuntimeError::new_err(format!(
-                    "complete_load: release_read failed for key {key}: {e:?}"
-                ))
-            })?;
+            let _ = self.dispatch_map.release_read(*key);
         }
 
         Ok(())
     }
 
     // ─── Handler-level operations ──────────────────────────────────────
+
+    /// Raw DRAM→GPU DMA transfer. No dispatch-map interaction.
+    ///
+    /// Takes pre-computed DRAM source pointers (from `prepare_load`) and
+    /// issues async H2D copies. Returns immediately; completion is detected
+    /// by `poll_completions` via stream synchronization.
+    pub fn load_dma(&self, job_id: u64, gpu_block_ids: &[u64], src_ptrs: &[u64]) -> PyResult<bool> {
+        self.ensure_init()?;
+
+        if gpu_block_ids.len() != src_ptrs.len() {
+            return Err(PyRuntimeError::new_err(
+                "gpu_block_ids and src_ptrs must have same length",
+            ));
+        }
+
+        let stream = self.gpu_services.create_stream().map_err(|e| {
+            PyRuntimeError::new_err(format!("load_dma: create_stream failed: {e}"))
+        })?;
+
+        let mut all_ok = true;
+        for (i, src_ptr) in src_ptrs.iter().enumerate() {
+            let block_id = gpu_block_ids[i];
+            let gpu_ptr = self.gpu_base_ptr + block_id * self.gpu_block_size;
+
+            if let Err(e) = self.gpu_services.memcpy_h2d_async(
+                *src_ptr as *const std::ffi::c_void,
+                gpu_ptr as *mut std::ffi::c_void,
+                self.gpu_block_size as usize,
+                stream,
+            ) {
+                eprintln!("[certus] load_dma memcpy_h2d_async failed block_id={block_id}: {e}");
+                all_ok = false;
+                break;
+            }
+        }
+
+        let cache_keys = gpu_block_ids.iter().map(|&id| id as CacheKey).collect();
+        let completed = !all_ok;
+        let job = Arc::new(TransferJob {
+            kind: JobKind::Load,
+            keys: cache_keys,
+            gpu_block_ids: gpu_block_ids.to_vec(),
+            completed: AtomicBool::new(completed),
+            success: AtomicBool::new(all_ok),
+            stream: Mutex::new(if all_ok { Some(stream) } else { None }),
+        });
+
+        {
+            let mut jobs = self.jobs.lock().unwrap();
+            jobs.insert(job_id, job);
+        }
+
+        Ok(all_ok)
+    }
 
     /// Submit async GPU→DRAM→NVMe transfer (store).
     ///

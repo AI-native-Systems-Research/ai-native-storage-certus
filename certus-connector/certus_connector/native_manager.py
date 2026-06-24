@@ -64,8 +64,11 @@ class NativeCertusOffloadingManager(OffloadingManager):
     def prepare_load(self, keys: Iterable[OffloadKey], req_context=None) -> LoadStoreSpec:
         int_keys = _keys_to_u64s(keys)
         print(f"[MGR] prepare_load n={len(int_keys)}", flush=True)
-        self._engine.prepare_load(int_keys)
-        locations = [BlockLocation(nvme_slab=k, dram_slot=None) for k in int_keys]
+        results = self._engine.prepare_load(int_keys)
+        locations = [
+            BlockLocation(nvme_slab=k, dram_ptr=ptr, size=sz)
+            for k, (ptr, sz) in zip(int_keys, results)
+        ]
         return CertusLoadStoreSpec(locations)
 
     def touch(self, keys: Iterable[OffloadKey]) -> None:

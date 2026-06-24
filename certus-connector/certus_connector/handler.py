@@ -173,10 +173,10 @@ class CertusToGpuHandler(OffloadingHandler):
         assert isinstance(dst_spec, GPULoadStoreSpec)
 
         gpu_block_ids = list(dst_spec.block_ids)
-        keys = [loc.nvme_slab for loc in src_spec.locations]
+        src_ptrs = [loc.dram_ptr for loc in src_spec.locations]
 
         self._dispatcher.register_load(job_id)
-        self._engine.load_async(job_id, gpu_block_ids, keys)
+        self._engine.load_dma(job_id, gpu_block_ids, src_ptrs)
         self._pending.append(PendingJob(
             job_id=job_id,
             start_time=time.monotonic(),

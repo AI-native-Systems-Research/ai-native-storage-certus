@@ -100,9 +100,9 @@ impl CertusEngine {
         self.inner.complete_store(&keys, success)
     }
 
-    /// Pin blocks for reading (protect from eviction) and return their
-    /// storage offsets. Call complete_load when DMA finishes.
-    fn prepare_load(&self, keys: Vec<u64>) -> PyResult<Vec<u64>> {
+    /// Pin blocks for reading, promote cold keys to DRAM, return
+    /// (dram_ptr, size) for each key. Call complete_load when GPU DMA finishes.
+    fn prepare_load(&self, keys: Vec<u64>) -> PyResult<Vec<(u64, u32)>> {
         self.inner.prepare_load(&keys)
     }
 
@@ -123,9 +123,14 @@ impl CertusEngine {
         self.inner.store_async(job_id, &gpu_block_ids, &keys)
     }
 
-    /// Submit async NVMe/DRAM→GPU transfer.
+    /// Submit async NVMe/DRAM→GPU transfer (legacy — use load_dma instead).
     fn load_async(&self, job_id: u64, gpu_block_ids: Vec<u64>, keys: Vec<u64>) -> PyResult<bool> {
         self.inner.load_async(job_id, &gpu_block_ids, &keys)
+    }
+
+    /// Raw DRAM→GPU async DMA. Takes pre-computed source pointers from prepare_load.
+    fn load_dma(&self, job_id: u64, gpu_block_ids: Vec<u64>, src_ptrs: Vec<u64>) -> PyResult<bool> {
+        self.inner.load_dma(job_id, &gpu_block_ids, &src_ptrs)
     }
 
     /// Poll for completed transfers. Returns list of (job_id, success).
