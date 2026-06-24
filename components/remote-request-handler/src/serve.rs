@@ -16,12 +16,29 @@ use crate::session::{Session, SessionConfig, MAX_BATCH_SIZE};
 const PROTOCOL_VERSION: u32 = 1;
 const MSG_BUF_SIZE: usize = 8192;
 
-/// Resolver function type: given a CacheKey, returns Some(data) if found, None otherwise.
-pub type Resolver = dyn Fn(u64) -> Option<Vec<u8>> + Send + Sync;
+/// A resolved cache entry: pointer to data in the memory-tier pool and its size.
+pub struct ResolvedEntry {
+    pub ptr: *const u8,
+    pub size: u32,
+}
+
+// SAFETY: The pointer references memory in the memory-tier pool which is
+// a long-lived mmap'd region. The caller holds a read reference that
+// prevents eviction while this entry is in use.
+unsafe impl Send for ResolvedEntry {}
+unsafe impl Sync for ResolvedEntry {}
+
+/// Resolver function: given a CacheKey, returns pointer+size if found in memory-tier.
+/// The resolver must hold a read reference on the key until the returned entry is consumed.
+pub type Resolver = dyn Fn(u64) -> Option<ResolvedEntry> + Send + Sync;
+
+/// Release callback: called after RDMA Write completes to release the read reference.
+pub type ReleaseCallback = dyn Fn(u64) + Send + Sync;
 
 fn handle_session(
-    conn: RdmaConnection,
+    conn: &RdmaConnection,
     resolver: &Arc<Resolver>,
+    release: &Arc<ReleaseCallback>,
     logger: &Arc<dyn ILogger + Send + Sync>,
 ) -> Result<()> {
     let session = Session::new(SessionConfig {
@@ -63,12 +80,24 @@ fn handle_session(
                     };
                     protocol::lookup_response(error_resp)
                 } else {
-                    let resp = session.process_batch(req, |key| resolver(key));
+                    let results = process_batch_with_rdma_write(conn, req, resolver, release);
+                    let resp = proto::BatchLookupResponse {
+                        batch_id: req.batch_id,
+                        results,
+                    };
+                    session.record_batch();
                     protocol::lookup_response(resp)
                 }
             }
             Some(proto::request_message::Payload::Close(ref req)) => {
-                let resp = session.process_close(req);
+                let batches = session.batches_processed();
+                let resp = proto::CloseResponse {
+                    batches_total: batches,
+                };
+                logger.debug(&format!(
+                    "remote-request-handler: close (reason={}, batches={})",
+                    req.reason, batches
+                ));
                 let response_msg = protocol::close_response(resp);
                 let encoded = protocol::encode_response(&response_msg);
                 send_mr.buf[..encoded.len()].copy_from_slice(&encoded);
@@ -86,6 +115,65 @@ fn handle_session(
     }
 
     Ok(())
+}
+
+/// Process a batch lookup with actual RDMA Write of data to remote memory.
+fn process_batch_with_rdma_write(
+    conn: &RdmaConnection,
+    req: &proto::BatchLookupRequest,
+    resolver: &Arc<Resolver>,
+    release: &Arc<ReleaseCallback>,
+) -> Vec<proto::EntryResult> {
+    req.entries
+        .iter()
+        .map(|entry| {
+            match resolver(entry.cache_key) {
+                Some(resolved) => {
+                    let write_len = (resolved.size).min(entry.max_size) as usize;
+
+                    // Register the memory-tier pointer, RDMA Write, then deregister
+                    let result = (|| -> Result<u32> {
+                        let local_mr =
+                            conn.register_existing_mr(resolved.ptr, write_len)?;
+                        conn.rdma_write(
+                            &local_mr,
+                            write_len,
+                            entry.remote_addr,
+                            entry.rkey,
+                        )?;
+                        Ok(write_len as u32)
+                    })();
+
+                    // Release the read reference regardless of write success
+                    release(entry.cache_key);
+
+                    match result {
+                        Ok(bytes_written) => proto::EntryResult {
+                            cache_key: entry.cache_key,
+                            success: true,
+                            bytes_written,
+                            error_code: proto::ErrorCode::Unspecified as i32,
+                            error_message: String::new(),
+                        },
+                        Err(e) => proto::EntryResult {
+                            cache_key: entry.cache_key,
+                            success: false,
+                            bytes_written: 0,
+                            error_code: proto::ErrorCode::RdmaWriteFailed as i32,
+                            error_message: e.to_string(),
+                        },
+                    }
+                }
+                None => proto::EntryResult {
+                    cache_key: entry.cache_key,
+                    success: false,
+                    bytes_written: 0,
+                    error_code: proto::ErrorCode::KeyNotFound as i32,
+                    error_message: "key not found".into(),
+                },
+            }
+        })
+        .collect()
 }
 
 fn mtu_to_bytes(mtu: u32) -> u32 {
@@ -217,20 +305,20 @@ fn log_rdma_devices(logger: &dyn ILogger) {
     unsafe { ffi::ibv_free_device_list(dev_list) };
 }
 
-/// Run the RDMA handler server with an optional resolver for cache lookups.
-/// Blocks indefinitely, accepting connections and processing sessions.
+/// Run the RDMA handler server with data transfer via RDMA Write.
 ///
-/// If `resolver` is None, all lookups return "not found" (standalone test mode).
-/// If `resolver` is Some, each CacheKey is resolved via the provided function.
-///
-/// `logger` is used for all diagnostic output.
+/// - `resolver`: returns a pointer+size to cached data for a given key (holds read ref)
+/// - `release`: called after RDMA Write completes to release the read reference
+/// - If `resolver` is None, all lookups return "not found" (standalone test mode)
 pub fn run_blocking(
     addr: &str,
     port: u16,
     resolver: Option<Arc<Resolver>>,
+    release: Option<Arc<ReleaseCallback>>,
     logger: Arc<dyn ILogger + Send + Sync>,
 ) -> Result<()> {
     let resolver = resolver.unwrap_or_else(|| Arc::new(|_| None));
+    let release: Arc<ReleaseCallback> = release.unwrap_or_else(|| Arc::new(|_| {}));
 
     log_rdma_devices(logger.as_ref());
 
@@ -248,7 +336,7 @@ pub fn run_blocking(
         match listener.accept() {
             Ok(conn) => {
                 logger.info("remote-request-handler: session accepted");
-                match handle_session(conn, &resolver, &logger) {
+                match handle_session(&conn, &resolver, &release, &logger) {
                     Ok(()) => {
                         logger.info("remote-request-handler: session closed normally");
                     }

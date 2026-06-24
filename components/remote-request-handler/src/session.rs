@@ -178,6 +178,11 @@ impl Session {
         *state = SessionState::Closed;
     }
 
+    /// Increment the batch counter (used when batch processing is external).
+    pub fn record_batch(&self) {
+        self.batches_processed.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Returns the number of batches processed in this session.
     pub fn batches_processed(&self) -> u64 {
         self.batches_processed.load(Ordering::Relaxed)

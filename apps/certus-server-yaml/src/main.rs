@@ -161,13 +161,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rdma_port = cli.rdma_port;
     if rdma_port > 0 {
         logger.info("remote-request-handler: initializing");
-        let dispatcher = Arc::clone(&stack.dispatcher);
+
+        // Resolver: look up key in dispatch-map, return pointer to memory-tier data
+        let dm_resolve = Arc::clone(&stack.dispatch_map);
         let resolver: Arc<remote_request_handler::serve::Resolver> = Arc::new(move |key| {
-            match dispatcher.check(key) {
-                Ok(true) => Some(vec![]),
+            use interfaces::IDispatchMap;
+            match dm_resolve.lookup(key) {
+                Ok(interfaces::LookupResult::MemoryTier { pointer, size }) => {
+                    Some(remote_request_handler::serve::ResolvedEntry {
+                        ptr: pointer as *const u8,
+                        size,
+                    })
+                }
                 _ => None,
             }
         });
+
+        // Release callback: release the read reference after RDMA Write completes
+        let dm_release = Arc::clone(&stack.dispatch_map);
+        let release: Arc<remote_request_handler::serve::ReleaseCallback> =
+            Arc::new(move |key| {
+                use interfaces::IDispatchMap;
+                let _ = dm_release.release_read(key);
+            });
+
         let rdma_logger = Arc::clone(&stack.logger)
             as Arc<dyn interfaces::ILogger + Send + Sync>;
         tokio::task::spawn_blocking(move || {
@@ -175,6 +192,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "0.0.0.0",
                 rdma_port,
                 Some(resolver),
+                Some(release),
                 rdma_logger,
             ) {
                 eprintln!("remote-request-handler: listener failed: {e}");

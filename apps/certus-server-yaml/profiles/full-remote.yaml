@@ -117,3 +117,5 @@ exports:
     interface: IDispatcher
   - component: spdk_env
     interface: ISPDKEnv
+  - component: dispatch_map
+    interface: IDispatchMap

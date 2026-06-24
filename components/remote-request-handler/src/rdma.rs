@@ -45,9 +45,17 @@ impl fmt::Display for RdmaError {
 impl std::error::Error for RdmaError {}
 
 /// A registered memory region for RDMA operations.
+///
+/// Can own a buffer (allocated by `register_mr`) or borrow an external
+/// pointer (registered by `register_existing_mr`).
 pub struct MemoryRegion {
     mr: *mut ffi::ibv_mr,
+    /// Owned buffer (None for externally-borrowed regions).
     pub buf: Vec<u8>,
+    /// Address of the registered region (for borrowed regions, this is the external pointer).
+    registered_addr: *const u8,
+    /// Length of the registered region.
+    registered_len: usize,
 }
 
 // SAFETY: MemoryRegion is only accessed from the thread that created it
@@ -68,7 +76,7 @@ impl Drop for MemoryRegion {
 
 impl MemoryRegion {
     pub fn addr(&self) -> u64 {
-        self.buf.as_ptr() as u64
+        self.registered_addr as u64
     }
 
     pub fn rkey(&self) -> u32 {
@@ -82,11 +90,11 @@ impl MemoryRegion {
     }
 
     pub fn len(&self) -> usize {
-        self.buf.len()
+        self.registered_len
     }
 
     pub fn is_empty(&self) -> bool {
-        self.buf.is_empty()
+        self.registered_len == 0
     }
 }
 
@@ -129,29 +137,58 @@ impl Drop for RdmaConnection {
 }
 
 impl RdmaConnection {
-    /// Register a memory region for RDMA access (local write + remote write + remote read).
+    /// Register a new memory region for RDMA access (allocates buffer).
     pub fn register_mr(&self, size: usize) -> Result<MemoryRegion> {
         let mut buf = vec![0u8; size];
         let access = ffi::IBV_ACCESS_LOCAL_WRITE
             | ffi::IBV_ACCESS_REMOTE_WRITE
             | ffi::IBV_ACCESS_REMOTE_READ;
 
+        let addr = buf.as_mut_ptr();
         // SAFETY: pd is valid, buf is a valid allocation of `size` bytes.
-        let mr = unsafe { ffi::ibv_reg_mr(self.pd, buf.as_mut_ptr() as *mut c_void, size, access) };
+        let mr = unsafe { ffi::ibv_reg_mr(self.pd, addr as *mut c_void, size, access) };
         if mr.is_null() {
             bail!("ibv_reg_mr failed");
         }
 
-        Ok(MemoryRegion { mr, buf })
+        Ok(MemoryRegion {
+            mr,
+            buf,
+            registered_addr: addr,
+            registered_len: size,
+        })
+    }
+
+    /// Register an existing memory address as an RDMA memory region.
+    /// The caller retains ownership of the memory — it must remain valid
+    /// until this MemoryRegion is dropped (which deregisters the MR).
+    pub fn register_existing_mr(&self, addr: *const u8, len: usize) -> Result<MemoryRegion> {
+        let access = ffi::IBV_ACCESS_LOCAL_WRITE
+            | ffi::IBV_ACCESS_REMOTE_WRITE
+            | ffi::IBV_ACCESS_REMOTE_READ;
+
+        // SAFETY: pd is valid, addr points to `len` bytes of valid memory
+        // owned by the caller (e.g., memory-tier pool).
+        let mr = unsafe { ffi::ibv_reg_mr(self.pd, addr as *mut c_void, len, access) };
+        if mr.is_null() {
+            bail!("ibv_reg_mr failed for existing address {:p} len {}", addr, len);
+        }
+
+        Ok(MemoryRegion {
+            mr,
+            buf: Vec::new(),
+            registered_addr: addr,
+            registered_len: len,
+        })
     }
 
     /// Send a message via RDMA Send (blocks until completion).
     pub fn send_msg(&self, mr: &MemoryRegion, len: usize) -> Result<()> {
-        // SAFETY: qp and mr are valid, buf pointer is within registered region.
+        // SAFETY: qp and mr are valid, registered_addr is within registered region.
         let ret = unsafe {
             ffi::rdma_test_send_msg(
                 self.qp,
-                mr.buf.as_ptr() as *mut c_void,
+                mr.registered_addr as *mut c_void,
                 len as u32,
                 mr.lkey(),
             )
@@ -175,7 +212,7 @@ impl RdmaConnection {
         let ret = unsafe {
             ffi::rdma_test_recv_msg(
                 self.qp,
-                mr.buf.as_mut_ptr() as *mut c_void,
+                mr.registered_addr as *mut c_void,
                 mr.len() as u32,
                 mr.lkey(),
             )
@@ -194,11 +231,11 @@ impl RdmaConnection {
         remote_addr: u64,
         rkey: u32,
     ) -> Result<()> {
-        // SAFETY: qp and local_mr are valid, remote_addr/rkey provided by caller.
+        // SAFETY: qp and local_mr are valid, registered_addr within MR bounds.
         let ret = unsafe {
             ffi::rdma_test_rdma_write(
                 self.qp,
-                local_mr.buf.as_ptr() as *mut c_void,
+                local_mr.registered_addr as *mut c_void,
                 len as u32,
                 local_mr.lkey(),
                 remote_addr,
