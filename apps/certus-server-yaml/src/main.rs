@@ -170,6 +170,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let dispatcher_resolve = Arc::clone(&stack.dispatcher);
             let resolver: Arc<remote_request_handler::serve::Resolver> =
                 Arc::new(move |key| {
+                    #[allow(unused_imports)]
                     use interfaces::{IDispatchMap, IDispatcher};
                     match dm_resolve.lookup(key) {
                         Ok(interfaces::LookupResult::MemoryTier { pointer, size }) => {
@@ -199,10 +200,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let dm_release = Arc::clone(&stack.dispatch_map);
             let release: Arc<remote_request_handler::serve::ReleaseCallback> =
                 Arc::new(move |key| {
+                    #[allow(unused_imports)]
                     use interfaces::IDispatchMap;
                     let _ = dm_release.release_read(key);
                 });
 
+            #[allow(unused_imports)]
             use interfaces::IMemoryTier;
             let pool = stack.memory_tier.pool_info().map(|(base, size)| {
                 Arc::new(remote_request_handler::serve::PoolRegion { base, size })
