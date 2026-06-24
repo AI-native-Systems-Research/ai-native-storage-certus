@@ -121,6 +121,7 @@ fn main() -> Result<()> {
     let mut total_bytes_written = 0u64;
     let mut crc_errors = 0u64;
     let mut crc_pass = 0u64;
+    let mut batch_latencies_us: Vec<f64> = Vec::with_capacity(args.iterations as usize);
 
     for iter in 0..args.iterations {
         // Clear result buffers before each batch (to detect actual writes)
@@ -147,10 +148,14 @@ fn main() -> Result<()> {
 
         let encoded = protocol::encode_request(&batch_req);
         send_mr.buf[..encoded.len()].copy_from_slice(&encoded);
+
+        let batch_start = std::time::Instant::now();
         conn.send_msg(&send_mr, encoded.len())?;
 
         // Receive batch response
         let nbytes = conn.recv_msg(&mut recv_mr)?;
+        let batch_elapsed_us = batch_start.elapsed().as_secs_f64() * 1_000_000.0;
+        batch_latencies_us.push(batch_elapsed_us);
         let response = proto::ResponseMessage::decode(&recv_mr.buf[..nbytes])?;
         match response.payload {
             Some(proto::response_message::Payload::Lookup(ref l)) => {
@@ -219,6 +224,15 @@ fn main() -> Result<()> {
             "Data transferred: {:.1} MiB, throughput: {:.3} GB/s",
             total_bytes_written as f64 / (1024.0 * 1024.0),
             throughput_gbs
+        );
+    }
+    if !batch_latencies_us.is_empty() {
+        let min = batch_latencies_us.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max = batch_latencies_us.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let mean = batch_latencies_us.iter().sum::<f64>() / batch_latencies_us.len() as f64;
+        println!(
+            "Batch latency: min={:.1} us, mean={:.1} us, max={:.1} us",
+            min, mean, max
         );
     }
 
