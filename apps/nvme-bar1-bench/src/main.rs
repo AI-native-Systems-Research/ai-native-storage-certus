@@ -1,3 +1,4 @@
+#![allow(dead_code, static_mut_refs)]
 //! NVMe → BAR1 DMA isolation benchmark.
 //!
 //! Measures raw NVMe read throughput into two DMA target types using direct

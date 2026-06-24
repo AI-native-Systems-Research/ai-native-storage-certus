@@ -33,6 +33,7 @@ members = [
     "components/example-helloworld-dylib",
     "components/eviction-policy-lru",
     "components/remote-lookup",
+    "components/remote-request-handler",
     "apps/dynamic-loading-example",
     "apps/certus-server-yaml",
     "apps/baseline-generalized-fs"
@@ -83,5 +84,6 @@ extent-manager = { path = "components/extent-manager" }
 gpu-services = { path = "components/gpu-services" }
 eviction-policy-lru = { path = "components/eviction-policy-lru" }
 remote-lookup = { path = "components/remote-lookup" }
+remote-request-handler = { path = "components/remote-request-handler" }
 certus-connector = { path = "certus-connector" }
 libloading = "0.8"
