@@ -5,8 +5,6 @@
 
 #[cfg(feature = "telemetry")]
 use std::sync::atomic::{AtomicU64, Ordering};
-#[cfg(feature = "telemetry")]
-use std::time::Instant;
 
 /// Telemetry collector for the remote request handler.
 ///
