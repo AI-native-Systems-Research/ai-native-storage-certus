@@ -167,15 +167,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             logger.info("remote-request-handler: initializing");
 
             let dm_resolve = Arc::clone(&stack.dispatch_map);
+            let dispatcher_resolve = Arc::clone(&stack.dispatcher);
             let resolver: Arc<remote_request_handler::serve::Resolver> =
                 Arc::new(move |key| {
-                    use interfaces::IDispatchMap;
+                    use interfaces::{IDispatchMap, IDispatcher};
                     match dm_resolve.lookup(key) {
                         Ok(interfaces::LookupResult::MemoryTier { pointer, size }) => {
                             Some(remote_request_handler::serve::ResolvedEntry {
                                 ptr: pointer as *const u8,
                                 size,
                             })
+                        }
+                        Ok(interfaces::LookupResult::BlockDevice { .. }) => {
+                            // SSD-resident: release read ref, promote to memory-tier, re-lookup
+                            let _ = dm_resolve.release_read(key);
+                            dispatcher_resolve.promote_to_memory_tier(&[key]);
+                            match dm_resolve.lookup(key) {
+                                Ok(interfaces::LookupResult::MemoryTier { pointer, size }) => {
+                                    Some(remote_request_handler::serve::ResolvedEntry {
+                                        ptr: pointer as *const u8,
+                                        size,
+                                    })
+                                }
+                                _ => None,
+                            }
                         }
                         _ => None,
                     }
