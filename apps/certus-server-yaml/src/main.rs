@@ -214,6 +214,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let rdma_logger = Arc::clone(&stack.logger)
                 as Arc<dyn interfaces::ILogger + Send + Sync>;
             tokio::task::spawn_blocking(move || {
+                let log = Arc::clone(&rdma_logger);
                 if let Err(e) = remote_request_handler::serve::run_blocking(
                     "0.0.0.0",
                     rdma_port,
@@ -222,7 +223,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     pool,
                     rdma_logger,
                 ) {
-                    eprintln!("remote-request-handler: listener failed: {e}");
+                    log.error(&format!("remote-request-handler: listener failed: {e}"));
                 }
             });
             logger.info(&format!(
