@@ -93,6 +93,7 @@ impl BackgroundWriter {
     /// Jobs enqueued concurrently by other threads after this call begins are
     /// not guaranteed to be complete when this returns.
     #[cfg(test)]
+    #[allow(dead_code)]
     pub fn flush(&self) {
         while self.in_flight.load(std::sync::atomic::Ordering::Acquire) > 0 {
             std::thread::sleep(Duration::from_millis(5));

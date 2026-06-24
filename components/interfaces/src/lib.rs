@@ -14,6 +14,7 @@ mod igreeter;
 mod ilogger;
 mod imemory_tier;
 mod iremote_lookup;
+mod iremote_request_handler;
 
 pub use idispatch_map::CacheKey;
 pub use idispatch_map::DispatchMapError;
@@ -39,6 +40,9 @@ pub use igreeter::IGreeter;
 pub use ilogger::ILogger;
 pub use iremote_lookup::IRemoteLookup;
 pub use iremote_lookup::RemoteLookupError;
+pub use iremote_request_handler::IRemoteRequestHandler;
+pub use iremote_request_handler::LookupRef;
+pub use iremote_request_handler::RemoteRequestHandlerError;
 pub use imemory_tier::MemoryTierError;
 #[cfg(feature = "spdk")]
 pub use imemory_tier::IMemoryTier;

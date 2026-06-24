@@ -1,0 +1,123 @@
+profile:
+  name: full-remote
+  description: "Production profile with SPDK NVMe + GPU acceleration + RDMA remote request handler"
+
+components:
+  logger:
+    crate: logger
+    factory: "LoggerComponent::new_default"
+    provides: [ILogger]
+
+  spdk_env:
+    crate: spdk-env
+    factory: "SPDKEnvComponent::new_default"
+    provides: [ISPDKEnv]
+    trait_path: spdk-env
+    init_hook: init_spdk_env
+
+  gpu:
+    crate: gpu-services
+    factory: "GpuServicesComponent::new_default"
+    provides: [IGpuServices]
+    init_hook: init_gpu
+
+  eviction_policy:
+    crate: eviction-policy-lru
+    factory: "EvictionPolicyLruComponent::new_default"
+    provides: [IEvictionPolicy]
+
+  dispatch_map:
+    crate: dispatch-map
+    factory: "DispatchMapComponent::new(Default::default())"
+    provides: [IDispatchMap]
+    init_hook: init_dispatch_map
+
+  memory_tier:
+    crate: memory-tier
+    factory: "MemoryTierComponent::new_default"
+    provides: [IMemoryTier]
+    init_hook: init_memory_tier
+
+  block_device:
+    crate: block-device-spdk-nvme
+    factory: "BlockDeviceSpdkNvmeComponent::new_default"
+    provides: [IBlockDevice, IBlockDeviceAdmin]
+    kind: factory
+    receptacles: [spdk_env, logger]
+
+  extent_manager:
+    crate: extent-manager
+    factory: "ExtentManager::new_inner"
+    provides: [IExtentManager]
+    kind: factory
+
+  remote_lookup:
+    crate: remote-lookup
+    factory: "RemoteLookupComponent::new"
+    provides: [IRemoteLookup]
+
+  remote_request_handler:
+    crate: remote-request-handler
+    factory: "RemoteRequestHandlerComponent::new"
+    provides: [IRemoteRequestHandler]
+
+  dispatcher:
+    crate: dispatcher
+    factory: "DispatcherComponent::new_default"
+    provides: [IDispatcher]
+    init_hook: init_dispatcher
+
+wiring:
+  - target: gpu.logger
+    source: logger
+  - target: eviction_policy.logger
+    source: logger
+  - target: dispatch_map.logger
+    source: logger
+  - target: dispatch_map.eviction_policy
+    source: eviction_policy
+  - target: memory_tier.logger
+    source: logger
+  - target: memory_tier.eviction_policy
+    source: eviction_policy
+  - target: dispatcher.logger
+    source: logger
+  - target: dispatcher.dispatch_map
+    source: dispatch_map
+  - target: dispatcher.memory_tier
+    source: memory_tier
+  - target: dispatcher.gpu_services
+    source: gpu
+  - target: dispatcher.spdk_env
+    source: spdk_env
+  - target: remote_lookup.logger
+    source: logger
+  - target: dispatcher.remote_lookup
+    source: remote_lookup
+  - target: remote_request_handler.logger
+    source: logger
+  - target: remote_request_handler.dispatcher
+    source: dispatcher
+
+init_order:
+  - logger
+  - spdk_env
+  - gpu
+  - eviction_policy
+  - dispatch_map
+  - memory_tier
+  - remote_lookup
+  - dispatcher
+  - remote_request_handler
+
+exports:
+  - component: logger
+    interface: ILogger
+  - component: dispatcher
+    interface: IDispatcher
+  - component: spdk_env
+    interface: ISPDKEnv
+  - component: dispatch_map
+    interface: IDispatchMap
+  - component: memory_tier
+    interface: IMemoryTier
