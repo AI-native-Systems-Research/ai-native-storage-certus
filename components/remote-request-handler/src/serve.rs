@@ -136,11 +136,15 @@ fn handle_session(
     Ok(())
 }
 
-/// Process a batch lookup with pipelined RDMA Writes.
+/// Two-phase batch processing: resolve all keys first, then post all RDMA Writes.
 ///
-/// All writes except the last are posted unsignaled (no CQE). The last write
-/// is signaled — polling its completion guarantees all prior writes are done
-/// (InfiniBand ordering guarantee on RC QPs).
+/// Phase 1 (Resolve): Acquire all dispatch-map read references and collect pointers.
+///   This batches the lock contention up front so it doesn't interleave with RDMA posting.
+///
+/// Phase 2 (Write): Post all RDMA Writes in a tight loop — unsignaled except the last.
+///   The NIC receives a continuous stream of work without stalls between entries.
+///
+/// Phase 3 (Release): Release all read references after writes complete.
 fn process_batch_with_rdma_write(
     conn: &RdmaConnection,
     req: &proto::BatchLookupRequest,
@@ -149,97 +153,99 @@ fn process_batch_with_rdma_write(
     pool_mr: &Option<crate::rdma::MemoryRegion>,
 ) -> Vec<proto::EntryResult> {
     let n = req.entries.len();
-    let mut results: Vec<proto::EntryResult> = Vec::with_capacity(n);
-    let mut pending_writes = 0usize;
+
+    // --- Phase 1: Resolve all keys (collect pointers, hold read refs) ---
+    struct Resolved {
+        ptr: *const u8,
+        #[allow(dead_code)]
+        size: u32,
+        write_len: usize,
+        idx: usize,
+    }
+    // SAFETY: ptr comes from memory-tier pool (Send-safe, stable until release)
+    unsafe impl Send for Resolved {}
+
+    let mut resolved: Vec<Resolved> = Vec::with_capacity(n);
+    let mut results: Vec<proto::EntryResult> = vec![
+        proto::EntryResult {
+            cache_key: 0,
+            success: false,
+            bytes_written: 0,
+            error_code: proto::ErrorCode::KeyNotFound as i32,
+            error_message: "key not found".into(),
+        };
+        n
+    ];
 
     for (i, entry) in req.entries.iter().enumerate() {
-        match resolver(entry.cache_key) {
-            Some(resolved) => {
-                let write_len = (resolved.size).min(entry.max_size) as usize;
-                let is_last_write = i == n - 1;
+        results[i].cache_key = entry.cache_key;
+        if let Some(r) = resolver(entry.cache_key) {
+            let write_len = (r.size).min(entry.max_size) as usize;
+            resolved.push(Resolved {
+                ptr: r.ptr,
+                size: r.size,
+                write_len,
+                idx: i,
+            });
+        }
+    }
 
-                let post_result = if let Some(ref pmr) = pool_mr {
-                    if is_last_write || pending_writes >= 62 {
-                        // Signaled write — generates CQE, guarantees all prior complete
-                        conn.rdma_write_from_pool(
-                            pmr,
-                            resolved.ptr,
-                            write_len,
-                            entry.remote_addr,
-                            entry.rkey,
-                        )
-                    } else {
-                        // Unsignaled write — no CQE, pipelined
-                        conn.post_rdma_write_unsignaled(
-                            pmr,
-                            resolved.ptr,
-                            write_len,
-                            entry.remote_addr,
-                            entry.rkey,
-                        )
-                    }
-                } else {
-                    // No pool MR: fallback to per-entry registration (always signaled)
-                    (|| -> Result<()> {
-                        let local_mr = conn.register_existing_mr(resolved.ptr, write_len)?;
-                        conn.rdma_write(&local_mr, write_len, entry.remote_addr, entry.rkey)
-                    })()
-                };
+    if resolved.is_empty() {
+        return results;
+    }
 
-                release(entry.cache_key);
+    // --- Phase 2: Post all RDMA Writes in a tight loop ---
+    let last_resolved_idx = resolved.len() - 1;
 
-                match post_result {
-                    Ok(()) => {
-                        pending_writes += 1;
-                        results.push(proto::EntryResult {
-                            cache_key: entry.cache_key,
-                            success: true,
-                            bytes_written: write_len as u32,
-                            error_code: proto::ErrorCode::Unspecified as i32,
-                            error_message: String::new(),
-                        });
-                    }
-                    Err(e) => {
-                        results.push(proto::EntryResult {
-                            cache_key: entry.cache_key,
-                            success: false,
-                            bytes_written: 0,
-                            error_code: proto::ErrorCode::RdmaWriteFailed as i32,
-                            error_message: e.to_string(),
-                        });
-                    }
-                }
+    for (wi, r) in resolved.iter().enumerate() {
+        let entry = &req.entries[r.idx];
+        let is_last = wi == last_resolved_idx;
+
+        let post_result = if let Some(ref pmr) = pool_mr {
+            if is_last {
+                conn.rdma_write_from_pool(pmr, r.ptr, r.write_len, entry.remote_addr, entry.rkey)
+            } else {
+                conn.post_rdma_write_unsignaled(
+                    pmr,
+                    r.ptr,
+                    r.write_len,
+                    entry.remote_addr,
+                    entry.rkey,
+                )
             }
-            None => {
-                // Key not found — if there are pending unsignaled writes and this is the
-                // last entry, we need a signaled fence to flush them.
-                if i == n - 1 && pending_writes > 0 {
-                    if let Some(ref pmr) = pool_mr {
-                        // Post a zero-length signaled write as a fence (flush prior writes)
-                        let _ = conn.rdma_write_from_pool(
-                            pmr,
-                            pmr.addr() as *const u8,
-                            0,
-                            entry.remote_addr,
-                            entry.rkey,
-                        );
-                    }
-                }
+        } else {
+            (|| -> Result<()> {
+                let local_mr = conn.register_existing_mr(r.ptr, r.write_len)?;
+                conn.rdma_write(&local_mr, r.write_len, entry.remote_addr, entry.rkey)
+            })()
+        };
 
-                results.push(proto::EntryResult {
+        match post_result {
+            Ok(()) => {
+                results[r.idx] = proto::EntryResult {
+                    cache_key: entry.cache_key,
+                    success: true,
+                    bytes_written: r.write_len as u32,
+                    error_code: proto::ErrorCode::Unspecified as i32,
+                    error_message: String::new(),
+                };
+            }
+            Err(e) => {
+                results[r.idx] = proto::EntryResult {
                     cache_key: entry.cache_key,
                     success: false,
                     bytes_written: 0,
-                    error_code: proto::ErrorCode::KeyNotFound as i32,
-                    error_message: "key not found".into(),
-                });
+                    error_code: proto::ErrorCode::RdmaWriteFailed as i32,
+                    error_message: e.to_string(),
+                };
             }
         }
     }
 
-    // If the last entry was a successful write, completion was already polled
-    // (signaled). If not (e.g., last entry was not-found but prior entries had
-    // unsignaled writes), we handled it with a fence above.
+    // --- Phase 3: Release all read references ---
+    for r in &resolved {
+        release(req.entries[r.idx].cache_key);
+    }
 
     results
 }

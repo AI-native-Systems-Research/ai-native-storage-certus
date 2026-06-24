@@ -13,7 +13,7 @@ use anyhow::{bail, Context, Result};
 use crate::ffi;
 
 const MAX_CQ_ENTRIES: c_int = 128;
-const MAX_SEND_WR: u32 = 64;
+const MAX_SEND_WR: u32 = 128;
 const MAX_RECV_WR: u32 = 64;
 const MAX_RETRIES: u32 = 3;
 const POLL_TIMEOUT_SECS: u64 = 10;
