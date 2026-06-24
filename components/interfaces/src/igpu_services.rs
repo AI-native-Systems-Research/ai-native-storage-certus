@@ -518,6 +518,31 @@ define_interface! {
         /// ```
         fn destroy_stream(&self, stream: GpuStream) -> Result<(), String>;
 
+        /// Query whether all operations on a CUDA stream have completed.
+        ///
+        /// Returns `Ok(true)` if all operations are complete, `Ok(false)` if
+        /// work is still in-flight. Unlike [`stream_synchronize`], this does
+        /// not block.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the stream handle is invalid.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # use interfaces::IGpuServices;
+        /// # fn example(gpu: &dyn IGpuServices) {
+        /// let stream = gpu.create_stream().unwrap();
+        /// // ... issue async work on stream ...
+        /// if gpu.stream_query(stream).unwrap() {
+        ///     println!("all work complete");
+        /// }
+        /// gpu.destroy_stream(stream).unwrap();
+        /// # }
+        /// ```
+        fn stream_query(&self, stream: GpuStream) -> Result<bool, String>;
+
         /// Synchronize a CUDA stream, blocking until all operations complete.
         ///
         /// # Errors

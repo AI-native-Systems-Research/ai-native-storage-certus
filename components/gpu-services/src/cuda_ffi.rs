@@ -12,6 +12,7 @@ use std::os::raw::{c_char, c_int};
 /// CUDA error codes (subset).
 pub type cudaError_t = c_int;
 pub const CUDA_SUCCESS: cudaError_t = 0;
+pub const CUDA_ERROR_NOT_READY: cudaError_t = 600;
 pub const CUDA_ERROR_HOST_MEMORY_ALREADY_REGISTERED: cudaError_t = 712;
 
 /// CUDA IPC memory handle — 64 bytes opaque.
@@ -113,6 +114,7 @@ extern "C" {
     pub fn cudaDeviceGetPCIBusId(pci_bus_id: *mut c_char, len: c_int, device: c_int)
         -> cudaError_t;
     pub fn cudaStreamCreate(stream: *mut CudaStream) -> cudaError_t;
+    pub fn cudaStreamQuery(stream: CudaStream) -> cudaError_t;
     pub fn cudaStreamSynchronize(stream: CudaStream) -> cudaError_t;
     pub fn cudaStreamDestroy(stream: CudaStream) -> cudaError_t;
     pub fn cudaMemcpyAsync(

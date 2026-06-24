@@ -584,6 +584,30 @@ impl IGpuServices for GpuServicesComponent {
         }
     }
 
+    fn stream_query(&self, stream: interfaces::GpuStream) -> Result<bool, String> {
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = stream;
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            // SAFETY: stream.0 was obtained from cudaStreamCreate.
+            let err = unsafe { cuda_ffi::cudaStreamQuery(stream.0) };
+            if err == cuda_ffi::CUDA_SUCCESS {
+                Ok(true)
+            } else if err == cuda_ffi::CUDA_ERROR_NOT_READY {
+                Ok(false)
+            } else {
+                Err(format!(
+                    "cudaStreamQuery failed: {}",
+                    cuda_ffi::cuda_error_string(err)
+                ))
+            }
+        }
+    }
+
     fn stream_synchronize(&self, stream: interfaces::GpuStream) -> Result<(), String> {
         #[cfg(not(feature = "gpu"))]
         {

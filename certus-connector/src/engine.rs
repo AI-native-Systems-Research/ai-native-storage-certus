@@ -11,8 +11,8 @@ use pyo3::types::PyDict;
 
 use component_core::query_interface;
 use interfaces::{
-    CacheKey, DispatcherConfig, DmaAllocFn, DmaBuffer, IDispatchMap, IDispatcher, IEvictionPolicy,
-    IGpuServices, ILogger, IpcHandle, LookupResult,
+    CacheKey, DispatcherConfig, DmaAllocFn, DmaBuffer, GpuStream, IDispatchMap, IDispatcher,
+    IEvictionPolicy, IGpuServices, ILogger, IpcHandle, LookupResult,
 };
 
 use crate::keys;
@@ -33,7 +33,12 @@ struct TransferJob {
     gpu_block_ids: Vec<u64>,
     completed: AtomicBool,
     success: AtomicBool,
+    stream: Mutex<Option<GpuStream>>,
 }
+
+// SAFETY: GpuStream wraps a CUDA stream pointer which is thread-safe to poll/sync from any thread.
+unsafe impl Send for TransferJob {}
+unsafe impl Sync for TransferJob {}
 
 // ─── EngineInner ───────────────────────────────────────────────────────────
 
@@ -141,7 +146,7 @@ impl EngineInner {
             .map_err(|e| PyRuntimeError::new_err(format!("failed to wire eviction_policy for dispatch map: {e}")))?;
         let dm: Arc<dyn IDispatchMap + Send + Sync> = query_interface!(dm_comp, IDispatchMap)
             .ok_or_else(|| PyRuntimeError::new_err("failed to query IDispatchMap"))?;
-        let numa_opt = if numa_node >= 0 { Some(numa_node as u32) } else { None };
+        let numa_opt = if numa_node >= 0 { Some(numa_node as i32) } else { None };
         let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
             DmaBuffer::new(size, align, numa_opt).map_err(|e| e.to_string())
         });
@@ -378,6 +383,9 @@ impl EngineInner {
     // ─── Handler-level operations ──────────────────────────────────────
 
     /// Submit async GPU→DRAM→NVMe transfer (store).
+    ///
+    /// Issues all D2H DMA copies via `populate_async` without blocking.
+    /// Completion is detected by `poll_completions` via `stream_query`.
     pub fn store_async(&self, job_id: u64, gpu_block_ids: &[u64], keys: &[u64]) -> PyResult<bool> {
         self.ensure_init()?;
 
@@ -395,6 +403,7 @@ impl EngineInner {
             gpu_block_ids: gpu_block_ids.to_vec(),
             completed: AtomicBool::new(false),
             success: AtomicBool::new(false),
+            stream: Mutex::new(None),
         });
 
         {
@@ -402,8 +411,9 @@ impl EngineInner {
             jobs.insert(job_id, Arc::clone(&job));
         }
 
-        // Execute store: for each block, create an IpcHandle pointing at the
-        // absolute GPU device address and call dispatcher.populate().
+        // Issue async DMA for each block. All copies share the same CUDA stream
+        // so a single stream_query covers all of them.
+        let mut last_stream: Option<GpuStream> = None;
         let mut all_ok = true;
         for (i, key) in cache_keys.iter().enumerate() {
             let block_id = gpu_block_ids[i];
@@ -414,26 +424,35 @@ impl EngineInner {
                 size: self.gpu_block_size as u32,
             };
 
-            match self.dispatcher.populate(*key, handle) {
-                Ok(()) => {
-                    self.entry_count.fetch_add(1, Ordering::Release);
+            match self.dispatcher.populate_async(*key, handle) {
+                Ok(stream) => {
+                    if !stream.0.is_null() {
+                        last_stream = Some(stream);
+                    } else {
+                        // Null stream = completed synchronously (fallback path).
+                        self.entry_count.fetch_add(1, Ordering::Release);
+                    }
                 }
                 Err(e) => {
                     let msg = format!("{e:?}");
                     if msg.contains("already exists") || msg.contains("AlreadyExists") {
-                        // Prefix caching TOCTOU: block was stored between
-                        // prepare_store and store_async. Treat as success.
                         continue;
                     }
-                    eprintln!("[certus] store_async populate failed key={key} block_id={block_id}: {msg}");
+                    eprintln!("[certus] store_async populate_async failed key={key} block_id={block_id}: {msg}");
                     all_ok = false;
                     break;
                 }
             }
         }
 
-        job.completed.store(true, Ordering::Release);
-        job.success.store(all_ok, Ordering::Release);
+        if !all_ok || last_stream.is_none() {
+            // Either failed or all completed synchronously.
+            job.completed.store(true, Ordering::Release);
+            job.success.store(all_ok, Ordering::Release);
+        } else {
+            // DMA is in-flight — store the stream for poll_completions.
+            *job.stream.lock().unwrap() = last_stream;
+        }
 
         Ok(all_ok)
     }
@@ -456,6 +475,7 @@ impl EngineInner {
             gpu_block_ids: gpu_block_ids.to_vec(),
             completed: AtomicBool::new(false),
             success: AtomicBool::new(false),
+            stream: Mutex::new(None),
         });
 
         {
@@ -489,11 +509,59 @@ impl EngineInner {
     }
 
     /// Poll for completed transfers. Returns list of (job_id, success).
+    ///
+    /// For store jobs with in-flight DMA, polls the CUDA stream via
+    /// `stream_query`. On completion, calls `populate_finalize` for each
+    /// key to register entries in the dispatch-map and enqueue SSD writes.
     pub fn poll_completions(&self) -> PyResult<Vec<(u64, bool)>> {
         self.ensure_init()?;
         let mut completions = Vec::new();
         let mut jobs = self.jobs.lock().unwrap();
 
+        // First pass: check in-flight store jobs for stream completion.
+        let in_flight_ids: Vec<u64> = jobs
+            .iter()
+            .filter(|(_, job)| !job.completed.load(Ordering::Acquire))
+            .map(|(id, _)| *id)
+            .collect();
+
+        for id in &in_flight_ids {
+            let job = jobs.get(id).unwrap();
+            let stream_opt = { job.stream.lock().unwrap().take() };
+
+            if let Some(stream) = stream_opt {
+                match self.gpu_services.stream_query(stream) {
+                    Ok(true) => {
+                        // DMA complete — finalize all keys.
+                        let mut all_ok = true;
+                        for key in &job.keys {
+                            match self.dispatcher.populate_finalize(*key) {
+                                Ok(()) => {
+                                    self.entry_count.fetch_add(1, Ordering::Release);
+                                }
+                                Err(e) => {
+                                    eprintln!("[certus] populate_finalize failed key={key}: {e:?}");
+                                    all_ok = false;
+                                }
+                            }
+                        }
+                        job.completed.store(true, Ordering::Release);
+                        job.success.store(all_ok, Ordering::Release);
+                    }
+                    Ok(false) => {
+                        // Still in-flight — put the stream back.
+                        *job.stream.lock().unwrap() = Some(stream);
+                    }
+                    Err(e) => {
+                        eprintln!("[certus] stream_query failed: {e}");
+                        job.completed.store(true, Ordering::Release);
+                        job.success.store(false, Ordering::Release);
+                    }
+                }
+            }
+        }
+
+        // Second pass: collect all completed jobs.
         let completed_ids: Vec<u64> = jobs
             .iter()
             .filter(|(_, job)| job.completed.load(Ordering::Acquire))
@@ -510,29 +578,51 @@ impl EngineInner {
     }
 
     /// Block until a specific job completes.
+    ///
+    /// For in-flight store jobs, synchronizes the CUDA stream (blocking)
+    /// then calls `populate_finalize` for each key.
     pub fn wait_job(&self, job_id: u64) -> PyResult<()> {
         self.ensure_init()?;
-        // Jobs complete synchronously in the current implementation,
-        // so this is effectively a lookup + remove.
+
         let jobs = self.jobs.lock().unwrap();
-        if let Some(job) = jobs.get(&job_id) {
-            if !job.completed.load(Ordering::Acquire) {
-                drop(jobs);
-                // Spin-wait (will be replaced with condvar when async I/O lands)
-                loop {
-                    let jobs = self.jobs.lock().unwrap();
-                    if let Some(job) = jobs.get(&job_id) {
-                        if job.completed.load(Ordering::Acquire) {
-                            break;
-                        }
-                    } else {
-                        break;
+        let job = match jobs.get(&job_id) {
+            Some(j) => Arc::clone(j),
+            None => return Ok(()),
+        };
+        drop(jobs);
+
+        if job.completed.load(Ordering::Acquire) {
+            return Ok(());
+        }
+
+        // Take the stream and block on it.
+        let stream_opt = { job.stream.lock().unwrap().take() };
+
+        if let Some(stream) = stream_opt {
+            if let Err(e) = self.gpu_services.stream_synchronize(stream) {
+                eprintln!("[certus] wait_job stream_synchronize failed: {e}");
+                job.completed.store(true, Ordering::Release);
+                job.success.store(false, Ordering::Release);
+                return Ok(());
+            }
+
+            // DMA complete — finalize all keys.
+            let mut all_ok = true;
+            for key in &job.keys {
+                match self.dispatcher.populate_finalize(*key) {
+                    Ok(()) => {
+                        self.entry_count.fetch_add(1, Ordering::Release);
                     }
-                    drop(jobs);
-                    std::thread::sleep(std::time::Duration::from_micros(100));
+                    Err(e) => {
+                        eprintln!("[certus] wait_job populate_finalize failed key={key}: {e:?}");
+                        all_ok = false;
+                    }
                 }
             }
+            job.completed.store(true, Ordering::Release);
+            job.success.store(all_ok, Ordering::Release);
         }
+
         Ok(())
     }
 
