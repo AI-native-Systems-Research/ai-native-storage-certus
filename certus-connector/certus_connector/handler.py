@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""OffloadingHandlers for Certus: delegate DMA transfers to CertusEngine.
+"""OffloadingHandlers for Certus NVMe offloading.
 
-The handlers extract keys from CertusLoadStoreSpec and call CertusEngine's
-store_async/load_async methods. The dispatcher inside CertusEngine resolves
-block locations internally — handlers don't need to pass slab/slot addresses.
+Handlers call non-blocking store_async/load_async directly (DMA issued
+without waiting). A shared CompletionDispatcher routes poll_completions()
+results to the correct handler.
 """
 
 from __future__ import annotations
@@ -21,29 +21,57 @@ from vllm.v1.kv_offload.worker.worker import (
     TransferType,
 )
 
+from certus_connector._instrument import COUNTERS
 from certus_connector.mediums import CertusLoadStoreSpec
 
 
-# ── Mock engine for testing without SPDK/CUDA ──
+# ── Completion routing ──
 
 
-class MockCertusEngine:
-    """In-memory mock matching CertusEngine's interface. No hardware needed."""
+class CompletionDispatcher:
+    """Routes poll_completions() results to the handler that owns each job.
 
-    def store_async(self, job_id: int, gpu_block_ids: list[int], keys: list[int]) -> bool:
-        return True
+    Completions are buffered per-type so that a poll triggered by one handler
+    doesn't lose completions belonging to the other.
+    """
 
-    def load_async(self, job_id: int, gpu_block_ids: list[int], keys: list[int]) -> bool:
-        return True
+    def __init__(self, engine: Any):
+        self._engine = engine
+        self._store_jobs: set[int] = set()
+        self._load_jobs: set[int] = set()
+        self._store_buf: dict[int, bool] = {}
+        self._load_buf: dict[int, bool] = {}
 
-    def poll_completions(self) -> list[tuple[int, bool]]:
-        return []
+    def register_store(self, job_id: int) -> None:
+        self._store_jobs.add(job_id)
 
-    def wait_job(self, job_id: int) -> None:
-        pass
+    def register_load(self, job_id: int) -> None:
+        self._load_jobs.add(job_id)
 
-    def shutdown(self) -> None:
-        pass
+    def _drain(self) -> None:
+        """Drain engine completions into per-type buffers."""
+        raw = self._engine.poll_completions()
+        for job_id, success in raw:
+            if job_id in self._store_jobs:
+                self._store_jobs.discard(job_id)
+                self._store_buf[job_id] = success
+            elif job_id in self._load_jobs:
+                self._load_jobs.discard(job_id)
+                self._load_buf[job_id] = success
+
+    def poll_stores(self) -> dict[int, bool]:
+        """Return buffered store completions (drains engine first)."""
+        self._drain()
+        result = self._store_buf
+        self._store_buf = {}
+        return result
+
+    def poll_loads(self) -> dict[int, bool]:
+        """Return buffered load completions (drains engine first)."""
+        self._drain()
+        result = self._load_buf
+        self._load_buf = {}
+        return result
 
 
 # ── Handler implementations ──
@@ -60,9 +88,15 @@ class PendingJob:
 class GpuToCertusHandler(OffloadingHandler):
     """Store: GPU → pinned CPU → NVMe (+ DRAM residency)."""
 
-    def __init__(self, engine: Any, block_size_bytes: int):
+    def __init__(
+        self,
+        engine: Any,
+        block_size_bytes: int,
+        dispatcher: CompletionDispatcher,
+    ):
         self._engine = engine
         self._block_size_bytes = block_size_bytes
+        self._dispatcher = dispatcher
         self._pending: deque[PendingJob] = deque()
         self._transfer_type: TransferType = ("GPU", "Certus")
 
@@ -74,30 +108,43 @@ class GpuToCertusHandler(OffloadingHandler):
         gpu_block_ids = list(src_spec.block_ids)
         keys = [loc.nvme_slab for loc in dst_spec.locations]
 
-        success = self._engine.store_async(job_id, gpu_block_ids, keys)
-        if success:
-            self._pending.append(PendingJob(
-                job_id=job_id,
-                start_time=time.monotonic(),
-                num_blocks=len(gpu_block_ids),
-                transfer_type=self._transfer_type,
-            ))
-        return success
+        self._dispatcher.register_store(job_id)
+        self._engine.store_async(job_id, gpu_block_ids, keys)
+        self._pending.append(PendingJob(
+            job_id=job_id,
+            start_time=time.monotonic(),
+            num_blocks=len(gpu_block_ids),
+            transfer_type=self._transfer_type,
+        ))
+        COUNTERS.store_blocks_submitted += len(gpu_block_ids)
+        return True
 
     def get_finished(self) -> list[TransferResult]:
         results: list[TransferResult] = []
-        completions = {jid: ok for jid, ok in self._engine.poll_completions()}
+        store_completions = self._dispatcher.poll_stores()
         now = time.monotonic()
-        while self._pending and self._pending[0].job_id in completions:
+        if self._pending and not store_completions:
+            head = self._pending[0]
+            age = now - head.start_time
+            if age > 5.0:
+                print(f"[STORE] get_finished STALL: oldest job={head.job_id} age={age:.1f}s, {len(self._pending)} pending, poll returned 0", flush=True)
+        while self._pending and self._pending[0].job_id in store_completions:
             job = self._pending.popleft()
-            success = completions.pop(job.job_id)
+            success = store_completions.pop(job.job_id)
+            elapsed = now - job.start_time
+            nbytes = job.num_blocks * self._block_size_bytes
             results.append(TransferResult(
                 job_id=job.job_id,
                 success=success,
-                transfer_size=job.num_blocks * self._block_size_bytes,
-                transfer_time=now - job.start_time,
+                transfer_size=nbytes,
+                transfer_time=elapsed,
                 transfer_type=job.transfer_type,
             ))
+            COUNTERS.store_blocks_completed += job.num_blocks
+            COUNTERS.store_total_bytes += nbytes
+            COUNTERS.store_latencies.append(elapsed * 1000)
+        if results:
+            print(f"[STORE] get_finished -> {len(results)} done, {len(self._pending)} pending", flush=True)
         return results
 
     def wait(self, job_ids: set[int]) -> None:
@@ -108,9 +155,15 @@ class GpuToCertusHandler(OffloadingHandler):
 class CertusToGpuHandler(OffloadingHandler):
     """Load: DRAM→GPU (fast) or NVMe→CPU→GPU (cache miss)."""
 
-    def __init__(self, engine: Any, block_size_bytes: int):
+    def __init__(
+        self,
+        engine: Any,
+        block_size_bytes: int,
+        dispatcher: CompletionDispatcher,
+    ):
         self._engine = engine
         self._block_size_bytes = block_size_bytes
+        self._dispatcher = dispatcher
         self._pending: deque[PendingJob] = deque()
         self._transfer_type: TransferType = ("Certus", "GPU")
 
@@ -120,32 +173,45 @@ class CertusToGpuHandler(OffloadingHandler):
         assert isinstance(dst_spec, GPULoadStoreSpec)
 
         gpu_block_ids = list(dst_spec.block_ids)
-        keys = [loc.nvme_slab for loc in src_spec.locations]
+        src_ptrs = [loc.dram_ptr for loc in src_spec.locations]
 
-        success = self._engine.load_async(job_id, gpu_block_ids, keys)
-        if success:
-            self._pending.append(PendingJob(
-                job_id=job_id,
-                start_time=time.monotonic(),
-                num_blocks=len(gpu_block_ids),
-                transfer_type=self._transfer_type,
-            ))
-        return success
+        self._dispatcher.register_load(job_id)
+        self._engine.load_dma(job_id, gpu_block_ids, src_ptrs)
+        self._pending.append(PendingJob(
+            job_id=job_id,
+            start_time=time.monotonic(),
+            num_blocks=len(gpu_block_ids),
+            transfer_type=self._transfer_type,
+        ))
+        COUNTERS.load_blocks_submitted += len(gpu_block_ids)
+        return True
 
     def get_finished(self) -> list[TransferResult]:
         results: list[TransferResult] = []
-        completions = {jid: ok for jid, ok in self._engine.poll_completions()}
+        load_completions = self._dispatcher.poll_loads()
         now = time.monotonic()
-        while self._pending and self._pending[0].job_id in completions:
+        if self._pending and not load_completions:
+            head = self._pending[0]
+            age = now - head.start_time
+            if age > 5.0:
+                print(f"[LOAD] get_finished STALL: oldest job={head.job_id} age={age:.1f}s, {len(self._pending)} pending, poll returned 0", flush=True)
+        while self._pending and self._pending[0].job_id in load_completions:
             job = self._pending.popleft()
-            success = completions.pop(job.job_id)
+            success = load_completions.pop(job.job_id)
+            elapsed = now - job.start_time
+            nbytes = job.num_blocks * self._block_size_bytes
             results.append(TransferResult(
                 job_id=job.job_id,
                 success=success,
-                transfer_size=job.num_blocks * self._block_size_bytes,
-                transfer_time=now - job.start_time,
+                transfer_size=nbytes,
+                transfer_time=elapsed,
                 transfer_type=job.transfer_type,
             ))
+            COUNTERS.load_blocks_completed += job.num_blocks
+            COUNTERS.load_total_bytes += nbytes
+            COUNTERS.load_latencies.append(elapsed * 1000)
+        if results:
+            print(f"[LOAD] get_finished -> {len(results)} done, {len(self._pending)} pending", flush=True)
         return results
 
     def wait(self, job_ids: set[int]) -> None:

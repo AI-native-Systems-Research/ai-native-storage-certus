@@ -27,24 +27,28 @@ from vllm.v1.kv_offload.worker.worker import OffloadingHandler
 from certus_connector.handler import (
     CertusToGpuHandler,
     GpuToCertusHandler,
-    MockCertusEngine,
 )
-from certus_connector.manager import CertusOffloadingManager, TieringConfig
 from certus_connector.mediums import CertusLoadStoreSpec
 from certus_connector.native_manager import NativeCertusOffloadingManager
 
 
-def _try_native_engine(extra_config: dict):
-    """Try to create a certus_native.CertusEngine. Returns None if unavailable."""
-    try:
+_ENGINE_SINGLETON = None
+
+
+def _get_or_create_engine(extra_config: dict):
+    """Process-level singleton — SPDK can only init once per process."""
+    global _ENGINE_SINGLETON
+    if _ENGINE_SINGLETON is None:
         import certus_native
-        return certus_native.CertusEngine({
+        _ENGINE_SINGLETON = certus_native.CertusEngine({
             "data_pci_addrs": extra_config.get("data_pci_addrs", []),
             "metadata_pci_addr": extra_config.get("metadata_pci_addr", ""),
             "gpu_block_size": int(extra_config.get("slab_size_bytes", 131072)),
+            "slab_size_bytes": int(extra_config.get("slab_size_bytes", 131072)),
+            "dram_cache_bytes": int(extra_config.get("dram_cache_bytes", 0)),
+            "numa_node": int(extra_config.get("numa_node", -1)),
         })
-    except (ImportError, RuntimeError):
-        return None
+    return _ENGINE_SINGLETON
 
 
 class CertusOffloadingSpec(OffloadingSpec):
@@ -67,61 +71,22 @@ class CertusOffloadingSpec(OffloadingSpec):
         )
         gpu_bs = self.gpu_block_size[0]
         self._offloaded_block_size = gpu_bs * self.block_size_factor
-
-        # Compute slab/slot capacities from byte budgets
-        slab_size_bytes = int(self.extra_config.get("slab_size_bytes", 131072))
-        dram_cache_bytes = int(self.extra_config.get("dram_cache_bytes", 0))
-        max_dram_slots = dram_cache_bytes // slab_size_bytes if slab_size_bytes > 0 else 0
-
-        # NVMe capacity: 0 = unlimited (for testing)
-        max_nvme_slabs = int(self.extra_config.get("max_nvme_slabs", 0))
-
-        self._tiering_config = TieringConfig(
-            max_nvme_slabs=max_nvme_slabs,
-            max_dram_slots=max_dram_slots,
-            promotion_touch_threshold=int(
-                self.extra_config.get("promotion_touch_threshold", 3)
-            ),
-            promotion_window_seconds=float(
-                self.extra_config.get("promotion_window_seconds", 10.0)
-            ),
-            demotion_idle_seconds=float(
-                self.extra_config.get("demotion_idle_seconds", 30.0)
-            ),
-        )
-
-        self._slab_size_bytes = slab_size_bytes
+        self._slab_size_bytes = int(self.extra_config.get("slab_size_bytes", 131072))
         self._native_engine = None
-        self._manager: CertusOffloadingManager | None = None
+        self._manager: NativeCertusOffloadingManager | None = None
         self._gpu_to_certus: GpuToCertusHandler | None = None
         self._certus_to_gpu: CertusToGpuHandler | None = None
 
     def _get_engine(self):
-        """Get the engine for handlers — same instance used by the manager."""
+        """Get the engine — process-level singleton shared across spec instances."""
         if self._native_engine is None:
-            self._native_engine = _try_native_engine(self.extra_config)
-        if self._native_engine is None:
-            self._native_engine = MockCertusEngine()
+            self._native_engine = _get_or_create_engine(self.extra_config)
         return self._native_engine
 
     def get_manager(self) -> OffloadingManager:
         if self._manager is None:
-            use_native = self.extra_config.get("use_native", True)
-            if use_native:
-                engine = self._get_engine()
-                if not isinstance(engine, MockCertusEngine):
-                    self._manager = NativeCertusOffloadingManager(engine)
-                    return self._manager
-
-            kv_events_config = self.vllm_config.kv_events_config
-            enable_events = (
-                kv_events_config is not None
-                and kv_events_config.enable_kv_cache_events
-            )
-            self._manager = CertusOffloadingManager(
-                config=self._tiering_config,
-                enable_events=enable_events,
-            )
+            engine = self._get_engine()
+            self._manager = NativeCertusOffloadingManager(engine)
         return self._manager
 
     def get_handlers(
@@ -129,16 +94,34 @@ class CertusOffloadingSpec(OffloadingSpec):
         kv_caches,
         attn_backends=None,
     ) -> Iterator[tuple[type[LoadStoreSpec], type[LoadStoreSpec], OffloadingHandler]]:
+        from certus_connector._instrument import start_reporter
+        from certus_connector.handler import CompletionDispatcher
+        start_reporter()
         engine = self._get_engine()
         if self._gpu_to_certus is None:
+            # Extract GPU KV cache base pointer and set on engine.
+            gpu_base_ptr, gpu_stride = self._extract_gpu_ptrs(kv_caches)
+            engine.set_gpu_base_ptr(gpu_base_ptr, gpu_stride)
+            print(f"[certus-spec] GPU base_ptr=0x{gpu_base_ptr:x} stride={gpu_stride}",
+                  flush=True)
+
+            dispatcher = CompletionDispatcher(engine)
             self._gpu_to_certus = GpuToCertusHandler(
                 engine=engine,
                 block_size_bytes=self._slab_size_bytes,
+                dispatcher=dispatcher,
             )
-        if self._certus_to_gpu is None:
             self._certus_to_gpu = CertusToGpuHandler(
                 engine=engine,
                 block_size_bytes=self._slab_size_bytes,
+                dispatcher=dispatcher,
             )
         yield GPULoadStoreSpec, CertusLoadStoreSpec, self._gpu_to_certus
         yield CertusLoadStoreSpec, GPULoadStoreSpec, self._certus_to_gpu
+
+    @staticmethod
+    def _extract_gpu_ptrs(kv_caches) -> tuple[int, int]:
+        """Extract GPU base pointer and stride (bytes) from the first KV cache tensor."""
+        tensor = kv_caches.tensors[0].tensor
+        stride_bytes = tensor.stride(0) * tensor.element_size()
+        return tensor.data_ptr(), stride_bytes
