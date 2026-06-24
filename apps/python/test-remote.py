@@ -375,14 +375,19 @@ def main():
         print(f"  ERROR: test-client failed: {results['error']}")
         sys.exit(1)
 
+    wall_s = results.get("wall_elapsed_s", 0)
     if "elapsed_ms" in results:
         total_entries = results["total_entries"]
+        total_data = total_entries * object_size
+        lookup_gbs = total_data / (1024**3) / wall_s if wall_s > 0 else 0
         print(f"  Completed: {results['iterations']} iterations, "
               f"{total_entries} total entries")
         print(f"  Batch time: {results['elapsed_ms']:.3f} ms "
               f"(excludes connection setup/teardown)")
         print(f"  Latency: {results['us_per_batch']:.1f} us/batch, "
               f"{results['us_per_entry']:.1f} us/entry")
+        print(f"  Throughput: {lookup_gbs:.3f} GB/s "
+              f"(wall clock {wall_s*1000:.1f} ms, includes connection time)")
     if "server_batches" in results:
         print(f"  Server confirmed: {results['server_batches']} batches processed")
     print()
@@ -416,7 +421,7 @@ def main():
     if "us_per_batch" in results:
         print(
             f"  Lookup (RDMA):   {results['us_per_batch']:.1f} us/batch, "
-            f"{results['us_per_entry']:.1f} us/entry"
+            f"{lookup_gbs:.3f} GB/s (incl. connection)"
         )
     print(f"  Status:          {'PASS' if populated > 0 and results['success'] else 'FAIL'}")
     print()
