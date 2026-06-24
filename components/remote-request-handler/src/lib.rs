@@ -31,7 +31,8 @@ pub mod telemetry;
 
 use component_framework::define_component;
 use interfaces::{
-    CacheKey, IDispatcher, ILogger, IRemoteRequestHandler, RemoteRequestHandlerError,
+    CacheKey, IDispatcher, ILogger, IRemoteRequestHandler, LookupRef,
+    RemoteRequestHandlerError,
 };
 
 define_component! {
@@ -46,7 +47,7 @@ define_component! {
 }
 
 impl IRemoteRequestHandler for RemoteRequestHandlerComponent {
-    fn handle_lookup(&self, key: CacheKey) -> Result<Vec<u8>, RemoteRequestHandlerError> {
+    fn handle_lookup(&self, key: CacheKey) -> Result<LookupRef, RemoteRequestHandlerError> {
         let _ = key;
         Err(RemoteRequestHandlerError::NotInitialized(
             "not yet implemented".into(),
@@ -63,7 +64,7 @@ impl IRemoteRequestHandler for RemoteRequestHandlerComponent {
     fn handle_batch_lookup(
         &self,
         keys: &[CacheKey],
-    ) -> Vec<Result<Vec<u8>, RemoteRequestHandlerError>> {
+    ) -> Vec<Result<LookupRef, RemoteRequestHandlerError>> {
         keys.iter()
             .map(|_| {
                 Err(RemoteRequestHandlerError::NotInitialized(
@@ -71,6 +72,10 @@ impl IRemoteRequestHandler for RemoteRequestHandlerComponent {
                 ))
             })
             .collect()
+    }
+
+    fn release_lookup(&self, _key: CacheKey) {
+        // No-op until the component is wired to the dispatch-map directly.
     }
 }
 
