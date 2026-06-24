@@ -52,7 +52,7 @@ impl<T: Send + 'static> ISender<T> for RtrbSender<T> {
                 Err(rtrb::PushError::Full(returned)) => {
                     val = returned;
                     drop(guard);
-                    std::thread::park_timeout(std::time::Duration::from_millis(1));
+                    std::thread::park_timeout(std::time::Duration::from_micros(50));
                 }
             }
         }
@@ -96,7 +96,7 @@ impl<T: Send + 'static> IReceiver<T> for RtrbReceiver<T> {
                 Ok(val) => return Ok(val),
                 Err(_) => {
                     drop(guard);
-                    std::thread::park_timeout(std::time::Duration::from_millis(1));
+                    std::thread::park_timeout(std::time::Duration::from_micros(50));
                 }
             }
         }

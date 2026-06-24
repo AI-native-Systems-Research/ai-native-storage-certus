@@ -87,3 +87,11 @@ remote-lookup = { path = "components/remote-lookup" }
 remote-request-handler = { path = "components/remote-request-handler" }
 certus-connector = { path = "certus-connector" }
 libloading = "0.8"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
+[profile.bench]
+lto = "fat"
+codegen-units = 1

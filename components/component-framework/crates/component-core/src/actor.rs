@@ -46,6 +46,39 @@ impl fmt::Display for ActorError {
 
 impl std::error::Error for ActorError {}
 
+/// Configuration for actor thread parking behavior.
+///
+/// Controls how quickly the actor parks its thread when idle and how long
+/// it sleeps before waking to check for new messages.
+#[derive(Debug, Clone)]
+pub struct ActorParkConfig {
+    /// Number of idle iterations before the actor parks.
+    /// Set to `u64::MAX` for busy-polling (never park).
+    pub park_threshold: u64,
+    /// Duration of each park timeout.
+    pub park_duration: std::time::Duration,
+}
+
+impl Default for ActorParkConfig {
+    fn default() -> Self {
+        Self {
+            park_threshold: 1_000_000,
+            park_duration: std::time::Duration::from_micros(100),
+        }
+    }
+}
+
+impl ActorParkConfig {
+    /// Configuration for busy-polling mode (never parks).
+    /// Uses maximum CPU but minimum latency.
+    pub fn busy_poll() -> Self {
+        Self {
+            park_threshold: u64::MAX,
+            park_duration: std::time::Duration::from_nanos(0),
+        }
+    }
+}
+
 // Actor lifecycle states
 const STATE_IDLE: u8 = 0;
 const STATE_RUNNING: u8 = 1;
@@ -377,6 +410,8 @@ where
     interface_info: Vec<InterfaceInfo>,
     /// Optional CPU affinity — if set, the actor's thread is pinned on activation.
     cpu_affinity: Mutex<Option<CpuSet>>,
+    /// Parking configuration for the actor's idle loop.
+    park_config: Mutex<ActorParkConfig>,
 }
 
 impl<M, H> Actor<M, H>
@@ -480,6 +515,7 @@ where
             sender_iface: OnceLock::new(),
             interface_info,
             cpu_affinity: Mutex::new(None),
+            park_config: Mutex::new(ActorParkConfig::default()),
         }
     }
 
@@ -510,6 +546,12 @@ where
     /// ```
     pub fn with_cpu_affinity(self, affinity: CpuSet) -> Self {
         *self.cpu_affinity.lock().unwrap() = Some(affinity);
+        self
+    }
+
+    /// Set parking configuration for this actor's idle loop (builder pattern).
+    pub fn with_park_config(self, config: ActorParkConfig) -> Self {
+        *self.park_config.lock().unwrap() = config;
         self
     }
 
@@ -618,6 +660,7 @@ where
 
         let error_callback = Arc::clone(&self.error_callback);
         let affinity = self.cpu_affinity.lock().unwrap().clone();
+        let park_config = self.park_config.lock().unwrap().clone();
 
         // Validate CPU IDs before spawning the thread (FR-004).
         if let Some(ref cpus) = affinity {
@@ -640,8 +683,8 @@ where
 
             handler.on_start();
 
-            const PARK_THRESHOLD: u64 = 10_000_000;
-            const PARK_DURATION: std::time::Duration = std::time::Duration::from_millis(10);
+            let park_threshold = park_config.park_threshold;
+            let park_duration = park_config.park_duration;
             let mut idle_count: u64 = 0;
 
             loop {
@@ -675,9 +718,9 @@ where
                             }
                         }
 
-                        if idle_count >= PARK_THRESHOLD {
+                        if idle_count >= park_threshold {
                             receiver.register_for_unpark();
-                            thread::park_timeout(PARK_DURATION);
+                            thread::park_timeout(park_duration);
                             idle_count = 0;
                         }
                     }

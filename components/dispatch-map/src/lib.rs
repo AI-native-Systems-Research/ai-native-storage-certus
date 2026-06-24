@@ -154,6 +154,7 @@ impl IDispatchMap for DispatchMapComponent {
 
         inner.entries.insert(key, entry);
 
+        #[cfg(debug_assertions)]
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!(
                 "dispatch-map: created staging for key {key}, size {size} blocks"
@@ -164,6 +165,44 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {
+        // Fast path: single lock acquisition for the common case (no active writer).
+        {
+            let mut inner = self.state.inner.lock().unwrap();
+            match inner.entries.get_mut(&key) {
+                None => return Ok(LookupResult::NotExist),
+                Some(entry) if entry.write_ref == 0 => {
+                    entry.read_ref = entry
+                        .read_ref
+                        .checked_add(1)
+                        .ok_or(DispatchMapError::RefCountOverflow(key))?;
+                    let handle = entry.eviction_handle;
+                    let result = match &entry.location {
+                        Location::Staging { buffer } => LookupResult::Staging {
+                            buffer: Arc::clone(buffer),
+                        },
+                        Location::BlockDevice { offset } => {
+                            LookupResult::BlockDevice { offset: *offset }
+                        }
+                        Location::MemoryTier { pointer, size, .. } => LookupResult::MemoryTier {
+                            pointer: *pointer,
+                            size: *size,
+                        },
+                    };
+                    drop(inner);
+                    if let Ok(ep) = self.eviction_policy.get() {
+                        let _ = ep.touch(handle);
+                    }
+                    #[cfg(debug_assertions)]
+                    if let Ok(logger) = self.logger.get() {
+                        logger.debug(&format!("dispatch-map: lookup key {key} → {result:?}"));
+                    }
+                    return Ok(result);
+                }
+                Some(_) => {}
+            }
+        }
+
+        // Slow path: writer active, wait for it to finish.
         let satisfied = self
             .state
             .wait_for(DEFAULT_TIMEOUT, |inner| match inner.entries.get(&key) {
@@ -203,6 +242,7 @@ impl IDispatchMap for DispatchMapComponent {
             let _ = ep.touch(handle);
         }
 
+        #[cfg(debug_assertions)]
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: lookup key {key} → {result:?}"));
         }
@@ -235,6 +275,7 @@ impl IDispatchMap for DispatchMapComponent {
             entry.read_ref -= 1;
         }
 
+        #[cfg(debug_assertions)]
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!(
                 "dispatch-map: converted key {key} to storage at offset {offset}"
@@ -248,6 +289,27 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn take_read(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+        // Fast path: single lock acquisition when no writer active.
+        {
+            let mut inner = self.state.inner.lock().unwrap();
+            match inner.entries.get_mut(&key) {
+                None => return Err(DispatchMapError::KeyNotFound(key)),
+                Some(entry) if entry.write_ref == 0 => {
+                    entry.read_ref = entry
+                        .read_ref
+                        .checked_add(1)
+                        .ok_or(DispatchMapError::RefCountOverflow(key))?;
+                    #[cfg(debug_assertions)]
+                    if let Ok(logger) = self.logger.get() {
+                        logger.debug(&format!("dispatch-map: take_read key {key}"));
+                    }
+                    return Ok(());
+                }
+                Some(_) => {}
+            }
+        }
+
+        // Slow path: writer active, wait for it to finish.
         let satisfied = self.state.wait_for(DEFAULT_TIMEOUT, |inner| {
             inner.entries.get(&key).map_or(true, |e| e.write_ref == 0)
         });
@@ -266,6 +328,7 @@ impl IDispatchMap for DispatchMapComponent {
             .read_ref
             .checked_add(1)
             .ok_or(DispatchMapError::RefCountOverflow(key))?;
+        #[cfg(debug_assertions)]
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: take_read key {key}"));
         }
@@ -291,6 +354,7 @@ impl IDispatchMap for DispatchMapComponent {
         }
 
         entry.write_ref = 1;
+        #[cfg(debug_assertions)]
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: take_write key {key}"));
         }
@@ -309,6 +373,7 @@ impl IDispatchMap for DispatchMapComponent {
         }
 
         entry.read_ref -= 1;
+        #[cfg(debug_assertions)]
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: release_read key {key}"));
         }
@@ -329,6 +394,7 @@ impl IDispatchMap for DispatchMapComponent {
         }
 
         entry.write_ref = 0;
+        #[cfg(debug_assertions)]
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: release_write key {key}"));
         }
@@ -353,6 +419,7 @@ impl IDispatchMap for DispatchMapComponent {
             .read_ref
             .checked_add(1)
             .ok_or(DispatchMapError::RefCountOverflow(key))?;
+        #[cfg(debug_assertions)]
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: downgrade_reference key {key}"));
         }
@@ -379,6 +446,7 @@ impl IDispatchMap for DispatchMapComponent {
             let _ = ep.remove(handle);
         }
 
+        #[cfg(debug_assertions)]
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: removed key {key}"));
         }
@@ -451,6 +519,7 @@ impl IDispatchMap for DispatchMapComponent {
 
         inner.entries.insert(key, entry);
 
+        #[cfg(debug_assertions)]
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!(
                 "dispatch-map: created memory-tier entry for key {key}, size {size}"
@@ -489,6 +558,7 @@ impl IDispatchMap for DispatchMapComponent {
             }
         }
 
+        #[cfg(debug_assertions)]
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!(
                 "dispatch-map: converted memory-tier key {key} to block device"

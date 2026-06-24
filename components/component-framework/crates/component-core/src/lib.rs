@@ -54,7 +54,7 @@ pub mod prelude;
 pub mod receptacle;
 pub mod registry;
 
-pub use actor::{pipe, pipe_mpsc, Actor, ActorError, ActorHandle, ActorHandler};
+pub use actor::{pipe, pipe_mpsc, Actor, ActorError, ActorHandle, ActorHandler, ActorParkConfig};
 pub use channel::crossbeam_bounded::CrossbeamBoundedChannel;
 pub use channel::crossbeam_unbounded::CrossbeamUnboundedChannel;
 pub use channel::kanal_bounded::KanalChannel;

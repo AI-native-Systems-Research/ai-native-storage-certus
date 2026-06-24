@@ -100,7 +100,7 @@ impl<T: Send + 'static> MpscSender<T> {
                         let mut guard = self.state.sender_thread.lock().unwrap();
                         *guard = Some(thread::current());
                     }
-                    thread::park_timeout(std::time::Duration::from_millis(1));
+                    thread::park_timeout(std::time::Duration::from_micros(50));
                 }
             }
         }
@@ -256,7 +256,7 @@ impl<T: Send + 'static> MpscReceiver<T> {
                 let mut guard = self.state.receiver_thread.lock().unwrap();
                 *guard = Some(thread::current());
             }
-            thread::park_timeout(std::time::Duration::from_millis(1));
+            thread::park_timeout(std::time::Duration::from_micros(50));
         }
     }
 

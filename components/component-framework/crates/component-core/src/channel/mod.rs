@@ -230,7 +230,7 @@ impl<T: Send + 'static> Sender<T> {
                             *guard = Some(thread::current());
                         }
                         self.state.sender_parked.store(true, Ordering::Release);
-                        thread::park_timeout(std::time::Duration::from_micros(50));
+                        thread::park_timeout(std::time::Duration::from_micros(10));
                         self.state.sender_parked.store(false, Ordering::Relaxed);
                     }
                 }
@@ -397,7 +397,7 @@ impl<T: Send + 'static> Receiver<T> {
                     *guard = Some(thread::current());
                 }
                 self.state.receiver_parked.store(true, Ordering::Release);
-                thread::park_timeout(std::time::Duration::from_micros(50));
+                thread::park_timeout(std::time::Duration::from_micros(10));
                 self.state.receiver_parked.store(false, Ordering::Relaxed);
                 spins = 64; // don't re-spin, but keep yielding/parking
             }

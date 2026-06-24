@@ -368,7 +368,7 @@ impl BlockDeviceHandler {
     /// them silently per FR-019. Returns `true` if any commands or
     /// completions were processed.
     fn poll_clients(&mut self) -> bool {
-        const MAX_COMMANDS_PER_CLIENT_PER_POLL: usize = 4;
+        const MAX_COMMANDS_PER_CLIENT_PER_POLL: usize = 32;
 
         let mut did_work = false;
         let num_clients = self.clients.len();
@@ -683,7 +683,7 @@ impl BlockDeviceHandler {
                 // timeout (capped) so transient saturation becomes brief
                 // backpressure instead of a spurious ReadFailed. The loop frees
                 // slots by polling completions, so it exits as soon as one frees.
-                let backpressure_ms = timeout_ms.min(SUBMIT_ENOMEM_MAX_BACKPRESSURE_MS).max(1);
+                let backpressure_ms = timeout_ms.clamp(1, SUBMIT_ENOMEM_MAX_BACKPRESSURE_MS);
                 let deadline = tsc.deadline_from_ms(tsc.now(), backpressure_ms);
 
                 loop {
@@ -793,7 +793,7 @@ impl BlockDeviceHandler {
                 // See the read path: retry on -ENOMEM up to the op's timeout
                 // (capped) instead of a fixed 1 ms, turning transient qpair
                 // saturation into brief backpressure rather than a WriteFailed.
-                let backpressure_ms = timeout_ms.min(SUBMIT_ENOMEM_MAX_BACKPRESSURE_MS).max(1);
+                let backpressure_ms = timeout_ms.clamp(1, SUBMIT_ENOMEM_MAX_BACKPRESSURE_MS);
                 let deadline = tsc.deadline_from_ms(tsc.now(), backpressure_ms);
 
                 loop {

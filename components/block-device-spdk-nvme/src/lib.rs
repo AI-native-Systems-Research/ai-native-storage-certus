@@ -47,7 +47,7 @@ mod actor;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
-use component_core::actor::{Actor, ActorHandle};
+use component_core::actor::{Actor, ActorHandle, ActorParkConfig};
 use component_core::channel::spsc::SpscChannel;
 use component_framework::define_component;
 use interfaces::{ILogger, PciAddress};
@@ -210,7 +210,10 @@ impl BlockDeviceSpdkNvmeComponent {
         }
 
         // Create and activate the actor with CPU affinity.
-        let actor: Actor<ControlMessage, BlockDeviceHandler> = Actor::new(handler, |_panic| {});
+        // Use busy-poll mode: the NVMe actor always has polling work (completions)
+        // and any parking adds directly to IO latency.
+        let actor: Actor<ControlMessage, BlockDeviceHandler> =
+            Actor::new(handler, |_panic| {}).with_park_config(ActorParkConfig::busy_poll());
 
         let explicit_cpu = self
             .actor_cpu
