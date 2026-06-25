@@ -21,6 +21,11 @@ components:
     provides: [IGpuServices]
     init_hook: init_gpu
 
+  eviction_policy:
+    crate: eviction-policy-lru
+    factory: "EvictionPolicyLruComponent::new_default"
+    provides: [IEvictionPolicy]
+
   dispatch_map:
     crate: dispatch-map
     factory: "DispatchMapComponent::new(Default::default())"
@@ -33,6 +38,24 @@ components:
     provides: [IMemoryTier]
     init_hook: init_memory_tier
 
+  block_device:
+    crate: block-device-spdk-nvme
+    factory: "BlockDeviceSpdkNvmeComponent::new_default"
+    provides: [IBlockDevice, IBlockDeviceAdmin]
+    kind: factory
+    receptacles: [spdk_env, logger]
+
+  extent_manager:
+    crate: extent-manager
+    factory: "ExtentManager::new_inner"
+    provides: [IExtentManager]
+    kind: factory
+
+  remote_lookup:
+    crate: remote-lookup
+    factory: "RemoteLookupComponent::new"
+    provides: [IRemoteLookup]
+
   dispatcher:
     crate: dispatcher
     factory: "DispatcherComponent::new_default"
@@ -42,10 +65,16 @@ components:
 wiring:
   - target: gpu.logger
     source: logger
+  - target: eviction_policy.logger
+    source: logger
   - target: dispatch_map.logger
     source: logger
+  - target: dispatch_map.eviction_policy
+    source: eviction_policy
   - target: memory_tier.logger
     source: logger
+  - target: memory_tier.eviction_policy
+    source: eviction_policy
   - target: dispatcher.logger
     source: logger
   - target: dispatcher.dispatch_map
@@ -56,13 +85,19 @@ wiring:
     source: gpu
   - target: dispatcher.spdk_env
     source: spdk_env
+  - target: remote_lookup.logger
+    source: logger
+  - target: dispatcher.remote_lookup
+    source: remote_lookup
 
 init_order:
   - logger
   - spdk_env
   - gpu
+  - eviction_policy
   - dispatch_map
   - memory_tier
+  - remote_lookup
   - dispatcher
 
 exports:
@@ -70,3 +105,5 @@ exports:
     interface: ILogger
   - component: dispatcher
     interface: IDispatcher
+  - component: spdk_env
+    interface: ISPDKEnv

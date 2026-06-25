@@ -8,14 +8,33 @@ use std::sync::Arc;
 use interfaces::{
     DmaAllocFn, DmaBuffer, DispatcherConfig, IDispatchMap, IDispatcher, IGpuServices, IMemoryTier,
 };
-use spdk_env::ISPDKEnv;
 
 use crate::config::StackConfig;
 
+#[cfg(feature = "spdk")]
 const NVME_CLASS_CODE: u32 = 0x010802;
 
+#[cfg(feature = "spdk-mem")]
+#[allow(dead_code)]
+pub fn init_spdk_env_dma_only(
+    iface: &Arc<dyn spdk_env::ISPDKEnv + Send + Sync>,
+    _config: &StackConfig,
+) -> Result<(), String> {
+    iface.init().map_err(|e| format!("SPDK init failed: {e}"))
+}
+
+#[cfg(feature = "spdk-mem")]
+#[allow(dead_code)]
+pub fn init_spdk_env_stub(
+    _iface: &Arc<dyn spdk_env::ISPDKEnv + Send + Sync>,
+    _config: &StackConfig,
+) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(feature = "spdk")]
 pub fn init_spdk_env(
-    iface: &Arc<dyn ISPDKEnv + Send + Sync>,
+    iface: &Arc<dyn spdk_env::ISPDKEnv + Send + Sync>,
     config: &StackConfig,
 ) -> Result<(), String> {
     iface.init().map_err(|e| format!("SPDK init failed: {e}"))?;
@@ -42,6 +61,16 @@ pub fn init_spdk_env(
             .map(|d| d.address.to_string())
             .collect()
     };
+
+    // Resolve NUMA node of the first selected drive for memory-tier placement.
+    let numa_node = addrs.first().and_then(|first_addr| {
+        iface
+            .devices()
+            .iter()
+            .find(|d| d.address.to_string() == *first_addr)
+            .map(|d| d.numa_node)
+    });
+    *config.resolved_numa_node.borrow_mut() = numa_node;
 
     *config.resolved_pci_addrs.borrow_mut() = addrs;
     Ok(())
@@ -71,8 +100,9 @@ pub fn init_memory_tier(
     iface: &Arc<dyn IMemoryTier + Send + Sync>,
     config: &StackConfig,
 ) -> Result<(), String> {
+    let numa_node = *config.resolved_numa_node.borrow();
     iface
-        .initialize(config.memory_tier_size)
+        .initialize(config.memory_tier_size, numa_node)
         .map_err(|e| format!("MemoryTier init failed: {e}"))?;
 
     // Register the memory-tier pool with CUDA for pinned DMA transfers.
@@ -99,13 +129,26 @@ pub fn init_dispatcher(
     iface: &Arc<dyn IDispatcher + Send + Sync>,
     config: &StackConfig,
 ) -> Result<(), String> {
-    let data_pci_addrs = config.resolved_pci_addrs.borrow().clone();
+    let mut data_pci_addrs = config.resolved_pci_addrs.borrow().clone();
+
+    // When SPDK is not used, generate placeholder addresses for the requested drive count.
+    if data_pci_addrs.is_empty() {
+        let count = if !config.device_paths.is_empty() {
+            config.device_paths.len()
+        } else {
+            config.drive_count.unwrap_or(1)
+        };
+        data_pci_addrs = (0..count)
+            .map(|i| format!("0000:00:0{i}.0"))
+            .collect();
+    }
 
     iface
         .initialize(DispatcherConfig {
             data_pci_addrs,
             format_on_init: config.format,
             poller_base_cpu: config.poller_base_cpu,
+            max_eviction_attempts: config.max_eviction_attempts,
             ..Default::default()
         })
         .map_err(|e| format!("Dispatcher init failed: {e}"))

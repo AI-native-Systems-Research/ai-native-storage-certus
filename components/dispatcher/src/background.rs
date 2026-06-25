@@ -24,6 +24,7 @@ pub struct BackgroundWriter {
     shutdown: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
     sender: Sender<WriteJob>,
+    in_flight: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl BackgroundWriter {
@@ -31,7 +32,16 @@ impl BackgroundWriter {
     ///
     /// The thread drains `WriteJob`s from the channel until the shutdown
     /// flag is set and the channel is empty.
-    pub fn start<F>(mut process_job: F) -> Self
+    #[cfg(test)]
+    pub fn start<F>(process_job: F) -> Self
+    where
+        F: FnMut(WriteJob) + Send + 'static,
+    {
+        Self::start_named(0, process_job)
+    }
+
+    /// Start a named background writer thread (used by `ParallelBackgroundWriter`).
+    pub(crate) fn start_named<F>(drive_idx: usize, mut process_job: F) -> Self
     where
         F: FnMut(WriteJob) + Send + 'static,
     {
@@ -39,11 +49,13 @@ impl BackgroundWriter {
             crossbeam_channel::unbounded();
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = Arc::clone(&shutdown);
+        let in_flight = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let in_flight_clone = Arc::clone(&in_flight);
 
         let handle = thread::Builder::new()
-            .name("dispatcher-bg-writer".into())
+            .name(format!("dispatcher-bg-writer-{drive_idx}"))
             .spawn(move || {
-                Self::worker_loop(&shutdown_clone, &receiver, &mut process_job);
+                Self::worker_loop(&shutdown_clone, &receiver, &in_flight_clone, &mut process_job);
             })
             .expect("failed to spawn background writer thread");
 
@@ -51,12 +63,34 @@ impl BackgroundWriter {
             shutdown,
             handle: Some(handle),
             sender,
+            in_flight,
         }
     }
 
     /// Enqueue a write job for background processing.
     pub fn enqueue(&self, job: WriteJob) -> Result<(), WriteJob> {
-        self.sender.send(job).map_err(|e| e.0)
+        self.in_flight.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.sender.send(job).map_err(|e| {
+            self.in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            e.0
+        })
+    }
+
+    /// Return the number of jobs currently in-flight (enqueued but not yet processed).
+    pub fn in_flight(&self) -> usize {
+        self.in_flight.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Block until all jobs enqueued before this call have been processed.
+    ///
+    /// Jobs enqueued concurrently by other threads after this call begins are
+    /// not guaranteed to be complete when this returns.
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub fn flush(&self) {
+        while self.in_flight.load(std::sync::atomic::Ordering::Acquire) > 0 {
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
 
     /// Signal shutdown and wait for the background thread to finish.
@@ -71,17 +105,25 @@ impl BackgroundWriter {
         }
     }
 
-    fn worker_loop<F>(shutdown: &AtomicBool, receiver: &Receiver<WriteJob>, process_job: &mut F)
-    where
+    fn worker_loop<F>(
+        shutdown: &AtomicBool,
+        receiver: &Receiver<WriteJob>,
+        in_flight: &std::sync::atomic::AtomicUsize,
+        process_job: &mut F,
+    ) where
         F: FnMut(WriteJob),
     {
         loop {
             match receiver.recv_timeout(std::time::Duration::from_millis(50)) {
-                Ok(job) => process_job(job),
+                Ok(job) => {
+                    process_job(job);
+                    in_flight.fetch_sub(1, std::sync::atomic::Ordering::Release);
+                }
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                     if shutdown.load(Ordering::Acquire) {
                         while let Ok(job) = receiver.try_recv() {
                             process_job(job);
+                            in_flight.fetch_sub(1, std::sync::atomic::Ordering::Release);
                         }
                         return;
                     }
@@ -97,6 +139,70 @@ impl Drop for BackgroundWriter {
         if self.handle.is_some() {
             self.shutdown();
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Parallel Background Writer (one thread per drive)
+// ---------------------------------------------------------------------------
+
+/// A pool of per-drive `BackgroundWriter` threads.
+///
+/// Routes each `WriteJob` to the writer responsible for its target drive,
+/// enabling concurrent write-through across multiple NVMe devices.
+pub struct ParallelBackgroundWriter {
+    writers: Vec<BackgroundWriter>,
+    num_drives: usize,
+}
+
+impl ParallelBackgroundWriter {
+    /// Start one writer thread per drive.
+    ///
+    /// `make_processor(drive_idx)` is called once per drive to produce the
+    /// job-processing closure for that drive's dedicated thread.
+    pub fn start<F>(num_drives: usize, make_processor: impl Fn(usize) -> F) -> Self
+    where
+        F: FnMut(WriteJob) + Send + 'static,
+    {
+        let writers = (0..num_drives)
+            .map(|idx| BackgroundWriter::start_named(idx, make_processor(idx)))
+            .collect();
+
+        Self { writers, num_drives }
+    }
+
+    /// Enqueue a write job, routing to the writer for its target drive.
+    pub fn enqueue(&self, job: WriteJob) -> Result<(), WriteJob> {
+        let idx = job.device_index % self.num_drives;
+        self.writers[idx].enqueue(job)
+    }
+
+    /// Total number of jobs in-flight across all drive writers.
+    pub fn in_flight(&self) -> usize {
+        self.writers.iter().map(|w| w.in_flight()).sum()
+    }
+
+    /// Block until all per-drive queues are drained.
+    pub fn flush(&self) {
+        loop {
+            if self.writers.iter().all(|w| w.in_flight() == 0) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// Shutdown all per-drive writer threads, draining remaining jobs.
+    pub fn shutdown(&mut self) {
+        for writer in &mut self.writers {
+            writer.shutdown();
+        }
+    }
+}
+
+impl Drop for ParallelBackgroundWriter {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 

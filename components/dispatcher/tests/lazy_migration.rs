@@ -196,6 +196,15 @@ impl IDispatchMap for MockDispatchMap {
         }
     }
 
+    fn entry_size(&self, key: CacheKey) -> Result<u32, DispatchMapError> {
+        let inner = self.inner.lock().unwrap();
+        if inner.entries.contains_key(&key) {
+            Ok(4096)
+        } else {
+            Err(DispatchMapError::KeyNotFound(key))
+        }
+    }
+
     fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
         let inner = self.inner.lock().unwrap();
         inner.entries.keys().copied().take(n).collect()
@@ -315,6 +324,9 @@ impl IGpuServices for MockGpuServices {
     fn create_stream(&self) -> Result<GpuStream, String> {
         Ok(GpuStream(0x1 as *mut std::ffi::c_void))
     }
+    fn stream_query(&self, _stream: GpuStream) -> Result<bool, String> {
+        Ok(true)
+    }
     fn destroy_stream(&self, _stream: GpuStream) -> Result<(), String> {
         Ok(())
     }
@@ -334,6 +346,30 @@ impl IGpuServices for MockGpuServices {
         Ok(())
     }
     fn memcpy_h2d_async(
+        &self,
+        src: *const std::ffi::c_void,
+        dst: *mut std::ffi::c_void,
+        size: usize,
+        _stream: GpuStream,
+    ) -> Result<(), String> {
+        unsafe {
+            std::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, size);
+        }
+        Ok(())
+    }
+    fn dma_copy_to_host_async(
+        &self,
+        src: *const std::ffi::c_void,
+        dst: &DmaBuffer,
+        size: usize,
+        _stream: GpuStream,
+    ) -> Result<(), String> {
+        unsafe {
+            std::ptr::copy_nonoverlapping(src as *const u8, dst.as_ptr() as *mut u8, size);
+        }
+        Ok(())
+    }
+    fn memcpy_d2h_async(
         &self,
         src: *const std::ffi::c_void,
         dst: *mut std::ffi::c_void,
@@ -396,7 +432,7 @@ impl MockMemoryTier {
 }
 
 impl IMemoryTier for MockMemoryTier {
-    fn initialize(&self, _pool_size: usize) -> Result<(), MemoryTierError> {
+    fn initialize(&self, _pool_size: usize, _numa_node: Option<i32>) -> Result<(), MemoryTierError> {
         Ok(())
     }
 
@@ -440,6 +476,10 @@ impl IMemoryTier for MockMemoryTier {
         Some(key)
     }
 
+    fn evict_lru_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+        self.evict_lru()
+    }
+
     fn remove(&self, key: CacheKey) -> Result<(), MemoryTierError> {
         let mut inner = self.inner.lock().unwrap();
         inner
@@ -450,6 +490,7 @@ impl IMemoryTier for MockMemoryTier {
     }
 
     fn touch(&self, _key: CacheKey) {}
+    fn batch_touch(&self, _keys: &[CacheKey]) {}
 
     fn contains(&self, key: CacheKey) -> bool {
         self.inner.lock().unwrap().slots.contains_key(&key)
@@ -474,6 +515,10 @@ impl IMemoryTier for MockMemoryTier {
         inner.slots.clear();
         inner.next_offset = 0;
         Ok(count)
+    }
+
+    fn is_dma_capable(&self) -> bool {
+        false
     }
 }
 

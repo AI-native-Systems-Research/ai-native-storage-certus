@@ -1,102 +1,205 @@
 {
-  "generated": "2026-05-29T00:00:00Z",
+  "generated": "2026-06-18T00:00:00Z",
   "project": "block-device-spdk-nvme v2",
-  "previous_report": "2026-05-21",
+  "previous_report": "2026-05-29",
   "summary": {
-    "specs_analyzed": 2,
-    "requirements_checked": 51,
+    "total_requirements": 50,
     "aligned": 47,
     "drifted": 2,
-    "not_implemented": 0,
-    "unspecced_features": 1
+    "not_implemented": 1,
+    "alignment_percentage": 94
   },
   "specs": [
     {
       "id": "001-spdk-nvme-block-device",
-      "title": "SPDK NVMe Block Device Component",
-      "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
-        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
-        "FR-015", "FR-016", "FR-017", "FR-018", "FR-019", "FR-020", "FR-021",
-        "FR-022", "FR-023", "FR-024",
-        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006", "SC-007"
-      ],
-      "drifted": [
-        {
-          "id": "D1",
-          "requirement": "SC-008",
-          "spec_text": "Performance-sensitive paths (IO submission, batch processing, qpair selection) MUST have benchmarks",
-          "actual": "No benches/ directory in block-device-spdk-nvme crate. QueuePairPool is pub with unit tests. apps/iops-benchmark measures aggregate performance but not per-function overhead.",
-          "location": "components/block-device-spdk-nvme/ (missing benches/ directory)",
-          "severity": "minor",
-          "carried_from": "2026-05-21"
-        },
-        {
-          "id": "D2",
-          "requirement": "FR-004, FR-015",
-          "spec_text": "FR-004 specifies async IO submission; FR-015 specifies queue pair exploitation. Neither addresses behavior when spdk_nvme_ns_cmd_read/write returns ENOMEM.",
-          "actual": "When rc == ENOMEM (-12), actor enters a spin-retry loop for up to 1ms (TscClock). On each retry, all queue pairs are polled via process_completions(0) to drain completions and free slots. If deadline expires with rc still non-zero, context is reclaimed, pending_ops entry removed, and error completion sent to client.",
-          "location": "src/actor.rs:618-670 (ReadAsync), src/actor.rs:718-773 (WriteAsync)",
-          "severity": "moderate",
-          "new_in": "2026-05-29",
-          "suggested_requirement": "FR-025",
-          "suggested_text": "When spdk_nvme_ns_cmd_read or spdk_nvme_ns_cmd_write returns ENOMEM (-12), the actor MUST retry the submission for up to 1ms (measured by TscClock). On each retry, the actor MUST poll all queue pairs for completions. If the 1ms deadline expires without successful submission, the operation MUST fail with an error completion; pending_ops entry and context pool slot MUST be reclaimed."
-        },
-        {
-          "id": "D3",
-          "requirement": "FR-015",
-          "spec_text": "The component MUST exploit different NVMe IO queues with varying queue depths to minimize latency for a given batch size.",
-          "actual": "STANDARD_DEPTHS = [4, 16, 64, 256]. select_index chooses shallowest queue with available() >= batch_size; falls back to deepest. io_queue_requests = depth * 2. CONTEXT_POOL_CAPACITY = 340 (sum of standard depths).",
-          "location": "src/qpair.rs:141 (STANDARD_DEPTHS), src/qpair.rs:256-265 (select_index), src/actor.rs:269 (CONTEXT_POOL_CAPACITY)",
-          "severity": "minor",
-          "new_in": "2026-05-29",
-          "note": "Under-specification rather than conflict. Depth values, shallowest-fit algorithm, fallback-to-deepest, and 2x request pool sizing are unconstrained by spec."
-        }
-      ],
-      "not_implemented": []
+      "path": "specs/001-spdk-nvme-block-device/spec.md",
+      "total_requirements": 25,
+      "aligned": 22,
+      "drifted": 2,
+      "not_implemented": 1,
+      "findings": {
+        "aligned": [
+          { "id": "FR-001", "summary": "IBlockDevice interface for creating/connecting client channels" },
+          { "id": "FR-002", "summary": "Two shared-memory SPSC channels per client (ingress + callback)" },
+          { "id": "FR-003", "summary": "Synchronous read/write with ns_id, DmaBuffer, LBA" },
+          { "id": "FR-004", "summary": "Async read/write with timeout, unique handle, handle in completion" },
+          { "id": "FR-005", "summary": "Abort in-flight async operation by handle" },
+          { "id": "FR-006", "summary": "Write-zeros operation" },
+          { "id": "FR-007", "summary": "Batch submission of IO operations" },
+          { "id": "FR-008", "summary": "Namespace probe, create, format, delete" },
+          { "id": "FR-009", "summary": "Controller hardware reset with graceful in-flight handling" },
+          { "id": "FR-010", "summary": "Device info via IBlockDevice interface" },
+          { "id": "FR-011", "summary": "Feature-gated telemetry with min/max/mean latency, ops, throughput" },
+          { "id": "FR-012", "summary": "Single controller per instance via set_pci_address + initialize" },
+          { "id": "FR-013", "summary": "Actor thread NUMA-pinned to controller node" },
+          { "id": "FR-014", "summary": "Actor polls all attached client channels" },
+          { "id": "FR-016", "summary": "ILogger receptacle for debug logging" },
+          { "id": "FR-017", "summary": "Uses spdk-env component for SPDK init" },
+          { "id": "FR-018", "summary": "DmaBuffer via Arc references in messages" },
+          { "id": "FR-019", "summary": "Client disconnect: cancel ops, release resources, discard completions" },
+          { "id": "FR-020", "summary": "Namespace operations serialized through actor thread" },
+          { "id": "FR-021", "summary": "IBlockDeviceAdmin with set_pci_address, set_actor_cpu, initialize, shutdown" },
+          { "id": "FR-022", "summary": "TscClock for timeout checking, calibrated at construction, ~1ms throttle" },
+          { "id": "FR-024", "summary": "Pre-allocated scratch buffers (completion_scratch, timeout_scratch)" }
+        ],
+        "drifted": [
+          {
+            "id": "FR-015",
+            "severity": "minor",
+            "spec_says": "io_queue_requests MUST be set to depth * 2",
+            "code_does": "qpair.rs:173 sets io_queue_requests = depth * 4 for request splitting and burst absorption",
+            "location": "src/qpair.rs:173",
+            "recommendation": "Update spec to depth * 4 with rationale"
+          },
+          {
+            "id": "FR-025",
+            "severity": "minor",
+            "spec_says": "Retry on ENOMEM for up to 50ms with poll-all-qpairs on each iteration",
+            "code_does": "Retries for min(timeout_ms, 1000ms) via SUBMIT_ENOMEM_MAX_BACKPRESSURE_MS constant; dynamic cap adapts to operation timeout",
+            "location": "src/actor.rs:686-715",
+            "recommendation": "Update spec to reflect dynamic backpressure window"
+          }
+        ],
+        "not_implemented": [
+          {
+            "id": "FR-023",
+            "requirement": "ContextPool slab allocator eliminating per-IO heap allocation",
+            "status": "partial",
+            "notes": "ContextPool exists with acquire/release but allocates via Box::new() on pool miss. Pool starts empty and grows on demand rather than pre-allocating. Steady-state behavior eliminates allocation after warmup."
+          }
+        ]
+      }
     },
     {
       "id": "002-iops-benchmark",
-      "title": "IOPS Benchmark Example Application",
-      "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006",
-        "FR-006a", "FR-006b", "FR-007", "FR-008", "FR-009", "FR-010",
-        "FR-011", "FR-012", "FR-013", "FR-014", "FR-015", "FR-016",
-        "FR-017", "FR-018", "FR-019", "FR-020", "FR-021", "FR-022",
-        "FR-023", "FR-024", "FR-025",
-        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006", "SC-007"
-      ],
-      "drifted": [],
-      "not_implemented": []
+      "path": "specs/002-iops-benchmark/spec.md",
+      "total_requirements": 25,
+      "aligned": 25,
+      "drifted": 0,
+      "not_implemented": 0,
+      "findings": {
+        "aligned": [
+          { "id": "FR-001", "summary": "--op flag: read, write, rw; default read" },
+          { "id": "FR-002", "summary": "--block-size flag, default 4096" },
+          { "id": "FR-003", "summary": "--queue-depth flag, default 32" },
+          { "id": "FR-004", "summary": "--threads flag, default 1" },
+          { "id": "FR-005", "summary": "--duration flag in seconds, default 10" },
+          { "id": "FR-006", "summary": "--ns-id flag, default 1" },
+          { "id": "FR-006a", "summary": "--pci-addr PCI BDF address; first device if omitted" },
+          { "id": "FR-006b", "summary": "--pattern random/sequential, default random" },
+          { "id": "FR-007", "summary": "Validate params at startup, exit with clear error" },
+          { "id": "FR-008", "summary": "Clamp queue depth to device max with warning" },
+          { "id": "FR-009", "summary": "Each thread connects via IBlockDevice own channels" },
+          { "id": "FR-010", "summary": "Async ops at configured queue depth, pipeline full" },
+          { "id": "FR-011", "summary": "rw mode: 50/50 random interleave" },
+          { "id": "FR-012", "summary": "Print config summary at startup with all params" },
+          { "id": "FR-013", "summary": "Per-second progress to stderr unless --quiet" },
+          { "id": "FR-014", "summary": "Signal threads to stop after duration" },
+          { "id": "FR-015", "summary": "Final summary: IOPS, MB/s, latency (min, mean, p50, p99, max) us" },
+          { "id": "FR-016", "summary": "rw mode: separate read/write IOPS" },
+          { "id": "FR-017", "summary": "Random = uniform LBA; Sequential = contiguous non-overlapping" },
+          { "id": "FR-018", "summary": "Count and report IO errors without aborting" },
+          { "id": "FR-019", "summary": "Exit 0 success, non-zero on failure" },
+          { "id": "FR-020", "summary": "--quiet suppresses progress output" },
+          { "id": "FR-021", "summary": "--help prints usage (implicit via clap derive)" },
+          { "id": "FR-022", "summary": "--io-mode sync/async, default async" },
+          { "id": "FR-023", "summary": "--block-size comma-separated for mixed workloads" },
+          { "id": "FR-024", "summary": "--batch-size for BatchSubmit grouping, default 1" },
+          { "id": "FR-025", "summary": "Workers pinned to NUMA-local cores" }
+        ],
+        "drifted": [],
+        "not_implemented": []
+      }
     }
   ],
-  "unspecced": [
+  "unspecced_features": [
     {
-      "id": "U1",
-      "feature": "ENOMEM retry loop with 1ms TSC deadline and all-qpair poll on each attempt",
-      "location": "src/actor.rs:618-670 (ReadAsync), src/actor.rs:718-773 (WriteAsync)",
-      "lines": 53,
-      "suggested_spec": "001-spdk-nvme-block-device",
-      "suggested_requirement": "FR-025",
-      "new_in": "2026-05-29"
+      "id": "UNSPEC-001",
+      "feature": "signal_stop() on IBlockDeviceAdmin",
+      "location": "src/lib.rs:355-359",
+      "impact": "low",
+      "spec": "001"
+    },
+    {
+      "id": "UNSPEC-002",
+      "feature": "detach_controller() on IBlockDeviceAdmin",
+      "location": "src/lib.rs:378-380",
+      "impact": "low",
+      "spec": "001"
+    },
+    {
+      "id": "UNSPEC-003",
+      "feature": "Fair client polling rotation (poll_start_idx)",
+      "location": "src/actor.rs:244,376-382",
+      "impact": "medium",
+      "spec": "001"
+    },
+    {
+      "id": "UNSPEC-004",
+      "feature": "Per-client command throttle (MAX_COMMANDS_PER_CLIENT_PER_POLL = 4)",
+      "location": "src/actor.rs:371",
+      "impact": "medium",
+      "spec": "001"
+    },
+    {
+      "id": "UNSPEC-005",
+      "feature": "Graceful drain on actor stop (5s deadline)",
+      "location": "src/actor.rs:1230-1247",
+      "impact": "medium",
+      "spec": "001"
+    },
+    {
+      "id": "UNSPEC-006",
+      "feature": "Controller parking for safe detach ordering",
+      "location": "src/actor.rs:1262-1264",
+      "impact": "low",
+      "spec": "001"
+    },
+    {
+      "id": "UNSPEC-007",
+      "feature": "Per-thread IOPS breakdown in progress and final report",
+      "location": "apps/iops-benchmark/src/report.rs:43-103",
+      "impact": "low",
+      "spec": "002"
+    },
+    {
+      "id": "UNSPEC-008",
+      "feature": "Byte-level throughput counter per thread for real-time MB/s",
+      "location": "apps/iops-benchmark/src/main.rs:224-225",
+      "impact": "low",
+      "spec": "002"
     }
   ],
-  "conflicts": [],
-  "resolved_since_last": [
+  "recommendations": [
     {
-      "id": "U1",
-      "feature": "Mixed block sizes (comma-separated --block-size)",
-      "resolution": "Now specified as FR-023 in spec 002"
+      "priority": "high",
+      "type": "spec_update",
+      "target": "FR-015",
+      "description": "Update io_queue_requests from depth*2 to depth*4 with rationale for request-splitting headroom"
     },
     {
-      "id": "U2",
-      "feature": "--batch-size flag (BatchSubmit grouping)",
-      "resolution": "Now specified as FR-024 in spec 002"
+      "priority": "high",
+      "type": "spec_update",
+      "target": "FR-025",
+      "description": "Update ENOMEM retry from fixed 50ms to dynamic min(op.timeout_ms, 1000ms)"
     },
     {
-      "id": "U3",
-      "feature": "NUMA worker thread pinning",
-      "resolution": "Now specified as FR-025 in spec 002"
+      "priority": "medium",
+      "type": "code_improvement",
+      "target": "FR-023",
+      "description": "Pre-allocate 340 context objects at actor construction to fully eliminate initial heap allocation"
+    },
+    {
+      "priority": "low",
+      "type": "spec_addition",
+      "target": "UNSPEC-001,UNSPEC-002",
+      "description": "Add signal_stop() and detach_controller() to IBlockDeviceAdmin spec (FR-021)"
+    },
+    {
+      "priority": "low",
+      "type": "spec_addition",
+      "target": "UNSPEC-003,UNSPEC-004",
+      "description": "Add fair polling rotation and per-client throttle as new FR (e.g., FR-026)"
     }
   ]
 }

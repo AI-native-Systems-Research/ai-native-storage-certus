@@ -17,7 +17,7 @@ use proto::{
     BatchCheckRequest, BatchCheckResponse, BatchLookupRequest, BatchLookupResponse,
     BatchPopulateRequest, BatchPopulateResponse, BatchRemoveRequest, BatchRemoveResponse,
     BatchTouchRequest, BatchTouchResponse, CheckResult, ClearMemoryTierRequest,
-    ClearMemoryTierResponse, EntryResult, ErrorCode,
+    ClearMemoryTierResponse, EntryResult, ErrorCode, FlushToSsdRequest, FlushToSsdResponse,
 };
 
 pub fn dispatcher_server(svc: DispatcherService) -> DispatcherServer<DispatcherService> {
@@ -443,17 +443,29 @@ impl Dispatcher for DispatcherService {
         check_duplicate_keys(&req.keys)?;
 
         let dispatcher = Arc::clone(&self.dispatcher);
-        let results = tokio::task::spawn_blocking(move || {
-            req.keys
-                .iter()
-                .map(|&key| match dispatcher.touch(key) {
-                    Ok(()) => success_result(key),
-                    Err(e) => error_result(key, &e),
-                })
-                .collect::<Vec<_>>()
+        let promote = req.promote;
+        let keys = req.keys;
+
+        let results = tokio::task::spawn_blocking({
+            let dispatcher = Arc::clone(&dispatcher);
+            let keys = keys.clone();
+            move || {
+                keys.iter()
+                    .map(|&key| match dispatcher.touch(key) {
+                        Ok(()) => success_result(key),
+                        Err(e) => error_result(key, &e),
+                    })
+                    .collect::<Vec<_>>()
+            }
         })
         .await
         .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        if promote {
+            tokio::task::spawn_blocking(move || {
+                dispatcher.promote_to_memory_tier(&keys);
+            });
+        }
 
         Ok(Response::new(BatchTouchResponse { results }))
     }
@@ -470,6 +482,21 @@ impl Dispatcher for DispatcherService {
 
         Ok(Response::new(ClearMemoryTierResponse {
             entries_cleared: entries_cleared as u64,
+        }))
+    }
+
+    async fn flush_to_ssd(
+        &self,
+        _request: Request<FlushToSsdRequest>,
+    ) -> Result<Response<FlushToSsdResponse>, Status> {
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let jobs_flushed = tokio::task::spawn_blocking(move || dispatcher.flush_to_ssd())
+            .await
+            .map_err(|e| Status::internal(format!("task join error: {e}")))?
+            .map_err(|e| Status::internal(format!("flush_to_ssd failed: {e}")))?;
+
+        Ok(Response::new(FlushToSsdResponse {
+            jobs_flushed: jobs_flushed as u64,
         }))
     }
 }

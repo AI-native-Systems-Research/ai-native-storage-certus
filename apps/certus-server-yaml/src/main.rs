@@ -32,6 +32,11 @@ struct Cli {
     #[arg(long = "device-pci")]
     device_pci: Vec<String>,
 
+    /// Linux block device path(s) — may be specified multiple times.
+    /// Use with the kernel block device backend (e.g., /dev/nvme0n1, /dev/md127).
+    #[arg(long = "device-path")]
+    device_path: Vec<String>,
+
     /// Use the first N discovered NVMe drives (alternative to --device-pci).
     #[arg(long = "drive-count", conflicts_with = "device_pci")]
     drive_count: Option<usize>,
@@ -59,6 +64,16 @@ struct Cli {
     /// Pin each NVMe poller thread to a dedicated CPU core.
     #[arg(long = "poller-base-cpu")]
     poller_base_cpu: Option<usize>,
+
+    /// Maximum eviction attempts before failing with pool-full error.
+    #[arg(long = "max-eviction-attempts", default_value_t = 2048)]
+    max_eviction_attempts: usize,
+
+    /// RDMA listener port for remote request handler (full-remote profile).
+    /// Requires --features rdma. Set to 0 to disable.
+    #[cfg(feature = "rdma")]
+    #[arg(long = "rdma-port", default_value_t = 18515)]
+    rdma_port: u16,
 }
 
 fn parse_size(s: &str) -> Result<usize, String> {
@@ -111,19 +126,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for addr in &cli.device_pci {
         validate_pci_address(addr).map_err(Box::<dyn std::error::Error>::from)?;
     }
-    if cli.device_pci.is_empty() && cli.drive_count.is_none() {
-        return Err("either --device-pci or --drive-count must be specified".into());
+    if cli.device_pci.is_empty() && cli.drive_count.is_none() && cli.device_path.is_empty() {
+        return Err(
+            "one of --device-pci, --drive-count, or --device-path must be specified".into(),
+        );
     }
 
     const DEFAULT_MEMORY_TIER_SIZE: usize = 2 * 1024 * 1024 * 1024; // 2 GiB
 
     let stack_config = StackConfig {
         device_pci: cli.device_pci.clone(),
+        device_paths: cli.device_path.clone(),
         drive_count: cli.drive_count,
         memory_tier_size: cli.memory_tier_size.unwrap_or(DEFAULT_MEMORY_TIER_SIZE),
         format: cli.format,
         poller_base_cpu: cli.poller_base_cpu,
+        max_eviction_attempts: cli.max_eviction_attempts,
         resolved_pci_addrs: std::cell::RefCell::new(Vec::new()),
+        resolved_numa_node: std::cell::RefCell::new(None),
     };
 
     // Build the component stack from the YAML-generated composition
@@ -138,6 +158,90 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "certus-server-yaml: memory-tier-size={} MiB",
         stack_config.memory_tier_size / (1024 * 1024)
     ));
+
+    // RDMA listener shutdown handle (used during graceful shutdown)
+    #[cfg(feature = "rdma")]
+    let mut rdma_shutdown_handle: Option<Arc<remote_request_handler::rdma::RdmaListener>> = None;
+
+    // Start RDMA remote-request-handler listener in background (optional: port 0 = disabled)
+    #[cfg(feature = "rdma")]
+    {
+        let rdma_port = cli.rdma_port;
+        if rdma_port > 0 {
+            logger.info("remote-request-handler: initializing");
+
+            let dm_resolve = Arc::clone(&stack.dispatch_map);
+            let dispatcher_resolve = Arc::clone(&stack.dispatcher);
+            let resolver: Arc<remote_request_handler::serve::Resolver> =
+                Arc::new(move |key| {
+                    #[allow(unused_imports)]
+                    use interfaces::{IDispatchMap, IDispatcher};
+                    match dm_resolve.lookup(key) {
+                        Ok(interfaces::LookupResult::MemoryTier { pointer, size }) => {
+                            Some(remote_request_handler::serve::ResolvedEntry {
+                                ptr: pointer as *const u8,
+                                size,
+                            })
+                        }
+                        Ok(interfaces::LookupResult::BlockDevice { .. }) => {
+                            // SSD-resident: release read ref, promote to memory-tier, re-lookup
+                            let _ = dm_resolve.release_read(key);
+                            dispatcher_resolve.promote_to_memory_tier(&[key]);
+                            match dm_resolve.lookup(key) {
+                                Ok(interfaces::LookupResult::MemoryTier { pointer, size }) => {
+                                    Some(remote_request_handler::serve::ResolvedEntry {
+                                        ptr: pointer as *const u8,
+                                        size,
+                                    })
+                                }
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    }
+                });
+
+            let dm_release = Arc::clone(&stack.dispatch_map);
+            let release: Arc<remote_request_handler::serve::ReleaseCallback> =
+                Arc::new(move |key| {
+                    #[allow(unused_imports)]
+                    use interfaces::IDispatchMap;
+                    let _ = dm_release.release_read(key);
+                });
+
+            #[allow(unused_imports)]
+            use interfaces::IMemoryTier;
+            let pool = stack.memory_tier.pool_info().map(|(base, size)| {
+                Arc::new(remote_request_handler::serve::PoolRegion { base, size })
+            });
+
+            let rdma_logger = Arc::clone(&stack.logger)
+                as Arc<dyn interfaces::ILogger + Send + Sync>;
+
+            let rdma_listener = remote_request_handler::serve::bind_listener(
+                "0.0.0.0",
+                rdma_port,
+                logger.as_ref(),
+            )
+            .map_err(|e| format!("remote-request-handler: bind failed: {e}"))?;
+
+            rdma_shutdown_handle = Some(Arc::clone(&rdma_listener));
+            tokio::task::spawn_blocking(move || {
+                remote_request_handler::serve::serve_loop(
+                    &rdma_listener,
+                    Some(resolver),
+                    Some(release),
+                    pool,
+                    rdma_logger,
+                );
+            });
+            logger.info(&format!(
+                "certus-server-yaml: RDMA remote-request-handler on port {rdma_port}"
+            ));
+        } else {
+            logger.info("certus-server-yaml: RDMA remote-request-handler disabled (port=0)");
+        }
+    }
 
     let svc = DispatcherService::new(Arc::clone(&stack.dispatcher));
     let addr = cli.listen.parse()?;
@@ -170,7 +274,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .await?;
 
+    // Mask signals during shutdown to prevent a second Ctrl+C from killing the
+    // process mid-teardown (which would segfault as SPDK memory is freed while
+    // actor threads are still running).
+    unsafe {
+        libc::signal(libc::SIGINT, libc::SIG_IGN);
+        libc::signal(libc::SIGTERM, libc::SIG_IGN);
+    }
+
+    // Shut down RDMA listener (unblocks the accept loop)
+    #[cfg(feature = "rdma")]
+    if let Some(ref handle) = rdma_shutdown_handle {
+        logger.info("remote-request-handler: shutting down");
+        handle.shutdown();
+    }
+
     let _ = stack.dispatcher.shutdown();
+    stack.spdk_env.fini();
     stack.logger.info("certus-server-yaml: shutdown complete");
 
     Ok(())

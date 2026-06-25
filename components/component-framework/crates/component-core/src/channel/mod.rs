@@ -204,6 +204,7 @@ impl<T: Send + 'static> Sender<T> {
     /// ```
     pub fn send(&self, value: T) -> Result<(), ChannelError> {
         let mut val = value;
+        let mut spins = 0u32;
         loop {
             match self.state.queue.push(val) {
                 Ok(()) => {
@@ -218,13 +219,20 @@ impl<T: Send + 'static> Sender<T> {
                 }
                 Err(returned) => {
                     val = returned;
-                    {
-                        let mut guard = self.state.sender_thread.lock().unwrap();
-                        *guard = Some(thread::current());
+                    spins += 1;
+                    if spins < 64 {
+                        std::hint::spin_loop();
+                    } else if spins < 256 {
+                        thread::yield_now();
+                    } else {
+                        {
+                            let mut guard = self.state.sender_thread.lock().unwrap();
+                            *guard = Some(thread::current());
+                        }
+                        self.state.sender_parked.store(true, Ordering::Release);
+                        thread::park_timeout(std::time::Duration::from_micros(50));
+                        self.state.sender_parked.store(false, Ordering::Relaxed);
                     }
-                    self.state.sender_parked.store(true, Ordering::Release);
-                    thread::park_timeout(std::time::Duration::from_millis(1));
-                    self.state.sender_parked.store(false, Ordering::Relaxed);
                 }
             }
         }
@@ -354,6 +362,7 @@ impl<T: Send + 'static> Receiver<T> {
     /// assert_eq!(rx.recv().unwrap_err(), ChannelError::Closed);
     /// ```
     pub fn recv(&self) -> Result<T, ChannelError> {
+        let mut spins = 0u32;
         loop {
             if let Some(value) = self.state.queue.pop() {
                 if self.state.sender_parked.load(Ordering::Relaxed) {
@@ -377,13 +386,21 @@ impl<T: Send + 'static> Receiver<T> {
                 return Err(ChannelError::Closed);
             }
 
-            {
-                let mut guard = self.state.receiver_thread.lock().unwrap();
-                *guard = Some(thread::current());
+            spins += 1;
+            if spins < 64 {
+                std::hint::spin_loop();
+            } else if spins < 256 {
+                thread::yield_now();
+            } else {
+                {
+                    let mut guard = self.state.receiver_thread.lock().unwrap();
+                    *guard = Some(thread::current());
+                }
+                self.state.receiver_parked.store(true, Ordering::Release);
+                thread::park_timeout(std::time::Duration::from_micros(50));
+                self.state.receiver_parked.store(false, Ordering::Relaxed);
+                spins = 64; // don't re-spin, but keep yielding/parking
             }
-            self.state.receiver_parked.store(true, Ordering::Release);
-            thread::park_timeout(std::time::Duration::from_millis(1));
-            self.state.receiver_parked.store(false, Ordering::Relaxed);
         }
     }
 

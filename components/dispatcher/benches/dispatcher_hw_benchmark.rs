@@ -21,7 +21,7 @@ use gpu_services::cuda_ffi;
 use gpu_services::GpuServicesComponent;
 use interfaces::{
     CacheKey, DispatchMapError, DispatcherConfig, DmaAllocFn, DmaBuffer, IDispatchMap,
-    IDispatcher, IGpuServices, ILogger, IMemoryTier, IpcHandle, LookupResult,
+    IDispatcher, IEvictionPolicy, IGpuServices, ILogger, IMemoryTier, IpcHandle, LookupResult,
 };
 use memory_tier::MemoryTierComponent;
 use spdk_env::{ISPDKEnv, SPDKEnvComponent};
@@ -195,6 +195,15 @@ impl IDispatchMap for HwDispatchMap {
         let inner = self.inner.lock().unwrap();
         if inner.contains_key(&key) {
             Ok(())
+        } else {
+            Err(DispatchMapError::KeyNotFound(key))
+        }
+    }
+
+    fn entry_size(&self, key: CacheKey) -> Result<u32, DispatchMapError> {
+        let inner = self.inner.lock().unwrap();
+        if inner.contains_key(&key) {
+            Ok(4096)
         } else {
             Err(DispatchMapError::KeyNotFound(key))
         }
@@ -397,11 +406,16 @@ fn setup_dispatcher(
         eprintln!("    [0] {} ({} MiB)", d.name, d.memory_bytes / (1024 * 1024));
     }
 
-    // Memory tier (real mmap pool)
+    // Eviction policy + memory tier
+    let ep_comp = eviction_policy_lru::EvictionPolicyLruComponent::new_default();
+    let ep: Arc<dyn IEvictionPolicy + Send + Sync> =
+        query_interface!(ep_comp, IEvictionPolicy).ok_or("IEvictionPolicy query failed")?;
+
     let mt_comp = MemoryTierComponent::new_default();
+    mt_comp.eviction_policy.connect(Arc::clone(&ep)).unwrap();
     let imt = query_interface!(mt_comp, IMemoryTier)
         .ok_or("IMemoryTier query failed")?;
-    imt.initialize(MEMORY_TIER_POOL_SIZE)
+    imt.initialize(MEMORY_TIER_POOL_SIZE, None)
         .map_err(|e| format!("memory-tier init: {e:?}"))?;
     eprintln!(
         "  Memory-tier: {} MiB pool",

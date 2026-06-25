@@ -13,14 +13,17 @@ members = [
     "apps/iops-benchmark",
     "apps/iops-benchmark-md",
     "apps/nvme-ns-manager",
+    "apps/nvme-bar1-bench",
     "apps/extent-benchmark",
     "components/block-device-spdk-nvme",
     "components/block-device-filesys",
+    "components/block-device-kernel",
     "components/extent-manager",
     "components/logger",
     "components/dispatch-map",
     "components/memory-tier",
     "components/dispatcher",
+    "components/dispatcher-p2p",
     "components/gpu-services",
     "apps/gpu-handle-test-server",
     "apps/gpu-show",
@@ -28,8 +31,12 @@ members = [
     "apps/gpu-bb-vs-p2p",
     "certus-connector",
     "components/example-helloworld-dylib",
+    "components/eviction-policy-lru",
+    "components/remote-lookup",
+    "components/remote-request-handler",
     "apps/dynamic-loading-example",
-    "apps/certus-server-yaml"
+    "apps/certus-server-yaml",
+    "apps/baseline-generalized-fs"
 ]
 
 # SPDK crates require pre-built native libraries at deps/spdk-build/.
@@ -45,12 +52,15 @@ default-members = [
     "apps/helloworld-mainline",
     "apps/dynamic-loading-example",
     "components/logger",
-    "components/gpu-services"
+    "components/gpu-services",
+    "components/eviction-policy-lru",
+    "components/remote-lookup"
 ]
 
 resolver = "2"
 
 [workspace.package]
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
@@ -64,11 +74,17 @@ interfaces = { path = "components/interfaces" }
 spdk-sys = { path = "components/spdk-sys" }
 spdk-env = { path = "components/spdk-env" }
 block-device-spdk-nvme = { path = "components/block-device-spdk-nvme" }
+block-device-filesys = { path = "components/block-device-filesys" }
+block-device-kernel = { path = "components/block-device-kernel" }
 logger = { path = "components/logger" }
 dispatch-map = { path = "components/dispatch-map" }
 memory-tier = { path = "components/memory-tier" }
-dispatcher = { path = "components/dispatcher" }
+dispatcher = { path = "components/dispatcher", default-features = false }
+dispatcher-p2p = { path = "components/dispatcher-p2p", default-features = false }
 extent-manager = { path = "components/extent-manager" }
 gpu-services = { path = "components/gpu-services" }
+eviction-policy-lru = { path = "components/eviction-policy-lru" }
+remote-lookup = { path = "components/remote-lookup" }
+remote-request-handler = { path = "components/remote-request-handler" }
 certus-connector = { path = "certus-connector" }
 libloading = "0.8"

@@ -33,6 +33,13 @@ struct ComponentDecl {
     /// Defaults to "interfaces" if not specified.
     trait_path: Option<String>,
     init_hook: Option<String>,
+    /// "factory" means this component is created N times at runtime (not a singleton).
+    /// It generates a factory closure instead of a singleton instance.
+    kind: Option<String>,
+    /// Receptacles that the factory-kind component needs wired.
+    /// Used to generate the correct factory closure body.
+    #[serde(default)]
+    receptacles: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -136,6 +143,10 @@ fn ensure_callable(factory: &str) -> String {
     }
 }
 
+fn is_factory_kind(decl: &ComponentDecl) -> bool {
+    decl.kind.as_deref() == Some("factory")
+}
+
 fn generate_composition(manifest: &ProfileManifest) -> String {
     let mut code = String::new();
 
@@ -178,10 +189,13 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
     )
     .unwrap();
 
-    // --- Instantiation phase ---
+    // --- Instantiation phase (skip factory-kind components) ---
     writeln!(code, "    // --- Instantiate components ---").unwrap();
     for name in &manifest.init_order {
         let decl = &manifest.components[name];
+        if is_factory_kind(decl) {
+            continue;
+        }
         let crate_ident = rust_crate_ident(&decl.crate_name);
         let factory_call = ensure_callable(&decl.factory);
         writeln!(
@@ -190,9 +204,9 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
         )
         .unwrap();
     }
-    // Instantiate components not in init_order (those without hooks)
+    // Instantiate components not in init_order (those without hooks, skip factories)
     for (name, decl) in &manifest.components {
-        if !manifest.init_order.contains(name) {
+        if !manifest.init_order.contains(name) && !is_factory_kind(decl) {
             let crate_ident = rust_crate_ident(&decl.crate_name);
             let factory_call = ensure_callable(&decl.factory);
             writeln!(
@@ -204,9 +218,12 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
     }
     writeln!(code).unwrap();
 
-    // --- Query interfaces phase ---
+    // --- Query interfaces phase (skip factory-kind) ---
     writeln!(code, "    // --- Query interfaces ---").unwrap();
     for (name, decl) in &manifest.components {
+        if is_factory_kind(decl) {
+            continue;
+        }
         let trait_mod = decl
             .trait_path
             .as_deref()
@@ -259,10 +276,94 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
     }
     writeln!(code).unwrap();
 
+    // --- Factory injection phase (for kind: factory components) ---
+    let factory_components: Vec<(&String, &ComponentDecl)> = manifest
+        .components
+        .iter()
+        .filter(|(_, decl)| is_factory_kind(decl))
+        .collect();
+
+    if !factory_components.is_empty() {
+        writeln!(code, "    // --- Inject component factories ---").unwrap();
+        for (name, decl) in &factory_components {
+            let crate_ident = rust_crate_ident(&decl.crate_name);
+            let factory_call = ensure_callable(&decl.factory);
+
+            if *name == "block_device" {
+                if decl.crate_name == "block-device-kernel" {
+                    // Kernel backend: capture device_paths from config for runtime indexing
+                    writeln!(code, "    let __device_paths = config.device_paths.clone();").unwrap();
+                    writeln!(code, "    comp_dispatcher.set_block_device_factory(Box::new(move |spdk_env, logger, drive_idx, pci_addr, cpu_pin| {{").unwrap();
+                    writeln!(code, "        let path = if drive_idx < __device_paths.len() {{").unwrap();
+                    writeln!(code, "            __device_paths[drive_idx].clone()").unwrap();
+                    writeln!(code, "        }} else {{").unwrap();
+                    writeln!(code, "            format!(\"/dev/nvme{{}}n1\", drive_idx)").unwrap();
+                    writeln!(code, "        }};").unwrap();
+                    writeln!(code, "        let bd = {crate_ident}::BlockDeviceKernelComponent::create(&path, 4096, 0);").unwrap();
+                } else if decl.crate_name == "block-device-filesys" {
+                    // Filesys backend: capture device_paths from config for runtime indexing
+                    writeln!(code, "    let __device_paths = config.device_paths.clone();").unwrap();
+                    writeln!(code, "    comp_dispatcher.set_block_device_factory(Box::new(move |spdk_env, logger, drive_idx, pci_addr, cpu_pin| {{").unwrap();
+                    writeln!(code, "        let path = if drive_idx < __device_paths.len() {{").unwrap();
+                    writeln!(code, "            __device_paths[drive_idx].clone()").unwrap();
+                    writeln!(code, "        }} else {{").unwrap();
+                    writeln!(code, "            format!(\"/ssd/certus-drive-{{}}.img\", drive_idx)").unwrap();
+                    writeln!(code, "        }};").unwrap();
+                    writeln!(code, "        let bd = {crate_ident}::BlockDeviceFilesysComponent::create(&path, 4096, 4194304);").unwrap();
+                } else {
+                    writeln!(code, "    comp_dispatcher.set_block_device_factory(Box::new(|spdk_env, logger, drive_idx, pci_addr, cpu_pin| {{").unwrap();
+                    writeln!(code, "        let bd = {crate_ident}::{factory_call};").unwrap();
+                }
+                for recep in &decl.receptacles {
+                    match recep.as_str() {
+                        "spdk_env" => {
+                            writeln!(code, "        bd.spdk_env.connect(std::sync::Arc::clone(spdk_env)).map_err(|e| e.to_string())?;").unwrap();
+                        }
+                        "logger" => {
+                            writeln!(code, "        bd.logger.connect(std::sync::Arc::clone(logger)).map_err(|e| e.to_string())?;").unwrap();
+                        }
+                        _ => {
+                            panic!("unsupported block_device receptacle '{recep}' in profile");
+                        }
+                    }
+                }
+                writeln!(code, "        let admin: std::sync::Arc<dyn interfaces::IBlockDeviceAdmin + Send + Sync> = component_core::query_interface!(bd, interfaces::IBlockDeviceAdmin)").unwrap();
+                writeln!(code, "            .ok_or_else(|| \"failed to query IBlockDeviceAdmin\".to_string())?;").unwrap();
+                if decl.crate_name == "block-device-spdk-nvme" {
+                    // SPDK backend: use IBlockDeviceAdmin for PCI-based init
+                    writeln!(code, "        admin.set_pci_address(pci_addr);").unwrap();
+                    writeln!(code, "        if let Some(cpu) = cpu_pin {{ admin.set_actor_cpu(cpu + drive_idx); }}").unwrap();
+                    writeln!(code, "        admin.initialize().map_err(|e| e.to_string())?;").unwrap();
+                } else if decl.crate_name == "block-device-kernel" {
+                    // Kernel block device backend: initialize via io_uring
+                    writeln!(code, "        bd.initialize().map_err(|e| e.to_string())?;").unwrap();
+                } else {
+                    // Non-SPDK backend: call initialize() directly on the component
+                    writeln!(code, "        bd.initialize().map_err(|e| e.to_string())?;").unwrap();
+                }
+                writeln!(code, "        let ibd: std::sync::Arc<dyn interfaces::IBlockDevice + Send + Sync> = component_core::query_interface!(bd, interfaces::IBlockDevice)").unwrap();
+                writeln!(code, "            .ok_or_else(|| \"failed to query IBlockDevice from factory component\".to_string())?;").unwrap();
+                writeln!(code, "        Ok((bd as std::sync::Arc<dyn component_core::IUnknown + Send + Sync>, ibd, admin))").unwrap();
+                writeln!(code, "    }}));").unwrap();
+            } else if *name == "extent_manager" {
+                writeln!(code, "    comp_dispatcher.set_extent_manager_factory(Box::new(|logger, dma_alloc| {{").unwrap();
+                writeln!(code, "        let em = {crate_ident}::{factory_call};").unwrap();
+                writeln!(code, "        em.set_dma_alloc(dma_alloc);").unwrap();
+                writeln!(code, "        em.logger.connect(std::sync::Arc::clone(logger) as std::sync::Arc<dyn interfaces::ILogger + Send + Sync>).unwrap();").unwrap();
+                writeln!(code, "        em as std::sync::Arc<dyn component_core::IUnknown + Send + Sync>").unwrap();
+                writeln!(code, "    }}));").unwrap();
+            }
+        }
+        writeln!(code).unwrap();
+    }
+
     // --- Initialization phase ---
     writeln!(code, "    // --- Initialize (in declared order) ---").unwrap();
     for name in &manifest.init_order {
         let decl = &manifest.components[name];
+        if is_factory_kind(decl) {
+            continue;
+        }
         if let Some(hook) = &decl.init_hook {
             let iface = &decl.provides[0];
             let iface_var = format!(
@@ -372,6 +473,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let manifest: ProfileManifest = serde_yaml::from_str(&yaml_content)
         .unwrap_or_else(|e| panic!("invalid YAML in '{manifest_path}': {e}"));
     validate_manifest(&manifest);
+
+    // Check that required features are enabled for the profile's crates
+    for (name, decl) in &manifest.components {
+        match decl.crate_name.as_str() {
+            "block-device-filesys" => {
+                if env::var("CARGO_FEATURE_FILESYS").is_err() {
+                    panic!(
+                        "profile '{profile}' uses block-device-filesys (component '{name}') \
+                         but the 'filesys' feature is not enabled.\n\
+                         Build with: CERTUS_PROFILE={profile} cargo build -p certus-server-yaml \
+                         --features filesys --no-default-features"
+                    );
+                }
+            }
+            "block-device-spdk-nvme" => {
+                if env::var("CARGO_FEATURE_SPDK").is_err() {
+                    panic!(
+                        "profile '{profile}' uses block-device-spdk-nvme (component '{name}') \
+                         but the 'spdk' feature is not enabled.\n\
+                         Build with: CERTUS_PROFILE={profile} cargo build -p certus-server-yaml \
+                         --features spdk"
+                    );
+                }
+            }
+            "block-device-kernel" => {
+                if env::var("CARGO_FEATURE_KERNEL").is_err() {
+                    panic!(
+                        "profile '{profile}' uses block-device-kernel (component '{name}') \
+                         but the 'kernel' feature is not enabled.\n\
+                         Build with: CERTUS_PROFILE={profile} cargo build -p certus-server-yaml \
+                         --features kernel --no-default-features"
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
 
     // 3. Generate composition code
     let composition_code = generate_composition(&manifest);

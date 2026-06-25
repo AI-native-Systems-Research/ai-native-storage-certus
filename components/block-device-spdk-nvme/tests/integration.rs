@@ -455,6 +455,7 @@ fn sync_write_async_read_roundtrip() {
             lba: 3,
             buf: Arc::clone(&read_buf),
             timeout_ms: 5000,
+            tag: 0,
         })
         .expect("send ReadAsync failed");
 
@@ -749,6 +750,7 @@ fn multi_client_independent_streams() {
                             lba,
                             buf: awbuf,
                             timeout_ms: 5000,
+                            tag: 0,
                         })
                         .expect("send WriteAsync failed");
 
@@ -771,6 +773,7 @@ fn multi_client_independent_streams() {
                             lba,
                             buf: Arc::clone(&arbuf),
                             timeout_ms: 5000,
+            tag: 0,
                         })
                         .expect("send ReadAsync failed");
 
@@ -1136,6 +1139,7 @@ fn sc002_timeout_accuracy() {
             lba: 0,
             buf: rbuf,
             timeout_ms,
+            tag: 0,
         })
         .expect("send async read");
 

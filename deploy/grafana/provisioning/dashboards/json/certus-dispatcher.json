@@ -1,0 +1,234 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Operations / sec (by type)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "" },
+      "targets": [
+        {
+          "expr": "rate(certus_dispatcher_ops_total[1m])",
+          "legendFormat": "{{op}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Error Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "" },
+      "targets": [
+        {
+          "expr": "rate(certus_dispatcher_ops_errors_total[1m])",
+          "legendFormat": "{{op}} errors/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "P50 / P95 / P99 Latency (µs)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(certus_dispatcher_op_duration_us_bucket[5m]))",
+          "legendFormat": "p50 {{op}}"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(certus_dispatcher_op_duration_us_bucket[5m]))",
+          "legendFormat": "p95 {{op}}"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(certus_dispatcher_op_duration_us_bucket[5m]))",
+          "legendFormat": "p99 {{op}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "µs"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Avg Batch Size",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "" },
+      "targets": [
+        {
+          "expr": "rate(certus_dispatcher_batch_size_sum[5m]) / rate(certus_dispatcher_batch_size_count[5m])",
+          "legendFormat": "{{op}} avg batch"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Memory-Tier Entries Cleared",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "" },
+      "targets": [
+        {
+          "expr": "certus_dispatcher_entries_cleared_total",
+          "legendFormat": "cleared"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      }
+    },
+    {
+      "title": "SSD Flush Jobs",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "" },
+      "targets": [
+        {
+          "expr": "certus_dispatcher_jobs_flushed_total",
+          "legendFormat": "flushed"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Cold Lookup Pipeline Stages (P95 µs)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(certus_pipeline_cold_ssd_read_us_bucket[5m]))",
+          "legendFormat": "SSD read"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(certus_pipeline_cold_gpu_dma_us_bucket[5m]))",
+          "legendFormat": "GPU DMA"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(certus_pipeline_cold_stream_sync_us_bucket[5m]))",
+          "legendFormat": "Stream sync"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(certus_pipeline_cold_prep_us_bucket[5m]))",
+          "legendFormat": "MT alloc/evict"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(certus_pipeline_cold_finalize_us_bucket[5m]))",
+          "legendFormat": "Finalize"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "µs" },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Cold Lookup Total (P50/P95/P99 µs)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(certus_pipeline_cold_total_us_bucket[5m]))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(certus_pipeline_cold_total_us_bucket[5m]))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(certus_pipeline_cold_total_us_bucket[5m]))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "µs" },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Hot Lookup GPU DMA (P50/P95/P99 µs)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(certus_pipeline_hot_gpu_dma_us_bucket[5m]))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(certus_pipeline_hot_gpu_dma_us_bucket[5m]))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(certus_pipeline_hot_gpu_dma_us_bucket[5m]))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "µs" },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Populate Stages (P95 µs)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(certus_pipeline_populate_alloc_us_bucket[5m]))",
+          "legendFormat": "MT alloc"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(certus_pipeline_populate_gpu_d2h_us_bucket[5m]))",
+          "legendFormat": "GPU D2H"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(certus_pipeline_populate_total_us_bucket[5m]))",
+          "legendFormat": "Total"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "µs" },
+        "overrides": []
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["certus"],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "title": "Certus Dispatcher",
+  "uid": "certus-dispatcher",
+  "version": 3
+}

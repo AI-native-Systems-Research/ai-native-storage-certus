@@ -57,6 +57,14 @@ pub struct DispatcherConfig {
     /// Set this to a dedicated core range to give each drive exclusive use of
     /// a core, which is required for SPDK busy-polling to achieve full bandwidth.
     pub poller_base_cpu: Option<usize>,
+    /// Maximum eviction attempts before returning AllocationFailed.
+    /// Default: 2048.
+    pub max_eviction_attempts: usize,
+    /// Delay in milliseconds between DRAM backfill jobs after P2P cold reads.
+    /// Throttles background NVMe→DRAM reads to avoid contending with active
+    /// P2P cold reads for drive bandwidth.
+    /// Default: 10. Set to 0 to disable backfill entirely.
+    pub backfill_delay_ms: u64,
 }
 
 impl Default for DispatcherConfig {
@@ -71,6 +79,8 @@ impl Default for DispatcherConfig {
             ssd_eviction_batch_size: 64,
             ssd_eviction_interval_secs: 5,
             poller_base_cpu: None,
+            max_eviction_attempts: 2048,
+            backfill_delay_ms: 10,
         }
     }
 }
@@ -352,6 +362,36 @@ component_macros::define_interface! {
         /// ```
         fn populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>;
 
+        /// Async variant of [`populate`] — issues the D2H DMA copy without blocking.
+        ///
+        /// Evicts if needed, allocates a memory-tier slot, and issues
+        /// `dma_copy_to_host_async` on the warm stream. Returns the CUDA stream
+        /// the copy was issued on. The caller must poll `stream_query` on the
+        /// returned stream and call [`populate_finalize`] once it reports complete.
+        ///
+        /// Between this call and `populate_finalize`, the memory-tier slot is
+        /// allocated but not registered in the dispatch-map — no reader can see it.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`DispatcherError::InvalidParameter`] if `ipc_handle.size` is 0.
+        /// Returns [`DispatcherError::AlreadyExists`] if the key is already cached.
+        /// Returns [`DispatcherError::AllocationFailed`] if the memory-tier pool is full.
+        fn populate_async(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<GpuStream, DispatcherError>;
+
+        /// Finalize a previously started async populate after DMA completion.
+        ///
+        /// Registers the memory-tier entry in the dispatch-map, downgrades the
+        /// write reference to a read reference, and enqueues the background SSD
+        /// write-through. Must only be called after `stream_query` confirms the
+        /// DMA issued by [`populate_async`] has completed.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`DispatcherError::KeyNotFound`] if no pending async populate
+        /// exists for this key.
+        fn populate_finalize(&self, key: CacheKey) -> Result<(), DispatcherError>;
+
         /// Prepare a store operation for the given cache key.
         ///
         /// Runs eviction if the cache is over capacity, allocates an extent
@@ -461,6 +501,17 @@ component_macros::define_interface! {
         /// ```
         fn touch(&self, key: CacheKey) -> Result<(), DispatcherError>;
 
+        /// Promote SSD-resident entries to the memory-tier without GPU DMA.
+        ///
+        /// For each key in `BlockDevice` state, reads data from SSD into a new
+        /// memory-tier slot and updates the dispatch-map. Keys in `MemoryTier`
+        /// or `Staging` state get a timestamp refresh. Missing keys are skipped.
+        ///
+        /// This is a best-effort, fire-and-forget operation intended to be called
+        /// from a background task. Errors on individual keys are logged but not
+        /// propagated.
+        fn promote_to_memory_tier(&self, keys: &[CacheKey]);
+
         /// Evict all entries from the memory-tier, demoting them to block-device-backed.
         ///
         /// Entries whose write-through has completed are converted to block-device
@@ -478,6 +529,16 @@ component_macros::define_interface! {
         /// # }
         /// ```
         fn clear_memory_tier(&self) -> Result<usize, DispatcherError>;
+
+        /// Flush all pending background write-through jobs to SSD and block until complete.
+        ///
+        /// Guarantees that every entry populated before this call has its data
+        /// persisted to the block device. After this returns, `clear_memory_tier`
+        /// will convert all memory-tier entries to BlockDevice state rather than
+        /// dropping them.
+        ///
+        /// Returns the number of entries that now have a valid SSD offset.
+        fn flush_to_ssd(&self) -> Result<usize, DispatcherError>;
     }
 }
 

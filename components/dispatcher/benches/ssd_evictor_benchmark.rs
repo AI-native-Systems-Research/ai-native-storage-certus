@@ -98,6 +98,10 @@ impl IDispatchMap for EvictorBenchMap {
         Ok(())
     }
 
+    fn entry_size(&self, _key: CacheKey) -> Result<u32, DispatchMapError> {
+        Ok(4096)
+    }
+
     fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
         let inner = self.inner.lock().unwrap();
         inner.keys().copied().take(n).collect()
@@ -137,7 +141,7 @@ impl IDispatchMap for EvictorBenchMap {
 struct NoopMemoryTier;
 
 impl IMemoryTier for NoopMemoryTier {
-    fn initialize(&self, _pool_size: usize) -> Result<(), MemoryTierError> {
+    fn initialize(&self, _pool_size: usize, _numa_node: Option<i32>) -> Result<(), MemoryTierError> {
         Ok(())
     }
 
@@ -153,11 +157,16 @@ impl IMemoryTier for NoopMemoryTier {
         None
     }
 
+    fn evict_lru_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+        None
+    }
+
     fn remove(&self, _key: CacheKey) -> Result<(), MemoryTierError> {
         Err(MemoryTierError::KeyNotFound(0))
     }
 
     fn touch(&self, _key: CacheKey) {}
+    fn batch_touch(&self, _keys: &[CacheKey]) {}
 
     fn contains(&self, _key: CacheKey) -> bool {
         false
@@ -173,6 +182,22 @@ impl IMemoryTier for NoopMemoryTier {
 
     fn pool_info(&self) -> Option<(*mut u8, usize)> {
         None
+    }
+
+    fn peek(&self, _key: CacheKey) -> Option<(*mut u8, u32)> {
+        None
+    }
+
+    fn oldest_keys(&self, _n: usize) -> Vec<CacheKey> {
+        Vec::new()
+    }
+
+    fn clear(&self) -> Result<usize, MemoryTierError> {
+        Ok(0)
+    }
+
+    fn is_dma_capable(&self) -> bool {
+        false
     }
 }
 

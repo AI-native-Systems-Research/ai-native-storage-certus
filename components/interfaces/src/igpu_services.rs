@@ -518,6 +518,31 @@ define_interface! {
         /// ```
         fn destroy_stream(&self, stream: GpuStream) -> Result<(), String>;
 
+        /// Query whether all operations on a CUDA stream have completed.
+        ///
+        /// Returns `Ok(true)` if all operations are complete, `Ok(false)` if
+        /// work is still in-flight. Unlike [`stream_synchronize`], this does
+        /// not block.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the stream handle is invalid.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # use interfaces::IGpuServices;
+        /// # fn example(gpu: &dyn IGpuServices) {
+        /// let stream = gpu.create_stream().unwrap();
+        /// // ... issue async work on stream ...
+        /// if gpu.stream_query(stream).unwrap() {
+        ///     println!("all work complete");
+        /// }
+        /// gpu.destroy_stream(stream).unwrap();
+        /// # }
+        /// ```
+        fn stream_query(&self, stream: GpuStream) -> Result<bool, String>;
+
         /// Synchronize a CUDA stream, blocking until all operations complete.
         ///
         /// # Errors
@@ -587,6 +612,49 @@ define_interface! {
         /// is not initialized, or the CUDA async memcpy operation fails.
         #[cfg(feature = "spdk")]
         fn memcpy_h2d_async(
+            &self, src: *const std::ffi::c_void, dst: *mut std::ffi::c_void,
+            size: usize, stream: GpuStream
+        ) -> Result<(), String>;
+
+        /// Asynchronously copy data from GPU device memory to a DMA buffer.
+        ///
+        /// Issues a `cudaMemcpyAsync` with `DeviceToHost` direction on the given
+        /// stream. The copy runs on the GPU DMA engine concurrently with CPU/NVMe
+        /// work. Call [`stream_synchronize`] to wait for completion.
+        ///
+        /// # Safety (caller contract)
+        ///
+        /// * `src` must be a valid GPU device pointer for at least `size` bytes.
+        /// * The destination buffer must remain valid until the stream is synchronized.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if GPU support is not compiled in, the component
+        /// is not initialized, `size` exceeds the destination buffer length,
+        /// or the CUDA async memcpy operation fails.
+        #[cfg(feature = "spdk")]
+        fn dma_copy_to_host_async(
+            &self, src: *const std::ffi::c_void, dst: &crate::spdk_types::DmaBuffer,
+            size: usize, stream: GpuStream
+        ) -> Result<(), String>;
+
+        /// Asynchronously copy from GPU device memory to a raw host pointer.
+        ///
+        /// Like [`dma_copy_to_host_async`] but takes a raw `dst` pointer,
+        /// avoiding the need to wrap pre-existing pinned memory in a `DmaBuffer`.
+        ///
+        /// # Safety (caller contract)
+        ///
+        /// * `src` must be a valid GPU device pointer for at least `size` bytes.
+        /// * `dst` must be a valid, CUDA-pinned host pointer for at least `size` bytes.
+        /// * Both pointers must remain valid until the stream is synchronized.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if GPU support is not compiled in, the component
+        /// is not initialized, or the CUDA async memcpy operation fails.
+        #[cfg(feature = "spdk")]
+        fn memcpy_d2h_async(
             &self, src: *const std::ffi::c_void, dst: *mut std::ffi::c_void,
             size: usize, stream: GpuStream
         ) -> Result<(), String>;

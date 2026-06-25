@@ -1,0 +1,58 @@
+{
+  "generated": "2026-06-19T19:30:00Z",
+  "project": "remote-lookup",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 8,
+    "aligned": 5,
+    "drifted": 3,
+    "not_implemented": 0,
+    "unspecced_features": 2
+  },
+  "specs": [
+    {
+      "id": "001-remote-lookup-placeholder",
+      "title": "Remote Lookup Batch Interface",
+      "aligned": ["FR-001", "FR-002", "FR-004", "FR-006", "FR-007"],
+      "drifted": [
+        {
+          "requirement": "FR-003",
+          "spec_text": "When connected, each entry in batch_lookup MUST produce a log message via the ILogger receptacle",
+          "actual": "Logging is unconditional — no connection state exists. Logs for every entry always.",
+          "location": "components/remote-lookup/src/lib.rs:48-54",
+          "severity": "minor"
+        },
+        {
+          "requirement": "FR-005",
+          "spec_text": "When not connected, batch_lookup MUST return Err(RemoteLookupError::NotConnected) for every entry",
+          "actual": "NotConnected variant removed from RemoteLookupError. No connection state in interface.",
+          "location": "components/interfaces/src/iremote_lookup.rs:10-15",
+          "severity": "major"
+        },
+        {
+          "requirement": "FR-008",
+          "spec_text": "Component MUST expose functionality only through IRemoteLookup interface",
+          "actual": "Interface now includes join_cluster and leave_cluster (not in original spec but are interface methods, not external public functions)",
+          "location": "components/interfaces/src/iremote_lookup.rs:66,80",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "join_cluster",
+      "location": "components/interfaces/src/iremote_lookup.rs:66",
+      "lines": 8,
+      "suggested_spec": "001-remote-lookup-placeholder"
+    },
+    {
+      "feature": "leave_cluster",
+      "location": "components/interfaces/src/iremote_lookup.rs:80",
+      "lines": 8,
+      "suggested_spec": "001-remote-lookup-placeholder"
+    }
+  ],
+  "conflicts": []
+}
