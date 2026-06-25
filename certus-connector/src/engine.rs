@@ -49,8 +49,6 @@ pub struct EngineInner {
     gpu_services: Arc<dyn IGpuServices + Send + Sync>,
     gpu_block_size: u64,
     gpu_base_ptr: u64,
-    max_cache_entries: usize,
-    eviction_watermark: usize,
     entry_count: AtomicU64,
     jobs: Mutex<HashMap<u64, Arc<TransferJob>>>,
     next_internal_id: AtomicU64,
@@ -95,17 +93,6 @@ impl EngineInner {
             .get_item("gpu_base_ptr")?
             .and_then(|v| v.extract().ok())
             .unwrap_or(0);
-
-        let eviction_threshold: f64 = config
-            .get_item("eviction_threshold")?
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(0.8);
-
-        let max_cache_entries: usize = if slab_size_bytes > 0 && dram_cache_bytes > 0 {
-            (dram_cache_bytes / slab_size_bytes) as usize
-        } else {
-            10000
-        };
 
         // --- Initialize SPDK environment ---
         let spdk_comp = spdk_env::SPDKEnvComponent::new_default();
@@ -199,18 +186,21 @@ impl EngineInner {
             query_interface!(disp_comp, IDispatcher)
                 .ok_or_else(|| PyRuntimeError::new_err("failed to query IDispatcher"))?;
 
+        let max_cache_entries: usize = if slab_size_bytes > 0 && dram_cache_bytes > 0 {
+            (dram_cache_bytes / slab_size_bytes) as usize
+        } else {
+            10000
+        };
+
         dispatcher
             .initialize(DispatcherConfig {
                 data_pci_addrs,
                 max_cache_entries,
-                eviction_threshold,
+                eviction_threshold: 0.95,
                 format_on_init: true,
                 ..Default::default()
             })
             .map_err(|e| PyRuntimeError::new_err(format!("Dispatcher init failed: {e}")))?;
-
-        let eviction_watermark =
-            (max_cache_entries as f64 * eviction_threshold) as usize;
 
         Ok(Self {
             dispatcher,
@@ -218,8 +208,6 @@ impl EngineInner {
             gpu_services: gpu,
             gpu_block_size,
             gpu_base_ptr,
-            max_cache_entries,
-            eviction_watermark,
             entry_count: AtomicU64::new(0),
             jobs: Mutex::new(HashMap::new()),
             next_internal_id: AtomicU64::new(0),
@@ -259,15 +247,14 @@ impl EngineInner {
         Ok(count)
     }
 
-    /// Allocate space for new keys, evicting LRU entries if necessary.
-    /// Returns (keys_to_store, evicted_keys), or None if eviction cannot
-    /// free enough space.
+    /// Check which keys need storing. Returns (keys_to_store, evicted_keys).
+    /// DRAM eviction is handled inside populate_async (dispatcher's
+    /// evict_for_space) which transitions entries to BlockDevice state,
+    /// preserving the check() → true invariant for NVMe-resident blocks.
     pub fn prepare_store(&self, keys: &[u64]) -> PyResult<Option<(Vec<u64>, Vec<u64>)>> {
         self.ensure_init()?;
         let cache_keys = keys::to_cache_keys(keys);
         let mut to_store = Vec::new();
-        let protected: std::collections::HashSet<CacheKey> =
-            cache_keys.iter().copied().collect();
 
         for (i, key) in cache_keys.iter().enumerate() {
             match self.dispatcher.check(*key) {
@@ -282,36 +269,7 @@ impl EngineInner {
             return Ok(Some((vec![], vec![])));
         }
 
-        let current_count = self.entry_count.load(Ordering::Acquire) as usize;
-        let after_store = current_count + to_store.len();
-        let evicted = if after_store > self.eviction_watermark {
-            let needed = after_store - self.eviction_watermark;
-            let candidates = self.dispatch_map.oldest_keys(usize::MAX);
-            let mut evicted_keys: Vec<u64> = Vec::new();
-            for candidate in candidates {
-                if evicted_keys.len() >= needed {
-                    break;
-                }
-                if protected.contains(&candidate) {
-                    continue;
-                }
-                match self.dispatcher.remove(candidate) {
-                    Ok(()) => {
-                        self.entry_count.fetch_sub(1, Ordering::Release);
-                        evicted_keys.push(candidate);
-                    }
-                    Err(_) => continue,
-                }
-            }
-            if evicted_keys.len() < needed {
-                return Ok(None);
-            }
-            evicted_keys
-        } else {
-            vec![]
-        };
-
-        Ok(Some((to_store, evicted)))
+        Ok(Some((to_store, vec![])))
     }
 
     /// Finalize or abort a store operation.
