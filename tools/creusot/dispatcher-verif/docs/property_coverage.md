@@ -36,7 +36,7 @@ Status labels:
 | 18 | Clean eviction = MemoryTier -> BlockDevice | `clean_evict` | Covered | Explicit clean-eviction predicate and transition contract. |
 | 19 | Blind fallback failure removes key | `blind_evict_with_fallback` | Covered | Conversion failure path enforces removal (`present=false`). |
 | 20 | `prepare_store(size=0)` => `InvalidParameter` + no mutation | `prepare_store` | Covered | Explicit size check and contract. |
-| 21 | Pending-write protocol lifecycle | `prepare_store`, `commit_store`, `cancel_store` | Covered | Protocol states represented (`PendingWrite` consumed by commit/cancel). |
+| 21 | Pending-write protocol lifecycle | `prepare_store`, `commit_store`, `cancel_store`, `prepare_store_product`, `p21_m1_prepare_commit_consumes_once`, `p21_m1_prepare_cancel_consumes_once`, `p21_m2_prepare_then_terminal_ops_miss` | Partial (mode-split) | Added product-aligned mode split: M1 (write-handle path) consume-once vs M2 (staging-only path) terminal-op miss behavior. Three dedicated P21 product VCs are currently unproved and tracked as proof-strengthening work. |
 | 22 | Commit success => BlockDevice + pending cleared | `commit_store` | Covered | State transition postconditions encoded. |
 | 23 | Cancel success => key removed + pending cleared | `cancel_store` | Covered | Success path clears presence/pending. |
 | 24 | Commit/cancel without pending => `KeyNotFound` + unchanged | `commit_store`, `cancel_store` | Covered | Miss path contracts preserve slot. |

@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_clean_evict": { "prover": "alt-ergo", "time": 0.03 } }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_clear_memory_tier2": { "prover": "alt-ergo", "time": 0.18 }
+    }
+  }
+}

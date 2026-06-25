@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_drain_eventual_zero": { "prover": "alt-ergo", "time": 0.022 }
+    }
+  }
+}

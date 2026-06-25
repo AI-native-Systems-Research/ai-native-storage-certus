@@ -1,0 +1,155 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 421 0 421 85 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 379 11 379 22
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 380 10 380 28
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 381 10 381 47
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 383 4 386 5
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 389 4 392 5
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 395 4 398 5
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 402 4 405 5
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 408 4 411 5
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 414 4 415 57
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 418 4 419 76
+let%span slib'9 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 89 16 89 38
+let%span slib'10 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 104 16 104 96
+let%span slib'11 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 109 16 109 97
+let%span slib'12 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 75 8 78 29
+let%span slib'13 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 114 16 114 92
+let%span slib'14 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 62 8 68 9
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_Model = { initialized: bool; used: UInt64.t; capacity: UInt64.t }
+
+type t_EntryState = MemoryTier | BlockDevice | Staging | PendingWrite
+
+type t_KeySlot = { present: bool; state: t_EntryState; size: UInt64.t; ts: UInt64.t }
+
+type t_OpError = NotInitialized | KeyNotFound | AlreadyExists | AllocationFailed | InvalidParameter | InvalidState
+
+type t_Result_unit_OpError = Ok () | Err t_OpError
+
+type tup3_Model_Result_unit_OpError_KeySlot = { f0: t_Model; f1: t_Result_unit_OpError; f2: t_KeySlot }
+
+predicate wf_model [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 88 0 88 33] (m: t_Model) =
+  [%#slib'9] UInt64.t'int m.used <= UInt64.t'int m.capacity
+
+predicate key_in_block_device [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 103 0 103 49] (slot: t_KeySlot) =
+  [%#slib'10] slot.present
+  /\ match slot.state with
+    | BlockDevice -> true
+    | _ -> false
+    end
+
+predicate key_in_pending_write [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 108 0 108 50] (slot: t_KeySlot) =
+  [%#slib'11] slot.present
+  /\ match slot.state with
+    | PendingWrite -> true
+    | _ -> false
+    end
+
+type tup2_EntryState_EntryState = { f0'0: t_EntryState; f1'0: t_EntryState }
+
+predicate state_eq [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 60 0 60 53] (a: t_EntryState) (b: t_EntryState) =
+  [%#slib'14] match { f0'0 = a; f1'0 = b } with
+    | {f0'0 = MemoryTier; f1'0 = MemoryTier} -> true
+    | {f0'0 = BlockDevice; f1'0 = BlockDevice} -> true
+    | {f0'0 = Staging; f1'0 = Staging} -> true
+    | {f0'0 = PendingWrite; f1'0 = PendingWrite} -> true
+    | _ -> false
+    end
+
+predicate same_slot [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 73 0 73 48] (a: t_KeySlot) (b: t_KeySlot) =
+  [%#slib'12] a.present = b.present
+  /\ state_eq a.state b.state /\ UInt64.t'int a.size = UInt64.t'int b.size /\ UInt64.t'int a.ts = UInt64.t'int b.ts
+
+predicate key_in_staging [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 113 0 113 44] (slot: t_KeySlot) =
+  [%#slib'13] slot.present
+  /\ match slot.state with
+    | Staging -> true
+    | _ -> false
+    end
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let commit_store [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 421 0 421 85]
+  (m: t_Model) (slot: t_KeySlot) (return (x: tup3_Model_Result_unit_OpError_KeySlot)) =
+{[@stop_split] [@expl:commit_store requires] [%#slib] wf_model m}
+  (! bb0
+  [ bb0 = any [ br0 -> {m.initialized = false} (! bb1) | br1 -> {m.initialized} (! bb2) ]
+  | bb2 = any [ br0 -> {slot.present = false} (! bb8) | br1 -> {slot.present} (! bb3) ]
+  | bb3 = any
+    [ br0 -> {slot.state = MemoryTier} (! bb4)
+    | br1 -> {slot.state = BlockDevice} (! bb4)
+    | br2 -> {slot.state = Staging} (! bb4)
+    | br3 -> {slot.state = PendingWrite} (! bb6) ]
+  | bb4 = s0 [ s0 = [ &_31 <- false ] s1 | s1 = bb7 ]
+  | bb6 = s0 [ s0 = [ &_31 <- true ] s1 | s1 = bb7 ]
+  | bb7 = any [ br0 -> {_31 = false} (! bb8) | br1 -> {_31} (! bb9) ]
+  | bb9 = s0
+    [ s0 = [ &out <- slot ] s1
+    | s1 = [ &_39 <- BlockDevice ] s2
+    | s2 = [ &out <- { out with state = _39 } ] s3
+    | s3 = [ &_41 <- Ok _42 ] s4
+    | s4 = [ &_ret <- { f0 = m; f1 = _41; f2 = out } ] s5
+    | s5 = return {_ret} ]
+  | bb8 = s0
+    [ s0 = [ &_36 <- KeyNotFound ] s1
+    | s1 = [ &_35 <- Err _36 ] s2
+    | s2 = [ &_ret <- { f0 = m; f1 = _35; f2 = slot } ] s3
+    | s3 = return {_ret} ]
+  | bb1 = s0
+    [ s0 = [ &_27 <- NotInitialized ] s1
+    | s1 = [ &_26 <- Err _27 ] s2
+    | s2 = [ &_ret <- { f0 = m; f1 = _26; f2 = slot } ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: tup3_Model_Result_unit_OpError_KeySlot = Any.any_l ()
+  | & m: t_Model = m
+  | & slot: t_KeySlot = slot
+  | & _26: t_Result_unit_OpError = Any.any_l ()
+  | & _27: t_OpError = Any.any_l ()
+  | & _31: bool = Any.any_l ()
+  | & _35: t_Result_unit_OpError = Any.any_l ()
+  | & _36: t_OpError = Any.any_l ()
+  | & out: t_KeySlot = Any.any_l ()
+  | & _39: t_EntryState = Any.any_l ()
+  | & _41: t_Result_unit_OpError = Any.any_l ()
+  | & _42: () = Any.any_l () ])
+  [ return (result: tup3_Model_Result_unit_OpError_KeySlot) ->
+  {[@stop_split] [@expl:commit_store ensures] ([@stop_split] [@expl:commit_store ensures #0] [%#slib'0] wf_model result.f0)
+    /\ ([@stop_split] [@expl:commit_store ensures #1] [%#slib'1] result.f0.initialized = m.initialized)
+    /\ ([@stop_split] [@expl:commit_store ensures #2] [%#slib'2] match result.f1 with
+        | Ok () -> key_in_block_device result.f2
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:commit_store ensures #3] [%#slib'3] match result.f1 with
+        | Ok () -> not key_in_pending_write result.f2
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:commit_store ensures #4] [%#slib'4] match result.f1 with
+        | Err (KeyNotFound) -> same_slot result.f2 slot
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:commit_store ensures #5] [%#slib'5] match result.f1 with
+        | Err (KeyNotFound) -> key_in_staging slot = key_in_staging result.f2
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:commit_store ensures #6] [%#slib'6] match result.f1 with
+        | Err (KeyNotFound) -> key_in_block_device slot = key_in_block_device result.f2
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:commit_store ensures #7] [%#slib'7] m.initialized /\ key_in_pending_write slot
+      -> match result.f1 with
+        | Ok () -> true
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:commit_store ensures #8] [%#slib'8] m.initialized /\ not key_in_pending_write slot
+    -> match result.f1 with
+      | Err (KeyNotFound) -> true
+      | _ -> false
+      end)}
+    (! return {result}) ]

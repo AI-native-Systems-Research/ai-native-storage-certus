@@ -1,0 +1,6 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": { "vc_clear_memory_tier3": { "prover": "z3", "time": 0.067 } }
+  }
+}

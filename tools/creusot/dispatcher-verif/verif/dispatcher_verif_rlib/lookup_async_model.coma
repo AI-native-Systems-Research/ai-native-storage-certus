@@ -1,0 +1,124 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1066 0 1069 51 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1094 32 1094 37
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1095 27 1095 31
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1077 40 1077 44
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1078 35 1078 40
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1085 40 1085 45
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1086 35 1086 39
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1038 4 1041 5
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1044 4 1048 5
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1051 4 1055 5
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1058 4 1064 5
+let%span slib'9 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1023 16 1023 65
+let%span slib'10 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1018 16 1018 65
+
+use creusot.prelude.Any
+
+type t_LookupPath = MemoryTierHit | BlockDeviceHit | StagingHit | Miss
+
+type t_OpError = NotInitialized | KeyNotFound | AlreadyExists | AllocationFailed | InvalidParameter | InvalidState
+
+type t_StreamToken = Null | Warm
+
+type t_AsyncCopyState = { copy_in_flight: bool; dst_ready: bool }
+
+type tup2_StreamToken_AsyncCopyState = { f0: t_StreamToken; f1: t_AsyncCopyState }
+
+type t_Result_tup2_StreamToken_AsyncCopyState_OpError = Ok tup2_StreamToken_AsyncCopyState | Err t_OpError
+
+type tup3_LookupPath_bool_Result_tup2_StreamToken_AsyncCopyState_OpError = {
+  f0'0: t_LookupPath;
+  f1'0: bool;
+  f2'0: t_Result_tup2_StreamToken_AsyncCopyState_OpError }
+
+predicate stream_is_warm [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1022 0 1022 45] (s: t_StreamToken) =
+  [%#slib'9] match s with
+    | Warm -> true
+    | _ -> false
+    end
+
+predicate stream_is_null [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1017 0 1017 45] (s: t_StreamToken) =
+  [%#slib'10] match s with
+    | Null -> true
+    | _ -> false
+    end
+
+type tup2_LookupPath_Result_tup2_StreamToken_AsyncCopyState_OpError = {
+  f0'1: t_LookupPath;
+  f1'1: t_Result_tup2_StreamToken_AsyncCopyState_OpError }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let lookup_async_model [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1066 0 1069 51]
+  (path: t_LookupPath) (warm_stream_ready: bool) (return (x: t_Result_tup2_StreamToken_AsyncCopyState_OpError)) = (! bb0
+  [ bb0 = any
+    [ br0 -> {path = MemoryTierHit} (! bb5)
+    | br1 -> {path = BlockDeviceHit} (! bb4)
+    | br2 -> {path = StagingHit} (! bb4)
+    | br3 -> {path = Miss} (! bb6) ]
+  | bb6 = s0 [ s0 = [ &_14 <- KeyNotFound ] s1 | s1 = [ &_ret <- Err _14 ] s2 | s2 = return {_ret} ]
+  | bb4 = s0
+    [ s0 = [ &_23 <- Null ] s1
+    | s1 = [ &_24 <- { copy_in_flight = ([%#slib] false); dst_ready = ([%#slib'0] true) } ] s2
+    | s2 = [ &_22 <- { f0 = _23; f1 = _24 } ] s3
+    | s3 = [ &_ret <- Ok _22 ] s4
+    | s4 = return {_ret} ]
+  | bb5 = any [ br0 -> {warm_stream_ready = false} (! bb8) | br1 -> {warm_stream_ready} (! bb7) ]
+  | bb7 = s0
+    [ s0 = [ &_17 <- Warm ] s1
+    | s1 = [ &_18 <- { copy_in_flight = ([%#slib'1] true); dst_ready = ([%#slib'2] false) } ] s2
+    | s2 = [ &_16 <- { f0 = _17; f1 = _18 } ] s3
+    | s3 = [ &_ret <- Ok _16 ] s4
+    | s4 = return {_ret} ]
+  | bb8 = s0
+    [ s0 = [ &_20 <- Null ] s1
+    | s1 = [ &_21 <- { copy_in_flight = ([%#slib'3] false); dst_ready = ([%#slib'4] true) } ] s2
+    | s2 = [ &_19 <- { f0 = _20; f1 = _21 } ] s3
+    | s3 = [ &_ret <- Ok _19 ] s4
+    | s4 = return {_ret} ] ]
+  [ & _ret: t_Result_tup2_StreamToken_AsyncCopyState_OpError = Any.any_l ()
+  | & path: t_LookupPath = path
+  | & warm_stream_ready: bool = warm_stream_ready
+  | & _14: t_OpError = Any.any_l ()
+  | & _16: tup2_StreamToken_AsyncCopyState = Any.any_l ()
+  | & _17: t_StreamToken = Any.any_l ()
+  | & _18: t_AsyncCopyState = Any.any_l ()
+  | & _19: tup2_StreamToken_AsyncCopyState = Any.any_l ()
+  | & _20: t_StreamToken = Any.any_l ()
+  | & _21: t_AsyncCopyState = Any.any_l ()
+  | & _22: tup2_StreamToken_AsyncCopyState = Any.any_l ()
+  | & _23: t_StreamToken = Any.any_l ()
+  | & _24: t_AsyncCopyState = Any.any_l () ])
+  [ return (result: t_Result_tup2_StreamToken_AsyncCopyState_OpError) ->
+  {[@stop_split] [@expl:lookup_async_model ensures] ([@stop_split] [@expl:lookup_async_model ensures #0] [%#slib'5] match path with
+        | Miss -> match result with
+          | Err (KeyNotFound) -> true
+          | _ -> false
+          end
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:lookup_async_model ensures #1] [%#slib'6] match { f0'0 = path;
+                                                                               f1'0 = warm_stream_ready;
+                                                                               f2'0 = result } with
+        | {f0'0 = MemoryTierHit; f1'0 = True; f2'0 = Ok {f0 = stream; f1 = st}} -> stream_is_warm stream
+        /\ st.copy_in_flight /\ not st.dst_ready
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:lookup_async_model ensures #2] [%#slib'7] match { f0'0 = path;
+                                                                               f1'0 = warm_stream_ready;
+                                                                               f2'0 = result } with
+        | {f0'0 = MemoryTierHit; f1'0 = False; f2'0 = Ok {f0 = stream; f1 = st}} -> stream_is_null stream
+        /\ not st.copy_in_flight /\ st.dst_ready
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:lookup_async_model ensures #3] [%#slib'8] match { f0'1 = path; f1'1 = result } with
+      | {f0'1 = BlockDeviceHit; f1'1 = Ok {f0 = stream; f1 = st}} -> stream_is_null stream
+      /\ not st.copy_in_flight /\ st.dst_ready
+      | {f0'1 = StagingHit; f1'1 = Ok {f0 = stream; f1 = st}} -> stream_is_null stream
+      /\ not st.copy_in_flight /\ st.dst_ready
+      | _ -> true
+      end)}
+    (! return {result}) ]

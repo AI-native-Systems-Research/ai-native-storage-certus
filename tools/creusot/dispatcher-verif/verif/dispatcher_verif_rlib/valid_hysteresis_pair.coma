@@ -1,0 +1,25 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1177 0 1177 60 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1174 11 1174 28
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1175 11 1175 22
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1176 10 1176 40
+
+use creusot.int.UInt8
+use creusot.prelude.Any
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let valid_hysteresis_pair [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1177 0 1177 60]
+  (threshold: UInt8.t) (low: UInt8.t) (return (x: bool)) =
+{[@stop_split] [@expl:valid_hysteresis_pair requires] ([@stop_split] [@expl:valid_hysteresis_pair requires #0] [%#slib] UInt8.t'int threshold
+    <= 100)
+  /\ ([@stop_split] [@expl:valid_hysteresis_pair requires #1] [%#slib'0] UInt8.t'int low <= 100)}
+  (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- UInt8.le low threshold ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l () | & threshold: UInt8.t = threshold | & low: UInt8.t = low ])
+  [ return (result: bool) -> {[@stop_split] [@expl:valid_hysteresis_pair ensures] [%#slib'1] result
+    = (UInt8.t'int low <= UInt8.t'int threshold)}
+    (! return {result}) ]

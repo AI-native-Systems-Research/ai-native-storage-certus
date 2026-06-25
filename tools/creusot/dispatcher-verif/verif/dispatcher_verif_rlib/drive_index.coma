@@ -1,0 +1,35 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 847 0 847 56 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 848 4 848 29
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 845 11 845 26
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 846 10 846 39
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.ComputerDivision
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let drive_index [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 847 0 847 56]
+  (key: UInt64.t) (num_drives: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:drive_index requires] [%#slib'0] UInt64.t'int num_drives > 0}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_8 <- UInt64.of_int (UInt64.t'int key) ] s1
+    | s1 = [ &_10 <- num_drives ] s2
+    | s2 = [ &_11 <- _10 = ([%#slib] (0: UInt64.t)) ] s3
+    | s3 = {[@expl:remainder by zero] [%#slib] not _11} s4
+    | s4 = UInt64.rem [%#slib] {_8} {_10} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s5)
+    | s5 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & key: UInt64.t = key
+  | & num_drives: UInt64.t = num_drives
+  | & _8: UInt64.t = Any.any_l ()
+  | & _10: UInt64.t = Any.any_l ()
+  | & _11: bool = Any.any_l () ])
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:drive_index ensures] [%#slib'1] UInt64.t'int result
+    = ComputerDivision.mod (UInt64.t'int key) (UInt64.t'int num_drives)}
+    (! return {result}) ]

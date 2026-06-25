@@ -1,0 +1,75 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 793 0 793 76 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 800 19 800 20
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 802 8 802 9
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 795 19 795 20
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 788 11 788 22
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 789 10 789 28
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 790 10 790 57
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 791 10 791 70
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 792 10 792 71
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 89 16 89 38
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 99 16 99 95
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_Model = { initialized: bool; used: UInt64.t; capacity: UInt64.t }
+
+type t_EntryState = MemoryTier | BlockDevice | Staging | PendingWrite
+
+type t_KeySlot = { present: bool; state: t_EntryState; size: UInt64.t; ts: UInt64.t }
+
+type tup3_Model_usize_KeySlot = { f0: t_Model; f1: UInt64.t; f2: t_KeySlot }
+
+predicate wf_model [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 88 0 88 33] (m: t_Model) =
+  [%#slib'7] UInt64.t'int m.used <= UInt64.t'int m.capacity
+
+predicate key_in_memory_tier [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 98 0 98 48] (slot: t_KeySlot) =
+  [%#slib'8] slot.present
+  /\ match slot.state with
+    | MemoryTier -> true
+    | _ -> false
+    end
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clear_memory_tier [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 793 0 793 76]
+  (m: t_Model) (slot: t_KeySlot) (return (x: tup3_Model_usize_KeySlot)) =
+{[@stop_split] [@expl:clear_memory_tier requires] [%#slib'2] wf_model m}
+  (! bb0
+  [ bb0 = any [ br0 -> {m.initialized = false} (! bb1) | br1 -> {m.initialized} (! bb2) ]
+  | bb2 = any [ br0 -> {slot.present = false} (! bb9) | br1 -> {slot.present} (! bb3) ]
+  | bb3 = any
+    [ br0 -> {slot.state = MemoryTier} (! bb6)
+    | br1 -> {slot.state = BlockDevice} (! bb4)
+    | br2 -> {slot.state = Staging} (! bb4)
+    | br3 -> {slot.state = PendingWrite} (! bb4) ]
+  | bb4 = s0 [ s0 = [ &_21 <- false ] s1 | s1 = bb7 ]
+  | bb6 = s0 [ s0 = [ &_21 <- true ] s1 | s1 = bb7 ]
+  | bb7 = any [ br0 -> {_21 = false} (! bb9) | br1 -> {_21} (! bb8) ]
+  | bb8 = s0
+    [ s0 = [ &out <- slot ] s1
+    | s1 = [ &_25 <- BlockDevice ] s2
+    | s2 = [ &out <- { out with state = _25 } ] s3
+    | s3 = [ &_ret <- { f0 = m; f1 = ([%#slib] (1: UInt64.t)); f2 = out } ] s4
+    | s4 = return {_ret} ]
+  | bb9 = s0 [ s0 = [ &_ret <- { f0 = m; f1 = ([%#slib'0] (0: UInt64.t)); f2 = slot } ] s1 | s1 = return {_ret} ]
+  | bb1 = s0 [ s0 = [ &_ret <- { f0 = m; f1 = ([%#slib'1] (0: UInt64.t)); f2 = slot } ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: tup3_Model_usize_KeySlot = Any.any_l ()
+  | & m: t_Model = m
+  | & slot: t_KeySlot = slot
+  | & _21: bool = Any.any_l ()
+  | & out: t_KeySlot = Any.any_l ()
+  | & _25: t_EntryState = Any.any_l () ])
+  [ return (result: tup3_Model_usize_KeySlot) ->
+  {[@stop_split] [@expl:clear_memory_tier ensures] ([@stop_split] [@expl:clear_memory_tier ensures #0] [%#slib'3] wf_model result.f0)
+    /\ ([@stop_split] [@expl:clear_memory_tier ensures #1] [%#slib'4] m.initialized -> not key_in_memory_tier result.f2)
+    /\ ([@stop_split] [@expl:clear_memory_tier ensures #2] [%#slib'5] m.initialized /\ UInt64.t'int result.f1 = 1
+      -> key_in_memory_tier slot)
+    /\ ([@stop_split] [@expl:clear_memory_tier ensures #3] [%#slib'6] m.initialized /\ UInt64.t'int result.f1 = 0
+    -> not key_in_memory_tier slot)}
+    (! return {result}) ]

@@ -1,0 +1,38 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_cancel_store": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_p21_m1_prepare_cancel_consumes_once": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.021 },
+          null,
+          { "prover": "z3", "time": 0.003 },
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.028 } ]
+          },
+          { "prover": "alt-ergo", "time": 0.023 },
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "z3", "time": 0.009 } ]
+          },
+          { "prover": "z3", "time": 0.003 },
+          { "prover": "alt-ergo", "time": 0.032 },
+          { "prover": "alt-ergo", "time": 0.03 },
+          { "prover": "z3", "time": 0.004 },
+          { "prover": "alt-ergo", "time": 0.053 },
+          { "prover": "alt-ergo", "time": 0.262 },
+          { "prover": "alt-ergo", "time": 0.037 },
+          { "prover": "alt-ergo", "time": 0.033 },
+          { "prover": "alt-ergo", "time": 0.034 },
+          { "prover": "alt-ergo", "time": 0.084 },
+          { "prover": "alt-ergo", "time": 0.034 },
+          { "prover": "alt-ergo", "time": 0.084 }
+        ]
+      },
+      "vc_prepare_store_product": { "prover": "alt-ergo", "time": 0.017 }
+    }
+  }
+}

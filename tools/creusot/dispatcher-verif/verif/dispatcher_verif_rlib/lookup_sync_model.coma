@@ -1,0 +1,293 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1134 0 1134 92 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1135 23 1135 66
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1135 23 1135 67
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1136 14 1136 50
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1123 4 1126 5
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1129 4 1132 5
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1038 4 1041 5
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1044 4 1048 5
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1051 4 1055 5
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1058 4 1064 5
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1104 4 1105 54
+let%span slib'9 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1108 4 1109 90
+let%span slib'10 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1023 16 1023 65
+let%span slib'11 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1018 16 1018 65
+let%span sops = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/ops.rs" 704 18 707 9
+let%span sops'0 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/ops.rs" 721 25 721 33
+let%span sops'1 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/ops.rs" 717 18 720 9
+let%span sops'2 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/ops.rs" 179 8 179 108
+let%span sops'3 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/ops.rs" 185 8 185 94
+let%span sops'4 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/ops.rs" 190 51 190 98
+let%span sops'5 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/ops.rs" 136 15 136 59
+let%span sops'6 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/ops.rs" 140 8 140 32
+let%span sops'7 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/ops.rs" 145 46 145 65
+let%span sops'8 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/ops.rs" 150 15 150 31
+let%span sops'9 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/ops.rs" 151 15 151 28
+let%span sops'10 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/ops.rs" 156 8 156 24
+let%span sops'11 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/ops.rs" 162 8 163 104
+let%span sconvert = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/convert.rs" 17 18 17 32
+
+use creusot.prelude.Any
+
+type t_LookupPath = MemoryTierHit | BlockDeviceHit | StagingHit | Miss
+
+type t_StreamToken = Null | Warm
+
+type t_AsyncCopyState = { copy_in_flight: bool; dst_ready: bool }
+
+type tup2_StreamToken_AsyncCopyState = { f0: t_StreamToken; f1: t_AsyncCopyState }
+
+type t_OpError = NotInitialized | KeyNotFound | AlreadyExists | AllocationFailed | InvalidParameter | InvalidState
+
+type t_Result_tup2_StreamToken_AsyncCopyState_OpError = Ok tup2_StreamToken_AsyncCopyState | Err t_OpError
+
+type tup3_LookupPath_bool_Result_tup2_StreamToken_AsyncCopyState_OpError = {
+  f0'0: t_LookupPath;
+  f1'0: bool;
+  f2'0: t_Result_tup2_StreamToken_AsyncCopyState_OpError }
+
+predicate stream_is_warm [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1022 0 1022 45] (s: t_StreamToken) =
+  [%#slib'10] match s with
+    | Warm -> true
+    | _ -> false
+    end
+
+predicate stream_is_null [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1017 0 1017 45] (s: t_StreamToken) =
+  [%#slib'11] match s with
+    | Null -> true
+    | _ -> false
+    end
+
+type tup2_LookupPath_Result_tup2_StreamToken_AsyncCopyState_OpError = {
+  f0'1: t_LookupPath;
+  f1'1: t_Result_tup2_StreamToken_AsyncCopyState_OpError }
+
+let lookup_async_model (path: t_LookupPath) (warm_stream_ready: bool)
+  (return (x: t_Result_tup2_StreamToken_AsyncCopyState_OpError)) = any
+  [ return (result: t_Result_tup2_StreamToken_AsyncCopyState_OpError) ->
+  {[@stop_split] [@expl:lookup_async_model ensures] ([@stop_split] [@expl:lookup_async_model ensures #0] [%#slib'4] match path with
+        | Miss -> match result with
+          | Err (KeyNotFound) -> true
+          | _ -> false
+          end
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:lookup_async_model ensures #1] [%#slib'5] match { f0'0 = path;
+                                                                               f1'0 = warm_stream_ready;
+                                                                               f2'0 = result } with
+        | {f0'0 = MemoryTierHit; f1'0 = True; f2'0 = Ok {f0 = stream; f1 = st}} -> stream_is_warm stream
+        /\ st.copy_in_flight /\ not st.dst_ready
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:lookup_async_model ensures #2] [%#slib'6] match { f0'0 = path;
+                                                                               f1'0 = warm_stream_ready;
+                                                                               f2'0 = result } with
+        | {f0'0 = MemoryTierHit; f1'0 = False; f2'0 = Ok {f0 = stream; f1 = st}} -> stream_is_null stream
+        /\ not st.copy_in_flight /\ st.dst_ready
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:lookup_async_model ensures #3] [%#slib'7] match { f0'1 = path; f1'1 = result } with
+      | {f0'1 = BlockDeviceHit; f1'1 = Ok {f0 = stream; f1 = st}} -> stream_is_null stream
+      /\ not st.copy_in_flight /\ st.dst_ready
+      | {f0'1 = StagingHit; f1'1 = Ok {f0 = stream; f1 = st}} -> stream_is_null stream
+      /\ not st.copy_in_flight /\ st.dst_ready
+      | _ -> true
+      end)}
+    (! return {result}) ]
+
+type t_Result_Infallible_OpError = Ok'0 () | Err'0 t_OpError
+
+type t_ControlFlow_Result_Infallible_OpError_tup2_StreamToken_AsyncCopyState =
+  | Continue tup2_StreamToken_AsyncCopyState
+  | Break t_Result_Infallible_OpError
+
+predicate inv_Infallible [@inline:trivial] (_1: ()) = false
+
+meta "rewrite_def" predicate inv_Infallible
+
+predicate inv_Result_Infallible_OpError (_1: t_Result_Infallible_OpError)
+
+axiom inv_axiom [@rewrite]:
+  forall x: t_Result_Infallible_OpError [inv_Result_Infallible_OpError x]. inv_Result_Infallible_OpError x
+    = match x with
+      | Ok'0 f0'2 -> inv_Infallible f0'2
+      | Err'0 f0'2 -> true
+      end
+
+predicate inv_ControlFlow_Result_Infallible_OpError_tup2_StreamToken_AsyncCopyState (_1: t_ControlFlow_Result_Infallible_OpError_tup2_StreamToken_AsyncCopyState)
+
+axiom inv_axiom'0 [@rewrite]:
+  forall x: t_ControlFlow_Result_Infallible_OpError_tup2_StreamToken_AsyncCopyState [inv_ControlFlow_Result_Infallible_OpError_tup2_StreamToken_AsyncCopyState x]. inv_ControlFlow_Result_Infallible_OpError_tup2_StreamToken_AsyncCopyState x
+    = match x with
+      | Continue f0'2 -> true
+      | Break f0'2 -> inv_Result_Infallible_OpError f0'2
+      end
+
+let branch_Result_tup2_StreamToken_AsyncCopyState_OpError (self_: t_Result_tup2_StreamToken_AsyncCopyState_OpError)
+  (return (x: t_ControlFlow_Result_Infallible_OpError_tup2_StreamToken_AsyncCopyState)) = any
+  [ return (result: t_ControlFlow_Result_Infallible_OpError_tup2_StreamToken_AsyncCopyState) ->
+  {[@stop_split] [@expl:branch_Result_tup2_StreamToken_AsyncCopyState_OpError ensures] ([@stop_split] [@expl:branch result type invariant] inv_ControlFlow_Result_Infallible_OpError_tup2_StreamToken_AsyncCopyState result)
+    /\ ([@stop_split] [@expl:branch ensures] [%#sops] match self_ with
+      | Ok v -> result = Continue v
+      | Err e -> result = Break (Err'0 e)
+      end)}
+    (! return {result}) ]
+
+let elim_Break (_x: t_ControlFlow_Result_Infallible_OpError_tup2_StreamToken_AsyncCopyState)
+  (return (f0'2: t_Result_Infallible_OpError)) = any
+  [ _k (f0'2: t_Result_Infallible_OpError) -> {Break f0'2 = _x} (! return {f0'2})
+  | _chk -> (! {[@expl:elim Break] match _x with
+      | Break _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+type t_Result_bool_OpError = Ok'1 bool | Err'1 t_OpError
+
+type tup2_Result_bool_OpError_Result_Infallible_OpError = {
+  f0'2: t_Result_bool_OpError;
+  f1'2: t_Result_Infallible_OpError }
+
+predicate postcondition_once_from (self: ()) (args: t_OpError) (result: t_OpError) =
+  let self_ = args in [%#sconvert] result = self_
+
+meta "rewrite_def" predicate postcondition_once_from
+
+predicate resolve_from [@inline:trivial] (_1: ()) = true
+
+meta "rewrite_def" predicate resolve_from
+
+predicate postcondition_mut_from (self: ()) (args: t_OpError) (result_state: ()) (result: t_OpError) =
+  let self_ = args in [%#sconvert] result = self_
+
+meta "rewrite_def" predicate postcondition_mut_from
+
+function fn_mut_once_from (self: ()) (args: t_OpError) (res: t_OpError) : ()
+
+axiom fn_mut_once_from_spec:
+  forall self: (), args: t_OpError, res: t_OpError [postcondition_once_from self args res]. [%#sops'11] postcondition_once_from self args res
+    = (exists res_state: (). postcondition_mut_from self args res_state res /\ resolve_from res_state)
+
+predicate hist_inv_from (self: ()) (result_state: ()) = true
+
+function hist_inv_trans_from (self: ()) (b: ()) (c: ()) : ()
+
+axiom hist_inv_trans_from_spec:
+  forall self: (), b: (), c: () [hist_inv_from self b, hist_inv_from b c | hist_inv_from self b, hist_inv_from self c | hist_inv_from b c, hist_inv_from self c]. ([%#sops'8] hist_inv_from self b)
+    -> ([%#sops'9] hist_inv_from b c) -> ([%#sops'10] hist_inv_from self c)
+
+function hist_inv_refl_from (self: ()) : ()
+
+axiom hist_inv_refl_from_spec: forall self: () [hist_inv_from self self]. [%#sops'7] hist_inv_from self self
+
+function postcondition_mut_hist_inv_from (self: ()) (args: t_OpError) (res_state: ()) (res: t_OpError) : ()
+
+axiom postcondition_mut_hist_inv_from_spec:
+  forall self: (), args: t_OpError, res_state: (), res: t_OpError [postcondition_mut_from self args res_state res | hist_inv_from self res_state]. ([%#sops'5] postcondition_mut_from self args res_state res)
+    -> ([%#sops'6] hist_inv_from self res_state)
+
+function fn_hist_inv_from (self: ()) (res_state: ()) : ()
+
+axiom fn_hist_inv_from_spec:
+  forall self: (), res_state: () [hist_inv_from self res_state]. [%#sops'4] hist_inv_from self res_state
+    = (self = res_state)
+
+predicate postcondition_from (self: ()) (args: t_OpError) (result: t_OpError) =
+  let self_ = args in [%#sconvert] result = self_
+
+meta "rewrite_def" predicate postcondition_from
+
+function fn_once_from (self: ()) (args: t_OpError) (res: t_OpError) : ()
+
+axiom fn_once_from_spec:
+  forall self: (), args: t_OpError, res: t_OpError [postcondition_once_from self args res]. [%#sops'3] postcondition_once_from self args res
+    = (postcondition_from self args res /\ resolve_from self)
+
+function fn_mut_from (self: ()) (args: t_OpError) (res_state: ()) (res: t_OpError) : ()
+
+axiom fn_mut_from_spec:
+  forall self: (), args: t_OpError, res_state: (), res: t_OpError [postcondition_mut_from self args res_state res]. [%#sops'2] postcondition_mut_from self args res_state res
+    = (postcondition_from self args res /\ self = res_state)
+
+let from_OpError (self_: t_OpError) (return (x: t_OpError)) = any
+  [ return (result: t_OpError) -> {[@stop_split] [@expl:from ensures] [%#sconvert] result = self_} (! return {result}) ]
+
+let from_residual_Result_bool_OpError (residual: t_Result_Infallible_OpError) (return (x: t_Result_bool_OpError)) =
+{[@stop_split] [@expl:from_residual 'residual' type invariant] [%#sops'0] inv_Result_Infallible_OpError residual}
+  any
+  [ return (result: t_Result_bool_OpError) ->
+  {[@stop_split] [@expl:from_residual ensures] [%#sops'1] match { f0'2 = result; f1'2 = residual } with
+      | {f0'2 = Err'1 result'0; f1'2 = Err'0 residual'0} -> postcondition_from () residual'0 result'0
+      | _ -> false
+      end}
+    (! return {result}) ]
+
+let elim_Continue (_x: t_ControlFlow_Result_Infallible_OpError_tup2_StreamToken_AsyncCopyState)
+  (return (f0'3: tup2_StreamToken_AsyncCopyState)) = any
+  [ _k (f0'3: tup2_StreamToken_AsyncCopyState) -> {Continue f0'3 = _x} (! return {f0'3})
+  | _chk -> (! {[@expl:elim Continue] match _x with
+      | Continue _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+let stream_synchronize_model (stream: t_StreamToken) (st: t_AsyncCopyState) (return (x: t_AsyncCopyState)) = any
+  [ return (result: t_AsyncCopyState) ->
+  {[@stop_split] [@expl:stream_synchronize_model ensures] ([@stop_split] [@expl:stream_synchronize_model ensures #0] [%#slib'8] stream_is_warm stream
+      -> not result.copy_in_flight /\ result.dst_ready)
+    /\ ([@stop_split] [@expl:stream_synchronize_model ensures #1] [%#slib'9] stream_is_null stream
+    -> result.copy_in_flight = st.copy_in_flight /\ result.dst_ready = st.dst_ready)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let lookup_sync_model [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1134 0 1134 92]
+  (path: t_LookupPath) (warm_stream_ready: bool) (return (x: t_Result_bool_OpError)) = (! bb0
+  [ bb0 = s0
+    [ s0 = lookup_async_model [%#slib] {path} {warm_stream_ready}
+        (fun (_x: t_Result_tup2_StreamToken_AsyncCopyState_OpError) -> [ &_10 <- _x ] s1)
+    | s1 = branch_Result_tup2_StreamToken_AsyncCopyState_OpError [%#slib'0] {_10}
+        (fun (_x: t_ControlFlow_Result_Infallible_OpError_tup2_StreamToken_AsyncCopyState) -> [ &_9 <- _x ] s2)
+    | s2 = any
+      [ br0 (x0: tup2_StreamToken_AsyncCopyState) -> {_9 = Continue x0} (! bb5)
+      | br1 (x0: t_Result_Infallible_OpError) -> {_9 = Break x0} (! bb6) ] ]
+  | bb6 = s0
+    [ s0 = elim_Break {_9} (fun (r0: t_Result_Infallible_OpError) -> [ &residual <- r0 ] s1)
+    | s1 = from_residual_Result_bool_OpError [%#slib'0] {residual}
+        (fun (_x: t_Result_bool_OpError) -> [ &_ret <- _x ] s2)
+    | s2 = return {_ret} ]
+  | bb5 = s0
+    [ s0 = elim_Continue {_9} (fun (r0: tup2_StreamToken_AsyncCopyState) -> [ &val' <- r0 ] s1)
+    | s1 = [ &_8 <- val' ] s2
+    | s2 = [ &stream <- _8.f0 ] s3
+    | s3 = [ &st <- _8.f1 ] s4
+    | s4 = stream_synchronize_model [%#slib'1] {stream} {st} (fun (_x: t_AsyncCopyState) -> [ &st2 <- _x ] s5)
+    | s5 = [ &_ret <- Ok'1 (st2.dst_ready) ] s6
+    | s6 = return {_ret} ] ]
+  [ & _ret: t_Result_bool_OpError = Any.any_l ()
+  | & path: t_LookupPath = path
+  | & warm_stream_ready: bool = warm_stream_ready
+  | & stream: t_StreamToken = Any.any_l ()
+  | & st: t_AsyncCopyState = Any.any_l ()
+  | & _8: tup2_StreamToken_AsyncCopyState = Any.any_l ()
+  | & _9: t_ControlFlow_Result_Infallible_OpError_tup2_StreamToken_AsyncCopyState = Any.any_l ()
+  | & _10: t_Result_tup2_StreamToken_AsyncCopyState_OpError = Any.any_l ()
+  | & residual: t_Result_Infallible_OpError = Any.any_l ()
+  | & val': tup2_StreamToken_AsyncCopyState = Any.any_l ()
+  | & st2: t_AsyncCopyState = Any.any_l () ])
+  [ return (result: t_Result_bool_OpError) ->
+  {[@stop_split] [@expl:lookup_sync_model ensures] ([@stop_split] [@expl:lookup_sync_model ensures #0] [%#slib'2] match result with
+        | Ok'1 ready -> ready
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:lookup_sync_model ensures #1] [%#slib'3] match path with
+      | Miss -> match result with
+        | Err'1 (KeyNotFound) -> true
+        | _ -> false
+        end
+      | _ -> true
+      end)}
+    (! return {result}) ]

@@ -1,0 +1,136 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 667 0 667 109 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 668 29 668 30
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 675 18 675 23
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 651 11 651 30
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 652 11 652 43
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 653 10 653 33
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 654 10 654 50
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 656 4 657 77
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 660 4 661 89
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 664 4 665 70
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 120 8 122 42
+let%span slib'9 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 128 16 128 59
+let%span slib'10 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 75 8 78 29
+let%span slib'11 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 99 16 99 95
+let%span slib'12 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 104 16 104 96
+let%span slib'13 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 109 16 109 97
+let%span slib'14 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 62 8 68 9
+
+use creusot.int.UInt32
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_RefCounters = { active_readers: UInt32.t }
+
+type t_OpError = NotInitialized | KeyNotFound | AlreadyExists | AllocationFailed | InvalidParameter | InvalidState
+
+type t_Result_unit_OpError = Ok () | Err t_OpError
+
+type t_EntryState = MemoryTier | BlockDevice | Staging | PendingWrite
+
+type t_KeySlot = { present: bool; state: t_EntryState; size: UInt64.t; ts: UInt64.t }
+
+type tup3_Result_unit_OpError_KeySlot_RefCounters = { f0: t_Result_unit_OpError; f1: t_KeySlot; f2: t_RefCounters }
+
+predicate key_in_memory_tier [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 98 0 98 48] (slot: t_KeySlot) =
+  [%#slib'11] slot.present
+  /\ match slot.state with
+    | MemoryTier -> true
+    | _ -> false
+    end
+
+predicate key_in_block_device [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 103 0 103 49] (slot: t_KeySlot) =
+  [%#slib'12] slot.present
+  /\ match slot.state with
+    | BlockDevice -> true
+    | _ -> false
+    end
+
+predicate key_in_pending_write [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 108 0 108 50] (slot: t_KeySlot) =
+  [%#slib'13] slot.present
+  /\ match slot.state with
+    | PendingWrite -> true
+    | _ -> false
+    end
+
+predicate slot_state_wf [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 118 0 118 43] (slot: t_KeySlot) =
+  [%#slib'8] not slot.present
+  -> not key_in_memory_tier slot /\ not key_in_block_device slot /\ not key_in_pending_write slot
+
+predicate ref_state_consistent [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 127 0 127 69] (slot: t_KeySlot) (refs: t_RefCounters) =
+  [%#slib'9] not slot.present -> UInt32.t'int refs.active_readers = 0
+
+type tup2_EntryState_EntryState = { f0'0: t_EntryState; f1'0: t_EntryState }
+
+predicate state_eq [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 60 0 60 53] (a: t_EntryState) (b: t_EntryState) =
+  [%#slib'14] match { f0'0 = a; f1'0 = b } with
+    | {f0'0 = MemoryTier; f1'0 = MemoryTier} -> true
+    | {f0'0 = BlockDevice; f1'0 = BlockDevice} -> true
+    | {f0'0 = Staging; f1'0 = Staging} -> true
+    | {f0'0 = PendingWrite; f1'0 = PendingWrite} -> true
+    | _ -> false
+    end
+
+predicate same_slot [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 73 0 73 48] (a: t_KeySlot) (b: t_KeySlot) =
+  [%#slib'10] a.present = b.present
+  /\ state_eq a.state b.state /\ UInt64.t'int a.size = UInt64.t'int b.size /\ UInt64.t'int a.ts = UInt64.t'int b.ts
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let remove_with_ref_guard [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 667 0 667 109]
+  (slot: t_KeySlot) (refs: t_RefCounters) (return (x: tup3_Result_unit_OpError_KeySlot_RefCounters)) =
+{[@stop_split] [@expl:remove_with_ref_guard requires] ([@stop_split] [@expl:remove_with_ref_guard requires #0] [%#slib'1] slot_state_wf slot)
+  /\ ([@stop_split] [@expl:remove_with_ref_guard requires #1] [%#slib'2] ref_state_consistent slot refs)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_19 <- UInt32.gt refs.active_readers ([%#slib] (0: UInt32.t)) ] s1
+    | s1 = any [ br0 -> {_19 = false} (! bb2) | br1 -> {_19} (! bb1) ] ]
+  | bb1 = s0
+    [ s0 = [ &_23 <- InvalidState ] s1
+    | s1 = [ &_22 <- Err _23 ] s2
+    | s2 = [ &_ret <- { f0 = _22; f1 = slot; f2 = refs } ] s3
+    | s3 = return {_ret} ]
+  | bb2 = any [ br0 -> {slot.present = false} (! bb4) | br1 -> {slot.present} (! bb3) ]
+  | bb3 = s0
+    [ s0 = [ &out <- slot ] s1
+    | s1 = [ &out <- { out with present = ([%#slib'0] false) } ] s2
+    | s2 = [ &_34 <- Ok _35 ] s3
+    | s3 = [ &_ret <- { f0 = _34; f1 = out; f2 = refs } ] s4
+    | s4 = return {_ret} ]
+  | bb4 = s0
+    [ s0 = [ &_30 <- KeyNotFound ] s1
+    | s1 = [ &_29 <- Err _30 ] s2
+    | s2 = [ &_ret <- { f0 = _29; f1 = slot; f2 = refs } ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: tup3_Result_unit_OpError_KeySlot_RefCounters = Any.any_l ()
+  | & slot: t_KeySlot = slot
+  | & refs: t_RefCounters = refs
+  | & _19: bool = Any.any_l ()
+  | & _22: t_Result_unit_OpError = Any.any_l ()
+  | & _23: t_OpError = Any.any_l ()
+  | & _29: t_Result_unit_OpError = Any.any_l ()
+  | & _30: t_OpError = Any.any_l ()
+  | & out: t_KeySlot = Any.any_l ()
+  | & _34: t_Result_unit_OpError = Any.any_l ()
+  | & _35: () = Any.any_l () ])
+  [ return (result: tup3_Result_unit_OpError_KeySlot_RefCounters) ->
+  {[@stop_split] [@expl:remove_with_ref_guard ensures] ([@stop_split] [@expl:remove_with_ref_guard ensures #0] [%#slib'3] slot_state_wf result.f1)
+    /\ ([@stop_split] [@expl:remove_with_ref_guard ensures #1] [%#slib'4] ref_state_consistent result.f1 result.f2)
+    /\ ([@stop_split] [@expl:remove_with_ref_guard ensures #2] [%#slib'5] UInt32.t'int refs.active_readers > 0
+      -> match result.f0 with
+        | Err (InvalidState) -> true
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:remove_with_ref_guard ensures #3] [%#slib'6] UInt32.t'int refs.active_readers > 0
+      -> same_slot result.f1 slot /\ UInt32.t'int result.f2.active_readers = UInt32.t'int refs.active_readers)
+    /\ ([@stop_split] [@expl:remove_with_ref_guard ensures #4] [%#slib'7] UInt32.t'int refs.active_readers = 0
+      /\ slot.present
+    -> match result.f0 with
+      | Ok () -> not result.f1.present
+      | _ -> false
+      end)}
+    (! return {result}) ]

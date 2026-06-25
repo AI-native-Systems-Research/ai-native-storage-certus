@@ -1,0 +1,15 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_drain_jobs_in_steps": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.019 },
+          { "prover": "alt-ergo", "time": 0.017 },
+          { "prover": "alt-ergo", "time": 0.022 }
+        ]
+      }
+    }
+  }
+}

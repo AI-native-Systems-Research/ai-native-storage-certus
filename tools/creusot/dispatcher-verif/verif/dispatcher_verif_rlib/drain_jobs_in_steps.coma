@@ -1,0 +1,48 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 921 0 921 73 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 923 8 923 9
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 925 8 925 31
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 917 10 917 37
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 918 10 918 53
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 919 10 919 76
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 920 10 920 60
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 909 8 913 9
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+function drain_jobs_spec [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 907 0 907 67] (initial_pending: UInt64.t) (steps: UInt64.t) : int
+ = [%#slib'5] if UInt64.t'int steps >= UInt64.t'int initial_pending then
+    0
+  else
+    UInt64.t'int initial_pending - UInt64.t'int steps
+
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let drain_jobs_in_steps [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 921 0 921 73]
+  (initial_pending: UInt64.t) (steps: UInt64.t) (return (x: UInt64.t)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_14 <- UInt64.ge steps initial_pending ] s1
+    | s1 = any [ br0 -> {_14 = false} (! bb2) | br1 -> {_14} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_ret <- [%#slib] (0: UInt64.t) ] s1 | s1 = return {_ret} ]
+  | bb2 = s0
+    [ s0 = UInt64.sub [%#slib'0] {initial_pending} {steps} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s1)
+    | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & initial_pending: UInt64.t = initial_pending
+  | & steps: UInt64.t = steps
+  | & _14: bool = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:drain_jobs_in_steps ensures] ([@stop_split] [@expl:drain_jobs_in_steps ensures #0] [%#slib'1] UInt64.t'int result
+      <= UInt64.t'int initial_pending)
+    /\ ([@stop_split] [@expl:drain_jobs_in_steps ensures #1] [%#slib'2] UInt64.t'int steps
+        >= UInt64.t'int initial_pending -> UInt64.t'int result = 0)
+    /\ ([@stop_split] [@expl:drain_jobs_in_steps ensures #2] [%#slib'3] UInt64.t'int steps
+        < UInt64.t'int initial_pending -> UInt64.t'int result + UInt64.t'int steps = UInt64.t'int initial_pending)
+    /\ ([@stop_split] [@expl:drain_jobs_in_steps ensures #3] [%#slib'4] UInt64.t'int result
+    = drain_jobs_spec initial_pending steps)}
+    (! return {result}) ]

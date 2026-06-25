@@ -1,0 +1,25 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 855 0 855 61 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 852 11 852 20
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 853 11 853 21
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 854 10 854 35
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let watermark_order_valid [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 855 0 855 61]
+  (low: UInt64.t) (high: UInt64.t) (return (x: bool)) =
+{[@stop_split] [@expl:watermark_order_valid requires] ([@stop_split] [@expl:watermark_order_valid requires #0] [%#slib] UInt64.t'int low
+    <= 1)
+  /\ ([@stop_split] [@expl:watermark_order_valid requires #1] [%#slib'0] UInt64.t'int high <= 1)}
+  (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- UInt64.le low high ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l () | & low: UInt64.t = low | & high: UInt64.t = high ])
+  [ return (result: bool) -> {[@stop_split] [@expl:watermark_order_valid ensures] [%#slib'1] result
+    = (UInt64.t'int low <= UInt64.t'int high)}
+    (! return {result}) ]

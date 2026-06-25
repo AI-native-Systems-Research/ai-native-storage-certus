@@ -1,0 +1,23 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1184 0 1184 50 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1185 16 1185 17
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1182 10 1182 37
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1183 10 1183 35
+
+use creusot.int.UInt8
+use creusot.prelude.Any
+use int.Int
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let evictor_should_start [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1184 0 1184 50]
+  (threshold: UInt8.t) (return (x: bool)) = (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- UInt8.gt threshold ([%#slib] (0: UInt8.t)) ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: bool = Any.any_l () | & threshold: UInt8.t = threshold ])
+  [ return (result: bool) ->
+  {[@stop_split] [@expl:evictor_should_start ensures] ([@stop_split] [@expl:evictor_should_start ensures #0] [%#slib'0] UInt8.t'int threshold
+        = 0 -> not result)
+    /\ ([@stop_split] [@expl:evictor_should_start ensures #1] [%#slib'1] UInt8.t'int threshold > 0 -> result)}
+    (! return {result}) ]

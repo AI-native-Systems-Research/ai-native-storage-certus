@@ -1,0 +1,44 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1111 0 1111 90 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1114 28 1114 33
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1115 23 1115 27
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1104 4 1105 54
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1108 4 1109 90
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1023 16 1023 65
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1018 16 1018 65
+
+use creusot.prelude.Any
+
+type t_StreamToken = Null | Warm
+
+type t_AsyncCopyState = { copy_in_flight: bool; dst_ready: bool }
+
+predicate stream_is_warm [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1022 0 1022 45] (s: t_StreamToken) =
+  [%#slib'3] match s with
+    | Warm -> true
+    | _ -> false
+    end
+
+predicate stream_is_null [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1017 0 1017 45] (s: t_StreamToken) =
+  [%#slib'4] match s with
+    | Null -> true
+    | _ -> false
+    end
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let stream_synchronize_model [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1111 0 1111 90]
+  (stream: t_StreamToken) (st: t_AsyncCopyState) (return (x: t_AsyncCopyState)) = (! bb0
+  [ bb0 = any [ br0 -> {stream = Null} (! bb3) | br1 -> {stream = Warm} (! bb4) ]
+  | bb4 = s0
+    [ s0 = [ &_ret <- { copy_in_flight = ([%#slib] false); dst_ready = ([%#slib'0] true) } ] s1 | s1 = return {_ret} ]
+  | bb3 = s0 [ s0 = [ &_ret <- st ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_AsyncCopyState = Any.any_l () | & stream: t_StreamToken = stream | & st: t_AsyncCopyState = st ])
+  [ return (result: t_AsyncCopyState) ->
+  {[@stop_split] [@expl:stream_synchronize_model ensures] ([@stop_split] [@expl:stream_synchronize_model ensures #0] [%#slib'1] stream_is_warm stream
+      -> not result.copy_in_flight /\ result.dst_ready)
+    /\ ([@stop_split] [@expl:stream_synchronize_model ensures #1] [%#slib'2] stream_is_null stream
+    -> result.copy_in_flight = st.copy_in_flight /\ result.dst_ready = st.dst_ready)}
+    (! return {result}) ]

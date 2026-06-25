@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lemma_drain_one_step_decrease": {
+        "prover": "alt-ergo",
+        "time": 0.023
+      }
+    }
+  }
+}

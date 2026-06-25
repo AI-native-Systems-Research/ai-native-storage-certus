@@ -1,0 +1,92 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1194 0 1194 82 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1195 17 1195 53
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1195 56 1195 59
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1195 17 1195 59
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1196 17 1196 44
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1198 4 1198 20
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1190 11 1190 24
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1191 11 1191 19
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1192 11 1192 26
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1193 10 1193 26
+let%span snum = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/num.rs" 325 20 326 51
+let%span snum'0 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/num.rs" 329 26 329 83
+let%span snum'1 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/num.rs" 330 26 330 83
+let%span snum'2 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/num.rs" 325 20 326 51
+let%span snum'3 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/num.rs" 329 26 329 83
+let%span snum'4 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/num.rs" 330 26 330 83
+
+use creusot.int.UInt8
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+constant const_MIN: UInt64.t = (0: UInt64.t)
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+let saturating_mul (self_: UInt64.t) (rhs: UInt64.t) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:saturating_mul ensures] ([@stop_split] [@expl:saturating_mul ensures #0] [%#snum] UInt64.t'int self_
+            * UInt64.t'int rhs
+          >= UInt64.t'int const_MIN
+        /\ UInt64.t'int self_ * UInt64.t'int rhs <= UInt64.t'int const_MAX
+      -> UInt64.t'int result = UInt64.t'int self_ * UInt64.t'int rhs)
+    /\ ([@stop_split] [@expl:saturating_mul ensures #1] [%#snum'0] UInt64.t'int self_ * UInt64.t'int rhs
+        < UInt64.t'int const_MIN -> UInt64.t'int result = UInt64.t'int const_MIN)
+    /\ ([@stop_split] [@expl:saturating_mul ensures #2] [%#snum'1] UInt64.t'int self_ * UInt64.t'int rhs
+      > UInt64.t'int const_MAX -> UInt64.t'int result = UInt64.t'int const_MAX)}
+    (! return {result}) ]
+
+let saturating_sub (self_: UInt64.t) (rhs: UInt64.t) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:saturating_sub ensures] ([@stop_split] [@expl:saturating_sub ensures #0] [%#snum'2] UInt64.t'int self_
+            - UInt64.t'int rhs
+          >= UInt64.t'int const_MIN
+        /\ UInt64.t'int self_ - UInt64.t'int rhs <= UInt64.t'int const_MAX
+      -> UInt64.t'int result = UInt64.t'int self_ - UInt64.t'int rhs)
+    /\ ([@stop_split] [@expl:saturating_sub ensures #1] [%#snum'3] UInt64.t'int self_ - UInt64.t'int rhs
+        < UInt64.t'int const_MIN -> UInt64.t'int result = UInt64.t'int const_MIN)
+    /\ ([@stop_split] [@expl:saturating_sub ensures #2] [%#snum'4] UInt64.t'int self_ - UInt64.t'int rhs
+      > UInt64.t'int const_MAX -> UInt64.t'int result = UInt64.t'int const_MAX)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let bounded_reduce [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1194 0 1194 82]
+  (used: UInt64.t) (batch: UInt64.t) (cap: UInt64.t) (low_pct: UInt8.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:bounded_reduce requires] ([@stop_split] [@expl:bounded_reduce requires #0] [%#slib'4] UInt64.t'int used
+    <= UInt64.t'int cap)
+  /\ ([@stop_split] [@expl:bounded_reduce requires #1] [%#slib'5] UInt64.t'int cap > 0)
+  /\ ([@stop_split] [@expl:bounded_reduce requires #2] [%#slib'6] UInt8.t'int low_pct <= 100)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_17 <- UInt64.of_int (UInt8.t'int low_pct) ] s1
+    | s1 = saturating_mul [%#slib] {cap} {_17} (fun (_x: UInt64.t) -> [ &_15 <- _x ] s2)
+    | s2 = [ &_19 <- ([%#slib'0] (100: UInt64.t)) = ([%#slib'1] (0: UInt64.t)) ] s3
+    | s3 = {[@expl:division by zero] [%#slib'1] not _19} s4
+    | s4 = UInt64.div [%#slib'1] {_15} {[%#slib'0] (100: UInt64.t)} (fun (_x: UInt64.t) -> [ &target <- _x ] s5)
+    | s5 = saturating_sub [%#slib'2] {used} {target} (fun (_x: UInt64.t) -> [ &excess <- _x ] s6)
+    | s6 = [ &_24 <- UInt64.le excess batch ] s7
+    | s7 = any [ br0 -> {_24 = false} (! bb5) | br1 -> {_24} (! bb4) ] ]
+  | bb4 = s0 [ s0 = [ &evict_now <- excess ] s1 | s1 = bb6 ]
+  | bb5 = s0 [ s0 = [ &evict_now <- batch ] s1 | s1 = bb6 ]
+  | bb6 = s0
+    [ s0 = UInt64.sub [%#slib'3] {used} {evict_now} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s1) | s1 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & used: UInt64.t = used
+  | & batch: UInt64.t = batch
+  | & cap: UInt64.t = cap
+  | & low_pct: UInt8.t = low_pct
+  | & target: UInt64.t = Any.any_l ()
+  | & _15: UInt64.t = Any.any_l ()
+  | & _17: UInt64.t = Any.any_l ()
+  | & _19: bool = Any.any_l ()
+  | & excess: UInt64.t = Any.any_l ()
+  | & evict_now: UInt64.t = Any.any_l ()
+  | & _24: bool = Any.any_l () ])
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:bounded_reduce ensures] [%#slib'7] UInt64.t'int result
+    <= UInt64.t'int used}
+    (! return {result}) ]

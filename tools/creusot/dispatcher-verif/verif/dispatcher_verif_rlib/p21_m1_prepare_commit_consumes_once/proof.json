@@ -1,0 +1,38 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_commit_store": { "prover": "alt-ergo", "time": 0.02 },
+      "vc_p21_m1_prepare_commit_consumes_once": {
+        "tactic": "split_vc",
+        "children": [
+          { "prover": "alt-ergo", "time": 0.022 },
+          null,
+          { "prover": "z3", "time": 0.005 },
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "alt-ergo", "time": 0.031 } ]
+          },
+          { "prover": "alt-ergo", "time": 0.026 },
+          {
+            "tactic": "split_vc",
+            "children": [ { "prover": "z3", "time": 0.006 } ]
+          },
+          { "prover": "z3", "time": 0.006 },
+          { "prover": "alt-ergo", "time": 0.032 },
+          { "prover": "alt-ergo", "time": 0.03 },
+          { "prover": "z3", "time": 0.002 },
+          { "prover": "alt-ergo", "time": 0.05 },
+          { "prover": "alt-ergo", "time": 0.223 },
+          { "prover": "alt-ergo", "time": 0.027 },
+          { "prover": "alt-ergo", "time": 0.032 },
+          { "prover": "alt-ergo", "time": 0.037 },
+          { "prover": "alt-ergo", "time": 0.093 },
+          { "prover": "alt-ergo", "time": 0.029 },
+          { "prover": "alt-ergo", "time": 0.093 }
+        ]
+      },
+      "vc_prepare_store_product": { "prover": "alt-ergo", "time": 0.017 }
+    }
+  }
+}

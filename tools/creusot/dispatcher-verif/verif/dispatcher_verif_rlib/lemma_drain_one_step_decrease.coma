@@ -1,0 +1,35 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 939 0 939 68 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 940 4 940 8
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 936 11 936 31
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 937 10 937 74
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 938 10 938 69
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 909 8 913 9
+
+use creusot.prelude.Any
+use creusot.int.UInt64
+use int.Int
+
+function drain_jobs_spec [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 907 0 907 67] (initial_pending: UInt64.t) (steps: UInt64.t) : int
+ = [%#slib'3] if UInt64.t'int steps >= UInt64.t'int initial_pending then
+    0
+  else
+    UInt64.t'int initial_pending - UInt64.t'int steps
+
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let lemma_drain_one_step_decrease [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 939 0 939 68]
+  (initial_pending: UInt64.t) (return (x: bool)) =
+{[@stop_split] [@expl:lemma_drain_one_step_decrease requires] [%#slib'0] UInt64.t'int initial_pending > 0}
+  (! bb0
+  [ bb0 = s0 [ s0 = [ &_ret <- [%#slib] true ] s1 | s1 = return {_ret} ] ] [ & _ret: bool = Any.any_l () ])
+  [ return (result: bool) ->
+  {[@stop_split] [@expl:lemma_drain_one_step_decrease ensures] ([@stop_split] [@expl:lemma_drain_one_step_decrease ensures #0] [%#slib'1] drain_jobs_spec initial_pending (1: UInt64.t)
+        + 1
+      = UInt64.t'int initial_pending)
+    /\ ([@stop_split] [@expl:lemma_drain_one_step_decrease ensures #1] [%#slib'2] drain_jobs_spec initial_pending (1: UInt64.t)
+    < UInt64.t'int initial_pending)}
+    (! return {result}) ]

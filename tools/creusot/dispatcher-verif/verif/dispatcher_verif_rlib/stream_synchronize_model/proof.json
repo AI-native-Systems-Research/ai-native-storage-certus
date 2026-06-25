@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_stream_synchronize_model": { "prover": "alt-ergo", "time": 0.021 }
+    }
+  }
+}

@@ -1,0 +1,69 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1336 0 1336 76 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1341 22 1341 27
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1329 11 1329 30
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1330 11 1330 35
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1331 10 1331 31
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1333 10 1333 52
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1335 10 1335 41
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 120 8 122 42
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 99 16 99 95
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 104 16 104 96
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 109 16 109 97
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+
+type t_EntryState = MemoryTier | BlockDevice | Staging | PendingWrite
+
+type t_KeySlot = { present: bool; state: t_EntryState; size: UInt64.t; ts: UInt64.t }
+
+predicate key_in_memory_tier [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 98 0 98 48] (slot: t_KeySlot) =
+  [%#slib'6] slot.present
+  /\ match slot.state with
+    | MemoryTier -> true
+    | _ -> false
+    end
+
+predicate key_in_block_device [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 103 0 103 49] (slot: t_KeySlot) =
+  [%#slib'7] slot.present
+  /\ match slot.state with
+    | BlockDevice -> true
+    | _ -> false
+    end
+
+predicate key_in_pending_write [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 108 0 108 50] (slot: t_KeySlot) =
+  [%#slib'8] slot.present
+  /\ match slot.state with
+    | PendingWrite -> true
+    | _ -> false
+    end
+
+predicate slot_state_wf [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 118 0 118 43] (slot: t_KeySlot) =
+  [%#slib'5] not slot.present
+  -> not key_in_memory_tier slot /\ not key_in_block_device slot /\ not key_in_pending_write slot
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let blind_evict_with_fallback [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1336 0 1336 76]
+  (slot: t_KeySlot) (convert_ok: bool) (return (x: t_KeySlot)) =
+{[@stop_split] [@expl:blind_evict_with_fallback requires] ([@stop_split] [@expl:blind_evict_with_fallback requires #0] [%#slib'0] slot_state_wf slot)
+  /\ ([@stop_split] [@expl:blind_evict_with_fallback requires #1] [%#slib'1] key_in_memory_tier slot)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &out <- slot ] s1 | s1 = any [ br0 -> {convert_ok = false} (! bb2) | br1 -> {convert_ok} (! bb1) ] ]
+  | bb1 = s0 [ s0 = [ &_15 <- BlockDevice ] s1 | s1 = [ &out <- { out with state = _15 } ] s2 | s2 = bb3 ]
+  | bb2 = s0 [ s0 = [ &out <- { out with present = ([%#slib] false) } ] s1 | s1 = bb3 ]
+  | bb3 = s0 [ s0 = [ &_ret <- out ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_KeySlot = Any.any_l ()
+  | & slot: t_KeySlot = slot
+  | & convert_ok: bool = convert_ok
+  | & out: t_KeySlot = Any.any_l ()
+  | & _15: t_EntryState = Any.any_l () ])
+  [ return (result: t_KeySlot) ->
+  {[@stop_split] [@expl:blind_evict_with_fallback ensures] ([@stop_split] [@expl:blind_evict_with_fallback ensures #0] [%#slib'2] slot_state_wf result)
+    /\ ([@stop_split] [@expl:blind_evict_with_fallback ensures #1] [%#slib'3] convert_ok -> key_in_block_device result)
+    /\ ([@stop_split] [@expl:blind_evict_with_fallback ensures #2] [%#slib'4] not convert_ok -> not result.present)}
+    (! return {result}) ]

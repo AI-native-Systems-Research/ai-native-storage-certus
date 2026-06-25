@@ -1,0 +1,182 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 821 0 821 106 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 822 23 822 29
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 829 14 829 43
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 830 10 830 22
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 828 16 828 45
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 827 16 827 33
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 826 16 826 29
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 825 16 825 48
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 830 48 830 66
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 831 17 831 18
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 832 19 832 20
+let%span slib'9 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 832 12 832 20
+let%span slib'10 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 834 20 834 21
+let%span slib'11 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 834 8 834 21
+let%span slib'12 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 837 7 837 19
+let%span slib'13 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 806 11 806 29
+let%span slib'14 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 807 11 807 41
+let%span slib'15 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 808 10 808 42
+let%span slib'16 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 810 4 813 5
+let%span slib'17 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 816 4 819 5
+let%span slib'18 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1 0 1 35
+let%span swell_founded = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/logic/well_founded.rs" 62 16 62 28
+let%span sord = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/logic/ord.rs" 162 41 162 102
+let%span sord'0 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/logic/ord.rs" 168 41 168 99
+let%span sord'1 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/logic/ord.rs" 174 41 174 99
+let%span sord'2 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/logic/ord.rs" 180 41 180 102
+let%span sord'3 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/logic/ord.rs" 186 41 186 83
+let%span sord'4 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/logic/ord.rs" 192 42 192 59
+let%span sord'5 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/logic/ord.rs" 193 42 193 59
+let%span sord'6 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/logic/ord.rs" 194 41 194 58
+let%span sord'7 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/logic/ord.rs" 200 42 200 83
+let%span sord'8 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/logic/ord.rs" 201 41 201 85
+let%span sord'9 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/logic/ord.rs" 207 42 207 86
+let%span sord'10 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/logic/ord.rs" 208 41 208 82
+let%span sord'11 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/logic/ord.rs" 214 41 214 97
+let%span sord'12 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/logic/ord.rs" 296 16 302 17
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_Ordering = Less | Equal | Greater
+
+function cmp_log_usize (self: UInt64.t) (o: UInt64.t) : t_Ordering = [%#sord'12] if UInt64.lt self o then
+    Less
+  else
+    if self = o then Equal else Greater
+
+
+function eq_cmp_usize (x: UInt64.t) (y: UInt64.t) : ()
+
+axiom eq_cmp_usize_spec: forall x: UInt64.t, y: UInt64.t. [%#sord'11] (x = y) = (cmp_log_usize x y = Equal)
+
+function antisym2_usize (x: UInt64.t) (y: UInt64.t) : ()
+
+axiom antisym2_usize_spec: forall x: UInt64.t, y: UInt64.t. ([%#sord'9] cmp_log_usize x y = Greater)
+    -> ([%#sord'10] cmp_log_usize y x = Less)
+
+function antisym1_usize (x: UInt64.t) (y: UInt64.t) : ()
+
+axiom antisym1_usize_spec: forall x: UInt64.t, y: UInt64.t. ([%#sord'7] cmp_log_usize x y = Less)
+    -> ([%#sord'8] cmp_log_usize y x = Greater)
+
+function trans_usize (x: UInt64.t) (y: UInt64.t) (z: UInt64.t) (o: t_Ordering) : ()
+
+axiom trans_usize_spec: forall x: UInt64.t, y: UInt64.t, z: UInt64.t, o: t_Ordering. ([%#sord'4] cmp_log_usize x y = o)
+    -> ([%#sord'5] cmp_log_usize y z = o) -> ([%#sord'6] cmp_log_usize x z = o)
+
+function refl_usize (x: UInt64.t) : ()
+
+axiom refl_usize_spec: forall x: UInt64.t. [%#sord'3] cmp_log_usize x x = Equal
+
+function cmp_gt_log_usize (x: UInt64.t) (y: UInt64.t) : ()
+
+axiom cmp_gt_log_usize_spec: forall x: UInt64.t, y: UInt64.t. [%#sord'2] UInt64.gt x y = (cmp_log_usize x y = Greater)
+
+function cmp_ge_log_usize (x: UInt64.t) (y: UInt64.t) : ()
+
+axiom cmp_ge_log_usize_spec: forall x: UInt64.t, y: UInt64.t. [%#sord'1] UInt64.ge x y = (cmp_log_usize x y <> Less)
+
+function cmp_lt_log_usize (x: UInt64.t) (y: UInt64.t) : ()
+
+axiom cmp_lt_log_usize_spec: forall x: UInt64.t, y: UInt64.t. [%#sord'0] UInt64.lt x y = (cmp_log_usize x y = Less)
+
+function cmp_le_log_usize (x: UInt64.t) (y: UInt64.t) : ()
+
+axiom cmp_le_log_usize_spec: forall x: UInt64.t, y: UInt64.t. [%#sord] UInt64.le x y = (cmp_log_usize x y <> Greater)
+
+predicate well_founded_relation_usize [@inline:trivial] (self: UInt64.t) (other: UInt64.t) =
+  [%#swell_founded] UInt64.gt self other
+
+meta "rewrite_def" predicate well_founded_relation_usize
+
+constant const_MAX_EVICT_ATTEMPTS: UInt64.t = [%#slib'18] (512: UInt64.t)
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+type t_OpError = NotInitialized | KeyNotFound | AlreadyExists | AllocationFailed | InvalidParameter | InvalidState
+
+type t_Result_unit_OpError = Ok () | Err t_OpError
+
+type tup3_usize_Result_unit_OpError_usize = { f0: UInt64.t; f1: t_Result_unit_OpError; f2: UInt64.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let evict_for_space [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 821 0 821 106]
+  (capacity: UInt64.t) (used: UInt64.t) (needed: UInt64.t) (return (x: tup3_usize_Result_unit_OpError_usize)) =
+{[@stop_split] [@expl:evict_for_space requires] ([@stop_split] [@expl:evict_for_space requires #0] [%#slib'13] UInt64.t'int used
+    <= UInt64.t'int capacity)
+  /\ ([@stop_split] [@expl:evict_for_space requires #1] [%#slib'14] UInt64.t'int used + UInt64.t'int needed
+  <= UInt64.t'int const_MAX)}
+  (! bb0
+  [ bb0 = s0 [ s0 = [ &attempts <- [%#slib] (0: UInt64.t) ] s1 | s1 = [ &cur <- used ] s2 | s2 = bb1 ]
+  | bb1 = bb1invariant
+    [ bb1 =
+      {[@expl:loop variant] well_founded_relation_usize variant_old_bb1 ([%#slib'0] UInt64.sub const_MAX_EVICT_ATTEMPTS attempts)}
+      bb1invariant
+    | bb1invariant = {[@expl:loop invariant #0] [%#slib'5] UInt64.t'int attempts
+      <= UInt64.t'int const_MAX_EVICT_ATTEMPTS}
+      {[@expl:loop invariant #1] [%#slib'4] UInt64.t'int cur <= UInt64.t'int used}
+      {[@expl:loop invariant #2] [%#slib'3] UInt64.t'int cur <= UInt64.t'int capacity}
+      {[@expl:loop invariant #3] [%#slib'2] UInt64.t'int cur + UInt64.t'int needed <= UInt64.t'int const_MAX}
+      (! [ &variant_old_bb1 <- [%#slib'0] UInt64.sub const_MAX_EVICT_ATTEMPTS attempts ] s0)
+      [ s0 = UInt64.add [%#slib'1] {cur} {needed} (fun (_x: UInt64.t) -> [ &_36 <- _x ] s1)
+      | s1 = [ &_35 <- UInt64.gt _36 capacity ] s2
+      | s2 = any [ br0 -> {_35 = false} (! bb10) | br1 -> {_35} (! bb3) ] ]
+      [ bb3 = s0
+        [ s0 = [ &_40 <- UInt64.lt attempts ([%#slib'6] const_MAX_EVICT_ATTEMPTS) ] s1
+        | s1 = any [ br0 -> {_40 = false} (! bb10) | br1 -> {_40} (! bb4) ] ]
+      | bb4 = s0
+        [ s0 = [ &_43 <- UInt64.gt cur ([%#slib'7] (0: UInt64.t)) ] s1
+        | s1 = any [ br0 -> {_43 = false} (! bb7) | br1 -> {_43} (! bb5) ] ]
+      | bb5 = s0
+        [ s0 = UInt64.sub [%#slib'9] {cur} {[%#slib'8] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &cur <- _x ] s1)
+        | s1 = bb7 ]
+      | bb7 = s0
+        [ s0 = UInt64.add [%#slib'11] {attempts} {[%#slib'10] (1: UInt64.t)}
+            (fun (_x: UInt64.t) -> [ &attempts <- _x ] s1)
+        | s1 = bb1 ] ] ]
+  | bb10 = s0
+    [ s0 = UInt64.add [%#slib'12] {cur} {needed} (fun (_x: UInt64.t) -> [ &_47 <- _x ] s1)
+    | s1 = [ &_46 <- UInt64.le _47 capacity ] s2
+    | s2 = any [ br0 -> {_46 = false} (! bb12) | br1 -> {_46} (! bb11) ] ]
+  | bb11 = s0
+    [ s0 = [ &_52 <- Ok _53 ] s1 | s1 = [ &_ret <- { f0 = attempts; f1 = _52; f2 = cur } ] s2 | s2 = return {_ret} ]
+  | bb12 = s0
+    [ s0 = [ &_57 <- AllocationFailed ] s1
+    | s1 = [ &_56 <- Err _57 ] s2
+    | s2 = [ &_ret <- { f0 = attempts; f1 = _56; f2 = cur } ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: tup3_usize_Result_unit_OpError_usize = Any.any_l ()
+  | & capacity: UInt64.t = capacity
+  | & used: UInt64.t = used
+  | & needed: UInt64.t = needed
+  | & attempts: UInt64.t = Any.any_l ()
+  | & cur: UInt64.t = Any.any_l ()
+  | & _35: bool = Any.any_l ()
+  | & _36: UInt64.t = Any.any_l ()
+  | & _40: bool = Any.any_l ()
+  | & _43: bool = Any.any_l ()
+  | & _46: bool = Any.any_l ()
+  | & _47: UInt64.t = Any.any_l ()
+  | & _52: t_Result_unit_OpError = Any.any_l ()
+  | & _53: () = Any.any_l ()
+  | & _56: t_Result_unit_OpError = Any.any_l ()
+  | & _57: t_OpError = Any.any_l ()
+  | & variant_old_bb1: UInt64.t = Any.any_l () ])
+  [ return (result: tup3_usize_Result_unit_OpError_usize) ->
+  {[@stop_split] [@expl:evict_for_space ensures] ([@stop_split] [@expl:evict_for_space ensures #0] [%#slib'15] UInt64.t'int result.f0
+      <= UInt64.t'int const_MAX_EVICT_ATTEMPTS)
+    /\ ([@stop_split] [@expl:evict_for_space ensures #1] [%#slib'16] match result.f1 with
+        | Ok () -> UInt64.t'int result.f2 + UInt64.t'int needed <= UInt64.t'int capacity
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:evict_for_space ensures #2] [%#slib'17] match result.f1 with
+      | Err (AllocationFailed) -> UInt64.t'int result.f2 + UInt64.t'int needed > UInt64.t'int capacity
+      | _ -> true
+      end)}
+    (! return {result}) ]

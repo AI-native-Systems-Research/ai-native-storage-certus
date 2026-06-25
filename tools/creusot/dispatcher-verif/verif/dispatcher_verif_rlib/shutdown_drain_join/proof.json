@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_drain_jobs_in_steps": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_shutdown_drain_join": { "prover": "alt-ergo", "time": 0.041 }
+    }
+  }
+}

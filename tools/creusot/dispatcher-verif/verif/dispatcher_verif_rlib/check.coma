@@ -1,0 +1,62 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 213 0 213 62 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 199 11 199 22
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 201 4 204 5
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 207 4 210 5
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 212 10 212 94
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 89 16 89 38
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 160 16 160 71
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_Model = { initialized: bool; used: UInt64.t; capacity: UInt64.t }
+
+type t_EntryState = MemoryTier | BlockDevice | Staging | PendingWrite
+
+type t_KeySlot = { present: bool; state: t_EntryState; size: UInt64.t; ts: UInt64.t }
+
+type t_OpError = NotInitialized | KeyNotFound | AlreadyExists | AllocationFailed | InvalidParameter | InvalidState
+
+type t_Result_bool_OpError = Ok bool | Err t_OpError
+
+predicate wf_model [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 88 0 88 33] (m: t_Model) =
+  [%#slib'3] UInt64.t'int m.used <= UInt64.t'int m.capacity
+
+predicate err_not_initialized [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 159 0 159 46] (e: t_OpError) =
+  [%#slib'4] match e with
+    | NotInitialized -> true
+    | _ -> false
+    end
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let check' [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 213 0 213 62]
+  (m: t_Model) (slot: t_KeySlot) (return (x: t_Result_bool_OpError)) =
+{[@stop_split] [@expl:check requires] [%#slib] wf_model m}
+  (! bb0
+  [ bb0 = any [ br0 -> {m.initialized = false} (! bb1) | br1 -> {m.initialized} (! bb2) ]
+  | bb2 = s0 [ s0 = [ &_ret <- Ok (slot.present) ] s1 | s1 = return {_ret} ]
+  | bb1 = s0 [ s0 = [ &_11 <- NotInitialized ] s1 | s1 = [ &_ret <- Err _11 ] s2 | s2 = return {_ret} ] ]
+  [ & _ret: t_Result_bool_OpError = Any.any_l ()
+  | & m: t_Model = m
+  | & slot: t_KeySlot = slot
+  | & _11: t_OpError = Any.any_l () ])
+  [ return (result: t_Result_bool_OpError) ->
+  {[@stop_split] [@expl:check ensures] ([@stop_split] [@expl:check ensures #0] [%#slib'0] match result with
+        | Ok v -> v = slot.present
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:check ensures #1] [%#slib'1] match result with
+        | Err e -> err_not_initialized e
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:check ensures #2] [%#slib'2] not m.initialized
+    -> match result with
+      | Err (NotInitialized) -> true
+      | _ -> false
+      end)}
+    (! return {result}) ]

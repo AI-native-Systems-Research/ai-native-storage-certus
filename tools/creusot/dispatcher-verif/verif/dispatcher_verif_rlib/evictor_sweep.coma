@@ -1,0 +1,122 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1208 0 1208 80 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1212 28 1212 29
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1216 44 1216 47
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1216 15 1216 48
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1216 15 1216 68
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1222 21 1227 5
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1203 11 1203 26
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1204 11 1204 27
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1205 10 1205 30
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1206 10 1206 63
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1207 10 1207 46
+let%span slib'9 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1190 11 1190 24
+let%span slib'10 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1191 11 1191 19
+let%span slib'11 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1192 11 1192 26
+let%span slib'12 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1193 10 1193 26
+let%span slib'13 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1156 8 1159 32
+let%span slib'14 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1165 16 1165 50
+let%span snum = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/num.rs" 325 20 326 51
+let%span snum'0 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/num.rs" 329 26 329 83
+let%span snum'1 = "/home/cornel/ai-native-storage-certus/creusot/creusot-std/src/std/num.rs" 330 26 330 83
+
+use creusot.int.UInt8
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_SsdEvictorCfg = {
+  enabled: bool;
+  threshold_percent: UInt8.t;
+  low_watermark_percent: UInt8.t;
+  batch_size: UInt64.t }
+
+type t_SsdEvictorState = { running: bool; used_units: UInt64.t; capacity_units: UInt64.t }
+
+constant const_MIN: UInt64.t = (0: UInt64.t)
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+let saturating_mul (self_: UInt64.t) (rhs: UInt64.t) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:saturating_mul ensures] ([@stop_split] [@expl:saturating_mul ensures #0] [%#snum] UInt64.t'int self_
+            * UInt64.t'int rhs
+          >= UInt64.t'int const_MIN
+        /\ UInt64.t'int self_ * UInt64.t'int rhs <= UInt64.t'int const_MAX
+      -> UInt64.t'int result = UInt64.t'int self_ * UInt64.t'int rhs)
+    /\ ([@stop_split] [@expl:saturating_mul ensures #1] [%#snum'0] UInt64.t'int self_ * UInt64.t'int rhs
+        < UInt64.t'int const_MIN -> UInt64.t'int result = UInt64.t'int const_MIN)
+    /\ ([@stop_split] [@expl:saturating_mul ensures #2] [%#snum'1] UInt64.t'int self_ * UInt64.t'int rhs
+      > UInt64.t'int const_MAX -> UInt64.t'int result = UInt64.t'int const_MAX)}
+    (! return {result}) ]
+
+let bounded_reduce (used: UInt64.t) (batch: UInt64.t) (cap: UInt64.t) (low_pct: UInt8.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:bounded_reduce requires] ([@stop_split] [@expl:bounded_reduce requires #0] [%#slib'9] UInt64.t'int used
+    <= UInt64.t'int cap)
+  /\ ([@stop_split] [@expl:bounded_reduce requires #1] [%#slib'10] UInt64.t'int cap > 0)
+  /\ ([@stop_split] [@expl:bounded_reduce requires #2] [%#slib'11] UInt8.t'int low_pct <= 100)}
+  any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:bounded_reduce ensures] [%#slib'12] UInt64.t'int result
+    <= UInt64.t'int used}
+    (! return {result}) ]
+
+predicate wf_ssd_cfg [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1154 0 1154 43] (c: t_SsdEvictorCfg) =
+  [%#slib'13] UInt8.t'int c.threshold_percent <= 100
+  /\ UInt8.t'int c.low_watermark_percent <= 100
+  /\ UInt8.t'int c.low_watermark_percent <= UInt8.t'int c.threshold_percent /\ UInt64.t'int c.batch_size > 0
+
+predicate wf_ssd_state [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1164 0 1164 47] (s: t_SsdEvictorState) =
+  [%#slib'14] UInt64.t'int s.used_units <= UInt64.t'int s.capacity_units
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let evictor_sweep [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1208 0 1208 80]
+  (cfg: t_SsdEvictorCfg) (st: t_SsdEvictorState) (return (x: t_SsdEvictorState)) =
+{[@stop_split] [@expl:evictor_sweep requires] ([@stop_split] [@expl:evictor_sweep requires #0] [%#slib'4] wf_ssd_cfg cfg)
+  /\ ([@stop_split] [@expl:evictor_sweep requires #1] [%#slib'5] wf_ssd_state st)}
+  (! bb0
+  [ bb0 = any [ br0 -> {cfg.enabled = false} (! bb1) | br1 -> {cfg.enabled} (! bb2) ]
+  | bb2 = s0
+    [ s0 = [ &_17 <- st.capacity_units = ([%#slib] (0: UInt64.t)) ] s1
+    | s1 = any [ br0 -> {_17 = false} (! bb4) | br1 -> {_17} (! bb3) ] ]
+  | bb3 = s0 [ s0 = [ &_ret <- st ] s1 | s1 = return {_ret} ]
+  | bb4 = s0
+    [ s0 = saturating_mul [%#slib'1] {st.used_units} {[%#slib'0] (100: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &_21 <- _x ] s1)
+    | s1 = [ &_23 <- st.capacity_units ] s2
+    | s2 = [ &_24 <- _23 = ([%#slib'2] (0: UInt64.t)) ] s3
+    | s3 = {[@expl:division by zero] [%#slib'2] not _24} s4
+    | s4 = UInt64.div [%#slib'2] {_21} {_23} (fun (_x: UInt64.t) -> [ &util <- _x ] s5)
+    | s5 = [ &_28 <- UInt64.of_int (UInt8.t'int cfg.threshold_percent) ] s6
+    | s6 = [ &_26 <- UInt64.le util _28 ] s7
+    | s7 = any [ br0 -> {_26 = false} (! bb8) | br1 -> {_26} (! bb7) ] ]
+  | bb7 = s0 [ s0 = [ &_ret <- st ] s1 | s1 = return {_ret} ]
+  | bb8 = s0
+    [ s0 = [ &out <- st ] s1
+    | s1 = bounded_reduce [%#slib'3] {out.used_units} {cfg.batch_size} {out.capacity_units} {cfg.low_watermark_percent}
+        (fun (_x: UInt64.t) -> [ &_32 <- _x ] s2)
+    | s2 = [ &out <- { out with used_units = _32 } ] s3
+    | s3 = [ &_ret <- out ] s4
+    | s4 = return {_ret} ]
+  | bb1 = s0 [ s0 = [ &_ret <- st ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_SsdEvictorState = Any.any_l ()
+  | & cfg: t_SsdEvictorCfg = cfg
+  | & st: t_SsdEvictorState = st
+  | & _17: bool = Any.any_l ()
+  | & util: UInt64.t = Any.any_l ()
+  | & _21: UInt64.t = Any.any_l ()
+  | & _23: UInt64.t = Any.any_l ()
+  | & _24: bool = Any.any_l ()
+  | & _26: bool = Any.any_l ()
+  | & _28: UInt64.t = Any.any_l ()
+  | & out: t_SsdEvictorState = Any.any_l ()
+  | & _32: UInt64.t = Any.any_l () ])
+  [ return (result: t_SsdEvictorState) ->
+  {[@stop_split] [@expl:evictor_sweep ensures] ([@stop_split] [@expl:evictor_sweep ensures #0] [%#slib'6] wf_ssd_state result)
+    /\ ([@stop_split] [@expl:evictor_sweep ensures #1] [%#slib'7] not cfg.enabled
+      -> UInt64.t'int result.used_units = UInt64.t'int st.used_units)
+    /\ ([@stop_split] [@expl:evictor_sweep ensures #2] [%#slib'8] UInt64.t'int result.used_units
+    <= UInt64.t'int st.used_units)}
+    (! return {result}) ]

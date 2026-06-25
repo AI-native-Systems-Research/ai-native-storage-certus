@@ -1,0 +1,37 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1353 0 1353 87 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1355 21 1355 25
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1347 11 1347 25
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1348 11 1348 27
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1350 10 1350 28
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1351 10 1351 35
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1352 10 1352 45
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+type t_RecoverExtent = { key_present: bool; offset: UInt64.t; size_blocks: UInt32.t }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let recover_extent [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1353 0 1353 87]
+  (e: t_RecoverExtent) (offset'0: UInt64.t) (size_blocks'0: UInt32.t) (return (x: t_RecoverExtent)) =
+{[@stop_split] [@expl:recover_extent requires] ([@stop_split] [@expl:recover_extent requires #0] [%#slib'0] not e.key_present)
+  /\ ([@stop_split] [@expl:recover_extent requires #1] [%#slib'1] UInt32.t'int size_blocks'0 > 0)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_ret <- { key_present = ([%#slib] true); offset = offset'0; size_blocks = size_blocks'0 } ] s1
+    | s1 = return {_ret} ] ]
+  [ & _ret: t_RecoverExtent = Any.any_l ()
+  | & offset'0: UInt64.t = offset'0
+  | & size_blocks'0: UInt32.t = size_blocks'0 ])
+  [ return (result: t_RecoverExtent) ->
+  {[@stop_split] [@expl:recover_extent ensures] ([@stop_split] [@expl:recover_extent ensures #0] [%#slib'2] result.key_present)
+    /\ ([@stop_split] [@expl:recover_extent ensures #1] [%#slib'3] UInt64.t'int result.offset = UInt64.t'int offset'0)
+    /\ ([@stop_split] [@expl:recover_extent ensures #2] [%#slib'4] UInt32.t'int result.size_blocks
+    = UInt32.t'int size_blocks'0)}
+    (! return {result}) ]

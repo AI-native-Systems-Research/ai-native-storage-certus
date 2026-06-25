@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_remove_with_ref_guard": { "prover": "alt-ergo", "time": 0.036 }
+    }
+  }
+}

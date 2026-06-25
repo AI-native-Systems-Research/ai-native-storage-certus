@@ -1,0 +1,24 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_clear_memory_tier": {
+        "tactic": "split_vc",
+        "children": [
+          {
+            "tactic": "split_vc",
+            "children": [
+              { "prover": "alt-ergo", "time": 0.019 },
+              { "prover": "alt-ergo", "time": 0.021 },
+              { "prover": "alt-ergo", "time": 0.021 },
+              { "prover": "alt-ergo", "time": 0.016 }
+            ]
+          },
+          { "prover": "alt-ergo", "time": 0.026 },
+          { "prover": "alt-ergo", "time": 0.022 },
+          { "prover": "alt-ergo", "time": 0.023 }
+        ]
+      }
+    }
+  }
+}

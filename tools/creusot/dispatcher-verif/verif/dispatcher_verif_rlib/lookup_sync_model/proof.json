@@ -1,0 +1,21 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_branch_Result_tup2_StreamToken_AsyncCopyState_OpError": {
+        "prover": "alt-ergo",
+        "time": 0.023
+      },
+      "vc_elim_Break": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_elim_Continue": { "prover": "alt-ergo", "time": 0.021 },
+      "vc_from_OpError": { "prover": "alt-ergo", "time": 0.018 },
+      "vc_from_residual_Result_bool_OpError": {
+        "prover": "alt-ergo",
+        "time": 0.02
+      },
+      "vc_lookup_async_model": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_lookup_sync_model": { "prover": "alt-ergo", "time": 0.129 },
+      "vc_stream_synchronize_model": { "prover": "alt-ergo", "time": 0.019 }
+    }
+  }
+}

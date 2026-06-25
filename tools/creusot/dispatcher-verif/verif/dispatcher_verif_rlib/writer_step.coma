@@ -1,0 +1,58 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 894 0 894 69 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 896 56 896 57
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 899 28 899 29
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 899 8 899 29
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 882 11 882 27
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 883 10 883 31
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 885 4 888 55
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 891 4 892 51
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 875 8 876 56
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_BackgroundState = {
+  writer_running: bool;
+  evictor_running: bool;
+  pending_jobs: UInt64.t;
+  shutdown_requested: bool;
+  writer_joined: bool;
+  evictor_joined: bool }
+
+predicate wf_background [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 873 0 873 48] (s: t_BackgroundState) =
+  [%#slib'6] (s.writer_joined -> not s.writer_running) /\ (s.evictor_joined -> not s.evictor_running)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let writer_step [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 894 0 894 69]
+  (s: t_BackgroundState) (fair: bool) (return (x: t_BackgroundState)) =
+{[@stop_split] [@expl:writer_step requires] [%#slib'2] wf_background s}
+  (! bb0
+  [ bb0 = s0 [ s0 = [ &out <- s ] s1 | s1 = any [ br0 -> {fair = false} (! bb6) | br1 -> {fair} (! bb1) ] ]
+  | bb1 = any [ br0 -> {out.writer_running = false} (! bb6) | br1 -> {out.writer_running} (! bb2) ]
+  | bb2 = s0
+    [ s0 = [ &_18 <- UInt64.gt out.pending_jobs ([%#slib] (0: UInt64.t)) ] s1
+    | s1 = any [ br0 -> {_18 = false} (! bb6) | br1 -> {_18} (! bb3) ] ]
+  | bb3 = s0
+    [ s0 = UInt64.sub [%#slib'1] {out.pending_jobs} {[%#slib'0] (1: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &out <- { out with pending_jobs = _x } ] s1)
+    | s1 = bb6 ]
+  | bb6 = s0 [ s0 = [ &_ret <- out ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_BackgroundState = Any.any_l ()
+  | & s: t_BackgroundState = s
+  | & fair: bool = fair
+  | & out: t_BackgroundState = Any.any_l ()
+  | & _18: bool = Any.any_l () ])
+  [ return (result: t_BackgroundState) ->
+  {[@stop_split] [@expl:writer_step ensures] ([@stop_split] [@expl:writer_step ensures #0] [%#slib'3] wf_background result)
+    /\ ([@stop_split] [@expl:writer_step ensures #1] [%#slib'4] fair
+        /\ s.writer_running /\ UInt64.t'int s.pending_jobs > 0
+      -> UInt64.t'int result.pending_jobs + 1 = UInt64.t'int s.pending_jobs)
+    /\ ([@stop_split] [@expl:writer_step ensures #2] [%#slib'5] not fair
+      \/ not s.writer_running \/ UInt64.t'int s.pending_jobs = 0
+    -> UInt64.t'int result.pending_jobs = UInt64.t'int s.pending_jobs)}
+    (! return {result}) ]

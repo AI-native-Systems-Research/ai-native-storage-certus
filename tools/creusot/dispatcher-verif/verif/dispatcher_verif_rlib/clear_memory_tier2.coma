@@ -1,0 +1,130 @@
+(* #"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1240 0 1240 72 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1245 20 1245 26
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1249 17 1249 18
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1249 8 1249 18
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1253 17 1253 18
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1253 8 1253 18
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1242 19 1242 20
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1232 11 1232 22
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1233 11 1233 23
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1234 10 1234 28
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1235 10 1235 29
+let%span slib'9 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1237 10 1237 96
+let%span slib'10 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1239 10 1239 62
+let%span slib'11 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 89 16 89 38
+let%span slib'12 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 133 16 133 58
+let%span slib'13 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 99 16 99 95
+let%span slib'14 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 144 8 145 56
+let%span slib'15 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 120 8 122 42
+let%span slib'16 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 104 16 104 96
+let%span slib'17 = "/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 109 16 109 97
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_Model = { initialized: bool; used: UInt64.t; capacity: UInt64.t }
+
+type t_EntryState = MemoryTier | BlockDevice | Staging | PendingWrite
+
+type t_KeySlot = { present: bool; state: t_EntryState; size: UInt64.t; ts: UInt64.t }
+
+type t_Cache2 = { k0: t_KeySlot; k1: t_KeySlot }
+
+type tup3_Model_usize_Cache2 = { f0: t_Model; f1: UInt64.t; f2: t_Cache2 }
+
+predicate wf_model [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 88 0 88 33] (m: t_Model) =
+  [%#slib'11] UInt64.t'int m.used <= UInt64.t'int m.capacity
+
+predicate key_in_memory_tier [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 98 0 98 48] (slot: t_KeySlot) =
+  [%#slib'13] slot.present
+  /\ match slot.state with
+    | MemoryTier -> true
+    | _ -> false
+    end
+
+predicate key_in_block_device [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 103 0 103 49] (slot: t_KeySlot) =
+  [%#slib'16] slot.present
+  /\ match slot.state with
+    | BlockDevice -> true
+    | _ -> false
+    end
+
+predicate key_in_pending_write [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 108 0 108 50] (slot: t_KeySlot) =
+  [%#slib'17] slot.present
+  /\ match slot.state with
+    | PendingWrite -> true
+    | _ -> false
+    end
+
+predicate slot_state_wf [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 118 0 118 43] (slot: t_KeySlot) =
+  [%#slib'15] not slot.present
+  -> not key_in_memory_tier slot /\ not key_in_block_device slot /\ not key_in_pending_write slot
+
+predicate wf_cache2 [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 132 0 132 35] (c: t_Cache2) =
+  [%#slib'12] slot_state_wf c.k0 /\ slot_state_wf c.k1
+
+function memory_tier_count2 [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 142 0 142 43] (c: t_Cache2) : int
+ = [%#slib'14] (if key_in_memory_tier c.k0 then 1 else 0) + (if key_in_memory_tier c.k1 then 1 else 0)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clear_memory_tier2 [#"/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/src/lib.rs" 1240 0 1240 72]
+  (m: t_Model) (c: t_Cache2) (return (x: tup3_Model_usize_Cache2)) =
+{[@stop_split] [@expl:clear_memory_tier2 requires] ([@stop_split] [@expl:clear_memory_tier2 requires #0] [%#slib'5] wf_model m)
+  /\ ([@stop_split] [@expl:clear_memory_tier2 requires #1] [%#slib'6] wf_cache2 c)}
+  (! bb0
+  [ bb0 = any [ br0 -> {m.initialized = false} (! bb1) | br1 -> {m.initialized} (! bb2) ]
+  | bb2 = s0
+    [ s0 = [ &out <- c ] s1
+    | s1 = [ &count <- [%#slib] (0: UInt64.t) ] s2
+    | s2 = any [ br0 -> {out.k0.present = false} (! bb10) | br1 -> {out.k0.present} (! bb3) ] ]
+  | bb3 = any
+    [ br0 -> {out.k0.state = MemoryTier} (! bb6)
+    | br1 -> {out.k0.state = BlockDevice} (! bb4)
+    | br2 -> {out.k0.state = Staging} (! bb4)
+    | br3 -> {out.k0.state = PendingWrite} (! bb4) ]
+  | bb4 = s0 [ s0 = [ &_23 <- false ] s1 | s1 = bb7 ]
+  | bb6 = s0 [ s0 = [ &_23 <- true ] s1 | s1 = bb7 ]
+  | bb7 = any [ br0 -> {_23 = false} (! bb10) | br1 -> {_23} (! bb8) ]
+  | bb8 = s0
+    [ s0 = [ &_25 <- BlockDevice ] s1
+    | s1 = [ &out <- { out with k0 = { out.k0 with state = _25 } } ] s2
+    | s2 = UInt64.add [%#slib'1] {count} {[%#slib'0] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &count <- _x ] s3)
+    | s3 = bb10 ]
+  | bb10 = any [ br0 -> {out.k1.present = false} (! bb18) | br1 -> {out.k1.present} (! bb11) ]
+  | bb11 = any
+    [ br0 -> {out.k1.state = MemoryTier} (! bb14)
+    | br1 -> {out.k1.state = BlockDevice} (! bb12)
+    | br2 -> {out.k1.state = Staging} (! bb12)
+    | br3 -> {out.k1.state = PendingWrite} (! bb12) ]
+  | bb12 = s0 [ s0 = [ &_28 <- false ] s1 | s1 = bb15 ]
+  | bb14 = s0 [ s0 = [ &_28 <- true ] s1 | s1 = bb15 ]
+  | bb15 = any [ br0 -> {_28 = false} (! bb18) | br1 -> {_28} (! bb16) ]
+  | bb16 = s0
+    [ s0 = [ &_30 <- BlockDevice ] s1
+    | s1 = [ &out <- { out with k1 = { out.k1 with state = _30 } } ] s2
+    | s2 = UInt64.add [%#slib'3] {count} {[%#slib'2] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &count <- _x ] s3)
+    | s3 = bb18 ]
+  | bb18 = s0 [ s0 = [ &_ret <- { f0 = m; f1 = count; f2 = out } ] s1 | s1 = return {_ret} ]
+  | bb1 = s0 [ s0 = [ &_ret <- { f0 = m; f1 = ([%#slib'4] (0: UInt64.t)); f2 = c } ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: tup3_Model_usize_Cache2 = Any.any_l ()
+  | & m: t_Model = m
+  | & c: t_Cache2 = c
+  | & out: t_Cache2 = Any.any_l ()
+  | & count: UInt64.t = Any.any_l ()
+  | & _23: bool = Any.any_l ()
+  | & _25: t_EntryState = Any.any_l ()
+  | & _28: bool = Any.any_l ()
+  | & _30: t_EntryState = Any.any_l () ])
+  [ return (result: tup3_Model_usize_Cache2) ->
+  {[@stop_split] [@expl:clear_memory_tier2 ensures] ([@stop_split] [@expl:clear_memory_tier2 ensures #0] [%#slib'7] wf_model result.f0)
+    /\ ([@stop_split] [@expl:clear_memory_tier2 ensures #1] [%#slib'8] wf_cache2 result.f2)
+    /\ ([@stop_split] [@expl:clear_memory_tier2 ensures #2] [%#slib'9] m.initialized
+      -> not key_in_memory_tier result.f2.k0 /\ not key_in_memory_tier result.f2.k1)
+    /\ ([@stop_split] [@expl:clear_memory_tier2 ensures #3] [%#slib'10] m.initialized
+    -> UInt64.t'int result.f1 = memory_tier_count2 c)}
+    (! return {result}) ]
