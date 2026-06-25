@@ -63,6 +63,7 @@ resolver = "2"
 creusot-std = { path = "tools/creusot/creusot/creusot-std" }
 
 [workspace.package]
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
