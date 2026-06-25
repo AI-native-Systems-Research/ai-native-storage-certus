@@ -584,6 +584,30 @@ impl IGpuServices for GpuServicesComponent {
         }
     }
 
+    fn stream_query(&self, stream: interfaces::GpuStream) -> Result<bool, String> {
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = stream;
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            // SAFETY: stream.0 was obtained from cudaStreamCreate.
+            let err = unsafe { cuda_ffi::cudaStreamQuery(stream.0) };
+            if err == cuda_ffi::CUDA_SUCCESS {
+                Ok(true)
+            } else if err == cuda_ffi::CUDA_ERROR_NOT_READY {
+                Ok(false)
+            } else {
+                Err(format!(
+                    "cudaStreamQuery failed: {}",
+                    cuda_ffi::cuda_error_string(err)
+                ))
+            }
+        }
+    }
+
     fn stream_synchronize(&self, stream: interfaces::GpuStream) -> Result<(), String> {
         #[cfg(not(feature = "gpu"))]
         {
@@ -695,6 +719,104 @@ impl IGpuServices for GpuServicesComponent {
             if err != cuda_ffi::CUDA_SUCCESS {
                 return Err(format!(
                     "cudaMemcpyAsync H2D failed: {}",
+                    cuda_ffi::cuda_error_string(err)
+                ));
+            }
+
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "spdk")]
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    fn dma_copy_to_host_async(
+        &self,
+        src: *const std::ffi::c_void,
+        dst: &interfaces::DmaBuffer,
+        size: usize,
+        stream: interfaces::GpuStream,
+    ) -> Result<(), String> {
+        if size > dst.len() {
+            return Err(format!(
+                "size ({size}) exceeds destination buffer length ({})",
+                dst.len()
+            ));
+        }
+
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = (src, stream);
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            let state = self.state().lock().map_err(|e| e.to_string())?;
+            if !state.initialized {
+                return Err("Not initialized: call initialize() first".to_string());
+            }
+            drop(state);
+
+            // SAFETY: Caller guarantees src is a valid GPU device pointer covering
+            // at least `size` bytes. dst.as_ptr() is a valid pinned DMA host buffer,
+            // size <= dst.len(), and stream.0 is a valid CUDA stream.
+            let err = unsafe {
+                cuda_ffi::cudaMemcpyAsync(
+                    dst.as_ptr(),
+                    src,
+                    size,
+                    cuda_ffi::CUDA_MEMCPY_DEVICE_TO_HOST,
+                    stream.0,
+                )
+            };
+
+            if err != cuda_ffi::CUDA_SUCCESS {
+                return Err(format!(
+                    "cudaMemcpyAsync D2H failed: {}",
+                    cuda_ffi::cuda_error_string(err)
+                ));
+            }
+
+            Ok(())
+        }
+    }
+
+    #[cfg(feature = "spdk")]
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    fn memcpy_d2h_async(
+        &self,
+        src: *const std::ffi::c_void,
+        dst: *mut std::ffi::c_void,
+        size: usize,
+        stream: interfaces::GpuStream,
+    ) -> Result<(), String> {
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = (src, dst, size, stream);
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            let state = self.state().lock().map_err(|e| e.to_string())?;
+            if !state.initialized {
+                return Err("Not initialized: call initialize() first".to_string());
+            }
+            drop(state);
+
+            let err = unsafe {
+                cuda_ffi::cudaMemcpyAsync(
+                    dst,
+                    src,
+                    size,
+                    cuda_ffi::CUDA_MEMCPY_DEVICE_TO_HOST,
+                    stream.0,
+                )
+            };
+
+            if err != cuda_ffi::CUDA_SUCCESS {
+                return Err(format!(
+                    "cudaMemcpyAsync D2H failed: {}",
                     cuda_ffi::cuda_error_string(err)
                 ));
             }
@@ -835,6 +957,11 @@ impl IGpuServices for GpuServicesComponent {
 mod tests {
     use super::*;
     use component_core::query_interface;
+    use std::sync::Arc;
+
+    fn make_logger() -> Arc<dyn ILogger + Send + Sync> {
+        logger::LoggerComponent::new_default()
+    }
 
     #[test]
     fn test_provides_igpu_services() {
@@ -880,10 +1007,8 @@ mod tests {
 
     #[test]
     fn test_initialize_with_logger() {
-        use std::sync::Arc;
         let component = GpuServicesComponent::new_default();
-        let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponent::new_default();
-        component.logger.connect(logger).unwrap();
+        component.logger.connect(make_logger()).unwrap();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         let _ = gpu.initialize();
     }
@@ -1068,10 +1193,8 @@ mod tests {
     #[cfg(all(feature = "gpu", feature = "spdk"))]
     #[test]
     fn test_prepare_memory_logs_with_logger() {
-        use std::sync::Arc;
         let component = GpuServicesComponent::new_default();
-        let logger_comp: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponent::new_default();
-        component.logger.connect(logger_comp).unwrap();
+        component.logger.connect(make_logger()).unwrap();
         let gpu = query_interface!(component, IGpuServices).unwrap();
         if gpu.initialize().is_ok() {
             // With logger connected, invalid payload still returns error

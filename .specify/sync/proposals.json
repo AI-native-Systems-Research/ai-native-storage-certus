@@ -1,0 +1,73 @@
+{
+  "generated": "2026-06-11T00:00:00Z",
+  "proposals": [
+    {
+      "id": 1,
+      "spec_id": "001-rdma-network-test",
+      "spec_path": "tools/rdma-test/specs/001-rdma-network-test/spec.md",
+      "requirement": "FR-007",
+      "title": "SSH Launch Script Implementation Details",
+      "direction": "BACKFILL",
+      "confidence": "HIGH",
+      "effort": "15 min",
+      "approved": true,
+      "current_state": "SSH launch script is fully implemented but spec lacks implementation details",
+      "proposed_resolution": "Added 'Implementation Details: FR-007' section documenting script location, usage syntax, CLI arguments, environment variables, error handling, and example invocations",
+      "rationale": "Code is production-ready; specification gap is purely documentation",
+      "applied": true,
+      "applied_at": "2026-06-11T00:00:00Z"
+    },
+    {
+      "id": 2,
+      "spec_id": "001-grpc-dispatcher-server",
+      "spec_path": "apps/certus-server/specs/001-grpc-dispatcher-server/spec.md",
+      "requirement": "FR-010",
+      "title": "Python Test Client Implementation Details",
+      "direction": "BACKFILL",
+      "confidence": "HIGH",
+      "effort": "30 min",
+      "approved": true,
+      "current_state": "Python test client (548 lines) fully implemented but spec lacks implementation details",
+      "proposed_resolution": "Added 'Implementation Details: FR-010' section documenting script location, CLI options, functional test suite (9 cases), benchmark methodology, output format, and example invocations",
+      "rationale": "Code is production-ready; specification gap is purely documentation",
+      "applied": true,
+      "applied_at": "2026-06-11T00:00:00Z"
+    },
+    {
+      "id": 3,
+      "spec_id": "001-grpc-dispatcher-server",
+      "spec_path": "apps/certus-server/specs/001-grpc-dispatcher-server/spec.md",
+      "requirement": "FR-014",
+      "title": "TLS Support Implementation Details",
+      "direction": "BACKFILL",
+      "confidence": "HIGH",
+      "effort": "25 min",
+      "approved": true,
+      "current_state": "TLS support (CLI flags) fully implemented but spec lacks implementation details",
+      "proposed_resolution": "Added 'Implementation Details: FR-014' section documenting CLI flags, certificate requirements, format, generation examples, client configuration, and security notes",
+      "rationale": "Code is production-ready; specification gap is purely documentation",
+      "applied": true,
+      "applied_at": "2026-06-11T00:00:00Z"
+    }
+  ],
+  "summary": {
+    "total": 3,
+    "approved": 3,
+    "applied": 3,
+    "backfill": 3,
+    "align": 0,
+    "new_spec": 0,
+    "changes_made": {
+      "specs_updated": [
+        "tools/rdma-test/specs/001-rdma-network-test/spec.md",
+        "apps/certus-server/specs/001-grpc-dispatcher-server/spec.md"
+      ],
+      "requirements_documented": [
+        "FR-007",
+        "FR-010",
+        "FR-014"
+      ],
+      "lines_added": 130
+    }
+  }
+}

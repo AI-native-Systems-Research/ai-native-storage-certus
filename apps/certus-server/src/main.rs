@@ -5,6 +5,8 @@
 //! CLI-provided PCI addresses.
 
 mod service;
+#[cfg(feature = "otel")]
+mod telemetry;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -14,8 +16,8 @@ use tonic::transport::{Identity, Server, ServerTlsConfig};
 
 use component_core::query_interface;
 use interfaces::{
-    DmaAllocFn, DmaBuffer, DispatcherConfig, IDispatchMap, IDispatcher, IGpuServices, ILogger,
-    IMemoryTier, PciAddress,
+    DmaAllocFn, DmaBuffer, DispatcherConfig, IDispatchMap, IDispatcher, IEvictionPolicy,
+    IGpuServices, ILogger, IMemoryTier, IRemoteLookup, PciAddress,
 };
 
 use service::DispatcherService;
@@ -61,6 +63,19 @@ struct Cli {
     /// (e.g. --poller-base-cpu 2 for drives on NUMA 0 with 4 drives → cores 2,3,4,5).
     #[arg(long = "poller-base-cpu")]
     poller_base_cpu: Option<usize>,
+
+    /// Maximum eviction attempts before failing with pool-full error.
+    #[arg(long = "max-eviction-attempts", default_value_t = 2048)]
+    max_eviction_attempts: usize,
+
+    /// OpenTelemetry OTLP endpoint (e.g. "http://localhost:4317").
+    /// Enables metrics export when set. Requires --features otel.
+    #[arg(long = "otel-endpoint")]
+    otel_endpoint: Option<String>,
+
+    /// Service name reported in OpenTelemetry metrics.
+    #[arg(long = "otel-service-name", default_value = "certus-server")]
+    otel_service_name: String,
 }
 
 fn parse_size(s: &str) -> Result<usize, String> {
@@ -112,7 +127,8 @@ fn initialize_component_stack(
     memory_tier_size: usize,
     format: bool,
     poller_base_cpu: Option<usize>,
-) -> Result<(Arc<dyn IDispatcher + Send + Sync>, Arc<dyn ILogger + Send + Sync>, Vec<String>), String> {
+    max_eviction_attempts: usize,
+) -> Result<(Arc<dyn IDispatcher + Send + Sync>, Arc<dyn ILogger + Send + Sync>, Vec<String>, Arc<dispatcher::DispatcherComponent>), String> {
     let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponent::new_default();
 
     logger.info("certus-server: initializing SPDK environment...");
@@ -162,6 +178,16 @@ fn initialize_component_stack(
         query_interface!(gpu_comp, IGpuServices).ok_or("failed to query IGpuServices")?;
     gpu.initialize().map_err(|e| format!("GPU init failed: {e}"))?;
 
+    // --- Create eviction policy ---
+    let ep_comp = eviction_policy_lru::EvictionPolicyLruComponent::new_default();
+    ep_comp
+        .logger
+        .connect(Arc::clone(&logger))
+        .map_err(|e| format!("eviction-policy logger bind: {e}"))?;
+    let eviction_policy: Arc<dyn IEvictionPolicy + Send + Sync> =
+        query_interface!(ep_comp, IEvictionPolicy)
+            .ok_or("failed to query IEvictionPolicy")?;
+
     // --- Create dispatch map ---
     logger.info("certus-server: initializing dispatch map...");
     let dm_comp = dispatch_map::DispatchMapComponent::new(
@@ -171,6 +197,10 @@ fn initialize_component_stack(
         .logger
         .connect(Arc::clone(&logger))
         .map_err(|e| format!("dispatch map logger bind: {e}"))?;
+    dm_comp
+        .eviction_policy
+        .connect(Arc::clone(&eviction_policy))
+        .map_err(|e| format!("dispatch map eviction_policy bind: {e}"))?;
 
     let dm: Arc<dyn IDispatchMap + Send + Sync> =
         query_interface!(dm_comp, IDispatchMap).ok_or("failed to query IDispatchMap")?;
@@ -188,9 +218,22 @@ fn initialize_component_stack(
         .logger
         .connect(Arc::clone(&logger))
         .map_err(|e| format!("memory-tier logger bind: {e}"))?;
+    mt_comp
+        .eviction_policy
+        .connect(Arc::clone(&eviction_policy))
+        .map_err(|e| format!("memory-tier eviction_policy bind: {e}"))?;
     let mt: Arc<dyn IMemoryTier + Send + Sync> =
         query_interface!(mt_comp, IMemoryTier).ok_or("failed to query IMemoryTier")?;
-    mt.initialize(memory_tier_size)
+
+    // Bind memory-tier pool to the NUMA node of the first selected drive.
+    let mt_numa_node: Option<i32> = device_pci_addrs.first().and_then(|first_addr| {
+        spdk_iface
+            .devices()
+            .iter()
+            .find(|d| d.address.to_string() == *first_addr)
+            .map(|d| d.numa_node)
+    });
+    mt.initialize(memory_tier_size, mt_numa_node)
         .map_err(|e| format!("MemoryTier init failed: {e}"))?;
 
     // Register the memory-tier pool with CUDA for pinned DMA transfers.
@@ -215,6 +258,15 @@ fn initialize_component_stack(
         }
     }
 
+    // --- Create remote lookup ---
+    let rl_comp = remote_lookup::RemoteLookupComponent::new();
+    rl_comp
+        .logger
+        .connect(Arc::clone(&logger))
+        .map_err(|e| format!("failed to bind remote_lookup logger: {e}"))?;
+    let remote_lookup: Arc<dyn IRemoteLookup + Send + Sync> =
+        query_interface!(rl_comp, IRemoteLookup).ok_or("failed to query IRemoteLookup")?;
+
     // --- Create dispatcher ---
     logger.info("certus-server: initializing dispatcher...");
     let disp_comp = dispatcher::DispatcherComponent::new_default();
@@ -238,6 +290,10 @@ fn initialize_component_stack(
         .logger
         .connect(Arc::clone(&logger))
         .map_err(|e| format!("failed to bind logger: {e}"))?;
+    disp_comp
+        .remote_lookup
+        .connect(Arc::clone(&remote_lookup))
+        .map_err(|e| format!("failed to bind remote_lookup: {e}"))?;
 
     let dispatcher: Arc<dyn IDispatcher + Send + Sync> =
         query_interface!(disp_comp, IDispatcher).ok_or("failed to query IDispatcher")?;
@@ -247,12 +303,13 @@ fn initialize_component_stack(
             data_pci_addrs: device_pci_addrs.clone(),
             format_on_init: format,
             poller_base_cpu,
+            max_eviction_attempts,
             ..Default::default()
         })
         .map_err(|e| format!("Dispatcher init failed: {e}"))?;
 
     logger.info("certus-server: component stack initialized");
-    Ok((dispatcher, logger, device_pci_addrs))
+    Ok((dispatcher, logger, device_pci_addrs, disp_comp))
 }
 
 fn resolve_device_addresses(cli: &Cli) -> Result<Vec<String>, String> {
@@ -278,8 +335,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     const DEFAULT_MEMORY_TIER_SIZE: usize = 2 * 1024 * 1024 * 1024; // 2 GiB
     let pool_size = cli.memory_tier_size.unwrap_or(DEFAULT_MEMORY_TIER_SIZE);
-    let (dispatcher, logger, device_pci) = initialize_component_stack(
+    let (dispatcher, logger, device_pci, disp_comp) = initialize_component_stack(
         &device_pci, cli.drive_count, pool_size, cli.format, cli.poller_base_cpu,
+        cli.max_eviction_attempts,
     )?;
 
     logger.info(&format!("certus-server: devices={:?}", device_pci));
@@ -293,7 +351,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         logger.info("certus-server: recovering extents from disk (use --format for clean slate)");
     }
 
-    let svc = DispatcherService::new(Arc::clone(&dispatcher));
+    #[cfg(feature = "otel")]
+    let svc = {
+        let svc = DispatcherService::new(Arc::clone(&dispatcher));
+        if let Some(ref endpoint) = cli.otel_endpoint {
+            let metrics = telemetry::Metrics::init(endpoint, &cli.otel_service_name)?;
+            logger.info(&format!("certus-server: OTel metrics exporting to {endpoint}"));
+            disp_comp.set_pipeline_metrics(Arc::new(metrics.pipeline.clone()));
+            svc.with_metrics(metrics)
+        } else {
+            svc
+        }
+    };
+
+    #[cfg(not(feature = "otel"))]
+    let svc = {
+        if cli.otel_endpoint.is_some() {
+            logger.warn(
+                "certus-server: --otel-endpoint specified but binary not compiled with --features otel"
+            );
+        }
+        let _ = &disp_comp;
+        DispatcherService::new(Arc::clone(&dispatcher))
+    };
 
     let addr = cli.listen.parse()?;
 

@@ -1,0 +1,13 @@
+{
+  "model": "NousResearch/Meta-Llama-3-8B",
+  "block_size": 16,
+  "per_block_bytes": 2097152,
+  "num_gpu_blocks": 2224,
+  "num_kv_heads": 8,
+  "head_dim": 128,
+  "num_layers": 32,
+  "dtype": "float16",
+  "cpu_offload_bytes": 68719476736,
+  "max_model_len": 8192,
+  "max_num_seqs": 128
+}

@@ -121,6 +121,145 @@ A Python client submits a batch of cache keys to `touch`. The server calls the d
 - **FR-018**: The server MUST maintain a global, process-lifetime IPC handle cache (keyed by the 64-byte CUDA IPC handle bytes) on the `DispatcherService` instance. Each cache entry stores the opened device pointer (`dev_ptr`), the `gpu_device_id` used when opening, and a reference count. When a batch operation requires an IPC handle: if the handle is already in the cache the existing device pointer is reused and the reference count is incremented; if the handle is not cached, the server opens it via `cudaIpcOpenMemHandle` (after calling `cudaSetDevice`, per FR-019), inserts it with `refcount = 1`, and records the opened pointer. After processing a batch, the server decrements the reference count for each handle opened during that batch; when the reference count reaches zero, the server calls `cudaIpcCloseMemHandle` and removes the entry from the cache. This design eliminates "resource already mapped" errors from concurrent batches and removes serialization on CUDA's global IPC lock.
 - **FR-019**: Before calling `cudaIpcOpenMemHandle` for a handle that is not already in the IPC cache, the server MUST call `cudaSetDevice(gpu_device_id)` when the `gpu_device_id` field of the `IpcHandle` message is non-negative (>= 0). If `cudaSetDevice` fails, the server MUST propagate the error as an `IoError` for that entry without opening the handle. This ensures the server CUDA context is associated with the correct device before the handle is opened, which is required for correct operation on multi-GPU systems.
 
+## Implementation Details
+
+### FR-010: Python Test Client
+
+**Location**: `apps/certus-server/python-client/test_client.py` (548 lines)
+
+**Status**: ✅ Production-ready
+
+**Prerequisites**:
+- Python 3.8+
+- `grpcio` and `grpcio-tools` packages
+- PyTorch or CUDA toolkit (for GPU memory and IPC handle generation)
+- Running certus-server instance
+
+**CLI Options**:
+```
+test_client.py [--server ADDRESS:PORT] [--skip-tests] [--benchmark]
+  --server       gRPC server address (default: localhost:50051)
+  --skip-tests   Skip functional tests, run benchmark only
+  --benchmark    Run performance benchmarks (throughput/latency measurement)
+```
+
+**Functional Test Suite** (9 test cases):
+1. **test_populate**: Batch populate with 100 entries, verify per-entry success
+2. **test_populate_duplicate_key**: Reject batch with duplicate keys
+3. **test_populate_already_exists**: Handle AlreadyExists error for duplicate key in second batch
+4. **test_check**: Verify check returns correct boolean for existing/missing keys
+5. **test_lookup**: Retrieve entries and verify data integrity
+6. **test_lookup_not_found**: Handle KeyNotFound error for missing keys
+7. **test_remove**: Batch remove and verify entries no longer exist
+8. **test_remove_not_found**: Handle KeyNotFound error during removal
+9. **test_touch**: Touch entries and verify success
+
+**Benchmark Suite**:
+- **Memory-Tier Lookup Latency**: Measure lookup latency for hot (in-memory) entries
+- **SSD-Tier Lookup Latency**: Measure lookup latency for cold (SSD-backed) entries
+- **Throughput**: Measure sustained lookup throughput (GB/s) for mixed workload
+- **Batch Scaling**: Measure throughput vs batch size (10, 100, 1000+ entries)
+
+**Benchmark Output**:
+```
+Memory-tier lookup: 12.34 µs/op (avg of 10000 ops)
+SSD-tier lookup: 234.56 µs/op (avg of 1000 ops)
+Throughput: 456.78 GB/s
+```
+
+**Exit Codes**:
+- `0`: All tests passed
+- `1`: Functional test failed
+- `2`: Benchmark failed
+- `3`: Connection error
+
+**Example Invocations**:
+```bash
+# Run full test suite and benchmark
+python3 test_client.py --server localhost:50051
+
+# Benchmark only (skip functional tests)
+python3 test_client.py --skip-tests --benchmark
+
+# Run against remote server
+python3 test_client.py --server remote-host:50051
+```
+
+### FR-014: TLS Support
+
+**Location**: `apps/certus-server/src/main.rs` (lines 50-56, 300-308)
+
+**Status**: ✅ Production-ready
+
+**CLI Flags**:
+- `--tls-cert <PATH>`: Path to PEM-encoded certificate file (required if TLS enabled)
+- `--tls-key <PATH>`: Path to PEM-encoded private key file (required if TLS enabled)
+
+**Behavior**:
+- TLS is **enabled** if both `--tls-cert` and `--tls-key` are provided
+- TLS is **disabled** (plaintext mode) if either or both flags are omitted
+- Both flags must be present to enable TLS; partial specification is an error
+
+**Certificate Requirements**:
+- PEM-encoded X.509 certificate (`.pem` or `.crt` file)
+- PEM-encoded RSA/ECDSA private key (`.key` or `.pem` file)
+- Certificate must be valid for the server's hostname/IP
+
+**Certificate Generation** (OpenSSL):
+```bash
+# Generate self-signed certificate (for testing)
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+
+# Generate certificate signing request (for production)
+openssl req -newkey rsa:4096 -keyout key.pem -out cert.csr
+# Then sign with your CA
+```
+
+**Python Client Configuration** (with TLS):
+```python
+import grpc
+
+# Load client certificate (if mutual TLS required)
+with open('client-cert.pem', 'rb') as f:
+    client_cert_chain = f.read()
+with open('client-key.pem', 'rb') as f:
+    client_private_key = f.read()
+
+# Load server CA certificate (or use default system CA bundle)
+with open('server-cert.pem', 'rb') as f:
+    root_certificates = f.read()
+
+credentials = grpc.ssl_channel_credentials(
+    root_certificates=root_certificates,
+    private_key=client_private_key,
+    certificate_chain=client_cert_chain
+)
+
+channel = grpc.secure_channel('localhost:50051', credentials)
+```
+
+**Server Logging**:
+- INFO level: "certus-server: TLS enabled" when TLS is active
+- ERROR level: Certificate/key file not found or invalid
+
+**Example Invocations**:
+```bash
+# Plaintext mode (default)
+./certus-server --device-pci 0000:02:00.0
+
+# TLS enabled with self-signed certificate
+./certus-server --device-pci 0000:02:00.0 --tls-cert cert.pem --tls-key key.pem
+
+# TLS with custom port
+./certus-server --device-pci 0000:02:00.0 --listen 0.0.0.0:50051 --tls-cert cert.pem --tls-key key.pem
+```
+
+**Security Notes**:
+- Self-signed certificates are suitable for development and testing only
+- For production, use certificates signed by a trusted CA
+- Consider mutual TLS (mTLS) for client authentication in sensitive environments
+- Ensure private key files have restricted permissions (e.g., `chmod 600`)
+
 ### Key Entities
 
 - **DispatcherConfig**: Configuration containing a list of data PCI addresses (`data_pci_addrs: Vec<String>`).

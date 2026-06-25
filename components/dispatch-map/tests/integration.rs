@@ -9,7 +9,7 @@ use component_framework::define_component;
 use dispatch_map::DispatchMapComponent;
 use interfaces::{
     DispatchMapError, DmaAllocFn, DmaBuffer, Extent, ExtentKey, ExtentManagerError, FormatParams,
-    IDispatchMap, IExtentManager, LookupResult, WriteHandle,
+    IDispatchMap, IEvictionPolicy, IExtentManager, LookupResult, WriteHandle,
 };
 
 use dispatch_map::DispatchMapState;
@@ -52,7 +52,12 @@ unsafe extern "C" fn mock_free(ptr: *mut std::ffi::c_void) {
 }
 
 fn setup_component() -> Arc<DispatchMapComponent> {
+    let ep_comp = eviction_policy_lru::EvictionPolicyLruComponent::new_default();
+    let ep: Arc<dyn IEvictionPolicy + Send + Sync> =
+        query_interface!(ep_comp, IEvictionPolicy).unwrap();
+
     let c = DispatchMapComponent::new(DispatchMapState::new());
+    c.eviction_policy.connect(ep).unwrap();
     let dm = query_interface!(c, IDispatchMap).unwrap();
     dm.set_dma_alloc(mock_dma_alloc());
     c
@@ -512,7 +517,12 @@ fn recovery_populated() {
     ];
     let em = MockExtentManagerComponent::new(extents);
 
+    let ep_comp = eviction_policy_lru::EvictionPolicyLruComponent::new_default();
+    let ep: Arc<dyn IEvictionPolicy + Send + Sync> =
+        query_interface!(ep_comp, IEvictionPolicy).unwrap();
+
     let c = DispatchMapComponent::new(DispatchMapState::new());
+    c.eviction_policy.connect(ep).unwrap();
     c.connect_receptacle_raw("extent_manager", &*em)
         .expect("bind extent_manager");
 
@@ -539,7 +549,12 @@ fn recovery_empty() {
 
     let em = MockExtentManagerComponent::new(vec![]);
 
+    let ep_comp = eviction_policy_lru::EvictionPolicyLruComponent::new_default();
+    let ep: Arc<dyn IEvictionPolicy + Send + Sync> =
+        query_interface!(ep_comp, IEvictionPolicy).unwrap();
+
     let c = DispatchMapComponent::new(DispatchMapState::new());
+    c.eviction_policy.connect(ep).unwrap();
     c.connect_receptacle_raw("extent_manager", &*em)
         .expect("bind extent_manager");
 

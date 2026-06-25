@@ -166,9 +166,11 @@ impl QueuePairPool {
             let mut opts: spdk_sys::spdk_nvme_io_qpair_opts = unsafe { std::mem::zeroed() };
             opts.io_queue_size = depth;
             // io_queue_requests must be >= io_queue_size; SPDK uses this for its
-            // internal request tracker pool. Setting it to 2x depth allows for
-            // request splitting (large IO → multiple NVMe commands).
-            opts.io_queue_requests = depth * 2;
+            // internal request tracker pool. Setting it to 4x depth allows for
+            // request splitting (large IO → multiple NVMe commands) and absorbs
+            // transient bursts under concurrent multi-client load before submit
+            // returns -ENOMEM.
+            opts.io_queue_requests = depth * 4;
             opts.opts_size = std::mem::size_of::<spdk_sys::spdk_nvme_io_qpair_opts>();
 
             // SAFETY: ctrlr_ptr is valid, opts is properly initialized.
@@ -254,14 +256,27 @@ impl QueuePairPool {
     /// assert_eq!(pool.select_index(50), 2);
     /// ```
     pub fn select_index(&self, batch_size: usize) -> usize {
-        // Find the shallowest queue with enough available capacity.
+        // Prefer the shallowest queue with enough available capacity (low
+        // latency for small IO; deep queues reserved for large batches).
         for (i, qp) in self.qpairs.iter().enumerate() {
             if qp.available() as usize >= batch_size {
                 return i;
             }
         }
-        // Fall back to deepest (last) queue pair.
-        self.qpairs.len().saturating_sub(1)
+        // No queue has room for the whole batch. Fall back to the queue with
+        // the MOST available capacity rather than unconditionally the deepest:
+        // under concurrent load the deepest queue may itself be saturated, and
+        // blindly piling on overflows its SPDK request pool (→ -ENOMEM on
+        // submit). Choosing the emptiest queue maximizes the chance the submit
+        // succeeds and spreads load across queue pairs. When all queues are
+        // empty this still picks the deepest (it has the most capacity),
+        // preserving the large-batch → deep-queue heuristic.
+        self.qpairs
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, qp)| qp.available())
+            .map(|(i, _)| i)
+            .unwrap_or(0)
     }
 
     /// Select the best queue pair for a given batch size.

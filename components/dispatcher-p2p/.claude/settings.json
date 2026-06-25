@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(components/dispatcher-p2p/**)",
+      "Write(components/dispatcher-p2p/**)",
+      "Read(components/component-framework/**)",
+      "Read(components/interfaces/**)",
+      "Read(components/gpu-services/**)",
+      "Read(components/spdk-env/**)",
+      "Read(components/block-device-spdk-nvme/**)",
+      "Read(components/extent-manager/**)",
+      "Read(components/memory-tier/**)",
+      "Read(components/logger/**)"
+    ]
+  }
+}

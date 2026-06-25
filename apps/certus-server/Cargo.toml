@@ -5,23 +5,38 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+default = []
+otel = [
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+]
+
 [dependencies]
 interfaces = { workspace = true, features = ["spdk"] }
 component-framework.workspace = true
 component-core.workspace = true
-dispatcher.workspace = true
+dispatcher = { workspace = true, features = ["spdk-backend"] }
 dispatch-map.workspace = true
+eviction-policy-lru.workspace = true
 memory-tier.workspace = true
 block-device-spdk-nvme.workspace = true
 extent-manager.workspace = true
 spdk-env.workspace = true
 gpu-services = { workspace = true, features = ["gpu"] }
 logger.workspace = true
+remote-lookup.workspace = true
 
 tonic = { version = "0.12", features = ["tls"] }
 prost = "0.13"
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
+
+# OpenTelemetry (optional, enabled via --features otel)
+opentelemetry = { version = "0.27", optional = true }
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio", "metrics"], optional = true }
+opentelemetry-otlp = { version = "0.27", features = ["metrics", "grpc-tonic"], optional = true }
 
 [build-dependencies]
 tonic-build = "0.12"

@@ -1,17 +1,54 @@
 # Sync Apply Report: Dispatcher Component
 
-**Date**: 2026-05-29  
+**Date**: 2026-06-12  
 **Operator**: speckit-sync-apply  
 **Spec**: `components/dispatcher/specs/001-dispatcher-cache-interface/spec.md`  
-**Prior runs**: 2026-05-21 (5 changes applied), 2026-05-28 (drift analysis)
+**Prior runs**: 2026-05-21 (5 changes), 2026-05-29 (7 changes)
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| New drift items identified | 7 |
-| Backfills applied to spec | 7 |
-| Spec sections modified | FR-019, FR-024, FR-025, FR-039, User Story 7, User Story 9, Assumptions |
+| New drift items identified | 2 |
+| Backfills applied to spec | 2 |
+| Spec sections modified | FR-024, Prior Clarity (IMemoryTier listing, eviction Q&A, write-through Q&A) |
+
+---
+
+## Backfills Applied (2026-06-12)
+
+### BACKFILL-013: FR-024 updated for shard-targeted eviction
+
+**Drift item**: DRIFT-A (2026-06-12)  
+**File**: `spec.md` FR-024  
+
+**Before**: Described blind LRU via `IMemoryTier::evict_lru()` on most iterations.
+
+**After**: FR-024 now describes shard-targeted eviction:
+- `evict_for_space` signature includes `target_key: CacheKey` parameter
+- Primary path calls `IMemoryTier::evict_lru_for_key(target_key)` — evicts from the same shard as the target key
+- Rationale: memory-tier uses 16 shards (key % 16); untargeted eviction freed space in wrong shards causing "pool full after eviction" failures under pool-overflow workloads despite global free space being available
+
+---
+
+### BACKFILL-014: `evict_lru_for_key` added to IMemoryTier interface listing
+
+**Drift item**: DRIFT-B (2026-06-12)  
+**File**: `spec.md` Prior Clarity (Session 2026-05-08)  
+
+**Before**: IMemoryTier listed as providing `insert(), get(), peek(), remove(), evict_lru(), oldest_keys(), touch(), capacity(), used()`.
+
+**After**: Now also lists `evict_lru_for_key()` with description: "evicts the LRU entry from the same shard as `key`, ensuring the freed space is allocatable by a subsequent `insert(key, ...)`." Pool description updated to note 16-shard architecture. Eviction Q&A and write-through Q&A updated to reference `evict_lru_for_key(target_key)` instead of `evict_lru()`.
+
+---
+
+## Previous Backfills (2026-05-29)
+
+| Metric | Count |
+|--------|-------|
+| Drift items resolved | 7 |
+| Backfills applied | BACKFILL-006 through BACKFILL-012 |
+| Spec sections modified | FR-019, FR-024, FR-025, FR-037, FR-039, User Story 7, User Story 9, Assumptions |
 
 ---
 

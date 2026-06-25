@@ -12,7 +12,7 @@ component-macros.workspace = true
 interfaces = { workspace = true, features = ["spdk"] }
 gpu-services = { workspace = true, features = ["spdk", "gpu"] }
 spdk-env.workspace = true
-block-device-spdk-nvme.workspace = true
+block-device-spdk-nvme = { workspace = true, optional = true }
 extent-manager.workspace = true
 memory-tier.workspace = true
 libc = "0.2"
@@ -20,10 +20,14 @@ crossbeam-channel = "0.5"
 parking_lot = "0.12"
 
 [features]
+default = ["spdk-backend"]
+spdk-backend = ["dep:block-device-spdk-nvme"]
 hardware-test = []
+pipeline-telemetry = []
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+eviction-policy-lru.workspace = true
 logger.workspace = true
 libc = "0.2"
 

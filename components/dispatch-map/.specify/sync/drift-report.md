@@ -1,78 +1,63 @@
 # Spec Drift Report
-
-Generated: 2026-05-21
-Project: dispatch-map v0
+Generated: 2026-06-18
+Project: dispatch-map
 
 ## Summary
-
 | Category | Count |
 |----------|-------|
 | Specs Analyzed | 1 |
-| Requirements Checked | 27 (FR: 21, SC: 6) |
-| Aligned | 24 (89%) |
-| Drifted | 3 (11%) |
+| Requirements Checked | 23 |
+| Aligned | 21 (91%) |
+| Drifted | 2 (9%) |
 | Not Implemented | 0 (0%) |
-| Unspecced Code | 1 |
+| Unspecced Code | 2 |
 
 ## Detailed Findings
-
-### Spec: 001-dispatch-map - Dispatch Map
-
+### Spec: 001-dispatch-map - Dispatch Map Component
 #### Aligned
-
-- **FR-001**: CacheKey = u64 -> `pub type CacheKey = u64` in `idispatch_map.rs`
-- **FR-002**: Per-entry metadata with location enum, size_blocks (u32), read_ref (u32), write_ref (u32), tsc (u64), protected by Mutex/Condvar. All fields present in `DispatchEntry`.
-- **FR-003**: `create_staging` validates size != 0, checks for duplicate key, allocates DMA buffer via injected allocator, records entry with write_ref=1, returns Arc<DmaBuffer>.
-- **FR-005**: `convert_to_storage` transitions Staging to BlockDevice; on MemoryTier sets `ssd_offset` field. Decrements read_ref by 1 as side effect.
-- **FR-006**: `take_read` waits with DEFAULT_TIMEOUT (2000ms) until write_ref=0, then increments read_ref. Returns Timeout error on deadline expiry.
-- **FR-007**: `take_write` waits with DEFAULT_TIMEOUT (2000ms) until read_ref=0 AND write_ref=0, then sets write_ref=1. Returns Timeout error on deadline expiry.
-- **FR-008**: `release_read` decrements read_ref; returns RefCountUnderflow error if already 0.
-- **FR-009**: `release_write` sets write_ref to 0; returns RefCountUnderflow error if already 0.
-- **FR-010**: `downgrade_reference` atomically sets write_ref=0 and increments read_ref under same lock. Returns NoWriteReference error if write_ref is 0.
-- **FR-011**: `remove` checks for active references (returns ActiveReferences error if any), then deletes entry. Returns KeyNotFound for missing keys.
-- **FR-012**: `initialize()` calls `IExtentManager::for_each_extent` and populates entries as BlockDevice locations with zero ref counts.
-- **FR-013**: All methods are thread-safe via Mutex+Condvar. Integration tests confirm multi-threaded concurrent access correctness.
-- **FR-014**: ILogger usage throughout (info for init/recovery, debug for operations).
-- **FR-015**: `define_component!` with IDispatchMap provided, ILogger and IExtentManager as receptacles.
-- **FR-016**: `touch(key)` updates TSC timestamp, returns KeyNotFound if key missing, does not modify ref counts.
-- **FR-017**: `oldest_keys(n)` returns up to n keys sorted by ascending TSC. Thread-safe (acquires lock).
-- **FR-019**: `set_dma_alloc(alloc)` method injects DMA allocator. Stored in `Mutex<Option<DmaAllocFn>>`.
-- **FR-020**: `initialize()` is an explicit public API call, not invoked during construction. Rebuilds from extent manager.
-- **FR-021**: `convert_to_storage` on MemoryTier entry sets `ssd_offset` field rather than transitioning to BlockDevice.
-- **SC-001**: Recovery test (`recovery_populated`) confirms 100% of extent-manager extents appear in map after initialization.
-- **SC-002**: Integration tests (`multiple_readers_concurrent`, `concurrent_readers_and_writer_on_different_keys`) confirm no corruption or deadlocks.
-- **SC-003**: Downgrade is atomic (single mutex acquisition, write_ref=0 + read_ref+=1 in same critical section). Test `downgrade_unblocks_pending_readers` confirms no window.
-- **SC-005**: Lookup does not block when no writer is active (wait_for returns immediately when write_ref=0). Benchmark `lookup_no_contention` confirms.
-- **SC-006**: Tests confirm no leaks or underflows (`release_read_underflow`, `release_write_underflow`, `lookup_acquires_read_ref`).
+- FR-001: CacheKey type as u64 → `interfaces::CacheKey` (re-exported in src/lib.rs:27)
+- FR-002: Per-entry metadata (location, size_blocks, read_ref, write_ref, tsc) with Mutex/Condvar → `src/entry.rs:48` (DispatchEntry) and `src/state.rs:21` (DispatchMapState with Mutex/Condvar)
+- FR-003: create_staging with DMA buffer, write_ref=1, error on size=0 and alloc failure → `src/lib.rs:102-141`
+- FR-004: lookup returns NotExist/Staging/BlockDevice/MemoryTier, increments read_ref, blocks on write_ref with 2000ms timeout, refreshes TSC → `src/lib.rs:143-183`
+- FR-005: convert_to_storage transitions Staging to BlockDevice, sets ssd_offset on MemoryTier, conditional read_ref decrement, error on already BlockDevice → `src/lib.rs:185-219`
+- FR-006: take_read waits for write_ref=0 with 2000ms timeout, increments read_ref → `src/lib.rs:222-245`
+- FR-007: take_write waits for read_ref=0 and write_ref=0 with 2000ms timeout → `src/lib.rs:247-269`
+- FR-008: release_read decrements read_ref, error on underflow → `src/lib.rs:272-289`
+- FR-009: release_write decrements write_ref, error on underflow → `src/lib.rs:292-309`
+- FR-010: downgrade_reference atomically transitions write to read, error if no write ref → `src/lib.rs:312-334`
+- FR-011: remove deletes entry, error on active references → `src/lib.rs:336-354`
+- FR-012: initialize recovers from IExtentManager via for_each_extent, returns Ok(()) when unbound → `src/lib.rs:60-99`
+- FR-013: All methods thread-safe via Mutex<Inner> and Condvar blocking → `src/state.rs` (all state behind Mutex)
+- FR-014: ILogger used for info, debug, and error logging → used in set_dma_alloc, initialize, create_staging, lookup, convert_to_storage, take_read, take_write, release_read, release_write, downgrade_reference, remove, create_memory_tier_entry, convert_memory_tier_to_block
+- FR-015: define_component! with IDispatchMap provider, ILogger and IExtentManager receptacles → `src/lib.rs:33-45`
+- FR-016: touch updates TSC, returns KeyNotFound, no ref count changes → `src/lib.rs:356-363`
+- FR-017: oldest_keys returns up to n keys sorted by ascending TSC → `src/lib.rs:375-384`
+- FR-019: set_dma_alloc stores injected allocator → `src/lib.rs:48-54`
+- FR-020: initialize() is explicit public API, not called during construction → `src/lib.rs:60-99` (must be called explicitly after binding)
+- FR-021: convert_to_storage on MemoryTier sets ssd_offset, does not transition to BlockDevice → `src/lib.rs:196-198`
+- FR-022: is_evictable checks MemoryTier + ssd_offset: Some + read_ref==0 + write_ref==0, returns false otherwise → `src/lib.rs:465-478`
+- FR-023: entry_size returns size_blocks * 4096, KeyNotFound on missing key → `src/lib.rs:366-373`
 
 #### Drifted
+- FR-018: Spec says MemoryTier fields are `pointer: *mut u8, size: u32, ssd_offset: Option<u64>` and two methods: `create_memory_tier_entry(key, pointer, size)` and `convert_memory_tier_to_block(key, offset)`. Implementation's `convert_memory_tier_to_block` takes only `(key)` — it reads the offset from the `ssd_offset` field already set by `convert_to_storage` rather than accepting an `offset` parameter. The spec says the method signature includes an `offset` parameter but the implementation does not.
+  - Location: src/lib.rs:424 (`fn convert_memory_tier_to_block(&self, key: CacheKey)`)
+  - Severity: minor (the implementation correctly reads the already-stored ssd_offset; the spec's "offset" parameter in FR-018 is inconsistent with the actual design where convert_to_storage sets ssd_offset first)
 
-- **FR-004**: Spec says lookup returns `BlockDevice(offset, size)`. Implementation's `LookupResult::BlockDevice` only contains `offset: u64` — no `size` field. The `size_blocks` stored in `DispatchEntry` is not exposed in the lookup result. Additionally, `MismatchSize` variant exists in the enum but spec says "for future use but is not currently triggered" — this matches, but the missing size in BlockDevice result is a gap.
-  - Location: `components/interfaces/src/idispatch_map.rs` (LookupResult::BlockDevice variant)
-  - Severity: minor (callers can track size independently; the entry stores it internally)
-
-- **FR-018**: Spec says MemoryTier fields are `pointer: u64, size: usize, ssd_offset: Option<u64>`. Implementation uses `pointer: *mut u8, size: u32, ssd_offset: Option<u64>`. The pointer type (`*mut u8` vs `u64`) and size type (`u32` vs `usize`) differ from the spec. The interface method `create_memory_tier_entry` also takes `pointer: *mut u8, size: u32` rather than `pointer: u64, size: usize`.
-  - Location: `components/dispatch-map/src/entry.rs` (Location::MemoryTier), `components/interfaces/src/idispatch_map.rs`
-  - Severity: minor (using raw pointer is more idiomatic Rust than u64 cast; u32 for size aligns with the block-based size convention used elsewhere)
-
-- **SC-004**: Spec says "The DispatchEntry struct size varies by Location variant (the Staging variant includes an Arc<DmaBuffer>)". The benchmark asserts size <= 56 bytes. The actual struct contains: Location enum (Staging has Arc = 16 bytes, BlockDevice has u64 = 8 bytes, MemoryTier has pointer+u32+Option<u64> = ~24 bytes + discriminant), size_blocks (u32), read_ref (u32), write_ref (u32), tsc (u64). This is larger than compact for the non-Staging variants but the spec's revised language merely says "varies by variant" which is factually correct. The benchmark's 56-byte bound is an implementation detail not in the spec.
-  - Location: `components/dispatch-map/src/entry.rs`, `benches/dispatch_map_benchmark.rs`
-  - Severity: informational (spec language is now permissive; implementation is reasonable)
+- SC-004: Spec says "The DispatchEntry struct size varies by Location variant (the Staging variant includes an Arc<DmaBuffer>)". This is factually correct but informational — the benchmark asserts size <= 56 bytes which is not specified.
+  - Location: src/entry.rs, benches/dispatch_map_benchmark.rs
+  - Severity: informational
 
 #### Not Implemented
-
 (none)
 
-### Unspecced Code
-
-| Feature | Location | Lines | Suggested Spec |
-|---------|----------|-------|----------------|
-| `entry_size()` public helper function for benchmarks | src/lib.rs | ~4 | Not needed in spec (test/bench utility) |
+## Unspecced Code
+- `recover_extent(key, offset, size_blocks)`: A standalone method that inserts a BlockDevice entry directly without going through create_staging or initialize(). Present in the IDispatchMap interface and implemented at `src/lib.rs:480-499`. Not covered by any FR-* requirement. Used for incremental recovery or external extent injection.
+- `entry_size()` free function (module-level): Returns `std::mem::size_of::<DispatchEntry>()` — the struct size in bytes for benchmarks/assertions. Defined at `src/lib.rs:16-18`. Distinct from the FR-023 `entry_size(key)` instance method.
 
 ## Recommendations
 
-1. **FR-004 BlockDevice size in LookupResult**: Consider adding `size_blocks: u32` to `LookupResult::BlockDevice` if callers need to know the extent size from a lookup. Alternatively, document in the spec that size is tracked internally but not exposed in the lookup result.
+1. **FR-018 convert_memory_tier_to_block signature**: Update spec FR-018 to clarify that `convert_memory_tier_to_block(key)` does not accept an `offset` parameter — it uses the `ssd_offset` already set by a prior `convert_to_storage` call. Alternatively, consider whether the spec's intent was a different method signature.
 
-2. **FR-018 pointer/size types**: Update the spec to match the implementation's more idiomatic types (`*mut u8` instead of `u64`, `u32` instead of `usize`), or update implementation to match the spec. The `*mut u8` approach is safer in Rust (no pointer-to-integer roundtrip needed). Recommend updating the spec.
+2. **Unspecced recover_extent**: Add a new requirement (e.g., FR-024) to cover `recover_extent(key, offset, size_blocks)` which directly inserts a BlockDevice entry. This is used by the dispatcher for incremental recovery paths that bypass the full `initialize()` walk.
 
-3. **SC-004 entry size**: The spec's current language is permissive ("varies by variant"). No action needed unless a hard size constraint is desired.
+3. **Module-level entry_size()**: This is a test/benchmark utility and may not need formal spec coverage. Consider documenting it as a diagnostic API if it should remain public.

@@ -1,0 +1,57 @@
+{
+  "generated": "2026-06-18T00:00:00Z",
+  "project": "block-device-filesys",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 18,
+    "aligned": 16,
+    "drifted": 1,
+    "not_implemented": 1,
+    "unspecced_features": 1
+  },
+  "specs": [
+    {
+      "id": "001-block-device-filesys",
+      "title": "Block Device Filesys Component",
+      "aligned": [
+        "FR-001",
+        "FR-002",
+        "FR-003",
+        "FR-005",
+        "FR-006",
+        "FR-007",
+        "FR-008",
+        "FR-009",
+        "FR-010",
+        "FR-011",
+        "FR-012",
+        "FR-013",
+        "FR-014",
+        "FR-016",
+        "FR-017",
+        "FR-018"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-004",
+          "spec_text": "Component MUST NOT expose any public functions outside its interface definitions",
+          "actual": "pub mod config exposes DeviceConfig and open_or_create_backing_file publicly; pub use re-exports interface types",
+          "location": "src/lib.rs:27",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": [
+        "FR-015"
+      ]
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "O_DIRECT + O_SYNC file open with tmpfs fallback",
+      "location": "src/config.rs:171-197",
+      "lines": 27,
+      "suggested_spec": "Update FR-007/FR-008 to document O_DIRECT/O_SYNC strategy"
+    }
+  ],
+  "conflicts": []
+}
