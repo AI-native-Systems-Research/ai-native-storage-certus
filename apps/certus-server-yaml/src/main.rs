@@ -118,8 +118,23 @@ fn validate_pci_address(addr: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .max_blocking_threads(16)
+        .on_thread_start(|| {
+            // Pin all Tokio threads to NUMA node 0 for memory locality with GPU/NVMe
+            if let Ok(cpuset) = component_core::numa::CpuSet::from_cpus(0..16) {
+                let _ = component_core::numa::set_thread_affinity(&cpuset);
+            }
+        })
+        .enable_all()
+        .build()
+        .expect("Failed to build Tokio runtime");
+    runtime.block_on(async_main())
+}
+
+async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     // Validate PCI addresses

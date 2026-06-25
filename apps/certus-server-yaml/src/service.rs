@@ -1,8 +1,9 @@
 //! gRPC service implementation for the Certus Dispatcher.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use dashmap::DashMap;
 use tonic::{Request, Response, Status};
 
 use gpu_services::cuda_ffi;
@@ -35,7 +36,7 @@ struct IpcCacheEntry {
 unsafe impl Send for IpcCacheEntry {}
 unsafe impl Sync for IpcCacheEntry {}
 
-type IpcCache = Arc<Mutex<HashMap<[u8; 64], IpcCacheEntry>>>;
+type IpcCache = Arc<DashMap<[u8; 64], IpcCacheEntry>>;
 
 pub struct DispatcherService {
     dispatcher: Arc<dyn IDispatcher + Send + Sync>,
@@ -46,7 +47,7 @@ impl DispatcherService {
     pub fn new(dispatcher: Arc<dyn IDispatcher + Send + Sync>) -> Self {
         Self {
             dispatcher,
-            ipc_cache: Arc::new(Mutex::new(HashMap::new())),
+            ipc_cache: Arc::new(DashMap::new()),
         }
     }
 }
@@ -56,8 +57,7 @@ fn ipc_cache_open(
     handle_bytes: &[u8; 64],
     gpu_device_id: i32,
 ) -> Result<*mut std::ffi::c_void, String> {
-    let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(entry) = map.get_mut(handle_bytes) {
+    if let Some(mut entry) = cache.get_mut(handle_bytes) {
         entry.refcount += 1;
         return Ok(entry.dev_ptr);
     }
@@ -94,7 +94,7 @@ fn ipc_cache_open(
         return Err("cudaIpcOpenMemHandle returned null".to_string());
     }
 
-    map.insert(*handle_bytes, IpcCacheEntry {
+    cache.insert(*handle_bytes, IpcCacheEntry {
         dev_ptr,
         gpu_device_id,
         refcount: 1,
@@ -103,14 +103,18 @@ fn ipc_cache_open(
 }
 
 fn ipc_cache_close(cache: &IpcCache, handle_bytes: &[u8; 64]) {
-    let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(entry) = map.get_mut(handle_bytes) {
+    let should_close = cache.get_mut(handle_bytes).map(|mut entry| {
         entry.refcount -= 1;
         if entry.refcount == 0 {
-            unsafe {
-                cuda_ffi::cudaIpcCloseMemHandle(entry.dev_ptr);
-            }
-            map.remove(handle_bytes);
+            Some(entry.dev_ptr)
+        } else {
+            None
+        }
+    });
+    if let Some(Some(dev_ptr)) = should_close {
+        cache.remove(handle_bytes);
+        unsafe {
+            cuda_ffi::cudaIpcCloseMemHandle(dev_ptr);
         }
     }
 }
@@ -271,7 +275,7 @@ impl Dispatcher for DispatcherService {
 
         let dispatcher = Arc::clone(&self.dispatcher);
         let cache = Arc::clone(&self.ipc_cache);
-        let results = tokio::task::spawn_blocking(move || {
+        let results = tokio::task::block_in_place(|| {
             let mut opened_keys: Vec<[u8; 64]> = Vec::new();
             let mut batch_entries: Vec<(u64, IpcHandle)> = Vec::with_capacity(req.entries.len());
             let mut pre_errors: Vec<Option<EntryResult>> = vec![None; req.entries.len()];
@@ -382,9 +386,7 @@ impl Dispatcher for DispatcherService {
             }
 
             results
-        })
-        .await
-        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+        });
 
         Ok(Response::new(BatchLookupResponse { results }))
     }
@@ -397,7 +399,7 @@ impl Dispatcher for DispatcherService {
         check_duplicate_keys(&req.keys)?;
 
         let dispatcher = Arc::clone(&self.dispatcher);
-        let results = tokio::task::spawn_blocking(move || {
+        let results = tokio::task::block_in_place(|| {
             req.keys
                 .iter()
                 .map(|&key| {
@@ -405,9 +407,7 @@ impl Dispatcher for DispatcherService {
                     CheckResult { key, exists }
                 })
                 .collect::<Vec<_>>()
-        })
-        .await
-        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+        });
 
         Ok(Response::new(BatchCheckResponse { results }))
     }
@@ -420,7 +420,7 @@ impl Dispatcher for DispatcherService {
         check_duplicate_keys(&req.keys)?;
 
         let dispatcher = Arc::clone(&self.dispatcher);
-        let results = tokio::task::spawn_blocking(move || {
+        let results = tokio::task::block_in_place(|| {
             req.keys
                 .iter()
                 .map(|&key| match dispatcher.remove(key) {
@@ -428,9 +428,7 @@ impl Dispatcher for DispatcherService {
                     Err(e) => error_result(key, &e),
                 })
                 .collect::<Vec<_>>()
-        })
-        .await
-        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+        });
 
         Ok(Response::new(BatchRemoveResponse { results }))
     }
@@ -446,22 +444,18 @@ impl Dispatcher for DispatcherService {
         let promote = req.promote;
         let keys = req.keys;
 
-        let results = tokio::task::spawn_blocking({
-            let dispatcher = Arc::clone(&dispatcher);
-            let keys = keys.clone();
-            move || {
-                keys.iter()
-                    .map(|&key| match dispatcher.touch(key) {
-                        Ok(()) => success_result(key),
-                        Err(e) => error_result(key, &e),
-                    })
-                    .collect::<Vec<_>>()
-            }
-        })
-        .await
-        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+        let results = tokio::task::block_in_place(|| {
+            keys.iter()
+                .map(|&key| match dispatcher.touch(key) {
+                    Ok(()) => success_result(key),
+                    Err(e) => error_result(key, &e),
+                })
+                .collect::<Vec<_>>()
+        });
 
         if promote {
+            let dispatcher = Arc::clone(&dispatcher);
+            let keys = keys.clone();
             tokio::task::spawn_blocking(move || {
                 dispatcher.promote_to_memory_tier(&keys);
             });
@@ -475,9 +469,7 @@ impl Dispatcher for DispatcherService {
         _request: Request<ClearMemoryTierRequest>,
     ) -> Result<Response<ClearMemoryTierResponse>, Status> {
         let dispatcher = Arc::clone(&self.dispatcher);
-        let entries_cleared = tokio::task::spawn_blocking(move || dispatcher.clear_memory_tier())
-            .await
-            .map_err(|e| Status::internal(format!("task join error: {e}")))?
+        let entries_cleared = tokio::task::block_in_place(|| dispatcher.clear_memory_tier())
             .map_err(|e| Status::internal(format!("clear_memory_tier failed: {e}")))?;
 
         Ok(Response::new(ClearMemoryTierResponse {

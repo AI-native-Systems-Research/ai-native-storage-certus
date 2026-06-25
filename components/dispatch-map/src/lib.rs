@@ -29,6 +29,7 @@ use interfaces::{
 };
 
 use crate::entry::{DispatchEntry, Location};
+use crate::state::shard_for_key;
 
 define_component! {
     pub DispatchMapComponent {
@@ -92,7 +93,11 @@ impl IDispatchMap for DispatchMapComponent {
             logger.info("dispatch-map: beginning state recovery from extent manager");
         }
 
-        let mut inner = self.state.inner.lock().unwrap();
+        // Lock all shards sequentially for recovery.
+        let mut shard_guards: Vec<_> = (0..state::NUM_SHARDS)
+            .map(|i| self.state.lock_shard(i))
+            .collect();
+
         let mut count: u64 = 0;
 
         em.for_each_extent(&mut |extent| {
@@ -106,9 +111,12 @@ impl IDispatchMap for DispatchMapComponent {
                 write_ref: 0,
                 eviction_handle,
             };
-            inner.entries.insert(extent.key, entry);
+            let shard_idx = shard_for_key(extent.key);
+            shard_guards[shard_idx].entries.insert(extent.key, entry);
             count += 1;
         });
+
+        drop(shard_guards);
 
         if let Ok(logger) = self.logger.get() {
             logger.info(&format!(
@@ -132,8 +140,9 @@ impl IDispatchMap for DispatchMapComponent {
         let pool_id = self.get_pool_id();
         let ep = self.eviction_policy.get().unwrap();
 
-        let mut inner = self.state.inner.lock().unwrap();
-        if inner.entries.contains_key(&key) {
+        let shard_idx = shard_for_key(key);
+        let mut shard = self.state.lock_shard(shard_idx);
+        if shard.entries.contains_key(&key) {
             return Err(DispatchMapError::AlreadyExists(key));
         }
 
@@ -152,7 +161,7 @@ impl IDispatchMap for DispatchMapComponent {
             eviction_handle,
         };
 
-        inner.entries.insert(key, entry);
+        shard.entries.insert(key, entry);
 
         #[cfg(debug_assertions)]
         if let Ok(logger) = self.logger.get() {
@@ -165,10 +174,12 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {
+        let shard_idx = shard_for_key(key);
+
         // Fast path: single lock acquisition for the common case (no active writer).
         {
-            let mut inner = self.state.inner.lock().unwrap();
-            match inner.entries.get_mut(&key) {
+            let mut shard = self.state.lock_shard(shard_idx);
+            match shard.entries.get_mut(&key) {
                 None => return Ok(LookupResult::NotExist),
                 Some(entry) if entry.write_ref == 0 => {
                     entry.read_ref = entry
@@ -188,7 +199,7 @@ impl IDispatchMap for DispatchMapComponent {
                             size: *size,
                         },
                     };
-                    drop(inner);
+                    drop(shard);
                     if let Ok(ep) = self.eviction_policy.get() {
                         let _ = ep.touch(handle);
                     }
@@ -203,15 +214,18 @@ impl IDispatchMap for DispatchMapComponent {
         }
 
         // Slow path: writer active, wait for it to finish.
-        let satisfied = self
-            .state
-            .wait_for(DEFAULT_TIMEOUT, |inner| match inner.entries.get(&key) {
-                None => true,
-                Some(e) => e.write_ref == 0,
-            });
+        let satisfied =
+            self.state
+                .wait_for_shard(shard_idx, DEFAULT_TIMEOUT, |shard| match shard
+                    .entries
+                    .get(&key)
+                {
+                    None => true,
+                    Some(e) => e.write_ref == 0,
+                });
 
-        let mut inner = self.state.inner.lock().unwrap();
-        let entry = match inner.entries.get_mut(&key) {
+        let mut shard = self.state.lock_shard(shard_idx);
+        let entry = match shard.entries.get_mut(&key) {
             None => return Ok(LookupResult::NotExist),
             Some(e) => e,
         };
@@ -237,7 +251,7 @@ impl IDispatchMap for DispatchMapComponent {
             },
         };
 
-        drop(inner);
+        drop(shard);
         if let Ok(ep) = self.eviction_policy.get() {
             let _ = ep.touch(handle);
         }
@@ -251,8 +265,9 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn convert_to_storage(&self, key: CacheKey, offset: u64) -> Result<(), DispatchMapError> {
-        let mut inner = self.state.inner.lock().unwrap();
-        let entry = inner
+        let shard_idx = shard_for_key(key);
+        let mut shard = self.state.lock_shard(shard_idx);
+        let entry = shard
             .entries
             .get_mut(&key)
             .ok_or(DispatchMapError::KeyNotFound(key))?;
@@ -282,17 +297,19 @@ impl IDispatchMap for DispatchMapComponent {
             ));
         }
 
-        drop(inner);
-        self.state.condvar.notify_all();
+        drop(shard);
+        self.state.condvars[shard_idx].notify_all();
 
         Ok(())
     }
 
     fn take_read(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+        let shard_idx = shard_for_key(key);
+
         // Fast path: single lock acquisition when no writer active.
         {
-            let mut inner = self.state.inner.lock().unwrap();
-            match inner.entries.get_mut(&key) {
+            let mut shard = self.state.lock_shard(shard_idx);
+            match shard.entries.get_mut(&key) {
                 None => return Err(DispatchMapError::KeyNotFound(key)),
                 Some(entry) if entry.write_ref == 0 => {
                     entry.read_ref = entry
@@ -310,12 +327,12 @@ impl IDispatchMap for DispatchMapComponent {
         }
 
         // Slow path: writer active, wait for it to finish.
-        let satisfied = self.state.wait_for(DEFAULT_TIMEOUT, |inner| {
-            inner.entries.get(&key).map_or(true, |e| e.write_ref == 0)
+        let satisfied = self.state.wait_for_shard(shard_idx, DEFAULT_TIMEOUT, |shard| {
+            shard.entries.get(&key).map_or(true, |e| e.write_ref == 0)
         });
 
-        let mut inner = self.state.inner.lock().unwrap();
-        let entry = inner
+        let mut shard = self.state.lock_shard(shard_idx);
+        let entry = shard
             .entries
             .get_mut(&key)
             .ok_or(DispatchMapError::KeyNotFound(key))?;
@@ -336,15 +353,17 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn take_write(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        let satisfied = self.state.wait_for(DEFAULT_TIMEOUT, |inner| {
-            inner
+        let shard_idx = shard_for_key(key);
+
+        let satisfied = self.state.wait_for_shard(shard_idx, DEFAULT_TIMEOUT, |shard| {
+            shard
                 .entries
                 .get(&key)
                 .map_or(true, |e| e.read_ref == 0 && e.write_ref == 0)
         });
 
-        let mut inner = self.state.inner.lock().unwrap();
-        let entry = inner
+        let mut shard = self.state.lock_shard(shard_idx);
+        let entry = shard
             .entries
             .get_mut(&key)
             .ok_or(DispatchMapError::KeyNotFound(key))?;
@@ -362,8 +381,9 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn release_read(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        let mut inner = self.state.inner.lock().unwrap();
-        let entry = inner
+        let shard_idx = shard_for_key(key);
+        let mut shard = self.state.lock_shard(shard_idx);
+        let entry = shard
             .entries
             .get_mut(&key)
             .ok_or(DispatchMapError::KeyNotFound(key))?;
@@ -377,14 +397,15 @@ impl IDispatchMap for DispatchMapComponent {
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: release_read key {key}"));
         }
-        drop(inner);
-        self.state.condvar.notify_all();
+        drop(shard);
+        self.state.condvars[shard_idx].notify_all();
         Ok(())
     }
 
     fn release_write(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        let mut inner = self.state.inner.lock().unwrap();
-        let entry = inner
+        let shard_idx = shard_for_key(key);
+        let mut shard = self.state.lock_shard(shard_idx);
+        let entry = shard
             .entries
             .get_mut(&key)
             .ok_or(DispatchMapError::KeyNotFound(key))?;
@@ -398,14 +419,15 @@ impl IDispatchMap for DispatchMapComponent {
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: release_write key {key}"));
         }
-        drop(inner);
-        self.state.condvar.notify_all();
+        drop(shard);
+        self.state.condvars[shard_idx].notify_all();
         Ok(())
     }
 
     fn downgrade_reference(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        let mut inner = self.state.inner.lock().unwrap();
-        let entry = inner
+        let shard_idx = shard_for_key(key);
+        let mut shard = self.state.lock_shard(shard_idx);
+        let entry = shard
             .entries
             .get_mut(&key)
             .ok_or(DispatchMapError::KeyNotFound(key))?;
@@ -423,14 +445,15 @@ impl IDispatchMap for DispatchMapComponent {
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: downgrade_reference key {key}"));
         }
-        drop(inner);
-        self.state.condvar.notify_all();
+        drop(shard);
+        self.state.condvars[shard_idx].notify_all();
         Ok(())
     }
 
     fn remove(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        let mut inner = self.state.inner.lock().unwrap();
-        let entry = inner
+        let shard_idx = shard_for_key(key);
+        let mut shard = self.state.lock_shard(shard_idx);
+        let entry = shard
             .entries
             .get(&key)
             .ok_or(DispatchMapError::KeyNotFound(key))?;
@@ -440,7 +463,7 @@ impl IDispatchMap for DispatchMapComponent {
         }
 
         let handle = entry.eviction_handle;
-        inner.entries.remove(&key);
+        shard.entries.remove(&key);
 
         if let Ok(ep) = self.eviction_policy.get() {
             let _ = ep.remove(handle);
@@ -455,13 +478,14 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn touch(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        let inner = self.state.inner.lock().unwrap();
-        let entry = inner
+        let shard_idx = shard_for_key(key);
+        let shard = self.state.lock_shard(shard_idx);
+        let entry = shard
             .entries
             .get(&key)
             .ok_or(DispatchMapError::KeyNotFound(key))?;
         let handle = entry.eviction_handle;
-        drop(inner);
+        drop(shard);
         if let Ok(ep) = self.eviction_policy.get() {
             let _ = ep.touch(handle);
         }
@@ -469,8 +493,9 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn entry_size(&self, key: CacheKey) -> Result<u32, DispatchMapError> {
-        let inner = self.state.inner.lock().unwrap();
-        let entry = inner
+        let shard_idx = shard_for_key(key);
+        let shard = self.state.lock_shard(shard_idx);
+        let entry = shard
             .entries
             .get(&key)
             .ok_or(DispatchMapError::KeyNotFound(key))?;
@@ -499,8 +524,9 @@ impl IDispatchMap for DispatchMapComponent {
         let pool_id = self.get_pool_id();
         let ep = self.eviction_policy.get().unwrap();
 
-        let mut inner = self.state.inner.lock().unwrap();
-        if inner.entries.contains_key(&key) {
+        let shard_idx = shard_for_key(key);
+        let mut shard = self.state.lock_shard(shard_idx);
+        if shard.entries.contains_key(&key) {
             return Err(DispatchMapError::AlreadyExists(key));
         }
 
@@ -517,7 +543,7 @@ impl IDispatchMap for DispatchMapComponent {
             eviction_handle,
         };
 
-        inner.entries.insert(key, entry);
+        shard.entries.insert(key, entry);
 
         #[cfg(debug_assertions)]
         if let Ok(logger) = self.logger.get() {
@@ -530,8 +556,9 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn convert_memory_tier_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        let mut inner = self.state.inner.lock().unwrap();
-        let entry = inner
+        let shard_idx = shard_for_key(key);
+        let mut shard = self.state.lock_shard(shard_idx);
+        let entry = shard
             .entries
             .get_mut(&key)
             .ok_or(DispatchMapError::KeyNotFound(key))?;
@@ -565,15 +592,16 @@ impl IDispatchMap for DispatchMapComponent {
             ));
         }
 
-        drop(inner);
-        self.state.condvar.notify_all();
+        drop(shard);
+        self.state.condvars[shard_idx].notify_all();
 
         Ok(())
     }
 
     fn is_evictable(&self, key: CacheKey) -> bool {
-        let inner = self.state.inner.lock().unwrap();
-        match inner.entries.get(&key) {
+        let shard_idx = shard_for_key(key);
+        let shard = self.state.lock_shard(shard_idx);
+        match shard.entries.get(&key) {
             Some(entry) => {
                 entry.read_ref == 0
                     && entry.write_ref == 0
@@ -595,8 +623,9 @@ impl IDispatchMap for DispatchMapComponent {
         let pool_id = self.get_pool_id();
         let ep = self.eviction_policy.get().unwrap();
 
-        let mut inner = self.state.inner.lock().unwrap();
-        if inner.entries.contains_key(&key) {
+        let shard_idx = shard_for_key(key);
+        let mut shard = self.state.lock_shard(shard_idx);
+        if shard.entries.contains_key(&key) {
             return Err(DispatchMapError::AlreadyExists(key));
         }
         let eviction_handle = ep.track(pool_id, key).unwrap();
@@ -607,7 +636,7 @@ impl IDispatchMap for DispatchMapComponent {
             write_ref: 0,
             eviction_handle,
         };
-        inner.entries.insert(key, entry);
+        shard.entries.insert(key, entry);
         Ok(())
     }
 }

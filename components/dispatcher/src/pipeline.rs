@@ -53,7 +53,7 @@ use interfaces::{
 use crate::io_segmenter;
 
 /// Number of GPU DMA copies before a periodic stream synchronization.
-pub const PIPELINE_RING_SIZE: usize = 8;
+pub const PIPELINE_RING_SIZE: usize = 4;
 
 /// Timeout for async NVMe read operations (ms).
 const READ_TIMEOUT_MS: u64 = 5000;
