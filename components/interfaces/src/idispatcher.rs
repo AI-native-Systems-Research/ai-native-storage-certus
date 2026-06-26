@@ -362,6 +362,45 @@ component_macros::define_interface! {
         /// ```
         fn populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>;
 
+        /// Reserve a memory-tier slot for the given key, evicting if necessary.
+        ///
+        /// Allocates `size` bytes in DRAM keyed by `key`. The returned pointer
+        /// is valid until `release_memory` or `memory_populated` is called.
+        /// Does NOT register in the dispatch-map or issue any DMA.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`DispatcherError::AlreadyExists`] if the key already has a slot.
+        /// Returns [`DispatcherError::AllocationFailed`] if the pool is full after eviction.
+        fn reserve_memory(&self, key: CacheKey, size: u32) -> Result<*mut u8, DispatcherError>;
+
+        /// DMA-copy from GPU into a previously reserved memory-tier slot.
+        ///
+        /// The slot must have been allocated by a prior `reserve_memory` call.
+        /// Blocks until the cudaMemcpy D2H completes.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`DispatcherError::KeyNotFound`] if no reserved slot exists for `key`.
+        /// Returns [`DispatcherError::IoError`] if the DMA copy fails.
+        fn populate_memory(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>;
+
+        /// Finalize a populated memory-tier slot: register in the dispatch-map
+        /// and enqueue background write-through to SSD.
+        ///
+        /// Must be called after `populate_memory` completes successfully.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`DispatcherError::KeyNotFound`] if the key is not in memory-tier.
+        fn memory_populated(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>;
+
+        /// Release a reserved memory-tier slot without populating it.
+        ///
+        /// Used on the cancellation path (e.g., `complete_store(success=false)`).
+        /// Idempotent — returns Ok if the key has no slot.
+        fn release_memory(&self, key: CacheKey) -> Result<(), DispatcherError>;
+
         /// Async variant of [`populate`] — issues the D2H DMA copy without blocking.
         ///
         /// Evicts if needed, allocates a memory-tier slot, and issues

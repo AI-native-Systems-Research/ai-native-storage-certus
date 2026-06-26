@@ -1881,6 +1881,39 @@ impl IDispatcher for DispatcherComponent {
             ));
         }
 
+        let size: u32 = ipc_handle.size;
+
+        // Phase 1: Evict if needed and allocate memory-tier slot.
+        let t_alloc = std::time::Instant::now();
+        let _mem_ptr = self.reserve_memory(key, size)?;
+        let alloc_us = t_alloc.elapsed().as_micros() as f64;
+
+        // Phase 2: DMA copy from GPU into the reserved slot.
+        let t_d2h = std::time::Instant::now();
+        self.populate_memory(key, ipc_handle)?;
+        let d2h_us = t_d2h.elapsed().as_micros() as f64;
+
+        // Phase 3: Register in dispatch-map and enqueue SSD write-through.
+        self.memory_populated(key, size)?;
+
+        if let Some(ref m) = *self.pipeline_metrics.read() {
+            m.record_populate_alloc(alloc_us);
+            m.record_populate_gpu_d2h(d2h_us);
+            m.record_populate_total(t_total.elapsed().as_micros() as f64);
+        }
+
+        Ok(())
+    }
+
+    fn reserve_memory(&self, key: CacheKey, size: u32) -> Result<*mut u8, DispatcherError> {
+        self.ensure_initialized()?;
+
+        if size == 0 {
+            return Err(DispatcherError::InvalidParameter(
+                "size must be > 0".into(),
+            ));
+        }
+
         let dm = self
             .dispatch_map
             .get()
@@ -1891,23 +1924,31 @@ impl IDispatcher for DispatcherComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
-        // Evict from memory-tier if needed to make space.
-        let t_alloc = std::time::Instant::now();
         let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
-        Self::evict_for_space(&dm, &mt, ipc_handle.size, key, max_attempts)?;
+        Self::evict_for_space(&dm, &mt, size, key, max_attempts)?;
 
-        // Allocate a slot in the memory-tier.
-        let mem_ptr = mt.insert(key, ipc_handle.size).map_err(|e| match e {
+        let mem_ptr = mt.insert(key, size).map_err(|e| match e {
             interfaces::MemoryTierError::AlreadyExists(k) => DispatcherError::AlreadyExists(k),
             interfaces::MemoryTierError::PoolFull => {
                 DispatcherError::AllocationFailed("memory-tier pool full after eviction".into())
             }
             other => DispatcherError::AllocationFailed(other.to_string()),
         })?;
-        let alloc_us = t_alloc.elapsed().as_micros() as f64;
 
-        // Create a temporary DmaBuffer wrapping the memory-tier slot for GPU DMA.
-        let aligned_size = (ipc_handle.size as usize).next_multiple_of(4096);
+        Ok(mem_ptr)
+    }
+
+    fn populate_memory(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError> {
+        self.ensure_initialized()?;
+
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        let (mem_ptr, slot_size) = mt.get(key).ok_or(DispatcherError::KeyNotFound(key))?;
+
+        let aligned_size = (slot_size as usize).next_multiple_of(4096);
         // SAFETY: mem_ptr is valid for aligned_size bytes, owned by memory-tier.
         let temp_buf = unsafe {
             DmaBuffer::from_raw(
@@ -1918,8 +1959,7 @@ impl IDispatcher for DispatcherComponent {
             )
         }
         .map_err(|e| {
-            let _ = mt.remove(key);
-            DispatcherError::AllocationFailed(format!("DmaBuffer wrap failed: {e}"))
+            DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}"))
         })?;
 
         let gpu = self
@@ -1927,8 +1967,6 @@ impl IDispatcher for DispatcherComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
 
-        // DMA copy from GPU to memory-tier slot.
-        let t_d2h = std::time::Instant::now();
         gpu.dma_copy_to_host(
             ipc_handle.address as *const std::ffi::c_void,
             &temp_buf,
@@ -1938,14 +1976,28 @@ impl IDispatcher for DispatcherComponent {
             let _ = mt.remove(key);
             DispatcherError::IoError(format!("GPU DMA copy failed: {e}"))
         })?;
-        let d2h_us = t_d2h.elapsed().as_micros() as f64;
 
-        // Don't let the noop-free wrapper be dropped (it would call noop_free, which is fine,
-        // but let's be explicit).
+        // Don't let the noop-free wrapper be dropped (it would call noop_free, which is fine, but let's be explicit).
         std::mem::forget(temp_buf);
+        Ok(())
+    }
 
-        // Register in dispatch-map as memory-tier entry.
-        dm.create_memory_tier_entry(key, mem_ptr, ipc_handle.size)
+    fn memory_populated(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError> {
+        self.ensure_initialized()?;
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        let (mem_ptr, _) = mt.get(key).ok_or(DispatcherError::KeyNotFound(key))?;
+
+        dm.create_memory_tier_entry(key, mem_ptr, size)
             .map_err(|e| match e {
                 interfaces::DispatchMapError::AlreadyExists(k) => {
                     let _ = mt.remove(key);
@@ -1957,11 +2009,9 @@ impl IDispatcher for DispatcherComponent {
                 }
             })?;
 
-        // Downgrade write ref to read ref for background writer.
         dm.downgrade_reference(key)
             .map_err(|e| DispatcherError::IoError(e.to_string()))?;
 
-        // Enqueue background write-through to SSD.
         let num_drives = {
             let dd = self.data_drives.read();
             dd.len().max(1)
@@ -1970,18 +2020,27 @@ impl IDispatcher for DispatcherComponent {
         if let Some(ref writer) = *guard {
             let _ = writer.enqueue(WriteJob {
                 key,
-                size: ipc_handle.size,
+                size,
                 device_index: Self::drive_index(key, num_drives),
             });
         }
 
-        if let Some(ref m) = *self.pipeline_metrics.read() {
-            m.record_populate_alloc(alloc_us);
-            m.record_populate_gpu_d2h(d2h_us);
-            m.record_populate_total(t_total.elapsed().as_micros() as f64);
-        }
-
         Ok(())
+    }
+
+    fn release_memory(&self, key: CacheKey) -> Result<(), DispatcherError> {
+        self.ensure_initialized()?;
+
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+
+        // Idempotent — KeyNotFound is not an error.
+        match mt.remove(key) {
+            Ok(()) | Err(interfaces::MemoryTierError::KeyNotFound(_)) => Ok(()),
+            Err(e) => Err(DispatcherError::IoError(e.to_string())),
+        }
     }
 
     fn populate_async(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<GpuStream, DispatcherError> {
