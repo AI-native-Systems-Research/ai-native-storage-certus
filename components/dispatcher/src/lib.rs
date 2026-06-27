@@ -1874,13 +1874,20 @@ impl IDispatcher for DispatcherComponent {
         let _mem_ptr = self.reserve_memory(key, size)?;
         let alloc_us = t_alloc.elapsed().as_micros() as f64;
 
-        // Phase 2: DMA copy from GPU into the reserved slot.
+        // Phase 2: Async DMA copy from GPU into the reserved slot, then sync.
         let t_d2h = std::time::Instant::now();
-        self.populate_memory(key, ipc_handle)?;
+        let gpu = self
+            .gpu_services
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
+        let stream = GpuStream(self.warm_stream.load(Ordering::Acquire) as *mut std::ffi::c_void);
+        self.copy_gpu_to_memory_async(key, ipc_handle, stream)?;
+        gpu.stream_synchronize(stream)
+            .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
         let d2h_us = t_d2h.elapsed().as_micros() as f64;
 
         // Phase 3: Register in dispatch-map and enqueue SSD write-through.
-        self.memory_populated(key, size)?;
+        self.copy_gpu_to_memory_completed(key, size)?;
 
         if let Some(ref m) = *self.pipeline_metrics.read() {
             m.record_populate_alloc(alloc_us);
@@ -1924,7 +1931,7 @@ impl IDispatcher for DispatcherComponent {
         Ok(mem_ptr)
     }
 
-    fn populate_memory(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError> {
+    fn copy_gpu_to_memory_async(&self, key: CacheKey, ipc_handle: IpcHandle, stream: GpuStream) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
 
         let mt = self
@@ -1953,14 +1960,15 @@ impl IDispatcher for DispatcherComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
 
-        gpu.dma_copy_to_host(
+        gpu.dma_copy_to_host_async(
             ipc_handle.address as *const std::ffi::c_void,
             &temp_buf,
             ipc_handle.size as usize,
+            stream,
         )
         .map_err(|e| {
             let _ = mt.remove(key);
-            DispatcherError::IoError(format!("GPU DMA copy failed: {e}"))
+            DispatcherError::IoError(format!("GPU async DMA copy failed: {e}"))
         })?;
 
         // Don't let the noop-free wrapper be dropped (it would call noop_free, which is fine, but let's be explicit).
@@ -1968,7 +1976,7 @@ impl IDispatcher for DispatcherComponent {
         Ok(())
     }
 
-    fn memory_populated(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError> {
+    fn copy_gpu_to_memory_completed(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
 
         let dm = self
