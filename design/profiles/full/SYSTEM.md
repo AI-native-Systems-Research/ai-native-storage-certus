@@ -86,10 +86,18 @@ define_component! {
             gpu_services: IGpuServices,
             spdk_env: ISPDKEnv,
             memory_tier: IMemoryTier,
+            remote_lookup: IRemoteLookup,
         },
         fields: {
             initialized: AtomicBool,
-            bg_writer: Mutex<Option<BackgroundWriter>>,
+            bg_writer: Mutex<Option<ParallelBackgroundWriter>>,
+            bg_evictor: Mutex<Option<BackgroundEvictor>>,
+            data_drives: RwLock<Vec<DataDrive>>,
+            pending_writes: Mutex<HashMap<CacheKey, PendingWrite>>,
+            pipeline_ring: RwLock<Option<PipelineRing>>,
+            warm_stream: AtomicU64,
+            block_device_factory: Mutex<Option<BlockDeviceFactory>>,
+            extent_manager_factory: Mutex<Option<ExtentManagerFactory>>,
             // ...
         },
     }
@@ -116,10 +124,16 @@ components/
 │       └── component-framework/ # Facade re-export
 ├── interfaces/              # All interface trait definitions
 ├── dispatcher/              # Central orchestrator (IDispatcher)
+├── dispatcher-p2p/          # P2P variant with GPUDirect cold path (IDispatcher)
 ├── dispatch-map/            # Key→location index (IDispatchMap)
 ├── memory-tier/             # DRAM cache pool (IMemoryTier)
 ├── block-device-spdk-nvme/  # NVMe driver (IBlockDevice)
+├── block-device-filesys/    # Filesystem-backed block device (IBlockDevice)
+├── block-device-kernel/     # Kernel block device (IBlockDevice)
 ├── extent-manager/          # Disk space allocator (IExtentManager)
+├── eviction-policy-lru/     # LRU eviction policy (IEvictionPolicy)
+├── remote-lookup/           # Remote cache lookups (IRemoteLookup)
+├── remote-request-handler/  # Remote request handling
 ├── spdk-env/                # SPDK environment wrapper (ISPDKEnv)
 ├── spdk-sys/                # Raw FFI bindings to SPDK
 ├── gpu-services/            # CUDA operations (IGpuServices)
@@ -128,6 +142,7 @@ components/
 └── console-logger/          # Example logger
 apps/
 ├── certus-server/           # gRPC server exposing IDispatcher
+├── certus-server-yaml/      # YAML-profile-configured server
 ├── iops-benchmark/          # NVMe IOPS benchmark
 ├── extent-benchmark/        # Extent manager benchmark
 ├── gpu-bb-vs-p2p/           # GPU bounce-buffer vs P2P benchmark
@@ -151,15 +166,22 @@ The top-level orchestrator interface. Coordinates all cache operations.
 | `initialize(config)` | Creates N block devices + N extent managers from PCI addresses |
 | `shutdown()` | Drains background writes, shuts down all drives |
 | `populate(key, ipc_handle)` | GPU→DRAM DMA, registers entry, enqueues write-through |
+| `reserve_memory(key, size)` | Reserve a DRAM slot without DMA (returns raw pointer) |
+| `populate_memory(key, ipc_handle)` | DMA into a previously reserved slot |
+| `memory_populated(key, size)` | Finalize reserved slot: register in dispatch-map + enqueue write-through |
+| `release_memory(key)` | Cancel a reserved slot without populating |
 | `lookup(key, ipc_handle)` | Serves from DRAM (warm) or promotes from SSD (cold) |
 | `lookup_async(key, ipc_handle)` | Non-blocking lookup, returns CUDA stream |
+| `batch_lookup(entries)` | Batch lookup: multiple keys with parallel SSD promotion |
 | `check(key)` | Existence check without data transfer |
 | `remove(key)` | Removes entry from all tiers |
 | `touch(key)` | Refreshes eviction timestamp |
+| `promote_to_memory_tier(keys)` | Pre-promote cold entries to DRAM for future warm access |
 | `prepare_store(key, size)` | Direct-write API: allocates DMA buffer + extent |
 | `commit_store(key)` | Writes prepared buffer to SSD |
 | `cancel_store(key)` | Aborts prepared write |
 | `clear_memory_tier()` | Evicts all DRAM entries |
+| `flush_to_ssd()` | Force all pending write-through jobs to complete |
 
 ### IDispatchMap
 
@@ -167,6 +189,8 @@ The key→location index with reader/writer reference counting.
 
 | Method | Description |
 |--------|-------------|
+| `set_dma_alloc(alloc)` | Registers the DMA buffer allocator function |
+| `initialize()` | Initializes internal state |
 | `create_staging(key, size)` | Allocates DMA staging buffer for a key |
 | `create_memory_tier_entry(key, ptr, size)` | Registers DRAM-resident entry |
 | `lookup(key)` | Returns `LookupResult` enum (NotExist/Staging/MemoryTier/BlockDevice) |
@@ -174,7 +198,10 @@ The key→location index with reader/writer reference counting.
 | `convert_memory_tier_to_block(key)` | Demotes DRAM entry to SSD-only |
 | `take_read/release_read` | Reference counting for concurrent access |
 | `take_write/release_write` | Exclusive writer semantics |
+| `downgrade_reference(key)` | Atomically downgrade write ref to read ref |
 | `remove(key)` | Removes entry (fails if active references) |
+| `touch(key)` | Refreshes eviction ordering |
+| `entry_size(key)` | Returns the size of a stored entry |
 | `oldest_keys(n)` | Returns N oldest keys for eviction |
 | `is_evictable(key)` | Checks if safe to evict (write-through complete, no refs) |
 | `recover_extent(key, offset, size)` | Rebuilds from persisted extents on startup |
@@ -185,13 +212,20 @@ DRAM cache pool with LRU eviction.
 
 | Method | Description |
 |--------|-------------|
-| `initialize(pool_size)` | Allocates mmap'd pool |
+| `initialize(pool_size, numa_node)` | Allocates mmap'd pool, optionally NUMA-pinned |
 | `insert(key, size)` | Allocates slot, returns pointer |
 | `get(key)` | Returns (pointer, size), refreshes LRU |
 | `peek(key)` | Returns (pointer, size) without LRU update |
 | `evict_lru()` | Removes oldest entry |
+| `evict_lru_for_key(key)` | Evicts until space is available for key's size |
+| `oldest_keys(n)` | Returns N oldest keys for eviction decisions |
 | `remove(key)` | Frees specific slot |
+| `touch(key) / batch_touch(keys)` | Refresh LRU timestamp(s) |
+| `contains(key)` | Existence check |
+| `capacity() / used()` | Pool utilization metrics |
 | `pool_info()` | Returns base pointer + size for CUDA registration |
+| `is_dma_capable()` | Whether pool is registered for zero-copy DMA |
+| `clear()` | Remove all entries, return count evicted |
 
 ### IBlockDevice
 
@@ -246,15 +280,27 @@ Simple logging interface (`error`, `warn`, `info`, `debug`).
 
 ## 5. Key Components in Detail
 
-### 5.1 Dispatcher (`components/dispatcher/`)
+### 5.1 Dispatcher (`components/dispatcher/` and `components/dispatcher-p2p/`)
 
-The central orchestrator implementing `IDispatcher`. It owns:
+The central orchestrator implementing `IDispatcher`. Two variants exist:
+
+- **DispatcherComponent** (`components/dispatcher/`) — Standard dispatcher
+- **DispatcherP2pComponent** (`components/dispatcher-p2p/`) — Adds GPUDirect P2P ring and DRAM backfill worker
+
+Both variants own:
 
 - **N data drives**: Each is a (BlockDevice, ExtentManager) pair created from PCI addresses
-- **Background writer thread**: Drains write-through jobs from a channel
-- **Background evictor thread**: Monitors SSD utilization and reclaims space
+- **ParallelBackgroundWriter**: Multi-threaded write-through (drains jobs from a channel)
+- **BackgroundEvictor**: Monitors SSD utilization and reclaims space
 - **Pipeline ring**: Pre-allocated ring of 8 CUDA-pinned DMA buffers + 2 CUDA streams for pipelined SSD→GPU reads
 - **Warm stream**: Dedicated CUDA stream for async memory-tier→GPU copies (lock-free access via AtomicU64)
+- **BlockDeviceFactory / ExtentManagerFactory**: Factory closures for creating DataDrive components during initialization
+
+The P2P variant additionally owns:
+- **P2pRing**: GPUDirect Storage ring for direct SSD→GPU transfers
+- **DramBackfillWorker**: Background thread that asynchronously promotes hot P2P entries back to DRAM
+
+Receptacles: `dispatch_map`, `memory_tier`, `gpu_services`, `spdk_env`, `logger`, `remote_lookup`.
 
 Key design decisions:
 - Drive selection is `key % num_drives` (deterministic sharding)
@@ -273,7 +319,7 @@ Default pool size: 256 MiB. The pool is CUDA-pinned at server startup for zero-c
 
 ### 5.3 Dispatch Map (`components/dispatch-map/`)
 
-The index tracking every cached entry's location and state:
+The index tracking every cached entry's location and state. Receptacles: `eviction_policy` (IEvictionPolicy), `extent_manager` (IExtentManager), `logger` (ILogger).
 
 ```rust
 enum LookupResult {
@@ -332,9 +378,11 @@ CUDA integration layer providing:
 A gRPC server (tonic + tokio) exposing the `IDispatcher` interface:
 
 **CLI options:**
-- `--device-pci` — NVMe PCI addresses (required, repeatable)
+- `--device-pci` — NVMe PCI addresses (repeatable)
+- `--device-path` — Filesystem device path (alternative to PCI, e.g., `/dev/null` for testing)
 - `--listen` — gRPC listen address (default: `0.0.0.0:50051`)
-- `--memory-tier-size` — Pool size (e.g., `256M`, `1G`)
+- `--memory-tier-size` — Pool size (e.g., `256M`, `1G`, `4G`)
+- `--format` — Format SSD extents on startup (start fresh)
 - `--tls-cert` / `--tls-key` — Optional TLS
 
 **Startup sequence:**
@@ -377,8 +425,9 @@ The dispatch-map uses reader/writer references to coordinate concurrent access:
 
 | Thread | Purpose |
 |--------|---------|
-| `dispatcher-bg-writer` | Drains write-through jobs: memory-tier → SSD |
+| `dispatcher-bg-writer` | Parallel write-through: memory-tier → SSD |
 | `dispatcher-bg-evictor` | Monitors SSD utilization, reclaims extents |
+| `dispatcher-bg-backfill` | (P2P variant) DRAM backfill for hot P2P entries |
 | `extent-mgr-checkpoint` | Periodic checkpoint of allocation metadata |
 | Block device actor threads | One per NVMe controller, NUMA-pinned |
 

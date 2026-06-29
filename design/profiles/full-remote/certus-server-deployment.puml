@@ -1,0 +1,90 @@
+@startuml
+skinparam defaultTextAlignment center
+skinparam padding 4
+skinparam nodesep 60
+skinparam ranksep 50
+skinparam rectangle {
+    RoundCorner 15
+}
+skinparam agent {
+    RoundCorner 10
+}
+hide stereotype
+
+title Certus Server — full-remote Profile
+
+' ============================================================
+' CLIENT
+' ============================================================
+rectangle "**Client Host**" as client_box #F5F5F5 {
+    agent "GPU Client\n(vLLM / PyTorch)" as pyclient
+    agent "GPU Memory" as client_gpu #LightGreen
+}
+
+' ============================================================
+' SERVER
+' ============================================================
+rectangle "**Server Host**" as server_box #FAFAFA {
+
+    rectangle "certus-server" as server_proc #White {
+
+        agent "gRPC Service (tonic)\nPopulate | Lookup | Check\nRemove | Touch | Flush" as grpc #F0F0F0
+
+        rectangle "**Dispatcher** <<IDispatcher>>" as dispatcher #DBEAFE {
+            rectangle "DataDrive [0..N]" as data_drive #FEF3C7 {
+                agent "BlockDeviceSpdkNvme\n<<IBlockDevice>>" as blkdev
+                agent "ExtentManager\n<<IExtentManager>>" as extmgr
+            }
+            agent "BackgroundWriter\nBackgroundEvictor\nPipelineRing" as disp_bg #FEF9C3
+        }
+
+        agent "DispatchMap\n<<IDispatchMap>>" as dispatch_map #DBEAFE
+        agent "MemoryTier\n<<IMemoryTier>>" as memory_tier #DBEAFE
+        agent "EvictionPolicy\n<<IEvictionPolicy>>" as eviction #E5E7EB
+        agent "GpuServices\n<<IGpuServices>>" as gpu_svc #BBF7D0
+        agent "SPDKEnv\n<<ISPDKEnv>>" as spdk_env #E5E7EB
+
+        rectangle "**Remote Cache Layer**" as remote_box #FEE2E2 {
+            agent "RemoteLookup\n<<IRemoteLookup>>\nforward misses" as remote_lookup
+            agent "RemoteRequestHandler\n<<IRemoteRequestHandler>>\nserve RDMA requests" as remote_handler
+        }
+    }
+
+    agent "GPU Memory\n(server)" as server_gpu #LightGreen
+    database "NVMe SSD [0..N]" as nvme_data
+}
+
+cloud "**Peer Certus Nodes**" as peers #FEE2E2
+
+' ============================================================
+' CONNECTIONS
+' ============================================================
+
+pyclient -down-> grpc : gRPC
+client_gpu .down.> server_gpu : CUDA IPC
+
+grpc -down-> dispatcher
+
+dispatcher -down-> dispatch_map
+dispatcher -down-> memory_tier
+dispatcher -down-> gpu_svc
+dispatcher -right-> remote_lookup
+
+dispatch_map -down-> eviction
+memory_tier -down-> eviction
+
+disp_bg --> blkdev
+blkdev -down-> spdk_env
+extmgr --> blkdev : metadata
+
+remote_handler -up-> dispatcher
+
+gpu_svc -right-> server_gpu : DMA
+
+spdk_env -down-> nvme_data : VFIO
+blkdev .down.> nvme_data : NVMe I/O
+
+remote_lookup -down-> peers : RDMA out
+peers -up-> remote_handler : RDMA in
+
+@enduml

@@ -119,24 +119,28 @@
 | SPDKEnvComponent | ISPDKEnv | — |
 | LoggerComponent | ILogger | — |
 | GpuServicesComponent | IGpuServices | logger |
-| MemoryTierComponent | IMemoryTier | logger |
+| EvictionPolicyLruComponent | IEvictionPolicy | logger |
+| MemoryTierComponent | IMemoryTier | logger, eviction_policy |
+| RemoteLookupComponent | IRemoteLookup | logger |
 | BlockDeviceSpdkNvme | IBlockDevice, IBlockDeviceAdmin | spdk_env, logger |
 | ExtentManager | IExtentManager | metadata_device, logger |
-| DispatchMapComponent | IDispatchMap | extent_manager, logger |
-| DispatcherComponent | IDispatcher | dispatch_map, memory_tier, gpu_services, spdk_env, logger |
+| DispatchMapComponent | IDispatchMap | extent_manager, eviction_policy, logger |
+| DispatcherComponent | IDispatcher | dispatch_map, memory_tier, gpu_services, spdk_env, logger, remote_lookup |
 
 ## Initialization Order
 
 1. **SPDKEnvComponent** — DPDK/EAL init, VFIO device discovery
 2. **LoggerComponent** — console/file logging
 3. **GpuServicesComponent** — CUDA device init
-4. **DispatchMapComponent** — key→location table (no persistence, starts fresh each session)
-5. **MemoryTierComponent** — mmap DRAM pool, CUDA-pinned via `cudaHostRegister`
-6. **DispatcherComponent** — top-level orchestrator (bound to dispatch_map, memory_tier, gpu, spdk_env)
+4. **EvictionPolicyLruComponent** — LRU eviction policy (shared by dispatch-map and memory-tier)
+5. **DispatchMapComponent** — key→location table (bound to eviction_policy, extent_manager)
+6. **MemoryTierComponent** — mmap DRAM pool, CUDA-pinned via `cudaHostRegister` (bound to eviction_policy)
+7. **RemoteLookupComponent** — remote cache cluster integration
+8. **DispatcherComponent** — top-level orchestrator (bound to dispatch_map, memory_tier, gpu, spdk_env, remote_lookup)
    - Internally creates **DataDrive[0..N]**: one (BlockDeviceSpdkNvme + ExtentManager) pair per `--device-pci` address; each drive stores both data and metadata
    - Allocates **PipelineRing** (CUDA-pinned + SPDK-registered ring buffers) for pipelined reads
    - Creates dedicated **warm_stream** (CUDA stream) for async memory-tier→GPU DMA
-   - Starts **BackgroundWriter** thread for async DRAM→SSD write-through
+   - Starts **ParallelBackgroundWriter** for async DRAM→SSD write-through
    - Starts **BackgroundEvictor** thread for SSD-tier space reclamation (threshold-based)
 
 ## Data Flow
@@ -182,8 +186,10 @@ SSD usage > threshold ──oldest_keys scan──▶ Remove extents from SSD
 ## CLI Options
 
 ```
-certus-server \
+certus-server-yaml \
     --device-pci DDDD:BB:DD.F [--device-pci ...] \
+    --memory-tier-size 4G \
+    --format \
     --listen 0.0.0.0:50051 \
     [--tls-cert path/to/cert.pem --tls-key path/to/key.pem]
 ```
@@ -191,6 +197,9 @@ certus-server \
 | Flag | Description |
 |------|-------------|
 | `--device-pci` | PCI address(es) of NVMe device(s), repeatable |
+| `--device-path` | Filesystem device path (alternative to PCI, e.g., `/dev/null` for testing) |
+| `--memory-tier-size` | DRAM pool size (e.g., `256M`, `1G`, `4G`) |
+| `--format` | Format SSD extents on startup (start fresh) |
 | `--listen` | gRPC bind address (default `0.0.0.0:50051`) |
 | `--tls-cert` / `--tls-key` | Enable TLS for gRPC transport |
 
@@ -203,6 +212,8 @@ certus-server \
 | Check | BatchCheckRequest | BatchCheckResponse | Existence check (no data transfer) |
 | Remove | BatchRemoveRequest | BatchRemoveResponse | Evict from DRAM + SSD, free extents |
 | Touch | BatchTouchRequest | BatchTouchResponse | Refresh LRU timestamp without DMA |
+| ClearMemoryTier | ClearMemoryTierRequest | ClearMemoryTierResponse | Evict all DRAM entries |
+| FlushToSsd | FlushToSsdRequest | FlushToSsdResponse | Force pending write-through to complete |
 
 ## Notes
 
@@ -212,4 +223,5 @@ certus-server \
 - The Dispatcher internally instantiates and owns its DataDrive components (not externally wired)
 - Memory-tier pool is registered with CUDA (`cudaHostRegister`) for pinned zero-copy DMA
 - PipelineRing pre-allocates 8 CUDA-pinned SPDK-registered buffers to avoid per-request allocation
-- Dispatcher v0 omits the memory_tier receptacle (staging-only path, retained for testing)
+- Dispatcher variant is selected via YAML profile (e.g., `full`, `full-p2p`, `full-remote`)
+- A `dispatcher-p2p` variant adds P2pRing and DramBackfillWorker for GPUDirect cold paths
