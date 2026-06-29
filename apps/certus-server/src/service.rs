@@ -657,15 +657,16 @@ mod tests {
             Ok(std::ptr::null_mut())
         }
 
-        fn populate_memory(
+        fn copy_gpu_to_memory_async(
             &self,
             _key: u64,
             _ipc_handle: IpcHandle,
+            _stream: GpuStream,
         ) -> Result<(), DispatcherError> {
             Ok(())
         }
 
-        fn memory_populated(&self, _key: u64, _size: u32) -> Result<(), DispatcherError> {
+        fn copy_gpu_to_memory_completed(&self, _key: u64, _size: u32) -> Result<(), DispatcherError> {
             Ok(())
         }
 
