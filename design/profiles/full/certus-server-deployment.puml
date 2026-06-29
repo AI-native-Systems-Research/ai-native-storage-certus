@@ -1,83 +1,79 @@
-@startuml certus-server-deployment
+@startuml
 skinparam defaultTextAlignment center
-skinparam padding 3
-skinparam nodesep 25
-skinparam ranksep 25
+skinparam padding 4
+skinparam nodesep 60
+skinparam ranksep 50
+skinparam rectangle {
+    RoundCorner 15
+}
+skinparam agent {
+    RoundCorner 10
+}
+hide stereotype
 
-title Certus Server — Component Deployment Diagram
+title Certus Server — full Profile
 
 ' ============================================================
 ' CLIENT
 ' ============================================================
-node "Client Host" {
-    component "Python Test Client\n<<gRPC client>>" as pyclient
-    database "GPU Memory\n(client ctx)" as client_gpu
-    pyclient -right[hidden]- client_gpu
+rectangle "**Client Host**" as client_box #F5F5F5 {
+    agent "GPU Client\n(vLLM / PyTorch)" as pyclient
+    agent "GPU Memory" as client_gpu #LightGreen
 }
 
 ' ============================================================
 ' SERVER
 ' ============================================================
-node "Server Host" {
+rectangle "**Server Host**" as server_box #FAFAFA {
 
-    node "certus-server (Rust / tokio)" {
+    rectangle "certus-server" as server_proc #White {
 
-        component "gRPC Service <<tonic>>\nPopulate | Lookup | Check | Remove | Touch" as grpc
+        agent "gRPC Service (tonic)\nPopulate | Lookup | Check\nRemove | Touch | Flush" as grpc #F0F0F0
 
-        component "DispatcherComponent <<IDispatcher>>" as dispatcher {
-            component "BackgroundWriter | BackgroundEvictor\nPipelineRing | warm_stream" as disp_bg
-            component "DataDrive [0..N]\n(BlockDeviceSpdkNvme + ExtentManager)" as data_drive
+        rectangle "**Dispatcher** <<IDispatcher>>" as dispatcher #DBEAFE {
+            rectangle "DataDrive [0..N]" as data_drive #FEF3C7 {
+                agent "BlockDeviceSpdkNvme\n<<IBlockDevice>>" as blkdev
+                agent "ExtentManager\n<<IExtentManager>>" as extmgr
+            }
+            agent "ParallelBackgroundWriter\nBackgroundEvictor\nPipelineRing" as disp_bg #FEF9C3
         }
 
-        component "DispatchMapComponent\n<<IDispatchMap>>" as dispatch_map
-        component "MemoryTierComponent\n<<IMemoryTier>>" as memory_tier
-        component "GpuServicesComponent\n<<IGpuServices>>" as gpu_svc
-        component "LoggerComponent\n<<ILogger>>" as logger
-
-        component "Metadata ExtentManager\n<<IExtentManager>>" as meta_em
-        component "Metadata BlockDeviceSpdkNvme\n<<IBlockDevice>>" as meta_bd
-        component "SPDKEnvComponent\n<<ISPDKEnv>>" as spdk_env
+        agent "DispatchMap\n<<IDispatchMap>>" as dispatch_map #DBEAFE
+        agent "MemoryTier\n<<IMemoryTier>>" as memory_tier #DBEAFE
+        agent "EvictionPolicy\n<<IEvictionPolicy>>" as eviction #E5E7EB
+        agent "GpuServices\n<<IGpuServices>>" as gpu_svc #BBF7D0
+        agent "SPDKEnv\n<<ISPDKEnv>>" as spdk_env #E5E7EB
+        agent "RemoteLookup\n<<IRemoteLookup>>" as remote_lookup #E5E7EB
     }
 
-    database "GPU Memory\n(server ctx)" as server_gpu
-    database "NVMe (metadata)" as nvme_meta
-    database "NVMe (data) [0..N]" as nvme_data
+    agent "GPU Memory\n(server)" as server_gpu #LightGreen
+    database "NVMe SSD [0..N]" as nvme_data
 }
 
 ' ============================================================
 ' CONNECTIONS
 ' ============================================================
 
-' Client → Server
-pyclient -down-> grpc : "gRPC/TCP (+TLS)"
-client_gpu .down.> server_gpu : "CUDA IPC"
+pyclient -down-> grpc : gRPC
+client_gpu .down.> server_gpu : CUDA IPC
 
-' gRPC → Dispatcher
 grpc -down-> dispatcher
 
-' Dispatcher bindings (receptacles)
 dispatcher -down-> dispatch_map
 dispatcher -down-> memory_tier
 dispatcher -down-> gpu_svc
-dispatcher ..> logger
-data_drive -down-> spdk_env
+dispatcher --> remote_lookup
 
-' Dispatcher internal
-disp_bg -down-> data_drive
+dispatch_map -down-> eviction
+memory_tier -down-> eviction
 
-' DispatchMap metadata chain
-dispatch_map -down-> meta_em
-meta_em -right-> meta_bd
-meta_bd -down-> spdk_env
+disp_bg --> blkdev
+blkdev -down-> spdk_env
+extmgr --> blkdev : metadata
 
-' GPU
-gpu_svc -right-> server_gpu : "DMA"
-gpu_svc .down.> memory_tier : "cudaHostRegister"
+gpu_svc -right-> server_gpu : DMA
 
-' SPDK → hardware
-spdk_env -down-> nvme_meta : "VFIO"
-spdk_env -down-> nvme_data : "VFIO"
-data_drive ..> nvme_data : "NVMe I/O"
-meta_bd ..> nvme_meta : "NVMe I/O"
+spdk_env -down-> nvme_data : VFIO
+blkdev .down.> nvme_data : NVMe I/O
 
 @enduml
