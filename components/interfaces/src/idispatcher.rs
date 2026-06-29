@@ -365,7 +365,7 @@ component_macros::define_interface! {
         /// Reserve a memory-tier slot for the given key, evicting if necessary.
         ///
         /// Allocates `size` bytes in DRAM keyed by `key`. The returned pointer
-        /// is valid until `release_memory` or `memory_populated` is called.
+        /// is valid until `release_memory` or `copy_gpu_to_memory_completed` is called.
         /// Does NOT register in the dispatch-map or issue any DMA.
         ///
         /// # Errors
@@ -377,23 +377,24 @@ component_macros::define_interface! {
         /// DMA-copy from GPU into a previously reserved memory-tier slot.
         ///
         /// The slot must have been allocated by a prior `reserve_memory` call.
-        /// Blocks until the cudaMemcpy D2H completes.
+        /// Issues `cudaMemcpyAsync` on the given stream and returns immediately.
+        /// Caller must synchronize the stream before calling `copy_gpu_to_memory_completed`.
         ///
         /// # Errors
         ///
         /// Returns [`DispatcherError::KeyNotFound`] if no reserved slot exists for `key`.
         /// Returns [`DispatcherError::IoError`] if the DMA copy fails.
-        fn populate_memory(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>;
+        fn copy_gpu_to_memory_async(&self, key: CacheKey, ipc_handle: IpcHandle, stream: GpuStream) -> Result<(), DispatcherError>;
 
         /// Finalize a populated memory-tier slot: register in the dispatch-map
         /// and enqueue background write-through to SSD.
         ///
-        /// Must be called after `populate_memory` completes successfully.
+        /// Must be called after `copy_gpu_to_memory_async` completes successfully.
         ///
         /// # Errors
         ///
         /// Returns [`DispatcherError::KeyNotFound`] if the key is not in memory-tier.
-        fn memory_populated(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>;
+        fn copy_gpu_to_memory_completed(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>;
 
         /// Release a reserved memory-tier slot without populating it.
         ///
