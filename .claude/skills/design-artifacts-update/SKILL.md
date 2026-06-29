@@ -109,28 +109,38 @@ The output filename is derived from the `@startuml <name>` identifier. Either us
 
 **PlantUML style guide for deployment diagrams:**
 
-Use plain style with per-component coloring:
+Use UML deployment diagram elements with standard skinparam:
 ```plantuml
 @startuml
-skinparam componentStyle rectangle
-skinparam packageStyle rectangle
-skinparam defaultFontSize 11
-skinparam shadowing false
+skinparam defaultTextAlignment center
+skinparam padding 3
+skinparam nodesep 25
+skinparam ranksep 25
 ```
 
-Color coding by component category:
-- **Infrastructure** (SPDK, NVMe): `#LightGray`
-- **Core data path** (Dispatcher, DispatchMap, MemoryTier): `#LightBlue`
-- **GPU** (GpuServices): `#LightGreen`
-- **Storage** (BlockDevice, ExtentManager): `#Wheat`
-- **Remote/network** (RemoteLookup, RemoteRequestHandler): `#LightCoral`
-- **Support** (Logger, EvictionPolicy): `#White`
-- **Background threads** (BackgroundWriter, Evictor, PipelineRing): `#Khaki`
+**UML element types** — use the correct shape for each concept:
+- `node` — Physical/logical hosts (Client Host, Server Host, certus-server process). Renders as a 3D cube.
+- `component` — Software components (DispatcherComponent, MemoryTierComponent, etc.). Renders as a rectangle with tabs.
+- `database` — Storage (GPU Memory, NVMe devices). Renders as a cylinder.
+- `cloud` — External/remote systems (Peer Certus Nodes).
 
-Apply color with `#Color` suffix on component definitions, e.g.:
-```
-[DispatcherComponent\n<<IDispatcher>>] as dispatcher #LightBlue
-[RemoteLookupComponent\n<<IRemoteLookup>>] as remotelookup #LightCoral
+**Color coding** (apply with `#Color` suffix for profile-specific components):
+- **Remote/network** components: `#LightCoral`
+
+**Example structure** (matches the `full` profile pattern):
+```plantuml
+node "Server Host" {
+    node "certus-server (Rust / tokio)" {
+        component "DispatcherComponent <<IDispatcher>>" as dispatcher {
+            component "BackgroundWriter | BackgroundEvictor\nPipelineRing | warm_stream" as disp_bg
+            component "DataDrive [0..N]\n(BlockDeviceSpdkNvme + ExtentManager)" as data_drive
+        }
+        component "DispatchMapComponent\n<<IDispatchMap>>" as dispatch_map
+        component "RemoteLookupComponent\n<<IRemoteLookup>>" as remote_lookup #LightCoral
+    }
+    database "NVMe (data) [0..N]" as nvme_data
+}
+cloud "Peer Nodes" as peers
 ```
 
 **PlantUML pitfalls to avoid:**

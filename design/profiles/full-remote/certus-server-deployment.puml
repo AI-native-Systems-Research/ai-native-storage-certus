@@ -1,101 +1,91 @@
 @startuml
-skinparam componentStyle rectangle
-skinparam packageStyle rectangle
-skinparam defaultFontSize 11
-skinparam shadowing false
+skinparam defaultTextAlignment center
+skinparam padding 3
+skinparam nodesep 25
+skinparam ranksep 25
 
-title Certus Server — full-remote Profile
+title Certus Server — full-remote Profile Component Deployment
 
-package "Client Process" {
-    [GPU Client\n(vLLM / PyTorch)] as client
-    database "GPU Memory\n(client context)" as client_gpu
-    client --> client_gpu : cudaIpcGetMemHandle
+' ============================================================
+' CLIENT
+' ============================================================
+node "Client Host" {
+    component "Python Test Client\n<<gRPC client>>" as pyclient
+    database "GPU Memory\n(client ctx)" as client_gpu
+    pyclient -right[hidden]- client_gpu
 }
 
-package "certus-server Process" {
-    package "gRPC Service Layer (tonic)" {
-        [Populate / Lookup / Check\nRemove / Touch / ClearMemoryTier\nFlushToSsd] as rpcs
+' ============================================================
+' SERVER
+' ============================================================
+node "Server Host" {
+
+    node "certus-server (Rust / tokio)" {
+
+        component "gRPC Service <<tonic>>\nPopulate | Lookup | Check | Remove | Touch\nClearMemoryTier | FlushToSsd" as grpc
+
+        component "DispatcherComponent <<IDispatcher>>" as dispatcher {
+            component "ParallelBackgroundWriter | BackgroundEvictor\nPipelineRing | warm_stream" as disp_bg
+            component "DataDrive [0..N]\n(BlockDeviceSpdkNvme + ExtentManager)" as data_drive
+        }
+
+        component "DispatchMapComponent\n<<IDispatchMap>>" as dispatch_map
+        component "MemoryTierComponent\n<<IMemoryTier>>" as memory_tier
+        component "EvictionPolicyLruComponent\n<<IEvictionPolicy>>" as eviction
+        component "GpuServicesComponent\n<<IGpuServices>>" as gpu_svc
+        component "LoggerComponent\n<<ILogger>>" as logger
+
+        component "SPDKEnvComponent\n<<ISPDKEnv>>" as spdk_env
+
+        component "RemoteLookupComponent\n<<IRemoteLookup>>" as remote_lookup #LightCoral
+        component "RemoteRequestHandlerComponent\n<<IRemoteRequestHandler>>" as remote_handler #LightCoral
     }
 
-    package "Dispatcher" as disppkg {
-        [DispatcherComponent\n<<IDispatcher>>] as dispatcher #LightBlue
-        [DataDrive 0..N] as drives #Wheat
-        [ParallelBackgroundWriter] as bgwriter #Khaki
-        [BackgroundEvictor] as bgevictor #Khaki
-        [PipelineRing] as pipeline #Khaki
-        [warm_stream] as warmstream #Khaki
-    }
-
-    package "Core Components" {
-        [SPDKEnvComponent\n<<ISPDKEnv>>] as spdk #LightGray
-        [GpuServicesComponent\n<<IGpuServices>>] as gpu #LightGreen
-        [EvictionPolicyLruComponent\n<<IEvictionPolicy>>] as eviction #White
-        [MemoryTierComponent\n<<IMemoryTier>>\nmmap pool + LRU] as memtier #LightBlue
-        [DispatchMapComponent\n<<IDispatchMap>>\nkey -> location index] as dispmap #LightBlue
-        [LoggerComponent\n<<ILogger>>] as logger #White
-    }
-
-    package "DataDrive" as datadrive {
-        [BlockDeviceSpdkNvme\n<<IBlockDevice>>\n<<IBlockDeviceAdmin>>] as blkdev #Wheat
-        [ExtentManager\n<<IExtentManager>>] as extmgr #Wheat
-    }
-
-    package "Remote Cache Layer" as remote_layer {
-        [RemoteLookupComponent\n<<IRemoteLookup>>\nforward misses to peers] as remotelookup #LightCoral
-        [RemoteRequestHandlerComponent\n<<IRemoteRequestHandler>>\nserve incoming RDMA requests] as remotehandler #LightCoral
-    }
+    database "GPU Memory\n(server ctx)" as server_gpu
+    database "NVMe (data) [0..N]" as nvme_data
 }
 
-database "NVMe SSD(s)" as nvme #LightGray
-cloud "Peer Certus Nodes\n(full-remote)" as peers #LightCoral
+cloud "Peer Certus Nodes\n(full-remote)" as peers
 
-' Client connections
-client --> rpcs : gRPC
-client_gpu ..> gpu : CUDA IPC
+' ============================================================
+' CONNECTIONS
+' ============================================================
 
-' gRPC to dispatcher
-rpcs --> dispatcher
+' Client -> Server
+pyclient -down-> grpc : "gRPC/TCP (+TLS)"
+client_gpu .down.> server_gpu : "CUDA IPC"
 
-' Dispatcher receptacles
-dispatcher --> dispmap : dispatch_map
-dispatcher --> memtier : memory_tier
-dispatcher --> gpu : gpu_services
-dispatcher --> spdk : spdk_env
-dispatcher --> remotelookup : remote_lookup
-dispatcher --> logger : logger
+' gRPC -> Dispatcher
+grpc -down-> dispatcher
 
-' DataDrive internals
-drives --> blkdev
-drives --> extmgr
-extmgr --> blkdev : metadata_device
-blkdev --> spdk : spdk_env
-blkdev --> logger
-extmgr --> logger
+' Dispatcher bindings (receptacles)
+dispatcher -down-> dispatch_map
+dispatcher -down-> memory_tier
+dispatcher -down-> gpu_svc
+dispatcher -down-> remote_lookup
+dispatcher ..> logger
+data_drive -down-> spdk_env
 
-' Standard component wiring
-dispmap --> eviction : eviction_policy
-dispmap --> logger
-memtier --> eviction : eviction_policy
-memtier --> logger
-gpu --> logger
-eviction --> logger
-remotelookup --> logger
+' Dispatcher internal
+disp_bg -down-> data_drive
 
-' Remote layer wiring
-remotehandler --> dispatcher : dispatcher
-remotehandler --> logger
+' DispatchMap wiring
+dispatch_map -down-> eviction
 
-' Hardware
-blkdev --> nvme : VFIO/SPDK
-spdk --> nvme : DPDK/EAL
+' MemoryTier wiring
+memory_tier -down-> eviction
 
-' Remote connections
-remotelookup --> peers : RDMA (outgoing)
-peers --> remotehandler : RDMA (incoming)
+' Remote layer
+remote_handler -up-> dispatcher : "dispatcher"
+remote_lookup -down-> peers : "RDMA (outgoing)"
+peers -down-> remote_handler : "RDMA (incoming)"
 
-' Background threads
-bgwriter --> drives : write-through
-bgevictor --> drives : evict extents
-pipeline --> memtier : pipelined reads
+' GPU
+gpu_svc -right-> server_gpu : "DMA"
+gpu_svc .down.> memory_tier : "cudaHostRegister"
+
+' SPDK -> hardware
+spdk_env -down-> nvme_data : "VFIO"
+data_drive ..> nvme_data : "NVMe I/O"
 
 @enduml
