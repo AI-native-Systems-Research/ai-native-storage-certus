@@ -95,10 +95,47 @@ Write to `/home/dwaddington/certus/design/profiles/<profile-name>/`:
 - `design-spec-hit-flow.md` — Lookup/read paths as they work in this profile.
 
 **Diagrams (update to match any topology or flow changes):**
-- `certus-server-deployment.puml` — PlantUML source reflecting the profile's component topology. Update component boxes, receptacle wiring, and background workers to match code.
-- `certus-server-deployment.svg` — Re-render from the `.puml` source if `plantuml` is available, otherwise leave as-is and note in the report.
+- `certus-server-deployment.puml` — PlantUML source reflecting the profile's component topology. Use color to distinguish component categories (see style guide below). Update component boxes, receptacle wiring, and background workers to match code.
+- `certus-server-deployment.svg` — Render from `.puml` (see rendering instructions below).
 - `design-spec-put-flow.svg` — Update if the put-flow steps changed.
 - `design-spec-hit-flow.svg` — Update if the hit-flow steps changed.
+
+**PlantUML rendering:**
+```bash
+java -jar ~/.vscode-server/data/User/globalStorage/justuskarlsson.plan-uml/plantuml-1.2025.10.jar \
+    -tsvg <file>.puml -o <output-dir>/
+```
+The output filename is derived from the `@startuml <name>` identifier. Either use `@startuml` without a name (output matches input filename) or rename the output file afterward.
+
+**PlantUML style guide for deployment diagrams:**
+
+Use plain style with per-component coloring:
+```plantuml
+@startuml
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+skinparam defaultFontSize 11
+skinparam shadowing false
+```
+
+Color coding by component category:
+- **Infrastructure** (SPDK, NVMe): `#LightGray`
+- **Core data path** (Dispatcher, DispatchMap, MemoryTier): `#LightBlue`
+- **GPU** (GpuServices): `#LightGreen`
+- **Storage** (BlockDevice, ExtentManager): `#Wheat`
+- **Remote/network** (RemoteLookup, RemoteRequestHandler): `#LightCoral`
+- **Support** (Logger, EvictionPolicy): `#White`
+- **Background threads** (BackgroundWriter, Evictor, PipelineRing): `#Khaki`
+
+Apply color with `#Color` suffix on component definitions, e.g.:
+```
+[DispatcherComponent\n<<IDispatcher>>] as dispatcher #LightBlue
+[RemoteLookupComponent\n<<IRemoteLookup>>] as remotelookup #LightCoral
+```
+
+**PlantUML pitfalls to avoid:**
+- Never nest `[]` inside component names — e.g., `[DataDrive[0..N]]` is invalid. Use `[DataDrive 0..N]` instead.
+- Always verify the `.puml` renders without errors before reporting success.
 
 Preserve existing writing style when updating. When creating from scratch, use the `full` profile's documents as a style reference.
 
