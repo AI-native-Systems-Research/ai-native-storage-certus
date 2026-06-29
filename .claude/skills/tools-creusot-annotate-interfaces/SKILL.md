@@ -262,6 +262,8 @@ As the final action, ensure you are back on the branch recorded in step 1:
 git checkout $ORIGINAL_BRANCH
 ```
 
+Do not commit annotation changes to interface .rs files.
+
 If changes were stashed in step 1, pop them: `git stash pop`
 
 This guarantees the user's working state is restored regardless of which branches were visited during the skill execution.
