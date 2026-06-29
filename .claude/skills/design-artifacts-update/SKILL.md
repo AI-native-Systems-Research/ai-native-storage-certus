@@ -1,24 +1,41 @@
 ---
 name: design-artifacts-update
-description: Update design artifacts in certus/design/ to reflect the current codebase
+description: Update or create design artifacts for a certus-server-yaml profile
+argument-hint: "[profile-name]"
 ---
 
-Update the architectural design documents in `/home/dwaddington/certus/design/` so they accurately reflect the current state of the code. The design directory is a separate working directory from the main repository.
+Create or update architectural design documents for a specific certus-server-yaml profile. Design files are stored per-profile at `/home/dwaddington/certus/design/profiles/<profile-name>/`.
+
+## Interactive Configuration
+
+Before starting, ask the user which **profile** to generate design artifacts for.
+
+Available profiles can be listed from `apps/certus-server-yaml/profiles/` (e.g., `full`, `full-p2p`, `full-remote`, `full-fs-block`, `full-kernel-block`, `minimal`).
+
+If the user provided a profile name as an argument, use that. Otherwise, present the available profiles and ask.
 
 ## Design Artifacts
 
-The following files in `/home/dwaddington/certus/design/` must be kept in sync with the code:
+Each profile directory contains markdown documents and their corresponding visual diagrams:
 
 | File | Purpose |
 |------|---------|
 | `SYSTEM.md` | Master architecture reference — components, interfaces, data flows, concurrency model, design decisions |
 | `certus-server-deployment.md` | Component topology diagram — receptacles, wiring, initialization order |
+| `certus-server-deployment.puml` | PlantUML source for the deployment diagram |
+| `certus-server-deployment.svg` | Rendered SVG of the deployment diagram |
 | `design-spec-put-flow.md` | Populate/write data path (GPU → DRAM → SSD) |
+| `design-spec-put-flow.svg` | Flow diagram for the put path |
 | `design-spec-hit-flow.md` | Lookup/read data paths (warm: DRAM → GPU, cold: SSD → DRAM → GPU) |
+| `design-spec-hit-flow.svg` | Flow diagram for the hit path |
 
 ## Workflow
 
-### 1. Gather Current Code State
+### 1. Read the Profile YAML
+
+Read `apps/certus-server-yaml/profiles/<profile-name>.yaml` to understand which components are composed for this profile — what dispatcher variant is used, which block device backend, what optional features are enabled.
+
+### 2. Gather Current Code State
 
 Read the following source files to establish ground truth:
 
@@ -32,12 +49,14 @@ Read the following source files to establish ground truth:
 - `components/interfaces/src/ispdk_env.rs` — `ISPDKEnv` trait
 - `components/interfaces/src/lib.rs` — Re-exports and shared types
 
-**Component implementations** (fields, receptacles, internal structure):
+**Component implementations** relevant to the profile (fields, receptacles, internal structure):
 - `components/dispatcher/src/lib.rs` — `define_component!` block and core logic
-- `components/dispatcher-p2p/src/lib.rs` — P2P variant if applicable
+- `components/dispatcher-p2p/src/lib.rs` — P2P variant (if profile uses it)
 - `components/dispatch-map/src/lib.rs`
 - `components/memory-tier/src/lib.rs`
-- `components/block-device-spdk-nvme/src/lib.rs`
+- `components/block-device-spdk-nvme/src/lib.rs` — (if profile uses SPDK NVMe)
+- `components/block-device-filesys/src/lib.rs` — (if profile uses filesystem backend)
+- `components/block-device-kernel/src/lib.rs` — (if profile uses kernel backend)
 - `components/extent-manager/src/lib.rs`
 - `components/gpu-services/src/lib.rs`
 - `components/spdk-env/src/lib.rs`
@@ -51,13 +70,13 @@ Read the following source files to establish ground truth:
 **Workspace structure**:
 - Root `Cargo.toml` — workspace members and default-members
 
-### 2. Read Each Design Artifact
+### 3. Check for Existing Design Files
 
-Read all four `.md` files in `/home/dwaddington/certus/design/` in full.
+If `/home/dwaddington/certus/design/profiles/<profile-name>/` already exists, read the existing `.md` files and update them in place (preserving structure and style). If the directory does not exist, create it and generate the four design files from scratch based on the profile's component composition.
 
-### 3. Identify Drift
+### 4. Identify Drift (update mode)
 
-Compare the design documents against the code and note discrepancies:
+When updating existing files, compare the design documents against the code and note discrepancies:
 
 - **Interface changes**: Methods added, removed, or renamed; signature changes (parameters, return types); new error variants
 - **Component changes**: New/removed fields or receptacles in `define_component!` blocks; new components added to the workspace
@@ -65,50 +84,54 @@ Compare the design documents against the code and note discrepancies:
 - **Topology changes**: New components, changed wiring, new background threads/workers
 - **Build/feature changes**: New cargo features, profiles, or conditional compilation gates
 
-### 4. Update Each Document
+### 5. Write or Update Documents and Diagrams
 
-Edit each `.md` file **in place**, preserving:
-- The existing document structure, headings, and style
-- ASCII diagrams (update them if topology changed)
-- The level of detail and explanatory prose
+Write to `/home/dwaddington/certus/design/profiles/<profile-name>/`:
 
-Correct:
-- Method lists and signatures
-- Component field/receptacle enumerations
-- Step-by-step flow descriptions
-- Workspace layout listings
-- Any factual claims about behavior that no longer match the code
+**Markdown documents:**
+- `SYSTEM.md` — Focus on components and data flows **specific to this profile**. Document which dispatcher variant, block device backend, and optional features are active.
+- `certus-server-deployment.md` — Component topology for this profile's composition.
+- `design-spec-put-flow.md` — Populate/write path as it works in this profile.
+- `design-spec-hit-flow.md` — Lookup/read paths as they work in this profile.
 
-**Do not** add speculative content or document unfinished/experimental features. Only document what the code currently implements.
+**Diagrams (update to match any topology or flow changes):**
+- `certus-server-deployment.puml` — PlantUML source reflecting the profile's component topology. Update component boxes, receptacle wiring, and background workers to match code.
+- `certus-server-deployment.svg` — Re-render from the `.puml` source if `plantuml` is available, otherwise leave as-is and note in the report.
+- `design-spec-put-flow.svg` — Update if the put-flow steps changed.
+- `design-spec-hit-flow.svg` — Update if the hit-flow steps changed.
 
-### 5. Report
+Preserve existing writing style when updating. When creating from scratch, use the `full` profile's documents as a style reference.
 
-After updating, print a summary of changes made to each file:
+**Do not** add speculative content or document unfinished/experimental features. Only document what the code currently implements for the selected profile.
+
+### 6. Report
+
+After completing, print a summary:
 
 ```
-Design Artifacts Updated:
-─────────────────────────
+Design Artifacts for profile '<profile-name>':
+──────────────────────────────────────────────
+Directory: certus/design/profiles/<profile-name>/
+
 SYSTEM.md:
-  - Updated IDispatcher method list (added reserve_memory, populate_memory, memory_populated, release_memory; removed populate_async, populate_finalize)
-  - Added new component: dispatcher-p2p
-  - ...
+  - [created | updated: <list of changes>]
 
 certus-server-deployment.md:
-  - Updated dispatcher receptacles
-  - ...
+  - [created | updated: <list of changes>]
 
 design-spec-put-flow.md:
-  - (no changes needed)
+  - [created | updated: <list of changes>]
 
 design-spec-hit-flow.md:
-  - Updated cold path step 4 to reflect new pipeline ring behavior
-  - ...
+  - [created | updated: <list of changes>]
 ```
 
 ## Important Notes
 
 - The design directory is at `/home/dwaddington/certus/design/`, NOT inside the main repo. It is a separate working directory.
+- Each profile gets its own subdirectory under `certus/design/profiles/`.
 - Preserve the existing writing style — these are human-authored design documents, not generated API docs.
 - When in doubt about intent (e.g., a method exists but is clearly a placeholder/TODO), keep the existing design text and note the discrepancy in the report rather than documenting placeholder code.
-- Do not modify the `.svg`, `.puml`, or `.pptx` files — only update the `.md` files.
+- Visual artifacts (`.svg`, `.puml`) live alongside the `.md` files in each profile directory and must be updated when topology or flows change.
 - If a design document section describes a future/planned feature that isn't implemented yet, leave it as-is (it represents design intent).
+- Profile-specific details (e.g., P2P ring in `full-p2p`, filesystem backend in `full-fs-block`) should be prominent in that profile's docs — don't include irrelevant components.
