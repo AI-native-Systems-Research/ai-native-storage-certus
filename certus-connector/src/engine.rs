@@ -516,14 +516,14 @@ impl EngineInner {
             };
 
             // Async DMA from GPU into the DRAM slot reserved by prepare_store.
-            if let Err(e) = self.dispatcher.copy_gpu_to_memory_async(*key, handle, stream) {
-                let msg = format!("{e:?}");
-                if msg.contains("AlreadyExists") {
-                    continue;
+            match self.dispatcher.copy_gpu_to_memory_async(*key, handle, stream) {
+                Ok(()) => {}
+                Err(interfaces::DispatcherError::AlreadyExists(_)) => continue,
+                Err(e) => {
+                    eprintln!("[certus] store_async copy_gpu_to_memory_async failed key={key} block_id={block_id}: {e:?}");
+                    all_ok = false;
+                    break;
                 }
-                eprintln!("[certus] store_async copy_gpu_to_memory_async failed key={key} block_id={block_id}: {msg}");
-                all_ok = false;
-                break;
             }
         }
 
