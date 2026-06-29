@@ -11,7 +11,7 @@ use pyo3::types::PyDict;
 
 use component_core::query_interface;
 use interfaces::{
-    CacheKey, DispatcherConfig, DispatcherError, DmaAllocFn, DmaBuffer, GpuStream, IDispatchMap,
+    CacheKey, DispatcherConfig, DmaAllocFn, DmaBuffer, GpuStream, IDispatchMap,
     IDispatcher, IEvictionPolicy, IGpuServices, ILogger, IMemoryTier, IpcHandle, LookupResult,
 };
 
@@ -247,20 +247,20 @@ impl EngineInner {
         Ok(count)
     }
 
-    /// Check which keys need storing. Returns (keys_to_store, evicted_keys).
-    /// DRAM eviction is handled inside populate_async (dispatcher's
-    /// evict_for_space) which transitions entries to BlockDevice state,
-    /// preserving the check() → true invariant for NVMe-resident blocks.
+    /// Check which keys need storing and reserve DRAM for them.
+    /// Returns None if DRAM allocation fails (graceful backpressure).
     pub fn prepare_store(&self, keys: &[u64]) -> PyResult<Option<(Vec<u64>, Vec<u64>)>> {
         self.ensure_init()?;
         let cache_keys = keys::to_cache_keys(keys);
         let mut to_store = Vec::new();
+        let mut to_store_cache_keys = Vec::new();
 
         for (i, key) in cache_keys.iter().enumerate() {
             match self.dispatcher.check(*key) {
                 Ok(true) => {}
                 Ok(false) | Err(_) => {
                     to_store.push(keys[i]);
+                    to_store_cache_keys.push(*key);
                 }
             }
         }
@@ -269,17 +269,49 @@ impl EngineInner {
             return Ok(Some((vec![], vec![])));
         }
 
+        // Reserve DRAM slots for all keys that need storing.
+        // If any reservation fails, release all prior reservations and return None.
+        let size = self.gpu_block_size as u32;
+        let mut reserved = Vec::new();
+        for key in &to_store_cache_keys {
+            match self.dispatcher.reserve_memory(*key, size) {
+                Ok(_ptr) => {
+                    reserved.push(*key);
+                }
+                Err(_) => {
+                    for rkey in &reserved {
+                        let _ = self.dispatcher.release_memory(*rkey);
+                    }
+                    return Ok(None);
+                }
+            }
+        }
+
         Ok(Some((to_store, vec![])))
     }
 
     /// Finalize or abort a store operation.
+    ///
+    /// On success: registers each key in the dispatch-map and enqueues SSD write-through.
+    /// On failure: releases the reserved DRAM slots.
     pub fn complete_store(&self, keys: &[u64], success: bool) -> PyResult<()> {
         self.ensure_init()?;
-        if !success {
-            let cache_keys = keys::to_cache_keys(keys);
+        let cache_keys = keys::to_cache_keys(keys);
+        let size = self.gpu_block_size as u32;
+
+        if success {
+            for key in &cache_keys {
+                if let Err(_e) = self.dispatcher.memory_populated(*key, size) {
+                    continue;
+                }
+                self.entry_count.fetch_add(1, Ordering::Release);
+            }
+        } else {
             for key in &cache_keys {
                 if self.dispatcher.remove(*key).is_ok() {
                     self.entry_count.fetch_sub(1, Ordering::Release);
+                } else {
+                    let _ = self.dispatcher.release_memory(*key);
                 }
             }
         }
@@ -450,10 +482,10 @@ impl EngineInner {
         Ok(all_ok)
     }
 
-    /// Submit async GPU→DRAM→NVMe transfer (store).
+    /// Submit GPU→DRAM transfer (store).
     ///
-    /// Issues all D2H DMA copies via `populate_async` without blocking.
-    /// Completion is detected by `poll_completions` via `stream_query`.
+    /// DMA-copies each block from GPU into the pre-reserved DRAM slot.
+    /// The slots were allocated by `prepare_store` via `reserve_memory`.
     pub fn store_async(&self, job_id: u64, gpu_block_ids: &[u64], keys: &[u64]) -> PyResult<bool> {
         self.ensure_init()?;
 
@@ -465,9 +497,6 @@ impl EngineInner {
 
         let cache_keys = keys::to_cache_keys(keys);
 
-        // Issue async DMA for each block BEFORE inserting into the jobs map.
-        // This avoids a race where poll_completions sees the job with stream=None.
-        let mut last_stream: Option<GpuStream> = None;
         let mut all_ok = true;
         for (i, key) in cache_keys.iter().enumerate() {
             let block_id = gpu_block_ids[i];
@@ -478,34 +507,25 @@ impl EngineInner {
                 size: self.gpu_block_size as u32,
             };
 
-            match self.dispatcher.populate_async(*key, handle) {
-                Ok(stream) => {
-                    if !stream.0.is_null() {
-                        last_stream = Some(stream);
-                    } else {
-                        self.entry_count.fetch_add(1, Ordering::Release);
-                    }
+            // DMA from GPU into the DRAM slot reserved by prepare_store.
+            if let Err(e) = self.dispatcher.populate_memory(*key, handle) {
+                let msg = format!("{e:?}");
+                if msg.contains("AlreadyExists") {
+                    continue;
                 }
-                Err(e) => {
-                    let msg = format!("{e:?}");
-                    if msg.contains("already exists") || msg.contains("AlreadyExists") {
-                        continue;
-                    }
-                    eprintln!("[certus] store_async populate_async failed key={key} block_id={block_id}: {msg}");
-                    all_ok = false;
-                    break;
-                }
+                eprintln!("[certus] store_async populate_memory failed key={key} block_id={block_id}: {msg}");
+                all_ok = false;
+                break;
             }
         }
 
-        let completed = !all_ok || last_stream.is_none();
         let job = Arc::new(TransferJob {
             kind: JobKind::Store,
             keys: cache_keys.clone(),
             gpu_block_ids: gpu_block_ids.to_vec(),
-            completed: AtomicBool::new(completed),
+            completed: AtomicBool::new(true),
             success: AtomicBool::new(all_ok),
-            stream: Mutex::new(last_stream),
+            stream: Mutex::new(None),
         });
 
         {
@@ -579,7 +599,7 @@ impl EngineInner {
     ///
     /// Both stores and loads share the same CUDA stream. A single
     /// `stream_synchronize` covers all in-flight DMA in both directions.
-    /// Store jobs additionally need `populate_finalize` to register entries.
+    /// Store jobs additionally need `memory_populated` to register entries.
     pub fn poll_completions(&self) -> PyResult<Vec<(u64, bool)>> {
         self.ensure_init()?;
         let mut completions = Vec::new();
@@ -611,18 +631,19 @@ impl EngineInner {
                 let job = jobs.get(id).unwrap();
                 let mut all_ok = true;
 
-                // Store jobs need populate_finalize to register in dispatch-map.
+                // Store jobs: memory_populated registers in dispatch-map.
                 // Load jobs are already committed — just need the stream sync.
                 if job.kind == JobKind::Store {
+                    let size = self.gpu_block_size as u32;
                     for key in &job.keys {
-                        match self.dispatcher.populate_finalize(*key) {
+                        match self.dispatcher.memory_populated(*key, size) {
                             Ok(()) => {
                                 self.entry_count.fetch_add(1, Ordering::Release);
                             }
                             Err(interfaces::DispatcherError::KeyNotFound(_)) => {}
                             Err(interfaces::DispatcherError::AlreadyExists(_)) => {}
                             Err(e) => {
-                                eprintln!("[certus] populate_finalize failed key={key}: {e:?}");
+                                eprintln!("[certus] memory_populated failed key={key}: {e:?}");
                                 all_ok = false;
                             }
                         }
@@ -653,7 +674,7 @@ impl EngineInner {
     /// Block until a specific job completes.
     ///
     /// For in-flight store jobs, synchronizes the CUDA stream (blocking)
-    /// then calls `populate_finalize` for each key.
+    /// then calls `memory_populated` for each key.
     pub fn wait_job(&self, job_id: u64) -> PyResult<()> {
         self.ensure_init()?;
 
@@ -681,13 +702,14 @@ impl EngineInner {
 
             let mut all_ok = true;
             if job.kind == JobKind::Store {
+                let size = self.gpu_block_size as u32;
                 for key in &job.keys {
-                    match self.dispatcher.populate_finalize(*key) {
+                    match self.dispatcher.memory_populated(*key, size) {
                         Ok(()) => {
                             self.entry_count.fetch_add(1, Ordering::Release);
                         }
                         Err(e) => {
-                            eprintln!("[certus] wait_job populate_finalize failed key={key}: {e:?}");
+                            eprintln!("[certus] wait_job memory_populated failed key={key}: {e:?}");
                             all_ok = false;
                         }
                     }
