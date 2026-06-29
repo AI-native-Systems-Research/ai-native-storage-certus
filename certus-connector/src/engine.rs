@@ -53,6 +53,7 @@ pub struct EngineInner {
     jobs: Mutex<HashMap<u64, Arc<TransferJob>>>,
     next_internal_id: AtomicU64,
     initialized: AtomicBool,
+    store_stream: GpuStream,
 }
 
 impl EngineInner {
@@ -202,6 +203,10 @@ impl EngineInner {
             })
             .map_err(|e| PyRuntimeError::new_err(format!("Dispatcher init failed: {e}")))?;
 
+        let store_stream = gpu.create_stream().map_err(|e| {
+            PyRuntimeError::new_err(format!("failed to create store stream: {e}"))
+        })?;
+
         Ok(Self {
             dispatcher,
             dispatch_map: dm,
@@ -212,6 +217,7 @@ impl EngineInner {
             jobs: Mutex::new(HashMap::new()),
             next_internal_id: AtomicU64::new(0),
             initialized: AtomicBool::new(true),
+            store_stream,
         })
     }
 
@@ -301,7 +307,7 @@ impl EngineInner {
 
         if success {
             for key in &cache_keys {
-                if let Err(_e) = self.dispatcher.memory_populated(*key, size) {
+                if let Err(_e) = self.dispatcher.copy_gpu_to_memory_completed(*key, size) {
                     continue;
                 }
                 self.entry_count.fetch_add(1, Ordering::Release);
@@ -497,6 +503,8 @@ impl EngineInner {
 
         let cache_keys = keys::to_cache_keys(keys);
 
+        let stream = self.store_stream;
+
         let mut all_ok = true;
         for (i, key) in cache_keys.iter().enumerate() {
             let block_id = gpu_block_ids[i];
@@ -507,25 +515,26 @@ impl EngineInner {
                 size: self.gpu_block_size as u32,
             };
 
-            // DMA from GPU into the DRAM slot reserved by prepare_store.
-            if let Err(e) = self.dispatcher.populate_memory(*key, handle) {
-                let msg = format!("{e:?}");
-                if msg.contains("AlreadyExists") {
-                    continue;
+            // Async DMA from GPU into the DRAM slot reserved by prepare_store.
+            match self.dispatcher.copy_gpu_to_memory_async(*key, handle, stream) {
+                Ok(()) => {}
+                Err(interfaces::DispatcherError::AlreadyExists(_)) => continue,
+                Err(e) => {
+                    eprintln!("[certus] store_async copy_gpu_to_memory_async failed key={key} block_id={block_id}: {e:?}");
+                    all_ok = false;
+                    break;
                 }
-                eprintln!("[certus] store_async populate_memory failed key={key} block_id={block_id}: {msg}");
-                all_ok = false;
-                break;
             }
         }
 
+        let completed = !all_ok;
         let job = Arc::new(TransferJob {
             kind: JobKind::Store,
             keys: cache_keys.clone(),
             gpu_block_ids: gpu_block_ids.to_vec(),
-            completed: AtomicBool::new(true),
+            completed: AtomicBool::new(completed),
             success: AtomicBool::new(all_ok),
-            stream: Mutex::new(None),
+            stream: Mutex::new(Some(stream)),
         });
 
         {
@@ -599,7 +608,7 @@ impl EngineInner {
     ///
     /// Both stores and loads share the same CUDA stream. A single
     /// `stream_synchronize` covers all in-flight DMA in both directions.
-    /// Store jobs additionally need `memory_populated` to register entries.
+    /// Store jobs additionally need `copy_gpu_to_memory_completed` to register entries.
     pub fn poll_completions(&self) -> PyResult<Vec<(u64, bool)>> {
         self.ensure_init()?;
         let mut completions = Vec::new();
@@ -612,47 +621,42 @@ impl EngineInner {
             .map(|(id, _)| *id)
             .collect();
 
-        if !in_flight_ids.is_empty() {
-            // All jobs share the same CUDA stream. Synchronize it once —
-            // this blocks until ALL pending DMA ops complete (typically sub-ms).
-            let stream_ptr = {
-                let first_job = jobs.get(&in_flight_ids[0]).unwrap();
-                first_job.stream.lock().unwrap().take()
-            };
+        for id in &in_flight_ids {
+            let job = jobs.get(id).unwrap();
 
-            if let Some(stream) = stream_ptr {
+            let stream_opt = { job.stream.lock().unwrap().take() };
+            if let Some(stream) = stream_opt {
                 if let Err(e) = self.gpu_services.stream_synchronize(stream) {
                     eprintln!("[certus] stream_synchronize failed: {e}");
+                    job.completed.store(true, Ordering::Release);
+                    job.success.store(false, Ordering::Release);
+                    continue;
                 }
             }
 
-            // Stream is synchronized — finalize all in-flight jobs.
-            for id in &in_flight_ids {
-                let job = jobs.get(id).unwrap();
-                let mut all_ok = true;
+            let mut all_ok = true;
 
-                // Store jobs: memory_populated registers in dispatch-map.
-                // Load jobs are already committed — just need the stream sync.
-                if job.kind == JobKind::Store {
-                    let size = self.gpu_block_size as u32;
-                    for key in &job.keys {
-                        match self.dispatcher.memory_populated(*key, size) {
-                            Ok(()) => {
-                                self.entry_count.fetch_add(1, Ordering::Release);
-                            }
-                            Err(interfaces::DispatcherError::KeyNotFound(_)) => {}
-                            Err(interfaces::DispatcherError::AlreadyExists(_)) => {}
-                            Err(e) => {
-                                eprintln!("[certus] memory_populated failed key={key}: {e:?}");
-                                all_ok = false;
-                            }
+            // Store jobs: copy_gpu_to_memory_completed registers in dispatch-map.
+            // Load jobs are already committed — just need the stream sync.
+            if job.kind == JobKind::Store {
+                let size = self.gpu_block_size as u32;
+                for key in &job.keys {
+                    match self.dispatcher.copy_gpu_to_memory_completed(*key, size) {
+                        Ok(()) => {
+                            self.entry_count.fetch_add(1, Ordering::Release);
+                        }
+                        Err(interfaces::DispatcherError::KeyNotFound(_)) => {}
+                        Err(interfaces::DispatcherError::AlreadyExists(_)) => {}
+                        Err(e) => {
+                            eprintln!("[certus] copy_gpu_to_memory_completed failed key={key}: {e:?}");
+                            all_ok = false;
                         }
                     }
                 }
-
-                job.completed.store(true, Ordering::Release);
-                job.success.store(all_ok, Ordering::Release);
             }
+
+            job.completed.store(true, Ordering::Release);
+            job.success.store(all_ok, Ordering::Release);
         }
 
         // Second pass: collect all completed jobs.
@@ -674,7 +678,7 @@ impl EngineInner {
     /// Block until a specific job completes.
     ///
     /// For in-flight store jobs, synchronizes the CUDA stream (blocking)
-    /// then calls `memory_populated` for each key.
+    /// then calls `copy_gpu_to_memory_completed` for each key.
     pub fn wait_job(&self, job_id: u64) -> PyResult<()> {
         self.ensure_init()?;
 
@@ -704,12 +708,14 @@ impl EngineInner {
             if job.kind == JobKind::Store {
                 let size = self.gpu_block_size as u32;
                 for key in &job.keys {
-                    match self.dispatcher.memory_populated(*key, size) {
+                    match self.dispatcher.copy_gpu_to_memory_completed(*key, size) {
                         Ok(()) => {
                             self.entry_count.fetch_add(1, Ordering::Release);
                         }
+                        Err(interfaces::DispatcherError::KeyNotFound(_)) => {}
+                        Err(interfaces::DispatcherError::AlreadyExists(_)) => {}
                         Err(e) => {
-                            eprintln!("[certus] wait_job memory_populated failed key={key}: {e:?}");
+                            eprintln!("[certus] wait_job copy_gpu_to_memory_completed failed key={key}: {e:?}");
                             all_ok = false;
                         }
                     }

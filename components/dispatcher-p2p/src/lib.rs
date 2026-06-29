@@ -1851,11 +1851,18 @@ impl IDispatcher for DispatcherP2pComponent {
         // Phase 1: Evict if needed and allocate memory-tier slot.
         let _mem_ptr = self.reserve_memory(key, size)?;
 
-        // Phase 2: DMA copy from GPU into the reserved slot.
-        self.populate_memory(key, ipc_handle)?;
+        // Phase 2: Async DMA into the reserved slot, then synchronize.
+        let gpu = self
+            .gpu_services
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
+        let stream = GpuStream(self.warm_stream.load(Ordering::Acquire) as *mut std::ffi::c_void);
+        self.copy_gpu_to_memory_async(key, ipc_handle, stream)?;
+        gpu.stream_synchronize(stream)
+            .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
 
         // Phase 3: Register in dispatch-map and enqueue SSD write-through.
-        self.memory_populated(key, size)?;
+        self.copy_gpu_to_memory_completed(key, size)?;
 
         Ok(())
     }
@@ -1892,7 +1899,7 @@ impl IDispatcher for DispatcherP2pComponent {
         Ok(mem_ptr)
     }
 
-    fn populate_memory(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError> {
+    fn copy_gpu_to_memory_async(&self, key: CacheKey, ipc_handle: IpcHandle, stream: GpuStream) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
 
         let mt = self
@@ -1921,14 +1928,15 @@ impl IDispatcher for DispatcherP2pComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
 
-        gpu.dma_copy_to_host(
+        gpu.dma_copy_to_host_async(
             ipc_handle.address as *const std::ffi::c_void,
             &temp_buf,
             ipc_handle.size as usize,
+            stream,
         )
         .map_err(|e| {
             let _ = mt.remove(key);
-            DispatcherError::IoError(format!("GPU DMA copy failed: {e}"))
+            DispatcherError::IoError(format!("GPU async DMA copy failed: {e}"))
         })?;
 
         // Don't let the noop-free wrapper be dropped (it would call noop_free, which is fine, but let's be explicit).
@@ -1936,7 +1944,7 @@ impl IDispatcher for DispatcherP2pComponent {
         Ok(())
     }
 
-    fn memory_populated(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError> {
+    fn copy_gpu_to_memory_completed(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
 
         let dm = self
