@@ -5,7 +5,11 @@ from dataclasses import dataclass, field
 
 @dataclass
 class SimConfig:
-    """All simulation parameters: capacity, timing, and pipeline configuration."""
+    """All simulation parameters: capacity, timing, and pipeline configuration.
+
+    Matches the Rust DispatcherConfig (components/interfaces/src/idispatcher.rs)
+    plus timing parameters for discrete-event simulation.
+    """
 
     # --- Drive topology ---
     num_drives: int = 4
@@ -43,6 +47,9 @@ class SimConfig:
 
     # --- Write-through ---
     write_through_enabled: bool = True
+
+    # --- Backfill (SSD->DRAM promotion throttle) ---
+    backfill_delay_us: float = 10_000.0  # 10ms default (matches Rust backfill_delay_ms=10)
 
     # --- Derived helpers ---
     def segments_per_entry(self) -> int:
