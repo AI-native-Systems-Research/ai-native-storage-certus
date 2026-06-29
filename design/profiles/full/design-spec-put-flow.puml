@@ -1,0 +1,56 @@
+@startuml
+skinparam shadowing false
+skinparam defaultFontSize 11
+
+title Cache Put / Populate Flow (full)
+
+participant "Client\n(Python/gRPC)" as client
+participant "gRPC Service\n(tonic)" as grpc
+participant "Dispatcher" as disp
+participant "MemoryTier\n(DRAM pool)" as mt
+participant "DispatchMap" as dm
+participant "BackgroundWriter" as bgw
+participant "ExtentManager" as em
+participant "BlockDevice\n(NVMe SSD)" as ssd
+
+== Synchronous Path (client-visible) ==
+
+client -> grpc: BatchPopulateRequest\n(key, IpcHandle)
+grpc -> grpc: cudaIpcOpenMemHandle\n-> device_ptr
+grpc -> disp: populate(key, IpcHandle)
+
+disp -> mt: evict_lru() if pool full
+note right of mt: LRU entries with\ncompleted write-through\nare eligible
+
+disp -> mt: insert(key, size)\n-> mem_ptr
+note right of mt: First-fit alloc from\nmmap'd CUDA-pinned pool
+
+disp -> disp: cudaMemcpy D2H\n(GPU -> mem_ptr)
+note right of disp: Zero-copy into\npinned memory-tier slot
+
+disp -> dm: create_memory_tier_entry\n(key, ptr, size)
+note right of dm: Entry visible to\ncheck/lookup immediately
+
+disp -> dm: downgrade_reference\n(write -> read)
+
+disp --> grpc: Ok
+grpc -> grpc: cudaIpcCloseMemHandle
+grpc --> client: BatchPopulateResponse\n(success)
+
+== Asynchronous Write-Through ==
+
+disp -> bgw: enqueue WriteJob\n(key, size, drive_idx)
+bgw -> mt: get(key) -> (ptr, size)
+bgw -> em: reserve_extent(key, size)\n-> WriteHandle
+bgw -> ssd: write segments\n(MDTS-aware chunked I/O)
+note right of ssd: Split into max_transfer_size\nchunks, each via WriteSync
+
+bgw -> em: publish()\n(finalize extent)
+bgw -> dm: convert_to_storage\n(key, block_offset)
+note right of dm: ssd_offset set;\nentry now durable
+
+bgw -> dm: release_read(key)
+
+note over mt, ssd: Entry exists in BOTH DRAM and SSD.\nLookups served from DRAM (warm).\nIf evicted from DRAM -> served from SSD (cold).
+
+@enduml

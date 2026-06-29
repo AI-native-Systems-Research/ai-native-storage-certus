@@ -1,0 +1,71 @@
+@startuml
+skinparam shadowing false
+skinparam defaultFontSize 11
+
+title Cache Get / Lookup Flow (full)
+
+participant "Client\n(Python/gRPC)" as client
+participant "gRPC Service\n(tonic)" as grpc
+participant "Dispatcher" as disp
+participant "MemoryTier\n(DRAM pool)" as mt
+participant "DispatchMap" as dm
+participant "PipelineRing" as pr
+participant "BlockDevice\n(NVMe SSD)" as ssd
+
+== Warm Path (MemoryTier -> GPU) ==
+
+client -> grpc: BatchLookupRequest\n(key, IpcHandle)
+grpc -> grpc: cudaIpcOpenMemHandle\n-> device_ptr
+grpc -> disp: lookup(key, IpcHandle)
+
+disp -> dm: lookup(key) + take_read
+dm --> disp: MemoryTier { ptr, size }
+
+disp -> disp: cudaMemcpyAsync H2D\n(mem_ptr -> GPU, warm_stream)
+note right of disp: Zero-copy from\npinned memory-tier pool
+
+disp -> dm: release_read(key)
+disp -> mt: touch(key)
+note right of mt: Refresh LRU timestamp
+
+disp --> grpc: Ok(stream_handle)
+grpc -> grpc: cudaIpcCloseMemHandle
+grpc --> client: BatchLookupResponse\n(success)
+
+== Cold Path (BlockDevice -> MemoryTier -> GPU) ==
+
+client -> grpc: BatchLookupRequest\n(key, IpcHandle)
+grpc -> disp: lookup(key, IpcHandle)
+
+disp -> dm: lookup(key) + take_read
+dm --> disp: BlockDevice { offset }
+disp -> dm: release_read(key)
+
+disp -> mt: evict_lru() if pool full
+disp -> mt: insert(key, size)\n-> new_ptr
+
+disp -> pr: pipelined_read(offset, size)
+note right of pr: 8 CUDA-pinned SPDK-registered\nbuffers, 2 CUDA streams
+pr -> ssd: NVMe read (chunked at MDTS)
+ssd --> pr: data chunks
+pr -> mt: copy chunks to new_ptr
+pr -> disp: cudaMemcpyAsync H2D\n(overlapped with I/O)
+
+disp -> dm: create_memory_tier_entry\n(key, new_ptr, size)
+note right of dm: Promoted: BlockDevice -> MemoryTier\nssd_offset preserved
+
+disp --> grpc: Ok(stream_handle)
+grpc --> client: BatchLookupResponse\n(success)
+
+== Cache Miss ==
+
+client -> grpc: BatchLookupRequest\n(key, IpcHandle)
+grpc -> disp: lookup(key, IpcHandle)
+
+disp -> dm: lookup(key)
+dm --> disp: NotExist
+
+disp --> grpc: KeyNotFound
+grpc --> client: BatchLookupResponse\n(key_not_found)
+
+@enduml
