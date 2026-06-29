@@ -4,10 +4,18 @@
 Simulates the certus-server two-tier GPU cache (DRAM memory-tier + NVMe SSDs)
 with realistic pipeline stage timing based on the system specifications.
 
+Matches the Rust IDispatcher trait with three-phase populate, direct-write
+(prepare_store/commit_store), per-drive background write-through, and
+pipelined SSD->DRAM->GPU cold promotion.
+
 Examples:
     # Synthetic workload: populate 1000 entries, lookup 5000, 4 drives, 64 MiB memory tier
     python run_sim.py --synthetic-populate 1000 --synthetic-lookup 5000 \\
         --num-drives 4 --memory-tier-size 64M --entry-size 128K
+
+    # Mixed workload with direct-write path
+    python run_sim.py --synthetic-populate 500 --synthetic-direct-write 500 \\
+        --synthetic-lookup 3000 --memory-tier-size 32M
 
     # Trace replay
     python run_sim.py --trace workload.jsonl --num-drives 4
@@ -57,6 +65,7 @@ def build_config(args: argparse.Namespace) -> SimConfig:
         max_queue_depth=args.max_queue_depth,
         max_queues_per_drive=args.max_queues_per_drive,
         write_through_enabled=not args.no_write_through,
+        backfill_delay_us=args.backfill_delay_ms * 1000.0,
     )
     return config
 
@@ -72,11 +81,13 @@ def main():
     wl = parser.add_argument_group("Workload")
     wl.add_argument("--trace", type=str, help="JSONL trace file to replay")
     wl.add_argument("--synthetic-populate", type=int, default=0,
-                    help="Number of entries to populate in synthetic mode")
+                    help="Number of entries to populate in synthetic mode (GPU->DRAM->SSD)")
+    wl.add_argument("--synthetic-direct-write", type=int, default=0,
+                    help="Number of entries via direct-write path (prepare_store/commit_store)")
     wl.add_argument("--synthetic-lookup", type=int, default=0,
                     help="Number of lookups in synthetic mode")
     wl.add_argument("--key-space", type=int, default=0,
-                    help="Key space for lookups (0 = same as populate count)")
+                    help="Key space for lookups (0 = same as populate+direct-write count)")
     wl.add_argument("--batch-size", type=int, default=100,
                     help="Entries per batch (default: 100)")
     wl.add_argument("--inter-batch-us", type=float, default=1000.0,
@@ -118,12 +129,14 @@ def main():
                     help="NVMe pipeline queue depth (default: 16)")
     tm.add_argument("--max-queues-per-drive", type=int, default=2,
                     help="Parallel queue threads per drive (default: 2)")
+    tm.add_argument("--backfill-delay-ms", type=float, default=10.0,
+                    help="Delay between SSD->DRAM promotion jobs (default: 10)")
 
     args = parser.parse_args()
 
     # Validate inputs
-    if not args.trace and args.synthetic_populate == 0:
-        parser.error("Must specify --trace or --synthetic-populate")
+    if not args.trace and args.synthetic_populate == 0 and args.synthetic_direct_write == 0:
+        parser.error("Must specify --trace, --synthetic-populate, or --synthetic-direct-write")
 
     config = build_config(args)
 
@@ -136,9 +149,10 @@ def main():
     print(f"  Entry size:      {args.entry_size}")
     print(f"  Queue depth:     {config.max_queue_depth}")
     print(f"  Write-through:   {'enabled' if config.write_through_enabled else 'disabled'}")
-    print(f"  NVMe read:       {config.nvme_read_latency_us} µs/segment")
-    print(f"  GPU H2D:         {config.gpu_h2d_latency_us} µs")
-    print(f"  GPU D2H:         {config.gpu_d2h_latency_us} µs")
+    print(f"  Backfill delay:  {args.backfill_delay_ms} ms")
+    print(f"  NVMe read:       {config.nvme_read_latency_us} us/segment")
+    print(f"  GPU H2D:         {config.gpu_h2d_latency_us} us")
+    print(f"  GPU D2H:         {config.gpu_d2h_latency_us} us")
     print("=" * 60)
     print()
 
@@ -149,9 +163,11 @@ def main():
         print(f"  {len(ops)} batch operations loaded")
     else:
         print(f"Generating synthetic workload:")
-        print(f"  Populate: {args.synthetic_populate} entries")
+        print(f"  Populate (GPU->DRAM->SSD): {args.synthetic_populate} entries")
+        if args.synthetic_direct_write > 0:
+            print(f"  Direct-write (GPU->SSD):   {args.synthetic_direct_write} entries")
         print(f"  Lookup:   {args.synthetic_lookup} entries")
-        print(f"  Key space:{args.key_space or args.synthetic_populate}")
+        print(f"  Key space:{args.key_space or (args.synthetic_populate + args.synthetic_direct_write)}")
         print(f"  Batch:    {args.batch_size}")
         ops = generate_synthetic(
             num_populate=args.synthetic_populate,
@@ -160,6 +176,7 @@ def main():
             key_space=args.key_space,
             batch_size=args.batch_size,
             inter_batch_us=args.inter_batch_us,
+            num_direct_write=args.synthetic_direct_write,
         )
         print(f"  {len(ops)} batch operations generated")
     print()
@@ -178,9 +195,8 @@ def main():
 
     # Run until workload completes + drain period for write-through
     max_workload_time = max(op.time_us for op in ops) if ops else 0.0
-    # Generous drain: workload time + time for all ops + write-through drain
-    drain_budget = len(ops) * len(ops[0].keys if ops else []) * 500.0  # ~500us per entry
-    sim_until = max_workload_time + drain_budget + 100_000.0  # +100ms drain
+    drain_budget = len(ops) * len(ops[0].keys if ops else []) * 500.0
+    sim_until = max_workload_time + drain_budget + 100_000.0
     env.run(until=sim_until)
 
     dispatcher.shutdown()
@@ -188,12 +204,12 @@ def main():
     sim_time_us = env.now
 
     # Report
-    print(f"Simulation complete: {sim_time_us:.0f} µs simulated in {wall_elapsed:.2f}s wall time")
+    print(f"Simulation complete: {sim_time_us:.0f} us simulated in {wall_elapsed:.2f}s wall time")
     print(f"  Speedup: {sim_time_us / (wall_elapsed * 1e6):.1f}x" if wall_elapsed > 0 else "")
     print()
 
     # Final state
-    print(f"── Final State ──")
+    print(f"-- Final State --")
     print(f"  Memory tier: {dispatcher.memory_tier.used_bytes / 1024**2:.1f} MiB / "
           f"{dispatcher.memory_tier.capacity_bytes / 1024**2:.1f} MiB "
           f"({dispatcher.memory_tier.entry_count()} entries)")

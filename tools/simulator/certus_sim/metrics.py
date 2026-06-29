@@ -38,6 +38,18 @@ class Metrics:
     write_through_success: int = 0
     write_through_failed: int = 0
 
+    # Prepare/commit store (direct-write path)
+    prepare_store_count: int = 0
+    prepare_store_success: int = 0
+    prepare_store_latencies_us: list[float] = field(default_factory=list)
+    commit_store_count: int = 0
+    commit_store_success: int = 0
+    commit_store_latencies_us: list[float] = field(default_factory=list)
+    cancel_store_count: int = 0
+
+    # Promotion (SSD->DRAM)
+    promotion_count: int = 0
+
     def record_populate(self, latency_us: float, success: bool) -> None:
         self.populate_count += 1
         if success:
@@ -79,6 +91,24 @@ class Metrics:
         else:
             self.write_through_failed += 1
 
+    def record_prepare_store(self, latency_us: float, success: bool) -> None:
+        self.prepare_store_count += 1
+        if success:
+            self.prepare_store_success += 1
+            self.prepare_store_latencies_us.append(latency_us)
+
+    def record_commit_store(self, latency_us: float, success: bool) -> None:
+        self.commit_store_count += 1
+        if success:
+            self.commit_store_success += 1
+            self.commit_store_latencies_us.append(latency_us)
+
+    def record_cancel_store(self) -> None:
+        self.cancel_store_count += 1
+
+    def record_promotion(self) -> None:
+        self.promotion_count += 1
+
     def hit_rate(self) -> float:
         total_lookups = self.lookup_hot_hits + self.lookup_cold_hits + self.lookup_misses
         if total_lookups == 0:
@@ -105,58 +135,74 @@ class Metrics:
             "  CERTUS SIMULATOR RESULTS",
             "=" * 60,
             "",
-            "── Populate ──",
+            "-- Populate --",
             f"  Total:       {self.populate_count}",
             f"  Success:     {self.populate_success}",
             f"  Failed:      {self.populate_count - self.populate_success}",
         ]
         if self.populate_latencies_us:
             lines += [
-                f"  Avg latency: {sum(self.populate_latencies_us)/len(self.populate_latencies_us):.1f} µs",
-                f"  P50 latency: {self._percentile(self.populate_latencies_us, 50):.1f} µs",
-                f"  P99 latency: {self._percentile(self.populate_latencies_us, 99):.1f} µs",
+                f"  Avg latency: {sum(self.populate_latencies_us)/len(self.populate_latencies_us):.1f} us",
+                f"  P50 latency: {self._percentile(self.populate_latencies_us, 50):.1f} us",
+                f"  P99 latency: {self._percentile(self.populate_latencies_us, 99):.1f} us",
             ]
 
         lines += [
             "",
-            "── Lookup ──",
+            "-- Lookup --",
             f"  Total:       {self.lookup_count}",
-            f"  Hot hits:    {self.lookup_hot_hits}",
-            f"  Cold hits:   {self.lookup_cold_hits}",
+            f"  Hot hits:    {self.lookup_hot_hits}  (staging + memory-tier)",
+            f"  Cold hits:   {self.lookup_cold_hits}  (SSD promotion)",
             f"  Misses:      {self.lookup_misses}",
             f"  Hit rate:    {self.hit_rate()*100:.1f}%",
             f"  Hot hit rate:{self.hot_hit_rate()*100:.1f}%",
         ]
         if self.lookup_hot_latencies_us:
             lines += [
-                f"  Hot avg:     {sum(self.lookup_hot_latencies_us)/len(self.lookup_hot_latencies_us):.1f} µs",
-                f"  Hot P50:     {self._percentile(self.lookup_hot_latencies_us, 50):.1f} µs",
-                f"  Hot P99:     {self._percentile(self.lookup_hot_latencies_us, 99):.1f} µs",
+                f"  Hot avg:     {sum(self.lookup_hot_latencies_us)/len(self.lookup_hot_latencies_us):.1f} us",
+                f"  Hot P50:     {self._percentile(self.lookup_hot_latencies_us, 50):.1f} us",
+                f"  Hot P99:     {self._percentile(self.lookup_hot_latencies_us, 99):.1f} us",
             ]
         if self.lookup_cold_latencies_us:
             lines += [
-                f"  Cold avg:    {sum(self.lookup_cold_latencies_us)/len(self.lookup_cold_latencies_us):.1f} µs",
-                f"  Cold P50:    {self._percentile(self.lookup_cold_latencies_us, 50):.1f} µs",
-                f"  Cold P99:    {self._percentile(self.lookup_cold_latencies_us, 99):.1f} µs",
+                f"  Cold avg:    {sum(self.lookup_cold_latencies_us)/len(self.lookup_cold_latencies_us):.1f} us",
+                f"  Cold P50:    {self._percentile(self.lookup_cold_latencies_us, 50):.1f} us",
+                f"  Cold P99:    {self._percentile(self.lookup_cold_latencies_us, 99):.1f} us",
             ]
 
         lines += [
             "",
-            "── Remove ──",
+            "-- Remove --",
             f"  Total:       {self.remove_count}",
             f"  Success:     {self.remove_success}",
             "",
-            "── Touch ──",
+            "-- Touch --",
             f"  Total:       {self.touch_count}",
             "",
-            "── Eviction ──",
+            "-- Direct-Write (prepare_store/commit_store) --",
+            f"  Prepared:    {self.prepare_store_count} ({self.prepare_store_success} success)",
+            f"  Committed:   {self.commit_store_count} ({self.commit_store_success} success)",
+            f"  Cancelled:   {self.cancel_store_count}",
+        ]
+        if self.commit_store_latencies_us:
+            lines += [
+                f"  Commit avg:  {sum(self.commit_store_latencies_us)/len(self.commit_store_latencies_us):.1f} us",
+                f"  Commit P99:  {self._percentile(self.commit_store_latencies_us, 99):.1f} us",
+            ]
+
+        lines += [
+            "",
+            "-- Eviction --",
             f"  Memory-tier clean:  {self.eviction_clean}",
             f"  Memory-tier dirty:  {self.eviction_dirty} (data loss)",
             f"  SSD evictions:      {self.ssd_evictions}",
             "",
-            "── Write-Through ──",
+            "-- Write-Through --",
             f"  Success:     {self.write_through_success}",
             f"  Failed:      {self.write_through_failed}",
+            "",
+            "-- Promotion (SSD->DRAM) --",
+            f"  Promoted:    {self.promotion_count}",
             "",
             "=" * 60,
         ]
