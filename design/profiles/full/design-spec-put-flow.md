@@ -38,6 +38,17 @@ The put flow moves a GPU tensor (cache block) from client GPU memory into a DRAM
 
 9. **Entry is now durable.** The entry exists in both DRAM (memory-tier) and SSD. Lookups are served from DRAM (warm path). If later evicted from DRAM, lookups promote from SSD (cold path).
 
+## Split-Populate API (reserve_memory / populate_memory / memory_populated)
+
+An alternative to the single-call `populate` is the split-populate path, which separates reservation from DMA:
+
+1. **`reserve_memory(key, size)`** — Reserves a DRAM slot in the memory-tier (runs eviction if needed). Returns a raw pointer to the allocated slot. Does NOT register in the dispatch-map.
+2. **`populate_memory(key, ipc_handle)`** — Issues `cudaMemcpy` D2H into the previously reserved slot.
+3. **`memory_populated(key, size)`** — Finalizes the entry: registers in the dispatch-map and enqueues background write-through (equivalent to steps 5–9 of the put flow).
+4. **`release_memory(key)`** — Cancellation path: frees the reserved slot without populating.
+
+This API enables the gRPC service layer to overlap reservation with other batch work, and supports external DMA engines that populate the slot outside the dispatcher's control.
+
 ## Duplicate Key Handling
 
 A put for an existing key returns `AlreadyExists`. The client must explicitly `remove` the key before re-populating. This avoids the complexity of in-place replacement with in-flight readers.
