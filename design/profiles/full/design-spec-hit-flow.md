@@ -52,6 +52,12 @@ The get/lookup flow serves a cached block from either DRAM (memory-tier) or SSD 
 
 If an entry is in the Staging state (from the `prepare_store`/`commit_store` direct-write API), lookup performs a synchronous `dma_copy_to_device` from the staging buffer to GPU and releases the read reference.
 
+## Batch Lookup and Pre-Promotion
+
+**`batch_lookup(entries)`** accepts multiple (key, IpcHandle) pairs and processes them concurrently. For entries on SSD (cold path), promotions run in parallel to exploit multi-drive bandwidth. Returns one Result per entry in the same order as the input.
+
+**`promote_to_memory_tier(keys)`** pre-promotes cold entries to DRAM without performing any GPU DMA. This is useful for warming the cache ahead of anticipated lookups — subsequent lookups will hit the warm path.
+
 ## Interaction with Put and Eviction
 
 - **Concurrent populate for same key:** Rejected by the dispatch-map (AlreadyExists). No conflict with in-flight readers.

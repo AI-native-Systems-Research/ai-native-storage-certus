@@ -1,0 +1,99 @@
+@startuml
+skinparam shadowing false
+skinparam defaultFontSize 11
+
+title Cache Get / Lookup Flow (full-remote)
+
+participant "Client\n(Python/gRPC)" as client
+participant "gRPC Service\n(tonic)" as grpc
+participant "Dispatcher" as disp
+participant "MemoryTier\n(DRAM pool)" as mt
+participant "DispatchMap" as dm
+participant "PipelineRing" as pr
+participant "BlockDevice\n(NVMe SSD)" as ssd
+participant "RemoteLookup" as rl
+participant "Peer Node" as peer
+
+== Warm Path (MemoryTier -> GPU) ==
+
+client -> grpc: BatchLookupRequest\n(key, IpcHandle)
+grpc -> grpc: cudaIpcOpenMemHandle\n-> device_ptr
+grpc -> disp: lookup(key, IpcHandle)
+
+disp -> dm: lookup(key) + take_read
+dm --> disp: MemoryTier { ptr, size }
+
+disp -> disp: cudaMemcpyAsync H2D\n(mem_ptr -> GPU, warm_stream)
+note right of disp: Zero-copy from\npinned memory-tier pool
+
+disp -> dm: release_read(key)
+disp -> mt: touch(key)
+note right of mt: Refresh LRU timestamp
+
+disp --> grpc: Ok(stream_handle)
+grpc -> grpc: cudaIpcCloseMemHandle
+grpc --> client: BatchLookupResponse\n(success)
+
+== Cold Path (BlockDevice -> MemoryTier -> GPU) ==
+
+client -> grpc: BatchLookupRequest\n(key, IpcHandle)
+grpc -> disp: lookup(key, IpcHandle)
+
+disp -> dm: lookup(key) + take_read
+dm --> disp: BlockDevice { offset }
+disp -> dm: release_read(key)
+
+disp -> mt: evict_lru() if pool full
+disp -> mt: insert(key, size)\n-> new_ptr
+
+disp -> pr: pipelined_read(offset, size)
+note right of pr: 8 CUDA-pinned SPDK-registered\nbuffers, 2 CUDA streams
+pr -> ssd: NVMe read (chunked at MDTS)
+ssd --> pr: data chunks
+pr -> mt: copy chunks to new_ptr
+pr -> disp: cudaMemcpyAsync H2D\n(overlapped with I/O)
+
+disp -> dm: create_memory_tier_entry\n(key, new_ptr, size)
+note right of dm: Promoted: BlockDevice -> MemoryTier\nssd_offset preserved
+
+disp --> grpc: Ok(stream_handle)
+grpc --> client: BatchLookupResponse\n(success)
+
+== Remote Path (Local Miss -> Peer Node) ==
+
+client -> grpc: BatchLookupRequest\n(key, IpcHandle)
+grpc -> disp: lookup(key, IpcHandle)
+
+disp -> dm: lookup(key)
+dm --> disp: NotExist
+note right of disp: Key not found locally
+
+disp -> rl: batch_lookup(key, IpcHandle)
+rl -> peer: RDMA request (key)
+note right of peer: Peer resolves via its\nown Dispatcher + DispatchMap
+
+alt Peer has the entry
+    peer --> rl: RDMA Write (data)
+    rl --> disp: Ok
+    disp --> grpc: Ok
+    grpc --> client: BatchLookupResponse\n(success)
+else Peer miss
+    peer --> rl: NotFound
+    rl --> disp: NotFound
+    disp --> grpc: KeyNotFound
+    grpc --> client: BatchLookupResponse\n(key_not_found)
+end
+
+== Incoming Remote Request (Peer -> This Node) ==
+
+peer -> peer: RemoteRequestHandler\n.handle_lookup(key)
+peer -> dm: lookup(key) + take_read
+dm --> peer: MemoryTier { ptr, size }
+note right of peer: LookupRef returned\n(entry pinned until release)
+
+peer -> peer: RDMA Write to requester\n(ptr, size)
+
+peer -> dm: release_read(key)
+note right of dm: Entry unpinned,\neviction allowed
+
+@enduml
