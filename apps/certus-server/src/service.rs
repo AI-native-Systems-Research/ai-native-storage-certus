@@ -653,15 +653,23 @@ mod tests {
             state.populate_results.get(&key).cloned().unwrap_or(Ok(()))
         }
 
-        fn populate_async(
+        fn reserve_memory(&self, _key: u64, _size: u32) -> Result<*mut u8, DispatcherError> {
+            Ok(std::ptr::null_mut())
+        }
+
+        fn populate_memory(
             &self,
             _key: u64,
             _ipc_handle: IpcHandle,
-        ) -> Result<GpuStream, DispatcherError> {
-            Ok(GpuStream(std::ptr::null_mut()))
+        ) -> Result<(), DispatcherError> {
+            Ok(())
         }
 
-        fn populate_finalize(&self, _key: u64) -> Result<(), DispatcherError> {
+        fn memory_populated(&self, _key: u64, _size: u32) -> Result<(), DispatcherError> {
+            Ok(())
+        }
+
+        fn release_memory(&self, _key: u64) -> Result<(), DispatcherError> {
             Ok(())
         }
 
