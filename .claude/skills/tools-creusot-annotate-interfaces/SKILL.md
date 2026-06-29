@@ -111,7 +111,7 @@ why3find prove
 - Iterate until all VCs are discharged (target: 0 unproved goals)
 - Record the number of VCs proved per function
 
-### 6. Commit on Verification Branch
+### 6. Commit on local Verification Branch (do not push remotely).
 
 ```bash
 git add components/<component-name>/verif/
