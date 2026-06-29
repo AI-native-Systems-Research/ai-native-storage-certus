@@ -362,35 +362,44 @@ component_macros::define_interface! {
         /// ```
         fn populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>;
 
-        /// Async variant of [`populate`] — issues the D2H DMA copy without blocking.
+        /// Reserve a memory-tier slot for the given key, evicting if necessary.
         ///
-        /// Evicts if needed, allocates a memory-tier slot, and issues
-        /// `dma_copy_to_host_async` on the warm stream. Returns the CUDA stream
-        /// the copy was issued on. The caller must poll `stream_query` on the
-        /// returned stream and call [`populate_finalize`] once it reports complete.
-        ///
-        /// Between this call and `populate_finalize`, the memory-tier slot is
-        /// allocated but not registered in the dispatch-map — no reader can see it.
+        /// Allocates `size` bytes in DRAM keyed by `key`. The returned pointer
+        /// is valid until `release_memory` or `memory_populated` is called.
+        /// Does NOT register in the dispatch-map or issue any DMA.
         ///
         /// # Errors
         ///
-        /// Returns [`DispatcherError::InvalidParameter`] if `ipc_handle.size` is 0.
-        /// Returns [`DispatcherError::AlreadyExists`] if the key is already cached.
-        /// Returns [`DispatcherError::AllocationFailed`] if the memory-tier pool is full.
-        fn populate_async(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<GpuStream, DispatcherError>;
+        /// Returns [`DispatcherError::AlreadyExists`] if the key already has a slot.
+        /// Returns [`DispatcherError::AllocationFailed`] if the pool is full after eviction.
+        fn reserve_memory(&self, key: CacheKey, size: u32) -> Result<*mut u8, DispatcherError>;
 
-        /// Finalize a previously started async populate after DMA completion.
+        /// DMA-copy from GPU into a previously reserved memory-tier slot.
         ///
-        /// Registers the memory-tier entry in the dispatch-map, downgrades the
-        /// write reference to a read reference, and enqueues the background SSD
-        /// write-through. Must only be called after `stream_query` confirms the
-        /// DMA issued by [`populate_async`] has completed.
+        /// The slot must have been allocated by a prior `reserve_memory` call.
+        /// Blocks until the cudaMemcpy D2H completes.
         ///
         /// # Errors
         ///
-        /// Returns [`DispatcherError::KeyNotFound`] if no pending async populate
-        /// exists for this key.
-        fn populate_finalize(&self, key: CacheKey) -> Result<(), DispatcherError>;
+        /// Returns [`DispatcherError::KeyNotFound`] if no reserved slot exists for `key`.
+        /// Returns [`DispatcherError::IoError`] if the DMA copy fails.
+        fn populate_memory(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>;
+
+        /// Finalize a populated memory-tier slot: register in the dispatch-map
+        /// and enqueue background write-through to SSD.
+        ///
+        /// Must be called after `populate_memory` completes successfully.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`DispatcherError::KeyNotFound`] if the key is not in memory-tier.
+        fn memory_populated(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>;
+
+        /// Release a reserved memory-tier slot without populating it.
+        ///
+        /// Used on the cancellation path (e.g., `complete_store(success=false)`).
+        /// Idempotent — returns Ok if the key has no slot.
+        fn release_memory(&self, key: CacheKey) -> Result<(), DispatcherError>;
 
         /// Prepare a store operation for the given cache key.
         ///
