@@ -104,6 +104,7 @@ impl IGpuServices for MockGpuServices {
         Err("mock: not implemented".into())
     }
     fn create_stream(&self) -> Result<GpuStream, String> {
+        // 0x1 is a non-null sentinel for a fake stream; the mock ignores the value.
         Ok(GpuStream(0x1 as *mut std::ffi::c_void))
     }
     fn stream_query(&self, _stream: GpuStream) -> Result<bool, String> {
