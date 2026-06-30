@@ -267,7 +267,8 @@ by a verification read-back.
   `spdk` feature. (See spec 002 for full requirements.)
 - **FR-014**: When the `gpu` feature is disabled, all interface methods
   MUST return an error indicating GPU support is not compiled, without
-  panicking.
+  panicking. Exception: `shutdown()` returns `Ok(())` as a no-op when
+  the GPU feature is disabled, since there are no resources to release.
 - **FR-015**: Component MUST provide a `register_host_memory(ptr, size)`
   method (gated behind `spdk` feature) that page-locks the specified
   host memory region via `cudaHostRegister` (enabling async GPU DMA)

@@ -103,16 +103,16 @@ A developer uses a dedicated test client program to verify the handler is functi
 - **FR-003**: System MUST establish a dedicated session for each accepted connection, maintaining session state independently.
 - **FR-004**: System MUST support a batched lookup operation where a caller submits up to 64 CacheKeys (64-bit identifiers) in a single request, along with corresponding remote memory addresses and 32-bit RDMA memory keys.
 - **FR-005**: System MUST reject batch requests that exceed 64 entries with an appropriate error.
-- **FR-006**: System MUST process lookup batches asynchronously — individual lookups within a batch do not block each other.
+- **FR-006**: System MUST process lookup batches efficiently — key resolution is performed serially, then RDMA Writes are posted in a tight serial loop using unsignaled completions (only the last Write is signaled) for maximum NIC pipelining. This achieves non-blocking network behavior via hardware-level pipelining without requiring per-lookup async task spawning.
 - **FR-007**: System MUST transfer lookup results directly into caller-specified remote memory locations using the provided addresses and 32-bit RDMA memory keys.
 - **FR-008**: System MUST support a close-connection operation that cleanly terminates a session and releases all resources.
-- **FR-009**: System MUST detect session failures via RDMA connection manager disconnect events and clean up associated resources without requiring an application-level heartbeat.
+- **FR-009**: System MUST detect session failures and clean up associated resources without requiring an application-level heartbeat. Detection occurs via transport-level I/O errors (recv_msg/send_msg failures) causing the session handler to exit and release resources. Explicit RDMA CM disconnect event monitoring (via a dedicated event listener) is defined but not yet wired into the serve loop; it may be added in a future iteration for faster failure detection.
 - **FR-010**: System MUST delegate lookup resolution to a dispatch service (initially a placeholder that logs each request).
 - **FR-011**: System MUST route all diagnostic and informational output through a logging interface.
 - **FR-012**: System MUST include a standalone test client program capable of connecting (with version handshake), submitting batched lookups, and disconnecting.
-- **FR-013**: System MUST include unit tests covering session creation, version handshake, batch lookup processing, and session teardown.
-- **FR-014**: System MUST optionally collect telemetry on connection rates and data transfer throughput/latency when enabled.
-- **FR-015**: System MUST be deployable as part of a "full-remote" configuration profile for the server executive.
+- **FR-013**: System MUST include unit tests covering session state management, protocol encoding/decoding, listener registry, and RDMA mock interactions. Full end-to-end integration tests (connecting through the serve loop) are not currently implemented — individual module-level tests validate each component in isolation.
+- **FR-014**: System MUST optionally collect telemetry on connection rates and data transfer throughput/latency when enabled. The `TelemetryCollector` implementation exists behind `#[cfg(feature = "telemetry")]` but is not yet integrated into the serve loop — wiring telemetry collection into the runtime path is a future task.
+- **FR-015**: System MUST be deployable as part of a "full-remote" configuration profile for the server executive. The component is wired into the profile YAML for receptacle binding, but actual RDMA serving is invoked via `serve::run_blocking()` / `serve::bind_listener()` directly in the server main — the `IRemoteRequestHandler` trait methods on the component are stubs (return `NotInitialized`) that exist for framework compatibility rather than functional dispatch.
 - **FR-016**: System MUST use a lightweight binary protocol for communication (not HTTP/REST).
 - **FR-017**: Security relies on network-level isolation (trusted RDMA fabric); no application-level authentication is required.
 

@@ -160,6 +160,7 @@ A developer learning the framework runs a self-contained example that demonstrat
 - Benchmarks use the existing Criterion framework already present in the project.
 - The actor's message handler runs on the pinned thread — any work spawned by the handler onto other threads is not affected by the actor's affinity.
 - This feature builds on top of feature 003 (actor-channels). The existing actor creation API is extended with an optional affinity parameter; no breaking changes.
+- `MPOL_INTERLEAVE`-based allocation and `move_pages()`/`migrate_pages()` wrappers were considered during design but are descoped from this iteration. NUMA locality relies on Linux first-touch policy when threads are pinned to the target node's CPUs. These capabilities may be added in a future iteration if workloads require explicit memory placement beyond first-touch.
 
 ## Clarifications
 
