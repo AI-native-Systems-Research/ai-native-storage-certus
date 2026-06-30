@@ -105,7 +105,7 @@ A developer integrates the SPDKEnv component with other Certus components via th
 - **FR-007**: System uses `eprintln!` for diagnostic output (initialization progress, warnings). There is no logger receptacle; the component has no receptacles.
 - **FR-008**: System MUST operate without root permissions when /dev/vfio directories have appropriate user-level access configured.
 - **FR-009**: System MUST return an empty device list (not an error) when VFIO is properly configured but no devices are bound.
-- **FR-010**: System MUST include a test example (main.rs binary) that instantiates the component, calls `init()`, queries ISPDKEnv, and prints discovered devices. (No logger wiring is required — the component uses `eprintln!` for diagnostics per FR-007.)
+- **FR-010**: System MUST include a runnable example (`examples/spdk-env-example.rs`) that instantiates the component, calls `init()`, queries ISPDKEnv, and prints discovered devices. (No logger wiring is required — the component uses `eprintln!` for diagnostics per FR-007.)
 - **FR-011**: System MUST be a plain procedural component (not an actor) that does not spawn its own threads or manage message queues.
 - **FR-012**: System MUST properly clean up SPDK/DPDK resources when the component is dropped.
 - **FR-013**: System MUST check for hugepage availability (required by DPDK) and report a clear error if hugepages are not configured.
@@ -113,7 +113,13 @@ A developer integrates the SPDKEnv component with other Certus components via th
 - **FR-015**: System MUST skip devices that cannot be probed (e.g., in use by another process), log a warning for each skipped device, and return only successfully probed devices. (Future: not yet implemented. Currently all matching devices are claimed; user must ensure exclusive access via system configuration.)
 - **FR-016**: The `ISPDKEnv` interface MUST provide `is_initialized() -> bool` to check whether the environment has been successfully initialized.
 - **FR-017**: The `ISPDKEnv` interface MUST provide `device_count() -> usize` to query the number of discovered devices without cloning the device vector.
-- **FR-018**: The `ISPDKEnv` interface is defined in the shared `interfaces` crate. The `spdk-env` crate imports and implements this interface rather than redefining it locally.
+- **FR-018**: The `ISPDKEnv` interface is defined locally in the
+  `spdk-env` crate via `define_interface!` (at `src/lib.rs`). A
+  mirror definition also exists in the shared `interfaces` crate
+  (`interfaces/src/ispdk_env.rs`) for downstream consumers. The
+  `spdk-env` crate does not import the `interfaces` version for its
+  own implementation — it uses its local definition. Both definitions
+  MUST be kept in sync manually.
 
 ### Key Entities
 

@@ -321,10 +321,15 @@ again to verify the old slot is now reusable.
 - **FR-014**: `checkpoint()` MUST skip I/O if no region has been
   modified since the last checkpoint.
 - **FR-015**: Concurrent `checkpoint()` calls MUST be coalesced: at
-  most two actual checkpoint I/O operations execute regardless of
-  how many callers request one.
+  most one actual checkpoint I/O operation executes at a time. Callers
+  arriving while a checkpoint is in progress wait for completion of the
+  current (or next) checkpoint rather than starting a parallel one.
+  This serializes all checkpoint I/O through a single writer.
 - **FR-016**: A background thread MUST call `checkpoint()` at a
-  configurable interval (default 30 seconds).
+  configurable interval (default 30 seconds). Note: the
+  `IExtentManager` interface doc comment incorrectly states "five
+  minutes" — the actual default is 30 seconds as set in the
+  constructor.
 - **FR-017**: Recovery MUST attempt the active checkpoint copy first;
   if it is unreadable (CRC failure, media error), recovery MUST fall
   back to the inactive copy.
@@ -343,7 +348,9 @@ again to verify the old slot is now reusable.
   size extents, with a rover for even distribution.
 - **FR-021**: A size-class manager MUST index slabs by element size
   (using `start_offset` as the identifier) so that allocation finds
-  a compatible slab in O(1).
+  a compatible slab in amortized O(1) via HashMap lookup. In
+  degenerate cases (stale entries from freed slabs), the Vec may
+  require linear cleanup, but steady-state behavior is O(1).
 - **FR-022**: Keys MUST be sharded to regions by
   `key & (region_count - 1)`. Because keys are hashes, this provides
   uniform distribution.
@@ -369,16 +376,23 @@ again to verify the old slot is now reusable.
 
 - **FR-026**: The component MUST provide a `get_instance_id()` method
   returning the instance ID stored in the superblock.
-- **FR-027**: The component MUST provide a `set_checkpoint_interval(duration)`
-  method to dynamically configure the background checkpoint interval.
+- **FR-027**: The component MUST provide a
+  `set_checkpoint_interval(interval: Option<Duration>)` method to
+  dynamically configure the background checkpoint interval. Passing
+  `None` disables the background checkpoint timer entirely.
 - **FR-028**: The component MUST provide a `set_metadata_ns_id(ns_id: u32)`
-  method to configure which NVMe namespace is used for metadata.
+  method to configure which NVMe namespace is used for metadata. This
+  method is available on the concrete `ExtentManager` struct but is NOT
+  part of the `IExtentManager` trait interface (callers must access the
+  concrete type before wiring).
 - **FR-029**: The component MUST provide a `set_dma_alloc(alloc)` method
   for overriding the DMA memory allocator.
-- **FR-030**: The component MAY support a `volatile_write_cache` feature
-  gate that controls whether `BlockDeviceClient::flush()` calls are issued
-  to the metadata device. (Future: not yet implemented; the feature gate
-  is reserved for future use).
+- **FR-030**: The component supports a `volatile_write_cache` feature
+  gate that controls whether `BlockDeviceClient::flush()` calls are
+  issued to the metadata device. When enabled, flush calls in
+  checkpoint and format paths are conditionally compiled out,
+  improving performance on devices with volatile write caches where
+  the caller accepts the associated durability risk.
 
 #### Capacity Reporting
 
@@ -402,9 +416,11 @@ again to verify the old slot is now reusable.
 
 - **FR-034**: The component MUST provide a fault injection test
   infrastructure behind a `testing` feature gate. This infrastructure
-  allows tests to simulate I/O failures on the metadata block device
-  (e.g., injecting errors into checkpoint writes or superblock reads)
-  to verify crash-safety and recovery behavior under failure conditions.
+  allows tests to simulate write I/O failures on the metadata block
+  device (via `FaultConfig` with `fail_after_n_writes` and
+  `fail_all_writes` options) to verify crash-safety and recovery
+  behavior under failure conditions. Read-failure injection is not
+  currently supported but may be added in a future iteration.
 
 ### Key Entities
 
