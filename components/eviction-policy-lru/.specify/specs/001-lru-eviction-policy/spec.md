@@ -63,7 +63,8 @@ so that the eviction policy is safe under concurrent workloads.
 - **FR-007**: System MUST provide `len(pool)` that returns the number of active entries in the pool.
 - **FR-008**: System MUST provide `clear_pool(pool)` that removes all entries from the pool, resetting it to empty.
 - **FR-009**: Methods returning `Result` (`track`, `touch`, `remove`) MUST return `EvictionPolicyError::InvalidPool` when given a non-existent pool. Methods returning `Option` or scalar (`pop_oldest`, `peek_oldest`, `len`, `clear_pool`) MUST gracefully degrade: returning `None`, empty collection, `0`, or no-op respectively.
-- **FR-010**: `touch` and `remove` on an already-removed handle MUST be idempotent (no panic, no effect).
+- **FR-010**: `touch` and `remove` on an already-removed handle MUST be idempotent (no panic, no effect). These return `Ok(())` silently rather than `Err(InvalidHandle)` — the `InvalidHandle` error variant is defined in the interface but is currently unused (reserved for future stricter validation).
+- **FR-012**: The component MUST provide a `batch_touch(handles: &[EvictionHandle])` method that marks multiple entries as most-recently-used in a single lock acquisition, amortizing lock overhead for the hot-path batch lookup use case.
 - **FR-011**: Removed node slots MUST be recycled via a free list to avoid unbounded memory growth for long-lived pools with high churn.
 
 ### Non-Functional Requirements

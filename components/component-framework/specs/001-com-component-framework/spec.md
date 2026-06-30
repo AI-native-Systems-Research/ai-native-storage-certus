@@ -163,6 +163,11 @@ the component's declaration.
   and zero or more receptacles.
 - **FR-005**: Receptacles MUST be connectable to a matching provided
   interface on another component and disconnectable at runtime.
+  Disconnection via third-party binding (by name) is not currently
+  supported — only first-party disconnection through direct field
+  access (`component.receptacle.disconnect()`) is available.
+  Third-party `disconnect_receptacle_raw()` may be added in a future
+  iteration.
 - **FR-006**: Type safety MUST be enforced at compile time for
   interface queries and receptacle connections wherever possible.
 - **FR-007**: The framework MUST produce compile-time errors when macro
