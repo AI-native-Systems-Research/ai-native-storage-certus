@@ -81,12 +81,12 @@ A developer needs to benchmark the file-backed block device to establish baselin
 ### Functional Requirements
 
 - **FR-001**: Component MUST implement IBlockDevice as defined in `components/interfaces/src/iblock_device.rs`.
-- **FR-002**: Component MUST declare a receptacle for ILogger and log operations at debug level and errors at error level.
+- **FR-002**: Component MUST declare a receptacle for ILogger and log operations at debug level. Initialization events are logged at info level. Errors are returned as results rather than logged at error level in most IO paths. Queue-full and disconnection events are logged at warn level.
 - **FR-003**: Component MUST use `define_component!` and `define_interface!` macros from the component-framework.
-- **FR-004**: Component MUST NOT expose any public functions outside its interface definitions and public configuration types. The `config` module (containing `DeviceConfig` and `open_or_create_backing_file`) is permitted as part of the public API to support external configuration and testing.
+- **FR-004**: The component's primary public API is through its interface definitions (`IBlockDevice`, `IBlockDeviceAdmin`). The `config` module (containing `DeviceConfig` and `open_or_create_backing_file`) is permitted as part of the public API. Additionally, `create()`, `initialize()`, and `shutdown()` are public convenience methods on the concrete component type for direct usage (they mirror the `IBlockDeviceAdmin` trait methods).
 - **FR-005**: Component MUST use a regular file on a Linux filesystem as the backing store for block data.
 - **FR-006**: Component MUST support configurable block size (default 512 bytes) and device capacity (number of blocks).
-- **FR-007**: Component MUST support synchronous read/write (ReadSync, WriteSync) via pread/pwrite syscalls with durable write semantics. The backing file is opened with O_DIRECT | O_SYNC to bypass the page cache and guarantee write-through durability. An explicit fdatasync is issued after each write as a belt-and-suspenders guarantee. On filesystems that do not support O_DIRECT (e.g., tmpfs), the component falls back to buffered IO with fdatasync-only durability.
+- **FR-007**: Component MUST support synchronous read/write (ReadSync, WriteSync) via pread/pwrite syscalls with durable write semantics. The backing file is opened with O_DIRECT | O_SYNC to bypass the page cache and guarantee write-through durability. An explicit fdatasync is issued after each write as a belt-and-suspenders guarantee. On filesystems that do not support O_DIRECT (e.g., tmpfs, detected via EINVAL on first open), the component falls back to buffered IO (without O_SYNC) with fdatasync-only durability.
 - **FR-008**: Component MUST support asynchronous read/write (ReadAsync, WriteAsync) using io_uring for kernel-level async IO, with timeout handling and OpHandle tracking. Async writes use IO_LINK to chain a write SQE with an fdatasync SQE for atomic durable completion. If io_uring is unavailable at runtime, the actor falls back to synchronous pread/pwrite with fdatasync.
 - **FR-009**: Component MUST support WriteZeros by writing zero-filled blocks to the backing file with fdatasync.
 - **FR-010**: Component MUST support BatchSubmit by executing operations sequentially within the batch.
@@ -94,7 +94,7 @@ A developer needs to benchmark the file-backed block device to establish baselin
 - **FR-012**: Component MUST support NsProbe returning a single namespace with the configured geometry.
 - **FR-013**: Component MUST use the actor model (dedicated thread) with lock-free channel communication for IO processing. The actor runs an io_uring event loop for async operations.
 - **FR-014**: Component MUST provide Criterion benchmarks for latency and throughput measurement.
-- **FR-015**: All public API items MUST have documentation examples. Examples that require filesystem setup or hardware may use `ignore` or `no_run` annotations where a fully runnable test is impractical.
+- **FR-015**: Key public API items (constructors, configuration types) MUST have documentation examples. The `create()` constructor, `DeviceConfig`, and `open_or_create_backing_file` have doc examples. Interface method implementations (`IBlockDevice` impl block) and lifecycle methods (`initialize`, `shutdown`) do not currently have individual doc examples — these are covered by integration tests instead.
 - **FR-016**: On initialization, component MUST create the backing file via fallocate if absent, or open it if it exists with the exact expected size. Size mismatch MUST produce an error.
 - **FR-017**: Component MUST access DmaBuffer byte slices directly (via existing accessor methods) for all IO operations — no intermediate copies.
 - **FR-018**: Component MUST depend on the `io-uring` crate (tokio-rs/io-uring) for async file IO. Minimum kernel version: 5.6.
