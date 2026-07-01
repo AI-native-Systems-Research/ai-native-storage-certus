@@ -65,6 +65,12 @@ pub struct DispatcherConfig {
     /// P2P cold reads for drive bandwidth.
     /// Default: 10. Set to 0 to disable backfill entirely.
     pub backfill_delay_ms: u64,
+    /// Size of the extent-manager metadata partition in bytes.
+    /// Default: 128 MiB.
+    pub metadata_partition_size: u64,
+    /// Size of the external metadata partition in bytes.
+    /// Default: 64 MiB.
+    pub external_metadata_partition_size: u64,
 }
 
 impl Default for DispatcherConfig {
@@ -81,6 +87,8 @@ impl Default for DispatcherConfig {
             poller_base_cpu: None,
             max_eviction_attempts: 2048,
             backfill_delay_ms: 10,
+            metadata_partition_size: 128 * 1024 * 1024,
+            external_metadata_partition_size: 64 * 1024 * 1024,
         }
     }
 }

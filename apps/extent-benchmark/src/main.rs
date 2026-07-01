@@ -11,10 +11,12 @@ use clap::Parser;
 use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent;
 use component_core::binding::bind;
 use component_core::iunknown::query;
+use disk_partition_manager::DiskPartitionManager;
 use extent_manager::test_support::{heap_dma_alloc, MockBlockDevice, MockLogger};
 use extent_manager::ExtentManager;
 use interfaces::{
-    DmaAllocFn, DmaBuffer, FormatParams, IBlockDevice, IExtentManager, ILogger,
+    DmaAllocFn, DmaBuffer, FormatParams, IBlockDevice, IExtentManager, ILogger, PartitionConfig,
+    PartitionSpec,
 };
 use spdk_env::SPDKEnvComponent;
 
@@ -44,8 +46,12 @@ fn main() {
 // --- Mock mode ---------------------------------------------------------------
 
 fn run_mock_mode(config: BenchmarkConfig, count: u64, params: FormatParams) {
-    let metadata_disk_size =
-        compute_metadata_disk_size(count, config.size_class, config.slab_size, config.region_count);
+    let metadata_disk_size = compute_metadata_disk_size(
+        count,
+        config.size_class,
+        config.slab_size,
+        config.region_count,
+    );
 
     let metadata_mock = Arc::new(MockBlockDevice::new(metadata_disk_size));
     let shared_state = metadata_mock.shared_state();
@@ -86,7 +92,13 @@ fn run_hardware_mode(config: BenchmarkConfig, count: u64, params: FormatParams, 
     let spdk_env_comp = SPDKEnvComponent::new_default();
     let metadata_block_dev = BlockDeviceSpdkNvmeComponent::new_default();
 
-    bind(&*spdk_env_comp, "ISPDKEnv", &*metadata_block_dev, "spdk_env").unwrap_or_else(|e| {
+    bind(
+        &*spdk_env_comp,
+        "ISPDKEnv",
+        &*metadata_block_dev,
+        "spdk_env",
+    )
+    .unwrap_or_else(|e| {
         eprintln!("error: bind spdk_env→metadata_block_dev: {e}");
         std::process::exit(2);
     });
@@ -147,12 +159,81 @@ fn run_hardware_mode(config: BenchmarkConfig, count: u64, params: FormatParams, 
     });
 
     let meta_ns_id = config.metadata_ns_id;
-    let component = make_hardware_component(&metadata_block_dev, Arc::clone(&dma_alloc), meta_ns_id);
+
+    // --- Partition table management ---
+    let part_mgr = DiskPartitionManager::new_default();
+    part_mgr.set_ns_id(meta_ns_id);
+    bind(
+        &*metadata_block_dev,
+        "IBlockDevice",
+        &*part_mgr,
+        "block_device",
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("error: bind metadata_block_dev→partition_mgr: {e}");
+        std::process::exit(2);
+    });
+
+    let sector_size = metadata_ibd.block_size();
+    let num_sectors = metadata_ibd.num_sectors(meta_ns_id).unwrap_or(0);
+    let partition_config = PartitionConfig {
+        sector_size,
+        total_sectors: num_sectors,
+        ns_id: meta_ns_id,
+        partitions: vec![
+            PartitionSpec {
+                type_guid: interfaces::type_guids::CERTUS_METADATA,
+                size_bytes: 128 * 1024 * 1024,
+                name: "certus-metadata".into(),
+            },
+            PartitionSpec {
+                type_guid: interfaces::type_guids::CERTUS_DATA,
+                size_bytes: 0, // rest of disk
+                name: "certus-data".into(),
+            },
+            PartitionSpec {
+                type_guid: interfaces::type_guids::CERTUS_EXTERNAL_META,
+                size_bytes: 64 * 1024 * 1024,
+                name: "certus-external".into(),
+            },
+        ],
+    };
+
+    let (table, _formatted) = part_mgr
+        .initialize_or_format(true, partition_config.clone())
+        .unwrap_or_else(|e| {
+            eprintln!("error: partition table init failed: {e}");
+            std::process::exit(2);
+        });
+
+    let metadata_base_lba = table.partitions[0].start_lba;
+    let data_base_lba = table.partitions[1].start_lba;
+
+    // Override data_disk_size from partition geometry
+    let data_disk_size = table.partitions[1].num_sectors * sector_size as u64;
+    let params = FormatParams {
+        data_disk_size,
+        ..params
+    };
+
+    let component = make_hardware_component(
+        &metadata_block_dev,
+        Arc::clone(&dma_alloc),
+        meta_ns_id,
+        metadata_base_lba,
+        data_base_lba,
+    );
 
     let meta_dev_clone = Arc::clone(&metadata_block_dev);
     let dma_alloc_clone = Arc::clone(&dma_alloc);
     let recover: Box<dyn Fn() -> Arc<ExtentManager>> = Box::new(move || {
-        make_hardware_component(&meta_dev_clone, Arc::clone(&dma_alloc_clone), meta_ns_id)
+        make_hardware_component(
+            &meta_dev_clone,
+            Arc::clone(&dma_alloc_clone),
+            meta_ns_id,
+            metadata_base_lba,
+            data_base_lba,
+        )
     });
 
     run_phases(component, recover, params, &config, count);
@@ -162,10 +243,15 @@ fn make_hardware_component(
     metadata_block_dev: &Arc<BlockDeviceSpdkNvmeComponent>,
     dma_alloc: DmaAllocFn,
     metadata_ns_id: u32,
+    metadata_base_lba: u64,
+    data_base_lba: u64,
 ) -> Arc<ExtentManager> {
     let component = ExtentManager::new_inner();
     component.set_dma_alloc(dma_alloc);
     component.set_metadata_ns_id(metadata_ns_id);
+    let iem = query::<dyn IExtentManager + Send + Sync>(&*component).unwrap();
+    iem.set_metadata_base_lba(metadata_base_lba);
+    iem.set_data_base_lba(data_base_lba);
     component
         .logger
         .connect(Arc::new(MockLogger) as Arc<dyn ILogger + Send + Sync>)
@@ -447,7 +533,12 @@ fn compute_metadata_disk_size(
 
 fn make_format_params(config: &BenchmarkConfig, count: u64) -> FormatParams {
     let data_disk_size = config.total_size.unwrap_or_else(|| {
-        compute_data_disk_size(count, config.size_class, config.slab_size, config.region_count)
+        compute_data_disk_size(
+            count,
+            config.size_class,
+            config.slab_size,
+            config.region_count,
+        )
     });
     FormatParams {
         data_disk_size,

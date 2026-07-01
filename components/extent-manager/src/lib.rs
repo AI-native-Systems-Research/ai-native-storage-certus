@@ -162,42 +162,13 @@ impl ExtentManager {
         *self.metadata_ns_id.lock().unwrap() = Some(ns_id);
     }
 
-    /// Set the base LBA offset for all metadata I/O.
-    ///
-    /// When the extent-manager's metadata lives on a GPT partition,
-    /// this offset is added to every read/write issued to the metadata
-    /// device. Must be called before `initialize()` or `format()`.
-    pub fn set_metadata_base_lba(&self, base_lba: u64) {
-        *self.metadata_base_lba.lock().unwrap() = base_lba;
-    }
-
-    /// Set the base LBA offset for the data partition.
-    ///
-    /// When the extent-manager's data lives on a GPT partition,
-    /// callers must add this offset to `Extent.offset / sector_size`
-    /// when issuing data I/O. Must be called before `initialize()` or
-    /// `format()`.
-    pub fn set_data_base_lba(&self, base_lba: u64) {
-        *self.data_base_lba.lock().unwrap() = base_lba;
-    }
-
-    /// Get the configured data base LBA offset.
-    ///
-    /// Returns the LBA that should be added to extent offsets when
-    /// computing absolute device LBAs for data I/O.
-    pub fn data_base_lba(&self) -> u64 {
-        *self.data_base_lba.lock().unwrap()
-    }
-
     fn get_metadata_client(&self, ns_id: u32) -> Result<BlockDeviceClient, ExtentManagerError> {
         let bd = self
             .metadata_device
             .get()
             .map_err(|_| error::not_initialized("metadata block device not connected"))?;
 
-        let channels = bd
-            .connect_client()
-            .map_err(error::nvme_to_em)?;
+        let channels = bd.connect_client().map_err(error::nvme_to_em)?;
 
         let alloc = self.dma_alloc.lock().unwrap().clone().unwrap_or_else(|| {
             Arc::new(|size, align, numa| {
@@ -209,11 +180,18 @@ impl ExtentManager {
         let base_lba = *self.metadata_base_lba.lock().unwrap();
 
         Ok(BlockDeviceClient::with_base_lba(
-            channels, alloc, sector_size, ns_id, base_lba,
+            channels,
+            alloc,
+            sector_size,
+            ns_id,
+            base_lba,
         ))
     }
 
-    fn region_for_key(&self, key: ExtentKey) -> Result<Arc<RwLock<RegionState>>, ExtentManagerError> {
+    fn region_for_key(
+        &self,
+        key: ExtentKey,
+    ) -> Result<Arc<RwLock<RegionState>>, ExtentManagerError> {
         let regions = self.regions.read();
         let regions = regions
             .as_ref()
@@ -222,7 +200,10 @@ impl ExtentManager {
         Ok(Arc::clone(&regions[idx]))
     }
 
-    fn region_for_offset(&self, offset: u64) -> Result<Arc<RwLock<RegionState>>, ExtentManagerError> {
+    fn region_for_offset(
+        &self,
+        offset: u64,
+    ) -> Result<Arc<RwLock<RegionState>>, ExtentManagerError> {
         let regions = self.regions.read();
         let regions = regions
             .as_ref()
@@ -233,7 +214,10 @@ impl ExtentManager {
             let s = shared
                 .as_ref()
                 .ok_or_else(|| error::not_initialized("component not initialized"))?;
-            (s.format_params.data_disk_size, s.superblock.data_start_offset)
+            (
+                s.format_params.data_disk_size,
+                s.superblock.data_start_offset,
+            )
         };
 
         let usable = data_disk_size - data_start_offset;
@@ -286,7 +270,9 @@ impl ExtentManager {
 
         let ns_id = {
             let shared = self.shared.lock().unwrap();
-            shared.as_ref().map_or(1, |s| s.format_params.metadata_disk_ns_id)
+            shared
+                .as_ref()
+                .map_or(1, |s| s.format_params.metadata_disk_ns_id)
         };
         let metadata_client = self.get_metadata_client(ns_id)?;
 
@@ -317,14 +303,20 @@ impl ExtentManager {
         let extent_count = {
             let regions = self.regions.read();
             regions.as_ref().map_or(0u64, |regions| {
-                regions.iter().map(|r| {
-                    let r = r.read();
-                    r.slabs.values().map(|slab| {
-                        (0..slab.num_slots() as usize)
-                            .filter(|&i| slab.get_key(i) != FREE_KEY)
-                            .count() as u64
-                    }).sum::<u64>()
-                }).sum()
+                regions
+                    .iter()
+                    .map(|r| {
+                        let r = r.read();
+                        r.slabs
+                            .values()
+                            .map(|slab| {
+                                (0..slab.num_slots() as usize)
+                                    .filter(|&i| slab.get_key(i) != FREE_KEY)
+                                    .count() as u64
+                            })
+                            .sum::<u64>()
+                    })
+                    .sum()
             })
         };
 
@@ -335,7 +327,6 @@ impl ExtentManager {
 
         Ok(())
     }
-
 }
 
 impl Drop for ExtentManager {
@@ -375,8 +366,12 @@ impl IExtentManager for ExtentManager {
             .metadata_device
             .get()
             .map_err(|_| error::not_initialized("metadata block device not connected"))?;
-        let metadata_disk_size = metadata_bd.num_sectors(params.metadata_disk_ns_id).map_err(error::nvme_to_em)?
-            * metadata_bd.sector_size(params.metadata_disk_ns_id).map_err(error::nvme_to_em)? as u64;
+        let metadata_disk_size = metadata_bd
+            .num_sectors(params.metadata_disk_ns_id)
+            .map_err(error::nvme_to_em)?
+            * metadata_bd
+                .sector_size(params.metadata_disk_ns_id)
+                .map_err(error::nvme_to_em)? as u64;
 
         // Compute checkpoint region layout on metadata device
         let alignment = params.metadata_alignment;
@@ -545,11 +540,7 @@ impl IExtentManager for ExtentManager {
         Ok(())
     }
 
-    fn reserve_extent(
-        &self,
-        key: ExtentKey,
-        size: u32,
-    ) -> Result<WriteHandle, ExtentManagerError> {
+    fn reserve_extent(&self, key: ExtentKey, size: u32) -> Result<WriteHandle, ExtentManagerError> {
         let region = self.region_for_key(key)?;
 
         let (slab_start, slot_idx, offset, aligned_size) = {
@@ -568,11 +559,19 @@ impl IExtentManager for ExtentManager {
             if key == FREE_KEY {
                 // Special sentinel: silently discard — free the slot and return Ok.
                 r.free_slot(slab_start, slot_idx);
-                return Ok(Extent { key, offset, size: aligned_size });
+                return Ok(Extent {
+                    key,
+                    offset,
+                    size: aligned_size,
+                });
             }
 
             r.publish_slot(slab_start, slot_idx, key);
-            Ok(Extent { key, offset, size: aligned_size })
+            Ok(Extent {
+                key,
+                offset,
+                size: aligned_size,
+            })
         });
 
         let abort_fn = Box::new(move || {
@@ -580,7 +579,13 @@ impl IExtentManager for ExtentManager {
             r.free_slot(slab_start, slot_idx);
         });
 
-        Ok(WriteHandle::new(key, offset, aligned_size, publish_fn, abort_fn))
+        Ok(WriteHandle::new(
+            key,
+            offset,
+            aligned_size,
+            publish_fn,
+            abort_fn,
+        ))
     }
 
     fn get_extents(&self) -> Vec<Extent> {
@@ -666,6 +671,18 @@ impl IExtentManager for ExtentManager {
         regions.as_ref().map_or(0, |rs| {
             rs.iter().map(|r| r.read().buddy.total_usable_size()).sum()
         })
+    }
+
+    fn set_metadata_base_lba(&self, base_lba: u64) {
+        *self.metadata_base_lba.lock().unwrap() = base_lba;
+    }
+
+    fn set_data_base_lba(&self, base_lba: u64) {
+        *self.data_base_lba.lock().unwrap() = base_lba;
+    }
+
+    fn data_base_lba(&self) -> u64 {
+        *self.data_base_lba.lock().unwrap()
     }
 
     fn checkpoint(&self) -> Result<(), ExtentManagerError> {

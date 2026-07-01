@@ -492,6 +492,14 @@ impl IExtentManager for MockExtentManagerComponent {
     fn capacity_bytes(&self) -> u64 {
         0
     }
+
+    fn set_metadata_base_lba(&self, _base_lba: u64) {}
+
+    fn set_data_base_lba(&self, _base_lba: u64) {}
+
+    fn data_base_lba(&self) -> u64 {
+        0
+    }
 }
 
 #[test]

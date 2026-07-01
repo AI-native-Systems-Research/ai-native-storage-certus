@@ -81,8 +81,8 @@ use interfaces::{
 use component_core::binding::bind;
 use spdk_env::ISPDKEnv;
 
-pub use crate::metrics::PipelineMetrics;
 use crate::background::{BackgroundEvictor, EvictorConfig, ParallelBackgroundWriter, WriteJob};
+pub use crate::metrics::PipelineMetrics;
 
 /// A pending store awaiting commit or cancel.
 ///
@@ -99,7 +99,6 @@ struct PendingWrite {
     /// Index into `data_drives` identifying the target SSD.
     drive_idx: usize,
 }
-
 
 /// Holds one (block-device, extent-manager) pair for a data drive.
 #[allow(dead_code)]
@@ -328,9 +327,10 @@ impl DispatcherComponent {
                     |e| DispatcherError::AllocationFailed(format!("DmaBuffer wrap segment: {e}")),
                 )?
             } else {
-                let staging = DmaBuffer::new(seg.length, block_size, Some(numa_node)).map_err(
-                    |e| DispatcherError::AllocationFailed(format!("DMA segment buffer: {e}")),
-                )?;
+                let staging =
+                    DmaBuffer::new(seg.length, block_size, Some(numa_node)).map_err(|e| {
+                        DispatcherError::AllocationFailed(format!("DMA segment buffer: {e}"))
+                    })?;
 
                 let copy_len = seg
                     .length
@@ -373,7 +373,6 @@ impl DispatcherComponent {
                     ));
                 }
             }
-
         }
         Ok(())
     }
@@ -871,7 +870,58 @@ impl DispatcherComponent {
                 })?;
             let sector_size = ibd.block_size();
             let num_sectors = ibd.num_sectors(1).unwrap_or(0);
-            let data_disk_size = num_sectors * sector_size as u64;
+
+            // --- Partition table management ---
+            let part_mgr = disk_partition_manager::DiskPartitionManager::new_default();
+            part_mgr.set_ns_id(1);
+            bind(
+                &*block_dev_component,
+                "IBlockDevice",
+                &*part_mgr,
+                "block_device",
+            )
+            .map_err(|e| {
+                DispatcherError::IoError(format!(
+                    "failed to bind block device to partition manager {i}: {e}"
+                ))
+            })?;
+
+            let partition_config = interfaces::PartitionConfig {
+                sector_size,
+                total_sectors: num_sectors,
+                ns_id: 1,
+                partitions: vec![
+                    interfaces::PartitionSpec {
+                        type_guid: interfaces::type_guids::CERTUS_METADATA,
+                        size_bytes: config.metadata_partition_size,
+                        name: "certus-metadata".into(),
+                    },
+                    interfaces::PartitionSpec {
+                        type_guid: interfaces::type_guids::CERTUS_DATA,
+                        size_bytes: 0, // rest of disk
+                        name: "certus-data".into(),
+                    },
+                    interfaces::PartitionSpec {
+                        type_guid: interfaces::type_guids::CERTUS_EXTERNAL_META,
+                        size_bytes: config.external_metadata_partition_size,
+                        name: "certus-external".into(),
+                    },
+                ],
+            };
+
+            let (table, formatted) = part_mgr
+                .initialize_or_format(config.format_on_init, partition_config)
+                .map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "failed to initialize partition table for data drive {i}: {e}"
+                    ))
+                })?;
+
+            // Configure extent-manager with partition offsets
+            iem.set_metadata_base_lba(table.partitions[0].start_lba);
+            iem.set_data_base_lba(table.partitions[1].start_lba);
+
+            let data_disk_size = table.partitions[1].num_sectors * sector_size as u64;
             let defaults = FormatParams::default();
             let region_size = data_disk_size / defaults.region_count as u64;
             // Slab must fit within a buddy-allocated region. Use 1/16 of region
@@ -885,7 +935,7 @@ impl DispatcherComponent {
                 defaults.slab_size
             };
             let max_extent_size = (slab_size.min(defaults.max_extent_size as u64)) as u32;
-            if config.format_on_init {
+            if formatted {
                 iem.format(FormatParams {
                     data_disk_size,
                     sector_size,
@@ -1654,19 +1704,23 @@ impl IDispatcher for DispatcherComponent {
                     .iter()
                     .map(|&i| {
                         let (key, handle) = &entries[i];
-                        (*key, IpcHandle {
-                            address: handle.address,
-                            size: handle.size,
-                        })
+                        (
+                            *key,
+                            IpcHandle {
+                                address: handle.address,
+                                size: handle.size,
+                            },
+                        )
                     })
                     .collect();
 
                 let remote_results = rl.batch_lookup(&remote_entries);
 
                 for (pos, remote_res) in not_found.iter().zip(remote_results.into_iter()) {
-                    results[*pos] = Some(remote_res.map_err(|e| {
-                        DispatcherError::IoError(format!("remote lookup: {e}"))
-                    }));
+                    results[*pos] = Some(
+                        remote_res
+                            .map_err(|e| DispatcherError::IoError(format!("remote lookup: {e}"))),
+                    );
                 }
             }
         }
@@ -1902,9 +1956,7 @@ impl IDispatcher for DispatcherComponent {
         self.ensure_initialized()?;
 
         if size == 0 {
-            return Err(DispatcherError::InvalidParameter(
-                "size must be > 0".into(),
-            ));
+            return Err(DispatcherError::InvalidParameter("size must be > 0".into()));
         }
 
         let dm = self
@@ -1931,7 +1983,12 @@ impl IDispatcher for DispatcherComponent {
         Ok(mem_ptr)
     }
 
-    fn copy_gpu_to_memory_async(&self, key: CacheKey, ipc_handle: IpcHandle, stream: GpuStream) -> Result<(), DispatcherError> {
+    fn copy_gpu_to_memory_async(
+        &self,
+        key: CacheKey,
+        ipc_handle: IpcHandle,
+        stream: GpuStream,
+    ) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
 
         let mt = self
@@ -1951,9 +2008,7 @@ impl IDispatcher for DispatcherComponent {
                 -1,
             )
         }
-        .map_err(|e| {
-            DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}"))
-        })?;
+        .map_err(|e| DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}")))?;
 
         let gpu = self
             .gpu_services
@@ -1976,7 +2031,11 @@ impl IDispatcher for DispatcherComponent {
         Ok(())
     }
 
-    fn copy_gpu_to_memory_completed(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError> {
+    fn copy_gpu_to_memory_completed(
+        &self,
+        key: CacheKey,
+        size: u32,
+    ) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
 
         let dm = self
@@ -2158,7 +2217,13 @@ impl IDispatcher for DispatcherComponent {
         let start_lba = block_offset / block_size as u64;
         let total_bytes = pending.size as usize;
 
-        Self::write_buffer_to_ssd(&*block_dev_iface, &pending.buffer, start_lba, total_bytes, true)?;
+        Self::write_buffer_to_ssd(
+            &*block_dev_iface,
+            &pending.buffer,
+            start_lba,
+            total_bytes,
+            true,
+        )?;
 
         // Data written — publish extent and register in dispatch map.
         let _ = pending.write_handle.publish();
@@ -2206,7 +2271,8 @@ impl IDispatcher for DispatcherComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
 
-        dm.touch(key).map_err(|_| DispatcherError::KeyNotFound(key))?;
+        dm.touch(key)
+            .map_err(|_| DispatcherError::KeyNotFound(key))?;
 
         if let Ok(mt) = self.memory_tier.get() {
             mt.touch(key);
@@ -2485,7 +2551,11 @@ mod tests {
     }
 
     impl IMemoryTier for MockMemoryTier {
-        fn initialize(&self, _pool_size: usize, _numa_node: Option<i32>) -> Result<(), MemoryTierError> {
+        fn initialize(
+            &self,
+            _pool_size: usize,
+            _numa_node: Option<i32>,
+        ) -> Result<(), MemoryTierError> {
             Ok(())
         }
 
