@@ -34,6 +34,34 @@ impl DiskPartitionManager {
     fn get_ns_id(&self) -> u32 {
         self.ns_id.lock().unwrap().unwrap_or(1)
     }
+
+    /// Try to read an existing partition table, or create one if `force_format`
+    /// is true or no valid GPT exists on disk.
+    ///
+    /// Returns the resolved partition table and a `formatted` flag indicating
+    /// whether a new partition table was written. When `formatted` is true,
+    /// downstream components should also format their on-disk structures
+    /// (e.g., call `IExtentManager::format()` instead of `initialize()`).
+    pub fn initialize_or_format(
+        &self,
+        force_format: bool,
+        config: PartitionConfig,
+    ) -> Result<(PartitionTable, bool), PartitionTableError> {
+        if force_format {
+            let table = self.format(config)?;
+            return Ok((table, true));
+        }
+
+        match self.initialize() {
+            Ok(table) => Ok((table, false)),
+            Err(PartitionTableError::NoPartitionTable(_))
+            | Err(PartitionTableError::CorruptTable(_)) => {
+                let table = self.format(config)?;
+                Ok((table, true))
+            }
+            Err(e) => Err(e),
+        }
+    }
 }
 
 impl IPartitionTable for DiskPartitionManager {
