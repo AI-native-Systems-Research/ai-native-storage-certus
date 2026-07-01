@@ -921,6 +921,22 @@ impl DispatcherComponent {
             iem.set_metadata_base_lba(table.partitions[0].start_lba);
             iem.set_data_base_lba(table.partitions[1].start_lba);
 
+            if formatted {
+                self.log_error(&format!(
+                    "dispatcher: WARNING: formatting disk for data drive {i} at {addr_str} \
+                     — all existing data will be destroyed"
+                ));
+            }
+
+            // Log partition layout
+            for p in &table.partitions {
+                let size_mib = p.num_sectors * sector_size as u64 / (1024 * 1024);
+                self.log_info(&format!(
+                    "dispatcher: drive {i} partition {}: \"{}\" start_lba={} size={} MiB",
+                    p.index, p.name, p.start_lba, size_mib
+                ));
+            }
+
             let data_disk_size = table.partitions[1].num_sectors * sector_size as u64;
             let defaults = FormatParams::default();
             let region_size = data_disk_size / defaults.region_count as u64;
