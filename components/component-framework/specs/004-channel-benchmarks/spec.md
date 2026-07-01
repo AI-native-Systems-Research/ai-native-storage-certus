@@ -78,14 +78,24 @@ As a framework developer, I want to benchmark channels across different producer
 - **FR-006**: Each third-party channel component MUST enforce the same binding constraints as its topology implies (SPSC backends reject a second sender or receiver; MPSC backends reject a second receiver but allow multiple senders).
 - **FR-007**: Each third-party channel component MUST support introspection (provided_interfaces, receptacles, version) consistent with the existing component model.
 - **FR-008**: The framework MUST provide a benchmark suite that measures throughput (messages per second) for each channel backend under standardized conditions.
-- **FR-009**: The benchmark suite MUST measure latency (time per message round-trip or send-to-receive) for each channel backend.
+- **FR-009**: The benchmark suite MUST measure latency (time per
+  send-to-receive cycle) for each channel backend. The current
+  implementation measures single-thread send+recv latency via
+  Criterion's `iter()` on one thread. Cross-thread round-trip
+  measurement (including wake-up costs) may be added as a future
+  enhancement.
 - **FR-010**: The benchmark suite MUST include SPSC benchmark groups comparing all SPSC-capable backends side by side.
 - **FR-011**: The benchmark suite MUST include MPSC benchmark groups comparing all MPSC-capable backends side by side with at least 2, 4, and 8 producer threads.
 - **FR-012**: The benchmark suite MUST test at least two different message sizes (small fixed-size and larger variable-size) to reveal serialization and memory-copy costs.
 - **FR-013**: The benchmark suite MUST test at least two different queue capacities to reveal back-pressure and cache behavior.
 - **FR-014**: All third-party channel components MUST have unit tests verifying send/receive correctness, binding enforcement, and channel closure semantics.
 - **FR-015**: All third-party channel components MUST have documentation examples on public types. Third-party backends expose their native construction API rather than the `split()` convenience method used by built-in channels. Documentation examples are provided on all public types.
-- **FR-016**: The benchmark suite MUST produce results that are directly comparable across backends (same message count, same thread counts, same measurement methodology).
+- **FR-016**: The benchmark suite MUST produce results that are directly comparable across backends (same message count, same thread counts, same measurement methodology). Benchmark group IDs follow the pattern `{topology}_throughput_{type}/{backend}/{capacity}` (e.g., `spsc_throughput_u64/built_in/capacity_1024`).
+- **FR-017**: Backpressure behavior is implicitly exercised when
+  bounded channels at small capacities (e.g., 64) are benchmarked
+  under sustained throughput load. A dedicated isolated-backpressure
+  benchmark (e.g., slow consumer, capacity=1) is not currently
+  included but may be added as a future enhancement.
 
 ### Key Entities
 

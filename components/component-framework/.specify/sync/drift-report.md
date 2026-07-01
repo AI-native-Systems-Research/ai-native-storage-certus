@@ -1,6 +1,7 @@
 # Spec Drift Report
-Generated: 2026-06-18
+Generated: 2026-06-30
 Project: component-framework
+Status: **Resolved** — all specs updated to match implementation
 
 ## Summary
 | Category | Count |
