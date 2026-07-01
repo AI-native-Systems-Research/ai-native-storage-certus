@@ -66,6 +66,9 @@ pub struct DispatcherConfig {
     /// Size of the extent-manager metadata partition in bytes.
     /// Default: 128 MiB.
     pub metadata_partition_size: u64,
+    /// Size of the extended metadata partition in bytes.
+    /// Default: 128 MiB.
+    pub extended_metadata_partition_size: u64,
 }
 
 impl Default for DispatcherConfig {
@@ -82,6 +85,7 @@ impl Default for DispatcherConfig {
             max_eviction_attempts: 2048,
             backfill_delay_ms: 10,
             metadata_partition_size: 128 * 1024 * 1024,
+            extended_metadata_partition_size: 128 * 1024 * 1024,
         }
     }
 }

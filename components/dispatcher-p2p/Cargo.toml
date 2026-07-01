@@ -14,6 +14,7 @@ gpu-services = { workspace = true, features = ["spdk", "gpu", "p2p"] }
 spdk-env.workspace = true
 block-device-spdk-nvme = { workspace = true, optional = true }
 extent-manager.workspace = true
+disk-partition-manager.workspace = true
 memory-tier.workspace = true
 libc = "0.2"
 crossbeam-channel = "0.5"

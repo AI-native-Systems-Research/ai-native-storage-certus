@@ -903,6 +903,11 @@ impl DispatcherComponent {
                         name: "certus-metadata".into(),
                     },
                     interfaces::PartitionSpec {
+                        type_guid: interfaces::type_guids::CERTUS_EXTERNAL_META,
+                        size_bytes: config.extended_metadata_partition_size,
+                        name: "certus-extended-metadata".into(),
+                    },
+                    interfaces::PartitionSpec {
                         type_guid: interfaces::type_guids::CERTUS_DATA,
                         size_bytes: 0, // rest of disk
                         name: "certus-data".into(),
@@ -920,7 +925,8 @@ impl DispatcherComponent {
 
             // Configure extent-manager with partition offsets
             iem.set_metadata_base_lba(table.partitions[0].start_lba);
-            iem.set_data_base_lba(table.partitions[1].start_lba);
+            // partition[1] = extended metadata (reserved for future use)
+            iem.set_data_base_lba(table.partitions[2].start_lba);
 
             if formatted {
                 self.log_warn(&format!(
@@ -938,7 +944,7 @@ impl DispatcherComponent {
                 ));
             }
 
-            let data_disk_size = table.partitions[1].num_sectors * sector_size as u64;
+            let data_disk_size = table.partitions[2].num_sectors * sector_size as u64;
             let defaults = FormatParams::default();
             let region_size = data_disk_size / defaults.region_count as u64;
             // Slab must fit within a buddy-allocated region. Use 1/16 of region
@@ -958,6 +964,7 @@ impl DispatcherComponent {
                     sector_size,
                     slab_size,
                     max_extent_size,
+                    metadata_region_size: 0,
                     ..defaults
                 })
                 .map_err(|e| {

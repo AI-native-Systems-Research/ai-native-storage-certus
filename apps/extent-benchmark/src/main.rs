@@ -187,6 +187,11 @@ fn run_hardware_mode(config: BenchmarkConfig, count: u64, params: FormatParams, 
                 name: "certus-metadata".into(),
             },
             PartitionSpec {
+                type_guid: interfaces::type_guids::CERTUS_EXTERNAL_META,
+                size_bytes: 128 * 1024 * 1024,
+                name: "certus-extended-metadata".into(),
+            },
+            PartitionSpec {
                 type_guid: interfaces::type_guids::CERTUS_DATA,
                 size_bytes: 0, // rest of disk
                 name: "certus-data".into(),
@@ -202,10 +207,11 @@ fn run_hardware_mode(config: BenchmarkConfig, count: u64, params: FormatParams, 
         });
 
     let metadata_base_lba = table.partitions[0].start_lba;
-    let data_base_lba = table.partitions[1].start_lba;
+    // partition[1] = extended metadata (reserved for future use)
+    let data_base_lba = table.partitions[2].start_lba;
 
     // Override data_disk_size from partition geometry
-    let data_disk_size = table.partitions[1].num_sectors * sector_size as u64;
+    let data_disk_size = table.partitions[2].num_sectors * sector_size as u64;
     let params = FormatParams {
         data_disk_size,
         ..params
