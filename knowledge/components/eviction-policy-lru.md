@@ -14,37 +14,48 @@ LRU eviction policy component. Manages multiple independent eviction pools, each
 EvictionPolicyLruComponent {
     version: "0.1.0",
     provides: [IEvictionPolicy],
-    receptacles: { logger: ILogger },
-    fields: { state: RwLock<EvictionState> },
+    receptacles: {
+        logger: ILogger,
+    },
 }
 ```
 
-## Interfaces Provided
+## Interface Definition
 
-| Interface | Methods |
-|-----------|---------|
-| `IEvictionPolicy` | `create_pool() -> PoolId` |
-|                   | `track(pool, key) -> Result<EvictionHandle, _>` |
-|                   | `touch(handle) -> Result<(), _>` |
-|                   | `remove(handle) -> Result<(), _>` |
-|                   | `pop_oldest(pool) -> Option<CacheKey>` |
-|                   | `peek_oldest(pool, n) -> Vec<CacheKey>` |
-|                   | `len(pool) -> usize` |
-|                   | `clear_pool(pool)` |
+```rust
+define_interface! {
+    pub IEvictionPolicy {
+        fn create_pool(&self) -> PoolId;
+        fn track(&self, pool: PoolId, key: CacheKey) -> Result<EvictionHandle, EvictionPolicyError>;
+        fn touch(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError>;
+        fn batch_touch(&self, handles: &[EvictionHandle]) -> Result<(), EvictionPolicyError>;
+        fn remove(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError>;
+        fn pop_oldest(&self, pool: PoolId) -> Option<CacheKey>;
+        fn peek_oldest(&self, pool: PoolId, n: usize) -> Vec<CacheKey>;
+        fn len(&self, pool: PoolId) -> usize;
+        fn clear_pool(&self, pool: PoolId);
+    }
+}
+```
+
+## Verified Properties
+
+None. No formal verification model exists for this component.
 
 ## Receptacles
 
-| Name | Interface | Required |
-|------|-----------|----------|
-| `logger` | `ILogger` | No (gracefully skips if unbound) |
+| Name | Interface | Required | Purpose |
+|------|-----------|----------|---------|
+| `logger` | `ILogger` | No | Optional logging (gracefully skips if unbound) |
+
+## Key Types
+
+- `PoolId = u32` — identifier for an independent eviction tracking pool
+- `EvictionHandle { pool_id: u32, index: u32 }` — opaque handle for O(1) touch/remove
+- `EvictionPolicyError` — `InvalidPool`, `InvalidHandle`
 
 ## Key Design Decisions
 
 - **Multi-pool**: Each consumer (memory-tier, dispatch-map) gets its own pool — no cross-contamination of eviction order.
 - **Handle-based API**: `track()` returns an `EvictionHandle` that encodes pool + list position. Subsequent operations use the handle for O(1) access.
 - **Thread-safe**: Per-pool `Mutex` granularity — operations on different pools don't contend.
-
-## Wired By
-
-- `certus-server-yaml` profiles: wired to `dispatch_map.eviction_policy` and `memory_tier.eviction_policy`
-- `certus-server`: manual wiring in `main.rs`
