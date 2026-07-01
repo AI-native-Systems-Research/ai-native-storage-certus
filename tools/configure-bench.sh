@@ -37,7 +37,7 @@ XFS_LABEL="fs-bench"
 #
 # memmap=254G$0x80000000  → reserve node 0 from 2G to 256G (keep 2G for boot)
 # mem=320G                → truncate at 320G (keeps 64G from node 1: 256G–320G)
-NODE0_RESERVE="254G\$0x80000000"   # escaped $ for grubby
+NODE0_RESERVE='254G\\\$0x80000000'   # \\\$ → literal $ in GRUB2 BLS entries
 MEM_LIMIT="320G"
 TOTAL_USABLE_NODE1="64"  # GiB available on node 1 after memmap+mem
 
@@ -190,9 +190,12 @@ show_status() {
         ((++issues))
     fi
 
-    # memmap=
-    if echo "$cmdline" | grep -q "memmap="; then
-        echo -e "  ${tag_certus}${tag_ss} memmap= present — memory isolated to NUMA node $GPU_NUMA"
+    # memmap= (must include the $offset to actually reserve memory)
+    if echo "$cmdline" | grep -qP 'memmap=254G\$0x80000000'; then
+        echo -e "  ${tag_certus}${tag_ss} memmap=254G\$0x80000000 — node 0 reserved"
+    elif echo "$cmdline" | grep -q "memmap="; then
+        echo -e "  ${tag_empty} memmap= present but OFFSET MISSING — reservation not active"
+        ((++issues))
     else
         echo -e "  ${tag_empty} memmap= MISSING — memory not isolated to NUMA node $GPU_NUMA"
         ((++issues))
@@ -210,7 +213,9 @@ show_status() {
     header "Kernel (next boot)"
     local next_boot_args
     next_boot_args=$(grubby --info=DEFAULT 2>/dev/null | grep ^args= | sed 's/^args="//' | sed 's/"$//')
-    if [[ -n "$next_boot_args" ]]; then
+    if [[ -z "$next_boot_args" && $EUID -ne 0 ]]; then
+        echo -e "  ${YELLOW}Run with sudo to see next-boot kernel args${NC}"
+    elif [[ -n "$next_boot_args" ]]; then
         local next_differs=false
         if [[ "$next_boot_args" != "$cmdline" ]]; then next_differs=true; fi
 
@@ -311,8 +316,9 @@ set_kernel_params() {
 
     # Verify
     echo
+    echo "  Next boot kernel: $(grubby --default-kernel)"
     echo "  Effective kernel args for next boot:"
-    grubby --info=DEFAULT | grep ^args | sed 's/^args="/  /' | sed 's/"$//'
+    grubby --info=DEFAULT | grep ^args | sed 's/^args="/  /' | sed 's/"$//' | sed 's/\\\$/$/g'
 
     # Check if reboot needed
     local current_cmdline
