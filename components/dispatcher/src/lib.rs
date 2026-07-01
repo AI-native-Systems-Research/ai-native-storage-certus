@@ -938,9 +938,16 @@ impl DispatcherComponent {
             // Log partition layout
             for p in &table.partitions {
                 let size_mib = p.num_sectors * sector_size as u64 / (1024 * 1024);
+                let size_str = if size_mib >= 1024 * 1024 {
+                    format!("{:.2} TiB", size_mib as f64 / (1024.0 * 1024.0))
+                } else if size_mib >= 1024 {
+                    format!("{:.2} GiB", size_mib as f64 / 1024.0)
+                } else {
+                    format!("{} MiB", size_mib)
+                };
                 self.log_info(&format!(
-                    "dispatcher: drive {i} partition {}: \"{}\" start_lba={} size={} MiB",
-                    p.index, p.name, p.start_lba, size_mib
+                    "dispatcher: drive {i} partition {}: \"{}\" start_lba={} size={}",
+                    p.index, p.name, p.start_lba, size_str
                 ));
             }
 
