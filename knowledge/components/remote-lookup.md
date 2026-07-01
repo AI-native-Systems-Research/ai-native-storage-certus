@@ -14,38 +14,40 @@ Placeholder component for remote cache lookups to other Certus nodes on the netw
 RemoteLookupComponent {
     version: "0.1.0",
     provides: [IRemoteLookup],
-    receptacles: { logger: ILogger },
+    receptacles: {
+        logger: ILogger,
+    },
 }
 ```
 
-## Interfaces Provided
+## Interface Definition
 
-| Interface | Methods |
-|-----------|---------|
-| `IRemoteLookup` | `batch_lookup(&[(CacheKey, IpcHandle)]) -> Vec<Result<(), RemoteLookupError>>` |
-|                  | `join_cluster(endpoint: &str) -> Result<(), RemoteLookupError>` |
-|                  | `leave_cluster() -> Result<(), RemoteLookupError>` |
+```rust
+define_interface! {
+    pub IRemoteLookup {
+        fn batch_lookup(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), RemoteLookupError>>;
+        fn join_cluster(&self, endpoint: &str) -> Result<(), RemoteLookupError>;
+        fn leave_cluster(&self) -> Result<(), RemoteLookupError>;
+    }
+}
+```
+
+## Verified Properties
+
+None. No formal verification model exists for this component.
 
 ## Receptacles
 
-| Name | Interface | Required |
-|------|-----------|----------|
-| `logger` | `ILogger` | No (gracefully skips if unbound) |
+| Name | Interface | Required | Purpose |
+|------|-----------|----------|---------|
+| `logger` | `ILogger` | No | Optional logging (gracefully skips if unbound) |
+
+## Key Types
+
+- `RemoteLookupError` — `NotFound`, `TransportError(String)`
 
 ## Key Design Decisions
 
 - **Same types as IDispatcher**: `batch_lookup` uses `&[(CacheKey, IpcHandle)]` — identical to the dispatcher's batch_lookup — enabling zero-cost delegation.
 - **Graceful degradation**: If the receptacle isn't bound in the dispatcher, the remote lookup phase is skipped and `KeyNotFound` is returned directly.
 - **Placeholder**: All methods log and return stub results. The interface contract is established for future network implementation.
-
-## Integration Points
-
-The dispatcher calls this component in three places:
-1. `initialize()` → `join_cluster("certus://local-cluster")`
-2. `shutdown()` → `leave_cluster()`
-3. `batch_lookup()` → forwards `KeyNotFound` entries after exhausting local tiers
-
-## Wired By
-
-- `certus-server-yaml` profiles: wired as `dispatcher.remote_lookup` → `remote_lookup` component
-- `certus-server`: manual wiring in `main.rs`

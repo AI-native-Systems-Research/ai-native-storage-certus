@@ -1,37 +1,65 @@
 # block-device-spdk-nvme (v2)
 
-**Crate**: `block-device-spdk-nvme-v2`
-**Path**: `components/block-device-spdk-nvme/v2/`
+**Crate**: `block-device-spdk-nvme`
+**Path**: `components/block-device-spdk-nvme/`
 **Version**: 0.2.0
 **Features**: `telemetry` (IO statistics), `spdk-test`
 
 ## Description
 
-Version 2 of the NVMe block device component. Same architecture as v1 (one actor thread per controller, SPSC client channels, same interface and messaging API) with hot-path optimizations:
+NVMe block device component using SPDK for direct userspace NVMe controller access. Each instance is associated with a single NVMe controller. The actor thread is pinned to the NUMA node of the controller. Provides both `IBlockDevice` (data path) and `IBlockDeviceAdmin` (lifecycle/configuration) interfaces.
 
-- **TSC-based timeout**: Uses hardware Time Stamp Counter (`rdtscp`) for low-overhead deadline checking (~20 cycles vs ~200 for `clock_gettime`). Timeout checks throttled to ~1ms intervals.
-- **ContextPool slab allocator**: Eliminates per-IO heap allocation for async completion contexts. Contexts are acquired from a slab at submission and returned in the callback.
-- **Scratch buffers**: Pre-allocated vectors for draining completions and collecting timed-out handles, avoiding allocation in the hot path.
-
-Both v1 and v2 can be used concurrently in applications with a runtime `--driver v1|v2` flag.
+Hot-path optimizations over v1:
+- **TSC-based timeout**: Uses hardware Time Stamp Counter (`rdtscp`) for low-overhead deadline checking
+- **ContextPool slab allocator**: Eliminates per-IO heap allocation for async completion contexts
+- **Scratch buffers**: Pre-allocated vectors for draining completions
 
 ## Component Definition
 
 ```
-BlockDeviceSpdkNvmeComponentV2 {
+BlockDeviceSpdkNvmeComponent {
     version: "0.2.0",
     provides: [IBlockDevice, IBlockDeviceAdmin],
-    receptacles: { spdk_env: ISPDKEnv, logger: ILogger },
-    fields: { ... },  // same structure as v1
+    receptacles: {
+        spdk_env: ISPDKEnv,
+        logger: ILogger,
+    },
 }
 ```
 
-## Interfaces Provided
+## Interface Definition
 
-| Interface | Key Methods |
-|-----------|------------|
-| `IBlockDevice` | `connect_client()`, `sector_size()`, `num_sectors()`, `max_queue_depth()`, `num_io_queues()`, `max_transfer_size()`, `block_size()`, `numa_node()`, `nvme_version()`, `telemetry()` |
-| `IBlockDeviceAdmin` | `set_pci_address()`, `set_actor_cpu()`, `initialize()`, `shutdown()` |
+```rust
+define_interface! {
+    pub IBlockDevice {
+        fn connect_client(&self) -> Result<ClientChannels, NvmeBlockError>;
+        fn sector_size(&self, ns_id: u32) -> Result<u32, NvmeBlockError>;
+        fn num_sectors(&self, ns_id: u32) -> Result<u64, NvmeBlockError>;
+        fn max_queue_depth(&self) -> u32;
+        fn num_io_queues(&self) -> u32;
+        fn max_transfer_size(&self) -> u32;
+        fn block_size(&self) -> u32;
+        fn numa_node(&self) -> i32;
+        fn nvme_version(&self) -> String;
+        fn telemetry(&self) -> Result<TelemetrySnapshot, NvmeBlockError>;
+    }
+}
+
+define_interface! {
+    pub IBlockDeviceAdmin {
+        fn set_pci_address(&self, addr: PciAddress);
+        fn set_actor_cpu(&self, cpu: usize);
+        fn initialize(&self) -> Result<(), NvmeBlockError>;
+        fn signal_stop(&self);
+        fn shutdown(&self) -> Result<(), NvmeBlockError>;
+        fn detach_controller(&self);
+    }
+}
+```
+
+## Verified Properties
+
+None. No formal verification model exists for this component's interface.
 
 ## Receptacles
 
@@ -40,6 +68,12 @@ BlockDeviceSpdkNvmeComponentV2 {
 | `spdk_env` | `ISPDKEnv` | Yes | SPDK environment must be initialized first |
 | `logger` | `ILogger` | No | Optional debug/info logging |
 
-## Messaging API
+## Key Types
 
-Same `Command`/`Completion` protocol as v1. See [block-device-spdk-nvme-v1.md](block-device-spdk-nvme-v1.md) for the full messaging reference.
+- `ClientChannels { command_tx: Sender<Command>, completion_rx: Receiver<Completion> }`
+- `Command` — `ReadSync`, `WriteSync`, `ReadAsync`, `WriteAsync`, `WriteZeros`, `BatchSubmit`, `AbortOp`, `NsProbe`, `NsCreate`, `NsFormat`, `NsDelete`, `ControllerReset`
+- `Completion` — `ReadDone`, `WriteDone`, `WriteZerosDone`, `AbortAck`, `Timeout`, `NsProbeResult`, `NsCreated`, `NsFormatted`, `NsDeleted`, `ResetDone`, `Error`
+- `NvmeBlockError` — `FeatureNotEnabled`, `NotInitialized`, `Timeout`, `Aborted`, `InvalidNamespace`, `NotSupported`, `BlockDevice`, `SpdkEnv`, `LbaOutOfRange`, `ClientDisconnected`
+- `TelemetrySnapshot { total_ops, min_latency_ns, max_latency_ns, mean_latency_ns, mean_throughput_mbps, elapsed_secs }`
+- `OpHandle(u64)` — unique async operation handle
+- `NamespaceInfo { ns_id, num_sectors, sector_size }`
