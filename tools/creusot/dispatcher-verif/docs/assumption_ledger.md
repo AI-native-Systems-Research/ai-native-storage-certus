@@ -99,3 +99,10 @@ Purpose:
 - Safety/correctness core remains strong and mostly assumption-light.
 - Temporal/liveness slices are useful and proved, but currently assumption-conditional.
 - This ledger should be updated whenever a proof gains or drops assumptions.
+
+## Link to Trusted Proof Debt
+
+- Trusted proof debt is tracked separately in:
+  - [trusted_ledger.md](/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/docs/trusted_ledger.md)
+- Rationale:
+  - assumptions and `#[trusted]` are different risk classes and should be audited independently.

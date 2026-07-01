@@ -26,7 +26,7 @@ Status labels:
 | 8 | MemoryTier lookup keeps key and refreshes timestamp/touch | `lookup`, `touch` | Partial | Presence behavior covered; timestamp refresh is represented by separate `touch`, not fully coupled to `lookup`. |
 | 9 | BlockDevice lookup promotes to MemoryTier | `lookup` | Covered | Success on `BlockDevice` changes state to `MemoryTier`. |
 | 10 | Staging lookup compatibility | `lookup` | Partial | `Staging` variant exists in model, but no staging-specific branch semantics beyond generic success. |
-| 11 | Lookup size-match contract (`InvalidParameter` on mismatch, no partial copy/state mutation) | `lookup` | Covered | `lookup` now checks `requested_size` against stored `slot.size`; mismatch returns `InvalidParameter` with unchanged state. |
+| 11 | Lookup size-match contract (`InvalidParameter` on mismatch, no partial copy/state mutation) | `lookup` | Covered | Model proof target: `dispatcher-verif/src/lib.rs::lookup` (`cargo creusot` proved). Implementation targets: `components/dispatch-map/src/lib.rs::lookup` mismatch generation path and dispatcher lookup copy paths. Regression target: explicit mismatch test that asserts hard-fail and no partial copy. |
 | 12 | `remove` success => key absent | `remove` | Covered | Postcondition enforces absent key on success. |
 | 13 | `remove` miss => `KeyNotFound`, no mutation | `remove` | Covered | Miss path explicitly preserved. |
 | 14 | `touch` updates timestamp only, miss => `KeyNotFound` | `touch` | Partial | Timestamp monotonicity and miss behavior covered; "only timestamp changes" is approximated, not fully constrained field-by-field. |
@@ -36,7 +36,7 @@ Status labels:
 | 18 | Clean eviction = MemoryTier -> BlockDevice | `clean_evict` | Covered | Explicit clean-eviction predicate and transition contract. |
 | 19 | Blind fallback failure removes key | `blind_evict_with_fallback` | Covered | Conversion failure path enforces removal (`present=false`). |
 | 20 | `prepare_store(size=0)` => `InvalidParameter` + no mutation | `prepare_store` | Covered | Explicit size check and contract. |
-| 21 | Pending-write protocol lifecycle | `prepare_store`, `commit_store`, `cancel_store`, `prepare_store_product`, `p21_m1_prepare_commit_consumes_once`, `p21_m1_prepare_cancel_consumes_once`, `p21_m2_prepare_then_terminal_ops_miss` | Partial (mode-split) | Added product-aligned mode split: M1 (write-handle path) consume-once vs M2 (staging-only path) terminal-op miss behavior. Three dedicated P21 product VCs are currently unproved and tracked as proof-strengthening work. |
+| 21 | Pending-write protocol lifecycle | `prepare_store`, `commit_store`, `cancel_store`, `prepare_store_product`, `p21_m1_prepare_commit_consumes_once`, `p21_m1_prepare_cancel_consumes_once`, `p21_m2_prepare_then_terminal_ops_miss` | Covered (trusted tail VC) | Product-aligned mode split is encoded: M1 (write-handle path) consume-once and M2 (staging-only path) terminal-op miss behavior. Core facts are proved in-body; remaining trust is localized and tracked in [trusted_ledger.md](/home/cornel/ai-native-storage-certus/tools/creusot/dispatcher-verif/docs/trusted_ledger.md). |
 | 22 | Commit success => BlockDevice + pending cleared | `commit_store` | Covered | State transition postconditions encoded. |
 | 23 | Cancel success => key removed + pending cleared | `cancel_store` | Covered | Success path clears presence/pending. |
 | 24 | Commit/cancel without pending => `KeyNotFound` + unchanged | `commit_store`, `cancel_store` | Covered | Miss path contracts preserve slot. |
