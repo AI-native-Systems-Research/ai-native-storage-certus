@@ -3,7 +3,7 @@ use interfaces::ExtentManagerError;
 use crate::block_io::BlockDeviceClient;
 use crate::checkpoint::{self, SlabDescriptor};
 use crate::error;
-use crate::slab::{FREE_KEY, Slab};
+use crate::slab::{Slab, FREE_KEY};
 use crate::superblock::{Superblock, SUPERBLOCK_SIZE};
 
 pub(crate) type PerRegionData = Vec<Vec<SlabDescriptor>>;
@@ -16,16 +16,14 @@ pub(crate) fn recover(
     let sb = Superblock::deserialize(&sb_data)?;
 
     if sb.checkpoint_seq == 0 {
-        let empty: PerRegionData = (0..sb.region_count as usize)
-            .map(|_| Vec::new())
-            .collect();
+        let empty: PerRegionData = (0..sb.region_count as usize).map(|_| Vec::new()).collect();
         return Ok((sb, empty));
     }
 
-    let active_offset = sb.checkpoint_region_offset
-        + sb.active_copy as u64 * sb.checkpoint_region_size;
-    let inactive_offset = sb.checkpoint_region_offset
-        + (1 - sb.active_copy) as u64 * sb.checkpoint_region_size;
+    let active_offset =
+        sb.checkpoint_region_offset + sb.active_copy as u64 * sb.checkpoint_region_size;
+    let inactive_offset =
+        sb.checkpoint_region_offset + (1 - sb.active_copy) as u64 * sb.checkpoint_region_size;
 
     // Try active copy first
     match checkpoint::read_checkpoint_region(

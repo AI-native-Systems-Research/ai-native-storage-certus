@@ -197,7 +197,6 @@ impl EngineInner {
             .initialize(DispatcherConfig {
                 data_pci_addrs,
                 max_cache_entries,
-                eviction_threshold: 0.95,
                 format_on_init: true,
                 ..Default::default()
             })

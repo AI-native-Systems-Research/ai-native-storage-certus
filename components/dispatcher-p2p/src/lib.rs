@@ -175,6 +175,12 @@ impl DispatcherP2pComponent {
         }
     }
 
+    fn log_warn(&self, msg: &str) {
+        if let Ok(logger) = self.logger.get() {
+            logger.warn(msg);
+        }
+    }
+
     #[allow(dead_code)]
     fn log_error(&self, msg: &str) {
         if let Ok(logger) = self.logger.get() {
@@ -856,9 +862,85 @@ impl DispatcherP2pComponent {
                         "failed to query IExtentManager for data drive {i}"
                     ))
                 })?;
+
+            // --- Partition table management ---
+            let part_mgr = disk_partition_manager::DiskPartitionManager::new_default();
+            part_mgr.set_ns_id(1);
+            bind(
+                &*block_dev_component,
+                "IBlockDevice",
+                &*part_mgr,
+                "block_device",
+            )
+            .map_err(|e| {
+                DispatcherError::IoError(format!(
+                    "failed to bind block device to partition manager {i}: {e}"
+                ))
+            })?;
+
             let sector_size = ibd.block_size();
             let num_sectors = ibd.num_sectors(1).unwrap_or(0);
-            let data_disk_size = num_sectors * sector_size as u64;
+
+            let partition_config = interfaces::PartitionConfig {
+                sector_size,
+                total_sectors: num_sectors,
+                ns_id: 1,
+                partitions: vec![
+                    interfaces::PartitionSpec {
+                        type_guid: interfaces::type_guids::CERTUS_METADATA,
+                        size_bytes: config.metadata_partition_size,
+                        name: "certus-metadata".into(),
+                    },
+                    interfaces::PartitionSpec {
+                        type_guid: interfaces::type_guids::CERTUS_EXTERNAL_META,
+                        size_bytes: config.extended_metadata_partition_size,
+                        name: "certus-extended-metadata".into(),
+                    },
+                    interfaces::PartitionSpec {
+                        type_guid: interfaces::type_guids::CERTUS_DATA,
+                        size_bytes: 0, // rest of disk
+                        name: "certus-data".into(),
+                    },
+                ],
+            };
+
+            let (table, formatted) = part_mgr
+                .initialize_or_format(config.format_on_init, partition_config)
+                .map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "failed to initialize partition table for data drive {i}: {e}"
+                    ))
+                })?;
+
+            // Configure extent-manager with partition offsets
+            iem.set_metadata_base_lba(table.partitions[0].start_lba);
+            // partition[1] = extended metadata (reserved for future use)
+            iem.set_data_base_lba(table.partitions[2].start_lba);
+
+            if formatted {
+                self.log_warn(&format!(
+                    "dispatcher: formatting disk for data drive {i} at {addr_str} \
+                     — all existing data will be destroyed"
+                ));
+            }
+
+            // Log partition layout
+            for p in &table.partitions {
+                let size_mib = p.num_sectors * sector_size as u64 / (1024 * 1024);
+                let size_str = if size_mib >= 1024 * 1024 {
+                    format!("{:.2} TiB", size_mib as f64 / (1024.0 * 1024.0))
+                } else if size_mib >= 1024 {
+                    format!("{:.2} GiB", size_mib as f64 / 1024.0)
+                } else {
+                    format!("{} MiB", size_mib)
+                };
+                self.log_info(&format!(
+                    "dispatcher: drive {i} partition {}: \"{}\" start_lba={} size={}",
+                    p.index, p.name, p.start_lba, size_str
+                ));
+            }
+
+            let data_disk_size = table.partitions[2].num_sectors * sector_size as u64;
             let defaults = FormatParams::default();
             let region_size = data_disk_size / defaults.region_count as u64;
             // Slab must fit within a buddy-allocated region. Use 1/16 of region
@@ -872,12 +954,13 @@ impl DispatcherP2pComponent {
                 defaults.slab_size
             };
             let max_extent_size = (slab_size.min(defaults.max_extent_size as u64)) as u32;
-            if config.format_on_init {
+            if formatted {
                 iem.format(FormatParams {
                     data_disk_size,
                     sector_size,
                     slab_size,
                     max_extent_size,
+                    metadata_region_size: 0,
                     ..defaults
                 })
                 .map_err(|e| {

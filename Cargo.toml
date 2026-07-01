@@ -18,6 +18,7 @@ members = [
     "components/block-device-spdk-nvme",
     "components/block-device-filesys",
     "components/block-device-kernel",
+    "components/disk-partition-manager",
     "components/extent-manager",
     "components/logger",
     "components/dispatch-map",
@@ -84,6 +85,7 @@ dispatch-map = { path = "components/dispatch-map" }
 memory-tier = { path = "components/memory-tier" }
 dispatcher = { path = "components/dispatcher", default-features = false }
 dispatcher-p2p = { path = "components/dispatcher-p2p", default-features = false }
+disk-partition-manager = { path = "components/disk-partition-manager" }
 extent-manager = { path = "components/extent-manager" }
 gpu-services = { path = "components/gpu-services" }
 eviction-policy-lru = { path = "components/eviction-policy-lru" }

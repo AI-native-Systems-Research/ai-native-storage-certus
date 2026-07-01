@@ -84,7 +84,7 @@ impl LogLevel {
     fn ansi_color(self) -> &'static str {
         match self {
             LogLevel::Error => "\x1b[31m",
-            LogLevel::Warn => "\x1b[33m",
+            LogLevel::Warn => "\x1b[38;5;208m",
             LogLevel::Info => "\x1b[32m",
             LogLevel::Debug => "\x1b[36m",
         }
@@ -383,7 +383,7 @@ mod tests {
         logger.debug("d");
         let output = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
         assert!(output.contains("\x1b[31m"), "missing red for error");
-        assert!(output.contains("\x1b[33m"), "missing yellow for warn");
+        assert!(output.contains("\x1b[38;5;208m"), "missing orange for warn");
         assert!(output.contains("\x1b[32m"), "missing green for info");
         assert!(output.contains("\x1b[36m"), "missing cyan for debug");
     }

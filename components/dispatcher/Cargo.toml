@@ -13,6 +13,7 @@ interfaces = { workspace = true, features = ["spdk"] }
 gpu-services = { workspace = true, features = ["spdk", "gpu"] }
 spdk-env.workspace = true
 block-device-spdk-nvme = { workspace = true, optional = true }
+disk-partition-manager.workspace = true
 extent-manager.workspace = true
 memory-tier.workspace = true
 libc = "0.2"

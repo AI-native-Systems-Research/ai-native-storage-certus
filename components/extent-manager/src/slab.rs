@@ -84,8 +84,7 @@ impl Slab {
     }
 
     pub fn contains_offset(&self, byte_offset: u64) -> bool {
-        byte_offset >= self.start_offset
-            && byte_offset < self.start_offset + self.slab_size
+        byte_offset >= self.start_offset && byte_offset < self.start_offset + self.slab_size
     }
 }
 
