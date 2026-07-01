@@ -191,11 +191,6 @@ fn run_hardware_mode(config: BenchmarkConfig, count: u64, params: FormatParams, 
                 size_bytes: 0, // rest of disk
                 name: "certus-data".into(),
             },
-            PartitionSpec {
-                type_guid: interfaces::type_guids::CERTUS_EXTERNAL_META,
-                size_bytes: 64 * 1024 * 1024,
-                name: "certus-external".into(),
-            },
         ],
     };
 

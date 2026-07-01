@@ -907,11 +907,6 @@ impl DispatcherComponent {
                         size_bytes: 0, // rest of disk
                         name: "certus-data".into(),
                     },
-                    interfaces::PartitionSpec {
-                        type_guid: interfaces::type_guids::CERTUS_EXTERNAL_META,
-                        size_bytes: config.external_metadata_partition_size,
-                        name: "certus-external".into(),
-                    },
                 ],
             };
 
