@@ -43,7 +43,7 @@ XFS_LABEL="fs-bench"
 #
 # memmap=254G$0x80000000  → reserve node 0 from 2G to 256G (keep 2G for boot)
 # mem=320G                → truncate at 320G (keeps 64G from node 1: 256G–320G)
-NODE0_RESERVE='254G\\\$0x80000000'   # \\\$ → literal $ in GRUB2 BLS entries
+NODE0_RESERVE='254G$0x80000000'
 MEM_LIMIT="320G"
 TOTAL_USABLE_NODE1="64"  # GiB available on node 1 after memmap+mem
 
