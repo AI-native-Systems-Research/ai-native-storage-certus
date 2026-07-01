@@ -14,6 +14,7 @@ mod igreeter;
 mod ilogger;
 mod imemory_tier;
 mod iremote_lookup;
+mod ipartition_table;
 mod iremote_request_handler;
 
 pub use idispatch_map::CacheKey;
@@ -83,3 +84,12 @@ pub use iextent_manager::FormatParams;
 #[cfg(feature = "spdk")]
 pub use iextent_manager::IExtentManager;
 pub use iextent_manager::WriteHandle;
+
+pub use ipartition_table::PartitionConfig;
+pub use ipartition_table::PartitionInfo;
+pub use ipartition_table::PartitionSpec;
+pub use ipartition_table::PartitionTable;
+pub use ipartition_table::PartitionTableError;
+pub use ipartition_table::type_guids;
+#[cfg(feature = "spdk")]
+pub use ipartition_table::IPartitionTable;

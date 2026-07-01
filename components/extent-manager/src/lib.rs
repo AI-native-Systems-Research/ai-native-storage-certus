@@ -80,6 +80,8 @@ define_component! {
             checkpoint_timer_state: Arc<CheckpointTimerState>,
             checkpoint_thread: Mutex<Option<JoinHandle<()>>>,
             metadata_ns_id: Mutex<Option<u32>>,
+            metadata_base_lba: Mutex<u64>,
+            data_base_lba: Mutex<u64>,
         },
     }
 }
@@ -160,6 +162,33 @@ impl ExtentManager {
         *self.metadata_ns_id.lock().unwrap() = Some(ns_id);
     }
 
+    /// Set the base LBA offset for all metadata I/O.
+    ///
+    /// When the extent-manager's metadata lives on a GPT partition,
+    /// this offset is added to every read/write issued to the metadata
+    /// device. Must be called before `initialize()` or `format()`.
+    pub fn set_metadata_base_lba(&self, base_lba: u64) {
+        *self.metadata_base_lba.lock().unwrap() = base_lba;
+    }
+
+    /// Set the base LBA offset for the data partition.
+    ///
+    /// When the extent-manager's data lives on a GPT partition,
+    /// callers must add this offset to `Extent.offset / sector_size`
+    /// when issuing data I/O. Must be called before `initialize()` or
+    /// `format()`.
+    pub fn set_data_base_lba(&self, base_lba: u64) {
+        *self.data_base_lba.lock().unwrap() = base_lba;
+    }
+
+    /// Get the configured data base LBA offset.
+    ///
+    /// Returns the LBA that should be added to extent offsets when
+    /// computing absolute device LBAs for data I/O.
+    pub fn data_base_lba(&self) -> u64 {
+        *self.data_base_lba.lock().unwrap()
+    }
+
     fn get_metadata_client(&self, ns_id: u32) -> Result<BlockDeviceClient, ExtentManagerError> {
         let bd = self
             .metadata_device
@@ -177,8 +206,11 @@ impl ExtentManager {
         });
 
         let sector_size = bd.sector_size(ns_id).map_err(error::nvme_to_em)?;
+        let base_lba = *self.metadata_base_lba.lock().unwrap();
 
-        Ok(BlockDeviceClient::new(channels, alloc, sector_size, ns_id))
+        Ok(BlockDeviceClient::with_base_lba(
+            channels, alloc, sector_size, ns_id, base_lba,
+        ))
     }
 
     fn region_for_key(&self, key: ExtentKey) -> Result<Arc<RwLock<RegionState>>, ExtentManagerError> {
