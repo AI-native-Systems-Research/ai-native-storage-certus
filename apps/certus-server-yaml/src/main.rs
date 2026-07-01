@@ -293,5 +293,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     stack.spdk_env.fini();
     stack.logger.info("certus-server-yaml: shutdown complete");
 
-    Ok(())
+    // Exit immediately to avoid blocking on tokio runtime drop waiting for
+    // spawn_blocking tasks (RDMA serve_loop) that may still be tearing down.
+    std::process::exit(0);
 }

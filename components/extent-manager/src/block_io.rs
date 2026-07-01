@@ -1,6 +1,4 @@
-use interfaces::{
-    ClientChannels, Command, Completion, DmaAllocFn, DmaBuffer, NvmeBlockError,
-};
+use interfaces::{ClientChannels, Command, Completion, DmaAllocFn, DmaBuffer, NvmeBlockError};
 use std::sync::{Arc, Mutex};
 
 use crate::error;
@@ -10,15 +8,34 @@ pub(crate) struct BlockDeviceClient {
     alloc: DmaAllocFn,
     sector_size: u32,
     ns_id: u32,
+    base_lba: u64,
 }
 
 impl BlockDeviceClient {
+    #[cfg(any(test, feature = "testing"))]
     pub fn new(channels: ClientChannels, alloc: DmaAllocFn, sector_size: u32, ns_id: u32) -> Self {
         Self {
             channels,
             alloc,
             sector_size,
             ns_id,
+            base_lba: 0,
+        }
+    }
+
+    pub fn with_base_lba(
+        channels: ClientChannels,
+        alloc: DmaAllocFn,
+        sector_size: u32,
+        ns_id: u32,
+        base_lba: u64,
+    ) -> Self {
+        Self {
+            channels,
+            alloc,
+            sector_size,
+            ns_id,
+            base_lba,
         }
     }
 
@@ -34,8 +51,7 @@ impl BlockDeviceClient {
         lba: u64,
         data: &[u8],
     ) -> Result<(), interfaces::ExtentManagerError> {
-        let num_blocks =
-            (data.len() + self.sector_size as usize - 1) / self.sector_size as usize;
+        let num_blocks = (data.len() + self.sector_size as usize - 1) / self.sector_size as usize;
         let buf_size = num_blocks * self.sector_size as usize;
 
         let mut buf = self.alloc_buffer(buf_size).map_err(error::nvme_to_em)?;
@@ -50,7 +66,7 @@ impl BlockDeviceClient {
         let buf = Arc::new(buf);
 
         for i in 0..num_blocks {
-            let block_lba = lba + i as u64;
+            let block_lba = self.base_lba + lba + i as u64;
             let block_start = i * self.sector_size as usize;
             let block_end = block_start + self.sector_size as usize;
 
@@ -96,12 +112,11 @@ impl BlockDeviceClient {
         lba: u64,
         num_bytes: usize,
     ) -> Result<Vec<u8>, interfaces::ExtentManagerError> {
-        let num_blocks =
-            (num_bytes + self.sector_size as usize - 1) / self.sector_size as usize;
+        let num_blocks = (num_bytes + self.sector_size as usize - 1) / self.sector_size as usize;
         let mut result = Vec::with_capacity(num_bytes);
 
         for i in 0..num_blocks {
-            let block_lba = lba + i as u64;
+            let block_lba = self.base_lba + lba + i as u64;
             let buf = self
                 .alloc_buffer(self.sector_size as usize)
                 .map_err(error::nvme_to_em)?;

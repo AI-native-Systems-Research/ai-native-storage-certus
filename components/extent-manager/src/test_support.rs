@@ -1,7 +1,7 @@
 use component_core::channel::SpscChannel;
 use interfaces::{
-    ClientChannels, Command, Completion, DmaAllocFn, DmaBuffer, IBlockDevice,
-    ILogger, NvmeBlockError, OpHandle, TelemetrySnapshot,
+    ClientChannels, Command, Completion, DmaAllocFn, DmaBuffer, IBlockDevice, ILogger,
+    NvmeBlockError, OpHandle, TelemetrySnapshot,
 };
 use std::collections::HashMap;
 use std::sync::{
@@ -270,10 +270,7 @@ pub fn heap_dma_alloc() -> DmaAllocFn {
         if ptr.is_null() {
             return Err("heap allocation failed".to_string());
         }
-        registry()
-            .lock()
-            .unwrap()
-            .insert(ptr as usize, layout);
+        registry().lock().unwrap().insert(ptr as usize, layout);
         unsafe {
             DmaBuffer::from_raw(ptr as *mut std::ffi::c_void, size, heap_free, -1)
                 .map_err(|e| e.to_string())

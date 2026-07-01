@@ -208,7 +208,18 @@ mod tests {
 
     #[test]
     fn corrupt_crc_detected() {
-        let sb = Superblock::new(1024 * 1024, 4096, 65536, 4096, 32, 4096 + 1048576, 65536, 0, 1, 0);
+        let sb = Superblock::new(
+            1024 * 1024,
+            4096,
+            65536,
+            4096,
+            32,
+            4096 + 1048576,
+            65536,
+            0,
+            1,
+            0,
+        );
         let mut buf = sb.serialize();
         buf[10] ^= 0xFF;
         let err = Superblock::deserialize(&buf).unwrap_err();
@@ -217,7 +228,18 @@ mod tests {
 
     #[test]
     fn invalid_magic_detected() {
-        let sb = Superblock::new(1024 * 1024, 4096, 65536, 4096, 32, 4096 + 1048576, 65536, 0, 1, 0);
+        let sb = Superblock::new(
+            1024 * 1024,
+            4096,
+            65536,
+            4096,
+            32,
+            4096 + 1048576,
+            65536,
+            0,
+            1,
+            0,
+        );
         let mut buf = sb.serialize();
         buf[0] = 0xFF;
         let err = Superblock::deserialize(&buf).unwrap_err();
