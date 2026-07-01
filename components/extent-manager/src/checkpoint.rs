@@ -78,9 +78,9 @@ pub(crate) fn write_checkpoint(
     // Only allocate what the payload requires — region_size may be much larger
     // than the actual data (e.g. the full half of a large NVMe disk).
     let mut blob = Vec::with_capacity(total_needed);
-    blob.extend_from_slice(&new_seq.to_le_bytes());                // 8 bytes
+    blob.extend_from_slice(&new_seq.to_le_bytes()); // 8 bytes
     blob.extend_from_slice(&(payload.len() as u32).to_le_bytes()); // 4 bytes
-    blob.extend_from_slice(&0u32.to_le_bytes());                   // 4 bytes CRC placeholder
+    blob.extend_from_slice(&0u32.to_le_bytes()); // 4 bytes CRC placeholder
     blob.extend_from_slice(&payload);
 
     let crc = crc32fast::hash(&blob);
@@ -88,9 +88,8 @@ pub(crate) fn write_checkpoint(
 
     // Pad to sector boundary (not region_size) for the block device write.
     let sector_size = metadata_client.sector_size();
-    let aligned_len = (blob.len() + sector_size as usize - 1)
-        / sector_size as usize
-        * sector_size as usize;
+    let aligned_len =
+        (blob.len() + sector_size as usize - 1) / sector_size as usize * sector_size as usize;
     blob.resize(aligned_len, 0);
 
     // Phase 3: Write to metadata device
@@ -142,7 +141,9 @@ pub(crate) fn read_checkpoint_region(
 
     let total = CHECKPOINT_HEADER_SIZE + payload_len;
     if total as u64 > region_size {
-        return Err(error::corrupt_metadata("checkpoint payload exceeds region size"));
+        return Err(error::corrupt_metadata(
+            "checkpoint payload exceeds region size",
+        ));
     }
 
     // Phase 2: read exactly as many sectors as the full header + payload requires.
@@ -262,7 +263,8 @@ mod tests {
         let recovered_seq = u64::from_le_bytes(blob[0..8].try_into().unwrap());
         let recovered_len = u32::from_le_bytes(blob[8..12].try_into().unwrap());
         let recovered_crc = u32::from_le_bytes(blob[12..16].try_into().unwrap());
-        let recovered_payload = &blob[CHECKPOINT_HEADER_SIZE..CHECKPOINT_HEADER_SIZE + recovered_len as usize];
+        let recovered_payload =
+            &blob[CHECKPOINT_HEADER_SIZE..CHECKPOINT_HEADER_SIZE + recovered_len as usize];
 
         assert_eq!(recovered_seq, 42);
         assert_eq!(recovered_len, payload.len() as u32);
@@ -313,7 +315,12 @@ mod tests {
 
         let slab = &regions[0][0];
         // Two occupied slots with keys 42 and 99 (order depends on slot allocation)
-        let occupied: Vec<u64> = slab.keys.iter().copied().filter(|&k| k != FREE_KEY).collect();
+        let occupied: Vec<u64> = slab
+            .keys
+            .iter()
+            .copied()
+            .filter(|&k| k != FREE_KEY)
+            .collect();
         assert_eq!(occupied.len(), 2);
         assert!(occupied.contains(&42));
         assert!(occupied.contains(&99));

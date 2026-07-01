@@ -6,7 +6,10 @@ use crate::worker::PhaseResult;
 pub fn print_header(config: &BenchmarkConfig, count: u64, data_disk_size: u64) {
     println!("=== Extent Manager Benchmark ===");
     match &config.metadata_device {
-        Some(addr) => println!("Metadata device: {} (ns_id={})", addr, config.metadata_ns_id),
+        Some(addr) => println!(
+            "Metadata device: {} (ns_id={})",
+            addr, config.metadata_ns_id
+        ),
         None => println!("Metadata device: (in-memory mock)"),
     }
     println!(
@@ -30,7 +33,10 @@ pub fn print_phase(result: &PhaseResult) {
     } else {
         String::new()
     };
-    println!("  Latency ({} samples{}):", result.latency.count, sample_note);
+    println!(
+        "  Latency ({} samples{}):",
+        result.latency.count, sample_note
+    );
     println!("    min:  {:>8} us", result.latency.min.as_micros());
     println!("    mean: {:>8} us", result.latency.mean.as_micros());
     println!("    p50:  {:>8} us", result.latency.p50.as_micros());

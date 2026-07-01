@@ -32,8 +32,6 @@ pub struct DispatcherConfig {
     pub data_pci_addrs: Vec<String>,
     /// Maximum entries in the in-memory cache. Default: 10000.
     pub max_cache_entries: usize,
-    /// Eviction threshold (unused, retained for config compatibility). Default: 0.8.
-    pub eviction_threshold: f64,
     /// Whether to format extent managers on initialization.
     /// Default: true. Set to false when re-initializing to preserve on-disk data.
     pub format_on_init: bool,
@@ -65,6 +63,12 @@ pub struct DispatcherConfig {
     /// P2P cold reads for drive bandwidth.
     /// Default: 10. Set to 0 to disable backfill entirely.
     pub backfill_delay_ms: u64,
+    /// Size of the extent-manager metadata partition in bytes.
+    /// Default: 128 MiB.
+    pub metadata_partition_size: u64,
+    /// Size of the extended metadata partition in bytes.
+    /// Default: 128 MiB.
+    pub extended_metadata_partition_size: u64,
 }
 
 impl Default for DispatcherConfig {
@@ -72,7 +76,6 @@ impl Default for DispatcherConfig {
         Self {
             data_pci_addrs: Vec::new(),
             max_cache_entries: 10000,
-            eviction_threshold: 0.8,
             format_on_init: true,
             ssd_eviction_threshold: 0.9,
             ssd_eviction_low_watermark: 0.8,
@@ -81,6 +84,8 @@ impl Default for DispatcherConfig {
             poller_base_cpu: None,
             max_eviction_attempts: 2048,
             backfill_delay_ms: 10,
+            metadata_partition_size: 128 * 1024 * 1024,
+            extended_metadata_partition_size: 128 * 1024 * 1024,
         }
     }
 }

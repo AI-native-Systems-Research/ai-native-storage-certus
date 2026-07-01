@@ -249,5 +249,14 @@ define_interface! {
 
         /// Return the total usable capacity in bytes across all regions.
         fn capacity_bytes(&self) -> u64;
+
+        /// Set the base LBA offset for all metadata I/O (partition-relative).
+        fn set_metadata_base_lba(&self, base_lba: u64);
+
+        /// Set the base LBA offset for the data partition.
+        fn set_data_base_lba(&self, base_lba: u64);
+
+        /// Get the configured data base LBA offset.
+        fn data_base_lba(&self) -> u64;
     }
 }
