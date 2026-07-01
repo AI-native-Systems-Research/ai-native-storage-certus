@@ -1,8 +1,8 @@
 # dispatcher (v1)
 
 **Crate**: `dispatcher-v1`
-**Path**: `components/dispatcher/v1/`
-**Version**: 1.0.0
+**Path**: `components/dispatcher/`
+**Version**: 0.1.0
 
 ## Description
 
@@ -15,7 +15,7 @@ On `initialize`, creates and initializes N data block devices and N extent manag
 ## Component Definition
 
 ```
-DispatcherComponentV0 {
+DispatcherComponent {
     version: "0.1.0",
     provides: [IDispatcher],
     receptacles: {
@@ -24,20 +24,57 @@ DispatcherComponentV0 {
         gpu_services: IGpuServices,
         spdk_env: ISPDKEnv,
         memory_tier: IMemoryTier,
+        remote_lookup: IRemoteLookup,
     },
 }
 ```
 
-## Interfaces Provided
+## Interface Definition
 
-| Interface | Key Methods |
-|-----------|------------|
-| `IDispatcher` | `initialize(config) -> Result<(), DispatcherError>` -- configure PCI devices, start subsystems and background writer |
-|              | `shutdown() -> Result<(), DispatcherError>` -- drain background writes, orderly teardown |
-|              | `populate(key, ipc_handle) -> Result<(), DispatcherError>` -- DMA-copy from GPU to memory-tier slot, evict LRU if full, queue write-through to SSD |
-|              | `lookup(key, ipc_handle) -> Result<(), DispatcherError>` -- serve from memory-tier (fast), promote from SSD, or read from staging |
-|              | `check(key) -> Result<bool, DispatcherError>` -- test existence without transfer |
-|              | `remove(key) -> Result<(), DispatcherError>` -- free memory-tier slot and/or SSD extent |
+```rust
+define_interface! {
+    pub IDispatcher {
+        fn initialize(&self, config: DispatcherConfig) -> Result<(), DispatcherError>;
+        fn shutdown(&self) -> Result<(), DispatcherError>;
+        fn lookup(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>;
+        fn lookup_async(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<GpuStream, DispatcherError>;
+        fn batch_lookup(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>>;
+        fn check(&self, key: CacheKey) -> Result<bool, DispatcherError>;
+        fn remove(&self, key: CacheKey) -> Result<(), DispatcherError>;
+        fn populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>;
+        fn reserve_memory(&self, key: CacheKey, size: u32) -> Result<*mut u8, DispatcherError>;
+        fn copy_gpu_to_memory_async(&self, key: CacheKey, ipc_handle: IpcHandle, stream: GpuStream) -> Result<(), DispatcherError>;
+        fn copy_gpu_to_memory_completed(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>;
+        fn release_memory(&self, key: CacheKey) -> Result<(), DispatcherError>;
+        fn prepare_store(&self, key: CacheKey, size: u32) -> Result<Arc<DmaBuffer>, DispatcherError>;
+        fn commit_store(&self, key: CacheKey) -> Result<(), DispatcherError>;
+        fn cancel_store(&self, key: CacheKey) -> Result<(), DispatcherError>;
+        fn touch(&self, key: CacheKey) -> Result<(), DispatcherError>;
+        fn promote_to_memory_tier(&self, keys: &[CacheKey]);
+        fn clear_memory_tier(&self) -> Result<usize, DispatcherError>;
+        fn flush_to_ssd(&self) -> Result<usize, DispatcherError>;
+    }
+}
+```
+
+## Verified Properties
+
+The following invariants are formally proved with Creusot (see `components/dispatcher/verif/`):
+
+| ID | Name | Description |
+|----|------|-------------|
+| P1 | drive-index-bounded | `drive_index(key, N)` always returns a value < N |
+| P2 | eviction-terminates | `evict_for_space` loop exits after at most `max_attempts` iterations |
+| P3 | size-validation | `populate` and `prepare_store` reject size == 0 |
+| P4 | init-guard | all operations return `NotInitialized` before `initialize()` succeeds |
+| P5 | populate-lifecycle | successful populate yields MemoryTier entry with read_ref=1, no write_ref |
+| P6 | prepare-commit-lifecycle | prepare creates pending with drive_idx < num_drives; commit produces BlockDevice entry |
+| P7 | cancel-removes | `cancel_store` transitions entry to NotExist |
+| P8 | drive-index-deterministic | same key always maps to same drive |
+| P9 | eviction-progress | each successful eviction strictly decreases memory used |
+| P10 | reserve-complete-lifecycle | reserve→copy→complete yields MemoryTier entry with read_ref=1 |
+
+Total: 10 properties, 24 verification conditions discharged by SMT solvers.
 
 ## Receptacles
 
@@ -45,25 +82,19 @@ DispatcherComponentV0 {
 |------|-----------|----------|---------|
 | `logger` | `ILogger` | No | Optional logging |
 | `dispatch_map` | `IDispatchMap` | Yes | Extent-to-location tracking and reference counting |
-| `gpu_services` | `IGpuServices` | Yes | GPU DMA copy operations (`dma_copy_to_host`, `dma_copy_to_device`) |
+| `gpu_services` | `IGpuServices` | Yes | GPU DMA copy operations |
 | `spdk_env` | `ISPDKEnv` | No | SPDK environment; if unconnected, operates in staging-only mode |
 | `memory_tier` | `IMemoryTier` | Yes | DRAM pool for caching data between GPU and SSD |
+| `remote_lookup` | `IRemoteLookup` | No | Remote node lookup for cache misses |
 
 ## Key Types
 
-- `DispatcherConfig { metadata_pci_addr, data_pci_addrs }` -- initialization configuration
-- `IpcHandle { address: *mut u8, size: u32 }` -- opaque GPU memory pointer for DMA transfers
-- `DispatcherError` -- `NotInitialized`, `KeyNotFound`, `AlreadyExists`, `AllocationFailed`, `IoError`, `Timeout`, `InvalidParameter`
+- `DispatcherConfig { data_pci_addrs, max_cache_entries, eviction_threshold, format_on_init, ssd_eviction_threshold, ssd_eviction_low_watermark, ssd_eviction_batch_size, ssd_eviction_interval_secs, poller_base_cpu, max_eviction_attempts, backfill_delay_ms }`
+- `IpcHandle { address: *mut u8, size: u32 }` — opaque GPU memory pointer for DMA transfers
+- `DispatcherError` — `NotInitialized`, `KeyNotFound`, `AlreadyExists`, `AllocationFailed`, `IoError`, `Timeout`, `InvalidParameter`
 
 ## Internal Modules
 
-- `background` -- async memory-tier-to-SSD write-through worker thread
-- `io_segmenter` -- splits large DMA transfers into block-device-aligned segments (128 KiB default)
-- `pipeline` -- pipelined SSD-to-GPU reads with ring-buffer reader for lookup promotion
-
-## Key Differences from v0
-
-- Memory-tier pool replaces staging buffers as primary data landing zone
-- Capacity-based LRU eviction (via `IMemoryTier::evict_lru`) replaces count-based TSC eviction
-- Lookup promotes SSD entries back to memory-tier for subsequent fast access
-- Write-through is best-effort; populate succeeds even if SSD write is deferred
+- `background` — parallel memory-tier-to-SSD write-through worker threads
+- `io_segmenter` — splits large DMA transfers into block-device-aligned segments (128 KiB default)
+- `pipeline` — pipelined SSD-to-GPU reads with ring-buffer reader for lookup promotion

@@ -21,31 +21,32 @@ SPDKEnvComponent {
 }
 ```
 
-## Interfaces Provided
+## Interface Definition
 
-| Interface | Methods |
-|-----------|---------|
-| `ISPDKEnv` | `init() -> Result<(), SpdkEnvError>` -- initialize SPDK environment |
-|           | `devices() -> Vec<VfioDevice>` -- list discovered NVMe devices |
-|           | `device_count() -> usize` |
-|           | `is_initialized() -> bool` |
+```rust
+define_interface! {
+    pub ISPDKEnv {
+        fn init(&self) -> Result<(), SpdkEnvError>;
+        fn fini(&self);
+        fn devices(&self) -> Vec<VfioDevice>;
+        fn device_count(&self) -> usize;
+        fn is_initialized(&self) -> bool;
+    }
+}
+```
+
+## Verified Properties
+
+None. No formal verification model exists for this component.
 
 ## Receptacles
 
 None.
 
-## Internal Modules
+## Key Types
 
-- `checks` -- pre-flight validation (hugepages, VFIO, permissions)
-- `device` -- PCI/VFIO device discovery
-- `dma` -- `DmaBuffer` safe wrapper around SPDK DMA allocation
-- `env` -- SPDK init/fini lifecycle
-- `error` -- `SpdkEnvError` definitions
-
-## Key Public Types
-
-- `SPDKEnvComponent` -- the component struct
-- `ISPDKEnv` -- the interface trait (local definition, mirrors `interfaces` crate)
-- `PciAddress`, `PciId`, `VfioDevice` -- device metadata
-- `DmaBuffer` -- DMA-safe hugepage buffer
-- `SpdkEnvError` -- environment error enum
+- `PciAddress { domain, bus, dev, func }` — PCI BDF address
+- `PciId { vendor_id, device_id, class_code }` — vendor/device/class IDs
+- `VfioDevice { address: PciAddress, id: PciId, numa_node: i32 }` — discovered NVMe device
+- `DmaBuffer` — DMA-safe hugepage buffer with pluggable allocator/deallocator
+- `SpdkEnvError` — `InitFailed`, `NotInitialized`, `DeviceNotFound`, `HugepagesUnavailable`, `VfioError`
