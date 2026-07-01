@@ -188,6 +188,12 @@ impl DispatcherComponent {
         }
     }
 
+    fn log_warn(&self, msg: &str) {
+        if let Ok(logger) = self.logger.get() {
+            logger.warn(msg);
+        }
+    }
+
     #[allow(dead_code)]
     fn log_error(&self, msg: &str) {
         if let Ok(logger) = self.logger.get() {
@@ -922,8 +928,8 @@ impl DispatcherComponent {
             iem.set_data_base_lba(table.partitions[1].start_lba);
 
             if formatted {
-                self.log_error(&format!(
-                    "dispatcher: WARNING: formatting disk for data drive {i} at {addr_str} \
+                self.log_warn(&format!(
+                    "dispatcher: formatting disk for data drive {i} at {addr_str} \
                      — all existing data will be destroyed"
                 ));
             }
