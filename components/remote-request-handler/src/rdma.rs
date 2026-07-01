@@ -513,15 +513,15 @@ unsafe impl Sync for RdmaListener {}
 impl Drop for RdmaListener {
     fn drop(&mut self) {
         // SAFETY: Both pointers were allocated by rdma-core.
-        // listen_id may already be destroyed by shutdown().
+        // shutdown() already destroyed both listen_id and channel.
         unsafe {
-            if !self.listen_id.is_null()
-                && !self.shutdown.load(std::sync::atomic::Ordering::Acquire)
-            {
-                ffi::rdma_destroy_id(self.listen_id);
-            }
-            if !self.channel.is_null() {
-                ffi::rdma_destroy_event_channel(self.channel);
+            if !self.shutdown.load(std::sync::atomic::Ordering::Acquire) {
+                if !self.listen_id.is_null() {
+                    ffi::rdma_destroy_id(self.listen_id);
+                }
+                if !self.channel.is_null() {
+                    ffi::rdma_destroy_event_channel(self.channel);
+                }
             }
         }
     }
@@ -585,17 +585,24 @@ impl RdmaListener {
         })
     }
 
-    /// Signal the listener to stop. Destroys the listen ID which unblocks
-    /// any pending `accept()` call (rdma_get_cm_event returns error).
+    /// Signal the listener to stop. Destroys the event channel which
+    /// closes the underlying fd and guarantees any blocked
+    /// `rdma_get_cm_event` returns immediately with an error.
     /// Safe to call from another thread.
     pub fn shutdown(&self) {
         self.shutdown
             .store(true, std::sync::atomic::Ordering::Release);
-        // SAFETY: Destroying the listen_id causes rdma_get_cm_event to
-        // return an error, unblocking the accept loop.
+        // SAFETY: Destroying the event channel closes its fd, which
+        // unblocks rdma_get_cm_event reliably (unlike rdma_destroy_id
+        // which only generates an async event that may not wake the
+        // blocked reader on all rdma-core versions).
+        // listen_id is destroyed first since it references the channel.
         unsafe {
             if !self.listen_id.is_null() {
                 ffi::rdma_destroy_id(self.listen_id);
+            }
+            if !self.channel.is_null() {
+                ffi::rdma_destroy_event_channel(self.channel);
             }
         }
     }
