@@ -705,6 +705,24 @@ free_all_hugepages() {
 # Device Binding — vfio-pci (Certus)
 # ============================================================================
 
+# Remove stale SPDK per-device lock files. SPDK writes /var/tmp/spdk_pci_lock_<bdf>
+# (root-owned, 0600) while it holds a device; if a run dies without releasing them
+# the files linger and the next certus startup gets Permission denied claiming the
+# device. Safe to remove when no SPDK process is running.
+free_spdk_locks() {
+    local locks=()
+    for bdf in "${NVME_BDFS[@]}"; do
+        local lock="/var/tmp/spdk_pci_lock_${bdf}"
+        [[ -e "$lock" ]] && locks+=("$lock")
+    done
+    if [[ ${#locks[@]} -eq 0 ]]; then
+        echo "  No stale SPDK lock files"
+    else
+        echo "  Removing ${#locks[@]} stale SPDK lock file(s): ${locks[*]}"
+        rm -f "${locks[@]}"
+    fi
+}
+
 bind_to_vfio() {
     header "Binding NVMe to vfio-pci (persistent)"
 
@@ -712,6 +730,8 @@ bind_to_vfio() {
         echo -e "  ${RED}Failed to load vfio-pci module. Is IOMMU enabled?${NC}" >&2
         exit 1
     fi
+
+    free_spdk_locks
 
     teardown_raid_if_active
 
