@@ -529,10 +529,11 @@ allocate_hugepages_node() {
     # other nodes guarantees exactly `target` pages, all on the GPU node.
     for other in /sys/devices/system/node/node*/hugepages/hugepages-1048576kB/nr_hugepages; do
         [[ "$other" == "$node_path" ]] && continue
-        local other_n
+        local other_n other_node
         other_n=$(cat "$other")
+        other_node=$(basename "$(dirname "$(dirname "$(dirname "$other")")")")
         if [[ $other_n -gt 0 ]]; then
-            echo "  Freeing $other_n × 1G hugepages on $(basename "$(dirname "$(dirname "$other")")")"
+            echo "  Freeing $other_n × 1G hugepages on $other_node"
             echo 0 > "$other"
         fi
     done
@@ -554,6 +555,38 @@ allocate_hugepages_node() {
         echo "  Reboot required for full allocation (boot param handles it)."
     else
         echo -e "  ${GREEN}Allocated $actual × 1G hugepages on node $GPU_NUMA${NC}"
+    fi
+}
+
+# Free ALL 1G hugepages (all nodes) at runtime — for sharedstorage, which wants
+# every GiB available as page cache. Boot reserves hugepages=CERTUS_HUGEPAGES, so
+# without this SS would silently lose that RAM from its page-cache budget. Free
+# pages can be released live (no reboot); pages held by a process cannot.
+free_all_hugepages() {
+    header "Hugepages (freeing for page cache)"
+
+    local freed_any=false
+    for f in /sys/devices/system/node/node*/hugepages/hugepages-1048576kB/nr_hugepages; do
+        [[ -f "$f" ]] || continue
+        local n node
+        n=$(cat "$f")
+        # path: .../node<N>/hugepages/hugepages-1048576kB/nr_hugepages
+        node=$(basename "$(dirname "$(dirname "$(dirname "$f")")")")
+        if [[ $n -gt 0 ]]; then
+            echo "  Freeing $n × 1G on $node"
+            echo 0 > "$f"
+            freed_any=true
+        fi
+    done
+
+    local remaining
+    remaining=$(grep HugePages_Total /proc/meminfo | awk '{print $2}')
+    if [[ $remaining -eq 0 ]]; then
+        $freed_any && echo -e "  ${GREEN}All hugepages freed — full RAM available for page cache${NC}" \
+                   || echo "  No hugepages reserved — nothing to free"
+    else
+        echo -e "  ${YELLOW}$remaining × 1G still reserved (likely in use by a process)${NC}"
+        echo "  Stop any SPDK/certus process, or reboot with hugepages=0, to reclaim."
     fi
 }
 
@@ -811,6 +844,9 @@ main() {
     # 2. Hugepages
     if [[ "$mode" == "certus" ]]; then
         allocate_hugepages_node "$CERTUS_HUGEPAGES"
+    else
+        # sharedstorage wants all RAM as page cache — release the boot reservation.
+        free_all_hugepages
     fi
 
     # 3. Configure devices
