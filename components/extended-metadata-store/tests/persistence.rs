@@ -360,6 +360,56 @@ fn delete_nonexistent_is_idempotent() {
     assert!(store.delete("never_existed").is_ok());
 }
 
+// ---------------------------------------------------------------------------
+// Phase 6: Iterate All tests (T036-T038)
+// ---------------------------------------------------------------------------
+
+/// T037: Put 100 entries + iterate_all returns exactly 100 with correct values.
+#[test]
+fn iterate_all_returns_all_100_entries() {
+    let (comp, _mock) = create_test_component(DISK_SIZE);
+    let store: Arc<dyn IExtendedMetadataStore + Send + Sync> =
+        query_interface!(comp, IExtendedMetadataStore).unwrap();
+
+    let mut expected: Vec<(String, Vec<u8>)> = Vec::new();
+    for i in 0..100 {
+        let key = format!("iter_key_{i:03}");
+        let value = format!("value_{i}").into_bytes();
+        store.put(&key, &value).unwrap();
+        expected.push((key, value));
+    }
+
+    let mut result = store.iterate_all().unwrap();
+    result.sort_by(|a, b| a.0.cmp(&b.0));
+    expected.sort_by(|a, b| a.0.cmp(&b.0));
+
+    assert_eq!(result.len(), 100);
+    for (got, exp) in result.iter().zip(expected.iter()) {
+        assert_eq!(got.0, exp.0);
+        assert_eq!(got.1, exp.1);
+    }
+}
+
+/// T038: Delete entry then iterate_all excludes it.
+#[test]
+fn iterate_all_excludes_deleted() {
+    let (comp, _mock) = create_test_component(DISK_SIZE);
+    let store: Arc<dyn IExtendedMetadataStore + Send + Sync> =
+        query_interface!(comp, IExtendedMetadataStore).unwrap();
+
+    store.put("x", b"1").unwrap();
+    store.put("y", b"2").unwrap();
+    store.put("z", b"3").unwrap();
+    store.delete("y").unwrap();
+
+    let result = store.iterate_all().unwrap();
+    let keys: Vec<&str> = result.iter().map(|(k, _)| k.as_str()).collect();
+    assert_eq!(result.len(), 2);
+    assert!(keys.contains(&"x"));
+    assert!(keys.contains(&"z"));
+    assert!(!keys.contains(&"y"));
+}
+
 /// T032: Fresh partition (all zeros) → format_fresh → empty store.
 #[test]
 fn recovery_fresh_partition_formats_empty() {

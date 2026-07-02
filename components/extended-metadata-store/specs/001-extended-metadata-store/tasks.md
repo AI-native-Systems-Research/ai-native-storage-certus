@@ -116,9 +116,9 @@
 
 ### Implementation for User Story 4
 
-- [ ] T036 [US4] Implement iterate_all() to acquire read lock and clone entire HashMap into Vec<(String, Vec<u8>)> in src/lib.rs (already done — verify works with RwLock)
-- [ ] T037 [US4] Add unit test: put 100 entries + iterate_all returns exactly 100 with correct values
-- [ ] T038 [US4] Add unit test: delete entry + iterate_all excludes it
+- [x] T036 [US4] Implement iterate_all() to acquire read lock and clone entire HashMap into Vec<(String, Vec<u8>)> in src/lib.rs (already done — verify works with RwLock)
+- [x] T037 [US4] Add unit test: put 100 entries + iterate_all returns exactly 100 with correct values
+- [x] T038 [US4] Add unit test: delete entry + iterate_all excludes it
 
 **Checkpoint**: Iteration correctness validated
 
