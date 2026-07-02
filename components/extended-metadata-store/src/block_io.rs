@@ -1,6 +1,6 @@
 //! Block device I/O layer with sector-aligned reads/writes and partition offset.
 
-use crate::on_disk::{self, Superblock};
+use crate::on_disk::Superblock;
 use interfaces::iblock_device::{ClientChannels, Command, Completion};
 use interfaces::DmaAllocFn;
 use std::sync::{Arc, Mutex};

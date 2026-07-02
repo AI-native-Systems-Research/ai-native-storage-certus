@@ -32,6 +32,9 @@ pub mod block_io;
 pub mod flush;
 
 #[cfg(feature = "testing")]
+pub mod recovery;
+
+#[cfg(feature = "testing")]
 pub mod test_support;
 
 define_component! {
@@ -83,6 +86,47 @@ impl ExtendedMetadataStoreComponent {
     pub fn mark_flushed(&self, seq: u64) {
         self.flush_seq.store(seq, Ordering::Relaxed);
         self.dirty_count.store(0, Ordering::Relaxed);
+    }
+
+    /// Initialize the store from a BlockDeviceClient.
+    ///
+    /// Reads the partition, recovers existing data or formats fresh.
+    /// Returns the recovered Superblock and any warnings.
+    #[cfg(feature = "testing")]
+    pub fn initialize_from_client(
+        &self,
+        client: &block_io::BlockDeviceClient,
+        total_sectors: u64,
+    ) -> Result<(on_disk::Superblock, Vec<String>), String> {
+        use recovery::{format_partition, recover_from_disk};
+
+        let result = recover_from_disk(client)?;
+        let mut warnings = result.warnings;
+
+        let superblock = if result.superblock.partition_sectors == 0 {
+            // Fresh format needed
+            let sb = format_partition(client, total_sectors)?;
+            warnings.push("partition formatted fresh".into());
+            sb
+        } else {
+            result.superblock
+        };
+
+        // Load recovered entries
+        if !result.entries.is_empty() {
+            self.load_entries(result.entries);
+        }
+        self.flush_seq
+            .store(superblock.flush_seq, Ordering::Relaxed);
+
+        // Log warnings via ILogger
+        if let Ok(logger) = self.logger.get() {
+            for w in &warnings {
+                logger.debug(&format!("extended-metadata-store: recovery: {w}"));
+            }
+        }
+
+        Ok((superblock, warnings))
     }
 }
 

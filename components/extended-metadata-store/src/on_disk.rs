@@ -26,10 +26,14 @@ pub struct Superblock {
 impl Superblock {
     pub fn new(sector_size: u32, partition_sectors: u64) -> Self {
         let superblock_sectors = 1u64;
-        let usable_sectors = partition_sectors - superblock_sectors;
-        let region_size = usable_sectors / 2;
-        let region_a_offset = superblock_sectors;
-        let region_b_offset = superblock_sectors + region_size;
+        let (_usable_sectors, region_size, region_a_offset, region_b_offset) =
+            if partition_sectors > superblock_sectors {
+                let usable = partition_sectors - superblock_sectors;
+                let region = usable / 2;
+                (usable, region, superblock_sectors, superblock_sectors + region)
+            } else {
+                (0, 0, 0, 0)
+            };
 
         Self {
             magic: SUPERBLOCK_MAGIC,
