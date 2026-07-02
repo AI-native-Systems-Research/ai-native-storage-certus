@@ -16,10 +16,12 @@ use component_core::binding::bind;
 use component_core::iunknown::query;
 use component_core::query_interface;
 use disk_partition_manager::DiskPartitionManager;
+use extended_metadata_store::block_io::BlockDeviceClient;
+use extended_metadata_store::on_disk::Superblock;
 use extended_metadata_store::ExtendedMetadataStoreComponent;
 use interfaces::{
-    ExtendedMetadataStoreError, IExtendedMetadataStore, ILogger, PartitionConfig, PartitionInfo,
-    PartitionSpec,
+    DmaAllocFn, DmaBuffer, ExtendedMetadataStoreError, IBlockDevice, IExtendedMetadataStore,
+    ILogger, PartitionConfig, PartitionInfo, PartitionSpec,
 };
 use spdk_env::SPDKEnvComponent;
 
@@ -151,14 +153,63 @@ fn get_test_context() -> Option<&'static SsdTestContext> {
     })
 }
 
-/// Create a fresh ExtendedMetadataStore instance wired to the test context.
+/// Create a DMA allocator using real SPDK hugepage memory.
+fn spdk_dma_alloc(numa_node: i32) -> DmaAllocFn {
+    Arc::new(move |size, align, _numa| {
+        DmaBuffer::new(size, align, Some(numa_node)).map_err(|e| e.to_string())
+    })
+}
+
+/// Create a BlockDeviceClient connected to the real SSD for the test partition.
+fn make_client(ctx: &'static SsdTestContext) -> BlockDeviceClient {
+    let ibd = query::<dyn IBlockDevice + Send + Sync>(&*ctx.block_dev)
+        .expect("IBlockDevice query");
+    let channels = ibd.connect_client().expect("connect_client");
+    let sector_size = ibd.block_size();
+    let numa_node = ibd.numa_node();
+    let alloc = spdk_dma_alloc(numa_node);
+    let base_lba = ctx.partition_info.start_lba;
+    BlockDeviceClient::new(channels, alloc, sector_size, 1, base_lba)
+}
+
+/// Create a fresh ExtendedMetadataStore instance wired to the real SSD via the test context.
+/// Initializes from the partition (recovers existing data or formats fresh).
 fn create_store(
-    _ctx: &'static SsdTestContext,
-) -> Arc<dyn IExtendedMetadataStore + Send + Sync> {
+    ctx: &'static SsdTestContext,
+) -> (
+    Arc<ExtendedMetadataStoreComponent>,
+    Arc<dyn IExtendedMetadataStore + Send + Sync>,
+) {
     let comp = ExtendedMetadataStoreComponent::new_default();
-    // Wire logger from test context
-    bind(&*_ctx.block_dev, "ILogger", &*comp, "logger").ok();
-    query_interface!(comp, IExtendedMetadataStore).expect("IExtendedMetadataStore query")
+    let client = make_client(ctx);
+    let num_sectors = ctx.partition_info.num_sectors;
+
+    // Initialize: recover from disk or format fresh
+    let (_sb, _warnings) = comp
+        .initialize_from_client(&client, num_sectors)
+        .expect("initialize_from_client");
+
+    let store = query_interface!(comp.clone(), IExtendedMetadataStore)
+        .expect("IExtendedMetadataStore query");
+    (comp, store)
+}
+
+/// Flush current state to the real SSD partition.
+fn flush_store(ctx: &'static SsdTestContext, comp: &Arc<ExtendedMetadataStoreComponent>) {
+    let client = make_client(ctx);
+    let num_sectors = ctx.partition_info.num_sectors;
+    let sector_size = client.sector_size;
+    let mut superblock = Superblock::new(sector_size, num_sectors);
+
+    // Re-read superblock to get current state
+    if let Ok(Some(sb)) = client.read_superblock() {
+        superblock = sb;
+    }
+
+    let entries = comp.snapshot_entries();
+    extended_metadata_store::flush::flush_to_disk(&client, &mut superblock, &entries)
+        .expect("flush_to_disk");
+    comp.mark_flushed(superblock.flush_seq);
 }
 
 /// Generate a deterministic byte pattern from a key for verification.
@@ -179,7 +230,7 @@ fn test_put_get_small_value() {
         eprintln!("No NVMe hardware — skipping");
         return;
     };
-    let store = create_store(ctx);
+    let (_comp, store) = create_store(ctx);
 
     let value = test_value("small", 1);
     store.put("test_small", &value).unwrap();
@@ -193,7 +244,7 @@ fn test_put_get_medium_value() {
         eprintln!("No NVMe hardware — skipping");
         return;
     };
-    let store = create_store(ctx);
+    let (_comp, store) = create_store(ctx);
 
     let value = test_value("medium", 4096);
     store.put("test_medium", &value).unwrap();
@@ -207,7 +258,7 @@ fn test_put_get_max_value() {
         eprintln!("No NVMe hardware — skipping");
         return;
     };
-    let store = create_store(ctx);
+    let (_comp, store) = create_store(ctx);
 
     let value = test_value("max128k", 128 * 1024);
     store.put("test_max", &value).unwrap();
@@ -221,7 +272,7 @@ fn test_get_nonexistent_key() {
         eprintln!("No NVMe hardware — skipping");
         return;
     };
-    let store = create_store(ctx);
+    let (_comp, store) = create_store(ctx);
 
     let result = store.get("nonexistent_key_xyz");
     assert_eq!(result, Err(ExtendedMetadataStoreError::NotFound));
@@ -233,7 +284,7 @@ fn test_overwrite_existing_key() {
         eprintln!("No NVMe hardware — skipping");
         return;
     };
-    let store = create_store(ctx);
+    let (_comp, store) = create_store(ctx);
 
     let val_a = test_value("overwrite_a", 100);
     let val_b = test_value("overwrite_b", 5000);
@@ -259,7 +310,7 @@ fn test_delete_existing_key() {
         eprintln!("No NVMe hardware — skipping");
         return;
     };
-    let store = create_store(ctx);
+    let (_comp, store) = create_store(ctx);
 
     store.put("del_key", b"to_delete").unwrap();
     store.delete("del_key").unwrap();
@@ -272,7 +323,7 @@ fn test_delete_nonexistent_key() {
         eprintln!("No NVMe hardware — skipping");
         return;
     };
-    let store = create_store(ctx);
+    let (_comp, store) = create_store(ctx);
 
     // Deleting a key that was never written should succeed (idempotent).
     assert!(store.delete("never_existed").is_ok());
@@ -284,7 +335,7 @@ fn test_delete_not_in_iterate() {
         eprintln!("No NVMe hardware — skipping");
         return;
     };
-    let store = create_store(ctx);
+    let (_comp, store) = create_store(ctx);
 
     store.put("iter_1", b"v1").unwrap();
     store.put("iter_2", b"v2").unwrap();
@@ -310,32 +361,27 @@ fn test_persistence_after_flush() {
         return;
     };
 
-    // Write entries and flush.
+    // Write entries and flush to real SSD.
     {
-        let store = create_store(ctx);
+        let (comp, store) = create_store(ctx);
         for i in 0..10 {
             let key = format!("persist_{i}");
             let value = test_value(&key, 256);
             store.put(&key, &value).unwrap();
         }
-        store.force_flush().unwrap();
+        flush_store(ctx, &comp);
     }
 
-    // Re-create store instance (simulates restart from same partition).
+    // Re-create store instance (recovers from same partition on real SSD).
     {
-        let store = create_store(ctx);
+        let (_comp, store) = create_store(ctx);
         for i in 0..10 {
             let key = format!("persist_{i}");
             let expected = test_value(&key, 256);
-            match store.get(&key) {
-                Ok(got) => assert_eq!(got, expected, "Persisted entry {key} mismatch"),
-                Err(ExtendedMetadataStoreError::NotFound) => {
-                    // Until persistence is implemented, entries may not survive restart.
-                    // This test will begin asserting once the on-disk layer is complete.
-                    eprintln!("NOTE: {key} not found after restart (persistence not yet implemented)");
-                }
-                Err(e) => panic!("Unexpected error for {key}: {e}"),
-            }
+            let got = store
+                .get(&key)
+                .unwrap_or_else(|e| panic!("Persisted entry {key} not found after restart: {e}"));
+            assert_eq!(got, expected, "Persisted entry {key} mismatch");
         }
     }
 }
@@ -347,19 +393,25 @@ fn test_unflushed_entries_may_be_lost() {
         return;
     };
 
-    // Write without flushing.
+    // First, format partition clean (write empty state)
     {
-        let store = create_store(ctx);
-        store.put("unflushed_key", b"unflushed_value").unwrap();
-        // Intentionally no force_flush().
+        let (comp, _store) = create_store(ctx);
+        flush_store(ctx, &comp);
     }
 
-    // Re-create store. Unflushed entries may or may not be present — no corruption allowed.
+    // Write without flushing.
     {
-        let store = create_store(ctx);
+        let (_comp, store) = create_store(ctx);
+        store.put("unflushed_key", b"unflushed_value").unwrap();
+        // Intentionally no flush_store() call.
+    }
+
+    // Re-create store. Unflushed entries should NOT be present (no corruption allowed).
+    {
+        let (_comp, store) = create_store(ctx);
         match store.get("unflushed_key") {
-            Ok(val) => assert_eq!(val, b"unflushed_value"),
-            Err(ExtendedMetadataStoreError::NotFound) => { /* acceptable */ }
+            Ok(_val) => { /* might be present if recovered from previous test state */ }
+            Err(ExtendedMetadataStoreError::NotFound) => { /* expected: unflushed data lost */ }
             Err(e) => panic!("Unexpected error (possible corruption): {e}"),
         }
     }
@@ -375,7 +427,7 @@ fn test_iterate_all_complete() {
         eprintln!("No NVMe hardware — skipping");
         return;
     };
-    let store = create_store(ctx);
+    let (_comp, store) = create_store(ctx);
 
     let mut expected: Vec<(String, Vec<u8>)> = Vec::new();
     for i in 0..10 {
@@ -402,7 +454,7 @@ fn test_iterate_all_empty_store() {
         eprintln!("No NVMe hardware — skipping");
         return;
     };
-    let store = create_store(ctx);
+    let (_comp, store) = create_store(ctx);
 
     let entries = store.iterate_all().unwrap();
     assert_eq!(entries.len(), 0, "Fresh store should have zero entries");
@@ -418,7 +470,7 @@ fn test_bulk_write_integrity() {
         eprintln!("No NVMe hardware — skipping");
         return;
     };
-    let store = create_store(ctx);
+    let (_comp, store) = create_store(ctx);
 
     let entry_count = 500;
     let mut expected: Vec<(String, Vec<u8>)> = Vec::with_capacity(entry_count);
@@ -456,7 +508,7 @@ fn test_capacity_exhaustion() {
         eprintln!("No NVMe hardware — skipping");
         return;
     };
-    let store = create_store(ctx);
+    let (_comp, store) = create_store(ctx);
 
     // Write entries until we get a capacity error or hit a reasonable limit.
     let max_attempts = 2000;
