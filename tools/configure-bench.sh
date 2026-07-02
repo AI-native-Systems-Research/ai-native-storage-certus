@@ -119,8 +119,20 @@ get_blkdev() {
 # Status
 # ============================================================================
 
+# fail_certus / fail_ss: record that a check disqualifies a connector.
+# Used via nameref by show_status (bash 4.3+). Reason shown in the summary.
+fail_certus() { certus_ok=false; certus_bad+=("$1"); }
+fail_ss()     { ss_ok=false;     ss_bad+=("$1"); }
+# fail_both: a check that neither connector can tolerate (e.g. wrong GPU node).
+fail_both()   { fail_certus "$1"; fail_ss "$1"; }
+
 show_status() {
-    local issues=0
+    # Per-connector readiness: a connector is "ready" only if EVERY check it
+    # needs is satisfied. Checks that discriminate (hugepages, NVMe driver, ...)
+    # will fail one connector while passing the other — that's expected. The
+    # system is usable by a connector only when that connector has zero fails.
+    local certus_ok=true ss_ok=true
+    local -a certus_bad=() ss_bad=()
 
     # --- Gather state ---
     local cmdline
@@ -158,7 +170,7 @@ show_status() {
         echo -e "  ${tag_certus}${tag_ss} GPU on NUMA node $gpu_numa — all resources pinned here"
     else
         echo -e "  ${tag_empty} GPU on NUMA node $gpu_numa, expected $GPU_NUMA"
-        ((++issues))
+        fail_both "GPU on NUMA node $gpu_numa (expected $GPU_NUMA)"
     fi
     echo
 
@@ -173,7 +185,7 @@ show_status() {
         echo "  ${total_mem} GiB total — system RAM not capped (cgroup limits the bench slice, see below)"
     else
         echo -e "  ${tag_empty} ${total_mem} GiB — not limited (need mem=${MEM_LIMIT})"
-        ((++issues))
+        fail_both "system RAM not limited (need mem=${MEM_LIMIT})"
     fi
     if [[ -n "$node0_mem" && $node0_mem -le 10000 ]]; then
         echo -e "  ${tag_certus}${tag_ss} node 0 reserved (${node0_mem} MB)"
@@ -183,52 +195,50 @@ show_status() {
         echo "  node 0 has ${node0_mem} MB — not reserved (cgroup mode pins to node $GPU_NUMA via numactl)"
     elif [[ -n "$node0_mem" && $node0_mem -gt 10000 ]]; then
         echo -e "  ${tag_empty} node 0 has ${node0_mem} MB — memmap reservation not active"
-        ((++issues))
+        fail_both "node 0 not reserved (${node0_mem} MB, memmap inactive)"
     fi
 
-    # cgroup memory limit (runtime)
+    # cgroup memory limit (runtime). The cap is mode-specific: certus expects the
+    # regular-RAM budget left after hugepages, sharedstorage the full node budget.
+    local certus_gib=$((TOTAL_USABLE_NODE1 - CERTUS_HUGEPAGES))
     if systemctl is-active --quiet "$BENCH_SLICE" 2>/dev/null; then
         local slice_max
         slice_max=$(systemctl show -p MemoryMax --value "$BENCH_SLICE" 2>/dev/null)
         if [[ "$slice_max" == "infinity" || -z "$slice_max" ]]; then
             echo -e "  ${tag_empty} slice ${BENCH_SLICE} active but MemoryMax unset"
+            [[ "$MEM_METHOD" == "cgroup" ]] && fail_both "cgroup slice active but MemoryMax unset"
         else
             local slice_gib=$((slice_max / 1024 / 1024 / 1024))
-            # Tag by which mode's expected regular-RAM budget this cap matches:
-            #   certus expects TOTAL_USABLE_NODE1 - CERTUS_HUGEPAGES, sharedstorage the full budget.
-            local certus_gib=$((TOTAL_USABLE_NODE1 - CERTUS_HUGEPAGES))
             local mem_tag=""
             if [[ $slice_gib -eq $certus_gib ]]; then mem_tag="${tag_certus}"; fi
             if [[ $slice_gib -eq $TOTAL_USABLE_NODE1 ]]; then mem_tag="${mem_tag}${tag_ss}"; fi
             if [[ -z "$mem_tag" ]]; then mem_tag="${tag_empty}"; fi
             echo -e "  ${mem_tag} cgroup slice ${BENCH_SLICE}: MemoryMax=${slice_gib} GiB (runtime limit)"
+            # In cgroup mode, a cap that doesn't match a connector's budget disqualifies it.
+            if [[ "$MEM_METHOD" == "cgroup" ]]; then
+                [[ $slice_gib -ne $certus_gib ]] && fail_certus "cgroup cap ${slice_gib}G ≠ certus budget ${certus_gib}G"
+                [[ $slice_gib -ne $TOTAL_USABLE_NODE1 ]] && fail_ss "cgroup cap ${slice_gib}G ≠ sharedstorage budget ${TOTAL_USABLE_NODE1}G"
+            fi
         fi
     elif [[ "$MEM_METHOD" == "cgroup" ]]; then
         echo -e "  ${tag_empty} cgroup slice ${BENCH_SLICE} not active — run 'sudo $0 <mode>' to create it"
-        ((++issues))
+        fail_both "cgroup slice ${BENCH_SLICE} not active"
     else
         echo "  cgroup slice ${BENCH_SLICE}: not active (MEM_METHOD=kernel)"
     fi
 
     echo "  Hugepages: $hp_total × 1G (free: $hp_free, node $GPU_NUMA: $hp_node)"
+    # certus needs CERTUS_HUGEPAGES on the GPU node; sharedstorage needs none.
     if [[ $hp_total -eq $CERTUS_HUGEPAGES && $hp_node -ge $CERTUS_HUGEPAGES ]]; then
         echo -e "  ${tag_certus} $hp_total × 1G on node $GPU_NUMA"
+        fail_ss "hugepages present ($hp_total × 1G; sharedstorage needs 0)"
     elif [[ $hp_total -eq $SS_HUGEPAGES ]]; then
         echo -e "  ${tag_ss} no hugepages — all RAM available for page cache"
+        fail_certus "no hugepages (certus needs $CERTUS_HUGEPAGES × 1G)"
     else
-        local hp_tag=""
-        if [[ $hp_total -eq $CERTUS_HUGEPAGES ]]; then hp_tag="${tag_certus}"; fi
-        if [[ $hp_total -eq $SS_HUGEPAGES ]]; then hp_tag="${tag_ss}"; fi
-        if [[ -z "$hp_tag" ]]; then
-            echo -e "  ${tag_empty} $hp_total hugepages — certus needs $CERTUS_HUGEPAGES, sharedstorage needs $SS_HUGEPAGES"
-            ((++issues))
-        else
-            echo -e "  ${hp_tag} $hp_total hugepages"
-        fi
-        if [[ $hp_total -gt 0 && $hp_node -eq 0 ]]; then
-            echo -e "  ${tag_empty} hugepages not on node $GPU_NUMA — cross-NUMA penalty"
-            ((++issues))
-        fi
+        echo -e "  ${tag_empty} $hp_total hugepages — certus needs $CERTUS_HUGEPAGES on node $GPU_NUMA, sharedstorage needs $SS_HUGEPAGES"
+        fail_certus "hugepages misconfigured ($hp_total total, $hp_node on node $GPU_NUMA; need $CERTUS_HUGEPAGES on node $GPU_NUMA)"
+        [[ $hp_total -ne $SS_HUGEPAGES ]] && fail_ss "hugepages present ($hp_total × 1G; sharedstorage needs 0)"
     fi
     echo
 
@@ -241,7 +251,7 @@ show_status() {
         echo "  mem= not set — not needed (cgroup slice caps RAM at runtime)"
     else
         echo -e "  ${tag_empty} mem=${MEM_LIMIT} MISSING — page cache not limited"
-        ((++issues))
+        fail_both "mem=${MEM_LIMIT} missing (kernel mode)"
     fi
 
     # memmap= (must include the $offset to actually reserve memory).
@@ -253,18 +263,19 @@ show_status() {
         echo "  memmap= not set — not needed (cgroup mode pins to node $GPU_NUMA via numactl)"
     elif echo "$cmdline" | grep -q "memmap="; then
         echo -e "  ${tag_empty} memmap= present but OFFSET MISSING — reservation not active"
-        ((++issues))
+        fail_both "memmap= offset missing (kernel mode)"
     else
         echo -e "  ${tag_empty} memmap= MISSING — memory not isolated to NUMA node $GPU_NUMA"
-        ((++issues))
+        fail_both "memmap= missing (kernel mode)"
     fi
 
-    # iommu=pt
+    # iommu=pt — required for vfio-pci (certus only). sharedstorage uses the
+    # kernel nvme driver, so it doesn't care.
     if echo "$cmdline" | grep -q "iommu=pt"; then
         echo -e "  ${tag_certus} iommu=pt"
     else
         echo -e "  ${tag_empty} iommu=pt MISSING — required for vfio-pci"
-        ((++issues))
+        fail_certus "iommu=pt missing (required for vfio-pci)"
     fi
     echo
 
@@ -299,23 +310,30 @@ show_status() {
         dev_numa=$(cat "/sys/bus/pci/devices/$bdf/numa_node" 2>/dev/null || echo "?")
         if [[ "$dev_numa" != "$GPU_NUMA" ]]; then
             status="WRONG NUMA($dev_numa)"
-            ((++issues))
+            fail_both "NVMe $bdf on wrong NUMA node ($dev_numa)"
         else
             status="ok"
         fi
         printf "  %-14s %-12s %-10s %-6s\n" "$bdf" "$drv" "$blk" "$status"
     done
 
+    # vfio-pci → certus (SPDK userspace); nvme → sharedstorage (kernel driver).
     if [[ $nvme_count -gt 0 && $vfio_count -gt 0 ]]; then
         echo -e "  ${tag_empty} MIXED drivers: $vfio_count vfio-pci + $nvme_count nvme"
-        ((++issues))
+        fail_both "NVMe drivers mixed ($vfio_count vfio-pci + $nvme_count nvme)"
     elif [[ $vfio_count -eq ${#NVME_BDFS[@]} ]]; then
         echo -e "  ${tag_certus} all drives bound to vfio-pci"
+        fail_ss "NVMe bound to vfio-pci (sharedstorage needs nvme)"
     elif [[ $nvme_count -eq ${#NVME_BDFS[@]} ]]; then
         echo -e "  ${tag_ss} all drives bound to nvme"
+        fail_certus "NVMe bound to nvme (certus needs vfio-pci)"
+    else
+        echo -e "  ${tag_empty} NVMe drivers incomplete ($vfio_count vfio-pci, $nvme_count nvme of ${#NVME_BDFS[@]})"
+        fail_both "NVMe drivers incomplete ($vfio_count vfio-pci, $nvme_count nvme of ${#NVME_BDFS[@]})"
     fi
     echo
 
+    # RAID only matters for sharedstorage (needs the mounted XFS filesystem).
     if [[ $nvme_count -gt 0 ]]; then
         header "RAID"
         if [[ -e "$MD_DEVICE" ]] && mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
@@ -323,10 +341,10 @@ show_status() {
             df -h "$MOUNT_POINT" | tail -1 | awk '{printf "  Usage: %s / %s (%s)\n", $3, $2, $5}'
         elif [[ -e "$MD_DEVICE" ]]; then
             echo -e "  ${tag_empty} $MD_DEVICE exists but NOT mounted"
-            ((++issues))
+            fail_ss "RAID $MD_DEVICE not mounted"
         else
             echo -e "  ${tag_empty} no RAID configured"
-            ((++issues))
+            fail_ss "no RAID configured at $MOUNT_POINT"
         fi
         echo
     fi
@@ -338,11 +356,25 @@ show_status() {
     echo
 
     # --- Summary ---
+    # A connector is READY only if every check it needs is satisfied. Most checks
+    # discriminate (hugepages, NVMe driver, cgroup cap), so exactly one connector
+    # is normally ready; a half-configured system is ready for NEITHER.
     header "Summary"
-    if [[ $issues -eq 0 ]]; then
-        echo -e "  ${GREEN}All checks passed.${NC}"
+    if $certus_ok; then
+        echo -e "  ${GREEN}READY for certus${NC}"
     else
-        echo -e "  ${RED}$issues issue(s)${NC} — fix with: sudo $0 {certus|sharedstorage}"
+        echo -e "  ${RED}NOT ready for certus:${NC}"
+        for r in "${certus_bad[@]}"; do echo "    - $r"; done
+    fi
+    if $ss_ok; then
+        echo -e "  ${GREEN}READY for sharedstorage${NC}"
+    else
+        echo -e "  ${RED}NOT ready for sharedstorage:${NC}"
+        for r in "${ss_bad[@]}"; do echo "    - $r"; done
+    fi
+    echo
+    if ! $certus_ok && ! $ss_ok; then
+        echo -e "  Configure one with: sudo $0 {certus|sharedstorage}"
     fi
 }
 
