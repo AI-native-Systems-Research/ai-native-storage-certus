@@ -1,0 +1,20 @@
+[package]
+name = "extended-metadata-store"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+testing = ["interfaces/spdk"]
+spdk = ["testing", "dep:block-device-spdk-nvme", "dep:disk-partition-manager", "dep:spdk-env", "dep:logger"]
+
+[dependencies]
+component-framework.workspace = true
+component-core.workspace = true
+component-macros.workspace = true
+interfaces.workspace = true
+block-device-spdk-nvme = { workspace = true, optional = true }
+disk-partition-manager = { workspace = true, optional = true }
+spdk-env = { workspace = true, optional = true }
+logger = { workspace = true, optional = true }
