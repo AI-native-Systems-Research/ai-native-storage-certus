@@ -51,18 +51,27 @@ MEM_LIMIT="320G"
 TOTAL_USABLE_NODE1="64"  # GiB available on node 1 after memmap+mem
 
 # Hugepages (1 GiB pages)
-CERTUS_HUGEPAGES=24      # 24 GiB SPDK DRAM tier (under DPDK ~32G memseg cap), leaves 40G regular for vLLM
+CERTUS_HUGEPAGES=48      # 48 GiB SPDK DRAM tier, leaves 16G regular for vLLM (needs DPDK RTE_MAX_MEM_MB_PER_LIST raised to 64G)
 SS_HUGEPAGES=0           # all regular memory for page cache
 
 # DPDK single-allocation ceiling. spdk_zmalloc -> rte_malloc cannot return a
-# block spanning more than one memseg list (RTE_MAX_MEM_MB_PER_LIST = 32 GiB),
-# so a single Certus DRAM tier is hard-capped just under 32 GiB regardless of
-# how many hugepages exist. Keep CERTUS_HUGEPAGES below this.
-DPDK_MEMSEG_LIST_GIB=32
+# block spanning more than one memseg list (RTE_MAX_MEM_MB_PER_LIST), so a
+# single Certus DRAM tier is hard-capped just under this regardless of how many
+# hugepages exist. Raised from the stock 32 GiB to 64 GiB via a patched
+# deps/spdk/dpdk/config/rte_config.h (rebuilt with deps/build_spdk.sh) to allow
+# a 48 GiB tier. Keep CERTUS_HUGEPAGES below this. NOTE: also bounded by
+# RTE_MAX_MEM_MB_PER_TYPE=64 GiB, so the practical single-tier max is ~60 GiB.
+DPDK_MEMSEG_LIST_GIB=64
 
 # Minimum regular RAM vLLM needs to init + generate (empirical: OOMs below ~16G
 # with an 8B model). The certus cgroup cap must clear this or vLLM is OOM-killed.
 VLLM_MIN_RAM_GIB=16
+
+# DPDK reserves ~3 x 1G hugepages for its own EAL heap + per-drive DMA buffers
+# (measured: 48-page pool - 44G tier = 4 free before drives, 1 after). So a
+# single DRAM-tier spdk_zmalloc maxes at ~(CERTUS_HUGEPAGES - this) GiB. The run
+# script's dram_cache_bytes must stay under that, not the full pool.
+DPDK_HUGEPAGE_OVERHEAD_GIB=3
 
 # Built native module whose allocation path must include SPDK hugepage support.
 CERTUS_NATIVE_SO="certus-connector/certus_native/certus_native.cpython-312-x86_64-linux-gnu.so"
@@ -391,12 +400,16 @@ show_status() {
         echo -e "  ${YELLOW}certus_native .so not found at $CERTUS_NATIVE_SO — cannot verify build${NC}"
     fi
 
-    # 2. DRAM tier size (= hugepage pool) under the DPDK single-alloc ceiling.
-    if [[ $CERTUS_HUGEPAGES -lt $DPDK_MEMSEG_LIST_GIB ]]; then
-        echo -e "  ${tag_certus} DRAM tier ${CERTUS_HUGEPAGES}G < DPDK memseg cap ${DPDK_MEMSEG_LIST_GIB}G"
+    # 2. A single DRAM-tier spdk_zmalloc is bounded by BOTH the DPDK memseg cap
+    #    AND the pool minus DPDK's own ~3-page overhead. Report the max usable.
+    local max_tier_gib=$((CERTUS_HUGEPAGES - DPDK_HUGEPAGE_OVERHEAD_GIB))
+    [[ $max_tier_gib -gt $DPDK_MEMSEG_LIST_GIB ]] && max_tier_gib=$DPDK_MEMSEG_LIST_GIB
+    if [[ $CERTUS_HUGEPAGES -ge $DPDK_MEMSEG_LIST_GIB ]]; then
+        echo -e "  ${tag_empty} hugepage pool ${CERTUS_HUGEPAGES}G >= DPDK memseg cap ${DPDK_MEMSEG_LIST_GIB}G — raise RTE_MAX_MEM_MB_PER_LIST"
+        fail_certus "hugepage pool ${CERTUS_HUGEPAGES}G at/over DPDK single-alloc ceiling ${DPDK_MEMSEG_LIST_GIB}G"
     else
-        echo -e "  ${tag_empty} DRAM tier ${CERTUS_HUGEPAGES}G >= DPDK memseg cap ${DPDK_MEMSEG_LIST_GIB}G — spdk_zmalloc will fail"
-        fail_certus "DRAM tier ${CERTUS_HUGEPAGES}G exceeds DPDK single-alloc ceiling (~${DPDK_MEMSEG_LIST_GIB}G)"
+        echo -e "  ${tag_certus} max single DRAM tier ≈ ${max_tier_gib}G (pool ${CERTUS_HUGEPAGES}G − ${DPDK_HUGEPAGE_OVERHEAD_GIB}G DPDK overhead; memseg cap ${DPDK_MEMSEG_LIST_GIB}G)"
+        echo "      set DRAM_CACHE_BYTES <= ${max_tier_gib}G (a full-pool ${CERTUS_HUGEPAGES}G request fails — no room for DPDK heap)"
     fi
 
     # 3. cgroup cap clears vLLM's regular-RAM floor (cgroup mode only).
@@ -426,9 +439,13 @@ show_status() {
 
     # 5. No orphaned GPU-holding process (leftover EngineCore starves a new run).
     if command -v nvidia-smi >/dev/null 2>&1; then
+        # Count non-empty lines. Don't use `grep -c . || echo 0`: grep exits 1 on
+        # zero matches, so the fallback appends a second "0" and breaks the -eq.
         local gpu_procs
-        gpu_procs=$(nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader 2>/dev/null | grep -c . || echo 0)
-        if [[ "$gpu_procs" -eq 0 ]]; then
+        # `|| true` so a zero-match grep (exit 1) doesn't trip `set -e`.
+        gpu_procs=$(nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader 2>/dev/null | grep -c '[0-9]' || true)
+        gpu_procs=${gpu_procs//[!0-9]/}
+        if [[ "${gpu_procs:-0}" -eq 0 ]]; then
             echo -e "  ${tag_certus}${tag_ss} GPU free (no compute processes)"
         else
             echo -e "  ${tag_empty} $gpu_procs process(es) holding GPU memory — a new run may fail to init"
