@@ -59,8 +59,11 @@ MEM_METHOD="${MEM_METHOD:-cgroup}"
 # cgroup slice used to cap benchmark memory at runtime. Run benchmarks under it
 # with: systemd-run --slice=certus-bench.slice --scope numactl ... <command>
 BENCH_SLICE="certus-bench.slice"
-# Total RAM ceiling for the bench slice (defaults to the node-1 usable budget).
-CGROUP_MEM_MAX="${CGROUP_MEM_MAX:-${TOTAL_USABLE_NODE1}G}"
+# RAM ceiling for the bench slice. If unset, defaults per-mode (see
+# cgroup_mem_max_for): certus gets the regular-memory budget left after
+# hugepages, sharedstorage gets the full node-1 budget. hugetlb pages are NOT
+# charged to the memory cgroup on this kernel, so this only bounds regular RAM.
+CGROUP_MEM_MAX="${CGROUP_MEM_MAX:-}"
 
 # ============================================================================
 # Helpers
@@ -332,8 +335,27 @@ show_status() {
 # Memory Limiting — cgroup (runtime, no reboot)
 # ============================================================================
 
+# Per-mode default RAM ceiling for the bench slice (regular memory only —
+# hugetlb is not charged to the memory cgroup on this kernel).
+#   certus         → node-1 budget minus the hugepage reservation (e.g. 64-56=8)
+#   sharedstorage  → full node-1 budget (all of it is page cache)
+cgroup_mem_max_for() {
+    local mode=$1
+    if [[ -n "$CGROUP_MEM_MAX" ]]; then
+        echo "$CGROUP_MEM_MAX"
+    elif [[ "$mode" == "certus" ]]; then
+        echo "$((TOTAL_USABLE_NODE1 - CERTUS_HUGEPAGES))G"
+    else
+        echo "${TOTAL_USABLE_NODE1}G"
+    fi
+}
+
 setup_cgroup_mem() {
-    header "Memory limit via cgroup ($CGROUP_MEM_MAX)"
+    local mode=$1
+    local mem_max
+    mem_max=$(cgroup_mem_max_for "$mode")
+
+    header "Memory limit via cgroup ($mem_max)"
 
     if ! command -v systemctl >/dev/null 2>&1; then
         echo -e "  ${RED}systemd not available — cannot use cgroup memory limit.${NC}" >&2
@@ -341,9 +363,11 @@ setup_cgroup_mem() {
         exit 1
     fi
 
-    # Create a persistent transient slice with a hard memory ceiling. MemoryMax
-    # is the hard cap (OOM-kills on breach); MemorySwapMax=0 prevents the cap
-    # being dodged via swap so the RAM ceiling is real.
+    # Create a persistent slice with a hard memory ceiling. MemoryMax is the hard
+    # cap (OOM-kills on breach); MemorySwapMax=0 prevents the cap being dodged via
+    # swap so the RAM ceiling is real. For certus we also bound 1G hugepages via
+    # the hugetlb controller so the *total* footprint = MemoryMax + hugepage cap
+    # is one known number (56G hugepages + 8G regular = 64G).
     local unit="/etc/systemd/system/${BENCH_SLICE}"
     echo "  Writing $unit"
     {
@@ -353,7 +377,7 @@ setup_cgroup_mem() {
         echo
         echo "[Slice]"
         echo "MemoryAccounting=yes"
-        echo "MemoryMax=${CGROUP_MEM_MAX}"
+        echo "MemoryMax=${mem_max}"
         echo "MemorySwapMax=0"
     } > "$unit"
 
@@ -361,11 +385,26 @@ setup_cgroup_mem() {
     # Start the slice so its cgroup exists and the limit is live immediately.
     systemctl start "$BENCH_SLICE"
 
-    echo -e "  ${GREEN}Slice ${BENCH_SLICE} active — MemoryMax=${CGROUP_MEM_MAX}, swap disabled${NC}"
+    # Bound 1G hugepages for the slice (certus only). The hugetlb controller has
+    # no systemd directive, so write the cgroup knob directly once the slice's
+    # cgroup exists. Value is in bytes.
+    if [[ "$mode" == "certus" ]]; then
+        local hugetlb_knob="/sys/fs/cgroup/${BENCH_SLICE}/hugetlb.1GB.max"
+        local hugetlb_bytes=$((CERTUS_HUGEPAGES * 1024 * 1024 * 1024))
+        if [[ -f "$hugetlb_knob" ]]; then
+            echo "$hugetlb_bytes" > "$hugetlb_knob"
+            echo "  hugetlb.1GB.max = ${CERTUS_HUGEPAGES}G (slice hugepage cap)"
+        else
+            echo -e "  ${YELLOW}hugetlb controller not delegated to ${BENCH_SLICE} — hugepage cap skipped${NC}"
+            echo "  (hugepages are still globally bounded by the hugepages=${CERTUS_HUGEPAGES} boot param)"
+        fi
+    fi
+
+    echo -e "  ${GREEN}Slice ${BENCH_SLICE} active — MemoryMax=${mem_max}, swap disabled${NC}"
     echo "  Run benchmarks inside it with:"
     echo "    systemd-run --slice=${BENCH_SLICE} --scope numactl --cpunodebind=$GPU_NUMA --membind=$GPU_NUMA <command>"
     echo
-    echo -e "  ${YELLOW}Note:${NC} cgroup caps RAM only. NUMA node-0 reservation and hugepage"
+    echo -e "  ${YELLOW}Note:${NC} MemoryMax caps regular RAM. NUMA node-0 reservation and hugepage"
     echo "  placement still require the kernel params (set once, independently)."
 }
 
@@ -683,7 +722,7 @@ main() {
 
     header "Configuring for: $mode"
     if [[ "$MEM_METHOD" == "cgroup" ]]; then
-        echo "  Memory limit: cgroup slice ${BENCH_SLICE} (MemoryMax=${CGROUP_MEM_MAX}, no reboot)"
+        echo "  Memory limit: cgroup slice ${BENCH_SLICE} (MemoryMax=$(cgroup_mem_max_for "$mode"), no reboot)"
     else
         echo "  Memory limit: kernel mem=${MEM_LIMIT} (reboot required)"
     fi
@@ -705,7 +744,7 @@ main() {
 
     # 1b. Memory limit via cgroup (runtime, no reboot) — the default.
     if [[ "$MEM_METHOD" == "cgroup" ]]; then
-        setup_cgroup_mem
+        setup_cgroup_mem "$mode"
     fi
 
     # 2. Hugepages
@@ -728,7 +767,7 @@ main() {
     if [[ "$MEM_METHOD" == "cgroup" ]]; then
         echo "    systemd-run --slice=${BENCH_SLICE} --scope \\"
         echo "      numactl --cpunodebind=$GPU_NUMA --membind=$GPU_NUMA <command>"
-        echo "    (the slice enforces MemoryMax=${CGROUP_MEM_MAX})"
+        echo "    (the slice enforces MemoryMax=$(cgroup_mem_max_for "$mode"))"
     else
         echo "    numactl --cpunodebind=$GPU_NUMA --membind=$GPU_NUMA <command>"
     fi
