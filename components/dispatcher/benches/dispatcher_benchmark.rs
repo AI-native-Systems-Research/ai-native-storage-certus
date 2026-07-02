@@ -6,31 +6,16 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 use dispatcher::io_segmenter::segment_io;
 use dispatcher::DispatcherComponent;
 use interfaces::{
-    CacheKey, DispatchMapError, DispatcherConfig, DmaAllocFn, DmaBuffer, GpuDeviceInfo,
+    CacheKey, DispatchMapError, DispatcherConfig, DmaBuffer, GpuDeviceInfo,
     GpuDmaBuffer, GpuIpcHandle, GpuStream, IDispatchMap, IDispatcher, IGpuServices, ILogger,
     IMemoryTier, IpcHandle, LookupResult, MemoryTierError,
 };
 
 // ===========================================================================
-// Mock infrastructure (staging-only, no hardware)
+// Mock infrastructure (memory-tier-only, no hardware)
 // ===========================================================================
 
-unsafe extern "C" fn dma_free(ptr: *mut std::ffi::c_void) {
-    unsafe { libc::free(ptr) };
-}
-
-fn alloc_dma_buffer(size: usize) -> Arc<DmaBuffer> {
-    let sz = size.max(4096);
-    let aligned_sz = sz.next_multiple_of(4096);
-    let ptr = unsafe { libc::aligned_alloc(4096, aligned_sz) };
-    assert!(!ptr.is_null());
-    unsafe { std::ptr::write_bytes(ptr as *mut u8, 0, aligned_sz) };
-    let buf = unsafe { DmaBuffer::from_raw(ptr, aligned_sz, dma_free, -1) }.unwrap();
-    Arc::new(buf)
-}
-
 struct BenchEntry {
-    buffer: Arc<DmaBuffer>,
     block_offset: Option<u64>,
     mem_pointer: Option<(usize, u32)>,
     write_ref: bool,
@@ -50,29 +35,8 @@ impl BenchDispatchMap {
 }
 
 impl IDispatchMap for BenchDispatchMap {
-    fn set_dma_alloc(&self, _alloc: DmaAllocFn) {}
-
     fn initialize(&self) -> Result<(), DispatchMapError> {
         Ok(())
-    }
-
-    fn create_staging(&self, key: CacheKey, size: u32) -> Result<Arc<DmaBuffer>, DispatchMapError> {
-        let mut inner = self.inner.lock().unwrap();
-        if inner.contains_key(&key) {
-            return Err(DispatchMapError::AlreadyExists(key));
-        }
-        let buffer = alloc_dma_buffer(size as usize * 4096);
-        inner.insert(
-            key,
-            BenchEntry {
-                buffer: Arc::clone(&buffer),
-                block_offset: None,
-                mem_pointer: None,
-                write_ref: true,
-                read_refs: 0,
-            },
-        );
-        Ok(buffer)
     }
 
     fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {
@@ -88,8 +52,9 @@ impl IDispatchMap for BenchDispatchMap {
                 } else if let Some(offset) = e.block_offset {
                     Ok(LookupResult::BlockDevice { offset })
                 } else {
-                    Ok(LookupResult::Staging {
-                        buffer: Arc::clone(&e.buffer),
+                    Ok(LookupResult::MemoryTier {
+                        pointer: std::ptr::null_mut(),
+                        size: 0,
                     })
                 }
             }
@@ -205,11 +170,9 @@ impl IDispatchMap for BenchDispatchMap {
         if inner.contains_key(&key) {
             return Err(DispatchMapError::AlreadyExists(key));
         }
-        let buffer = alloc_dma_buffer(size as usize);
         inner.insert(
             key,
             BenchEntry {
-                buffer,
                 block_offset: None,
                 mem_pointer: Some((pointer as usize, size)),
                 write_ref: true,
@@ -504,7 +467,7 @@ fn bench_segment_io_1m(c: &mut Criterion) {
 }
 
 // ===========================================================================
-// populate benchmarks (GPU -> staging)
+// populate benchmarks (GPU -> memory-tier)
 // ===========================================================================
 
 fn bench_populate(c: &mut Criterion) {
@@ -648,36 +611,6 @@ fn bench_check(c: &mut Criterion) {
     group.finish();
 }
 
-// ===========================================================================
-// prepare_store + cancel_store benchmarks (allocation hot path)
-// ===========================================================================
-
-fn bench_prepare_cancel(c: &mut Criterion) {
-    let mut group = c.benchmark_group("prepare_cancel_store");
-
-    let sizes: &[usize] = &[4096, 64 * 1024, 256 * 1024];
-
-    for &size in sizes {
-        group.throughput(Throughput::Bytes(size as u64));
-        group.bench_with_input(
-            BenchmarkId::from_parameter(format!("{size}")),
-            &size,
-            |b, &sz| {
-                let (d, _dm) = setup_dispatcher();
-                let mut key_counter: u64 = 0;
-
-                b.iter(|| {
-                    let key = key_counter;
-                    key_counter += 1;
-                    let _buf = d.prepare_store(black_box(key), sz as u32).unwrap();
-                    d.cancel_store(black_box(key)).unwrap();
-                });
-            },
-        );
-    }
-    group.finish();
-}
-
 criterion_group!(
     benches,
     bench_segment_io_small,
@@ -686,6 +619,5 @@ criterion_group!(
     bench_lookup_warm,
     bench_lookup_cold,
     bench_check,
-    bench_prepare_cancel,
 );
 criterion_main!(benches);

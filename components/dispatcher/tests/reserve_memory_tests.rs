@@ -27,7 +27,7 @@ use std::sync::{Arc, Mutex};
 use component_core::query_interface;
 use dispatcher::DispatcherComponent;
 use interfaces::{
-    CacheKey, DispatchMapError, DispatcherConfig, DispatcherError, DmaAllocFn, DmaBuffer,
+    CacheKey, DispatchMapError, DispatcherConfig, DispatcherError, DmaBuffer,
     GpuDeviceInfo, GpuDmaBuffer, GpuIpcHandle, GpuStream, IDispatchMap, IDispatcher, IGpuServices,
     ILogger, IMemoryTier, IpcHandle, LookupResult, MemoryTierError,
 };
@@ -375,18 +375,8 @@ impl MockDispatchMap {
 }
 
 impl IDispatchMap for MockDispatchMap {
-    fn set_dma_alloc(&self, _alloc: DmaAllocFn) {}
-
     fn initialize(&self) -> Result<(), DispatchMapError> {
         Ok(())
-    }
-
-    fn create_staging(
-        &self,
-        _key: CacheKey,
-        _size: u32,
-    ) -> Result<Arc<DmaBuffer>, DispatchMapError> {
-        unimplemented!("create_staging is not exercised by reserve_memory tests")
     }
 
     fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {

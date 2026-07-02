@@ -1,14 +1,10 @@
 //! IDispatcher interface and associated types for the dispatcher component.
 
 use std::fmt;
-#[cfg(feature = "spdk")]
-use std::sync::Arc;
 
 use crate::idispatch_map::CacheKey;
 #[cfg(feature = "spdk")]
 use crate::igpu_services::GpuStream;
-#[cfg(feature = "spdk")]
-use crate::spdk_types::DmaBuffer;
 
 /// Configuration for dispatcher initialization.
 ///
@@ -166,14 +162,12 @@ impl std::error::Error for DispatcherError {}
 //
 // - P1 (drive-index-bounded): drive_index(key, N) always returns a value < N
 // - P2 (eviction-terminates): evict_for_space loop exits after at most max_attempts iterations
-// - P3 (size-validation): populate and prepare_store reject size == 0
+// - P3 (size-validation): populate rejects size == 0
 // - P4 (init-guard): all operations return NotInitialized before initialize() succeeds
 // - P5 (populate-lifecycle): successful populate yields MemoryTier entry with read_ref=1, no write_ref
-// - P6 (prepare-commit-lifecycle): prepare creates pending with drive_idx < num_drives; commit produces BlockDevice entry
-// - P7 (cancel-removes): cancel_store transitions entry to NotExist
-// - P8 (drive-index-deterministic): same key always maps to same drive
-// - P9 (eviction-progress): each successful eviction strictly decreases memory used
-// - P10 (reserve-complete-lifecycle): reserve→copy→complete yields MemoryTier entry with read_ref=1
+// - P6 (drive-index-deterministic): same key always maps to same drive
+// - P7 (eviction-progress): each successful eviction strictly decreases memory used
+// - P8 (reserve-complete-lifecycle): reserve→copy→complete yields MemoryTier entry with read_ref=1
 //
 // Total: 10 properties, 24 verification conditions discharged by SMT solvers.
 
@@ -223,7 +217,7 @@ component_macros::define_interface! {
 
         /// Shut down the dispatcher, completing all in-flight background writes.
         ///
-        /// Blocks until all pending staging-to-SSD writes finish, then shuts down
+        /// Blocks until all pending memory-tier-to-SSD writes finish, then shuts down
         /// all managed block devices and extent managers.
         ///
         /// # Verified: P4 (init-guard)
@@ -253,7 +247,7 @@ component_macros::define_interface! {
 
         /// Look up a cache entry and DMA-copy data to the client's GPU memory.
         ///
-        /// If the entry is in staging, copies from the staging buffer.
+        /// If the entry is in the memory-tier, copies from the DRAM buffer.
         /// If the entry is on SSD, reads from the block device and copies.
         /// Blocks if a writer is active on the key (dispatch map semantics).
         ///
@@ -293,8 +287,8 @@ component_macros::define_interface! {
         ///
         /// Returns the CUDA stream the copy was issued on. The caller must call
         /// `stream_synchronize` on the returned stream before accessing the GPU
-        /// destination memory. For non-memory-tier paths (staging, SSD) the copy
-        /// completes synchronously and a null stream is returned.
+        /// destination memory. For SSD-backed entries the copy completes
+        /// synchronously and a null stream is returned.
         ///
         /// # Errors
         ///
@@ -335,7 +329,7 @@ component_macros::define_interface! {
 
         /// Batch lookup: retrieve multiple cache entries concurrently.
         ///
-        /// For entries in the memory-tier or staging, behaves like sequential
+        /// For entries in the memory-tier, behaves like sequential
         /// lookups. For entries on SSD (cold path), promotes them in parallel
         /// to exploit multi-drive bandwidth.
         ///
@@ -380,7 +374,7 @@ component_macros::define_interface! {
         /// Remove a cache entry, freeing all associated resources.
         ///
         /// If a background write is in progress, blocks until it completes
-        /// before removing. Frees staging buffer and/or SSD extent.
+        /// before removing. Frees memory-tier slot and/or SSD extent.
         ///
         /// # Errors
         ///
@@ -410,8 +404,8 @@ component_macros::define_interface! {
 
         /// Populate a new cache entry by DMA-copying from GPU memory.
         ///
-        /// Allocates a staging buffer, copies data from the IPC handle,
-        /// and returns immediately. The staging-to-SSD write happens
+        /// Allocates a memory-tier slot, copies data from the GPU via DMA,
+        /// and returns immediately. The memory-tier-to-SSD write happens
         /// asynchronously in the background.
         ///
         /// # Errors
@@ -512,105 +506,6 @@ component_macros::define_interface! {
         /// # Verified: P4 (init-guard)
         /// Rejects uninitialized.
         fn release_memory(&self, key: CacheKey) -> Result<(), DispatcherError>;
-
-        /// Prepare a store operation for the given cache key.
-        ///
-        /// Runs eviction if the cache is over capacity, allocates an extent
-        /// on the target data drive, and returns a DMA buffer the caller can
-        /// write into. The extent is committed when the caller subsequently
-        /// calls `commit_store`.
-        ///
-        /// # Errors
-        ///
-        /// Returns [`DispatcherError::InvalidParameter`] if `size` is 0.
-        /// Returns [`DispatcherError::AlreadyExists`] if the key is already cached.
-        /// Returns [`DispatcherError::AllocationFailed`] if extent allocation fails.
-        ///
-        /// # Verified: P1 (drive-index-bounded), P3 (size-validation), P4 (init-guard), P6 (prepare-commit-lifecycle)
-        /// Drive index for extent allocation is < num_drives. Rejects zero-size.
-        /// Rejects uninitialized. Creates pending write record with valid drive_idx.
-        ///
-        /// # Examples
-        ///
-        /// ```no_run
-        /// # use interfaces::{IDispatcher, DispatcherError, CacheKey};
-        /// # fn example(dispatcher: &dyn IDispatcher) -> Result<(), DispatcherError> {
-        /// let key: CacheKey = 200;
-        /// let size: u32 = 4096;
-        ///
-        /// // Phase 1: prepare — returns a DMA buffer to fill.
-        /// let dma_buf = dispatcher.prepare_store(key, size)?;
-        ///
-        /// // Phase 2: write data into the buffer.
-        /// unsafe {
-        ///     std::ptr::write_bytes(dma_buf.as_ptr() as *mut u8, 0xCD, size as usize);
-        /// }
-        ///
-        /// // Phase 3: commit — writes buffer to SSD and publishes the extent.
-        /// dispatcher.commit_store(key)?;
-        /// # Ok(())
-        /// # }
-        /// ```
-        fn prepare_store(&self, key: CacheKey, size: u32) -> Result<Arc<DmaBuffer>, DispatcherError>;
-
-        /// Commit a previously prepared store, writing the DMA buffer to SSD.
-        ///
-        /// Retrieves the pending write for `key`, writes the buffer contents
-        /// to the reserved extent on SSD, publishes the extent metadata, and
-        /// registers the entry in the dispatch map as block-device-backed.
-        ///
-        /// # Errors
-        ///
-        /// Returns [`DispatcherError::KeyNotFound`] if no pending write exists for `key`.
-        /// Returns [`DispatcherError::IoError`] if the SSD write fails.
-        ///
-        /// # Verified: P4 (init-guard), P6 (prepare-commit-lifecycle)
-        /// Rejects uninitialized. Consumes pending write exactly once, producing
-        /// a BlockDevice entry with ssd_offset and write_ref released.
-        ///
-        /// # Examples
-        ///
-        /// ```no_run
-        /// # use interfaces::{IDispatcher, DispatcherError, CacheKey};
-        /// # fn example(dispatcher: &dyn IDispatcher) -> Result<(), DispatcherError> {
-        /// let key: CacheKey = 200;
-        /// // Assumes prepare_store(key, size) was called previously.
-        /// dispatcher.commit_store(key)?;
-        /// // Entry is now persisted on SSD and visible via check/lookup.
-        /// assert!(dispatcher.check(key)?);
-        /// # Ok(())
-        /// # }
-        /// ```
-        fn commit_store(&self, key: CacheKey) -> Result<(), DispatcherError>;
-
-        /// Cancel a previously prepared store, freeing the reserved extent.
-        ///
-        /// Removes and drops the pending write for `key`. The `WriteHandle`
-        /// destructor automatically aborts the extent reservation.
-        ///
-        /// # Errors
-        ///
-        /// Returns [`DispatcherError::KeyNotFound`] if no pending write exists for `key`.
-        ///
-        /// # Verified: P4 (init-guard), P7 (cancel-removes)
-        /// Rejects uninitialized. After cancel, the key transitions to NotExist
-        /// in the dispatch-map (WriteHandle drop auto-aborts the extent).
-        ///
-        /// # Examples
-        ///
-        /// ```no_run
-        /// # use interfaces::{IDispatcher, DispatcherError, CacheKey};
-        /// # fn example(dispatcher: &dyn IDispatcher) -> Result<(), DispatcherError> {
-        /// let key: CacheKey = 300;
-        /// let dma_buf = dispatcher.prepare_store(key, 4096)?;
-        /// // Decide not to commit — cancel releases the reserved extent.
-        /// dispatcher.cancel_store(key)?;
-        /// // Key is no longer visible.
-        /// assert!(!dispatcher.check(key)?);
-        /// # Ok(())
-        /// # }
-        /// ```
-        fn cancel_store(&self, key: CacheKey) -> Result<(), DispatcherError>;
 
         /// Update the timestamp for a cache entry without performing any DMA.
         ///

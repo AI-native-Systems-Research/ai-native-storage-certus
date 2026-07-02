@@ -1,16 +1,12 @@
 //! Internal synchronization state for the dispatch map.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Condvar, Mutex};
 use std::time::Duration;
 
-use interfaces::{CacheKey, DmaAllocFn, DmaBuffer, PoolId};
+use interfaces::{CacheKey, PoolId};
 
 use crate::entry::DispatchEntry;
-
-fn default_dma_alloc() -> DmaAllocFn {
-    Arc::new(|size, align, numa| DmaBuffer::new(size, align, numa).map_err(|e| e.to_string()))
-}
 
 /// Protected inner state behind the Mutex.
 pub(crate) struct Inner {
@@ -21,7 +17,6 @@ pub(crate) struct Inner {
 pub struct DispatchMapState {
     pub(crate) inner: Mutex<Inner>,
     pub(crate) condvar: Condvar,
-    pub(crate) dma_alloc: Mutex<Option<DmaAllocFn>>,
     pub(crate) pool_id: Mutex<Option<PoolId>>,
 }
 
@@ -38,7 +33,6 @@ impl DispatchMapState {
                 entries: HashMap::new(),
             }),
             condvar: Condvar::new(),
-            dma_alloc: Mutex::new(Some(default_dma_alloc())),
             pool_id: Mutex::new(None),
         }
     }

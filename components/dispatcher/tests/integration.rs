@@ -27,7 +27,7 @@ use component_core::iunknown::query;
 use component_core::query_interface;
 use dispatcher::DispatcherComponent;
 use interfaces::{
-    CacheKey, DispatchMapError, DispatcherConfig, DispatcherError, DmaAllocFn, DmaBuffer,
+    CacheKey, DispatchMapError, DispatcherConfig, DispatcherError, DmaBuffer,
     GpuDeviceInfo, GpuDmaBuffer, GpuIpcHandle, GpuStream, IDispatchMap, IDispatcher, IGpuServices,
     ILogger, IpcHandle, LookupResult,
 };
@@ -207,11 +207,10 @@ impl IGpuServices for MockGpuServices {
 }
 
 // ---------------------------------------------------------------------------
-// HwDispatchMap — real SPDK DMA-backed staging buffers
+// HwDispatchMap — tracks entry locations for dispatch map mock
 // ---------------------------------------------------------------------------
 
 struct HwDmEntry {
-    buffer: Arc<DmaBuffer>,
     block_offset: Option<u64>,
     write_ref: bool,
     read_refs: u32,
@@ -219,14 +218,12 @@ struct HwDmEntry {
 
 struct HwDispatchMap {
     inner: Mutex<std::collections::HashMap<CacheKey, HwDmEntry>>,
-    dma_alloc: Mutex<Option<DmaAllocFn>>,
 }
 
 impl HwDispatchMap {
-    fn new(dma_alloc: DmaAllocFn) -> Self {
+    fn new() -> Self {
         Self {
             inner: Mutex::new(std::collections::HashMap::new()),
-            dma_alloc: Mutex::new(Some(dma_alloc)),
         }
     }
 
@@ -245,36 +242,8 @@ impl HwDispatchMap {
 }
 
 impl IDispatchMap for HwDispatchMap {
-    fn set_dma_alloc(&self, alloc: DmaAllocFn) {
-        *self.dma_alloc.lock().unwrap() = Some(alloc);
-    }
-
     fn initialize(&self) -> Result<(), DispatchMapError> {
         Ok(())
-    }
-
-    fn create_staging(&self, key: CacheKey, size: u32) -> Result<Arc<DmaBuffer>, DispatchMapError> {
-        let mut inner = self.inner.lock().unwrap();
-        if inner.contains_key(&key) {
-            return Err(DispatchMapError::AlreadyExists(key));
-        }
-        let alloc_guard = self.dma_alloc.lock().unwrap();
-        let alloc = alloc_guard
-            .as_ref()
-            .ok_or_else(|| DispatchMapError::NotInitialized("dma_alloc not set".into()))?;
-        let buf =
-            alloc(size as usize * 4096, 4096, None).map_err(DispatchMapError::AllocationFailed)?;
-        let buffer = Arc::new(buf);
-        inner.insert(
-            key,
-            HwDmEntry {
-                buffer: Arc::clone(&buffer),
-                block_offset: None,
-                write_ref: true,
-                read_refs: 0,
-            },
-        );
-        Ok(buffer)
     }
 
     fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {
@@ -283,8 +252,9 @@ impl IDispatchMap for HwDispatchMap {
             None => Ok(LookupResult::NotExist),
             Some(e) => match e.block_offset {
                 Some(offset) => Ok(LookupResult::BlockDevice { offset }),
-                None => Ok(LookupResult::Staging {
-                    buffer: Arc::clone(&e.buffer),
+                None => Ok(LookupResult::MemoryTier {
+                    pointer: std::ptr::null_mut(),
+                    size: 0,
                 }),
             },
         }
@@ -441,11 +411,7 @@ fn create_dispatcher(
     let ienv =
         query::<dyn ISPDKEnv + Send + Sync>(&**spdk_env_comp).expect("failed to query ISPDKEnv");
 
-    let dma_alloc: DmaAllocFn = Arc::new(|size, align, _numa| {
-        DmaBuffer::new(size, align, None).map_err(|e| e.to_string())
-    });
-
-    let dm = Arc::new(HwDispatchMap::new(dma_alloc));
+    let dm = Arc::new(HwDispatchMap::new());
     let dispatcher = DispatcherComponent::new_default();
 
     dispatcher
@@ -574,7 +540,7 @@ fn hw_idispatcher_full_integration() {
     // =======================================================================
     // 5. lookup() — data retrieval
     // =======================================================================
-    eprintln!("\n=== 5. lookup — existing key (staging hit) ===");
+    eprintln!("\n=== 5. lookup — existing key (memory-tier hit) ===");
     {
         let mut out = vec![0u8; 4096];
         d.lookup(1, make_handle(&mut out)).unwrap();
@@ -952,7 +918,7 @@ fn hw_data_integrity() {
     }
 
     // =======================================================================
-    // 8. Verify integrity survives lazy migration (staging → SSD → readback)
+    // 8. Verify integrity survives lazy migration (memory-tier → SSD → readback)
     // =======================================================================
     eprintln!("=== Integrity 8: post-migration readback ===");
     {
@@ -986,7 +952,7 @@ fn hw_data_integrity() {
 }
 
 // ===========================================================================
-// SSD read-back integrity test — full staging → SSD → read-back cycle
+// SSD read-back integrity test — full memory-tier → SSD → read-back cycle
 // ===========================================================================
 
 #[test]
@@ -1139,103 +1105,3 @@ fn hw_ssd_readback_integrity() {
     eprintln!("\n=== SSD READBACK INTEGRITY TEST PASSED ===");
 }
 
-// ===========================================================================
-// prepare_store → commit_store → lookup integration test
-// ===========================================================================
-
-#[test]
-fn hw_prepare_commit_store() {
-    let pci_addrs = discover_devices();
-    let (comp, _dm) = create_dispatcher(&pci_addrs[..1]);
-    let d: Arc<dyn IDispatcher + Send + Sync> = query_interface!(comp, IDispatcher).unwrap();
-
-    // =======================================================================
-    // 1. prepare_store → write pattern → commit_store → lookup readback (4 KiB)
-    // =======================================================================
-    eprintln!("\n=== PrepareCommit 1: single 4 KiB block ===");
-    {
-        let src: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
-        let buf = d.prepare_store(5000, 4096).unwrap();
-        unsafe {
-            std::ptr::copy_nonoverlapping(src.as_ptr(), buf.as_ptr() as *mut u8, 4096);
-        }
-        d.commit_store(5000).unwrap();
-        assert!(d.check(5000).unwrap());
-
-        let mut dst = vec![0u8; 4096];
-        d.lookup(5000, make_handle(&mut dst)).unwrap();
-        assert_eq!(src, dst, "4 KiB prepare/commit readback mismatch");
-    }
-
-    // =======================================================================
-    // 2. 12 KiB (multi-block)
-    // =======================================================================
-    eprintln!("=== PrepareCommit 2: multi-block 12 KiB ===");
-    {
-        let src: Vec<u8> = (0..12288).map(|i| ((i * 7 + 13) % 256) as u8).collect();
-        let buf = d.prepare_store(5001, 12288).unwrap();
-        unsafe {
-            std::ptr::copy_nonoverlapping(src.as_ptr(), buf.as_ptr() as *mut u8, 12288);
-        }
-        d.commit_store(5001).unwrap();
-
-        let mut dst = vec![0u8; 12288];
-        d.lookup(5001, make_handle(&mut dst)).unwrap();
-        assert_eq!(src, dst, "12 KiB prepare/commit readback mismatch");
-    }
-
-    // =======================================================================
-    // 3. 256 KiB (MDTS segmentation)
-    // =======================================================================
-    eprintln!("=== PrepareCommit 3: large 256 KiB buffer ===");
-    {
-        let size = 256 * 1024;
-        let src: Vec<u8> = (0..size).map(|i| ((i * 31 + 17) % 256) as u8).collect();
-        let buf = d.prepare_store(5002, size as u32).unwrap();
-        unsafe {
-            std::ptr::copy_nonoverlapping(src.as_ptr(), buf.as_ptr() as *mut u8, size);
-        }
-        d.commit_store(5002).unwrap();
-
-        let mut dst = vec![0u8; size];
-        d.lookup(5002, make_handle(&mut dst)).unwrap();
-        assert_eq!(src, dst, "256 KiB prepare/commit readback mismatch");
-    }
-
-    // =======================================================================
-    // 4. cancel_store — entry disappears
-    // =======================================================================
-    eprintln!("=== PrepareCommit 4: cancel_store ===");
-    {
-        let _buf = d.prepare_store(5003, 4096).unwrap();
-        d.cancel_store(5003).unwrap();
-        assert!(!d.check(5003).unwrap());
-    }
-
-    // =======================================================================
-    // 5. Duplicate key detection — prepare_store on existing key fails
-    // =======================================================================
-    eprintln!("=== PrepareCommit 5: duplicate key detection ===");
-    {
-        let err = d.prepare_store(5000, 4096);
-        assert!(
-            matches!(err, Err(DispatcherError::AlreadyExists(5000))),
-            "got: {err:?}"
-        );
-    }
-
-    // =======================================================================
-    // 6. commit_store on nonexistent key fails
-    // =======================================================================
-    eprintln!("=== PrepareCommit 6: commit nonexistent key ===");
-    {
-        let err = d.commit_store(99999);
-        assert!(
-            matches!(err, Err(DispatcherError::KeyNotFound(99999))),
-            "got: {err:?}"
-        );
-    }
-
-    d.shutdown().unwrap();
-    eprintln!("\n=== PREPARE/COMMIT STORE TEST PASSED ===");
-}
