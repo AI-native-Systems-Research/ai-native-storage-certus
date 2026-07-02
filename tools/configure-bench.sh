@@ -412,9 +412,16 @@ setup_cgroup_mem() {
 
     # Create a persistent slice with a hard memory ceiling. MemoryMax is the hard
     # cap (OOM-kills on breach); MemorySwapMax=0 prevents the cap being dodged via
-    # swap so the RAM ceiling is real. For certus we also bound 1G hugepages via
-    # the hugetlb controller so the *total* footprint = MemoryMax + hugepage cap
-    # is one known number (56G hugepages + 8G regular = 64G).
+    # swap so the RAM ceiling is real.
+    #
+    # MemoryMax bounds *regular* RAM only — 1G hugepages are not charged to the
+    # memory cgroup on this kernel. We deliberately do NOT try to cap hugepages
+    # per-slice: systemd creates the slice's cgroup on demand (only when a process
+    # is placed in it via systemd-run), so there's no cgroup dir to write
+    # hugetlb.1GB.max into at configure time, and systemd exposes no directive for
+    # it. It's also unnecessary — the hugepages=N boot param reserves exactly N
+    # pages globally, so certus physically cannot use more than that. Total
+    # footprint is therefore bounded to MemoryMax + N GiB (e.g. 8G + 56G = 64G).
     local unit="/etc/systemd/system/${BENCH_SLICE}"
     echo "  Writing $unit"
     {
@@ -432,19 +439,9 @@ setup_cgroup_mem() {
     # Start the slice so its cgroup exists and the limit is live immediately.
     systemctl start "$BENCH_SLICE"
 
-    # Bound 1G hugepages for the slice (certus only). The hugetlb controller has
-    # no systemd directive, so write the cgroup knob directly once the slice's
-    # cgroup exists. Value is in bytes.
     if [[ "$mode" == "certus" ]]; then
-        local hugetlb_knob="/sys/fs/cgroup/${BENCH_SLICE}/hugetlb.1GB.max"
-        local hugetlb_bytes=$((CERTUS_HUGEPAGES * 1024 * 1024 * 1024))
-        if [[ -f "$hugetlb_knob" ]]; then
-            echo "$hugetlb_bytes" > "$hugetlb_knob"
-            echo "  hugetlb.1GB.max = ${CERTUS_HUGEPAGES}G (slice hugepage cap)"
-        else
-            echo -e "  ${YELLOW}hugetlb controller not delegated to ${BENCH_SLICE} — hugepage cap skipped${NC}"
-            echo "  (hugepages are still globally bounded by the hugepages=${CERTUS_HUGEPAGES} boot param)"
-        fi
+        echo "  Hugepages bounded globally by hugepages=${CERTUS_HUGEPAGES} boot param"
+        echo "  (total footprint ≈ MemoryMax ${mem_max} + ${CERTUS_HUGEPAGES}G hugepages)"
     fi
 
     echo -e "  ${GREEN}Slice ${BENCH_SLICE} active — MemoryMax=${mem_max}, swap disabled${NC}"
