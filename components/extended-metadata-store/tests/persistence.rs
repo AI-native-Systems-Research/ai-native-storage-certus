@@ -302,6 +302,64 @@ fn recovery_fallback_to_inactive_region() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Phase 5: Delete persistence tests (T033-T035)
+// ---------------------------------------------------------------------------
+
+/// T034: Put + delete + flush + reboot + get returns NotFound.
+#[test]
+fn delete_persists_across_reboot() {
+    let mock = MockBlockDevice::new(DISK_SIZE);
+    let comp = ExtendedMetadataStoreComponent::new_default();
+    let store: Arc<dyn IExtendedMetadataStore + Send + Sync> =
+        query_interface!(comp.clone(), IExtendedMetadataStore).unwrap();
+
+    store.put("keep", b"kept").unwrap();
+    store.put("remove", b"gone").unwrap();
+    store.delete("remove").unwrap();
+
+    // Flush current state (only "keep" should be persisted)
+    let client = connect_client(&mock);
+    let num_sectors = DISK_SIZE / SECTOR_SIZE as u64;
+    let mut superblock = Superblock::new(SECTOR_SIZE, num_sectors);
+    let entries = comp.snapshot_entries();
+    flush_to_disk(&client, &mut superblock, &entries).unwrap();
+
+    // Reboot
+    let shared = mock.shared_state();
+    drop(client);
+    let mock2 = MockBlockDevice::reboot_from(shared);
+    let client2 = connect_client(&mock2);
+
+    let comp2 = ExtendedMetadataStoreComponent::new_default();
+    comp2.initialize_from_client(&client2, num_sectors).unwrap();
+
+    let store2: Arc<dyn IExtendedMetadataStore + Send + Sync> =
+        query_interface!(comp2, IExtendedMetadataStore).unwrap();
+
+    assert_eq!(store2.get("keep").unwrap(), b"kept");
+    assert_eq!(
+        store2.get("remove"),
+        Err(ExtendedMetadataStoreError::NotFound)
+    );
+
+    // iterate_all should also exclude deleted key
+    let all = store2.iterate_all().unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].0, "keep");
+}
+
+/// T035: Delete non-existent key returns Ok (idempotent).
+#[test]
+fn delete_nonexistent_is_idempotent() {
+    let (comp, _mock) = create_test_component(DISK_SIZE);
+    let store: Arc<dyn IExtendedMetadataStore + Send + Sync> =
+        query_interface!(comp, IExtendedMetadataStore).unwrap();
+
+    assert!(store.delete("never_existed").is_ok());
+    assert!(store.delete("never_existed").is_ok());
+}
+
 /// T032: Fresh partition (all zeros) → format_fresh → empty store.
 #[test]
 fn recovery_fresh_partition_formats_empty() {

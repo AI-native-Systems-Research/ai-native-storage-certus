@@ -100,9 +100,9 @@
 
 ### Implementation for User Story 3
 
-- [ ] T033 [US3] Implement delete() to acquire write lock, remove entry, increment dirty_count in src/lib.rs (already done for in-memory — verify works with persistence)
-- [ ] T034 [US3] Add unit test: put + delete + flush + reboot + get returns NotFound
-- [ ] T035 [US3] Add unit test: delete non-existent key returns Ok(()) (idempotent)
+- [x] T033 [US3] Implement delete() to acquire write lock, remove entry, increment dirty_count in src/lib.rs (already done for in-memory — verify works with persistence)
+- [x] T034 [US3] Add unit test: put + delete + flush + reboot + get returns NotFound
+- [x] T035 [US3] Add unit test: delete non-existent key returns Ok(()) (idempotent)
 
 **Checkpoint**: Delete operations persist correctly
 
