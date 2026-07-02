@@ -41,9 +41,9 @@ XFS_LABEL="fs-bench"
 #   Node 0: 0x0000000000 – 0x4000000000 (256 GiB)
 #   Node 1: 0x4000000000 – 0x8000000000 (258 GiB)
 #
-# memmap=254G$0x80000000  → reserve node 0 from 2G to 256G (keep 2G for boot)
-# mem=320G                → truncate at 320G (keeps 64G from node 1: 256G–320G)
-NODE0_RESERVE='254G$0x80000000'
+# memmap=254G$2G  → reserve node 0 from 2G to 256G (keep 2G for boot)
+# mem=320G        → truncate at 320G (keeps 64G from node 1: 256G–320G)
+NODE0_RESERVE='254G$2G'
 MEM_LIMIT="320G"
 TOTAL_USABLE_NODE1="64"  # GiB available on node 1 after memmap+mem
 
@@ -240,9 +240,10 @@ show_status() {
         ((++issues))
     fi
 
-    # memmap= (must include the $offset to actually reserve memory)
-    if echo "$cmdline" | grep -qP 'memmap=254G\$0x80000000'; then
-        echo -e "  ${tag_certus}${tag_ss} memmap=254G\$0x80000000 — node 0 reserved"
+    # memmap= (must include the $offset to actually reserve memory).
+    # The kernel normalizes the offset to hex in /proc/cmdline, so match either form.
+    if echo "$cmdline" | grep -qE 'memmap=254G\$(2G|0x80000000)'; then
+        echo -e "  ${tag_certus}${tag_ss} memmap=254G\$2G — node 0 reserved"
     elif echo "$cmdline" | grep -q "memmap="; then
         echo -e "  ${tag_empty} memmap= present but OFFSET MISSING — reservation not active"
         ((++issues))
