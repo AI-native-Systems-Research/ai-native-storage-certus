@@ -164,6 +164,10 @@ show_status() {
 
     if [[ $total_mem -le 100 ]]; then
         echo -e "  ${tag_certus}${tag_ss} RAM limited to ~${total_mem} GiB"
+    elif [[ "$MEM_METHOD" == "cgroup" ]]; then
+        # cgroup mode caps RAM per-slice at runtime, not system-wide, so total
+        # system RAM is expected to be full. The slice check below is authoritative.
+        echo "  ${total_mem} GiB total — system RAM not capped (cgroup limits the bench slice, see below)"
     else
         echo -e "  ${tag_empty} ${total_mem} GiB — not limited (need mem=${MEM_LIMIT})"
         ((++issues))
@@ -185,8 +189,11 @@ show_status() {
             local slice_gib=$((slice_max / 1024 / 1024 / 1024))
             echo -e "  ${tag_certus}${tag_ss} cgroup slice ${BENCH_SLICE}: MemoryMax=${slice_gib} GiB (runtime limit)"
         fi
+    elif [[ "$MEM_METHOD" == "cgroup" ]]; then
+        echo -e "  ${tag_empty} cgroup slice ${BENCH_SLICE} not active — run 'sudo $0 <mode>' to create it"
+        ((++issues))
     else
-        echo "  cgroup slice ${BENCH_SLICE}: not active (using MEM_METHOD=kernel?)"
+        echo "  cgroup slice ${BENCH_SLICE}: not active (MEM_METHOD=kernel)"
     fi
 
     echo "  Hugepages: $hp_total × 1G (free: $hp_free, node $GPU_NUMA: $hp_node)"
@@ -213,9 +220,11 @@ show_status() {
 
     header "Kernel (running)"
 
-    # mem=
+    # mem= (only required in kernel mode; cgroup mode caps RAM via the slice)
     if echo "$cmdline" | grep -q "mem=${MEM_LIMIT}"; then
         echo -e "  ${tag_certus}${tag_ss} mem=${MEM_LIMIT}"
+    elif [[ "$MEM_METHOD" == "cgroup" ]]; then
+        echo "  mem= not set — not needed (cgroup slice caps RAM at runtime)"
     else
         echo -e "  ${tag_empty} mem=${MEM_LIMIT} MISSING — page cache not limited"
         ((++issues))
