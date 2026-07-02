@@ -483,6 +483,20 @@ allocate_hugepages_node() {
         return
     fi
 
+    # Free any 1G hugepages on other NUMA nodes. The boot param `hugepages=N`
+    # (no node qualifier) spreads N pages evenly across all nodes, so without
+    # this we'd end up with N/2 on node0 PLUS `target` on node1. Zeroing the
+    # other nodes guarantees exactly `target` pages, all on the GPU node.
+    for other in /sys/devices/system/node/node*/hugepages/hugepages-1048576kB/nr_hugepages; do
+        [[ "$other" == "$node_path" ]] && continue
+        local other_n
+        other_n=$(cat "$other")
+        if [[ $other_n -gt 0 ]]; then
+            echo "  Freeing $other_n × 1G hugepages on $(basename "$(dirname "$(dirname "$other")")")"
+            echo 0 > "$other"
+        fi
+    done
+
     local current
     current=$(cat "$node_path")
     if [[ $current -ge $target ]]; then
