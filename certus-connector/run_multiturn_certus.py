@@ -34,19 +34,26 @@ if __name__ == "__main__":
           f"output_tokens={OUTPUT_TOKENS} max_num_seqs={MAX_NUM_SEQS}",
           file=sys.stderr)
 
+    # NVMe drives migrated to node 1 (GPU's NUMA node), bound to vfio-pci.
+    # dram_cache_bytes draws from the 48 x 1G-hugepage pool (SPDK tier). The tier
+    # must leave ~3 hugepages for DPDK's own EAL heap + per-drive DMA buffers, so
+    # a single spdk_zmalloc maxes at ~44-45 GiB of a 48-page pool (48 GiB fails).
+    # Requires DPDK RTE_MAX_MEM_MB_PER_LIST raised to 64G (single alloc > 32G).
+    # Keep in sync with CERTUS_HUGEPAGES in configure-bench.sh.
+    DRAM_CACHE_BYTES = int(os.environ.get("DRAM_CACHE_BYTES", 47244640256))  # 44 GiB
     KV_CONFIG = {
         "kv_connector": "OffloadingConnector",
         "kv_role": "kv_both",
         "kv_connector_extra_config": {
             "spec_name": "CertusOffloadingSpec",
             "spec_module_path": "certus_connector.spec",
-            "data_pci_addrs": ["0000:61:00.0", "0000:62:00.0",
-                               "0000:63:00.0", "0000:64:00.0"],
-            "metadata_pci_addr": "0000:62:00.0",
+            "data_pci_addrs": ["0000:c1:00.0", "0000:c2:00.0",
+                               "0000:c3:00.0", "0000:c4:00.0"],
+            "metadata_pci_addr": "0000:c2:00.0",
             "slab_size_bytes": 2097152,
-            "dram_cache_bytes": 68719476736,
+            "dram_cache_bytes": DRAM_CACHE_BYTES,
             "io_queue_depth": 128,
-            "numa_node": 0,
+            "numa_node": 1,
         },
     }
 
@@ -135,7 +142,7 @@ if __name__ == "__main__":
         "model": MODEL,
         "max_model_len": MAX_MODEL_LEN,
         "output_tokens": OUTPUT_TOKENS,
-        "dram_cache_bytes": 68719476736,
+        "dram_cache_bytes": DRAM_CACHE_BYTES,
         "slab_size_bytes": 2097152,
     }
     with open(os.path.join(_here, "certus_multiturn_results.json"), "w") as f:
