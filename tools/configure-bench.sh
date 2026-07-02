@@ -19,6 +19,9 @@
 #
 set -euo pipefail
 
+# Directory this script lives in (tools/), used to locate the built .so etc.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # ============================================================================
 # Configuration — edit these if hardware changes
 # ============================================================================
@@ -48,8 +51,21 @@ MEM_LIMIT="320G"
 TOTAL_USABLE_NODE1="64"  # GiB available on node 1 after memmap+mem
 
 # Hugepages (1 GiB pages)
-CERTUS_HUGEPAGES=56      # 56 GiB for SPDK DRAM tier, leaves 8G regular
+CERTUS_HUGEPAGES=24      # 24 GiB SPDK DRAM tier (under DPDK ~32G memseg cap), leaves 40G regular for vLLM
 SS_HUGEPAGES=0           # all regular memory for page cache
+
+# DPDK single-allocation ceiling. spdk_zmalloc -> rte_malloc cannot return a
+# block spanning more than one memseg list (RTE_MAX_MEM_MB_PER_LIST = 32 GiB),
+# so a single Certus DRAM tier is hard-capped just under 32 GiB regardless of
+# how many hugepages exist. Keep CERTUS_HUGEPAGES below this.
+DPDK_MEMSEG_LIST_GIB=32
+
+# Minimum regular RAM vLLM needs to init + generate (empirical: OOMs below ~16G
+# with an 8B model). The certus cgroup cap must clear this or vLLM is OOM-killed.
+VLLM_MIN_RAM_GIB=16
+
+# Built native module whose allocation path must include SPDK hugepage support.
+CERTUS_NATIVE_SO="certus-connector/certus_native/certus_native.cpython-312-x86_64-linux-gnu.so"
 
 # Memory limiting method:
 #   cgroup  — runtime cap via a systemd slice (default; no reboot)
@@ -349,6 +365,80 @@ show_status() {
         echo
     fi
 
+    # --- Certus build & runtime hazards (certus only) ---
+    # These encode failure modes found the hard way: a build without the SPDK
+    # hugepage path silently allocs the DRAM tier from cgroup-charged RAM; a tier
+    # over the DPDK memseg cap can't allocate; a cgroup cap below vLLM's floor
+    # OOMs it; stale SPDK locks / orphaned GPU procs block startup.
+    header "Certus build & sizing"
+
+    # 1. Native module built with the SPDK hugepage allocation path.
+    # NB: use grep -c (not grep -q) — with `set -o pipefail`, grep -q exits on
+    # first match and SIGPIPEs `strings`, making the pipeline return nonzero and
+    # falsely failing the check.
+    local so_path="$SCRIPT_DIR/../$CERTUS_NATIVE_SO"
+    if [[ -f "$so_path" ]]; then
+        local hp_path_count
+        hp_path_count=$(strings "$so_path" 2>/dev/null | grep -c 'allocated from SPDK hugepages' || true)
+        if [[ "$hp_path_count" -gt 0 ]]; then
+            echo -e "  ${tag_certus} certus_native has SPDK hugepage alloc path"
+        else
+            echo -e "  ${tag_empty} certus_native MISSING SPDK hugepage path — DRAM tier will use cgroup-charged RAM"
+            echo "      fix: add features=[\"spdk\"] to memory-tier dep, rebuild (maturin develop --release)"
+            fail_certus "certus_native built without SPDK hugepage path (memory-tier missing spdk feature)"
+        fi
+    else
+        echo -e "  ${YELLOW}certus_native .so not found at $CERTUS_NATIVE_SO — cannot verify build${NC}"
+    fi
+
+    # 2. DRAM tier size (= hugepage pool) under the DPDK single-alloc ceiling.
+    if [[ $CERTUS_HUGEPAGES -lt $DPDK_MEMSEG_LIST_GIB ]]; then
+        echo -e "  ${tag_certus} DRAM tier ${CERTUS_HUGEPAGES}G < DPDK memseg cap ${DPDK_MEMSEG_LIST_GIB}G"
+    else
+        echo -e "  ${tag_empty} DRAM tier ${CERTUS_HUGEPAGES}G >= DPDK memseg cap ${DPDK_MEMSEG_LIST_GIB}G — spdk_zmalloc will fail"
+        fail_certus "DRAM tier ${CERTUS_HUGEPAGES}G exceeds DPDK single-alloc ceiling (~${DPDK_MEMSEG_LIST_GIB}G)"
+    fi
+
+    # 3. cgroup cap clears vLLM's regular-RAM floor (cgroup mode only).
+    if [[ "$MEM_METHOD" == "cgroup" ]]; then
+        local certus_cap_gib=$((TOTAL_USABLE_NODE1 - CERTUS_HUGEPAGES))
+        if [[ $certus_cap_gib -ge $VLLM_MIN_RAM_GIB ]]; then
+            echo -e "  ${tag_certus} cgroup cap ${certus_cap_gib}G >= vLLM floor ${VLLM_MIN_RAM_GIB}G"
+        else
+            echo -e "  ${tag_empty} cgroup cap ${certus_cap_gib}G < vLLM floor ${VLLM_MIN_RAM_GIB}G — vLLM will be OOM-killed"
+            fail_certus "cgroup cap ${certus_cap_gib}G below vLLM RAM floor ${VLLM_MIN_RAM_GIB}G"
+        fi
+    fi
+
+    # 4. No stale SPDK per-device lock files (block device claim if unreadable).
+    local stale_locks=()
+    for bdf in "${NVME_BDFS[@]}"; do
+        local lock="/var/tmp/spdk_pci_lock_${bdf}"
+        [[ -e "$lock" ]] && stale_locks+=("$lock")
+    done
+    if [[ ${#stale_locks[@]} -eq 0 ]]; then
+        echo -e "  ${tag_certus} no stale SPDK lock files"
+    else
+        echo -e "  ${tag_empty} ${#stale_locks[@]} stale SPDK lock file(s) — may block device claim (Permission denied)"
+        echo "      fix: sudo rm -f /var/tmp/spdk_pci_lock_0000:c*"
+        fail_certus "${#stale_locks[@]} stale SPDK lock file(s) in /var/tmp"
+    fi
+
+    # 5. No orphaned GPU-holding process (leftover EngineCore starves a new run).
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        local gpu_procs
+        gpu_procs=$(nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader 2>/dev/null | grep -c . || echo 0)
+        if [[ "$gpu_procs" -eq 0 ]]; then
+            echo -e "  ${tag_certus}${tag_ss} GPU free (no compute processes)"
+        else
+            echo -e "  ${tag_empty} $gpu_procs process(es) holding GPU memory — a new run may fail to init"
+            nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader 2>/dev/null | sed 's/^/      /'
+            echo "      fix: sudo pkill -9 -f 'VLLM::EngineCore' (or kill the listed pids)"
+            fail_both "$gpu_procs process(es) holding GPU memory"
+        fi
+    fi
+    echo
+
 
     header "Run"
     echo "  numactl --cpunodebind=$GPU_NUMA --membind=$GPU_NUMA <command>"
@@ -540,12 +630,16 @@ allocate_hugepages_node() {
 
     local current
     current=$(cat "$node_path")
-    if [[ $current -ge $target ]]; then
-        echo "  Node $GPU_NUMA already has $current × 1G hugepages (need $target)"
+    if [[ $current -eq $target ]]; then
+        echo "  Node $GPU_NUMA already has $current × 1G hugepages"
         return
+    elif [[ $current -gt $target ]]; then
+        # Over-allocated (e.g. target lowered) — shrink to exactly target so the
+        # regular-RAM budget grows accordingly. Free pages release live.
+        echo "  Node $GPU_NUMA has $current × 1G, reducing to $target..."
+    else
+        echo "  Allocating $target × 1G hugepages on node $GPU_NUMA..."
     fi
-
-    echo "  Allocating $target × 1G hugepages on node $GPU_NUMA..."
     echo "$target" > "$node_path"
 
     local actual

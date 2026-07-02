@@ -145,6 +145,10 @@ impl EngineInner {
         // --- Create memory tier ---
         let mt_comp = memory_tier::MemoryTierComponent::new_default();
         mt_comp
+            .logger
+            .connect(Arc::clone(&log) as Arc<dyn ILogger + Send + Sync>)
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire logger for memory-tier: {e}")))?;
+        mt_comp
             .eviction_policy
             .connect(Arc::clone(&eviction_policy))
             .map_err(|e| PyRuntimeError::new_err(format!("failed to wire eviction_policy for memory-tier: {e}")))?;
