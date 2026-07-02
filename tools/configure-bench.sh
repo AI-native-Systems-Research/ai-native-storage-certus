@@ -362,8 +362,19 @@ show_status() {
     if [[ $nvme_count -gt 0 ]]; then
         header "RAID"
         if [[ -e "$MD_DEVICE" ]] && mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
-            echo -e "  ${tag_ss} $MD_DEVICE mounted at $MOUNT_POINT"
-            df -h "$MOUNT_POINT" | tail -1 | awk '{printf "  Usage: %s / %s (%s)\n", $3, $2, $5}'
+            # Verify the mount is actually XFS on md0 — not a stale/wrong fs left
+            # behind (e.g. a corrupt array that certus's raw SPDK writes clobbered
+            # but that still assembled + mounted). fstype must be xfs to be ready.
+            local fstype src
+            fstype=$(findmnt -no FSTYPE "$MOUNT_POINT" 2>/dev/null)
+            src=$(findmnt -no SOURCE "$MOUNT_POINT" 2>/dev/null)
+            if [[ "$fstype" == "xfs" && "$src" == "$MD_DEVICE" ]]; then
+                echo -e "  ${tag_ss} $MD_DEVICE (xfs) mounted at $MOUNT_POINT"
+                df -h "$MOUNT_POINT" | tail -1 | awk '{printf "  Usage: %s / %s (%s)\n", $3, $2, $5}'
+            else
+                echo -e "  ${tag_empty} $MOUNT_POINT mounted but not xfs-on-$MD_DEVICE (fstype=${fstype:-none}, src=${src:-none})"
+                fail_ss "mount at $MOUNT_POINT is not xfs on $MD_DEVICE (fstype=${fstype:-none})"
+            fi
         elif [[ -e "$MD_DEVICE" ]]; then
             echo -e "  ${tag_empty} $MD_DEVICE exists but NOT mounted"
             fail_ss "RAID $MD_DEVICE not mounted"
@@ -863,28 +874,32 @@ setup_raid() {
         blkdevs+=("/dev/$blk")
     done
 
-    # Check if RAID already exists and is assembled
-    if [[ -e "$MD_DEVICE" ]] && mdadm --detail "$MD_DEVICE" &>/dev/null; then
-        echo "  $MD_DEVICE already assembled"
-    else
-        # Try to assemble existing array first
-        if mdadm --assemble "$MD_DEVICE" "${blkdevs[@]}" 2>/dev/null; then
-            echo "  Assembled existing $MD_DEVICE"
-        else
-            # Create new RAID0
-            echo -e "  ${YELLOW}Creating new RAID0 — this will DESTROY data on ${blkdevs[*]}${NC}"
-            mdadm --create "$MD_DEVICE" \
-                --level=0 \
-                --raid-devices=${#blkdevs[@]} \
-                --chunk=512K \
-                "${blkdevs[@]}"
-            echo "  Created $MD_DEVICE (RAID0, 512K chunks, ${#blkdevs[@]} devices)"
+    # ALWAYS recreate the array + filesystem. These drives may have last been
+    # used by certus, where SPDK binds them to vfio-pci and writes RAW block I/O
+    # — clobbering the mdadm superblocks and XFS metadata. A leftover superblock
+    # can still trick `mdadm --assemble` into bringing up a CORRUPT array that
+    # mounts but silently loses/misreads data. So we never reuse: tear down, wipe
+    # every member's signatures, create fresh, and reformat.
+    teardown_raid_if_active
 
-            # Format with XFS
-            echo "  Formatting with XFS..."
-            mkfs.xfs -f -L "$XFS_LABEL" "$MD_DEVICE"
-        fi
-    fi
+    echo -e "  ${YELLOW}Recreating RAID0 — this DESTROYS all data on ${blkdevs[*]}${NC}"
+    for dev in "${blkdevs[@]}"; do
+        mdadm --zero-superblock "$dev" 2>/dev/null || true  # drop stale md metadata
+        wipefs -a "$dev" >/dev/null 2>&1 || true            # drop fs/partition signatures
+    done
+
+    mdadm --create "$MD_DEVICE" \
+        --level=0 \
+        --raid-devices=${#blkdevs[@]} \
+        --chunk=512K \
+        --run \
+        --force \
+        "${blkdevs[@]}"
+    echo "  Created $MD_DEVICE (RAID0, 512K chunks, ${#blkdevs[@]} devices)"
+
+    # Format with XFS
+    echo "  Formatting with XFS (label=$XFS_LABEL)..."
+    mkfs.xfs -f -L "$XFS_LABEL" "$MD_DEVICE"
 
     # Mount
     mkdir -p "$MOUNT_POINT"
@@ -895,13 +910,7 @@ setup_raid() {
         echo "  Already mounted at $MOUNT_POINT"
     fi
 
-    # Clean stale KV data
-    if [[ -d "$MOUNT_POINT/shared-kv" ]]; then
-        local kv_size
-        kv_size=$(du -sh "$MOUNT_POINT/shared-kv" 2>/dev/null | cut -f1)
-        echo "  Existing KV data: $kv_size — clearing"
-        rm -rf "$MOUNT_POINT/shared-kv"
-    fi
+    # Fresh mkfs means the volume is empty; just create the KV directory.
     mkdir -p "$MOUNT_POINT/shared-kv"
 
     echo
