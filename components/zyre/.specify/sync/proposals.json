@@ -1,0 +1,92 @@
+{
+  "generated": "2026-07-09",
+  "based_on": "2026-07-09",
+  "mode": "interactive",
+  "user_decisions": [
+    {
+      "date": "2026-07-09",
+      "decision": "Drop the multi-frame send API (shout_multi/whisper_multi). A single ZeroMQ frame is bounded only by memory (ZMQ_MAXMSGSIZE default -1; zyre sets no cap), so the single-frame &[u8] API already carries arbitrarily large payloads."
+    }
+  ],
+  "summary": {
+    "align": 1,
+    "backfill": 2,
+    "human_decision": 0,
+    "new_specs": 0
+  },
+  "proposals": [
+    {
+      "id": "P1",
+      "spec": "001-zyre-bindings",
+      "requirement": "FR-004 (D-1)",
+      "direction": "ALIGN",
+      "action": "remove_feature",
+      "status": "approved",
+      "confidence": "HIGH",
+      "spec_text": "single-frame &[u8] primary API plus _multi variants; ZyreEvent multi-frame variant carrying Vec<Vec<u8>>",
+      "actual": "shout_multi/whisper_multi exist on send side; parse_message reads only zmsg_first so receive is truncated to frame 0; no Vec<Vec<u8>> variant exists",
+      "resolution": {
+        "code_changes": [
+          "components/interfaces/src/izyre.rs:374-378 — remove shout_multi/whisper_multi from IZyreNode trait",
+          "components/zyre/src/node.rs:238-276 — remove both method implementations"
+        ],
+        "spec_changes": [
+          "spec.md:90 — reword FR-004 to single-frame only (arbitrary size, no _multi)",
+          "spec.md:125 — add Session 2026-07-09 clarification superseding the 2026-07-01 payload-API decision",
+          "spec.md:136 — remove the multi-frame Assumptions bullet",
+          "data-model.md:54 — replace invariant: single message frame, memory-bounded, no multi-frame representation",
+          "contracts/izyre.md:75-76 — delete the two _multi trait lines",
+          "quickstart.md:71 — replace shout_multi example with single-frame shout",
+          "tasks.md:169 — mark T050 removed/obsolete"
+        ]
+      },
+      "rationale": "Single-frame API covers all payloads _multi could send; receive can only reconstruct one frame. Removal eliminates asymmetry and fully aligns SC-004. Safe at v0.1.0 (publish=false, no external callers).",
+      "resolves": ["D-1", "SC-004"],
+      "applied": true,
+      "applied_at": "2026-07-09"
+    },
+    {
+      "id": "P2",
+      "spec": "001-zyre-bindings",
+      "requirement": "tasks.md (D-2)",
+      "direction": "BACKFILL",
+      "status": "approved",
+      "applied": true,
+      "applied_at": "2026-07-09",
+      "confidence": "HIGH",
+      "spec_text": "T008-T013/T048-T049 describe error.rs/peer.rs/event.rs/builder.rs, NodeConfigBuilder, ping()-only IZyre with ZyreNode::new() used directly; T050 adds _multi variants",
+      "actual": "Factory design: types in interfaces/src/izyre.rs, public-fields NodeConfig, IZyre::create_node, crate-private ZyreNode (commit b45418d)",
+      "resolution": {
+        "spec_changes": [
+          "Rewrite T008-T013 to interfaces/src/izyre.rs single-file layout, public-fields NodeConfig, actual modules (ffi.rs/node.rs/lib.rs)",
+          "Rewrite T048-T049 to the factory create_node design",
+          "Remove/obsolete T050 (multi-frame) per P1"
+        ]
+      },
+      "rationale": "Documentation catch-up to approved spec artifacts and shipped code; no code impact."
+    },
+    {
+      "id": "P3",
+      "spec": "001-zyre-bindings",
+      "requirement": "data-model.md — ZyreEvent accessors",
+      "direction": "BACKFILL",
+      "status": "approved",
+      "applied": true,
+      "applied_at": "2026-07-09",
+      "confidence": "HIGH",
+      "spec_text": "not mentioned",
+      "actual": "ZyreEvent::peer()/peer_name()/group() helpers at interfaces/src/izyre.rs:151-191",
+      "resolution": {
+        "spec_changes": [
+          "Add one line under the ZyreEvent entity in data-model.md documenting the accessors and their Option return shape"
+        ]
+      },
+      "rationale": "Eliminates the minor unspecced-code finding; low risk."
+    }
+  ],
+  "follow_ups": [
+    { "sc": "SC-001", "note": "add/adjust timed round-trip assertion (test uses 5s deadline, not 2s bound)" },
+    { "sc": "SC-003", "note": "run T042/T055 clean build < 5 min (Linux + C deps)" },
+    { "sc": "SC-005", "note": "run suite under Miri/valgrind (Linux + C deps)" }
+  ]
+}

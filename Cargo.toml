@@ -37,7 +37,8 @@ members = [
     "components/remote-request-handler",
     "apps/dynamic-loading-example",
     "apps/certus-server-yaml",
-    "apps/baseline-generalized-fs"
+    "apps/baseline-generalized-fs",
+    "components/zyre"
 ]
 
 # SPDK crates require pre-built native libraries at deps/spdk-build/.
@@ -88,5 +89,6 @@ gpu-services = { path = "components/gpu-services" }
 eviction-policy-lru = { path = "components/eviction-policy-lru" }
 remote-lookup = { path = "components/remote-lookup" }
 remote-request-handler = { path = "components/remote-request-handler" }
+zyre = { path = "components/zyre" }
 certus-connector = { path = "certus-connector" }
 libloading = "0.8"

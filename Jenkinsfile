@@ -10,6 +10,8 @@ pipeline {
           sh 'whoami'
           sh '[ -L "./deps/spdk" ] || ln -s "/opt/spdk/" "./deps/spdk"'
           sh '[ -L "./deps/spdk-build" ] || ln -s "/opt/spdk-build/" "./deps/spdk-build"'
+          sh '[ -L "./deps/zyre" ] || ln -s "/opt/zyre/" "./deps/zyre"'
+          sh '[ -L "./deps/zyre-build" ] || ln -s "/opt/zyre-build/" "./deps/zyre-build"'
           sh 'cd ./kernel/modules/gdrcopy/; make'
         script {
           def status = sh(script: '. ~/.cargo/env ; cargo build', returnStatus: true)
