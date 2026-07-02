@@ -190,7 +190,14 @@ show_status() {
             echo -e "  ${tag_empty} slice ${BENCH_SLICE} active but MemoryMax unset"
         else
             local slice_gib=$((slice_max / 1024 / 1024 / 1024))
-            echo -e "  ${tag_certus}${tag_ss} cgroup slice ${BENCH_SLICE}: MemoryMax=${slice_gib} GiB (runtime limit)"
+            # Tag by which mode's expected regular-RAM budget this cap matches:
+            #   certus expects TOTAL_USABLE_NODE1 - CERTUS_HUGEPAGES, sharedstorage the full budget.
+            local certus_gib=$((TOTAL_USABLE_NODE1 - CERTUS_HUGEPAGES))
+            local mem_tag=""
+            if [[ $slice_gib -eq $certus_gib ]]; then mem_tag="${tag_certus}"; fi
+            if [[ $slice_gib -eq $TOTAL_USABLE_NODE1 ]]; then mem_tag="${mem_tag}${tag_ss}"; fi
+            if [[ -z "$mem_tag" ]]; then mem_tag="${tag_empty}"; fi
+            echo -e "  ${mem_tag} cgroup slice ${BENCH_SLICE}: MemoryMax=${slice_gib} GiB (runtime limit)"
         fi
     elif [[ "$MEM_METHOD" == "cgroup" ]]; then
         echo -e "  ${tag_empty} cgroup slice ${BENCH_SLICE} not active — run 'sudo $0 <mode>' to create it"
