@@ -7,7 +7,7 @@ publish = false
 
 [features]
 testing = ["interfaces/spdk"]
-spdk = ["testing", "dep:block-device-spdk-nvme", "dep:disk-partition-manager", "dep:spdk-env"]
+spdk = ["testing", "dep:block-device-spdk-nvme", "dep:disk-partition-manager", "dep:spdk-env", "dep:logger"]
 
 [dependencies]
 component-framework.workspace = true
@@ -17,3 +17,4 @@ interfaces.workspace = true
 block-device-spdk-nvme = { workspace = true, optional = true }
 disk-partition-manager = { workspace = true, optional = true }
 spdk-env = { workspace = true, optional = true }
+logger = { workspace = true, optional = true }
