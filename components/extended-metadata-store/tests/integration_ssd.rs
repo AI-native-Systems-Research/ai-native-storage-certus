@@ -427,7 +427,10 @@ fn test_iterate_all_complete() {
         eprintln!("No NVMe hardware — skipping");
         return;
     };
-    let (_comp, store) = create_store(ctx);
+    // Start with a clean partition
+    let (comp, store) = create_store(ctx);
+    comp.load_entries(Vec::new());
+    flush_store(ctx, &comp);
 
     let mut expected: Vec<(String, Vec<u8>)> = Vec::new();
     for i in 0..10 {
@@ -454,9 +457,14 @@ fn test_iterate_all_empty_store() {
         eprintln!("No NVMe hardware — skipping");
         return;
     };
-    let (_comp, store) = create_store(ctx);
+    // Format partition clean, then verify iterate returns nothing
+    let (comp, store) = create_store(ctx);
+    comp.load_entries(Vec::new());
+    flush_store(ctx, &comp);
 
-    let entries = store.iterate_all().unwrap();
+    // Re-create from the now-empty partition
+    let (_comp2, store2) = create_store(ctx);
+    let entries = store2.iterate_all().unwrap();
     assert_eq!(entries.len(), 0, "Fresh store should have zero entries");
 }
 
