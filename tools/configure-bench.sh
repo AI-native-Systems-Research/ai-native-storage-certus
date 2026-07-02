@@ -177,6 +177,10 @@ show_status() {
     fi
     if [[ -n "$node0_mem" && $node0_mem -le 10000 ]]; then
         echo -e "  ${tag_certus}${tag_ss} node 0 reserved (${node0_mem} MB)"
+    elif [[ -n "$node0_mem" && $node0_mem -gt 10000 && "$MEM_METHOD" == "cgroup" ]]; then
+        # cgroup mode doesn't reserve node 0 — allocations are pinned to node 1
+        # via numactl --membind=1, so node 0 having memory is fine.
+        echo "  node 0 has ${node0_mem} MB — not reserved (cgroup mode pins to node $GPU_NUMA via numactl)"
     elif [[ -n "$node0_mem" && $node0_mem -gt 10000 ]]; then
         echo -e "  ${tag_empty} node 0 has ${node0_mem} MB — memmap reservation not active"
         ((++issues))
@@ -242,8 +246,11 @@ show_status() {
 
     # memmap= (must include the $offset to actually reserve memory).
     # The kernel normalizes the offset to hex in /proc/cmdline, so match either form.
+    # Only required in kernel mode; cgroup mode pins to node $GPU_NUMA via numactl.
     if echo "$cmdline" | grep -qE 'memmap=254G\$(2G|0x80000000)'; then
         echo -e "  ${tag_certus}${tag_ss} memmap=254G\$2G — node 0 reserved"
+    elif [[ "$MEM_METHOD" == "cgroup" ]]; then
+        echo "  memmap= not set — not needed (cgroup mode pins to node $GPU_NUMA via numactl)"
     elif echo "$cmdline" | grep -q "memmap="; then
         echo -e "  ${tag_empty} memmap= present but OFFSET MISSING — reservation not active"
         ((++issues))
@@ -412,8 +419,9 @@ setup_cgroup_mem() {
     echo "  Run benchmarks inside it with:"
     echo "    systemd-run --slice=${BENCH_SLICE} --scope numactl --cpunodebind=$GPU_NUMA --membind=$GPU_NUMA <command>"
     echo
-    echo -e "  ${YELLOW}Note:${NC} MemoryMax caps regular RAM. NUMA node-0 reservation and hugepage"
-    echo "  placement still require the kernel params (set once, independently)."
+    echo -e "  ${YELLOW}Note:${NC} MemoryMax caps regular RAM; run under numactl --membind=$GPU_NUMA"
+    echo "  to keep allocations on the GPU node (no node-0 reservation needed)."
+    echo "  Only the hugepages= boot param is required (1G pages reserved at boot)."
 }
 
 # ============================================================================
@@ -437,12 +445,14 @@ set_kernel_params() {
     echo "  Removing old params: $remove_args"
     grubby --update-kernel=ALL --remove-args="$remove_args" 2>/dev/null || true
 
-    # Hugepages + node-0 reservation are always set via boot params (they can't
-    # be done from a cgroup). The mem= RAM-size cap is only added in kernel mode;
-    # in cgroup mode the systemd slice enforces the RAM ceiling at runtime.
-    local new_args="default_hugepagesz=1G hugepagesz=1G hugepages=${hugepages} memmap=${NODE0_RESERVE}"
+    # Hugepages are always set via boot params (1G pages need contiguous memory
+    # reserved at boot). The mem= RAM cap and memmap= node-0 reservation are only
+    # needed in kernel mode; in cgroup mode the systemd slice caps RAM at runtime
+    # and numactl --membind pins allocations to node $GPU_NUMA, so node 0 doesn't
+    # need reserving.
+    local new_args="default_hugepagesz=1G hugepagesz=1G hugepages=${hugepages}"
     if [[ "$MEM_METHOD" == "kernel" ]]; then
-        new_args="$new_args mem=${MEM_LIMIT}"
+        new_args="$new_args mem=${MEM_LIMIT} memmap=${NODE0_RESERVE}"
     fi
     echo "  Setting: $new_args"
     grubby --update-kernel=ALL --args="$new_args"
