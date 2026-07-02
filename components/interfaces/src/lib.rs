@@ -16,6 +16,7 @@ mod imemory_tier;
 mod iremote_lookup;
 mod ipartition_table;
 mod iremote_request_handler;
+mod izyre;
 
 pub use idispatch_map::CacheKey;
 pub use idispatch_map::DispatchMapError;
@@ -44,6 +45,8 @@ pub use iremote_lookup::RemoteLookupError;
 pub use iremote_request_handler::IRemoteRequestHandler;
 pub use iremote_request_handler::LookupRef;
 pub use iremote_request_handler::RemoteRequestHandlerError;
+pub use izyre::IZyre;
+pub use izyre::ZyreError;
 pub use imemory_tier::MemoryTierError;
 #[cfg(feature = "spdk")]
 pub use imemory_tier::IMemoryTier;

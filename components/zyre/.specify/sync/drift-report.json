@@ -1,0 +1,36 @@
+{
+  "generated": "2026-07-01T00:00:00Z",
+  "project": "zyre",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 12,
+    "aligned": 12,
+    "drifted": 0,
+    "not_implemented": 0,
+    "unspecced_features": 0
+  },
+  "specs": [
+    {
+      "id": "001-zyre-bindings",
+      "title": "Zyre Rust Bindings",
+      "aligned": [
+        "FR-001",
+        "FR-002",
+        "FR-003",
+        "FR-004",
+        "FR-005",
+        "FR-006",
+        "FR-007",
+        "FR-008",
+        "FR-009",
+        "FR-010",
+        "FR-011",
+        "FR-012"
+      ],
+      "drifted": [],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [],
+  "conflicts": []
+}
