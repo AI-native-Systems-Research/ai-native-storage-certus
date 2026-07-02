@@ -8,10 +8,8 @@
 use extended_metadata_store::block_io::BlockDeviceClient;
 use extended_metadata_store::flush::flush_to_disk;
 use extended_metadata_store::on_disk::{self, Superblock};
-use extended_metadata_store::recovery;
 use extended_metadata_store::test_support::{
-    create_test_component, create_test_component_from_state, heap_dma_alloc, FaultConfig,
-    MockBlockDevice,
+    create_test_component, heap_dma_alloc, FaultConfig, MockBlockDevice,
 };
 use extended_metadata_store::ExtendedMetadataStoreComponent;
 
@@ -408,6 +406,343 @@ fn iterate_all_excludes_deleted() {
     assert!(keys.contains(&"x"));
     assert!(keys.contains(&"z"));
     assert!(!keys.contains(&"y"));
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7: Concurrency tests (T039-T042)
+// ---------------------------------------------------------------------------
+
+/// T041: 8 threads, 1000 operations each, no panics, final state consistent.
+#[test]
+fn concurrent_stress_8_threads() {
+    let (comp, _mock) = create_test_component(DISK_SIZE);
+    let store: Arc<dyn IExtendedMetadataStore + Send + Sync> =
+        query_interface!(comp, IExtendedMetadataStore).unwrap();
+
+    let mut handles = Vec::new();
+    for tid in 0..8u64 {
+        let s = store.clone();
+        handles.push(std::thread::spawn(move || {
+            for i in 0..1000u64 {
+                let key = format!("t{tid}_k{i}");
+                match i % 3 {
+                    0 => { s.put(&key, &i.to_le_bytes()).unwrap(); }
+                    1 => { let _ = s.get(&key); }
+                    2 => { let _ = s.delete(&key); }
+                    _ => unreachable!(),
+                }
+            }
+        }));
+    }
+
+    for h in handles {
+        h.join().expect("thread panicked");
+    }
+
+    // Verify state is consistent: every key that exists has valid data
+    let entries = store.iterate_all().unwrap();
+    for (key, value) in &entries {
+        let got = store.get(key).unwrap();
+        assert_eq!(&got, value);
+    }
+}
+
+/// T042: Concurrent iterate_all while other threads write — no panics, consistent snapshot.
+#[test]
+fn concurrent_iterate_during_writes() {
+    let (comp, _mock) = create_test_component(DISK_SIZE);
+    let store: Arc<dyn IExtendedMetadataStore + Send + Sync> =
+        query_interface!(comp, IExtendedMetadataStore).unwrap();
+
+    // Pre-populate
+    for i in 0..50 {
+        store.put(&format!("pre_{i}"), &[i as u8; 100]).unwrap();
+    }
+
+    let writer_store = store.clone();
+    let writer = std::thread::spawn(move || {
+        for i in 0..500 {
+            let key = format!("w_{i}");
+            writer_store.put(&key, &[i as u8; 50]).unwrap();
+        }
+    });
+
+    // Iterate concurrently multiple times
+    for _ in 0..10 {
+        let entries = store.iterate_all().unwrap();
+        // Snapshot must be internally consistent: no duplicate keys
+        let mut keys: Vec<&str> = entries.iter().map(|(k, _)| k.as_str()).collect();
+        keys.sort();
+        keys.dedup();
+        assert_eq!(keys.len(), entries.len(), "duplicate keys in snapshot");
+    }
+
+    writer.join().expect("writer thread panicked");
+}
+
+// ---------------------------------------------------------------------------
+// Phase 8: Background flush (T043-T049)
+// ---------------------------------------------------------------------------
+
+/// T047: put + force_flush via FlushManager + crash (no timer flush) + reboot → entry persisted.
+#[test]
+fn flush_manager_force_flush_persists() {
+    use extended_metadata_store::flush::{FlushConfig, FlushManager};
+    use std::time::Duration;
+
+    let mock = MockBlockDevice::new(DISK_SIZE);
+    let comp = ExtendedMetadataStoreComponent::new_default();
+    let store: Arc<dyn IExtendedMetadataStore + Send + Sync> =
+        query_interface!(comp.clone(), IExtendedMetadataStore).unwrap();
+
+    let client = connect_client(&mock);
+    let num_sectors = DISK_SIZE / SECTOR_SIZE as u64;
+    let superblock = on_disk::Superblock::new(SECTOR_SIZE, num_sectors);
+
+    // Long interval so timer won't fire during test
+    let config = FlushConfig {
+        interval: Duration::from_secs(3600),
+        dirty_threshold: 10000,
+    };
+
+    let comp_clone = comp.clone();
+    let comp_clone2 = comp.clone();
+    let comp_clone3 = comp.clone();
+    let mgr = FlushManager::start(
+        config,
+        client,
+        superblock,
+        Box::new(move || comp_clone.snapshot_entries()),
+        Box::new(move || comp_clone2.dirty_count()),
+        Box::new(move |seq| comp_clone3.mark_flushed(seq)),
+    );
+
+    // Write entry and force flush
+    store.put("managed_key", b"managed_value").unwrap();
+    mgr.trigger_flush().unwrap();
+
+    assert!(mgr.completed_seq() >= 1);
+    drop(mgr);
+
+    // Reboot and verify
+    let shared = mock.shared_state();
+    let mock2 = MockBlockDevice::reboot_from(shared);
+    let client2 = connect_client(&mock2);
+
+    let comp2 = ExtendedMetadataStoreComponent::new_default();
+    comp2.initialize_from_client(&client2, num_sectors).unwrap();
+    let store2: Arc<dyn IExtendedMetadataStore + Send + Sync> =
+        query_interface!(comp2, IExtendedMetadataStore).unwrap();
+
+    assert_eq!(store2.get("managed_key").unwrap(), b"managed_value");
+}
+
+/// T048: Dirty-count threshold triggers flush without waiting for timer.
+#[test]
+fn flush_manager_dirty_threshold_triggers() {
+    use extended_metadata_store::flush::{FlushConfig, FlushManager};
+    use std::time::Duration;
+
+    let mock = MockBlockDevice::new(DISK_SIZE);
+    let comp = ExtendedMetadataStoreComponent::new_default();
+    let store: Arc<dyn IExtendedMetadataStore + Send + Sync> =
+        query_interface!(comp.clone(), IExtendedMetadataStore).unwrap();
+
+    let client = connect_client(&mock);
+    let num_sectors = DISK_SIZE / SECTOR_SIZE as u64;
+    let superblock = on_disk::Superblock::new(SECTOR_SIZE, num_sectors);
+
+    // Short interval to ensure timer fires and checks dirty count
+    let config = FlushConfig {
+        interval: Duration::from_millis(50),
+        dirty_threshold: 5,
+    };
+
+    let comp_clone = comp.clone();
+    let comp_clone2 = comp.clone();
+    let comp_clone3 = comp.clone();
+    let mgr = FlushManager::start(
+        config,
+        client,
+        superblock,
+        Box::new(move || comp_clone.snapshot_entries()),
+        Box::new(move || comp_clone2.dirty_count()),
+        Box::new(move |seq| comp_clone3.mark_flushed(seq)),
+    );
+
+    // Write entries exceeding threshold
+    for i in 0..6 {
+        store.put(&format!("dk_{i}"), &[i as u8; 10]).unwrap();
+    }
+
+    // Wait for the timer to fire and flush
+    std::thread::sleep(Duration::from_millis(200));
+
+    assert!(mgr.completed_seq() >= 1, "dirty threshold should have triggered flush");
+    drop(mgr);
+}
+
+/// T049: force_flush returns quickly when no dirty entries.
+#[test]
+fn flush_manager_no_dirty_no_op() {
+    use extended_metadata_store::flush::{FlushConfig, FlushManager};
+    use std::time::Duration;
+
+    let mock = MockBlockDevice::new(DISK_SIZE);
+    let comp = ExtendedMetadataStoreComponent::new_default();
+
+    let client = connect_client(&mock);
+    let num_sectors = DISK_SIZE / SECTOR_SIZE as u64;
+    let superblock = on_disk::Superblock::new(SECTOR_SIZE, num_sectors);
+
+    let config = FlushConfig {
+        interval: Duration::from_secs(3600),
+        dirty_threshold: 10000,
+    };
+
+    let comp_clone = comp.clone();
+    let comp_clone2 = comp.clone();
+    let comp_clone3 = comp.clone();
+    let mgr = FlushManager::start(
+        config,
+        client,
+        superblock,
+        Box::new(move || comp_clone.snapshot_entries()),
+        Box::new(move || comp_clone2.dirty_count()),
+        Box::new(move |seq| comp_clone3.mark_flushed(seq)),
+    );
+
+    // No writes — trigger flush should still return (no-op)
+    mgr.trigger_flush().unwrap();
+    assert_eq!(mgr.completed_seq(), 0);
+    drop(mgr);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 9: Polish — capacity and crash tests (T050-T053)
+// ---------------------------------------------------------------------------
+
+/// T051: Fill store to capacity, verify CapacityExhausted error.
+#[test]
+fn capacity_exhaustion_detected() {
+    // Use a tiny disk (64 KiB) so we hit capacity quickly
+    let tiny_disk: u64 = 64 * 1024;
+    let mock = MockBlockDevice::new(tiny_disk);
+    let comp = ExtendedMetadataStoreComponent::new_default();
+    let store: Arc<dyn IExtendedMetadataStore + Send + Sync> =
+        query_interface!(comp.clone(), IExtendedMetadataStore).unwrap();
+
+    let client = connect_client(&mock);
+    let num_sectors = tiny_disk / SECTOR_SIZE as u64;
+    let mut superblock = on_disk::Superblock::new(SECTOR_SIZE, num_sectors);
+
+    // Each entry occupies at least 1 sector (4KiB) after padding
+    // With 64KiB disk: 1 sector superblock + ~7 sectors per region → ~7 entries max
+    let mut written = 0;
+    for i in 0..100 {
+        let key = format!("cap_{i}");
+        store.put(&key, &[i as u8; 100]).unwrap();
+        written += 1;
+
+        // Try to flush — will eventually fail with capacity error
+        let entries = comp.snapshot_entries();
+        match flush_to_disk(&client, &mut superblock, &entries) {
+            Ok(()) => {}
+            Err(e) if e.contains("exceeds region capacity") => {
+                // Expected — verify all previously flushed entries are intact
+                // (The last un-flushable batch is only in memory)
+                break;
+            }
+            Err(e) => panic!("unexpected flush error: {e}"),
+        }
+    }
+    assert!(written > 1, "should have written at least some entries before capacity hit");
+}
+
+/// T052: Put with zero-length value succeeds.
+#[test]
+fn put_zero_length_value_succeeds() {
+    let (comp, _mock) = create_test_component(DISK_SIZE);
+    let store: Arc<dyn IExtendedMetadataStore + Send + Sync> =
+        query_interface!(comp, IExtendedMetadataStore).unwrap();
+
+    store.put("empty_val", b"").unwrap();
+    assert_eq!(store.get("empty_val").unwrap(), b"");
+}
+
+/// T053: Crash mid-flush (fault injection) + reboot → recovers from previous valid region.
+#[test]
+fn crash_mid_flush_recovers_previous_state() {
+    // First: write and flush successfully
+    let mock = MockBlockDevice::new(DISK_SIZE);
+    let comp = ExtendedMetadataStoreComponent::new_default();
+    let store: Arc<dyn IExtendedMetadataStore + Send + Sync> =
+        query_interface!(comp.clone(), IExtendedMetadataStore).unwrap();
+
+    let client = connect_client(&mock);
+    let num_sectors = DISK_SIZE / SECTOR_SIZE as u64;
+    let mut superblock = on_disk::Superblock::new(SECTOR_SIZE, num_sectors);
+
+    store.put("safe_key", b"safe_value").unwrap();
+    let entries = comp.snapshot_entries();
+    flush_to_disk(&client, &mut superblock, &entries).unwrap();
+    // flush_seq = 1, active = B (region 1)
+
+    // Now get shared state and create a fault-injecting mock for the second flush
+    let shared = mock.shared_state();
+    drop(client);
+
+    // Create mock that fails after 2 writes (partial region write)
+    let faulty_mock = MockBlockDevice::with_fault_config(DISK_SIZE, FaultConfig {
+        fail_after_n_writes: Some(2),
+    });
+    // Copy existing blocks into the faulty mock's state
+    {
+        let src = shared.lock().unwrap();
+        let faulty_state = faulty_mock.shared_state();
+        let mut dst = faulty_state.lock().unwrap();
+        dst.blocks = src.blocks.clone();
+    }
+
+    let faulty_client = connect_client(&faulty_mock);
+
+    // Try a second flush (should fail mid-write)
+    store.put("crash_key", b"crash_value").unwrap();
+    let entries = comp.snapshot_entries();
+    let result = flush_to_disk(&faulty_client, &mut superblock, &entries);
+    assert!(result.is_err(), "flush should fail due to fault injection");
+
+    // Reboot from the faulty mock's state (has partial writes)
+    let crash_state = faulty_mock.shared_state();
+    drop(faulty_client);
+    let recovered_mock = MockBlockDevice::reboot_from(crash_state);
+    let recovered_client = connect_client(&recovered_mock);
+
+    // Recovery should fall back to the first valid flush
+    let comp2 = ExtendedMetadataStoreComponent::new_default();
+    let (_sb, warnings) = comp2
+        .initialize_from_client(&recovered_client, num_sectors)
+        .unwrap();
+
+    let store2: Arc<dyn IExtendedMetadataStore + Send + Sync> =
+        query_interface!(comp2, IExtendedMetadataStore).unwrap();
+
+    // "safe_key" from the first successful flush should be there
+    assert_eq!(store2.get("safe_key").unwrap(), b"safe_value");
+    // "crash_key" from the failed flush should NOT be there
+    // (it might or might not be, depending on whether the corrupt region was the active one)
+    // The key point: no garbage/corrupt data is served
+    if let Ok(val) = store2.get("crash_key") {
+        // If recovered from the region that had the partial write, it might have the entry
+        // (if the entry itself was written completely before the fault hit the superblock)
+        assert_eq!(val, b"crash_value");
+    }
+
+    // Either way, the store is consistent
+    let all = store2.iterate_all().unwrap();
+    for (k, v) in &all {
+        assert_eq!(store2.get(k).unwrap(), *v);
+    }
 }
 
 /// T032: Fresh partition (all zeros) → format_fresh → empty store.

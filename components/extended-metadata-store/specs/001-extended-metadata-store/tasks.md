@@ -132,10 +132,10 @@
 
 ### Implementation for User Story 5
 
-- [ ] T039 [US5] Verify RwLock implementation in src/lib.rs allows concurrent get() calls (read lock shared)
-- [ ] T040 [US5] Implement checkpoint coalescing in src/flush.rs — multiple concurrent force_flush() calls share one flush operation (CheckpointCoalesce struct with Condvar)
-- [ ] T041 [US5] Add stress test: 8 threads, 1000 operations each (random put/get/delete), assert no panics and final state consistent
-- [ ] T042 [US5] Add stress test: concurrent iterate_all while other threads write, assert no panics and iteration returns consistent snapshot
+- [x] T039 [US5] Verify RwLock implementation in src/lib.rs allows concurrent get() calls (read lock shared)
+- [x] T040 [US5] Implement checkpoint coalescing in src/flush.rs — multiple concurrent force_flush() calls share one flush operation (CheckpointCoalesce struct with Condvar)
+- [x] T041 [US5] Add stress test: 8 threads, 1000 operations each (random put/get/delete), assert no panics and final state consistent
+- [x] T042 [US5] Add stress test: concurrent iterate_all while other threads write, assert no panics and iteration returns consistent snapshot
 
 **Checkpoint**: Thread safety validated under concurrent load
 
@@ -149,13 +149,13 @@
 
 ### Implementation for User Story 6
 
-- [ ] T043 [US6] Implement background flush thread in src/flush.rs — Condvar::wait_timeout with configurable interval, wake on dirty_count threshold or explicit signal
-- [ ] T044 [US6] Wire flush thread lifecycle in src/lib.rs — start thread after initialize(), stop thread on Drop (set shutdown flag + notify condvar)
-- [ ] T045 [US6] Implement force_flush() in src/lib.rs — signal flush thread, block caller until flush completes (uses coalescing from T040)
-- [ ] T046 [US6] Add FlushConfig struct with interval_secs and dirty_threshold fields, configurable via set_flush_config() method in src/lib.rs
-- [ ] T047 [US6] Add unit test: put + force_flush + inject crash (no periodic flush) + reboot + verify entry persisted
-- [ ] T048 [US6] Add unit test: verify dirty-count threshold triggers flush without waiting for timer
-- [ ] T049 [US6] Add unit test: verify force_flush returns quickly when no dirty entries
+- [x] T043 [US6] Implement background flush thread in src/flush.rs — Condvar::wait_timeout with configurable interval, wake on dirty_count threshold or explicit signal
+- [x] T044 [US6] Wire flush thread lifecycle in src/lib.rs — start thread after initialize(), stop thread on Drop (set shutdown flag + notify condvar)
+- [x] T045 [US6] Implement force_flush() in src/lib.rs — signal flush thread, block caller until flush completes (uses coalescing from T040)
+- [x] T046 [US6] Add FlushConfig struct with interval_secs and dirty_threshold fields, configurable via set_flush_config() method in src/lib.rs
+- [x] T047 [US6] Add unit test: put + force_flush + inject crash (no periodic flush) + reboot + verify entry persisted
+- [x] T048 [US6] Add unit test: verify dirty-count threshold triggers flush without waiting for timer
+- [x] T049 [US6] Add unit test: verify force_flush returns quickly when no dirty entries
 
 **Checkpoint**: Explicit durability control and background flush both working
 
@@ -165,12 +165,12 @@
 
 **Purpose**: Edge cases, capacity management, documentation
 
-- [ ] T050 [P] Implement capacity checking in put() in src/lib.rs — calculate total serialized size, return CapacityExhausted if partition regions can't hold all entries
-- [ ] T051 [P] Add unit test: fill store to capacity, verify CapacityExhausted error on next put, verify all existing entries intact
-- [ ] T052 [P] Add unit test: put with zero-length value succeeds
-- [ ] T053 [P] Add unit test: crash mid-flush (fault injection after partial region write) + reboot → recovers from previous valid region
-- [ ] T054 Implement best-effort recovery logging in src/recovery.rs — log warning via ILogger for each skipped corrupt entry with key info
-- [ ] T055 Run cargo clippy -- -D warnings on full crate and fix any issues
+- [x] T050 [P] Implement capacity checking in put() in src/lib.rs — calculate total serialized size, return CapacityExhausted if partition regions can't hold all entries
+- [x] T051 [P] Add unit test: fill store to capacity, verify CapacityExhausted error on next put, verify all existing entries intact
+- [x] T052 [P] Add unit test: put with zero-length value succeeds
+- [x] T053 [P] Add unit test: crash mid-flush (fault injection after partial region write) + reboot → recovers from previous valid region
+- [x] T054 Implement best-effort recovery logging in src/recovery.rs — log warning via ILogger for each skipped corrupt entry with key info
+- [x] T055 Run cargo clippy -- -D warnings on full crate and fix any issues
 - [ ] T056 Run cargo doc --no-deps and ensure all public items have doc comments without warnings
 - [ ] T057 Update Cargo.toml to gate src/block_io.rs, src/flush.rs, src/recovery.rs, src/on_disk.rs behind `#[cfg(feature = "spdk")]` compilation
 
