@@ -111,6 +111,8 @@ fn get_test_context() -> Option<&'static SsdTestContext> {
         let sector_size = ibd.block_size();
         let num_sectors = ibd.num_sectors(1).unwrap_or(0);
 
+        // Partition layout: index 0 = internal metadata, index 1 = extended metadata store.
+        // Tests use partition 1 (CERTUS_EXTERNAL_META) by default.
         let partition_config = PartitionConfig {
             sector_size,
             total_sectors: num_sectors,
@@ -136,8 +138,9 @@ fn get_test_context() -> Option<&'static SsdTestContext> {
                 std::process::exit(2);
             });
 
-        // Partition index 1 = CERTUS_EXTERNAL_META
-        let partition_info = table.partitions[1].clone();
+        // Use partition 1 (CERTUS_EXTERNAL_META) by default for the metadata store.
+        const PARTITION_INDEX: usize = 1;
+        let partition_info = table.partitions[PARTITION_INDEX].clone();
 
         Some(Box::leak(Box::new(SsdTestContext {
             block_dev,
