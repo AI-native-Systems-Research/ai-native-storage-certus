@@ -7,7 +7,7 @@
 //! The [`TelemetrySnapshot`] data type is defined in the `interfaces` crate.
 
 #[cfg(feature = "telemetry")]
-use interfaces::IoByteStats;
+use interfaces::ReadWriteStats;
 use interfaces::{NvmeBlockError, TelemetrySnapshot};
 
 /// Internal telemetry collector using atomic counters.
@@ -20,13 +20,16 @@ pub(crate) struct TelemetryStats {
     max_latency_ns: std::sync::atomic::AtomicU64,
     sum_latency_ns: std::sync::atomic::AtomicU64,
     total_bytes: std::sync::atomic::AtomicU64,
-    // Per-direction byte/op counters. `total_ops`/`total_bytes` above remain the
-    // read+write aggregate used by `snapshot()`; these split the same events so
-    // callers can account read vs write traffic without changing existing output.
+    // Per-direction byte/op/latency counters. `total_ops`/`total_bytes`/
+    // `sum_latency_ns` above remain the read+write aggregate used by `snapshot()`;
+    // these split the same events so callers can account read vs write traffic
+    // (including per-direction mean latency) without changing existing output.
     read_ops: std::sync::atomic::AtomicU64,
     read_bytes: std::sync::atomic::AtomicU64,
+    read_latency_ns_sum: std::sync::atomic::AtomicU64,
     write_ops: std::sync::atomic::AtomicU64,
     write_bytes: std::sync::atomic::AtomicU64,
+    write_latency_ns_sum: std::sync::atomic::AtomicU64,
     start_time: std::time::Instant,
 }
 
@@ -42,8 +45,10 @@ impl TelemetryStats {
             total_bytes: std::sync::atomic::AtomicU64::new(0),
             read_ops: std::sync::atomic::AtomicU64::new(0),
             read_bytes: std::sync::atomic::AtomicU64::new(0),
+            read_latency_ns_sum: std::sync::atomic::AtomicU64::new(0),
             write_ops: std::sync::atomic::AtomicU64::new(0),
             write_bytes: std::sync::atomic::AtomicU64::new(0),
+            write_latency_ns_sum: std::sync::atomic::AtomicU64::new(0),
             start_time: std::time::Instant::now(),
         }
     }
@@ -62,9 +67,11 @@ impl TelemetryStats {
         if is_read {
             self.read_ops.fetch_add(1, Relaxed);
             self.read_bytes.fetch_add(bytes, Relaxed);
+            self.read_latency_ns_sum.fetch_add(latency_ns, Relaxed);
         } else {
             self.write_ops.fetch_add(1, Relaxed);
             self.write_bytes.fetch_add(bytes, Relaxed);
+            self.write_latency_ns_sum.fetch_add(latency_ns, Relaxed);
         }
 
         // Update min with CAS loop.
@@ -129,14 +136,16 @@ impl TelemetryStats {
         }
     }
 
-    /// Snapshot the per-direction byte/op counters.
-    pub fn io_byte_stats(&self) -> IoByteStats {
+    /// Snapshot the per-direction byte/op/latency counters.
+    pub fn io_byte_stats(&self) -> ReadWriteStats {
         use std::sync::atomic::Ordering::Relaxed;
-        IoByteStats {
+        ReadWriteStats {
             read_ops: self.read_ops.load(Relaxed),
             read_bytes: self.read_bytes.load(Relaxed),
+            read_latency_ns_sum: self.read_latency_ns_sum.load(Relaxed),
             write_ops: self.write_ops.load(Relaxed),
             write_bytes: self.write_bytes.load(Relaxed),
+            write_latency_ns_sum: self.write_latency_ns_sum.load(Relaxed),
         }
     }
 }
@@ -228,7 +237,12 @@ mod tests {
         assert_eq!(io.read_bytes, 8192);
         assert_eq!(io.write_ops, 1);
         assert_eq!(io.write_bytes, 512);
-        // Aggregate matches the combined snapshot + IoByteStats sums.
+        // Per-direction latency: reads (1000+1500)/2 = 1250, writes 2000/1 = 2000.
+        assert_eq!(io.read_latency_ns_sum, 2500);
+        assert_eq!(io.mean_read_latency_ns(), 1250);
+        assert_eq!(io.write_latency_ns_sum, 2000);
+        assert_eq!(io.mean_write_latency_ns(), 2000);
+        // Aggregate matches the combined snapshot + ReadWriteStats sums.
         assert_eq!(io.total_ops(), stats.snapshot().total_ops);
         assert_eq!(io.total_bytes(), 8704);
     }

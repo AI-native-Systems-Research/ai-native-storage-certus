@@ -335,11 +335,20 @@ impl EngineInner {
     }
 
     /// Cumulative SSD I/O counters aggregated across all data drives:
-    /// `(read_ops, read_bytes, write_ops, write_bytes)`. Zero unless the block
-    /// devices were built with the `telemetry` feature.
-    pub fn io_byte_stats(&self) -> (u64, u64, u64, u64) {
+    /// `(read_ops, read_bytes, read_latency_ns_sum, write_ops, write_bytes,
+    /// write_latency_ns_sum)`. Latency sums divided by the matching op count give
+    /// mean per-direction latency. Zero unless the block devices were built with
+    /// the `telemetry` feature.
+    pub fn io_byte_stats(&self) -> (u64, u64, u64, u64, u64, u64) {
         let s = self.dispatcher.io_byte_stats();
-        (s.read_ops, s.read_bytes, s.write_ops, s.write_bytes)
+        (
+            s.read_ops,
+            s.read_bytes,
+            s.read_latency_ns_sum,
+            s.write_ops,
+            s.write_bytes,
+            s.write_latency_ns_sum,
+        )
     }
 
     /// Pin blocks for reading and return DRAM pointers for H2D DMA.

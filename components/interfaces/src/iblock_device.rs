@@ -124,35 +124,52 @@ pub struct TelemetrySnapshot {
 ///
 /// Unlike [`TelemetrySnapshot`] (which aggregates reads and writes into a
 /// single latency/throughput view), this separates read and write traffic so
-/// callers can account bytes-to/from-device per direction. Counters are
+/// callers can account bytes, ops, and latency per direction. Counters are
 /// monotonic for the life of the device; take deltas across two snapshots to
 /// measure a time window.
+///
+/// Latency is stored as a cumulative nanosecond sum per direction so it deltas
+/// cleanly: the mean latency over a window is
+/// `Δ(read_latency_ns_sum) / Δ(read_ops)`. Use the [`mean_read_latency_ns`] /
+/// [`mean_write_latency_ns`] helpers for a whole-snapshot mean.
 ///
 /// The `total_*` accessors return the read+write sum, matching the aggregate
 /// semantics of [`TelemetrySnapshot`].
 ///
+/// [`mean_read_latency_ns`]: ReadWriteStats::mean_read_latency_ns
+/// [`mean_write_latency_ns`]: ReadWriteStats::mean_write_latency_ns
+///
 /// # Examples
 ///
 /// ```
-/// use interfaces::IoByteStats;
+/// use interfaces::ReadWriteStats;
 ///
-/// let s = IoByteStats { read_ops: 10, read_bytes: 4096, write_ops: 3, write_bytes: 1536 };
+/// let s = ReadWriteStats {
+///     read_ops: 10, read_bytes: 4096, read_latency_ns_sum: 20_000,
+///     write_ops: 3, write_bytes: 1536, write_latency_ns_sum: 9_000,
+/// };
 /// assert_eq!(s.total_ops(), 13);
 /// assert_eq!(s.total_bytes(), 5632);
+/// assert_eq!(s.mean_read_latency_ns(), 2_000);
+/// assert_eq!(s.mean_write_latency_ns(), 3_000);
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct IoByteStats {
+pub struct ReadWriteStats {
     /// Number of completed read operations.
     pub read_ops: u64,
     /// Total bytes read from the device.
     pub read_bytes: u64,
+    /// Cumulative latency of all read operations, in nanoseconds.
+    pub read_latency_ns_sum: u64,
     /// Number of completed write operations.
     pub write_ops: u64,
     /// Total bytes written to the device.
     pub write_bytes: u64,
+    /// Cumulative latency of all write operations, in nanoseconds.
+    pub write_latency_ns_sum: u64,
 }
 
-impl IoByteStats {
+impl ReadWriteStats {
     /// Total operations (reads + writes).
     pub fn total_ops(&self) -> u64 {
         self.read_ops + self.write_ops
@@ -161,6 +178,24 @@ impl IoByteStats {
     /// Total bytes transferred (read + written).
     pub fn total_bytes(&self) -> u64 {
         self.read_bytes + self.write_bytes
+    }
+
+    /// Mean read latency in nanoseconds (0 if no reads recorded).
+    pub fn mean_read_latency_ns(&self) -> u64 {
+        if self.read_ops == 0 {
+            0
+        } else {
+            self.read_latency_ns_sum / self.read_ops
+        }
+    }
+
+    /// Mean write latency in nanoseconds (0 if no writes recorded).
+    pub fn mean_write_latency_ns(&self) -> u64 {
+        if self.write_ops == 0 {
+            0
+        } else {
+            self.write_latency_ns_sum / self.write_ops
+        }
     }
 }
 
@@ -477,9 +512,9 @@ define_interface! {
         fn telemetry(&self) -> Result<TelemetrySnapshot, NvmeBlockError>;
 
         /// Return cumulative read/write byte and op counters (requires
-        /// `telemetry` feature). Returns all-zero [`IoByteStats`] when the
+        /// `telemetry` feature). Returns all-zero [`ReadWriteStats`] when the
         /// feature is disabled or the backend does not track per-direction IO.
-        fn io_byte_stats(&self) -> IoByteStats;
+        fn io_byte_stats(&self) -> ReadWriteStats;
     }
 }
 

@@ -55,7 +55,7 @@ use spdk_env::ISPDKEnv;
 
 // Re-export interface types from the interfaces crate for consumer convenience.
 pub use interfaces::{
-    ClientChannels, Command, Completion, IBlockDevice, IoByteStats, NamespaceInfo, NvmeBlockError,
+    ClientChannels, Command, Completion, IBlockDevice, ReadWriteStats, NamespaceInfo, NvmeBlockError,
     OpHandle, TelemetrySnapshot,
 };
 
@@ -507,7 +507,7 @@ impl IBlockDevice for BlockDeviceSpdkNvmeComponent {
         }
     }
 
-    fn io_byte_stats(&self) -> IoByteStats {
+    fn io_byte_stats(&self) -> ReadWriteStats {
         #[cfg(feature = "telemetry")]
         {
             let stats_guard = self
@@ -519,13 +519,13 @@ impl IBlockDevice for BlockDeviceSpdkNvmeComponent {
                     .downcast_ref::<crate::telemetry::TelemetryStats>()
                     .map(|stats| stats.io_byte_stats())
                     .unwrap_or_default(),
-                None => IoByteStats::default(),
+                None => ReadWriteStats::default(),
             }
         }
 
         #[cfg(not(feature = "telemetry"))]
         {
-            IoByteStats::default()
+            ReadWriteStats::default()
         }
     }
 }

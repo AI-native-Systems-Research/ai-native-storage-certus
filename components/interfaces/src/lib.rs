@@ -71,7 +71,7 @@ pub use ispdk_env::ISPDKEnv;
 
 #[cfg(feature = "spdk")]
 pub use iblock_device::{
-    ClientChannels, Command, Completion, IBlockDevice, IoByteStats, NamespaceInfo, NvmeBlockError,
+    ClientChannels, Command, Completion, IBlockDevice, ReadWriteStats, NamespaceInfo, NvmeBlockError,
     OpHandle, TelemetrySnapshot,
 };
 

@@ -600,7 +600,7 @@ component_macros::define_interface! {
         /// dispatcher; take deltas across two calls to measure a window. Values
         /// are all-zero unless the underlying block devices were built with
         /// their `telemetry` feature enabled.
-        fn io_byte_stats(&self) -> crate::iblock_device::IoByteStats;
+        fn io_byte_stats(&self) -> crate::iblock_device::ReadWriteStats;
     }
 }
 
