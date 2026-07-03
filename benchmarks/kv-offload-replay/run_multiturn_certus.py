@@ -100,10 +100,11 @@ if __name__ == "__main__":
     # --- Per-round SSD I/O accounting via the iostat file ---------------------
     # The CertusEngine with the real counters lives in the vLLM EngineCore worker
     # PROCESS, not here. A writer thread in that process publishes cumulative
-    # (read_ops, read_bytes, write_ops, write_bytes) to CERTUS_IOSTAT_FILE every
-    # 0.5s (requires certus_native built --features rw-telemetry). We read that
-    # file around each generate() for per-round deltas — the certus analogue of
-    # the SharedStorage /sys/block capture.
+    # (read_ops, read_bytes, read_latency_ns_sum, write_ops, write_bytes,
+    # write_latency_ns_sum) to CERTUS_IOSTAT_FILE every 0.5s (requires
+    # certus_native built --features rw-telemetry). We read that file around each
+    # generate() for per-round deltas — the certus analogue of the SharedStorage
+    # /sys/block capture.
     IOSTAT_FILE = os.environ.get("CERTUS_IOSTAT_FILE", "/tmp/certus_iostat.txt")
 
     def io_stats():
