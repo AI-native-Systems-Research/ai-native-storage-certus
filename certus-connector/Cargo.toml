@@ -28,10 +28,10 @@ spdk-env = { path = "../components/spdk-env" }
 gpu-services = { path = "../components/gpu-services", features = ["gpu"] }
 
 [features]
-# Enable per-drive SSD read/write byte+op counters, surfaced via the pyo3
-# `io_byte_stats()` method. Propagates the telemetry feature to the block-device
-# crate through both the direct dep and the dispatcher.
-io-telemetry = ["dispatcher/io-telemetry", "block-device-spdk-nvme/telemetry"]
+# Enable per-drive SSD read/write byte, op, and latency counters, surfaced via
+# the pyo3 `read_write_stats()` method. Propagates the telemetry feature to the
+# block-device crate through both the direct dep and the dispatcher.
+rw-telemetry = ["dispatcher/rw-telemetry", "block-device-spdk-nvme/telemetry"]
 
 [build-dependencies]
 pyo3-build-config = "0.22"
