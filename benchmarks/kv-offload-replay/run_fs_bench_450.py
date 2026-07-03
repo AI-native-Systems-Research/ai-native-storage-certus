@@ -11,17 +11,48 @@ MODEL = os.environ.get("MODEL", "NousResearch/Meta-Llama-3-8B")
 DRAM = int(os.environ.get("DRAM", 8589934592))
 PROMPT_BUDGET = MAX_MODEL_LEN - OUTPUT_TOKENS
 
+KV_PATH = "/mnt/fs-backend-bench/shared-kv"
+
 KV_CONFIG = {
     "kv_connector": "OffloadingConnector",
     "kv_role": "kv_both",
     "kv_connector_extra_config": {
         "spec_name": "SharedStorageOffloadingSpec",
         "spec_module_path": "llmd_fs_backend.spec",
-        "shared_storage_path": "/mnt/fs-backend-bench/shared-kv",
+        "shared_storage_path": KV_PATH,
         "max_staging_memory_gb": DRAM // (1024**3),
         "threads_per_gpu": 64,
     },
 }
+
+
+def preflight():
+    """Verify the box is configured for the SharedStorage bench before we spend
+    minutes loading a model into a mis-configured system. Fail fast and loud.
+    Configure with: sudo ./tools/configure-bench.sh sharedstorage (then reboot
+    for the mem= cap). Skip with SKIP_PREFLIGHT=1."""
+    if os.environ.get("SKIP_PREFLIGHT"):
+        return
+    errs = []
+    # 1. KV path is a writable dir on the mounted RAID (not a bare rootfs dir).
+    if not os.path.ismount("/mnt/fs-backend-bench"):
+        errs.append("/mnt/fs-backend-bench not mounted (run configure-bench.sh sharedstorage)")
+    elif not os.access(KV_PATH, os.W_OK):
+        errs.append(f"{KV_PATH} missing or not writable")
+    # 2. RAM must be capped — page cache is SS's DRAM, and a faithful run needs
+    #    the hard mem= cap active, not the full box.
+    with open("/proc/meminfo") as f:
+        total_gib = int(f.readline().split()[1]) / (1024**2)
+    if total_gib > 100:
+        errs.append(f"RAM not capped ({total_gib:.0f} GiB) — reboot for mem= cap "
+                    "(see configure-bench.sh kernel mode)")
+    if errs:
+        sys.exit("[preflight] NOT ready for sharedstorage:\n  - " + "\n  - ".join(errs))
+    print(f"[preflight] ok: RAID mounted, {KV_PATH} writable, RAM ~{total_gib:.0f} GiB",
+          file=sys.stderr, flush=True)
+
+
+preflight()
 
 t0 = time.perf_counter()
 print(f"[trace] +0.0s loading dataset", file=sys.stderr, flush=True)
