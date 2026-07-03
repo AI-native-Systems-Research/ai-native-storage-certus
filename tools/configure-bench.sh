@@ -571,6 +571,24 @@ setup_cgroup_mem() {
     echo "  Only the hugepages= boot param is required (1G pages reserved at boot)."
 }
 
+# Remove the bench cgroup slice. Used when switching to kernel mode, where the
+# mem=/memmap= boot params cap RAM system-wide and a leftover MemoryMax slice
+# would double-limit (and mislead the status check).
+teardown_cgroup_mem() {
+    command -v systemctl >/dev/null 2>&1 || return 0
+    local unit="/etc/systemd/system/${BENCH_SLICE}"
+    if systemctl is-active --quiet "$BENCH_SLICE" 2>/dev/null || [[ -f "$unit" ]]; then
+        header "Removing cgroup slice (kernel mode caps RAM via boot params)"
+        systemctl stop "$BENCH_SLICE" 2>/dev/null || true
+        if [[ -f "$unit" ]]; then
+            echo "  Removing $unit"
+            rm -f "$unit"
+            systemctl daemon-reload
+        fi
+        echo -e "  ${GREEN}Slice ${BENCH_SLICE} removed${NC}"
+    fi
+}
+
 # ============================================================================
 # Kernel Parameters
 # ============================================================================
@@ -977,8 +995,11 @@ main() {
     set_kernel_params "$mode"
 
     # 1b. Memory limit via cgroup (runtime, no reboot) — the default.
+    #     In kernel mode, tear down any leftover slice so it doesn't double-limit.
     if [[ "$MEM_METHOD" == "cgroup" ]]; then
         setup_cgroup_mem "$mode"
+    else
+        teardown_cgroup_mem
     fi
 
     # 2. Hugepages
