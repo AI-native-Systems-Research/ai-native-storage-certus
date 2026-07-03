@@ -107,17 +107,23 @@ if __name__ == "__main__":
     IOSTAT_FILE = os.environ.get("CERTUS_IOSTAT_FILE", "/tmp/certus_iostat.txt")
 
     def io_stats():
+        # 6 fields: read_ops, read_bytes, read_lat_ns_sum, write_ops, write_bytes, write_lat_ns_sum
         try:
             with open(IOSTAT_FILE) as f:
                 parts = f.read().split()
-            if len(parts) >= 4:
-                return tuple(int(x) for x in parts[:4])  # rops, rbytes, wops, wbytes
+            if len(parts) >= 6:
+                return tuple(int(x) for x in parts[:6])
         except (OSError, ValueError):
             pass
         return None
 
     def gib(n):
         return "n/a" if n is None else f"{n / (1024**3):.2f} GiB"
+
+    def mean_us(lat_ns_delta, ops_delta):
+        if lat_ns_delta is None or not ops_delta:
+            return "n/a"
+        return f"{lat_ns_delta / ops_delta / 1000:.1f}us"
 
     t_start = time.perf_counter()
 
@@ -155,16 +161,18 @@ if __name__ == "__main__":
             next_turn[i] += 1
         total_generations += len(active_prompts)
         n_alive = sum(alive)
-        # Deltas: cumulative (read_ops, read_bytes, write_ops, write_bytes).
+        # Deltas: (read_ops, read_bytes, read_lat_ns, write_ops, write_bytes, write_lat_ns).
         if io0 is not None and io1 is not None:
-            d_rops, d_rb, d_wops, d_wb = (io1[j] - io0[j] for j in range(4))
+            d_rops, d_rb, d_rlat, d_wops, d_wb, d_wlat = (io1[j] - io0[j] for j in range(6))
         else:
-            d_rops = d_rb = d_wops = d_wb = None
-        round_io.append((rounds_done, len(active_prompts), d_rb, d_wb, d_rops, d_wops))
+            d_rops = d_rb = d_rlat = d_wops = d_wb = d_wlat = None
+        round_io.append((rounds_done, len(active_prompts),
+                         d_rb, d_wb, d_rops, d_wops, d_rlat, d_wlat))
         print(f"[run] round {rounds_done}: {len(active_prompts)} prompts in "
               f"{round_elapsed:.1f}s  ({n_alive} convs still alive)  "
               f"ssd_read={gib(d_rb)} ssd_write={gib(d_wb)} "
-              f"r_ops={d_rops} w_ops={d_wops}",
+              f"r_ops={d_rops} w_ops={d_wops} "
+              f"r_lat={mean_us(d_rlat, d_rops)} w_lat={mean_us(d_wlat, d_wops)}",
               file=sys.stderr, flush=True)
 
     elapsed = time.perf_counter() - t_start
@@ -191,20 +199,27 @@ if __name__ == "__main__":
         tot_wb = sum(r[3] for r in round_io if r[3] is not None)
         tot_rops = sum(r[4] for r in round_io if r[4] is not None)
         tot_wops = sum(r[5] for r in round_io if r[5] is not None)
-        print("\n[io] per-round SSD bytes (certus engine, all drives):", file=sys.stderr)
+        tot_rlat = sum(r[6] for r in round_io if r[6] is not None)
+        tot_wlat = sum(r[7] for r in round_io if r[7] is not None)
+        print("\n[io] per-round SSD bytes + latency (certus engine, all drives):", file=sys.stderr)
         print(f"[io] {'round':>5} {'prompts':>7} {'ssd_read':>12} {'ssd_write':>12} "
-              f"{'r_ops':>10} {'w_ops':>10}", file=sys.stderr)
-        for rnd, npr, rb, wb, rops, wops in round_io:
+              f"{'r_ops':>10} {'w_ops':>10} {'r_lat':>10} {'w_lat':>10}", file=sys.stderr)
+        for rnd, npr, rb, wb, rops, wops, rlat, wlat in round_io:
             print(f"[io] {rnd:>5} {npr:>7} {gib(rb):>12} {gib(wb):>12} "
-                  f"{rops:>10} {wops:>10}", file=sys.stderr)
+                  f"{rops:>10} {wops:>10} {mean_us(rlat, rops):>10} {mean_us(wlat, wops):>10}",
+                  file=sys.stderr)
         print(f"[io] {'TOTAL':>5} {'':>7} {gib(tot_rb):>12} {gib(tot_wb):>12} "
-              f"{tot_rops:>10} {tot_wops:>10}", file=sys.stderr)
+              f"{tot_rops:>10} {tot_wops:>10} {mean_us(tot_rlat, tot_rops):>10} "
+              f"{mean_us(tot_wlat, tot_wops):>10}", file=sys.stderr)
         io_path = os.path.join(_here, f"certus_round_io_{int(elapsed)}.json")
         with open(io_path, "w") as f:
             json.dump({"wall": elapsed, "rounds": [
                 {"round": r, "prompts": n, "read_bytes": rb, "write_bytes": wb,
-                 "read_ops": rops, "write_ops": wops}
-                for r, n, rb, wb, rops, wops in round_io],
+                 "read_ops": rops, "write_ops": wops,
+                 "read_latency_ns_sum": rlat, "write_latency_ns_sum": wlat}
+                for r, n, rb, wb, rops, wops, rlat, wlat in round_io],
                 "total_read_bytes": tot_rb, "total_write_bytes": tot_wb,
-                "total_read_ops": tot_rops, "total_write_ops": tot_wops}, f, indent=2)
+                "total_read_ops": tot_rops, "total_write_ops": tot_wops,
+                "total_read_latency_ns_sum": tot_rlat,
+                "total_write_latency_ns_sum": tot_wlat}, f, indent=2)
         print(f"[io] saved {io_path}", file=sys.stderr)
