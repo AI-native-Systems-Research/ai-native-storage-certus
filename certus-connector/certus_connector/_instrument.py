@@ -100,7 +100,7 @@ _reporter_started = False
 # handlers are constructed there), not the driver process running the benchmark
 # loop. To let an out-of-process reader (e.g. run_multiturn_certus.py) sample
 # per-round SSD I/O, a thread in this worker process periodically writes the
-# engine's cumulative io_byte_stats() to a small file. Path via CERTUS_IOSTAT_FILE
+# engine's cumulative read_write_stats() to a small file. Path via CERTUS_IOSTAT_FILE
 # (default /tmp/certus_iostat.txt). Line format:
 # "read_ops read_bytes read_latency_ns_sum write_ops write_bytes write_latency_ns_sum".
 _ENGINE_REF = None
@@ -119,10 +119,10 @@ def _iostat_writer():
     while True:
         time.sleep(0.5)
         eng = _ENGINE_REF
-        if eng is None or not hasattr(eng, "io_byte_stats"):
+        if eng is None or not hasattr(eng, "read_write_stats"):
             continue
         try:
-            vals = eng.io_byte_stats()  # 6-tuple incl. per-direction latency sums
+            vals = eng.read_write_stats()  # 6-tuple incl. per-direction latency sums
             with open(tmp, "w") as f:
                 f.write(" ".join(str(v) for v in vals) + "\n")
             os.replace(tmp, path)  # atomic publish

@@ -98,7 +98,7 @@ class CertusOffloadingSpec(OffloadingSpec):
         from certus_connector.handler import CompletionDispatcher
         engine = self._get_engine()
         # Register the engine so the iostat writer thread (in this worker process)
-        # can publish cumulative SSD io_byte_stats() for an out-of-process reader.
+        # can publish cumulative SSD read_write_stats() for an out-of-process reader.
         set_engine(engine)
         start_reporter()
         if self._gpu_to_certus is None:

@@ -220,7 +220,7 @@ impl IBlockDevice for MockBlockDevice {
         })
     }
 
-    fn io_byte_stats(&self) -> interfaces::ReadWriteStats {
+    fn read_write_stats(&self) -> interfaces::ReadWriteStats {
         interfaces::ReadWriteStats::default()
     }
 }

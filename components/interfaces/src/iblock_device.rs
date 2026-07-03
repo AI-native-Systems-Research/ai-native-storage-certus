@@ -514,7 +514,7 @@ define_interface! {
         /// Return cumulative read/write byte and op counters (requires
         /// `telemetry` feature). Returns all-zero [`ReadWriteStats`] when the
         /// feature is disabled or the backend does not track per-direction IO.
-        fn io_byte_stats(&self) -> ReadWriteStats;
+        fn read_write_stats(&self) -> ReadWriteStats;
     }
 }
 

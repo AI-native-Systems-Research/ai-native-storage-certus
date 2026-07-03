@@ -137,7 +137,7 @@ impl TelemetryStats {
     }
 
     /// Snapshot the per-direction byte/op/latency counters.
-    pub fn io_byte_stats(&self) -> ReadWriteStats {
+    pub fn read_write_stats(&self) -> ReadWriteStats {
         use std::sync::atomic::Ordering::Relaxed;
         ReadWriteStats {
             read_ops: self.read_ops.load(Relaxed),
@@ -232,7 +232,7 @@ mod tests {
         stats.record(1000, 4096, true); // read
         stats.record(2000, 512, false); // write
         stats.record(1500, 4096, true); // read
-        let io = stats.io_byte_stats();
+        let io = stats.read_write_stats();
         assert_eq!(io.read_ops, 2);
         assert_eq!(io.read_bytes, 8192);
         assert_eq!(io.write_ops, 1);

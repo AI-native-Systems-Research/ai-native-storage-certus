@@ -2273,11 +2273,11 @@ impl IDispatcher for DispatcherP2pComponent {
         Ok(flushed)
     }
 
-    fn io_byte_stats(&self) -> interfaces::ReadWriteStats {
+    fn read_write_stats(&self) -> interfaces::ReadWriteStats {
         // Aggregate per-direction counters across every data drive.
         let mut agg = interfaces::ReadWriteStats::default();
         for drive in self.data_drives.read().iter() {
-            let s = drive.block_dev_iface.io_byte_stats();
+            let s = drive.block_dev_iface.read_write_stats();
             agg.read_ops += s.read_ops;
             agg.read_bytes += s.read_bytes;
             agg.read_latency_ns_sum += s.read_latency_ns_sum;

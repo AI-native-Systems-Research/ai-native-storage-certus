@@ -121,8 +121,8 @@ impl CertusEngine {
     /// write_latency_ns_sum)`. Monotonic; take deltas for a per-round measurement
     /// (mean latency = Δlatency_sum / Δops). Zero unless certus_native was built
     /// with the `telemetry` feature.
-    fn io_byte_stats(&self) -> (u64, u64, u64, u64, u64, u64) {
-        self.inner.io_byte_stats()
+    fn read_write_stats(&self) -> (u64, u64, u64, u64, u64, u64) {
+        self.inner.read_write_stats()
     }
 
     // ─── Handler-level operations ───────────────────────────────────────

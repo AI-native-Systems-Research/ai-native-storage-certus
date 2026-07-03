@@ -507,7 +507,7 @@ impl IBlockDevice for BlockDeviceSpdkNvmeComponent {
         }
     }
 
-    fn io_byte_stats(&self) -> ReadWriteStats {
+    fn read_write_stats(&self) -> ReadWriteStats {
         #[cfg(feature = "telemetry")]
         {
             let stats_guard = self
@@ -517,7 +517,7 @@ impl IBlockDevice for BlockDeviceSpdkNvmeComponent {
             match stats_guard.as_ref() {
                 Some(any_arc) => any_arc
                     .downcast_ref::<crate::telemetry::TelemetryStats>()
-                    .map(|stats| stats.io_byte_stats())
+                    .map(|stats| stats.read_write_stats())
                     .unwrap_or_default(),
                 None => ReadWriteStats::default(),
             }

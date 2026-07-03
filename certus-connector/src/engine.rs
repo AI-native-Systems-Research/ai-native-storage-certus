@@ -339,8 +339,8 @@ impl EngineInner {
     /// write_latency_ns_sum)`. Latency sums divided by the matching op count give
     /// mean per-direction latency. Zero unless the block devices were built with
     /// the `telemetry` feature.
-    pub fn io_byte_stats(&self) -> (u64, u64, u64, u64, u64, u64) {
-        let s = self.dispatcher.io_byte_stats();
+    pub fn read_write_stats(&self) -> (u64, u64, u64, u64, u64, u64) {
+        let s = self.dispatcher.read_write_stats();
         (
             s.read_ops,
             s.read_bytes,

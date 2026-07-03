@@ -339,7 +339,7 @@ impl IBlockDevice for BlockDeviceFilesysComponent {
         }
     }
 
-    fn io_byte_stats(&self) -> interfaces::ReadWriteStats {
+    fn read_write_stats(&self) -> interfaces::ReadWriteStats {
         // This backend does not track per-direction byte/op counters.
         interfaces::ReadWriteStats::default()
     }
