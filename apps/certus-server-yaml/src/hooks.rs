@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use interfaces::{
-    DmaAllocFn, DmaBuffer, DispatcherConfig, IDispatchMap, IDispatcher, IGpuServices, IMemoryTier,
+    DispatcherConfig, IDispatchMap, IDispatcher, IGpuServices, IMemoryTier,
 };
 
 use crate::config::StackConfig;
@@ -87,10 +87,6 @@ pub fn init_dispatch_map(
     iface: &Arc<dyn IDispatchMap + Send + Sync>,
     _config: &StackConfig,
 ) -> Result<(), String> {
-    let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
-        DmaBuffer::new(size, align, None).map_err(|e| e.to_string())
-    });
-    iface.set_dma_alloc(dma_alloc);
     iface
         .initialize()
         .map_err(|e| format!("DispatchMap init failed: {e}"))

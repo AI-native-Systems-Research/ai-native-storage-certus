@@ -1,4 +1,4 @@
-//! Background write worker for staging-to-SSD persistence and SSD eviction.
+//! Background write worker for memory-tier-to-SSD persistence and SSD eviction.
 
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use interfaces::{CacheKey, IDispatchMap, IExtentManager, ILogger, IMemoryTier, LookupResult};
 
-/// A job for the background writer to persist a staging buffer to SSD.
+/// A job for the background writer to persist a memory-tier entry to SSD.
 #[derive(Debug)]
 pub struct WriteJob {
     /// Cache key identifying the entry.
