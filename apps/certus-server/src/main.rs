@@ -16,7 +16,7 @@ use tonic::transport::{Identity, Server, ServerTlsConfig};
 
 use component_core::query_interface;
 use interfaces::{
-    DmaAllocFn, DmaBuffer, DispatcherConfig, IDispatchMap, IDispatcher, IEvictionPolicy,
+    DispatcherConfig, IDispatchMap, IDispatcher, IEvictionPolicy,
     IGpuServices, ILogger, IMemoryTier, IRemoteLookup, PciAddress,
 };
 
@@ -204,10 +204,6 @@ fn initialize_component_stack(
 
     let dm: Arc<dyn IDispatchMap + Send + Sync> =
         query_interface!(dm_comp, IDispatchMap).ok_or("failed to query IDispatchMap")?;
-    let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
-        DmaBuffer::new(size, align, None).map_err(|e| e.to_string())
-    });
-    dm.set_dma_alloc(dma_alloc);
     dm.initialize()
         .map_err(|e| format!("DispatchMap init failed: {e}"))?;
 

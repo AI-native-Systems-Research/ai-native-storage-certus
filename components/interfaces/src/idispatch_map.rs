@@ -13,11 +13,6 @@ pub enum LookupResult {
     NotExist,
     /// Key found but the requested size does not match the stored size.
     MismatchSize,
-    /// Data is in a DMA staging buffer.
-    Staging {
-        /// Shared reference to the DMA buffer.
-        buffer: std::sync::Arc<crate::spdk_types::DmaBuffer>,
-    },
     /// Data has been committed to a block device.
     BlockDevice {
         /// Byte offset on the block device.
@@ -33,8 +28,7 @@ pub enum LookupResult {
 }
 
 // SAFETY: The pointer in MemoryTier refers to memory in the memory-tier pool,
-// which is thread-safe (mmap'd region protected by dispatch-map mutex). The
-// Arc<DmaBuffer> in Staging is already Send+Sync via its own impls.
+// which is thread-safe (mmap'd region protected by dispatch-map mutex).
 #[cfg(feature = "spdk")]
 unsafe impl Send for LookupResult {}
 #[cfg(feature = "spdk")]
@@ -97,8 +91,8 @@ impl std::error::Error for DispatchMapError {}
 // - P4 (downgrade-requires-write): downgrade_reference fails without active write ref
 // - P5 (downgrade-conservation): downgrade preserves total ref count (write+read constant)
 // - P6 (remove-zero-refs): remove fails if any read or write references are active
-// - P7 (create-no-duplicates): create_staging / create_memory_tier_entry reject existing keys
-// - P8 (size-nonzero): create_staging / create_memory_tier_entry reject size == 0
+// - P7 (create-no-duplicates): create_memory_tier_entry rejects existing keys
+// - P8 (size-nonzero): create_memory_tier_entry rejects size == 0
 // - P9 (lookup-increments-read): successful lookup increments read_ref by exactly 1
 // - P10 (convert-requires-ssd-offset): convert_memory_tier_to_block requires ssd_offset present
 //
@@ -107,22 +101,8 @@ impl std::error::Error for DispatchMapError {}
 #[cfg(feature = "spdk")]
 component_macros::define_interface! {
     pub IDispatchMap {
-        /// Set the DMA buffer allocator used by `create_staging`.
-        fn set_dma_alloc(&self, alloc: crate::spdk_types::DmaAllocFn);
-
         /// Recover committed extents from the bound `IExtentManager`.
         fn initialize(&self) -> Result<(), DispatchMapError>;
-
-        /// Allocate a DMA staging buffer for `key` with `size` 4KiB blocks.
-        ///
-        /// # Verified: P7 (create-no-duplicates), P8 (size-nonzero)
-        /// Returns AlreadyExists if key is present. Returns InvalidSize if size == 0.
-        /// On success, sets write_ref=1 (implicit write lock for the creator).
-        fn create_staging(
-            &self,
-            key: CacheKey,
-            size: u32,
-        ) -> Result<std::sync::Arc<crate::spdk_types::DmaBuffer>, DispatchMapError>;
 
         /// Look up `key`, blocking if a writer is active.
         ///
@@ -136,7 +116,7 @@ component_macros::define_interface! {
         /// Suggested technique: Spin model or Loom test.
         fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError>;
 
-        /// Transition a staging entry to a block-device location.
+        /// Transition a memory-tier entry to a block-device location.
         ///
         /// # Unchecked: Also decrements read_ref by 1
         /// Implementation atomically converts location AND decrements read_ref.
@@ -214,7 +194,7 @@ component_macros::define_interface! {
 
         /// Create an entry for a key with a memory-tier location.
         ///
-        /// Acquires a write reference (same semantics as `create_staging`).
+        /// Acquires a write reference.
         ///
         /// # Verified: P7 (create-no-duplicates), P8 (size-nonzero)
         /// Returns AlreadyExists if key present. Returns InvalidSize if size == 0.
@@ -250,7 +230,7 @@ component_macros::define_interface! {
         /// Insert a recovered extent as a BlockDevice entry.
         ///
         /// Used during recovery to rebuild the dispatch map from persisted
-        /// extents without allocating staging buffers.
+        /// extents without allocating DMA buffers.
         ///
         /// # Verified: P7 (create-no-duplicates)
         /// Returns AlreadyExists if key is already present.

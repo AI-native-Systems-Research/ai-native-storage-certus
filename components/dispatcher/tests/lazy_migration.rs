@@ -1,7 +1,7 @@
-//! Integration tests for lazy migration of staging buffers to SSD/NVMe.
+//! Integration tests for lazy migration of memory-tier entries to SSD/NVMe.
 //!
 //! Verifies that after `populate()`, the background writer migrates entries
-//! from staging (DMA buffer) to block-device state, and that subsequent
+//! from memory-tier to block-device state, and that subsequent
 //! lookups and checks still succeed on migrated entries.
 
 use std::collections::HashMap;
@@ -11,7 +11,7 @@ use std::thread;
 use component_core::query_interface;
 use dispatcher::DispatcherComponent;
 use interfaces::{
-    CacheKey, DispatchMapError, DispatcherConfig, DmaAllocFn, DmaBuffer, GpuDeviceInfo,
+    CacheKey, DispatchMapError, DispatcherConfig, DmaBuffer, GpuDeviceInfo,
     GpuDmaBuffer, GpuIpcHandle, GpuStream, IDispatchMap, IDispatcher, IGpuServices, ILogger,
     IMemoryTier, IpcHandle, LookupResult, MemoryTierError,
 };
@@ -20,22 +20,7 @@ use interfaces::{
 // Mock infrastructure
 // ---------------------------------------------------------------------------
 
-unsafe extern "C" fn dma_free(ptr: *mut std::ffi::c_void) {
-    unsafe { libc::free(ptr) };
-}
-
-fn alloc_dma_buffer(size: usize) -> Arc<DmaBuffer> {
-    let sz = size.max(4096);
-    let aligned_sz = sz.next_multiple_of(4096);
-    let ptr = unsafe { libc::aligned_alloc(4096, aligned_sz) };
-    assert!(!ptr.is_null(), "aligned_alloc failed for {aligned_sz} bytes");
-    unsafe { std::ptr::write_bytes(ptr as *mut u8, 0, aligned_sz) };
-    let buf = unsafe { DmaBuffer::from_raw(ptr, aligned_sz, dma_free, -1) }.unwrap();
-    Arc::new(buf)
-}
-
 struct MockEntry {
-    buffer: Arc<DmaBuffer>,
     block_offset: Option<u64>,
     write_ref: bool,
     read_refs: u32,
@@ -74,28 +59,8 @@ impl MockDispatchMap {
 }
 
 impl IDispatchMap for MockDispatchMap {
-    fn set_dma_alloc(&self, _alloc: DmaAllocFn) {}
-
     fn initialize(&self) -> Result<(), DispatchMapError> {
         Ok(())
-    }
-
-    fn create_staging(&self, key: CacheKey, size: u32) -> Result<Arc<DmaBuffer>, DispatchMapError> {
-        let mut inner = self.inner.lock().unwrap();
-        if inner.entries.contains_key(&key) {
-            return Err(DispatchMapError::AlreadyExists(key));
-        }
-        let buffer = alloc_dma_buffer(size as usize * 4096);
-        inner.entries.insert(
-            key,
-            MockEntry {
-                buffer: Arc::clone(&buffer),
-                block_offset: None,
-                write_ref: true,
-                read_refs: 0,
-            },
-        );
-        Ok(buffer)
     }
 
     fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {
@@ -104,8 +69,9 @@ impl IDispatchMap for MockDispatchMap {
             None => Ok(LookupResult::NotExist),
             Some(entry) => match entry.block_offset {
                 Some(offset) => Ok(LookupResult::BlockDevice { offset }),
-                None => Ok(LookupResult::Staging {
-                    buffer: Arc::clone(&entry.buffer),
+                None => Ok(LookupResult::MemoryTier {
+                    pointer: std::ptr::null_mut(),
+                    size: 0,
                 }),
             },
         }
@@ -223,7 +189,6 @@ impl IDispatchMap for MockDispatchMap {
         inner.entries.insert(
             key,
             MockEntry {
-                buffer: alloc_dma_buffer(4096),
                 block_offset: None,
                 write_ref: true,
                 read_refs: 0,
@@ -561,14 +526,14 @@ fn make_handle(buf: &mut [u8]) -> IpcHandle {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn staging_entry_migrates_to_block_device_on_drain() {
+fn entry_migrates_to_block_device_on_drain() {
     let (c, dm) = setup();
     let d = query_interface!(c, IDispatcher).unwrap();
 
     let mut buf = vec![0u8; 4096];
     d.populate(1, make_handle(&mut buf)).unwrap();
 
-    assert_eq!(dm.migrated_count(), 0, "should still be in staging before drain");
+    assert_eq!(dm.migrated_count(), 0, "should not be migrated");
 
     d.shutdown().unwrap();
 

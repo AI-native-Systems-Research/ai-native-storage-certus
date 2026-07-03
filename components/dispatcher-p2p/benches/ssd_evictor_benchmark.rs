@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use interfaces::{
-    CacheKey, DispatchMapError, DmaAllocFn, DmaBuffer, IDispatchMap, IMemoryTier, LookupResult,
+    CacheKey, DispatchMapError, IDispatchMap, IMemoryTier, LookupResult,
     MemoryTierError,
 };
 
@@ -37,18 +37,8 @@ impl EvictorBenchMap {
 }
 
 impl IDispatchMap for EvictorBenchMap {
-    fn set_dma_alloc(&self, _alloc: DmaAllocFn) {}
-
     fn initialize(&self) -> Result<(), DispatchMapError> {
         Ok(())
-    }
-
-    fn create_staging(
-        &self,
-        _key: CacheKey,
-        _size: u32,
-    ) -> Result<Arc<DmaBuffer>, DispatchMapError> {
-        unimplemented!("not used in evictor benchmark")
     }
 
     fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {

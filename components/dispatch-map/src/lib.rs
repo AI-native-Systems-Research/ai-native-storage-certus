@@ -1,8 +1,8 @@
 //! DispatchMap component for the Certus storage system.
 //!
-//! Maps extent keys ([`CacheKey`]) to their current location — either an
-//! in-memory DMA staging buffer or a block-device offset — with
-//! readers-writer reference counting for concurrent access.
+//! Maps extent keys ([`CacheKey`]) to their current location — either a
+//! memory-tier pointer or a block-device offset — with readers-writer
+//! reference counting for concurrent access.
 //!
 //! Provides the [`IDispatchMap`] interface with receptacles for [`ILogger`]
 //! and [`IExtentManager`].
@@ -17,15 +17,14 @@ pub fn entry_size() -> usize {
     std::mem::size_of::<entry::DispatchEntry>()
 }
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use component_framework::define_component;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_millis(2000);
 use interfaces::{
-    CacheKey, DispatchMapError, DmaAllocFn, DmaBuffer, IDispatchMap, IEvictionPolicy,
-    IExtentManager, ILogger, LookupResult,
+    CacheKey, DispatchMapError, IDispatchMap, IEvictionPolicy, IExtentManager, ILogger,
+    LookupResult,
 };
 
 use crate::entry::{DispatchEntry, Location};
@@ -60,13 +59,6 @@ impl DispatchMapComponent {
 }
 
 impl IDispatchMap for DispatchMapComponent {
-    fn set_dma_alloc(&self, alloc: DmaAllocFn) {
-        let mut dma = self.state.dma_alloc.lock().unwrap();
-        *dma = Some(alloc);
-        if let Ok(logger) = self.logger.get() {
-            logger.info("dispatch-map: DMA allocator set");
-        }
-    }
 
     /// Recover dispatch map state from the extent manager's persisted extents.
     /// Each extent is re-inserted as a BlockDevice location with zero reference
@@ -118,51 +110,6 @@ impl IDispatchMap for DispatchMapComponent {
         Ok(())
     }
 
-    fn create_staging(&self, key: CacheKey, size: u32) -> Result<Arc<DmaBuffer>, DispatchMapError> {
-        if size == 0 {
-            return Err(DispatchMapError::InvalidSize);
-        }
-
-        let alloc_fn = {
-            let dma = self.state.dma_alloc.lock().unwrap();
-            dma.clone()
-                .ok_or_else(|| DispatchMapError::NotInitialized("DMA allocator not set".into()))?
-        };
-
-        let pool_id = self.get_pool_id();
-        let ep = self.eviction_policy.get().unwrap();
-
-        let mut inner = self.state.inner.lock().unwrap();
-        if inner.entries.contains_key(&key) {
-            return Err(DispatchMapError::AlreadyExists(key));
-        }
-
-        let byte_size = size as usize * 4096;
-        let buf = alloc_fn(byte_size, 4096, None).map_err(DispatchMapError::AllocationFailed)?;
-        let buffer = Arc::new(buf);
-
-        let eviction_handle = ep.track(pool_id, key).unwrap();
-        let entry = DispatchEntry {
-            location: Location::Staging {
-                buffer: Arc::clone(&buffer),
-            },
-            size_blocks: size,
-            read_ref: 0,
-            write_ref: 1,
-            eviction_handle,
-        };
-
-        inner.entries.insert(key, entry);
-
-        if let Ok(logger) = self.logger.get() {
-            logger.debug(&format!(
-                "dispatch-map: created staging for key {key}, size {size} blocks"
-            ));
-        }
-
-        Ok(buffer)
-    }
-
     fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {
         let satisfied = self
             .state
@@ -188,9 +135,6 @@ impl IDispatchMap for DispatchMapComponent {
         let handle = entry.eviction_handle;
 
         let result = match &entry.location {
-            Location::Staging { buffer } => LookupResult::Staging {
-                buffer: Arc::clone(buffer),
-            },
             Location::BlockDevice { offset } => LookupResult::BlockDevice { offset: *offset },
             Location::MemoryTier { pointer, size, .. } => LookupResult::MemoryTier {
                 pointer: *pointer,
@@ -218,9 +162,6 @@ impl IDispatchMap for DispatchMapComponent {
             .ok_or(DispatchMapError::KeyNotFound(key))?;
 
         match &mut entry.location {
-            Location::Staging { .. } => {
-                entry.location = Location::BlockDevice { offset };
-            }
             Location::MemoryTier { ssd_offset, .. } => {
                 *ssd_offset = Some(offset);
             }
@@ -545,42 +486,8 @@ impl IDispatchMap for DispatchMapComponent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use component_core::query_interface;
-
-    fn mock_dma_alloc() -> DmaAllocFn {
-        Arc::new(|size, _align, _numa| {
-            let layout = std::alloc::Layout::from_size_align(size, 4096).unwrap();
-            // SAFETY: Test-only allocation with valid layout.
-            let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
-            if ptr.is_null() {
-                return Err("allocation failed".into());
-            }
-            // SAFETY: ptr is valid heap memory from alloc_zeroed with matching layout.
-            unsafe {
-                DmaBuffer::from_raw(
-                    ptr as *mut std::ffi::c_void,
-                    size,
-                    mock_free as unsafe extern "C" fn(*mut std::ffi::c_void),
-                    -1,
-                )
-            }
-            .map_err(|e| e.to_string())
-        })
-    }
-
-    unsafe extern "C" fn mock_free(ptr: *mut std::ffi::c_void) {
-        if !ptr.is_null() {
-            // SAFETY: ptr was allocated with alloc_zeroed in mock_dma_alloc with 4096 alignment.
-            // We use a size of 1 here because global alloc doesn't track size; this is
-            // test-only code and the OS reclaims the full allocation.
-            unsafe {
-                std::alloc::dealloc(
-                    ptr as *mut u8,
-                    std::alloc::Layout::from_size_align_unchecked(1, 1),
-                );
-            }
-        }
-    }
 
     fn setup_component() -> Arc<DispatchMapComponent> {
         let ep_comp = eviction_policy_lru::EvictionPolicyLruComponent::new_default();
@@ -589,9 +496,13 @@ mod tests {
 
         let c = DispatchMapComponent::new(DispatchMapState::new());
         c.eviction_policy.connect(ep).unwrap();
-        let dm = query_interface!(c, IDispatchMap).unwrap();
-        dm.set_dma_alloc(mock_dma_alloc());
         c
+    }
+
+    /// Helper: create a memory-tier entry (replaces the old create_staging test helper).
+    fn create_entry(dm: &Arc<dyn IDispatchMap + Send + Sync>, key: CacheKey) {
+        let ptr = Box::into_raw(vec![0u8; 4096].into_boxed_slice()) as *mut u8;
+        dm.create_memory_tier_entry(key, ptr, 4096).unwrap();
     }
 
     // --- US4: Reference counting ---
@@ -600,10 +511,9 @@ mod tests {
     fn take_read_increments_ref() {
         let c = setup_component();
         let dm = query_interface!(c, IDispatchMap).unwrap();
-        let _ = dm.create_staging(1, 1).unwrap();
+        create_entry(&dm, 1);
         dm.release_write(1).unwrap();
         dm.take_read(1).unwrap();
-        // read_ref should be 1
         dm.release_read(1).unwrap();
     }
 
@@ -611,10 +521,9 @@ mod tests {
     fn take_write_blocks_on_readers() {
         let c = setup_component();
         let dm = query_interface!(c, IDispatchMap).unwrap();
-        let _ = dm.create_staging(1, 1).unwrap();
+        create_entry(&dm, 1);
         dm.release_write(1).unwrap();
         dm.take_read(1).unwrap();
-        // write should timeout because read_ref > 0
         let err = dm.take_write(1);
         assert!(matches!(err, Err(DispatchMapError::Timeout(1))));
         dm.release_read(1).unwrap();
@@ -624,7 +533,7 @@ mod tests {
     fn release_read_underflow() {
         let c = setup_component();
         let dm = query_interface!(c, IDispatchMap).unwrap();
-        let _ = dm.create_staging(1, 1).unwrap();
+        create_entry(&dm, 1);
         dm.release_write(1).unwrap();
         let err = dm.release_read(1);
         assert!(matches!(err, Err(DispatchMapError::RefCountUnderflow(1))));
@@ -634,7 +543,7 @@ mod tests {
     fn release_write_underflow() {
         let c = setup_component();
         let dm = query_interface!(c, IDispatchMap).unwrap();
-        let _ = dm.create_staging(1, 1).unwrap();
+        create_entry(&dm, 1);
         dm.release_write(1).unwrap();
         let err = dm.release_write(1);
         assert!(matches!(err, Err(DispatchMapError::RefCountUnderflow(1))));
@@ -644,9 +553,8 @@ mod tests {
     fn downgrade_reference_happy_path() {
         let c = setup_component();
         let dm = query_interface!(c, IDispatchMap).unwrap();
-        let _ = dm.create_staging(1, 1).unwrap();
+        create_entry(&dm, 1);
         dm.downgrade_reference(1).unwrap();
-        // now read_ref=1, write_ref=0; release the read
         dm.release_read(1).unwrap();
     }
 
@@ -654,37 +562,10 @@ mod tests {
     fn downgrade_without_write_ref() {
         let c = setup_component();
         let dm = query_interface!(c, IDispatchMap).unwrap();
-        let _ = dm.create_staging(1, 1).unwrap();
+        create_entry(&dm, 1);
         dm.release_write(1).unwrap();
         let err = dm.downgrade_reference(1);
         assert!(matches!(err, Err(DispatchMapError::NoWriteReference(1))));
-    }
-
-    // --- US1: Staging ---
-
-    #[test]
-    fn create_staging_happy_path() {
-        let c = setup_component();
-        let dm = query_interface!(c, IDispatchMap).unwrap();
-        let buf = dm.create_staging(42, 4).unwrap();
-        assert_eq!(buf.len(), 4 * 4096);
-    }
-
-    #[test]
-    fn create_staging_size_zero() {
-        let c = setup_component();
-        let dm = query_interface!(c, IDispatchMap).unwrap();
-        let err = dm.create_staging(1, 0);
-        assert!(matches!(err, Err(DispatchMapError::InvalidSize)));
-    }
-
-    #[test]
-    fn create_staging_duplicate_key() {
-        let c = setup_component();
-        let dm = query_interface!(c, IDispatchMap).unwrap();
-        let _ = dm.create_staging(1, 1).unwrap();
-        let err = dm.create_staging(1, 1);
-        assert!(matches!(err, Err(DispatchMapError::AlreadyExists(1))));
     }
 
     // --- US2: Lookup ---
@@ -698,18 +579,20 @@ mod tests {
     }
 
     #[test]
-    fn lookup_staging() {
+    fn lookup_memory_tier() {
         let c = setup_component();
         let dm = query_interface!(c, IDispatchMap).unwrap();
-        let buf = dm.create_staging(1, 2).unwrap();
+        let mut buf = [0u8; 8192];
+        dm.create_memory_tier_entry(1, buf.as_mut_ptr(), 8192)
+            .unwrap();
         dm.release_write(1).unwrap();
         let result = dm.lookup(1).unwrap();
         match result {
-            LookupResult::Staging { buffer } => {
-                assert_eq!(buffer.as_ptr(), buf.as_ptr());
-                assert_eq!(buffer.len(), 2 * 4096);
+            LookupResult::MemoryTier { pointer, size } => {
+                assert_eq!(pointer, buf.as_mut_ptr());
+                assert_eq!(size, 8192);
             }
-            _ => panic!("expected Staging"),
+            _ => panic!("expected MemoryTier"),
         }
         dm.release_read(1).unwrap();
     }
@@ -718,10 +601,11 @@ mod tests {
     fn lookup_block_device() {
         let c = setup_component();
         let dm = query_interface!(c, IDispatchMap).unwrap();
-        let _ = dm.create_staging(1, 1).unwrap();
+        create_entry(&dm, 1);
+        dm.convert_to_storage(1, 8192).unwrap();
         dm.release_write(1).unwrap();
         dm.take_write(1).unwrap();
-        dm.convert_to_storage(1, 8192).unwrap();
+        dm.convert_memory_tier_to_block(1).unwrap();
         dm.release_write(1).unwrap();
         let result = dm.lookup(1).unwrap();
         match result {
@@ -739,7 +623,7 @@ mod tests {
     fn convert_to_storage_happy_path() {
         let c = setup_component();
         let dm = query_interface!(c, IDispatchMap).unwrap();
-        let _ = dm.create_staging(1, 1).unwrap();
+        create_entry(&dm, 1);
         dm.convert_to_storage(1, 4096).unwrap();
     }
 
@@ -752,11 +636,14 @@ mod tests {
     }
 
     #[test]
-    fn convert_to_storage_already_converted() {
+    fn convert_to_storage_already_block_device() {
         let c = setup_component();
         let dm = query_interface!(c, IDispatchMap).unwrap();
-        let _ = dm.create_staging(1, 1).unwrap();
+        create_entry(&dm, 1);
         dm.convert_to_storage(1, 4096).unwrap();
+        dm.release_write(1).unwrap();
+        dm.take_write(1).unwrap();
+        dm.convert_memory_tier_to_block(1).unwrap();
         let err = dm.convert_to_storage(1, 8192);
         assert!(matches!(err, Err(DispatchMapError::InvalidState(_))));
     }
@@ -767,7 +654,7 @@ mod tests {
     fn remove_happy_path() {
         let c = setup_component();
         let dm = query_interface!(c, IDispatchMap).unwrap();
-        let _ = dm.create_staging(1, 1).unwrap();
+        create_entry(&dm, 1);
         dm.release_write(1).unwrap();
         dm.remove(1).unwrap();
         let result = dm.lookup(1).unwrap();
@@ -778,7 +665,7 @@ mod tests {
     fn remove_active_references() {
         let c = setup_component();
         let dm = query_interface!(c, IDispatchMap).unwrap();
-        let _ = dm.create_staging(1, 1).unwrap();
+        create_entry(&dm, 1);
         let err = dm.remove(1);
         assert!(matches!(err, Err(DispatchMapError::ActiveReferences(1))));
     }
@@ -804,24 +691,23 @@ mod tests {
     fn oldest_keys_fewer_than_n() {
         let c = setup_component();
         let dm = query_interface!(c, IDispatchMap).unwrap();
-        let _ = dm.create_staging(10, 1).unwrap();
-        let _ = dm.create_staging(20, 1).unwrap();
+        create_entry(&dm, 10);
+        create_entry(&dm, 11);
         let keys = dm.oldest_keys(5);
         assert_eq!(keys.len(), 2);
         assert!(keys.contains(&10));
-        assert!(keys.contains(&20));
+        assert!(keys.contains(&11));
     }
 
     #[test]
     fn oldest_keys_respects_creation_order() {
         let c = setup_component();
         let dm = query_interface!(c, IDispatchMap).unwrap();
-        let _ = dm.create_staging(1, 1).unwrap();
-        let _ = dm.create_staging(2, 1).unwrap();
-        let _ = dm.create_staging(3, 1).unwrap();
+        create_entry(&dm, 1);
+        create_entry(&dm, 2);
+        create_entry(&dm, 3);
         let keys = dm.oldest_keys(2);
         assert_eq!(keys.len(), 2);
-        // Keys created first have lower TSC, so they should appear first.
         assert_eq!(keys[0], 1);
         assert_eq!(keys[1], 2);
     }
@@ -830,20 +716,18 @@ mod tests {
     fn oldest_keys_lookup_updates_timestamp() {
         let c = setup_component();
         let dm = query_interface!(c, IDispatchMap).unwrap();
-        let _ = dm.create_staging(1, 1).unwrap();
+        create_entry(&dm, 1);
         dm.release_write(1).unwrap();
-        let _ = dm.create_staging(2, 1).unwrap();
+        create_entry(&dm, 2);
         dm.release_write(2).unwrap();
-        let _ = dm.create_staging(3, 1).unwrap();
+        create_entry(&dm, 3);
         dm.release_write(3).unwrap();
 
-        // Touch key 1 via lookup — its TSC should now be newest.
         let _ = dm.lookup(1).unwrap();
         dm.release_read(1).unwrap();
 
         let keys = dm.oldest_keys(2);
         assert_eq!(keys.len(), 2);
-        // Key 1 was refreshed, so 2 and 3 are the oldest.
         assert!(keys.contains(&2));
         assert!(keys.contains(&3));
         assert!(!keys.contains(&1));
