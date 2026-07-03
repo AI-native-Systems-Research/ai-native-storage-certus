@@ -65,7 +65,6 @@ pub mod metrics;
 pub mod pipeline;
 
 use parking_lot::RwLock;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -75,7 +74,7 @@ use interfaces::{
     CacheKey, ClientChannels, Command, Completion, DispatcherConfig, DispatcherError, DmaAllocFn,
     DmaBuffer, FormatParams, GpuStream, IBlockDevice, IBlockDeviceAdmin, IDispatchMap, IDispatcher,
     IExtentManager, IGpuServices, ILogger, IMemoryTier, IRemoteLookup, IpcHandle, LookupResult,
-    PciAddress, WriteHandle,
+    PciAddress,
 };
 
 use component_core::binding::bind;
@@ -83,22 +82,6 @@ use spdk_env::ISPDKEnv;
 
 use crate::background::{BackgroundEvictor, EvictorConfig, ParallelBackgroundWriter, WriteJob};
 pub use crate::metrics::PipelineMetrics;
-
-/// A pending store awaiting commit or cancel.
-///
-/// Created by `prepare_store` and consumed by either `commit_store` (writes
-/// the buffer to SSD and publishes the extent) or `cancel_store` (drops the
-/// handle, which auto-aborts the reservation).
-struct PendingWrite {
-    /// Extent reservation handle; calling `publish()` commits, dropping aborts.
-    write_handle: WriteHandle,
-    /// DMA buffer the caller writes data into between prepare and commit.
-    buffer: Arc<DmaBuffer>,
-    /// Original (unaligned) data size in bytes.
-    size: u32,
-    /// Index into `data_drives` identifying the target SSD.
-    drive_idx: usize,
-}
 
 /// Holds one (block-device, extent-manager) pair for a data drive.
 #[allow(dead_code)]
@@ -162,7 +145,6 @@ define_component! {
             bg_writer: Mutex<Option<ParallelBackgroundWriter>>,
             bg_evictor: Mutex<Option<BackgroundEvictor>>,
             data_drives: RwLock<Vec<DataDrive>>,
-            pending_writes: Mutex<HashMap<CacheKey, PendingWrite>>,
             pipeline_ring: RwLock<Option<pipeline::PipelineRing>>,
             warm_stream: AtomicU64,
             block_device_factory: Mutex<Option<BlockDeviceFactory>>,
@@ -171,10 +153,6 @@ define_component! {
             pipeline_metrics: RwLock<Option<Arc<dyn PipelineMetrics>>>,
         },
     }
-}
-
-unsafe extern "C" fn libc_free(ptr: *mut std::ffi::c_void) {
-    unsafe { libc::free(ptr) };
 }
 
 /// No-op free function for temporary DmaBuffer wrappers around memory-tier pointers.
@@ -1215,8 +1193,6 @@ impl IDispatcher for DispatcherComponent {
             writer.shutdown();
         }
 
-        self.pending_writes.lock().unwrap().clear();
-
         // Checkpoint all extent managers to persist metadata before teardown.
         {
             let drives = self.data_drives.read();
@@ -1306,7 +1282,7 @@ impl IDispatcher for DispatcherComponent {
     /// 1. **Classification loop**: for each key, query dispatch-map:
     ///    - MemoryTier hit → issue async H2D DMA (round-robin across 4 streams)
     ///    - BlockDevice hit → collect into cold_entries for phase 2
-    ///    - NotExist/Staging → handle inline
+    ///    - NotExist → handle inline
     ///    After the loop, synchronize all warm streams once.
     ///
     /// 2. **Cold promotion** (if any BlockDevice hits):
@@ -1432,21 +1408,6 @@ impl IDispatcher for DispatcherComponent {
                         }
                         let _ = dm.release_read(key);
                         deferred_touch_keys.push(key);
-                        results[i] = Some(res);
-                    }
-                    LookupResult::Staging { buffer } => {
-                        let res = gpu
-                            .dma_copy_to_device(
-                                &buffer,
-                                ipc_handle.address as *mut std::ffi::c_void,
-                                ipc_handle.size as usize,
-                            )
-                            .map_err(|e| {
-                                DispatcherError::IoError(format!(
-                                    "GPU DMA copy (staging→device) failed: {e}"
-                                ))
-                            });
-                        let _ = dm.release_read(key);
                         results[i] = Some(res);
                     }
                     LookupResult::BlockDevice { offset } => {
@@ -1849,20 +1810,6 @@ impl IDispatcher for DispatcherComponent {
                             Ok(null_stream)
                         }
                     }
-                    LookupResult::Staging { buffer } => {
-                        let copy_result = gpu.dma_copy_to_device(
-                            &buffer,
-                            ipc_handle.address as *mut std::ffi::c_void,
-                            ipc_handle.size as usize,
-                        );
-                        let _ = dm.release_read(key);
-                        copy_result.map_err(|e| {
-                            DispatcherError::IoError(format!(
-                                "GPU DMA copy (staging→device) failed: {e}"
-                            ))
-                        })?;
-                        Ok(null_stream)
-                    }
                     LookupResult::BlockDevice { offset } => {
                         let _ = dm.release_read(key);
                         self.promote_and_serve(key, offset, &ipc_handle, &gpu, &dm, &mt)?;
@@ -2127,173 +2074,6 @@ impl IDispatcher for DispatcherComponent {
         }
     }
 
-    fn prepare_store(&self, key: CacheKey, size: u32) -> Result<Arc<DmaBuffer>, DispatcherError> {
-        self.ensure_initialized()?;
-        self.log_info(&format!("dispatcher: prepare_store key={key} size={size}"));
-
-        if size == 0 {
-            return Err(DispatcherError::InvalidParameter("size must be > 0".into()));
-        }
-
-        let dm = self
-            .dispatch_map
-            .get()
-            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
-
-        // Register the key in the dispatch map (prevents duplicates, makes check() visible).
-        // Uses create_staging as a lightweight reservation for the direct-write path.
-        let _staging = dm.create_staging(key, 1).map_err(|e| match e {
-            interfaces::DispatchMapError::AlreadyExists(k) => DispatcherError::AlreadyExists(k),
-            other => DispatcherError::IoError(other.to_string()),
-        })?;
-
-        // Determine target drive and allocate extent.
-        let drives = self.data_drives.read();
-        let num_drives = drives.len().max(1);
-        let drive_idx = Self::drive_index(key, num_drives);
-
-        let (block_size, numa_node) = if let Some(drive) = drives.get(drive_idx) {
-            (
-                drive.block_dev_iface.block_size() as usize,
-                drive.block_dev_iface.numa_node(),
-            )
-        } else {
-            (4096, -1)
-        };
-
-        let extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>> =
-            drives.iter().map(|d| Arc::clone(&d.extent_mgr)).collect();
-        drop(drives);
-
-        let aligned_size = (size as usize).next_multiple_of(block_size);
-
-        // Reserve extent via extent manager (if available).
-        let write_handle = if let Some(em) = extent_mgrs.get(drive_idx) {
-            match em.reserve_extent(key, aligned_size as u32) {
-                Ok(wh) => Some(wh),
-                Err(e) => {
-                    let _ = dm.remove(key);
-                    return Err(DispatcherError::AllocationFailed(format!(
-                        "reserve_extent failed: {e}"
-                    )));
-                }
-            }
-        } else {
-            None
-        };
-
-        // Allocate DMA buffer for the caller to write into.
-        let buf = match DmaBuffer::new(aligned_size, block_size, Some(numa_node)) {
-            Ok(b) => b,
-            Err(_) => {
-                // Fallback for environments without SPDK DMA (e.g., staging-only mode).
-                let ptr = unsafe { libc::aligned_alloc(block_size, aligned_size) };
-                if ptr.is_null() {
-                    let _ = dm.remove(key);
-                    return Err(DispatcherError::AllocationFailed(
-                        "aligned_alloc failed".into(),
-                    ));
-                }
-                unsafe { std::ptr::write_bytes(ptr as *mut u8, 0, aligned_size) };
-                unsafe {
-                    DmaBuffer::from_raw(ptr, aligned_size, libc_free, -1).map_err(|e| {
-                        let _ = dm.remove(key);
-                        DispatcherError::AllocationFailed(format!(
-                            "DMA buffer from_raw failed: {e}"
-                        ))
-                    })?
-                }
-            }
-        };
-
-        let buf = Arc::new(buf);
-
-        // Store the pending write for later commit/cancel.
-        if let Some(wh) = write_handle {
-            self.pending_writes.lock().unwrap().insert(
-                key,
-                PendingWrite {
-                    write_handle: wh,
-                    buffer: Arc::clone(&buf),
-                    size,
-                    drive_idx,
-                },
-            );
-        }
-
-        Ok(buf)
-    }
-
-    fn commit_store(&self, key: CacheKey) -> Result<(), DispatcherError> {
-        self.ensure_initialized()?;
-        self.log_info(&format!("dispatcher: commit_store key={key}"));
-
-        let pending = self
-            .pending_writes
-            .lock()
-            .unwrap()
-            .remove(&key)
-            .ok_or(DispatcherError::KeyNotFound(key))?;
-
-        let drives = self.data_drives.read();
-        let drive = drives.get(pending.drive_idx).ok_or_else(|| {
-            DispatcherError::IoError("data drive not available for commit".into())
-        })?;
-
-        let block_size = drive.block_dev_iface.block_size() as usize;
-        let block_dev_iface = Arc::clone(&drive.block_dev_iface);
-        drop(drives);
-
-        let block_offset = pending.write_handle.extent_offset();
-        let start_lba = block_offset / block_size as u64;
-        let total_bytes = pending.size as usize;
-
-        Self::write_buffer_to_ssd(
-            &*block_dev_iface,
-            &pending.buffer,
-            start_lba,
-            total_bytes,
-            true,
-        )?;
-
-        // Data written — publish extent and register in dispatch map.
-        let _ = pending.write_handle.publish();
-
-        let dm = self
-            .dispatch_map
-            .get()
-            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
-
-        dm.convert_to_storage(key, block_offset)
-            .map_err(|e| DispatcherError::IoError(format!("convert_to_storage failed: {e}")))?;
-
-        let _ = dm.release_write(key);
-
-        Ok(())
-    }
-
-    fn cancel_store(&self, key: CacheKey) -> Result<(), DispatcherError> {
-        self.ensure_initialized()?;
-        self.log_info(&format!("dispatcher: cancel_store key={key}"));
-
-        self.pending_writes
-            .lock()
-            .unwrap()
-            .remove(&key)
-            .ok_or(DispatcherError::KeyNotFound(key))?;
-
-        // PendingWrite dropped here — WriteHandle::drop calls abort automatically.
-
-        // Remove the dispatch map entry created by prepare_store.
-        let dm = self
-            .dispatch_map
-            .get()
-            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
-        let _ = dm.remove(key);
-
-        Ok(())
-    }
-
     fn touch(&self, key: CacheKey) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
 
@@ -2345,10 +2125,6 @@ impl IDispatcher for DispatcherComponent {
                     let _ = dm.release_read(key);
                     let _ = dm.touch(key);
                     mt.touch(key);
-                }
-                Ok(LookupResult::Staging { .. }) => {
-                    let _ = dm.release_read(key);
-                    let _ = dm.touch(key);
                 }
                 _ => {}
             }
@@ -2510,31 +2286,13 @@ mod tests {
     use std::thread;
 
     use interfaces::{
-        CacheKey, DispatchMapError, DmaAllocFn, DmaBuffer, GpuDeviceInfo, GpuDmaBuffer,
+        CacheKey, DispatchMapError, DmaBuffer, GpuDeviceInfo, GpuDmaBuffer,
         GpuIpcHandle, GpuStream, IMemoryTier, LookupResult, MemoryTierError,
     };
 
     // -----------------------------------------------------------------------
     // Test infrastructure
     // -----------------------------------------------------------------------
-
-    unsafe extern "C" fn dma_free(ptr: *mut std::ffi::c_void) {
-        // SAFETY: ptr was allocated with libc::aligned_alloc in alloc_dma_buffer.
-        unsafe { libc::free(ptr) };
-    }
-
-    fn alloc_dma_buffer(size: usize) -> Arc<DmaBuffer> {
-        let sz = size.max(4096);
-        let aligned_sz = sz.next_multiple_of(4096);
-        let ptr = unsafe { libc::aligned_alloc(4096, aligned_sz) };
-        assert!(
-            !ptr.is_null(),
-            "aligned_alloc failed for {aligned_sz} bytes"
-        );
-        unsafe { std::ptr::write_bytes(ptr as *mut u8, 0, aligned_sz) };
-        let buf = unsafe { DmaBuffer::from_raw(ptr, aligned_sz, dma_free, -1) }.unwrap();
-        Arc::new(buf)
-    }
 
     // --- MockMemoryTier ---
 
@@ -2687,9 +2445,6 @@ mod tests {
     // --- MockDispatchMap ---
 
     enum MockEntryLocation {
-        Staging {
-            buffer: Arc<DmaBuffer>,
-        },
         MemoryTier {
             pointer: *mut u8,
             size: u32,
@@ -2747,33 +2502,8 @@ mod tests {
     }
 
     impl IDispatchMap for MockDispatchMap {
-        fn set_dma_alloc(&self, _alloc: DmaAllocFn) {}
-
         fn initialize(&self) -> Result<(), DispatchMapError> {
             Ok(())
-        }
-
-        fn create_staging(
-            &self,
-            key: CacheKey,
-            size: u32,
-        ) -> Result<Arc<DmaBuffer>, DispatchMapError> {
-            let mut inner = self.inner.lock().unwrap();
-            if inner.entries.contains_key(&key) {
-                return Err(DispatchMapError::AlreadyExists(key));
-            }
-            let buffer = alloc_dma_buffer(size as usize * 4096);
-            inner.entries.insert(
-                key,
-                MockEntry {
-                    location: MockEntryLocation::Staging {
-                        buffer: Arc::clone(&buffer),
-                    },
-                    write_ref: true,
-                    read_refs: 0,
-                },
-            );
-            Ok(buffer)
         }
 
         fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {
@@ -2784,9 +2514,6 @@ mod tests {
             match inner.entries.get(&key) {
                 None => Ok(LookupResult::NotExist),
                 Some(entry) => match &entry.location {
-                    MockEntryLocation::Staging { buffer } => Ok(LookupResult::Staging {
-                        buffer: Arc::clone(buffer),
-                    }),
                     MockEntryLocation::MemoryTier {
                         pointer,
                         size,
@@ -2812,13 +2539,6 @@ mod tests {
                     match &mut entry.location {
                         MockEntryLocation::MemoryTier { ssd_offset, .. } => {
                             *ssd_offset = Some(offset);
-                        }
-                        MockEntryLocation::Staging { .. } => {
-                            entry.location = MockEntryLocation::MemoryTier {
-                                pointer: std::ptr::null_mut(),
-                                size: 0,
-                                ssd_offset: Some(offset),
-                            };
                         }
                     }
                     Ok(())
@@ -3166,7 +2886,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
-            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3209,7 +2928,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
-            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3226,7 +2944,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
-            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3245,7 +2962,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
-            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3269,7 +2985,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
-            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3294,7 +3009,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
-            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3319,7 +3033,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
-            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3339,7 +3052,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
-            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3359,7 +3071,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
-            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3384,7 +3095,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
-            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3412,7 +3122,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
-            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3431,7 +3140,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
-            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3451,7 +3159,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
-            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3502,7 +3209,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
-            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3532,7 +3238,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
-            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3606,7 +3311,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
-            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3934,7 +3638,6 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
-            Mutex::new(HashMap::new()),
             RwLock::new(None),
             AtomicU64::new(0),
             Mutex::new(None),
@@ -3972,23 +3675,6 @@ mod tests {
         d.shutdown().unwrap();
     }
 
-    #[test]
-    fn prepare_store_returns_dma_buffer() {
-        let (c, _dm) = setup_initialized();
-        let d = query_interface!(c, IDispatcher).unwrap();
-
-        let dma_buf = d.prepare_store(99, 4096).unwrap();
-        assert!(dma_buf.len() >= 4096);
-
-        // The prepared key is visible via check().
-        assert!(d.check(99).unwrap());
-
-        // Duplicate prepare_store on the same key fails.
-        let err = d.prepare_store(99, 4096);
-        assert!(matches!(err, Err(DispatcherError::AlreadyExists(99))));
-
-        d.shutdown().unwrap();
-    }
 
     // -----------------------------------------------------------------------
     // Background SSD Evictor tests
