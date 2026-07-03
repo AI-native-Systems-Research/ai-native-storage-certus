@@ -96,6 +96,38 @@ def _reporter():
 
 _reporter_started = False
 
+# The real CertusEngine lives in the vLLM EngineCore worker PROCESS (the spec's
+# handlers are constructed there), not the driver process running the benchmark
+# loop. To let an out-of-process reader (e.g. run_multiturn_certus.py) sample
+# per-round SSD I/O, a thread in this worker process periodically writes the
+# engine's cumulative io_byte_stats() to a small file. Path via CERTUS_IOSTAT_FILE
+# (default /tmp/certus_iostat.txt). Line format: "read_ops read_bytes write_ops write_bytes".
+_ENGINE_REF = None
+
+
+def set_engine(engine):
+    """Register the CertusEngine so the iostat writer thread can sample it."""
+    global _ENGINE_REF
+    _ENGINE_REF = engine
+
+
+def _iostat_writer():
+    import os
+    path = os.environ.get("CERTUS_IOSTAT_FILE", "/tmp/certus_iostat.txt")
+    tmp = path + ".tmp"
+    while True:
+        time.sleep(0.5)
+        eng = _ENGINE_REF
+        if eng is None or not hasattr(eng, "io_byte_stats"):
+            continue
+        try:
+            rops, rb, wops, wb = eng.io_byte_stats()
+            with open(tmp, "w") as f:
+                f.write(f"{rops} {rb} {wops} {wb}\n")
+            os.replace(tmp, path)  # atomic publish
+        except Exception:
+            pass
+
 
 def start_reporter():
     global _reporter_started
@@ -104,3 +136,5 @@ def start_reporter():
     _reporter_started = True
     t = threading.Thread(target=_reporter, daemon=True, name="certus-instr")
     t.start()
+    w = threading.Thread(target=_iostat_writer, daemon=True, name="certus-iostat")
+    w.start()

@@ -594,6 +594,13 @@ component_macros::define_interface! {
         /// This is a liveness property on the background writer channel drain.
         /// Suggested technique: integration test with populate→flush→verify sequence.
         fn flush_to_ssd(&self) -> Result<usize, DispatcherError>;
+
+        /// Return cumulative SSD read/write byte and op counters, aggregated
+        /// across all data drives. Counters are monotonic for the life of the
+        /// dispatcher; take deltas across two calls to measure a window. Values
+        /// are all-zero unless the underlying block devices were built with
+        /// their `telemetry` feature enabled.
+        fn io_byte_stats(&self) -> crate::iblock_device::IoByteStats;
     }
 }
 

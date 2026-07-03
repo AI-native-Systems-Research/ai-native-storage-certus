@@ -149,6 +149,10 @@ impl IBlockDevice for MockBlockDevice {
             "mock does not support telemetry".into(),
         ))
     }
+
+    fn io_byte_stats(&self) -> interfaces::IoByteStats {
+        interfaces::IoByteStats::default()
+    }
 }
 
 fn process_command(cmd: Command, state: &Arc<Mutex<MockState>>, handle: OpHandle) -> Completion {

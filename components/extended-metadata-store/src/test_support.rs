@@ -219,6 +219,10 @@ impl IBlockDevice for MockBlockDevice {
             elapsed_secs: 0.0,
         })
     }
+
+    fn io_byte_stats(&self) -> interfaces::IoByteStats {
+        interfaces::IoByteStats::default()
+    }
 }
 
 // --- DMA allocation for tests (heap-based, no hugepages) ---

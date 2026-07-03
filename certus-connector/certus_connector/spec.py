@@ -94,10 +94,13 @@ class CertusOffloadingSpec(OffloadingSpec):
         kv_caches,
         attn_backends=None,
     ) -> Iterator[tuple[type[LoadStoreSpec], type[LoadStoreSpec], OffloadingHandler]]:
-        from certus_connector._instrument import start_reporter
+        from certus_connector._instrument import start_reporter, set_engine
         from certus_connector.handler import CompletionDispatcher
-        start_reporter()
         engine = self._get_engine()
+        # Register the engine so the iostat writer thread (in this worker process)
+        # can publish cumulative SSD io_byte_stats() for an out-of-process reader.
+        set_engine(engine)
+        start_reporter()
         if self._gpu_to_certus is None:
             # Extract GPU KV cache base pointer and set on engine.
             gpu_base_ptr, gpu_stride = self._extract_gpu_ptrs(kv_caches)

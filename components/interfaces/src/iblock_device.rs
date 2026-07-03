@@ -120,6 +120,50 @@ pub struct TelemetrySnapshot {
     pub elapsed_secs: f64,
 }
 
+/// Cumulative IO byte and operation counters, split by direction.
+///
+/// Unlike [`TelemetrySnapshot`] (which aggregates reads and writes into a
+/// single latency/throughput view), this separates read and write traffic so
+/// callers can account bytes-to/from-device per direction. Counters are
+/// monotonic for the life of the device; take deltas across two snapshots to
+/// measure a time window.
+///
+/// The `total_*` accessors return the read+write sum, matching the aggregate
+/// semantics of [`TelemetrySnapshot`].
+///
+/// # Examples
+///
+/// ```
+/// use interfaces::IoByteStats;
+///
+/// let s = IoByteStats { read_ops: 10, read_bytes: 4096, write_ops: 3, write_bytes: 1536 };
+/// assert_eq!(s.total_ops(), 13);
+/// assert_eq!(s.total_bytes(), 5632);
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct IoByteStats {
+    /// Number of completed read operations.
+    pub read_ops: u64,
+    /// Total bytes read from the device.
+    pub read_bytes: u64,
+    /// Number of completed write operations.
+    pub write_ops: u64,
+    /// Total bytes written to the device.
+    pub write_bytes: u64,
+}
+
+impl IoByteStats {
+    /// Total operations (reads + writes).
+    pub fn total_ops(&self) -> u64 {
+        self.read_ops + self.write_ops
+    }
+
+    /// Total bytes transferred (read + written).
+    pub fn total_bytes(&self) -> u64 {
+        self.read_bytes + self.write_bytes
+    }
+}
+
 // ---------------------------------------------------------------------------
 // OpHandle
 // ---------------------------------------------------------------------------
@@ -431,6 +475,11 @@ define_interface! {
 
         /// Return telemetry statistics (requires `telemetry` feature).
         fn telemetry(&self) -> Result<TelemetrySnapshot, NvmeBlockError>;
+
+        /// Return cumulative read/write byte and op counters (requires
+        /// `telemetry` feature). Returns all-zero [`IoByteStats`] when the
+        /// feature is disabled or the backend does not track per-direction IO.
+        fn io_byte_stats(&self) -> IoByteStats;
     }
 }
 

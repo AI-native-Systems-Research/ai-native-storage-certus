@@ -334,6 +334,14 @@ impl EngineInner {
         Ok(())
     }
 
+    /// Cumulative SSD I/O counters aggregated across all data drives:
+    /// `(read_ops, read_bytes, write_ops, write_bytes)`. Zero unless the block
+    /// devices were built with the `telemetry` feature.
+    pub fn io_byte_stats(&self) -> (u64, u64, u64, u64) {
+        let s = self.dispatcher.io_byte_stats();
+        (s.read_ops, s.read_bytes, s.write_ops, s.write_bytes)
+    }
+
     /// Pin blocks for reading and return DRAM pointers for H2D DMA.
     ///
     /// For MemoryTier keys: takes read_ref, returns pointer directly.

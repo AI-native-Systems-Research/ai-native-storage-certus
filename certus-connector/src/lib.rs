@@ -116,6 +116,14 @@ impl CertusEngine {
         self.inner.touch(&keys)
     }
 
+    /// Cumulative SSD I/O counters across all data drives, as
+    /// `(read_ops, read_bytes, write_ops, write_bytes)`. Monotonic; take deltas
+    /// for a per-round measurement. Zero unless certus_native was built with the
+    /// `telemetry` feature.
+    fn io_byte_stats(&self) -> (u64, u64, u64, u64) {
+        self.inner.io_byte_stats()
+    }
+
     // ─── Handler-level operations ───────────────────────────────────────
 
     /// Submit async GPU→DRAM→NVMe transfer.

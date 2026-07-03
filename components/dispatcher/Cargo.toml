@@ -25,6 +25,8 @@ default = ["spdk-backend"]
 spdk-backend = ["dep:block-device-spdk-nvme"]
 hardware-test = []
 pipeline-telemetry = []
+# Enable per-drive SSD read/write byte+op counters (IDispatcher::io_byte_stats).
+io-telemetry = ["block-device-spdk-nvme?/telemetry"]
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
