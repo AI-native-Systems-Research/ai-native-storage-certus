@@ -120,7 +120,7 @@ pub struct TelemetrySnapshot {
     pub elapsed_secs: f64,
 }
 
-/// Cumulative IO byte and operation counters, split by direction.
+/// Cumulative I/O byte, operation, and latency counters, split by direction.
 ///
 /// Unlike [`TelemetrySnapshot`] (which aggregates reads and writes into a
 /// single latency/throughput view), this separates read and write traffic so
