@@ -521,6 +521,61 @@ fn data_integrity_multi_block_patterns() {
 }
 
 #[test]
+fn async_tag_propagation() {
+    let (_comp, channels, _dir) = setup_component(4096, 256);
+
+    let write_data = vec![0xAB_u8; 4096];
+    let write_buf = alloc_dma_buffer_with_data(&write_data);
+    let write_buf_arc = Arc::new(write_buf);
+
+    channels
+        .command_tx
+        .send(Command::WriteAsync {
+            ns_id: 1,
+            lba: 5,
+            buf: write_buf_arc,
+            timeout_ms: 5000,
+            tag: 42,
+        })
+        .unwrap();
+
+    let completion = channels.completion_rx.recv().unwrap();
+    match completion {
+        Completion::WriteDone { tag, result, .. } => {
+            assert!(result.is_ok());
+            assert_eq!(tag, 42);
+        }
+        _ => panic!("expected WriteDone"),
+    }
+
+    let read_buf = alloc_dma_buffer(4096);
+    let read_buf_arc = Arc::new(Mutex::new(read_buf));
+
+    channels
+        .command_tx
+        .send(Command::ReadAsync {
+            ns_id: 1,
+            lba: 5,
+            buf: Arc::clone(&read_buf_arc),
+            timeout_ms: 5000,
+            tag: 99,
+        })
+        .unwrap();
+
+    let completion = channels.completion_rx.recv().unwrap();
+    match completion {
+        Completion::ReadDone { tag, result, .. } => {
+            assert!(result.is_ok());
+            assert_eq!(tag, 99);
+        }
+        _ => panic!("expected ReadDone"),
+    }
+
+    let guard = read_buf_arc.lock().unwrap();
+    assert_eq!(&guard.as_slice()[..4096], &write_data[..]);
+}
+
+#[test]
 fn component_provides_iblock_device() {
     use component_core::IUnknown;
 
