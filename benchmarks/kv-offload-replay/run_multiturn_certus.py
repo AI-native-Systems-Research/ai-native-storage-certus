@@ -41,21 +41,109 @@ if __name__ == "__main__":
     # Requires DPDK RTE_MAX_MEM_MB_PER_LIST raised to 64G (single alloc > 32G).
     # Keep in sync with CERTUS_HUGEPAGES in configure-bench.sh.
     DRAM_CACHE_BYTES = int(os.environ.get("DRAM_CACHE_BYTES", 47244640256))  # 44 GiB
+    # NVMe PCI addrs + NUMA node are env-overridable so the same script can bench
+    # on either node. Defaults are node 1 (GPU's node, historical). To bench on
+    # node 0 (everything-but-GPU on node 0, matching configure-bench.sh BENCH_NUMA=0):
+    #   DATA_PCI_ADDRS=0000:61:00.0,0000:62:00.0,0000:63:00.0,0000:64:00.0
+    #   METADATA_PCI_ADDR=0000:62:00.0  CERTUS_NUMA_NODE=0
+    DATA_PCI_ADDRS = os.environ.get(
+        "DATA_PCI_ADDRS",
+        "0000:c1:00.0,0000:c2:00.0,0000:c3:00.0,0000:c4:00.0").split(",")
+    METADATA_PCI_ADDR = os.environ.get("METADATA_PCI_ADDR", "0000:c2:00.0")
+    CERTUS_NUMA_NODE = int(os.environ.get("CERTUS_NUMA_NODE", 1))
+    print(f"[run] data_pci_addrs={DATA_PCI_ADDRS} metadata={METADATA_PCI_ADDR} "
+          f"numa_node={CERTUS_NUMA_NODE}", file=sys.stderr)
     KV_CONFIG = {
         "kv_connector": "OffloadingConnector",
         "kv_role": "kv_both",
         "kv_connector_extra_config": {
             "spec_name": "CertusOffloadingSpec",
             "spec_module_path": "certus_connector.spec",
-            "data_pci_addrs": ["0000:c1:00.0", "0000:c2:00.0",
-                               "0000:c3:00.0", "0000:c4:00.0"],
-            "metadata_pci_addr": "0000:c2:00.0",
+            "data_pci_addrs": DATA_PCI_ADDRS,
+            "metadata_pci_addr": METADATA_PCI_ADDR,
             "slab_size_bytes": 2097152,
             "dram_cache_bytes": DRAM_CACHE_BYTES,
             "io_queue_depth": 128,
-            "numa_node": 1,
+            "numa_node": CERTUS_NUMA_NODE,
         },
     }
+
+    def preflight():
+        """Verify the box is configured for the Certus bench before we spend
+        minutes loading a model into a mis-configured system. Fail fast and loud.
+        Configure with: sudo ./tools/configure-bench.sh certus (then REBOOT for
+        the 1G hugepage reservation). Skip with SKIP_PREFLIGHT=1.
+
+        Mirrors the SharedStorage script's preflight, but checks the certus
+        prerequisites: enough 1G hugepages on CERTUS_NUMA_NODE for the DRAM tier,
+        every data drive bound to vfio-pci, and no stale claims (SPDK locks / a
+        GPU-holding process) that would block SPDK startup."""
+        if os.environ.get("SKIP_PREFLIGHT"):
+            return
+        errs = []
+
+        # 1. Hugepages: the SPDK DRAM tier is a single spdk_zmalloc from the 1G
+        #    pool on CERTUS_NUMA_NODE. DPDK keeps ~3 pages for its own EAL heap +
+        #    per-drive DMA buffers, so we need dram_cache_bytes + overhead worth
+        #    of pages, all resident on the bench node. Runtime allocation of 1G
+        #    pages fails once RAM is fragmented — hence the reboot requirement.
+        DPDK_OVERHEAD_PAGES = 3
+        need_pages = -(-DRAM_CACHE_BYTES // (1024**3)) + DPDK_OVERHEAD_PAGES  # ceil
+        node_hp_path = (f"/sys/devices/system/node/node{CERTUS_NUMA_NODE}"
+                        f"/hugepages/hugepages-1048576kB/nr_hugepages")
+        node_free_path = (f"/sys/devices/system/node/node{CERTUS_NUMA_NODE}"
+                          f"/hugepages/hugepages-1048576kB/free_hugepages")
+        try:
+            with open(node_hp_path) as f:
+                node_hp = int(f.read())
+            with open(node_free_path) as f:
+                node_free = int(f.read())
+        except OSError:
+            node_hp = node_free = 0
+        if node_free < need_pages:
+            errs.append(
+                f"only {node_free} free 1G hugepages on node {CERTUS_NUMA_NODE} "
+                f"({node_hp} total) — DRAM tier of {DRAM_CACHE_BYTES/1024**3:.0f} "
+                f"GiB needs >= {need_pages}. Runtime alloc of 1G pages fails on a "
+                f"fragmented box; set hugepages=48 boot param and REBOOT "
+                f"(sudo ./tools/configure-bench.sh certus).")
+
+        # 2. Every data drive (and the metadata drive) must be bound to vfio-pci
+        #    for SPDK userspace access. If any is still on the nvme kernel driver
+        #    (e.g. left in the SharedStorage RAID), SPDK can't claim it.
+        want_vfio = set(DATA_PCI_ADDRS) | {METADATA_PCI_ADDR}
+        for bdf in sorted(want_vfio):
+            drv_link = f"/sys/bus/pci/devices/{bdf}/driver"
+            drv = os.path.basename(os.readlink(drv_link)) if os.path.islink(drv_link) else "none"
+            if drv != "vfio-pci":
+                errs.append(f"{bdf} bound to '{drv}', need vfio-pci "
+                            f"(run configure-bench.sh certus)")
+            else:
+                # NUMA sanity: the drive should live on the node we're pinning to.
+                try:
+                    with open(f"/sys/bus/pci/devices/{bdf}/numa_node") as f:
+                        dev_numa = int(f.read())
+                    if dev_numa != CERTUS_NUMA_NODE:
+                        errs.append(f"{bdf} on NUMA node {dev_numa}, but "
+                                    f"numa_node={CERTUS_NUMA_NODE} requested")
+                except (OSError, ValueError):
+                    pass
+
+        # 3. Stale SPDK per-device lock files block the device claim (Permission
+        #    denied) on the next startup if a prior run died without releasing.
+        stale = [f"/var/tmp/spdk_pci_lock_{bdf}" for bdf in sorted(want_vfio)
+                 if os.path.exists(f"/var/tmp/spdk_pci_lock_{bdf}")]
+        if stale:
+            errs.append(f"{len(stale)} stale SPDK lock file(s) — a dead run left "
+                        f"them; remove with: sudo rm -f {' '.join(stale)}")
+
+        if errs:
+            sys.exit("[preflight] NOT ready for certus:\n  - " + "\n  - ".join(errs))
+        print(f"[preflight] ok: {node_free} free 1G hugepages on node "
+              f"{CERTUS_NUMA_NODE}, {len(want_vfio)} drives on vfio-pci, no stale "
+              f"locks", file=sys.stderr, flush=True)
+
+    preflight()
 
     with open(SUBSET_PATH) as f:
         all_data = json.load(f)
