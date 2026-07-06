@@ -14,8 +14,9 @@ mod report;
 mod stats;
 mod worker;
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 use std::time::Instant;
 
 use clap::Parser;
@@ -24,7 +25,7 @@ use block_device_spdk_nvme::BlockDeviceSpdkNvmeComponent;
 use component_core::binding::bind;
 use component_core::iunknown::query;
 use component_core::numa::{set_thread_affinity, CpuSet, NumaTopology};
-use interfaces::{Command, Completion, IBlockDevice, NamespaceInfo, PciAddress};
+use interfaces::{Command, Completion, IBlockDevice, NamespaceInfo};
 use spdk_env::{SPDKEnvComponent, VfioDevice};
 
 use config::BenchConfig;
@@ -36,8 +37,6 @@ struct DeviceState {
     admin: Arc<dyn interfaces::IBlockDeviceAdmin + Send + Sync>,
     /// Block device interface.
     ibd: Arc<dyn IBlockDevice + Send + Sync>,
-    /// PCI address of this device.
-    pci_addr: PciAddress,
     /// PCI address as formatted string.
     pci_addr_str: String,
     /// Namespace information for this device.
@@ -50,7 +49,10 @@ fn main() {
     // --- Component wiring & SPDK init ---
     let spdk_env_comp = SPDKEnvComponent::new_default();
 
+    let spdk_init_start = Instant::now();
     let ienv = initialize_spdk(&spdk_env_comp);
+    let spdk_init_time = spdk_init_start.elapsed().as_secs_f64();
+    eprintln!("[timing] SPDK environment init: {:.3}s", spdk_init_time);
 
     // --- Enumerate devices ---
     let available_devices = ienv.devices();
@@ -93,13 +95,68 @@ fn main() {
         std::process::exit(2);
     }
 
-    // --- Initialize devices ---
+    // --- Initialize devices in parallel ---
+    let init_start = Instant::now();
+    let dev_count = selected_devices.len();
+    let mut init_results: Vec<Result<DeviceState, String>> = (0..dev_count)
+        .map(|_| Err("not initialized".into()))
+        .collect();
+
+    // Pre-discover NUMA CPUs so each device actor is pinned to a distinct core.
+    // We assume devices share NUMA node 0; if not, the actor will fall back to
+    // the component's default (first CPU of its own NUMA node).
+    let numa_actor_cpus: Vec<usize> = NumaTopology::discover()
+        .ok()
+        .and_then(|topo| topo.node(0).map(|n| n.cpus().iter().collect()))
+        .unwrap_or_default();
+    let actor_cpu_assignments: Vec<Option<usize>> = (0..dev_count)
+        .map(|i| {
+            if !numa_actor_cpus.is_empty() {
+                Some(numa_actor_cpus[i % numa_actor_cpus.len()])
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Each device gets its own BlockDeviceSpdkNvmeComponent and calls
+    // spdk_nvme_probe() concurrently. SPDK serialises internally if needed;
+    // we just overlap the latency across devices.
+    if dev_count > 1 {
+        let assigned: Vec<usize> = actor_cpu_assignments.iter().flatten().copied().collect();
+        eprintln!(
+            "[info] assigning actor CPUs {:?} across {} devices",
+            assigned, dev_count
+        );
+    }
+    std::thread::scope(|s| {
+        let handles: Vec<_> = selected_devices
+            .iter()
+            .enumerate()
+            .map(|(dev_idx, device)| {
+                let spdk_ref = &spdk_env_comp;
+                let actor_cpu = actor_cpu_assignments[dev_idx];
+                s.spawn(move || (dev_idx, initialize_device(spdk_ref, device, actor_cpu)))
+            })
+            .collect();
+        for handle in handles {
+            let (dev_idx, result) = handle.join().unwrap_or_else(|_| {
+                eprintln!("error: device init thread panicked");
+                std::process::exit(2);
+            });
+            init_results[dev_idx] = result;
+        }
+    });
+    eprintln!(
+        "[timing] Device init (parallel): {:.3}s",
+        init_start.elapsed().as_secs_f64()
+    );
+
     let mut device_states: Vec<DeviceState> = Vec::new();
-    for (dev_idx, device) in selected_devices.iter().enumerate() {
-        match initialize_device(&spdk_env_comp, device) {
+    for (dev_idx, result) in init_results.into_iter().enumerate() {
+        match result {
             Ok(state) => {
                 if dev_idx == 0 {
-                    // Print config only for first device
                     report::print_config(
                         &config,
                         &state.pci_addr_str,
@@ -121,35 +178,50 @@ fn main() {
         }
     }
 
-    // --- Validate config against first device ---
+    // --- Validate config and namespace selection across all devices ---
     let first_state = &device_states[0];
-    let ns_info = first_state
-        .namespaces
+    let device_ns_infos: Vec<NamespaceInfo> = device_states
         .iter()
-        .find(|ns| ns.ns_id == config.ns_id)
-        .cloned()
-        .unwrap_or_else(|| {
-            let available: Vec<u32> = first_state.namespaces.iter().map(|ns| ns.ns_id).collect();
-            eprintln!(
-                "error: namespace {} not found (available: {:?})",
-                config.ns_id, available
-            );
-            std::process::exit(1);
-        });
+        .enumerate()
+        .map(|(idx, state)| {
+            state
+                .namespaces
+                .iter()
+                .find(|ns| ns.ns_id == config.ns_id)
+                .cloned()
+                .unwrap_or_else(|| {
+                    let available: Vec<u32> = state.namespaces.iter().map(|ns| ns.ns_id).collect();
+                    eprintln!(
+                        "error: device {} missing namespace {} (available: {:?})",
+                        idx, config.ns_id, available
+                    );
+                    std::process::exit(1);
+                })
+        })
+        .collect();
 
-    if let Err(msg) = config.validate(
-        ns_info.sector_size,
-        first_state.ibd.max_queue_depth(),
-        &first_state.namespaces,
-    ) {
-        eprintln!("error: {msg}");
-        std::process::exit(1);
+    for (idx, state) in device_states.iter().enumerate() {
+        if let Err(msg) = config.validate(
+            device_ns_infos[idx].sector_size,
+            state.ibd.max_queue_depth(),
+            &state.namespaces,
+        ) {
+            eprintln!("error: device {} validation failed: {}", idx, msg);
+            std::process::exit(1);
+        }
     }
-    config.clamp_queue_depth(first_state.ibd.max_queue_depth());
+
+    let min_max_qd = device_states
+        .iter()
+        .map(|s| s.ibd.max_queue_depth())
+        .min()
+        .unwrap_or(first_state.ibd.max_queue_depth());
+    config.clamp_queue_depth(min_max_qd);
 
     // --- Discover NUMA topology for CPU pinning ---
     let numa_node = first_state.ibd.numa_node();
-    let (_, worker_cpus) = if numa_node >= 0 {
+    let actor_cpu_set: HashSet<usize> = actor_cpu_assignments.iter().flatten().copied().collect();
+    let worker_cpus = if numa_node >= 0 {
         NumaTopology::discover()
             .ok()
             .and_then(|topo| {
@@ -157,17 +229,20 @@ fn main() {
                     .map(|n| n.cpus().iter().collect::<Vec<_>>())
             })
             .map(|cpus| {
-                let actor = cpus.first().copied();
-                let workers = if cpus.len() > 1 {
-                    cpus[1..].to_vec()
+                let workers: Vec<usize> = cpus
+                    .iter()
+                    .copied()
+                    .filter(|cpu| !actor_cpu_set.contains(cpu))
+                    .collect();
+                if workers.is_empty() {
+                    cpus
                 } else {
-                    vec![]
-                };
-                (actor, workers)
+                    workers
+                }
             })
-            .unwrap_or((None, vec![]))
+            .unwrap_or_default()
     } else {
-        (None, vec![])
+        vec![]
     };
 
     if !worker_cpus.is_empty() && device_states.len() == 1 {
@@ -177,16 +252,27 @@ fn main() {
         );
     }
 
+    // --threads means per-device; total workers scale with device count.
+    let threads_per_device = config.threads as usize;
+    let total_workers = threads_per_device * device_states.len();
+
     // --- Launch workers ---
+    // Workers block at start_barrier until the main thread sets bench_start
+    // and releases them, ensuring init time is excluded from wall-clock.
+    let start_barrier = Arc::new(Barrier::new(total_workers + 1));
     let stop_flag = Arc::new(AtomicBool::new(false));
     let config_arc = Arc::new(config.clone());
-    let mut worker_handles = Vec::with_capacity(config.threads as usize);
-    let mut op_counters = Vec::with_capacity(config.threads as usize);
-    let mut byte_counters = Vec::with_capacity(config.threads as usize);
+    let mut worker_handles = Vec::with_capacity(total_workers);
+    let mut op_counters = Vec::with_capacity(total_workers);
+    let mut byte_counters = Vec::with_capacity(total_workers);
 
-    for thread_idx in 0..config.threads {
-        // Distribute workers round-robin across devices
-        let device_idx = (thread_idx as usize) % device_states.len();
+    // Assign contiguous blocks of workers to each device so that sequential
+    // LBA partitioning stays within each device's own namespace.
+    // Device d gets global worker indices [d*T .. (d+1)*T).
+    for thread_idx in 0..total_workers {
+        let device_idx = thread_idx / threads_per_device;
+        // Per-device index used for sequential LBA region partitioning.
+        let per_device_idx = thread_idx % threads_per_device;
         let ibd = Arc::clone(&device_states[device_idx].ibd);
 
         let channels = ibd.connect_client().unwrap_or_else(|e| {
@@ -202,9 +288,10 @@ fn main() {
 
         let worker_config = Arc::clone(&config_arc);
         let worker_stop = Arc::clone(&stop_flag);
-        let worker_ns_info = ns_info.clone();
+        let worker_ns_info = device_ns_infos[device_idx].clone();
 
         let worker_cpus_clone = worker_cpus.clone();
+        let worker_barrier = Arc::clone(&start_barrier);
         let handle = std::thread::spawn(move || {
             // Pin this worker to a NUMA-local core (round-robin).
             if !worker_cpus_clone.is_empty() {
@@ -221,7 +308,8 @@ fn main() {
                 op_counter,
                 byte_counter,
                 worker_stop,
-                thread_idx,
+                per_device_idx as u32,
+                worker_barrier,
             )
             .unwrap_or_else(|e| {
                 eprintln!("error: worker {thread_idx} init failed: {e}");
@@ -234,8 +322,11 @@ fn main() {
         worker_handles.push(handle);
     }
 
-    // --- Timer + progress reporter ---
+    // --- Start bench clock after all workers are ready ---
+    // This barrier rendezvous ensures bench_start is set before any worker
+    // issues its first IO, so init overhead is excluded from the measurement.
     let bench_start = Instant::now();
+    start_barrier.wait();
 
     let timer_stop = Arc::clone(&stop_flag);
     let duration_secs = config.duration;
@@ -309,7 +400,7 @@ fn main() {
             let device_results: Vec<_> = results
                 .iter()
                 .enumerate()
-                .filter(|(t, _)| (t % device_states.len()) == idx)
+                .filter(|(t, _)| t / threads_per_device == idx)
                 .map(|(_, r)| r)
                 .collect();
             if !device_results.is_empty() {
@@ -364,9 +455,14 @@ fn initialize_spdk(spdk_env_comp: &SPDKEnvComponent) -> Arc<dyn spdk_env::ISPDKE
 }
 
 /// Initialize a single NVMe device.
+///
+/// `actor_cpu` optionally pins the device's actor thread to a specific core.
+/// Pass `Some(cpu)` to avoid contention when multiple devices share the same
+/// NUMA node (which would otherwise all default to the same first core).
 fn initialize_device(
     spdk_env_comp: &SPDKEnvComponent,
     device: &VfioDevice,
+    actor_cpu: Option<usize>,
 ) -> Result<DeviceState, String> {
     // Create a fresh component for this device
     let block_dev: Arc<dyn component_core::IUnknown> = BlockDeviceSpdkNvmeComponent::new_default();
@@ -383,6 +479,10 @@ fn initialize_device(
         dev: device.address.dev,
         func: device.address.func,
     });
+
+    if let Some(cpu) = actor_cpu {
+        admin.set_actor_cpu(cpu);
+    }
 
     admin
         .initialize()
@@ -422,12 +522,6 @@ fn initialize_device(
     Ok(DeviceState {
         admin,
         ibd,
-        pci_addr: interfaces::PciAddress {
-            domain: device.address.domain,
-            bus: device.address.bus,
-            dev: device.address.dev,
-            func: device.address.func,
-        },
         pci_addr_str,
         namespaces,
     })
