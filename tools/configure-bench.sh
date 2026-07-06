@@ -57,6 +57,10 @@ MD_DEVICE="/dev/md0"
 MOUNT_POINT="/mnt/fs-backend-bench"
 XFS_LABEL="fs-bench"
 
+# Minimum regular RAM vLLM needs to init + generate (empirical: OOMs below ~16G
+# with an 8B model). The certus cgroup cap must clear this or vLLM is OOM-killed.
+VLLM_MIN_RAM_GIB=16
+
 # Memory cap (regular RAM). Node 0 sits at physical 0, so a bare `mem=${BENCH_MEM}`
 # keeps the bottom BENCH_MEM (all node 0) and drops everything above it (node 1)
 # — no memmap, no `$`, no boot risk. Default 64 GiB to match the prior node-1
@@ -67,10 +71,11 @@ XFS_LABEL="fs-bench"
 # strips from the BLS options= line at boot — see the BENCH_NUMA comment above.
 # Do NOT reintroduce a `$`-bearing kernel arg here.
 BENCH_MEM="${BENCH_MEM:-64G}"
+BENCH_MEM=24
 TOTAL_USABLE_NODE1="${BENCH_MEM%G}"  # GiB budget on the bench node (numeric)
 
 # Hugepages (1 GiB pages)
-CERTUS_HUGEPAGES=48      # 48 GiB SPDK DRAM tier, leaves 16G regular for vLLM (needs DPDK RTE_MAX_MEM_MB_PER_LIST raised to 64G)
+CERTUS_HUGEPAGES="$((BENCH_MEM - VLLM_MIN_RAM_GIB))"      # 48 GiB SPDK DRAM tier, leaves 16G regular for vLLM (needs DPDK RTE_MAX_MEM_MB_PER_LIST raised to 64G)
 SS_HUGEPAGES=0           # all regular memory for page cache
 
 # DPDK single-allocation ceiling. spdk_zmalloc -> rte_malloc cannot return a
@@ -81,10 +86,6 @@ SS_HUGEPAGES=0           # all regular memory for page cache
 # a 48 GiB tier. Keep CERTUS_HUGEPAGES below this. NOTE: also bounded by
 # RTE_MAX_MEM_MB_PER_TYPE=64 GiB, so the practical single-tier max is ~60 GiB.
 DPDK_MEMSEG_LIST_GIB=64
-
-# Minimum regular RAM vLLM needs to init + generate (empirical: OOMs below ~16G
-# with an 8B model). The certus cgroup cap must clear this or vLLM is OOM-killed.
-VLLM_MIN_RAM_GIB=16
 
 # DPDK reserves ~3 x 1G hugepages for its own EAL heap + per-drive DMA buffers
 # (measured: 48-page pool - 44G tier = 4 free before drives, 1 after). So a
