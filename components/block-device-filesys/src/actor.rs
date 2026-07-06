@@ -46,6 +46,7 @@ struct InflightOp {
     client_id: u64,
     deadline: Option<Instant>,
     is_read: bool,
+    tag: u64,
     #[cfg(feature = "telemetry")]
     start_ns: u64,
     #[cfg(feature = "telemetry")]
@@ -339,7 +340,7 @@ impl FilesysHandler {
         lba: u64,
         buf: Arc<std::sync::Mutex<DmaBuffer>>,
         _timeout_ms: u64,
-        _tag: u64,
+        tag: u64,
     ) {
         let handle = self.next_op_handle();
         let buf_len = {
@@ -353,7 +354,7 @@ impl FilesysHandler {
                 client_id,
                 Completion::ReadDone {
                     handle,
-                    tag: 0,
+                    tag,
                     result: Err(e),
                 },
             );
@@ -381,7 +382,7 @@ impl FilesysHandler {
                         client_id,
                         Completion::ReadDone {
                             handle,
-                    tag: 0,
+                            tag,
                             result: Err(NvmeBlockError::NotInitialized(
                                 "io_uring submission queue full".into(),
                             )),
@@ -406,6 +407,7 @@ impl FilesysHandler {
                     client_id,
                     deadline,
                     is_read: true,
+                    tag,
                     #[cfg(feature = "telemetry")]
                     start_ns: Instant::now().elapsed().as_nanos() as u64,
                     #[cfg(feature = "telemetry")]
@@ -443,7 +445,7 @@ impl FilesysHandler {
                 self.telemetry.record_op(0, buf_len as u64);
             }
 
-            self.send_completion(client_id, Completion::ReadDone { handle, tag: 0, result });
+            self.send_completion(client_id, Completion::ReadDone { handle, tag, result });
         }
     }
 
@@ -454,7 +456,7 @@ impl FilesysHandler {
         lba: u64,
         buf: Arc<DmaBuffer>,
         _timeout_ms: u64,
-        _tag: u64,
+        tag: u64,
     ) {
         let handle = self.next_op_handle();
         let buf_len = buf.len();
@@ -465,7 +467,7 @@ impl FilesysHandler {
                 client_id,
                 Completion::WriteDone {
                     handle,
-                    tag: 0,
+                    tag,
                     result: Err(e),
                 },
             );
@@ -498,7 +500,7 @@ impl FilesysHandler {
                         client_id,
                         Completion::WriteDone {
                             handle,
-                    tag: 0,
+                            tag,
                             result: Err(NvmeBlockError::NotInitialized(
                                 "io_uring submission queue full".into(),
                             )),
@@ -528,6 +530,7 @@ impl FilesysHandler {
                     client_id,
                     deadline,
                     is_read: false,
+                    tag,
                     #[cfg(feature = "telemetry")]
                     start_ns: Instant::now().elapsed().as_nanos() as u64,
                     #[cfg(feature = "telemetry")]
@@ -575,7 +578,7 @@ impl FilesysHandler {
                 self.telemetry.record_op(0, buf_len as u64);
             }
 
-            self.send_completion(client_id, Completion::WriteDone { handle, tag: 0, result });
+            self.send_completion(client_id, Completion::WriteDone { handle, tag, result });
         }
     }
 
@@ -724,13 +727,13 @@ impl FilesysHandler {
                 let completion = if op.is_read {
                     Completion::ReadDone {
                         handle: op.handle,
-                    tag: 0,
+                        tag: op.tag,
                         result,
                     }
                 } else {
                     Completion::WriteDone {
                         handle: op.handle,
-                    tag: 0,
+                        tag: op.tag,
                         result,
                     }
                 };

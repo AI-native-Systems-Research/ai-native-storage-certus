@@ -11,7 +11,7 @@ use pyo3::types::PyDict;
 
 use component_core::query_interface;
 use interfaces::{
-    CacheKey, DispatcherConfig, DmaAllocFn, DmaBuffer, GpuStream, IDispatchMap,
+    CacheKey, DispatcherConfig, GpuStream, IDispatchMap,
     IDispatcher, IEvictionPolicy, IGpuServices, ILogger, IMemoryTier, IpcHandle, LookupResult,
 };
 
@@ -134,13 +134,10 @@ impl EngineInner {
             .map_err(|e| PyRuntimeError::new_err(format!("failed to wire eviction_policy for dispatch map: {e}")))?;
         let dm: Arc<dyn IDispatchMap + Send + Sync> = query_interface!(dm_comp, IDispatchMap)
             .ok_or_else(|| PyRuntimeError::new_err("failed to query IDispatchMap"))?;
-        let numa_opt = if numa_node >= 0 { Some(numa_node as i32) } else { None };
-        let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
-            DmaBuffer::new(size, align, numa_opt).map_err(|e| e.to_string())
-        });
-        dm.set_dma_alloc(dma_alloc);
         dm.initialize()
             .map_err(|e| PyRuntimeError::new_err(format!("DispatchMap init failed: {e}")))?;
+
+        let numa_opt = if numa_node >= 0 { Some(numa_node as i32) } else { None };
 
         // --- Create memory tier ---
         let mt_comp = memory_tier::MemoryTierComponent::new_default();
@@ -376,11 +373,6 @@ impl EngineInner {
             match self.dispatch_map.lookup(*key) {
                 Ok(LookupResult::MemoryTier { pointer, size }) => {
                     results.push((pointer as u64, size));
-                }
-                Ok(LookupResult::Staging { buffer }) => {
-                    let ptr = buffer.as_ptr() as u64;
-                    let size = buffer.len() as u32;
-                    results.push((ptr, size));
                 }
                 Ok(LookupResult::BlockDevice { .. }) => {
                     // Promotion failed for this key — rollback and error.
@@ -731,80 +723,6 @@ impl EngineInner {
         Ok(())
     }
 
-    /// Store bytes from a host buffer directly (no GPU DMA). For testing only.
-    /// Uses dispatcher.prepare_store()+commit_store() to write directly into
-    /// the DMA buffer and flush to NVMe without going through CUDA.
-    pub fn store_host_bytes(&self, key: u64, data: &[u8]) -> PyResult<()> {
-        self.ensure_init()?;
-        let dma_buf = self.dispatcher
-            .prepare_store(key, data.len() as u32)
-            .map_err(|e| PyRuntimeError::new_err(format!("store_host_bytes prepare failed: {e}")))?;
-
-        // Copy data into the DMA buffer directly.
-        // SAFETY: dma_buf is a valid DMA allocation covering at least data.len() bytes.
-        unsafe {
-            std::ptr::copy_nonoverlapping(data.as_ptr(), dma_buf.as_ptr() as *mut u8, data.len());
-        }
-
-        self.dispatcher
-            .commit_store(key)
-            .map_err(|e| PyRuntimeError::new_err(format!("store_host_bytes commit failed: {e}")))?;
-
-        self.entry_count.fetch_add(1, Ordering::Release);
-        Ok(())
-    }
-
-    /// Read bytes from the dispatch map's staging buffer for a key (no GPU DMA).
-    /// For testing only — verifies data was written correctly before background
-    /// NVMe migration moves it off the staging buffer.
-    pub fn load_host_bytes(&self, key: u64, size: usize) -> PyResult<Vec<u8>> {
-        self.ensure_init()?;
-        // Read directly from the dispatch map staging buffer, bypassing GPU DMA.
-        let result = self.dispatch_map
-            .lookup(key)
-            .map_err(|e| PyRuntimeError::new_err(format!("load_host_bytes lookup failed: {e}")))?;
-
-        use interfaces::LookupResult;
-        match result {
-            LookupResult::Staging { buffer } => {
-                let copy_len = size.min(buffer.len());
-                let mut out = vec![0u8; size];
-                // SAFETY: buffer is a valid DMA allocation; out is a valid heap allocation.
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        buffer.as_ptr() as *const u8,
-                        out.as_mut_ptr(),
-                        copy_len,
-                    );
-                }
-                let _ = self.dispatch_map.release_read(key);
-                Ok(out)
-            }
-            LookupResult::MemoryTier { pointer, size: entry_size } => {
-                let copy_len = size.min(entry_size as usize);
-                let mut out = vec![0u8; size];
-                // SAFETY: pointer is a valid memory-tier slot for entry_size bytes.
-                unsafe {
-                    std::ptr::copy_nonoverlapping(pointer, out.as_mut_ptr(), copy_len);
-                }
-                let _ = self.dispatch_map.release_read(key);
-                Ok(out)
-            }
-            LookupResult::BlockDevice { .. } => {
-                let _ = self.dispatch_map.release_read(key);
-                Err(PyRuntimeError::new_err(
-                    "key already migrated to NVMe — use load_async for block device reads",
-                ))
-            }
-            LookupResult::NotExist => Err(PyRuntimeError::new_err(
-                format!("key {key} not found in dispatch map"),
-            )),
-            LookupResult::MismatchSize => {
-                let _ = self.dispatch_map.release_read(key);
-                Err(PyRuntimeError::new_err("size mismatch on lookup"))
-            }
-        }
-    }
 
     /// Shut down the engine, releasing all resources.
     pub fn shutdown(&self) -> PyResult<()> {

@@ -1,39 +1,9 @@
 use std::sync::Arc;
 
 use component_core::query_interface;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, measurement::WallTime};
+use criterion::{black_box, criterion_group, criterion_main, measurement::WallTime, Criterion};
 use dispatch_map::{DispatchMapComponent, DispatchMapState};
-use interfaces::{DmaAllocFn, DmaBuffer, IDispatchMap, IEvictionPolicy};
-
-fn mock_dma_alloc() -> DmaAllocFn {
-    Arc::new(|size, _align, _numa| {
-        let layout = std::alloc::Layout::from_size_align(size, 4096).unwrap();
-        let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
-        if ptr.is_null() {
-            return Err("allocation failed".into());
-        }
-        unsafe {
-            DmaBuffer::from_raw(
-                ptr as *mut std::ffi::c_void,
-                size,
-                mock_free as unsafe extern "C" fn(*mut std::ffi::c_void),
-                -1,
-            )
-        }
-        .map_err(|e| e.to_string())
-    })
-}
-
-unsafe extern "C" fn mock_free(ptr: *mut std::ffi::c_void) {
-    if !ptr.is_null() {
-        unsafe {
-            std::alloc::dealloc(
-                ptr as *mut u8,
-                std::alloc::Layout::from_size_align_unchecked(1, 1),
-            );
-        }
-    }
-}
+use interfaces::{IDispatchMap, IEvictionPolicy};
 
 fn setup_bench_component() -> Arc<DispatchMapComponent> {
     let ep_comp = eviction_policy_lru::EvictionPolicyLruComponent::new_default();
@@ -44,12 +14,17 @@ fn setup_bench_component() -> Arc<DispatchMapComponent> {
     comp
 }
 
+/// Helper: create a memory-tier entry for benchmarking.
+fn create_entry(dm: &Arc<dyn IDispatchMap + Send + Sync>, key: u64) {
+    let ptr = Box::into_raw(vec![0u8; 4096].into_boxed_slice()) as *mut u8;
+    dm.create_memory_tier_entry(key, ptr, 4096).unwrap();
+}
+
 fn bench_lookup_no_contention(c: &mut Criterion) {
     let comp = setup_bench_component();
     let dm = query_interface!(comp, IDispatchMap).unwrap();
-    dm.set_dma_alloc(mock_dma_alloc());
 
-    let _ = dm.create_staging(1, 1).unwrap();
+    create_entry(&dm, 1);
     dm.release_write(1).unwrap();
 
     c.bench_function("lookup_no_contention", |b| {
@@ -64,9 +39,8 @@ fn bench_lookup_no_contention(c: &mut Criterion) {
 fn bench_ref_ops_throughput(c: &mut Criterion) {
     let comp = setup_bench_component();
     let dm = query_interface!(comp, IDispatchMap).unwrap();
-    dm.set_dma_alloc(mock_dma_alloc());
 
-    let _ = dm.create_staging(1, 1).unwrap();
+    create_entry(&dm, 1);
     dm.release_write(1).unwrap();
 
     c.bench_function("take_release_read", |b| {
@@ -87,11 +61,10 @@ fn bench_ref_ops_throughput(c: &mut Criterion) {
 fn bench_lru_lookup(c: &mut Criterion<WallTime>) {
     let comp = setup_bench_component();
     let dm = query_interface!(comp, IDispatchMap).unwrap();
-    dm.set_dma_alloc(mock_dma_alloc());
 
     // Populate the map with 1000 entries.
     for key in 0..1000u64 {
-        let _ = dm.create_staging(key, 1).unwrap();
+        create_entry(&dm, key);
         dm.release_write(key).unwrap();
     }
 

@@ -674,22 +674,6 @@ mod tests {
             Ok(())
         }
 
-        fn prepare_store(
-            &self,
-            _key: u64,
-            _size: u32,
-        ) -> Result<Arc<interfaces::DmaBuffer>, DispatcherError> {
-            panic!("not used in service tests")
-        }
-
-        fn commit_store(&self, _key: u64) -> Result<(), DispatcherError> {
-            Ok(())
-        }
-
-        fn cancel_store(&self, _key: u64) -> Result<(), DispatcherError> {
-            Ok(())
-        }
-
         fn touch(&self, key: u64) -> Result<(), DispatcherError> {
             self.state
                 .lock()

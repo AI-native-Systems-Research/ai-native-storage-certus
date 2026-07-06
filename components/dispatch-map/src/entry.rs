@@ -1,14 +1,10 @@
 //! Dispatch map entry types and location enum.
 
-use std::sync::Arc;
-
-use interfaces::{DmaBuffer, EvictionHandle};
+use interfaces::EvictionHandle;
 
 /// Represents where extent data currently resides.
 #[derive(Debug)]
 pub(crate) enum Location {
-    /// Data is in an in-memory DMA staging buffer.
-    Staging { buffer: Arc<DmaBuffer> },
     /// Data has been committed to a block device.
     BlockDevice { offset: u64 },
     /// Data is in the DRAM memory-tier pool.
