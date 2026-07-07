@@ -368,7 +368,14 @@ impl BlockDeviceHandler {
     /// them silently per FR-019. Returns `true` if any commands or
     /// completions were processed.
     fn poll_clients(&mut self) -> bool {
-        const MAX_COMMANDS_PER_CLIENT_PER_POLL: usize = 4;
+        // Drain each client completely rather than capping at 4 per client.
+        // A low per-client cap was originally intended to prevent one client
+        // from starving others, but in practice it limits the effective NVMe
+        // queue depth: the actor flips to completion-poll mode before the
+        // hardware queue is fully loaded, collapsing effective QD.
+        // With a high cap the actor still respects queue-pair capacity limits
+        // (ENOMEM backpressure) so it never over-submits.
+        const MAX_COMMANDS_PER_CLIENT_PER_POLL: usize = 64;
 
         let mut did_work = false;
         let num_clients = self.clients.len();
@@ -709,7 +716,9 @@ impl BlockDeviceHandler {
                     // Poll all qpairs to advance hardware completions.
                     for i in 0..controller.qpairs.len() {
                         if let Some(qp) = controller.qpairs.get_mut(i) {
-                            unsafe { qp.process_completions(0); }
+                            unsafe {
+                                qp.process_completions(0);
+                            }
                         }
                     }
                 }
@@ -819,7 +828,9 @@ impl BlockDeviceHandler {
                     // Poll all qpairs to advance hardware completions.
                     for i in 0..controller.qpairs.len() {
                         if let Some(qp) = controller.qpairs.get_mut(i) {
-                            unsafe { qp.process_completions(0); }
+                            unsafe {
+                                qp.process_completions(0);
+                            }
                         }
                     }
                 }
@@ -1212,7 +1223,10 @@ impl ActorHandler<ControlMessage> for BlockDeviceHandler {
             self.check_timeouts();
             self.last_timeout_check = now;
         }
-        did_work
+        // Keep spinning whenever clients are connected. NVMe completions only
+        // arrive via spdk_nvme_qpair_process_completions() inside on_idle().
+        // Parking delays completion delivery and collapses effective queue depth.
+        did_work || !self.clients.is_empty()
     }
 
     fn on_start(&mut self) {
