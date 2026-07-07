@@ -12,6 +12,7 @@
 #   sudo ./build_raid0.sh --name <name>                # Array name (default: certus-raid0)
 #   sudo ./build_raid0.sh --chunk <KiB>                # Chunk size KiB (default: 512)
 #   sudo ./build_raid0.sh --count <n>                  # Number of devices to use (default: all)
+#   sudo ./build_raid0.sh --wipe                       # Wipe GPT partition tables first
 #   sudo ./build_raid0.sh --devices /dev/nvme0n1 ...   # Explicit device list
 #
 # Environment:
@@ -22,6 +23,7 @@ set -euo pipefail
 ARRAY_NAME="certus-raid0"
 CHUNK_KIB=512
 YES=false
+WIPE=false
 EXPLICIT_DEVS=()
 DEVICE_COUNT=0
 
@@ -35,6 +37,9 @@ check_root() {
 check_deps() {
     command -v mdadm  &>/dev/null || die "mdadm not found. Install with: dnf install mdadm"
     command -v lsblk  &>/dev/null || die "lsblk not found (util-linux package)."
+    if $WIPE; then
+        command -v wipefs &>/dev/null || die "wipefs not found (util-linux package)."
+    fi
 }
 
 # Discover all NVMe block device nodes whose PCI controller is bound to the 'nvme' driver.
@@ -95,6 +100,23 @@ check_superblocks() {
     [[ "$confirm" =~ ^[yY] ]] || { echo "Aborted."; exit 1; }
 }
 
+wipe_partition_tables() {
+    local devs=("$@")
+    echo
+    echo "  Wiping partition tables..."
+    for dev in "${devs[@]}"; do
+        # Wipe all signatures repeatedly until none remain (layered signatures
+        # such as partition + filesystem require multiple passes).
+        while wipefs --all --force "$dev" 2>/dev/null | grep -q .; do
+            :
+        done
+        # Zero the first and last 1 MiB to catch any remaining GPT headers
+        dd if=/dev/zero of="$dev" bs=1M count=1 conv=notrunc 2>/dev/null
+        dd if=/dev/zero of="$dev" bs=1M seek=$(( $(blockdev --getsize64 "$dev") / 1048576 - 1 )) count=1 conv=notrunc 2>/dev/null
+        info "Wiped: $dev"
+    done
+}
+
 create_array() {
     local devs=("$@")
     local n=${#devs[@]}
@@ -107,6 +129,10 @@ create_array() {
     fi
 
     check_superblocks "${devs[@]}"
+
+    if $WIPE; then
+        wipe_partition_tables "${devs[@]}"
+    fi
 
     echo
     echo "  Array device : $md_dev"
@@ -154,6 +180,9 @@ parse_args() {
                 [[ "$1" =~ ^[0-9]+$ ]] || die "--count value must be a number"
                 DEVICE_COUNT="$1"
                 ;;
+            --wipe)
+                WIPE=true
+                ;;
             --yes|-y)
                 YES=true
                 ;;
@@ -172,6 +201,7 @@ parse_args() {
                 echo "  --name <name>          Array name (default: certus-raid0)"
                 echo "  --chunk <KiB>          Chunk size in KiB (default: 512)"
                 echo "  --count <n>            Number of devices to use (default: all)"
+                echo "  --wipe                 Wipe GPT/partition tables before creating array"
                 echo "  --yes, -y              Non-interactive (use all discovered devices)"
                 echo "  --devices <dev>...     Specify block devices explicitly"
                 echo "  --help                 Show this help"
