@@ -61,8 +61,8 @@ XFS_LABEL="fs-bench"
 # with an 8B model). The certus cgroup cap must clear this or vLLM is OOM-killed.
 VLLM_MIN_RAM_GIB=16
 
-# Memory cap (regular RAM). Node 0 sits at physical 0, so a bare `mem=${BENCH_MEM}`
-# keeps the bottom BENCH_MEM (all node 0) and drops everything above it (node 1)
+# Memory cap (regular RAM). Node 0 sits at physical 0, so a bare `mem=${BENCH_MEM_GIB}`
+# keeps the bottom BENCH_MEM_GIB (all node 0) and drops everything above it (node 1)
 # — no memmap, no `$`, no boot risk. Default 64 GiB to match the prior node-1
 # 64 GiB runs for apples-to-apples comparison; override via env for sweeps.
 #
@@ -70,12 +70,11 @@ VLLM_MIN_RAM_GIB=16
 # The memmap= reserved-region form requires a literal `$`, which GRUB's blscfg
 # strips from the BLS options= line at boot — see the BENCH_NUMA comment above.
 # Do NOT reintroduce a `$`-bearing kernel arg here.
-BENCH_MEM="${BENCH_MEM:-64G}"
-BENCH_MEM=24
-TOTAL_USABLE_NODE1="${BENCH_MEM%G}"  # GiB budget on the bench node (numeric)
+BENCH_MEM_GIB="${BENCH_MEM_GIB:-64}"
+BENCH_MEM_GIB=24
 
 # Hugepages (1 GiB pages)
-CERTUS_HUGEPAGES="$((BENCH_MEM - VLLM_MIN_RAM_GIB))"      # 48 GiB SPDK DRAM tier, leaves 16G regular for vLLM (needs DPDK RTE_MAX_MEM_MB_PER_LIST raised to 64G)
+CERTUS_HUGEPAGES="$((BENCH_MEM_GIB - VLLM_MIN_RAM_GIB))"      # 48 GiB SPDK DRAM tier, leaves 16G regular for vLLM (needs DPDK RTE_MAX_MEM_MB_PER_LIST raised to 64G)
 SS_HUGEPAGES=0           # all regular memory for page cache
 
 # DPDK single-allocation ceiling. spdk_zmalloc -> rte_malloc cannot return a
@@ -224,19 +223,18 @@ show_status() {
     header "Memory"
     echo "  Total: ${total_mem} GiB (node 0: ${node0_mem} MB, node 1: ${node1_mem} MB)"
 
-    # In kernel mode a plain `mem=${BENCH_MEM}` caps total RAM to just the bench
+    # In kernel mode a plain `mem=${BENCH_MEM_GIB}G` caps total RAM to just the bench
     # node (node 0 = bottom of physical memory). Accept anything at or below the
     # cap plus a little slack — the kernel loses a bit to crashkernel/reserved.
-    local bench_mem_gib=${BENCH_MEM%G}
-    if [[ $total_mem -le $((bench_mem_gib + 10)) ]]; then
-        echo -e "  ${tag_certus}${tag_ss} RAM limited to ~${total_mem} GiB (mem=${BENCH_MEM})"
+    if [[ $total_mem -le $((BENCH_MEM_GIB + 10)) ]]; then
+        echo -e "  ${tag_certus}${tag_ss} RAM limited to ~${total_mem} GiB (mem=${BENCH_MEM_GIB} GiB)"
     elif [[ "$MEM_METHOD" == "cgroup" ]]; then
         # cgroup mode caps RAM per-slice at runtime, not system-wide, so total
         # system RAM is expected to be full. The slice check below is authoritative.
         echo "  ${total_mem} GiB total — system RAM not capped (cgroup limits the bench slice, see below)"
     else
-        echo -e "  ${tag_empty} ${total_mem} GiB — not limited (need mem=${BENCH_MEM})"
-        fail_both "system RAM not limited (need mem=${BENCH_MEM})"
+        echo -e "  ${tag_empty} ${total_mem} GiB — not limited (need mem=${BENCH_MEM_GIB}G)"
+        fail_both "system RAM not limited (need mem=${BENCH_MEM_GIB}G)"
     fi
 
     # The node NOT being benched should have been dropped by the mem= cap. For the
@@ -255,7 +253,7 @@ show_status() {
 
     # cgroup memory limit (runtime). The cap is mode-specific: certus expects the
     # regular-RAM budget left after hugepages, sharedstorage the full node budget.
-    local certus_gib=$((TOTAL_USABLE_NODE1 - CERTUS_HUGEPAGES))
+    local certus_gib=$((BENCH_MEM_GIB - CERTUS_HUGEPAGES))
     if systemctl is-active --quiet "$BENCH_SLICE" 2>/dev/null; then
         local slice_max
         slice_max=$(systemctl show -p MemoryMax --value "$BENCH_SLICE" 2>/dev/null)
@@ -266,13 +264,13 @@ show_status() {
             local slice_gib=$((slice_max / 1024 / 1024 / 1024))
             local mem_tag=""
             if [[ $slice_gib -eq $certus_gib ]]; then mem_tag="${tag_certus}"; fi
-            if [[ $slice_gib -eq $TOTAL_USABLE_NODE1 ]]; then mem_tag="${mem_tag}${tag_ss}"; fi
+            if [[ $slice_gib -eq $BENCH_MEM_GIB ]]; then mem_tag="${mem_tag}${tag_ss}"; fi
             if [[ -z "$mem_tag" ]]; then mem_tag="${tag_empty}"; fi
             echo -e "  ${mem_tag} cgroup slice ${BENCH_SLICE}: MemoryMax=${slice_gib} GiB (runtime limit)"
             # In cgroup mode, a cap that doesn't match a connector's budget disqualifies it.
             if [[ "$MEM_METHOD" == "cgroup" ]]; then
                 [[ $slice_gib -ne $certus_gib ]] && fail_certus "cgroup cap ${slice_gib}G ≠ certus budget ${certus_gib}G"
-                [[ $slice_gib -ne $TOTAL_USABLE_NODE1 ]] && fail_ss "cgroup cap ${slice_gib}G ≠ sharedstorage budget ${TOTAL_USABLE_NODE1}G"
+                [[ $slice_gib -ne $BENCH_MEM_GIB ]] && fail_ss "cgroup cap ${slice_gib}G ≠ sharedstorage budget ${BENCH_MEM_GIB}G"
             fi
         fi
     elif [[ "$MEM_METHOD" == "cgroup" ]]; then
@@ -307,13 +305,13 @@ show_status() {
 
     # mem= (only required in kernel mode; cgroup mode caps RAM via the slice).
     # Node 0 is isolated with a plain mem= cap — no memmap, no `$` to be eaten.
-    if echo "$cmdline" | grep -q "mem=${BENCH_MEM}"; then
-        echo -e "  ${tag_certus}${tag_ss} mem=${BENCH_MEM} — RAM capped to node $BENCH_NUMA"
+    if echo "$cmdline" | grep -q "mem=${BENCH_MEM_GIB}G"; then
+        echo -e "  ${tag_certus}${tag_ss} mem=${BENCH_MEM_GIB}G — RAM capped to node $BENCH_NUMA"
     elif [[ "$MEM_METHOD" == "cgroup" ]]; then
         echo "  mem= not set — not needed (cgroup slice caps RAM at runtime)"
     else
-        echo -e "  ${tag_empty} mem=${BENCH_MEM} MISSING — RAM not capped to node $BENCH_NUMA"
-        fail_both "mem=${BENCH_MEM} missing (kernel mode)"
+        echo -e "  ${tag_empty} mem=${BENCH_MEM_GIB}G MISSING — RAM not capped to node $BENCH_NUMA"
+        fail_both "mem=${BENCH_MEM_GIB}G missing (kernel mode)"
     fi
 
     # A leftover memmap= from an older config means the `$`-trap could be in play.
@@ -452,7 +450,7 @@ show_status() {
 
     # 3. cgroup cap clears vLLM's regular-RAM floor (cgroup mode only).
     if [[ "$MEM_METHOD" == "cgroup" ]]; then
-        local certus_cap_gib=$((TOTAL_USABLE_NODE1 - CERTUS_HUGEPAGES))
+        local certus_cap_gib=$((BENCH_MEM_GIB - CERTUS_HUGEPAGES))
         if [[ $certus_cap_gib -ge $VLLM_MIN_RAM_GIB ]]; then
             echo -e "  ${tag_certus} cgroup cap ${certus_cap_gib}G >= vLLM floor ${VLLM_MIN_RAM_GIB}G"
         else
@@ -536,9 +534,9 @@ cgroup_mem_max_for() {
     if [[ -n "$CGROUP_MEM_MAX" ]]; then
         echo "$CGROUP_MEM_MAX"
     elif [[ "$mode" == "certus" ]]; then
-        echo "$((TOTAL_USABLE_NODE1 - CERTUS_HUGEPAGES))G"
+        echo "$((BENCH_MEM_GIB - CERTUS_HUGEPAGES))G"
     else
-        echo "${TOTAL_USABLE_NODE1}G"
+        echo "${BENCH_MEM_GIB}G"
     fi
 }
 
@@ -642,13 +640,13 @@ set_kernel_params() {
     # mode the systemd slice caps RAM at runtime and numactl --membind pins
     # allocations to node $BENCH_NUMA, so the cap isn't needed at boot.
     #
-    # Benching on node 0 (the default) means a plain `mem=${BENCH_MEM}` cap: node 0
-    # is at physical 0, so this keeps the bottom BENCH_MEM (all node 0) and drops
+    # Benching on node 0 (the default) means a plain `mem=${BENCH_MEM_GIB}G` cap: node 0
+    # is at physical 0, so this keeps the bottom BENCH_MEM_GIB (all node 0) and drops
     # node 1. NO memmap, NO `$` — the reserved-region form that GRUB's blscfg
     # mangles is deliberately avoided (see the BENCH_NUMA config comment).
     local new_args="default_hugepagesz=1G hugepagesz=1G hugepages=${hugepages}"
     if [[ "$MEM_METHOD" == "kernel" ]]; then
-        new_args="$new_args mem=${BENCH_MEM}"
+        new_args="$new_args mem=${BENCH_MEM_GIB}G"
     fi
     echo "  Setting: $new_args"
     grubby --update-kernel=ALL --args="$new_args"
@@ -674,7 +672,7 @@ set_kernel_params() {
     # Check if reboot needed
     local current_cmdline mem_ok=true
     current_cmdline=$(cat /proc/cmdline)
-    if [[ "$MEM_METHOD" == "kernel" ]] && ! echo "$current_cmdline" | grep -q "mem=${BENCH_MEM}"; then
+    if [[ "$MEM_METHOD" == "kernel" ]] && ! echo "$current_cmdline" | grep -q "mem=${BENCH_MEM_GIB}G"; then
         mem_ok=false
     fi
     if echo "$current_cmdline" | grep -q "hugepages=${hugepages}" && $mem_ok; then
@@ -1000,9 +998,9 @@ usage() {
     echo "  Bench NUMA node: $BENCH_NUMA   (GPU is physically on node $GPU_NUMA)"
     echo "  NVMe (node $BENCH_NUMA): ${NVME_BDFS[*]}"
     echo "  CPUs (node $BENCH_NUMA): $NUMA_CPUS"
-    echo "  Memory budget:   ${TOTAL_USABLE_NODE1} GiB (mem=${BENCH_MEM}) on node $BENCH_NUMA"
+    echo "  Memory budget:   ${BENCH_MEM_GIB} GiB (mem=${BENCH_MEM_GIB}G) on node $BENCH_NUMA"
     echo
-    echo "Env overrides: BENCH_NUMA (default 0), BENCH_MEM (default 64G), MEM_METHOD (cgroup|kernel)"
+    echo "Env overrides: BENCH_NUMA (default 0), BENCH_MEM_GIB (default 64), MEM_METHOD (cgroup|kernel)"
     exit 1
 }
 
@@ -1026,16 +1024,16 @@ main() {
     if [[ "$MEM_METHOD" == "cgroup" ]]; then
         echo "  Memory limit: cgroup slice ${BENCH_SLICE} (MemoryMax=$(cgroup_mem_max_for "$mode"), no reboot)"
     else
-        echo "  Memory limit: kernel mem=${BENCH_MEM} (reboot required)"
+        echo "  Memory limit: kernel mem=${BENCH_MEM_GIB}G (reboot required)"
     fi
-    echo "  Memory: ${TOTAL_USABLE_NODE1} GiB on NUMA node $BENCH_NUMA"
+    echo "  Memory: ${BENCH_MEM_GIB} GiB on NUMA node $BENCH_NUMA"
     if [[ "$mode" == "certus" ]]; then
         echo "  Hugepages: ${CERTUS_HUGEPAGES} × 1G (SPDK DRAM tier)"
-        echo "  Regular mem: $((TOTAL_USABLE_NODE1 - CERTUS_HUGEPAGES)) GiB"
+        echo "  Regular mem: $((BENCH_MEM_GIB - CERTUS_HUGEPAGES)) GiB"
         echo "  NVMe: vfio-pci (SPDK userspace)"
     else
         echo "  Hugepages: 0"
-        echo "  Regular mem: ${TOTAL_USABLE_NODE1} GiB (page cache)"
+        echo "  Regular mem: ${BENCH_MEM_GIB} GiB (page cache)"
         echo "  NVMe: RAID0 + XFS at $MOUNT_POINT"
     fi
     echo "  CPUs: $NUMA_CPUS"
