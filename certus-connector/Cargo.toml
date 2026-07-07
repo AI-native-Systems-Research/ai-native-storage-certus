@@ -21,7 +21,7 @@ dispatcher = { path = "../components/dispatcher" }
 logger = { path = "../components/logger" }
 dispatch-map = { path = "../components/dispatch-map" }
 eviction-policy-lru = { path = "../components/eviction-policy-lru" }
-memory-tier = { path = "../components/memory-tier" }
+memory-tier = { path = "../components/memory-tier", features = ["spdk"] }
 block-device-spdk-nvme = { path = "../components/block-device-spdk-nvme" }
 extent-manager = { path = "../components/extent-manager" }
 spdk-env = { path = "../components/spdk-env" }
