@@ -546,3 +546,495 @@ impl Dispatcher for DispatcherService {
         }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    use interfaces::{DispatcherConfig, GpuStream};
+
+    struct MockDispatcherState {
+        populate_results: HashMap<u64, Result<(), DispatcherError>>,
+        batch_lookup_results: Vec<Result<(), DispatcherError>>,
+        check_results: HashMap<u64, Result<bool, DispatcherError>>,
+        remove_results: HashMap<u64, Result<(), DispatcherError>>,
+        touch_results: HashMap<u64, Result<(), DispatcherError>>,
+        clear_memory_tier_result: Result<usize, DispatcherError>,
+        populate_calls: Vec<(u64, u32)>,
+        batch_lookup_calls: Vec<Vec<u64>>,
+        check_calls: Vec<u64>,
+    }
+
+    impl Default for MockDispatcherState {
+        fn default() -> Self {
+            Self {
+                populate_results: HashMap::new(),
+                batch_lookup_results: Vec::new(),
+                check_results: HashMap::new(),
+                remove_results: HashMap::new(),
+                touch_results: HashMap::new(),
+                clear_memory_tier_result: Ok(0),
+                populate_calls: Vec::new(),
+                batch_lookup_calls: Vec::new(),
+                check_calls: Vec::new(),
+            }
+        }
+    }
+
+    struct MockDispatcher {
+        state: Mutex<MockDispatcherState>,
+    }
+
+    impl MockDispatcher {
+        fn new(state: MockDispatcherState) -> Self {
+            Self { state: Mutex::new(state) }
+        }
+    }
+
+    impl Default for MockDispatcher {
+        fn default() -> Self {
+            Self::new(Default::default())
+        }
+    }
+
+    impl IDispatcher for MockDispatcher {
+        fn initialize(&self, _config: DispatcherConfig) -> Result<(), DispatcherError> {
+            Ok(())
+        }
+
+        fn shutdown(&self) -> Result<(), DispatcherError> {
+            Ok(())
+        }
+
+        fn lookup(&self, _key: u64, _ipc_handle: IpcHandle) -> Result<(), DispatcherError> {
+            Ok(())
+        }
+
+        fn lookup_async(
+            &self,
+            _key: u64,
+            _ipc_handle: IpcHandle,
+        ) -> Result<GpuStream, DispatcherError> {
+            Ok(GpuStream(std::ptr::null_mut()))
+        }
+
+        fn batch_lookup(&self, entries: &[(u64, IpcHandle)]) -> Vec<Result<(), DispatcherError>> {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            state
+                .batch_lookup_calls
+                .push(entries.iter().map(|(key, _)| *key).collect());
+            if state.batch_lookup_results.is_empty() {
+                vec![Ok(()); entries.len()]
+            } else {
+                state.batch_lookup_results.clone()
+            }
+        }
+
+        fn check(&self, key: u64) -> Result<bool, DispatcherError> {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            state.check_calls.push(key);
+            state.check_results.get(&key).cloned().unwrap_or(Ok(false))
+        }
+
+        fn remove(&self, key: u64) -> Result<(), DispatcherError> {
+            self.state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove_results
+                .get(&key)
+                .cloned()
+                .unwrap_or(Ok(()))
+        }
+
+        fn populate(&self, key: u64, ipc_handle: IpcHandle) -> Result<(), DispatcherError> {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            state.populate_calls.push((key, ipc_handle.size));
+            state.populate_results.get(&key).cloned().unwrap_or(Ok(()))
+        }
+
+        fn reserve_memory(&self, _key: u64, _size: u32) -> Result<*mut u8, DispatcherError> {
+            Ok(std::ptr::null_mut())
+        }
+
+        fn copy_gpu_to_memory_async(
+            &self,
+            _key: u64,
+            _ipc_handle: IpcHandle,
+            _stream: GpuStream,
+        ) -> Result<(), DispatcherError> {
+            Ok(())
+        }
+
+        fn copy_gpu_to_memory_completed(&self, _key: u64, _size: u32) -> Result<(), DispatcherError> {
+            Ok(())
+        }
+
+        fn release_memory(&self, _key: u64) -> Result<(), DispatcherError> {
+            Ok(())
+        }
+
+        fn touch(&self, key: u64) -> Result<(), DispatcherError> {
+            self.state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .touch_results
+                .get(&key)
+                .cloned()
+                .unwrap_or(Ok(()))
+        }
+
+        fn promote_to_memory_tier(&self, _keys: &[u64]) {}
+
+        fn clear_memory_tier(&self) -> Result<usize, DispatcherError> {
+            self.state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clear_memory_tier_result
+                .clone()
+        }
+
+        fn flush_to_ssd(&self) -> Result<usize, DispatcherError> {
+            Ok(0)
+        }
+    }
+
+    fn proto_ipc_handle(seed: u8) -> proto::IpcHandle {
+        proto::IpcHandle {
+            cuda_ipc_handle: vec![seed; 64],
+            size: 4096,
+            gpu_device_id: -1,
+        }
+    }
+
+    fn handle_key(handle: &proto::IpcHandle) -> [u8; 64] {
+        handle
+            .cuda_ipc_handle
+            .as_slice()
+            .try_into()
+            .expect("test handles are always 64 bytes")
+    }
+
+    fn cache_entry(refcount: usize) -> IpcCacheEntry {
+        IpcCacheEntry {
+            dev_ptr: std::ptr::null_mut(),
+            gpu_device_id: -1,
+            refcount,
+        }
+    }
+
+    #[tokio::test]
+    async fn populate_happy_path_uses_cached_ipc_and_stores() {
+        let mock = Arc::new(MockDispatcher::default());
+        let service = DispatcherService::new(mock.clone());
+        let ipc_handle = proto_ipc_handle(1);
+        let key = handle_key(&ipc_handle);
+        service
+            .ipc_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key, cache_entry(1));
+
+        let request = BatchPopulateRequest {
+            entries: vec![proto::PopulateEntry {
+                key: 10,
+                ipc_handle: Some(ipc_handle),
+            }],
+        };
+        let response = service
+            .populate(Request::new(request))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(response.results.len(), 1);
+        assert!(response.results[0].success);
+        assert_eq!(response.results[0].key, 10);
+        assert_eq!(
+            mock.state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .populate_calls,
+            vec![(10, 4096)]
+        );
+        assert_eq!(
+            service
+                .ipc_cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&key)
+                .unwrap()
+                .refcount,
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn populate_reports_ipc_open_failure() {
+        let mock = Arc::new(MockDispatcher::default());
+        let service = DispatcherService::new(mock.clone());
+
+        let request = BatchPopulateRequest {
+            entries: vec![proto::PopulateEntry {
+                key: 11,
+                ipc_handle: Some(proto_ipc_handle(0)),
+            }],
+        };
+        let response = service
+            .populate(Request::new(request))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(response.results.len(), 1);
+        let result = &response.results[0];
+        assert!(!result.success);
+        assert_eq!(result.error_code, ErrorCode::IoError as i32);
+        assert!(result.error_message.contains("IPC open failed"));
+        assert!(
+            mock.state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .populate_calls
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn populate_maps_dispatcher_error_response() {
+        let mut state = MockDispatcherState::default();
+        state
+            .populate_results
+            .insert(12, Err(DispatcherError::Timeout("pending".to_string())));
+        let mock = Arc::new(MockDispatcher::new(state));
+        let service = DispatcherService::new(mock);
+
+        let ipc_handle = proto_ipc_handle(2);
+        let key = handle_key(&ipc_handle);
+        service
+            .ipc_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key, cache_entry(1));
+
+        let request = BatchPopulateRequest {
+            entries: vec![proto::PopulateEntry {
+                key: 12,
+                ipc_handle: Some(ipc_handle),
+            }],
+        };
+        let response = service
+            .populate(Request::new(request))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(response.results.len(), 1);
+        assert!(!response.results[0].success);
+        assert_eq!(response.results[0].error_code, ErrorCode::Timeout as i32);
+    }
+
+    #[tokio::test]
+    async fn lookup_handles_mixed_success_and_failures() {
+        let mut state = MockDispatcherState::default();
+        state.batch_lookup_results = vec![
+            Ok(()),
+            Err(DispatcherError::KeyNotFound(22)),
+            Err(DispatcherError::Timeout("pending".to_string())),
+        ];
+        let mock = Arc::new(MockDispatcher::new(state));
+        let service = DispatcherService::new(mock.clone());
+
+        let h1 = proto_ipc_handle(3);
+        let h2 = proto_ipc_handle(4);
+        let h3 = proto_ipc_handle(5);
+        for h in [&h1, &h2, &h3] {
+            let key = handle_key(h);
+            service
+                .ipc_cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(key, cache_entry(1));
+        }
+
+        let request = BatchLookupRequest {
+            entries: vec![
+                proto::LookupEntry {
+                    key: 21,
+                    ipc_handle: Some(h1),
+                },
+                proto::LookupEntry {
+                    key: 22,
+                    ipc_handle: Some(h2),
+                },
+                proto::LookupEntry {
+                    key: 23,
+                    ipc_handle: Some(h3),
+                },
+            ],
+        };
+        let response = service.lookup(Request::new(request)).await.unwrap().into_inner();
+
+        assert_eq!(response.results.len(), 3);
+        assert!(response.results[0].success);
+        assert!(!response.results[1].success);
+        assert_eq!(response.results[1].error_code, ErrorCode::KeyNotFound as i32);
+        assert!(!response.results[2].success);
+        assert_eq!(response.results[2].error_code, ErrorCode::Timeout as i32);
+        assert_eq!(
+            mock.state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .batch_lookup_calls,
+            vec![vec![21, 22, 23]]
+        );
+    }
+
+    #[tokio::test]
+    async fn check_returns_per_key_results_in_order() {
+        let mut state = MockDispatcherState::default();
+        state.check_results.insert(31, Ok(true));
+        state.check_results.insert(32, Ok(true));
+        state.check_results.insert(33, Ok(false));
+        state
+            .check_results
+            .insert(34, Err(DispatcherError::Timeout("pending".to_string())));
+        let mock = Arc::new(MockDispatcher::new(state));
+        let service = DispatcherService::new(mock.clone());
+
+        let request = BatchCheckRequest {
+            keys: vec![31, 32, 33, 34],
+        };
+        let response = service.check(Request::new(request)).await.unwrap().into_inner();
+
+        assert_eq!(
+            response
+                .results
+                .iter()
+                .map(|r| (r.key, r.exists))
+                .collect::<Vec<_>>(),
+            vec![(31, true), (32, true), (33, false), (34, false)]
+        );
+        assert_eq!(
+            mock.state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .check_calls,
+            vec![31, 32, 33, 34]
+        );
+    }
+
+    #[tokio::test]
+    async fn remove_supports_partial_failure() {
+        let mut state = MockDispatcherState::default();
+        state
+            .remove_results
+            .insert(42, Err(DispatcherError::KeyNotFound(42)));
+        let mock = Arc::new(MockDispatcher::new(state));
+        let service = DispatcherService::new(mock);
+
+        let request = BatchRemoveRequest {
+            keys: vec![41, 42, 43],
+        };
+        let response = service.remove(Request::new(request)).await.unwrap().into_inner();
+
+        assert_eq!(response.results.len(), 3);
+        assert!(response.results[0].success);
+        assert!(!response.results[1].success);
+        assert_eq!(response.results[1].error_code, ErrorCode::KeyNotFound as i32);
+        assert!(response.results[2].success);
+    }
+
+    #[tokio::test]
+    async fn touch_supports_partial_failure() {
+        let mut state = MockDispatcherState::default();
+        state
+            .touch_results
+            .insert(52, Err(DispatcherError::KeyNotFound(52)));
+        let mock = Arc::new(MockDispatcher::new(state));
+        let service = DispatcherService::new(mock);
+
+        let request = BatchTouchRequest {
+            keys: vec![51, 52],
+            promote: false,
+        };
+        let response = service.touch(Request::new(request)).await.unwrap().into_inner();
+
+        assert_eq!(response.results.len(), 2);
+        assert!(response.results[0].success);
+        assert!(!response.results[1].success);
+        assert_eq!(response.results[1].error_code, ErrorCode::KeyNotFound as i32);
+    }
+
+    #[test]
+    fn ipc_cache_refcount_close_keeps_handle_open_when_still_referenced() {
+        let cache = Arc::new(Mutex::new(HashMap::new()));
+        let key = [7u8; 64];
+        cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key, cache_entry(1));
+
+        let ptr = ipc_cache_open(&cache, &key, -1).unwrap();
+        assert!(ptr.is_null());
+        assert_eq!(
+            cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&key)
+                .unwrap()
+                .refcount,
+            2
+        );
+
+        ipc_cache_close(&cache, &key);
+        assert_eq!(
+            cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&key)
+                .unwrap()
+                .refcount,
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn clear_memory_tier_returns_entries_cleared() {
+        let state = MockDispatcherState {
+            clear_memory_tier_result: Ok(17),
+            ..Default::default()
+        };
+        let mock = Arc::new(MockDispatcher::new(state));
+        let service = DispatcherService::new(mock);
+
+        let response = service
+            .clear_memory_tier(Request::new(ClearMemoryTierRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(response.entries_cleared, 17);
+    }
+
+    #[tokio::test]
+    async fn clear_memory_tier_maps_not_initialized_error() {
+        let state = MockDispatcherState {
+            clear_memory_tier_result: Err(DispatcherError::NotInitialized(
+                "dispatcher not initialized".to_string(),
+            )),
+            ..Default::default()
+        };
+        let mock = Arc::new(MockDispatcher::new(state));
+        let service = DispatcherService::new(mock);
+
+        let err = service
+            .clear_memory_tier(Request::new(ClearMemoryTierRequest {}))
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code(), tonic::Code::Internal);
+        assert!(err.message().contains("clear_memory_tier failed"));
+        assert!(err.message().contains("not initialized"));
+    }
+}

@@ -9,6 +9,7 @@ publish = false
 block-device-spdk-nvme.workspace = true
 component-core.workspace = true
 component-framework.workspace = true
+disk-partition-manager.workspace = true
 interfaces = { workspace = true, features = ["spdk"] }
 spdk-env.workspace = true
 extent-manager = { path = "../../components/extent-manager", features = ["testing"] }

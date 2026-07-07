@@ -20,7 +20,7 @@ use dispatcher::DispatcherComponent;
 use gpu_services::cuda_ffi;
 use gpu_services::GpuServicesComponent;
 use interfaces::{
-    CacheKey, DispatchMapError, DispatcherConfig, DmaAllocFn, DmaBuffer, IDispatchMap, IDispatcher,
+    CacheKey, DispatchMapError, DispatcherConfig, DmaBuffer, IDispatchMap, IDispatcher,
     IEvictionPolicy, IGpuServices, ILogger, IMemoryTier, IpcHandle, LookupResult,
 };
 use memory_tier::MemoryTierComponent;
@@ -40,14 +40,12 @@ struct HwDmEntry {
 
 struct HwDispatchMap {
     inner: Mutex<HashMap<CacheKey, HwDmEntry>>,
-    dma_alloc: Mutex<Option<DmaAllocFn>>,
 }
 
 impl HwDispatchMap {
     fn new() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),
-            dma_alloc: Mutex::new(None),
         }
     }
 
@@ -61,37 +59,8 @@ impl HwDispatchMap {
 }
 
 impl IDispatchMap for HwDispatchMap {
-    fn set_dma_alloc(&self, alloc: DmaAllocFn) {
-        *self.dma_alloc.lock().unwrap() = Some(alloc);
-    }
-
     fn initialize(&self) -> Result<(), DispatchMapError> {
         Ok(())
-    }
-
-    fn create_staging(&self, key: CacheKey, size: u32) -> Result<Arc<DmaBuffer>, DispatchMapError> {
-        let mut inner = self.inner.lock().unwrap();
-        if inner.contains_key(&key) {
-            return Err(DispatchMapError::AlreadyExists(key));
-        }
-        let alloc_guard = self.dma_alloc.lock().unwrap();
-        let alloc = alloc_guard
-            .as_ref()
-            .ok_or_else(|| DispatchMapError::NotInitialized("dma_alloc not set".into()))?;
-        let buf =
-            alloc(size as usize * 4096, 4096, None).map_err(DispatchMapError::AllocationFailed)?;
-        let buffer = Arc::new(buf);
-        inner.insert(
-            key,
-            HwDmEntry {
-                buffer: Arc::clone(&buffer),
-                block_offset: None,
-                mem_pointer: None,
-                write_ref: true,
-                read_refs: 0,
-            },
-        );
-        Ok(buffer)
     }
 
     fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {
@@ -107,9 +76,7 @@ impl IDispatchMap for HwDispatchMap {
                 } else if let Some(offset) = e.block_offset {
                     Ok(LookupResult::BlockDevice { offset })
                 } else {
-                    Ok(LookupResult::Staging {
-                        buffer: Arc::clone(&e.buffer),
-                    })
+                    Ok(LookupResult::NotExist)
                 }
             }
         }

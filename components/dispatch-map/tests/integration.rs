@@ -8,8 +8,8 @@ use component_core::query_interface;
 use component_framework::define_component;
 use dispatch_map::DispatchMapComponent;
 use interfaces::{
-    DispatchMapError, DmaAllocFn, DmaBuffer, Extent, ExtentKey, ExtentManagerError, FormatParams,
-    IDispatchMap, IEvictionPolicy, IExtentManager, LookupResult, WriteHandle,
+    DispatchMapError, Extent, ExtentKey, ExtentManagerError, FormatParams, IDispatchMap,
+    IEvictionPolicy, IExtentManager, LookupResult, WriteHandle,
 };
 
 use dispatch_map::DispatchMapState;
@@ -18,39 +18,6 @@ use dispatch_map::DispatchMapState;
 // Mock helpers
 // ---------------------------------------------------------------------------
 
-fn mock_dma_alloc() -> DmaAllocFn {
-    Arc::new(|size, _align, _numa| {
-        let layout = std::alloc::Layout::from_size_align(size, 4096).unwrap();
-        // SAFETY: Test-only allocation with valid layout.
-        let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
-        if ptr.is_null() {
-            return Err("allocation failed".into());
-        }
-        // SAFETY: ptr is valid heap memory from alloc_zeroed.
-        unsafe {
-            DmaBuffer::from_raw(
-                ptr as *mut std::ffi::c_void,
-                size,
-                mock_free as unsafe extern "C" fn(*mut std::ffi::c_void),
-                -1,
-            )
-        }
-        .map_err(|e| e.to_string())
-    })
-}
-
-unsafe extern "C" fn mock_free(ptr: *mut std::ffi::c_void) {
-    if !ptr.is_null() {
-        // SAFETY: test-only dealloc matching mock_dma_alloc.
-        unsafe {
-            std::alloc::dealloc(
-                ptr as *mut u8,
-                std::alloc::Layout::from_size_align_unchecked(1, 1),
-            );
-        }
-    }
-}
-
 fn setup_component() -> Arc<DispatchMapComponent> {
     let ep_comp = eviction_policy_lru::EvictionPolicyLruComponent::new_default();
     let ep: Arc<dyn IEvictionPolicy + Send + Sync> =
@@ -58,9 +25,13 @@ fn setup_component() -> Arc<DispatchMapComponent> {
 
     let c = DispatchMapComponent::new(DispatchMapState::new());
     c.eviction_policy.connect(ep).unwrap();
-    let dm = query_interface!(c, IDispatchMap).unwrap();
-    dm.set_dma_alloc(mock_dma_alloc());
     c
+}
+
+/// Helper: create a memory-tier entry with a leaked buffer for the given key.
+fn create_entry(dm: &Arc<dyn IDispatchMap + Send + Sync>, key: u64) {
+    let ptr = Box::into_raw(vec![0u8; 4096].into_boxed_slice()) as *mut u8;
+    dm.create_memory_tier_entry(key, ptr, 4096).unwrap();
 }
 
 // ---------------------------------------------------------------------------
@@ -71,7 +42,7 @@ fn setup_component() -> Arc<DispatchMapComponent> {
 fn multiple_readers_concurrent() {
     let c = setup_component();
     let dm = query_interface!(c, IDispatchMap).unwrap();
-    let _ = dm.create_staging(1, 1).unwrap();
+    create_entry(&dm, 1);
     dm.release_write(1).unwrap();
 
     let handles: Vec<_> = (0..4)
@@ -94,7 +65,7 @@ fn multiple_readers_concurrent() {
 fn writer_blocks_until_readers_release() {
     let c = setup_component();
     let dm = query_interface!(c, IDispatchMap).unwrap();
-    let _ = dm.create_staging(1, 1).unwrap();
+    create_entry(&dm, 1);
     dm.release_write(1).unwrap();
 
     dm.take_read(1).unwrap();
@@ -115,7 +86,7 @@ fn writer_blocks_until_readers_release() {
 fn writer_timeout_with_active_readers() {
     let c = setup_component();
     let dm = query_interface!(c, IDispatchMap).unwrap();
-    let _ = dm.create_staging(1, 1).unwrap();
+    create_entry(&dm, 1);
     dm.release_write(1).unwrap();
 
     dm.take_read(1).unwrap();
@@ -134,13 +105,13 @@ fn writer_timeout_with_active_readers() {
 fn lookup_blocks_on_active_writer() {
     let c = setup_component();
     let dm = query_interface!(c, IDispatchMap).unwrap();
-    let _ = dm.create_staging(1, 1).unwrap();
-    // write_ref is 1 from create_staging
+    create_entry(&dm, 1);
+    // write_ref is 1 from create_memory_tier_entry
 
     let dm2 = Arc::clone(&dm);
     let reader = thread::spawn(move || {
         let result = dm2.lookup(1).unwrap();
-        assert!(matches!(result, LookupResult::Staging { .. }));
+        assert!(matches!(result, LookupResult::MemoryTier { .. }));
         dm2.release_read(1).unwrap();
     });
 
@@ -158,8 +129,8 @@ fn lookup_blocks_on_active_writer() {
 fn writer_blocks_on_another_writer() {
     let c = setup_component();
     let dm = query_interface!(c, IDispatchMap).unwrap();
-    let _ = dm.create_staging(1, 1).unwrap();
-    // write_ref=1 from create_staging
+    create_entry(&dm, 1);
+    // write_ref=1 from create_memory_tier_entry
 
     let dm2 = Arc::clone(&dm);
     let second_writer = thread::spawn(move || dm2.take_write(1));
@@ -178,7 +149,7 @@ fn writer_blocks_on_another_writer() {
 fn second_writer_times_out_while_first_holds() {
     let c = setup_component();
     let dm = query_interface!(c, IDispatchMap).unwrap();
-    let _ = dm.create_staging(1, 1).unwrap();
+    create_entry(&dm, 1);
     // write_ref=1 — never release
 
     let dm2 = Arc::clone(&dm);
@@ -194,7 +165,7 @@ fn second_writer_times_out_while_first_holds() {
 fn writer_waits_for_all_readers_to_drain() {
     let c = setup_component();
     let dm = query_interface!(c, IDispatchMap).unwrap();
-    let _ = dm.create_staging(1, 1).unwrap();
+    create_entry(&dm, 1);
     dm.release_write(1).unwrap();
 
     // Acquire 3 read refs.
@@ -223,7 +194,7 @@ fn writer_waits_for_all_readers_to_drain() {
 fn take_read_times_out_with_active_writer() {
     let c = setup_component();
     let dm = query_interface!(c, IDispatchMap).unwrap();
-    let _ = dm.create_staging(1, 1).unwrap();
+    create_entry(&dm, 1);
     // write_ref=1 — never release
 
     let dm2 = Arc::clone(&dm);
@@ -239,7 +210,7 @@ fn take_read_times_out_with_active_writer() {
 fn lookup_times_out_with_active_writer() {
     let c = setup_component();
     let dm = query_interface!(c, IDispatchMap).unwrap();
-    let _ = dm.create_staging(1, 1).unwrap();
+    create_entry(&dm, 1);
     // write_ref=1 — never release
 
     let dm2 = Arc::clone(&dm);
@@ -255,9 +226,9 @@ fn lookup_times_out_with_active_writer() {
 fn independent_keys_do_not_interfere() {
     let c = setup_component();
     let dm = query_interface!(c, IDispatchMap).unwrap();
-    let _ = dm.create_staging(1, 1).unwrap();
+    create_entry(&dm, 1);
     // key 1 has write_ref=1
-    let _ = dm.create_staging(2, 1).unwrap();
+    create_entry(&dm, 2);
     dm.release_write(2).unwrap();
 
     // Reading key 2 must not block on key 1's writer.
@@ -283,13 +254,13 @@ fn independent_keys_do_not_interfere() {
 fn downgrade_unblocks_pending_readers() {
     let c = setup_component();
     let dm = query_interface!(c, IDispatchMap).unwrap();
-    let _ = dm.create_staging(1, 1).unwrap();
+    create_entry(&dm, 1);
     // write_ref=1
 
     let dm2 = Arc::clone(&dm);
     let reader = thread::spawn(move || {
         let result = dm2.lookup(1).unwrap();
-        assert!(matches!(result, LookupResult::Staging { .. }));
+        assert!(matches!(result, LookupResult::MemoryTier { .. }));
         dm2.release_read(1).unwrap();
     });
 
@@ -305,7 +276,7 @@ fn downgrade_unblocks_pending_readers() {
 fn downgrade_still_blocks_writers() {
     let c = setup_component();
     let dm = query_interface!(c, IDispatchMap).unwrap();
-    let _ = dm.create_staging(1, 1).unwrap();
+    create_entry(&dm, 1);
     dm.downgrade_reference(1).unwrap();
     // Now read_ref=1, write_ref=0.
 
@@ -323,7 +294,7 @@ fn downgrade_still_blocks_writers() {
 fn sequential_writers_succeed() {
     let c = setup_component();
     let dm = query_interface!(c, IDispatchMap).unwrap();
-    let _ = dm.create_staging(1, 1).unwrap();
+    create_entry(&dm, 1);
     dm.release_write(1).unwrap();
 
     for _ in 0..5 {
@@ -336,7 +307,7 @@ fn sequential_writers_succeed() {
 fn reader_succeeds_immediately_after_writer_releases() {
     let c = setup_component();
     let dm = query_interface!(c, IDispatchMap).unwrap();
-    let _ = dm.create_staging(1, 1).unwrap();
+    create_entry(&dm, 1);
     // write_ref=1
 
     let dm2 = Arc::clone(&dm);
@@ -355,7 +326,7 @@ fn reader_succeeds_immediately_after_writer_releases() {
 fn remove_blocked_by_active_read_ref() {
     let c = setup_component();
     let dm = query_interface!(c, IDispatchMap).unwrap();
-    let _ = dm.create_staging(1, 1).unwrap();
+    create_entry(&dm, 1);
     dm.release_write(1).unwrap();
     dm.take_read(1).unwrap();
 
@@ -370,7 +341,7 @@ fn remove_blocked_by_active_read_ref() {
 fn remove_blocked_by_active_write_ref() {
     let c = setup_component();
     let dm = query_interface!(c, IDispatchMap).unwrap();
-    let _ = dm.create_staging(1, 1).unwrap();
+    create_entry(&dm, 1);
     // write_ref=1
 
     let err = dm.remove(1);
@@ -386,7 +357,7 @@ fn concurrent_readers_and_writer_on_different_keys() {
     let dm = query_interface!(c, IDispatchMap).unwrap();
 
     for k in 1..=4 {
-        let _ = dm.create_staging(k, 1).unwrap();
+        create_entry(&dm, k);
         dm.release_write(k).unwrap();
     }
 
@@ -416,7 +387,7 @@ fn concurrent_readers_and_writer_on_different_keys() {
 fn lookup_acquires_read_ref() {
     let c = setup_component();
     let dm = query_interface!(c, IDispatchMap).unwrap();
-    let _ = dm.create_staging(1, 1).unwrap();
+    create_entry(&dm, 1);
     dm.release_write(1).unwrap();
 
     let _ = dm.lookup(1).unwrap();
@@ -492,6 +463,14 @@ impl IExtentManager for MockExtentManagerComponent {
     fn capacity_bytes(&self) -> u64 {
         0
     }
+
+    fn set_metadata_base_lba(&self, _base_lba: u64) {}
+
+    fn set_data_base_lba(&self, _base_lba: u64) {}
+
+    fn data_base_lba(&self) -> u64 {
+        0
+    }
 }
 
 #[test]
@@ -527,7 +506,6 @@ fn recovery_populated() {
         .expect("bind extent_manager");
 
     let dm = query_interface!(c, IDispatchMap).unwrap();
-    dm.set_dma_alloc(mock_dma_alloc());
     dm.initialize().unwrap();
 
     for key in [10, 20, 30] {
@@ -559,7 +537,6 @@ fn recovery_empty() {
         .expect("bind extent_manager");
 
     let dm = query_interface!(c, IDispatchMap).unwrap();
-    dm.set_dma_alloc(mock_dma_alloc());
     dm.initialize().unwrap();
 
     let result = dm.lookup(1).unwrap();

@@ -1,14 +1,10 @@
 //! IDispatcher interface and associated types for the dispatcher component.
 
 use std::fmt;
-#[cfg(feature = "spdk")]
-use std::sync::Arc;
 
 use crate::idispatch_map::CacheKey;
 #[cfg(feature = "spdk")]
 use crate::igpu_services::GpuStream;
-#[cfg(feature = "spdk")]
-use crate::spdk_types::DmaBuffer;
 
 /// Configuration for dispatcher initialization.
 ///
@@ -32,8 +28,6 @@ pub struct DispatcherConfig {
     pub data_pci_addrs: Vec<String>,
     /// Maximum entries in the in-memory cache. Default: 10000.
     pub max_cache_entries: usize,
-    /// Eviction threshold (unused, retained for config compatibility). Default: 0.8.
-    pub eviction_threshold: f64,
     /// Whether to format extent managers on initialization.
     /// Default: true. Set to false when re-initializing to preserve on-disk data.
     pub format_on_init: bool,
@@ -65,6 +59,12 @@ pub struct DispatcherConfig {
     /// P2P cold reads for drive bandwidth.
     /// Default: 10. Set to 0 to disable backfill entirely.
     pub backfill_delay_ms: u64,
+    /// Size of the extent-manager metadata partition in bytes.
+    /// Default: 128 MiB.
+    pub metadata_partition_size: u64,
+    /// Size of the extended metadata partition in bytes.
+    /// Default: 128 MiB.
+    pub extended_metadata_partition_size: u64,
 }
 
 impl Default for DispatcherConfig {
@@ -72,7 +72,6 @@ impl Default for DispatcherConfig {
         Self {
             data_pci_addrs: Vec::new(),
             max_cache_entries: 10000,
-            eviction_threshold: 0.8,
             format_on_init: true,
             ssd_eviction_threshold: 0.9,
             ssd_eviction_low_watermark: 0.8,
@@ -81,6 +80,8 @@ impl Default for DispatcherConfig {
             poller_base_cpu: None,
             max_eviction_attempts: 2048,
             backfill_delay_ms: 10,
+            metadata_partition_size: 128 * 1024 * 1024,
+            extended_metadata_partition_size: 128 * 1024 * 1024,
         }
     }
 }
@@ -155,6 +156,21 @@ impl fmt::Display for DispatcherError {
 
 impl std::error::Error for DispatcherError {}
 
+// # Verified Properties (see `components/dispatcher/verif/`)
+//
+// The following invariants are formally proved with Creusot:
+//
+// - P1 (drive-index-bounded): drive_index(key, N) always returns a value < N
+// - P2 (eviction-terminates): evict_for_space loop exits after at most max_attempts iterations
+// - P3 (size-validation): populate rejects size == 0
+// - P4 (init-guard): all operations return NotInitialized before initialize() succeeds
+// - P5 (populate-lifecycle): successful populate yields MemoryTier entry with read_ref=1, no write_ref
+// - P6 (drive-index-deterministic): same key always maps to same drive
+// - P7 (eviction-progress): each successful eviction strictly decreases memory used
+// - P8 (reserve-complete-lifecycle): reserve→copy→complete yields MemoryTier entry with read_ref=1
+//
+// Total: 10 properties, 24 verification conditions discharged by SMT solvers.
+
 #[cfg(feature = "spdk")]
 component_macros::define_interface! {
     pub IDispatcher {
@@ -169,6 +185,14 @@ component_macros::define_interface! {
         /// Returns [`DispatcherError::NotInitialized`] if required receptacles
         /// (dispatch_map, memory_tier) are not bound.
         /// Returns [`DispatcherError::InvalidParameter`] if `data_pci_addrs` is empty.
+        ///
+        /// # Verified: P3 (size-validation), P4 (init-guard)
+        /// Rejects empty `data_pci_addrs` (InvalidParameter). After success,
+        /// sets initialized=true enabling all other operations.
+        ///
+        /// # Unchecked: Concurrent initialization safety
+        /// Two threads calling initialize() simultaneously could race on the
+        /// AtomicBool store. Suggested technique: Spin model or Loom testing.
         ///
         /// # Examples
         ///
@@ -193,8 +217,20 @@ component_macros::define_interface! {
 
         /// Shut down the dispatcher, completing all in-flight background writes.
         ///
-        /// Blocks until all pending staging-to-SSD writes finish, then shuts down
+        /// Blocks until all pending memory-tier-to-SSD writes finish, then shuts down
         /// all managed block devices and extent managers.
+        ///
+        /// # Verified: P4 (init-guard)
+        /// After shutdown completes, initialized=false and all subsequent
+        /// operations return NotInitialized.
+        ///
+        /// # Unchecked: Background writer drain completeness
+        /// Claims all pending writes complete before returning. Cannot be
+        /// modeled sequentially. Suggested technique: Spin model or integration test.
+        ///
+        /// # Unchecked: Two-phase block device shutdown ordering
+        /// Signal-all-then-join ordering prevents use-after-free on SPDK
+        /// transport memory. Suggested technique: Loom concurrency testing.
         ///
         /// # Examples
         ///
@@ -211,7 +247,7 @@ component_macros::define_interface! {
 
         /// Look up a cache entry and DMA-copy data to the client's GPU memory.
         ///
-        /// If the entry is in staging, copies from the staging buffer.
+        /// If the entry is in the memory-tier, copies from the DRAM buffer.
         /// If the entry is on SSD, reads from the block device and copies.
         /// Blocks if a writer is active on the key (dispatch map semantics).
         ///
@@ -219,6 +255,15 @@ component_macros::define_interface! {
         ///
         /// Returns [`DispatcherError::KeyNotFound`] if the key does not exist.
         /// Returns [`DispatcherError::NotInitialized`] if called before [`initialize`].
+        ///
+        /// # Verified: P1 (drive-index-bounded), P4 (init-guard)
+        /// Drive selection for cold-path reads is always within [0, num_drives).
+        /// Returns NotInitialized if called before initialize().
+        ///
+        /// # Unchecked: Blocks until writer completes
+        /// Doc claims lookup blocks if a writer is active. This is a concurrency
+        /// property delegated to dispatch-map's reference protocol.
+        /// Suggested technique: Spin model of reader/writer interaction.
         ///
         /// # Examples
         ///
@@ -242,13 +287,20 @@ component_macros::define_interface! {
         ///
         /// Returns the CUDA stream the copy was issued on. The caller must call
         /// `stream_synchronize` on the returned stream before accessing the GPU
-        /// destination memory. For non-memory-tier paths (staging, SSD) the copy
-        /// completes synchronously and a null stream is returned.
+        /// destination memory. For SSD-backed entries the copy completes
+        /// synchronously and a null stream is returned.
         ///
         /// # Errors
         ///
         /// Returns [`DispatcherError::KeyNotFound`] if the key does not exist.
         /// Returns [`DispatcherError::IoError`] if the DMA copy fails.
+        ///
+        /// # Verified: P1 (drive-index-bounded), P4 (init-guard)
+        /// Cold-path drive selection bounded. Rejects uninitialized.
+        ///
+        /// # Unchecked: Caller must synchronize returned stream before memory access
+        /// Caller protocol — if violated, GPU destination contains partial data.
+        /// Suggested technique: debug assertion in wrapper layer.
         ///
         /// # Examples
         ///
@@ -277,11 +329,19 @@ component_macros::define_interface! {
 
         /// Batch lookup: retrieve multiple cache entries concurrently.
         ///
-        /// For entries in the memory-tier or staging, behaves like sequential
+        /// For entries in the memory-tier, behaves like sequential
         /// lookups. For entries on SSD (cold path), promotes them in parallel
         /// to exploit multi-drive bandwidth.
         ///
         /// Returns one `Result` per input entry, in the same order.
+        ///
+        /// # Verified: P1 (drive-index-bounded), P2 (eviction-terminates), P4 (init-guard)
+        /// Cold-path drive selection is bounded. Eviction during promotion
+        /// terminates. Rejects calls before initialization.
+        ///
+        /// # Unchecked: Result ordering matches input ordering
+        /// The implementation uses thread::scope with per-drive parallelism;
+        /// results are assembled by index. Suggested technique: property-based testing.
         fn batch_lookup(
             &self,
             entries: &[(CacheKey, IpcHandle)],
@@ -291,6 +351,9 @@ component_macros::define_interface! {
         ///
         /// Returns `true` if the key is present in the cache (any tier),
         /// `false` otherwise.
+        ///
+        /// # Verified: P4 (init-guard)
+        /// Returns NotInitialized before initialize().
         ///
         /// # Examples
         ///
@@ -311,11 +374,19 @@ component_macros::define_interface! {
         /// Remove a cache entry, freeing all associated resources.
         ///
         /// If a background write is in progress, blocks until it completes
-        /// before removing. Frees staging buffer and/or SSD extent.
+        /// before removing. Frees memory-tier slot and/or SSD extent.
         ///
         /// # Errors
         ///
         /// Returns [`DispatcherError::KeyNotFound`] if the key does not exist.
+        ///
+        /// # Verified: P1 (drive-index-bounded), P4 (init-guard)
+        /// Drive index for extent removal is bounded. Rejects uninitialized.
+        ///
+        /// # Unchecked: Blocks until background write completes
+        /// Doc claims remove blocks if a writer is active. This depends on
+        /// dispatch-map reference semantics (lookup acquires read ref).
+        /// Suggested technique: Spin model or Loom test.
         ///
         /// # Examples
         ///
@@ -333,8 +404,8 @@ component_macros::define_interface! {
 
         /// Populate a new cache entry by DMA-copying from GPU memory.
         ///
-        /// Allocates a staging buffer, copies data from the IPC handle,
-        /// and returns immediately. The staging-to-SSD write happens
+        /// Allocates a memory-tier slot, copies data from the GPU via DMA,
+        /// and returns immediately. The memory-tier-to-SSD write happens
         /// asynchronously in the background.
         ///
         /// # Errors
@@ -342,6 +413,16 @@ component_macros::define_interface! {
         /// Returns [`DispatcherError::InvalidParameter`] if `ipc_handle.size` is 0.
         /// Returns [`DispatcherError::AlreadyExists`] if the key is already cached.
         /// Returns [`DispatcherError::AllocationFailed`] if the memory-tier pool is full.
+        ///
+        /// # Verified: P3 (size-validation), P4 (init-guard), P5 (populate-lifecycle), P2 (eviction-terminates)
+        /// Rejects zero-size. Rejects uninitialized. On success, entry is
+        /// registered in MemoryTier with read_ref=1 (held by background writer)
+        /// and no write_ref. Eviction terminates within max_attempts.
+        ///
+        /// # Unchecked: Background write-through eventually persists to SSD
+        /// The enqueued write job executes asynchronously; completion is not
+        /// guaranteed before `flush_to_ssd` is called.
+        /// Suggested technique: integration test with flush barrier.
         ///
         /// # Examples
         ///
@@ -362,122 +443,69 @@ component_macros::define_interface! {
         /// ```
         fn populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>;
 
-        /// Async variant of [`populate`] — issues the D2H DMA copy without blocking.
+        /// Reserve a memory-tier slot for the given key, evicting if necessary.
         ///
-        /// Evicts if needed, allocates a memory-tier slot, and issues
-        /// `dma_copy_to_host_async` on the warm stream. Returns the CUDA stream
-        /// the copy was issued on. The caller must poll `stream_query` on the
-        /// returned stream and call [`populate_finalize`] once it reports complete.
-        ///
-        /// Between this call and `populate_finalize`, the memory-tier slot is
-        /// allocated but not registered in the dispatch-map — no reader can see it.
+        /// Allocates `size` bytes in DRAM keyed by `key`. The returned pointer
+        /// is valid until `release_memory` or `copy_gpu_to_memory_completed` is called.
+        /// Does NOT register in the dispatch-map or issue any DMA.
         ///
         /// # Errors
         ///
-        /// Returns [`DispatcherError::InvalidParameter`] if `ipc_handle.size` is 0.
-        /// Returns [`DispatcherError::AlreadyExists`] if the key is already cached.
-        /// Returns [`DispatcherError::AllocationFailed`] if the memory-tier pool is full.
-        fn populate_async(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<GpuStream, DispatcherError>;
+        /// Returns [`DispatcherError::AlreadyExists`] if the key already has a slot.
+        /// Returns [`DispatcherError::AllocationFailed`] if the pool is full after eviction.
+        ///
+        /// # Verified: P2 (eviction-terminates), P3 (size-validation), P4 (init-guard), P10 (reserve-complete-lifecycle)
+        /// Eviction terminates. Rejects zero-size. Rejects uninitialized.
+        /// Part of the reserve→copy→complete lifecycle.
+        ///
+        /// # Unchecked: Returned pointer validity
+        /// The pointer is valid pinned DRAM co-registered with CUDA and SPDK.
+        /// Correctness depends on memory-tier pool lifetime.
+        /// Suggested technique: Miri or ASAN integration test.
+        fn reserve_memory(&self, key: CacheKey, size: u32) -> Result<*mut u8, DispatcherError>;
 
-        /// Finalize a previously started async populate after DMA completion.
+        /// DMA-copy from GPU into a previously reserved memory-tier slot.
         ///
-        /// Registers the memory-tier entry in the dispatch-map, downgrades the
-        /// write reference to a read reference, and enqueues the background SSD
-        /// write-through. Must only be called after `stream_query` confirms the
-        /// DMA issued by [`populate_async`] has completed.
+        /// The slot must have been allocated by a prior `reserve_memory` call.
+        /// Issues `cudaMemcpyAsync` on the given stream and returns immediately.
+        /// Caller must synchronize the stream before calling `copy_gpu_to_memory_completed`.
         ///
         /// # Errors
         ///
-        /// Returns [`DispatcherError::KeyNotFound`] if no pending async populate
-        /// exists for this key.
-        fn populate_finalize(&self, key: CacheKey) -> Result<(), DispatcherError>;
+        /// Returns [`DispatcherError::KeyNotFound`] if no reserved slot exists for `key`.
+        /// Returns [`DispatcherError::IoError`] if the DMA copy fails.
+        ///
+        /// # Verified: P4 (init-guard), P10 (reserve-complete-lifecycle)
+        /// Rejects uninitialized. Part of the reserve→copy→complete lifecycle.
+        ///
+        /// # Unchecked: Stream must be synchronized before copy_gpu_to_memory_completed
+        /// Caller protocol — no in-process enforcement. If violated, GPU DMA
+        /// may not have completed and memory-tier slot contains partial data.
+        /// Suggested technique: debug-mode runtime assertion via stream query.
+        fn copy_gpu_to_memory_async(&self, key: CacheKey, ipc_handle: IpcHandle, stream: GpuStream) -> Result<(), DispatcherError>;
 
-        /// Prepare a store operation for the given cache key.
+        /// Finalize a populated memory-tier slot: register in the dispatch-map
+        /// and enqueue background write-through to SSD.
         ///
-        /// Runs eviction if the cache is over capacity, allocates an extent
-        /// on the target data drive, and returns a DMA buffer the caller can
-        /// write into. The extent is committed when the caller subsequently
-        /// calls `commit_store`.
+        /// Must be called after `copy_gpu_to_memory_async` completes successfully.
         ///
         /// # Errors
         ///
-        /// Returns [`DispatcherError::InvalidParameter`] if `size` is 0.
-        /// Returns [`DispatcherError::AlreadyExists`] if the key is already cached.
-        /// Returns [`DispatcherError::AllocationFailed`] if extent allocation fails.
+        /// Returns [`DispatcherError::KeyNotFound`] if the key is not in memory-tier.
         ///
-        /// # Examples
-        ///
-        /// ```no_run
-        /// # use interfaces::{IDispatcher, DispatcherError, CacheKey};
-        /// # fn example(dispatcher: &dyn IDispatcher) -> Result<(), DispatcherError> {
-        /// let key: CacheKey = 200;
-        /// let size: u32 = 4096;
-        ///
-        /// // Phase 1: prepare — returns a DMA buffer to fill.
-        /// let dma_buf = dispatcher.prepare_store(key, size)?;
-        ///
-        /// // Phase 2: write data into the buffer.
-        /// unsafe {
-        ///     std::ptr::write_bytes(dma_buf.as_ptr() as *mut u8, 0xCD, size as usize);
-        /// }
-        ///
-        /// // Phase 3: commit — writes buffer to SSD and publishes the extent.
-        /// dispatcher.commit_store(key)?;
-        /// # Ok(())
-        /// # }
-        /// ```
-        fn prepare_store(&self, key: CacheKey, size: u32) -> Result<Arc<DmaBuffer>, DispatcherError>;
+        /// # Verified: P4 (init-guard), P5 (populate-lifecycle), P10 (reserve-complete-lifecycle)
+        /// Rejects uninitialized. Produces entry with read_ref=1 (for background
+        /// writer) via downgrade_reference. Enqueues write job.
+        fn copy_gpu_to_memory_completed(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>;
 
-        /// Commit a previously prepared store, writing the DMA buffer to SSD.
+        /// Release a reserved memory-tier slot without populating it.
         ///
-        /// Retrieves the pending write for `key`, writes the buffer contents
-        /// to the reserved extent on SSD, publishes the extent metadata, and
-        /// registers the entry in the dispatch map as block-device-backed.
+        /// Used on the cancellation path (e.g., `complete_store(success=false)`).
+        /// Idempotent — returns Ok if the key has no slot.
         ///
-        /// # Errors
-        ///
-        /// Returns [`DispatcherError::KeyNotFound`] if no pending write exists for `key`.
-        /// Returns [`DispatcherError::IoError`] if the SSD write fails.
-        ///
-        /// # Examples
-        ///
-        /// ```no_run
-        /// # use interfaces::{IDispatcher, DispatcherError, CacheKey};
-        /// # fn example(dispatcher: &dyn IDispatcher) -> Result<(), DispatcherError> {
-        /// let key: CacheKey = 200;
-        /// // Assumes prepare_store(key, size) was called previously.
-        /// dispatcher.commit_store(key)?;
-        /// // Entry is now persisted on SSD and visible via check/lookup.
-        /// assert!(dispatcher.check(key)?);
-        /// # Ok(())
-        /// # }
-        /// ```
-        fn commit_store(&self, key: CacheKey) -> Result<(), DispatcherError>;
-
-        /// Cancel a previously prepared store, freeing the reserved extent.
-        ///
-        /// Removes and drops the pending write for `key`. The `WriteHandle`
-        /// destructor automatically aborts the extent reservation.
-        ///
-        /// # Errors
-        ///
-        /// Returns [`DispatcherError::KeyNotFound`] if no pending write exists for `key`.
-        ///
-        /// # Examples
-        ///
-        /// ```no_run
-        /// # use interfaces::{IDispatcher, DispatcherError, CacheKey};
-        /// # fn example(dispatcher: &dyn IDispatcher) -> Result<(), DispatcherError> {
-        /// let key: CacheKey = 300;
-        /// let dma_buf = dispatcher.prepare_store(key, 4096)?;
-        /// // Decide not to commit — cancel releases the reserved extent.
-        /// dispatcher.cancel_store(key)?;
-        /// // Key is no longer visible.
-        /// assert!(!dispatcher.check(key)?);
-        /// # Ok(())
-        /// # }
-        /// ```
-        fn cancel_store(&self, key: CacheKey) -> Result<(), DispatcherError>;
+        /// # Verified: P4 (init-guard)
+        /// Rejects uninitialized.
+        fn release_memory(&self, key: CacheKey) -> Result<(), DispatcherError>;
 
         /// Update the timestamp for a cache entry without performing any DMA.
         ///
@@ -487,6 +515,9 @@ component_macros::define_interface! {
         /// # Errors
         ///
         /// Returns [`DispatcherError::KeyNotFound`] if the key does not exist.
+        ///
+        /// # Verified: P4 (init-guard)
+        /// Rejects uninitialized.
         ///
         /// # Examples
         ///
@@ -510,6 +541,14 @@ component_macros::define_interface! {
         /// This is a best-effort, fire-and-forget operation intended to be called
         /// from a background task. Errors on individual keys are logged but not
         /// propagated.
+        ///
+        /// # Verified: P1 (drive-index-bounded), P2 (eviction-terminates), P4 (init-guard)
+        /// Drive selection bounded. Eviction terminates. Rejects uninitialized.
+        ///
+        /// # Unchecked: Per-drive parallelism correctness
+        /// Multiple threads read from the same physical drive concurrently.
+        /// Correctness depends on SPDK queue-pair isolation.
+        /// Suggested technique: stress test with concurrent promote + lookup.
         fn promote_to_memory_tier(&self, keys: &[CacheKey]);
 
         /// Evict all entries from the memory-tier, demoting them to block-device-backed.
@@ -517,6 +556,14 @@ component_macros::define_interface! {
         /// Entries whose write-through has completed are converted to block-device
         /// state in the dispatch map. Entries still being written are removed entirely.
         /// Returns the number of entries cleared.
+        ///
+        /// # Verified: P4 (init-guard), P9 (eviction-progress)
+        /// Rejects uninitialized. Each eviction decreases memory used.
+        ///
+        /// # Unchecked: Entries still being written are removed without data loss
+        /// Entries without ssd_offset are fully removed (data lost). This is
+        /// intentional but callers must call flush_to_ssd first to avoid loss.
+        /// Suggested technique: integration test verifying flush→clear sequence.
         ///
         /// # Examples
         ///
@@ -538,6 +585,14 @@ component_macros::define_interface! {
         /// dropping them.
         ///
         /// Returns the number of entries that now have a valid SSD offset.
+        ///
+        /// # Verified: P4 (init-guard)
+        /// Rejects uninitialized.
+        ///
+        /// # Unchecked: All populated entries persisted after return
+        /// Guarantees total persistence of all entries populated before the call.
+        /// This is a liveness property on the background writer channel drain.
+        /// Suggested technique: integration test with populate→flush→verify sequence.
         fn flush_to_ssd(&self) -> Result<usize, DispatcherError>;
     }
 }

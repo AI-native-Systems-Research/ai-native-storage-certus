@@ -4,7 +4,7 @@ use interfaces::{ExtentKey, ExtentManagerError, FormatParams};
 
 use crate::buddy::BuddyAllocator;
 use crate::error;
-use crate::slab::{FREE_KEY, SizeClassManager, Slab};
+use crate::slab::{SizeClassManager, Slab, FREE_KEY};
 use crate::superblock::Superblock;
 
 pub(crate) struct RegionState {
@@ -38,10 +38,7 @@ impl RegionState {
         (size + sector_size - 1) / sector_size * sector_size
     }
 
-    pub fn alloc_extent(
-        &mut self,
-        size: u32,
-    ) -> Result<(u64, usize, u64), ExtentManagerError> {
+    pub fn alloc_extent(&mut self, size: u32) -> Result<(u64, usize, u64), ExtentManagerError> {
         let element_size = self.align_to_sector_size(size, self.format_params.sector_size);
 
         // The SizeClassManager invariant: only non-full slabs appear in the list.
@@ -121,10 +118,7 @@ impl RegionState {
         self.dirty = true;
     }
 
-    pub fn remove_extent_by_offset(
-        &mut self,
-        offset: u64,
-    ) -> Result<(), ExtentManagerError> {
+    pub fn remove_extent_by_offset(&mut self, offset: u64) -> Result<(), ExtentManagerError> {
         let slab_start = self
             .slabs
             .range(..=offset)
@@ -146,7 +140,10 @@ impl RegionState {
             slot
         };
 
-        self.slabs.get_mut(&slab_start).unwrap().set_key(slot_idx, FREE_KEY);
+        self.slabs
+            .get_mut(&slab_start)
+            .unwrap()
+            .set_key(slot_idx, FREE_KEY);
         self.pending_frees.push((slab_start, slot_idx));
         self.dirty = true;
         Ok(())

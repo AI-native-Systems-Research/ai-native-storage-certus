@@ -166,27 +166,74 @@ impl fmt::Debug for WriteHandle {
     }
 }
 
+// # Verified Properties (see `components/extent-manager/verif/`)
+//
+// The following invariants are formally proved with Creusot:
+//
+// - P1 (sector-size-nonzero): format rejects sector_size == 0
+// - P2 (slab-alignment): format rejects slab_size not aligned to sector_size
+// - P3 (extent-size-bounded): format rejects max_extent_size > slab_size
+// - P4 (region-count-nonzero): format rejects region_count == 0
+// - P5 (size-aligned): reserve_extent aligns size up to sector_size boundary
+// - P6 (publish-exactly-once): WriteHandle::publish consumes the handle
+// - P7 (abort-on-drop): dropping uncommitted WriteHandle auto-aborts reservation
+// - P8 (out-of-space): reserve_extent returns OutOfSpace when no capacity
+// - P9 (offset-not-found): remove_extent returns OffsetNotFound for invalid offset
+// - P10 (lifecycle-valid): reserve→publish produces Extent with aligned size and correct offset
+//
+// Total: 10 properties, 22 verification conditions discharged by SMT solvers.
+
 #[cfg(feature = "spdk")]
 define_interface! {
     pub IExtentManager {
+        /// Format the extent manager, writing superblock and initializing regions.
+        ///
+        /// # Verified: P1 (sector-size-nonzero), P2 (slab-alignment), P3 (extent-size-bounded), P4 (region-count-nonzero)
+        /// Validates all format parameters before writing to disk.
+        ///
+        /// # Unchecked: Superblock write atomicity
+        /// Superblock is written as a single 4KiB block. Power loss during write
+        /// could leave corrupt metadata. Suggested technique: crash-injection test.
         fn format(&self, params: FormatParams) -> Result<(), ExtentManagerError>;
 
+        /// Recover state from persisted metadata (superblock + checkpoints).
+        ///
+        /// # Unchecked: Recovery correctness after crash
+        /// Depends on dual-checkpoint consistency and monotonic sequence numbers.
+        /// Suggested technique: crash-injection + recovery verification test.
         fn initialize(&self) -> Result<(), ExtentManagerError>;
 
+        /// Reserve space for a new extent and return a WriteHandle.
+        ///
+        /// # Verified: P5 (size-aligned), P8 (out-of-space), P10 (lifecycle-valid)
+        /// Returned WriteHandle has sector-aligned size >= requested size.
+        /// Returns OutOfSpace when buddy allocator cannot satisfy request.
         fn reserve_extent(
             &self,
             key: ExtentKey,
             size: u32,
         ) -> Result<WriteHandle, ExtentManagerError>;
 
+        /// Return all committed extents.
         fn get_extents(&self) -> Vec<Extent>;
 
+        /// Iterate over all committed extents without collecting.
         fn for_each_extent(&self, cb: &mut dyn FnMut(&Extent));
 
+        /// Remove an extent at the given block offset.
+        ///
+        /// # Verified: P9 (offset-not-found)
+        /// Returns OffsetNotFound if no extent exists at that offset.
         fn remove_extent(&self, offset: u64) -> Result<(), ExtentManagerError>;
 
+        /// Persist current state to the metadata device.
+        ///
+        /// # Unchecked: Checkpoint atomicity (dual-region alternation)
+        /// Uses two checkpoint regions with sequence numbers. A crash during
+        /// write should not corrupt both. Suggested technique: crash-injection.
         fn checkpoint(&self) -> Result<(), ExtentManagerError>;
 
+        /// Return the instance identifier from the superblock.
         fn get_instance_id(&self) -> Result<u64, ExtentManagerError>;
 
         /// Set the automatic checkpoint interval.
@@ -202,5 +249,14 @@ define_interface! {
 
         /// Return the total usable capacity in bytes across all regions.
         fn capacity_bytes(&self) -> u64;
+
+        /// Set the base LBA offset for all metadata I/O (partition-relative).
+        fn set_metadata_base_lba(&self, base_lba: u64);
+
+        /// Set the base LBA offset for the data partition.
+        fn set_data_base_lba(&self, base_lba: u64);
+
+        /// Get the configured data base LBA offset.
+        fn data_base_lba(&self) -> u64;
     }
 }

@@ -1,4 +1,4 @@
-//! Background write worker for staging-to-SSD persistence and SSD eviction.
+//! Background write worker for memory-tier-to-SSD persistence and SSD eviction.
 
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use interfaces::{CacheKey, IDispatchMap, IExtentManager, ILogger, IMemoryTier, LookupResult};
 
-/// A job for the background writer to persist a staging buffer to SSD.
+/// A job for the background writer to persist a memory-tier entry to SSD.
 #[derive(Debug)]
 pub struct WriteJob {
     /// Cache key identifying the entry.
@@ -55,7 +55,12 @@ impl BackgroundWriter {
         let handle = thread::Builder::new()
             .name(format!("dispatcher-bg-writer-{drive_idx}"))
             .spawn(move || {
-                Self::worker_loop(&shutdown_clone, &receiver, &in_flight_clone, &mut process_job);
+                Self::worker_loop(
+                    &shutdown_clone,
+                    &receiver,
+                    &in_flight_clone,
+                    &mut process_job,
+                );
             })
             .expect("failed to spawn background writer thread");
 
@@ -69,9 +74,11 @@ impl BackgroundWriter {
 
     /// Enqueue a write job for background processing.
     pub fn enqueue(&self, job: WriteJob) -> Result<(), WriteJob> {
-        self.in_flight.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.in_flight
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.sender.send(job).map_err(|e| {
-            self.in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            self.in_flight
+                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
             e.0
         })
     }
@@ -168,7 +175,10 @@ impl ParallelBackgroundWriter {
             .map(|idx| BackgroundWriter::start_named(idx, make_processor(idx)))
             .collect();
 
-        Self { writers, num_drives }
+        Self {
+            writers,
+            num_drives,
+        }
     }
 
     /// Enqueue a write job, routing to the writer for its target drive.
@@ -340,7 +350,9 @@ impl BackgroundEvictor {
         }
     }
 
-    pub(crate) fn compute_utilization(extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>]) -> (u64, u64) {
+    pub(crate) fn compute_utilization(
+        extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
+    ) -> (u64, u64) {
         let mut total_used = 0u64;
         let mut total_cap = 0u64;
         for em in extent_mgrs {

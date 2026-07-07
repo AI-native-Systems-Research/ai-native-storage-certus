@@ -11,7 +11,7 @@ use pyo3::types::PyDict;
 
 use component_core::query_interface;
 use interfaces::{
-    CacheKey, DispatcherConfig, DispatcherError, DmaAllocFn, DmaBuffer, GpuStream, IDispatchMap,
+    CacheKey, DispatcherConfig, GpuStream, IDispatchMap,
     IDispatcher, IEvictionPolicy, IGpuServices, ILogger, IMemoryTier, IpcHandle, LookupResult,
 };
 
@@ -49,12 +49,11 @@ pub struct EngineInner {
     gpu_services: Arc<dyn IGpuServices + Send + Sync>,
     gpu_block_size: u64,
     gpu_base_ptr: u64,
-    max_cache_entries: usize,
-    eviction_watermark: usize,
     entry_count: AtomicU64,
     jobs: Mutex<HashMap<u64, Arc<TransferJob>>>,
     next_internal_id: AtomicU64,
     initialized: AtomicBool,
+    store_stream: GpuStream,
 }
 
 impl EngineInner {
@@ -96,17 +95,6 @@ impl EngineInner {
             .and_then(|v| v.extract().ok())
             .unwrap_or(0);
 
-        let eviction_threshold: f64 = config
-            .get_item("eviction_threshold")?
-            .and_then(|v| v.extract().ok())
-            .unwrap_or(0.8);
-
-        let max_cache_entries: usize = if slab_size_bytes > 0 && dram_cache_bytes > 0 {
-            (dram_cache_bytes / slab_size_bytes) as usize
-        } else {
-            10000
-        };
-
         // --- Initialize SPDK environment ---
         let spdk_comp = spdk_env::SPDKEnvComponent::new_default();
         let spdk_iface = query_interface!(spdk_comp, spdk_env::ISPDKEnv)
@@ -146,16 +134,17 @@ impl EngineInner {
             .map_err(|e| PyRuntimeError::new_err(format!("failed to wire eviction_policy for dispatch map: {e}")))?;
         let dm: Arc<dyn IDispatchMap + Send + Sync> = query_interface!(dm_comp, IDispatchMap)
             .ok_or_else(|| PyRuntimeError::new_err("failed to query IDispatchMap"))?;
-        let numa_opt = if numa_node >= 0 { Some(numa_node as i32) } else { None };
-        let dma_alloc: DmaAllocFn = Arc::new(move |size, align, _numa| {
-            DmaBuffer::new(size, align, numa_opt).map_err(|e| e.to_string())
-        });
-        dm.set_dma_alloc(dma_alloc);
         dm.initialize()
             .map_err(|e| PyRuntimeError::new_err(format!("DispatchMap init failed: {e}")))?;
 
+        let numa_opt = if numa_node >= 0 { Some(numa_node as i32) } else { None };
+
         // --- Create memory tier ---
         let mt_comp = memory_tier::MemoryTierComponent::new_default();
+        mt_comp
+            .logger
+            .connect(Arc::clone(&log) as Arc<dyn ILogger + Send + Sync>)
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire logger for memory-tier: {e}")))?;
         mt_comp
             .eviction_policy
             .connect(Arc::clone(&eviction_policy))
@@ -199,18 +188,24 @@ impl EngineInner {
             query_interface!(disp_comp, IDispatcher)
                 .ok_or_else(|| PyRuntimeError::new_err("failed to query IDispatcher"))?;
 
+        let max_cache_entries: usize = if slab_size_bytes > 0 && dram_cache_bytes > 0 {
+            (dram_cache_bytes / slab_size_bytes) as usize
+        } else {
+            10000
+        };
+
         dispatcher
             .initialize(DispatcherConfig {
                 data_pci_addrs,
                 max_cache_entries,
-                eviction_threshold,
                 format_on_init: true,
                 ..Default::default()
             })
             .map_err(|e| PyRuntimeError::new_err(format!("Dispatcher init failed: {e}")))?;
 
-        let eviction_watermark =
-            (max_cache_entries as f64 * eviction_threshold) as usize;
+        let store_stream = gpu.create_stream().map_err(|e| {
+            PyRuntimeError::new_err(format!("failed to create store stream: {e}"))
+        })?;
 
         Ok(Self {
             dispatcher,
@@ -218,12 +213,11 @@ impl EngineInner {
             gpu_services: gpu,
             gpu_block_size,
             gpu_base_ptr,
-            max_cache_entries,
-            eviction_watermark,
             entry_count: AtomicU64::new(0),
             jobs: Mutex::new(HashMap::new()),
             next_internal_id: AtomicU64::new(0),
             initialized: AtomicBool::new(true),
+            store_stream,
         })
     }
 
@@ -259,21 +253,20 @@ impl EngineInner {
         Ok(count)
     }
 
-    /// Allocate space for new keys, evicting LRU entries if necessary.
-    /// Returns (keys_to_store, evicted_keys), or None if eviction cannot
-    /// free enough space.
+    /// Check which keys need storing and reserve DRAM for them.
+    /// Returns None if DRAM allocation fails (graceful backpressure).
     pub fn prepare_store(&self, keys: &[u64]) -> PyResult<Option<(Vec<u64>, Vec<u64>)>> {
         self.ensure_init()?;
         let cache_keys = keys::to_cache_keys(keys);
         let mut to_store = Vec::new();
-        let protected: std::collections::HashSet<CacheKey> =
-            cache_keys.iter().copied().collect();
+        let mut to_store_cache_keys = Vec::new();
 
         for (i, key) in cache_keys.iter().enumerate() {
             match self.dispatcher.check(*key) {
                 Ok(true) => {}
                 Ok(false) | Err(_) => {
                     to_store.push(keys[i]);
+                    to_store_cache_keys.push(*key);
                 }
             }
         }
@@ -282,46 +275,49 @@ impl EngineInner {
             return Ok(Some((vec![], vec![])));
         }
 
-        let current_count = self.entry_count.load(Ordering::Acquire) as usize;
-        let after_store = current_count + to_store.len();
-        let evicted = if after_store > self.eviction_watermark {
-            let needed = after_store - self.eviction_watermark;
-            let candidates = self.dispatch_map.oldest_keys(usize::MAX);
-            let mut evicted_keys: Vec<u64> = Vec::new();
-            for candidate in candidates {
-                if evicted_keys.len() >= needed {
-                    break;
+        // Reserve DRAM slots for all keys that need storing.
+        // If any reservation fails, release all prior reservations and return None.
+        let size = self.gpu_block_size as u32;
+        let mut reserved = Vec::new();
+        for key in &to_store_cache_keys {
+            match self.dispatcher.reserve_memory(*key, size) {
+                Ok(_ptr) => {
+                    reserved.push(*key);
                 }
-                if protected.contains(&candidate) {
-                    continue;
-                }
-                match self.dispatcher.remove(candidate) {
-                    Ok(()) => {
-                        self.entry_count.fetch_sub(1, Ordering::Release);
-                        evicted_keys.push(candidate);
+                Err(_) => {
+                    for rkey in &reserved {
+                        let _ = self.dispatcher.release_memory(*rkey);
                     }
-                    Err(_) => continue,
+                    return Ok(None);
                 }
             }
-            if evicted_keys.len() < needed {
-                return Ok(None);
-            }
-            evicted_keys
-        } else {
-            vec![]
-        };
+        }
 
-        Ok(Some((to_store, evicted)))
+        Ok(Some((to_store, vec![])))
     }
 
     /// Finalize or abort a store operation.
+    ///
+    /// On success: registers each key in the dispatch-map and enqueues SSD write-through.
+    /// On failure: releases the reserved DRAM slots.
     pub fn complete_store(&self, keys: &[u64], success: bool) -> PyResult<()> {
         self.ensure_init()?;
-        if !success {
-            let cache_keys = keys::to_cache_keys(keys);
+        let cache_keys = keys::to_cache_keys(keys);
+        let size = self.gpu_block_size as u32;
+
+        if success {
+            for key in &cache_keys {
+                if let Err(_e) = self.dispatcher.copy_gpu_to_memory_completed(*key, size) {
+                    continue;
+                }
+                self.entry_count.fetch_add(1, Ordering::Release);
+            }
+        } else {
             for key in &cache_keys {
                 if self.dispatcher.remove(*key).is_ok() {
                     self.entry_count.fetch_sub(1, Ordering::Release);
+                } else {
+                    let _ = self.dispatcher.release_memory(*key);
                 }
             }
         }
@@ -377,11 +373,6 @@ impl EngineInner {
             match self.dispatch_map.lookup(*key) {
                 Ok(LookupResult::MemoryTier { pointer, size }) => {
                     results.push((pointer as u64, size));
-                }
-                Ok(LookupResult::Staging { buffer }) => {
-                    let ptr = buffer.as_ptr() as u64;
-                    let size = buffer.len() as u32;
-                    results.push((ptr, size));
                 }
                 Ok(LookupResult::BlockDevice { .. }) => {
                     // Promotion failed for this key — rollback and error.
@@ -492,10 +483,10 @@ impl EngineInner {
         Ok(all_ok)
     }
 
-    /// Submit async GPU→DRAM→NVMe transfer (store).
+    /// Submit GPU→DRAM transfer (store).
     ///
-    /// Issues all D2H DMA copies via `populate_async` without blocking.
-    /// Completion is detected by `poll_completions` via `stream_query`.
+    /// DMA-copies each block from GPU into the pre-reserved DRAM slot.
+    /// The slots were allocated by `prepare_store` via `reserve_memory`.
     pub fn store_async(&self, job_id: u64, gpu_block_ids: &[u64], keys: &[u64]) -> PyResult<bool> {
         self.ensure_init()?;
 
@@ -507,9 +498,8 @@ impl EngineInner {
 
         let cache_keys = keys::to_cache_keys(keys);
 
-        // Issue async DMA for each block BEFORE inserting into the jobs map.
-        // This avoids a race where poll_completions sees the job with stream=None.
-        let mut last_stream: Option<GpuStream> = None;
+        let stream = self.store_stream;
+
         let mut all_ok = true;
         for (i, key) in cache_keys.iter().enumerate() {
             let block_id = gpu_block_ids[i];
@@ -520,34 +510,26 @@ impl EngineInner {
                 size: self.gpu_block_size as u32,
             };
 
-            match self.dispatcher.populate_async(*key, handle) {
-                Ok(stream) => {
-                    if !stream.0.is_null() {
-                        last_stream = Some(stream);
-                    } else {
-                        self.entry_count.fetch_add(1, Ordering::Release);
-                    }
-                }
+            // Async DMA from GPU into the DRAM slot reserved by prepare_store.
+            match self.dispatcher.copy_gpu_to_memory_async(*key, handle, stream) {
+                Ok(()) => {}
+                Err(interfaces::DispatcherError::AlreadyExists(_)) => continue,
                 Err(e) => {
-                    let msg = format!("{e:?}");
-                    if msg.contains("already exists") || msg.contains("AlreadyExists") {
-                        continue;
-                    }
-                    eprintln!("[certus] store_async populate_async failed key={key} block_id={block_id}: {msg}");
+                    eprintln!("[certus] store_async copy_gpu_to_memory_async failed key={key} block_id={block_id}: {e:?}");
                     all_ok = false;
                     break;
                 }
             }
         }
 
-        let completed = !all_ok || last_stream.is_none();
+        let completed = !all_ok;
         let job = Arc::new(TransferJob {
             kind: JobKind::Store,
             keys: cache_keys.clone(),
             gpu_block_ids: gpu_block_ids.to_vec(),
             completed: AtomicBool::new(completed),
             success: AtomicBool::new(all_ok),
-            stream: Mutex::new(last_stream),
+            stream: Mutex::new(Some(stream)),
         });
 
         {
@@ -621,7 +603,7 @@ impl EngineInner {
     ///
     /// Both stores and loads share the same CUDA stream. A single
     /// `stream_synchronize` covers all in-flight DMA in both directions.
-    /// Store jobs additionally need `populate_finalize` to register entries.
+    /// Store jobs additionally need `copy_gpu_to_memory_completed` to register entries.
     pub fn poll_completions(&self) -> PyResult<Vec<(u64, bool)>> {
         self.ensure_init()?;
         let mut completions = Vec::new();
@@ -634,46 +616,42 @@ impl EngineInner {
             .map(|(id, _)| *id)
             .collect();
 
-        if !in_flight_ids.is_empty() {
-            // All jobs share the same CUDA stream. Synchronize it once —
-            // this blocks until ALL pending DMA ops complete (typically sub-ms).
-            let stream_ptr = {
-                let first_job = jobs.get(&in_flight_ids[0]).unwrap();
-                first_job.stream.lock().unwrap().take()
-            };
+        for id in &in_flight_ids {
+            let job = jobs.get(id).unwrap();
 
-            if let Some(stream) = stream_ptr {
+            let stream_opt = { job.stream.lock().unwrap().take() };
+            if let Some(stream) = stream_opt {
                 if let Err(e) = self.gpu_services.stream_synchronize(stream) {
                     eprintln!("[certus] stream_synchronize failed: {e}");
+                    job.completed.store(true, Ordering::Release);
+                    job.success.store(false, Ordering::Release);
+                    continue;
                 }
             }
 
-            // Stream is synchronized — finalize all in-flight jobs.
-            for id in &in_flight_ids {
-                let job = jobs.get(id).unwrap();
-                let mut all_ok = true;
+            let mut all_ok = true;
 
-                // Store jobs need populate_finalize to register in dispatch-map.
-                // Load jobs are already committed — just need the stream sync.
-                if job.kind == JobKind::Store {
-                    for key in &job.keys {
-                        match self.dispatcher.populate_finalize(*key) {
-                            Ok(()) => {
-                                self.entry_count.fetch_add(1, Ordering::Release);
-                            }
-                            Err(interfaces::DispatcherError::KeyNotFound(_)) => {}
-                            Err(interfaces::DispatcherError::AlreadyExists(_)) => {}
-                            Err(e) => {
-                                eprintln!("[certus] populate_finalize failed key={key}: {e:?}");
-                                all_ok = false;
-                            }
+            // Store jobs: copy_gpu_to_memory_completed registers in dispatch-map.
+            // Load jobs are already committed — just need the stream sync.
+            if job.kind == JobKind::Store {
+                let size = self.gpu_block_size as u32;
+                for key in &job.keys {
+                    match self.dispatcher.copy_gpu_to_memory_completed(*key, size) {
+                        Ok(()) => {
+                            self.entry_count.fetch_add(1, Ordering::Release);
+                        }
+                        Err(interfaces::DispatcherError::KeyNotFound(_)) => {}
+                        Err(interfaces::DispatcherError::AlreadyExists(_)) => {}
+                        Err(e) => {
+                            eprintln!("[certus] copy_gpu_to_memory_completed failed key={key}: {e:?}");
+                            all_ok = false;
                         }
                     }
                 }
-
-                job.completed.store(true, Ordering::Release);
-                job.success.store(all_ok, Ordering::Release);
             }
+
+            job.completed.store(true, Ordering::Release);
+            job.success.store(all_ok, Ordering::Release);
         }
 
         // Second pass: collect all completed jobs.
@@ -695,7 +673,7 @@ impl EngineInner {
     /// Block until a specific job completes.
     ///
     /// For in-flight store jobs, synchronizes the CUDA stream (blocking)
-    /// then calls `populate_finalize` for each key.
+    /// then calls `copy_gpu_to_memory_completed` for each key.
     pub fn wait_job(&self, job_id: u64) -> PyResult<()> {
         self.ensure_init()?;
 
@@ -723,13 +701,16 @@ impl EngineInner {
 
             let mut all_ok = true;
             if job.kind == JobKind::Store {
+                let size = self.gpu_block_size as u32;
                 for key in &job.keys {
-                    match self.dispatcher.populate_finalize(*key) {
+                    match self.dispatcher.copy_gpu_to_memory_completed(*key, size) {
                         Ok(()) => {
                             self.entry_count.fetch_add(1, Ordering::Release);
                         }
+                        Err(interfaces::DispatcherError::KeyNotFound(_)) => {}
+                        Err(interfaces::DispatcherError::AlreadyExists(_)) => {}
                         Err(e) => {
-                            eprintln!("[certus] wait_job populate_finalize failed key={key}: {e:?}");
+                            eprintln!("[certus] wait_job copy_gpu_to_memory_completed failed key={key}: {e:?}");
                             all_ok = false;
                         }
                     }
@@ -742,80 +723,6 @@ impl EngineInner {
         Ok(())
     }
 
-    /// Store bytes from a host buffer directly (no GPU DMA). For testing only.
-    /// Uses dispatcher.prepare_store()+commit_store() to write directly into
-    /// the DMA buffer and flush to NVMe without going through CUDA.
-    pub fn store_host_bytes(&self, key: u64, data: &[u8]) -> PyResult<()> {
-        self.ensure_init()?;
-        let dma_buf = self.dispatcher
-            .prepare_store(key, data.len() as u32)
-            .map_err(|e| PyRuntimeError::new_err(format!("store_host_bytes prepare failed: {e}")))?;
-
-        // Copy data into the DMA buffer directly.
-        // SAFETY: dma_buf is a valid DMA allocation covering at least data.len() bytes.
-        unsafe {
-            std::ptr::copy_nonoverlapping(data.as_ptr(), dma_buf.as_ptr() as *mut u8, data.len());
-        }
-
-        self.dispatcher
-            .commit_store(key)
-            .map_err(|e| PyRuntimeError::new_err(format!("store_host_bytes commit failed: {e}")))?;
-
-        self.entry_count.fetch_add(1, Ordering::Release);
-        Ok(())
-    }
-
-    /// Read bytes from the dispatch map's staging buffer for a key (no GPU DMA).
-    /// For testing only — verifies data was written correctly before background
-    /// NVMe migration moves it off the staging buffer.
-    pub fn load_host_bytes(&self, key: u64, size: usize) -> PyResult<Vec<u8>> {
-        self.ensure_init()?;
-        // Read directly from the dispatch map staging buffer, bypassing GPU DMA.
-        let result = self.dispatch_map
-            .lookup(key)
-            .map_err(|e| PyRuntimeError::new_err(format!("load_host_bytes lookup failed: {e}")))?;
-
-        use interfaces::LookupResult;
-        match result {
-            LookupResult::Staging { buffer } => {
-                let copy_len = size.min(buffer.len());
-                let mut out = vec![0u8; size];
-                // SAFETY: buffer is a valid DMA allocation; out is a valid heap allocation.
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        buffer.as_ptr() as *const u8,
-                        out.as_mut_ptr(),
-                        copy_len,
-                    );
-                }
-                let _ = self.dispatch_map.release_read(key);
-                Ok(out)
-            }
-            LookupResult::MemoryTier { pointer, size: entry_size } => {
-                let copy_len = size.min(entry_size as usize);
-                let mut out = vec![0u8; size];
-                // SAFETY: pointer is a valid memory-tier slot for entry_size bytes.
-                unsafe {
-                    std::ptr::copy_nonoverlapping(pointer, out.as_mut_ptr(), copy_len);
-                }
-                let _ = self.dispatch_map.release_read(key);
-                Ok(out)
-            }
-            LookupResult::BlockDevice { .. } => {
-                let _ = self.dispatch_map.release_read(key);
-                Err(PyRuntimeError::new_err(
-                    "key already migrated to NVMe — use load_async for block device reads",
-                ))
-            }
-            LookupResult::NotExist => Err(PyRuntimeError::new_err(
-                format!("key {key} not found in dispatch map"),
-            )),
-            LookupResult::MismatchSize => {
-                let _ = self.dispatch_map.release_read(key);
-                Err(PyRuntimeError::new_err("size mismatch on lookup"))
-            }
-        }
-    }
 
     /// Shut down the engine, releasing all resources.
     pub fn shutdown(&self) -> PyResult<()> {

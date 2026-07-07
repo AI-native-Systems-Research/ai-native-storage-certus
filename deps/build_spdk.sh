@@ -27,6 +27,20 @@ cd "${SRC_DIR}"
 echo "Updating submodules..."
 git submodule update --init
 
+# Patch DPDK memseg limit so a single spdk_zmalloc can exceed the stock 32 GiB
+# per-memseg-list cap (RTE_MAX_MEM_MB_PER_LIST). The Certus DRAM tier does one
+# large spdk_zmalloc for the whole pool; without this a >32 GiB tier fails.
+# deps/spdk is gitignored, so apply the patch here to keep it reproducible.
+DPDK_RTE_CONFIG="${SRC_DIR}/dpdk/config/rte_config.h"
+if [ -f "${DPDK_RTE_CONFIG}" ]; then
+    if grep -q '#define RTE_MAX_MEM_MB_PER_LIST 32768' "${DPDK_RTE_CONFIG}"; then
+        echo "Patching RTE_MAX_MEM_MB_PER_LIST 32768 -> 65536 (allow >32G single alloc)..."
+        sed -i 's/#define RTE_MAX_MEM_MB_PER_LIST 32768/#define RTE_MAX_MEM_MB_PER_LIST 65536/' "${DPDK_RTE_CONFIG}"
+    else
+        echo "RTE_MAX_MEM_MB_PER_LIST already patched (or unexpected value) — leaving as-is."
+    fi
+fi
+
 # Configure
 echo "Configuring SPDK..."
 ./configure --prefix="${INSTALL_DIR}" --without-crypto "$@"
