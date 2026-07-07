@@ -1,7 +1,7 @@
 /// Per-thread IO worker for the IOPS benchmark.
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Barrier, Mutex};
 use std::time::Instant;
 
 use rand::Rng;
@@ -27,6 +27,7 @@ pub struct Worker {
     op_counter: Arc<AtomicU64>,
     byte_counter: Arc<AtomicU64>,
     stop_flag: Arc<AtomicBool>,
+    start_barrier: Arc<Barrier>,
     submit_count: u64,
     lba_gen: Box<dyn LbaGenerator + Send>,
 }
@@ -45,6 +46,7 @@ impl Worker {
         byte_counter: Arc<AtomicU64>,
         stop_flag: Arc<AtomicBool>,
         thread_index: u32,
+        start_barrier: Arc<Barrier>,
     ) -> Result<Self, NvmeBlockError> {
         let sector_size = ns_info.sector_size as usize;
         let max_blocks_per_io = (config.max_block_size() / sector_size) as u64;
@@ -69,9 +71,7 @@ impl Worker {
         }
 
         let lba_gen: Box<dyn LbaGenerator + Send> = match config.pattern {
-            Pattern::Random => {
-                Box::new(RandomLba::new(ns_info.num_sectors, max_blocks_per_io))
-            }
+            Pattern::Random => Box::new(RandomLba::new(ns_info.num_sectors, max_blocks_per_io)),
             Pattern::Sequential => Box::new(SequentialLba::new(
                 thread_index,
                 config.threads,
@@ -91,6 +91,7 @@ impl Worker {
             op_counter,
             byte_counter,
             stop_flag,
+            start_barrier,
             submit_count: 0,
             lba_gen,
         })
@@ -100,6 +101,10 @@ impl Worker {
     ///
     /// Returns the collected per-thread statistics.
     pub fn run(&mut self) -> ThreadResult {
+        // Wait until all workers and the main thread are ready so that
+        // bench_start is set before any IO is issued.
+        self.start_barrier.wait();
+
         let mut result = ThreadResult::default();
         let timeout_ms = (self.config.duration + 5) * 1000; // generous timeout
 
