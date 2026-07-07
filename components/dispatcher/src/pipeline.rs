@@ -384,8 +384,8 @@ pub unsafe fn pipelined_multi_object_zero_copy(
             })
             .is_err()
         {
-            for i in 0..num_jobs {
-                results[i] = Err(DispatcherError::IoError("channel send failed".into()));
+            for result in results.iter_mut().take(num_jobs) {
+                *result = Err(DispatcherError::IoError("channel send failed".into()));
             }
             return results;
         }

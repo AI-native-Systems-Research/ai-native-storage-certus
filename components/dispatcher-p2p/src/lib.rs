@@ -37,6 +37,7 @@
 #![allow(clippy::too_many_arguments)]
 
 mod background;
+pub mod cold_pool;
 pub mod io_segmenter;
 pub mod p2p_ring;
 pub mod pipeline;
@@ -61,6 +62,7 @@ use crate::background::{
     BackgroundEvictor, DramBackfillJob, DramBackfillWorker, EvictorConfig,
     ParallelBackgroundWriter, WriteJob,
 };
+use crate::p2p_ring::P2pRing;
 
 /// Maximum number of queue threads per drive for cold-path processing.
 /// With 4 drives, using 1 thread per drive gives each thread the full
@@ -132,6 +134,7 @@ define_component! {
             bg_writer: Mutex<Option<ParallelBackgroundWriter>>,
             bg_evictor: Mutex<Option<BackgroundEvictor>>,
             bg_backfill: Mutex<Option<DramBackfillWorker>>,
+            cold_pool: Mutex<Option<cold_pool::P2pColdReadPool>>,
             data_drives: RwLock<Vec<DataDrive>>,
             pipeline_ring: RwLock<Option<pipeline::PipelineRing>>,
             p2p_ring: RwLock<Option<p2p_ring::P2pRing>>,
@@ -206,7 +209,7 @@ impl DispatcherP2pComponent {
             Ok(t) => t,
             Err(_) => {
                 logger
-                    .warn("dispatcher: NUMA topology unavailable, poller CPUs will not be pinned");
+                    .warn("dispatcher-p2p: NUMA topology unavailable, poller CPUs will not be pinned");
                 return vec![None; pci_addrs.len()];
             }
         };
@@ -240,7 +243,7 @@ impl DispatcherP2pComponent {
                 let cpu = cpus[*idx % cpus.len()];
                 *idx += 1;
                 logger.info(&format!(
-                    "dispatcher: auto-pinning poller for {addr} to CPU {cpu} (NUMA node {node_id})"
+                    "dispatcher-p2p: auto-pinning poller for {addr} to CPU {cpu} (NUMA node {node_id})"
                 ));
                 Some(cpu)
             })
@@ -897,7 +900,7 @@ impl DispatcherP2pComponent {
 
             if formatted {
                 self.log_warn(&format!(
-                    "dispatcher: formatting disk for data drive {i} at {addr_str} \
+                    "dispatcher-p2p: formatting disk for data drive {i} at {addr_str} \
                      — all existing data will be destroyed"
                 ));
             }
@@ -913,7 +916,7 @@ impl DispatcherP2pComponent {
                     format!("{} MiB", size_mib)
                 };
                 self.log_info(&format!(
-                    "dispatcher: drive {i} partition {}: \"{}\" start_lba={} size={}",
+                    "dispatcher-p2p: drive {i} partition {}: \"{}\" start_lba={} size={}",
                     p.index, p.name, p.start_lba, size_str
                 ));
             }
@@ -959,7 +962,7 @@ impl DispatcherP2pComponent {
                 .map(|base| format!(", poller pinned to CPU {}", base + i))
                 .unwrap_or_default();
             self.log_info(&format!(
-                "dispatcher: data drive {i} initialized at {addr_str}{cpu_msg}"
+                "dispatcher-p2p: data drive {i} initialized at {addr_str}{cpu_msg}"
             ));
 
             let cached_channels = ibd.connect_client().ok();
@@ -981,7 +984,7 @@ impl DispatcherP2pComponent {
 
 impl IDispatcher for DispatcherP2pComponent {
     fn initialize(&self, config: DispatcherConfig) -> Result<(), DispatcherError> {
-        self.log_info("dispatcher: initializing");
+        self.log_info("dispatcher-p2p: initializing");
 
         self.dispatch_map
             .get()
@@ -1021,7 +1024,7 @@ impl IDispatcher for DispatcherP2pComponent {
                 drop(drives_guard);
                 let elapsed = t0.elapsed();
                 self.log_info(&format!(
-                    "dispatcher: dispatch-map recovered {recovered} extents from disk ({elapsed:.2?})"
+                    "dispatcher-p2p: dispatch-map recovered {recovered} extents from disk ({elapsed:.2?})"
                 ));
             }
 
@@ -1060,7 +1063,7 @@ impl IDispatcher for DispatcherP2pComponent {
                     match p2p_ring::P2pRing::new(&*gpu, chunk_size) {
                         Some(ring) => {
                             self.log_info(&format!(
-                                "dispatcher: P2P ring initialized ({} slots, {} KiB each, {} streams)",
+                                "dispatcher-p2p: P2P ring initialized ({} slots, {} KiB each, {} streams)",
                                 p2p_ring::P2P_RING_SLOTS,
                                 chunk_size / 1024,
                                 ring.streams().len(),
@@ -1069,7 +1072,7 @@ impl IDispatcher for DispatcherP2pComponent {
                         }
                         None => {
                             self.log_info(
-                                "dispatcher: P2P ring unavailable, cold reads use DRAM path",
+                                "dispatcher-p2p: P2P ring unavailable, cold reads use DRAM path",
                             );
                         }
                     }
@@ -1083,7 +1086,7 @@ impl IDispatcher for DispatcherP2pComponent {
                             {
                                 Ok(()) => {
                                     self.log_info(&format!(
-                                        "dispatcher: registered memory-tier pool ({} MiB) for zero-copy DMA",
+                                        "dispatcher-p2p: registered memory-tier pool ({} MiB) for zero-copy DMA",
                                         pool_size / (1024 * 1024)
                                     ));
                                 }
@@ -1094,6 +1097,31 @@ impl IDispatcher for DispatcherP2pComponent {
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        // Create cold-read worker pool with pre-connected NVMe channels.
+        if self.p2p_ring.read().is_some() {
+            let pool_drives: Vec<Arc<dyn IBlockDevice + Send + Sync>> = {
+                let dd = self.data_drives.read();
+                dd.iter().map(|d| Arc::clone(&d.block_dev_iface)).collect()
+            };
+            if !pool_drives.is_empty() {
+                match cold_pool::P2pColdReadPool::new(&pool_drives, MAX_QUEUES_PER_DRIVE) {
+                    Ok(pool) => {
+                        self.log_info(&format!(
+                            "dispatcher-p2p: P2P cold-read pool started ({} drives × {} queues)",
+                            pool.num_drives(),
+                            pool.queues_per_drive(),
+                        ));
+                        *self.cold_pool.lock().unwrap() = Some(pool);
+                    }
+                    Err(e) => {
+                        self.log_info(&format!(
+                            "dispatcher-p2p: cold-read pool failed (non-fatal, fallback to per-batch): {e:?}"
+                        ));
                     }
                 }
             }
@@ -1254,12 +1282,12 @@ impl IDispatcher for DispatcherP2pComponent {
             let _ = rl.join_cluster("certus://local-cluster");
         }
 
-        self.log_info("dispatcher: initialized");
+        self.log_info("dispatcher-p2p: initialized");
         Ok(())
     }
 
     fn shutdown(&self) -> Result<(), DispatcherError> {
-        self.log_info("dispatcher: shutting down");
+        self.log_info("dispatcher-p2p: shutting down");
 
         if let Some(mut evictor) = self.bg_evictor.lock().unwrap().take() {
             evictor.shutdown();
@@ -1273,13 +1301,17 @@ impl IDispatcher for DispatcherP2pComponent {
             backfill.shutdown();
         }
 
+        if let Some(pool) = self.cold_pool.lock().unwrap().take() {
+            pool.shutdown();
+        }
+
         // Checkpoint all extent managers to persist metadata before teardown.
         {
             let drives = self.data_drives.read();
             for (i, drive) in drives.iter().enumerate() {
                 if let Err(e) = drive.extent_mgr.checkpoint() {
                     self.log_error(&format!(
-                        "dispatcher: extent manager {i} checkpoint failed: {e}"
+                        "dispatcher-p2p: extent manager {i} checkpoint failed: {e}"
                     ));
                 }
             }
@@ -1326,7 +1358,7 @@ impl IDispatcher for DispatcherP2pComponent {
             if let Some(ref admin) = drive.block_dev_admin {
                 if let Err(e) = admin.shutdown() {
                     self.log_error(&format!(
-                        "dispatcher: failed to shut down data drive {i}: {e}"
+                        "dispatcher-p2p: failed to shut down data drive {i}: {e}"
                     ));
                 }
             }
@@ -1343,7 +1375,7 @@ impl IDispatcher for DispatcherP2pComponent {
         }
 
         self.initialized.store(false, Ordering::Release);
-        self.log_info("dispatcher: shut down");
+        self.log_info("dispatcher-p2p: shut down");
         Ok(())
     }
 
@@ -1533,137 +1565,147 @@ impl IDispatcher for DispatcherP2pComponent {
                 }
 
                 let p2p_ring_guard = self.p2p_ring.read();
-                let p2p_ref = p2p_ring_guard.as_ref();
+                let p2p_ref = p2p_ring_guard.as_ref().expect(
+                    "dispatcher-p2p requires P2P ring; use full.yaml profile for DRAM path",
+                );
+                let ring_ptr: *const P2pRing = p2p_ref;
 
-                std::thread::scope(|s| {
-                    #[allow(clippy::type_complexity)]
-                    let mut thread_handles: Vec<
-                        std::thread::ScopedJoinHandle<(Vec<(usize, Result<(), DispatcherError>)>, Vec<(CacheKey, usize)>)>,
-                    > = Vec::new();
+                let pool_guard = self.cold_pool.lock().unwrap();
+                let use_pool = pool_guard.is_some();
 
-                    let mut thread_counter = 0usize;
-                    // Total threads = one per non-empty drive (MAX_QUEUES_PER_DRIVE=1).
-                    // This gives each thread the maximum ring partition size (16 slots).
-                    let total_threads = per_drive
-                        .iter()
-                        .filter(|e| !e.is_empty())
-                        .map(|_| MAX_QUEUES_PER_DRIVE)
-                        .sum::<usize>()
-                        .max(1);
+                let mut thread_counter = 0usize;
+                let total_threads = per_drive
+                    .iter()
+                    .filter(|e| !e.is_empty())
+                    .map(|_| MAX_QUEUES_PER_DRIVE)
+                    .sum::<usize>()
+                    .max(1);
 
-                    for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
-                        if entry_indices.is_empty() {
-                            continue;
-                        }
+                // Dispatch work — either via persistent pool or inline fallback.
+                #[allow(clippy::type_complexity)]
+                let mut pending_results: Vec<(
+                    Vec<usize>,
+                    usize,
+                    crossbeam_channel::Receiver<Vec<Result<(), DispatcherError>>>,
+                )> = Vec::new();
 
-                        // With MAX_QUEUES_PER_DRIVE=1, one thread handles all entries
-                        // for this drive, getting the full ring partition.
-                        let num_queues = MAX_QUEUES_PER_DRIVE.min(entry_indices.len());
-                        let chunks: Vec<&[usize]> = entry_indices
-                            .chunks(entry_indices.len().div_ceil(num_queues))
+                for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
+                    if entry_indices.is_empty() {
+                        continue;
+                    }
+
+                    let num_queues = MAX_QUEUES_PER_DRIVE.min(entry_indices.len());
+                    let chunks: Vec<&[usize]> = entry_indices
+                        .chunks(entry_indices.len().div_ceil(num_queues))
+                        .collect();
+
+                    for chunk in chunks {
+                        let indices = chunk.to_vec();
+                        let my_thread_idx = thread_counter;
+                        thread_counter += 1;
+
+                        let block_size = drives[drive_idx].block_dev_iface.block_size();
+                        let partition =
+                            p2p_ring::ThreadPartition::new(my_thread_idx, total_threads);
+
+                        let jobs: Vec<pipeline::P2pColdJob> = indices
+                            .iter()
+                            .map(|&ci| {
+                                let entry = &cold_entries[ci];
+                                pipeline::P2pColdJob {
+                                    gpu_dst: entry.ipc_handle_addr as *mut std::ffi::c_void,
+                                    start_lba: entry.offset / block_size as u64,
+                                    total_bytes: entry.ipc_handle_size as usize,
+                                }
+                            })
                             .collect();
 
-                        for chunk in chunks {
-                            let dm_ref = &dm;
-                            let _mt_ref = &mt;
-                            let _gpu_ref = &gpu;
-                            let drives_ref = &drives;
-                            let cold_ref = &cold_entries;
-                            let indices = chunk.to_vec();
-                            let my_thread_idx = thread_counter;
-                            thread_counter += 1;
+                        let (result_tx, result_rx) = crossbeam_channel::bounded(1);
 
-                            let handle = s.spawn(move || {
-                                let drive = &drives_ref[drive_idx];
-                                let block_size = drive.block_dev_iface.block_size();
-
-                                let channels =
-                                    drive.block_dev_iface.connect_client().map_err(|e| {
-                                        DispatcherError::IoError(format!(
-                                            "connect_client failed: {e}"
-                                        ))
-                                    });
-
-                                let mut batch_results: Vec<(usize, Result<(), DispatcherError>)> =
-                                    Vec::with_capacity(indices.len());
-
-                                let channels = match channels {
-                                    Ok(ch) => ch,
-                                    Err(e) => {
-                                        for &ci in &indices {
-                                            batch_results.push((ci, Err(e.clone())));
-                                        }
-                                        return (batch_results, Vec::new());
-                                    }
-                                };
-
-                                // P2P path: SSD → BAR1 ring → D2D → client GPU.
-                                let p2p = p2p_ref.expect(
-                                    "dispatcher-p2p requires P2P ring; use full.yaml profile for DRAM path"
-                                );
-                                // With total_threads = num_non_empty_drives, each thread
-                                // gets a non-overlapping 16-slot partition of the 64-slot ring.
-                                let partition = p2p_ring::ThreadPartition::new(
-                                    my_thread_idx,
-                                    total_threads,
-                                );
-                                let mut backfill_keys: Vec<(CacheKey, usize)> = Vec::new();
-
-                                // Build multi-object job list for interleaved P2P pipeline.
-                                let jobs: Vec<pipeline::P2pColdJob> = indices.iter().map(|&ci| {
-                                    let entry = &cold_ref[ci];
-                                    pipeline::P2pColdJob {
-                                        gpu_dst: entry.ipc_handle_addr as *mut std::ffi::c_void,
-                                        start_lba: entry.offset / block_size as u64,
-                                        total_bytes: entry.ipc_handle_size as usize,
-                                    }
-                                }).collect();
-
-                                let pipeline_results = unsafe {
-                                    pipeline::pipelined_multi_object_p2p(
-                                        &*drive.block_dev_iface,
-                                        p2p,
-                                        &partition,
-                                        &channels,
-                                        &jobs,
-                                    )
-                                };
-
-                                for (job_idx, result) in pipeline_results.into_iter().enumerate() {
-                                    let ci = indices[job_idx];
-                                    let entry = &cold_ref[ci];
-                                    if result.is_ok() {
-                                        let _ = dm_ref.release_write(entry.key);
-                                        backfill_keys.push((entry.key, drive_idx));
-                                    }
-                                    batch_results.push((ci, result));
+                        if use_pool {
+                            let request = cold_pool::P2pColdReadRequest {
+                                jobs,
+                                partition,
+                                ring_ptr,
+                                result_tx,
+                            };
+                            if let Err(e) = pool_guard.as_ref().unwrap().submit(
+                                drive_idx,
+                                0,
+                                request,
+                            ) {
+                                for &ci in &indices {
+                                    results[cold_entries[ci].idx] = Some(Err(e.clone()));
                                 }
-
-                                (batch_results, backfill_keys)
-                            });
-
-                            thread_handles.push(handle);
+                                continue;
+                            }
+                        } else {
+                            // Inline fallback: connect + run on current thread.
+                            let channels = drives[drive_idx]
+                                .block_dev_iface
+                                .connect_client()
+                                .map_err(|e| {
+                                    DispatcherError::IoError(format!(
+                                        "connect_client failed: {e}"
+                                    ))
+                                });
+                            match channels {
+                                Ok(ch) => {
+                                    let pipeline_results = unsafe {
+                                        pipeline::pipelined_multi_object_p2p(
+                                            &*drives[drive_idx].block_dev_iface,
+                                            p2p_ref,
+                                            &partition,
+                                            &ch,
+                                            &jobs,
+                                        )
+                                    };
+                                    let _ = result_tx.send(pipeline_results);
+                                }
+                                Err(e) => {
+                                    let errs = jobs.iter().map(|_| Err(e.clone())).collect();
+                                    let _ = result_tx.send(errs);
+                                }
+                            }
                         }
-                    }
 
-                    // Collect results from all threads.
-                    let mut all_backfill_keys: Vec<(CacheKey, usize)> = Vec::new();
-                    for handle in thread_handles {
-                        let (batch_results, backfill_keys) =
-                            handle.join().unwrap_or_else(|_| (Vec::new(), Vec::new()));
-                        for (ci, res) in batch_results {
-                            results[cold_entries[ci].idx] = Some(res);
-                        }
-                        all_backfill_keys.extend(backfill_keys);
+                        pending_results.push((indices, drive_idx, result_rx));
                     }
+                }
 
-                    // Enqueue async DRAM backfill for all P2P-served keys.
-                    if let Some(ref backfill) = *self.bg_backfill.lock().unwrap() {
-                        for (key, drive_index) in all_backfill_keys {
-                            let _ = backfill.enqueue(DramBackfillJob { key, drive_index });
+                drop(pool_guard);
+
+                // Collect results from all workers.
+                let mut all_backfill_keys: Vec<(CacheKey, usize)> = Vec::new();
+                for (indices, drive_idx, rx) in pending_results {
+                    let pipeline_results = rx.recv().unwrap_or_else(|_| {
+                        indices
+                            .iter()
+                            .map(|_| {
+                                Err(DispatcherError::IoError("worker channel closed".into()))
+                            })
+                            .collect()
+                    });
+
+                    for (job_idx, result) in pipeline_results.into_iter().enumerate() {
+                        let ci = indices[job_idx];
+                        let entry = &cold_entries[ci];
+                        if result.is_ok() {
+                            let _ = dm.release_write(entry.key);
+                            all_backfill_keys.push((entry.key, drive_idx));
                         }
+                        results[entry.idx] = Some(result);
                     }
-                });
+                }
+
+                drop(p2p_ring_guard);
+
+                // Enqueue async DRAM backfill for all P2P-served keys.
+                if let Some(ref backfill) = *self.bg_backfill.lock().unwrap() {
+                    for (key, drive_index) in all_backfill_keys {
+                        let _ = backfill.enqueue(DramBackfillJob { key, drive_index });
+                    }
+                }
             }
         }
 
@@ -2849,6 +2891,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             RwLock::new(None),
@@ -2891,6 +2934,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             RwLock::new(None),
@@ -2904,6 +2948,7 @@ mod tests {
     fn query_idispatcher() {
         let c = DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -2922,6 +2967,7 @@ mod tests {
     fn initialize_without_receptacles_fails() {
         let c = DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -2945,6 +2991,7 @@ mod tests {
     fn initialize_with_empty_pci_addrs_fails() {
         let c = DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -2972,6 +3019,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             RwLock::new(None),
@@ -2996,6 +3044,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             RwLock::new(None),
@@ -3015,6 +3064,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             RwLock::new(None),
@@ -3031,6 +3081,7 @@ mod tests {
     fn populate_before_initialize_fails() {
         let c = DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -3055,6 +3106,7 @@ mod tests {
     fn populate_with_zero_size_fails() {
         let c = DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -3085,6 +3137,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             RwLock::new(None),
@@ -3100,6 +3153,7 @@ mod tests {
     fn double_shutdown_succeeds() {
         let c = DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -3119,6 +3173,7 @@ mod tests {
     fn concurrent_pre_init_calls_from_multiple_threads() {
         let c = Arc::new(DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -3172,6 +3227,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             RwLock::new(None),
@@ -3198,6 +3254,7 @@ mod tests {
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
         let c = DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -3271,6 +3328,7 @@ mod tests {
             Arc::new(MockMemoryTier::with_fail_insert(1024 * 1024));
         let c = DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
@@ -3598,6 +3656,7 @@ mod tests {
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(8192));
         let c = DispatcherP2pComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),

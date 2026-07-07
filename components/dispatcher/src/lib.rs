@@ -60,6 +60,7 @@
 #![allow(clippy::too_many_arguments)]
 
 mod background;
+pub mod cold_pool;
 pub mod io_segmenter;
 pub mod metrics;
 pub mod pipeline;
@@ -144,6 +145,7 @@ define_component! {
             initialized: AtomicBool,
             bg_writer: Mutex<Option<ParallelBackgroundWriter>>,
             bg_evictor: Mutex<Option<BackgroundEvictor>>,
+            cold_pool: Mutex<Option<cold_pool::ColdReadPool>>,
             data_drives: RwLock<Vec<DataDrive>>,
             pipeline_ring: RwLock<Option<pipeline::PipelineRing>>,
             warm_stream: AtomicU64,
@@ -1139,6 +1141,32 @@ impl IDispatcher for DispatcherComponent {
 
         *self.bg_writer.lock().unwrap() = Some(writer);
 
+        // Start persistent cold-path worker pool (pre-connected NVMe channels + CUDA streams).
+        if let Ok(gpu) = self.gpu_services.get() {
+            let pool_drives: Vec<Arc<dyn IBlockDevice + Send + Sync>> = {
+                let dd = self.data_drives.read();
+                dd.iter().map(|d| Arc::clone(&d.block_dev_iface)).collect()
+            };
+            if !pool_drives.is_empty() {
+                const COLD_POOL_QUEUES_PER_DRIVE: usize = 2;
+                match cold_pool::ColdReadPool::new(&pool_drives, &gpu, COLD_POOL_QUEUES_PER_DRIVE) {
+                    Ok(pool) => {
+                        self.log_info(&format!(
+                            "dispatcher: cold pool started ({} drives × {} queues)",
+                            pool_drives.len(),
+                            COLD_POOL_QUEUES_PER_DRIVE,
+                        ));
+                        *self.cold_pool.lock().unwrap() = Some(pool);
+                    }
+                    Err(e) => {
+                        self.log_info(&format!(
+                            "cold pool creation failed (non-fatal, will use scoped threads): {e:?}"
+                        ));
+                    }
+                }
+            }
+        }
+
         // Start background SSD evictor if drives exist and threshold is configured.
         if config.ssd_eviction_threshold > 0.0 {
             let dm_for_evictor = self
@@ -1191,6 +1219,11 @@ impl IDispatcher for DispatcherComponent {
 
         if let Some(mut writer) = self.bg_writer.lock().unwrap().take() {
             writer.shutdown();
+        }
+
+        // Shut down cold pool before block device teardown (workers hold ClientChannels).
+        if let Some(pool) = self.cold_pool.lock().unwrap().take() {
+            pool.shutdown();
         }
 
         // Checkpoint all extent managers to persist metadata before teardown.
@@ -1283,7 +1316,7 @@ impl IDispatcher for DispatcherComponent {
     ///    - MemoryTier hit → issue async H2D DMA (round-robin across 4 streams)
     ///    - BlockDevice hit → collect into cold_entries for phase 2
     ///    - NotExist → handle inline
-    ///    After the loop, synchronize all warm streams once.
+    ///      After the loop, synchronize all warm streams once.
     ///
     /// 2. **Cold promotion** (if any BlockDevice hits):
     ///    - Group cold entries by drive index
@@ -1481,202 +1514,193 @@ impl IDispatcher for DispatcherComponent {
                     per_drive[drive_idx].push(ci);
                 }
 
-                std::thread::scope(|s| {
-                    #[allow(clippy::type_complexity)]
-                    let mut thread_handles: Vec<
-                        std::thread::ScopedJoinHandle<Vec<(usize, Result<(), DispatcherError>)>>,
-                    > = Vec::new();
+                let pool_guard = self.cold_pool.lock().unwrap();
+                let pool = pool_guard.as_ref();
+                let queues_per_drive = pool.map_or(MAX_QUEUES_PER_DRIVE, |p| p.queues_per_drive());
 
-                    for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
-                        if entry_indices.is_empty() {
+                let queue_depth = 128;
+                let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
+                let pm = self.pipeline_metrics.read();
+                let pm_arc: Option<Arc<dyn PipelineMetrics>> =
+                    pm.as_ref().map(Arc::clone);
+                drop(pm);
+
+                // For each drive, prepare ColdReadJobs and submit to pool (or fallback).
+                #[allow(clippy::type_complexity)]
+                let mut pending_results: Vec<(
+                    Vec<usize>,         // job_ci mapping
+                    Vec<*mut u8>,       // mem_ptrs
+                    crossbeam_channel::Receiver<Vec<Result<(), DispatcherError>>>,
+                )> = Vec::new();
+                let mut prep_failures: Vec<(usize, Result<(), DispatcherError>)> = Vec::new();
+
+                for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
+                    if entry_indices.is_empty() {
+                        continue;
+                    }
+
+                    let drive = &drives[drive_idx];
+                    let block_size = drive.block_dev_iface.block_size();
+
+                    // Split this drive's entries across queue slots.
+                    let num_queues = queues_per_drive.min(entry_indices.len());
+                    let chunks: Vec<&[usize]> = entry_indices
+                        .chunks(entry_indices.len().div_ceil(num_queues))
+                        .collect();
+
+                    for (slot, chunk) in chunks.into_iter().enumerate() {
+                        let mut jobs: Vec<pipeline::ColdReadJob> =
+                            Vec::with_capacity(chunk.len());
+                        let mut job_ci: Vec<usize> = Vec::with_capacity(chunk.len());
+                        let mut mem_ptrs: Vec<*mut u8> = Vec::with_capacity(chunk.len());
+
+                        for &ci in chunk {
+                            let entry = &cold_entries[ci];
+                            let ipc_size = entry.ipc_handle_size;
+
+                            let prep = (|| -> Result<*mut u8, DispatcherError> {
+                                Self::evict_for_space(&dm, &mt, ipc_size, entry.key, max_attempts)?;
+                                mt.insert(entry.key, ipc_size).map_err(|e| {
+                                    DispatcherError::AllocationFailed(format!(
+                                        "promote insert failed: {e}"
+                                    ))
+                                })
+                            })();
+
+                            match prep {
+                                Ok(mem_ptr) => {
+                                    jobs.push(pipeline::ColdReadJob {
+                                        mem_ptr,
+                                        gpu_dst: entry.ipc_handle_addr
+                                            as *mut std::ffi::c_void,
+                                        start_lba: entry.offset / block_size as u64,
+                                        total_bytes: ipc_size as usize,
+                                    });
+                                    job_ci.push(ci);
+                                    mem_ptrs.push(mem_ptr);
+                                }
+                                Err(e) => {
+                                    prep_failures.push((ci, Err(e)));
+                                }
+                            }
+                        }
+
+                        if jobs.is_empty() {
                             continue;
                         }
 
-                        // Split this drive's entries across multiple queue threads.
-                        let num_queues = MAX_QUEUES_PER_DRIVE.min(entry_indices.len());
-                        let chunks: Vec<&[usize]> = entry_indices
-                            .chunks(entry_indices.len().div_ceil(num_queues))
-                            .collect();
+                        let (result_tx, result_rx) = crossbeam_channel::bounded(1);
 
-                        let queue_depth = 128;
+                        let request = cold_pool::ColdReadRequest {
+                            jobs,
+                            chunk_size,
+                            queue_depth,
+                            metrics: pm_arc.clone(),
+                            result_tx,
+                        };
 
-                        let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
-                        for chunk in chunks {
-                            let dm_ref = &dm;
-                            let mt_ref = &mt;
-                            let gpu_ref = &gpu;
-                            let drives_ref = &drives;
-                            let cold_ref = &cold_entries;
-                            let indices = chunk.to_vec();
-
-                            let handle = s.spawn(move || {
-                                let drive = &drives_ref[drive_idx];
-                                let block_size = drive.block_dev_iface.block_size();
-
-                                let channels =
-                                    drive.block_dev_iface.connect_client().map_err(|e| {
-                                        DispatcherError::IoError(format!(
-                                            "connect_client failed: {e}"
-                                        ))
-                                    });
-                                let streams_result = gpu_ref.create_stream().and_then(|a| {
-                                    gpu_ref.create_stream().map(|b| [a, b]).map_err(|e| {
-                                        let _ = gpu_ref.destroy_stream(a);
-                                        e
-                                    })
-                                });
-
-                                let mut batch_results: Vec<(usize, Result<(), DispatcherError>)> =
-                                    Vec::with_capacity(indices.len());
-
-                                let (channels, streams) = match (channels, streams_result) {
-                                    (Ok(ch), Ok(st)) => (ch, st),
-                                    (Err(e), _) => {
-                                        for &ci in &indices {
-                                            batch_results.push((ci, Err(e.clone())));
-                                        }
-                                        return batch_results;
-                                    }
-                                    (_, Err(e)) => {
-                                        let err = DispatcherError::IoError(format!(
-                                            "create_stream failed: {e}"
-                                        ));
-                                        for &ci in &indices {
-                                            batch_results.push((ci, Err(err.clone())));
-                                        }
-                                        return batch_results;
-                                    }
-                                };
-
-                                // Prepare all cold entries for multi-object pipeline.
-                                let t_prep_start = std::time::Instant::now();
-                                #[cfg(feature = "pipeline-telemetry")]
-                                let _ = t_prep_start;
-                                let mut jobs: Vec<pipeline::ColdReadJob> =
-                                    Vec::with_capacity(indices.len());
-                                let mut job_ci: Vec<usize> = Vec::with_capacity(indices.len());
-                                let mut mem_ptrs: Vec<*mut u8> = Vec::with_capacity(indices.len());
-
-                                for &ci in &indices {
-                                    let entry = &cold_ref[ci];
-                                    let ipc_size = entry.ipc_handle_size;
-
-                                    let prep = (|| -> Result<*mut u8, DispatcherError> {
-                                        Self::evict_for_space(dm_ref, mt_ref, ipc_size, entry.key, max_attempts)?;
-                                        mt_ref.insert(entry.key, ipc_size).map_err(|e| {
-                                            DispatcherError::AllocationFailed(format!(
-                                                "promote insert failed: {e}"
-                                            ))
-                                        })
-                                    })();
-
-                                    match prep {
-                                        Ok(mem_ptr) => {
-                                            jobs.push(pipeline::ColdReadJob {
-                                                mem_ptr,
-                                                gpu_dst: entry.ipc_handle_addr
-                                                    as *mut std::ffi::c_void,
-                                                start_lba: entry.offset / block_size as u64,
-                                                total_bytes: ipc_size as usize,
-                                            });
-                                            job_ci.push(ci);
-                                            mem_ptrs.push(mem_ptr);
-                                        }
-                                        Err(e) => {
-                                            batch_results.push((ci, Err(e)));
-                                        }
-                                    }
+                        if let Some(p) = pool {
+                            if let Err(e) = p.submit(drive_idx, slot, request) {
+                                for &ci in &job_ci {
+                                    prep_failures.push((ci, Err(e.clone())));
                                 }
-                                let t_prep_done = t_prep_start.elapsed();
-
-                                // Run all prepared jobs through the multi-object pipeline.
-                                if !jobs.is_empty() {
-                                    let t_pipeline_start = std::time::Instant::now();
-                                    let pm = self.pipeline_metrics.read();
-                                    let pm_ref = pm.as_deref();
+                                continue;
+                            }
+                        } else {
+                            // Fallback: no pool available, run inline on current thread.
+                            let drive_iface = &*drive.block_dev_iface;
+                            let gpu_ref = &*gpu;
+                            let channels = drive_iface.connect_client();
+                            let streams_result = gpu_ref.create_stream().and_then(|a| {
+                                gpu_ref.create_stream().map(|b| [a, b]).map_err(|e| {
+                                    let _ = gpu_ref.destroy_stream(a);
+                                    e
+                                })
+                            });
+                            match (channels, streams_result) {
+                                (Ok(ch), Ok(st)) => {
                                     let pipeline_results = unsafe {
                                         pipeline::pipelined_multi_object_zero_copy(
-                                            &*drive.block_dev_iface,
-                                            &**gpu_ref,
-                                            &streams,
-                                            &channels,
-                                            &jobs,
-                                            chunk_size,
-                                            queue_depth,
-                                            pm_ref,
+                                            drive_iface,
+                                            gpu_ref,
+                                            &st,
+                                            &ch,
+                                            &request.jobs,
+                                            request.chunk_size,
+                                            request.queue_depth,
+                                            request.metrics.as_deref(),
                                         )
                                     };
-                                    let t_pipeline_done = t_pipeline_start.elapsed();
-
-                                    let t_finalize_start = std::time::Instant::now();
-                                    // Finalize each job's dispatch-map state.
-                                    for (job_idx, result) in pipeline_results.into_iter().enumerate()
-                                    {
-                                        let ci = job_ci[job_idx];
-                                        let entry = &cold_ref[ci];
-                                        let res = match result {
-                                            Ok(()) => {
-                                                let _ = dm_ref.remove(entry.key);
-                                                let create_res = dm_ref
-                                                    .create_memory_tier_entry(
-                                                        entry.key,
-                                                        mem_ptrs[job_idx],
-                                                        entry.ipc_handle_size,
-                                                    )
-                                                    .map_err(|e| {
-                                                        DispatcherError::IoError(format!(
-                                                            "promote re-register failed: {e}"
-                                                        ))
-                                                    });
-                                                if create_res.is_ok() {
-                                                    let _ = dm_ref.convert_to_storage(
-                                                        entry.key,
-                                                        entry.offset,
-                                                    );
-                                                    let _ = dm_ref.release_write(entry.key);
-                                                }
-                                                create_res
-                                            }
-                                            Err(e) => Err(e),
-                                        };
-                                        batch_results.push((ci, res));
-                                    }
-                                    let t_finalize_done = t_finalize_start.elapsed();
-                                    #[cfg(feature = "pipeline-telemetry")]
-                                    eprintln!(
-                                        "[cold-perf] drive={} jobs={} segs={} prep={:.1}ms pipeline={:.1}ms finalize={:.1}ms",
-                                        drive_idx,
-                                        jobs.len(),
-                                        jobs.len() * 32,
-                                        t_prep_done.as_secs_f64() * 1000.0,
-                                        t_pipeline_done.as_secs_f64() * 1000.0,
-                                        t_finalize_done.as_secs_f64() * 1000.0,
-                                    );
-                                    if let Some(ref m) = *self.pipeline_metrics.read() {
-                                        m.record_cold_prep(t_prep_done.as_micros() as f64);
-                                        m.record_cold_total(drive_idx, t_pipeline_done.as_micros() as f64);
-                                        m.record_cold_finalize(t_finalize_done.as_micros() as f64);
-                                    }
+                                    let _ = gpu_ref.destroy_stream(st[0]);
+                                    let _ = gpu_ref.destroy_stream(st[1]);
+                                    let _ = request.result_tx.send(pipeline_results);
                                 }
-
-                                let _ = gpu_ref.destroy_stream(streams[0]);
-                                let _ = gpu_ref.destroy_stream(streams[1]);
-
-                                batch_results
-                            });
-
-                            thread_handles.push(handle);
+                                (Err(e), _) => {
+                                    let err = DispatcherError::IoError(format!(
+                                        "connect_client failed: {e}"
+                                    ));
+                                    let _ = request.result_tx.send(
+                                        (0..request.jobs.len()).map(|_| Err(err.clone())).collect()
+                                    );
+                                }
+                                (_, Err(e)) => {
+                                    let err = DispatcherError::IoError(format!(
+                                        "create_stream failed: {e}"
+                                    ));
+                                    let _ = request.result_tx.send(
+                                        (0..request.jobs.len()).map(|_| Err(err.clone())).collect()
+                                    );
+                                }
+                            }
                         }
-                    }
 
-                    // Collect results from all threads.
-                    for handle in thread_handles {
-                        let batch_results = handle.join().unwrap_or_else(|_| Vec::new());
-                        for (ci, res) in batch_results {
-                            results[cold_entries[ci].idx] = Some(res);
-                        }
+                        pending_results.push((job_ci, mem_ptrs, result_rx));
                     }
-                });
+                }
+
+                drop(pool_guard);
+
+                // Record prep failures.
+                for (ci, res) in prep_failures {
+                    results[cold_entries[ci].idx] = Some(res);
+                }
+
+                // Collect pipeline results and finalize dispatch-map state.
+                for (job_ci, mem_ptrs, result_rx) in pending_results {
+                    let pipeline_results = result_rx.recv().unwrap_or_else(|_| {
+                        (0..job_ci.len())
+                            .map(|_| Err(DispatcherError::IoError("pool worker disconnected".into())))
+                            .collect()
+                    });
+
+                    for (job_idx, result) in pipeline_results.into_iter().enumerate() {
+                        let ci = job_ci[job_idx];
+                        let entry = &cold_entries[ci];
+                        let res = match result {
+                            Ok(()) => {
+                                let _ = dm.remove(entry.key);
+                                let create_res = dm
+                                    .create_memory_tier_entry(
+                                        entry.key,
+                                        mem_ptrs[job_idx],
+                                        entry.ipc_handle_size,
+                                    )
+                                    .map_err(|e| {
+                                        DispatcherError::IoError(format!(
+                                            "promote re-register failed: {e}"
+                                        ))
+                                    });
+                                if create_res.is_ok() {
+                                    let _ = dm.convert_to_storage(entry.key, entry.offset);
+                                    let _ = dm.release_write(entry.key);
+                                }
+                                create_res
+                            }
+                            Err(e) => Err(e),
+                        };
+                        results[cold_entries[ci].idx] = Some(res);
+                    }
+                }
             }
         }
 
@@ -2143,14 +2167,11 @@ impl IDispatcher for DispatcherComponent {
                 if Self::evict_for_space(&dm, &mt, entry.size, entry.key, max_attempts).is_err() {
                     continue;
                 }
-                match mt.insert(entry.key, entry.size) {
-                    Ok(mem_ptr) => {
-                        let _ = dm.remove(entry.key);
-                        let _ = dm.create_memory_tier_entry(entry.key, mem_ptr, entry.size);
-                        let _ = dm.convert_to_storage(entry.key, entry.offset);
-                        let _ = dm.release_write(entry.key);
-                    }
-                    Err(_) => {}
+                if let Ok(mem_ptr) = mt.insert(entry.key, entry.size) {
+                    let _ = dm.remove(entry.key);
+                    let _ = dm.create_memory_tier_entry(entry.key, mem_ptr, entry.size);
+                    let _ = dm.convert_to_storage(entry.key, entry.offset);
+                    let _ = dm.release_write(entry.key);
                 }
             }
             return;
@@ -2885,6 +2906,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -2927,6 +2949,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -2941,6 +2964,7 @@ mod tests {
     fn query_idispatcher() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
@@ -2959,6 +2983,7 @@ mod tests {
     fn initialize_without_receptacles_fails() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
@@ -2982,6 +3007,7 @@ mod tests {
     fn initialize_with_empty_pci_addrs_fails() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
@@ -3008,6 +3034,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3032,6 +3059,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3051,6 +3079,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3068,6 +3097,7 @@ mod tests {
     fn populate_before_initialize_fails() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
@@ -3092,6 +3122,7 @@ mod tests {
     fn populate_with_zero_size_fails() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
@@ -3121,6 +3152,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3137,6 +3169,7 @@ mod tests {
     fn double_shutdown_succeeds() {
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
@@ -3156,6 +3189,7 @@ mod tests {
     fn concurrent_pre_init_calls_from_multiple_threads() {
         let c = Arc::new(DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
@@ -3208,6 +3242,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3235,6 +3270,7 @@ mod tests {
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
@@ -3308,6 +3344,7 @@ mod tests {
             Arc::new(MockMemoryTier::with_fail_insert(1024 * 1024));
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
@@ -3635,6 +3672,7 @@ mod tests {
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(8192));
         let c = DispatcherComponent::new(
             AtomicBool::new(false),
+            Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
             RwLock::new(Vec::new()),
