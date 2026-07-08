@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use interfaces::{
-    CacheKey, DispatchMapError, IDispatchMap, IMemoryTier, LookupResult,
-    MemoryTierError,
+    CacheKey, DispatchMapError, IDispatchMap, IMemoryTier, LookupResult, MemoryTierError,
+    MemoryTierTelemetrySnapshot,
 };
 
 // ===========================================================================
@@ -129,7 +129,11 @@ impl IDispatchMap for EvictorBenchMap {
 struct NoopMemoryTier;
 
 impl IMemoryTier for NoopMemoryTier {
-    fn initialize(&self, _pool_size: usize, _numa_node: Option<i32>) -> Result<(), MemoryTierError> {
+    fn initialize(
+        &self,
+        _pool_size: usize,
+        _numa_node: Option<i32>,
+    ) -> Result<(), MemoryTierError> {
         Ok(())
     }
 
@@ -186,6 +190,10 @@ impl IMemoryTier for NoopMemoryTier {
 
     fn is_dma_capable(&self) -> bool {
         false
+    }
+
+    fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot {
+        MemoryTierTelemetrySnapshot::default()
     }
 }
 

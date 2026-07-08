@@ -208,8 +208,9 @@ impl DispatcherP2pComponent {
         let topo = match component_core::numa::NumaTopology::discover() {
             Ok(t) => t,
             Err(_) => {
-                logger
-                    .warn("dispatcher-p2p: NUMA topology unavailable, poller CPUs will not be pinned");
+                logger.warn(
+                    "dispatcher-p2p: NUMA topology unavailable, poller CPUs will not be pinned",
+                );
                 return vec![None; pci_addrs.len()];
             }
         };
@@ -293,9 +294,10 @@ impl DispatcherP2pComponent {
                     |e| DispatcherError::AllocationFailed(format!("DmaBuffer wrap segment: {e}")),
                 )?
             } else {
-                let staging = DmaBuffer::new(seg.length, block_size, Some(numa_node)).map_err(
-                    |e| DispatcherError::AllocationFailed(format!("DMA segment buffer: {e}")),
-                )?;
+                let staging =
+                    DmaBuffer::new(seg.length, block_size, Some(numa_node)).map_err(|e| {
+                        DispatcherError::AllocationFailed(format!("DMA segment buffer: {e}"))
+                    })?;
 
                 let copy_len = seg
                     .length
@@ -459,7 +461,9 @@ impl DispatcherP2pComponent {
             // DRAM is filled — register as MemoryTier immediately.
             let _ = dm.remove(key);
             dm.create_memory_tier_entry(key, mem_ptr, ipc_handle.size)
-                .map_err(|e| DispatcherError::IoError(format!("promote re-register failed: {e}")))?;
+                .map_err(|e| {
+                    DispatcherError::IoError(format!("promote re-register failed: {e}"))
+                })?;
             let _ = dm.convert_to_storage(key, offset);
             let _ = dm.release_write(key);
         }
@@ -531,7 +535,6 @@ impl DispatcherP2pComponent {
         }
         Ok(())
     }
-
 
     fn process_write_job(
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
@@ -1629,11 +1632,9 @@ impl IDispatcher for DispatcherP2pComponent {
                                 ring_ptr,
                                 result_tx,
                             };
-                            if let Err(e) = pool_guard.as_ref().unwrap().submit(
-                                drive_idx,
-                                0,
-                                request,
-                            ) {
+                            if let Err(e) =
+                                pool_guard.as_ref().unwrap().submit(drive_idx, 0, request)
+                            {
                                 for &ci in &indices {
                                     results[cold_entries[ci].idx] = Some(Err(e.clone()));
                                 }
@@ -1645,9 +1646,7 @@ impl IDispatcher for DispatcherP2pComponent {
                                 .block_dev_iface
                                 .connect_client()
                                 .map_err(|e| {
-                                    DispatcherError::IoError(format!(
-                                        "connect_client failed: {e}"
-                                    ))
+                                    DispatcherError::IoError(format!("connect_client failed: {e}"))
                                 });
                             match channels {
                                 Ok(ch) => {
@@ -1681,9 +1680,7 @@ impl IDispatcher for DispatcherP2pComponent {
                     let pipeline_results = rx.recv().unwrap_or_else(|_| {
                         indices
                             .iter()
-                            .map(|_| {
-                                Err(DispatcherError::IoError("worker channel closed".into()))
-                            })
+                            .map(|_| Err(DispatcherError::IoError("worker channel closed".into())))
                             .collect()
                     });
 
@@ -1725,19 +1722,23 @@ impl IDispatcher for DispatcherP2pComponent {
                     .iter()
                     .map(|&i| {
                         let (key, handle) = &entries[i];
-                        (*key, IpcHandle {
-                            address: handle.address,
-                            size: handle.size,
-                        })
+                        (
+                            *key,
+                            IpcHandle {
+                                address: handle.address,
+                                size: handle.size,
+                            },
+                        )
                     })
                     .collect();
 
                 let remote_results = rl.batch_lookup(&remote_entries);
 
                 for (pos, remote_res) in not_found.iter().zip(remote_results.into_iter()) {
-                    results[*pos] = Some(remote_res.map_err(|e| {
-                        DispatcherError::IoError(format!("remote lookup: {e}"))
-                    }));
+                    results[*pos] = Some(
+                        remote_res
+                            .map_err(|e| DispatcherError::IoError(format!("remote lookup: {e}"))),
+                    );
                 }
             }
         }
@@ -1943,9 +1944,7 @@ impl IDispatcher for DispatcherP2pComponent {
         self.ensure_initialized()?;
 
         if size == 0 {
-            return Err(DispatcherError::InvalidParameter(
-                "size must be > 0".into(),
-            ));
+            return Err(DispatcherError::InvalidParameter("size must be > 0".into()));
         }
 
         let dm = self
@@ -1971,7 +1970,12 @@ impl IDispatcher for DispatcherP2pComponent {
         Ok(mem_ptr)
     }
 
-    fn copy_gpu_to_memory_async(&self, key: CacheKey, ipc_handle: IpcHandle, stream: GpuStream) -> Result<(), DispatcherError> {
+    fn copy_gpu_to_memory_async(
+        &self,
+        key: CacheKey,
+        ipc_handle: IpcHandle,
+        stream: GpuStream,
+    ) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
 
         let mt = self
@@ -1991,9 +1995,7 @@ impl IDispatcher for DispatcherP2pComponent {
                 -1,
             )
         }
-        .map_err(|e| {
-            DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}"))
-        })?;
+        .map_err(|e| DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}")))?;
 
         let gpu = self
             .gpu_services
@@ -2016,7 +2018,11 @@ impl IDispatcher for DispatcherP2pComponent {
         Ok(())
     }
 
-    fn copy_gpu_to_memory_completed(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError> {
+    fn copy_gpu_to_memory_completed(
+        &self,
+        key: CacheKey,
+        size: u32,
+    ) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
 
         let dm = self
@@ -2277,8 +2283,8 @@ mod tests {
     use std::thread;
 
     use interfaces::{
-        CacheKey, DispatchMapError, DmaBuffer, GpuDeviceInfo, GpuDmaBuffer,
-        GpuIpcHandle, GpuStream, IMemoryTier, LookupResult, MemoryTierError,
+        CacheKey, DispatchMapError, DmaBuffer, GpuDeviceInfo, GpuDmaBuffer, GpuIpcHandle,
+        GpuStream, IMemoryTier, LookupResult, MemoryTierError, MemoryTierTelemetrySnapshot,
     };
 
     // -----------------------------------------------------------------------
@@ -2349,7 +2355,11 @@ mod tests {
     }
 
     impl IMemoryTier for MockMemoryTier {
-        fn initialize(&self, _pool_size: usize, _numa_node: Option<i32>) -> Result<(), MemoryTierError> {
+        fn initialize(
+            &self,
+            _pool_size: usize,
+            _numa_node: Option<i32>,
+        ) -> Result<(), MemoryTierError> {
             Ok(())
         }
 
@@ -2444,6 +2454,10 @@ mod tests {
 
         fn is_dma_capable(&self) -> bool {
             false
+        }
+
+        fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot {
+            MemoryTierTelemetrySnapshot::default()
         }
     }
 

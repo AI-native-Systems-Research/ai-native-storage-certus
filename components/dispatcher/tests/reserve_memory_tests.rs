@@ -27,9 +27,9 @@ use std::sync::{Arc, Mutex};
 use component_core::query_interface;
 use dispatcher::DispatcherComponent;
 use interfaces::{
-    CacheKey, DispatchMapError, DispatcherConfig, DispatcherError, DmaBuffer,
-    GpuDeviceInfo, GpuDmaBuffer, GpuIpcHandle, GpuStream, IDispatchMap, IDispatcher, IGpuServices,
-    ILogger, IMemoryTier, IpcHandle, LookupResult, MemoryTierError,
+    CacheKey, DispatchMapError, DispatcherConfig, DispatcherError, DmaBuffer, GpuDeviceInfo,
+    GpuDmaBuffer, GpuIpcHandle, GpuStream, IDispatchMap, IDispatcher, IGpuServices, ILogger,
+    IMemoryTier, IpcHandle, LookupResult, MemoryTierError, MemoryTierTelemetrySnapshot,
 };
 
 // ---------------------------------------------------------------------------
@@ -342,6 +342,10 @@ impl IMemoryTier for MockMemoryTier {
 
     fn is_dma_capable(&self) -> bool {
         false
+    }
+
+    fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot {
+        MemoryTierTelemetrySnapshot::default()
     }
 }
 
