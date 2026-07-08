@@ -4,6 +4,17 @@ use std::fmt;
 
 use crate::idispatch_map::CacheKey;
 
+/// Snapshot of memory-tier telemetry counters.
+///
+/// Returned by `IMemoryTier::telemetry_snapshot()`. All fields are cumulative
+/// since the last reset (or component creation).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MemoryTierTelemetrySnapshot {
+    pub evictions: u64,
+    pub write_lock_contentions: u64,
+    pub read_lock_contentions: u64,
+}
+
 /// Errors returned by `IMemoryTier` operations.
 #[derive(Debug, Clone)]
 pub enum MemoryTierError {
@@ -188,6 +199,12 @@ component_macros::define_interface! {
         /// # Verified: P2 (init-guard)
         /// Rejects uninitialized.
         fn clear(&self) -> Result<usize, MemoryTierError>;
+
+        /// Return a snapshot of telemetry counters.
+        ///
+        /// Returns zeros when the `telemetry` feature is not enabled on the
+        /// implementing crate.
+        fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot;
     }
 }
 

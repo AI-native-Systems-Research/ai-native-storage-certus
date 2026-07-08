@@ -16,18 +16,55 @@
 mod allocator;
 
 use std::collections::HashMap;
+#[cfg(feature = "telemetry")]
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
 
 use component_framework::define_component;
 use interfaces::{
-    CacheKey, EvictionHandle, IEvictionPolicy, ILogger, IMemoryTier, MemoryTierError, PoolId,
+    CacheKey, EvictionHandle, IEvictionPolicy, ILogger, IMemoryTier, MemoryTierError,
+    MemoryTierTelemetrySnapshot, PoolId,
 };
 
 use crate::allocator::FreeList;
 
 /// Default memory-tier pool size (256 MiB).
 pub const DEFAULT_POOL_SIZE: usize = 256 * 1024 * 1024;
+
+/// Telemetry counters for the memory-tier (zero-cost when `telemetry` feature is disabled).
+#[cfg(feature = "telemetry")]
+#[derive(Default)]
+pub struct MemoryTierTelemetry {
+    pub evictions: AtomicU64,
+    pub write_lock_contentions: AtomicU64,
+    pub read_lock_contentions: AtomicU64,
+}
+
+#[cfg(feature = "telemetry")]
+impl MemoryTierTelemetry {
+    pub fn snapshot(&self) -> TelemetrySnapshot {
+        TelemetrySnapshot {
+            evictions: self.evictions.load(Ordering::Relaxed),
+            write_lock_contentions: self.write_lock_contentions.load(Ordering::Relaxed),
+            read_lock_contentions: self.read_lock_contentions.load(Ordering::Relaxed),
+        }
+    }
+
+    pub fn reset(&self) {
+        self.evictions.store(0, Ordering::Relaxed);
+        self.write_lock_contentions.store(0, Ordering::Relaxed);
+        self.read_lock_contentions.store(0, Ordering::Relaxed);
+    }
+}
+
+#[cfg(feature = "telemetry")]
+#[derive(Debug, Clone, Copy)]
+pub struct TelemetrySnapshot {
+    pub evictions: u64,
+    pub write_lock_contentions: u64,
+    pub read_lock_contentions: u64,
+}
 
 struct Slot {
     offset: usize,
@@ -47,6 +84,8 @@ struct MemoryTierState {
     pool: RwLock<Pool>,
     initialized: AtomicBool,
     spdk_allocated: bool,
+    #[cfg(feature = "telemetry")]
+    telemetry: MemoryTierTelemetry,
 }
 
 // SAFETY: pool_ptr points to mmap'd or SPDK-allocated memory accessible from any thread.
@@ -67,6 +106,8 @@ impl Default for MemoryTierState {
             }),
             initialized: AtomicBool::new(false),
             spdk_allocated: false,
+            #[cfg(feature = "telemetry")]
+            telemetry: MemoryTierTelemetry::default(),
         }
     }
 }
@@ -118,6 +159,30 @@ impl MemoryTierComponent {
         if let Ok(logger) = self.logger.get() {
             logger.warn(msg);
         }
+    }
+
+    /// Returns the telemetry counters (only available with `telemetry` feature).
+    #[cfg(feature = "telemetry")]
+    pub fn telemetry(&self) -> TelemetrySnapshot {
+        let state = self.state.read().unwrap();
+        state.telemetry.snapshot()
+    }
+
+    /// Resets all telemetry counters to zero.
+    #[cfg(feature = "telemetry")]
+    pub fn reset_telemetry(&self) {
+        let state = self.state.read().unwrap();
+        state.telemetry.reset();
+    }
+
+    /// Returns free capacity in bytes (capacity - used).
+    pub fn free_capacity(&self) -> usize {
+        let state = self.state.read().unwrap();
+        if !state.initialized.load(Ordering::Acquire) {
+            return 0;
+        }
+        let pool = state.pool.read().unwrap();
+        pool.allocator.capacity() - pool.allocator.used()
     }
 
     /// Fallback pool allocation via mmap (used when SPDK is unavailable).
@@ -272,6 +337,19 @@ impl IMemoryTier for MemoryTierComponent {
         }
 
         let ep = self.eviction_policy.get().unwrap();
+
+        #[cfg(feature = "telemetry")]
+        let mut pool = match state.pool.try_write() {
+            Ok(guard) => guard,
+            Err(_) => {
+                state
+                    .telemetry
+                    .write_lock_contentions
+                    .fetch_add(1, Ordering::Relaxed);
+                state.pool.write().unwrap()
+            }
+        };
+        #[cfg(not(feature = "telemetry"))]
         let mut pool = state.pool.write().unwrap();
 
         if pool.slots.contains_key(&key) {
@@ -304,7 +382,21 @@ impl IMemoryTier for MemoryTierComponent {
         }
 
         let ep = self.eviction_policy.get().unwrap();
+
+        #[cfg(feature = "telemetry")]
+        let pool = match state.pool.try_read() {
+            Ok(guard) => guard,
+            Err(_) => {
+                state
+                    .telemetry
+                    .read_lock_contentions
+                    .fetch_add(1, Ordering::Relaxed);
+                state.pool.read().unwrap()
+            }
+        };
+        #[cfg(not(feature = "telemetry"))]
         let pool = state.pool.read().unwrap();
+
         let slot = pool.slots.get(&key)?;
         let ptr = unsafe { state.pool_ptr.add(slot.offset) };
         let size = slot.size;
@@ -344,10 +436,26 @@ impl IMemoryTier for MemoryTierComponent {
 
         let ep = self.eviction_policy.get().unwrap();
         if let Some(key) = ep.pop_oldest(state.pool_id) {
+            #[cfg(feature = "telemetry")]
+            let mut pool = match state.pool.try_write() {
+                Ok(guard) => guard,
+                Err(_) => {
+                    state
+                        .telemetry
+                        .write_lock_contentions
+                        .fetch_add(1, Ordering::Relaxed);
+                    state.pool.write().unwrap()
+                }
+            };
+            #[cfg(not(feature = "telemetry"))]
             let mut pool = state.pool.write().unwrap();
+
             if let Some(slot) = pool.slots.remove(&key) {
                 pool.allocator.deallocate(slot.offset, slot.size as usize);
             }
+            #[cfg(feature = "telemetry")]
+            state.telemetry.evictions.fetch_add(1, Ordering::Relaxed);
+
             Some(key)
         } else {
             None
@@ -367,7 +475,21 @@ impl IMemoryTier for MemoryTierComponent {
         }
 
         let ep = self.eviction_policy.get().unwrap();
+
+        #[cfg(feature = "telemetry")]
+        let mut pool = match state.pool.try_write() {
+            Ok(guard) => guard,
+            Err(_) => {
+                state
+                    .telemetry
+                    .write_lock_contentions
+                    .fetch_add(1, Ordering::Relaxed);
+                state.pool.write().unwrap()
+            }
+        };
+        #[cfg(not(feature = "telemetry"))]
         let mut pool = state.pool.write().unwrap();
+
         let slot = pool
             .slots
             .remove(&key)
@@ -404,7 +526,21 @@ impl IMemoryTier for MemoryTierComponent {
             Ok(ep) => ep,
             Err(_) => return,
         };
+
+        #[cfg(feature = "telemetry")]
+        let pool = match state.pool.try_read() {
+            Ok(guard) => guard,
+            Err(_) => {
+                state
+                    .telemetry
+                    .read_lock_contentions
+                    .fetch_add(1, Ordering::Relaxed);
+                state.pool.read().unwrap()
+            }
+        };
+        #[cfg(not(feature = "telemetry"))]
         let pool = state.pool.read().unwrap();
+
         let mut handles = Vec::with_capacity(keys.len());
         for &key in keys {
             if let Some(slot) = pool.slots.get(&key) {
@@ -471,6 +607,28 @@ impl IMemoryTier for MemoryTierComponent {
     fn is_dma_capable(&self) -> bool {
         let state = self.state.read().unwrap();
         state.spdk_allocated
+    }
+
+    fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot {
+        #[cfg(feature = "telemetry")]
+        {
+            let state = self.state.read().unwrap();
+            MemoryTierTelemetrySnapshot {
+                evictions: state.telemetry.evictions.load(Ordering::Relaxed),
+                write_lock_contentions: state
+                    .telemetry
+                    .write_lock_contentions
+                    .load(Ordering::Relaxed),
+                read_lock_contentions: state
+                    .telemetry
+                    .read_lock_contentions
+                    .load(Ordering::Relaxed),
+            }
+        }
+        #[cfg(not(feature = "telemetry"))]
+        {
+            MemoryTierTelemetrySnapshot::default()
+        }
     }
 }
 

@@ -13,40 +13,41 @@ mod igpu_services;
 mod igreeter;
 mod ilogger;
 mod imemory_tier;
-mod iremote_lookup;
 mod ipartition_table;
+mod iremote_lookup;
 mod iremote_request_handler;
 
 pub use idispatch_map::CacheKey;
 pub use idispatch_map::DispatchMapError;
 #[cfg(feature = "spdk")]
-pub use idispatch_map::LookupResult;
-#[cfg(feature = "spdk")]
 pub use idispatch_map::IDispatchMap;
+#[cfg(feature = "spdk")]
+pub use idispatch_map::LookupResult;
 pub use idispatcher::DispatcherConfig;
 pub use idispatcher::DispatcherError;
-pub use idispatcher::IpcHandle;
 #[cfg(feature = "spdk")]
 pub use idispatcher::IDispatcher;
+pub use idispatcher::IpcHandle;
+pub use ieviction_policy::EvictionHandle;
+pub use ieviction_policy::EvictionPolicyError;
+pub use ieviction_policy::IEvictionPolicy;
+pub use ieviction_policy::PoolId;
 pub use igpu_services::GpuDeviceInfo;
 pub use igpu_services::GpuDmaBuffer;
 pub use igpu_services::GpuIpcHandle;
 pub use igpu_services::GpuStream;
 pub use igpu_services::IGpuServices;
-pub use ieviction_policy::EvictionHandle;
-pub use ieviction_policy::EvictionPolicyError;
-pub use ieviction_policy::IEvictionPolicy;
-pub use ieviction_policy::PoolId;
 pub use igreeter::IGreeter;
 pub use ilogger::ILogger;
+#[cfg(feature = "spdk")]
+pub use imemory_tier::IMemoryTier;
+pub use imemory_tier::MemoryTierError;
+pub use imemory_tier::MemoryTierTelemetrySnapshot;
 pub use iremote_lookup::IRemoteLookup;
 pub use iremote_lookup::RemoteLookupError;
 pub use iremote_request_handler::IRemoteRequestHandler;
 pub use iremote_request_handler::LookupRef;
 pub use iremote_request_handler::RemoteRequestHandlerError;
-pub use imemory_tier::MemoryTierError;
-#[cfg(feature = "spdk")]
-pub use imemory_tier::IMemoryTier;
 
 #[cfg(feature = "spdk")]
 pub mod spdk_types;
@@ -85,11 +86,11 @@ pub use iextent_manager::FormatParams;
 pub use iextent_manager::IExtentManager;
 pub use iextent_manager::WriteHandle;
 
+pub use ipartition_table::type_guids;
+#[cfg(feature = "spdk")]
+pub use ipartition_table::IPartitionTable;
 pub use ipartition_table::PartitionConfig;
 pub use ipartition_table::PartitionInfo;
 pub use ipartition_table::PartitionSpec;
 pub use ipartition_table::PartitionTable;
 pub use ipartition_table::PartitionTableError;
-pub use ipartition_table::type_guids;
-#[cfg(feature = "spdk")]
-pub use ipartition_table::IPartitionTable;

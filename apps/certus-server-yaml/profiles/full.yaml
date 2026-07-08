@@ -107,3 +107,5 @@ exports:
     interface: IDispatcher
   - component: spdk_env
     interface: ISPDKEnv
+  - component: memory_tier
+    interface: IMemoryTier

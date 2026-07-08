@@ -1521,15 +1521,14 @@ impl IDispatcher for DispatcherComponent {
                 let queue_depth = 128;
                 let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
                 let pm = self.pipeline_metrics.read();
-                let pm_arc: Option<Arc<dyn PipelineMetrics>> =
-                    pm.as_ref().map(Arc::clone);
+                let pm_arc: Option<Arc<dyn PipelineMetrics>> = pm.as_ref().map(Arc::clone);
                 drop(pm);
 
                 // For each drive, prepare ColdReadJobs and submit to pool (or fallback).
                 #[allow(clippy::type_complexity)]
                 let mut pending_results: Vec<(
-                    Vec<usize>,         // job_ci mapping
-                    Vec<*mut u8>,       // mem_ptrs
+                    Vec<usize>,   // job_ci mapping
+                    Vec<*mut u8>, // mem_ptrs
                     crossbeam_channel::Receiver<Vec<Result<(), DispatcherError>>>,
                 )> = Vec::new();
                 let mut prep_failures: Vec<(usize, Result<(), DispatcherError>)> = Vec::new();
@@ -1549,8 +1548,7 @@ impl IDispatcher for DispatcherComponent {
                         .collect();
 
                     for (slot, chunk) in chunks.into_iter().enumerate() {
-                        let mut jobs: Vec<pipeline::ColdReadJob> =
-                            Vec::with_capacity(chunk.len());
+                        let mut jobs: Vec<pipeline::ColdReadJob> = Vec::with_capacity(chunk.len());
                         let mut job_ci: Vec<usize> = Vec::with_capacity(chunk.len());
                         let mut mem_ptrs: Vec<*mut u8> = Vec::with_capacity(chunk.len());
 
@@ -1571,8 +1569,7 @@ impl IDispatcher for DispatcherComponent {
                                 Ok(mem_ptr) => {
                                     jobs.push(pipeline::ColdReadJob {
                                         mem_ptr,
-                                        gpu_dst: entry.ipc_handle_addr
-                                            as *mut std::ffi::c_void,
+                                        gpu_dst: entry.ipc_handle_addr as *mut std::ffi::c_void,
                                         start_lba: entry.offset / block_size as u64,
                                         total_bytes: ipc_size as usize,
                                     });
@@ -1640,7 +1637,7 @@ impl IDispatcher for DispatcherComponent {
                                         "connect_client failed: {e}"
                                     ));
                                     let _ = request.result_tx.send(
-                                        (0..request.jobs.len()).map(|_| Err(err.clone())).collect()
+                                        (0..request.jobs.len()).map(|_| Err(err.clone())).collect(),
                                     );
                                 }
                                 (_, Err(e)) => {
@@ -1648,7 +1645,7 @@ impl IDispatcher for DispatcherComponent {
                                         "create_stream failed: {e}"
                                     ));
                                     let _ = request.result_tx.send(
-                                        (0..request.jobs.len()).map(|_| Err(err.clone())).collect()
+                                        (0..request.jobs.len()).map(|_| Err(err.clone())).collect(),
                                     );
                                 }
                             }
@@ -1669,7 +1666,9 @@ impl IDispatcher for DispatcherComponent {
                 for (job_ci, mem_ptrs, result_rx) in pending_results {
                     let pipeline_results = result_rx.recv().unwrap_or_else(|_| {
                         (0..job_ci.len())
-                            .map(|_| Err(DispatcherError::IoError("pool worker disconnected".into())))
+                            .map(|_| {
+                                Err(DispatcherError::IoError("pool worker disconnected".into()))
+                            })
                             .collect()
                     });
 
@@ -2307,8 +2306,8 @@ mod tests {
     use std::thread;
 
     use interfaces::{
-        CacheKey, DispatchMapError, DmaBuffer, GpuDeviceInfo, GpuDmaBuffer,
-        GpuIpcHandle, GpuStream, IMemoryTier, LookupResult, MemoryTierError,
+        CacheKey, DispatchMapError, DmaBuffer, GpuDeviceInfo, GpuDmaBuffer, GpuIpcHandle,
+        GpuStream, IMemoryTier, LookupResult, MemoryTierError, MemoryTierTelemetrySnapshot,
     };
 
     // -----------------------------------------------------------------------
@@ -2460,6 +2459,10 @@ mod tests {
 
         fn is_dma_capable(&self) -> bool {
             false
+        }
+
+        fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot {
+            MemoryTierTelemetrySnapshot::default()
         }
     }
 
@@ -3712,7 +3715,6 @@ mod tests {
 
         d.shutdown().unwrap();
     }
-
 
     // -----------------------------------------------------------------------
     // Background SSD Evictor tests
