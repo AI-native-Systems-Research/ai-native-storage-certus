@@ -86,6 +86,29 @@ impl Default for DispatcherConfig {
     }
 }
 
+/// Cumulative cache-level hit/miss counters for the load (lookup) path.
+///
+/// Every load classifies each requested key against the dispatch-map and is
+/// tallied here by where it resolved:
+/// - `mem_tier_hits` — served from the DRAM memory tier (no SSD read).
+/// - `ssd_hits` — resolved to a block-device entry, requiring an NVMe read to
+///   promote the block back into DRAM before serving it.
+/// - `misses` — the key was not present in the cache at all (`NotExist`).
+///
+/// Counters are monotonic for the life of the dispatcher; take deltas across
+/// two calls to measure a window (e.g. one benchmark round). Comparing
+/// `mem_tier_hits` against `ssd_hits` shows what fraction of the working set is
+/// being served from DRAM versus SSD.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CacheLevelStats {
+    /// Load blocks served from the DRAM memory tier (no SSD read).
+    pub mem_tier_hits: u64,
+    /// Load blocks resolved from the NVMe block device (each implies an SSD read).
+    pub ssd_hits: u64,
+    /// Load blocks not present in the cache (`LookupResult::NotExist`).
+    pub misses: u64,
+}
+
 /// Opaque handle to client GPU memory for DMA transfers.
 ///
 /// # Examples
@@ -601,6 +624,13 @@ component_macros::define_interface! {
         /// are all-zero unless the underlying block devices were built with
         /// their `telemetry` feature enabled.
         fn read_write_stats(&self) -> crate::iblock_device::ReadWriteStats;
+
+        /// Return cumulative cache-level hit/miss counters for the load path,
+        /// broken down by the tier that served each requested block (DRAM
+        /// memory tier vs NVMe block device) plus outright misses. Counters are
+        /// monotonic for the life of the dispatcher; take deltas across two
+        /// calls to measure a window.
+        fn cache_level_stats(&self) -> CacheLevelStats;
     }
 }
 

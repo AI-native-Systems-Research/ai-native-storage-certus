@@ -72,10 +72,10 @@ use std::sync::Mutex;
 
 use component_framework::define_component;
 use interfaces::{
-    CacheKey, ClientChannels, Command, Completion, DispatcherConfig, DispatcherError, DmaAllocFn,
-    DmaBuffer, FormatParams, GpuStream, IBlockDevice, IBlockDeviceAdmin, IDispatchMap, IDispatcher,
-    IExtentManager, IGpuServices, ILogger, IMemoryTier, IRemoteLookup, IpcHandle, LookupResult,
-    PciAddress,
+    CacheKey, CacheLevelStats, ClientChannels, Command, Completion, DispatcherConfig,
+    DispatcherError, DmaAllocFn, DmaBuffer, FormatParams, GpuStream, IBlockDevice,
+    IBlockDeviceAdmin, IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger,
+    IMemoryTier, IRemoteLookup, IpcHandle, LookupResult, PciAddress,
 };
 
 use component_core::binding::bind;
@@ -153,6 +153,11 @@ define_component! {
             extent_manager_factory: Mutex<Option<ExtentManagerFactory>>,
             max_eviction_attempts: AtomicUsize,
             pipeline_metrics: RwLock<Option<Arc<dyn PipelineMetrics>>>,
+            // Cache-level hit/miss counters for the load path. Monotonic for the
+            // life of the dispatcher; exposed via `cache_level_stats()`.
+            mem_tier_hits: AtomicU64,
+            ssd_hits: AtomicU64,
+            cache_misses: AtomicU64,
         },
     }
 }
@@ -1379,6 +1384,7 @@ impl IDispatcher for DispatcherComponent {
             match dm.lookup(key) {
                 Ok(lookup_result) => match lookup_result {
                     LookupResult::NotExist => {
+                        self.cache_misses.fetch_add(1, Ordering::Relaxed);
                         results[i] = Some(Err(DispatcherError::KeyNotFound(key)));
                     }
                     LookupResult::MismatchSize => {
@@ -1388,6 +1394,7 @@ impl IDispatcher for DispatcherComponent {
                         )));
                     }
                     LookupResult::MemoryTier { pointer, size } => {
+                        self.mem_tier_hits.fetch_add(1, Ordering::Relaxed);
                         let copy_size = (ipc_handle.size as usize).min(size as usize);
                         let t_hot = std::time::Instant::now();
                         let raw = self.warm_stream.load(Ordering::Acquire);
@@ -1444,6 +1451,7 @@ impl IDispatcher for DispatcherComponent {
                         results[i] = Some(res);
                     }
                     LookupResult::BlockDevice { offset } => {
+                        self.ssd_hits.fetch_add(1, Ordering::Relaxed);
                         let _ = dm.release_read(key);
                         cold_entries.push(ColdEntry {
                             idx: i,
@@ -1773,7 +1781,10 @@ impl IDispatcher for DispatcherComponent {
             Ok(lookup_result) => {
                 use interfaces::LookupResult;
                 match lookup_result {
-                    LookupResult::NotExist => Err(DispatcherError::KeyNotFound(key)),
+                    LookupResult::NotExist => {
+                        self.cache_misses.fetch_add(1, Ordering::Relaxed);
+                        Err(DispatcherError::KeyNotFound(key))
+                    }
                     LookupResult::MismatchSize => {
                         let _ = dm.release_read(key);
                         Err(DispatcherError::InvalidParameter(
@@ -1781,6 +1792,7 @@ impl IDispatcher for DispatcherComponent {
                         ))
                     }
                     LookupResult::MemoryTier { pointer, size } => {
+                        self.mem_tier_hits.fetch_add(1, Ordering::Relaxed);
                         let copy_size = (ipc_handle.size as usize).min(size as usize);
 
                         // Use dedicated warm stream (lock-free AtomicU64 load).
@@ -1834,6 +1846,7 @@ impl IDispatcher for DispatcherComponent {
                         }
                     }
                     LookupResult::BlockDevice { offset } => {
+                        self.ssd_hits.fetch_add(1, Ordering::Relaxed);
                         let _ = dm.release_read(key);
                         self.promote_and_serve(key, offset, &ipc_handle, &gpu, &dm, &mt)?;
                         Ok(null_stream)
@@ -2311,6 +2324,14 @@ impl IDispatcher for DispatcherComponent {
             agg.write_latency_ns_sum += s.write_latency_ns_sum;
         }
         agg
+    }
+
+    fn cache_level_stats(&self) -> CacheLevelStats {
+        CacheLevelStats {
+            mem_tier_hits: self.mem_tier_hits.load(Ordering::Relaxed),
+            ssd_hits: self.ssd_hits.load(Ordering::Relaxed),
+            misses: self.cache_misses.load(Ordering::Relaxed),
+        }
     }
 }
 

@@ -41,19 +41,28 @@ if __name__ == "__main__":
     # Requires DPDK RTE_MAX_MEM_MB_PER_LIST raised to 64G (single alloc > 32G).
     # Keep in sync with CERTUS_HUGEPAGES in configure-bench.sh.
     DRAM_CACHE_BYTES = int(os.environ.get("DRAM_CACHE_BYTES", 47244640256))  # 44 GiB
+    # Drives / SPDK-tier NUMA node are env-overridable so one script serves both
+    # the node-1 44 GiB config (default: c1-c4, node 1) and the node-0 24 GiB cap
+    # (DATA_PCI_ADDRS=0000:61..64:00.0 METADATA_PCI_ADDR=0000:62:00.0
+    #  CERTUS_NUMA_NODE=0). The tier node must be one that actually has RAM.
+    DATA_PCI_ADDRS = os.environ.get(
+        "DATA_PCI_ADDRS",
+        "0000:c1:00.0,0000:c2:00.0,0000:c3:00.0,0000:c4:00.0",
+    ).split(",")
+    METADATA_PCI_ADDR = os.environ.get("METADATA_PCI_ADDR", "0000:c2:00.0")
+    CERTUS_NUMA_NODE = int(os.environ.get("CERTUS_NUMA_NODE", 1))
     KV_CONFIG = {
         "kv_connector": "OffloadingConnector",
         "kv_role": "kv_both",
         "kv_connector_extra_config": {
             "spec_name": "CertusOffloadingSpec",
             "spec_module_path": "certus_connector.spec",
-            "data_pci_addrs": ["0000:c1:00.0", "0000:c2:00.0",
-                               "0000:c3:00.0", "0000:c4:00.0"],
-            "metadata_pci_addr": "0000:c2:00.0",
+            "data_pci_addrs": DATA_PCI_ADDRS,
+            "metadata_pci_addr": METADATA_PCI_ADDR,
             "slab_size_bytes": 2097152,
             "dram_cache_bytes": DRAM_CACHE_BYTES,
             "io_queue_depth": 128,
-            "numa_node": 1,
+            "numa_node": CERTUS_NUMA_NODE,
         },
     }
 
@@ -95,7 +104,9 @@ if __name__ == "__main__":
 
     rounds_done = 0
     total_generations = 0
-    round_io = []  # (round, prompts, d_read_bytes, d_write_bytes, d_read_ops, d_write_ops)
+    round_io = []  # (round, prompts, d_read_bytes, d_write_bytes, d_read_ops,
+                   #  d_write_ops, d_read_lat_ns, d_write_lat_ns,
+                   #  d_mem_tier_hits, d_ssd_hits, d_misses)
 
     # --- Per-round SSD I/O accounting via the iostat file ---------------------
     # The CertusEngine with the real counters lives in the vLLM EngineCore worker
@@ -108,12 +119,18 @@ if __name__ == "__main__":
     IOSTAT_FILE = os.environ.get("CERTUS_IOSTAT_FILE", "/tmp/certus_iostat.txt")
 
     def io_stats():
-        # 6 fields: read_ops, read_bytes, read_lat_ns_sum, write_ops, write_bytes, write_lat_ns_sum
+        # 6 SSD fields: read_ops, read_bytes, read_lat_ns_sum, write_ops,
+        # write_bytes, write_lat_ns_sum. Optionally 3 more cache-level fields:
+        # mem_tier_hits, ssd_hits, misses (load blocks served from DRAM, from
+        # SSD, and not found). Returns a 9-tuple, padding the cache fields with
+        # 0 if the engine predates them.
         try:
             with open(IOSTAT_FILE) as f:
                 parts = f.read().split()
+            if len(parts) >= 9:
+                return tuple(int(x) for x in parts[:9])
             if len(parts) >= 6:
-                return tuple(int(x) for x in parts[:6])
+                return tuple(int(x) for x in parts[:6]) + (0, 0, 0)
         except (OSError, ValueError):
             pass
         return None
@@ -162,18 +179,28 @@ if __name__ == "__main__":
             next_turn[i] += 1
         total_generations += len(active_prompts)
         n_alive = sum(alive)
-        # Deltas: (read_ops, read_bytes, read_lat_ns, write_ops, write_bytes, write_lat_ns).
+        # Deltas: 6 SSD fields + 3 cache-level fields (mem_tier_hits, ssd_hits, misses).
         if io0 is not None and io1 is not None:
-            d_rops, d_rb, d_rlat, d_wops, d_wb, d_wlat = (io1[j] - io0[j] for j in range(6))
+            (d_rops, d_rb, d_rlat, d_wops, d_wb, d_wlat,
+             d_mem_hits, d_ssd_hits, d_misses) = (io1[j] - io0[j] for j in range(9))
         else:
             d_rops = d_rb = d_rlat = d_wops = d_wb = d_wlat = None
+            d_mem_hits = d_ssd_hits = d_misses = None
         round_io.append((rounds_done, len(active_prompts),
-                         d_rb, d_wb, d_rops, d_wops, d_rlat, d_wlat))
+                         d_rb, d_wb, d_rops, d_wops, d_rlat, d_wlat,
+                         d_mem_hits, d_ssd_hits, d_misses))
+        # Fraction of load blocks served from DRAM (hit rate against the tier).
+        if d_mem_hits is not None and (d_mem_hits + d_ssd_hits) > 0:
+            dram_pct = f"{100 * d_mem_hits / (d_mem_hits + d_ssd_hits):.1f}%"
+        else:
+            dram_pct = "n/a"
         print(f"[run] round {rounds_done}: {len(active_prompts)} prompts in "
               f"{round_elapsed:.1f}s  ({n_alive} convs still alive)  "
               f"ssd_read={gib(d_rb)} ssd_write={gib(d_wb)} "
               f"r_ops={d_rops} w_ops={d_wops} "
-              f"r_lat={mean_us(d_rlat, d_rops)} w_lat={mean_us(d_wlat, d_wops)}",
+              f"r_lat={mean_us(d_rlat, d_rops)} w_lat={mean_us(d_wlat, d_wops)}  "
+              f"mem_tier_hits={d_mem_hits} ssd_hits={d_ssd_hits} misses={d_misses} "
+              f"dram_served={dram_pct}",
               file=sys.stderr, flush=True)
 
     elapsed = time.perf_counter() - t_start
@@ -202,25 +229,39 @@ if __name__ == "__main__":
         tot_wops = sum(r[5] for r in round_io if r[5] is not None)
         tot_rlat = sum(r[6] for r in round_io if r[6] is not None)
         tot_wlat = sum(r[7] for r in round_io if r[7] is not None)
-        print("\n[io] per-round SSD bytes + latency (certus engine, all drives):", file=sys.stderr)
+        tot_mem_hits = sum(r[8] for r in round_io if r[8] is not None)
+        tot_ssd_hits = sum(r[9] for r in round_io if r[9] is not None)
+        tot_misses = sum(r[10] for r in round_io if r[10] is not None)
+        tot_hits = tot_mem_hits + tot_ssd_hits
+        dram_pct = f"{100 * tot_mem_hits / tot_hits:.1f}%" if tot_hits else "n/a"
+        print("\n[io] per-round SSD bytes + latency + cache-tier hits (certus engine, all drives):",
+              file=sys.stderr)
         print(f"[io] {'round':>5} {'prompts':>7} {'ssd_read':>12} {'ssd_write':>12} "
-              f"{'r_ops':>10} {'w_ops':>10} {'r_lat':>10} {'w_lat':>10}", file=sys.stderr)
-        for rnd, npr, rb, wb, rops, wops, rlat, wlat in round_io:
+              f"{'r_ops':>10} {'w_ops':>10} {'r_lat':>10} {'w_lat':>10} "
+              f"{'mem_hits':>10} {'ssd_hits':>10} {'misses':>8}", file=sys.stderr)
+        for rnd, npr, rb, wb, rops, wops, rlat, wlat, mh, sh, ms in round_io:
             print(f"[io] {rnd:>5} {npr:>7} {gib(rb):>12} {gib(wb):>12} "
-                  f"{rops:>10} {wops:>10} {mean_us(rlat, rops):>10} {mean_us(wlat, wops):>10}",
+                  f"{rops:>10} {wops:>10} {mean_us(rlat, rops):>10} {mean_us(wlat, wops):>10} "
+                  f"{str(mh):>10} {str(sh):>10} {str(ms):>8}",
                   file=sys.stderr)
         print(f"[io] {'TOTAL':>5} {'':>7} {gib(tot_rb):>12} {gib(tot_wb):>12} "
               f"{tot_rops:>10} {tot_wops:>10} {mean_us(tot_rlat, tot_rops):>10} "
-              f"{mean_us(tot_wlat, tot_wops):>10}", file=sys.stderr)
+              f"{mean_us(tot_wlat, tot_wops):>10} "
+              f"{tot_mem_hits:>10} {tot_ssd_hits:>10} {tot_misses:>8}", file=sys.stderr)
+        print(f"[io] load blocks served from DRAM: {dram_pct} "
+              f"({tot_mem_hits} mem-tier vs {tot_ssd_hits} ssd)", file=sys.stderr)
         io_path = os.path.join(_here, f"certus_round_io_{int(elapsed)}.json")
         with open(io_path, "w") as f:
             json.dump({"wall": elapsed, "rounds": [
                 {"round": r, "prompts": n, "read_bytes": rb, "write_bytes": wb,
                  "read_ops": rops, "write_ops": wops,
-                 "read_latency_ns_sum": rlat, "write_latency_ns_sum": wlat}
-                for r, n, rb, wb, rops, wops, rlat, wlat in round_io],
+                 "read_latency_ns_sum": rlat, "write_latency_ns_sum": wlat,
+                 "mem_tier_hits": mh, "ssd_hits": sh, "misses": ms}
+                for r, n, rb, wb, rops, wops, rlat, wlat, mh, sh, ms in round_io],
                 "total_read_bytes": tot_rb, "total_write_bytes": tot_wb,
                 "total_read_ops": tot_rops, "total_write_ops": tot_wops,
                 "total_read_latency_ns_sum": tot_rlat,
-                "total_write_latency_ns_sum": tot_wlat}, f, indent=2)
+                "total_write_latency_ns_sum": tot_wlat,
+                "total_mem_tier_hits": tot_mem_hits, "total_ssd_hits": tot_ssd_hits,
+                "total_misses": tot_misses}, f, indent=2)
         print(f"[io] saved {io_path}", file=sys.stderr)

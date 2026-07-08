@@ -123,6 +123,12 @@ def _iostat_writer():
             continue
         try:
             vals = eng.read_write_stats()  # 6-tuple incl. per-direction latency sums
+            # Append cache-level hit/miss counters (mem_tier_hits, ssd_hits,
+            # misses) when the engine exposes them, so a reader can see what
+            # fraction of loads were served from DRAM vs SSD. Line becomes 9
+            # fields; older readers that slice [:6] stay compatible.
+            if hasattr(eng, "cache_level_stats"):
+                vals = tuple(vals) + tuple(eng.cache_level_stats())
             with open(tmp, "w") as f:
                 f.write(" ".join(str(v) for v in vals) + "\n")
             os.replace(tmp, path)  # atomic publish

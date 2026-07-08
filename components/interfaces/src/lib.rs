@@ -23,6 +23,7 @@ pub use idispatch_map::DispatchMapError;
 pub use idispatch_map::IDispatchMap;
 #[cfg(feature = "spdk")]
 pub use idispatch_map::LookupResult;
+pub use idispatcher::CacheLevelStats;
 pub use idispatcher::DispatcherConfig;
 pub use idispatcher::DispatcherError;
 #[cfg(feature = "spdk")]

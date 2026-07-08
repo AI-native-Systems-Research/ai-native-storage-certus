@@ -351,6 +351,17 @@ impl EngineInner {
         )
     }
 
+    /// Cumulative cache-level hit/miss counters for the load path, as
+    /// `(mem_tier_hits, ssd_hits, misses)`. `mem_tier_hits` are load blocks
+    /// served from DRAM (no SSD read); `ssd_hits` are blocks resolved from the
+    /// NVMe block device (each implies an SSD read); `misses` are blocks not
+    /// present in the cache. Monotonic for the life of the engine — take deltas
+    /// across two calls to measure a window (e.g. one benchmark round).
+    pub fn cache_level_stats(&self) -> (u64, u64, u64) {
+        let s = self.dispatcher.cache_level_stats();
+        (s.mem_tier_hits, s.ssd_hits, s.misses)
+    }
+
     /// Pin blocks for reading and return DRAM pointers for H2D DMA.
     ///
     /// For MemoryTier keys: takes read_ref, returns pointer directly.

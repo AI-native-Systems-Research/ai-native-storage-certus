@@ -125,6 +125,15 @@ impl CertusEngine {
         self.inner.read_write_stats()
     }
 
+    /// Cumulative cache-level hit/miss counters for the load path, as
+    /// `(mem_tier_hits, ssd_hits, misses)`: blocks served from DRAM, blocks
+    /// resolved from NVMe (each an SSD read), and blocks not present. Monotonic;
+    /// take deltas for a per-round measurement. Comparing `mem_tier_hits` to
+    /// `ssd_hits` shows what fraction of loads were served from DRAM vs SSD.
+    fn cache_level_stats(&self) -> (u64, u64, u64) {
+        self.inner.cache_level_stats()
+    }
+
     // ─── Handler-level operations ───────────────────────────────────────
 
     /// Submit async GPU→DRAM→NVMe transfer.
