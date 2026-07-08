@@ -902,7 +902,15 @@ impl IGpuServices for GpuServicesComponent {
             }
 
             let rc = unsafe { spdk_mem_register(ptr, size) };
-            if rc != 0 {
+            // spdk_mem_register returns -errno. -EBUSY (-16) means the range is
+            // ALREADY registered — which is the normal case for an
+            // SPDK-allocated pool (spdk_zmalloc(SPDK_MALLOC_DMA) memory is in
+            // SPDK's map by construction). That is success, not failure: the
+            // memory is DMA-capable and we must NOT roll back the CUDA host
+            // registration we just added (doing so leaves the pool un-pinned and
+            // breaks GPU memcpy to/from it).
+            const NEG_EBUSY: std::os::raw::c_int = -16;
+            if rc != 0 && rc != NEG_EBUSY {
                 if we_registered_cuda {
                     unsafe { cuda_ffi::cudaHostUnregister(ptr) };
                 }
