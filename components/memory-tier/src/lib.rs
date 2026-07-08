@@ -428,6 +428,17 @@ impl IMemoryTier for MemoryTierComponent {
         ep.peek_oldest(state.pool_id, n)
     }
 
+    fn oldest_keys_in_shard(&self, key: CacheKey, n: usize) -> Vec<CacheKey> {
+        let state = self.state.read().unwrap();
+        if !state.initialized.load(Ordering::Acquire) || n == 0 {
+            return Vec::new();
+        }
+
+        let ep = self.eviction_policy.get().unwrap();
+        let shard_idx = Self::shard_for_key(key);
+        ep.peek_oldest(state.pool_ids[shard_idx], n)
+    }
+
     fn evict_lru(&self) -> Option<CacheKey> {
         let state = self.state.read().unwrap();
         if !state.initialized.load(Ordering::Acquire) {

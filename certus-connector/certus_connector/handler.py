@@ -106,10 +106,15 @@ class GpuToCertusHandler(OffloadingHandler):
         assert isinstance(dst_spec, CertusLoadStoreSpec)
 
         gpu_block_ids = list(src_spec.block_ids)
-        keys = [loc.nvme_slab for loc in dst_spec.locations]
+        # Address-based store (mirror of the load path): DMA each GPU block
+        # straight into its pre-reserved DRAM slot. dram_ptr was resolved by
+        # prepare_store and carried in the spec, so no key lookup is needed and
+        # the transfer cannot fail with KeyNotFound — the slot is held live by a
+        # write reference until complete_store.
+        dst_ptrs = [loc.dram_ptr for loc in dst_spec.locations]
 
         self._dispatcher.register_store(job_id)
-        self._engine.store_async(job_id, gpu_block_ids, keys)
+        self._engine.store_dma(job_id, gpu_block_ids, dst_ptrs)
         self._pending.append(PendingJob(
             job_id=job_id,
             start_time=time.monotonic(),

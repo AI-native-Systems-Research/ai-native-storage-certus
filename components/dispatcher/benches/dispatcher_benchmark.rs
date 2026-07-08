@@ -198,6 +198,10 @@ impl IDispatchMap for BenchDispatchMap {
         false
     }
 
+    fn stats(&self) -> interfaces::DispatchMapStats {
+        interfaces::DispatchMapStats::default()
+    }
+
     fn recover_extent(
         &self,
         _key: CacheKey,
@@ -406,6 +410,9 @@ impl IMemoryTier for BenchMemoryTier {
         None
     }
     fn oldest_keys(&self, _n: usize) -> Vec<CacheKey> {
+        Vec::new()
+    }
+    fn oldest_keys_in_shard(&self, _key: CacheKey, _n: usize) -> Vec<CacheKey> {
         Vec::new()
     }
     fn clear(&self) -> Result<usize, MemoryTierError> {

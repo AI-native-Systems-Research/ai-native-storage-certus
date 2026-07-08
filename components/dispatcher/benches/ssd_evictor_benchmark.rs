@@ -112,6 +112,10 @@ impl IDispatchMap for EvictorBenchMap {
         false
     }
 
+    fn stats(&self) -> interfaces::DispatchMapStats {
+        interfaces::DispatchMapStats::default()
+    }
+
     fn recover_extent(
         &self,
         _key: CacheKey,
@@ -181,6 +185,10 @@ impl IMemoryTier for NoopMemoryTier {
     }
 
     fn oldest_keys(&self, _n: usize) -> Vec<CacheKey> {
+        Vec::new()
+    }
+
+    fn oldest_keys_in_shard(&self, _key: CacheKey, _n: usize) -> Vec<CacheKey> {
         Vec::new()
     }
 

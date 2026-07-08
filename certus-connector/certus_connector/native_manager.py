@@ -91,16 +91,27 @@ class NativeCertusOffloadingManager(OffloadingManager):
             print(f"[MGR] prepare_store -> None (rejected)", flush=True)
             return None
 
-        to_store_ints, evicted_ints = result
-        print(f"[MGR] prepare_store -> store={len(to_store_ints)} evict={len(evicted_ints)}", flush=True)
+        # (keys_to_store, dram_ptrs, evicted) — keys_to_store may be a subset
+        # (partial store). dram_ptrs[i] is the reserved slot for keys_to_store[i],
+        # carried into BlockLocation.dram_ptr so the store DMAs by address.
+        to_store_ints, dram_ptrs, evicted_ints = result
+        print(
+            f"[MGR] prepare_store -> store={len(to_store_ints)} "
+            f"evict={len(evicted_ints)} (of {len(int_keys)})",
+            flush=True,
+        )
 
         to_store_keys = [keys_list[int_keys.index(k)] for k in to_store_ints]
         evicted_keys = [
             k.to_bytes(8, "big") for k in evicted_ints
         ]
 
+        # dram_ptr carries the reserved slot address; store_dma DMAs to it
+        # directly (block size is the engine's fixed slab size, so `size` here is
+        # unused by the store path and left at its default).
         locations = [
-            BlockLocation(nvme_slab=k, dram_slot=None) for k in to_store_ints
+            BlockLocation(nvme_slab=k, dram_ptr=ptr)
+            for k, ptr in zip(to_store_ints, dram_ptrs)
         ]
 
         if evicted_keys:

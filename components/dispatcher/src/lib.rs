@@ -387,14 +387,10 @@ impl DispatcherComponent {
     ) -> Result<(), DispatcherError> {
         let total_bytes = ipc_handle.size as usize;
 
-        // Evict if needed to make space.
+        // Reserve a slot with strict per-shard eviction.
         let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
-        Self::evict_for_space(dm, mt, ipc_handle.size, key, max_attempts, &self.mem_tier_evictions)?;
-
-        // Insert into memory-tier.
-        let mem_ptr = mt.insert(key, ipc_handle.size).map_err(|e| {
-            DispatcherError::AllocationFailed(format!("promote insert failed: {e}"))
-        })?;
+        let mem_ptr =
+            Self::reserve_slot(dm, mt, key, ipc_handle.size, max_attempts, &self.mem_tier_evictions)?;
 
         // Read from SSD into memory-tier using pipelined reader.
         let drives = self.data_drives.read();
@@ -473,87 +469,69 @@ impl DispatcherComponent {
         Ok(())
     }
 
-    /// Evict entries from the memory-tier until enough space is available.
+    /// Reserve a memory-tier slot for `key`, evicting from `key`'s own shard as
+    /// needed, and return the slot pointer.
     ///
-    /// Each evicted entry transitions from MemoryTier to BlockDevice in the
-    /// dispatch-map. If write-through hasn't completed (no ssd_offset), the
-    /// dispatch-map entry is removed entirely so lookups get NotExist rather
-    /// than a dangling memory-tier pointer.
-    /// Evict entries from memory-tier until `needed` bytes are free.
+    /// The memory-tier is sharded (a key maps to exactly one shard) and each
+    /// shard allocates independently, so a global `used()/capacity()` check is
+    /// meaningless for admission — the target shard can be full while the pool
+    /// has slack. This is therefore insert-driven: attempt `insert`, and on
+    /// `PoolFull` free space *in the target key's shard* (`oldest_keys_in_shard`)
+    /// and retry.
     ///
-    /// Strategy: alternate between blind O(1) LRU eviction (fast path) and
-    /// small-batch candidate scanning (every 8th attempt) to find cleanly
-    /// evictable entries (write-through complete). Gives up after
-    /// `max_attempts` iterations to avoid unbounded stalls.
+    /// Only cleanly-evictable entries are evicted (`is_evictable`: write-through
+    /// complete, no active read/write references). We never evict a slot that is
+    /// in-flight (write_ref>0), being read (read_ref>0), or not yet persisted
+    /// (ssd_offset=None): with reserve-time registration such slots are live and
+    /// evicting them would corrupt an in-progress store/load or lose unpersisted
+    /// data. The victim transitions MemoryTier → BlockDevice (data survives on
+    /// SSD). If the shard has no clean victim, returns `ShardFull` — nothing is
+    /// evicted or lost; the caller may skip the key (store) or fail the op.
     ///
-    /// Evicted entries transition from MemoryTier → BlockDevice in the
-    /// dispatch-map (data remains on SSD from the prior write-through).
-    // NOTE: This only handles global capacity pressure. If keys are heavily skewed
-    // to one shard (e.g., all keys ≡ 0 mod 16), the target shard can fill while
-    // global used() < capacity(). In that case insert() will return PoolFull after
-    // this function succeeds. Acceptable for now — real workloads distribute evenly.
-    fn evict_for_space(
+    /// Callers register/re-register the dispatch-map entry themselves after this
+    /// returns; `reserve_slot` only manages the memory-tier slot.
+    fn reserve_slot(
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
-        needed: u32,
-        target_key: CacheKey,
+        key: CacheKey,
+        size: u32,
         max_attempts: usize,
         mem_tier_evictions: &AtomicU64,
-    ) -> Result<(), DispatcherError> {
-        const MAX_SCAN: usize = 4;
-
+    ) -> Result<*mut u8, DispatcherError> {
+        const SCAN: usize = 8;
         let mut attempts = 0usize;
-        while mt.used() + needed as usize > mt.capacity() {
-            attempts += 1;
-            if attempts > max_attempts {
-                static WARNED: std::sync::atomic::AtomicBool =
-                    std::sync::atomic::AtomicBool::new(false);
-                if !WARNED.swap(true, Ordering::Relaxed) {
-                    const GIB: f64 = (1024 * 1024 * 1024) as f64;
-                    eprintln!(
-                        "WARNING: memory-tier exhausted (used={:.2} GiB, capacity={:.2} GiB, needed={:.2} GiB). \
-                         Increase --memory-tier-size or reduce concurrent load.",
-                        mt.used() as f64 / GIB,
-                        mt.capacity() as f64 / GIB,
-                        needed as f64 / GIB,
-                    );
+        loop {
+            match mt.insert(key, size) {
+                Ok(ptr) => return Ok(ptr),
+                Err(interfaces::MemoryTierError::AlreadyExists(k)) => {
+                    return Err(DispatcherError::AlreadyExists(k));
                 }
-                return Err(DispatcherError::AllocationFailed(
-                    "memory-tier pool full after eviction".into(),
-                ));
-            }
-
-            // Every 8th attempt probe a small batch for a clean eviction
-            // (write-through complete, no data loss).  All other iterations
-            // fall straight through to blind LRU to minimise lock hold time.
-            let evict_key = if attempts % 8 == 0 {
-                let candidates = mt.oldest_keys(MAX_SCAN);
-                candidates.iter().find(|&&k| dm.is_evictable(k)).copied()
-            } else {
-                None
-            };
-
-            match evict_key {
-                Some(key) => {
-                    // Another thread may have concurrently evicted this key.
-                    if mt.remove(key).is_ok() {
-                        mem_tier_evictions.fetch_add(1, Ordering::Relaxed);
-                        let _ = dm.convert_memory_tier_to_block(key);
+                Err(interfaces::MemoryTierError::PoolFull) => {
+                    attempts += 1;
+                    if attempts > max_attempts {
+                        return Err(DispatcherError::ShardFull(key));
                     }
-                }
-                None => {
-                    // Targeted LRU: evict from the same shard as target_key so the
-                    // freed space is usable by the subsequent insert(target_key, ...).
-                    if let Some(evicted_key) = mt.evict_lru_for_key(target_key) {
-                        mem_tier_evictions.fetch_add(1, Ordering::Relaxed);
-                        if dm.convert_memory_tier_to_block(evicted_key).is_err() {
-                            let _ = dm.remove(evicted_key);
+                    let victim = mt
+                        .oldest_keys_in_shard(key, SCAN)
+                        .into_iter()
+                        .find(|&k| dm.is_evictable(k));
+                    match victim {
+                        Some(evicted_key) => {
+                            // is_evictable ⇒ ssd_offset set, so the block-device
+                            // transition succeeds and the data survives on SSD.
+                            let _ = dm.convert_memory_tier_to_block(evicted_key);
+                            if mt.remove(evicted_key).is_ok() {
+                                mem_tier_evictions.fetch_add(1, Ordering::Relaxed);
+                            }
                         }
+                        None => return Err(DispatcherError::ShardFull(key)),
                     }
+                }
+                Err(other) => {
+                    return Err(DispatcherError::AllocationFailed(other.to_string()));
                 }
             }
         }
-        Ok(())
     }
 
     fn process_write_job(
@@ -1504,28 +1482,22 @@ impl IDispatcher for DispatcherComponent {
             if num_drives == 0 {
                 let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
                 for entry in &cold_entries {
-                    Self::evict_for_space(
+                    let res = Self::reserve_slot(
                         &dm,
                         &mt,
-                        entry.ipc_handle_size,
                         entry.key,
+                        entry.ipc_handle_size,
                         max_attempts,
                         &self.mem_tier_evictions,
                     )
-                    .ok();
-                    let res = mt
-                        .insert(entry.key, entry.ipc_handle_size)
-                        .map(|mem_ptr| {
-                            let _ = dm.create_memory_tier_entry(
-                                entry.key,
-                                mem_ptr,
-                                entry.ipc_handle_size,
-                            );
-                            let _ = dm.release_write(entry.key);
-                        })
-                        .map_err(|e| {
-                            DispatcherError::AllocationFailed(format!("promote insert failed: {e}"))
-                        });
+                    .map(|mem_ptr| {
+                        let _ = dm.create_memory_tier_entry(
+                            entry.key,
+                            mem_ptr,
+                            entry.ipc_handle_size,
+                        );
+                        let _ = dm.release_write(entry.key);
+                    });
                     results[entry.idx] = Some(res);
                 }
             } else {
@@ -1578,14 +1550,10 @@ impl IDispatcher for DispatcherComponent {
                             let entry = &cold_entries[ci];
                             let ipc_size = entry.ipc_handle_size;
 
-                            let prep = (|| -> Result<*mut u8, DispatcherError> {
-                                Self::evict_for_space(&dm, &mt, ipc_size, entry.key, max_attempts, &self.mem_tier_evictions)?;
-                                mt.insert(entry.key, ipc_size).map_err(|e| {
-                                    DispatcherError::AllocationFailed(format!(
-                                        "promote insert failed: {e}"
-                                    ))
-                                })
-                            })();
+                            let prep = Self::reserve_slot(
+                                &dm, &mt, entry.key, ipc_size, max_attempts,
+                                &self.mem_tier_evictions,
+                            );
 
                             match prep {
                                 Ok(mem_ptr) => {
@@ -1951,9 +1919,27 @@ impl IDispatcher for DispatcherComponent {
 
         let size: u32 = ipc_handle.size;
 
-        // Phase 1: Evict if needed and allocate memory-tier slot.
+        // Phase 1: reserve a memory-tier slot (strict per-shard eviction, see
+        // `reserve_slot`) and register the entry in the dispatch-map with a write
+        // reference held (in-flight) — same reserve-time registration as the
+        // connector's `reserve_memory`, so `copy_gpu_to_memory_completed` only
+        // downgrades the reference (never creates the entry).
         let t_alloc = std::time::Instant::now();
-        let _mem_ptr = self.reserve_memory(key, size)?;
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+        let mt = self
+            .memory_tier
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+        let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
+        let mem_ptr =
+            Self::reserve_slot(&dm, &mt, key, size, max_attempts, &self.mem_tier_evictions)?;
+        dm.create_memory_tier_entry(key, mem_ptr, size).map_err(|e| {
+            let _ = mt.remove(key);
+            DispatcherError::IoError(e.to_string())
+        })?;
         let alloc_us = t_alloc.elapsed().as_micros() as f64;
 
         // Phase 2: Async DMA copy from GPU into the reserved slot, then sync.
@@ -1998,15 +1984,32 @@ impl IDispatcher for DispatcherComponent {
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
         let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
-        Self::evict_for_space(&dm, &mt, size, key, max_attempts, &self.mem_tier_evictions)?;
 
-        let mem_ptr = mt.insert(key, size).map_err(|e| match e {
-            interfaces::MemoryTierError::AlreadyExists(k) => DispatcherError::AlreadyExists(k),
-            interfaces::MemoryTierError::PoolFull => {
-                DispatcherError::AllocationFailed("memory-tier pool full after eviction".into())
+        // Reserve a slot with strict per-shard eviction (see `reserve_slot`).
+        let mem_ptr =
+            Self::reserve_slot(&dm, &mt, key, size, max_attempts, &self.mem_tier_evictions)?;
+
+        // Register the reserved slot in the dispatch-map immediately with a write
+        // reference held (write_ref=1). This makes the slot:
+        //   - non-evictable (is_evictable requires write_ref==0), and
+        //   - non-loadable until complete (lookup waits while write_ref>0),
+        // for the whole reserve → DMA → complete_store window. complete_store
+        // (copy_gpu_to_memory_completed) releases the write reference; it must
+        // NOT create the entry again.
+        match dm.create_memory_tier_entry(key, mem_ptr, size) {
+            Ok(()) => {}
+            Err(interfaces::DispatchMapError::AlreadyExists(k)) => {
+                // Raced with a concurrent store of the same (content-addressed)
+                // key — it is already resident. Free the slot we just inserted
+                // and report the duplicate; the caller skips it.
+                let _ = mt.remove(key);
+                return Err(DispatcherError::AlreadyExists(k));
             }
-            other => DispatcherError::AllocationFailed(other.to_string()),
-        })?;
+            Err(e) => {
+                let _ = mt.remove(key);
+                return Err(DispatcherError::IoError(e.to_string()));
+            }
+        }
 
         Ok(mem_ptr)
     }
@@ -2076,17 +2079,16 @@ impl IDispatcher for DispatcherComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
-        let (mem_ptr, _) = mt.get(key).ok_or(DispatcherError::KeyNotFound(key))?;
-
-        // Index registration happens exactly once (manager thread). A genuine
-        // failure here means the reserved slot is orphaned, so release it and
-        // propagate. There is no `AlreadyExists` special case: with single
-        // registration the entry cannot already exist, and treating "already
-        // present" as a reason to free the (live) slot was a corruption bug.
-        dm.create_memory_tier_entry(key, mem_ptr, size).map_err(|e| {
-            let _ = mt.remove(key);
-            DispatcherError::IoError(e.to_string())
-        })?;
+        // The dispatch-map entry was already created at reserve time
+        // (reserve_memory), with write_ref=1 holding the slot in-flight —
+        // protected from eviction and from premature loads. Completing the store
+        // only downgrades that write reference to a read reference (write_ref→0,
+        // read_ref+1), which makes the entry loadable and, once write-through
+        // sets ssd_offset, evictable. We do NOT create the entry here.
+        //
+        // `mt.get` is used purely to confirm the reserved slot is still resident
+        // (it must be — write_ref protects it) and is harmless as a sanity check.
+        let _ = mt.get(key).ok_or(DispatcherError::KeyNotFound(key))?;
 
         dm.downgrade_reference(key)
             .map_err(|e| DispatcherError::IoError(e.to_string()))?;
@@ -2115,7 +2117,14 @@ impl IDispatcher for DispatcherComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
-        // Idempotent — KeyNotFound is not an error.
+        // A reserved slot is registered in BOTH the memory-tier and the
+        // dispatch-map (reserve_memory creates the entry with write_ref=1), so
+        // aborting a reservation must remove both — otherwise the dispatch-map
+        // entry lingers and a later reserve of the same key sees AlreadyExists.
+        // Both removals are idempotent (KeyNotFound is not an error).
+        if let Ok(dm) = self.dispatch_map.get() {
+            let _ = dm.remove(key);
+        }
         match mt.remove(key) {
             Ok(()) | Err(interfaces::MemoryTierError::KeyNotFound(_)) => Ok(()),
             Err(e) => Err(DispatcherError::IoError(e.to_string())),
@@ -2188,23 +2197,21 @@ impl IDispatcher for DispatcherComponent {
         if num_drives == 0 {
             let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
             for entry in &cold_entries {
-                if Self::evict_for_space(
+                match Self::reserve_slot(
                     &dm,
                     &mt,
-                    entry.size,
                     entry.key,
+                    entry.size,
                     max_attempts,
                     &self.mem_tier_evictions,
-                )
-                .is_err()
-                {
-                    continue;
-                }
-                if let Ok(mem_ptr) = mt.insert(entry.key, entry.size) {
-                    let _ = dm.remove(entry.key);
-                    let _ = dm.create_memory_tier_entry(entry.key, mem_ptr, entry.size);
-                    let _ = dm.convert_to_storage(entry.key, entry.offset);
-                    let _ = dm.release_write(entry.key);
+                ) {
+                    Ok(mem_ptr) => {
+                        let _ = dm.remove(entry.key);
+                        let _ = dm.create_memory_tier_entry(entry.key, mem_ptr, entry.size);
+                        let _ = dm.convert_to_storage(entry.key, entry.offset);
+                        let _ = dm.release_write(entry.key);
+                    }
+                    Err(_) => {}
                 }
             }
             return;
@@ -2248,15 +2255,9 @@ impl IDispatcher for DispatcherComponent {
                         let block_size = block_dev.block_size() as u64;
                         let start_lba = entry.offset / block_size;
 
-                        if Self::evict_for_space(
-                            dm, mt, entry.size, entry.key, max_attempts, evict_ctr,
-                        )
-                        .is_err()
-                        {
-                            continue;
-                        }
-
-                        let mem_ptr = match mt.insert(entry.key, entry.size) {
+                        let mem_ptr = match Self::reserve_slot(
+                            dm, mt, entry.key, entry.size, max_attempts, evict_ctr,
+                        ) {
                             Ok(ptr) => ptr,
                             Err(_) => continue,
                         };
@@ -2463,6 +2464,12 @@ mod tests {
         }
 
         fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
+            let inner = self.inner.lock().unwrap();
+            inner.slots.keys().take(n).copied().collect()
+        }
+
+        fn oldest_keys_in_shard(&self, _key: CacheKey, n: usize) -> Vec<CacheKey> {
+            // Mock is a single flat pool (no sharding); return oldest overall.
             let inner = self.inner.lock().unwrap();
             inner.slots.keys().take(n).copied().collect()
         }
@@ -2788,6 +2795,23 @@ mod tests {
                 ),
                 None => false,
             }
+        }
+
+        fn stats(&self) -> interfaces::DispatchMapStats {
+            let inner = self.inner.lock().unwrap();
+            let mut s = interfaces::DispatchMapStats::default();
+            for entry in inner.entries.values() {
+                s.total += 1;
+                match &entry.location {
+                    MockEntryLocation::MemoryTier {
+                        pointer,
+                        ssd_offset: Some(_),
+                        ..
+                    } if pointer.is_null() => s.block_device += 1,
+                    MockEntryLocation::MemoryTier { .. } => s.memory_tier += 1,
+                }
+            }
+            s
         }
 
         fn recover_extent(
@@ -3499,7 +3523,11 @@ mod tests {
 
         let mut buf = vec![0u8; 4096];
         let err = d.populate(1, make_handle(&mut buf));
-        assert!(matches!(err, Err(DispatcherError::AllocationFailed(_))));
+        // Strict per-shard reservation with no evictable victim → ShardFull.
+        assert!(
+            matches!(err, Err(DispatcherError::ShardFull(_))),
+            "expected ShardFull, got {err:?}"
+        );
         d.shutdown().unwrap();
     }
 
@@ -3754,46 +3782,74 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn evict_for_space_evicts_when_pool_full() {
+    fn reserve_slot_evicts_clean_victim_when_pool_full() {
         let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
         // Small pool: 16 KiB total (can hold 4 × 4 KiB entries).
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(16384));
 
-        // Insert 4 entries into the memory-tier directly.
+        // Fill with 4 cleanly-evictable entries (write-through complete via
+        // convert_to_storage → is_evictable true).
         for key in 0..4u64 {
             mt.insert(key, 4096).unwrap();
             dm.create_memory_tier_entry(key, std::ptr::null_mut(), 4096)
                 .unwrap();
             dm.release_write(key).unwrap();
-            // Set ssd_offset so convert_memory_tier_to_block can succeed.
             dm.convert_to_storage(key, key * 4096).unwrap();
         }
 
-        // Pool is now full (16384 used). Trying to add 4096 more should evict.
+        // Pool is full. Reserving a slot for a new key must evict one clean
+        // victim and return a valid pointer.
         let evictions = AtomicU64::new(0);
-        DispatcherComponent::evict_for_space(&dm, &mt, 4096, 100, 512, &evictions).unwrap();
+        let ptr = DispatcherComponent::reserve_slot(&dm, &mt, 99, 4096, 512, &evictions).unwrap();
 
-        // At least one entry was evicted from memory-tier, and counted.
-        assert!(mt.used() + 4096 <= mt.capacity());
+        assert!(!ptr.is_null(), "reserve_slot must return a non-null pointer");
+        assert!(mt.contains(99), "new key must be resident");
+        assert!(mt.used() <= mt.capacity());
         assert!(evictions.load(Ordering::Relaxed) >= 1);
     }
 
     #[test]
-    fn evict_for_space_noop_when_space_available() {
+    fn reserve_slot_shard_full_when_no_clean_victim() {
+        let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
+        // Pool holds exactly 2 × 4 KiB entries.
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(8192));
+
+        // Fill with 2 in-flight entries (no convert_to_storage → not evictable).
+        for key in 0..2u64 {
+            mt.insert(key, 4096).unwrap();
+            dm.create_memory_tier_entry(key, std::ptr::null_mut(), 4096)
+                .unwrap();
+        }
+
+        // No clean victim → ShardFull; the in-flight entries survive.
+        let evictions = AtomicU64::new(0);
+        let res = DispatcherComponent::reserve_slot(&dm, &mt, 99, 4096, 512, &evictions);
+        assert!(
+            matches!(res, Err(DispatcherError::ShardFull(99))),
+            "expected ShardFull, got {res:?}"
+        );
+        assert!(mt.contains(0) && mt.contains(1), "in-flight entries must survive");
+        assert!(!mt.contains(99));
+        assert_eq!(evictions.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn reserve_slot_no_eviction_when_space_available() {
         let dm: Arc<dyn IDispatchMap + Send + Sync> = Arc::new(MockDispatchMap::new());
         let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(1024 * 1024));
 
-        // Insert one 4 KiB entry.
         mt.insert(0, 4096).unwrap();
         dm.create_memory_tier_entry(0, std::ptr::null_mut(), 4096)
             .unwrap();
         dm.release_write(0).unwrap();
 
-        // Plenty of space, no eviction needed.
+        // Plenty of space — reserving another key evicts nothing.
         let evictions = AtomicU64::new(0);
-        DispatcherComponent::evict_for_space(&dm, &mt, 4096, 100, 512, &evictions).unwrap();
+        let ptr = DispatcherComponent::reserve_slot(&dm, &mt, 1, 4096, 512, &evictions).unwrap();
 
-        assert!(mt.contains(0), "entry should not be evicted");
+        assert!(!ptr.is_null());
+        assert!(mt.contains(0), "existing entry should not be evicted");
+        assert!(mt.contains(1));
         assert_eq!(evictions.load(Ordering::Relaxed), 0);
     }
 
@@ -3841,7 +3897,12 @@ mod tests {
         let mut buf2 = vec![0u8; 4096];
         d.populate(2, make_handle(&mut buf2)).unwrap();
 
-        // Third populate should trigger eviction of one entry and succeed.
+        // Drain write-through so entries 1 and 2 become cleanly evictable
+        // (ssd_offset set, no active refs). Strict per-shard eviction only
+        // reclaims persisted entries — never in-flight/unpersisted data.
+        d.flush_to_ssd().unwrap();
+
+        // Third populate must now evict one clean victim and succeed.
         let mut buf3 = vec![0u8; 4096];
         d.populate(3, make_handle(&mut buf3)).unwrap();
 

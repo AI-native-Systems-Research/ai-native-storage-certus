@@ -211,6 +211,20 @@ impl IDispatchMap for MockDispatchMap {
         inner.entries.contains_key(&key)
     }
 
+    fn stats(&self) -> interfaces::DispatchMapStats {
+        let inner = self.inner.lock().unwrap();
+        let mut s = interfaces::DispatchMapStats::default();
+        for entry in inner.entries.values() {
+            s.total += 1;
+            if entry.block_offset.is_some() {
+                s.block_device += 1;
+            } else {
+                s.memory_tier += 1;
+            }
+        }
+        s
+    }
+
     fn recover_extent(
         &self,
         _key: CacheKey,
@@ -434,6 +448,11 @@ impl IMemoryTier for MockMemoryTier {
     }
 
     fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
+        let inner = self.inner.lock().unwrap();
+        inner.slots.keys().take(n).copied().collect()
+    }
+
+    fn oldest_keys_in_shard(&self, _key: CacheKey, n: usize) -> Vec<CacheKey> {
         let inner = self.inner.lock().unwrap();
         inner.slots.keys().take(n).copied().collect()
     }

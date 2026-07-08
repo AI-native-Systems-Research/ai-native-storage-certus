@@ -287,6 +287,11 @@ impl IMemoryTier for MockMemoryTier {
         inner.slots.keys().copied().take(n).collect()
     }
 
+    fn oldest_keys_in_shard(&self, _key: CacheKey, n: usize) -> Vec<CacheKey> {
+        let inner = self.inner.lock().unwrap();
+        inner.slots.keys().copied().take(n).collect()
+    }
+
     fn evict_lru(&self) -> Option<CacheKey> {
         let mut inner = self.inner.lock().unwrap();
         let key = inner.slots.keys().next().copied()?;
@@ -507,6 +512,15 @@ impl IDispatchMap for MockDispatchMap {
         false
     }
 
+    fn stats(&self) -> interfaces::DispatchMapStats {
+        let inner = self.inner.lock().unwrap();
+        interfaces::DispatchMapStats {
+            total: inner.len() as u64,
+            memory_tier: inner.len() as u64,
+            block_device: 0,
+        }
+    }
+
     fn recover_extent(
         &self,
         _key: CacheKey,
@@ -609,17 +623,21 @@ fn reserve_memory_zero_size_returns_invalid_parameter() {
 }
 
 #[test]
-fn reserve_memory_full_pool_returns_allocation_failed() {
+fn reserve_memory_full_pool_returns_shard_full() {
     let (c, _dm) = setup_with_failing_mt();
     let d = query_interface!(c, IDispatcher).unwrap();
 
+    // reserve_memory uses strict per-shard eviction: when the shard has no
+    // cleanly-evictable victim it returns ShardFull (nothing evicted/lost) so
+    // the connector can skip the key (partial store) rather than treat it as a
+    // fatal allocation failure.
     let err = d
         .reserve_memory(1, 4096)
         .expect_err("exhausted pool must fail");
 
     assert!(
-        matches!(err, DispatcherError::AllocationFailed(_)),
-        "expected AllocationFailed, got: {err:?}"
+        matches!(err, DispatcherError::ShardFull(1)),
+        "expected ShardFull, got: {err:?}"
     );
     d.shutdown().unwrap();
 }
@@ -745,12 +763,16 @@ fn full_three_phase_store_lifecycle() {
     let key: CacheKey = 100;
     let size: u32 = 4096;
 
-    // Phase 1: reserve — allocates DRAM slot, does NOT register in dispatch-map.
+    // Phase 1: reserve — allocates the DRAM slot AND registers the entry in the
+    // dispatch-map with a write reference held (in-flight). With the real
+    // dispatch-map a lookup would block on the write ref, so the entry is not
+    // yet loadable; complete downgrades that reference.
     let ptr = d.reserve_memory(key, size).unwrap();
     assert!(!ptr.is_null());
-    assert!(
-        !d.check(key).unwrap(),
-        "key must NOT be visible before copy_gpu_to_memory_completed"
+    assert_eq!(
+        dm.entry_count(),
+        1,
+        "reserve_memory must register the entry (in-flight) in the dispatch-map"
     );
 
     // Phase 2: async DMA from a fake GPU buffer into the reserved slot.
@@ -758,10 +780,11 @@ fn full_three_phase_store_lifecycle() {
     d.copy_gpu_to_memory_async(key, make_handle(&mut src), null_stream())
         .unwrap();
 
-    // Phase 3: finalize — registers key in dispatch-map and enqueues SSD write-through.
+    // Phase 3: finalize — downgrades the write reference (loadable) and enqueues
+    // SSD write-through. Does NOT create the entry again.
     d.copy_gpu_to_memory_completed(key, size).unwrap();
 
-    // Key must now be visible via check() and dispatch-map.
+    // Key is visible via check() and there is exactly one dispatch-map entry.
     assert!(
         d.check(key).unwrap(),
         "key must be visible after copy_gpu_to_memory_completed"

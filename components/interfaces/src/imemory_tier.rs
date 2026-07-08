@@ -147,6 +147,16 @@ component_macros::define_interface! {
         /// Suggested technique: property-based test.
         fn oldest_keys(&self, n: usize) -> Vec<CacheKey>;
 
+        /// Peek at the N oldest keys in the shard that `key` maps to, oldest
+        /// first, without removing them.
+        ///
+        /// Unlike `oldest_keys` (which samples across all shards), this returns
+        /// only candidates from the shard a subsequent `insert(key, ...)` would
+        /// allocate from, so a caller can choose an eviction victim that frees
+        /// space usable by `key`. Used by the dispatcher to find a cleanly-
+        /// evictable victim in the target shard.
+        fn oldest_keys_in_shard(&self, key: CacheKey, n: usize) -> Vec<CacheKey>;
+
         /// Remove a specific entry, freeing its slot.
         ///
         /// # Verified: P2 (init-guard), P6 (capacity-accounting), P9 (remove-key-not-found)

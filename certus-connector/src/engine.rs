@@ -271,45 +271,59 @@ impl EngineInner {
 
     /// Check which keys need storing and reserve DRAM for them.
     /// Returns None if DRAM allocation fails (graceful backpressure).
-    pub fn prepare_store(&self, keys: &[u64]) -> PyResult<Option<(Vec<u64>, Vec<u64>)>> {
+    /// Reserve DRAM slots for `keys` that aren't already resident.
+    ///
+    /// Returns `(keys_to_store, dram_ptrs, evicted)` where `dram_ptrs[i]` is the
+    /// reserved slot address for `keys_to_store[i]` — the store path DMAs to it
+    /// directly (see `store_dma`), mirroring the load path. Each reserved slot
+    /// holds a write reference (protected from eviction and premature load)
+    /// until `complete_store`.
+    ///
+    /// Partial success: a key whose memory-tier shard has no cleanly-evictable
+    /// victim (`ShardFull`), or which raced to already-resident (`AlreadyExists`),
+    /// is simply omitted from the result — never a whole-batch failure. This is
+    /// allowed by the vLLM contract (`keys_to_store` may be a subset) and is safe
+    /// because keys are content-addressed: an un-stored block is recomputed
+    /// later, never wrong. It also removes any livelock: a shard-skewed batch
+    /// always makes forward progress on the keys that do fit.
+    pub fn prepare_store(&self, keys: &[u64]) -> PyResult<Option<(Vec<u64>, Vec<u64>, Vec<u64>)>> {
         self.ensure_init()?;
         let cache_keys = keys::to_cache_keys(keys);
-        let mut to_store = Vec::new();
-        let mut to_store_cache_keys = Vec::new();
-
-        for (i, key) in cache_keys.iter().enumerate() {
-            match self.dispatcher.check(*key) {
-                Ok(true) => {}
-                Ok(false) | Err(_) => {
-                    to_store.push(keys[i]);
-                    to_store_cache_keys.push(*key);
-                }
-            }
-        }
-
-        if to_store.is_empty() {
-            return Ok(Some((vec![], vec![])));
-        }
-
-        // Reserve DRAM slots for all keys that need storing.
-        // If any reservation fails, release all prior reservations and return None.
         let size = self.gpu_block_size as u32;
-        let mut reserved = Vec::new();
-        for key in &to_store_cache_keys {
-            match self.dispatcher.reserve_memory(*key, size) {
-                Ok(_ptr) => {
-                    reserved.push(*key);
+
+        let mut stored_keys: Vec<u64> = Vec::with_capacity(keys.len());
+        let mut stored_ptrs: Vec<u64> = Vec::with_capacity(keys.len());
+
+        // No separate existence pre-check: reserve_memory does `mt.insert` first,
+        // which returns AlreadyExists (cheaply, before any eviction) for a key
+        // that is already resident OR in-flight from a concurrent store. Relying
+        // on that avoids a blocking dispatch-map `lookup` (which now waits on the
+        // write reference of in-flight entries) and handles the race atomically.
+        for (i, ck) in cache_keys.iter().enumerate() {
+            match self.dispatcher.reserve_memory(*ck, size) {
+                Ok(ptr) => {
+                    stored_keys.push(keys[i]);
+                    stored_ptrs.push(ptr as u64);
                 }
-                Err(_) => {
-                    for rkey in &reserved {
-                        let _ = self.dispatcher.release_memory(*rkey);
-                    }
-                    return Ok(None);
+                Err(interfaces::DispatcherError::AlreadyExists(_)) => {
+                    // Already resident / in-flight dup — do nothing (skip).
+                    continue;
+                }
+                Err(interfaces::DispatcherError::ShardFull(_)) => {
+                    // Shard full of un-evictable (in-flight/unpersisted) entries:
+                    // skip this key (partial store). Nothing reserved or lost.
+                    continue;
+                }
+                Err(e) => {
+                    // Unexpected — don't fail the whole batch (store is
+                    // best-effort, content-addressed), but surface it.
+                    eprintln!("[certus] prepare_store reserve_memory failed key={ck}: {e:?}");
+                    continue;
                 }
             }
         }
 
-        Ok(Some((to_store, vec![])))
+        Ok(Some((stored_keys, stored_ptrs, vec![])))
     }
 
     /// Finalize or abort a store operation.
@@ -635,6 +649,62 @@ impl EngineInner {
         {
             let mut jobs = self.jobs.lock().unwrap();
             jobs.insert(job_id, Arc::clone(&job));
+        }
+
+        Ok(all_ok)
+    }
+
+    /// Raw GPU→DRAM async DMA (store). Mirror of `load_dma`.
+    ///
+    /// Takes the pre-resolved destination pointers from `prepare_store` (the
+    /// memory-tier slots reserved by `reserve_memory`) and DMAs each GPU block
+    /// straight into its slot via `memcpy_d2h_async` — no key lookup, so this
+    /// can NEVER fail with `KeyNotFound`. Correctness relies on the write
+    /// reference held from reserve until `complete_store`: the slot cannot be
+    /// evicted while in-flight, so the destination address stays valid.
+    /// Registration/write-through happen later in `complete_store`.
+    pub fn store_dma(&self, job_id: u64, gpu_block_ids: &[u64], dst_ptrs: &[u64]) -> PyResult<bool> {
+        self.ensure_init()?;
+
+        if gpu_block_ids.len() != dst_ptrs.len() {
+            return Err(PyRuntimeError::new_err(
+                "gpu_block_ids and dst_ptrs must have same length",
+            ));
+        }
+
+        let stream = self.store_stream;
+
+        let mut all_ok = true;
+        for (i, dst_ptr) in dst_ptrs.iter().enumerate() {
+            let block_id = gpu_block_ids[i];
+            let gpu_ptr = self.gpu_base_ptr + block_id * self.gpu_block_size;
+
+            if let Err(e) = self.gpu_services.memcpy_d2h_async(
+                gpu_ptr as *const std::ffi::c_void,
+                *dst_ptr as *mut std::ffi::c_void,
+                self.gpu_block_size as usize,
+                stream,
+            ) {
+                eprintln!("[certus] store_dma memcpy_d2h_async failed block_id={block_id}: {e}");
+                all_ok = false;
+                break;
+            }
+        }
+
+        let cache_keys = gpu_block_ids.iter().map(|&id| id as CacheKey).collect();
+        let completed = !all_ok;
+        let job = Arc::new(TransferJob {
+            kind: JobKind::Store,
+            keys: cache_keys,
+            gpu_block_ids: gpu_block_ids.to_vec(),
+            completed: AtomicBool::new(completed),
+            success: AtomicBool::new(all_ok),
+            stream: Mutex::new(Some(stream)),
+        });
+
+        {
+            let mut jobs = self.jobs.lock().unwrap();
+            jobs.insert(job_id, job);
         }
 
         Ok(all_ok)

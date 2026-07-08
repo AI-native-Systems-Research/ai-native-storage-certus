@@ -89,9 +89,14 @@ impl CertusEngine {
         self.inner.batch_check(&keys)
     }
 
-    /// Allocate space for new keys, evicting if necessary.
-    /// Returns (keys_to_store, evicted_keys), or None if cannot free enough space.
-    fn prepare_store(&self, keys: Vec<u64>) -> PyResult<Option<(Vec<u64>, Vec<u64>)>> {
+    /// Reserve DRAM slots for new keys, evicting if necessary.
+    /// Returns `(keys_to_store, dram_ptrs, evicted_keys)` — `dram_ptrs[i]` is the
+    /// reserved slot address for `keys_to_store[i]`, passed to `store_dma`.
+    /// May store a subset (partial success); `None` only on a hard failure.
+    fn prepare_store(
+        &self,
+        keys: Vec<u64>,
+    ) -> PyResult<Option<(Vec<u64>, Vec<u64>, Vec<u64>)>> {
         self.inner.prepare_store(&keys)
     }
 
@@ -153,9 +158,15 @@ impl CertusEngine {
 
     // ─── Handler-level operations ───────────────────────────────────────
 
-    /// Submit async GPU→DRAM→NVMe transfer.
+    /// Submit async GPU→DRAM→NVMe transfer (legacy — use store_dma instead).
     fn store_async(&self, job_id: u64, gpu_block_ids: Vec<u64>, keys: Vec<u64>) -> PyResult<bool> {
         self.inner.store_async(job_id, &gpu_block_ids, &keys)
+    }
+
+    /// Raw GPU→DRAM async DMA. Takes pre-reserved destination pointers from
+    /// prepare_store. No key lookup — cannot fail with KeyNotFound.
+    fn store_dma(&self, job_id: u64, gpu_block_ids: Vec<u64>, dst_ptrs: Vec<u64>) -> PyResult<bool> {
+        self.inner.store_dma(job_id, &gpu_block_ids, &dst_ptrs)
     }
 
     /// Submit async NVMe/DRAM→GPU transfer (legacy — use load_dma instead).

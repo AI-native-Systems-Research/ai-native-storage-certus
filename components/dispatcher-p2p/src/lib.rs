@@ -2420,6 +2420,11 @@ mod tests {
             inner.slots.keys().take(n).copied().collect()
         }
 
+        fn oldest_keys_in_shard(&self, _key: CacheKey, n: usize) -> Vec<CacheKey> {
+            let inner = self.inner.lock().unwrap();
+            inner.slots.keys().take(n).copied().collect()
+        }
+
         fn evict_lru(&self) -> Option<CacheKey> {
             let mut inner = self.inner.lock().unwrap();
             let key = inner.slots.keys().next().copied()?;
@@ -2741,6 +2746,23 @@ mod tests {
                 ),
                 None => false,
             }
+        }
+
+        fn stats(&self) -> interfaces::DispatchMapStats {
+            let inner = self.inner.lock().unwrap();
+            let mut s = interfaces::DispatchMapStats::default();
+            for entry in inner.entries.values() {
+                s.total += 1;
+                match &entry.location {
+                    MockEntryLocation::MemoryTier {
+                        pointer,
+                        ssd_offset: Some(_),
+                        ..
+                    } if pointer.is_null() => s.block_device += 1,
+                    MockEntryLocation::MemoryTier { .. } => s.memory_tier += 1,
+                }
+            }
+            s
         }
 
         fn recover_extent(

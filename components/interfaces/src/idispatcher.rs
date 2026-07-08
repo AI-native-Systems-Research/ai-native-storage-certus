@@ -162,6 +162,11 @@ pub enum DispatcherError {
     AlreadyExists(CacheKey),
     /// DMA buffer allocation failed (out of memory).
     AllocationFailed(String),
+    /// The memory-tier shard for this key is full of entries that cannot be
+    /// cleanly evicted (in-flight write, unpersisted, or referenced). Distinct
+    /// from `AllocationFailed`: nothing was evicted or lost, and the caller may
+    /// skip this key (partial store) rather than treat it as fatal.
+    ShardFull(CacheKey),
     /// Block device or extent manager I/O error.
     IoError(String),
     /// A blocking operation exceeded the 100ms timeout.
@@ -177,6 +182,7 @@ impl fmt::Display for DispatcherError {
             Self::KeyNotFound(k) => write!(f, "key not found: {k}"),
             Self::AlreadyExists(k) => write!(f, "key already exists: {k}"),
             Self::AllocationFailed(msg) => write!(f, "allocation failed: {msg}"),
+            Self::ShardFull(k) => write!(f, "memory-tier shard full (no clean victim) for key: {k}"),
             Self::IoError(msg) => write!(f, "I/O error: {msg}"),
             Self::Timeout(msg) => write!(f, "timeout: {msg}"),
             Self::InvalidParameter(msg) => write!(f, "invalid parameter: {msg}"),
