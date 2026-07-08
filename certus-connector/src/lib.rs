@@ -125,13 +125,30 @@ impl CertusEngine {
         self.inner.read_write_stats()
     }
 
-    /// Cumulative cache-level hit/miss counters for the load path, as
-    /// `(mem_tier_hits, ssd_hits, misses)`: blocks served from DRAM, blocks
-    /// resolved from NVMe (each an SSD read), and blocks not present. Monotonic;
-    /// take deltas for a per-round measurement. Comparing `mem_tier_hits` to
-    /// `ssd_hits` shows what fraction of loads were served from DRAM vs SSD.
-    fn cache_level_stats(&self) -> (u64, u64, u64) {
-        self.inner.cache_level_stats()
+    /// Cumulative cache-level counters as
+    /// `(mem_tier_hits, ssd_hits, misses, mem_tier_evictions)`: load blocks
+    /// served from DRAM, load blocks resolved from NVMe (each an SSD read), load
+    /// blocks not present, and blocks demoted out of the DRAM memory tier under
+    /// capacity pressure. Monotonic; take deltas for a per-round measurement.
+    /// Comparing `mem_tier_hits` to `ssd_hits` shows what fraction of loads were
+    /// served from DRAM vs SSD; `mem_tier_evictions` tracks store-path pressure.
+    fn cache_stats(&self) -> (u64, u64, u64, u64) {
+        self.inner.cache_stats()
+    }
+
+    /// Live DRAM memory-tier occupancy as `(used_bytes, capacity_bytes)`.
+    fn mem_tier_usage(&self) -> (u64, u64) {
+        self.inner.mem_tier_usage()
+    }
+
+    /// Cumulative completed store entries (net of removals).
+    fn entry_count(&self) -> u64 {
+        self.inner.entry_count()
+    }
+
+    /// Current live dispatch-map entry counts `(total, memory_tier, block_device)`.
+    fn index_stats(&self) -> (u64, u64, u64) {
+        self.inner.index_stats()
     }
 
     // ─── Handler-level operations ───────────────────────────────────────

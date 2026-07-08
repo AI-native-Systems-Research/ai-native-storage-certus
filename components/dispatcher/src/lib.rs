@@ -72,7 +72,7 @@ use std::sync::Mutex;
 
 use component_framework::define_component;
 use interfaces::{
-    CacheKey, CacheLevelStats, ClientChannels, Command, Completion, DispatcherConfig,
+    CacheKey, CacheStats, ClientChannels, Command, Completion, DispatcherConfig,
     DispatcherError, DmaAllocFn, DmaBuffer, FormatParams, GpuStream, IBlockDevice,
     IBlockDeviceAdmin, IDispatchMap, IDispatcher, IExtentManager, IGpuServices, ILogger,
     IMemoryTier, IRemoteLookup, IpcHandle, LookupResult, PciAddress,
@@ -154,10 +154,14 @@ define_component! {
             max_eviction_attempts: AtomicUsize,
             pipeline_metrics: RwLock<Option<Arc<dyn PipelineMetrics>>>,
             // Cache-level hit/miss counters for the load path. Monotonic for the
-            // life of the dispatcher; exposed via `cache_level_stats()`.
+            // life of the dispatcher; exposed via `cache_stats()`.
             mem_tier_hits: AtomicU64,
             ssd_hits: AtomicU64,
             cache_misses: AtomicU64,
+            // DRAM memory-tier evictions (demotions to the block device under
+            // capacity pressure). Incremented in `evict_for_space`; exposed via
+            // `cache_stats()`.
+            mem_tier_evictions: AtomicU64,
         },
     }
 }
@@ -385,7 +389,7 @@ impl DispatcherComponent {
 
         // Evict if needed to make space.
         let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
-        Self::evict_for_space(dm, mt, ipc_handle.size, key, max_attempts)?;
+        Self::evict_for_space(dm, mt, ipc_handle.size, key, max_attempts, &self.mem_tier_evictions)?;
 
         // Insert into memory-tier.
         let mem_ptr = mt.insert(key, ipc_handle.size).map_err(|e| {
@@ -494,6 +498,7 @@ impl DispatcherComponent {
         needed: u32,
         target_key: CacheKey,
         max_attempts: usize,
+        mem_tier_evictions: &AtomicU64,
     ) -> Result<(), DispatcherError> {
         const MAX_SCAN: usize = 4;
 
@@ -532,6 +537,7 @@ impl DispatcherComponent {
                 Some(key) => {
                     // Another thread may have concurrently evicted this key.
                     if mt.remove(key).is_ok() {
+                        mem_tier_evictions.fetch_add(1, Ordering::Relaxed);
                         let _ = dm.convert_memory_tier_to_block(key);
                     }
                 }
@@ -539,6 +545,7 @@ impl DispatcherComponent {
                     // Targeted LRU: evict from the same shard as target_key so the
                     // freed space is usable by the subsequent insert(target_key, ...).
                     if let Some(evicted_key) = mt.evict_lru_for_key(target_key) {
+                        mem_tier_evictions.fetch_add(1, Ordering::Relaxed);
                         if dm.convert_memory_tier_to_block(evicted_key).is_err() {
                             let _ = dm.remove(evicted_key);
                         }
@@ -1497,8 +1504,15 @@ impl IDispatcher for DispatcherComponent {
             if num_drives == 0 {
                 let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
                 for entry in &cold_entries {
-                    Self::evict_for_space(&dm, &mt, entry.ipc_handle_size, entry.key, max_attempts)
-                        .ok();
+                    Self::evict_for_space(
+                        &dm,
+                        &mt,
+                        entry.ipc_handle_size,
+                        entry.key,
+                        max_attempts,
+                        &self.mem_tier_evictions,
+                    )
+                    .ok();
                     let res = mt
                         .insert(entry.key, entry.ipc_handle_size)
                         .map(|mem_ptr| {
@@ -1565,7 +1579,7 @@ impl IDispatcher for DispatcherComponent {
                             let ipc_size = entry.ipc_handle_size;
 
                             let prep = (|| -> Result<*mut u8, DispatcherError> {
-                                Self::evict_for_space(&dm, &mt, ipc_size, entry.key, max_attempts)?;
+                                Self::evict_for_space(&dm, &mt, ipc_size, entry.key, max_attempts, &self.mem_tier_evictions)?;
                                 mt.insert(entry.key, ipc_size).map_err(|e| {
                                     DispatcherError::AllocationFailed(format!(
                                         "promote insert failed: {e}"
@@ -1984,7 +1998,7 @@ impl IDispatcher for DispatcherComponent {
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
         let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
-        Self::evict_for_space(&dm, &mt, size, key, max_attempts)?;
+        Self::evict_for_space(&dm, &mt, size, key, max_attempts, &self.mem_tier_evictions)?;
 
         let mem_ptr = mt.insert(key, size).map_err(|e| match e {
             interfaces::MemoryTierError::AlreadyExists(k) => DispatcherError::AlreadyExists(k),
@@ -2064,17 +2078,15 @@ impl IDispatcher for DispatcherComponent {
 
         let (mem_ptr, _) = mt.get(key).ok_or(DispatcherError::KeyNotFound(key))?;
 
-        dm.create_memory_tier_entry(key, mem_ptr, size)
-            .map_err(|e| match e {
-                interfaces::DispatchMapError::AlreadyExists(k) => {
-                    let _ = mt.remove(key);
-                    DispatcherError::AlreadyExists(k)
-                }
-                other => {
-                    let _ = mt.remove(key);
-                    DispatcherError::IoError(other.to_string())
-                }
-            })?;
+        // Index registration happens exactly once (manager thread). A genuine
+        // failure here means the reserved slot is orphaned, so release it and
+        // propagate. There is no `AlreadyExists` special case: with single
+        // registration the entry cannot already exist, and treating "already
+        // present" as a reason to free the (live) slot was a corruption bug.
+        dm.create_memory_tier_entry(key, mem_ptr, size).map_err(|e| {
+            let _ = mt.remove(key);
+            DispatcherError::IoError(e.to_string())
+        })?;
 
         dm.downgrade_reference(key)
             .map_err(|e| DispatcherError::IoError(e.to_string()))?;
@@ -2176,7 +2188,16 @@ impl IDispatcher for DispatcherComponent {
         if num_drives == 0 {
             let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
             for entry in &cold_entries {
-                if Self::evict_for_space(&dm, &mt, entry.size, entry.key, max_attempts).is_err() {
+                if Self::evict_for_space(
+                    &dm,
+                    &mt,
+                    entry.size,
+                    entry.key,
+                    max_attempts,
+                    &self.mem_tier_evictions,
+                )
+                .is_err()
+                {
                     continue;
                 }
                 if let Ok(mem_ptr) = mt.insert(entry.key, entry.size) {
@@ -2202,6 +2223,7 @@ impl IDispatcher for DispatcherComponent {
         }
 
         let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
+        let evict_ctr = &self.mem_tier_evictions;
 
         std::thread::scope(|s| {
             for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
@@ -2226,8 +2248,10 @@ impl IDispatcher for DispatcherComponent {
                         let block_size = block_dev.block_size() as u64;
                         let start_lba = entry.offset / block_size;
 
-                        if Self::evict_for_space(dm, mt, entry.size, entry.key, max_attempts)
-                            .is_err()
+                        if Self::evict_for_space(
+                            dm, mt, entry.size, entry.key, max_attempts, evict_ctr,
+                        )
+                        .is_err()
                         {
                             continue;
                         }
@@ -2326,11 +2350,12 @@ impl IDispatcher for DispatcherComponent {
         agg
     }
 
-    fn cache_level_stats(&self) -> CacheLevelStats {
-        CacheLevelStats {
+    fn cache_stats(&self) -> CacheStats {
+        CacheStats {
             mem_tier_hits: self.mem_tier_hits.load(Ordering::Relaxed),
             ssd_hits: self.ssd_hits.load(Ordering::Relaxed),
             misses: self.cache_misses.load(Ordering::Relaxed),
+            mem_tier_evictions: self.mem_tier_evictions.load(Ordering::Relaxed),
         }
     }
 }
@@ -2955,6 +2980,10 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -2998,6 +3027,10 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
     }
 
@@ -3015,6 +3048,10 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher);
         assert!(d.is_some());
@@ -3034,6 +3071,10 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -3058,6 +3099,10 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -3083,6 +3128,10 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -3108,6 +3157,10 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.check(42);
@@ -3128,6 +3181,10 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.remove(42);
@@ -3148,6 +3205,10 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -3173,6 +3234,10 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         // Even though not initialized, zero-size check comes after init check.
@@ -3201,6 +3266,10 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -3220,6 +3289,10 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -3240,6 +3313,10 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         ));
 
         let handles: Vec<_> = (0..4)
@@ -3291,6 +3368,10 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.memory_tier.connect(mt).unwrap();
@@ -3321,6 +3402,10 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -3395,6 +3480,10 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -3681,10 +3770,12 @@ mod tests {
         }
 
         // Pool is now full (16384 used). Trying to add 4096 more should evict.
-        DispatcherComponent::evict_for_space(&dm, &mt, 4096, 100, 512).unwrap();
+        let evictions = AtomicU64::new(0);
+        DispatcherComponent::evict_for_space(&dm, &mt, 4096, 100, 512, &evictions).unwrap();
 
-        // At least one entry was evicted from memory-tier.
+        // At least one entry was evicted from memory-tier, and counted.
         assert!(mt.used() + 4096 <= mt.capacity());
+        assert!(evictions.load(Ordering::Relaxed) >= 1);
     }
 
     #[test]
@@ -3699,9 +3790,11 @@ mod tests {
         dm.release_write(0).unwrap();
 
         // Plenty of space, no eviction needed.
-        DispatcherComponent::evict_for_space(&dm, &mt, 4096, 100, 512).unwrap();
+        let evictions = AtomicU64::new(0);
+        DispatcherComponent::evict_for_space(&dm, &mt, 4096, 100, 512, &evictions).unwrap();
 
         assert!(mt.contains(0), "entry should not be evicted");
+        assert_eq!(evictions.load(Ordering::Relaxed), 0);
     }
 
     #[test]
@@ -3723,6 +3816,10 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
+            AtomicU64::new(0),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)

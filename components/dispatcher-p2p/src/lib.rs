@@ -2288,10 +2288,10 @@ impl IDispatcher for DispatcherP2pComponent {
         agg
     }
 
-    fn cache_level_stats(&self) -> interfaces::CacheLevelStats {
+    fn cache_stats(&self) -> interfaces::CacheStats {
         // The P2P dispatcher does not yet track per-tier load hit/miss counters;
         // report zeros so the interface is satisfied without reporting bogus data.
-        interfaces::CacheLevelStats::default()
+        interfaces::CacheStats::default()
     }
 }
 

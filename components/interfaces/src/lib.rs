@@ -19,11 +19,12 @@ mod iremote_request_handler;
 
 pub use idispatch_map::CacheKey;
 pub use idispatch_map::DispatchMapError;
+pub use idispatch_map::DispatchMapStats;
 #[cfg(feature = "spdk")]
 pub use idispatch_map::IDispatchMap;
 #[cfg(feature = "spdk")]
 pub use idispatch_map::LookupResult;
-pub use idispatcher::CacheLevelStats;
+pub use idispatcher::CacheStats;
 pub use idispatcher::DispatcherConfig;
 pub use idispatcher::DispatcherError;
 #[cfg(feature = "spdk")]

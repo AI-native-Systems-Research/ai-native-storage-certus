@@ -95,18 +95,25 @@ impl Default for DispatcherConfig {
 ///   promote the block back into DRAM before serving it.
 /// - `misses` — the key was not present in the cache at all (`NotExist`).
 ///
+/// `mem_tier_evictions` covers the write side rather than the load side: it counts
+/// blocks demoted out of the DRAM memory tier to the block device under
+/// capacity pressure (LRU eviction while making room for a new entry).
+///
 /// Counters are monotonic for the life of the dispatcher; take deltas across
 /// two calls to measure a window (e.g. one benchmark round). Comparing
 /// `mem_tier_hits` against `ssd_hits` shows what fraction of the working set is
 /// being served from DRAM versus SSD.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct CacheLevelStats {
+pub struct CacheStats {
     /// Load blocks served from the DRAM memory tier (no SSD read).
     pub mem_tier_hits: u64,
     /// Load blocks resolved from the NVMe block device (each implies an SSD read).
     pub ssd_hits: u64,
     /// Load blocks not present in the cache (`LookupResult::NotExist`).
     pub misses: u64,
+    /// Blocks evicted from the DRAM memory tier to the block device under
+    /// capacity pressure (demotions made while reserving space for new entries).
+    pub mem_tier_evictions: u64,
 }
 
 /// Opaque handle to client GPU memory for DMA transfers.
@@ -630,7 +637,7 @@ component_macros::define_interface! {
         /// memory tier vs NVMe block device) plus outright misses. Counters are
         /// monotonic for the life of the dispatcher; take deltas across two
         /// calls to measure a window.
-        fn cache_level_stats(&self) -> CacheLevelStats;
+        fn cache_stats(&self) -> CacheStats;
     }
 }
 

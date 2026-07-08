@@ -46,6 +46,9 @@ unsafe impl Sync for TransferJob {}
 pub struct EngineInner {
     dispatcher: Arc<dyn IDispatcher + Send + Sync>,
     dispatch_map: Arc<dyn IDispatchMap + Send + Sync>,
+    // Direct handle to the DRAM memory tier, kept so `mem_tier_usage()` can
+    // report live `used()`/`capacity()` for diagnostics (is the tier ever full?).
+    memory_tier: Arc<dyn IMemoryTier + Send + Sync>,
     gpu_services: Arc<dyn IGpuServices + Send + Sync>,
     gpu_block_size: u64,
     gpu_base_ptr: u64,
@@ -54,6 +57,15 @@ pub struct EngineInner {
     next_internal_id: AtomicU64,
     initialized: AtomicBool,
     store_stream: GpuStream,
+    // Cache-level hit/miss counters for the load path. Monotonic for the life
+    // of the engine; exposed via `cache_stats()`. Incremented in `prepare_load`
+    // by where each requested key resolved in the dispatch map (DRAM memory
+    // tier vs NVMe block device vs not present). The dispatcher's own
+    // `cache_stats()` only tallies its gRPC lookup path, which the connector's
+    // load path bypasses — so the engine tallies its own.
+    mem_tier_hits: AtomicU64,
+    ssd_hits: AtomicU64,
+    cache_misses: AtomicU64,
 }
 
 impl EngineInner {
@@ -210,6 +222,7 @@ impl EngineInner {
         Ok(Self {
             dispatcher,
             dispatch_map: dm,
+            memory_tier,
             gpu_services: gpu,
             gpu_block_size,
             gpu_base_ptr,
@@ -218,6 +231,9 @@ impl EngineInner {
             next_internal_id: AtomicU64::new(0),
             initialized: AtomicBool::new(true),
             store_stream,
+            mem_tier_hits: AtomicU64::new(0),
+            ssd_hits: AtomicU64::new(0),
+            cache_misses: AtomicU64::new(0),
         })
     }
 
@@ -351,15 +367,55 @@ impl EngineInner {
         )
     }
 
-    /// Cumulative cache-level hit/miss counters for the load path, as
-    /// `(mem_tier_hits, ssd_hits, misses)`. `mem_tier_hits` are load blocks
-    /// served from DRAM (no SSD read); `ssd_hits` are blocks resolved from the
-    /// NVMe block device (each implies an SSD read); `misses` are blocks not
-    /// present in the cache. Monotonic for the life of the engine — take deltas
-    /// across two calls to measure a window (e.g. one benchmark round).
-    pub fn cache_level_stats(&self) -> (u64, u64, u64) {
-        let s = self.dispatcher.cache_level_stats();
-        (s.mem_tier_hits, s.ssd_hits, s.misses)
+    /// Cumulative cache-level counters as
+    /// `(mem_tier_hits, ssd_hits, misses, mem_tier_evictions)`. The first three
+    /// cover the load path: `mem_tier_hits` are load blocks served from DRAM
+    /// (no SSD read); `ssd_hits` are blocks resolved from the NVMe block device
+    /// (each implies an SSD read); `misses` are blocks not present in the cache.
+    /// `mem_tier_evictions` covers the store path: blocks demoted out of the DRAM
+    /// memory tier under capacity pressure. All monotonic for the life of the
+    /// engine — take deltas across two calls to measure a window (e.g. one
+    /// benchmark round).
+    ///
+    /// The load counters are the engine's own, tallied in `prepare_load` (the
+    /// connector resolves keys via the dispatch map directly and never
+    /// traverses the dispatcher's gRPC lookup). `mem_tier_evictions` comes from the
+    /// dispatcher, where `reserve_memory` performs the eviction regardless of
+    /// caller.
+    pub fn cache_stats(&self) -> (u64, u64, u64, u64) {
+        (
+            self.mem_tier_hits.load(Ordering::Relaxed),
+            self.ssd_hits.load(Ordering::Relaxed),
+            self.cache_misses.load(Ordering::Relaxed),
+            self.dispatcher.cache_stats().mem_tier_evictions,
+        )
+    }
+
+    /// Live DRAM memory-tier occupancy as `(used_bytes, capacity_bytes)`.
+    /// Diagnostic: lets an out-of-process sampler see whether the tier is
+    /// filling (and thus whether capacity-pressure eviction should be firing).
+    pub fn mem_tier_usage(&self) -> (u64, u64) {
+        (
+            self.memory_tier.used() as u64,
+            self.memory_tier.capacity() as u64,
+        )
+    }
+
+    /// Cumulative count of completed store entries (net of removals) tracked by
+    /// the engine. Diagnostic: compare against `mem_tier_usage()` (in blocks) to
+    /// see whether the dispatch-map index and the resident memory tier agree.
+    pub fn entry_count(&self) -> u64 {
+        self.entry_count.load(Ordering::Relaxed)
+    }
+
+    /// Current *live* dispatch-map entry counts as
+    /// `(total, memory_tier, block_device)`. Unlike `entry_count` (cumulative),
+    /// this is the instantaneous index population by location — compare
+    /// `memory_tier` against `mem_tier_usage()` (in blocks) to detect stale
+    /// index entries (index claims DRAM-resident after the slot was freed).
+    pub fn index_stats(&self) -> (u64, u64, u64) {
+        let s = self.dispatch_map.stats();
+        (s.total, s.memory_tier, s.block_device)
     }
 
     /// Pin blocks for reading and return DRAM pointers for H2D DMA.
@@ -374,15 +430,31 @@ impl EngineInner {
         self.ensure_init()?;
         let cache_keys = keys::to_cache_keys(keys);
 
-        // First pass: identify which keys need NVMe→DRAM promotion.
+        // First pass: identify which keys need NVMe→DRAM promotion, and tally
+        // each requested key against the cache tier that resolved it. This is
+        // the load path's single classification point (the second pass sees
+        // everything as MemoryTier once promotion has run), so the cache-level
+        // counters are incremented here. Semantics match the dispatcher's own
+        // gRPC lookup counters: MemoryTier → mem-tier hit, BlockDevice → SSD
+        // hit (an NVMe read to promote), NotExist → miss.
         let mut needs_promote: Vec<CacheKey> = Vec::new();
         for key in &cache_keys {
             match self.dispatch_map.lookup(*key) {
                 Ok(LookupResult::BlockDevice { .. }) => {
+                    self.ssd_hits.fetch_add(1, Ordering::Relaxed);
                     let _ = self.dispatch_map.release_read(*key);
                     needs_promote.push(*key);
                 }
+                Ok(LookupResult::MemoryTier { .. }) => {
+                    self.mem_tier_hits.fetch_add(1, Ordering::Relaxed);
+                    let _ = self.dispatch_map.release_read(*key);
+                }
+                Ok(LookupResult::NotExist) => {
+                    self.cache_misses.fetch_add(1, Ordering::Relaxed);
+                }
                 Ok(_) => {
+                    // MismatchSize: neither hit nor miss; release the ref and
+                    // let the second pass surface it as an error.
                     let _ = self.dispatch_map.release_read(*key);
                 }
                 Err(_) => {}
@@ -657,29 +729,12 @@ impl EngineInner {
                 }
             }
 
-            let mut all_ok = true;
-
-            // Store jobs: copy_gpu_to_memory_completed registers in dispatch-map.
-            // Load jobs are already committed — just need the stream sync.
-            if job.kind == JobKind::Store {
-                let size = self.gpu_block_size as u32;
-                for key in &job.keys {
-                    match self.dispatcher.copy_gpu_to_memory_completed(*key, size) {
-                        Ok(()) => {
-                            self.entry_count.fetch_add(1, Ordering::Release);
-                        }
-                        Err(interfaces::DispatcherError::KeyNotFound(_)) => {}
-                        Err(interfaces::DispatcherError::AlreadyExists(_)) => {}
-                        Err(e) => {
-                            eprintln!("[certus] copy_gpu_to_memory_completed failed key={key}: {e:?}");
-                            all_ok = false;
-                        }
-                    }
-                }
-            }
-
+            // The handler thread only detects DMA completion (the stream sync
+            // above). Dispatch-map index registration for stores happens exactly
+            // once, on the manager thread, in `complete_store` — never here — so
+            // the index is never registered twice and can't race the tier.
             job.completed.store(true, Ordering::Release);
-            job.success.store(all_ok, Ordering::Release);
+            job.success.store(true, Ordering::Release);
         }
 
         // Second pass: collect all completed jobs.
@@ -727,25 +782,11 @@ impl EngineInner {
                 return Ok(());
             }
 
-            let mut all_ok = true;
-            if job.kind == JobKind::Store {
-                let size = self.gpu_block_size as u32;
-                for key in &job.keys {
-                    match self.dispatcher.copy_gpu_to_memory_completed(*key, size) {
-                        Ok(()) => {
-                            self.entry_count.fetch_add(1, Ordering::Release);
-                        }
-                        Err(interfaces::DispatcherError::KeyNotFound(_)) => {}
-                        Err(interfaces::DispatcherError::AlreadyExists(_)) => {}
-                        Err(e) => {
-                            eprintln!("[certus] wait_job copy_gpu_to_memory_completed failed key={key}: {e:?}");
-                            all_ok = false;
-                        }
-                    }
-                }
-            }
+            // Index registration for stores is the manager thread's job
+            // (`complete_store`), not the handler's. Here we only detect that
+            // the DMA has landed.
             job.completed.store(true, Ordering::Release);
-            job.success.store(all_ok, Ordering::Release);
+            job.success.store(true, Ordering::Release);
         }
 
         Ok(())

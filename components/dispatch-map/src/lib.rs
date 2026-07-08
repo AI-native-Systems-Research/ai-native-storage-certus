@@ -457,6 +457,19 @@ impl IDispatchMap for DispatchMapComponent {
         }
     }
 
+    fn stats(&self) -> interfaces::DispatchMapStats {
+        let inner = self.state.inner.lock().unwrap();
+        let mut s = interfaces::DispatchMapStats::default();
+        for entry in inner.entries.values() {
+            s.total += 1;
+            match entry.location {
+                Location::MemoryTier { .. } => s.memory_tier += 1,
+                Location::BlockDevice { .. } => s.block_device += 1,
+            }
+        }
+        s
+    }
+
     fn recover_extent(
         &self,
         key: CacheKey,

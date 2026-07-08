@@ -98,6 +98,22 @@ impl std::error::Error for DispatchMapError {}
 //
 // Total: 10 properties, 24 verification conditions discharged by SMT solvers.
 
+/// Snapshot of the dispatch-map's current *live* entry population, broken down
+/// by where each entry's data resides. Unlike the engine's cumulative
+/// `entry_count`, these are instantaneous counts of entries currently in the
+/// map. Comparing `memory_tier` against the memory tier's resident block count
+/// reveals stale index entries (index still claims DRAM-resident after the slot
+/// was freed).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DispatchMapStats {
+    /// Total live entries in the map.
+    pub total: u64,
+    /// Entries whose data is in the DRAM memory tier (`Location::MemoryTier`).
+    pub memory_tier: u64,
+    /// Entries whose data is committed to a block device (`Location::BlockDevice`).
+    pub block_device: u64,
+}
+
 #[cfg(feature = "spdk")]
 component_macros::define_interface! {
     pub IDispatchMap {
@@ -226,6 +242,11 @@ component_macros::define_interface! {
         /// Combines the zero-refs check (P6) with the ssd_offset presence
         /// check (P10) into a single predicate.
         fn is_evictable(&self, key: CacheKey) -> bool;
+
+        /// Current live entry counts, broken down by location
+        /// (`total` / `memory_tier` / `block_device`). Instantaneous, not
+        /// cumulative — for reconciling the index against the memory tier.
+        fn stats(&self) -> DispatchMapStats;
 
         /// Insert a recovered extent as a BlockDevice entry.
         ///

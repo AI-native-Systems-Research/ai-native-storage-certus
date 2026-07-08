@@ -80,11 +80,24 @@ def _reporter():
         lp50 = _percentile(l_lat, 50)
         lp95 = _percentile(l_lat, 95)
 
+        # Diagnostic: sample live DRAM memory-tier occupancy so we can see
+        # whether the tier ever fills (and thus whether capacity eviction fires).
+        mt_str = ""
+        eng = _ENGINE_REF
+        if eng is not None and hasattr(eng, "mem_tier_usage"):
+            try:
+                used, cap = eng.mem_tier_usage()
+                pct = (100.0 * used / cap) if cap else 0.0
+                mt_str = (f" mt_used={used / 1024**3:.2f}/"
+                          f"{cap / 1024**3:.2f}GiB ({pct:.0f}%)")
+            except Exception:
+                pass
+
         print(
             f"[INSTR] store={c.store_blocks_completed}blk "
             f"load={c.load_blocks_completed}blk "
             f"lookup={c.lookup_calls} prep_store={c.prepare_store_calls} "
-            f"prep_load={c.prepare_load_calls} evict={c.evictions}",
+            f"prep_load={c.prepare_load_calls} evict={c.evictions}{mt_str}",
             file=sys.stderr,
         )
         print(
@@ -123,12 +136,25 @@ def _iostat_writer():
             continue
         try:
             vals = eng.read_write_stats()  # 6-tuple incl. per-direction latency sums
-            # Append cache-level hit/miss counters (mem_tier_hits, ssd_hits,
-            # misses) when the engine exposes them, so a reader can see what
-            # fraction of loads were served from DRAM vs SSD. Line becomes 9
+            # Append cache-level counters (mem_tier_hits, ssd_hits, misses,
+            # dram_evictions) when the engine exposes them, so a reader can see
+            # what fraction of loads were served from DRAM vs SSD and how many
+            # blocks were evicted from DRAM under pressure. Line becomes 10
             # fields; older readers that slice [:6] stay compatible.
-            if hasattr(eng, "cache_level_stats"):
-                vals = tuple(vals) + tuple(eng.cache_level_stats())
+            if hasattr(eng, "cache_stats"):
+                vals = tuple(vals) + tuple(eng.cache_stats())
+            # Diagnostic fields 11-13: entry_count (index entries), mt_used,
+            # mt_capacity (bytes). Lets a reader compare the dispatch-map index
+            # against actual resident memory-tier bytes per round.
+            if hasattr(eng, "entry_count"):
+                vals = tuple(vals) + (eng.entry_count(),)
+            if hasattr(eng, "mem_tier_usage"):
+                vals = tuple(vals) + tuple(eng.mem_tier_usage())
+            # Fields 14-16: live dispatch-map index counts by location
+            # (total, memory_tier, block_device). Compare memory_tier against
+            # mt_used/SLAB to detect stale index entries.
+            if hasattr(eng, "index_stats"):
+                vals = tuple(vals) + tuple(eng.index_stats())
             with open(tmp, "w") as f:
                 f.write(" ".join(str(v) for v in vals) + "\n")
             os.replace(tmp, path)  # atomic publish
