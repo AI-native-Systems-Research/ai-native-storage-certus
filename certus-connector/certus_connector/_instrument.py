@@ -127,39 +127,75 @@ def set_engine(engine):
 
 def _iostat_writer():
     import os
+    import sys
     path = os.environ.get("CERTUS_IOSTAT_FILE", "/tmp/certus_iostat.txt")
-    tmp = path + ".tmp"
+    # Per-pid temp path. A fixed "{path}.tmp" collides with temp files left by
+    # other runs/users in a shared, sticky /tmp — and under SELinux (Enforcing)
+    # even root is denied open()/replace() on a file created in another user's
+    # context. A pid-scoped name means this process only ever touches files it
+    # created, so the atomic write always succeeds.
+    tmp = f"{path}.{os.getpid()}.tmp"
+    # Call each stats accessor independently so one failing accessor does not
+    # blank the whole line (previously a single `except: pass` around the entire
+    # body meant e.g. a throwing read_write_stats() left the file frozen and the
+    # reader saw all-zero deltas). Failed accessors degrade to zero-fill; the
+    # first failure of each is logged once so the culprit is visible.
+    warned: set = set()
+
+    def _grab(name, fn, width):
+        try:
+            return tuple(fn())
+        except Exception as e:  # noqa: BLE001 — surface which accessor is broken
+            if name not in warned:
+                warned.add(name)
+                print(
+                    f"[INSTR] iostat writer: {name}() raised {e!r} "
+                    f"— degrading to {width} zero field(s)",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            return (0,) * width
+
     while True:
         time.sleep(0.5)
         eng = _ENGINE_REF
-        if eng is None or not hasattr(eng, "read_write_stats"):
+        if eng is None:
             continue
+
+        # Fields 0-5: per-direction SSD ops/bytes/latency (rw-telemetry).
+        vals = _grab("read_write_stats", eng.read_write_stats, 6) \
+            if hasattr(eng, "read_write_stats") else (0,) * 6
+        # Fields 6-9: cache-level counters (mem_tier_hits, ssd_hits, misses,
+        # mem_tier_evictions).
+        if hasattr(eng, "cache_stats"):
+            vals = vals + _grab("cache_stats", eng.cache_stats, 4)
+        # Field 10: cumulative completed store entries.
+        if hasattr(eng, "entry_count"):
+            vals = vals + _grab("entry_count", lambda: (eng.entry_count(),), 1)
+        # Fields 11-12: resident memory-tier used/capacity bytes.
+        if hasattr(eng, "mem_tier_usage"):
+            vals = vals + _grab("mem_tier_usage", eng.mem_tier_usage, 2)
+        # Fields 13-15: live dispatch-map index counts (total, mem_tier, block_dev).
+        if hasattr(eng, "index_stats"):
+            vals = vals + _grab("index_stats", eng.index_stats, 3)
+
         try:
-            vals = eng.read_write_stats()  # 6-tuple incl. per-direction latency sums
-            # Append cache-level counters (mem_tier_hits, ssd_hits, misses,
-            # dram_evictions) when the engine exposes them, so a reader can see
-            # what fraction of loads were served from DRAM vs SSD and how many
-            # blocks were evicted from DRAM under pressure. Line becomes 10
-            # fields; older readers that slice [:6] stay compatible.
-            if hasattr(eng, "cache_stats"):
-                vals = tuple(vals) + tuple(eng.cache_stats())
-            # Diagnostic fields 11-13: entry_count (index entries), mt_used,
-            # mt_capacity (bytes). Lets a reader compare the dispatch-map index
-            # against actual resident memory-tier bytes per round.
-            if hasattr(eng, "entry_count"):
-                vals = tuple(vals) + (eng.entry_count(),)
-            if hasattr(eng, "mem_tier_usage"):
-                vals = tuple(vals) + tuple(eng.mem_tier_usage())
-            # Fields 14-16: live dispatch-map index counts by location
-            # (total, memory_tier, block_device). Compare memory_tier against
-            # mt_used/SLAB to detect stale index entries.
-            if hasattr(eng, "index_stats"):
-                vals = tuple(vals) + tuple(eng.index_stats())
             with open(tmp, "w") as f:
                 f.write(" ".join(str(v) for v in vals) + "\n")
             os.replace(tmp, path)  # atomic publish
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            # Don't leak our per-pid temp on failure.
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            if "_write" not in warned:
+                warned.add("_write")
+                print(
+                    f"[INSTR] iostat writer: file write to {path} failed: {e!r}",
+                    file=sys.stderr,
+                    flush=True,
+                )
 
 
 def start_reporter():
