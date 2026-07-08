@@ -6,9 +6,9 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 use dispatcher::io_segmenter::segment_io;
 use dispatcher::DispatcherComponent;
 use interfaces::{
-    CacheKey, DispatchMapError, DispatcherConfig, DmaBuffer, GpuDeviceInfo,
-    GpuDmaBuffer, GpuIpcHandle, GpuStream, IDispatchMap, IDispatcher, IGpuServices, ILogger,
-    IMemoryTier, IpcHandle, LookupResult, MemoryTierError,
+    CacheKey, DispatchMapError, DispatcherConfig, DmaBuffer, GpuDeviceInfo, GpuDmaBuffer,
+    GpuIpcHandle, GpuStream, IDispatchMap, IDispatcher, IGpuServices, ILogger, IMemoryTier,
+    IpcHandle, LookupResult, MemoryTierError, MemoryTierTelemetrySnapshot,
 };
 
 // ===========================================================================
@@ -363,7 +363,11 @@ impl BenchMemoryTier {
 }
 
 impl IMemoryTier for BenchMemoryTier {
-    fn initialize(&self, _pool_size: usize, _numa_node: Option<i32>) -> Result<(), MemoryTierError> {
+    fn initialize(
+        &self,
+        _pool_size: usize,
+        _numa_node: Option<i32>,
+    ) -> Result<(), MemoryTierError> {
         Ok(())
     }
     fn insert(&self, _key: CacheKey, _size: u32) -> Result<*mut u8, MemoryTierError> {
@@ -410,6 +414,10 @@ impl IMemoryTier for BenchMemoryTier {
     fn is_dma_capable(&self) -> bool {
         false
     }
+
+    fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot {
+        MemoryTierTelemetrySnapshot::default()
+    }
 }
 
 // ===========================================================================
@@ -429,7 +437,9 @@ fn setup_dispatcher() -> (Arc<dyn IDispatcher + Send + Sync>, Arc<BenchDispatchM
         .connect(Arc::new(BenchGpuServices) as Arc<dyn IGpuServices + Send + Sync>)
         .unwrap();
     c.memory_tier
-        .connect(Arc::new(BenchMemoryTier::new(64 * 1024 * 1024)) as Arc<dyn IMemoryTier + Send + Sync>)
+        .connect(
+            Arc::new(BenchMemoryTier::new(64 * 1024 * 1024)) as Arc<dyn IMemoryTier + Send + Sync>
+        )
         .unwrap();
 
     let d: Arc<dyn IDispatcher + Send + Sync> = query_interface!(c, IDispatcher).unwrap();
