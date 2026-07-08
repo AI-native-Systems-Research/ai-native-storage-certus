@@ -41,10 +41,7 @@ impl FreeList {
         }
         let aligned_size = size.next_multiple_of(ALIGNMENT);
 
-        let (&offset, &region_size) = self
-            .free_regions
-            .iter()
-            .find(|(_, &s)| s >= aligned_size)?;
+        let (&offset, &region_size) = self.free_regions.iter().find(|(_, &s)| s >= aligned_size)?;
 
         self.free_regions.remove(&offset);
 
@@ -67,11 +64,7 @@ impl FreeList {
         let mut new_size = aligned_size;
 
         // Coalesce with the preceding free region.
-        if let Some((&prev_offset, &prev_size)) = self
-            .free_regions
-            .range(..offset)
-            .next_back()
-        {
+        if let Some((&prev_offset, &prev_size)) = self.free_regions.range(..offset).next_back() {
             if prev_offset + prev_size == offset {
                 new_offset = prev_offset;
                 new_size += prev_size;

@@ -11,9 +11,9 @@ use std::thread;
 use component_core::query_interface;
 use dispatcher::DispatcherComponent;
 use interfaces::{
-    CacheKey, DispatchMapError, DispatcherConfig, DmaBuffer, GpuDeviceInfo,
-    GpuDmaBuffer, GpuIpcHandle, GpuStream, IDispatchMap, IDispatcher, IGpuServices, ILogger,
-    IMemoryTier, IpcHandle, LookupResult, MemoryTierError,
+    CacheKey, DispatchMapError, DispatcherConfig, DmaBuffer, GpuDeviceInfo, GpuDmaBuffer,
+    GpuIpcHandle, GpuStream, IDispatchMap, IDispatcher, IGpuServices, ILogger, IMemoryTier,
+    IpcHandle, LookupResult, MemoryTierError, MemoryTierTelemetrySnapshot,
 };
 
 // ---------------------------------------------------------------------------
@@ -397,7 +397,11 @@ impl MockMemoryTier {
 }
 
 impl IMemoryTier for MockMemoryTier {
-    fn initialize(&self, _pool_size: usize, _numa_node: Option<i32>) -> Result<(), MemoryTierError> {
+    fn initialize(
+        &self,
+        _pool_size: usize,
+        _numa_node: Option<i32>,
+    ) -> Result<(), MemoryTierError> {
         Ok(())
     }
 
@@ -485,6 +489,10 @@ impl IMemoryTier for MockMemoryTier {
     fn is_dma_capable(&self) -> bool {
         false
     }
+
+    fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot {
+        MemoryTierTelemetrySnapshot::default()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -537,7 +545,11 @@ fn entry_migrates_to_block_device_on_drain() {
 
     d.shutdown().unwrap();
 
-    assert_eq!(dm.migrated_count(), 1, "entry should be migrated after bg writer drains");
+    assert_eq!(
+        dm.migrated_count(),
+        1,
+        "entry should be migrated after bg writer drains"
+    );
 }
 
 #[test]

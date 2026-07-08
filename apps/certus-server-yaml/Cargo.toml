@@ -13,7 +13,7 @@ dispatcher = { workspace = true, default-features = false }
 dispatcher-p2p = { workspace = true, default-features = false, optional = true }
 dispatch-map.workspace = true
 eviction-policy-lru.workspace = true
-memory-tier.workspace = true
+memory-tier = { workspace = true, features = ["telemetry"] }
 block-device-spdk-nvme = { workspace = true, optional = true }
 block-device-filesys = { workspace = true, optional = true }
 block-device-kernel = { workspace = true, optional = true }
@@ -30,6 +30,11 @@ tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
 libc = "0.2"
 
+# OpenTelemetry (optional, enabled via --features otel)
+opentelemetry = { version = "0.27", optional = true }
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio", "metrics"], optional = true }
+opentelemetry-otlp = { version = "0.27", features = ["metrics", "grpc-tonic"], optional = true }
+
 [features]
 default = ["spdk"]
 spdk = ["spdk-mem", "dep:block-device-spdk-nvme", "dispatcher/spdk-backend"]
@@ -38,6 +43,7 @@ filesys = ["dep:block-device-filesys", "spdk-mem"]
 kernel = ["dep:block-device-kernel", "spdk-mem"]
 p2p-native = ["dep:dispatcher-p2p", "spdk", "gpu-services/p2p", "dispatcher-p2p/spdk-backend"]
 rdma = ["dep:remote-request-handler"]
+otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp"]
 
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }
