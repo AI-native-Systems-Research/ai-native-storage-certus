@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_ensure_initialized": { "prover": "alt-ergo", "time": 0.013 }
+    }
+  }
+}

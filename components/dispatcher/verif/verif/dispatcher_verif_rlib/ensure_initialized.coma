@@ -1,0 +1,36 @@
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 36 0 36 75 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 34 10 34 100
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 35 10 35 68
+
+use creusot.prelude.Any
+
+type t_DispatcherError = NotInitialized | InvalidParameter | AlreadyExists | KeyNotFound | AllocationFailed | IoError
+
+type t_Result_unit_DispatcherError = Ok () | Err t_DispatcherError
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let ensure_initialized [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 36 0 36 75]
+  (initialized: bool) (return (x: t_Result_unit_DispatcherError)) = (! bb0
+  [ bb0 = any [ br0 -> {initialized = false} (! bb1) | br1 -> {initialized} (! bb2) ]
+  | bb2 = s0 [ s0 = [ &_ret <- Ok _10 ] s1 | s1 = return {_ret} ]
+  | bb1 = s0 [ s0 = [ &_9 <- NotInitialized ] s1 | s1 = [ &_ret <- Err _9 ] s2 | s2 = return {_ret} ] ]
+  [ & _ret: t_Result_unit_DispatcherError = Any.any_l ()
+  | & initialized: bool = initialized
+  | & _9: t_DispatcherError = Any.any_l ()
+  | & _10: () = Any.any_l () ])
+  [ return (result: t_Result_unit_DispatcherError) ->
+  {[@stop_split] [@expl:ensure_initialized ensures] ([@stop_split] [@expl:ensure_initialized ensures #0] [%#slib] not initialized
+      -> match result with
+        | Err (NotInitialized) -> true
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:ensure_initialized ensures #1] [%#slib'0] initialized
+    -> match result with
+      | Ok _ -> true
+      | _ -> false
+      end)}
+    (! return {result}) ]
