@@ -517,12 +517,22 @@ impl DispatcherComponent {
                         .find(|&k| dm.is_evictable(k));
                     match victim {
                         Some(evicted_key) => {
-                            // is_evictable ⇒ ssd_offset set, so the block-device
-                            // transition succeeds and the data survives on SSD.
-                            let _ = dm.convert_memory_tier_to_block(evicted_key);
+                            // Free the tier slot FIRST so the retried insert can
+                            // use it, then demote the dispatch-map entry to
+                            // BlockDevice (is_evictable ⇒ ssd_offset set, so the
+                            // data survives on SSD and the conversion succeeds).
+                            // Order matters: converting before a failed remove
+                            // would mark the key BlockDevice while still resident
+                            // (inconsistent, leaks the slot). Count the eviction
+                            // on the actual slot free.
                             if mt.remove(evicted_key).is_ok() {
                                 mem_tier_evictions.fetch_add(1, Ordering::Relaxed);
+                                if dm.convert_memory_tier_to_block(evicted_key).is_err() {
+                                    let _ = dm.remove(evicted_key);
+                                }
                             }
+                            // If remove failed (raced with another evictor), fall
+                            // through and retry the insert loop.
                         }
                         None => return Err(DispatcherError::ShardFull(key)),
                     }
