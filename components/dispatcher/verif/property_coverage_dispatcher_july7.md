@@ -19,14 +19,17 @@ Annotation buckets (consistent with the interface-annotation style):
 |---|---|---|---|
 | `ensure_initialized` | **P2** — operational APIs fail `NotInitialized` before init | `ensure_initialized()?` prefix (`:2131`, `:2228`, `:2276`, `:2298`) | `# Verified` |
 | `prepare_store_guards` | **P20** — `prepare_store(size==0) → InvalidParameter`, no mutation | `prepare_store` guard prefix (`:2130-2136`) | `# Verified` |
+| `consume_pending` | **P24** — commit/cancel miss ⇒ `KeyNotFound`, map unchanged | `.remove(&key).ok_or(KeyNotFound)?` (`:2236`, `:2283`) | `# Verified` |
+| `insert_pending` | **P21** (prepare side) — after prepare, key present | `pending_writes…insert(key, …)` (`:2213`) | `# Verified` |
+| `consume_once` | **P21** — consume-exactly-once: first commit/cancel `Ok`, second `KeyNotFound` | prepare-insert then commit/cancel remove (`:2213`, `:2236`, `:2283`) | `# Verified` |
 
-`cargo creusot` → **Proved (2 files)**.
+`cargo creusot` → **all proofs green (5 functions)**.
 
-Note on "no mutation": both guards return before any `dispatch_map` /
-`pending_writes` access, so state-preservation is structural on these paths
-(there is no state touched before the early return). Full map-level
-no-mutation clauses are added in the P21–P24 work once the pending-write
-`FMap` carrier is wired.
+Note on "no mutation": the P2/P20 guards return before any `dispatch_map` /
+`pending_writes` access, so state-preservation is structural on those paths.
+For P24, no-mutation is now a proved map-level clause: on the miss branch the
+final map `ext_eq`s the initial map. The pending-write `FMap` carrier is wired
+via `consume_pending` / `insert_pending`.
 
 ## Dispatcher-owned properties — status against `P1..P31`
 
@@ -43,18 +46,22 @@ P12, P13, P17, P18, P26, P27, P30, P31) stay in `dispatch-map/verif`.
 | P16 — eviction failure ⇒ capacity not achieved | dispatcher | `# Unchecked` | Loop postcondition on `evict_for_space`. |
 | P19 — blind eviction fallback removes key | dispatcher | `# Unchecked` | Depends on dispatch-map transition lemmas. |
 | P20 — `prepare_store(size==0) → InvalidParameter` | dispatcher | `# Verified` (`prepare_store_guards`) | — |
-| P21 — pending-write consume-once (prepare/commit/cancel) | dispatcher | `# Unchecked` | `FMap<CacheKey, PendingModel>` ghost; `remove_ghost` mirror. **Keystone.** |
+| P21 — pending-write consume-once (prepare/commit/cancel) | dispatcher | `# Verified` (`insert_pending`, `consume_once`) | — |
 | P22 — commit ⇒ PendingWrite → BlockDevice, pending cleared | dispatcher | `# Unchecked` | Builds on P21 + trusted dispatch-map `convert_to_storage` lemma. |
 | P23 — cancel ⇒ key absent, pending cleared | dispatcher | `# Unchecked` | Builds on P21 + trusted dispatch-map `remove` lemma. |
-| P24 — commit/cancel miss ⇒ `KeyNotFound`, no mutation | dispatcher | `# Unchecked` | Direct from `FMap::remove` on absent key (feasibility-proved). |
+| P24 — commit/cancel miss ⇒ `KeyNotFound`, no mutation | dispatcher | `# Verified` (`consume_pending`) | — |
 | P25 — `clear_memory_tier` map postcondition + count | dispatcher | `# Unchecked` | Map-level loop proof. |
 | P28 — drive-index determinism (`key % num_drives`) | dispatcher | `# Unchecked` | Pure arithmetic contract on `drive_index`. |
 | P29 — watermark/threshold consistency | dispatcher | `# Unchecked` | Config-comparison direction proof. |
 
 ## Trusted / assumption ledger
 
-Currently **empty** — the two proved artifacts use no trusted lemmas or
-external assumptions. Assumptions will be recorded here as P21–P24 land:
+The P2/P20 guards use no trusted lemmas. The P21/P24 map proofs rely only on
+the `creusot_std::logic::FMap` ghost primitives (`insert_ghost`, `remove_ghost`),
+which are `#[trusted]` in creusot-std itself — a toolchain-level assumption, not
+a project-specific lemma. No dispatch-map lemmas are imported yet.
+
+Assumptions to be recorded here as P22–P23 land:
 
 - dispatch-map per-entry postconditions imported as lemmas
   (`convert_to_storage`, `remove`, `create_staging`) — proved in

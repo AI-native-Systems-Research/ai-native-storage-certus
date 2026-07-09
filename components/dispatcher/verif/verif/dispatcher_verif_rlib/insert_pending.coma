@@ -1,0 +1,88 @@
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 115 0 119 25 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 120 4 120 34
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 113 10 113 30
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 114 10 114 50
+let%span sfmap = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 420 14 420 49
+let%span sfmap'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 421 14 421 40
+let%span sfmap'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span sfmap'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 62 14 62 70
+let%span sfmap'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 63 14 63 88
+let%span sfmap'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sfmap'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 54 14 54 25
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use creusot.int.UInt32
+use map.Map
+use creusot.prelude.Any
+use int.Int
+
+type t_FMap_u64_PendingModel
+
+type t_PendingModel = { size: UInt32.t; drive_idx: UInt64.t }
+
+type t_Option_PendingModel = None | Some t_PendingModel
+
+function to_mapping_u64 (self: t_FMap_u64_PendingModel) : Map.map UInt64.t t_Option_PendingModel
+
+function len_u64 (self: t_FMap_u64_PendingModel) : int
+
+axiom len_u64_spec: forall self: t_FMap_u64_PendingModel [len_u64 self]. [%#sfmap'5] len_u64 self >= 0
+
+function get_u64 [@inline:trivial] (self: t_FMap_u64_PendingModel) (k: UInt64.t) : t_Option_PendingModel =
+  [%#sfmap'4] Map.get (to_mapping_u64 self) k
+
+meta "rewrite_def" function get_u64
+
+predicate contains_u64 [@inline:trivial] (self: t_FMap_u64_PendingModel) (k: UInt64.t) =
+  [%#sfmap'1] get_u64 self k <> None
+
+meta "rewrite_def" predicate contains_u64
+
+function insert_u64 (self: t_FMap_u64_PendingModel) (k: UInt64.t) (v: t_PendingModel) : t_FMap_u64_PendingModel
+
+axiom insert_u64_spec:
+  forall self: t_FMap_u64_PendingModel, k: UInt64.t, v: t_PendingModel [insert_u64 self k v]. [%#sfmap'2] to_mapping_u64 (insert_u64 self k v)
+    = Map.set (to_mapping_u64 self) k (Some v)
+
+axiom insert_u64_spec'0:
+  forall self: t_FMap_u64_PendingModel, k: UInt64.t, v: t_PendingModel [insert_u64 self k v]. [%#sfmap'3] len_u64 (insert_u64 self k v)
+    = (if contains_u64 self k then len_u64 self else len_u64 self + 1)
+
+let insert_ghost_u64 (self: MutBorrow.t t_FMap_u64_PendingModel) (key: UInt64.t) (value: t_PendingModel)
+  (return (x: t_Option_PendingModel)) = any
+  [ return (result: t_Option_PendingModel) ->
+  {[@stop_split] [@expl:insert_ghost_u64 ensures] ([@stop_split] [@expl:insert_ghost ensures #0] [%#sfmap] self.final
+      = insert_u64 self.current key value)
+    /\ ([@stop_split] [@expl:insert_ghost ensures #1] [%#sfmap'0] result = get_u64 self.current key)}
+    (! return {result}) ]
+
+predicate resolve_refmut_FMap_u64_PendingModel [@inline:trivial] (_1: MutBorrow.t t_FMap_u64_PendingModel) =
+  _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_FMap_u64_PendingModel
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let insert_pending [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 115 0 119 25]
+  (map: MutBorrow.t t_FMap_u64_PendingModel) (key: UInt64.t) (pending: t_PendingModel)
+  (return (x: t_Option_PendingModel)) = (! bb0
+  [ bb0 = s0
+    [ s0 = MutBorrow.borrow_final <t_FMap_u64_PendingModel> {map.current} {MutBorrow.get_id map}
+        (fun (_bor: MutBorrow.t t_FMap_u64_PendingModel) ->
+          [ &_10 <- _bor ] [ &map <- { map with current = _bor.final } ] s1)
+    | s1 = insert_ghost_u64 [%#slib] {_10} {key} {pending} (fun (_x: t_Option_PendingModel) -> [ &_ret <- _x ] s2)
+    | s2 = -{resolve_refmut_FMap_u64_PendingModel map}- s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: t_Option_PendingModel = Any.any_l ()
+  | & map: MutBorrow.t t_FMap_u64_PendingModel = map
+  | & key: UInt64.t = key
+  | & pending: t_PendingModel = pending
+  | & _10: MutBorrow.t t_FMap_u64_PendingModel = Any.any_l () ])
+  [ return (result: t_Option_PendingModel) ->
+  {[@stop_split] [@expl:insert_pending ensures] ([@stop_split] [@expl:insert_pending ensures #0] [%#slib'0] contains_u64 map.final key)
+    /\ ([@stop_split] [@expl:insert_pending ensures #1] [%#slib'1] not contains_u64 map.current key -> result = None)}
+    (! return {result}) ]

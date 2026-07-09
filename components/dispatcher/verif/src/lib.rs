@@ -1,4 +1,4 @@
-use creusot_std::prelude::*;
+use creusot_std::{logic::FMap, prelude::*};
 
 // Creusot verification model for the `dispatcher` component.
 //
@@ -59,4 +59,86 @@ pub fn prepare_store_guards(initialized: bool, size: u32) -> Result<(), Dispatch
         return Err(DispatcherError::InvalidParameter);
     }
     Ok(())
+}
+
+// ---------- Pending-write map model ----------
+//
+// The real dispatcher holds `pending_writes: Mutex<HashMap<CacheKey, PendingWrite>>`
+// (dispatcher/src/lib.rs:165). We model it with a logic-level `FMap`, since
+// std `HashMap::insert`/`remove` carry no Creusot specs in this toolchain.
+//
+// `PendingModel` mirrors the verifiable fields of the real `PendingWrite`
+// (:92). `write_handle` (WriteHandle) and `buffer` (Arc<DmaBuffer>) are I/O
+// resources that live behind the trusted boundary and are omitted.
+
+pub struct PendingModel {
+    pub size: u32,
+    pub drive_idx: usize,
+}
+
+// ---------- P24: commit/cancel miss semantics ----------
+//
+// Mirrors the consume step shared by `commit_store` (:2231) and `cancel_store`
+// (:2279):
+//     let pending = self.pending_writes.lock().unwrap()
+//         .remove(&key).ok_or(DispatcherError::KeyNotFound(key))?;
+//
+// P24: with no pending write for `key`, commit/cancel returns `KeyNotFound`
+// and the pending-write map is unchanged (no mutation).
+
+#[check(ghost)]
+#[ensures(match result {
+    Ok(_)  => (*map).contains(key) && !(^map).contains(key),
+    Err(DispatcherError::KeyNotFound) => !(*map).contains(key) && (^map).ext_eq(*map),
+    _ => false,
+})]
+pub fn consume_pending(
+    map: &mut FMap<u64, PendingModel>,
+    key: u64,
+) -> Result<PendingModel, DispatcherError> {
+    match map.remove_ghost(&key) {
+        Some(p) => Ok(p),
+        None => Err(DispatcherError::KeyNotFound),
+    }
+}
+
+// ---------- P21: pending-write consume-once protocol ----------
+//
+// Mirrors the `prepare_store` insert (:2213):
+//     self.pending_writes.lock().unwrap().insert(key, PendingWrite { .. });
+//
+// After prepare, the key is present in the pending-write map.
+
+#[check(ghost)]
+#[ensures((^map).contains(key))]
+#[ensures(!(*map).contains(key) ==> result == None)]
+pub fn insert_pending(
+    map: &mut FMap<u64, PendingModel>,
+    key: u64,
+    pending: PendingModel,
+) -> Option<PendingModel> {
+    map.insert_ghost(key, pending)
+}
+
+// Consume-once: given a key with a pending write, the first commit/cancel
+// succeeds and consumes it; any second commit/cancel on the same key misses
+// (`KeyNotFound`). This is the "consume exactly once" guarantee — a pending
+// write cannot be committed and then also cancelled (or committed twice).
+
+#[check(ghost)]
+#[requires((*map).contains(key))]
+#[ensures(match result {
+    (Ok(_), Err(DispatcherError::KeyNotFound)) => true,
+    _ => false,
+})]
+pub fn consume_once(
+    map: &mut FMap<u64, PendingModel>,
+    key: u64,
+) -> (
+    Result<PendingModel, DispatcherError>,
+    Result<PendingModel, DispatcherError>,
+) {
+    let first = consume_pending(map, key);
+    let second = consume_pending(map, key);
+    (first, second)
 }

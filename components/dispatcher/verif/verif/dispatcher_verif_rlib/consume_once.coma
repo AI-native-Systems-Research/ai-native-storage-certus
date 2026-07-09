@@ -1,0 +1,100 @@
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 134 0 140 1 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 141 16 141 41
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 142 17 142 42
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 129 11 129 31
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 130 10 133 1
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 90 10 94 1
+let%span sfmap = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span sfmap'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 168 40 168 65
+let%span sfmap'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 171 12 171 41
+let%span sfmap'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use creusot.int.UInt32
+use map.Map
+use creusot.prelude.Any
+
+type t_FMap_u64_PendingModel
+
+type t_PendingModel = { size: UInt32.t; drive_idx: UInt64.t }
+
+type t_DispatcherError = NotInitialized | InvalidParameter | AlreadyExists | KeyNotFound | AllocationFailed | IoError
+
+type t_Result_PendingModel_DispatcherError = Ok t_PendingModel | Err t_DispatcherError
+
+type t_Option_PendingModel = None | Some t_PendingModel
+
+function to_mapping_u64 (self: t_FMap_u64_PendingModel) : Map.map UInt64.t t_Option_PendingModel
+
+function get_u64 [@inline:trivial] (self: t_FMap_u64_PendingModel) (k: UInt64.t) : t_Option_PendingModel =
+  [%#sfmap'2] Map.get (to_mapping_u64 self) k
+
+meta "rewrite_def" function get_u64
+
+predicate contains_u64 [@inline:trivial] (self: t_FMap_u64_PendingModel) (k: UInt64.t) =
+  [%#sfmap] get_u64 self k <> None
+
+meta "rewrite_def" predicate contains_u64
+
+predicate ext_eq_u64 (self: t_FMap_u64_PendingModel) (other: t_FMap_u64_PendingModel) =
+  [%#sfmap'1] forall k: UInt64.t. get_u64 self k = get_u64 other k
+
+axiom ext_eq_u64_spec: forall self: t_FMap_u64_PendingModel, other: t_FMap_u64_PendingModel [self
+    = other]. [%#sfmap'0] ext_eq_u64 self other = (self = other)
+
+let consume_pending (map: MutBorrow.t t_FMap_u64_PendingModel) (key: UInt64.t)
+  (return (x: t_Result_PendingModel_DispatcherError)) = any
+  [ return (result: t_Result_PendingModel_DispatcherError) ->
+  {[@stop_split] [@expl:consume_pending ensures] [%#slib'3] match result with
+      | Ok _ -> contains_u64 map.current key /\ not contains_u64 map.final key
+      | Err (KeyNotFound) -> not contains_u64 map.current key /\ ext_eq_u64 map.final map.current
+      | _ -> false
+      end}
+    (! return {result}) ]
+
+predicate resolve_refmut_FMap_u64_PendingModel [@inline:trivial] (_1: MutBorrow.t t_FMap_u64_PendingModel) =
+  _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_FMap_u64_PendingModel
+
+type tup2_Result_PendingModel_DispatcherError_Result_PendingModel_DispatcherError = {
+  f0: t_Result_PendingModel_DispatcherError;
+  f1: t_Result_PendingModel_DispatcherError }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let consume_once [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 134 0 140 1]
+  (map: MutBorrow.t t_FMap_u64_PendingModel) (key: UInt64.t)
+  (return (x: tup2_Result_PendingModel_DispatcherError_Result_PendingModel_DispatcherError)) =
+{[@stop_split] [@expl:consume_once requires] [%#slib'1] contains_u64 map.current key}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = MutBorrow.borrow_mut <t_FMap_u64_PendingModel> {map.current}
+        (fun (_bor: MutBorrow.t t_FMap_u64_PendingModel) ->
+          [ &_8 <- _bor ] [ &map <- { map with current = _bor.final } ] s1)
+    | s1 = consume_pending [%#slib] {_8} {key} (fun (_x: t_Result_PendingModel_DispatcherError) -> [ &first <- _x ] s2)
+    | s2 = MutBorrow.borrow_final <t_FMap_u64_PendingModel> {map.current} {MutBorrow.get_id map}
+        (fun (_bor: MutBorrow.t t_FMap_u64_PendingModel) ->
+          [ &_11 <- _bor ] [ &map <- { map with current = _bor.final } ] s3)
+    | s3 = consume_pending [%#slib'0] {_11} {key}
+        (fun (_x: t_Result_PendingModel_DispatcherError) -> [ &second <- _x ] s4)
+    | s4 = -{resolve_refmut_FMap_u64_PendingModel map}- s5
+    | s5 = [ &_ret <- { f0 = first; f1 = second } ] s6
+    | s6 = return {_ret} ] ]
+  [ & _ret: tup2_Result_PendingModel_DispatcherError_Result_PendingModel_DispatcherError = Any.any_l ()
+  | & map: MutBorrow.t t_FMap_u64_PendingModel = map
+  | & key: UInt64.t = key
+  | & first: t_Result_PendingModel_DispatcherError = Any.any_l ()
+  | & _8: MutBorrow.t t_FMap_u64_PendingModel = Any.any_l ()
+  | & second: t_Result_PendingModel_DispatcherError = Any.any_l ()
+  | & _11: MutBorrow.t t_FMap_u64_PendingModel = Any.any_l () ])
+  [ return (result: tup2_Result_PendingModel_DispatcherError_Result_PendingModel_DispatcherError) ->
+  {[@stop_split] [@expl:consume_once ensures] [%#slib'2] match result with
+      | {f0 = Ok _; f1 = Err (KeyNotFound)} -> true
+      | _ -> false
+      end}
+    (! return {result}) ]

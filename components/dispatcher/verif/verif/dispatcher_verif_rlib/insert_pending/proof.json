@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_insert_ghost_u64": { "prover": "alt-ergo", "time": 0.017 },
+      "vc_insert_pending": { "prover": "alt-ergo", "time": 0.021 }
+    }
+  }
+}

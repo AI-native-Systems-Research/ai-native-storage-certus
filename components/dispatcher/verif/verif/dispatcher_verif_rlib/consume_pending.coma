@@ -1,0 +1,119 @@
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 95 0 98 42 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 99 10 99 32
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 90 10 94 1
+let%span sfmap = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 445 14 445 43
+let%span sfmap'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 446 14 446 41
+let%span sfmap'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span sfmap'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 168 40 168 65
+let%span sfmap'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 171 12 171 41
+let%span sfmap'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 77 14 77 67
+let%span sfmap'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 78 14 78 84
+let%span sfmap'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sfmap'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 54 14 54 25
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use creusot.int.UInt32
+use map.Map
+use creusot.prelude.Any
+use int.Int
+
+type t_FMap_u64_PendingModel
+
+type t_PendingModel = { size: UInt32.t; drive_idx: UInt64.t }
+
+type t_Option_PendingModel = None | Some t_PendingModel
+
+function to_mapping_u64 (self: t_FMap_u64_PendingModel) : Map.map UInt64.t t_Option_PendingModel
+
+function len_u64 (self: t_FMap_u64_PendingModel) : int
+
+axiom len_u64_spec: forall self: t_FMap_u64_PendingModel [len_u64 self]. [%#sfmap'7] len_u64 self >= 0
+
+function get_u64 [@inline:trivial] (self: t_FMap_u64_PendingModel) (k: UInt64.t) : t_Option_PendingModel =
+  [%#sfmap'6] Map.get (to_mapping_u64 self) k
+
+meta "rewrite_def" function get_u64
+
+predicate contains_u64 [@inline:trivial] (self: t_FMap_u64_PendingModel) (k: UInt64.t) =
+  [%#sfmap'1] get_u64 self k <> None
+
+meta "rewrite_def" predicate contains_u64
+
+function remove_u64 (self: t_FMap_u64_PendingModel) (k: UInt64.t) : t_FMap_u64_PendingModel
+
+axiom remove_u64_spec:
+  forall self: t_FMap_u64_PendingModel, k: UInt64.t [remove_u64 self k]. [%#sfmap'4] to_mapping_u64 (remove_u64 self k)
+    = Map.set (to_mapping_u64 self) k (None)
+
+axiom remove_u64_spec'0:
+  forall self: t_FMap_u64_PendingModel, k: UInt64.t [remove_u64 self k]. [%#sfmap'5] len_u64 (remove_u64 self k)
+    = (if contains_u64 self k then len_u64 self - 1 else len_u64 self)
+
+let remove_ghost_u64 (self: MutBorrow.t t_FMap_u64_PendingModel) (key: UInt64.t) (return (x: t_Option_PendingModel)) =
+any
+  [ return (result: t_Option_PendingModel) ->
+  {[@stop_split] [@expl:remove_ghost_u64 ensures] ([@stop_split] [@expl:remove_ghost ensures #0] [%#sfmap] self.final
+      = remove_u64 self.current key)
+    /\ ([@stop_split] [@expl:remove_ghost ensures #1] [%#sfmap'0] result = get_u64 self.current key)}
+    (! return {result}) ]
+
+predicate resolve_refmut_FMap_u64_PendingModel [@inline:trivial] (_1: MutBorrow.t t_FMap_u64_PendingModel) =
+  _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_FMap_u64_PendingModel
+
+let elim_Some (_x: t_Option_PendingModel) (return (f0: t_PendingModel)) = any
+  [ _k (f0: t_PendingModel) -> {Some f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+type t_DispatcherError = NotInitialized | InvalidParameter | AlreadyExists | KeyNotFound | AllocationFailed | IoError
+
+type t_Result_PendingModel_DispatcherError = Ok t_PendingModel | Err t_DispatcherError
+
+predicate ext_eq_u64 (self: t_FMap_u64_PendingModel) (other: t_FMap_u64_PendingModel) =
+  [%#sfmap'3] forall k: UInt64.t. get_u64 self k = get_u64 other k
+
+axiom ext_eq_u64_spec: forall self: t_FMap_u64_PendingModel, other: t_FMap_u64_PendingModel [self
+    = other]. [%#sfmap'2] ext_eq_u64 self other = (self = other)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let consume_pending [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 95 0 98 42]
+  (map: MutBorrow.t t_FMap_u64_PendingModel) (key: UInt64.t) (return (x: t_Result_PendingModel_DispatcherError)) =
+(! bb0
+  [ bb0 = s0
+    [ s0 = [ &_9 <- key ] s1
+    | s1 = MutBorrow.borrow_final <t_FMap_u64_PendingModel> {map.current} {MutBorrow.get_id map}
+        (fun (_bor: MutBorrow.t t_FMap_u64_PendingModel) ->
+          [ &_7 <- _bor ] [ &map <- { map with current = _bor.final } ] s2)
+    | s2 = remove_ghost_u64 [%#slib] {_7} {_9} (fun (_x: t_Option_PendingModel) -> [ &_6 <- _x ] s3)
+    | s3 = -{resolve_refmut_FMap_u64_PendingModel map}- s4
+    | s4 = any [ br0 -> {_6 = None} (! bb4) | br1 (x0: t_PendingModel) -> {_6 = Some x0} (! bb5) ] ]
+  | bb5 = s0
+    [ s0 = elim_Some {_6} (fun (r0: t_PendingModel) -> [ &p <- r0 ] s1)
+    | s1 = [ &_ret <- Ok p ] s2
+    | s2 = return {_ret} ]
+  | bb4 = s0 [ s0 = [ &_13 <- KeyNotFound ] s1 | s1 = [ &_ret <- Err _13 ] s2 | s2 = return {_ret} ] ]
+  [ & _ret: t_Result_PendingModel_DispatcherError = Any.any_l ()
+  | & map: MutBorrow.t t_FMap_u64_PendingModel = map
+  | & key: UInt64.t = key
+  | & _6: t_Option_PendingModel = Any.any_l ()
+  | & _7: MutBorrow.t t_FMap_u64_PendingModel = Any.any_l ()
+  | & _9: UInt64.t = Any.any_l ()
+  | & p: t_PendingModel = Any.any_l ()
+  | & _13: t_DispatcherError = Any.any_l () ])
+  [ return (result: t_Result_PendingModel_DispatcherError) ->
+  {[@stop_split] [@expl:consume_pending ensures] [%#slib'0] match result with
+      | Ok _ -> contains_u64 map.current key /\ not contains_u64 map.final key
+      | Err (KeyNotFound) -> not contains_u64 map.current key /\ ext_eq_u64 map.final map.current
+      | _ -> false
+      end}
+    (! return {result}) ]
