@@ -13,6 +13,48 @@ baseline.
 
 ---
 
+## Summary — what has been proved (plain English)
+
+We are using Creusot (a deductive verifier for Rust) to mathematically prove
+that the dispatcher behaves correctly on specific safety-critical paths. Because
+the real dispatcher uses locks, threads, and hardware calls that Creusot can't
+read, each proof works on a small faithful *model* of one method's logic.
+
+So far, five proofs are green. Two of them prove behaviour that still matches
+today's code:
+
+- **You cannot use the dispatcher before it is initialized.** Every operational
+  call first checks an "initialized" flag; if it isn't set, the call fails with
+  `NotInitialized` and touches no state. Proved. *(P2)*
+- **A store request with size zero is rejected cleanly.** The dispatcher rejects
+  a zero-size request with `InvalidParameter` before doing any work. Proved. The
+  guard used to live on `prepare_store`; it now lives on `populate`, but the
+  logic we proved is identical. *(P20)*
+
+The other three proofs are still mathematically correct, but they describe a
+part of the dispatcher that **no longer exists**. They modelled the old
+"staging / pending-write" workflow (`prepare_store` → `commit_store` /
+`cancel_store`), and proved its key safety guarantee:
+
+- **A staged write is finalized exactly once** — once you commit or cancel a
+  pending write, a second commit-or-cancel on the same key correctly reports
+  "not found". This rules out double-commit or commit-then-cancel bugs. *(P21,
+  P24)*
+
+That staging API was deleted in commit `25a7273` ("remove vestigial staging
+buffer concept") — a separate refactor, **not** the P11 fix — so those three
+proofs (`consume_pending`, `insert_pending`, `consume_once`) are now marked
+`# Stale`: kept for history, but they no longer describe running code. The
+current write path is `populate` → `reserve_memory` → `copy_gpu_to_memory_async`
+→ `copy_gpu_to_memory_completed`, with `release_memory` as cancel.
+
+**Next:** retarget onto live code. The top target is **P11** — proving that a
+lookup whose stored size doesn't match the requested size *hard-fails* instead
+of doing a partial copy (today `lookup_async` and `batch_lookup` silently copy
+`min(stored, requested)` bytes).
+
+---
+
 ## 1. The plan and where we are
 
 Dispatcher-verif owns the **system-level** half of `P1..P31`; per-entry
@@ -21,26 +63,63 @@ high-impact, dependency-aware):
 
 | Order | Property | Description | Status |
 |---|---|---|---|
-| 1 | **P20** | `prepare_store(size==0) → InvalidParameter`, no mutation | ✅ Proved |
-| — | **P2** | operational APIs fail `NotInitialized` before init | ✅ Proved |
-| 2 | **P24** | commit/cancel miss ⇒ `KeyNotFound`, no mutation | ✅ Proved |
-| 3 | **P21** | pending-write consume-once (prepare/commit/cancel) — *keystone* | ✅ Proved |
-| 4 | **P22** | commit ⇒ PendingWrite → BlockDevice, pending cleared | ⏳ Next |
-| 5 | **P23** | cancel ⇒ key absent, pending cleared | ⏳ |
-| 6 | **P11** | lookup size-mismatch hard-fail, no partial copy | ⏳ |
-| 7 | **P1**  | `initialize()` iff required receptacles bound | ⏳ |
+| — | **P2** | operational APIs fail `NotInitialized` before init | ✅ Proved (live) |
+| — | **P20** | `size==0 → InvalidParameter` (now on `populate`) | ✅ Proved (live, re-anchored) |
+| — | **P21** | pending-write consume-once (prepare/commit/cancel) | ⚠️ Stale — mirrors removed API |
+| — | **P24** | commit/cancel miss ⇒ `KeyNotFound`, no mutation | ⚠️ Stale — mirrors removed API |
+| — | **P22** | commit ⇒ PendingWrite → BlockDevice, pending cleared | ✖️ Retired — API removed |
+| — | **P23** | cancel ⇒ key absent, pending cleared | ✖️ Retired — API removed |
+| 1 | **P11** | lookup size-mismatch hard-fail, no partial copy — **next keystone** | ⏳ Next |
+| 2 | **P1**  | `initialize()` iff required receptacles bound | ⏳ |
 
 Later (medium priority, dispatcher-owned): P14–P16 (eviction bound/postconds),
 P19 (blind fallback), P25 (`clear_memory_tier`), P28 (drive determinism), P29
 (watermark consistency).
 
-**Progress:** 4 / 8 high-priority dispatcher properties proved (P2, P20, P24, P21).
+**Progress:** 2 live proofs against current code (P2, P20). 3 proofs (P21/P24)
+are green but `# Stale` — they mirror the `pending_writes` staging API deleted
+by `25a7273`; P22/P23 retired (never started, no live counterpart). Retargeting
+onto the current write/lookup path; P11 is next.
 
 ---
 
 ## 2. Proof log
 
-### 2026-07-08 — P24, P21 (pending-write consume-once)
+### 2026-07-09 — retargeting: P21/P24 marked `# Stale`, P11 promoted
+
+**No new proof.** Reconciliation against the current tree (with Codex, who
+made the recent dispatcher changes).
+
+**Finding:** commit `25a7273` (*"remove vestigial staging buffer concept"*)
+deleted the `prepare_store` / `commit_store` / `cancel_store` / `pending_writes`
+API from the dispatcher. Verified this is on **both** `unstable` and
+`unstable-creusot` — the two branches' `dispatcher/src/lib.rs` is byte-identical
+and `unstable-creusot` is 0 commits behind, so **CI sync is healthy**. (An
+earlier alarm about branch drift was a false positive caused by a stale local
+`origin/unstable` ref before fetch.) Codex confirmed this was a standalone
+staging refactor, **not** the P11 fix.
+
+**Impact on existing proofs:**
+- **P2** (`ensure_initialized`, `:271`) — still live. `# Verified`.
+- **P20** (`prepare_store_guards`) — the `size==0` guard moved from
+  `prepare_store` to `populate` (`:1915`, tests `:3315`/`:3100`); logic
+  identical, so still `# Verified`, re-anchored.
+- **P21 / P24** (`consume_pending`, `insert_pending`, `consume_once`) — mirror
+  the deleted `pending_writes` map. Green but no longer evidence for running
+  code → `# Stale`. The new write lifecycle (`reserve_memory` →
+  `copy_gpu_to_memory_async` → `copy_gpu_to_memory_completed`, `release_memory`
+  cancel) has no pending-write map, so consume-once has no direct counterpart.
+- **P22 / P23** — depended on `commit_store` / `cancel_store`; retired.
+
+**Next target (Codex-endorsed):** **P11** — `lookup_async` (`:1784`) and
+`batch_lookup` (`:1391`) currently copy `min(ipc_handle.size, size)` bytes,
+allowing a partial copy on size mismatch. Prove `stored != requested ==>
+Err(InvalidParameter)` with the copy branch unreachable. Ownership is at the
+dispatcher (dispatch-map `lookup` is key-only).
+
+---
+
+### 2026-07-08 — P24, P21 (pending-write consume-once)  ⚠️ later marked `# Stale` (see 2026-07-09)
 
 **What was proved** (`cargo creusot` → all proofs green, 5 functions):
 
@@ -115,17 +194,17 @@ carrier in P21–P24.
 | Property | Status | Artifact |
 |---|---|---|
 | P1  | `# Unchecked` | — |
-| P2  | `# Verified`  | `ensure_initialized.coma` |
-| P11 | `# Unchecked` | — |
+| P2  | `# Verified` (live) | `ensure_initialized.coma` |
+| P11 | `# Unchecked` — **next** | — |
 | P14 | `# Unchecked` | — |
 | P15 | `# Unchecked` | — |
 | P16 | `# Unchecked` | — |
 | P19 | `# Unchecked` | — |
-| P20 | `# Verified`  | `prepare_store_guards.coma` |
-| P21 | `# Verified`  | `insert_pending.coma`, `consume_once.coma` |
-| P22 | `# Unchecked` | — |
-| P23 | `# Unchecked` | — |
-| P24 | `# Verified`  | `consume_pending.coma` |
+| P20 | `# Verified` (live, re-anchored to `populate`) | `prepare_store_guards.coma` |
+| P21 | `# Stale` (mirrors removed API) | `insert_pending.coma`, `consume_once.coma` |
+| P22 | `# Retired` (API removed) | — |
+| P23 | `# Retired` (API removed) | — |
+| P24 | `# Stale` (mirrors removed API) | `consume_pending.coma` |
 | P25 | `# Unchecked` | — |
 | P28 | `# Unchecked` | — |
 | P29 | `# Unchecked` | — |
@@ -137,24 +216,33 @@ carrier in P21–P24.
 - **Namespace:** single canonical `P1..P31`. No alternate P-namespaces.
 - **Ownership:** dispatch-map = per-entry; dispatcher = system-level. P11 is
   dispatcher-owned (dispatch-map `lookup` lacks a requested-size argument).
-- **Annotation style:** `# Verified` only with a `.coma` artifact behind it;
-  otherwise `# Unchecked`.
+- **Annotation style:** `# Verified` only with a `.coma` artifact behind it AND
+  the mirrored code still live; `# Stale` if the artifact is green but the code
+  it mirrors was removed/reworked; `# Retired` if abandoned; else `# Unchecked`.
 - **Routing:** verif crates + proof artifacts → `unstable-creusot` directly;
   modelling docs/skills outside `verif/` → `unstable` via PR.
-- **Handoff for next session:** FMap-mutation idiom is now established
-  (`#[check(ghost)]` + `remove_ghost`/`insert_ghost`, proved in P24/P21) — it is
-  the in-repo precedent for map-level proofs. Next is P22 (commit ⇒ PendingWrite →
-  BlockDevice, pending cleared): extend `consume_once`'s Ok branch with the
-  trusted dispatch-map `convert_to_storage` lemma, then P23 (cancel) with the
-  `remove` lemma.
+- **Lesson learned:** each proof's mirror must be re-checked against the current
+  tree at commit time — line-number anchors and whole APIs drift as the 6-person
+  team lands changes on `unstable`. The P21/P24 cluster went stale within a day
+  of a refactor we didn't track.
+- **Handoff for next session:** the FMap-mutation idiom (`#[check(ghost)]` +
+  `remove_ghost`/`insert_ghost`) is proven usable and carries forward to future
+  map-level proofs, even though the pending-write map is gone. Next is **P11**
+  on `lookup_async` (`:1784`) / `batch_lookup` (`:1391`): prove size mismatch
+  hard-fails (`Err(InvalidParameter)`) with the `min(...)` partial-copy branch
+  unreachable.
 
 ---
 
 ## 5. How to update this report
 
 On each proof commit:
-1. Add a dated entry under **§2 Proof log** (commit hash, properties, contract
+1. Re-check every proof's mirror against the current `unstable-creusot` tree
+   (`git fetch` first — a stale `origin/*` ref will lie). Confirm the mirrored
+   method/line still exists; downgrade any drifted proof to `# Stale`.
+2. Add a dated entry under **§2 Proof log** (commit hash, properties, contract
    summary, trusted lemmas used, how it advances the plan).
-2. Flip the property row(s) in **§1** and **§3** to ✅ / `# Verified`.
-3. Update the in-crate `property_coverage_dispatcher_july7.md` to match.
-4. Note any new trusted assumptions in the crate's trusted ledger.
+3. Flip the property row(s) in **§1** and **§3** (`# Verified` / `# Stale` /
+   `# Retired` / `# Unchecked`).
+4. Update the in-crate `property_coverage_dispatcher_july7.md` to match.
+5. Note any new trusted assumptions in the crate's trusted ledger.
