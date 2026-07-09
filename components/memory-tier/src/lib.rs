@@ -428,15 +428,18 @@ impl IMemoryTier for MemoryTierComponent {
         ep.peek_oldest(state.pool_id, n)
     }
 
-    fn oldest_keys_in_shard(&self, key: CacheKey, n: usize) -> Vec<CacheKey> {
+    fn oldest_keys_in_shard(&self, _key: CacheKey, n: usize) -> Vec<CacheKey> {
+        // The tier is now a single pool (per-shard partitioning was removed in
+        // the single-rwlock refactor), so this returns the pool's N oldest keys
+        // â the same set a subsequent insert competes for. `key` is retained in
+        // the signature for API compatibility with callers.
         let state = self.state.read().unwrap();
         if !state.initialized.load(Ordering::Acquire) || n == 0 {
             return Vec::new();
         }
 
         let ep = self.eviction_policy.get().unwrap();
-        let shard_idx = Self::shard_for_key(key);
-        ep.peek_oldest(state.pool_ids[shard_idx], n)
+        ep.peek_oldest(state.pool_id, n)
     }
 
     fn evict_lru(&self) -> Option<CacheKey> {
