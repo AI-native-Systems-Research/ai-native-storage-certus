@@ -19,6 +19,18 @@ service Dispatcher {
   // Touch cache entries, updating eviction timestamps without DMA.
   rpc Touch(BatchTouchRequest) returns (BatchTouchResponse);
 
+  // Reserve memory-tier slots for split-phase store (no DMA, no dispatch-map registration).
+  rpc Reserve(BatchReserveRequest) returns (BatchReserveResponse);
+
+  // DMA-copy from GPU into previously reserved slots (server synchronizes stream internally).
+  rpc CopyToStore(BatchCopyToStoreRequest) returns (BatchCopyToStoreResponse);
+
+  // Finalize reserved slots: register in dispatch-map and enqueue SSD write-through.
+  rpc CommitStore(BatchCommitStoreRequest) returns (BatchCommitStoreResponse);
+
+  // Cancel reserved slots without populating (idempotent).
+  rpc AbortStore(BatchAbortStoreRequest) returns (BatchAbortStoreResponse);
+
   // Clear all entries from the memory-tier cache pool.
   rpc ClearMemoryTier(ClearMemoryTierRequest) returns (ClearMemoryTierResponse);
 
@@ -121,6 +133,50 @@ message BatchTouchRequest {
 }
 
 message BatchTouchResponse {
+  repeated EntryResult results = 1;
+}
+
+// --- Split-phase Store ---
+
+message ReserveEntry {
+  uint64 key = 1;
+  uint32 size = 2;    // Data size in bytes to reserve
+}
+
+message BatchReserveRequest {
+  repeated ReserveEntry entries = 1;
+}
+
+message BatchReserveResponse {
+  repeated EntryResult results = 1;
+}
+
+message CopyToStoreEntry {
+  uint64 key = 1;
+  IpcHandle ipc_handle = 2;
+}
+
+message BatchCopyToStoreRequest {
+  repeated CopyToStoreEntry entries = 1;
+}
+
+message BatchCopyToStoreResponse {
+  repeated EntryResult results = 1;
+}
+
+message BatchCommitStoreRequest {
+  repeated uint64 keys = 1;
+}
+
+message BatchCommitStoreResponse {
+  repeated EntryResult results = 1;
+}
+
+message BatchAbortStoreRequest {
+  repeated uint64 keys = 1;
+}
+
+message BatchAbortStoreResponse {
   repeated EntryResult results = 1;
 }
 
