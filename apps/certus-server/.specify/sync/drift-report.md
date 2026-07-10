@@ -1,80 +1,133 @@
-# Spec Drift Report
+# Drift Report: certus-server
 
-Generated: 2026-05-29
-Project: certus-server
+**Generated**: 2026-07-10  
+**Specs analyzed**: 3  
+**Requirements checked**: 45  
 
 ## Summary
 
-| Category | Count |
-|----------|-------|
-| Specs Analyzed | 1 |
-| Requirements Checked | 17 |
-| Aligned | 15 (88%) |
-| Drifted | 2 (12%) |
-| Not Implemented | 0 (0%) |
-| Unspecced Code | 3 |
+| Status | Count |
+|--------|-------|
+| Aligned | 43 |
+| Drifted | 1 |
+| Not Validated | 2 |
+| Unspecced Features | 0 |
 
-## Detailed Findings
+---
 
-### Spec: 001-grpc-dispatcher-server - gRPC Dispatcher Server
+## Spec 001: gRPC Dispatcher Server
 
-#### Aligned
+**Overall**: 22/22 requirements aligned
 
-- FR-001: gRPC service exposes lookup, check, remove, populate, touch, clear_memory_tier -> `proto/dispatcher.proto`, `src/service.rs`
-- FR-002: Populate accepts list of (key, ipc_handle), returns per-entry results -> `src/service.rs`
-- FR-003: Lookup internally calls `batch_lookup()` for parallel cold promotion; IPC handles deduplicated within batch -> `src/service.rs` (updated 2026-05-28)
-- FR-004: Check accepts list of keys, returns list of boolean results -> `src/service.rs`
-- FR-005: Remove accepts list of keys, returns per-entry results -> `src/service.rs`
-- FR-005b: Touch accepts list of keys, returns per-entry results -> `src/service.rs`
-- FR-006: CLI accepts device PCI(s), listen address/port, TLS cert/key paths -> `src/main.rs`
-- FR-007: Per-entry results include key, success, error_code, error_message -> `proto/dispatcher.proto`, `src/service.rs`
-- FR-008: Server auto-initializes dispatcher on startup using CLI PCI addresses -> `src/main.rs`
-- FR-008b: Dispatch map starts fresh each launch -> confirmed
-- FR-008c: Memory-tier pool registered with CUDA via cudaHostRegister -> confirmed
-- FR-010: Python test client exercises all gRPC methods with batch operations -> `python-client/`
-- FR-013: Multiple connections supported, processing serialized via Mutex -> `src/service.rs`
-- FR-014: Optional TLS via --tls-cert/--tls-key -> `src/main.rs`
-- FR-015: Pre-validates batch for duplicate keys, rejects entire batch -> `src/service.rs`
-- FR-016: Multiple --device-pci arguments supported -> `src/main.rs`
-- FR-017: ClearMemoryTier gRPC method exposed -> `src/service.rs`
+### Aligned Requirements
 
-#### Drifted
+- **FR-001**: gRPC service exposes lookup, check, remove, populate, touch, clear_memory_tier. Lifecycle operations not exposed via gRPC.
+- **FR-002**: Populate accepts list of (key, ipc_handle) pairs, calls dispatcher.populate() per entry, returns per-entry results.
+- **FR-003**: Lookup uses dispatcher.batch_lookup() for parallel cold promotion; IPC handles deduplicated within batch via local_ptrs HashMap.
+- **FR-004**: Check accepts list of keys, calls dispatcher.check() per key, returns list of CheckResult with boolean exists.
+- **FR-005**: Remove accepts list of keys, calls dispatcher.remove() per key, returns per-entry results.
+- **FR-005b**: Touch accepts list of keys, calls dispatcher.touch() per key, returns per-entry results.
+- **FR-006**: CLI accepts --device-pci (repeatable), --listen (default 0.0.0.0:50051), --tls-cert, --tls-key.
+- **FR-007**: EntryResult includes key, success, error_code, error_message. Partial-success model: each entry processed independently.
+- **FR-008**: Server auto-initializes dispatcher on startup: SPDK env -> GPU services -> dispatch map -> memory-tier -> dispatcher.
+- **FR-008b**: Dispatch map starts fresh each launch (DispatchMapState::default(), no extent manager).
+- **FR-008c**: Memory-tier pool registered with CUDA via cudaHostRegister; logs warning and continues on failure.
+- **FR-009**: SIGTERM and SIGINT both handled via tokio::signal. Dispatcher shutdown called after serve_with_shutdown completes.
+- **FR-010**: Python test client in python-client/ directory.
+- **FR-011**: IpcHandle in proto: cuda_ipc_handle (bytes, 64), size (uint32), gpu_device_id (int32).
+- **FR-013**: Concurrent request processing via Arc<dyn IDispatcher> (Send + Sync). Fine-grained serialization at IPC cache and pending-stores maps only.
+- **FR-014**: TLS enabled when both --tls-cert and --tls-key provided.
+- **FR-015**: check_duplicate_keys() pre-validates all batch requests.
+- **FR-016**: --device-pci is repeatable; all addresses passed to DispatcherConfig.data_pci_addrs.
+- **FR-017**: ClearMemoryTier RPC calls dispatcher.clear_memory_tier(), returns entries_cleared.
+- **FR-018**: Global IPC handle cache with reference counting; cudaIpcCloseMemHandle only when refcount reaches zero.
+- **FR-019**: cudaSetDevice(gpu_device_id) called before cudaIpcOpenMemHandle when gpu_device_id >= 0.
+- **FR-020**: Split-phase store protocol (Reserve/CopyToStore/CommitStore/AbortStore) with PendingStores tracking.
+- **FR-021**: Pin/Unpin RPCs with promote flag for combined pin+prefetch.
+- **FR-022**: TakeEvents RPC drains eviction events from bounded crossbeam channel (capacity 16384).
 
-- **FR-009**: Spec says "shut down dispatcher when receiving SIGTERM/SIGINT" but code only handles SIGINT via
-  `tokio::signal::ctrl_c()`. SIGTERM is not caught.
-  - Location: `src/main.rs`
-  - Severity: moderate
+### Success Criteria
 
-- **FR-011 / Key Entities / IpcHandle**: Spec says IpcHandle contains "a 64-byte CUDA IPC memory handle and a
-  size (uint32)". The proto now has a third field `gpu_device_id` (int32, field 3). The spec definition in
-  FR-011 and the Key Entities section does not mention this field.
-  - Location: `proto/dispatcher.proto:33`, `src/service.rs:209,305`
-  - Severity: moderate — the field is required for correct multi-GPU operation; missing from spec entirely
+| SC | Status | Notes |
+|----|--------|-------|
+| SC-001 | aligned | All 5 operation types work in batch with single round-trip |
+| SC-002 | aligned | Batch operations supported up to arbitrary size |
+| SC-003 | aligned | Per-entry error reporting with key correlation |
+| SC-004 | aligned | Component stack initializes promptly |
+| SC-005 | aligned | Python test client exercises acceptance scenarios |
+| SC-006 | aligned | Multiple --device-pci arguments work |
 
-#### Not Implemented
+---
 
-(none)
+## Spec 002: Operational Configuration & Lifecycle
 
-### Unspecced Code
+**Overall**: 13/13 requirements aligned, 1 minor drift (cosmetic, code-side)
 
-| # | Feature | Location | Severity | Notes |
-|---|---------|----------|----------|-------|
-| 1 | **Global persistent IPC handle cache** (`IpcCacheEntry` with `dev_ptr`, `gpu_device_id`, `refcount`; keyed by 64-byte handle bytes; lives on `DispatcherService` for the lifetime of the server process) | `src/service.rs:27-115` | high | Previous report only noted within-batch deduplication (FR-003). The current cache is a persistent cross-request structure that eliminates repeated open/close across concurrent batches and removes serialization on CUDA's global IPC lock. Qualitatively different from within-batch reuse — requires a new requirement. |
-| 2 | **`cudaSetDevice(gpu_device_id)` before `cudaIpcOpenMemHandle`** | `src/service.rs:65-75` | high | When a handle is not yet in the cache, the server calls `cudaSetDevice(gpu_device_id)` (when `gpu_device_id >= 0`) prior to opening the IPC handle. This behavior is entirely absent from the spec. It is necessary for correct operation on multi-GPU systems and to avoid "resource already mapped" errors when the server CUDA context is not on the allocating device. |
-| 3 | **Reference-counted cache eviction** (`refcount` incremented on open, decremented on close; `cudaIpcCloseMemHandle` called only when refcount reaches zero) | `src/service.rs:106-115` | moderate | The mechanism by which cached handles are eventually closed — reference counting rather than LRU or explicit eviction — is not specified anywhere. |
+### Aligned Requirements
 
-## Recommendations
+- **FR-001**: --drive-count supported, conflicts_with = "device_pci" enforced by clap.
+- **FR-002**: NVMe discovery via SPDK devices() filtered by class code 0x010802, sorted NUMA-0 first, first N selected.
+- **FR-003**: If nvme_devices.len() < count, returns descriptive error.
+- **FR-004**: resolve_device_addresses() returns Err if neither --device-pci nor --drive-count specified.
+- **FR-005**: --format flag; format_on_init passed to DispatcherConfig.
+- **FR-006**: parse_size() handles K/M/G suffixes (case-insensitive), DEFAULT_MEMORY_TIER_SIZE = 2 GiB.
+- **FR-007**: --poller-base-cpu passed to DispatcherConfig as poller_base_cpu: Option<usize>.
+- **FR-008**: --max-eviction-attempts with default_value_t = 2048, passed to DispatcherConfig.
+- **FR-009**: validate_pci_address() / parse_pci_address() validates DDDD:BB:DD.F format.
+- **FR-010**: FlushToSsd RPC blocks until complete, returns jobs_flushed.
+- **FR-011**: Touch accepts promote bool field; fires background promote_to_memory_tier.
+- **FR-012**: cudaHostRegister on memory-tier pool with warning fallback.
+- **FR-013**: Memory-tier pool allocated on NUMA node of first selected NVMe drive.
 
-1. **Add FR-018** (new): Specify the global IPC handle cache that persists across requests. Include the
-   keying strategy (64-byte handle bytes), the fields stored (`dev_ptr`, `gpu_device_id`, `refcount`),
-   and the motivation (eliminate "resource already mapped" errors, remove CUDA IPC lock serialization).
+### Drifted (code-side only)
 
-2. **Add FR-019** (new): Specify that the server calls `cudaSetDevice(gpu_device_id)` before opening an
-   IPC handle that is not already cached, when `gpu_device_id >= 0`.
+| Req | Severity | Issue |
+|-----|----------|-------|
+| FR-006 | minor | CLI struct doc comment says "Defaults to 256M" (src/main.rs:44) but actual default is 2 GiB. Spec is correct; only the help text shown to users is wrong. |
 
-3. **Update FR-011 and Key Entities IpcHandle**: Add `gpu_device_id` (int32, field 3) to the IpcHandle
-   description. Explain that the client provides the CUDA device ordinal that allocated the memory so the
-   server can set the correct device before opening the handle.
+**Recommendation**: Fix the doc comment from "Defaults to 256M" to "Defaults to 2G" to match the actual default.
 
-4. **Fix SIGTERM handling (FR-009)**: Add SIGTERM handler alongside the existing SIGINT handler
-   (`tokio::signal::ctrl_c`).
+### Success Criteria
+
+| SC | Status | Notes |
+|----|--------|-------|
+| SC-001 | aligned | --drive-count auto-selects NVMe devices |
+| SC-002 | aligned | Without --format, extent managers recover |
+| SC-003 | aligned | --poller-base-cpu configures pinning |
+| SC-004 | aligned | Pool size logged in MiB |
+
+---
+
+## Spec 003: OpenTelemetry Observability
+
+**Overall**: 11/11 FRs aligned, 2 success criteria not validated
+
+### Aligned Requirements
+
+- **FR-001**: `otel` feature flag gates all OTel code.
+- **FR-002**: MetricExporter with tonic/gRPC targeting --otel-endpoint.
+- **FR-003**: --otel-service-name configures service.name attribute (default "certus-server").
+- **FR-004**: PeriodicReader with 10-second interval.
+- **FR-005**: ops.total incremented by entry count per batch (total entries processed); ops.errors, op.duration_us, batch.size all present with `op` attribute.
+- **FR-006**: entries_cleared and jobs_flushed counters present.
+- **FR-007**: Cold pipeline histograms: ssd_read_us, gpu_dma_us, stream_sync_us, total_us, prep_us, finalize_us.
+- **FR-008**: Hot pipeline histogram: hot.gpu_dma_us.
+- **FR-009**: Populate pipeline histograms: gpu_d2h_us, alloc_us, total_us.
+- **FR-010**: PipelineStageMetrics injected via disp_comp.set_pipeline_metrics().
+- **FR-011**: entries_cleared and jobs_flushed initialized to 0.
+
+### Not Validated (Success Criteria)
+
+| SC | Status | Issue |
+|----|--------|-------|
+| SC-002 | not validated | "Pipeline stage metrics correlate with hardware-measured latencies within 10%." No automated validation harness exists. Requires hardware test environment. |
+| SC-003 | not validated | "Disabling otel feature produces binary with zero OTel dependencies." Assumed correct from cfg gating but no CI check confirms the dependency tree. |
+
+---
+
+## Action Items
+
+| Priority | Action | Type |
+|----------|--------|------|
+| Low | Fix --memory-tier-size help text from "256M" to "2G" in src/main.rs:44 | Code fix |
+| Low | Add CI check for zero OTel deps when feature disabled (SC-003 validation) | CI |

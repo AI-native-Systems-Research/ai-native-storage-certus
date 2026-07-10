@@ -64,9 +64,9 @@ A performance engineer drills into cold-path and hot-path pipeline stages to ide
 - **FR-003**: The `--otel-service-name` argument MUST configure the `service.name` resource attribute (default: `certus-server`).
 - **FR-004**: Metrics MUST be exported periodically with a 10-second interval.
 - **FR-005**: The server MUST export the following dispatcher-level metrics with `op` attribute:
-  - `certus.dispatcher.ops.total` (counter): Total operations per type
-  - `certus.dispatcher.ops.errors` (counter): Failed operations per type
-  - `certus.dispatcher.op.duration_us` (histogram): Operation latency in microseconds
+  - `certus.dispatcher.ops.total` (counter): Total entries processed per operation type (incremented by the entry count of each batch, not by 1 per batch invocation)
+  - `certus.dispatcher.ops.errors` (counter): Failed entries per operation type
+  - `certus.dispatcher.op.duration_us` (histogram): Operation latency in microseconds (per batch)
   - `certus.dispatcher.batch.size` (histogram): Entries per batch request
 - **FR-006**: The server MUST export the following aggregate counters:
   - `certus.dispatcher.entries_cleared` (counter): Total memory-tier entries cleared
@@ -91,7 +91,7 @@ A performance engineer drills into cold-path and hot-path pipeline stages to ide
 
 | Metric Name | Type | Unit | Attributes | Description |
 |-------------|------|------|------------|-------------|
-| `certus.dispatcher.ops.total` | Counter | ops | `op` | Total batch operations |
+| `certus.dispatcher.ops.total` | Counter | entries | `op` | Total entries processed (batch size added per call) |
 | `certus.dispatcher.ops.errors` | Counter | ops | `op` | Failed entries |
 | `certus.dispatcher.op.duration_us` | Histogram | µs | `op` | End-to-end RPC latency |
 | `certus.dispatcher.batch.size` | Histogram | entries | `op` | Batch size distribution |
