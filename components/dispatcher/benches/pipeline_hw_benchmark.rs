@@ -16,7 +16,9 @@ use component_core::binding::bind;
 use component_core::query_interface;
 use gpu_services::cuda_ffi;
 use gpu_services::GpuServicesComponent;
-use interfaces::{ClientChannels, GpuStream, IBlockDevice, IBlockDeviceAdmin, IGpuServices, PciAddress};
+use interfaces::{
+    ClientChannels, GpuStream, IBlockDevice, IBlockDeviceAdmin, IGpuServices, PciAddress,
+};
 use logger::LoggerComponent;
 use spdk_env::SPDKEnvComponent;
 
@@ -65,10 +67,9 @@ fn initialize_hw() -> Result<HwContext, String> {
         .map_err(|e| format!("bind logger→block_dev: {e}"))?;
 
     // Initialize SPDK
-    let ienv = component_core::iunknown::query::<dyn spdk_env::ISPDKEnv + Send + Sync>(
-        &*spdk_env_comp,
-    )
-    .ok_or("ISPDKEnv query failed")?;
+    let ienv =
+        component_core::iunknown::query::<dyn spdk_env::ISPDKEnv + Send + Sync>(&*spdk_env_comp)
+            .ok_or("ISPDKEnv query failed")?;
     ienv.init().map_err(|e| format!("SPDK init: {e}"))?;
 
     // Find first NVMe device
@@ -77,15 +78,11 @@ fn initialize_hw() -> Result<HwContext, String> {
         return Err("no NVMe devices found".into());
     }
     let spdk_addr = devices[0].address;
-    eprintln!(
-        "NVMe: PCI={}, using first device",
-        spdk_addr
-    );
+    eprintln!("NVMe: PCI={}, using first device", spdk_addr);
 
     // Initialize block device
-    let admin =
-        component_core::iunknown::query::<dyn IBlockDeviceAdmin + Send + Sync>(&*block_dev)
-            .ok_or("IBlockDeviceAdmin query failed")?;
+    let admin = component_core::iunknown::query::<dyn IBlockDeviceAdmin + Send + Sync>(&*block_dev)
+        .ok_or("IBlockDeviceAdmin query failed")?;
     admin.set_pci_address(PciAddress {
         domain: spdk_addr.domain,
         bus: spdk_addr.bus,
@@ -97,9 +94,8 @@ fn initialize_hw() -> Result<HwContext, String> {
         .map_err(|e| format!("block device init: {e}"))?;
 
     // Probe namespace
-    let ibd =
-        component_core::iunknown::query::<dyn IBlockDevice + Send + Sync>(&*block_dev)
-            .ok_or("IBlockDevice query failed")?;
+    let ibd = component_core::iunknown::query::<dyn IBlockDevice + Send + Sync>(&*block_dev)
+        .ok_or("IBlockDevice query failed")?;
     let sector_size = ibd.block_size() as usize;
     let max_transfer = ibd.max_transfer_size() as usize;
 
@@ -363,10 +359,12 @@ fn main() {
     };
 
     // Pre-allocate the pipeline ring (CUDA-pinned + SPDK-registered buffers + CUDA streams).
-    let igpu =
-        query_interface!(ctx.gpu_services, IGpuServices).expect("IGpuServices query failed");
-    eprintln!("Allocating pipeline ring ({} CUDA-pinned buffers, {} KiB each)...",
-        dispatcher::pipeline::PIPELINE_RING_SIZE, ctx.max_transfer / 1024);
+    let igpu = query_interface!(ctx.gpu_services, IGpuServices).expect("IGpuServices query failed");
+    eprintln!(
+        "Allocating pipeline ring ({} CUDA-pinned buffers, {} KiB each)...",
+        dispatcher::pipeline::PIPELINE_RING_SIZE,
+        ctx.max_transfer / 1024
+    );
     let ring = dispatcher::pipeline::PipelineRing::new(&*igpu, ctx.max_transfer)
         .expect("PipelineRing allocation failed");
 

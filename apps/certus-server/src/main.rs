@@ -347,9 +347,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         logger.info("certus-server: recovering extents from disk (use --format for clean slate)");
     }
 
+    let eviction_rx = disp_comp.create_eviction_channel(16384);
+    let eviction_dropped = Arc::new(std::sync::atomic::AtomicU64::new(0));
+
     #[cfg(feature = "otel")]
     let svc = {
-        let svc = DispatcherService::new(Arc::clone(&dispatcher));
+        let svc = DispatcherService::new(
+            Arc::clone(&dispatcher),
+            eviction_rx,
+            Arc::clone(&eviction_dropped),
+        );
         if let Some(ref endpoint) = cli.otel_endpoint {
             let metrics = telemetry::Metrics::init(endpoint, &cli.otel_service_name)?;
             logger.info(&format!("certus-server: OTel metrics exporting to {endpoint}"));
@@ -368,7 +375,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         let _ = &disp_comp;
-        DispatcherService::new(Arc::clone(&dispatcher))
+        DispatcherService::new(
+            Arc::clone(&dispatcher),
+            eviction_rx,
+            Arc::clone(&eviction_dropped),
+        )
     };
 
     let addr = cli.listen.parse()?;

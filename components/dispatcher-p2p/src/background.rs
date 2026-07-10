@@ -8,6 +8,8 @@ use std::time::Duration;
 
 use interfaces::{CacheKey, IDispatchMap, IExtentManager, ILogger, IMemoryTier, LookupResult};
 
+use crate::{EvictionEvent, EvictionReason};
+
 /// A job for the background writer to persist a memory-tier entry to SSD.
 #[derive(Debug)]
 pub struct WriteJob {
@@ -321,6 +323,7 @@ impl BackgroundEvictor {
         extent_mgrs: Vec<Arc<dyn IExtentManager + Send + Sync>>,
         config: EvictorConfig,
         logger: Option<Arc<dyn ILogger + Send + Sync>>,
+        eviction_tx: Option<Sender<EvictionEvent>>,
     ) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = Arc::clone(&shutdown);
@@ -335,6 +338,7 @@ impl BackgroundEvictor {
                     &extent_mgrs,
                     &config,
                     logger.as_deref(),
+                    eviction_tx.as_ref(),
                 );
             })
             .expect("failed to spawn SSD evictor thread");
@@ -359,6 +363,7 @@ impl BackgroundEvictor {
         extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
         config: &EvictorConfig,
         logger: Option<&(dyn ILogger + Send + Sync)>,
+        eviction_tx: Option<&Sender<EvictionEvent>>,
     ) {
         loop {
             thread::sleep(config.interval);
@@ -404,6 +409,13 @@ impl BackgroundEvictor {
                 // Remove from dispatch-map.
                 if dm.remove(key).is_err() {
                     continue;
+                }
+
+                if let Some(tx) = eviction_tx {
+                    let _ = tx.try_send(EvictionEvent {
+                        key,
+                        reason: EvictionReason::Removed,
+                    });
                 }
 
                 // Free extent on the appropriate drive.

@@ -87,7 +87,9 @@ mod tests {
 
     #[test]
     fn remote_lookup_error_display() {
-        assert!(RemoteLookupError::NotFound.to_string().contains("not found"));
+        assert!(RemoteLookupError::NotFound
+            .to_string()
+            .contains("not found"));
         assert!(RemoteLookupError::TransportError("timeout".into())
             .to_string()
             .contains("timeout"));

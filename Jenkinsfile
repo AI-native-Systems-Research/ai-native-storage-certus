@@ -68,5 +68,22 @@ pipeline {
         }
       }
     }
+    stage('OffloadingSpec Tests') {
+      steps {
+        script {
+          sh '. ~/.cargo/env ; CERTUS_PROFILE=full cargo r -r -p certus-server-yaml -- --memory-tier-size 256M --format --device-pci 0000:86:00.0 &'
+          sh 'for i in $(seq 1 60); do nc -z localhost 50051 && break || sleep 2; done'
+
+          def status = sh(script: 'cd apps/python && python3 test-offloading-spec.py --memory-tier-size 256M', returnStatus: true)
+          echo "test-offloading-spec.py exit status: ${status}"
+          sh 'pkill -f certus-server-yaml || true'
+          sh 'sleep 2'
+
+          if (status != 0) {
+            error("test-offloading-spec.py failed with exit status ${status}")
+          }
+        }
+      }
+    }
   }
 }

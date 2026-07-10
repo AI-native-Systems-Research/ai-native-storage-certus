@@ -104,9 +104,10 @@ impl P2pColdReadPool {
     ) -> Result<(), DispatcherError> {
         let drive_workers = &self.workers[drive_idx % self.num_drives];
         let worker = &drive_workers[slot % drive_workers.len()];
-        worker.sender.send(request).map_err(|_| {
-            DispatcherError::IoError("cold_pool worker disconnected".into())
-        })
+        worker
+            .sender
+            .send(request)
+            .map_err(|_| DispatcherError::IoError("cold_pool worker disconnected".into()))
     }
 
     pub fn num_drives(&self) -> usize {

@@ -284,7 +284,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let svc = DispatcherService::new(Arc::clone(&stack.dispatcher));
+    let svc = DispatcherService::new(
+        Arc::clone(&stack.dispatcher),
+        stack.eviction_rx.clone(),
+        Arc::clone(&stack.eviction_dropped),
+    );
     let addr = cli.listen.parse()?;
 
     // Build server with optional TLS
