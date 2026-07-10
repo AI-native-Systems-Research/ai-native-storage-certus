@@ -1,12 +1,12 @@
 {
-  "generated": "2026-06-18",
+  "generated": "2026-07-10",
   "component": "dispatch-map",
   "specs_analyzed": 1,
   "requirements": {
-    "total": 23,
-    "aligned": 21,
-    "drifted": 2,
-    "not_implemented": 0
+    "total": 29,
+    "aligned": 22,
+    "drifted": 5,
+    "not_implemented": 2
   },
   "unspecced_code": 2,
   "findings": [
@@ -15,96 +15,96 @@
       "spec": "001-dispatch-map",
       "status": "aligned",
       "description": "CacheKey type as u64 for identifying extents",
-      "location": "src/lib.rs:27",
+      "location": "src/lib.rs:25",
       "notes": "CacheKey re-exported from interfaces crate"
     },
     {
       "req_id": "FR-002",
       "spec": "001-dispatch-map",
-      "status": "aligned",
-      "description": "Per-entry metadata: location, size_blocks, read_ref, write_ref, tsc with Mutex/Condvar",
-      "location": "src/entry.rs:48, src/state.rs:21",
-      "notes": "DispatchEntry struct with all required fields; DispatchMapState uses Mutex+Condvar"
+      "status": "drifted",
+      "description": "Location enum should have Staging, BlockDevice, and MemoryTier variants. Implementation only has BlockDevice and MemoryTier.",
+      "location": "src/entry.rs:7-17",
+      "notes": "Staging variant and Arc<DmaBuffer> entirely removed. Entry struct otherwise matches: size_blocks u32, read_ref u32, write_ref u32, EvictionHandle, Mutex/Condvar."
     },
     {
       "req_id": "FR-003",
       "spec": "001-dispatch-map",
-      "status": "aligned",
-      "description": "create_staging allocates DMA buffer, records entry with write_ref=1, error on size=0 or alloc failure",
-      "location": "src/lib.rs:102-141",
-      "notes": "Validates size!=0, checks duplicate key, uses injected DmaAllocFn"
+      "status": "not_implemented",
+      "description": "create_staging(key, size) allocates DMA buffer, records entry with write_ref=1, error on size=0 or alloc failure",
+      "location": null,
+      "notes": "Method does not exist. Staging concept replaced by create_memory_tier_entry which accepts pre-allocated pointer. Intentional architectural removal."
     },
     {
       "req_id": "FR-004",
       "spec": "001-dispatch-map",
-      "status": "aligned",
-      "description": "lookup returns NotExist/Staging/BlockDevice/MemoryTier, increments read_ref, blocks on active write with 2000ms timeout, refreshes TSC",
-      "location": "src/lib.rs:143-183",
-      "notes": "All specified behaviors implemented correctly including timeout and TSC refresh"
+      "status": "drifted",
+      "description": "lookup returns NotExist/Staging/BlockDevice/MemoryTier, increments read_ref, blocks on write with 2000ms timeout, refreshes TSC",
+      "location": "src/lib.rs:113-155",
+      "notes": "Staging variant absent from LookupResult. Returns NotExist/BlockDevice/MemoryTier only. All other behaviors (read_ref increment, blocking on write_ref with 2000ms timeout, TSC refresh via eviction policy) correctly implemented."
     },
     {
       "req_id": "FR-005",
       "spec": "001-dispatch-map",
-      "status": "aligned",
+      "status": "drifted",
       "description": "convert_to_storage transitions Staging->BlockDevice, sets ssd_offset on MemoryTier, conditional read_ref decrement",
-      "location": "src/lib.rs:185-219",
-      "notes": "Error on already BlockDevice; conditional decrement only if read_ref>0"
+      "location": "src/lib.rs:157-188",
+      "notes": "No Staging variant to transition from. Only handles MemoryTier (sets ssd_offset) and rejects BlockDevice. Conditional read_ref decrement when read_ref>0 is correct. Error on already-BlockDevice is correct."
     },
     {
       "req_id": "FR-006",
       "spec": "001-dispatch-map",
       "status": "aligned",
       "description": "take_read waits until write_ref=0 with 2000ms timeout, then increments read_ref",
-      "location": "src/lib.rs:222-245",
-      "notes": "Uses wait_for with DEFAULT_TIMEOUT"
+      "location": "src/lib.rs:191-213",
+      "notes": "Uses wait_for with DEFAULT_TIMEOUT (2000ms); returns Timeout on failure"
     },
     {
       "req_id": "FR-007",
       "spec": "001-dispatch-map",
       "status": "aligned",
       "description": "take_write waits until read_ref=0 and write_ref=0 with 2000ms timeout",
-      "location": "src/lib.rs:247-269",
-      "notes": "Uses wait_for with DEFAULT_TIMEOUT; sets write_ref=1"
+      "location": "src/lib.rs:216-238",
+      "notes": "Uses wait_for with DEFAULT_TIMEOUT; sets write_ref=1 on success"
     },
     {
       "req_id": "FR-008",
       "spec": "001-dispatch-map",
       "status": "aligned",
       "description": "release_read decrements read_ref, error on underflow",
-      "location": "src/lib.rs:272-289",
-      "notes": "Returns RefCountUnderflow if read_ref already 0"
+      "location": "src/lib.rs:241-258",
+      "notes": "Returns RefCountUnderflow if read_ref already 0; notifies condvar on success"
     },
     {
       "req_id": "FR-009",
       "spec": "001-dispatch-map",
       "status": "aligned",
       "description": "release_write decrements write_ref, error on underflow",
-      "location": "src/lib.rs:292-309",
-      "notes": "Returns RefCountUnderflow if write_ref already 0"
+      "location": "src/lib.rs:261-278",
+      "notes": "Returns RefCountUnderflow if write_ref already 0; sets write_ref=0; notifies condvar"
     },
     {
       "req_id": "FR-010",
       "spec": "001-dispatch-map",
       "status": "aligned",
       "description": "downgrade_reference atomically transitions write to read reference",
-      "location": "src/lib.rs:312-334",
-      "notes": "write_ref=0, read_ref+=1 in single critical section; error if no write ref held"
+      "location": "src/lib.rs:281-303",
+      "notes": "write_ref=0, read_ref+=1 in single critical section; error if no write ref held; notifies condvar"
     },
     {
       "req_id": "FR-011",
       "spec": "001-dispatch-map",
       "status": "aligned",
       "description": "remove deletes entry, error if active references",
-      "location": "src/lib.rs:336-354",
-      "notes": "Checks read_ref>0 || write_ref>0 before removal"
+      "location": "src/lib.rs:305-328",
+      "notes": "Checks read_ref>0 || write_ref>0; also removes from eviction policy"
     },
     {
       "req_id": "FR-012",
       "spec": "001-dispatch-map",
       "status": "aligned",
-      "description": "initialize recovers extents via IExtentManager::for_each_extent; Ok(()) if unbound",
-      "location": "src/lib.rs:60-99",
-      "notes": "Populates map with BlockDevice entries from extent manager; handles unbound case"
+      "description": "IEvictionPolicy must be connected (error if unbound); recovers from IExtentManager via for_each_extent; Ok(()) if no IExtentManager bound",
+      "location": "src/lib.rs:67-111",
+      "notes": "Returns NotInitialized error if eviction_policy unconnected; populates map with BlockDevice entries from extent manager"
     },
     {
       "req_id": "FR-013",
@@ -120,62 +120,62 @@
       "status": "aligned",
       "description": "ILogger receptacle used for info, debug, and error logging",
       "location": "src/lib.rs (throughout all methods)",
-      "notes": "Logger used in set_dma_alloc, initialize, create_staging, lookup, convert_to_storage, all ref operations, remove, memory-tier methods"
+      "notes": "Logger used in initialize, lookup, convert_to_storage, take_read, take_write, release_read, release_write, downgrade_reference, remove, create_memory_tier_entry, convert_memory_tier_to_block"
     },
     {
       "req_id": "FR-015",
       "spec": "001-dispatch-map",
       "status": "aligned",
-      "description": "define_component! with IDispatchMap provider, ILogger and IExtentManager receptacles",
-      "location": "src/lib.rs:33-45",
-      "notes": "Correct macro usage with version, provides, receptacles, and fields"
+      "description": "define_component! with IDispatchMap provider, ILogger/IExtentManager/IEvictionPolicy receptacles",
+      "location": "src/lib.rs:32-45",
+      "notes": "Correct macro usage with version 0.2.0, provides [IDispatchMap], receptacles for logger, extent_manager, eviction_policy"
     },
     {
       "req_id": "FR-016",
       "spec": "001-dispatch-map",
       "status": "aligned",
-      "description": "touch(key) updates TSC without acquiring references, returns KeyNotFound if missing",
-      "location": "src/lib.rs:356-363",
-      "notes": "Updates entry.tsc via rdtsc(); no ref count modification"
+      "description": "touch(key) marks entry as most-recently-used via IEvictionPolicy, no references acquired, KeyNotFound if missing",
+      "location": "src/lib.rs:330-342",
+      "notes": "Gets eviction_handle from entry, calls ep.touch(handle); no ref count modification"
     },
     {
       "req_id": "FR-017",
       "spec": "001-dispatch-map",
       "status": "aligned",
-      "description": "oldest_keys(n) returns up to n keys sorted by ascending TSC",
-      "location": "src/lib.rs:375-384",
-      "notes": "Collects all entries, sorts by tsc, takes n; thread-safe via mutex"
+      "description": "oldest_keys(n) delegates to IEvictionPolicy::peek_oldest(pool, n), thread-safe",
+      "location": "src/lib.rs:353-359",
+      "notes": "Gets pool_id, calls ep.peek_oldest(pool_id, n); returns Vec<CacheKey>"
     },
     {
       "req_id": "FR-018",
       "spec": "001-dispatch-map",
-      "status": "drifted",
-      "description": "MemoryTier variant with pointer/size/ssd_offset; create_memory_tier_entry and convert_memory_tier_to_block methods",
-      "location": "src/lib.rs:424",
-      "notes": "Spec says convert_memory_tier_to_block(key, offset) but implementation is convert_memory_tier_to_block(key) — reads offset from ssd_offset field already set by convert_to_storage. Minor signature mismatch."
+      "status": "aligned",
+      "description": "MemoryTier variant with pointer/size/ssd_offset; create_memory_tier_entry(key, pointer, size) and convert_memory_tier_to_block(key)",
+      "location": "src/lib.rs:362-443, src/entry.rs:11-16",
+      "notes": "create_memory_tier_entry creates with write_ref=1, rejects size=0 and duplicates. convert_memory_tier_to_block reads offset from ssd_offset field. Spec says offset is 'read from the entry's internal ssd_offset field rather than passed as a parameter' which matches implementation."
     },
     {
       "req_id": "FR-019",
       "spec": "001-dispatch-map",
-      "status": "aligned",
-      "description": "set_dma_alloc(alloc) injects DMA allocator for create_staging",
-      "location": "src/lib.rs:48-54",
-      "notes": "Stores in Mutex<Option<DmaAllocFn>>; logs when set"
+      "status": "not_implemented",
+      "description": "set_dma_alloc(alloc) for injecting DMA allocator used by create_staging",
+      "location": null,
+      "notes": "Method does not exist. create_staging was removed; create_memory_tier_entry accepts pre-allocated pointer so DMA alloc injection is unnecessary. Intentional architectural removal."
     },
     {
       "req_id": "FR-020",
       "spec": "001-dispatch-map",
       "status": "aligned",
-      "description": "initialize() is explicit public API, not called during construction",
-      "location": "src/lib.rs:60-99",
-      "notes": "Constructor only sets up state; initialize() must be called explicitly"
+      "description": "initialize() is explicit public API, not implicitly called during construction",
+      "location": "src/lib.rs:67",
+      "notes": "Must be called explicitly after binding receptacles"
     },
     {
       "req_id": "FR-021",
       "spec": "001-dispatch-map",
       "status": "aligned",
       "description": "convert_to_storage on MemoryTier sets ssd_offset rather than transitioning to BlockDevice",
-      "location": "src/lib.rs:196-198",
+      "location": "src/lib.rs:165-166",
       "notes": "Match arm for Location::MemoryTier sets *ssd_offset = Some(offset)"
     },
     {
@@ -183,23 +183,71 @@
       "spec": "001-dispatch-map",
       "status": "aligned",
       "description": "is_evictable(key) returns true iff MemoryTier with ssd_offset:Some and no active refs",
-      "location": "src/lib.rs:465-478",
-      "notes": "Checks read_ref==0, write_ref==0, Location::MemoryTier{ssd_offset: Some(_)}; false for all other cases"
+      "location": "src/lib.rs:445-458",
+      "notes": "Checks read_ref==0, write_ref==0, Location::MemoryTier{ssd_offset: Some(_)}; returns false for non-existent, non-MemoryTier, no ssd_offset, or active refs"
     },
     {
       "req_id": "FR-023",
       "spec": "001-dispatch-map",
       "status": "aligned",
-      "description": "entry_size(key) returns size in bytes (size_blocks * 4096) without acquiring references",
-      "location": "src/lib.rs:366-373",
-      "notes": "Returns KeyNotFound if key does not exist"
+      "description": "entry_size(key) returns size_blocks * 4096 without acquiring references, KeyNotFound on missing key",
+      "location": "src/lib.rs:344-351",
+      "notes": "Returns stored size in block-aligned bytes; no ref count changes"
+    },
+    {
+      "req_id": "SC-001",
+      "spec": "001-dispatch-map",
+      "status": "aligned",
+      "description": "All committed extents recoverable from persistent storage on initialization",
+      "location": "src/lib.rs:90-103",
+      "notes": "for_each_extent iterates all extents and inserts them into the map"
+    },
+    {
+      "req_id": "SC-002",
+      "spec": "001-dispatch-map",
+      "status": "aligned",
+      "description": "Concurrent readers experience no data corruption or deadlocks",
+      "location": "src/state.rs",
+      "notes": "Mutex serializes all entry access; Condvar provides blocking semantics without busy-waiting"
+    },
+    {
+      "req_id": "SC-003",
+      "spec": "001-dispatch-map",
+      "status": "aligned",
+      "description": "Write-to-read downgrade completes atomically with no unprotected window",
+      "location": "src/lib.rs:281-303",
+      "notes": "Both write_ref=0 and read_ref+=1 happen inside single lock acquisition"
+    },
+    {
+      "req_id": "SC-004",
+      "spec": "001-dispatch-map",
+      "status": "drifted",
+      "description": "DispatchEntry struct size varies by Location variant (Staging includes Arc<DmaBuffer>)",
+      "location": "src/entry.rs:27-35",
+      "notes": "Staging variant no longer exists. Entry size now varies between BlockDevice (offset: u64) and MemoryTier (pointer + size + ssd_offset). The reference to Arc<DmaBuffer> is obsolete."
+    },
+    {
+      "req_id": "SC-005",
+      "spec": "001-dispatch-map",
+      "status": "aligned",
+      "description": "Lookup completes without blocking when no writer is active",
+      "location": "src/lib.rs:114-119",
+      "notes": "wait_for predicate satisfied immediately when write_ref==0"
+    },
+    {
+      "req_id": "SC-006",
+      "spec": "001-dispatch-map",
+      "status": "aligned",
+      "description": "All ref count operations maintain consistent counts, no leaks or underflows",
+      "location": "src/lib.rs (all ref methods)",
+      "notes": "Underflow checks on release; checked_add on increment; atomic downgrade"
     }
   ],
   "unspecced": [
     {
-      "feature": "recover_extent(key, offset, size_blocks) — directly inserts BlockDevice entry",
-      "location": "src/lib.rs:480-499",
-      "notes": "Present in IDispatchMap interface; used for incremental recovery bypassing initialize()"
+      "feature": "recover_extent(key, offset, size_blocks) — directly inserts BlockDevice entry with eviction tracking",
+      "location": "src/lib.rs:460-483",
+      "notes": "Present in IDispatchMap interface (interfaces/src/idispatch_map.rs:237-243). Used for incremental recovery bypassing initialize(). Returns AlreadyExists if key present."
     },
     {
       "feature": "entry_size() module-level free function — returns sizeof(DispatchEntry)",
