@@ -32,6 +32,7 @@ tonic = { version = "0.12", features = ["tls"] }
 prost = "0.13"
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
+crossbeam-channel = "0.5"
 
 # OpenTelemetry (optional, enabled via --features otel)
 opentelemetry = { version = "0.27", optional = true }

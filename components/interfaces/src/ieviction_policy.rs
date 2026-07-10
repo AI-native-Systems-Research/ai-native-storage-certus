@@ -28,7 +28,6 @@ impl EvictionHandle {
 /// Identifier for an independent eviction tracking pool.
 pub type PoolId = u32;
 
-
 /// Errors returned by `IEvictionPolicy` operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EvictionPolicyError {

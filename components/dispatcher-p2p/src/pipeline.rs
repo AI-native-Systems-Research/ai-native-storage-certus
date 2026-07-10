@@ -770,7 +770,8 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
             }
             Ok(Completion::Timeout { handle }) => {
                 return Err(DispatcherError::IoError(format!(
-                    "P2P NVMe read timeout (handle {:?})", handle
+                    "P2P NVMe read timeout (handle {:?})",
+                    handle
                 )));
             }
             Ok(other) => {
@@ -787,7 +788,9 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
 
         let slot = ring_offset + (completed % ring_size);
         let seg = &segments[completed];
-        let copy_len = seg.length.min(total_bytes.saturating_sub(seg.buffer_offset));
+        let copy_len = seg
+            .length
+            .min(total_bytes.saturating_sub(seg.buffer_offset));
         // Distribute D2D copies across all streams for maximum throughput.
         let current_stream = all_streams[completed % num_streams];
 
@@ -812,8 +815,7 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
         let next_completed = completed + 1;
         if next_to_submit < num_chunks {
             // We need to sync before recycling if we've wrapped around the ring.
-            let needs_sync = next_completed > 0
-                && next_completed % sync_interval == 0;
+            let needs_sync = next_completed > 0 && next_completed % sync_interval == 0;
 
             if needs_sync {
                 for s in all_streams {
@@ -838,9 +840,7 @@ pub unsafe fn pipelined_ssd_to_gpu_p2p(
                     tag: next_to_submit as u64,
                 })
                 .map_err(|e| {
-                    DispatcherError::IoError(format!(
-                        "P2P ReadAsync submit #{next_to_submit}: {e}"
-                    ))
+                    DispatcherError::IoError(format!("P2P ReadAsync submit #{next_to_submit}: {e}"))
                 })?;
             next_to_submit += 1;
         }
@@ -979,7 +979,9 @@ pub unsafe fn pipelined_multi_object_p2p(
 
                     let job = &jobs[obj_idx];
                     let seg = &all_objs[obj_idx].segments[seg_idx];
-                    let copy_len = seg.length.min(job.total_bytes.saturating_sub(seg.buffer_offset));
+                    let copy_len = seg
+                        .length
+                        .min(job.total_bytes.saturating_sub(seg.buffer_offset));
                     let slot = ring_offset + ((completed - 1) % ring_size);
                     let current_stream = all_streams[(completed - 1) % num_streams];
 
@@ -1030,7 +1032,8 @@ pub unsafe fn pipelined_multi_object_p2p(
                         {
                             for r in &mut results {
                                 if r.is_ok() {
-                                    *r = Err(DispatcherError::IoError("channel send failed".into()));
+                                    *r =
+                                        Err(DispatcherError::IoError("channel send failed".into()));
                                 }
                             }
                             break;
@@ -1040,31 +1043,47 @@ pub unsafe fn pipelined_multi_object_p2p(
                 }
             }
             Ok(Completion::Timeout { handle }) => {
-                return results.into_iter().map(|r| {
-                    if r.is_ok() {
-                        Err(DispatcherError::IoError(format!("P2P NVMe timeout (handle {:?})", handle)))
-                    } else {
-                        r
-                    }
-                }).collect();
+                return results
+                    .into_iter()
+                    .map(|r| {
+                        if r.is_ok() {
+                            Err(DispatcherError::IoError(format!(
+                                "P2P NVMe timeout (handle {:?})",
+                                handle
+                            )))
+                        } else {
+                            r
+                        }
+                    })
+                    .collect();
             }
             Ok(other) => {
-                return results.into_iter().map(|r| {
-                    if r.is_ok() {
-                        Err(DispatcherError::IoError(format!("P2P unexpected completion: {other:?}")))
-                    } else {
-                        r
-                    }
-                }).collect();
+                return results
+                    .into_iter()
+                    .map(|r| {
+                        if r.is_ok() {
+                            Err(DispatcherError::IoError(format!(
+                                "P2P unexpected completion: {other:?}"
+                            )))
+                        } else {
+                            r
+                        }
+                    })
+                    .collect();
             }
             Err(_) => {
-                return results.into_iter().map(|r| {
-                    if r.is_ok() {
-                        Err(DispatcherError::IoError("P2P completion channel disconnected".into()))
-                    } else {
-                        r
-                    }
-                }).collect();
+                return results
+                    .into_iter()
+                    .map(|r| {
+                        if r.is_ok() {
+                            Err(DispatcherError::IoError(
+                                "P2P completion channel disconnected".into(),
+                            ))
+                        } else {
+                            r
+                        }
+                    })
+                    .collect();
             }
         }
     }
@@ -1136,9 +1155,10 @@ pub unsafe fn pipelined_ssd_to_dram_only(
         .map(|seg| {
             let ptr = unsafe { mem_tier_ptr.add(seg.buffer_offset) as *mut std::ffi::c_void };
             let buf_size = seg.length.next_multiple_of(block_size);
-            let buf = unsafe { DmaBuffer::from_raw(ptr, buf_size, noop_free, -1) }.map_err(
-                |e| DispatcherError::AllocationFailed(format!("DmaBuffer wrap chunk: {e}")),
-            )?;
+            let buf =
+                unsafe { DmaBuffer::from_raw(ptr, buf_size, noop_free, -1) }.map_err(|e| {
+                    DispatcherError::AllocationFailed(format!("DmaBuffer wrap chunk: {e}"))
+                })?;
             Ok(Arc::new(Mutex::new(buf)))
         })
         .collect::<Result<Vec<_>, DispatcherError>>()?;
@@ -1157,18 +1177,14 @@ pub unsafe fn pipelined_ssd_to_dram_only(
                 timeout_ms: READ_TIMEOUT_MS,
                 tag: submitted as u64,
             })
-            .map_err(|e| {
-                DispatcherError::IoError(format!("ReadAsync send #{submitted}: {e}"))
-            })?;
+            .map_err(|e| DispatcherError::IoError(format!("ReadAsync send #{submitted}: {e}")))?;
         submitted += 1;
     }
 
     while completed < num_chunks {
         match channels.completion_rx.recv() {
             Ok(Completion::ReadDone { tag: _, result, .. }) => {
-                result.map_err(|e| {
-                    DispatcherError::IoError(format!("SSD read failed: {e}"))
-                })?;
+                result.map_err(|e| DispatcherError::IoError(format!("SSD read failed: {e}")))?;
 
                 completed += 1;
 
@@ -1265,7 +1281,10 @@ pub unsafe fn pipelined_multi_ssd_to_dram_only(
             .collect();
 
         total_segments += segments.len();
-        all_objs.push(ObjSegments { segments, chunk_bufs });
+        all_objs.push(ObjSegments {
+            segments,
+            chunk_bufs,
+        });
     }
 
     if total_segments == 0 {
