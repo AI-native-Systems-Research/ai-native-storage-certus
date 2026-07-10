@@ -13,6 +13,9 @@ dependencies = [
     "torch",
     "numpy",
 ]
+# vLLM is provided by the runtime environment (heavy GPU dependency); the
+# connector targets its v1 kv_offload OffloadingSpec API as of this release.
+# vllm==0.20.0
 
 [project.optional-dependencies]
 dev = ["pytest", "grpcio-tools>=1.60.0"]

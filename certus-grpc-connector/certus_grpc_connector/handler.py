@@ -109,7 +109,7 @@ class GpuToCertusHandler(_GrpcHandler):
         src_spec, dst_spec = spec
         assert isinstance(src_spec, GPULoadStoreSpec)
         assert isinstance(dst_spec, CertusLoadStoreSpec)
-        gpu_block_ids = list(src_spec.block_ids)
+        gpu_block_ids = [int(b) for b in src_spec.block_ids]
         keys = dst_spec.keys
         return self._submit(job_id, gpu_block_ids, keys)
 
@@ -134,7 +134,7 @@ class CertusToGpuHandler(_GrpcHandler):
         src_spec, dst_spec = spec
         assert isinstance(src_spec, CertusLoadStoreSpec)
         assert isinstance(dst_spec, GPULoadStoreSpec)
-        gpu_block_ids = list(dst_spec.block_ids)
+        gpu_block_ids = [int(b) for b in dst_spec.block_ids]
         keys = src_spec.keys
         return self._submit(job_id, gpu_block_ids, keys)
 

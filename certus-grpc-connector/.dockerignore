@@ -1,0 +1,10 @@
+# Build context is the repo root; exclude everything heavy and irrelevant to
+# the vLLM client image (only certus-grpc-connector/ and the one dataset are
+# COPYed). Listed here for when the context is trimmed to this subtree.
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+target/
+deps/spdk/
+deps/spdk-build/
+.git/

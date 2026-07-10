@@ -60,7 +60,9 @@ class KvCacheIpc:
     base_delta: int  # data_ptr - alloc_base
 
     def block_offset(self, block_id: int) -> int:
-        return self.base_delta + block_id * self.stride_bytes
+        # int() guards against numpy int64 block ids (GPULoadStoreSpec stores
+        # block_ids as an np.int64 array), which protobuf's uint64 field rejects.
+        return int(self.base_delta + int(block_id) * self.stride_bytes)
 
 
 def current_device() -> int:

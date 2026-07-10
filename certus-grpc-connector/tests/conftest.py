@@ -65,9 +65,12 @@ def _install_fake_vllm() -> None:
     abstract.PrepareStoreOutput = PrepareStoreOutput
     abstract.OffloadingManager = OffloadingManager
 
+    import numpy as np
+
     class GPULoadStoreSpec(LoadStoreSpec):
-        def __init__(self, block_ids):
-            self.block_ids = block_ids
+        # Mirror vLLM 0.20.0: block_ids stored as an np.int64 array.
+        def __init__(self, block_ids, group_sizes=None, block_indices=None):
+            self.block_ids = np.array(block_ids, dtype=np.int64)
 
     mediums.GPULoadStoreSpec = GPULoadStoreSpec
 
