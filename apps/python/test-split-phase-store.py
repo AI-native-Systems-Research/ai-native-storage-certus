@@ -444,6 +444,246 @@ def test_pin_nonexistent(stub, block_size):
     print("    Pin:       correctly rejected (KeyNotFound)")
 
 
+def test_pin_double_pin_unpin(stub, keys, block_size, pop_ptrs, pop_handles):
+    """Pin twice → Unpin once → entry still pinned → Unpin again → fully unpinned."""
+    print("\n  [TEST] Double Pin: Pin×2 → Unpin×1 (still pinned) → Unpin×1 → Remove")
+
+    # Populate entries
+    for i, key in enumerate(keys):
+        gpu_write(pop_ptrs[i], make_pattern(key, block_size))
+
+    pop_entries = [
+        dispatcher_pb2.PopulateEntry(
+            key=k,
+            ipc_handle=dispatcher_pb2.IpcHandle(
+                cuda_ipc_handle=pop_handles[i],
+                size=block_size,
+            ),
+        )
+        for i, k in enumerate(keys)
+    ]
+    resp = stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=pop_entries))
+    assert_all_success(resp, "Populate")
+    print("    Populate:    OK")
+
+    # Pin twice (refcount should go to 2)
+    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=keys))
+    assert_all_success(resp, "Pin (first)")
+    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=keys))
+    assert_all_success(resp, "Pin (second)")
+    print("    Pin×2:       OK (refcount=2)")
+
+    # Unpin once (refcount drops to 1, still pinned)
+    resp = stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=keys))
+    assert_all_success(resp, "Unpin (first)")
+    print("    Unpin×1:     OK (refcount=1)")
+
+    # Entries should still exist
+    exists = check_exists(stub, keys)
+    for k in keys:
+        if not exists.get(k, False):
+            raise AssertionError(f"Key {k} disappeared while still pinned (refcount=1)")
+    print("    Still exists: OK")
+
+    # Unpin again (refcount drops to 0, fully unpinned)
+    resp = stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=keys))
+    assert_all_success(resp, "Unpin (second)")
+    print("    Unpin×2:     OK (refcount=0)")
+
+    # Cleanup
+    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    print("    Cleanup:     OK")
+
+
+def test_pin_lookup_while_pinned(stub, keys, block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles):
+    """Populate → Pin → Lookup (data still accessible) → Unpin → Remove."""
+    print("\n  [TEST] Lookup while pinned: Populate → Pin → Lookup → Unpin → Remove")
+
+    # Write unique patterns and populate
+    patterns = {}
+    for i, key in enumerate(keys):
+        pattern = make_pattern(key, block_size)
+        patterns[key] = pattern
+        gpu_write(pop_ptrs[i], pattern)
+
+    pop_entries = [
+        dispatcher_pb2.PopulateEntry(
+            key=k,
+            ipc_handle=dispatcher_pb2.IpcHandle(
+                cuda_ipc_handle=pop_handles[i],
+                size=block_size,
+            ),
+        )
+        for i, k in enumerate(keys)
+    ]
+    resp = stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=pop_entries))
+    assert_all_success(resp, "Populate")
+    print("    Populate:  OK")
+
+    # Pin
+    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=keys))
+    assert_all_success(resp, "Pin")
+    print("    Pin:       OK")
+
+    # Lookup while pinned — should work and return correct data
+    lookup_entries = [
+        dispatcher_pb2.LookupEntry(
+            key=k,
+            ipc_handle=dispatcher_pb2.IpcHandle(
+                cuda_ipc_handle=lookup_handles[i],
+                size=block_size,
+            ),
+        )
+        for i, k in enumerate(keys)
+    ]
+    resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=lookup_entries))
+    _libcudart.cudaDeviceSynchronize()
+    assert_all_success(resp, "Lookup")
+
+    for i, k in enumerate(keys):
+        actual = gpu_read(lookup_ptrs[i], block_size)
+        if actual != patterns[k]:
+            first_bad = next(
+                (j for j in range(len(actual)) if actual[j] != patterns[k][j]), "?"
+            )
+            raise AssertionError(
+                f"Integrity fail while pinned: key={k}, first mismatch at byte {first_bad}"
+            )
+    print(f"    Lookup:    OK ({len(keys)} objects verified while pinned)")
+
+    # Unpin
+    resp = stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=keys))
+    assert_all_success(resp, "Unpin")
+    print("    Unpin:     OK")
+
+    # Cleanup
+    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    print("    Cleanup:   OK")
+
+
+def test_unpin_underflow(stub, keys, block_size, pop_ptrs, pop_handles):
+    """Populate → Pin → Unpin → Unpin again → expect error (refcount underflow)."""
+    print("\n  [TEST] Unpin underflow: Pin×1 → Unpin×2 → expect error on second")
+
+    # Populate
+    for i, key in enumerate(keys):
+        gpu_write(pop_ptrs[i], make_pattern(key, block_size))
+
+    pop_entries = [
+        dispatcher_pb2.PopulateEntry(
+            key=k,
+            ipc_handle=dispatcher_pb2.IpcHandle(
+                cuda_ipc_handle=pop_handles[i],
+                size=block_size,
+            ),
+        )
+        for i, k in enumerate(keys)
+    ]
+    resp = stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=pop_entries))
+    assert_all_success(resp, "Populate")
+    print("    Populate:  OK")
+
+    # Pin once
+    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=keys))
+    assert_all_success(resp, "Pin")
+    print("    Pin:       OK")
+
+    # Unpin once (valid — returns to 0)
+    resp = stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=keys))
+    assert_all_success(resp, "Unpin (first)")
+    print("    Unpin×1:   OK")
+
+    # Unpin again — should fail (refcount already 0)
+    resp = stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=keys))
+    for r in resp.results:
+        if r.success:
+            raise AssertionError(
+                f"Unpin key={r.key} succeeded when refcount should be 0 (expected error)"
+            )
+    print("    Unpin×2:   correctly rejected (underflow)")
+
+    # Cleanup
+    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    print("    Cleanup:   OK")
+
+
+def test_pin_with_split_phase_store(stub, keys, block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles):
+    """Reserve → CopyToStore → CommitStore → Pin → Lookup → Unpin → Remove.
+
+    Verifies Pin/Unpin works with entries created via the split-phase store path.
+    """
+    print("\n  [TEST] Pin with split-phase store: Reserve → Commit → Pin → Lookup → Unpin")
+
+    # Write patterns to GPU
+    patterns = {}
+    for i, key in enumerate(keys):
+        pattern = make_pattern(key, block_size)
+        patterns[key] = pattern
+        gpu_write(pop_ptrs[i], pattern)
+
+    # Reserve
+    entries = [
+        dispatcher_pb2.ReserveEntry(key=k, size=block_size)
+        for k in keys
+    ]
+    resp = stub.Reserve(dispatcher_pb2.BatchReserveRequest(entries=entries))
+    assert_all_success(resp, "Reserve")
+
+    # CopyToStore
+    copy_entries = [
+        dispatcher_pb2.CopyToStoreEntry(
+            key=k,
+            ipc_handle=dispatcher_pb2.IpcHandle(
+                cuda_ipc_handle=pop_handles[i],
+                size=block_size,
+            ),
+        )
+        for i, k in enumerate(keys)
+    ]
+    resp = stub.CopyToStore(dispatcher_pb2.BatchCopyToStoreRequest(entries=copy_entries))
+    assert_all_success(resp, "CopyToStore")
+
+    # CommitStore
+    resp = stub.CommitStore(dispatcher_pb2.BatchCommitStoreRequest(keys=keys))
+    assert_all_success(resp, "CommitStore")
+    print("    Split-phase store: OK")
+
+    # Pin the committed entries
+    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=keys))
+    assert_all_success(resp, "Pin")
+    print("    Pin:       OK")
+
+    # Lookup while pinned — verify data integrity
+    lookup_entries = [
+        dispatcher_pb2.LookupEntry(
+            key=k,
+            ipc_handle=dispatcher_pb2.IpcHandle(
+                cuda_ipc_handle=lookup_handles[i],
+                size=block_size,
+            ),
+        )
+        for i, k in enumerate(keys)
+    ]
+    resp = stub.Lookup(dispatcher_pb2.BatchLookupRequest(entries=lookup_entries))
+    _libcudart.cudaDeviceSynchronize()
+    assert_all_success(resp, "Lookup")
+
+    for i, k in enumerate(keys):
+        actual = gpu_read(lookup_ptrs[i], block_size)
+        if actual != patterns[k]:
+            raise AssertionError(f"Integrity fail: key={k} after split-phase + pin")
+    print(f"    Integrity: OK ({len(keys)} objects)")
+
+    # Unpin
+    resp = stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=keys))
+    assert_all_success(resp, "Unpin")
+    print("    Unpin:     OK")
+
+    # Cleanup
+    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    print("    Cleanup:   OK")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Integration test for split-phase store APIs"
@@ -489,7 +729,7 @@ def main():
     # background write-through between tests.
     key_sets = [
         [base_key + (t * num_objects) + i for i in range(num_objects)]
-        for t in range(7)
+        for t in range(12)
     ]
 
     # Connect
@@ -526,6 +766,18 @@ def main():
         )),
         ("unpin_without_pin", lambda: test_unpin_without_pin(stub, block_size)),
         ("pin_nonexistent", lambda: test_pin_nonexistent(stub, block_size)),
+        ("pin_double_pin_unpin", lambda: test_pin_double_pin_unpin(
+            stub, key_sets[7], block_size, pop_ptrs, pop_handles
+        )),
+        ("pin_lookup_while_pinned", lambda: test_pin_lookup_while_pinned(
+            stub, key_sets[8], block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles
+        )),
+        ("unpin_underflow", lambda: test_unpin_underflow(
+            stub, key_sets[9], block_size, pop_ptrs, pop_handles
+        )),
+        ("pin_with_split_phase_store", lambda: test_pin_with_split_phase_store(
+            stub, key_sets[10], block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles
+        )),
     ]
 
     all_keys = [k for ks in key_sets for k in ks]

@@ -619,7 +619,6 @@ impl DispatcherComponent {
         // convert_to_storage also decrements the read reference.
         let _ = write_handle.publish();
         let _ = dm.convert_to_storage(job.key, block_offset);
-        let _ = dm.release_read(job.key);
     }
 }
 
