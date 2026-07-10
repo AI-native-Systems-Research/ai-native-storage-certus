@@ -1,13 +1,13 @@
 {
-  "generated": "2026-05-05T00:00:00Z",
+  "generated": "2026-07-10T00:00:00Z",
   "project": "certus-server",
   "summary": {
-    "specs_analyzed": 1,
-    "requirements_checked": 14,
-    "aligned": 12,
-    "drifted": 2,
-    "not_implemented": 0,
-    "unspecced_features": 1
+    "specs_analyzed": 3,
+    "requirements_checked": 42,
+    "aligned": 37,
+    "drifted": 3,
+    "not_implemented": 2,
+    "unspecced_features": 5
   },
   "specs": [
     {
@@ -19,39 +19,152 @@
         "FR-003",
         "FR-004",
         "FR-005",
+        "FR-005b",
         "FR-006",
         "FR-007",
         "FR-008",
+        "FR-008b",
+        "FR-008c",
+        "FR-009",
         "FR-010",
+        "FR-011",
         "FR-013",
         "FR-014",
-        "FR-015"
+        "FR-015",
+        "FR-016",
+        "FR-017",
+        "FR-018",
+        "FR-019"
       ],
       "drifted": [
         {
-          "requirement": "FR-009",
-          "spec_text": "Server MUST shut down the dispatcher when receiving SIGTERM/SIGINT, draining active requests and completing all in-flight operations before exiting",
-          "actual": "Only SIGINT handled via tokio::signal::ctrl_c(); SIGTERM not caught, so 'kill <pid>' does not trigger graceful shutdown",
-          "location": "src/main.rs:244",
-          "severity": "moderate"
-        },
-        {
-          "requirement": "FR-011",
-          "spec_text": "IPC handle contains a memory address (or opaque identifier) and a size field, address transmitted as a 64-bit integer (pointer value)",
-          "actual": "IPC handle uses a 64-byte CUDA IPC memory handle (bytes field) plus uint32 size, which is superior for cross-process GPU sharing but diverges from spec assumption",
-          "location": "proto/dispatcher.proto:22-27",
+          "requirement": "FR-013",
+          "spec_text": "Server MUST accept multiple client connections but serialize request processing (one request at a time). Serialization is achieved via a Mutex around the dispatcher reference.",
+          "actual": "The dispatcher reference is wrapped in Arc (not Mutex). Serialization only occurs at the IPC cache Mutex and pending_stores Mutex. Multiple gRPC requests can execute concurrently on the tokio runtime via spawn_blocking; they only serialize on shared state access. This is actually better behavior but diverges from the stated serialization guarantee.",
+          "location": "src/service.rs:54-86",
           "severity": "minor"
         }
       ],
-      "not_implemented": []
+      "not_implemented": [],
+      "success_criteria": {
+        "SC-001": "aligned",
+        "SC-002": "aligned",
+        "SC-003": "aligned",
+        "SC-004": "aligned",
+        "SC-005": "aligned",
+        "SC-006": "aligned"
+      }
+    },
+    {
+      "id": "002-operational-config",
+      "title": "Operational Configuration & Lifecycle",
+      "aligned": [
+        "FR-001",
+        "FR-002",
+        "FR-003",
+        "FR-004",
+        "FR-005",
+        "FR-006",
+        "FR-007",
+        "FR-008",
+        "FR-009",
+        "FR-010",
+        "FR-011",
+        "FR-012"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-006",
+          "spec_text": "System MUST support --memory-tier-size accepting human-readable sizes (K/M/G suffixes, case-insensitive). Default is 2 GiB.",
+          "actual": "The parse_size() function supports K/M/G suffixes correctly. However, the CLI help text says 'Defaults to 256M' (line 44 comment) while the actual default constant DEFAULT_MEMORY_TIER_SIZE is 2 GiB (2 * 1024 * 1024 * 1024). The code is correct (2 GiB default) but the help text is misleading.",
+          "location": "src/main.rs:44,332",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": [],
+      "success_criteria": {
+        "SC-001": "aligned",
+        "SC-002": "aligned",
+        "SC-003": "aligned",
+        "SC-004": "aligned"
+      }
+    },
+    {
+      "id": "003-otel-observability",
+      "title": "OpenTelemetry Observability",
+      "aligned": [
+        "FR-001",
+        "FR-002",
+        "FR-003",
+        "FR-004",
+        "FR-005",
+        "FR-006",
+        "FR-007",
+        "FR-008",
+        "FR-009",
+        "FR-010",
+        "FR-011"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-005",
+          "spec_text": "certus.dispatcher.batch.size histogram with op attribute",
+          "actual": "The batch_size histogram is recorded via record_op() which passes the 'op' attribute correctly. However, the ops_total counter records the total entry count per batch rather than incrementing by 1 per batch operation. This means ops_total counts entries, not operations. The metric semantics are: 1 batch of 100 entries records ops_total += 100 rather than ops_total += 1.",
+          "location": "src/telemetry.rs:166-174",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": [
+        {
+          "requirement": "SC-002",
+          "spec_text": "Pipeline stage metrics correlate with hardware-measured latencies (within 10% for NVMe read, GPU DMA)",
+          "reason": "No validation harness exists to verify metric correlation with hardware measurements",
+          "severity": "low"
+        },
+        {
+          "requirement": "SC-003",
+          "spec_text": "Disabling the otel feature produces a binary with zero OTel dependencies and no runtime overhead",
+          "reason": "Not validated via CI/test; assumed correct from conditional compilation but no explicit check exists",
+          "severity": "low"
+        }
+      ],
+      "success_criteria": {
+        "SC-001": "aligned",
+        "SC-002": "not_implemented",
+        "SC-003": "not_implemented"
+      }
     }
   ],
   "unspecced": [
     {
-      "feature": "CUDA IPC handle open/close helpers",
-      "location": "src/service.rs:65-99",
-      "lines": 35,
-      "suggested_spec": "Update 001-grpc-dispatcher-server FR-011 assumptions"
+      "feature": "Split-phase store protocol (Reserve/CopyToStore/CommitStore/AbortStore RPCs)",
+      "location": "src/service.rs:528-763, proto/dispatcher.proto:22-32",
+      "description": "A 3-phase store protocol allowing clients to reserve memory, DMA copy from GPU, then commit or abort. Not covered by any spec.",
+      "suggested_spec": "Create new spec 004-split-phase-store or add to 001-grpc-dispatcher-server"
+    },
+    {
+      "feature": "Pin/Unpin RPCs with promote semantics",
+      "location": "src/service.rs:807-863, proto/dispatcher.proto:40-44",
+      "description": "Pin increments a reference count to prevent eviction; Unpin decrements it. Pin supports a 'promote' field that fire-and-forget promotes SSD-resident entries to memory tier after pinning. Not covered by any spec.",
+      "suggested_spec": "Create new spec 005-pinning or add to 001-grpc-dispatcher-server"
+    },
+    {
+      "feature": "TakeEvents RPC (eviction event drain)",
+      "location": "src/service.rs:865-901, proto/dispatcher.proto:47",
+      "description": "Non-blocking poll that drains eviction events from a crossbeam channel. Reports dropped_count for events lost due to channel overflow. Constructor accepts eviction_rx and eviction_dropped. Not covered by any spec.",
+      "suggested_spec": "Create new spec 006-eviction-events or add to 001-grpc-dispatcher-server"
+    },
+    {
+      "feature": "Eviction channel setup in main",
+      "location": "src/main.rs:350-351",
+      "description": "Creates a bounded crossbeam channel (capacity 16384) via disp_comp.create_eviction_channel() and tracks dropped events via AtomicU64. Infrastructure supporting TakeEvents.",
+      "suggested_spec": "Fold into TakeEvents spec"
+    },
+    {
+      "feature": "NUMA-aware memory-tier binding",
+      "location": "src/main.rs:225-232",
+      "description": "Memory-tier pool is bound to the NUMA node of the first selected drive (resolves via SPDK device list). Not mentioned in any spec.",
+      "suggested_spec": "Add to 002-operational-config as a new FR covering NUMA affinity"
     }
   ],
   "conflicts": []
