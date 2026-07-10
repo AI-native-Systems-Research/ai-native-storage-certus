@@ -60,6 +60,26 @@ class DispatcherStub(object):
                 request_serializer=dispatcher__pb2.BatchTouchRequest.SerializeToString,
                 response_deserializer=dispatcher__pb2.BatchTouchResponse.FromString,
                 _registered_method=True)
+        self.Reserve = channel.unary_unary(
+                '/certus.dispatcher.v1.Dispatcher/Reserve',
+                request_serializer=dispatcher__pb2.BatchReserveRequest.SerializeToString,
+                response_deserializer=dispatcher__pb2.BatchReserveResponse.FromString,
+                _registered_method=True)
+        self.CopyToStore = channel.unary_unary(
+                '/certus.dispatcher.v1.Dispatcher/CopyToStore',
+                request_serializer=dispatcher__pb2.BatchCopyToStoreRequest.SerializeToString,
+                response_deserializer=dispatcher__pb2.BatchCopyToStoreResponse.FromString,
+                _registered_method=True)
+        self.CommitStore = channel.unary_unary(
+                '/certus.dispatcher.v1.Dispatcher/CommitStore',
+                request_serializer=dispatcher__pb2.BatchCommitStoreRequest.SerializeToString,
+                response_deserializer=dispatcher__pb2.BatchCommitStoreResponse.FromString,
+                _registered_method=True)
+        self.AbortStore = channel.unary_unary(
+                '/certus.dispatcher.v1.Dispatcher/AbortStore',
+                request_serializer=dispatcher__pb2.BatchAbortStoreRequest.SerializeToString,
+                response_deserializer=dispatcher__pb2.BatchAbortStoreResponse.FromString,
+                _registered_method=True)
         self.ClearMemoryTier = channel.unary_unary(
                 '/certus.dispatcher.v1.Dispatcher/ClearMemoryTier',
                 request_serializer=dispatcher__pb2.ClearMemoryTierRequest.SerializeToString,
@@ -111,6 +131,34 @@ class DispatcherServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Reserve(self, request, context):
+        """Reserve memory-tier slots for split-phase store (no DMA, no dispatch-map registration).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CopyToStore(self, request, context):
+        """DMA-copy from GPU into previously reserved slots (server synchronizes stream internally).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CommitStore(self, request, context):
+        """Finalize reserved slots: register in dispatch-map and enqueue SSD write-through.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def AbortStore(self, request, context):
+        """Cancel reserved slots without populating (idempotent).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ClearMemoryTier(self, request, context):
         """Clear all entries from the memory-tier cache pool.
         """
@@ -119,7 +167,7 @@ class DispatcherServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def FlushToSsd(self, request, context):
-        """Flush all pending background write-through jobs to SSD and block until done.
+        """Flush all pending background write-through jobs to SSD and block until complete.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -152,6 +200,26 @@ def add_DispatcherServicer_to_server(servicer, server):
                     servicer.Touch,
                     request_deserializer=dispatcher__pb2.BatchTouchRequest.FromString,
                     response_serializer=dispatcher__pb2.BatchTouchResponse.SerializeToString,
+            ),
+            'Reserve': grpc.unary_unary_rpc_method_handler(
+                    servicer.Reserve,
+                    request_deserializer=dispatcher__pb2.BatchReserveRequest.FromString,
+                    response_serializer=dispatcher__pb2.BatchReserveResponse.SerializeToString,
+            ),
+            'CopyToStore': grpc.unary_unary_rpc_method_handler(
+                    servicer.CopyToStore,
+                    request_deserializer=dispatcher__pb2.BatchCopyToStoreRequest.FromString,
+                    response_serializer=dispatcher__pb2.BatchCopyToStoreResponse.SerializeToString,
+            ),
+            'CommitStore': grpc.unary_unary_rpc_method_handler(
+                    servicer.CommitStore,
+                    request_deserializer=dispatcher__pb2.BatchCommitStoreRequest.FromString,
+                    response_serializer=dispatcher__pb2.BatchCommitStoreResponse.SerializeToString,
+            ),
+            'AbortStore': grpc.unary_unary_rpc_method_handler(
+                    servicer.AbortStore,
+                    request_deserializer=dispatcher__pb2.BatchAbortStoreRequest.FromString,
+                    response_serializer=dispatcher__pb2.BatchAbortStoreResponse.SerializeToString,
             ),
             'ClearMemoryTier': grpc.unary_unary_rpc_method_handler(
                     servicer.ClearMemoryTier,
@@ -300,6 +368,114 @@ class Dispatcher(object):
             '/certus.dispatcher.v1.Dispatcher/Touch',
             dispatcher__pb2.BatchTouchRequest.SerializeToString,
             dispatcher__pb2.BatchTouchResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Reserve(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/certus.dispatcher.v1.Dispatcher/Reserve',
+            dispatcher__pb2.BatchReserveRequest.SerializeToString,
+            dispatcher__pb2.BatchReserveResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CopyToStore(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/certus.dispatcher.v1.Dispatcher/CopyToStore',
+            dispatcher__pb2.BatchCopyToStoreRequest.SerializeToString,
+            dispatcher__pb2.BatchCopyToStoreResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CommitStore(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/certus.dispatcher.v1.Dispatcher/CommitStore',
+            dispatcher__pb2.BatchCommitStoreRequest.SerializeToString,
+            dispatcher__pb2.BatchCommitStoreResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def AbortStore(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/certus.dispatcher.v1.Dispatcher/AbortStore',
+            dispatcher__pb2.BatchAbortStoreRequest.SerializeToString,
+            dispatcher__pb2.BatchAbortStoreResponse.FromString,
             options,
             channel_credentials,
             insecure,

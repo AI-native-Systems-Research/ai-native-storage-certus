@@ -24,15 +24,15 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10\x64ispatcher.proto\x12\x14\x63\x65rtus.dispatcher.v1\"I\n\tIpcHandle\x12\x17\n\x0f\x63uda_ipc_handle\x18\x01 \x01(\x0c\x12\x0c\n\x04size\x18\x02 \x01(\r\x12\x15\n\rgpu_device_id\x18\x03 \x01(\x05\"w\n\x0b\x45ntryResult\x12\x0b\n\x03key\x18\x01 \x01(\x04\x12\x0f\n\x07success\x18\x02 \x01(\x08\x12\x33\n\nerror_code\x18\x03 \x01(\x0e\x32\x1f.certus.dispatcher.v1.ErrorCode\x12\x15\n\rerror_message\x18\x04 \x01(\t\"Q\n\rPopulateEntry\x12\x0b\n\x03key\x18\x01 \x01(\x04\x12\x33\n\nipc_handle\x18\x02 \x01(\x0b\x32\x1f.certus.dispatcher.v1.IpcHandle\"L\n\x14\x42\x61tchPopulateRequest\x12\x34\n\x07\x65ntries\x18\x01 \x03(\x0b\x32#.certus.dispatcher.v1.PopulateEntry\"K\n\x15\x42\x61tchPopulateResponse\x12\x32\n\x07results\x18\x01 \x03(\x0b\x32!.certus.dispatcher.v1.EntryResult\"O\n\x0bLookupEntry\x12\x0b\n\x03key\x18\x01 \x01(\x04\x12\x33\n\nipc_handle\x18\x02 \x01(\x0b\x32\x1f.certus.dispatcher.v1.IpcHandle\"H\n\x12\x42\x61tchLookupRequest\x12\x32\n\x07\x65ntries\x18\x01 \x03(\x0b\x32!.certus.dispatcher.v1.LookupEntry\"I\n\x13\x42\x61tchLookupResponse\x12\x32\n\x07results\x18\x01 \x03(\x0b\x32!.certus.dispatcher.v1.EntryResult\"!\n\x11\x42\x61tchCheckRequest\x12\x0c\n\x04keys\x18\x01 \x03(\x04\"*\n\x0b\x43heckResult\x12\x0b\n\x03key\x18\x01 \x01(\x04\x12\x0e\n\x06\x65xists\x18\x02 \x01(\x08\"H\n\x12\x42\x61tchCheckResponse\x12\x32\n\x07results\x18\x01 \x03(\x0b\x32!.certus.dispatcher.v1.CheckResult\"\"\n\x12\x42\x61tchRemoveRequest\x12\x0c\n\x04keys\x18\x01 \x03(\x04\"I\n\x13\x42\x61tchRemoveResponse\x12\x32\n\x07results\x18\x01 \x03(\x0b\x32!.certus.dispatcher.v1.EntryResult\"2\n\x11\x42\x61tchTouchRequest\x12\x0c\n\x04keys\x18\x01 \x03(\x04\x12\x0f\n\x07promote\x18\x02 \x01(\x08\"H\n\x12\x42\x61tchTouchResponse\x12\x32\n\x07results\x18\x01 \x03(\x0b\x32!.certus.dispatcher.v1.EntryResult\"\x18\n\x16\x43learMemoryTierRequest\"2\n\x17\x43learMemoryTierResponse\x12\x17\n\x0f\x65ntries_cleared\x18\x01 \x01(\x04\"\x13\n\x11\x46lushToSsdRequest\"*\n\x12\x46lushToSsdResponse\x12\x14\n\x0cjobs_flushed\x18\x01 \x01(\x04*\x97\x02\n\tErrorCode\x12\x1a\n\x16\x45RROR_CODE_UNSPECIFIED\x10\x00\x12\x1e\n\x1a\x45RROR_CODE_NOT_INITIALIZED\x10\x01\x12\x1c\n\x18\x45RROR_CODE_KEY_NOT_FOUND\x10\x02\x12\x1d\n\x19\x45RROR_CODE_ALREADY_EXISTS\x10\x03\x12 \n\x1c\x45RROR_CODE_ALLOCATION_FAILED\x10\x04\x12\x17\n\x13\x45RROR_CODE_IO_ERROR\x10\x05\x12\x16\n\x12\x45RROR_CODE_TIMEOUT\x10\x06\x12 \n\x1c\x45RROR_CODE_INVALID_PARAMETER\x10\x07\x12\x1c\n\x18\x45RROR_CODE_DUPLICATE_KEY\x10\x08\x32\xb8\x05\n\nDispatcher\x12\x63\n\x08Populate\x12*.certus.dispatcher.v1.BatchPopulateRequest\x1a+.certus.dispatcher.v1.BatchPopulateResponse\x12]\n\x06Lookup\x12(.certus.dispatcher.v1.BatchLookupRequest\x1a).certus.dispatcher.v1.BatchLookupResponse\x12Z\n\x05\x43heck\x12\'.certus.dispatcher.v1.BatchCheckRequest\x1a(.certus.dispatcher.v1.BatchCheckResponse\x12]\n\x06Remove\x12(.certus.dispatcher.v1.BatchRemoveRequest\x1a).certus.dispatcher.v1.BatchRemoveResponse\x12Z\n\x05Touch\x12\'.certus.dispatcher.v1.BatchTouchRequest\x1a(.certus.dispatcher.v1.BatchTouchResponse\x12n\n\x0f\x43learMemoryTier\x12,.certus.dispatcher.v1.ClearMemoryTierRequest\x1a-.certus.dispatcher.v1.ClearMemoryTierResponse\x12_\n\nFlushToSsd\x12\'.certus.dispatcher.v1.FlushToSsdRequest\x1a(.certus.dispatcher.v1.FlushToSsdResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10\x64ispatcher.proto\x12\x14\x63\x65rtus.dispatcher.v1\"I\n\tIpcHandle\x12\x17\n\x0f\x63uda_ipc_handle\x18\x01 \x01(\x0c\x12\x0c\n\x04size\x18\x02 \x01(\r\x12\x15\n\rgpu_device_id\x18\x03 \x01(\x05\"w\n\x0b\x45ntryResult\x12\x0b\n\x03key\x18\x01 \x01(\x04\x12\x0f\n\x07success\x18\x02 \x01(\x08\x12\x33\n\nerror_code\x18\x03 \x01(\x0e\x32\x1f.certus.dispatcher.v1.ErrorCode\x12\x15\n\rerror_message\x18\x04 \x01(\t\"Q\n\rPopulateEntry\x12\x0b\n\x03key\x18\x01 \x01(\x04\x12\x33\n\nipc_handle\x18\x02 \x01(\x0b\x32\x1f.certus.dispatcher.v1.IpcHandle\"L\n\x14\x42\x61tchPopulateRequest\x12\x34\n\x07\x65ntries\x18\x01 \x03(\x0b\x32#.certus.dispatcher.v1.PopulateEntry\"K\n\x15\x42\x61tchPopulateResponse\x12\x32\n\x07results\x18\x01 \x03(\x0b\x32!.certus.dispatcher.v1.EntryResult\"O\n\x0bLookupEntry\x12\x0b\n\x03key\x18\x01 \x01(\x04\x12\x33\n\nipc_handle\x18\x02 \x01(\x0b\x32\x1f.certus.dispatcher.v1.IpcHandle\"H\n\x12\x42\x61tchLookupRequest\x12\x32\n\x07\x65ntries\x18\x01 \x03(\x0b\x32!.certus.dispatcher.v1.LookupEntry\"I\n\x13\x42\x61tchLookupResponse\x12\x32\n\x07results\x18\x01 \x03(\x0b\x32!.certus.dispatcher.v1.EntryResult\"!\n\x11\x42\x61tchCheckRequest\x12\x0c\n\x04keys\x18\x01 \x03(\x04\"*\n\x0b\x43heckResult\x12\x0b\n\x03key\x18\x01 \x01(\x04\x12\x0e\n\x06\x65xists\x18\x02 \x01(\x08\"H\n\x12\x42\x61tchCheckResponse\x12\x32\n\x07results\x18\x01 \x03(\x0b\x32!.certus.dispatcher.v1.CheckResult\"\"\n\x12\x42\x61tchRemoveRequest\x12\x0c\n\x04keys\x18\x01 \x03(\x04\"I\n\x13\x42\x61tchRemoveResponse\x12\x32\n\x07results\x18\x01 \x03(\x0b\x32!.certus.dispatcher.v1.EntryResult\"2\n\x11\x42\x61tchTouchRequest\x12\x0c\n\x04keys\x18\x01 \x03(\x04\x12\x0f\n\x07promote\x18\x02 \x01(\x08\"H\n\x12\x42\x61tchTouchResponse\x12\x32\n\x07results\x18\x01 \x03(\x0b\x32!.certus.dispatcher.v1.EntryResult\")\n\x0cReserveEntry\x12\x0b\n\x03key\x18\x01 \x01(\x04\x12\x0c\n\x04size\x18\x02 \x01(\r\"J\n\x13\x42\x61tchReserveRequest\x12\x33\n\x07\x65ntries\x18\x01 \x03(\x0b\x32\".certus.dispatcher.v1.ReserveEntry\"J\n\x14\x42\x61tchReserveResponse\x12\x32\n\x07results\x18\x01 \x03(\x0b\x32!.certus.dispatcher.v1.EntryResult\"T\n\x10\x43opyToStoreEntry\x12\x0b\n\x03key\x18\x01 \x01(\x04\x12\x33\n\nipc_handle\x18\x02 \x01(\x0b\x32\x1f.certus.dispatcher.v1.IpcHandle\"R\n\x17\x42\x61tchCopyToStoreRequest\x12\x37\n\x07\x65ntries\x18\x01 \x03(\x0b\x32&.certus.dispatcher.v1.CopyToStoreEntry\"N\n\x18\x42\x61tchCopyToStoreResponse\x12\x32\n\x07results\x18\x01 \x03(\x0b\x32!.certus.dispatcher.v1.EntryResult\"\'\n\x17\x42\x61tchCommitStoreRequest\x12\x0c\n\x04keys\x18\x01 \x03(\x04\"N\n\x18\x42\x61tchCommitStoreResponse\x12\x32\n\x07results\x18\x01 \x03(\x0b\x32!.certus.dispatcher.v1.EntryResult\"&\n\x16\x42\x61tchAbortStoreRequest\x12\x0c\n\x04keys\x18\x01 \x03(\x04\"M\n\x17\x42\x61tchAbortStoreResponse\x12\x32\n\x07results\x18\x01 \x03(\x0b\x32!.certus.dispatcher.v1.EntryResult\"\x18\n\x16\x43learMemoryTierRequest\"2\n\x17\x43learMemoryTierResponse\x12\x17\n\x0f\x65ntries_cleared\x18\x01 \x01(\x04\"\x13\n\x11\x46lushToSsdRequest\"*\n\x12\x46lushToSsdResponse\x12\x14\n\x0cjobs_flushed\x18\x01 \x01(\x04*\x97\x02\n\tErrorCode\x12\x1a\n\x16\x45RROR_CODE_UNSPECIFIED\x10\x00\x12\x1e\n\x1a\x45RROR_CODE_NOT_INITIALIZED\x10\x01\x12\x1c\n\x18\x45RROR_CODE_KEY_NOT_FOUND\x10\x02\x12\x1d\n\x19\x45RROR_CODE_ALREADY_EXISTS\x10\x03\x12 \n\x1c\x45RROR_CODE_ALLOCATION_FAILED\x10\x04\x12\x17\n\x13\x45RROR_CODE_IO_ERROR\x10\x05\x12\x16\n\x12\x45RROR_CODE_TIMEOUT\x10\x06\x12 \n\x1c\x45RROR_CODE_INVALID_PARAMETER\x10\x07\x12\x1c\n\x18\x45RROR_CODE_DUPLICATE_KEY\x10\x08\x32\xe1\x08\n\nDispatcher\x12\x63\n\x08Populate\x12*.certus.dispatcher.v1.BatchPopulateRequest\x1a+.certus.dispatcher.v1.BatchPopulateResponse\x12]\n\x06Lookup\x12(.certus.dispatcher.v1.BatchLookupRequest\x1a).certus.dispatcher.v1.BatchLookupResponse\x12Z\n\x05\x43heck\x12\'.certus.dispatcher.v1.BatchCheckRequest\x1a(.certus.dispatcher.v1.BatchCheckResponse\x12]\n\x06Remove\x12(.certus.dispatcher.v1.BatchRemoveRequest\x1a).certus.dispatcher.v1.BatchRemoveResponse\x12Z\n\x05Touch\x12\'.certus.dispatcher.v1.BatchTouchRequest\x1a(.certus.dispatcher.v1.BatchTouchResponse\x12`\n\x07Reserve\x12).certus.dispatcher.v1.BatchReserveRequest\x1a*.certus.dispatcher.v1.BatchReserveResponse\x12l\n\x0b\x43opyToStore\x12-.certus.dispatcher.v1.BatchCopyToStoreRequest\x1a..certus.dispatcher.v1.BatchCopyToStoreResponse\x12l\n\x0b\x43ommitStore\x12-.certus.dispatcher.v1.BatchCommitStoreRequest\x1a..certus.dispatcher.v1.BatchCommitStoreResponse\x12i\n\nAbortStore\x12,.certus.dispatcher.v1.BatchAbortStoreRequest\x1a-.certus.dispatcher.v1.BatchAbortStoreResponse\x12n\n\x0f\x43learMemoryTier\x12,.certus.dispatcher.v1.ClearMemoryTierRequest\x1a-.certus.dispatcher.v1.ClearMemoryTierResponse\x12_\n\nFlushToSsd\x12\'.certus.dispatcher.v1.FlushToSsdRequest\x1a(.certus.dispatcher.v1.FlushToSsdResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'dispatcher_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_ERRORCODE']._serialized_start=1240
-  _globals['_ERRORCODE']._serialized_end=1519
+  _globals['_ERRORCODE']._serialized_start=1925
+  _globals['_ERRORCODE']._serialized_end=2204
   _globals['_IPCHANDLE']._serialized_start=42
   _globals['_IPCHANDLE']._serialized_end=115
   _globals['_ENTRYRESULT']._serialized_start=117
@@ -63,14 +63,34 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_BATCHTOUCHREQUEST']._serialized_end=1020
   _globals['_BATCHTOUCHRESPONSE']._serialized_start=1022
   _globals['_BATCHTOUCHRESPONSE']._serialized_end=1094
-  _globals['_CLEARMEMORYTIERREQUEST']._serialized_start=1096
-  _globals['_CLEARMEMORYTIERREQUEST']._serialized_end=1120
-  _globals['_CLEARMEMORYTIERRESPONSE']._serialized_start=1122
-  _globals['_CLEARMEMORYTIERRESPONSE']._serialized_end=1172
-  _globals['_FLUSHTOSSDREQUEST']._serialized_start=1174
-  _globals['_FLUSHTOSSDREQUEST']._serialized_end=1193
-  _globals['_FLUSHTOSSDRESPONSE']._serialized_start=1195
-  _globals['_FLUSHTOSSDRESPONSE']._serialized_end=1237
-  _globals['_DISPATCHER']._serialized_start=1522
-  _globals['_DISPATCHER']._serialized_end=2218
+  _globals['_RESERVEENTRY']._serialized_start=1096
+  _globals['_RESERVEENTRY']._serialized_end=1137
+  _globals['_BATCHRESERVEREQUEST']._serialized_start=1139
+  _globals['_BATCHRESERVEREQUEST']._serialized_end=1213
+  _globals['_BATCHRESERVERESPONSE']._serialized_start=1215
+  _globals['_BATCHRESERVERESPONSE']._serialized_end=1289
+  _globals['_COPYTOSTOREENTRY']._serialized_start=1291
+  _globals['_COPYTOSTOREENTRY']._serialized_end=1375
+  _globals['_BATCHCOPYTOSTOREREQUEST']._serialized_start=1377
+  _globals['_BATCHCOPYTOSTOREREQUEST']._serialized_end=1459
+  _globals['_BATCHCOPYTOSTORERESPONSE']._serialized_start=1461
+  _globals['_BATCHCOPYTOSTORERESPONSE']._serialized_end=1539
+  _globals['_BATCHCOMMITSTOREREQUEST']._serialized_start=1541
+  _globals['_BATCHCOMMITSTOREREQUEST']._serialized_end=1580
+  _globals['_BATCHCOMMITSTORERESPONSE']._serialized_start=1582
+  _globals['_BATCHCOMMITSTORERESPONSE']._serialized_end=1660
+  _globals['_BATCHABORTSTOREREQUEST']._serialized_start=1662
+  _globals['_BATCHABORTSTOREREQUEST']._serialized_end=1700
+  _globals['_BATCHABORTSTORERESPONSE']._serialized_start=1702
+  _globals['_BATCHABORTSTORERESPONSE']._serialized_end=1779
+  _globals['_CLEARMEMORYTIERREQUEST']._serialized_start=1781
+  _globals['_CLEARMEMORYTIERREQUEST']._serialized_end=1805
+  _globals['_CLEARMEMORYTIERRESPONSE']._serialized_start=1807
+  _globals['_CLEARMEMORYTIERRESPONSE']._serialized_end=1857
+  _globals['_FLUSHTOSSDREQUEST']._serialized_start=1859
+  _globals['_FLUSHTOSSDREQUEST']._serialized_end=1878
+  _globals['_FLUSHTOSSDRESPONSE']._serialized_start=1880
+  _globals['_FLUSHTOSSDRESPONSE']._serialized_end=1922
+  _globals['_DISPATCHER']._serialized_start=2207
+  _globals['_DISPATCHER']._serialized_end=3328
 # @@protoc_insertion_point(module_scope)
