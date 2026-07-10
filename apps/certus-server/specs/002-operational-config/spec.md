@@ -122,6 +122,7 @@ A Python client calls `Touch` with `promote = true`. The server touches each ent
 - **FR-010**: The gRPC `FlushToSsd` method MUST block until all pending background write-through jobs complete, then return the count of flushed jobs.
 - **FR-011**: The gRPC `Touch` method MUST accept a `promote` boolean field. When true, touched entries that are SSD-resident are asynchronously promoted to the memory tier after the touch response is sent.
 - **FR-012**: The memory-tier pool MUST be registered with CUDA via `cudaHostRegister` after allocation. If registration fails, the server MUST log a warning and continue (fallback to staged transfer path).
+- **FR-013**: The memory-tier pool MUST be allocated on the NUMA node of the first selected NVMe drive. The server resolves the NUMA node by matching the first PCI address against the SPDK device list and passes the node ID to memory-tier initialization. This ensures DRAM and the primary NVMe drive share a NUMA domain for optimal DMA performance.
 
 ### CLI Interface
 
