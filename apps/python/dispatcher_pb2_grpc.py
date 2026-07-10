@@ -182,7 +182,7 @@ class DispatcherServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def FlushToSsd(self, request, context):
-        """Flush all pending background write-through jobs to SSD and block until done.
+        """Flush all pending background write-through jobs to SSD and block until complete.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')

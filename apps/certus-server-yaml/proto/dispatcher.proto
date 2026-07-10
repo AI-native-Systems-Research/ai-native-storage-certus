@@ -210,6 +210,10 @@ message FlushToSsdResponse {
 
 message BatchPinRequest {
   repeated uint64 keys = 1;
+  // When true, SSD-resident entries are promoted to the memory-tier (DRAM)
+  // after pinning. Combines prepare_load semantics (Pin + promote) into a
+  // single round-trip.
+  bool promote = 2;
 }
 
 message BatchPinResponse {

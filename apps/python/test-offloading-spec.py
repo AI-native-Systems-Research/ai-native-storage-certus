@@ -10,7 +10,7 @@ OffloadingSpec → Certus gRPC mapping:
     transfer_async(store: GPU→DRAM)  → CopyToStore
     complete_store(keys, success)    → CommitStore / AbortStore
     lookup(keys)                     → Check
-    prepare_load(keys)               → Pin + Touch(promote=true)
+    prepare_load(keys)               → Pin(promote=true)
     transfer_async(load: DRAM→GPU)   → Lookup (DMA readback)
     complete_load(keys)              → Unpin
     touch(keys)                      → Touch
@@ -394,29 +394,23 @@ def test_lookup_check(stub, keys, block_size, ptrs, handles):
 
 
 def test_prepare_load(stub, keys, block_size, ptrs, handles):
-    """OffloadingSpec.prepare_load → Pin + Touch(promote=true)
+    """OffloadingSpec.prepare_load → Pin(promote=true)
 
     Validates:
-    - Pin prevents eviction (entry survives after pinning)
-    - Touch with promote=true is accepted for memory-tier entries
+    - Pin(promote=true) pins AND promotes in a single round-trip
     - Pinned entries remain accessible
+    - Entry survives after pinning (not evicted)
     """
-    print("\n  [prepare_load] Pin + Touch(promote) protects entry for load")
+    print("\n  [prepare_load] Pin(promote=true) protects and promotes for load")
 
     for i, k in enumerate(keys):
         gpu_write(ptrs[i], make_pattern(k, block_size))
     populate_via_populate_rpc(stub, keys, block_size, ptrs, handles)
 
-    # Pin (prevents eviction during load)
-    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=keys))
-    assert_all_success(resp, "Pin")
-    print("    Pin:              OK")
-
-    # Touch with promote (for SSD-resident entries this promotes to DRAM;
-    # for memory-tier entries it just updates the eviction timestamp)
-    resp = stub.Touch(dispatcher_pb2.BatchTouchRequest(keys=keys, promote=True))
-    assert_all_success(resp, "Touch(promote)")
-    print("    Touch(promote):   OK")
+    # Pin with promote (single call replaces Pin + Touch(promote=true))
+    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=keys, promote=True))
+    assert_all_success(resp, "Pin(promote)")
+    print("    Pin(promote):     OK")
 
     # Entry still visible (not evicted)
     exists = check_exists(stub, keys)
@@ -576,7 +570,7 @@ def test_touch(stub, keys, block_size, ptrs, handles):
     print("    Cleanup:           OK")
 
 
-def test_take_events(stub, block_size, ptrs, handles):
+def test_take_events(stub, block_size, ptrs, handles, pool_size):
     """OffloadingSpec.take_events → TakeEvents (eviction drain)
 
     Validates:
@@ -602,7 +596,7 @@ def test_take_events(stub, block_size, ptrs, handles):
     # Flood memory-tier with pool_capacity + overflow to guarantee eviction.
     # We need MORE unique keys than pool slots so at least some must be evicted.
     # Use random base to avoid collisions with prior runs (keys persist on SSD).
-    pool_slots = (256 * 1024 * 1024) // block_size
+    pool_slots = pool_size // block_size
     overflow = max(64, pool_slots // 16)
     num_entries = pool_slots + overflow
     base_key = random.randint(500_000_000, 700_000_000)
@@ -838,11 +832,9 @@ def test_full_offloading_lifecycle(stub, keys, block_size, ptrs, handles, lu_ptr
         assert exists.get(k, False), f"Key {k} not found in Check"
     print("    4. lookup:        OK")
 
-    # 5. prepare_load → Pin + Touch(promote)
-    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=keys))
-    assert_all_success(resp, "Pin")
-    resp = stub.Touch(dispatcher_pb2.BatchTouchRequest(keys=keys, promote=True))
-    assert_all_success(resp, "Touch(promote)")
+    # 5. prepare_load → Pin(promote=true)
+    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=keys, promote=True))
+    assert_all_success(resp, "Pin(promote)")
     print("    5. prepare_load:  OK")
 
     # 6. transfer_async load → Lookup (DMA to GPU)
@@ -888,7 +880,7 @@ def test_full_offloading_lifecycle(stub, keys, block_size, ptrs, handles, lu_ptr
     print("    Cleanup:          OK")
 
 
-def test_pin_prevents_eviction(stub, block_size, ptrs, handles):
+def test_pin_prevents_eviction(stub, block_size, ptrs, handles, pool_size):
     """Pin semantics: pinned entries survive memory pressure.
 
     Validates that a pinned entry is NOT evicted even when the memory-tier
@@ -913,7 +905,7 @@ def test_pin_prevents_eviction(stub, block_size, ptrs, handles):
     stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
 
     # Flood memory-tier to trigger eviction
-    num_flood = (256 * 1024 * 1024) // block_size + 16
+    num_flood = pool_size // block_size + 16
     base_key = 600_100_000
     flood_keys = [base_key + i for i in range(num_flood)]
 
@@ -968,6 +960,10 @@ def main():
         help="Number of objects per test (default: 8)"
     )
     parser.add_argument("--gpu", type=int, default=0, help="GPU device index")
+    parser.add_argument(
+        "--memory-tier-size", type=parse_size, default=256 * 1024 * 1024,
+        help="Server memory-tier pool size (default: 256M). Must match server config."
+    )
     args = parser.parse_args()
 
     block_size = args.block_size
@@ -1054,10 +1050,10 @@ def main():
             load_ptrs, load_handles)),
         # Eviction events (floods memory-tier — run after non-pressure tests)
         ("take_events", lambda: test_take_events(
-            stub, block_size, store_ptrs, store_handles)),
+            stub, block_size, store_ptrs, store_handles, args.memory_tier_size)),
         # Pin-under-pressure
         ("pin_prevents_eviction", lambda: test_pin_prevents_eviction(
-            stub, block_size, store_ptrs, store_handles)),
+            stub, block_size, store_ptrs, store_handles, args.memory_tier_size)),
     ]
 
     all_keys = [k for ks in key_sets for k in ks]
