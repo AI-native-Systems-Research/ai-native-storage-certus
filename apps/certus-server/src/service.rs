@@ -1,6 +1,7 @@
 //! gRPC service implementation for the Certus Dispatcher.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tonic::{Request, Response, Status};
@@ -24,7 +25,7 @@ use proto::{
     BatchReserveResponse, BatchTouchRequest, BatchTouchResponse, CheckResult,
     BatchPinRequest, BatchPinResponse, BatchUnpinRequest, BatchUnpinResponse,
     ClearMemoryTierRequest, ClearMemoryTierResponse, EntryResult, ErrorCode, FlushToSsdRequest,
-    FlushToSsdResponse,
+    FlushToSsdResponse, TakeEventsRequest, TakeEventsResponse,
 };
 
 pub fn dispatcher_server(svc: DispatcherService) -> DispatcherServer<DispatcherService> {
@@ -54,16 +55,24 @@ pub struct DispatcherService {
     dispatcher: Arc<dyn IDispatcher + Send + Sync>,
     ipc_cache: IpcCache,
     pending_stores: PendingStores,
+    eviction_rx: crossbeam_channel::Receiver<dispatcher::EvictionEvent>,
+    eviction_dropped: Arc<AtomicU64>,
     #[cfg(feature = "otel")]
     metrics: Option<Metrics>,
 }
 
 impl DispatcherService {
-    pub fn new(dispatcher: Arc<dyn IDispatcher + Send + Sync>) -> Self {
+    pub fn new(
+        dispatcher: Arc<dyn IDispatcher + Send + Sync>,
+        eviction_rx: crossbeam_channel::Receiver<dispatcher::EvictionEvent>,
+        eviction_dropped: Arc<AtomicU64>,
+    ) -> Self {
         Self {
             dispatcher,
             ipc_cache: Arc::new(Mutex::new(HashMap::new())),
             pending_stores: Arc::new(Mutex::new(HashMap::new())),
+            eviction_rx,
+            eviction_dropped,
             #[cfg(feature = "otel")]
             metrics: None,
         }
@@ -840,6 +849,44 @@ impl Dispatcher for DispatcherService {
 
         Ok(Response::new(BatchUnpinResponse { results }))
     }
+
+    async fn take_events(
+        &self,
+        request: Request<TakeEventsRequest>,
+    ) -> Result<Response<TakeEventsResponse>, Status> {
+        let req = request.into_inner();
+        let max = req.max_events as usize;
+
+        let mut events = Vec::new();
+        loop {
+            match self.eviction_rx.try_recv() {
+                Ok(ev) => {
+                    events.push(proto::EvictionEvent {
+                        key: ev.key,
+                        reason: match ev.reason {
+                            dispatcher::EvictionReason::Demoted => {
+                                proto::EvictionReason::Demoted.into()
+                            }
+                            dispatcher::EvictionReason::Removed => {
+                                proto::EvictionReason::Removed.into()
+                            }
+                        },
+                    });
+                    if max > 0 && events.len() >= max {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+
+        let dropped_count = self.eviction_dropped.swap(0, Ordering::Relaxed);
+
+        Ok(Response::new(TakeEventsResponse {
+            events,
+            dropped_count,
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -848,6 +895,12 @@ mod tests {
     use std::sync::Arc;
 
     use interfaces::{DispatcherConfig, GpuStream};
+
+    fn test_service(dispatcher: Arc<dyn IDispatcher + Send + Sync>) -> DispatcherService {
+        let (_tx, rx) = crossbeam_channel::bounded(16);
+        let dropped = Arc::new(AtomicU64::new(0));
+        DispatcherService::new(dispatcher, rx, dropped)
+    }
 
     struct MockDispatcherState {
         populate_results: HashMap<u64, Result<(), DispatcherError>>,
@@ -1029,7 +1082,7 @@ mod tests {
     #[tokio::test]
     async fn populate_happy_path_uses_cached_ipc_and_stores() {
         let mock = Arc::new(MockDispatcher::default());
-        let service = DispatcherService::new(mock.clone());
+        let service = test_service(mock.clone());
         let ipc_handle = proto_ipc_handle(1);
         let key = handle_key(&ipc_handle);
         service
@@ -1075,7 +1128,7 @@ mod tests {
     #[tokio::test]
     async fn populate_reports_ipc_open_failure() {
         let mock = Arc::new(MockDispatcher::default());
-        let service = DispatcherService::new(mock.clone());
+        let service = test_service(mock.clone());
 
         let request = BatchPopulateRequest {
             entries: vec![proto::PopulateEntry {
@@ -1110,7 +1163,7 @@ mod tests {
             .populate_results
             .insert(12, Err(DispatcherError::Timeout("pending".to_string())));
         let mock = Arc::new(MockDispatcher::new(state));
-        let service = DispatcherService::new(mock);
+        let service = test_service(mock);
 
         let ipc_handle = proto_ipc_handle(2);
         let key = handle_key(&ipc_handle);
@@ -1146,7 +1199,7 @@ mod tests {
             Err(DispatcherError::Timeout("pending".to_string())),
         ];
         let mock = Arc::new(MockDispatcher::new(state));
-        let service = DispatcherService::new(mock.clone());
+        let service = test_service(mock.clone());
 
         let h1 = proto_ipc_handle(3);
         let h2 = proto_ipc_handle(4);
@@ -1203,7 +1256,7 @@ mod tests {
             .check_results
             .insert(34, Err(DispatcherError::Timeout("pending".to_string())));
         let mock = Arc::new(MockDispatcher::new(state));
-        let service = DispatcherService::new(mock.clone());
+        let service = test_service(mock.clone());
 
         let request = BatchCheckRequest {
             keys: vec![31, 32, 33, 34],
@@ -1234,7 +1287,7 @@ mod tests {
             .remove_results
             .insert(42, Err(DispatcherError::KeyNotFound(42)));
         let mock = Arc::new(MockDispatcher::new(state));
-        let service = DispatcherService::new(mock);
+        let service = test_service(mock);
 
         let request = BatchRemoveRequest {
             keys: vec![41, 42, 43],
@@ -1255,7 +1308,7 @@ mod tests {
             .touch_results
             .insert(52, Err(DispatcherError::KeyNotFound(52)));
         let mock = Arc::new(MockDispatcher::new(state));
-        let service = DispatcherService::new(mock);
+        let service = test_service(mock);
 
         let request = BatchTouchRequest {
             keys: vec![51, 52],
@@ -1309,7 +1362,7 @@ mod tests {
             ..Default::default()
         };
         let mock = Arc::new(MockDispatcher::new(state));
-        let service = DispatcherService::new(mock);
+        let service = test_service(mock);
 
         let response = service
             .clear_memory_tier(Request::new(ClearMemoryTierRequest {}))
@@ -1329,7 +1382,7 @@ mod tests {
             ..Default::default()
         };
         let mock = Arc::new(MockDispatcher::new(state));
-        let service = DispatcherService::new(mock);
+        let service = test_service(mock);
 
         let err = service
             .clear_memory_tier(Request::new(ClearMemoryTierRequest {}))

@@ -1,6 +1,7 @@
 //! gRPC service implementation for the Certus Dispatcher.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tonic::{Request, Response, Status};
@@ -21,7 +22,7 @@ use proto::{
     BatchReserveResponse, BatchTouchRequest, BatchTouchResponse, CheckResult,
     BatchPinRequest, BatchPinResponse, BatchUnpinRequest, BatchUnpinResponse,
     ClearMemoryTierRequest, ClearMemoryTierResponse, EntryResult, ErrorCode, FlushToSsdRequest,
-    FlushToSsdResponse,
+    FlushToSsdResponse, TakeEventsRequest, TakeEventsResponse,
 };
 
 pub fn dispatcher_server(svc: DispatcherService) -> DispatcherServer<DispatcherService> {
@@ -51,14 +52,22 @@ pub struct DispatcherService {
     dispatcher: Arc<dyn IDispatcher + Send + Sync>,
     ipc_cache: IpcCache,
     pending_stores: PendingStores,
+    eviction_rx: crossbeam_channel::Receiver<dispatcher::EvictionEvent>,
+    eviction_dropped: Arc<AtomicU64>,
 }
 
 impl DispatcherService {
-    pub fn new(dispatcher: Arc<dyn IDispatcher + Send + Sync>) -> Self {
+    pub fn new(
+        dispatcher: Arc<dyn IDispatcher + Send + Sync>,
+        eviction_rx: crossbeam_channel::Receiver<dispatcher::EvictionEvent>,
+        eviction_dropped: Arc<AtomicU64>,
+    ) -> Self {
         Self {
             dispatcher,
             ipc_cache: Arc::new(Mutex::new(HashMap::new())),
             pending_stores: Arc::new(Mutex::new(HashMap::new())),
+            eviction_rx,
+            eviction_dropped,
         }
     }
 }
@@ -761,5 +770,43 @@ impl Dispatcher for DispatcherService {
         .map_err(|e| Status::internal(format!("task join error: {e}")))?;
 
         Ok(Response::new(BatchUnpinResponse { results }))
+    }
+
+    async fn take_events(
+        &self,
+        request: Request<TakeEventsRequest>,
+    ) -> Result<Response<TakeEventsResponse>, Status> {
+        let req = request.into_inner();
+        let max = req.max_events as usize;
+
+        let mut events = Vec::new();
+        loop {
+            match self.eviction_rx.try_recv() {
+                Ok(ev) => {
+                    events.push(proto::EvictionEvent {
+                        key: ev.key,
+                        reason: match ev.reason {
+                            dispatcher::EvictionReason::Demoted => {
+                                proto::EvictionReason::Demoted.into()
+                            }
+                            dispatcher::EvictionReason::Removed => {
+                                proto::EvictionReason::Removed.into()
+                            }
+                        },
+                    });
+                    if max > 0 && events.len() >= max {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+
+        let dropped_count = self.eviction_dropped.swap(0, Ordering::Relaxed);
+
+        Ok(Response::new(TakeEventsResponse {
+            events,
+            dropped_count,
+        }))
     }
 }

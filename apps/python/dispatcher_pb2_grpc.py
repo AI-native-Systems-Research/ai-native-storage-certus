@@ -100,6 +100,11 @@ class DispatcherStub(object):
                 request_serializer=dispatcher__pb2.BatchUnpinRequest.SerializeToString,
                 response_deserializer=dispatcher__pb2.BatchUnpinResponse.FromString,
                 _registered_method=True)
+        self.TakeEvents = channel.unary_unary(
+                '/certus.dispatcher.v1.Dispatcher/TakeEvents',
+                request_serializer=dispatcher__pb2.TakeEventsRequest.SerializeToString,
+                response_deserializer=dispatcher__pb2.TakeEventsResponse.FromString,
+                _registered_method=True)
 
 
 class DispatcherServicer(object):
@@ -177,7 +182,7 @@ class DispatcherServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def FlushToSsd(self, request, context):
-        """Flush all pending background write-through jobs to SSD and block until complete.
+        """Flush all pending background write-through jobs to SSD and block until done.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -192,6 +197,13 @@ class DispatcherServicer(object):
 
     def Unpin(self, request, context):
         """Unpin cache entries: decrement reference count, allowing eviction when zero.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def TakeEvents(self, request, context):
+        """Drain eviction events since the last call (non-blocking poll).
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -264,6 +276,11 @@ def add_DispatcherServicer_to_server(servicer, server):
                     servicer.Unpin,
                     request_deserializer=dispatcher__pb2.BatchUnpinRequest.FromString,
                     response_serializer=dispatcher__pb2.BatchUnpinResponse.SerializeToString,
+            ),
+            'TakeEvents': grpc.unary_unary_rpc_method_handler(
+                    servicer.TakeEvents,
+                    request_deserializer=dispatcher__pb2.TakeEventsRequest.FromString,
+                    response_serializer=dispatcher__pb2.TakeEventsResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -618,6 +635,33 @@ class Dispatcher(object):
             '/certus.dispatcher.v1.Dispatcher/Unpin',
             dispatcher__pb2.BatchUnpinRequest.SerializeToString,
             dispatcher__pb2.BatchUnpinResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def TakeEvents(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/certus.dispatcher.v1.Dispatcher/TakeEvents',
+            dispatcher__pb2.TakeEventsRequest.SerializeToString,
+            dispatcher__pb2.TakeEventsResponse.FromString,
             options,
             channel_credentials,
             insecure,

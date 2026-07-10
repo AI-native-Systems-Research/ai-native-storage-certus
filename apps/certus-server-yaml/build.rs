@@ -69,10 +69,7 @@ fn validate_manifest(manifest: &ProfileManifest) {
             );
         }
         if !component_names.contains(parts[0]) {
-            panic!(
-                "wiring target references unknown component '{}'",
-                parts[0]
-            );
+            panic!("wiring target references unknown component '{}'", parts[0]);
         }
         if !component_names.contains(entry.source.as_str()) {
             panic!(
@@ -99,20 +96,14 @@ fn validate_manifest(manifest: &ProfileManifest) {
     // Validate init_order only references declared components
     for name in &manifest.init_order {
         if !component_names.contains(name.as_str()) {
-            panic!(
-                "init_order references unknown component '{}'",
-                name
-            );
+            panic!("init_order references unknown component '{}'", name);
         }
     }
 
     // Validate exports
     for export in &manifest.exports {
         if !component_names.contains(export.component.as_str()) {
-            panic!(
-                "export references unknown component '{}'",
-                export.component
-            );
+            panic!("export references unknown component '{}'", export.component);
         }
         let decl = &manifest.components[&export.component];
         if !decl.provides.contains(&export.interface) {
@@ -156,7 +147,12 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
         manifest.profile.name
     )
     .unwrap();
-    writeln!(code, "// Profile: {} — {}", manifest.profile.name, manifest.profile.description).unwrap();
+    writeln!(
+        code,
+        "// Profile: {} — {}",
+        manifest.profile.name, manifest.profile.description
+    )
+    .unwrap();
     writeln!(code).unwrap();
     writeln!(code, "use component_core::query_interface;").unwrap();
     writeln!(code).unwrap();
@@ -166,10 +162,7 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
     for export in &manifest.exports {
         let trait_name = interface_to_trait(&export.interface);
         let export_decl = &manifest.components[&export.component];
-        let trait_mod = export_decl
-            .trait_path
-            .as_deref()
-            .unwrap_or("interfaces");
+        let trait_mod = export_decl.trait_path.as_deref().unwrap_or("interfaces");
         let trait_mod = rust_crate_ident(trait_mod);
         writeln!(
             code,
@@ -178,6 +171,9 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
         )
         .unwrap();
     }
+    // Eviction channel receiver (from dispatcher component)
+    writeln!(code, "    pub eviction_rx: crossbeam_channel::Receiver<dispatcher::EvictionEvent>,").unwrap();
+    writeln!(code, "    pub eviction_dropped: std::sync::Arc<std::sync::atomic::AtomicU64>,").unwrap();
     writeln!(code, "}}").unwrap();
     writeln!(code).unwrap();
 
@@ -198,22 +194,14 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
         }
         let crate_ident = rust_crate_ident(&decl.crate_name);
         let factory_call = ensure_callable(&decl.factory);
-        writeln!(
-            code,
-            "    let comp_{name} = {crate_ident}::{factory_call};",
-        )
-        .unwrap();
+        writeln!(code, "    let comp_{name} = {crate_ident}::{factory_call};",).unwrap();
     }
     // Instantiate components not in init_order (those without hooks, skip factories)
     for (name, decl) in &manifest.components {
         if !manifest.init_order.contains(name) && !is_factory_kind(decl) {
             let crate_ident = rust_crate_ident(&decl.crate_name);
             let factory_call = ensure_callable(&decl.factory);
-            writeln!(
-                code,
-                "    let comp_{name} = {crate_ident}::{factory_call};",
-            )
-            .unwrap();
+            writeln!(code, "    let comp_{name} = {crate_ident}::{factory_call};",).unwrap();
         }
     }
     writeln!(code).unwrap();
@@ -224,14 +212,15 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
         if is_factory_kind(decl) {
             continue;
         }
-        let trait_mod = decl
-            .trait_path
-            .as_deref()
-            .unwrap_or("interfaces");
+        let trait_mod = decl.trait_path.as_deref().unwrap_or("interfaces");
         let trait_mod = rust_crate_ident(trait_mod);
         for iface in &decl.provides {
             let trait_name = interface_to_trait(iface);
-            let var_name = format!("iface_{}_{}", name, iface.to_lowercase().trim_start_matches('i'));
+            let var_name = format!(
+                "iface_{}_{}",
+                name,
+                iface.to_lowercase().trim_start_matches('i')
+            );
             writeln!(
                 code,
                 "    let {var_name}: std::sync::Arc<dyn {trait_mod}::{trait_name} + Send + Sync> = query_interface!(comp_{name}, {trait_mod}::{trait_name})"
@@ -292,9 +281,17 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
             if *name == "block_device" {
                 if decl.crate_name == "block-device-kernel" {
                     // Kernel backend: capture device_paths from config for runtime indexing
-                    writeln!(code, "    let __device_paths = config.device_paths.clone();").unwrap();
+                    writeln!(
+                        code,
+                        "    let __device_paths = config.device_paths.clone();"
+                    )
+                    .unwrap();
                     writeln!(code, "    comp_dispatcher.set_block_device_factory(Box::new(move |spdk_env, logger, drive_idx, pci_addr, cpu_pin| {{").unwrap();
-                    writeln!(code, "        let path = if drive_idx < __device_paths.len() {{").unwrap();
+                    writeln!(
+                        code,
+                        "        let path = if drive_idx < __device_paths.len() {{"
+                    )
+                    .unwrap();
                     writeln!(code, "            __device_paths[drive_idx].clone()").unwrap();
                     writeln!(code, "        }} else {{").unwrap();
                     writeln!(code, "            format!(\"/dev/nvme{{}}n1\", drive_idx)").unwrap();
@@ -302,12 +299,24 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
                     writeln!(code, "        let bd = {crate_ident}::BlockDeviceKernelComponent::create(&path, 4096, 0);").unwrap();
                 } else if decl.crate_name == "block-device-filesys" {
                     // Filesys backend: capture device_paths from config for runtime indexing
-                    writeln!(code, "    let __device_paths = config.device_paths.clone();").unwrap();
+                    writeln!(
+                        code,
+                        "    let __device_paths = config.device_paths.clone();"
+                    )
+                    .unwrap();
                     writeln!(code, "    comp_dispatcher.set_block_device_factory(Box::new(move |spdk_env, logger, drive_idx, pci_addr, cpu_pin| {{").unwrap();
-                    writeln!(code, "        let path = if drive_idx < __device_paths.len() {{").unwrap();
+                    writeln!(
+                        code,
+                        "        let path = if drive_idx < __device_paths.len() {{"
+                    )
+                    .unwrap();
                     writeln!(code, "            __device_paths[drive_idx].clone()").unwrap();
                     writeln!(code, "        }} else {{").unwrap();
-                    writeln!(code, "            format!(\"/ssd/certus-drive-{{}}.img\", drive_idx)").unwrap();
+                    writeln!(
+                        code,
+                        "            format!(\"/ssd/certus-drive-{{}}.img\", drive_idx)"
+                    )
+                    .unwrap();
                     writeln!(code, "        }};").unwrap();
                     writeln!(code, "        let bd = {crate_ident}::BlockDeviceFilesysComponent::create(&path, 4096, 4194304);").unwrap();
                 } else {
@@ -333,7 +342,11 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
                     // SPDK backend: use IBlockDeviceAdmin for PCI-based init
                     writeln!(code, "        admin.set_pci_address(pci_addr);").unwrap();
                     writeln!(code, "        if let Some(cpu) = cpu_pin {{ admin.set_actor_cpu(cpu + drive_idx); }}").unwrap();
-                    writeln!(code, "        admin.initialize().map_err(|e| e.to_string())?;").unwrap();
+                    writeln!(
+                        code,
+                        "        admin.initialize().map_err(|e| e.to_string())?;"
+                    )
+                    .unwrap();
                 } else if decl.crate_name == "block-device-kernel" {
                     // Kernel block device backend: initialize via io_uring
                     writeln!(code, "        bd.initialize().map_err(|e| e.to_string())?;").unwrap();
@@ -350,7 +363,11 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
                 writeln!(code, "        let em = {crate_ident}::{factory_call};").unwrap();
                 writeln!(code, "        em.set_dma_alloc(dma_alloc);").unwrap();
                 writeln!(code, "        em.logger.connect(std::sync::Arc::clone(logger) as std::sync::Arc<dyn interfaces::ILogger + Send + Sync>).unwrap();").unwrap();
-                writeln!(code, "        em as std::sync::Arc<dyn component_core::IUnknown + Send + Sync>").unwrap();
+                writeln!(
+                    code,
+                    "        em as std::sync::Arc<dyn component_core::IUnknown + Send + Sync>"
+                )
+                .unwrap();
                 writeln!(code, "    }}));").unwrap();
             }
         }
@@ -371,13 +388,14 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
                 name,
                 iface.to_lowercase().trim_start_matches('i')
             );
-            writeln!(
-                code,
-                "    crate::hooks::{hook}(&{iface_var}, config)?;"
-            )
-            .unwrap();
+            writeln!(code, "    crate::hooks::{hook}(&{iface_var}, config)?;").unwrap();
         }
     }
+    writeln!(code).unwrap();
+
+    // --- Create eviction channel from dispatcher component ---
+    writeln!(code, "    let eviction_rx = comp_dispatcher.create_eviction_channel(16384);").unwrap();
+    writeln!(code, "    let eviction_dropped = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));").unwrap();
     writeln!(code).unwrap();
 
     // --- Return exports ---
@@ -390,6 +408,8 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
         );
         writeln!(code, "        {}: {iface_var},", export.component).unwrap();
     }
+    writeln!(code, "        eviction_rx,").unwrap();
+    writeln!(code, "        eviction_dropped,").unwrap();
     writeln!(code, "    }})").unwrap();
     writeln!(code, "}}").unwrap();
 

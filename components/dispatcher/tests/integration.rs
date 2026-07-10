@@ -27,9 +27,9 @@ use component_core::iunknown::query;
 use component_core::query_interface;
 use dispatcher::DispatcherComponent;
 use interfaces::{
-    CacheKey, DispatchMapError, DispatcherConfig, DispatcherError, DmaBuffer,
-    GpuDeviceInfo, GpuDmaBuffer, GpuIpcHandle, GpuStream, IDispatchMap, IDispatcher, IGpuServices,
-    ILogger, IpcHandle, LookupResult,
+    CacheKey, DispatchMapError, DispatcherConfig, DispatcherError, DmaBuffer, GpuDeviceInfo,
+    GpuDmaBuffer, GpuIpcHandle, GpuStream, IDispatchMap, IDispatcher, IGpuServices, ILogger,
+    IpcHandle, LookupResult,
 };
 use spdk_env::{ISPDKEnv, SPDKEnvComponent};
 
@@ -42,8 +42,7 @@ static SPDK_ENV: OnceLock<Arc<SPDKEnvComponent>> = OnceLock::new();
 fn get_spdk_env() -> &'static Arc<SPDKEnvComponent> {
     SPDK_ENV.get_or_init(|| {
         let comp = SPDKEnvComponent::new_default();
-        let ienv =
-            query::<dyn ISPDKEnv + Send + Sync>(&*comp).expect("failed to query ISPDKEnv");
+        let ienv = query::<dyn ISPDKEnv + Send + Sync>(&*comp).expect("failed to query ISPDKEnv");
         ienv.init()
             .expect("SPDK init failed — check hugepages, VFIO, IOMMU");
         comp
@@ -404,9 +403,7 @@ fn discover_devices() -> Vec<String> {
     addrs
 }
 
-fn create_dispatcher(
-    pci_addrs: &[String],
-) -> (Arc<DispatcherComponent>, Arc<HwDispatchMap>) {
+fn create_dispatcher(pci_addrs: &[String]) -> (Arc<DispatcherComponent>, Arc<HwDispatchMap>) {
     let spdk_env_comp = get_spdk_env();
     let ienv =
         query::<dyn ISPDKEnv + Send + Sync>(&**spdk_env_comp).expect("failed to query ISPDKEnv");
@@ -463,7 +460,11 @@ fn hw_idispatcher_full_integration() {
     // 1. initialize() — called by create_dispatcher(), verify component is live
     // =======================================================================
     eprintln!("\n=== 1. initialize — component is live ===");
-    assert_eq!(d.check(0).unwrap(), false, "empty dispatcher has no entries");
+    assert_eq!(
+        d.check(0).unwrap(),
+        false,
+        "empty dispatcher has no entries"
+    );
 
     // =======================================================================
     // 2. populate() — happy path
@@ -696,9 +697,7 @@ fn hw_idispatcher_full_integration() {
     d.shutdown().unwrap();
 
     let migrated = dm.migrated_count();
-    eprintln!(
-        "after shutdown: {migrated}/{total_entries} entries migrated to block device"
-    );
+    eprintln!("after shutdown: {migrated}/{total_entries} entries migrated to block device");
     assert_eq!(
         migrated, total_entries,
         "all entries should be migrated after shutdown drains the bg writer"
@@ -749,7 +748,10 @@ fn hw_multi_device_initialization() {
         return;
     }
 
-    eprintln!("\n=== Multi-device: initializing {} devices ===", pci_addrs.len());
+    eprintln!(
+        "\n=== Multi-device: initializing {} devices ===",
+        pci_addrs.len()
+    );
     let (comp, dm) = create_dispatcher(&pci_addrs);
     let d: Arc<dyn IDispatcher + Send + Sync> = query_interface!(comp, IDispatcher).unwrap();
 
@@ -862,7 +864,11 @@ fn hw_data_integrity() {
     eprintln!("=== Integrity 6: cross-contamination check (20 keys) ===");
     {
         let patterns: Vec<Vec<u8>> = (0..20u64)
-            .map(|k| (0..4096).map(|i| ((i + k as usize * 37) % 256) as u8).collect())
+            .map(|k| {
+                (0..4096)
+                    .map(|i| ((i + k as usize * 37) % 256) as u8)
+                    .collect()
+            })
             .collect();
 
         for (k, pat) in patterns.iter().enumerate() {
@@ -874,7 +880,8 @@ fn hw_data_integrity() {
             let mut dst = vec![0u8; 4096];
             d.lookup(200 + k as u64, make_handle(&mut dst)).unwrap();
             assert_eq!(
-                pat, &dst,
+                pat,
+                &dst,
                 "cross-contamination: key {} data mismatch",
                 200 + k
             );
@@ -893,8 +900,9 @@ fn hw_data_integrity() {
                     let disp = query_interface!(comp_clone, IDispatcher).unwrap();
                     for i in 0..10u64 {
                         let key = 500 + t * 100 + i;
-                        let mut src: Vec<u8> =
-                            (0..4096).map(|b| ((b + key as usize) % 256) as u8).collect();
+                        let mut src: Vec<u8> = (0..4096)
+                            .map(|b| ((b + key as usize) % 256) as u8)
+                            .collect();
                         disp.populate(key, make_handle(&mut src)).unwrap();
                     }
                 })
@@ -908,8 +916,9 @@ fn hw_data_integrity() {
         for t in 0..4u64 {
             for i in 0..10u64 {
                 let key = 500 + t * 100 + i;
-                let expected: Vec<u8> =
-                    (0..4096).map(|b| ((b + key as usize) % 256) as u8).collect();
+                let expected: Vec<u8> = (0..4096)
+                    .map(|b| ((b + key as usize) % 256) as u8)
+                    .collect();
                 let mut dst = vec![0u8; 4096];
                 d.lookup(key, make_handle(&mut dst)).unwrap();
                 assert_eq!(expected, dst, "concurrent key {key} data mismatch");
@@ -1095,7 +1104,8 @@ fn hw_ssd_readback_integrity() {
         d.lookup(2000 + k as u64, make_handle(&mut dst))
             .unwrap_or_else(|e| panic!("SSD readback key {} failed: {e}", 2000 + k));
         assert_eq!(
-            pat, &dst,
+            pat,
+            &dst,
             "cross-contamination: key {} SSD readback mismatch",
             2000 + k
         );
@@ -1104,4 +1114,3 @@ fn hw_ssd_readback_integrity() {
     d.shutdown().unwrap();
     eprintln!("\n=== SSD READBACK INTEGRITY TEST PASSED ===");
 }
-

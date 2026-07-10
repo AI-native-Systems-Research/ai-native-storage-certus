@@ -684,6 +684,123 @@ def test_pin_with_split_phase_store(stub, keys, block_size, pop_ptrs, pop_handle
     print("    Cleanup:   OK")
 
 
+def test_take_events_empty(stub):
+    """TakeEvents on an empty queue returns zero events."""
+    print("  [take_events_empty]")
+    resp = stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
+    assert len(resp.events) == 0, f"Expected 0 events, got {len(resp.events)}"
+    assert resp.dropped_count == 0, f"Expected 0 dropped, got {resp.dropped_count}"
+    print("    Empty drain: OK")
+
+
+def test_take_events_after_eviction(stub, block_size, pop_ptrs, pop_handles):
+    """Fill memory-tier to trigger eviction, then drain events."""
+    print("  [take_events_after_eviction]")
+
+    # Drain any stale events first
+    stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
+
+    # Populate many entries to force eviction (memory-tier is 256 MiB).
+    # Use large objects to fill faster.
+    num_entries = (256 * 1024 * 1024) // block_size + 16
+    base_key = 900000
+
+    keys_to_populate = []
+    for i in range(num_entries):
+        k = base_key + i
+        keys_to_populate.append(k)
+
+    # Populate in batches
+    batch_size = min(len(pop_ptrs), 8)
+    for batch_start in range(0, len(keys_to_populate), batch_size):
+        batch_keys = keys_to_populate[batch_start:batch_start + batch_size]
+        entries = []
+        for idx, k in enumerate(batch_keys):
+            ptr_idx = idx % len(pop_ptrs)
+            entries.append(dispatcher_pb2.PopulateEntry(
+                key=k,
+                ipc_handle=dispatcher_pb2.IpcHandle(
+                    cuda_ipc_handle=pop_handles[ptr_idx],
+                    size=block_size,
+                ),
+            ))
+        resp = stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=entries))
+        # Some may fail due to pool full — that's expected
+        for r in resp.results:
+            if not r.success and r.error_code != dispatcher_pb2.ERROR_CODE_ALREADY_EXISTS:
+                pass  # Pool full or other transient errors are fine
+
+    # Now drain eviction events
+    resp = stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
+    print(f"    Events drained: {len(resp.events)} (dropped: {resp.dropped_count})")
+    assert len(resp.events) > 0 or resp.dropped_count > 0, \
+        "Expected at least some eviction events after overflowing memory-tier"
+
+    # Verify event structure
+    for ev in resp.events:
+        assert ev.key > 0, f"Event key should be > 0, got {ev.key}"
+        assert ev.reason in (
+            dispatcher_pb2.EVICTION_REASON_DEMOTED,
+            dispatcher_pb2.EVICTION_REASON_REMOVED,
+        ), f"Unexpected reason: {ev.reason}"
+    print(f"    Event structure: OK")
+
+    # Second drain should be empty
+    resp2 = stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
+    assert len(resp2.events) == 0, f"Expected 0 events on second drain, got {len(resp2.events)}"
+    print(f"    Second drain empty: OK")
+
+    # Cleanup
+    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys_to_populate))
+    print("    Cleanup: OK")
+
+
+def test_take_events_max_limit(stub, block_size, pop_ptrs, pop_handles):
+    """TakeEvents with max_events limit returns at most that many."""
+    print("  [take_events_max_limit]")
+
+    # Drain stale events
+    stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
+
+    # Populate enough to trigger evictions
+    num_entries = (256 * 1024 * 1024) // block_size + 16
+    base_key = 800000
+
+    keys_to_populate = []
+    for i in range(num_entries):
+        keys_to_populate.append(base_key + i)
+
+    batch_size = min(len(pop_ptrs), 8)
+    for batch_start in range(0, len(keys_to_populate), batch_size):
+        batch_keys = keys_to_populate[batch_start:batch_start + batch_size]
+        entries = []
+        for idx, k in enumerate(batch_keys):
+            ptr_idx = idx % len(pop_ptrs)
+            entries.append(dispatcher_pb2.PopulateEntry(
+                key=k,
+                ipc_handle=dispatcher_pb2.IpcHandle(
+                    cuda_ipc_handle=pop_handles[ptr_idx],
+                    size=block_size,
+                ),
+            ))
+        stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=entries))
+
+    # Request only 3 events
+    resp = stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=3))
+    if len(resp.events) > 0:
+        assert len(resp.events) <= 3, f"Expected at most 3 events, got {len(resp.events)}"
+        print(f"    max_events=3: got {len(resp.events)} events (OK)")
+    else:
+        print(f"    max_events=3: no events available (evictions may be pending)")
+
+    # Drain remaining
+    stub.TakeEvents(dispatcher_pb2.TakeEventsRequest(max_events=0))
+
+    # Cleanup
+    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys_to_populate))
+    print("    Cleanup: OK")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Integration test for split-phase store APIs"
@@ -777,6 +894,13 @@ def main():
         )),
         ("pin_with_split_phase_store", lambda: test_pin_with_split_phase_store(
             stub, key_sets[10], block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles
+        )),
+        ("take_events_empty", lambda: test_take_events_empty(stub)),
+        ("take_events_after_eviction", lambda: test_take_events_after_eviction(
+            stub, block_size, pop_ptrs, pop_handles
+        )),
+        ("take_events_max_limit", lambda: test_take_events_max_limit(
+            stub, block_size, pop_ptrs, pop_handles
         )),
     ]
 
