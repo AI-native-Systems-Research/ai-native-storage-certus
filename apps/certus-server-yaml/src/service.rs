@@ -25,6 +25,11 @@ use proto::{
     FlushToSsdResponse, TakeEventsRequest, TakeEventsResponse,
 };
 
+#[cfg(feature = "p2p-native")]
+use dispatcher_p2p::{EvictionEvent, EvictionReason};
+#[cfg(not(feature = "p2p-native"))]
+use dispatcher::{EvictionEvent, EvictionReason};
+
 pub fn dispatcher_server(svc: DispatcherService) -> DispatcherServer<DispatcherService> {
     DispatcherServer::new(svc)
 }
@@ -52,14 +57,14 @@ pub struct DispatcherService {
     dispatcher: Arc<dyn IDispatcher + Send + Sync>,
     ipc_cache: IpcCache,
     pending_stores: PendingStores,
-    eviction_rx: crossbeam_channel::Receiver<dispatcher::EvictionEvent>,
+    eviction_rx: crossbeam_channel::Receiver<EvictionEvent>,
     eviction_dropped: Arc<AtomicU64>,
 }
 
 impl DispatcherService {
     pub fn new(
         dispatcher: Arc<dyn IDispatcher + Send + Sync>,
-        eviction_rx: crossbeam_channel::Receiver<dispatcher::EvictionEvent>,
+        eviction_rx: crossbeam_channel::Receiver<EvictionEvent>,
         eviction_dropped: Arc<AtomicU64>,
     ) -> Self {
         Self {
@@ -798,10 +803,10 @@ impl Dispatcher for DispatcherService {
                     events.push(proto::EvictionEvent {
                         key: ev.key,
                         reason: match ev.reason {
-                            dispatcher::EvictionReason::Demoted => {
+                            EvictionReason::Demoted => {
                                 proto::EvictionReason::Demoted.into()
                             }
-                            dispatcher::EvictionReason::Removed => {
+                            EvictionReason::Removed => {
                                 proto::EvictionReason::Removed.into()
                             }
                         },

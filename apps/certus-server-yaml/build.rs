@@ -172,7 +172,8 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
         .unwrap();
     }
     // Eviction channel receiver (from dispatcher component)
-    writeln!(code, "    pub eviction_rx: crossbeam_channel::Receiver<dispatcher::EvictionEvent>,").unwrap();
+    let dispatcher_crate = rust_crate_ident(&manifest.components["dispatcher"].crate_name);
+    writeln!(code, "    pub eviction_rx: crossbeam_channel::Receiver<{dispatcher_crate}::EvictionEvent>,").unwrap();
     writeln!(code, "    pub eviction_dropped: std::sync::Arc<std::sync::atomic::AtomicU64>,").unwrap();
     writeln!(code, "}}").unwrap();
     writeln!(code).unwrap();
