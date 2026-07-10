@@ -421,7 +421,12 @@ def main():
         lookup_ptrs.append(ptr)
         lookup_handles.append(handle)
 
-    keys = [base_key + i for i in range(num_objects)]
+    # Each test gets its own key range to avoid state leakage from
+    # background write-through between tests.
+    key_sets = [
+        [base_key + (t * num_objects) + i for i in range(num_objects)]
+        for t in range(6)
+    ]
 
     # Connect
     channel = grpc.insecure_channel(
@@ -437,23 +442,24 @@ def main():
     failed = 0
     tests = [
         ("happy_path", lambda: test_happy_path(
-            stub, keys, block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles
+            stub, key_sets[0], block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles
         )),
         ("abort_path", lambda: test_abort_path(
-            stub, keys, block_size, pop_ptrs, pop_handles
+            stub, key_sets[1], block_size, pop_ptrs, pop_handles
         )),
         ("abort_without_copy", lambda: test_abort_without_copy(
-            stub, keys, block_size
+            stub, key_sets[2], block_size
         )),
         ("commit_without_reserve", lambda: test_commit_without_reserve(
             stub, block_size
         )),
         ("double_reserve", lambda: test_double_reserve(stub, block_size)),
         ("slot_reuse", lambda: test_reserve_after_abort_reuse(
-            stub, keys, block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles
+            stub, key_sets[5], block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles
         )),
     ]
 
+    all_keys = [k for ks in key_sets for k in ks]
     for name, test_fn in tests:
         try:
             test_fn()
@@ -463,11 +469,11 @@ def main():
             failed += 1
             # Attempt cleanup on failure
             try:
-                stub.AbortStore(dispatcher_pb2.BatchAbortStoreRequest(keys=keys))
+                stub.AbortStore(dispatcher_pb2.BatchAbortStoreRequest(keys=all_keys))
             except Exception:
                 pass
             try:
-                stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+                stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=all_keys))
             except Exception:
                 pass
 
