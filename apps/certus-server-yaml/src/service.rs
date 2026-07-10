@@ -19,6 +19,7 @@ use proto::{
     BatchCopyToStoreResponse, BatchLookupRequest, BatchLookupResponse, BatchPopulateRequest,
     BatchPopulateResponse, BatchRemoveRequest, BatchRemoveResponse, BatchReserveRequest,
     BatchReserveResponse, BatchTouchRequest, BatchTouchResponse, CheckResult,
+    BatchPinRequest, BatchPinResponse, BatchUnpinRequest, BatchUnpinResponse,
     ClearMemoryTierRequest, ClearMemoryTierResponse, EntryResult, ErrorCode, FlushToSsdRequest,
     FlushToSsdResponse,
 };
@@ -714,5 +715,51 @@ impl Dispatcher for DispatcherService {
         Ok(Response::new(FlushToSsdResponse {
             jobs_flushed: jobs_flushed as u64,
         }))
+    }
+
+    async fn pin(
+        &self,
+        request: Request<BatchPinRequest>,
+    ) -> Result<Response<BatchPinResponse>, Status> {
+        let req = request.into_inner();
+        check_duplicate_keys(&req.keys)?;
+
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let results = tokio::task::spawn_blocking(move || {
+            req.keys
+                .iter()
+                .map(|&key| match dispatcher.pin(key) {
+                    Ok(()) => success_result(key),
+                    Err(e) => error_result(key, &e),
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        Ok(Response::new(BatchPinResponse { results }))
+    }
+
+    async fn unpin(
+        &self,
+        request: Request<BatchUnpinRequest>,
+    ) -> Result<Response<BatchUnpinResponse>, Status> {
+        let req = request.into_inner();
+        check_duplicate_keys(&req.keys)?;
+
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let results = tokio::task::spawn_blocking(move || {
+            req.keys
+                .iter()
+                .map(|&key| match dispatcher.unpin(key) {
+                    Ok(()) => success_result(key),
+                    Err(e) => error_result(key, &e),
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        Ok(Response::new(BatchUnpinResponse { results }))
     }
 }

@@ -380,6 +380,70 @@ def test_reserve_after_abort_reuse(stub, keys, block_size, pop_ptrs, pop_handles
     print("    Cleanup:        OK")
 
 
+def test_pin_unpin(stub, keys, block_size, pop_ptrs, pop_handles):
+    """Populate → Pin → verify pinned key cannot be evicted → Unpin → cleanup."""
+    print("\n  [TEST] Pin/Unpin: Populate → Pin → Unpin → Remove")
+
+    # Write data and populate
+    for i, key in enumerate(keys):
+        gpu_write(pop_ptrs[i], make_pattern(key, block_size))
+
+    pop_entries = [
+        dispatcher_pb2.PopulateEntry(
+            key=k,
+            ipc_handle=dispatcher_pb2.IpcHandle(
+                cuda_ipc_handle=pop_handles[i],
+                size=block_size,
+            ),
+        )
+        for i, k in enumerate(keys)
+    ]
+    resp = stub.Populate(dispatcher_pb2.BatchPopulateRequest(entries=pop_entries))
+    assert_all_success(resp, "Populate")
+    print("    Populate:  OK")
+
+    # Pin all keys
+    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=keys))
+    assert_all_success(resp, "Pin")
+    print("    Pin:       OK")
+
+    # Verify keys still exist (pinning should not remove them)
+    exists = check_exists(stub, keys)
+    for k in keys:
+        if not exists.get(k, False):
+            raise AssertionError(f"Key {k} disappeared after Pin")
+    print("    Still exists: OK")
+
+    # Unpin all keys
+    resp = stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=keys))
+    assert_all_success(resp, "Unpin")
+    print("    Unpin:     OK")
+
+    # Cleanup
+    stub.Remove(dispatcher_pb2.BatchRemoveRequest(keys=keys))
+    print("    Cleanup:   OK")
+
+
+def test_unpin_without_pin(stub, block_size):
+    """Unpin a key that was never pinned → should fail with KeyNotFound."""
+    print("\n  [TEST] Unpin without Pin → expect error")
+
+    bogus_key = 0xDEAD_BEEF_0010
+    resp = stub.Unpin(dispatcher_pb2.BatchUnpinRequest(keys=[bogus_key]))
+    assert_result_error(resp, bogus_key, "KEY_NOT_FOUND", "Unpin")
+    print("    Unpin:     correctly rejected (KeyNotFound)")
+
+
+def test_pin_nonexistent(stub, block_size):
+    """Pin a key that doesn't exist → should fail with KeyNotFound."""
+    print("\n  [TEST] Pin nonexistent key → expect error")
+
+    bogus_key = 0xDEAD_BEEF_0011
+    resp = stub.Pin(dispatcher_pb2.BatchPinRequest(keys=[bogus_key]))
+    assert_result_error(resp, bogus_key, "KEY_NOT_FOUND", "Pin")
+    print("    Pin:       correctly rejected (KeyNotFound)")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Integration test for split-phase store APIs"
@@ -425,7 +489,7 @@ def main():
     # background write-through between tests.
     key_sets = [
         [base_key + (t * num_objects) + i for i in range(num_objects)]
-        for t in range(6)
+        for t in range(7)
     ]
 
     # Connect
@@ -457,6 +521,11 @@ def main():
         ("slot_reuse", lambda: test_reserve_after_abort_reuse(
             stub, key_sets[5], block_size, pop_ptrs, pop_handles, lookup_ptrs, lookup_handles
         )),
+        ("pin_unpin", lambda: test_pin_unpin(
+            stub, key_sets[6], block_size, pop_ptrs, pop_handles
+        )),
+        ("unpin_without_pin", lambda: test_unpin_without_pin(stub, block_size)),
+        ("pin_nonexistent", lambda: test_pin_nonexistent(stub, block_size)),
     ]
 
     all_keys = [k for ks in key_sets for k in ks]

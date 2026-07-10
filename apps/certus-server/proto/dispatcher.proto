@@ -36,6 +36,12 @@ service Dispatcher {
 
   // Flush all pending background write-through jobs to SSD and block until done.
   rpc FlushToSsd(FlushToSsdRequest) returns (FlushToSsdResponse);
+
+  // Pin cache entries: increment reference count to prevent eviction.
+  rpc Pin(BatchPinRequest) returns (BatchPinResponse);
+
+  // Unpin cache entries: decrement reference count, allowing eviction when zero.
+  rpc Unpin(BatchUnpinRequest) returns (BatchUnpinResponse);
 }
 
 // --- Common types ---
@@ -194,4 +200,22 @@ message FlushToSsdRequest {}
 
 message FlushToSsdResponse {
   uint64 jobs_flushed = 1;
+}
+
+// --- Pin / Unpin ---
+
+message BatchPinRequest {
+  repeated uint64 keys = 1;
+}
+
+message BatchPinResponse {
+  repeated EntryResult results = 1;
+}
+
+message BatchUnpinRequest {
+  repeated uint64 keys = 1;
+}
+
+message BatchUnpinResponse {
+  repeated EntryResult results = 1;
 }

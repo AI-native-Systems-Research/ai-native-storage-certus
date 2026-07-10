@@ -2097,6 +2097,38 @@ impl IDispatcher for DispatcherComponent {
         }
     }
 
+    fn pin(&self, key: CacheKey) -> Result<(), DispatcherError> {
+        self.ensure_initialized()?;
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        dm.take_read(key).map_err(|e| match e {
+            interfaces::DispatchMapError::KeyNotFound(k) => DispatcherError::KeyNotFound(k),
+            interfaces::DispatchMapError::Timeout(k) => {
+                DispatcherError::Timeout(format!("timeout waiting on key: {k}"))
+            }
+            other => DispatcherError::IoError(other.to_string()),
+        })
+    }
+
+    fn unpin(&self, key: CacheKey) -> Result<(), DispatcherError> {
+        self.ensure_initialized()?;
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        dm.release_read(key).map_err(|e| match e {
+            interfaces::DispatchMapError::KeyNotFound(k) => DispatcherError::KeyNotFound(k),
+            interfaces::DispatchMapError::RefCountUnderflow(k) => DispatcherError::KeyNotFound(k),
+            other => DispatcherError::IoError(other.to_string()),
+        })
+    }
+
     fn touch(&self, key: CacheKey) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
 

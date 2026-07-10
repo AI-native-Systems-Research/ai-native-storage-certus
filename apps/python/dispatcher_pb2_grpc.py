@@ -90,6 +90,16 @@ class DispatcherStub(object):
                 request_serializer=dispatcher__pb2.FlushToSsdRequest.SerializeToString,
                 response_deserializer=dispatcher__pb2.FlushToSsdResponse.FromString,
                 _registered_method=True)
+        self.Pin = channel.unary_unary(
+                '/certus.dispatcher.v1.Dispatcher/Pin',
+                request_serializer=dispatcher__pb2.BatchPinRequest.SerializeToString,
+                response_deserializer=dispatcher__pb2.BatchPinResponse.FromString,
+                _registered_method=True)
+        self.Unpin = channel.unary_unary(
+                '/certus.dispatcher.v1.Dispatcher/Unpin',
+                request_serializer=dispatcher__pb2.BatchUnpinRequest.SerializeToString,
+                response_deserializer=dispatcher__pb2.BatchUnpinResponse.FromString,
+                _registered_method=True)
 
 
 class DispatcherServicer(object):
@@ -173,6 +183,20 @@ class DispatcherServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Pin(self, request, context):
+        """Pin cache entries: increment reference count to prevent eviction.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Unpin(self, request, context):
+        """Unpin cache entries: decrement reference count, allowing eviction when zero.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_DispatcherServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -230,6 +254,16 @@ def add_DispatcherServicer_to_server(servicer, server):
                     servicer.FlushToSsd,
                     request_deserializer=dispatcher__pb2.FlushToSsdRequest.FromString,
                     response_serializer=dispatcher__pb2.FlushToSsdResponse.SerializeToString,
+            ),
+            'Pin': grpc.unary_unary_rpc_method_handler(
+                    servicer.Pin,
+                    request_deserializer=dispatcher__pb2.BatchPinRequest.FromString,
+                    response_serializer=dispatcher__pb2.BatchPinResponse.SerializeToString,
+            ),
+            'Unpin': grpc.unary_unary_rpc_method_handler(
+                    servicer.Unpin,
+                    request_deserializer=dispatcher__pb2.BatchUnpinRequest.FromString,
+                    response_serializer=dispatcher__pb2.BatchUnpinResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -530,6 +564,60 @@ class Dispatcher(object):
             '/certus.dispatcher.v1.Dispatcher/FlushToSsd',
             dispatcher__pb2.FlushToSsdRequest.SerializeToString,
             dispatcher__pb2.FlushToSsdResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Pin(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/certus.dispatcher.v1.Dispatcher/Pin',
+            dispatcher__pb2.BatchPinRequest.SerializeToString,
+            dispatcher__pb2.BatchPinResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Unpin(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/certus.dispatcher.v1.Dispatcher/Unpin',
+            dispatcher__pb2.BatchUnpinRequest.SerializeToString,
+            dispatcher__pb2.BatchUnpinResponse.FromString,
             options,
             channel_credentials,
             insecure,
