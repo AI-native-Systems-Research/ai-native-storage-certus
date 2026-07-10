@@ -9,9 +9,7 @@ use std::thread::{self, JoinHandle};
 
 use crossbeam_channel::{Receiver, Sender};
 
-use interfaces::{
-    ClientChannels, DispatcherError, GpuStream, IBlockDevice, IGpuServices,
-};
+use interfaces::{ClientChannels, DispatcherError, GpuStream, IBlockDevice, IGpuServices};
 
 use crate::metrics::PipelineMetrics;
 use crate::pipeline::{self, ColdReadJob};
@@ -132,9 +130,10 @@ impl ColdReadPool {
     ) -> Result<(), DispatcherError> {
         let drive_workers = &self.workers[drive_idx % self.num_drives];
         let worker = &drive_workers[slot % drive_workers.len()];
-        worker.sender.send(request).map_err(|_| {
-            DispatcherError::IoError("cold_pool worker disconnected".into())
-        })
+        worker
+            .sender
+            .send(request)
+            .map_err(|_| DispatcherError::IoError("cold_pool worker disconnected".into()))
     }
 
     /// Number of drives in the pool.
