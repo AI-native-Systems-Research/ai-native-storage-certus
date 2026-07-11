@@ -10,7 +10,8 @@
 set -euo pipefail
 
 LISTEN="${LISTEN:-0.0.0.0:50051}"
-SERVER_BIN=/src/target/release/certus-server
+SERVER_BIN="${SERVER_BIN:-/usr/local/bin/certus-server}"
+WORKLOAD="${WORKLOAD:-/workspace/certus-grpc-connector/run_multiturn_grpc_certus.py}"
 LOG=/tmp/certus-server.log
 
 # --device-pci is repeatable; expand the space-separated DEVICE_PCI list.
@@ -62,4 +63,4 @@ for i in $(seq 1 120); do
 done
 
 echo "[entrypoint] running workload (NUM_CONVS=${NUM_CONVS}, MODEL=${MODEL})"
-exec python3 /src/certus-grpc-connector/run_multiturn_grpc_certus.py
+exec python3 "${WORKLOAD}"
