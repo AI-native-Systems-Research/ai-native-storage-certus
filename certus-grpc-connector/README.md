@@ -92,6 +92,31 @@ python3 -m pytest tests/ -v
 pip install -e .
 ```
 
+## Docker (workload driver)
+
+`Dockerfile` builds a **client-side** image only — vLLM + this connector + the
+multi-turn workload driver (`run_multiturn_grpc_certus.py`). The `certus-server`
+runs **separately** on the host (it owns SPDK/NVMe/hugepages; build it there
+with `deps/build_spdk.sh` + `cargo build -p certus-server`). The container
+offloads to it over gRPC.
+
+```bash
+# Build (context = repo root; needs certus-grpc-connector/ + the dataset)
+podman build -f certus-grpc-connector/Dockerfile -t certus-grpc-bench .
+
+# Run against a server reachable at CERTUS_SERVER. --ipc=host lets the server
+# open the CUDA IPC handles this container's vLLM process exports.
+podman run --rm --gpus all --ipc=host \
+    -e CERTUS_SERVER=<host>:50051 \
+    -e HF_TOKEN=<token> \
+    -v $HOME/.cache/huggingface:/root/.cache/huggingface \
+    certus-grpc-bench
+```
+
+The entrypoint waits for `CERTUS_SERVER` to accept connections (failing fast if
+it never comes up), then runs the 450-conv / 12-turn workload. Override
+`NUM_CONVS`, `MODEL`, `SLAB_SIZE_BYTES`, `DATASET_PATH` via `-e`.
+
 ## vLLM configuration
 
 ```json
