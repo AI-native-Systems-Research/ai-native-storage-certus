@@ -23,23 +23,36 @@ from __future__ import annotations
 import ctypes
 from dataclasses import dataclass
 
-# CUDA runtime (cudaIpcGetMemHandle) and driver (cuMemGetAddressRange) APIs.
-_libcudart = ctypes.CDLL("libcudart.so")
-_libcuda = ctypes.CDLL("libcuda.so")
+# CUDA runtime (cudaIpcGetMemHandle) and driver (cuMemGetAddressRange) APIs are
+# loaded lazily on first use, NOT at import. This keeps the module (and the
+# manager, which does no CUDA) importable in processes without the CUDA driver
+# — e.g. the scheduler process, unit tests, or a --gpus-less container.
+_libcudart = None
+_libcuda = None
 
-_libcudart.cudaIpcGetMemHandle.restype = ctypes.c_int
-_libcudart.cudaIpcGetMemHandle.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-_libcudart.cudaGetDevice.restype = ctypes.c_int
-_libcudart.cudaGetDevice.argtypes = [ctypes.POINTER(ctypes.c_int)]
 
-# Driver API: cuMemGetAddressRange(CUdeviceptr *base, size_t *size, CUdeviceptr dptr).
-# CUdeviceptr is an unsigned integer the width of a pointer.
-_libcuda.cuMemGetAddressRange_v2.restype = ctypes.c_int
-_libcuda.cuMemGetAddressRange_v2.argtypes = [
-    ctypes.POINTER(ctypes.c_ulonglong),
-    ctypes.POINTER(ctypes.c_size_t),
-    ctypes.c_ulonglong,
-]
+def _load_cuda():
+    global _libcudart, _libcuda
+    if _libcudart is not None:
+        return
+    libcudart = ctypes.CDLL("libcudart.so")
+    libcuda = ctypes.CDLL("libcuda.so")
+
+    libcudart.cudaIpcGetMemHandle.restype = ctypes.c_int
+    libcudart.cudaIpcGetMemHandle.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    libcudart.cudaGetDevice.restype = ctypes.c_int
+    libcudart.cudaGetDevice.argtypes = [ctypes.POINTER(ctypes.c_int)]
+
+    # Driver API: cuMemGetAddressRange(CUdeviceptr *base, size_t *size, CUdeviceptr dptr).
+    # CUdeviceptr is an unsigned integer the width of a pointer.
+    libcuda.cuMemGetAddressRange_v2.restype = ctypes.c_int
+    libcuda.cuMemGetAddressRange_v2.argtypes = [
+        ctypes.POINTER(ctypes.c_ulonglong),
+        ctypes.POINTER(ctypes.c_size_t),
+        ctypes.c_ulonglong,
+    ]
+    _libcudart, _libcuda = libcudart, libcuda
+
 
 _IPC_HANDLE_BYTES = 64
 
@@ -66,6 +79,7 @@ class KvCacheIpc:
 
 
 def current_device() -> int:
+    _load_cuda()
     dev = ctypes.c_int()
     err = _libcudart.cudaGetDevice(ctypes.byref(dev))
     if err != 0:
@@ -109,6 +123,7 @@ def ipc_for_tensor(data_ptr: int, stride_bytes: int, gpu_device_id: int) -> KvCa
     and record the delta so per-block offsets are relative to what the server
     resolves the handle to.
     """
+    _load_cuda()
     alloc_base = _alloc_base(data_ptr)
     handle = _ipc_handle(alloc_base)
     return KvCacheIpc(
