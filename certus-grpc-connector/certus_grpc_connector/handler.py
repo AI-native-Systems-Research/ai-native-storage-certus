@@ -121,8 +121,39 @@ class GpuToCertusHandler(_GrpcHandler):
             )
             for block_id, key in zip(gpu_block_ids, keys)
         ]
-        resp = self._stub.CopyToStore(pb.BatchCopyToStoreRequest(entries=entries))
-        return all_success(resp.results)
+        try:
+            resp = self._stub.CopyToStore(pb.BatchCopyToStoreRequest(entries=entries))
+        except Exception as e:  # noqa: BLE001 - store failure must not crash vLLM
+            # A whole-batch RPC failure: roll back all reservations and report
+            # success (see the invariant note below). Blocks stay uncached.
+            print(f"[certus-grpc] CopyToStore RPC error: {e} — aborting {len(keys)} keys",
+                  flush=True)
+            try:
+                self._stub.AbortStore(pb.BatchAbortStoreRequest(keys=keys))
+            except Exception:  # noqa: BLE001
+                pass
+            return True
+
+        # CRITICAL: the store handler must NEVER report success=False. vLLM's
+        # offloading worker asserts transfer_result.success (worker.py) and a
+        # False return kills the engine. A failed CopyToStore only means "this
+        # block won't be cached" — the KV data is still valid in GPU memory, so
+        # it is safe to drop. But because store is split-phase (Reserve ->
+        # CopyToStore -> CommitStore), we must roll back any key whose copy
+        # failed, so the subsequent CommitStore can't publish an unpopulated
+        # slot as a valid entry. Abort the failed keys; report success.
+        failed = [r.key for r in resp.results if not r.success]
+        if failed:
+            print(
+                f"[certus-grpc] CopyToStore failed for {len(failed)}/{len(keys)} "
+                f"blocks — aborting those reservations, leaving them uncached",
+                flush=True,
+            )
+            try:
+                self._stub.AbortStore(pb.BatchAbortStoreRequest(keys=failed))
+            except Exception as e:  # noqa: BLE001 - best-effort rollback
+                print(f"[certus-grpc] AbortStore rollback failed: {e}", flush=True)
+        return True
 
 
 class CertusToGpuHandler(_GrpcHandler):

@@ -26,6 +26,7 @@ class FakeStub:
         self.calls: list[tuple[str, object]] = []
         self.exists: dict[int, bool] = {}
         self.reserve_fail: set[int] = set()
+        self.copy_fail: set[int] = set()
         self.events: list[pb.EvictionEvent] = []
         self.dropped_count = 0
 
@@ -79,7 +80,10 @@ class FakeStub:
     def CopyToStore(self, req):
         self.calls.append(("CopyToStore", req))
         return pb.BatchCopyToStoreResponse(
-            results=[pb.EntryResult(key=e.key, success=True) for e in req.entries]
+            results=[
+                pb.EntryResult(key=e.key, success=e.key not in self.copy_fail)
+                for e in req.entries
+            ]
         )
 
     def Lookup(self, req):
@@ -253,4 +257,28 @@ def test_store_handler_sends_offsets_per_block():
     assert [e.ipc_handle.offset for e in req.entries] == [3 * 1024, 7 * 1024]
     assert all(e.ipc_handle.cuda_ipc_handle == b"z" * 64 for e in req.entries)
     assert all(e.ipc_handle.gpu_device_id == 1 for e in req.entries)
+    executor.shutdown()
+
+
+def test_store_handler_never_reports_failure_and_aborts_failed_keys():
+    """Regression: a failed CopyToStore must NOT surface success=False (vLLM's
+    offloading worker asserts transfer_result.success and crashes the engine).
+    The failed keys are rolled back via AbortStore; the job reports success."""
+    from certus_grpc_connector.handler import GpuToCertusHandler
+    from vllm.v1.kv_offload.mediums import GPULoadStoreSpec
+
+    stub = FakeStub()
+    stub.copy_fail = {70}  # one of two blocks fails to copy
+    kv = KvCacheIpc(handle_bytes=b"z" * 64, gpu_device_id=0, stride_bytes=1024, base_delta=0)
+    executor = ThreadPoolExecutor(max_workers=1)
+    h = GpuToCertusHandler(stub, kv, block_size_bytes=1024, executor=executor)
+
+    src = GPULoadStoreSpec(block_ids=[3, 7])
+    dst = CertusLoadStoreSpec([BlockLocation(key=30), BlockLocation(key=70)])
+    h.transfer_async(job_id=9, spec=(src, dst))
+    h.wait({9})
+    results = h.get_finished()
+    assert len(results) == 1 and results[0].success is True  # never False
+    (abort,) = _calls_of(stub, "AbortStore")
+    assert list(abort.keys) == [70]  # only the failed key rolled back
     executor.shutdown()
