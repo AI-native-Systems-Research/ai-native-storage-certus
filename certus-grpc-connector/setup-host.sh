@@ -14,8 +14,8 @@
 # the c1-c4 drives (which hold filesystems / the podman image store here).
 #
 # Usage:
-#   sudo ./setup-host.sh                       # auto: hugepages = node RAM - 16G
-#   sudo MEM_TOTAL_GIB=64 ./setup-host.sh      # treat node as 64G -> 48 hugepages
+#   sudo ./setup-host.sh                       # default: hugepages = physical RAM - 16G
+#   sudo MEM_TOTAL_GIB=24 ./setup-host.sh      # under mem=24G cap -> 8 hugepages
 #   sudo VLLM_RESERVE_GIB=16 MEM_TOTAL_GIB=64 ./setup-host.sh   # explicit split
 #   sudo HUGEPAGES_1G=8 ./setup-host.sh        # override the count directly
 #   sudo SKIP_DRIVES=1 ./setup-host.sh         # GPU only
@@ -38,14 +38,23 @@ NVME_NUMA="${NVME_NUMA:-0}"
 # Memory split (mirrors tools/configure-bench.sh):
 #   hugepages(1G) = MEM_TOTAL_GIB - VLLM_RESERVE_GIB
 # i.e. reserve regular RAM for vLLM to init/run, give ALL the rest to the SPDK
-# DRAM cache as 1 GiB hugepages. MEM_TOTAL_GIB is the RAM available on the tier
-# node (what you cap with the mem= kernel param); default = detected node total.
-# The usable tier is then ~(hugepages - 3) GiB (DPDK EAL/DMA overhead).
+# DRAM cache as 1 GiB hugepages. The usable tier is then ~(hugepages - 3) GiB
+# (DPDK EAL/DMA overhead).
+#
+# MEM_TOTAL_GIB default = the PHYSICAL RAM installed in the box (dmidecode),
+# i.e. what's available with no mem= cap. When you DO run under a mem= cap (as
+# the bench does), pass MEM_TOTAL_GIB=<cap> explicitly so the tier is sized to
+# the capped, kernel-visible RAM rather than the full DIMM total.
 VLLM_RESERVE_GIB="${VLLM_RESERVE_GIB:-16}"
-_node_kb=$(cat "/sys/devices/system/node/node${NVME_NUMA}/meminfo" 2>/dev/null \
-    | awk '/MemTotal/{print $4}')
-_node_gib=$(( ${_node_kb:-0} / 1024 / 1024 ))
-MEM_TOTAL_GIB="${MEM_TOTAL_GIB:-${_node_gib}}"
+# Physical total from dmidecode (sum populated DIMMs); fall back to node meminfo.
+_phys_gib=$(dmidecode -t memory 2>/dev/null | awk '
+    /Size:/ && $2 ~ /^[0-9]+$/ { v=$2; if ($3=="MB") v=v/1024; else if ($3=="TB") v=v*1024; sum+=v }
+    END { printf "%d", sum }')
+if [[ -z "${_phys_gib}" || "${_phys_gib}" -eq 0 ]]; then
+    _node_kb=$(awk '/MemTotal/{print $4}' "/sys/devices/system/node/node${NVME_NUMA}/meminfo" 2>/dev/null)
+    _phys_gib=$(( ${_node_kb:-0} / 1024 / 1024 ))
+fi
+MEM_TOTAL_GIB="${MEM_TOTAL_GIB:-${_phys_gib}}"
 # Allow explicit HUGEPAGES_1G override; otherwise derive from the memory split.
 if [[ -z "${HUGEPAGES_1G:-}" ]]; then
     HUGEPAGES_1G=$(( MEM_TOTAL_GIB - VLLM_RESERVE_GIB ))
