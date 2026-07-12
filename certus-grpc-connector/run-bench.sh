@@ -28,7 +28,9 @@
 #                               host builds into /mnt/certus1 — see below)
 set -euo pipefail
 
-IMAGE="${IMAGE:-certus-grpc-bench}"
+# Fully-qualified so rootless podman doesn't hit short-name resolution (which
+# can't prompt without a TTY). Override IMAGE to point elsewhere.
+IMAGE="${IMAGE:-localhost/certus-grpc-bench}"
 GPU="${GPU:-all}"
 CERTUS_SERVER="${CERTUS_SERVER:-localhost:50051}"
 NUM_CONVS="${NUM_CONVS:-450}"
@@ -86,6 +88,7 @@ echo "[run-bench] image=${IMAGE} gpu=${GPU} server=${CERTUS_SERVER}"
 echo "[run-bench] num_convs=${NUM_CONVS} model=${MODEL}"
 
 exec podman run --rm \
+    --pull=never \
     --device "nvidia.com/gpu=${GPU}" \
     --ipc=host \
     "${cache_mount[@]}" \
