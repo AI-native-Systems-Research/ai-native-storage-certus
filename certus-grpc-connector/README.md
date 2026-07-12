@@ -96,26 +96,70 @@ pip install -e .
 
 `Dockerfile` builds a **client-side** image only — vLLM + this connector + the
 multi-turn workload driver (`run_multiturn_grpc_certus.py`). The `certus-server`
-runs **separately** on the host (it owns SPDK/NVMe/hugepages; build it there
-with `deps/build_spdk.sh` + `cargo build -p certus-server`). The container
+runs **separately** on the host (it owns SPDK/NVMe/hugepages). The container
 offloads to it over gRPC.
 
-```bash
-# Build (context = repo root; needs certus-grpc-connector/ + the dataset)
-podman build -f certus-grpc-connector/Dockerfile -t certus-grpc-bench .
+### What the container does and does NOT provide
 
-# Run against a server reachable at CERTUS_SERVER. --ipc=host lets the server
-# open the CUDA IPC handles this container's vLLM process exports.
-podman run --rm --gpus all --ipc=host \
+A container image bundles **userspace** dependencies (vLLM, torch, the CUDA
+*runtime*, this connector) — those are baked in and reproducible. It cannot
+bundle **kernel/driver** dependencies:
+
+- **GPU driver** (`libcuda.so`) — injected from the host at run time by the
+  NVIDIA container runtime; it must match the host kernel module.
+- **SPDK / hugepages / vfio** — needed by the *server*, which runs on the host.
+
+So running the benchmark is always "this image **plus** a provisioned host." The
+image *declares* the GPU need (see the `org.certus.gpu-required` label); a
+host-level component *fulfills* it. Two helper scripts wire this up.
+
+### Running the benchmark end-to-end
+
+```bash
+# 0. Build the image (context = repo root; needs certus-grpc-connector/ + dataset).
+#    This host keeps the image on /mnt/certus1, so pass the store paths:
+podman --root /mnt/certus1/podman/storage --runroot /mnt/certus1/podman/run \
+    build -f certus-grpc-connector/Dockerfile -t certus-grpc-bench .
+
+# 1. GPU prerequisite — ONE-TIME, root. Installs nvidia-container-toolkit and
+#    generates the podman CDI spec (/etc/cdi/nvidia.yaml).
+sudo ./certus-grpc-connector/setup-host.sh
+
+# 2. Server prerequisite — build + launch certus-server on the host. Prep SPDK/
+#    NVMe/hugepages (reusable repo script), then build and run the server:
+sudo tools/configure-bench.sh certus         # vfio bind + hugepages
+deps/build_spdk.sh && cargo build --release -p certus-server
+target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 \
+    --device-pci 0000:63:00.0 --device-pci 0000:64:00.0 \
+    --memory-tier-size 44G --listen 0.0.0.0:50051 --format
+
+# 3. Run the workload container against the server.
+GPU=0 CERTUS_SERVER=localhost:50051 ./certus-grpc-connector/run-bench.sh
+```
+
+`run-bench.sh` preflights the CDI spec and image, then launches `podman run`
+with `--device nvidia.com/gpu=$GPU`, `--ipc=host` (so the host server can open
+the container's CUDA IPC handles), the HF cache mount, and `CERTUS_SERVER`. If
+the GPU prerequisite is missing it prints the exact `setup-host.sh` command
+rather than failing with a cryptic `libcuda.so` error.
+
+The container entrypoint waits for `CERTUS_SERVER` to accept connections
+(failing fast if it never comes up), then runs the 450-conv / 12-turn workload.
+
+**Overridable env** (`-e` on `podman run`, or exported before `run-bench.sh`):
+`GPU`, `CERTUS_SERVER`, `NUM_CONVS`, `MODEL`, `SLAB_SIZE_BYTES`, `DATASET_PATH`,
+`HF_TOKEN`, `HF_CACHE`, and `PODMAN_STORE` / `PODMAN_RUNROOT` for the store paths.
+
+### Manual run (without the wrapper)
+
+```bash
+podman --root /mnt/certus1/podman/storage --runroot /mnt/certus1/podman/run \
+    run --rm --device nvidia.com/gpu=0 --ipc=host \
     -e CERTUS_SERVER=<host>:50051 \
     -e HF_TOKEN=<token> \
     -v $HOME/.cache/huggingface:/root/.cache/huggingface \
     certus-grpc-bench
 ```
-
-The entrypoint waits for `CERTUS_SERVER` to accept connections (failing fast if
-it never comes up), then runs the 450-conv / 12-turn workload. Override
-`NUM_CONVS`, `MODEL`, `SLAB_SIZE_BYTES`, `DATASET_PATH` via `-e`.
 
 ## vLLM configuration
 
