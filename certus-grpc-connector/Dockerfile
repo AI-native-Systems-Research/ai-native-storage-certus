@@ -21,6 +21,21 @@
 FROM docker.io/vllm/vllm-openai:v0.20.0
 ENTRYPOINT []
 
+# GPU is REQUIRED at run time: vLLM loads the model on the GPU and the connector
+# exports CUDA IPC handles from the KV cache. The NVIDIA_* vars below are the
+# request the NVIDIA container runtime reads to inject the GPUs + the host's
+# libcuda.so. The runtime itself (nvidia-container-toolkit / CDI) is a HOST
+# prerequisite — it cannot be installed into the image, because libcuda.so is
+# the host driver, version-matched to the host kernel module. Run with a GPU:
+#   docker:  --gpus all
+#   podman:  --device nvidia.com/gpu=all   (needs `nvidia-ctk cdi generate`)
+LABEL org.certus.gpu-required="true" \
+      org.certus.host-prereq="nvidia-container-toolkit (docker --gpus / podman CDI)"
+# Re-declared here (also inherited from the base) so the GPU contract is visible
+# in this Dockerfile rather than buried in the base image's env.
+ENV NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
 WORKDIR /workspace
 
 # Connector sources + the shared dataset (paths relative to the repo-root build
