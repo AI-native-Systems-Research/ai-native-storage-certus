@@ -23,9 +23,14 @@
 set -euo pipefail
 
 # ── Config (override via env) ──
-# Server NVMe drives (NUMA 0 set — NOT the c1-c4 filesystem drives).
+# Server NVMe drives — the NUMA-0 set (0000:61-64), NOT the c1-c4 filesystem
+# drives. NUMA 0 is deliberate: all GPU<->SSD transfers stage through the DRAM
+# tier (GPU->DRAM->SSD, never direct), and the tier's hugepages must sit on the
+# node whose RAM we cap with the mem= kernel param — node 0 in this bench setup.
+# So drive/GPU NUMA locality is irrelevant; tier-on-node-0 is what matters.
 NVME_BDFS="${NVME_BDFS:-0000:61:00.0 0000:62:00.0 0000:63:00.0 0000:64:00.0}"
-# NUMA node whose hugepage pool feeds the SPDK DRAM tier (matches the drives).
+# NUMA node for the hugepage pool that feeds the SPDK DRAM tier (the mem=-capped
+# node). Keep at 0 unless the drives and cap node change together.
 NVME_NUMA="${NVME_NUMA:-0}"
 # 1 GiB hugepages to allocate for the tier. The real benchmark wants ~48; size
 # to available RAM (this is the knob to raise on a big-memory host).
