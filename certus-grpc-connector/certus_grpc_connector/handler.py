@@ -178,4 +178,18 @@ class CertusToGpuHandler(_GrpcHandler):
             for block_id, key in zip(gpu_block_ids, keys)
         ]
         resp = self._stub.Lookup(pb.BatchLookupRequest(entries=entries))
-        return all_success(resp.results)
+        # Diagnostic: a load must not fail (vLLM asserts), and it shouldn't be
+        # able to — prepare_load pinned these keys. If the server reports any
+        # per-key failure, dump exactly which key + error so we can see WHY a
+        # Lookup missed a key that lookup()/Check said was present.
+        if not all_success(resp.results):
+            for r in resp.results:
+                if not r.success:
+                    print(
+                        f"[certus-grpc] LOAD FAILURE key={r.key} "
+                        f"error_code={r.error_code} msg={r.error_message!r} "
+                        f"(this key was Check-hit and Pinned in prepare_load)",
+                        flush=True,
+                    )
+            return False
+        return True

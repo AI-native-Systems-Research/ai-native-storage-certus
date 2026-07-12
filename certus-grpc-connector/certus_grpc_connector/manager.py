@@ -128,9 +128,27 @@ class GrpcCertusOffloadingManager(OffloadingManager):
 
     def prepare_load(self, keys: Iterable[OffloadKey], req_context=None) -> LoadStoreSpec:
         int_keys = _keys_to_u64s(keys)
-        # Pin protects from eviction and (promote=true) pulls SSD-resident
-        # entries back into DRAM in one round-trip.
-        self._stub.Pin(pb.BatchPinRequest(keys=int_keys, promote=True))
+        # Pin (promote=FALSE) only takes the eviction-protecting read-ref. We must
+        # NOT ask Pin to promote: Pin's promote is async/fire-and-forget, and the
+        # Lookup that immediately follows (in the load handler) already promotes
+        # cold (BlockDevice) entries itself. Two promotes race on the same key —
+        # both do mt.insert() — and the loser hits MemoryTierError::AlreadyExists,
+        # surfaced as ALLOCATION_FAILED, which fails the load and crashes vLLM
+        # (worker asserts transfer success). Lookup is self-sufficient: it serves
+        # MemoryTier hits directly and promotes BlockDevice misses in one path.
+        resp = self._stub.Pin(pb.BatchPinRequest(keys=int_keys, promote=False))
+        # Diagnostic: vLLM only reaches here for keys lookup()/Check reported as
+        # present, and cannot drop keys from the returned spec (dst block ids are
+        # positionally zipped). So a Pin failure here is the earliest signal that
+        # a Check-hit entry vanished — log which key + why.
+        for r in resp.results:
+            if not r.success:
+                print(
+                    f"[certus-grpc] PIN FAILURE in prepare_load key={r.key} "
+                    f"error_code={r.error_code} msg={r.error_message!r} "
+                    f"(Check said present, Pin says gone — eviction race)",
+                    flush=True,
+                )
         return CertusLoadStoreSpec([BlockLocation(key=k) for k in int_keys])
 
     def complete_load(self, keys: Iterable[OffloadKey]) -> None:

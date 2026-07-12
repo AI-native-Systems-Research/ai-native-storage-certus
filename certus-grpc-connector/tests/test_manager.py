@@ -209,7 +209,9 @@ def test_prepare_load_pins_with_promote_and_complete_load_unpins():
     assert spec.keys == [4, 5]
     (pin,) = _calls_of(stub, "Pin")
     assert list(pin.keys) == [4, 5]
-    assert pin.promote is True
+    # promote must be False: Lookup promotes cold entries itself; a Pin-promote
+    # would race the Lookup-promote on mt.insert (AlreadyExists -> load crash).
+    assert pin.promote is False
     mgr.complete_load([(4).to_bytes(8, "big"), (5).to_bytes(8, "big")])
     (unpin,) = _calls_of(stub, "Unpin")
     assert list(unpin.keys) == [4, 5]
