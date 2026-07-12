@@ -1,61 +1,119 @@
 #!/bin/bash
-# setup-host.sh — one-time host provisioning for the GPU half of the
-# certus-grpc-connector container (RHEL/Fedora, root).
+# setup-host.sh — one-time host provisioning for the certus-grpc-connector
+# benchmark (RHEL/Fedora, root).
 #
-# Containers bundle userspace, but the NVIDIA driver userspace (libcuda.so) is
-# host-injected at run time by the NVIDIA container runtime — it cannot live in
-# the image (it must match the host kernel module). This script installs that
-# runtime and generates the CDI spec podman uses to expose GPUs.
+# Covers BOTH host prerequisites that a container cannot provide:
+#   A. GPU  — nvidia-container-toolkit + CDI spec (so podman can pass the GPU
+#             and inject the host libcuda.so into the workload container).
+#   B. Server storage — bind the certus-server NVMe drives to vfio-pci and
+#             allocate 1 GiB hugepages for the SPDK DRAM tier.
 #
-# This covers ONLY the GPU prerequisite. The SPDK/NVMe/hugepage prep for the
-# separately-run certus-server is handled by the repo's tools/configure-bench.sh.
+# The reusable repo script tools/configure-bench.sh does the broader NUMA/cgroup
+# bench setup but is hardcoded to the c1-c4 drives; this script targets the
+# server's own drive set (default 0000:61-64:00.0, NUMA 0) so it doesn't touch
+# the c1-c4 drives (which hold filesystems / the podman image store here).
 #
-# Usage:  sudo ./setup-host.sh
+# Usage:
+#   sudo ./setup-host.sh                    # GPU + drives + hugepages (defaults)
+#   sudo HUGEPAGES_1G=8 ./setup-host.sh     # allocate 8 x 1G hugepages
+#   sudo SKIP_DRIVES=1 ./setup-host.sh      # GPU only
+#   sudo NVME_BDFS="0000:61:00.0 0000:62:00.0" ./setup-host.sh   # custom drives
 #
-# Idempotent: re-running is safe (skips install if already present, regenerates
-# the CDI spec).
+# Idempotent: skips installs/binds already in place; re-generates the CDI spec.
 set -euo pipefail
+
+# ── Config (override via env) ──
+# Server NVMe drives (NUMA 0 set — NOT the c1-c4 filesystem drives).
+NVME_BDFS="${NVME_BDFS:-0000:61:00.0 0000:62:00.0 0000:63:00.0 0000:64:00.0}"
+# NUMA node whose hugepage pool feeds the SPDK DRAM tier (matches the drives).
+NVME_NUMA="${NVME_NUMA:-0}"
+# 1 GiB hugepages to allocate for the tier. The real benchmark wants ~48; size
+# to available RAM (this is the knob to raise on a big-memory host).
+HUGEPAGES_1G="${HUGEPAGES_1G:-8}"
+SKIP_DRIVES="${SKIP_DRIVES:-0}"
+SKIP_GPU="${SKIP_GPU:-0}"
 
 if [[ $EUID -ne 0 ]]; then
     echo "error: must run as root (sudo ./setup-host.sh)" >&2
     exit 1
 fi
 
-echo "== 1. NVIDIA driver present? =="
-if ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi -L >/dev/null 2>&1; then
-    echo "error: nvidia-smi not working — install/enable the NVIDIA GPU driver first." >&2
-    echo "       (The container toolkit needs a working host driver.)" >&2
-    exit 1
+# ════════════════════════════ A. GPU ════════════════════════════
+if [[ "${SKIP_GPU}" != "1" ]]; then
+    echo "== A1. NVIDIA driver present? =="
+    if ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi -L >/dev/null 2>&1; then
+        echo "error: nvidia-smi not working — install/enable the NVIDIA GPU driver first." >&2
+        exit 1
+    fi
+    nvidia-smi -L
+
+    echo "== A2. Install nvidia-container-toolkit (dnf) =="
+    if command -v nvidia-ctk >/dev/null 2>&1; then
+        echo "  nvidia-ctk already installed ($(nvidia-ctk --version 2>/dev/null | head -1))"
+    else
+        curl -s -L https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
+            -o /etc/yum.repos.d/nvidia-container-toolkit.repo
+        dnf install -y nvidia-container-toolkit
+    fi
+
+    echo "== A3. Generate CDI spec for podman (rootless uses CDI) =="
+    mkdir -p /etc/cdi
+    nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+    echo "  wrote /etc/cdi/nvidia.yaml"
+    nvidia-ctk cdi list 2>/dev/null | grep -E "nvidia.com/gpu" \
+        || echo "  warning: no nvidia.com/gpu devices listed — check the CDI spec." >&2
 fi
-nvidia-smi -L
 
-echo "== 2. Install nvidia-container-toolkit (dnf) =="
-if command -v nvidia-ctk >/dev/null 2>&1; then
-    echo "  nvidia-ctk already installed ($(nvidia-ctk --version 2>/dev/null | head -1))"
-else
-    # NVIDIA libnvidia-container repo (RHEL/Fedora). Uses dnf.
-    curl -s -L https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
-        -o /etc/yum.repos.d/nvidia-container-toolkit.repo
-    dnf install -y nvidia-container-toolkit
+# ═══════════════════════ B. Server storage ═══════════════════════
+if [[ "${SKIP_DRIVES}" != "1" ]]; then
+    echo "== B1. Bind NVMe drives to vfio-pci =="
+    if ! modprobe vfio-pci; then
+        echo "error: cannot load vfio-pci — is IOMMU enabled (iommu=pt on the kernel cmdline)?" >&2
+        exit 1
+    fi
+    for bdf in ${NVME_BDFS}; do
+        dev_path="/sys/bus/pci/devices/${bdf}"
+        if [[ ! -d "${dev_path}" ]]; then
+            echo "  ${bdf}: NOT PRESENT — skipping" >&2
+            continue
+        fi
+        drv=$(basename "$(readlink -f "${dev_path}/driver" 2>/dev/null)" 2>/dev/null || true)
+        if [[ "${drv}" == "vfio-pci" ]]; then
+            echo "  ${bdf}: already bound to vfio-pci"
+            continue
+        fi
+        [[ -n "${drv}" && "${drv}" != "." ]] && { echo "  ${bdf}: unbinding from ${drv}"; echo "${bdf}" > "${dev_path}/driver/unbind"; }
+        echo "  ${bdf}: binding to vfio-pci"
+        echo "vfio-pci" > "${dev_path}/driver_override"
+        echo "${bdf}" > /sys/bus/pci/drivers_probe
+        echo "" > "${dev_path}/driver_override"
+    done
+
+    echo "== B2. Allocate ${HUGEPAGES_1G} x 1G hugepages on NUMA node ${NVME_NUMA} =="
+    hp_path="/sys/devices/system/node/node${NVME_NUMA}/hugepages/hugepages-1048576kB/nr_hugepages"
+    if [[ ! -f "${hp_path}" ]]; then
+        echo "error: ${hp_path} not found — 1 GiB hugepages unsupported on this node?" >&2
+        exit 1
+    fi
+    echo "${HUGEPAGES_1G}" > "${hp_path}"
+    got=$(cat "${hp_path}")
+    echo "  node ${NVME_NUMA}: requested ${HUGEPAGES_1G}, got ${got} x 1G hugepages"
+    if [[ "${got}" -lt "${HUGEPAGES_1G}" ]]; then
+        echo "  warning: fewer hugepages than requested — not enough free contiguous RAM." >&2
+        echo "           The server --memory-tier-size must fit in ${got} GiB." >&2
+    fi
 fi
 
-echo "== 3. Generate CDI spec for podman (rootless uses CDI, not --gpus) =="
-# podman resolves `--device nvidia.com/gpu=<id>` from a CDI spec. Regenerate it
-# so it reflects the current GPUs/driver.
-mkdir -p /etc/cdi
-nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
-echo "  wrote /etc/cdi/nvidia.yaml"
+cat <<EOF
 
-echo "== 4. Verify: devices podman can now request =="
-nvidia-ctk cdi list 2>/dev/null | grep -E "nvidia.com/gpu" || {
-    echo "  warning: no nvidia.com/gpu devices listed — check the CDI spec." >&2
-}
-
-cat <<'EOF'
-
-Done. GPU prerequisite is installed.
+Done.
+  GPU:   CDI spec at /etc/cdi/nvidia.yaml (podman --device nvidia.com/gpu=<id>)
+  Drives: ${NVME_BDFS} → vfio-pci
+  Hugepages: $(cat "/sys/devices/system/node/node${NVME_NUMA}/hugepages/hugepages-1048576kB/nr_hugepages" 2>/dev/null || echo '?') x 1G on node ${NVME_NUMA}
 
 Next:
-  * Server (SPDK/NVMe/hugepages) — separate prep:  sudo tools/configure-bench.sh certus
-  * Then launch the workload container:            ./certus-grpc-connector/run-bench.sh
+  deps/build_spdk.sh && cargo build --release -p certus-server
+  target/release/certus-server $(for b in ${NVME_BDFS}; do printf -- '--device-pci %s ' "$b"; done)\\
+      --memory-tier-size <=N>G --listen 0.0.0.0:50051 --format
+  ./certus-grpc-connector/run-bench.sh
 EOF

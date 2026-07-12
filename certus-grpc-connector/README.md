@@ -121,13 +121,14 @@ host-level component *fulfills* it. Two helper scripts wire this up.
 podman --root /mnt/certus1/podman/storage --runroot /mnt/certus1/podman/run \
     build -f certus-grpc-connector/Dockerfile -t certus-grpc-bench .
 
-# 1. GPU prerequisite — ONE-TIME, root. Installs nvidia-container-toolkit and
-#    generates the podman CDI spec (/etc/cdi/nvidia.yaml).
-sudo ./certus-grpc-connector/setup-host.sh
+# 1. Host prerequisites — ONE-TIME, root. Installs nvidia-container-toolkit +
+#    CDI spec (GPU), AND binds the server NVMe drives to vfio-pci + allocates
+#    1G hugepages for the DRAM tier. Defaults to the 0000:61-64 (NUMA-0) drive
+#    set; size the tier to available RAM with HUGEPAGES_1G:
+sudo HUGEPAGES_1G=48 ./certus-grpc-connector/setup-host.sh
 
-# 2. Server prerequisite — build + launch certus-server on the host. Prep SPDK/
-#    NVMe/hugepages (reusable repo script), then build and run the server:
-sudo tools/configure-bench.sh certus         # vfio bind + hugepages
+# 2. Build + launch certus-server on the host (drives already bound in step 1).
+#    --memory-tier-size must fit the hugepages allocated above.
 deps/build_spdk.sh && cargo build --release -p certus-server
 target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 \
     --device-pci 0000:63:00.0 --device-pci 0000:64:00.0 \
@@ -137,7 +138,9 @@ target/release/certus-server --device-pci 0000:61:00.0 --device-pci 0000:62:00.0
 GPU=0 CERTUS_SERVER=localhost:50051 ./certus-grpc-connector/run-bench.sh
 ```
 
-`run-bench.sh` preflights the CDI spec and image, then launches `podman run`
+`setup-host.sh` targets the server's own drive set (0000:61-64), leaving the
+c1-c4 drives (filesystems / the podman image store) untouched. `run-bench.sh`
+preflights the CDI spec and image, then launches `podman run`
 with `--device nvidia.com/gpu=$GPU`, `--ipc=host` (so the host server can open
 the container's CUDA IPC handles), the HF cache mount, and `CERTUS_SERVER`. If
 the GPU prerequisite is missing it prints the exact `setup-host.sh` command
