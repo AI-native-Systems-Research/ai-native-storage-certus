@@ -543,38 +543,47 @@ impl DispatcherComponent {
         target_key: CacheKey,
         max_attempts: usize,
     ) -> Result<(), DispatcherError> {
-        const MAX_SCAN: usize = 4;
+        // Scan a wide window of the LRU-ordered keys for a cleanly-evictable
+        // victim. At realistic tier sizes (a few thousand entries) this covers
+        // the whole tier in a single in-memory pass (~tens of µs — far cheaper
+        // than the SSD I/O it gates), so the evictor never fails while clean
+        // slots exist. (The old value of 4 could miss thousands of reclaimable
+        // slots and spuriously return pool-full.)
+        const MAX_SCAN: usize = 16384;
 
         let mut attempts = 0usize;
         while mt.used() + needed as usize > mt.capacity() {
             attempts += 1;
             if attempts > max_attempts {
-                static WARNED: std::sync::atomic::AtomicBool =
-                    std::sync::atomic::AtomicBool::new(false);
-                if !WARNED.swap(true, Ordering::Relaxed) {
-                    const GIB: f64 = (1024 * 1024 * 1024) as f64;
-                    eprintln!(
-                        "WARNING: memory-tier exhausted (used={:.2} GiB, capacity={:.2} GiB, needed={:.2} GiB). \
-                         Increase --memory-tier-size or reduce concurrent load.",
-                        mt.used() as f64 / GIB,
-                        mt.capacity() as f64 / GIB,
-                        needed as f64 / GIB,
-                    );
-                }
+                // DIAGNOSTIC: dump slot-state breakdown at each pool-full failure
+                // to show WHAT the tier is full of (droppable vs pinned).
+                let (read_pinned, write_pending, clean, dirty, block) =
+                    dm.debug_tier_breakdown();
+                const MIB: f64 = (1024 * 1024) as f64;
+                eprintln!(
+                    "[POOL-FULL] used={:.0}MiB cap={:.0}MiB needed={:.0}MiB | \
+                     memtier: read_pinned={} write_pending={} clean_evictable={} \
+                     dirty_unref={} | block_device={}",
+                    mt.used() as f64 / MIB,
+                    mt.capacity() as f64 / MIB,
+                    needed as f64 / MIB,
+                    read_pinned,
+                    write_pending,
+                    clean,
+                    dirty,
+                    block,
+                );
                 return Err(DispatcherError::AllocationFailed(
                     "memory-tier pool full after eviction".into(),
                 ));
             }
 
-            // Every 8th attempt probe a small batch for a clean eviction
-            // (write-through complete, no data loss).  All other iterations
-            // fall straight through to blind LRU to minimise lock hold time.
-            let evict_key = if attempts % 8 == 0 {
-                let candidates = mt.oldest_keys(MAX_SCAN);
-                candidates.iter().find(|&&k| dm.is_evictable(k)).copied()
-            } else {
-                None
-            };
+            // Prefer a clean eviction (write-through complete, no data loss) on
+            // EVERY attempt: scan the LRU-ordered keys and take the oldest one
+            // that is cleanly evictable. Only fall through to blind LRU when no
+            // clean candidate exists at all.
+            let candidates = mt.oldest_keys(MAX_SCAN);
+            let evict_key = candidates.iter().find(|&&k| dm.is_evictable(k)).copied();
 
             match evict_key {
                 Some(key) => {
@@ -1636,6 +1645,21 @@ impl IDispatcher for DispatcherComponent {
                             let prep = (|| -> Result<*mut u8, DispatcherError> {
                                 self.evict_for_space(&dm, &mt, ipc_size, entry.key, max_attempts)?;
                                 mt.insert(entry.key, ipc_size).map_err(|e| {
+                                    // DIAGNOSTIC: evict_for_space succeeded but the
+                                    // insert still failed — dump tier state at this
+                                    // TOCTOU failure to see what's occupying it.
+                                    let (rp, wp, cl, di, bl) = dm.debug_tier_breakdown();
+                                    const MIB: f64 = (1024 * 1024) as f64;
+                                    eprintln!(
+                                        "[POOL-FULL] (lookup-promote insert) used={:.0}MiB \
+                                         cap={:.0}MiB needed={:.0}MiB | memtier: read_pinned={} \
+                                         write_pending={} clean_evictable={} dirty_unref={} | \
+                                         block_device={} err={}",
+                                        mt.used() as f64 / MIB,
+                                        mt.capacity() as f64 / MIB,
+                                        ipc_size as f64 / MIB,
+                                        rp, wp, cl, di, bl, e,
+                                    );
                                     DispatcherError::AllocationFailed(format!(
                                         "promote insert failed: {e}"
                                     ))
@@ -2869,6 +2893,10 @@ mod tests {
                 ),
                 None => false,
             }
+        }
+
+        fn debug_tier_breakdown(&self) -> (usize, usize, usize, usize, usize) {
+            (0, 0, 0, 0, 0)
         }
 
         fn recover_extent(

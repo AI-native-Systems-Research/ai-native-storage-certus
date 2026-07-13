@@ -511,6 +511,29 @@ impl IDispatchMap for DispatchMapComponent {
         }
     }
 
+    fn debug_tier_breakdown(&self) -> (usize, usize, usize, usize, usize) {
+        let inner = self.state.inner.lock().unwrap();
+        let (mut read_pinned, mut write_pending, mut clean, mut dirty, mut block) =
+            (0usize, 0usize, 0usize, 0usize, 0usize);
+        for entry in inner.entries.values() {
+            match &entry.location {
+                Location::BlockDevice { .. } => block += 1,
+                Location::MemoryTier { ssd_offset, .. } => {
+                    if entry.write_ref > 0 {
+                        write_pending += 1;
+                    } else if entry.read_ref > 0 {
+                        read_pinned += 1;
+                    } else if ssd_offset.is_some() {
+                        clean += 1;
+                    } else {
+                        dirty += 1;
+                    }
+                }
+            }
+        }
+        (read_pinned, write_pending, clean, dirty, block)
+    }
+
     fn recover_extent(
         &self,
         key: CacheKey,

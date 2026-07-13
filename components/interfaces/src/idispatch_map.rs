@@ -248,6 +248,13 @@ component_macros::define_interface! {
         /// check (P10) into a single predicate.
         fn is_evictable(&self, key: CacheKey) -> bool;
 
+        /// DIAGNOSTIC: classify all entries for pool-full analysis. Returns
+        /// counts: (memtier_read_pinned, memtier_write_pending,
+        /// memtier_clean_evictable, memtier_dirty_unreferenced, block_device).
+        /// clean_evictable = MemoryTier + ssd_offset set + no refs (droppable now);
+        /// dirty_unreferenced = MemoryTier + no ssd_offset + no refs.
+        fn debug_tier_breakdown(&self) -> (usize, usize, usize, usize, usize);
+
         /// Insert a recovered extent as a BlockDevice entry.
         ///
         /// Used during recovery to rebuild the dispatch map from persisted

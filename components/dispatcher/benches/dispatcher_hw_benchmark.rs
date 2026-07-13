@@ -242,6 +242,11 @@ impl IDispatchMap for HwDispatchMap {
         false
     }
 
+    fn debug_tier_breakdown(&self) -> (usize, usize, usize, usize, usize) {
+        (0, 0, 0, 0, 0)
+    }
+
+
     fn recover_extent(
         &self,
         _key: CacheKey,
