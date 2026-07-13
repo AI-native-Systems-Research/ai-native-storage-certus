@@ -194,6 +194,23 @@ impl IDispatchMap for BenchDispatchMap {
         }
     }
 
+    fn promote_block_to_memory_tier(
+        &self,
+        key: CacheKey,
+        pointer: *mut u8,
+        size: u32,
+    ) -> Result<(), DispatchMapError> {
+        let mut inner = self.inner.lock().unwrap();
+        match inner.get_mut(&key) {
+            Some(e) => {
+                e.mem_pointer = Some((pointer as usize, size));
+                e.block_offset = None;
+                Ok(())
+            }
+            None => Err(DispatchMapError::KeyNotFound(key)),
+        }
+    }
+
     fn is_evictable(&self, _key: CacheKey) -> bool {
         false
     }

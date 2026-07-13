@@ -490,15 +490,13 @@ impl DispatcherComponent {
         drop(ring_guard);
         drop(drives);
 
-        // Update dispatch-map: remove old BlockDevice entry and create fresh MemoryTier.
-        // Since we released the read ref before calling this method, we can remove
-        // and re-register.
-        let _ = dm.remove(key);
-        dm.create_memory_tier_entry(key, mem_ptr, ipc_handle.size)
-            .map_err(|e| DispatcherError::IoError(format!("promote re-register failed: {e}")))?;
-        // Set the ssd_offset since data is still on SSD.
-        let _ = dm.convert_to_storage(key, offset);
-        let _ = dm.release_write(key);
+        // In-place BlockDevice->MemoryTier transition (retains the SSD offset so
+        // the entry stays demotable). Unlike the old remove+recreate, this works
+        // when the entry is pinned (read_ref > 0) by an in-flight load — remove
+        // rejects pinned entries, which crashed the load path.
+        let _ = offset; // offset retained inside promote_block_to_memory_tier
+        dm.promote_block_to_memory_tier(key, mem_ptr, ipc_handle.size)
+            .map_err(|e| DispatcherError::IoError(format!("promote transition failed: {e}")))?;
 
         Ok(())
     }
@@ -1539,12 +1537,12 @@ impl IDispatcher for DispatcherComponent {
                     let res = mt
                         .insert(entry.key, entry.ipc_handle_size)
                         .map(|mem_ptr| {
-                            let _ = dm.create_memory_tier_entry(
+                            // In-place, pin-safe promote (no remove/recreate).
+                            let _ = dm.promote_block_to_memory_tier(
                                 entry.key,
                                 mem_ptr,
                                 entry.ipc_handle_size,
                             );
-                            let _ = dm.release_write(entry.key);
                         })
                         .map_err(|e| {
                             DispatcherError::AllocationFailed(format!("promote insert failed: {e}"))
@@ -1722,23 +1720,20 @@ impl IDispatcher for DispatcherComponent {
                         let entry = &cold_entries[ci];
                         let res = match result {
                             Ok(()) => {
-                                let _ = dm.remove(entry.key);
-                                let create_res = dm
-                                    .create_memory_tier_entry(
-                                        entry.key,
-                                        mem_ptrs[job_idx],
-                                        entry.ipc_handle_size,
-                                    )
-                                    .map_err(|e| {
-                                        DispatcherError::IoError(format!(
-                                            "promote re-register failed: {e}"
-                                        ))
-                                    });
-                                if create_res.is_ok() {
-                                    let _ = dm.convert_to_storage(entry.key, entry.offset);
-                                    let _ = dm.release_write(entry.key);
-                                }
-                                create_res
+                                // In-place BlockDevice->MemoryTier: preserves the
+                                // load's pin (read_ref) and keeps the SSD offset,
+                                // so it works on a pinned entry (unlike the old
+                                // remove+recreate, whose remove failed on a pin).
+                                dm.promote_block_to_memory_tier(
+                                    entry.key,
+                                    mem_ptrs[job_idx],
+                                    entry.ipc_handle_size,
+                                )
+                                .map_err(|e| {
+                                    DispatcherError::IoError(format!(
+                                        "promote transition failed: {e}"
+                                    ))
+                                })
                             }
                             Err(e) => Err(e),
                         };
@@ -2244,10 +2239,8 @@ impl IDispatcher for DispatcherComponent {
                     continue;
                 }
                 if let Ok(mem_ptr) = mt.insert(entry.key, entry.size) {
-                    let _ = dm.remove(entry.key);
-                    let _ = dm.create_memory_tier_entry(entry.key, mem_ptr, entry.size);
-                    let _ = dm.convert_to_storage(entry.key, entry.offset);
-                    let _ = dm.release_write(entry.key);
+                    // In-place promote (pin-safe): no remove/recreate.
+                    let _ = dm.promote_block_to_memory_tier(entry.key, mem_ptr, entry.size);
                 }
             }
             return;
@@ -2325,10 +2318,8 @@ impl IDispatcher for DispatcherComponent {
                             continue;
                         }
 
-                        let _ = dm.remove(entry.key);
-                        let _ = dm.create_memory_tier_entry(entry.key, mem_ptr, entry.size);
-                        let _ = dm.convert_to_storage(entry.key, entry.offset);
-                        let _ = dm.release_write(entry.key);
+                        // In-place, pin-safe promote (no remove/recreate).
+                        let _ = dm.promote_block_to_memory_tier(entry.key, mem_ptr, entry.size);
                     }
                 });
             }
@@ -2787,6 +2778,31 @@ mod tests {
                     }
                     _ => Err(DispatchMapError::InvalidState("no ssd_offset set".into())),
                 },
+            }
+        }
+
+        fn promote_block_to_memory_tier(
+            &self,
+            key: CacheKey,
+            pointer: *mut u8,
+            size: u32,
+        ) -> Result<(), DispatchMapError> {
+            if size == 0 {
+                return Err(DispatchMapError::InvalidSize);
+            }
+            let mut inner = self.inner.lock().unwrap();
+            match inner.entries.get_mut(&key) {
+                None => Err(DispatchMapError::KeyNotFound(key)),
+                Some(entry) => {
+                    // Mock only models a MemoryTier location; flip pointer/size
+                    // in place, preserving refs (no remove/recreate).
+                    entry.location = MockEntryLocation::MemoryTier {
+                        pointer,
+                        size,
+                        ssd_offset: Some(0),
+                    };
+                    Ok(())
+                }
             }
         }
 
