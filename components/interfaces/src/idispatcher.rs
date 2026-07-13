@@ -373,8 +373,8 @@ component_macros::define_interface! {
 
         /// Remove a cache entry, freeing all associated resources.
         ///
-        /// If a background write is in progress, blocks until it completes
-        /// before removing. Frees memory-tier slot and/or SSD extent.
+        /// Does NOT block waiting for background write-through to complete.
+        /// Proceeds immediately with removal. Frees memory-tier slot and/or SSD extent.
         ///
         /// # Errors
         ///
