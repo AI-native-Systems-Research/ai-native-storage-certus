@@ -217,6 +217,27 @@ component_macros::define_interface! {
         /// Rejects entries not in MemoryTier state.
         fn convert_memory_tier_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError>;
 
+        /// Promote a block-device entry to a memory-tier location **in place**.
+        ///
+        /// Transitions `BlockDevice { offset }` to
+        /// `MemoryTier { pointer, size, ssd_offset: Some(offset) }`, preserving
+        /// the entry's eviction handle and ALL reference counts. This is the
+        /// inverse of `convert_memory_tier_to_block` and, crucially, does NOT
+        /// remove/recreate the entry — so it works while the entry is pinned
+        /// (`read_ref > 0`), which is exactly the case during a load
+        /// (prepare_load pins, then the lookup promotes the cold block).
+        /// `ssd_offset` retains the original block offset so the promoted entry
+        /// remains demotable/evictable without data loss.
+        ///
+        /// Returns `KeyNotFound` if absent, `InvalidSize` if size == 0, and
+        /// `InvalidState` if the entry is not in block-device state.
+        fn promote_block_to_memory_tier(
+            &self,
+            key: CacheKey,
+            pointer: *mut u8,
+            size: u32,
+        ) -> Result<(), DispatchMapError>;
+
         /// Check if a memory-tier entry is safe to evict.
         ///
         /// Returns `true` if the entry exists, is in MemoryTier state with
