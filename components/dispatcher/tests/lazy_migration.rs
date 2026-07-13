@@ -206,6 +206,20 @@ impl IDispatchMap for MockDispatchMap {
         }
     }
 
+    fn promote_block_to_memory_tier(
+        &self,
+        key: CacheKey,
+        _pointer: *mut u8,
+        _size: u32,
+    ) -> Result<(), DispatchMapError> {
+        let inner = self.inner.lock().unwrap();
+        if inner.entries.contains_key(&key) {
+            Ok(())
+        } else {
+            Err(DispatchMapError::KeyNotFound(key))
+        }
+    }
+
     fn is_evictable(&self, key: CacheKey) -> bool {
         let inner = self.inner.lock().unwrap();
         inner.entries.contains_key(&key)

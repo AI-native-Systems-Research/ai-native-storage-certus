@@ -448,6 +448,54 @@ impl IDispatchMap for DispatchMapComponent {
         Ok(())
     }
 
+    fn promote_block_to_memory_tier(
+        &self,
+        key: CacheKey,
+        pointer: *mut u8,
+        size: u32,
+    ) -> Result<(), DispatchMapError> {
+        if size == 0 {
+            return Err(DispatchMapError::InvalidSize);
+        }
+
+        let mut inner = self.state.inner.lock().unwrap();
+        let entry = inner
+            .entries
+            .get_mut(&key)
+            .ok_or(DispatchMapError::KeyNotFound(key))?;
+
+        match &entry.location {
+            Location::BlockDevice { offset } => {
+                // In-place flip: keep the eviction handle and all refs (the
+                // entry may be pinned by an in-flight load). Retain the SSD
+                // offset so the promoted entry stays demotable without a reread.
+                let offset = *offset;
+                entry.location = Location::MemoryTier {
+                    pointer,
+                    size,
+                    ssd_offset: Some(offset),
+                };
+                entry.size_blocks = size.div_ceil(4096);
+            }
+            Location::MemoryTier { .. } => {
+                return Err(DispatchMapError::InvalidState(
+                    "entry is already in memory-tier state".into(),
+                ));
+            }
+        }
+
+        if let Ok(logger) = self.logger.get() {
+            logger.debug(&format!(
+                "dispatch-map: promoted block-device key {key} to memory-tier in place, size {size}"
+            ));
+        }
+
+        drop(inner);
+        self.state.condvar.notify_all();
+
+        Ok(())
+    }
+
     fn is_evictable(&self, key: CacheKey) -> bool {
         let inner = self.state.inner.lock().unwrap();
         match inner.entries.get(&key) {
