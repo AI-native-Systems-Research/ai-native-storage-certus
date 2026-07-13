@@ -2811,6 +2811,29 @@ mod tests {
             }
         }
 
+        fn promote_block_to_memory_tier(
+            &self,
+            key: CacheKey,
+            pointer: *mut u8,
+            size: u32,
+        ) -> Result<(), DispatchMapError> {
+            if size == 0 {
+                return Err(DispatchMapError::InvalidSize);
+            }
+            let mut inner = self.inner.lock().unwrap();
+            match inner.entries.get_mut(&key) {
+                None => Err(DispatchMapError::KeyNotFound(key)),
+                Some(entry) => {
+                    entry.location = MockEntryLocation::MemoryTier {
+                        pointer,
+                        size,
+                        ssd_offset: Some(0),
+                    };
+                    Ok(())
+                }
+            }
+        }
+
         fn is_evictable(&self, key: CacheKey) -> bool {
             let inner = self.inner.lock().unwrap();
             match inner.entries.get(&key) {
