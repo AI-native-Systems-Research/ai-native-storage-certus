@@ -548,7 +548,8 @@ mod verification {
             size_blocks: 1,
             read_ref,
             write_ref,
-            tsc: 0,
+            eviction_handle: interfaces::EvictionHandle::new(0, 0),
+            reuse_count: std::sync::atomic::AtomicU32::new(0),
         }
     }
 
