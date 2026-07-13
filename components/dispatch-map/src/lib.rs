@@ -17,6 +17,7 @@ pub fn entry_size() -> usize {
     std::mem::size_of::<entry::DispatchEntry>()
 }
 
+use std::sync::atomic::AtomicU32;
 use std::time::Duration;
 
 use component_framework::define_component;
@@ -97,6 +98,7 @@ impl IDispatchMap for DispatchMapComponent {
                 read_ref: 0,
                 write_ref: 0,
                 eviction_handle,
+                reuse_count: AtomicU32::new(0),
             };
             inner.entries.insert(extent.key, entry);
             count += 1;
@@ -132,6 +134,7 @@ impl IDispatchMap for DispatchMapComponent {
             .read_ref
             .checked_add(1)
             .ok_or(DispatchMapError::RefCountOverflow(key))?;
+        entry.reuse_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let handle = entry.eviction_handle;
 
         let result = match &entry.location {
@@ -207,6 +210,7 @@ impl IDispatchMap for DispatchMapComponent {
             .read_ref
             .checked_add(1)
             .ok_or(DispatchMapError::RefCountOverflow(key))?;
+        entry.reuse_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: take_read key {key}"));
         }
@@ -294,6 +298,7 @@ impl IDispatchMap for DispatchMapComponent {
             .read_ref
             .checked_add(1)
             .ok_or(DispatchMapError::RefCountOverflow(key))?;
+        entry.reuse_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: downgrade_reference key {key}"));
         }
@@ -388,6 +393,7 @@ impl IDispatchMap for DispatchMapComponent {
             read_ref: 0,
             write_ref: 1,
             eviction_handle,
+            reuse_count: AtomicU32::new(0),
         };
 
         inner.entries.insert(key, entry);
@@ -525,6 +531,7 @@ impl IDispatchMap for DispatchMapComponent {
             read_ref: 0,
             write_ref: 0,
             eviction_handle,
+            reuse_count: AtomicU32::new(0),
         };
         inner.entries.insert(key, entry);
         Ok(())
