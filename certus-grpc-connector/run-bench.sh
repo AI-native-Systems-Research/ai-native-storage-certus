@@ -72,6 +72,13 @@ EOF
     exit 1
 fi
 
+# Resolve the tag to an image ID and run by ID. With a custom --root store,
+# rootless podman can spuriously report "image not known" at `run` time for a
+# tagged name that `image exists` accepts (name-resolution races against
+# <none> dangling images). Running by ID sidesteps name resolution entirely.
+IMAGE_ID="$(podman image inspect "${IMAGE}" --format '{{.Id}}' 2>/dev/null)"
+[[ -n "${IMAGE_ID}" ]] && IMAGE="${IMAGE_ID}"
+
 # ── HF token passthrough (only if set) ──
 hf_env=()
 [[ -n "${HF_TOKEN:-}" ]] && hf_env+=(-e "HF_TOKEN=${HF_TOKEN}")
@@ -87,7 +94,11 @@ fi
 echo "[run-bench] image=${IMAGE} gpu=${GPU} server=${CERTUS_SERVER}"
 echo "[run-bench] num_convs=${NUM_CONVS} model=${MODEL}"
 
-exec podman run --rm \
+# NOTE: `exec` bypasses the podman() shell function, so the store flags must be
+# passed explicitly here — otherwise `run` hits the DEFAULT store (where the
+# image isn't) and fails with "image not known" even though the preflight (which
+# goes through the function) found it in the custom store.
+exec command podman "${store_flags[@]}" run --rm \
     --pull=never \
     --device "nvidia.com/gpu=${GPU}" \
     --ipc=host \
