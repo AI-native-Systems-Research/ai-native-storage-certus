@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "certus-grpc-connector"
+version = "0.1.0"
+description = "Certus storage connector for vLLM — pure-Python gRPC client to certus-server"
+requires-python = ">=3.10"
+dependencies = [
+    "grpcio>=1.60.0",
+    "protobuf>=4.25.0",
+    "torch",
+    "numpy",
+]
+# vLLM is provided by the runtime environment (heavy GPU dependency); the
+# connector targets its v1 kv_offload OffloadingSpec API as of this release.
+# vllm==0.20.0
+
+[project.optional-dependencies]
+dev = ["pytest", "grpcio-tools>=1.60.0"]
+
+[tool.setuptools]
+packages = ["certus_grpc_connector"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
