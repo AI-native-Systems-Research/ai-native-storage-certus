@@ -270,7 +270,11 @@ impl Dispatcher for DispatcherService {
                         &DispatcherError::IoError("IPC handle not cached".into()),
                     ),
                 };
-                let ipc = IpcHandle { address: dev_ptr as *mut u8, size: handle.size };
+                let ipc = IpcHandle {
+                    // dev_ptr is the allocation base; offset addresses this block within it.
+                    address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
+                    size: handle.size,
+                };
                 match dispatcher.populate(entry.key, ipc) {
                     Ok(()) => success_result(entry.key),
                     Err(e) => error_result(entry.key, &e),
@@ -366,7 +370,9 @@ impl Dispatcher for DispatcherService {
                     },
                 };
                 batch_entries.push((entry.key, IpcHandle {
-                    address: dev_ptr as *mut u8,
+                    // dev_ptr is the allocation base (deduped per handle); offset is
+                    // per-entry, so apply it here to address this block within the alloc.
+                    address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
                     size: handle.size,
                 }));
             }
@@ -641,7 +647,8 @@ impl Dispatcher for DispatcherService {
                         }
                     };
                     let ipc = IpcHandle {
-                        address: dev_ptr as *mut u8,
+                        // dev_ptr is the allocation base; offset addresses this block within it.
+                        address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
                         size: handle.size,
                     };
                     match dispatcher.copy_gpu_to_memory_async(
@@ -922,6 +929,9 @@ mod tests {
         touch_results: HashMap<u64, Result<(), DispatcherError>>,
         clear_memory_tier_result: Result<usize, DispatcherError>,
         populate_calls: Vec<(u64, u32)>,
+        /// Resolved device address passed to `populate`, per key. Used to verify
+        /// the server folds `IpcHandle.offset` into the opened base pointer.
+        populate_addrs: Vec<(u64, usize)>,
         batch_lookup_calls: Vec<Vec<u64>>,
         check_calls: Vec<u64>,
     }
@@ -936,6 +946,7 @@ mod tests {
                 touch_results: HashMap::new(),
                 clear_memory_tier_result: Ok(0),
                 populate_calls: Vec::new(),
+                populate_addrs: Vec::new(),
                 batch_lookup_calls: Vec::new(),
                 check_calls: Vec::new(),
             }
@@ -1010,6 +1021,9 @@ mod tests {
         fn populate(&self, key: u64, ipc_handle: IpcHandle) -> Result<(), DispatcherError> {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             state.populate_calls.push((key, ipc_handle.size));
+            state
+                .populate_addrs
+                .push((key, ipc_handle.address as usize));
             state.populate_results.get(&key).cloned().unwrap_or(Ok(()))
         }
 
@@ -1072,6 +1086,7 @@ mod tests {
             cuda_ipc_handle: vec![seed; 64],
             size: 4096,
             gpu_device_id: -1,
+            offset: 0,
         }
     }
 
@@ -1134,6 +1149,48 @@ mod tests {
                 .unwrap()
                 .refcount,
             1
+        );
+    }
+
+    #[tokio::test]
+    async fn populate_folds_offset_into_resolved_address() {
+        // Seed the IPC cache with a known non-null base so we can assert the
+        // server adds IpcHandle.offset to the opened allocation base.
+        const BASE: usize = 0x1000_0000;
+        const OFFSET: u64 = 0x4_0000;
+        let mock = Arc::new(MockDispatcher::default());
+        let service = test_service(mock.clone());
+        let mut ipc_handle = proto_ipc_handle(2);
+        ipc_handle.offset = OFFSET;
+        let key = handle_key(&ipc_handle);
+        service.ipc_cache.lock().unwrap_or_else(|e| e.into_inner()).insert(
+            key,
+            IpcCacheEntry {
+                dev_ptr: BASE as *mut std::ffi::c_void,
+                gpu_device_id: -1,
+                refcount: 1,
+            },
+        );
+
+        let request = BatchPopulateRequest {
+            entries: vec![proto::PopulateEntry {
+                key: 20,
+                ipc_handle: Some(ipc_handle),
+            }],
+        };
+        let response = service
+            .populate(Request::new(request))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(response.results[0].success);
+        assert_eq!(
+            mock.state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .populate_addrs,
+            vec![(20, BASE + OFFSET as usize)]
         );
     }
 

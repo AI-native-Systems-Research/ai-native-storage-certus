@@ -55,6 +55,11 @@ message IpcHandle {
   bytes cuda_ipc_handle = 1;
   uint32 size = 2;              // Data size in bytes
   int32 gpu_device_id = 3;     // CUDA device ordinal that allocated this memory
+  // Byte offset from the allocation base (what cudaIpcOpenMemHandle resolves to)
+  // to the start of this block. Lets a client share one large allocation (e.g. a
+  // vLLM KV cache) and address individual blocks; the server DMAs at base+offset.
+  // Defaults to 0 for clients that export one allocation per block.
+  uint64 offset = 4;
 }
 
 enum ErrorCode {
