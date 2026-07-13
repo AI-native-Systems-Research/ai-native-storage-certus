@@ -266,7 +266,8 @@ impl Dispatcher for DispatcherService {
                         }
                     };
                     let ipc = IpcHandle {
-                        address: dev_ptr as *mut u8,
+                        // dev_ptr is the allocation base; offset addresses this block within it.
+                        address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
                         size: handle.size,
                     };
                     match dispatcher.populate(entry.key, ipc) {
@@ -368,7 +369,9 @@ impl Dispatcher for DispatcherService {
                 batch_entries.push((
                     entry.key,
                     IpcHandle {
-                        address: dev_ptr as *mut u8,
+                        // dev_ptr is the allocation base (deduped per handle); offset is
+                        // per-entry, so apply it here to address this block within the alloc.
+                        address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
                         size: handle.size,
                     },
                 ));
@@ -602,7 +605,8 @@ impl Dispatcher for DispatcherService {
                         }
                     };
                     let ipc = IpcHandle {
-                        address: dev_ptr as *mut u8,
+                        // dev_ptr is the allocation base; offset addresses this block within it.
+                        address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
                         size: handle.size,
                     };
                     match dispatcher.copy_gpu_to_memory_async(
