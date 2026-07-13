@@ -104,6 +104,37 @@ if __name__ == "__main__":
     alive = [True] * len(convs)
     next_turn = [0] * len(convs)
 
+    # --- Per-round SSD I/O accounting via the server's GetIoStats RPC ---------
+    # The server aggregates per-direction read/write byte/op/latency counters
+    # across all data drives (requires the server built with --features
+    # rw-telemetry). We open our own channel to poll it around each round for
+    # deltas — the gRPC analogue of the in-process iostat file.
+    import grpc
+    from certus_grpc_connector import dispatcher_pb2 as _pb
+    from certus_grpc_connector import dispatcher_pb2_grpc as _pbg
+
+    _io_chan = grpc.insecure_channel(CERTUS_SERVER)
+    _io_stub = _pbg.DispatcherStub(_io_chan)
+
+    def io_stats():
+        # Returns (read_ops, read_bytes, read_lat_ns_sum, write_ops,
+        # write_bytes, write_lat_ns_sum); zeros if the server lacks the feature.
+        try:
+            r = _io_stub.GetIoStats(_pb.GetIoStatsRequest())
+            return (r.read_ops, r.read_bytes, r.read_latency_ns_sum,
+                    r.write_ops, r.write_bytes, r.write_latency_ns_sum)
+        except Exception as e:  # noqa: BLE001
+            print(f"[run] GetIoStats failed: {e}", file=sys.stderr, flush=True)
+            return (0, 0, 0, 0, 0, 0)
+
+    def gib(n):
+        return f"{n / (1024**3):.2f}GiB"
+
+    def mean_us(lat_ns_sum, ops):
+        return f"{(lat_ns_sum / ops) / 1000:.1f}us" if ops else "n/a"
+
+    io_prev = io_stats()
+
     rounds_done = 0
     total_generations = 0
     t_start = time.perf_counter()
@@ -138,9 +169,18 @@ if __name__ == "__main__":
             next_turn[i] += 1
             total_generations += 1
         rounds_done += 1
+
+        # Per-round SSD I/O deltas from the server counters.
+        io_now = io_stats()
+        d = [io_now[k] - io_prev[k] for k in range(6)]
+        io_prev = io_now
+        d_rops, d_rb, d_rlat, d_wops, d_wb, d_wlat = d
         print(
             f"[run] round {rounds_done}: {len(active_prompts)} prompts, "
-            f"{total_generations} total generations",
+            f"{total_generations} total generations  "
+            f"ssd_read={gib(d_rb)} ssd_write={gib(d_wb)} "
+            f"r_ops={d_rops} w_ops={d_wops} "
+            f"r_lat={mean_us(d_rlat, d_rops)} w_lat={mean_us(d_wlat, d_wops)}",
             file=sys.stderr,
         )
 
