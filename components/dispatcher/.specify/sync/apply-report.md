@@ -1,9 +1,9 @@
 # Sync Apply Report: Dispatcher Component
 
-**Date**: 2026-06-12  
+**Date**: 2026-07-14  
 **Operator**: speckit-sync-apply  
 **Spec**: `components/dispatcher/specs/001-dispatcher-cache-interface/spec.md`  
-**Prior runs**: 2026-05-21 (5 changes), 2026-05-29 (7 changes)
+**Prior runs**: 2026-05-21 (5 changes), 2026-05-29 (7 changes), 2026-06-12 (2 changes)
 
 ## Summary
 
@@ -11,7 +11,38 @@
 |--------|-------|
 | New drift items identified | 2 |
 | Backfills applied to spec | 2 |
-| Spec sections modified | FR-024, Prior Clarity (IMemoryTier listing, eviction Q&A, write-through Q&A) |
+| Spec sections modified | FR-033, User Story 12 (new), FR-046–FR-050 (new), Key Entities |
+
+---
+
+## Backfills Applied (2026-07-14)
+
+### BACKFILL-015: FR-033 updated to include memory-tier eviction config fields
+
+**Drift item**: FR-033 drift (2026-07-14)  
+**File**: `spec.md` FR-033  
+
+**Before**: FR-033 listed only SSD eviction config fields: `ssd_eviction_threshold`, `ssd_eviction_low_watermark`, `ssd_eviction_batch_size`, `ssd_eviction_interval_secs`, and `max_eviction_attempts`.
+
+**After**: FR-033 now additionally specifies: `memory_tier_eviction_threshold` (f64, default 0.0 — disabled), `memory_tier_eviction_low_watermark` (f64, default 0.70), `memory_tier_eviction_batch_size` (usize, default 64), `memory_tier_eviction_interval_secs` (u64, default 2).
+
+---
+
+### BACKFILL-016: User Story 12 + FR-046 through FR-050 added for Background Memory-Tier Demotion
+
+**Drift item**: Unspecced MemoryTierEvictor (2026-07-14)  
+**File**: `spec.md` User Story 12, FR-046–FR-050, Key Entities  
+
+**Before**: No specification for the background memory-tier evictor. Feature existed only in code (`src/background.rs:409-555`).
+
+**After**:
+- **User Story 12** (Priority P3): Background Memory-Tier Demotion — proactive LRU demotion from DRAM to SSD when utilization exceeds threshold.
+- **FR-046**: Start evictor thread on `initialize()` when threshold > 0.0; join on `shutdown()`.
+- **FR-047**: Periodic utilization check at configurable interval (default 2s).
+- **FR-048**: Demote via `oldest_keys(batch_size)`, stop at low watermark or batch exhaustion.
+- **FR-049**: Check `is_evictable` before demotion; path is `mt.remove` + `convert_memory_tier_to_block`; remove entry on transition failure.
+- **FR-050**: Emit `EvictionEvent` (Demoted or Removed) via eviction channel (FR-042).
+- **Key Entities**: Added "Background Memory-Tier Evictor" definition.
 
 ---
 
@@ -157,6 +188,8 @@ The following were noted in the drift report but not backfilled to the spec beca
 
 | Drift Item | Status |
 |-----------|--------|
+| FR-033 memory-tier config fields | Resolved — FR-033 updated (BACKFILL-015) |
+| Unspecced MemoryTierEvictor | Resolved — US12 + FR-046–050 added (BACKFILL-016) |
 | DRIFT-A: evict_for_space algorithm | Resolved — FR-024 and US7 rewritten |
 | DRIFT-B: sliding window pipeline | Resolved — FR-019 and US9 rewritten |
 | DRIFT-C: batch_lookup warm_stream | Resolved — FR-037 extended |

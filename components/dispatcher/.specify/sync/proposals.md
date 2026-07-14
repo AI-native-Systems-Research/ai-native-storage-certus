@@ -1,48 +1,61 @@
 # Sync Proposals: Dispatcher Component
 
-**Generated**: 2026-05-28
+**Generated**: 2026-07-14
 **Spec**: `components/dispatcher/specs/001-dispatcher-cache-interface/spec.md`
-**Status**: All 3 proposals approved and applied
+**Status**: 2 proposals applied
 
 ## Summary
 
 | Resolution Type | Count |
 |-----------------|-------|
-| Backfill (Code -> Spec) | 3 |
+| Backfill (Code -> Spec) | 2 |
 | Align (Spec -> Code) | 0 |
 | Human Decision | 0 |
 
 ## Proposals
 
-### Proposal 1: FR-001 — Add `batch_lookup` to method list
+### Proposal 1: FR-033 — Add memory-tier eviction config fields
 
 **Direction**: BACKFILL
-**Status**: APPROVED and APPLIED
+**Status**: APPLIED
 
 **Current State**:
-- Spec says: interface provides `initialize`, `shutdown`, `lookup`, `lookup_async`, `check`, `remove`, `populate`, `prepare_store`, `commit_store`, `cancel_store`, and `touch`
-- Code does: additionally provides `batch_lookup`
+- Spec says: "DispatcherConfig MUST include `ssd_eviction_threshold`, `ssd_eviction_low_watermark`, `ssd_eviction_batch_size`, `ssd_eviction_interval_secs`, and `max_eviction_attempts`"
+- Code does: additionally includes `memory_tier_eviction_threshold` (f64, default 0.0), `memory_tier_eviction_low_watermark` (f64, default 0.70), `memory_tier_eviction_batch_size` (usize, default 64), `memory_tier_eviction_interval_secs` (u64, default 2)
 
-**Resolution Applied**: Updated FR-001 to include `batch_lookup` in the method enumeration. Added FR-039 with full `batch_lookup` semantics.
+**Proposed Resolution**: Update FR-033 to include the four new memory-tier eviction fields.
+
+**Confidence**: HIGH
 
 ---
 
-### Proposal 2: FR-019 — Parameterized pipeline queue depth
+### Proposal 2: New User Story 12 + FR-046 through FR-050 — Background Memory-Tier Demotion
 
-**Direction**: BACKFILL
-**Status**: APPROVED and APPLIED
+**Direction**: BACKFILL (NEW_SPEC)
+**Status**: APPLIED
 
-**Current State**:
-- Spec says: "up to 16 concurrent NVMe reads"
-- Code does: accepts `max_queue_depth` parameter (16 for single-entry, 16/num_queues for batch)
+**Feature**: MemoryTierEvictor — a background thread that proactively demotes LRU entries from DRAM memory-tier to SSD when utilization exceeds a configurable threshold.
 
-**Resolution Applied**: Updated FR-019 to describe the parameterized `max_queue_depth` and multi-queue sharing strategy.
+**Proposed Spec Additions**:
+
+- **User Story 12**: Background Memory-Tier Demotion (Priority: P3)
+- **FR-046**: The dispatcher MUST start a background memory-tier evictor thread during `initialize()` if `memory_tier_eviction_threshold > 0.0`. The evictor MUST be shut down (thread joined) during `shutdown()`.
+- **FR-047**: The memory-tier evictor MUST periodically check memory-tier utilization (`IMemoryTier::used()` / `IMemoryTier::capacity()`). The check interval MUST be configurable via `memory_tier_eviction_interval_secs` (default: 2 seconds).
+- **FR-048**: When memory-tier utilization exceeds `memory_tier_eviction_threshold` (default: disabled at 0.0), the evictor MUST demote entries using `IMemoryTier::oldest_keys(batch_size)` for LRU ordering, stopping when utilization drops below `memory_tier_eviction_low_watermark` (default: 0.70) or the batch is exhausted.
+- **FR-049**: For each candidate, the evictor MUST check `IDispatchMap::is_evictable(key)` (write-through complete, no active references) before demoting. Demotion path: `IMemoryTier::remove(key)` followed by `IDispatchMap::convert_memory_tier_to_block(key)`. If BlockDevice transition fails, the dispatch-map entry is removed entirely.
+- **FR-050**: The evictor MUST emit `EvictionEvent { key, reason: Demoted }` (or `Removed` on transition failure) via the eviction notification channel (FR-042) for each demoted entry.
+
+**Confidence**: HIGH
 
 ---
 
-### Proposal 3: New User Story 11 — Parallel Batch Cold Promotion
+## Previous Proposals (Applied)
 
-**Direction**: NEW_SPEC (backfill)
-**Status**: APPROVED and APPLIED
+### Proposal (2026-05-28): FR-001 — Add `batch_lookup`
+**Status**: APPLIED
 
-**Resolution Applied**: Added User Story 11 describing batch parallel cold promotion with per-drive thread groups, multi-queue threads, reduced queue depth, and acceptance scenarios. Added SC-014 measuring batch throughput improvement.
+### Proposal (2026-05-28): FR-019 — Parameterized pipeline queue depth
+**Status**: APPLIED
+
+### Proposal (2026-05-28): New User Story 11 — Parallel Batch Cold Promotion
+**Status**: APPLIED

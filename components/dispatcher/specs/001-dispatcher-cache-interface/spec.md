@@ -183,6 +183,24 @@ A client application submits a batch of cache keys to `batch_lookup`. For entrie
 
 ---
 
+### User Story 12 - Background Memory-Tier Demotion (Priority: P3)
+
+When the memory-tier DRAM pool approaches capacity, a background evictor proactively demotes the oldest (LRU) entries from DRAM to SSD-backed BlockDevice state before on-demand eviction pressure causes stalls on the populate or cold-promotion hot paths. The evictor periodically checks memory-tier utilization (`used() / capacity()`). When utilization exceeds the configured threshold (`memory_tier_eviction_threshold`), it demotes entries in batches until utilization drops below the low-water mark (`memory_tier_eviction_low_watermark`). Only entries whose write-through is complete (`is_evictable`) are eligible for demotion. The demotion path is: `IMemoryTier::remove(key)` followed by `IDispatchMap::convert_memory_tier_to_block(key)` — the data remains accessible on SSD via the BlockDevice lookup path.
+
+**Why this priority**: Proactive demotion prevents memory-tier exhaustion before it causes `AllocationFailed` errors on the populate hot path. Without this, the only memory-tier eviction is reactive (triggered during populate), which adds latency to client requests under sustained write load.
+
+**Independent Test**: Can be tested by configuring a small memory-tier pool with threshold=0.5, populating past 50% capacity, and verifying that old entries are proactively transitioned to BlockDevice state within the evictor interval.
+
+**Acceptance Scenarios**:
+
+1. **Given** memory-tier utilization exceeds `memory_tier_eviction_threshold` (e.g. 0.8), **When** the evictor wakes, **Then** it calls `oldest_keys(batch_size)` and demotes entries whose write-through is complete (`is_evictable`) until utilization drops below `memory_tier_eviction_low_watermark` (default 0.70) or the batch is exhausted.
+2. **Given** an entry has not completed write-through (not evictable), **When** the evictor evaluates it, **Then** it is skipped.
+3. **Given** `memory_tier_eviction_threshold` is set to 0.0 in DispatcherConfig (default), **When** the dispatcher initializes, **Then** the background memory-tier evictor is NOT started.
+4. **Given** shutdown is called while the memory-tier evictor is running, **When** the evictor is mid-sweep, **Then** it finishes the current entry, exits the loop, and the thread joins cleanly.
+5. **Given** a successful demotion, **When** the entry's key is subsequently looked up, **Then** the entry is served via the BlockDevice cold path (SSD promotion back to DRAM).
+
+---
+
 ### Edge Cases
 
 - When memory-tier insertion fails during populate (pool full after eviction attempt), populate returns an `AllocationFailed` error to the caller and no dispatch map entry is created.
@@ -254,7 +272,7 @@ A client application submits a batch of cache keys to `batch_lookup`. For entrie
 - **FR-030**: The SSD evictor MUST periodically check combined SSD utilization (sum of `IExtentManager::used_bytes()` / sum of `IExtentManager::capacity_bytes()` across all extent managers). The check interval MUST be configurable via `ssd_eviction_interval_secs` (default: 5 seconds).
 - **FR-031**: When SSD utilization exceeds `ssd_eviction_threshold` (default: 0.9), the evictor MUST evict BlockDevice-only entries using `IDispatchMap::oldest_keys(batch_size)` for LRU ordering, stopping when utilization drops below `ssd_eviction_low_watermark` (default: 0.8) or the batch is exhausted.
 - **FR-032**: The SSD evictor MUST skip entries in MemoryTier state (still hot in DRAM). Entries with active read or write references MUST be skipped gracefully (dm.remove fails without panic).
-- **FR-033**: The `DispatcherConfig` MUST include `ssd_eviction_threshold` (f64, default 0.9), `ssd_eviction_low_watermark` (f64, default 0.8), `ssd_eviction_batch_size` (usize, default 64), `ssd_eviction_interval_secs` (u64, default 5), and `max_eviction_attempts` (usize, default 2048). Setting `ssd_eviction_threshold` to 0.0 disables the evictor. `max_eviction_attempts` controls how many iterations `evict_for_space` attempts before returning `AllocationFailed`.
+- **FR-033**: The `DispatcherConfig` MUST include `ssd_eviction_threshold` (f64, default 0.9), `ssd_eviction_low_watermark` (f64, default 0.8), `ssd_eviction_batch_size` (usize, default 64), `ssd_eviction_interval_secs` (u64, default 5), `max_eviction_attempts` (usize, default 2048), `memory_tier_eviction_threshold` (f64, default 0.0), `memory_tier_eviction_low_watermark` (f64, default 0.70), `memory_tier_eviction_batch_size` (usize, default 64), and `memory_tier_eviction_interval_secs` (u64, default 2). Setting `ssd_eviction_threshold` to 0.0 disables the SSD evictor. Setting `memory_tier_eviction_threshold` to 0.0 disables the memory-tier evictor. `max_eviction_attempts` controls how many iterations `evict_for_space` attempts before returning `AllocationFailed`.
 - **FR-034**: During `initialize()`, after GPU and memory-tier are ready, the dispatcher MUST call `IGpuServices::register_host_memory` on the memory-tier pool to CUDA-pin and SPDK-register it for zero-copy NVMe and GPU DMA. Registration failure MUST be logged as a warning (zero-copy pipelines require this registration). The dispatcher SHOULD also cache block-device `ClientChannels` per data drive at init time to avoid per-operation connection overhead.
 - **FR-035**: During `shutdown()`, before memory-tier teardown, the dispatcher MUST call `IGpuServices::unregister_host_memory` to release CUDA page-locking and SPDK registration on the memory-tier pool.
 - **FR-036**: System MUST provide a `lookup_async(key, ipc_handle) -> Result<GpuStream, DispatcherError>` method on the `IDispatcher` interface. This method performs the same cache lookup as `lookup` (dispatch-map query, memory-tier hit, BlockDevice promotion) but returns a `GpuStream` handle instead of blocking on the H2D DMA transfer. The caller MUST call `stream_synchronize` on the returned stream before accessing the GPU destination memory. For SSD promotion paths the copy completes synchronously and a null stream is returned. The synchronous `lookup` method MUST delegate to `lookup_async` internally and call `stream_synchronize` before returning.
@@ -267,6 +285,11 @@ A client application submits a batch of cache keys to `batch_lookup`. For entrie
 - **FR-043**: The dispatcher MUST define a `PipelineMetrics` trait providing timing observation hooks for internal pipeline stages (cold SSD read latency, hot GPU DMA latency, populate phase duration). An implementation of `PipelineMetrics` MAY be injected to record per-operation telemetry. When no metrics implementation is provided, timing observations are no-ops.
 - **FR-044**: The dispatcher MUST provide a `ColdReadPool` — a persistent worker pool with pre-connected NVMe client channels and CUDA streams — for cold-path reads in `batch_lookup`. The pool pre-allocates per-drive, per-queue resources at initialization time to avoid per-batch connection overhead. `batch_lookup` dispatches cold entries to the pool instead of spawning scoped threads for each batch (FR-039 describes the logical parallelism; ColdReadPool is the resource-management optimization).
 - **FR-045**: When `batch_lookup` encounters entries not found in the local dispatch map and the `IRemoteLookup` receptacle is bound (FR-011), the dispatcher MUST forward those cache-miss keys to `IRemoteLookup` for resolution against remote Certus nodes. Results from remote lookup are merged back into the batch response in input order. When the receptacle is unbound, cache misses remain as `KeyNotFound` errors.
+- **FR-046**: The dispatcher MUST start a background memory-tier evictor thread during `initialize()` if `memory_tier_eviction_threshold > 0.0`. The evictor MUST be shut down (thread joined) during `shutdown()`.
+- **FR-047**: The memory-tier evictor MUST periodically check memory-tier utilization (`IMemoryTier::used()` / `IMemoryTier::capacity()`). The check interval MUST be configurable via `memory_tier_eviction_interval_secs` (default: 2 seconds).
+- **FR-048**: When memory-tier utilization exceeds `memory_tier_eviction_threshold` (default: disabled at 0.0), the evictor MUST demote entries using `IMemoryTier::oldest_keys(batch_size)` for LRU ordering, stopping when utilization drops below `memory_tier_eviction_low_watermark` (default: 0.70) or the batch is exhausted.
+- **FR-049**: For each candidate, the evictor MUST check `IDispatchMap::is_evictable(key)` (write-through complete, no active references) before demoting. Demotion path: `IMemoryTier::remove(key)` followed by `IDispatchMap::convert_memory_tier_to_block(key)`. If BlockDevice transition fails, the dispatch-map entry is removed entirely.
+- **FR-050**: The evictor MUST emit `EvictionEvent { key, reason: Demoted }` (or `Removed` on transition failure) via the eviction notification channel (FR-042) for each demoted entry.
 
 ### Key Entities
 
@@ -279,6 +302,7 @@ A client application submits a batch of cache keys to `batch_lookup`. For entrie
 - **Background Writer**: A dedicated thread that processes write-through jobs, reading from memory-tier pointers via `IMemoryTier::peek()` (to avoid refreshing LRU) and writing to SSD via extent managers.
 - **Pipelined Reader**: A sliding-window zero-copy pipeline (`pipeline.rs`) that maintains up to `max_queue_depth` concurrent in-flight NVMe reads into unique memory-tier offsets. As each read completes, an async GPU H2D copy is issued for that segment and the next NVMe read is submitted immediately, overlapping SSD I/O with GPU DMA. Two variants: `pipelined_ssd_to_gpu_zero_copy` (single object) and `pipelined_multi_object_zero_copy` (batch of N objects with tag-based completion routing). Memory-tier SPDK+CUDA co-registration is required.
 - **Background SSD Evictor**: A dedicated thread that periodically checks SSD utilization and evicts the oldest BlockDevice entries when capacity exceeds a threshold.
+- **Background Memory-Tier Evictor**: A dedicated thread that proactively demotes LRU entries from DRAM memory-tier to SSD-backed BlockDevice state when DRAM utilization exceeds a configurable threshold, preventing on-demand eviction stalls on the populate hot path.
 
 ## Success Criteria *(mandatory)*
 
