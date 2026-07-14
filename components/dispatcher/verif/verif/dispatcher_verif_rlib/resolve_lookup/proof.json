@@ -1,0 +1,10 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_elim_BlockDevice": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_elim_MemoryTier": { "prover": "alt-ergo", "time": 0.015 },
+      "vc_resolve_lookup": { "prover": "alt-ergo", "time": 0.037 }
+    }
+  }
+}

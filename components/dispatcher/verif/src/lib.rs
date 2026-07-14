@@ -76,6 +76,92 @@ pub fn ensure_initialized(initialized: bool) -> Result<(), DispatcherError> {
     Ok(())
 }
 
+// ---------- P11: lookup size-mismatch hard-fail (no partial copy) ----------
+//
+// Mirrors the `LookupResult` -> `Result` decision inside `lookup_async`
+// (dispatcher/src/lib.rs:1786-1830) and `batch_lookup` (:1420-1442):
+//     match dm.lookup(key)? {
+//         LookupResult::NotExist            => Err(KeyNotFound),
+//         LookupResult::MismatchSize        => { dm.release_read(key);
+//                                                Err(InvalidParameter("size mismatch")) }
+//         LookupResult::MemoryTier { size } => { let n = min(ipc.size, size); copy(n); Ok(n) }
+//         LookupResult::BlockDevice { .. }  => { ... Ok(read_size) }
+//     }
+//
+// P11 requires: a size mismatch must hard-fail with `InvalidParameter` and
+// perform no (partial) copy. Modeled at L0 over the dispatcher's decision
+// logic, treating the `LookupResult` variant as an input.
+//
+// IMPLEMENTATION NOTE (verified against live code, 2026-07-14): the
+// `MismatchSize` variant is declared in the interface
+// (interfaces/src/idispatch_map.rs:15) but has NO producer — `dm.lookup(key)`
+// is key-only (dispatch-map/src/lib.rs:115) and returns only
+// NotExist/BlockDevice/MemoryTier. So the dispatcher's `MismatchSize` arm is
+// currently unreachable, and the copy path defensively clamps with
+// `copy_size = min(ipc.size, stored)`. This proof therefore certifies the
+// dispatcher's DECISION LOGIC (given MismatchSize -> InvalidParameter, no copy;
+// given a hit -> copy is clamped to `min`, never an over-copy past either
+// buffer) but does NOT assert that the running system detects a mismatch,
+// because nothing currently produces `MismatchSize`. Closing that gap requires
+// dispatch-map to compare requested vs stored size and emit `MismatchSize`.
+
+pub enum LookupOutcome {
+    NotExist,
+    MismatchSize,
+    MemoryTier { size: usize },
+    BlockDevice { size: usize },
+}
+
+// `copy_size` result: `None` means no copy was performed (error/miss paths);
+// `Some(n)` is the number of bytes the dispatcher would copy on a hit.
+#[ensures(match outcome {
+    LookupOutcome::MismatchSize => match result {
+        (Err(DispatcherError::InvalidParameter), copied) => copied == None,
+        _ => false,
+    },
+    _ => true,
+})]
+#[ensures(match outcome {
+    LookupOutcome::NotExist => match result {
+        (Err(DispatcherError::KeyNotFound), copied) => copied == None,
+        _ => false,
+    },
+    _ => true,
+})]
+// On a MemoryTier hit the copy is clamped: never exceeds requested, never
+// exceeds stored -> no over-read of either buffer, i.e. no unsafe partial copy.
+#[ensures(match outcome {
+    LookupOutcome::MemoryTier { size } => match result {
+        (Ok(()), Some(n)) => n@ <= requested@ && n@ <= size@,
+        _ => false,
+    },
+    _ => true,
+})]
+#[ensures(match outcome {
+    LookupOutcome::BlockDevice { size } => match result {
+        (Ok(()), Some(n)) => n@ <= requested@ && n@ <= size@,
+        _ => false,
+    },
+    _ => true,
+})]
+pub fn resolve_lookup(
+    outcome: LookupOutcome,
+    requested: usize,
+) -> (Result<(), DispatcherError>, Option<usize>) {
+    match outcome {
+        LookupOutcome::NotExist => (Err(DispatcherError::KeyNotFound), None),
+        LookupOutcome::MismatchSize => (Err(DispatcherError::InvalidParameter), None),
+        LookupOutcome::MemoryTier { size } => {
+            let n = if requested < size { requested } else { size };
+            (Ok(()), Some(n))
+        }
+        LookupOutcome::BlockDevice { size } => {
+            let n = if requested < size { requested } else { size };
+            (Ok(()), Some(n))
+        }
+    }
+}
+
 // ---------- P20: prepare_store argument validation ----------
 //
 // Mirrors the guard prefix of `prepare_store` (dispatcher/src/lib.rs:2130-2136):

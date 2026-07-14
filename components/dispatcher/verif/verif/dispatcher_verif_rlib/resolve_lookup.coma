@@ -1,0 +1,133 @@
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 147 0 150 49 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 117 10 123 1
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 124 10 130 1
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 133 10 139 1
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 140 10 146 1
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+type t_LookupOutcome = NotExist | MismatchSize | MemoryTier UInt64.t | BlockDevice UInt64.t
+
+let elim_BlockDevice (_x: t_LookupOutcome) (return (size: UInt64.t)) = any
+  [ _k (size: UInt64.t) -> {BlockDevice size = _x} (! return {size})
+  | _chk -> (! {[@expl:elim BlockDevice] match _x with
+      | BlockDevice _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+type t_DispatcherError = NotInitialized | InvalidParameter | AlreadyExists | KeyNotFound | AllocationFailed | IoError
+
+type t_Result_unit_DispatcherError = Ok () | Err t_DispatcherError
+
+type t_Option_usize = None | Some UInt64.t
+
+type tup2_Result_unit_DispatcherError_Option_usize = { f0: t_Result_unit_DispatcherError; f1: t_Option_usize }
+
+let elim_MemoryTier (_x: t_LookupOutcome) (return (size: UInt64.t)) = any
+  [ _k (size: UInt64.t) -> {MemoryTier size = _x} (! return {size})
+  | _chk -> (! {[@expl:elim MemoryTier] match _x with
+      | MemoryTier _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let resolve_lookup [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 147 0 150 49]
+  (outcome: t_LookupOutcome) (requested: UInt64.t) (return (x: tup2_Result_unit_DispatcherError_Option_usize)) = (! bb0
+  [ bb0 = any
+    [ br0 -> {outcome = NotExist} (! bb8)
+    | br1 -> {outcome = MismatchSize} (! bb7)
+    | br2 (x0: UInt64.t) -> {outcome = MemoryTier x0} (! bb6)
+    | br3 (x0: UInt64.t) -> {outcome = BlockDevice x0} (! bb5) ]
+  | bb5 = s0
+    [ s0 = elim_BlockDevice {outcome} (fun (rsize: UInt64.t) -> [ &size'0 <- rsize ] s1)
+    | s1 = [ &_31 <- UInt64.lt requested size'0 ] s2
+    | s2 = any [ br0 -> {_31 = false} (! bb13) | br1 -> {_31} (! bb12) ] ]
+  | bb12 = s0 [ s0 = [ &n'0 <- requested ] s1 | s1 = bb14 ]
+  | bb13 = s0 [ s0 = [ &n'0 <- size'0 ] s1 | s1 = bb14 ]
+  | bb14 = s0
+    [ s0 = [ &_34 <- Ok _35 ] s1
+    | s1 = [ &_36 <- Some n'0 ] s2
+    | s2 = [ &_ret <- { f0 = _34; f1 = _36 } ] s3
+    | s3 = return {_ret} ]
+  | bb6 = s0
+    [ s0 = elim_MemoryTier {outcome} (fun (rsize: UInt64.t) -> [ &size <- rsize ] s1)
+    | s1 = [ &_22 <- UInt64.lt requested size ] s2
+    | s2 = any [ br0 -> {_22 = false} (! bb10) | br1 -> {_22} (! bb9) ] ]
+  | bb9 = s0 [ s0 = [ &n <- requested ] s1 | s1 = bb11 ]
+  | bb10 = s0 [ s0 = [ &n <- size ] s1 | s1 = bb11 ]
+  | bb11 = s0
+    [ s0 = [ &_25 <- Ok _26 ] s1
+    | s1 = [ &_27 <- Some n ] s2
+    | s2 = [ &_ret <- { f0 = _25; f1 = _27 } ] s3
+    | s3 = return {_ret} ]
+  | bb7 = s0
+    [ s0 = [ &_18 <- InvalidParameter ] s1
+    | s1 = [ &_17 <- Err _18 ] s2
+    | s2 = [ &_19 <- None ] s3
+    | s3 = [ &_ret <- { f0 = _17; f1 = _19 } ] s4
+    | s4 = return {_ret} ]
+  | bb8 = s0
+    [ s0 = [ &_15 <- KeyNotFound ] s1
+    | s1 = [ &_14 <- Err _15 ] s2
+    | s2 = [ &_16 <- None ] s3
+    | s3 = [ &_ret <- { f0 = _14; f1 = _16 } ] s4
+    | s4 = return {_ret} ] ]
+  [ & _ret: tup2_Result_unit_DispatcherError_Option_usize = Any.any_l ()
+  | & outcome: t_LookupOutcome = outcome
+  | & requested: UInt64.t = requested
+  | & _14: t_Result_unit_DispatcherError = Any.any_l ()
+  | & _15: t_DispatcherError = Any.any_l ()
+  | & _16: t_Option_usize = Any.any_l ()
+  | & _17: t_Result_unit_DispatcherError = Any.any_l ()
+  | & _18: t_DispatcherError = Any.any_l ()
+  | & _19: t_Option_usize = Any.any_l ()
+  | & size: UInt64.t = Any.any_l ()
+  | & n: UInt64.t = Any.any_l ()
+  | & _22: bool = Any.any_l ()
+  | & _25: t_Result_unit_DispatcherError = Any.any_l ()
+  | & _26: () = Any.any_l ()
+  | & _27: t_Option_usize = Any.any_l ()
+  | & size'0: UInt64.t = Any.any_l ()
+  | & n'0: UInt64.t = Any.any_l ()
+  | & _31: bool = Any.any_l ()
+  | & _34: t_Result_unit_DispatcherError = Any.any_l ()
+  | & _35: () = Any.any_l ()
+  | & _36: t_Option_usize = Any.any_l () ])
+  [ return (result: tup2_Result_unit_DispatcherError_Option_usize) ->
+  {[@stop_split] [@expl:resolve_lookup ensures] ([@stop_split] [@expl:resolve_lookup ensures #0] [%#slib] match outcome with
+        | MismatchSize -> match result with
+          | {f0 = Err (InvalidParameter); f1 = copied} -> copied = None
+          | _ -> false
+          end
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:resolve_lookup ensures #1] [%#slib'0] match outcome with
+        | NotExist -> match result with
+          | {f0 = Err (KeyNotFound); f1 = copied} -> copied = None
+          | _ -> false
+          end
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:resolve_lookup ensures #2] [%#slib'1] match outcome with
+        | MemoryTier size -> match result with
+          | {f0 = Ok (); f1 = Some n} -> UInt64.t'int n <= UInt64.t'int requested /\ UInt64.t'int n <= UInt64.t'int size
+          | _ -> false
+          end
+        | _ -> true
+        end)
+    /\ ([@stop_split] [@expl:resolve_lookup ensures #3] [%#slib'2] match outcome with
+      | BlockDevice size -> match result with
+        | {f0 = Ok (); f1 = Some n} -> UInt64.t'int n <= UInt64.t'int requested /\ UInt64.t'int n <= UInt64.t'int size
+        | _ -> false
+        end
+      | _ -> true
+      end)}
+    (! return {result}) ]
