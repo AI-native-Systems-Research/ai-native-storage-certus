@@ -2,19 +2,27 @@
 #
 # configure-bench.sh — Configure system for Certus or SharedStorage benchmarks.
 #
-# Ensures all resources (NVMe, memory, CPUs) are co-located on the GPU's NUMA
-# node. Sets kernel boot parameters via grubby and configures NVMe devices at
-# runtime (vfio-pci for Certus, RAID0+XFS for SharedStorage).
+# Pins the workload's resources (NVMe, memory, CPUs, hugepages) to one NUMA node
+# (RESOURCE_NUMA). On THIS host that is node 0 (drives 61-64); the GPU is on node
+# 1, so GPU access is cross-node by design. Sets kernel boot parameters via
+# grubby and configures NVMe devices at runtime (vfio-pci for Certus, RAID0+XFS
+# for SharedStorage).
+#
+# Defaults are tuned for this host: RESOURCE_NUMA=0, drives 61-64, 16×1G
+# hugepages, mem=32G via the kernel method (no cgroup). Override any of them with
+# env vars (RESOURCE_NUMA, GPU_NUMA, NVME_BDFS, CERTUS_HUGEPAGES, MEM_LIMIT,
+# NUMA_CPUS, MEM_METHOD) if the topology changes.
 #
 # Memory can be limited two ways (MEM_METHOD env var):
-#   cgroup  (default) — cap RAM at runtime via a systemd slice; no reboot.
-#   kernel            — cap RAM via mem=/memmap= boot params; requires reboot.
+#   kernel  (default) — cap RAM via mem= boot param (memmap= too if the resource
+#                       node is the HIGH node); mem=32G is already in this kernel.
+#   cgroup            — cap RAM at runtime via a systemd slice; no reboot.
 #
 # Usage:
-#   sudo ./configure-bench.sh certus                     # Certus, cgroup mem limit (default)
-#   sudo ./configure-bench.sh sharedstorage              # SharedStorage, cgroup mem limit
-#   sudo MEM_METHOD=kernel ./configure-bench.sh certus   # Certus, kernel mem limit (reboot)
-#   sudo CGROUP_MEM_MAX=32G ./configure-bench.sh certus  # cap the bench slice at 32 GiB
+#   sudo ./configure-bench.sh certus                     # Certus (node 0, 16×1G, mem=32G)
+#   sudo ./configure-bench.sh sharedstorage              # SharedStorage (RAID0+XFS)
+#   sudo MEM_METHOD=cgroup ./configure-bench.sh certus   # Certus, cgroup mem limit (no reboot)
+#   sudo NVME_BDFS="0000:c1:00.0 ..." ./configure-bench.sh certus  # override drive set
 #   sudo ./configure-bench.sh status                     # Show current configuration
 #
 set -euo pipefail
@@ -26,32 +34,40 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Configuration — edit these if hardware changes
 # ============================================================================
 
-# GPU NUMA node (all resources pinned here)
-GPU_NUMA=1
+# NUMA node holding the workload's resources (NVMe drives, hugepages, CPUs, RAM).
+# On THIS host that is node 0 — the certus vfio drives (61-64) live there and
+# `mem=32G` keeps all usable RAM in node 0's low address range. Overridable via
+# the RESOURCE_NUMA env var if the topology changes.
+RESOURCE_NUMA="${RESOURCE_NUMA:-0}"
 
-# NVMe devices on the GPU's NUMA node
-NVME_BDFS=("0000:c1:00.0" "0000:c2:00.0" "0000:c3:00.0" "0000:c4:00.0")
+# NUMA node the GPU (a1:00.0) sits on — used ONLY for the GPU-location sanity
+# check, NOT for pinning. On this host the GPU is on node 1 while the drives are
+# on node 0, so this deliberately differs from RESOURCE_NUMA.
+GPU_NUMA="${GPU_NUMA:-1}"
 
-# CPUs on the GPU's NUMA node
-NUMA_CPUS="16-31,48-63"
+# NVMe devices making up the workload storage (node $RESOURCE_NUMA). Default is
+# the node-0 set (61-64); override with the NVME_BDFS env var for the node-1 set.
+NVME_BDFS=(${NVME_BDFS:-"0000:61:00.0" "0000:62:00.0" "0000:63:00.0" "0000:64:00.0"})
+
+# CPUs on the resource NUMA node ($RESOURCE_NUMA). Node 0 = 0-15,32-47.
+NUMA_CPUS="${NUMA_CPUS:-0-15,32-47}"
 
 # RAID / filesystem
 MD_DEVICE="/dev/md0"
 MOUNT_POINT="/mnt/fs-backend-bench"
 XFS_LABEL="fs-bench"
 
-# Memory layout — derived from NUMA physical address ranges:
-#   Node 0: 0x0000000000 – 0x4000000000 (256 GiB)
-#   Node 1: 0x4000000000 – 0x8000000000 (258 GiB)
-#
-# memmap=254G$2G  → reserve node 0 from 2G to 256G (keep 2G for boot)
-# mem=320G        → truncate at 320G (keeps 64G from node 1: 256G–320G)
-NODE0_RESERVE='254G$2G'
-MEM_LIMIT="320G"
-TOTAL_USABLE_NODE1="64"  # GiB available on node 1 after memmap+mem
+# Memory cap. `mem=32G` truncates total physical RAM to 32 GiB; because node 0
+# occupies the low addresses, all 32G lands on node 0 and node 1 gets 0 MB — so
+# no memmap reservation is needed when resources are already on node 0. (If the
+# resource node were the HIGH one, NODE0_RESERVE would carve out node 0 via
+# memmap; leave it empty for the node-0 layout.)
+NODE0_RESERVE=''
+MEM_LIMIT="${MEM_LIMIT:-32G}"
+TOTAL_USABLE_GIB="${TOTAL_USABLE_GIB:-32}"  # GiB usable on node $RESOURCE_NUMA after mem=
 
 # Hugepages (1 GiB pages)
-CERTUS_HUGEPAGES=48      # 48 GiB SPDK DRAM tier, leaves 16G regular for vLLM (needs DPDK RTE_MAX_MEM_MB_PER_LIST raised to 64G)
+CERTUS_HUGEPAGES="${CERTUS_HUGEPAGES:-16}"  # 16 GiB SPDK DRAM tier on node $RESOURCE_NUMA
 SS_HUGEPAGES=0           # all regular memory for page cache
 
 # DPDK single-allocation ceiling. spdk_zmalloc -> rte_malloc cannot return a
@@ -77,9 +93,12 @@ DPDK_HUGEPAGE_OVERHEAD_GIB=3
 CERTUS_NATIVE_SO="certus-connector/certus_native/certus_native.cpython-312-x86_64-linux-gnu.so"
 
 # Memory limiting method:
-#   cgroup  — runtime cap via a systemd slice (default; no reboot)
-#   kernel  — boot-param cap via mem=/memmap= (requires reboot)
-MEM_METHOD="${MEM_METHOD:-cgroup}"
+#   kernel  — boot-param cap via mem=/memmap= (default on this host; needs reboot
+#             to change, but mem=32G is already in the running kernel)
+#   cgroup  — runtime cap via a systemd slice (no reboot)
+# This host uses the kernel method: `mem=32G` bounds RAM and, because node 0 owns
+# the low addresses, keeps it all on the resource node — no cgroup slice needed.
+MEM_METHOD="${MEM_METHOD:-kernel}"
 
 # cgroup slice used to cap benchmark memory at runtime. Run benchmarks under it
 # with: systemd-run --slice=certus-bench.slice --scope numactl ... <command>
@@ -175,8 +194,8 @@ show_status() {
     hp_total=$(grep HugePages_Total /proc/meminfo | awk '{print $2}')
     hp_free=$(grep HugePages_Free /proc/meminfo | awk '{print $2}')
     hp_node=0
-    if [[ -f /sys/devices/system/node/node${GPU_NUMA}/hugepages/hugepages-1048576kB/nr_hugepages ]]; then
-        hp_node=$(cat /sys/devices/system/node/node${GPU_NUMA}/hugepages/hugepages-1048576kB/nr_hugepages)
+    if [[ -f /sys/devices/system/node/node${RESOURCE_NUMA}/hugepages/hugepages-1048576kB/nr_hugepages ]]; then
+        hp_node=$(cat /sys/devices/system/node/node${RESOURCE_NUMA}/hugepages/hugepages-1048576kB/nr_hugepages)
     fi
 
     local total_mem node0_mem node1_mem
@@ -188,14 +207,19 @@ show_status() {
     # Each check is tagged with which connector(s) it currently SATISFIES.
     # Empty [] = satisfies neither (problem). Colored tag = meets that connector's requirement.
 
-    header "GPU (determines NUMA node)"
+    header "GPU / resource NUMA nodes"
     local gpu_numa
     gpu_numa=$(cat /sys/bus/pci/devices/0000:a1:00.0/numa_node 2>/dev/null || echo "?")
     if [[ "$gpu_numa" == "$GPU_NUMA" ]]; then
-        echo -e "  ${tag_certus}${tag_ss} GPU on NUMA node $gpu_numa — all resources pinned here"
+        echo -e "  ${tag_certus}${tag_ss} GPU on NUMA node $gpu_numa (expected $GPU_NUMA)"
     else
         echo -e "  ${tag_empty} GPU on NUMA node $gpu_numa, expected $GPU_NUMA"
         fail_both "GPU on NUMA node $gpu_numa (expected $GPU_NUMA)"
+    fi
+    if [[ "$RESOURCE_NUMA" != "$GPU_NUMA" ]]; then
+        echo "  Resources (NVMe/hugepages/CPUs/RAM) pinned to node $RESOURCE_NUMA; GPU on node $GPU_NUMA (cross-node by design on this host)"
+    else
+        echo "  Resources pinned to node $RESOURCE_NUMA (same as GPU)"
     fi
     echo
 
@@ -212,12 +236,17 @@ show_status() {
         echo -e "  ${tag_empty} ${total_mem} GiB — not limited (need mem=${MEM_LIMIT})"
         fail_both "system RAM not limited (need mem=${MEM_LIMIT})"
     fi
-    if [[ -n "$node0_mem" && $node0_mem -le 10000 ]]; then
+    # Node-0 reservation only matters when the resource node is the HIGH node and
+    # node 0 must be emptied (NODE0_RESERVE set). On the node-0 resource layout,
+    # node 0 is SUPPOSED to hold the RAM, so its memory is expected, not a fault.
+    if [[ -z "$NODE0_RESERVE" ]]; then
+        echo "  node 0 holds ${node0_mem:-?} MB — expected (node 0 is the resource node)"
+    elif [[ -n "$node0_mem" && $node0_mem -le 10000 ]]; then
         echo -e "  ${tag_certus}${tag_ss} node 0 reserved (${node0_mem} MB)"
     elif [[ -n "$node0_mem" && $node0_mem -gt 10000 && "$MEM_METHOD" == "cgroup" ]]; then
-        # cgroup mode doesn't reserve node 0 — allocations are pinned to node 1
-        # via numactl --membind=1, so node 0 having memory is fine.
-        echo "  node 0 has ${node0_mem} MB — not reserved (cgroup mode pins to node $GPU_NUMA via numactl)"
+        # cgroup mode doesn't reserve node 0 — allocations are pinned to the
+        # resource node via numactl --membind, so node 0 having memory is fine.
+        echo "  node 0 has ${node0_mem} MB — not reserved (cgroup mode pins to node $RESOURCE_NUMA via numactl)"
     elif [[ -n "$node0_mem" && $node0_mem -gt 10000 ]]; then
         echo -e "  ${tag_empty} node 0 has ${node0_mem} MB — memmap reservation not active"
         fail_both "node 0 not reserved (${node0_mem} MB, memmap inactive)"
@@ -225,7 +254,7 @@ show_status() {
 
     # cgroup memory limit (runtime). The cap is mode-specific: certus expects the
     # regular-RAM budget left after hugepages, sharedstorage the full node budget.
-    local certus_gib=$((TOTAL_USABLE_NODE1 - CERTUS_HUGEPAGES))
+    local certus_gib=$((TOTAL_USABLE_GIB - CERTUS_HUGEPAGES))
     if systemctl is-active --quiet "$BENCH_SLICE" 2>/dev/null; then
         local slice_max
         slice_max=$(systemctl show -p MemoryMax --value "$BENCH_SLICE" 2>/dev/null)
@@ -236,13 +265,13 @@ show_status() {
             local slice_gib=$((slice_max / 1024 / 1024 / 1024))
             local mem_tag=""
             if [[ $slice_gib -eq $certus_gib ]]; then mem_tag="${tag_certus}"; fi
-            if [[ $slice_gib -eq $TOTAL_USABLE_NODE1 ]]; then mem_tag="${mem_tag}${tag_ss}"; fi
+            if [[ $slice_gib -eq $TOTAL_USABLE_GIB ]]; then mem_tag="${mem_tag}${tag_ss}"; fi
             if [[ -z "$mem_tag" ]]; then mem_tag="${tag_empty}"; fi
             echo -e "  ${mem_tag} cgroup slice ${BENCH_SLICE}: MemoryMax=${slice_gib} GiB (runtime limit)"
             # In cgroup mode, a cap that doesn't match a connector's budget disqualifies it.
             if [[ "$MEM_METHOD" == "cgroup" ]]; then
                 [[ $slice_gib -ne $certus_gib ]] && fail_certus "cgroup cap ${slice_gib}G ≠ certus budget ${certus_gib}G"
-                [[ $slice_gib -ne $TOTAL_USABLE_NODE1 ]] && fail_ss "cgroup cap ${slice_gib}G ≠ sharedstorage budget ${TOTAL_USABLE_NODE1}G"
+                [[ $slice_gib -ne $TOTAL_USABLE_GIB ]] && fail_ss "cgroup cap ${slice_gib}G ≠ sharedstorage budget ${TOTAL_USABLE_GIB}G"
             fi
         fi
     elif [[ "$MEM_METHOD" == "cgroup" ]]; then
@@ -252,17 +281,17 @@ show_status() {
         echo "  cgroup slice ${BENCH_SLICE}: not active (MEM_METHOD=kernel)"
     fi
 
-    echo "  Hugepages: $hp_total × 1G (free: $hp_free, node $GPU_NUMA: $hp_node)"
+    echo "  Hugepages: $hp_total × 1G (free: $hp_free, node $RESOURCE_NUMA: $hp_node)"
     # certus needs CERTUS_HUGEPAGES on the GPU node; sharedstorage needs none.
     if [[ $hp_total -eq $CERTUS_HUGEPAGES && $hp_node -ge $CERTUS_HUGEPAGES ]]; then
-        echo -e "  ${tag_certus} $hp_total × 1G on node $GPU_NUMA"
+        echo -e "  ${tag_certus} $hp_total × 1G on node $RESOURCE_NUMA"
         fail_ss "hugepages present ($hp_total × 1G; sharedstorage needs 0)"
     elif [[ $hp_total -eq $SS_HUGEPAGES ]]; then
         echo -e "  ${tag_ss} no hugepages — all RAM available for page cache"
         fail_certus "no hugepages (certus needs $CERTUS_HUGEPAGES × 1G)"
     else
-        echo -e "  ${tag_empty} $hp_total hugepages — certus needs $CERTUS_HUGEPAGES on node $GPU_NUMA, sharedstorage needs $SS_HUGEPAGES"
-        fail_certus "hugepages misconfigured ($hp_total total, $hp_node on node $GPU_NUMA; need $CERTUS_HUGEPAGES on node $GPU_NUMA)"
+        echo -e "  ${tag_empty} $hp_total hugepages — certus needs $CERTUS_HUGEPAGES on node $RESOURCE_NUMA, sharedstorage needs $SS_HUGEPAGES"
+        fail_certus "hugepages misconfigured ($hp_total total, $hp_node on node $RESOURCE_NUMA; need $CERTUS_HUGEPAGES on node $RESOURCE_NUMA)"
         [[ $hp_total -ne $SS_HUGEPAGES ]] && fail_ss "hugepages present ($hp_total × 1G; sharedstorage needs 0)"
     fi
     echo
@@ -279,18 +308,21 @@ show_status() {
         fail_both "mem=${MEM_LIMIT} missing (kernel mode)"
     fi
 
-    # memmap= (must include the $offset to actually reserve memory).
+    # memmap= — only needed when the resource node is the HIGH node and node 0
+    # must be carved out. When resources are on node 0 (NODE0_RESERVE empty),
+    # mem= alone keeps all RAM on node 0, so no memmap is required or expected.
     # The kernel normalizes the offset to hex in /proc/cmdline, so match either form.
-    # Only required in kernel mode; cgroup mode pins to node $GPU_NUMA via numactl.
-    if echo "$cmdline" | grep -qE 'memmap=254G\$(2G|0x80000000)'; then
-        echo -e "  ${tag_certus}${tag_ss} memmap=254G\$2G — node 0 reserved"
+    if [[ -z "$NODE0_RESERVE" ]]; then
+        echo "  memmap= not needed (resources on node $RESOURCE_NUMA; mem=${MEM_LIMIT} keeps RAM there)"
+    elif echo "$cmdline" | grep -qE 'memmap=254G\$(2G|0x80000000)'; then
+        echo -e "  ${tag_certus}${tag_ss} memmap=${NODE0_RESERVE} — node 0 reserved"
     elif [[ "$MEM_METHOD" == "cgroup" ]]; then
-        echo "  memmap= not set — not needed (cgroup mode pins to node $GPU_NUMA via numactl)"
+        echo "  memmap= not set — not needed (cgroup mode pins to node $RESOURCE_NUMA via numactl)"
     elif echo "$cmdline" | grep -q "memmap="; then
         echo -e "  ${tag_empty} memmap= present but OFFSET MISSING — reservation not active"
         fail_both "memmap= offset missing (kernel mode)"
     else
-        echo -e "  ${tag_empty} memmap= MISSING — memory not isolated to NUMA node $GPU_NUMA"
+        echo -e "  ${tag_empty} memmap= MISSING — memory not isolated to NUMA node $RESOURCE_NUMA"
         fail_both "memmap= missing (kernel mode)"
     fi
 
@@ -324,7 +356,7 @@ show_status() {
     fi
     echo
 
-    header "NVMe Devices (NUMA node $GPU_NUMA)"
+    header "NVMe Devices (NUMA node $RESOURCE_NUMA)"
     printf "  %-14s %-12s %-10s %-6s\n" "BDF" "Driver" "Block Dev" "Status"
     printf "  %-14s %-12s %-10s %-6s\n" "--------------" "------------" "----------" "------"
     for bdf in "${NVME_BDFS[@]}"; do
@@ -333,7 +365,7 @@ show_status() {
         blk=$(get_blkdev "$bdf")
         local dev_numa
         dev_numa=$(cat "/sys/bus/pci/devices/$bdf/numa_node" 2>/dev/null || echo "?")
-        if [[ "$dev_numa" != "$GPU_NUMA" ]]; then
+        if [[ "$dev_numa" != "$RESOURCE_NUMA" ]]; then
             status="WRONG NUMA($dev_numa)"
             fail_both "NVMe $bdf on wrong NUMA node ($dev_numa)"
         else
@@ -414,7 +446,7 @@ show_status() {
 
     # 3. cgroup cap clears vLLM's regular-RAM floor (cgroup mode only).
     if [[ "$MEM_METHOD" == "cgroup" ]]; then
-        local certus_cap_gib=$((TOTAL_USABLE_NODE1 - CERTUS_HUGEPAGES))
+        local certus_cap_gib=$((TOTAL_USABLE_GIB - CERTUS_HUGEPAGES))
         if [[ $certus_cap_gib -ge $VLLM_MIN_RAM_GIB ]]; then
             echo -e "  ${tag_certus} cgroup cap ${certus_cap_gib}G >= vLLM floor ${VLLM_MIN_RAM_GIB}G"
         else
@@ -458,7 +490,7 @@ show_status() {
 
 
     header "Run"
-    echo "  numactl --cpunodebind=$GPU_NUMA --membind=$GPU_NUMA <command>"
+    echo "  numactl --cpunodebind=$RESOURCE_NUMA --membind=$RESOURCE_NUMA <command>"
     echo "  CPUs: $NUMA_CPUS"
     echo
 
@@ -498,9 +530,9 @@ cgroup_mem_max_for() {
     if [[ -n "$CGROUP_MEM_MAX" ]]; then
         echo "$CGROUP_MEM_MAX"
     elif [[ "$mode" == "certus" ]]; then
-        echo "$((TOTAL_USABLE_NODE1 - CERTUS_HUGEPAGES))G"
+        echo "$((TOTAL_USABLE_GIB - CERTUS_HUGEPAGES))G"
     else
-        echo "${TOTAL_USABLE_NODE1}G"
+        echo "${TOTAL_USABLE_GIB}G"
     fi
 }
 
@@ -553,9 +585,9 @@ setup_cgroup_mem() {
 
     echo -e "  ${GREEN}Slice ${BENCH_SLICE} active — MemoryMax=${mem_max}, swap disabled${NC}"
     echo "  Run benchmarks inside it with:"
-    echo "    systemd-run --slice=${BENCH_SLICE} --scope numactl --cpunodebind=$GPU_NUMA --membind=$GPU_NUMA <command>"
+    echo "    systemd-run --slice=${BENCH_SLICE} --scope numactl --cpunodebind=$RESOURCE_NUMA --membind=$RESOURCE_NUMA <command>"
     echo
-    echo -e "  ${YELLOW}Note:${NC} MemoryMax caps regular RAM; run under numactl --membind=$GPU_NUMA"
+    echo -e "  ${YELLOW}Note:${NC} MemoryMax caps regular RAM; run under numactl --membind=$RESOURCE_NUMA"
     echo "  to keep allocations on the GPU node (no node-0 reservation needed)."
     echo "  Only the hugepages= boot param is required (1G pages reserved at boot)."
 }
@@ -584,11 +616,14 @@ set_kernel_params() {
     # Hugepages are always set via boot params (1G pages need contiguous memory
     # reserved at boot). The mem= RAM cap and memmap= node-0 reservation are only
     # needed in kernel mode; in cgroup mode the systemd slice caps RAM at runtime
-    # and numactl --membind pins allocations to node $GPU_NUMA, so node 0 doesn't
+    # and numactl --membind pins allocations to node $RESOURCE_NUMA, so node 0 doesn't
     # need reserving.
     local new_args="default_hugepagesz=1G hugepagesz=1G hugepages=${hugepages}"
     if [[ "$MEM_METHOD" == "kernel" ]]; then
-        new_args="$new_args mem=${MEM_LIMIT} memmap=${NODE0_RESERVE}"
+        new_args="$new_args mem=${MEM_LIMIT}"
+        # memmap only when carving node 0 out of a HIGH resource node; empty on
+        # the node-0 layout where mem= alone keeps all RAM on the resource node.
+        [[ -n "$NODE0_RESERVE" ]] && new_args="$new_args memmap=${NODE0_RESERVE}"
     fi
     echo "  Setting: $new_args"
     grubby --update-kernel=ALL --args="$new_args"
@@ -620,13 +655,13 @@ set_kernel_params() {
 
 allocate_hugepages_node() {
     local target=$1
-    local node_path="/sys/devices/system/node/node${GPU_NUMA}/hugepages/hugepages-1048576kB/nr_hugepages"
+    local node_path="/sys/devices/system/node/node${RESOURCE_NUMA}/hugepages/hugepages-1048576kB/nr_hugepages"
 
-    header "Hugepages (node $GPU_NUMA)"
+    header "Hugepages (node $RESOURCE_NUMA)"
 
     if [[ ! -f "$node_path" ]]; then
         echo -e "  ${YELLOW}1G hugepage support not available at runtime${NC}"
-        echo "  Will be allocated at next boot from node $GPU_NUMA (memmap reserves node 0)"
+        echo "  Will be allocated at next boot from node $RESOURCE_NUMA (memmap reserves node 0)"
         return
     fi
 
@@ -648,14 +683,14 @@ allocate_hugepages_node() {
     local current
     current=$(cat "$node_path")
     if [[ $current -eq $target ]]; then
-        echo "  Node $GPU_NUMA already has $current × 1G hugepages"
+        echo "  Node $RESOURCE_NUMA already has $current × 1G hugepages"
         return
     elif [[ $current -gt $target ]]; then
         # Over-allocated (e.g. target lowered) — shrink to exactly target so the
         # regular-RAM budget grows accordingly. Free pages release live.
-        echo "  Node $GPU_NUMA has $current × 1G, reducing to $target..."
+        echo "  Node $RESOURCE_NUMA has $current × 1G, reducing to $target..."
     else
-        echo "  Allocating $target × 1G hugepages on node $GPU_NUMA..."
+        echo "  Allocating $target × 1G hugepages on node $RESOURCE_NUMA..."
     fi
     echo "$target" > "$node_path"
 
@@ -665,7 +700,7 @@ allocate_hugepages_node() {
         echo -e "  ${YELLOW}Only got $actual / $target — 1G pages require contiguous memory${NC}"
         echo "  Reboot required for full allocation (boot param handles it)."
     else
-        echo -e "  ${GREEN}Allocated $actual × 1G hugepages on node $GPU_NUMA${NC}"
+        echo -e "  ${GREEN}Allocated $actual × 1G hugepages on node $RESOURCE_NUMA${NC}"
     fi
 }
 
@@ -897,15 +932,16 @@ usage() {
     echo "Usage: sudo $0 {certus|sharedstorage|status}"
     echo
     echo "Modes:"
-    echo "  certus         56G hugepages, NVMe → vfio-pci (SPDK)"
+    echo "  certus         ${CERTUS_HUGEPAGES}×1G hugepages, NVMe → vfio-pci (SPDK)"
     echo "  sharedstorage  0 hugepages, NVMe → RAID0 + XFS"
     echo "  status         Show current configuration"
     echo
     echo "System topology:"
-    echo "  GPU NUMA node:  $GPU_NUMA"
-    echo "  NVMe (node $GPU_NUMA): ${NVME_BDFS[*]}"
-    echo "  CPUs (node $GPU_NUMA): $NUMA_CPUS"
-    echo "  Memory budget:  ${TOTAL_USABLE_NODE1} GiB from node $GPU_NUMA"
+    echo "  Resource NUMA node: $RESOURCE_NUMA"
+    echo "  GPU NUMA node:      $GPU_NUMA"
+    echo "  NVMe (node $RESOURCE_NUMA):     ${NVME_BDFS[*]}"
+    echo "  CPUs (node $RESOURCE_NUMA):     $NUMA_CPUS"
+    echo "  Memory budget:      ${TOTAL_USABLE_GIB} GiB from node $RESOURCE_NUMA"
     exit 1
 }
 
@@ -931,14 +967,14 @@ main() {
     else
         echo "  Memory limit: kernel mem=${MEM_LIMIT} (reboot required)"
     fi
-    echo "  Memory: ${TOTAL_USABLE_NODE1} GiB on NUMA node $GPU_NUMA"
+    echo "  Memory: ${TOTAL_USABLE_GIB} GiB on NUMA node $RESOURCE_NUMA"
     if [[ "$mode" == "certus" ]]; then
         echo "  Hugepages: ${CERTUS_HUGEPAGES} × 1G (SPDK DRAM tier)"
-        echo "  Regular mem: $((TOTAL_USABLE_NODE1 - CERTUS_HUGEPAGES)) GiB"
+        echo "  Regular mem: $((TOTAL_USABLE_GIB - CERTUS_HUGEPAGES)) GiB"
         echo "  NVMe: vfio-pci (SPDK userspace)"
     else
         echo "  Hugepages: 0"
-        echo "  Regular mem: ${TOTAL_USABLE_NODE1} GiB (page cache)"
+        echo "  Regular mem: ${TOTAL_USABLE_GIB} GiB (page cache)"
         echo "  NVMe: RAID0 + XFS at $MOUNT_POINT"
     fi
     echo "  CPUs: $NUMA_CPUS"
@@ -974,10 +1010,10 @@ main() {
     echo "  Run benchmarks with:"
     if [[ "$MEM_METHOD" == "cgroup" ]]; then
         echo "    systemd-run --slice=${BENCH_SLICE} --scope \\"
-        echo "      numactl --cpunodebind=$GPU_NUMA --membind=$GPU_NUMA <command>"
+        echo "      numactl --cpunodebind=$RESOURCE_NUMA --membind=$RESOURCE_NUMA <command>"
         echo "    (the slice enforces MemoryMax=$(cgroup_mem_max_for "$mode"))"
     else
-        echo "    numactl --cpunodebind=$GPU_NUMA --membind=$GPU_NUMA <command>"
+        echo "    numactl --cpunodebind=$RESOURCE_NUMA --membind=$RESOURCE_NUMA <command>"
     fi
     echo
     if [[ "$mode" == "certus" ]]; then

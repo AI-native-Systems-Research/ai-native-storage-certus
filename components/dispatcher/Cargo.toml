@@ -25,6 +25,9 @@ default = ["spdk-backend"]
 spdk-backend = ["dep:block-device-spdk-nvme"]
 hardware-test = []
 pipeline-telemetry = []
+# Enable per-direction SSD read/write byte counters (IDispatcher::read_write_stats)
+# by turning on the underlying block device's telemetry counters.
+rw-telemetry = ["block-device-spdk-nvme?/telemetry"]
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

@@ -12,6 +12,8 @@ otel = [
     "dep:opentelemetry_sdk",
     "dep:opentelemetry-otlp",
 ]
+# Enable per-direction SSD read/write byte counters exposed via GetIoStats.
+rw-telemetry = ["dispatcher/rw-telemetry"]
 
 [dependencies]
 interfaces = { workspace = true, features = ["spdk"] }

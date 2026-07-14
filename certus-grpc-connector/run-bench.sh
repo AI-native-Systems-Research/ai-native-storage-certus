@@ -15,12 +15,13 @@
 #
 # Usage:
 #   ./run-bench.sh
-#   GPU=0 CERTUS_SERVER=localhost:50051 NUM_CONVS=450 ./run-bench.sh
+#   GPU=0 NUM_CONVS=450 ./run-bench.sh
 #
 # Env (all optional; defaults shown):
 #   IMAGE=certus-grpc-bench     container image tag
 #   GPU=all                     GPU selector (all | 0 | 0,1 | <uuid>)
-#   CERTUS_SERVER=localhost:50051
+#   CERTUS_SERVER=host.containers.internal:50051  (host-gateway; NOT localhost —
+#                               that is the container's own loopback)
 #   NUM_CONVS=450  MODEL=NousResearch/Meta-Llama-3-8B  SLAB_SIZE_BYTES=2097152
 #   HF_CACHE=$HOME/.cache/huggingface
 #   HF_TOKEN=<token>            passed through if set
@@ -32,7 +33,12 @@ set -euo pipefail
 # can't prompt without a TTY). Override IMAGE to point elsewhere.
 IMAGE="${IMAGE:-localhost/certus-grpc-bench}"
 GPU="${GPU:-all}"
-CERTUS_SERVER="${CERTUS_SERVER:-localhost:50051}"
+# Default to podman's host-gateway name, NOT localhost: inside the container
+# "localhost" is the container's own loopback, so the host-side certus-server is
+# unreachable there. host.containers.internal resolves to the host from within a
+# rootless container (server must listen on 0.0.0.0, which it does). Override
+# with an explicit IP if this name doesn't resolve on an older podman.
+CERTUS_SERVER="${CERTUS_SERVER:-host.containers.internal:50051}"
 NUM_CONVS="${NUM_CONVS:-450}"
 MODEL="${MODEL:-NousResearch/Meta-Llama-3-8B}"
 SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"
