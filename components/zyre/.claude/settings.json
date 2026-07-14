@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(components/component-framework)",
+      "Write(components/interfaces/**)",
+      "Write(components/zyre/**)"
+    ],
+    "deny": [
+      "Read(components/example-helloworld/**)"
+    ],
+    "additionalDirectories": [
+      "../../interfaces",
+      "../../component-framework"
+    ]
+  }
+}
