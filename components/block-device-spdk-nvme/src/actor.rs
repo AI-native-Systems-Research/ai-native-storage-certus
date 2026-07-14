@@ -480,7 +480,8 @@ impl BlockDeviceHandler {
 
                 #[cfg(feature = "telemetry")]
                 if entry.result.is_ok() {
-                    self.telemetry.record(entry.latency_ns, entry.bytes);
+                    self.telemetry
+                        .record(entry.latency_ns, entry.bytes, entry.is_read);
                 }
 
                 let completion = if entry.is_read {
@@ -598,7 +599,7 @@ impl BlockDeviceHandler {
 
                 #[cfg(feature = "telemetry")]
                 if result.is_ok() {
-                    telemetry.record(tsc.ticks_to_ns(tsc.now() - start), bytes);
+                    telemetry.record(tsc.ticks_to_ns(tsc.now() - start), bytes, true);
                 }
 
                 let _ = session.callback_tx.send(Completion::ReadDone {
@@ -621,7 +622,7 @@ impl BlockDeviceHandler {
 
                 #[cfg(feature = "telemetry")]
                 if result.is_ok() {
-                    telemetry.record(tsc.ticks_to_ns(tsc.now() - start), bytes);
+                    telemetry.record(tsc.ticks_to_ns(tsc.now() - start), bytes, false);
                 }
 
                 let _ = session.callback_tx.send(Completion::WriteDone {

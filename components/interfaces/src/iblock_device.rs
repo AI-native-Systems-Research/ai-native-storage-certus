@@ -120,6 +120,62 @@ pub struct TelemetrySnapshot {
     pub elapsed_secs: f64,
 }
 
+/// Cumulative I/O byte, operation, and latency counters, split by direction.
+///
+/// Unlike [`TelemetrySnapshot`] (which aggregates reads and writes into a
+/// single latency/throughput view), this separates read and write traffic so
+/// callers can account bytes, ops, and latency per direction. Counters are
+/// monotonic for the life of the device; take deltas across two snapshots to
+/// measure a time window.
+///
+/// The `total_*` accessors return the read+write sum, matching the aggregate
+/// semantics of [`TelemetrySnapshot`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ReadWriteStats {
+    /// Number of completed read operations.
+    pub read_ops: u64,
+    /// Total bytes read from the device.
+    pub read_bytes: u64,
+    /// Cumulative latency of all read operations, in nanoseconds.
+    pub read_latency_ns_sum: u64,
+    /// Number of completed write operations.
+    pub write_ops: u64,
+    /// Total bytes written to the device.
+    pub write_bytes: u64,
+    /// Cumulative latency of all write operations, in nanoseconds.
+    pub write_latency_ns_sum: u64,
+}
+
+impl ReadWriteStats {
+    /// Total operations (reads + writes).
+    pub fn total_ops(&self) -> u64 {
+        self.read_ops + self.write_ops
+    }
+
+    /// Total bytes transferred (read + written).
+    pub fn total_bytes(&self) -> u64 {
+        self.read_bytes + self.write_bytes
+    }
+
+    /// Mean read latency in nanoseconds (0 if no reads recorded).
+    pub fn mean_read_latency_ns(&self) -> u64 {
+        if self.read_ops == 0 {
+            0
+        } else {
+            self.read_latency_ns_sum / self.read_ops
+        }
+    }
+
+    /// Mean write latency in nanoseconds (0 if no writes recorded).
+    pub fn mean_write_latency_ns(&self) -> u64 {
+        if self.write_ops == 0 {
+            0
+        } else {
+            self.write_latency_ns_sum / self.write_ops
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // OpHandle
 // ---------------------------------------------------------------------------
@@ -431,6 +487,11 @@ define_interface! {
 
         /// Return telemetry statistics (requires `telemetry` feature).
         fn telemetry(&self) -> Result<TelemetrySnapshot, NvmeBlockError>;
+
+        /// Return cumulative per-direction read/write byte, op, and latency
+        /// counters. Returns zeroed counters unless built with the `telemetry`
+        /// feature. Monotonic; take deltas across two calls for a window.
+        fn read_write_stats(&self) -> ReadWriteStats;
     }
 }
 

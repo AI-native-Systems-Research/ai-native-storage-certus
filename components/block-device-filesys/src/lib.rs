@@ -338,6 +338,12 @@ impl IBlockDevice for BlockDeviceFilesysComponent {
             ))
         }
     }
+
+    /// Per-direction read/write counters. The filesys block device does not
+    /// track per-direction rw-telemetry, so this returns zeroed counters.
+    fn read_write_stats(&self) -> interfaces::ReadWriteStats {
+        interfaces::ReadWriteStats::default()
+    }
 }
 
 #[cfg(test)]

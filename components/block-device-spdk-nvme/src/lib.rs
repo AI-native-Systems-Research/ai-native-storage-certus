@@ -506,6 +506,29 @@ impl IBlockDevice for BlockDeviceSpdkNvmeComponent {
             crate::telemetry::telemetry_not_available()
         }
     }
+
+    fn read_write_stats(&self) -> interfaces::ReadWriteStats {
+        #[cfg(feature = "telemetry")]
+        {
+            let stats_guard = self
+                .telemetry_stats
+                .lock()
+                .expect("telemetry lock poisoned");
+            if let Some(any_arc) = stats_guard.as_ref() {
+                if let Some(stats) =
+                    any_arc.downcast_ref::<crate::telemetry::TelemetryStats>()
+                {
+                    return stats.read_write_stats();
+                }
+            }
+            interfaces::ReadWriteStats::default()
+        }
+
+        #[cfg(not(feature = "telemetry"))]
+        {
+            interfaces::ReadWriteStats::default()
+        }
+    }
 }
 
 #[cfg(test)]
