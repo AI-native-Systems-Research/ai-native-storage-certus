@@ -24,8 +24,11 @@ pub enum ZyreError {
     InvalidConfig(String),
     /// A send operation (whisper/shout) failed.
     SendFailed,
-    /// Receive returned unexpectedly (node stopped).
+    /// Receive failed unexpectedly (e.g. the calling thread was interrupted).
     RecvFailed,
+    /// The node has been stopped and its terminal [`ZyreEvent::Stop`] already
+    /// consumed; no further events will be delivered.
+    Stopped,
 }
 
 impl fmt::Display for ZyreError {
@@ -36,7 +39,8 @@ impl fmt::Display for ZyreError {
             Self::NotStarted => write!(f, "node not started"),
             Self::InvalidConfig(reason) => write!(f, "invalid configuration: {reason}"),
             Self::SendFailed => write!(f, "send operation failed"),
-            Self::RecvFailed => write!(f, "receive failed (node stopped)"),
+            Self::RecvFailed => write!(f, "receive failed (interrupted)"),
+            Self::Stopped => write!(f, "node stopped; no more events"),
         }
     }
 }
@@ -144,7 +148,10 @@ pub enum ZyreEvent {
         group: String,
         message: Vec<u8>,
     },
-    /// The local node has stopped.
+    /// The local node has stopped. This is the terminal event: it is delivered
+    /// exactly once after [`IZyreNode::stop`] (or a drop-triggered stop) as an
+    /// end-of-stream sentinel, after which [`IZyreNode::recv`] returns
+    /// [`ZyreError::Stopped`].
     Stop,
 }
 
@@ -357,6 +364,12 @@ pub trait IZyreNode: Send {
     fn start(&mut self) -> Result<(), ZyreError>;
 
     /// Stop the node, signaling departure to peers.
+    ///
+    /// After `stop`, the node enters a draining state: any events already
+    /// queued, followed by a final [`ZyreEvent::Stop`] sentinel, can still be
+    /// read with [`recv`](Self::recv) / [`try_recv`](Self::try_recv). Once the
+    /// `Stop` sentinel is consumed, further `recv` calls return
+    /// [`ZyreError::Stopped`]. Dropping the node also stops it.
     fn stop(&mut self);
 
     /// Join a named group.
@@ -372,9 +385,18 @@ pub trait IZyreNode: Send {
     fn whisper(&self, peer: &PeerId, data: &[u8]) -> Result<(), ZyreError>;
 
     /// Receive the next event from the network (blocking).
+    ///
+    /// Returns [`ZyreError::NotStarted`] before [`start`](Self::start). After
+    /// [`stop`](Self::stop) it continues to deliver queued events and then the
+    /// terminal [`ZyreEvent::Stop`]; subsequent calls return
+    /// [`ZyreError::Stopped`].
     fn recv(&self) -> Result<ZyreEvent, ZyreError>;
 
     /// Try to receive an event without blocking. Returns `Ok(None)` if none.
+    ///
+    /// Follows the same lifecycle as [`recv`](Self::recv): it yields `Ok(None)`
+    /// once the node has stopped and the terminal [`ZyreEvent::Stop`] has been
+    /// consumed.
     fn try_recv(&self) -> Result<Option<ZyreEvent>, ZyreError>;
 
     /// Get this node's UUID.

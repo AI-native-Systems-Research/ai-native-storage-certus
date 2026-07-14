@@ -89,6 +89,16 @@ The bindings add no threads of their own; the zyre C library runs its own
 discovery/beacon threads internally. The caller drives event reception by
 calling `recv()` / `try_recv()`.
 
+**Receive lifecycle**: `recv`/`try_recv` return `ZyreError::NotStarted` before
+`start()`. After `stop()` (or a drop-triggered stop) the node keeps delivering
+any queued events followed by a single terminal `ZyreEvent::Stop` sentinel;
+once that sentinel is consumed, `recv` returns `ZyreError::Stopped` and
+`try_recv` returns `Ok(None)` (it never blocks on the now-producerless inbox).
+`recv` returns `ZyreError::RecvFailed` if the calling thread is interrupted.
+Because the handle is `Send` but not `Sync`, this drain is single-threaded: a
+node that is stopped must be stopped by whichever thread owns it — there is no
+separate stop handle for signalling a node parked in another thread's `recv`.
+
 ## Consumer Pattern
 
 ```rust
@@ -110,20 +120,24 @@ node.join("certus-cluster")?;
 // Send a message to the group
 node.shout("certus-cluster", b"hello from node")?;
 
-// Receive events
-loop {
+// Process events until this node decides to leave, then stop and drain:
+// stop() enqueues a terminal Stop sentinel, so the same loop exits cleanly
+// once it is observed (any events already queued arrive before it).
+let mut running = true;
+while running {
     match node.recv()? {
-        ZyreEvent::Shout { peer, group, message, .. } => {
+        ZyreEvent::Shout { peer, group, .. } => {
             println!("Got message from {peer} in {group}");
+            node.stop(); // begin shutdown; keep draining until Stop
         }
         ZyreEvent::Exit { peer, .. } => {
             println!("Peer {peer} left");
         }
-        ZyreEvent::Stop => break,
+        ZyreEvent::Stop => running = false, // terminal end-of-stream sentinel
         _ => {}
     }
 }
-// Node automatically stopped and cleaned up when dropped
+// recv() would now return Err(ZyreError::Stopped); the node is cleaned up on drop.
 ```
 
 ## Health Check Pattern

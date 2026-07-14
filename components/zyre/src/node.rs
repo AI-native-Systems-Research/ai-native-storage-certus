@@ -1,5 +1,21 @@
+use std::cell::Cell;
+
 use crate::ffi;
 use interfaces::{IZyreNode, NodeConfig, PeerId, ZyreError, ZyreEvent};
+
+/// Lifecycle state of a [`ZyreNode`].
+///
+/// `stop()` moves `Running -> Draining` so the events already queued by the
+/// zyre actor plus its final `Stop` sentinel stay readable. Consuming that
+/// `Stop` moves `Draining -> Done`, after which no further `zyre_recv` is
+/// issued: the actor has exited, so another receive would block forever.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum State {
+    Created,
+    Running,
+    Draining,
+    Done,
+}
 
 /// A zyre peer node on the network — the concrete implementation of
 /// [`interfaces::IZyreNode`].
@@ -13,11 +29,13 @@ use interfaces::{IZyreNode, NodeConfig, PeerId, ZyreError, ZyreEvent};
 /// crate-private so callers cannot bypass the `IZyre` interface.
 pub(crate) struct ZyreNode {
     ptr: *mut ffi::zyre_t,
-    started: bool,
+    state: Cell<State>,
 }
 
 // SAFETY: zyre_t can be moved between threads (ownership transfer).
 // The C API is not thread-safe for concurrent access, so we do NOT impl Sync.
+// `Cell<State>` is `Send` (State is a Copy enum) but not `Sync`, which also
+// reinforces the intended non-`Sync` guarantee.
 unsafe impl Send for ZyreNode {}
 
 impl ZyreNode {
@@ -45,11 +63,22 @@ impl ZyreNode {
 
         let mut node = Self {
             ptr,
-            started: false,
+            state: Cell::new(State::Created),
         };
 
         node.apply_config(&config)?;
         Ok(node)
+    }
+
+    /// Guard for operations that require a running (started, not-yet-stopped)
+    /// node. Returns [`ZyreError::NotStarted`] before `start()` and
+    /// [`ZyreError::Stopped`] once the node has been stopped.
+    fn ensure_running(&self) -> Result<(), ZyreError> {
+        match self.state.get() {
+            State::Running => Ok(()),
+            State::Created => Err(ZyreError::NotStarted),
+            State::Draining | State::Done => Err(ZyreError::Stopped),
+        }
     }
 
     fn apply_config(&mut self, config: &NodeConfig) -> Result<(), ZyreError> {
@@ -102,27 +131,32 @@ impl ZyreNode {
 impl IZyreNode for ZyreNode {
     /// Start the node, beginning network discovery and messaging.
     fn start(&mut self) -> Result<(), ZyreError> {
+        if self.state.get() != State::Created {
+            return Err(ZyreError::StartFailed("node already started".into()));
+        }
         let rc = unsafe { ffi::zyre_start(self.ptr) };
         if rc != 0 {
             return Err(ZyreError::StartFailed("zyre_start returned error".into()));
         }
-        self.started = true;
+        self.state.set(State::Running);
         Ok(())
     }
 
     /// Stop the node, signaling departure to peers.
     fn stop(&mut self) {
-        if self.started {
+        // Only a running node can be stopped. `zyre_stop` blocks until the
+        // actor has queued its final `["STOP", uuid, name]` sentinel on the
+        // inbox, so after this returns the node is drainable, not gone — the
+        // sentinel (and any events ahead of it) is still readable via recv().
+        if self.state.get() == State::Running {
             unsafe { ffi::zyre_stop(self.ptr) };
-            self.started = false;
+            self.state.set(State::Draining);
         }
     }
 
     /// Join a named group.
     fn join(&mut self, group: &str) -> Result<(), ZyreError> {
-        if !self.started {
-            return Err(ZyreError::NotStarted);
-        }
+        self.ensure_running()?;
         let group_c = std::ffi::CString::new(group)
             .map_err(|_| ZyreError::InvalidConfig("group name contains null byte".into()))?;
         unsafe { ffi::zyre_join(self.ptr, group_c.as_ptr()) };
@@ -131,9 +165,7 @@ impl IZyreNode for ZyreNode {
 
     /// Leave a named group.
     fn leave(&mut self, group: &str) -> Result<(), ZyreError> {
-        if !self.started {
-            return Err(ZyreError::NotStarted);
-        }
+        self.ensure_running()?;
         let group_c = std::ffi::CString::new(group)
             .map_err(|_| ZyreError::InvalidConfig("group name contains null byte".into()))?;
         unsafe { ffi::zyre_leave(self.ptr, group_c.as_ptr()) };
@@ -142,9 +174,7 @@ impl IZyreNode for ZyreNode {
 
     /// Send a message to all peers in a group.
     fn shout(&self, group: &str, data: &[u8]) -> Result<(), ZyreError> {
-        if !self.started {
-            return Err(ZyreError::NotStarted);
-        }
+        self.ensure_running()?;
         let group_c = std::ffi::CString::new(group)
             .map_err(|_| ZyreError::InvalidConfig("group name contains null byte".into()))?;
         let rc = unsafe {
@@ -160,9 +190,7 @@ impl IZyreNode for ZyreNode {
 
     /// Send a message directly to a specific peer.
     fn whisper(&self, peer: &PeerId, data: &[u8]) -> Result<(), ZyreError> {
-        if !self.started {
-            return Err(ZyreError::NotStarted);
-        }
+        self.ensure_running()?;
         let peer_c = std::ffi::CString::new(peer.as_str())
             .map_err(|_| ZyreError::InvalidConfig("peer id contains null byte".into()))?;
         let rc = unsafe {
@@ -178,8 +206,13 @@ impl IZyreNode for ZyreNode {
 
     /// Receive the next event from the network (blocking).
     fn recv(&self) -> Result<ZyreEvent, ZyreError> {
-        if !self.started {
-            return Err(ZyreError::NotStarted);
+        match self.state.get() {
+            State::Created => return Err(ZyreError::NotStarted),
+            // The `Stop` sentinel has already been delivered and the actor has
+            // exited; another `zyre_recv` on the producerless inbox would block
+            // forever, so report the terminal state instead.
+            State::Done => return Err(ZyreError::Stopped),
+            State::Running | State::Draining => {}
         }
         let event_ptr = unsafe { ffi::zyre_event_new(self.ptr) };
         if event_ptr.is_null() {
@@ -187,6 +220,10 @@ impl IZyreNode for ZyreNode {
         }
         let event = parse_event(event_ptr);
         unsafe { ffi::zyre_event_destroy(&mut (event_ptr as *mut _)) };
+        // `Stop` is the terminal end-of-stream sentinel: after it, stop reading.
+        if matches!(event, Ok(ZyreEvent::Stop)) {
+            self.state.set(State::Done);
+        }
         event
     }
 
@@ -194,8 +231,10 @@ impl IZyreNode for ZyreNode {
     ///
     /// Returns `Ok(None)` if no event is available.
     fn try_recv(&self) -> Result<Option<ZyreEvent>, ZyreError> {
-        if !self.started {
-            return Err(ZyreError::NotStarted);
+        match self.state.get() {
+            State::Created => return Err(ZyreError::NotStarted),
+            State::Done => return Ok(None),
+            State::Running | State::Draining => {}
         }
         let socket = unsafe { ffi::zyre_socket(self.ptr) };
         if socket.is_null() {
@@ -526,5 +565,14 @@ mod tests {
             ZyreNode::new(config),
             Err(ZyreError::InvalidConfig(_))
         ));
+    }
+
+    #[test]
+    fn recv_before_start_is_not_started() {
+        // A freshly created (un-started) node is in `Created`, so recv/try_recv
+        // report `NotStarted` without touching the network.
+        let node = ZyreNode::new(NodeConfig::default()).expect("create node");
+        assert!(matches!(node.recv(), Err(ZyreError::NotStarted)));
+        assert!(matches!(node.try_recv(), Err(ZyreError::NotStarted)));
     }
 }

@@ -16,7 +16,7 @@ implementation (crate-private, FFI-owning).
 | Field | Type | Description |
 |-------|------|-------------|
 | ptr | `*mut zyre_t` | Owned raw pointer to the C node (internal) |
-| started | `bool` | Whether `start()` has been called |
+| state | `Cell<State>` | Lifecycle: `Created → Running → Draining → Done` (interior mutability so `&self` recv can advance to `Done`) |
 
 **Trait shape**: `pub trait IZyreNode: Send` — plain trait, not a
 `define_interface!` component interface. `Send` but not `Sync` (matches the C
@@ -53,6 +53,7 @@ enum ZyreEvent {
 - Every variant except `Stop` carries a `PeerId` and peer name.
 - `message` in Whisper/Shout is the payload of the (single) message frame. Payload size is bounded only by memory; there is no multi-frame representation.
 - `headers` in Enter is a snapshot — headers do not update after initial discovery.
+- `Stop` is the terminal event: it is delivered exactly once after `stop()` (the zyre actor enqueues a `["STOP", own-uuid, own-name]` sentinel on the inbox), and no events follow it.
 
 **Accessors**: `ZyreEvent` provides convenience methods `peer() -> Option<&PeerId>`, `peer_name() -> Option<&str>`, and `group() -> Option<&str>` so callers can read common fields without matching every variant (all return `None` for `Stop`; `group()` returns `None` for non-group events).
 
@@ -116,13 +117,18 @@ Newtype wrapping a UUID string identifying a remote peer.
 ### ZyreNode Lifecycle
 
 ```text
-[Created] --start()--> [Running] --stop()/drop--> [Stopped]
-    |                      |
-    |                      +--recv()--> [Running] (returns ZyreEvent)
-    |                      +--shout()/whisper()--> [Running]
-    |                      +--join()/leave()--> [Running]
+[Created] --start()--> [Running] --stop()--> [Draining] --recv() yields Stop--> [Done]
+    |                      |                       |
+    |                      +--recv()/try_recv()    +--recv()/try_recv() drain the
+    |                      +--shout()/whisper()       queued events, then the
+    |                      +--join()/leave()          terminal Stop sentinel
     |
-    +-- (any operation except start) --> Error::NotStarted
+    +-- recv/send/join/leave before start --> Error::NotStarted
+
+In [Draining]/[Done]: send/join/leave --> Error::Stopped.
+After [Done]: recv() --> Error::Stopped; try_recv() --> Ok(None) (no further
+zyre_recv is issued — the actor has exited).
+Drop stops a Running node and destroys it regardless of drain progress.
 ```
 
 ### Peer States (as observed by a running node)

@@ -20,7 +20,7 @@ use std::thread;
 use std::time::Duration;
 
 use component_core::query_interface;
-use zyre::{GossipConfig, IZyre, NodeConfig, ZyreComponent, ZyreEvent};
+use zyre::{GossipConfig, IZyre, NodeConfig, ZyreComponent, ZyreError, ZyreEvent};
 
 /// Process-global lock serializing the socket-creating integration tests.
 static SERIAL_LOCK: Mutex<()> = Mutex::new(());
@@ -191,4 +191,50 @@ fn gossip_discovery() {
     }
 
     assert!(discovered, "node B should discover node A via gossip");
+}
+
+#[test]
+fn stop_delivers_terminal_stop_event() {
+    let _guard = serialize();
+
+    let comp = ZyreComponent::new();
+    let izyre = query_interface!(comp, IZyre).expect("query IZyre");
+
+    let mut config = NodeConfig::default();
+    config.name = Some("stopper".into());
+    let mut node = izyre.create_node(config).expect("create node");
+    node.start().expect("start");
+
+    // `stop()` enqueues a terminal Stop sentinel on the inbox; the node stays
+    // drainable until it is consumed.
+    node.stop();
+
+    // Drain (non-blocking) until we observe the terminal Stop event. With no
+    // peers, Stop is the only queued message, but tolerate stray events.
+    let mut saw_stop = false;
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        match node.try_recv() {
+            Ok(Some(ZyreEvent::Stop)) => {
+                saw_stop = true;
+                break;
+            }
+            Ok(Some(_)) => continue,
+            Ok(None) => thread::sleep(Duration::from_millis(20)),
+            Err(e) => panic!("unexpected recv error before Stop: {e}"),
+        }
+    }
+    assert!(saw_stop, "stop() should deliver a terminal ZyreEvent::Stop");
+
+    // Once the sentinel is consumed the stream is terminal: recv() reports
+    // Stopped, and try_recv() yields Ok(None) (never blocking on the now
+    // producerless inbox).
+    assert!(
+        matches!(node.recv(), Err(ZyreError::Stopped)),
+        "recv after Stop should return Stopped"
+    );
+    assert!(
+        matches!(node.try_recv(), Ok(None)),
+        "try_recv after Stop should return Ok(None)"
+    );
 }
