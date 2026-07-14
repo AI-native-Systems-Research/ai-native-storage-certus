@@ -172,10 +172,11 @@ Each entry below gives: **What it says**, **Why it's needed**, and **What breaks
 - *Why:* Defense-in-depth for a deprecated path that may still exist in old state. Marked `legacy`.
 - *Without it:* Old staged entries could trigger undefined behavior after the design moved on.
 
-**P11 — Size mismatch hard-fails with `InvalidParameter` and copies nothing.** *(the keystone)*
+**P11 — Size mismatch hard-fails with `InvalidParameter` and copies nothing.** *(a data-integrity keystone)*
 - *What it says:* If a caller's buffer size doesn't match the stored object's size, the lookup must **refuse outright** — no "copy as much as fits" partial copy.
-- *Why:* This is the single most important safety property here. A silent partial copy hands the caller **truncated or mismatched data** while reporting success — a data-integrity disaster. (A tester found exactly this class of bug in an earlier implementation, which drove design changes.)
-- *Without it:* Callers get corrupted data that looks valid. This is the top verification target.
+- *Why:* A silent partial copy hands the caller **truncated or mismatched data** while reporting success — a data-integrity disaster. (A tester found exactly this class of bug in an earlier implementation, which drove design changes.)
+- *Without it:* Callers get corrupted data that looks valid.
+- *How today's design actually ensures it:* Two layers, and it's worth being precise about them. (1) On the reachable product path the lookup copy is **clamped to `min(requested, stored)`**, so it can never read past either buffer — no over-copy. (2) There is also an explicit "size mismatch → `InvalidParameter`, copy nothing" arm, **but in the current code it is defensive and unreachable**: the map-level `lookup` is *key-only* — it never compares sizes, so it never actually reports a mismatch (only a test mock injects one). The real-world guarantee therefore rests on an **invariant that the requested size always equals the stored size at lookup**. Confirming where that invariant comes from (the source of `ipc_handle.size` vs the stored entry size) is an open follow-up; until then it's a reasonable assumption rather than a proved fact. So P11 is best read as *"the copy path is size-safe, and mismatch handling is present but currently a can't-happen guard"* — not as an open live bug.
 
 ### D. Deletion and touch — "removes are exact, touch is harmless"
 
@@ -317,3 +318,4 @@ The recurring design DNA is two rules: **the map never lies about what exists an
 - Each property is explained as What it says / Why it's needed / What breaks without it, grouped by design area (init, insert, read, delete, evict, legacy, clear, recovery, arithmetic, map-wide invariants).
 - Companion to `properties_to_prove.md` (authoritative registry) — this file carries the "why", that file carries IDs/status/evidence.
 - To be extended alongside future global properties (P32+) as component extraction proceeds.
+- 2026-07-14: revised the P11 entry to match the current design — the size-mismatch arm is defensive/unreachable (map `lookup` is key-only), the reachable copy path is `min`-clamped (no over-copy), and safety rests on a *requested==stored* invariant that is a pending follow-up to confirm. P11 is no longer framed as an open live bug.
