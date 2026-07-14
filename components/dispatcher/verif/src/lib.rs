@@ -61,6 +61,34 @@ pub fn prepare_store_guards(initialized: bool, size: u32) -> Result<(), Dispatch
     Ok(())
 }
 
+// ---------- P28: drive-selection index bound ----------
+//
+// Mirrors `drive_index` (dispatcher/src/lib.rs:241): a splitmix64 finalizer
+// over the key, reduced `% num_drives` to pick a data drive. The call site
+// (:1556) is guarded by `if num_drives == 0` (:1532), so the divisor is
+// always positive.
+//
+// Determinism / stability (P28's plain-English claim) is structural: this is
+// a pure function of (key, num_drives) with no state, clock, or RNG, so equal
+// inputs always yield equal outputs. The substantive safety theorem we
+// discharge is that the result is a valid drive index — `result < num_drives`
+// — so drive selection can never index a nonexistent drive. The hash body is
+// kept verbatim; we deliberately prove nothing about the hash value, only that
+// the final `% num_drives` lands in range.
+
+#[requires(num_drives@ > 0)]
+#[ensures(result@ < num_drives@)]
+pub fn drive_index(key: u64, num_drives: usize) -> usize {
+    // splitmix64 finalizer: distributes sequential keys uniformly.
+    let mut h = key;
+    h ^= h >> 30;
+    h = h.wrapping_mul(0xbf58476d1ce4e5b9);
+    h ^= h >> 27;
+    h = h.wrapping_mul(0x94d049bb133111eb);
+    h ^= h >> 31;
+    h as usize % num_drives
+}
+
 // ---------- Pending-write map model ----------
 //
 // The real dispatcher holds `pending_writes: Mutex<HashMap<CacheKey, PendingWrite>>`

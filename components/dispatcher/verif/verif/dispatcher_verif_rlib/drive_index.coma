@@ -1,0 +1,70 @@
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 81 0 81 56 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 84 14 84 16
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 84 9 84 16
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 85 23 85 41
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 85 8 85 42
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 86 14 86 16
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 86 9 86 16
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 87 23 87 41
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 87 8 87 42
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 88 14 88 16
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 88 9 88 16
+let%span slib'9 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 89 4 89 27
+let%span slib'10 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 79 11 79 26
+let%span slib'11 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 80 10 80 31
+let%span snum = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/num.rs" 316 26 316 48
+
+use creusot.int.Int32
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+let wrapping_mul (self_: UInt64.t) (rhs: UInt64.t) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:wrapping_mul ensures] [%#snum] result = UInt64.mul self_ rhs}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let drive_index [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 81 0 81 56]
+  (key: UInt64.t) (num_drives: UInt64.t) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:drive_index requires] [%#slib'10] UInt64.t'int num_drives > 0}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &h <- key ] s1
+    | s1 = UInt64.shr [%#slib'0] {h} {Int32.to_int ([%#slib] (30: Int32.t))} (fun (_x: UInt64.t) -> [ &_8 <- _x ] s2)
+    | s2 = [ &h <- UInt64.bw_xor h _8 ] s3
+    | s3 = wrapping_mul [%#slib'2] {h} {[%#slib'1] (13787848793156543929: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &_10 <- _x ] s4)
+    | s4 = [ &h <- _10 ] s5
+    | s5 = UInt64.shr [%#slib'4] {h} {Int32.to_int ([%#slib'3] (27: Int32.t))} (fun (_x: UInt64.t) -> [ &_12 <- _x ] s6)
+    | s6 = [ &h <- UInt64.bw_xor h _12 ] s7
+    | s7 = wrapping_mul [%#slib'6] {h} {[%#slib'5] (10723151780598845931: UInt64.t)}
+        (fun (_x: UInt64.t) -> [ &_14 <- _x ] s8)
+    | s8 = [ &h <- _14 ] s9
+    | s9 = UInt64.shr [%#slib'8] {h} {Int32.to_int ([%#slib'7] (31: Int32.t))}
+        (fun (_x: UInt64.t) -> [ &_16 <- _x ] s10)
+    | s10 = [ &h <- UInt64.bw_xor h _16 ] s11
+    | s11 = [ &_18 <- UInt64.of_int (UInt64.t'int h) ] s12
+    | s12 = [ &_20 <- num_drives ] s13
+    | s13 = [ &_21 <- _20 = ([%#slib'9] (0: UInt64.t)) ] s14
+    | s14 = {[@expl:remainder by zero] [%#slib'9] not _21} s15
+    | s15 = UInt64.rem [%#slib'9] {_18} {_20} (fun (_x: UInt64.t) -> [ &_ret <- _x ] s16)
+    | s16 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & key: UInt64.t = key
+  | & num_drives: UInt64.t = num_drives
+  | & h: UInt64.t = Any.any_l ()
+  | & _8: UInt64.t = Any.any_l ()
+  | & _10: UInt64.t = Any.any_l ()
+  | & _12: UInt64.t = Any.any_l ()
+  | & _14: UInt64.t = Any.any_l ()
+  | & _16: UInt64.t = Any.any_l ()
+  | & _18: UInt64.t = Any.any_l ()
+  | & _20: UInt64.t = Any.any_l ()
+  | & _21: bool = Any.any_l () ])
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:drive_index ensures] [%#slib'11] UInt64.t'int result
+    < UInt64.t'int num_drives}
+    (! return {result}) ]

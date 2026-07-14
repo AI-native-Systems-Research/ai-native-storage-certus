@@ -74,7 +74,7 @@ P12, P13, P17, P18, P26, P27, P30, P31) stay in `dispatch-map/verif`.
 | P23 — cancel ⇒ key absent, pending cleared | dispatcher | `# Retired` | Depended on removed `cancel_store` / `pending_writes`. No live counterpart. |
 | P24 — commit/cancel miss ⇒ `KeyNotFound`, no mutation | dispatcher | `# Stale` (`consume_pending`) | Mirrors deleted `pending_writes` map. Retire, or reconceive against `release_memory` idempotent-cancel semantics. |
 | P25 — `clear_memory_tier` map postcondition + count | dispatcher | `# Unchecked` | Map-level loop proof. |
-| P28 — drive-index determinism (`key % num_drives`) | dispatcher | `# Unchecked` | Pure arithmetic contract on `drive_index`. |
+| P28 — drive-index determinism (`key % num_drives`) | dispatcher | `# Verified` (`drive_index`) | 2/2 VCs discharged (`vc_drive_index`, `vc_wrapping_mul`) in 1 `.coma` proof file (`drive_index.coma`). Theorem: `num_drives>0 ==> result < num_drives` (index always in range; no OOB drive select). Determinism/stability is structural (pure fn). Splitmix64 body kept verbatim; only the `% num_drives` bound is proved. |
 | P29 — watermark/threshold consistency | dispatcher | `# Unchecked` | Config-comparison direction proof. |
 
 ## Trusted / assumption ledger

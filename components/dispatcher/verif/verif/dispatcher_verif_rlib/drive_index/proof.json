@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_drive_index": { "prover": "alt-ergo", "time": 0.039 },
+      "vc_wrapping_mul": { "prover": "alt-ergo", "time": 0.01 }
+    }
+  }
+}
