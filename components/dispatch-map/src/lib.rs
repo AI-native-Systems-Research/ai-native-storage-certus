@@ -17,6 +17,7 @@ pub fn entry_size() -> usize {
     std::mem::size_of::<entry::DispatchEntry>()
 }
 
+use std::sync::atomic::AtomicU32;
 use std::time::Duration;
 
 use component_framework::define_component;
@@ -97,6 +98,7 @@ impl IDispatchMap for DispatchMapComponent {
                 read_ref: 0,
                 write_ref: 0,
                 eviction_handle,
+                reuse_count: AtomicU32::new(0),
             };
             inner.entries.insert(extent.key, entry);
             count += 1;
@@ -132,6 +134,7 @@ impl IDispatchMap for DispatchMapComponent {
             .read_ref
             .checked_add(1)
             .ok_or(DispatchMapError::RefCountOverflow(key))?;
+        entry.reuse_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let handle = entry.eviction_handle;
 
         let result = match &entry.location {
@@ -207,6 +210,7 @@ impl IDispatchMap for DispatchMapComponent {
             .read_ref
             .checked_add(1)
             .ok_or(DispatchMapError::RefCountOverflow(key))?;
+        entry.reuse_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: take_read key {key}"));
         }
@@ -294,6 +298,7 @@ impl IDispatchMap for DispatchMapComponent {
             .read_ref
             .checked_add(1)
             .ok_or(DispatchMapError::RefCountOverflow(key))?;
+        entry.reuse_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: downgrade_reference key {key}"));
         }
@@ -388,6 +393,7 @@ impl IDispatchMap for DispatchMapComponent {
             read_ref: 0,
             write_ref: 1,
             eviction_handle,
+            reuse_count: AtomicU32::new(0),
         };
 
         inner.entries.insert(key, entry);
@@ -442,6 +448,54 @@ impl IDispatchMap for DispatchMapComponent {
         Ok(())
     }
 
+    fn promote_block_to_memory_tier(
+        &self,
+        key: CacheKey,
+        pointer: *mut u8,
+        size: u32,
+    ) -> Result<(), DispatchMapError> {
+        if size == 0 {
+            return Err(DispatchMapError::InvalidSize);
+        }
+
+        let mut inner = self.state.inner.lock().unwrap();
+        let entry = inner
+            .entries
+            .get_mut(&key)
+            .ok_or(DispatchMapError::KeyNotFound(key))?;
+
+        match &entry.location {
+            Location::BlockDevice { offset } => {
+                // In-place flip: keep the eviction handle and all refs (the
+                // entry may be pinned by an in-flight load). Retain the SSD
+                // offset so the promoted entry stays demotable without a reread.
+                let offset = *offset;
+                entry.location = Location::MemoryTier {
+                    pointer,
+                    size,
+                    ssd_offset: Some(offset),
+                };
+                entry.size_blocks = size.div_ceil(4096);
+            }
+            Location::MemoryTier { .. } => {
+                return Err(DispatchMapError::InvalidState(
+                    "entry is already in memory-tier state".into(),
+                ));
+            }
+        }
+
+        if let Ok(logger) = self.logger.get() {
+            logger.debug(&format!(
+                "dispatch-map: promoted block-device key {key} to memory-tier in place, size {size}"
+            ));
+        }
+
+        drop(inner);
+        self.state.condvar.notify_all();
+
+        Ok(())
+    }
+
     fn is_evictable(&self, key: CacheKey) -> bool {
         let inner = self.state.inner.lock().unwrap();
         match inner.entries.get(&key) {
@@ -477,6 +531,7 @@ impl IDispatchMap for DispatchMapComponent {
             read_ref: 0,
             write_ref: 0,
             eviction_handle,
+            reuse_count: AtomicU32::new(0),
         };
         inner.entries.insert(key, entry);
         Ok(())

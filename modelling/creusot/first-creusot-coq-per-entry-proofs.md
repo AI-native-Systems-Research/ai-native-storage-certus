@@ -1,3 +1,12 @@
+# First Creusot + Coq Per-Entry Proofs
+
+Status note (2026-07-10):
+- This report is still valuable as a historical record of the first dispatch-map and
+  segment-io proof patterns (including Coq-assisted lemmas).
+- Some workflow details mention older dispatcher semantics (for example staging-era
+  context) and should not be treated as current dispatcher behavior guarantees.
+- Current spec-to-code coverage status now lives in `modelling/creusot/creusot-spec-coverage/`.
+
 # Creusot Formal Verification — Progress Report
 
 Creusot is a deductive verification tool for Rust. It takes annotated Rust functions

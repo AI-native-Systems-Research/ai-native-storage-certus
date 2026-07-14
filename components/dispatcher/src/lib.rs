@@ -60,6 +60,7 @@
 #![allow(clippy::too_many_arguments)]
 
 mod background;
+pub mod cold_pool;
 pub mod io_segmenter;
 pub mod metrics;
 pub mod pipeline;
@@ -82,6 +83,18 @@ use spdk_env::ISPDKEnv;
 
 use crate::background::{BackgroundEvictor, EvictorConfig, ParallelBackgroundWriter, WriteJob};
 pub use crate::metrics::PipelineMetrics;
+
+#[derive(Clone, Debug)]
+pub enum EvictionReason {
+    Demoted,
+    Removed,
+}
+
+#[derive(Clone, Debug)]
+pub struct EvictionEvent {
+    pub key: CacheKey,
+    pub reason: EvictionReason,
+}
 
 /// Holds one (block-device, extent-manager) pair for a data drive.
 #[allow(dead_code)]
@@ -144,6 +157,7 @@ define_component! {
             initialized: AtomicBool,
             bg_writer: Mutex<Option<ParallelBackgroundWriter>>,
             bg_evictor: Mutex<Option<BackgroundEvictor>>,
+            cold_pool: Mutex<Option<cold_pool::ColdReadPool>>,
             data_drives: RwLock<Vec<DataDrive>>,
             pipeline_ring: RwLock<Option<pipeline::PipelineRing>>,
             warm_stream: AtomicU64,
@@ -151,6 +165,8 @@ define_component! {
             extent_manager_factory: Mutex<Option<ExtentManagerFactory>>,
             max_eviction_attempts: AtomicUsize,
             pipeline_metrics: RwLock<Option<Arc<dyn PipelineMetrics>>>,
+            eviction_tx: Mutex<Option<crossbeam_channel::Sender<EvictionEvent>>>,
+            eviction_dropped: AtomicU64,
         },
     }
 }
@@ -195,6 +211,31 @@ impl DispatcherComponent {
     /// When set, internal data-path stages report timing through this trait.
     pub fn set_pipeline_metrics(&self, m: Arc<dyn PipelineMetrics>) {
         *self.pipeline_metrics.write() = Some(m);
+    }
+
+    /// Create a bounded eviction event channel and install the sender.
+    /// Returns the receiver that the gRPC layer should drain via `TakeEvents`.
+    pub fn create_eviction_channel(
+        &self,
+        capacity: usize,
+    ) -> crossbeam_channel::Receiver<EvictionEvent> {
+        let (tx, rx) = crossbeam_channel::bounded(capacity);
+        *self.eviction_tx.lock().unwrap() = Some(tx);
+        rx
+    }
+
+    /// Read and reset the count of eviction events dropped due to a full channel.
+    pub fn eviction_dropped_count(&self) -> u64 {
+        self.eviction_dropped.swap(0, Ordering::Relaxed)
+    }
+
+    fn emit_eviction(&self, key: CacheKey, reason: EvictionReason) {
+        let guard = self.eviction_tx.lock().unwrap();
+        if let Some(ref tx) = *guard {
+            if tx.try_send(EvictionEvent { key, reason }).is_err() {
+                self.eviction_dropped.fetch_add(1, Ordering::Relaxed);
+            }
+        }
     }
 
     fn drive_index(key: CacheKey, num_drives: usize) -> usize {
@@ -378,7 +419,7 @@ impl DispatcherComponent {
 
         // Evict if needed to make space.
         let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
-        Self::evict_for_space(dm, mt, ipc_handle.size, key, max_attempts)?;
+        self.evict_for_space(dm, mt, ipc_handle.size, key, max_attempts)?;
 
         // Insert into memory-tier.
         let mem_ptr = mt.insert(key, ipc_handle.size).map_err(|e| {
@@ -449,15 +490,13 @@ impl DispatcherComponent {
         drop(ring_guard);
         drop(drives);
 
-        // Update dispatch-map: remove old BlockDevice entry and create fresh MemoryTier.
-        // Since we released the read ref before calling this method, we can remove
-        // and re-register.
-        let _ = dm.remove(key);
-        dm.create_memory_tier_entry(key, mem_ptr, ipc_handle.size)
-            .map_err(|e| DispatcherError::IoError(format!("promote re-register failed: {e}")))?;
-        // Set the ssd_offset since data is still on SSD.
-        let _ = dm.convert_to_storage(key, offset);
-        let _ = dm.release_write(key);
+        // In-place BlockDevice->MemoryTier transition (retains the SSD offset so
+        // the entry stays demotable). Unlike the old remove+recreate, this works
+        // when the entry is pinned (read_ref > 0) by an in-flight load — remove
+        // rejects pinned entries, which crashed the load path.
+        let _ = offset; // offset retained inside promote_block_to_memory_tier
+        dm.promote_block_to_memory_tier(key, mem_ptr, ipc_handle.size)
+            .map_err(|e| DispatcherError::IoError(format!("promote transition failed: {e}")))?;
 
         Ok(())
     }
@@ -482,6 +521,7 @@ impl DispatcherComponent {
     // global used() < capacity(). In that case insert() will return PoolFull after
     // this function succeeds. Acceptable for now — real workloads distribute evenly.
     fn evict_for_space(
+        &self,
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
         needed: u32,
@@ -526,6 +566,7 @@ impl DispatcherComponent {
                     // Another thread may have concurrently evicted this key.
                     if mt.remove(key).is_ok() {
                         let _ = dm.convert_memory_tier_to_block(key);
+                        self.emit_eviction(key, EvictionReason::Demoted);
                     }
                 }
                 None => {
@@ -534,6 +575,9 @@ impl DispatcherComponent {
                     if let Some(evicted_key) = mt.evict_lru_for_key(target_key) {
                         if dm.convert_memory_tier_to_block(evicted_key).is_err() {
                             let _ = dm.remove(evicted_key);
+                            self.emit_eviction(evicted_key, EvictionReason::Removed);
+                        } else {
+                            self.emit_eviction(evicted_key, EvictionReason::Demoted);
                         }
                     }
                 }
@@ -617,7 +661,6 @@ impl DispatcherComponent {
         // convert_to_storage also decrements the read reference.
         let _ = write_handle.publish();
         let _ = dm.convert_to_storage(job.key, block_offset);
-        let _ = dm.release_read(job.key);
     }
 }
 
@@ -1139,6 +1182,32 @@ impl IDispatcher for DispatcherComponent {
 
         *self.bg_writer.lock().unwrap() = Some(writer);
 
+        // Start persistent cold-path worker pool (pre-connected NVMe channels + CUDA streams).
+        if let Ok(gpu) = self.gpu_services.get() {
+            let pool_drives: Vec<Arc<dyn IBlockDevice + Send + Sync>> = {
+                let dd = self.data_drives.read();
+                dd.iter().map(|d| Arc::clone(&d.block_dev_iface)).collect()
+            };
+            if !pool_drives.is_empty() {
+                const COLD_POOL_QUEUES_PER_DRIVE: usize = 2;
+                match cold_pool::ColdReadPool::new(&pool_drives, &gpu, COLD_POOL_QUEUES_PER_DRIVE) {
+                    Ok(pool) => {
+                        self.log_info(&format!(
+                            "dispatcher: cold pool started ({} drives × {} queues)",
+                            pool_drives.len(),
+                            COLD_POOL_QUEUES_PER_DRIVE,
+                        ));
+                        *self.cold_pool.lock().unwrap() = Some(pool);
+                    }
+                    Err(e) => {
+                        self.log_info(&format!(
+                            "cold pool creation failed (non-fatal, will use scoped threads): {e:?}"
+                        ));
+                    }
+                }
+            }
+        }
+
         // Start background SSD evictor if drives exist and threshold is configured.
         if config.ssd_eviction_threshold > 0.0 {
             let dm_for_evictor = self
@@ -1156,6 +1225,7 @@ impl IDispatcher for DispatcherComponent {
             let evictor_logger = self.logger.get().ok();
 
             if !evictor_extent_mgrs.is_empty() {
+                let evictor_eviction_tx = self.eviction_tx.lock().unwrap().clone();
                 let evictor = BackgroundEvictor::start(
                     dm_for_evictor,
                     mt_for_evictor,
@@ -1167,6 +1237,7 @@ impl IDispatcher for DispatcherComponent {
                         interval: std::time::Duration::from_secs(config.ssd_eviction_interval_secs),
                     },
                     evictor_logger,
+                    evictor_eviction_tx,
                 );
                 *self.bg_evictor.lock().unwrap() = Some(evictor);
             }
@@ -1191,6 +1262,11 @@ impl IDispatcher for DispatcherComponent {
 
         if let Some(mut writer) = self.bg_writer.lock().unwrap().take() {
             writer.shutdown();
+        }
+
+        // Shut down cold pool before block device teardown (workers hold ClientChannels).
+        if let Some(pool) = self.cold_pool.lock().unwrap().take() {
+            pool.shutdown();
         }
 
         // Checkpoint all extent managers to persist metadata before teardown.
@@ -1283,7 +1359,7 @@ impl IDispatcher for DispatcherComponent {
     ///    - MemoryTier hit → issue async H2D DMA (round-robin across 4 streams)
     ///    - BlockDevice hit → collect into cold_entries for phase 2
     ///    - NotExist → handle inline
-    ///    After the loop, synchronize all warm streams once.
+    ///      After the loop, synchronize all warm streams once.
     ///
     /// 2. **Cold promotion** (if any BlockDevice hits):
     ///    - Group cold entries by drive index
@@ -1456,17 +1532,17 @@ impl IDispatcher for DispatcherComponent {
             if num_drives == 0 {
                 let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
                 for entry in &cold_entries {
-                    Self::evict_for_space(&dm, &mt, entry.ipc_handle_size, entry.key, max_attempts)
+                    self.evict_for_space(&dm, &mt, entry.ipc_handle_size, entry.key, max_attempts)
                         .ok();
                     let res = mt
                         .insert(entry.key, entry.ipc_handle_size)
                         .map(|mem_ptr| {
-                            let _ = dm.create_memory_tier_entry(
+                            // In-place, pin-safe promote (no remove/recreate).
+                            let _ = dm.promote_block_to_memory_tier(
                                 entry.key,
                                 mem_ptr,
                                 entry.ipc_handle_size,
                             );
-                            let _ = dm.release_write(entry.key);
                         })
                         .map_err(|e| {
                             DispatcherError::AllocationFailed(format!("promote insert failed: {e}"))
@@ -1481,202 +1557,189 @@ impl IDispatcher for DispatcherComponent {
                     per_drive[drive_idx].push(ci);
                 }
 
-                std::thread::scope(|s| {
-                    #[allow(clippy::type_complexity)]
-                    let mut thread_handles: Vec<
-                        std::thread::ScopedJoinHandle<Vec<(usize, Result<(), DispatcherError>)>>,
-                    > = Vec::new();
+                let pool_guard = self.cold_pool.lock().unwrap();
+                let pool = pool_guard.as_ref();
+                let queues_per_drive = pool.map_or(MAX_QUEUES_PER_DRIVE, |p| p.queues_per_drive());
 
-                    for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
-                        if entry_indices.is_empty() {
+                let queue_depth = 128;
+                let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
+                let pm = self.pipeline_metrics.read();
+                let pm_arc: Option<Arc<dyn PipelineMetrics>> = pm.as_ref().map(Arc::clone);
+                drop(pm);
+
+                // For each drive, prepare ColdReadJobs and submit to pool (or fallback).
+                #[allow(clippy::type_complexity)]
+                let mut pending_results: Vec<(
+                    Vec<usize>,   // job_ci mapping
+                    Vec<*mut u8>, // mem_ptrs
+                    crossbeam_channel::Receiver<Vec<Result<(), DispatcherError>>>,
+                )> = Vec::new();
+                let mut prep_failures: Vec<(usize, Result<(), DispatcherError>)> = Vec::new();
+
+                for (drive_idx, entry_indices) in per_drive.iter().enumerate() {
+                    if entry_indices.is_empty() {
+                        continue;
+                    }
+
+                    let drive = &drives[drive_idx];
+                    let block_size = drive.block_dev_iface.block_size();
+
+                    // Split this drive's entries across queue slots.
+                    let num_queues = queues_per_drive.min(entry_indices.len());
+                    let chunks: Vec<&[usize]> = entry_indices
+                        .chunks(entry_indices.len().div_ceil(num_queues))
+                        .collect();
+
+                    for (slot, chunk) in chunks.into_iter().enumerate() {
+                        let mut jobs: Vec<pipeline::ColdReadJob> = Vec::with_capacity(chunk.len());
+                        let mut job_ci: Vec<usize> = Vec::with_capacity(chunk.len());
+                        let mut mem_ptrs: Vec<*mut u8> = Vec::with_capacity(chunk.len());
+
+                        for &ci in chunk {
+                            let entry = &cold_entries[ci];
+                            let ipc_size = entry.ipc_handle_size;
+
+                            let prep = (|| -> Result<*mut u8, DispatcherError> {
+                                self.evict_for_space(&dm, &mt, ipc_size, entry.key, max_attempts)?;
+                                mt.insert(entry.key, ipc_size).map_err(|e| {
+                                    DispatcherError::AllocationFailed(format!(
+                                        "promote insert failed: {e}"
+                                    ))
+                                })
+                            })();
+
+                            match prep {
+                                Ok(mem_ptr) => {
+                                    jobs.push(pipeline::ColdReadJob {
+                                        mem_ptr,
+                                        gpu_dst: entry.ipc_handle_addr as *mut std::ffi::c_void,
+                                        start_lba: entry.offset / block_size as u64,
+                                        total_bytes: ipc_size as usize,
+                                    });
+                                    job_ci.push(ci);
+                                    mem_ptrs.push(mem_ptr);
+                                }
+                                Err(e) => {
+                                    prep_failures.push((ci, Err(e)));
+                                }
+                            }
+                        }
+
+                        if jobs.is_empty() {
                             continue;
                         }
 
-                        // Split this drive's entries across multiple queue threads.
-                        let num_queues = MAX_QUEUES_PER_DRIVE.min(entry_indices.len());
-                        let chunks: Vec<&[usize]> = entry_indices
-                            .chunks(entry_indices.len().div_ceil(num_queues))
-                            .collect();
+                        let (result_tx, result_rx) = crossbeam_channel::bounded(1);
 
-                        let queue_depth = 128;
+                        let request = cold_pool::ColdReadRequest {
+                            jobs,
+                            chunk_size,
+                            queue_depth,
+                            metrics: pm_arc.clone(),
+                            result_tx,
+                        };
 
-                        let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
-                        for chunk in chunks {
-                            let dm_ref = &dm;
-                            let mt_ref = &mt;
-                            let gpu_ref = &gpu;
-                            let drives_ref = &drives;
-                            let cold_ref = &cold_entries;
-                            let indices = chunk.to_vec();
-
-                            let handle = s.spawn(move || {
-                                let drive = &drives_ref[drive_idx];
-                                let block_size = drive.block_dev_iface.block_size();
-
-                                let channels =
-                                    drive.block_dev_iface.connect_client().map_err(|e| {
-                                        DispatcherError::IoError(format!(
-                                            "connect_client failed: {e}"
-                                        ))
-                                    });
-                                let streams_result = gpu_ref.create_stream().and_then(|a| {
-                                    gpu_ref.create_stream().map(|b| [a, b]).map_err(|e| {
-                                        let _ = gpu_ref.destroy_stream(a);
-                                        e
-                                    })
-                                });
-
-                                let mut batch_results: Vec<(usize, Result<(), DispatcherError>)> =
-                                    Vec::with_capacity(indices.len());
-
-                                let (channels, streams) = match (channels, streams_result) {
-                                    (Ok(ch), Ok(st)) => (ch, st),
-                                    (Err(e), _) => {
-                                        for &ci in &indices {
-                                            batch_results.push((ci, Err(e.clone())));
-                                        }
-                                        return batch_results;
-                                    }
-                                    (_, Err(e)) => {
-                                        let err = DispatcherError::IoError(format!(
-                                            "create_stream failed: {e}"
-                                        ));
-                                        for &ci in &indices {
-                                            batch_results.push((ci, Err(err.clone())));
-                                        }
-                                        return batch_results;
-                                    }
-                                };
-
-                                // Prepare all cold entries for multi-object pipeline.
-                                let t_prep_start = std::time::Instant::now();
-                                #[cfg(feature = "pipeline-telemetry")]
-                                let _ = t_prep_start;
-                                let mut jobs: Vec<pipeline::ColdReadJob> =
-                                    Vec::with_capacity(indices.len());
-                                let mut job_ci: Vec<usize> = Vec::with_capacity(indices.len());
-                                let mut mem_ptrs: Vec<*mut u8> = Vec::with_capacity(indices.len());
-
-                                for &ci in &indices {
-                                    let entry = &cold_ref[ci];
-                                    let ipc_size = entry.ipc_handle_size;
-
-                                    let prep = (|| -> Result<*mut u8, DispatcherError> {
-                                        Self::evict_for_space(dm_ref, mt_ref, ipc_size, entry.key, max_attempts)?;
-                                        mt_ref.insert(entry.key, ipc_size).map_err(|e| {
-                                            DispatcherError::AllocationFailed(format!(
-                                                "promote insert failed: {e}"
-                                            ))
-                                        })
-                                    })();
-
-                                    match prep {
-                                        Ok(mem_ptr) => {
-                                            jobs.push(pipeline::ColdReadJob {
-                                                mem_ptr,
-                                                gpu_dst: entry.ipc_handle_addr
-                                                    as *mut std::ffi::c_void,
-                                                start_lba: entry.offset / block_size as u64,
-                                                total_bytes: ipc_size as usize,
-                                            });
-                                            job_ci.push(ci);
-                                            mem_ptrs.push(mem_ptr);
-                                        }
-                                        Err(e) => {
-                                            batch_results.push((ci, Err(e)));
-                                        }
-                                    }
+                        if let Some(p) = pool {
+                            if let Err(e) = p.submit(drive_idx, slot, request) {
+                                for &ci in &job_ci {
+                                    prep_failures.push((ci, Err(e.clone())));
                                 }
-                                let t_prep_done = t_prep_start.elapsed();
-
-                                // Run all prepared jobs through the multi-object pipeline.
-                                if !jobs.is_empty() {
-                                    let t_pipeline_start = std::time::Instant::now();
-                                    let pm = self.pipeline_metrics.read();
-                                    let pm_ref = pm.as_deref();
+                                continue;
+                            }
+                        } else {
+                            // Fallback: no pool available, run inline on current thread.
+                            let drive_iface = &*drive.block_dev_iface;
+                            let gpu_ref = &*gpu;
+                            let channels = drive_iface.connect_client();
+                            let streams_result = gpu_ref.create_stream().and_then(|a| {
+                                gpu_ref.create_stream().map(|b| [a, b]).map_err(|e| {
+                                    let _ = gpu_ref.destroy_stream(a);
+                                    e
+                                })
+                            });
+                            match (channels, streams_result) {
+                                (Ok(ch), Ok(st)) => {
                                     let pipeline_results = unsafe {
                                         pipeline::pipelined_multi_object_zero_copy(
-                                            &*drive.block_dev_iface,
-                                            &**gpu_ref,
-                                            &streams,
-                                            &channels,
-                                            &jobs,
-                                            chunk_size,
-                                            queue_depth,
-                                            pm_ref,
+                                            drive_iface,
+                                            gpu_ref,
+                                            &st,
+                                            &ch,
+                                            &request.jobs,
+                                            request.chunk_size,
+                                            request.queue_depth,
+                                            request.metrics.as_deref(),
                                         )
                                     };
-                                    let t_pipeline_done = t_pipeline_start.elapsed();
-
-                                    let t_finalize_start = std::time::Instant::now();
-                                    // Finalize each job's dispatch-map state.
-                                    for (job_idx, result) in pipeline_results.into_iter().enumerate()
-                                    {
-                                        let ci = job_ci[job_idx];
-                                        let entry = &cold_ref[ci];
-                                        let res = match result {
-                                            Ok(()) => {
-                                                let _ = dm_ref.remove(entry.key);
-                                                let create_res = dm_ref
-                                                    .create_memory_tier_entry(
-                                                        entry.key,
-                                                        mem_ptrs[job_idx],
-                                                        entry.ipc_handle_size,
-                                                    )
-                                                    .map_err(|e| {
-                                                        DispatcherError::IoError(format!(
-                                                            "promote re-register failed: {e}"
-                                                        ))
-                                                    });
-                                                if create_res.is_ok() {
-                                                    let _ = dm_ref.convert_to_storage(
-                                                        entry.key,
-                                                        entry.offset,
-                                                    );
-                                                    let _ = dm_ref.release_write(entry.key);
-                                                }
-                                                create_res
-                                            }
-                                            Err(e) => Err(e),
-                                        };
-                                        batch_results.push((ci, res));
-                                    }
-                                    let t_finalize_done = t_finalize_start.elapsed();
-                                    #[cfg(feature = "pipeline-telemetry")]
-                                    eprintln!(
-                                        "[cold-perf] drive={} jobs={} segs={} prep={:.1}ms pipeline={:.1}ms finalize={:.1}ms",
-                                        drive_idx,
-                                        jobs.len(),
-                                        jobs.len() * 32,
-                                        t_prep_done.as_secs_f64() * 1000.0,
-                                        t_pipeline_done.as_secs_f64() * 1000.0,
-                                        t_finalize_done.as_secs_f64() * 1000.0,
-                                    );
-                                    if let Some(ref m) = *self.pipeline_metrics.read() {
-                                        m.record_cold_prep(t_prep_done.as_micros() as f64);
-                                        m.record_cold_total(drive_idx, t_pipeline_done.as_micros() as f64);
-                                        m.record_cold_finalize(t_finalize_done.as_micros() as f64);
-                                    }
+                                    let _ = gpu_ref.destroy_stream(st[0]);
+                                    let _ = gpu_ref.destroy_stream(st[1]);
+                                    let _ = request.result_tx.send(pipeline_results);
                                 }
-
-                                let _ = gpu_ref.destroy_stream(streams[0]);
-                                let _ = gpu_ref.destroy_stream(streams[1]);
-
-                                batch_results
-                            });
-
-                            thread_handles.push(handle);
+                                (Err(e), _) => {
+                                    let err = DispatcherError::IoError(format!(
+                                        "connect_client failed: {e}"
+                                    ));
+                                    let _ = request.result_tx.send(
+                                        (0..request.jobs.len()).map(|_| Err(err.clone())).collect(),
+                                    );
+                                }
+                                (_, Err(e)) => {
+                                    let err = DispatcherError::IoError(format!(
+                                        "create_stream failed: {e}"
+                                    ));
+                                    let _ = request.result_tx.send(
+                                        (0..request.jobs.len()).map(|_| Err(err.clone())).collect(),
+                                    );
+                                }
+                            }
                         }
-                    }
 
-                    // Collect results from all threads.
-                    for handle in thread_handles {
-                        let batch_results = handle.join().unwrap_or_else(|_| Vec::new());
-                        for (ci, res) in batch_results {
-                            results[cold_entries[ci].idx] = Some(res);
-                        }
+                        pending_results.push((job_ci, mem_ptrs, result_rx));
                     }
-                });
+                }
+
+                drop(pool_guard);
+
+                // Record prep failures.
+                for (ci, res) in prep_failures {
+                    results[cold_entries[ci].idx] = Some(res);
+                }
+
+                // Collect pipeline results and finalize dispatch-map state.
+                for (job_ci, mem_ptrs, result_rx) in pending_results {
+                    let pipeline_results = result_rx.recv().unwrap_or_else(|_| {
+                        (0..job_ci.len())
+                            .map(|_| {
+                                Err(DispatcherError::IoError("pool worker disconnected".into()))
+                            })
+                            .collect()
+                    });
+
+                    for (job_idx, result) in pipeline_results.into_iter().enumerate() {
+                        let ci = job_ci[job_idx];
+                        let entry = &cold_entries[ci];
+                        let res = match result {
+                            Ok(()) => {
+                                // In-place BlockDevice->MemoryTier: preserves the
+                                // load's pin (read_ref) and keeps the SSD offset,
+                                // so it works on a pinned entry (unlike the old
+                                // remove+recreate, whose remove failed on a pin).
+                                dm.promote_block_to_memory_tier(
+                                    entry.key,
+                                    mem_ptrs[job_idx],
+                                    entry.ipc_handle_size,
+                                )
+                                .map_err(|e| {
+                                    DispatcherError::IoError(format!(
+                                        "promote transition failed: {e}"
+                                    ))
+                                })
+                            }
+                            Err(e) => Err(e),
+                        };
+                        results[cold_entries[ci].idx] = Some(res);
+                    }
+                }
             }
         }
 
@@ -1948,7 +2011,7 @@ impl IDispatcher for DispatcherComponent {
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
         let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
-        Self::evict_for_space(&dm, &mt, size, key, max_attempts)?;
+        self.evict_for_space(&dm, &mt, size, key, max_attempts)?;
 
         let mem_ptr = mt.insert(key, size).map_err(|e| match e {
             interfaces::MemoryTierError::AlreadyExists(k) => DispatcherError::AlreadyExists(k),
@@ -2074,6 +2137,38 @@ impl IDispatcher for DispatcherComponent {
         }
     }
 
+    fn pin(&self, key: CacheKey) -> Result<(), DispatcherError> {
+        self.ensure_initialized()?;
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        dm.take_read(key).map_err(|e| match e {
+            interfaces::DispatchMapError::KeyNotFound(k) => DispatcherError::KeyNotFound(k),
+            interfaces::DispatchMapError::Timeout(k) => {
+                DispatcherError::Timeout(format!("timeout waiting on key: {k}"))
+            }
+            other => DispatcherError::IoError(other.to_string()),
+        })
+    }
+
+    fn unpin(&self, key: CacheKey) -> Result<(), DispatcherError> {
+        self.ensure_initialized()?;
+
+        let dm = self
+            .dispatch_map
+            .get()
+            .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+
+        dm.release_read(key).map_err(|e| match e {
+            interfaces::DispatchMapError::KeyNotFound(k) => DispatcherError::KeyNotFound(k),
+            interfaces::DispatchMapError::RefCountUnderflow(k) => DispatcherError::KeyNotFound(k),
+            other => DispatcherError::IoError(other.to_string()),
+        })
+    }
+
     fn touch(&self, key: CacheKey) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
 
@@ -2140,17 +2235,12 @@ impl IDispatcher for DispatcherComponent {
         if num_drives == 0 {
             let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
             for entry in &cold_entries {
-                if Self::evict_for_space(&dm, &mt, entry.size, entry.key, max_attempts).is_err() {
+                if self.evict_for_space(&dm, &mt, entry.size, entry.key, max_attempts).is_err() {
                     continue;
                 }
-                match mt.insert(entry.key, entry.size) {
-                    Ok(mem_ptr) => {
-                        let _ = dm.remove(entry.key);
-                        let _ = dm.create_memory_tier_entry(entry.key, mem_ptr, entry.size);
-                        let _ = dm.convert_to_storage(entry.key, entry.offset);
-                        let _ = dm.release_write(entry.key);
-                    }
-                    Err(_) => {}
+                if let Ok(mem_ptr) = mt.insert(entry.key, entry.size) {
+                    // In-place promote (pin-safe): no remove/recreate.
+                    let _ = dm.promote_block_to_memory_tier(entry.key, mem_ptr, entry.size);
                 }
             }
             return;
@@ -2193,7 +2283,7 @@ impl IDispatcher for DispatcherComponent {
                         let block_size = block_dev.block_size() as u64;
                         let start_lba = entry.offset / block_size;
 
-                        if Self::evict_for_space(dm, mt, entry.size, entry.key, max_attempts)
+                        if self.evict_for_space(dm, mt, entry.size, entry.key, max_attempts)
                             .is_err()
                         {
                             continue;
@@ -2228,10 +2318,8 @@ impl IDispatcher for DispatcherComponent {
                             continue;
                         }
 
-                        let _ = dm.remove(entry.key);
-                        let _ = dm.create_memory_tier_entry(entry.key, mem_ptr, entry.size);
-                        let _ = dm.convert_to_storage(entry.key, entry.offset);
-                        let _ = dm.release_write(entry.key);
+                        // In-place, pin-safe promote (no remove/recreate).
+                        let _ = dm.promote_block_to_memory_tier(entry.key, mem_ptr, entry.size);
                     }
                 });
             }
@@ -2286,8 +2374,8 @@ mod tests {
     use std::thread;
 
     use interfaces::{
-        CacheKey, DispatchMapError, DmaBuffer, GpuDeviceInfo, GpuDmaBuffer,
-        GpuIpcHandle, GpuStream, IMemoryTier, LookupResult, MemoryTierError,
+        CacheKey, DispatchMapError, DmaBuffer, GpuDeviceInfo, GpuDmaBuffer, GpuIpcHandle,
+        GpuStream, IMemoryTier, LookupResult, MemoryTierError, MemoryTierTelemetrySnapshot,
     };
 
     // -----------------------------------------------------------------------
@@ -2439,6 +2527,10 @@ mod tests {
 
         fn is_dma_capable(&self) -> bool {
             false
+        }
+
+        fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot {
+            MemoryTierTelemetrySnapshot::default()
         }
     }
 
@@ -2689,6 +2781,31 @@ mod tests {
             }
         }
 
+        fn promote_block_to_memory_tier(
+            &self,
+            key: CacheKey,
+            pointer: *mut u8,
+            size: u32,
+        ) -> Result<(), DispatchMapError> {
+            if size == 0 {
+                return Err(DispatchMapError::InvalidSize);
+            }
+            let mut inner = self.inner.lock().unwrap();
+            match inner.entries.get_mut(&key) {
+                None => Err(DispatchMapError::KeyNotFound(key)),
+                Some(entry) => {
+                    // Mock only models a MemoryTier location; flip pointer/size
+                    // in place, preserving refs (no remove/recreate).
+                    entry.location = MockEntryLocation::MemoryTier {
+                        pointer,
+                        size,
+                        ssd_offset: Some(0),
+                    };
+                    Ok(())
+                }
+            }
+        }
+
         fn is_evictable(&self, key: CacheKey) -> bool {
             let inner = self.inner.lock().unwrap();
             match inner.entries.get(&key) {
@@ -2885,6 +3002,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -2892,6 +3010,8 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            Mutex::new(None),
+            AtomicU64::new(0),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -2927,6 +3047,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -2934,6 +3055,8 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            Mutex::new(None),
+            AtomicU64::new(0),
         );
     }
 
@@ -2943,6 +3066,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -2950,6 +3074,8 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            Mutex::new(None),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher);
         assert!(d.is_some());
@@ -2961,6 +3087,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -2968,6 +3095,8 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            Mutex::new(None),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -2984,6 +3113,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -2991,6 +3121,8 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            Mutex::new(None),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let config = DispatcherConfig {
@@ -3008,6 +3140,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3015,6 +3148,8 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            Mutex::new(None),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -3032,6 +3167,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3039,6 +3175,8 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            Mutex::new(None),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.check(42);
@@ -3051,6 +3189,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3058,6 +3197,8 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            Mutex::new(None),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let err = d.remove(42);
@@ -3070,6 +3211,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3077,6 +3219,8 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            Mutex::new(None),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         let mut buf = vec![0u8; 4096];
@@ -3094,6 +3238,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3101,6 +3246,8 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            Mutex::new(None),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         // Even though not initialized, zero-size check comes after init check.
@@ -3121,6 +3268,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3128,6 +3276,8 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            Mutex::new(None),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -3139,6 +3289,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3146,6 +3297,8 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            Mutex::new(None),
+            AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
         assert!(d.shutdown().is_ok());
@@ -3158,6 +3311,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3165,6 +3319,8 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            Mutex::new(None),
+            AtomicU64::new(0),
         ));
 
         let handles: Vec<_> = (0..4)
@@ -3208,6 +3364,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3215,6 +3372,8 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            Mutex::new(None),
+            AtomicU64::new(0),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.memory_tier.connect(mt).unwrap();
@@ -3237,6 +3396,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3244,6 +3404,8 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            Mutex::new(None),
+            AtomicU64::new(0),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -3310,6 +3472,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3317,6 +3480,8 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            Mutex::new(None),
+            AtomicU64::new(0),
         );
         c.dispatch_map.connect(dm).unwrap();
         c.logger.connect(logger).unwrap();
@@ -3602,8 +3767,24 @@ mod tests {
             dm.convert_to_storage(key, key * 4096).unwrap();
         }
 
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            RwLock::new(None),
+            Mutex::new(None),
+            AtomicU64::new(0),
+        );
+
         // Pool is now full (16384 used). Trying to add 4096 more should evict.
-        DispatcherComponent::evict_for_space(&dm, &mt, 4096, 100, 512).unwrap();
+        c.evict_for_space(&dm, &mt, 4096, 100, 512).unwrap();
 
         // At least one entry was evicted from memory-tier.
         assert!(mt.used() + 4096 <= mt.capacity());
@@ -3620,8 +3801,24 @@ mod tests {
             .unwrap();
         dm.release_write(0).unwrap();
 
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            RwLock::new(None),
+            Mutex::new(None),
+            AtomicU64::new(0),
+        );
+
         // Plenty of space, no eviction needed.
-        DispatcherComponent::evict_for_space(&dm, &mt, 4096, 100, 512).unwrap();
+        c.evict_for_space(&dm, &mt, 4096, 100, 512).unwrap();
 
         assert!(mt.contains(0), "entry should not be evicted");
     }
@@ -3637,6 +3834,7 @@ mod tests {
             AtomicBool::new(false),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3644,6 +3842,8 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
+            Mutex::new(None),
+            AtomicU64::new(0),
         );
         c.dispatch_map
             .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
@@ -3674,7 +3874,6 @@ mod tests {
 
         d.shutdown().unwrap();
     }
-
 
     // -----------------------------------------------------------------------
     // Background SSD Evictor tests
@@ -3842,6 +4041,7 @@ mod tests {
                 batch_size: 10,
                 interval: std::time::Duration::from_millis(50),
             },
+            None,
             None,
         );
 

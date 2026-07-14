@@ -5,9 +5,7 @@
 
 use std::sync::Arc;
 
-use interfaces::{
-    DispatcherConfig, IDispatchMap, IDispatcher, IGpuServices, IMemoryTier,
-};
+use interfaces::{DispatcherConfig, IDispatchMap, IDispatcher, IGpuServices, IMemoryTier};
 
 use crate::config::StackConfig;
 
@@ -80,7 +78,9 @@ pub fn init_gpu(
     iface: &Arc<dyn IGpuServices + Send + Sync>,
     _config: &StackConfig,
 ) -> Result<(), String> {
-    iface.initialize().map_err(|e| format!("GPU init failed: {e}"))
+    iface
+        .initialize()
+        .map_err(|e| format!("GPU init failed: {e}"))
 }
 
 pub fn init_dispatch_map(
@@ -134,9 +134,7 @@ pub fn init_dispatcher(
         } else {
             config.drive_count.unwrap_or(1)
         };
-        data_pci_addrs = (0..count)
-            .map(|i| format!("0000:00:0{i}.0"))
-            .collect();
+        data_pci_addrs = (0..count).map(|i| format!("0000:00:0{i}.0")).collect();
     }
 
     iface

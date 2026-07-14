@@ -20,8 +20,8 @@ use dispatcher::DispatcherComponent;
 use gpu_services::cuda_ffi;
 use gpu_services::GpuServicesComponent;
 use interfaces::{
-    CacheKey, DispatchMapError, DispatcherConfig, IDispatchMap,
-    IDispatcher, IEvictionPolicy, IGpuServices, ILogger, IMemoryTier, IpcHandle, LookupResult,
+    CacheKey, DispatchMapError, DispatcherConfig, IDispatchMap, IDispatcher, IEvictionPolicy,
+    IGpuServices, ILogger, IMemoryTier, IpcHandle, LookupResult,
 };
 use memory_tier::MemoryTierComponent;
 use spdk_env::{ISPDKEnv, SPDKEnvComponent};
@@ -221,6 +221,23 @@ impl IDispatchMap for HwDispatchMap {
         }
     }
 
+    fn promote_block_to_memory_tier(
+        &self,
+        key: CacheKey,
+        pointer: *mut u8,
+        size: u32,
+    ) -> Result<(), DispatchMapError> {
+        let mut inner = self.inner.lock().unwrap();
+        match inner.get_mut(&key) {
+            Some(e) => {
+                e.mem_pointer = Some((pointer as usize, size));
+                e.block_offset = None;
+                Ok(())
+            }
+            None => Err(DispatchMapError::KeyNotFound(key)),
+        }
+    }
+
     fn is_evictable(&self, _key: CacheKey) -> bool {
         false
     }
@@ -342,10 +359,9 @@ fn setup_dispatcher(
 > {
     // SPDK env
     let spdk_env_comp = SPDKEnvComponent::new_default();
-    let ienv = query::<dyn ISPDKEnv + Send + Sync>(&*spdk_env_comp)
-        .ok_or("ISPDKEnv query failed")?;
-    ienv.init()
-        .map_err(|e| format!("SPDK init: {e}"))?;
+    let ienv =
+        query::<dyn ISPDKEnv + Send + Sync>(&*spdk_env_comp).ok_or("ISPDKEnv query failed")?;
+    ienv.init().map_err(|e| format!("SPDK init: {e}"))?;
 
     let devices = ienv.devices();
     if devices.is_empty() {
@@ -360,14 +376,17 @@ fn setup_dispatcher(
 
     // GPU services (real CUDA)
     let gpu_comp = GpuServicesComponent::new_default();
-    let igpu = query_interface!(gpu_comp, IGpuServices)
-        .ok_or("IGpuServices query failed")?;
+    let igpu = query_interface!(gpu_comp, IGpuServices).ok_or("IGpuServices query failed")?;
     igpu.initialize()
         .map_err(|e| format!("GPU services init: {e}"))?;
     let gpu_devices = igpu.get_devices().unwrap_or_default();
     eprintln!("  GPU: {} device(s)", gpu_devices.len());
     if let Some(d) = gpu_devices.first() {
-        eprintln!("    [0] {} ({} MiB)", d.name, d.memory_bytes / (1024 * 1024));
+        eprintln!(
+            "    [0] {} ({} MiB)",
+            d.name,
+            d.memory_bytes / (1024 * 1024)
+        );
     }
 
     // Eviction policy + memory tier
@@ -377,8 +396,7 @@ fn setup_dispatcher(
 
     let mt_comp = MemoryTierComponent::new_default();
     mt_comp.eviction_policy.connect(Arc::clone(&ep)).unwrap();
-    let imt = query_interface!(mt_comp, IMemoryTier)
-        .ok_or("IMemoryTier query failed")?;
+    let imt = query_interface!(mt_comp, IMemoryTier).ok_or("IMemoryTier query failed")?;
     imt.initialize(MEMORY_TIER_POOL_SIZE, None)
         .map_err(|e| format!("memory-tier init: {e:?}"))?;
     eprintln!(
@@ -476,18 +494,28 @@ fn bench_warm_lookup(
 
     // Warmup
     for _ in 0..WARMUP_ITERS {
-        let h = IpcHandle { address: dst_ptr, size: dst_size };
-        d.lookup_async(key, h).map_err(|e| format!("warmup lookup: {e:?}"))?;
+        let h = IpcHandle {
+            address: dst_ptr,
+            size: dst_size,
+        };
+        d.lookup_async(key, h)
+            .map_err(|e| format!("warmup lookup: {e:?}"))?;
     }
 
     // Measured iterations: use lookup_async + targeted stream_synchronize.
     let mut times_us = Vec::with_capacity(MEASURED_ITERS);
     for _ in 0..MEASURED_ITERS {
-        let h = IpcHandle { address: dst_ptr, size: dst_size };
+        let h = IpcHandle {
+            address: dst_ptr,
+            size: dst_size,
+        };
         let start = Instant::now();
-        let stream = d.lookup_async(key, h).map_err(|e| format!("lookup: {e:?}"))?;
+        let stream = d
+            .lookup_async(key, h)
+            .map_err(|e| format!("lookup: {e:?}"))?;
         if !stream.0.is_null() {
-            gpu.stream_synchronize(stream).map_err(|e| format!("sync: {e}"))?;
+            gpu.stream_synchronize(stream)
+                .map_err(|e| format!("sync: {e}"))?;
         }
         times_us.push(start.elapsed().as_secs_f64() * 1_000_000.0);
     }
@@ -536,7 +564,10 @@ fn bench_cold_lookup(
     while !dm.has_block_offset(key) {
         if Instant::now() > deadline {
             let _ = d.remove(key);
-            unsafe { gpu_free(gpu_src); gpu_free(gpu_dst); }
+            unsafe {
+                gpu_free(gpu_src);
+                gpu_free(gpu_dst);
+            }
             return Err("background write did not complete (extent too large for slab?)".into());
         }
         std::thread::sleep(std::time::Duration::from_millis(5));
@@ -555,8 +586,12 @@ fn bench_cold_lookup(
     for _ in 0..WARMUP_ITERS {
         let _ = mt.remove(key);
         let _ = dm.convert_memory_tier_to_block(key);
-        let h = IpcHandle { address: dst_ptr, size: dst_size };
-        d.lookup(key, h).map_err(|e| format!("warmup cold lookup: {e:?}"))?;
+        let h = IpcHandle {
+            address: dst_ptr,
+            size: dst_size,
+        };
+        d.lookup(key, h)
+            .map_err(|e| format!("warmup cold lookup: {e:?}"))?;
         unsafe { cuda_ffi::cudaDeviceSynchronize() };
     }
 
@@ -566,9 +601,13 @@ fn bench_cold_lookup(
         let _ = mt.remove(key);
         let _ = dm.convert_memory_tier_to_block(key);
 
-        let h = IpcHandle { address: dst_ptr, size: dst_size };
+        let h = IpcHandle {
+            address: dst_ptr,
+            size: dst_size,
+        };
         let start = Instant::now();
-        d.lookup(key, h).map_err(|e| format!("cold lookup iter {iter}: {e:?}"))?;
+        d.lookup(key, h)
+            .map_err(|e| format!("cold lookup iter {iter}: {e:?}"))?;
         unsafe { cuda_ffi::cudaDeviceSynchronize() };
         times_us.push(start.elapsed().as_secs_f64() * 1_000_000.0);
     }

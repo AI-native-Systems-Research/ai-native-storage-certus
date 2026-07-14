@@ -6,7 +6,10 @@
 
 mod config;
 mod hooks;
+mod metrics;
 mod service;
+#[cfg(feature = "otel")]
+mod telemetry;
 
 // Include the generated composition code (build_stack + ComponentStack).
 include!(concat!(env!("OUT_DIR"), "/composition.rs"));
@@ -69,6 +72,19 @@ struct Cli {
     #[arg(long = "max-eviction-attempts", default_value_t = 2048)]
     max_eviction_attempts: usize,
 
+    /// Prometheus metrics HTTP port. Disabled by default; set > 0 to enable.
+    #[arg(long = "metrics-port", default_value_t = 0)]
+    metrics_port: u16,
+
+    /// OTLP gRPC endpoint for metrics export (e.g. http://localhost:4317).
+    /// Requires --features otel. Omit to disable.
+    #[arg(long = "otel-endpoint")]
+    otel_endpoint: Option<String>,
+
+    /// OTel service name for this instance.
+    #[arg(long = "otel-service-name", default_value = "certus-server-yaml")]
+    otel_service_name: String,
+
     /// RDMA listener port for remote request handler (full-remote profile).
     /// Requires --features rdma. Set to 0 to disable.
     #[cfg(feature = "rdma")]
@@ -101,20 +117,14 @@ fn validate_pci_address(addr: &str) -> Result<(), String> {
             "invalid PCI address format '{addr}': expected DDDD:BB:DD.F"
         ));
     }
-    u32::from_str_radix(parts[0], 16)
-        .map_err(|_| format!("invalid PCI domain in '{addr}'"))?;
-    u8::from_str_radix(parts[1], 16)
-        .map_err(|_| format!("invalid PCI bus in '{addr}'"))?;
+    u32::from_str_radix(parts[0], 16).map_err(|_| format!("invalid PCI domain in '{addr}'"))?;
+    u8::from_str_radix(parts[1], 16).map_err(|_| format!("invalid PCI bus in '{addr}'"))?;
     let dev_func: Vec<&str> = parts[2].split('.').collect();
     if dev_func.len() != 2 {
-        return Err(format!(
-            "invalid PCI dev.func in '{addr}': expected DD.F"
-        ));
+        return Err(format!("invalid PCI dev.func in '{addr}': expected DD.F"));
     }
-    u8::from_str_radix(dev_func[0], 16)
-        .map_err(|_| format!("invalid PCI device in '{addr}'"))?;
-    u8::from_str_radix(dev_func[1], 16)
-        .map_err(|_| format!("invalid PCI function in '{addr}'"))?;
+    u8::from_str_radix(dev_func[0], 16).map_err(|_| format!("invalid PCI device in '{addr}'"))?;
+    u8::from_str_radix(dev_func[1], 16).map_err(|_| format!("invalid PCI function in '{addr}'"))?;
     Ok(())
 }
 
@@ -159,6 +169,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         stack_config.memory_tier_size / (1024 * 1024)
     ));
 
+    // Start Prometheus metrics HTTP endpoint
+    if cli.metrics_port > 0 {
+        let mt = Arc::clone(&stack.memory_tier);
+        let port = cli.metrics_port;
+        tokio::spawn(metrics::serve_metrics(port, mt));
+        logger.info(&format!(
+            "certus-server-yaml: metrics endpoint on port {port}"
+        ));
+    }
+
+    // Initialize OpenTelemetry OTLP metrics export
+    #[cfg(feature = "otel")]
+    let _otel_metrics = {
+        if let Some(ref endpoint) = cli.otel_endpoint {
+            let m = telemetry::OtelMetrics::init(
+                endpoint,
+                &cli.otel_service_name,
+                Arc::clone(&stack.memory_tier),
+            )
+            .map_err(|e| format!("otel init failed: {e}"))?;
+            logger.info(&format!(
+                "certus-server-yaml: OTel metrics exporting to {endpoint}"
+            ));
+            Some(m)
+        } else {
+            None
+        }
+    };
+    #[cfg(not(feature = "otel"))]
+    if cli.otel_endpoint.is_some() {
+        logger.warn(
+            "certus-server-yaml: --otel-endpoint specified but binary not compiled with --features otel"
+        );
+    }
+
     // RDMA listener shutdown handle (used during graceful shutdown)
     #[cfg(feature = "rdma")]
     let mut rdma_shutdown_handle: Option<Arc<remote_request_handler::rdma::RdmaListener>> = None;
@@ -172,34 +217,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let dm_resolve = Arc::clone(&stack.dispatch_map);
             let dispatcher_resolve = Arc::clone(&stack.dispatcher);
-            let resolver: Arc<remote_request_handler::serve::Resolver> =
-                Arc::new(move |key| {
-                    #[allow(unused_imports)]
-                    use interfaces::{IDispatchMap, IDispatcher};
-                    match dm_resolve.lookup(key) {
-                        Ok(interfaces::LookupResult::MemoryTier { pointer, size }) => {
-                            Some(remote_request_handler::serve::ResolvedEntry {
-                                ptr: pointer as *const u8,
-                                size,
-                            })
-                        }
-                        Ok(interfaces::LookupResult::BlockDevice { .. }) => {
-                            // SSD-resident: release read ref, promote to memory-tier, re-lookup
-                            let _ = dm_resolve.release_read(key);
-                            dispatcher_resolve.promote_to_memory_tier(&[key]);
-                            match dm_resolve.lookup(key) {
-                                Ok(interfaces::LookupResult::MemoryTier { pointer, size }) => {
-                                    Some(remote_request_handler::serve::ResolvedEntry {
-                                        ptr: pointer as *const u8,
-                                        size,
-                                    })
-                                }
-                                _ => None,
-                            }
-                        }
-                        _ => None,
+            let resolver: Arc<remote_request_handler::serve::Resolver> = Arc::new(move |key| {
+                #[allow(unused_imports)]
+                use interfaces::{IDispatchMap, IDispatcher};
+                match dm_resolve.lookup(key) {
+                    Ok(interfaces::LookupResult::MemoryTier { pointer, size }) => {
+                        Some(remote_request_handler::serve::ResolvedEntry {
+                            ptr: pointer as *const u8,
+                            size,
+                        })
                     }
-                });
+                    Ok(interfaces::LookupResult::BlockDevice { .. }) => {
+                        // SSD-resident: release read ref, promote to memory-tier, re-lookup
+                        let _ = dm_resolve.release_read(key);
+                        dispatcher_resolve.promote_to_memory_tier(&[key]);
+                        match dm_resolve.lookup(key) {
+                            Ok(interfaces::LookupResult::MemoryTier { pointer, size }) => {
+                                Some(remote_request_handler::serve::ResolvedEntry {
+                                    ptr: pointer as *const u8,
+                                    size,
+                                })
+                            }
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                }
+            });
 
             let dm_release = Arc::clone(&stack.dispatch_map);
             let release: Arc<remote_request_handler::serve::ReleaseCallback> =
@@ -215,15 +259,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Arc::new(remote_request_handler::serve::PoolRegion { base, size })
             });
 
-            let rdma_logger = Arc::clone(&stack.logger)
-                as Arc<dyn interfaces::ILogger + Send + Sync>;
+            let rdma_logger =
+                Arc::clone(&stack.logger) as Arc<dyn interfaces::ILogger + Send + Sync>;
 
-            let rdma_listener = remote_request_handler::serve::bind_listener(
-                "0.0.0.0",
-                rdma_port,
-                logger.as_ref(),
-            )
-            .map_err(|e| format!("remote-request-handler: bind failed: {e}"))?;
+            let rdma_listener =
+                remote_request_handler::serve::bind_listener("0.0.0.0", rdma_port, logger.as_ref())
+                    .map_err(|e| format!("remote-request-handler: bind failed: {e}"))?;
 
             rdma_shutdown_handle = Some(Arc::clone(&rdma_listener));
             tokio::task::spawn_blocking(move || {
@@ -243,7 +284,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let svc = DispatcherService::new(Arc::clone(&stack.dispatcher));
+    let svc = DispatcherService::new(
+        Arc::clone(&stack.dispatcher),
+        stack.eviction_rx.clone(),
+        Arc::clone(&stack.eviction_dropped),
+    );
     let addr = cli.listen.parse()?;
 
     // Build server with optional TLS

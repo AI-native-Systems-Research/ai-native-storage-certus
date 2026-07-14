@@ -373,8 +373,8 @@ component_macros::define_interface! {
 
         /// Remove a cache entry, freeing all associated resources.
         ///
-        /// If a background write is in progress, blocks until it completes
-        /// before removing. Frees memory-tier slot and/or SSD extent.
+        /// Does NOT block waiting for background write-through to complete.
+        /// Proceeds immediately with removal. Frees memory-tier slot and/or SSD extent.
         ///
         /// # Errors
         ///
@@ -506,6 +506,29 @@ component_macros::define_interface! {
         /// # Verified: P4 (init-guard)
         /// Rejects uninitialized.
         fn release_memory(&self, key: CacheKey) -> Result<(), DispatcherError>;
+
+        /// Acquire an eviction-protection read reference on a cache entry.
+        ///
+        /// While pinned, the entry cannot be evicted by the LRU policy.
+        /// Each `pin` call must be balanced by a corresponding `unpin`.
+        /// Multiple pins on the same key stack (ref-count increments).
+        ///
+        /// # Errors
+        ///
+        /// Returns [`DispatcherError::KeyNotFound`] if the key does not exist.
+        /// Returns [`DispatcherError::Timeout`] if a writer holds exclusive access.
+        fn pin(&self, key: CacheKey) -> Result<(), DispatcherError>;
+
+        /// Release an eviction-protection read reference on a cache entry.
+        ///
+        /// Decrements the read ref-count. When all pins are released, the
+        /// entry becomes eligible for eviction again.
+        ///
+        /// # Errors
+        ///
+        /// Returns [`DispatcherError::KeyNotFound`] if the key does not exist
+        /// or was already fully unpinned (ref-count underflow).
+        fn unpin(&self, key: CacheKey) -> Result<(), DispatcherError>;
 
         /// Update the timestamp for a cache entry without performing any DMA.
         ///

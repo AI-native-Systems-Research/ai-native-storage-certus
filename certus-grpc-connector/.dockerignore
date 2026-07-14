@@ -1,0 +1,12 @@
+# The combined image builds SPDK + the Rust workspace, so the build context is
+# the whole repo. Exclude only heavy/irrelevant artifacts to keep the context
+# small. NOTE: this file is read only when the build context root contains it;
+# for a repo-root context, keep a matching .dockerignore at the repo root.
+.git/
+target/
+deps/spdk/
+deps/spdk-build/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/node_modules/

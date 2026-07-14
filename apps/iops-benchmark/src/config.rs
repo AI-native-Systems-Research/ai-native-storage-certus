@@ -100,6 +100,10 @@ pub struct BenchConfig {
     #[arg(long)]
     pub pci_addr: Option<String>,
 
+    /// Number of NVMe devices to benchmark. If > 1, workers are distributed across devices.
+    #[arg(long, default_value_t = 1)]
+    pub device_count: u32,
+
     /// IO access pattern: random or sequential.
     #[arg(long, default_value = "random", value_enum)]
     pub pattern: Pattern,
@@ -111,7 +115,6 @@ pub struct BenchConfig {
     /// Suppress per-second progress output.
     #[arg(long, default_value_t = false)]
     pub quiet: bool,
-
 }
 
 impl BenchConfig {
@@ -155,6 +158,9 @@ impl BenchConfig {
                 "batch-size {} exceeds queue-depth {}",
                 self.batch_size, self.queue_depth
             ));
+        }
+        if self.device_count < 1 {
+            return Err("device-count must be >= 1".into());
         }
         if !ns_list.iter().any(|ns| ns.ns_id == self.ns_id) {
             let available: Vec<u32> = ns_list.iter().map(|ns| ns.ns_id).collect();
@@ -208,6 +214,7 @@ mod tests {
             duration: 10,
             ns_id: 1,
             pci_addr: None,
+            device_count: 1,
             pattern: Pattern::Random,
             io_mode: IoMode::Async,
             quiet: false,
@@ -226,6 +233,7 @@ mod tests {
             duration: 10,
             ns_id: 1,
             pci_addr: None,
+            device_count: 1,
             pattern: Pattern::Random,
             io_mode: IoMode::Async,
             quiet: false,
@@ -245,6 +253,7 @@ mod tests {
             duration: 10,
             ns_id: 5,
             pci_addr: None,
+            device_count: 1,
             pattern: Pattern::Random,
             io_mode: IoMode::Async,
             quiet: false,
@@ -264,6 +273,7 @@ mod tests {
             duration: 10,
             ns_id: 1,
             pci_addr: None,
+            device_count: 1,
             pattern: Pattern::Random,
             io_mode: IoMode::Async,
             quiet: false,
@@ -283,6 +293,7 @@ mod tests {
             duration: 10,
             ns_id: 1,
             pci_addr: None,
+            device_count: 1,
             pattern: Pattern::Random,
             io_mode: IoMode::Async,
             quiet: false,
@@ -302,6 +313,7 @@ mod tests {
             duration: 10,
             ns_id: 1,
             pci_addr: None,
+            device_count: 1,
             pattern: Pattern::Random,
             io_mode: IoMode::Async,
             quiet: false,
@@ -328,5 +340,4 @@ mod tests {
         assert_eq!(format!("{}", IoMode::Sync), "sync");
         assert_eq!(format!("{}", IoMode::Async), "async");
     }
-
 }

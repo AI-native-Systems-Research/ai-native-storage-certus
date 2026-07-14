@@ -43,6 +43,7 @@ pub use ilogger::ILogger;
 #[cfg(feature = "spdk")]
 pub use imemory_tier::IMemoryTier;
 pub use imemory_tier::MemoryTierError;
+pub use imemory_tier::MemoryTierTelemetrySnapshot;
 pub use iremote_lookup::IRemoteLookup;
 pub use iremote_lookup::RemoteLookupError;
 pub use iremote_request_handler::IRemoteRequestHandler;

@@ -19,11 +19,32 @@ service Dispatcher {
   // Touch cache entries, updating eviction timestamps without DMA.
   rpc Touch(BatchTouchRequest) returns (BatchTouchResponse);
 
+  // Reserve memory-tier slots for split-phase store (no DMA, no dispatch-map registration).
+  rpc Reserve(BatchReserveRequest) returns (BatchReserveResponse);
+
+  // DMA-copy from GPU into previously reserved slots (server synchronizes stream internally).
+  rpc CopyToStore(BatchCopyToStoreRequest) returns (BatchCopyToStoreResponse);
+
+  // Finalize reserved slots: register in dispatch-map and enqueue SSD write-through.
+  rpc CommitStore(BatchCommitStoreRequest) returns (BatchCommitStoreResponse);
+
+  // Cancel reserved slots without populating (idempotent).
+  rpc AbortStore(BatchAbortStoreRequest) returns (BatchAbortStoreResponse);
+
   // Clear all entries from the memory-tier cache pool.
   rpc ClearMemoryTier(ClearMemoryTierRequest) returns (ClearMemoryTierResponse);
 
   // Flush all pending background write-through jobs to SSD and block until complete.
   rpc FlushToSsd(FlushToSsdRequest) returns (FlushToSsdResponse);
+
+  // Pin cache entries: increment reference count to prevent eviction.
+  rpc Pin(BatchPinRequest) returns (BatchPinResponse);
+
+  // Unpin cache entries: decrement reference count, allowing eviction when zero.
+  rpc Unpin(BatchUnpinRequest) returns (BatchUnpinResponse);
+
+  // Drain eviction events since the last call (non-blocking poll).
+  rpc TakeEvents(TakeEventsRequest) returns (TakeEventsResponse);
 }
 
 // --- Common types ---
@@ -34,6 +55,11 @@ message IpcHandle {
   bytes cuda_ipc_handle = 1;
   uint32 size = 2;              // Data size in bytes
   int32 gpu_device_id = 3;     // CUDA device ordinal that allocated this memory
+  // Byte offset from the allocation base (what cudaIpcOpenMemHandle resolves to)
+  // to the start of this block. Lets a client share one large allocation (e.g. a
+  // vLLM KV cache) and address individual blocks; the server DMAs at base+offset.
+  // Defaults to 0 for clients that export one allocation per block.
+  uint64 offset = 4;
 }
 
 enum ErrorCode {
@@ -124,6 +150,50 @@ message BatchTouchResponse {
   repeated EntryResult results = 1;
 }
 
+// --- Split-phase Store ---
+
+message ReserveEntry {
+  uint64 key = 1;
+  uint32 size = 2;    // Data size in bytes to reserve
+}
+
+message BatchReserveRequest {
+  repeated ReserveEntry entries = 1;
+}
+
+message BatchReserveResponse {
+  repeated EntryResult results = 1;
+}
+
+message CopyToStoreEntry {
+  uint64 key = 1;
+  IpcHandle ipc_handle = 2;
+}
+
+message BatchCopyToStoreRequest {
+  repeated CopyToStoreEntry entries = 1;
+}
+
+message BatchCopyToStoreResponse {
+  repeated EntryResult results = 1;
+}
+
+message BatchCommitStoreRequest {
+  repeated uint64 keys = 1;
+}
+
+message BatchCommitStoreResponse {
+  repeated EntryResult results = 1;
+}
+
+message BatchAbortStoreRequest {
+  repeated uint64 keys = 1;
+}
+
+message BatchAbortStoreResponse {
+  repeated EntryResult results = 1;
+}
+
 // --- ClearMemoryTier ---
 
 message ClearMemoryTierRequest {}
@@ -139,4 +209,48 @@ message FlushToSsdRequest {}
 message FlushToSsdResponse {
   // Number of write jobs that were in-flight at the time flush was called.
   uint64 jobs_flushed = 1;
+}
+
+// --- Pin / Unpin ---
+
+message BatchPinRequest {
+  repeated uint64 keys = 1;
+  // When true, SSD-resident entries are promoted to the memory-tier (DRAM)
+  // after pinning. Combines prepare_load semantics (Pin + promote) into a
+  // single round-trip.
+  bool promote = 2;
+}
+
+message BatchPinResponse {
+  repeated EntryResult results = 1;
+}
+
+message BatchUnpinRequest {
+  repeated uint64 keys = 1;
+}
+
+message BatchUnpinResponse {
+  repeated EntryResult results = 1;
+}
+
+// --- TakeEvents (eviction drain) ---
+
+message TakeEventsRequest {
+  uint32 max_events = 1;  // 0 = drain all available
+}
+
+enum EvictionReason {
+  EVICTION_REASON_UNSPECIFIED = 0;
+  EVICTION_REASON_DEMOTED = 1;   // DRAM→SSD, key still accessible
+  EVICTION_REASON_REMOVED = 2;   // Data lost, key no longer accessible
+}
+
+message EvictionEvent {
+  uint64 key = 1;
+  EvictionReason reason = 2;
+}
+
+message TakeEventsResponse {
+  repeated EvictionEvent events = 1;
+  uint64 dropped_count = 2;  // Events lost due to channel overflow since last drain
 }

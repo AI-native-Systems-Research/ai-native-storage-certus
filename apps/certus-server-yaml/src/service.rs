@@ -1,12 +1,13 @@
 //! gRPC service implementation for the Certus Dispatcher.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tonic::{Request, Response, Status};
 
 use gpu_services::cuda_ffi;
-use interfaces::{DispatcherError, IDispatcher, IpcHandle};
+use interfaces::{DispatcherError, GpuStream, IDispatcher, IpcHandle};
 
 pub mod proto {
     tonic::include_proto!("certus.dispatcher.v1");
@@ -14,11 +15,20 @@ pub mod proto {
 
 use proto::dispatcher_server::{Dispatcher, DispatcherServer};
 use proto::{
-    BatchCheckRequest, BatchCheckResponse, BatchLookupRequest, BatchLookupResponse,
-    BatchPopulateRequest, BatchPopulateResponse, BatchRemoveRequest, BatchRemoveResponse,
-    BatchTouchRequest, BatchTouchResponse, CheckResult, ClearMemoryTierRequest,
-    ClearMemoryTierResponse, EntryResult, ErrorCode, FlushToSsdRequest, FlushToSsdResponse,
+    BatchAbortStoreRequest, BatchAbortStoreResponse, BatchCheckRequest, BatchCheckResponse,
+    BatchCommitStoreRequest, BatchCommitStoreResponse, BatchCopyToStoreRequest,
+    BatchCopyToStoreResponse, BatchLookupRequest, BatchLookupResponse, BatchPopulateRequest,
+    BatchPopulateResponse, BatchRemoveRequest, BatchRemoveResponse, BatchReserveRequest,
+    BatchReserveResponse, BatchTouchRequest, BatchTouchResponse, CheckResult,
+    BatchPinRequest, BatchPinResponse, BatchUnpinRequest, BatchUnpinResponse,
+    ClearMemoryTierRequest, ClearMemoryTierResponse, EntryResult, ErrorCode, FlushToSsdRequest,
+    FlushToSsdResponse, TakeEventsRequest, TakeEventsResponse,
 };
+
+#[cfg(feature = "p2p-native")]
+use dispatcher_p2p::{EvictionEvent, EvictionReason};
+#[cfg(not(feature = "p2p-native"))]
+use dispatcher::{EvictionEvent, EvictionReason};
 
 pub fn dispatcher_server(svc: DispatcherService) -> DispatcherServer<DispatcherService> {
     DispatcherServer::new(svc)
@@ -37,16 +47,32 @@ unsafe impl Sync for IpcCacheEntry {}
 
 type IpcCache = Arc<Mutex<HashMap<[u8; 64], IpcCacheEntry>>>;
 
+struct PendingStoreEntry {
+    size: u32,
+}
+
+type PendingStores = Arc<Mutex<HashMap<u64, PendingStoreEntry>>>;
+
 pub struct DispatcherService {
     dispatcher: Arc<dyn IDispatcher + Send + Sync>,
     ipc_cache: IpcCache,
+    pending_stores: PendingStores,
+    eviction_rx: crossbeam_channel::Receiver<EvictionEvent>,
+    eviction_dropped: Arc<AtomicU64>,
 }
 
 impl DispatcherService {
-    pub fn new(dispatcher: Arc<dyn IDispatcher + Send + Sync>) -> Self {
+    pub fn new(
+        dispatcher: Arc<dyn IDispatcher + Send + Sync>,
+        eviction_rx: crossbeam_channel::Receiver<EvictionEvent>,
+        eviction_dropped: Arc<AtomicU64>,
+    ) -> Self {
         Self {
             dispatcher,
             ipc_cache: Arc::new(Mutex::new(HashMap::new())),
+            pending_stores: Arc::new(Mutex::new(HashMap::new())),
+            eviction_rx,
+            eviction_dropped,
         }
     }
 }
@@ -240,7 +266,8 @@ impl Dispatcher for DispatcherService {
                         }
                     };
                     let ipc = IpcHandle {
-                        address: dev_ptr as *mut u8,
+                        // dev_ptr is the allocation base; offset addresses this block within it.
+                        address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
                         size: handle.size,
                     };
                     match dispatcher.populate(entry.key, ipc) {
@@ -342,7 +369,9 @@ impl Dispatcher for DispatcherService {
                 batch_entries.push((
                     entry.key,
                     IpcHandle {
-                        address: dev_ptr as *mut u8,
+                        // dev_ptr is the allocation base (deduped per handle); offset is
+                        // per-entry, so apply it here to address this block within the alloc.
+                        address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
                         size: handle.size,
                     },
                 ));
@@ -470,6 +499,212 @@ impl Dispatcher for DispatcherService {
         Ok(Response::new(BatchTouchResponse { results }))
     }
 
+    async fn reserve(
+        &self,
+        request: Request<BatchReserveRequest>,
+    ) -> Result<Response<BatchReserveResponse>, Status> {
+        let req = request.into_inner();
+        let keys: Vec<u64> = req.entries.iter().map(|e| e.key).collect();
+        check_duplicate_keys(&keys)?;
+
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let pending = Arc::clone(&self.pending_stores);
+        let results = tokio::task::spawn_blocking(move || {
+            req.entries
+                .iter()
+                .map(|entry| match dispatcher.reserve_memory(entry.key, entry.size) {
+                    Ok(_ptr) => {
+                        pending
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .insert(entry.key, PendingStoreEntry { size: entry.size });
+                        success_result(entry.key)
+                    }
+                    Err(e) => error_result(entry.key, &e),
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        Ok(Response::new(BatchReserveResponse { results }))
+    }
+
+    async fn copy_to_store(
+        &self,
+        request: Request<BatchCopyToStoreRequest>,
+    ) -> Result<Response<BatchCopyToStoreResponse>, Status> {
+        let req = request.into_inner();
+        let keys: Vec<u64> = req.entries.iter().map(|e| e.key).collect();
+        check_duplicate_keys(&keys)?;
+
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let cache = Arc::clone(&self.ipc_cache);
+        let results = tokio::task::spawn_blocking(move || {
+            let mut opened_keys: Vec<[u8; 64]> = Vec::new();
+            let mut pre_errors: Vec<Option<EntryResult>> = vec![None; req.entries.len()];
+            let mut local_ptrs: HashMap<[u8; 64], *mut std::ffi::c_void> = HashMap::new();
+
+            for (i, entry) in req.entries.iter().enumerate() {
+                let handle = match entry.ipc_handle.as_ref() {
+                    Some(h) => h,
+                    None => {
+                        pre_errors[i] = Some(error_result(
+                            entry.key,
+                            &DispatcherError::InvalidParameter("missing ipc_handle".into()),
+                        ));
+                        continue;
+                    }
+                };
+                let key: [u8; 64] = match handle.cuda_ipc_handle.as_slice().try_into() {
+                    Ok(k) => k,
+                    Err(_) => {
+                        pre_errors[i] = Some(error_result(
+                            entry.key,
+                            &DispatcherError::InvalidParameter(format!(
+                                "cuda_ipc_handle must be 64 bytes, got {}",
+                                handle.cuda_ipc_handle.len()
+                            )),
+                        ));
+                        continue;
+                    }
+                };
+                if let std::collections::hash_map::Entry::Vacant(slot) = local_ptrs.entry(key) {
+                    match ipc_cache_open(&cache, &key, handle.gpu_device_id) {
+                        Ok(ptr) => {
+                            slot.insert(ptr);
+                            opened_keys.push(key);
+                        }
+                        Err(e) => {
+                            pre_errors[i] = Some(error_result(
+                                entry.key,
+                                &DispatcherError::IoError(format!("IPC open failed: {e}")),
+                            ));
+                        }
+                    }
+                }
+            }
+
+            let results: Vec<EntryResult> = req
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(i, entry)| {
+                    if let Some(err) = pre_errors[i].take() {
+                        return err;
+                    }
+                    let handle = entry.ipc_handle.as_ref().unwrap();
+                    let ipc_key: [u8; 64] = handle.cuda_ipc_handle.as_slice().try_into().unwrap();
+                    let dev_ptr = match local_ptrs.get(&ipc_key) {
+                        Some(&ptr) => ptr,
+                        None => {
+                            return error_result(
+                                entry.key,
+                                &DispatcherError::IoError("IPC handle not cached".into()),
+                            )
+                        }
+                    };
+                    let ipc = IpcHandle {
+                        // dev_ptr is the allocation base; offset addresses this block within it.
+                        address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
+                        size: handle.size,
+                    };
+                    match dispatcher.copy_gpu_to_memory_async(
+                        entry.key,
+                        ipc,
+                        GpuStream(std::ptr::null_mut()),
+                    ) {
+                        Ok(()) => success_result(entry.key),
+                        Err(e) => error_result(entry.key, &e),
+                    }
+                })
+                .collect();
+
+            for key in &opened_keys {
+                ipc_cache_close(&cache, key);
+            }
+            results
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        Ok(Response::new(BatchCopyToStoreResponse { results }))
+    }
+
+    async fn commit_store(
+        &self,
+        request: Request<BatchCommitStoreRequest>,
+    ) -> Result<Response<BatchCommitStoreResponse>, Status> {
+        let req = request.into_inner();
+        check_duplicate_keys(&req.keys)?;
+
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let pending = Arc::clone(&self.pending_stores);
+        let results = tokio::task::spawn_blocking(move || {
+            req.keys
+                .iter()
+                .map(|&key| {
+                    let size = {
+                        let map = pending.lock().unwrap_or_else(|e| e.into_inner());
+                        match map.get(&key) {
+                            Some(entry) => entry.size,
+                            None => {
+                                return error_result(
+                                    key,
+                                    &DispatcherError::KeyNotFound(key),
+                                )
+                            }
+                        }
+                    };
+                    match dispatcher.copy_gpu_to_memory_completed(key, size) {
+                        Ok(()) => {
+                            pending
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .remove(&key);
+                            success_result(key)
+                        }
+                        Err(e) => error_result(key, &e),
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        Ok(Response::new(BatchCommitStoreResponse { results }))
+    }
+
+    async fn abort_store(
+        &self,
+        request: Request<BatchAbortStoreRequest>,
+    ) -> Result<Response<BatchAbortStoreResponse>, Status> {
+        let req = request.into_inner();
+        check_duplicate_keys(&req.keys)?;
+
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let pending = Arc::clone(&self.pending_stores);
+        let results = tokio::task::spawn_blocking(move || {
+            req.keys
+                .iter()
+                .map(|&key| {
+                    pending
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&key);
+                    match dispatcher.release_memory(key) {
+                        Ok(()) => success_result(key),
+                        Err(e) => error_result(key, &e),
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        Ok(Response::new(BatchAbortStoreResponse { results }))
+    }
+
     async fn clear_memory_tier(
         &self,
         _request: Request<ClearMemoryTierRequest>,
@@ -497,6 +732,102 @@ impl Dispatcher for DispatcherService {
 
         Ok(Response::new(FlushToSsdResponse {
             jobs_flushed: jobs_flushed as u64,
+        }))
+    }
+
+    async fn pin(
+        &self,
+        request: Request<BatchPinRequest>,
+    ) -> Result<Response<BatchPinResponse>, Status> {
+        let req = request.into_inner();
+        check_duplicate_keys(&req.keys)?;
+
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let promote = req.promote;
+        let keys = req.keys;
+
+        let results = tokio::task::spawn_blocking({
+            let dispatcher = Arc::clone(&dispatcher);
+            let keys = keys.clone();
+            move || {
+                keys.iter()
+                    .map(|&key| match dispatcher.pin(key) {
+                        Ok(()) => success_result(key),
+                        Err(e) => error_result(key, &e),
+                    })
+                    .collect::<Vec<_>>()
+            }
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        if promote {
+            tokio::task::spawn_blocking(move || {
+                dispatcher.promote_to_memory_tier(&keys);
+            });
+        }
+
+        Ok(Response::new(BatchPinResponse { results }))
+    }
+
+    async fn unpin(
+        &self,
+        request: Request<BatchUnpinRequest>,
+    ) -> Result<Response<BatchUnpinResponse>, Status> {
+        let req = request.into_inner();
+        check_duplicate_keys(&req.keys)?;
+
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let results = tokio::task::spawn_blocking(move || {
+            req.keys
+                .iter()
+                .map(|&key| match dispatcher.unpin(key) {
+                    Ok(()) => success_result(key),
+                    Err(e) => error_result(key, &e),
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        Ok(Response::new(BatchUnpinResponse { results }))
+    }
+
+    async fn take_events(
+        &self,
+        request: Request<TakeEventsRequest>,
+    ) -> Result<Response<TakeEventsResponse>, Status> {
+        let req = request.into_inner();
+        let max = req.max_events as usize;
+
+        let mut events = Vec::new();
+        loop {
+            match self.eviction_rx.try_recv() {
+                Ok(ev) => {
+                    events.push(proto::EvictionEvent {
+                        key: ev.key,
+                        reason: match ev.reason {
+                            EvictionReason::Demoted => {
+                                proto::EvictionReason::Demoted.into()
+                            }
+                            EvictionReason::Removed => {
+                                proto::EvictionReason::Removed.into()
+                            }
+                        },
+                    });
+                    if max > 0 && events.len() >= max {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+
+        let dropped_count = self.eviction_dropped.swap(0, Ordering::Relaxed);
+
+        Ok(Response::new(TakeEventsResponse {
+            events,
+            dropped_count,
         }))
     }
 }

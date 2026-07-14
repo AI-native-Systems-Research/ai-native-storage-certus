@@ -1,5 +1,7 @@
 //! Dispatch map entry types and location enum.
 
+use std::sync::atomic::AtomicU32;
+
 use interfaces::EvictionHandle;
 
 /// Represents where extent data currently resides.
@@ -23,7 +25,6 @@ unsafe impl Send for Location {}
 unsafe impl Sync for Location {}
 
 /// Per-key metadata stored in the dispatch map.
-#[derive(Debug)]
 pub(crate) struct DispatchEntry {
     pub location: Location,
     #[allow(dead_code)]
@@ -32,4 +33,22 @@ pub(crate) struct DispatchEntry {
     pub write_ref: u32,
     /// Handle into the eviction policy's LRU ordering.
     pub eviction_handle: EvictionHandle,
+    /// Number of times this entry has been reused (read hits).
+    pub reuse_count: AtomicU32,
+}
+
+impl std::fmt::Debug for DispatchEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DispatchEntry")
+            .field("location", &self.location)
+            .field("size_blocks", &self.size_blocks)
+            .field("read_ref", &self.read_ref)
+            .field("write_ref", &self.write_ref)
+            .field("eviction_handle", &self.eviction_handle)
+            .field(
+                "reuse_count",
+                &self.reuse_count.load(std::sync::atomic::Ordering::Relaxed),
+            )
+            .finish()
+    }
 }

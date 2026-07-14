@@ -1,12 +1,13 @@
 //! gRPC service implementation for the Certus Dispatcher.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tonic::{Request, Response, Status};
 
 use gpu_services::cuda_ffi;
-use interfaces::{DispatcherError, IDispatcher, IpcHandle};
+use interfaces::{DispatcherError, GpuStream, IDispatcher, IpcHandle};
 
 #[cfg(feature = "otel")]
 use crate::telemetry::Metrics;
@@ -17,10 +18,14 @@ pub mod proto {
 
 use proto::dispatcher_server::{Dispatcher, DispatcherServer};
 use proto::{
-    BatchCheckRequest, BatchCheckResponse, BatchLookupRequest, BatchLookupResponse,
-    BatchPopulateRequest, BatchPopulateResponse, BatchRemoveRequest, BatchRemoveResponse,
-    BatchTouchRequest, BatchTouchResponse, CheckResult, ClearMemoryTierRequest,
-    ClearMemoryTierResponse, EntryResult, ErrorCode, FlushToSsdRequest, FlushToSsdResponse,
+    BatchAbortStoreRequest, BatchAbortStoreResponse, BatchCheckRequest, BatchCheckResponse,
+    BatchCommitStoreRequest, BatchCommitStoreResponse, BatchCopyToStoreRequest,
+    BatchCopyToStoreResponse, BatchLookupRequest, BatchLookupResponse, BatchPopulateRequest,
+    BatchPopulateResponse, BatchRemoveRequest, BatchRemoveResponse, BatchReserveRequest,
+    BatchReserveResponse, BatchTouchRequest, BatchTouchResponse, CheckResult,
+    BatchPinRequest, BatchPinResponse, BatchUnpinRequest, BatchUnpinResponse,
+    ClearMemoryTierRequest, ClearMemoryTierResponse, EntryResult, ErrorCode, FlushToSsdRequest,
+    FlushToSsdResponse, TakeEventsRequest, TakeEventsResponse,
 };
 
 pub fn dispatcher_server(svc: DispatcherService) -> DispatcherServer<DispatcherService> {
@@ -40,18 +45,34 @@ unsafe impl Sync for IpcCacheEntry {}
 
 type IpcCache = Arc<Mutex<HashMap<[u8; 64], IpcCacheEntry>>>;
 
+struct PendingStoreEntry {
+    size: u32,
+}
+
+type PendingStores = Arc<Mutex<HashMap<u64, PendingStoreEntry>>>;
+
 pub struct DispatcherService {
     dispatcher: Arc<dyn IDispatcher + Send + Sync>,
     ipc_cache: IpcCache,
+    pending_stores: PendingStores,
+    eviction_rx: crossbeam_channel::Receiver<dispatcher::EvictionEvent>,
+    eviction_dropped: Arc<AtomicU64>,
     #[cfg(feature = "otel")]
     metrics: Option<Metrics>,
 }
 
 impl DispatcherService {
-    pub fn new(dispatcher: Arc<dyn IDispatcher + Send + Sync>) -> Self {
+    pub fn new(
+        dispatcher: Arc<dyn IDispatcher + Send + Sync>,
+        eviction_rx: crossbeam_channel::Receiver<dispatcher::EvictionEvent>,
+        eviction_dropped: Arc<AtomicU64>,
+    ) -> Self {
         Self {
             dispatcher,
             ipc_cache: Arc::new(Mutex::new(HashMap::new())),
+            pending_stores: Arc::new(Mutex::new(HashMap::new())),
+            eviction_rx,
+            eviction_dropped,
             #[cfg(feature = "otel")]
             metrics: None,
         }
@@ -249,7 +270,11 @@ impl Dispatcher for DispatcherService {
                         &DispatcherError::IoError("IPC handle not cached".into()),
                     ),
                 };
-                let ipc = IpcHandle { address: dev_ptr as *mut u8, size: handle.size };
+                let ipc = IpcHandle {
+                    // dev_ptr is the allocation base; offset addresses this block within it.
+                    address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
+                    size: handle.size,
+                };
                 match dispatcher.populate(entry.key, ipc) {
                     Ok(()) => success_result(entry.key),
                     Err(e) => error_result(entry.key, &e),
@@ -345,7 +370,9 @@ impl Dispatcher for DispatcherService {
                     },
                 };
                 batch_entries.push((entry.key, IpcHandle {
-                    address: dev_ptr as *mut u8,
+                    // dev_ptr is the allocation base (deduped per handle); offset is
+                    // per-entry, so apply it here to address this block within the alloc.
+                    address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
                     size: handle.size,
                 }));
             }
@@ -504,6 +531,244 @@ impl Dispatcher for DispatcherService {
         Ok(Response::new(BatchTouchResponse { results }))
     }
 
+    async fn reserve(
+        &self,
+        request: Request<BatchReserveRequest>,
+    ) -> Result<Response<BatchReserveResponse>, Status> {
+        let req = request.into_inner();
+        let keys: Vec<u64> = req.entries.iter().map(|e| e.key).collect();
+        check_duplicate_keys(&keys)?;
+        #[cfg(feature = "otel")]
+        let _t0 = std::time::Instant::now();
+
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let pending = Arc::clone(&self.pending_stores);
+        let results = tokio::task::spawn_blocking(move || {
+            req.entries
+                .iter()
+                .map(|entry| match dispatcher.reserve_memory(entry.key, entry.size) {
+                    Ok(_ptr) => {
+                        pending
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .insert(entry.key, PendingStoreEntry { size: entry.size });
+                        success_result(entry.key)
+                    }
+                    Err(e) => error_result(entry.key, &e),
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        #[cfg(feature = "otel")]
+        if let Some(ref m) = self.metrics {
+            let errors = results.iter().filter(|r| !r.success).count() as u64;
+            m.record_op("reserve", results.len() as u64, errors, _t0.elapsed().as_micros() as f64);
+        }
+
+        Ok(Response::new(BatchReserveResponse { results }))
+    }
+
+    async fn copy_to_store(
+        &self,
+        request: Request<BatchCopyToStoreRequest>,
+    ) -> Result<Response<BatchCopyToStoreResponse>, Status> {
+        let req = request.into_inner();
+        let keys: Vec<u64> = req.entries.iter().map(|e| e.key).collect();
+        check_duplicate_keys(&keys)?;
+        #[cfg(feature = "otel")]
+        let _t0 = std::time::Instant::now();
+
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let cache = Arc::clone(&self.ipc_cache);
+        let results = tokio::task::spawn_blocking(move || {
+            let mut opened_keys: Vec<[u8; 64]> = Vec::new();
+            let mut pre_errors: Vec<Option<EntryResult>> = vec![None; req.entries.len()];
+            let mut local_ptrs: HashMap<[u8; 64], *mut std::ffi::c_void> = HashMap::new();
+
+            for (i, entry) in req.entries.iter().enumerate() {
+                let handle = match entry.ipc_handle.as_ref() {
+                    Some(h) => h,
+                    None => {
+                        pre_errors[i] = Some(error_result(
+                            entry.key,
+                            &DispatcherError::InvalidParameter("missing ipc_handle".into()),
+                        ));
+                        continue;
+                    }
+                };
+                let key: [u8; 64] = match handle.cuda_ipc_handle.as_slice().try_into() {
+                    Ok(k) => k,
+                    Err(_) => {
+                        pre_errors[i] = Some(error_result(
+                            entry.key,
+                            &DispatcherError::InvalidParameter(format!(
+                                "cuda_ipc_handle must be 64 bytes, got {}",
+                                handle.cuda_ipc_handle.len()
+                            )),
+                        ));
+                        continue;
+                    }
+                };
+                if !local_ptrs.contains_key(&key) {
+                    match ipc_cache_open(&cache, &key, handle.gpu_device_id) {
+                        Ok(ptr) => {
+                            local_ptrs.insert(key, ptr);
+                            opened_keys.push(key);
+                        }
+                        Err(e) => {
+                            pre_errors[i] = Some(error_result(
+                                entry.key,
+                                &DispatcherError::IoError(format!("IPC open failed: {e}")),
+                            ));
+                        }
+                    }
+                }
+            }
+
+            let results: Vec<EntryResult> = req
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(i, entry)| {
+                    if let Some(err) = pre_errors[i].take() {
+                        return err;
+                    }
+                    let handle = entry.ipc_handle.as_ref().unwrap();
+                    let ipc_key: [u8; 64] = handle.cuda_ipc_handle.as_slice().try_into().unwrap();
+                    let dev_ptr = match local_ptrs.get(&ipc_key) {
+                        Some(&ptr) => ptr,
+                        None => {
+                            return error_result(
+                                entry.key,
+                                &DispatcherError::IoError("IPC handle not cached".into()),
+                            )
+                        }
+                    };
+                    let ipc = IpcHandle {
+                        // dev_ptr is the allocation base; offset addresses this block within it.
+                        address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
+                        size: handle.size,
+                    };
+                    match dispatcher.copy_gpu_to_memory_async(
+                        entry.key,
+                        ipc,
+                        GpuStream(std::ptr::null_mut()),
+                    ) {
+                        Ok(()) => success_result(entry.key),
+                        Err(e) => error_result(entry.key, &e),
+                    }
+                })
+                .collect();
+
+            for key in &opened_keys {
+                ipc_cache_close(&cache, key);
+            }
+            results
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        #[cfg(feature = "otel")]
+        if let Some(ref m) = self.metrics {
+            let errors = results.iter().filter(|r| !r.success).count() as u64;
+            m.record_op("copy_to_store", results.len() as u64, errors, _t0.elapsed().as_micros() as f64);
+        }
+
+        Ok(Response::new(BatchCopyToStoreResponse { results }))
+    }
+
+    async fn commit_store(
+        &self,
+        request: Request<BatchCommitStoreRequest>,
+    ) -> Result<Response<BatchCommitStoreResponse>, Status> {
+        let req = request.into_inner();
+        check_duplicate_keys(&req.keys)?;
+        #[cfg(feature = "otel")]
+        let _t0 = std::time::Instant::now();
+
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let pending = Arc::clone(&self.pending_stores);
+        let results = tokio::task::spawn_blocking(move || {
+            req.keys
+                .iter()
+                .map(|&key| {
+                    let size = {
+                        let map = pending.lock().unwrap_or_else(|e| e.into_inner());
+                        match map.get(&key) {
+                            Some(entry) => entry.size,
+                            None => {
+                                return error_result(
+                                    key,
+                                    &DispatcherError::KeyNotFound(key),
+                                )
+                            }
+                        }
+                    };
+                    match dispatcher.copy_gpu_to_memory_completed(key, size) {
+                        Ok(()) => {
+                            pending
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .remove(&key);
+                            success_result(key)
+                        }
+                        Err(e) => error_result(key, &e),
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        #[cfg(feature = "otel")]
+        if let Some(ref m) = self.metrics {
+            let errors = results.iter().filter(|r| !r.success).count() as u64;
+            m.record_op("commit_store", results.len() as u64, errors, _t0.elapsed().as_micros() as f64);
+        }
+
+        Ok(Response::new(BatchCommitStoreResponse { results }))
+    }
+
+    async fn abort_store(
+        &self,
+        request: Request<BatchAbortStoreRequest>,
+    ) -> Result<Response<BatchAbortStoreResponse>, Status> {
+        let req = request.into_inner();
+        check_duplicate_keys(&req.keys)?;
+        #[cfg(feature = "otel")]
+        let _t0 = std::time::Instant::now();
+
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let pending = Arc::clone(&self.pending_stores);
+        let results = tokio::task::spawn_blocking(move || {
+            req.keys
+                .iter()
+                .map(|&key| {
+                    pending
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&key);
+                    match dispatcher.release_memory(key) {
+                        Ok(()) => success_result(key),
+                        Err(e) => error_result(key, &e),
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        #[cfg(feature = "otel")]
+        if let Some(ref m) = self.metrics {
+            let errors = results.iter().filter(|r| !r.success).count() as u64;
+            m.record_op("abort_store", results.len() as u64, errors, _t0.elapsed().as_micros() as f64);
+        }
+
+        Ok(Response::new(BatchAbortStoreResponse { results }))
+    }
+
     async fn clear_memory_tier(
         &self,
         _request: Request<ClearMemoryTierRequest>,
@@ -545,6 +810,102 @@ impl Dispatcher for DispatcherService {
             jobs_flushed: jobs_flushed as u64,
         }))
     }
+
+    async fn pin(
+        &self,
+        request: Request<BatchPinRequest>,
+    ) -> Result<Response<BatchPinResponse>, Status> {
+        let req = request.into_inner();
+        check_duplicate_keys(&req.keys)?;
+
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let promote = req.promote;
+        let keys = req.keys;
+
+        let results = tokio::task::spawn_blocking({
+            let dispatcher = Arc::clone(&dispatcher);
+            let keys = keys.clone();
+            move || {
+                keys.iter()
+                    .map(|&key| match dispatcher.pin(key) {
+                        Ok(()) => success_result(key),
+                        Err(e) => error_result(key, &e),
+                    })
+                    .collect::<Vec<_>>()
+            }
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        if promote {
+            tokio::task::spawn_blocking(move || {
+                dispatcher.promote_to_memory_tier(&keys);
+            });
+        }
+
+        Ok(Response::new(BatchPinResponse { results }))
+    }
+
+    async fn unpin(
+        &self,
+        request: Request<BatchUnpinRequest>,
+    ) -> Result<Response<BatchUnpinResponse>, Status> {
+        let req = request.into_inner();
+        check_duplicate_keys(&req.keys)?;
+
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let results = tokio::task::spawn_blocking(move || {
+            req.keys
+                .iter()
+                .map(|&key| match dispatcher.unpin(key) {
+                    Ok(()) => success_result(key),
+                    Err(e) => error_result(key, &e),
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        Ok(Response::new(BatchUnpinResponse { results }))
+    }
+
+    async fn take_events(
+        &self,
+        request: Request<TakeEventsRequest>,
+    ) -> Result<Response<TakeEventsResponse>, Status> {
+        let req = request.into_inner();
+        let max = req.max_events as usize;
+
+        let mut events = Vec::new();
+        loop {
+            match self.eviction_rx.try_recv() {
+                Ok(ev) => {
+                    events.push(proto::EvictionEvent {
+                        key: ev.key,
+                        reason: match ev.reason {
+                            dispatcher::EvictionReason::Demoted => {
+                                proto::EvictionReason::Demoted.into()
+                            }
+                            dispatcher::EvictionReason::Removed => {
+                                proto::EvictionReason::Removed.into()
+                            }
+                        },
+                    });
+                    if max > 0 && events.len() >= max {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+
+        let dropped_count = self.eviction_dropped.swap(0, Ordering::Relaxed);
+
+        Ok(Response::new(TakeEventsResponse {
+            events,
+            dropped_count,
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -554,6 +915,12 @@ mod tests {
 
     use interfaces::{DispatcherConfig, GpuStream};
 
+    fn test_service(dispatcher: Arc<dyn IDispatcher + Send + Sync>) -> DispatcherService {
+        let (_tx, rx) = crossbeam_channel::bounded(16);
+        let dropped = Arc::new(AtomicU64::new(0));
+        DispatcherService::new(dispatcher, rx, dropped)
+    }
+
     struct MockDispatcherState {
         populate_results: HashMap<u64, Result<(), DispatcherError>>,
         batch_lookup_results: Vec<Result<(), DispatcherError>>,
@@ -562,6 +929,9 @@ mod tests {
         touch_results: HashMap<u64, Result<(), DispatcherError>>,
         clear_memory_tier_result: Result<usize, DispatcherError>,
         populate_calls: Vec<(u64, u32)>,
+        /// Resolved device address passed to `populate`, per key. Used to verify
+        /// the server folds `IpcHandle.offset` into the opened base pointer.
+        populate_addrs: Vec<(u64, usize)>,
         batch_lookup_calls: Vec<Vec<u64>>,
         check_calls: Vec<u64>,
     }
@@ -576,6 +946,7 @@ mod tests {
                 touch_results: HashMap::new(),
                 clear_memory_tier_result: Ok(0),
                 populate_calls: Vec::new(),
+                populate_addrs: Vec::new(),
                 batch_lookup_calls: Vec::new(),
                 check_calls: Vec::new(),
             }
@@ -650,6 +1021,9 @@ mod tests {
         fn populate(&self, key: u64, ipc_handle: IpcHandle) -> Result<(), DispatcherError> {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             state.populate_calls.push((key, ipc_handle.size));
+            state
+                .populate_addrs
+                .push((key, ipc_handle.address as usize));
             state.populate_results.get(&key).cloned().unwrap_or(Ok(()))
         }
 
@@ -697,6 +1071,14 @@ mod tests {
         fn flush_to_ssd(&self) -> Result<usize, DispatcherError> {
             Ok(0)
         }
+
+        fn pin(&self, _key: u64) -> Result<(), DispatcherError> {
+            Ok(())
+        }
+
+        fn unpin(&self, _key: u64) -> Result<(), DispatcherError> {
+            Ok(())
+        }
     }
 
     fn proto_ipc_handle(seed: u8) -> proto::IpcHandle {
@@ -704,6 +1086,7 @@ mod tests {
             cuda_ipc_handle: vec![seed; 64],
             size: 4096,
             gpu_device_id: -1,
+            offset: 0,
         }
     }
 
@@ -726,7 +1109,7 @@ mod tests {
     #[tokio::test]
     async fn populate_happy_path_uses_cached_ipc_and_stores() {
         let mock = Arc::new(MockDispatcher::default());
-        let service = DispatcherService::new(mock.clone());
+        let service = test_service(mock.clone());
         let ipc_handle = proto_ipc_handle(1);
         let key = handle_key(&ipc_handle);
         service
@@ -770,9 +1153,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn populate_folds_offset_into_resolved_address() {
+        // Seed the IPC cache with a known non-null base so we can assert the
+        // server adds IpcHandle.offset to the opened allocation base.
+        const BASE: usize = 0x1000_0000;
+        const OFFSET: u64 = 0x4_0000;
+        let mock = Arc::new(MockDispatcher::default());
+        let service = test_service(mock.clone());
+        let mut ipc_handle = proto_ipc_handle(2);
+        ipc_handle.offset = OFFSET;
+        let key = handle_key(&ipc_handle);
+        service.ipc_cache.lock().unwrap_or_else(|e| e.into_inner()).insert(
+            key,
+            IpcCacheEntry {
+                dev_ptr: BASE as *mut std::ffi::c_void,
+                gpu_device_id: -1,
+                refcount: 1,
+            },
+        );
+
+        let request = BatchPopulateRequest {
+            entries: vec![proto::PopulateEntry {
+                key: 20,
+                ipc_handle: Some(ipc_handle),
+            }],
+        };
+        let response = service
+            .populate(Request::new(request))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(response.results[0].success);
+        assert_eq!(
+            mock.state
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .populate_addrs,
+            vec![(20, BASE + OFFSET as usize)]
+        );
+    }
+
+    #[tokio::test]
     async fn populate_reports_ipc_open_failure() {
         let mock = Arc::new(MockDispatcher::default());
-        let service = DispatcherService::new(mock.clone());
+        let service = test_service(mock.clone());
 
         let request = BatchPopulateRequest {
             entries: vec![proto::PopulateEntry {
@@ -807,7 +1232,7 @@ mod tests {
             .populate_results
             .insert(12, Err(DispatcherError::Timeout("pending".to_string())));
         let mock = Arc::new(MockDispatcher::new(state));
-        let service = DispatcherService::new(mock);
+        let service = test_service(mock);
 
         let ipc_handle = proto_ipc_handle(2);
         let key = handle_key(&ipc_handle);
@@ -843,7 +1268,7 @@ mod tests {
             Err(DispatcherError::Timeout("pending".to_string())),
         ];
         let mock = Arc::new(MockDispatcher::new(state));
-        let service = DispatcherService::new(mock.clone());
+        let service = test_service(mock.clone());
 
         let h1 = proto_ipc_handle(3);
         let h2 = proto_ipc_handle(4);
@@ -900,7 +1325,7 @@ mod tests {
             .check_results
             .insert(34, Err(DispatcherError::Timeout("pending".to_string())));
         let mock = Arc::new(MockDispatcher::new(state));
-        let service = DispatcherService::new(mock.clone());
+        let service = test_service(mock.clone());
 
         let request = BatchCheckRequest {
             keys: vec![31, 32, 33, 34],
@@ -931,7 +1356,7 @@ mod tests {
             .remove_results
             .insert(42, Err(DispatcherError::KeyNotFound(42)));
         let mock = Arc::new(MockDispatcher::new(state));
-        let service = DispatcherService::new(mock);
+        let service = test_service(mock);
 
         let request = BatchRemoveRequest {
             keys: vec![41, 42, 43],
@@ -952,7 +1377,7 @@ mod tests {
             .touch_results
             .insert(52, Err(DispatcherError::KeyNotFound(52)));
         let mock = Arc::new(MockDispatcher::new(state));
-        let service = DispatcherService::new(mock);
+        let service = test_service(mock);
 
         let request = BatchTouchRequest {
             keys: vec![51, 52],
@@ -1006,7 +1431,7 @@ mod tests {
             ..Default::default()
         };
         let mock = Arc::new(MockDispatcher::new(state));
-        let service = DispatcherService::new(mock);
+        let service = test_service(mock);
 
         let response = service
             .clear_memory_tier(Request::new(ClearMemoryTierRequest {}))
@@ -1026,7 +1451,7 @@ mod tests {
             ..Default::default()
         };
         let mock = Arc::new(MockDispatcher::new(state));
-        let service = DispatcherService::new(mock);
+        let service = test_service(mock);
 
         let err = service
             .clear_memory_tier(Request::new(ClearMemoryTierRequest {}))
