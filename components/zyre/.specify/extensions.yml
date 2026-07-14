@@ -1,0 +1,12 @@
+installed: []
+settings:
+  auto_execute_hooks: true
+hooks:
+  after_implement:
+  - extension: sync
+    command: speckit.sync.analyze
+    enabled: true
+    optional: true
+    prompt: Check for spec drift after implementation?
+    description: ''
+    condition: null
