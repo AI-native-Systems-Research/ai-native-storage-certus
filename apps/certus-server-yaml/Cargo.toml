@@ -45,6 +45,7 @@ kernel = ["dep:block-device-kernel", "spdk-mem"]
 p2p-native = ["dep:dispatcher-p2p", "spdk", "gpu-services/p2p", "dispatcher-p2p/spdk-backend"]
 rdma = ["dep:remote-request-handler"]
 otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp"]
+rw-telemetry = ["dispatcher/rw-telemetry"]
 
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }

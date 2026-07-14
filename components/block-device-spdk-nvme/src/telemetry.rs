@@ -7,6 +7,8 @@
 //! The [`TelemetrySnapshot`] data type is defined in the `interfaces` crate.
 
 use interfaces::{NvmeBlockError, TelemetrySnapshot};
+#[cfg(feature = "telemetry")]
+use interfaces::ReadWriteStats;
 
 /// Internal telemetry collector using atomic counters.
 ///
@@ -19,6 +21,15 @@ pub(crate) struct TelemetryStats {
     sum_latency_ns: std::sync::atomic::AtomicU64,
     total_bytes: std::sync::atomic::AtomicU64,
     start_time: std::time::Instant,
+    // Per-direction counters. total_ops/total_bytes/sum_latency_ns above remain
+    // the read+write aggregate used by snapshot(); these split the same events
+    // so callers can account read vs write traffic (and per-direction latency).
+    read_ops: std::sync::atomic::AtomicU64,
+    read_bytes: std::sync::atomic::AtomicU64,
+    read_latency_ns_sum: std::sync::atomic::AtomicU64,
+    write_ops: std::sync::atomic::AtomicU64,
+    write_bytes: std::sync::atomic::AtomicU64,
+    write_latency_ns_sum: std::sync::atomic::AtomicU64,
 }
 
 #[cfg(feature = "telemetry")]
@@ -32,6 +43,12 @@ impl TelemetryStats {
             sum_latency_ns: std::sync::atomic::AtomicU64::new(0),
             total_bytes: std::sync::atomic::AtomicU64::new(0),
             start_time: std::time::Instant::now(),
+            read_ops: std::sync::atomic::AtomicU64::new(0),
+            read_bytes: std::sync::atomic::AtomicU64::new(0),
+            read_latency_ns_sum: std::sync::atomic::AtomicU64::new(0),
+            write_ops: std::sync::atomic::AtomicU64::new(0),
+            write_bytes: std::sync::atomic::AtomicU64::new(0),
+            write_latency_ns_sum: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -39,12 +56,23 @@ impl TelemetryStats {
     ///
     /// `latency_ns` is the operation latency in nanoseconds.
     /// `bytes` is the number of bytes transferred.
-    pub fn record(&self, latency_ns: u64, bytes: u64) {
+    /// `is_read` routes the op/byte/latency counts to the read or write side.
+    pub fn record(&self, latency_ns: u64, bytes: u64, is_read: bool) {
         use std::sync::atomic::Ordering::Relaxed;
 
         self.total_ops.fetch_add(1, Relaxed);
         self.sum_latency_ns.fetch_add(latency_ns, Relaxed);
         self.total_bytes.fetch_add(bytes, Relaxed);
+
+        if is_read {
+            self.read_ops.fetch_add(1, Relaxed);
+            self.read_bytes.fetch_add(bytes, Relaxed);
+            self.read_latency_ns_sum.fetch_add(latency_ns, Relaxed);
+        } else {
+            self.write_ops.fetch_add(1, Relaxed);
+            self.write_bytes.fetch_add(bytes, Relaxed);
+            self.write_latency_ns_sum.fetch_add(latency_ns, Relaxed);
+        }
 
         // Update min with CAS loop.
         let mut current = self.min_latency_ns.load(Relaxed);
@@ -105,6 +133,19 @@ impl TelemetryStats {
             mean_latency_ns,
             mean_throughput_mbps,
             elapsed_secs,
+        }
+    }
+
+    /// Snapshot the per-direction read/write byte, op, and latency counters.
+    pub fn read_write_stats(&self) -> ReadWriteStats {
+        use std::sync::atomic::Ordering::Relaxed;
+        ReadWriteStats {
+            read_ops: self.read_ops.load(Relaxed),
+            read_bytes: self.read_bytes.load(Relaxed),
+            read_latency_ns_sum: self.read_latency_ns_sum.load(Relaxed),
+            write_ops: self.write_ops.load(Relaxed),
+            write_bytes: self.write_bytes.load(Relaxed),
+            write_latency_ns_sum: self.write_latency_ns_sum.load(Relaxed),
         }
     }
 }

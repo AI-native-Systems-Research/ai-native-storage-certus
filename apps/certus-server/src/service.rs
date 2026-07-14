@@ -25,7 +25,7 @@ use proto::{
     BatchReserveResponse, BatchTouchRequest, BatchTouchResponse, CheckResult,
     BatchPinRequest, BatchPinResponse, BatchUnpinRequest, BatchUnpinResponse,
     ClearMemoryTierRequest, ClearMemoryTierResponse, EntryResult, ErrorCode, FlushToSsdRequest,
-    FlushToSsdResponse, TakeEventsRequest, TakeEventsResponse,
+    FlushToSsdResponse, GetIoStatsRequest, IoStatsResponse, TakeEventsRequest, TakeEventsResponse,
 };
 
 pub fn dispatcher_server(svc: DispatcherService) -> DispatcherServer<DispatcherService> {
@@ -906,6 +906,25 @@ impl Dispatcher for DispatcherService {
             dropped_count,
         }))
     }
+
+    async fn get_io_stats(
+        &self,
+        _request: Request<GetIoStatsRequest>,
+    ) -> Result<Response<IoStatsResponse>, Status> {
+        let dispatcher = Arc::clone(&self.dispatcher);
+        let s = tokio::task::spawn_blocking(move || dispatcher.read_write_stats())
+            .await
+            .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        Ok(Response::new(IoStatsResponse {
+            read_ops: s.read_ops,
+            read_bytes: s.read_bytes,
+            read_latency_ns_sum: s.read_latency_ns_sum,
+            write_ops: s.write_ops,
+            write_bytes: s.write_bytes,
+            write_latency_ns_sum: s.write_latency_ns_sum,
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -1078,6 +1097,10 @@ mod tests {
 
         fn unpin(&self, _key: u64) -> Result<(), DispatcherError> {
             Ok(())
+        }
+
+        fn read_write_stats(&self) -> interfaces::ReadWriteStats {
+            interfaces::ReadWriteStats::default()
         }
     }
 
