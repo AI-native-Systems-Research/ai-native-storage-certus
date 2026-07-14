@@ -95,6 +95,21 @@ struct DataDrive {
     cached_channels: Option<ClientChannels>,
 }
 
+fn format_bytes(bytes: usize) -> String {
+    const KIB: usize = 1024;
+    const MIB: usize = 1024 * 1024;
+    const GIB: usize = 1024 * 1024 * 1024;
+    if bytes >= GIB {
+        format!("{:.2} GiB", bytes as f64 / GIB as f64)
+    } else if bytes >= MIB {
+        format!("{:.2} MiB", bytes as f64 / MIB as f64)
+    } else if bytes >= KIB {
+        format!("{:.2} KiB", bytes as f64 / KIB as f64)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 /// Factory function type for creating block device components.
 /// Receives SPDK env, logger, drive index, PCI address, and optional CPU pin.
 /// Returns a fully-initialized block device: (IUnknown holder, IBlockDevice, IBlockDeviceAdmin).
@@ -888,6 +903,25 @@ impl DispatcherP2pComponent {
                                 "failed to wire logger for extent manager {i}: {e}"
                             ))
                         })?;
+                    if let Ok(mt) = self.memory_tier.get() {
+                        let mt_hook = Arc::clone(&mt);
+                        let logger_hook =
+                            Arc::clone(&logger) as Arc<dyn ILogger + Send + Sync>;
+                        em.set_post_checkpoint_hook(Arc::new(move || {
+                            let used = mt_hook.used();
+                            let capacity = mt_hook.capacity();
+                            let pct = if capacity > 0 {
+                                used as f64 / capacity as f64 * 100.0
+                            } else {
+                                0.0
+                            };
+                            logger_hook.info(&format!(
+                                "memory_tier_pool ({} / {}, {pct:.1}% used)",
+                                format_bytes(used),
+                                format_bytes(capacity),
+                            ));
+                        }));
+                    }
                     em as Arc<dyn component_core::IUnknown + Send + Sync>
                 }
             };
