@@ -335,3 +335,52 @@ fn round_trip_within_two_seconds() {
         "round-trip took {elapsed:?}, exceeding the SC-001 2s bound"
     );
 }
+
+/// spec.md edge case: a message sent to a UUID that has already departed
+/// completes silently (fire-and-forget, matching zyre's design) rather than
+/// erroring. `zyre_whisper` hands the message to the node's actor and returns
+/// success regardless of whether the target peer is still reachable; the actor
+/// drops it if the peer is unknown.
+#[test]
+fn whisper_to_departed_peer_is_fire_and_forget() {
+    let _guard = serialize();
+
+    let comp = ZyreComponent::new();
+    let izyre = query_interface!(comp, IZyre).expect("query IZyre");
+
+    let mut config_a = NodeConfig::default();
+    config_a.name = Some("ff-a".into());
+    let mut config_b = NodeConfig::default();
+    config_b.name = Some("ff-b".into());
+
+    let mut node_a = izyre.create_node(config_a).expect("create node A");
+    let mut node_b = izyre.create_node(config_b).expect("create node B");
+
+    node_a.start().expect("start A");
+    node_b.start().expect("start B");
+
+    // A learns B's UUID from the ENTER event.
+    let mut peer_b = None;
+    let deadline = std::time::Instant::now() + scaled(Duration::from_secs(5));
+    while std::time::Instant::now() < deadline {
+        match node_a.try_recv() {
+            Ok(Some(ZyreEvent::Enter { peer, name, .. })) if name == "ff-b" => {
+                peer_b = Some(peer);
+                break;
+            }
+            Ok(Some(_)) => continue,
+            Ok(None) => thread::sleep(Duration::from_millis(50)),
+            Err(e) => panic!("recv error: {e}"),
+        }
+    }
+    let peer_b = peer_b.expect("A should discover B");
+
+    // B departs.
+    drop(node_b);
+
+    // A whispers to the now-departed UUID: it must succeed silently, not error.
+    assert!(
+        node_a.whisper(&peer_b, b"still there?").is_ok(),
+        "whisper to a departed peer should succeed silently (fire-and-forget)"
+    );
+}

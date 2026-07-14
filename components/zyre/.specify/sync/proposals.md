@@ -156,4 +156,6 @@ All three SC gaps from the drift report were addressed:
 - **SC-003** ✓ — measured a from-scratch `cargo build -p zyre` (incl. bindgen) at 2.27 s, far under the 5-minute budget. The one-time C-deps build (`build_zyre.sh`) is separate and unchanged.
 - **SC-005** ✓ — Miri can't cross FFI, so added a committed valgrind harness (`run-valgrind.sh` + `valgrind.supp`). memcheck over the lib + integration suites reports 0 errors / 0 bytes lost attributable to the bindings (only C-library-internal reports suppressed, documented).
 
-Still open: the whisper-to-departed-UUID fire-and-forget test (`spec.md:81`) — optional, not an SC gate.
+Also resolved (2026-07-14): the whisper-to-departed-UUID fire-and-forget edge case (`spec.md:81`) now has `whisper_to_departed_peer_is_fire_and_forget` — A discovers B, B departs, A's whisper to the departed UUID returns `Ok`.
+
+No open items remain from this spec-sync pass.

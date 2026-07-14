@@ -132,6 +132,6 @@
     { "sc": "SC-001", "status": "resolved", "applied_at": "2026-07-14", "note": "added round_trip_within_two_seconds asserting A->B->A within 2s; discovery/whisper tests resend-in-loop; ZYRE_TEST_TIMEOUT_SCALE knob for valgrind" },
     { "sc": "SC-003", "status": "resolved", "applied_at": "2026-07-14", "note": "from-scratch cargo build -p zyre incl. bindgen = 2.27s (<5min); C-deps build separate" },
     { "sc": "SC-005", "status": "resolved", "applied_at": "2026-07-14", "note": "valgrind harness run-valgrind.sh + valgrind.supp; memcheck over lib+integration = 0 errors/0 bytes lost attributable to bindings; Miri inapplicable (FFI)" },
-    { "sc": "fire-and-forget", "status": "open", "note": "optional whisper-to-departed-UUID test (spec.md:81); not an SC gate" }
+    { "sc": "fire-and-forget", "status": "resolved", "applied_at": "2026-07-14", "note": "whisper_to_departed_peer_is_fire_and_forget: A discovers B, B departs, A's whisper to the departed UUID returns Ok (spec.md:81)" }
   ]
 }
