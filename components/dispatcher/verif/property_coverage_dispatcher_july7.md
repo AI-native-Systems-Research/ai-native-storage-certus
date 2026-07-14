@@ -61,7 +61,7 @@ P12, P13, P17, P18, P26, P27, P30, P31) stay in `dispatch-map/verif`.
 
 | Property | Owner | Status here | Next proof target |
 |---|---|---|---|
-| P1  — `initialize()` iff required receptacles bound | dispatcher | `# Unchecked` | Model receptacles as `Option<Handle>`; prove `Ok <==> (dispatch_map & memory_tier bound)`. |
+| P1  — `initialize()` iff required receptacles bound | dispatcher | `# Verified` (`initialize_dependency_guards`) | 1/1 VC discharged in 1 `.coma` file (`initialize_dependency_guards.coma`). Mirrors the `initialize` guard prefix (`lib.rs:1053-1065`): `dispatch_map` unbound → `NotInitialized`; then `memory_tier` unbound → `NotInitialized`; then empty `data_pci_addrs` → `InvalidParameter`; both bound + non-empty → `Ok`. Check order preserved so the error variant matches live code. Pairs with P2. |
 | P2  — operational APIs fail `NotInitialized` pre-init | dispatcher | `# Verified` (`ensure_initialized`) | — |
 | P11 — lookup size-mismatch hard-fail, no partial copy | dispatcher | `# Unchecked` — **next keystone** | `lookup_async` (`:1784`) and `batch_lookup` (`:1391`) do `min(ipc_handle.size, size)` (partial copy). dispatch-map `lookup` is key-only, so ownership is at dispatcher. Prove `stored != requested ==> Err(InvalidParameter)` + copy branch unreachable. |
 | P14 — eviction attempt bound (`MAX_EVICT_ATTEMPTS`) | dispatcher | `# Unchecked` | Bounded-loop proof over `evict_for_space` (variant `512 - attempts`). |

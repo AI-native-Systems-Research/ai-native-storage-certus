@@ -23,6 +23,42 @@ pub enum DispatcherError {
     IoError,
 }
 
+// ---------- P1: initialize dependency-binding contract ----------
+//
+// Mirrors the guard prefix of `initialize` (dispatcher/src/lib.rs:1053-1065):
+//     self.dispatch_map.get().map_err(|_| NotInitialized(..))?;   // required
+//     self.memory_tier.get().map_err(|_| NotInitialized(..))?;    // required
+//     if config.data_pci_addrs.is_empty() { return InvalidParameter }
+//
+// Initialization must fail when a required dependency is missing and proceed
+// only when both receptacles are bound and at least one data PCI address is
+// configured. The receptacle bindings and the address list are modeled as
+// booleans; the check order is preserved so the exact error variant matches
+// the live code (`dispatch_map` checked before `memory_tier`). This pairs with
+// P2 (`ensure_initialized`): P2 gates operational APIs on the post-init flag,
+// P1 fixes the conditions under which init itself succeeds.
+
+#[ensures(!dispatch_map_bound ==> match result { Err(DispatcherError::NotInitialized) => true, _ => false })]
+#[ensures(dispatch_map_bound && !memory_tier_bound ==> match result { Err(DispatcherError::NotInitialized) => true, _ => false })]
+#[ensures(dispatch_map_bound && memory_tier_bound && pci_addrs_empty ==> match result { Err(DispatcherError::InvalidParameter) => true, _ => false })]
+#[ensures(dispatch_map_bound && memory_tier_bound && !pci_addrs_empty ==> match result { Ok(_) => true, _ => false })]
+pub fn initialize_dependency_guards(
+    dispatch_map_bound: bool,
+    memory_tier_bound: bool,
+    pci_addrs_empty: bool,
+) -> Result<(), DispatcherError> {
+    if !dispatch_map_bound {
+        return Err(DispatcherError::NotInitialized);
+    }
+    if !memory_tier_bound {
+        return Err(DispatcherError::NotInitialized);
+    }
+    if pci_addrs_empty {
+        return Err(DispatcherError::InvalidParameter);
+    }
+    Ok(())
+}
+
 // ---------- P2: initialized-state gate ----------
 //
 // Mirrors `self.ensure_initialized()?` at the top of every operational API

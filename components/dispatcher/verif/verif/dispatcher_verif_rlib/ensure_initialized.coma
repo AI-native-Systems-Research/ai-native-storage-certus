@@ -1,7 +1,7 @@
-(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 36 0 36 75 *)
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 72 0 72 75 *)
 
-let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 34 10 34 100
-let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 35 10 35 68
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 70 10 70 100
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 71 10 71 68
 
 use creusot.prelude.Any
 
@@ -13,7 +13,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let ensure_initialized [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 36 0 36 75]
+let ensure_initialized [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 72 0 72 75]
   (initialized: bool) (return (x: t_Result_unit_DispatcherError)) = (! bb0
   [ bb0 = any [ br0 -> {initialized = false} (! bb1) | br1 -> {initialized} (! bb2) ]
   | bb2 = s0 [ s0 = [ &_ret <- Ok _10 ] s1 | s1 = return {_ret} ]

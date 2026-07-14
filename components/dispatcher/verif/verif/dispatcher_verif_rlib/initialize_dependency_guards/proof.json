@@ -1,0 +1,11 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_initialize_dependency_guards": {
+        "prover": "alt-ergo",
+        "time": 0.011
+      }
+    }
+  }
+}

@@ -1,0 +1,60 @@
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 45 0 49 32 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 41 10 41 107
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 42 10 42 128
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 43 10 43 148
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 44 10 44 116
+
+use creusot.prelude.Any
+
+type t_DispatcherError = NotInitialized | InvalidParameter | AlreadyExists | KeyNotFound | AllocationFailed | IoError
+
+type t_Result_unit_DispatcherError = Ok () | Err t_DispatcherError
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let initialize_dependency_guards [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 45 0 49 32]
+  (dispatch_map_bound: bool) (memory_tier_bound: bool) (pci_addrs_empty: bool)
+  (return (x: t_Result_unit_DispatcherError)) = (! bb0
+  [ bb0 = any [ br0 -> {dispatch_map_bound = false} (! bb1) | br1 -> {dispatch_map_bound} (! bb2) ]
+  | bb2 = any [ br0 -> {memory_tier_bound = false} (! bb4) | br1 -> {memory_tier_bound} (! bb3) ]
+  | bb3 = any [ br0 -> {pci_addrs_empty = false} (! bb6) | br1 -> {pci_addrs_empty} (! bb5) ]
+  | bb5 = s0 [ s0 = [ &_28 <- InvalidParameter ] s1 | s1 = [ &_ret <- Err _28 ] s2 | s2 = return {_ret} ]
+  | bb6 = s0 [ s0 = [ &_ret <- Ok _29 ] s1 | s1 = return {_ret} ]
+  | bb4 = s0 [ s0 = [ &_24 <- NotInitialized ] s1 | s1 = [ &_ret <- Err _24 ] s2 | s2 = return {_ret} ]
+  | bb1 = s0 [ s0 = [ &_20 <- NotInitialized ] s1 | s1 = [ &_ret <- Err _20 ] s2 | s2 = return {_ret} ] ]
+  [ & _ret: t_Result_unit_DispatcherError = Any.any_l ()
+  | & dispatch_map_bound: bool = dispatch_map_bound
+  | & memory_tier_bound: bool = memory_tier_bound
+  | & pci_addrs_empty: bool = pci_addrs_empty
+  | & _20: t_DispatcherError = Any.any_l ()
+  | & _24: t_DispatcherError = Any.any_l ()
+  | & _28: t_DispatcherError = Any.any_l ()
+  | & _29: () = Any.any_l () ])
+  [ return (result: t_Result_unit_DispatcherError) ->
+  {[@stop_split] [@expl:initialize_dependency_guards ensures] ([@stop_split] [@expl:initialize_dependency_guards ensures #0] [%#slib] not dispatch_map_bound
+      -> match result with
+        | Err (NotInitialized) -> true
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:initialize_dependency_guards ensures #1] [%#slib'0] dispatch_map_bound
+        /\ not memory_tier_bound
+      -> match result with
+        | Err (NotInitialized) -> true
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:initialize_dependency_guards ensures #2] [%#slib'1] dispatch_map_bound
+        /\ memory_tier_bound /\ pci_addrs_empty
+      -> match result with
+        | Err (InvalidParameter) -> true
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:initialize_dependency_guards ensures #3] [%#slib'2] dispatch_map_bound
+      /\ memory_tier_bound /\ not pci_addrs_empty
+    -> match result with
+      | Ok _ -> true
+      | _ -> false
+      end)}
+    (! return {result}) ]
