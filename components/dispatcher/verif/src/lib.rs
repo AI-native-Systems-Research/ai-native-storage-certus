@@ -236,6 +236,95 @@ pub fn touch_decision(
     (Ok(()), true)
 }
 
+// ---------- P7: lookup miss returns KeyNotFound and preserves state ----------
+//
+// Mirrors the miss arm of `lookup_async` (dispatcher/src/lib.rs:1812-1816):
+//     self.ensure_initialized()?;                          // P2 gate
+//     ...
+//     match dm.lookup(key) {
+//         Ok(LookupResult::NotExist) => Err(KeyNotFound(key)),  // (:1816)
+//         ...hit arms: copy + mt.touch(key) / dm.release_read(key)...
+//     }
+// The `NotExist` arm returns immediately, before any `mt.touch(key)`,
+// `dm.release_read(key)`, or GPU copy — so a lookup miss mutates no state. The
+// pre-init path (P2 gate) likewise touches nothing.
+//
+// P7 requires: lookup on a missing key returns `KeyNotFound` and preserves
+// state. Modeled at L0 with `initialized`/`exists` booleans. The "preserve
+// state" half is the `mutated` flag (metadata refresh / read-ref release / copy)
+// proved to be set exactly on a hit — hence `false` on both the miss and the
+// pre-init paths. Complements P11 (`resolve_lookup`, which proves the hit copy
+// is clamped and that the miss yields no copy) by adding the init gate and the
+// explicit no-mutation guarantee on the miss. Pairs with P2/P14.
+
+#[ensures(!initialized ==> match result.0 { Err(DispatcherError::NotInitialized) => true, _ => false })]
+#[ensures(initialized && !key_present ==> match result.0 { Err(DispatcherError::KeyNotFound) => true, _ => false })]
+#[ensures(initialized && key_present ==> match result.0 { Ok(_) => true, _ => false })]
+// "preserve state": a mutation happens exactly on a hit, never on a miss/pre-init.
+#[ensures(result.1 == (initialized && key_present))]
+pub fn lookup_miss_decision(
+    initialized: bool,
+    key_present: bool,
+) -> (Result<(), DispatcherError>, bool) {
+    if !initialized {
+        return (Err(DispatcherError::NotInitialized), false);
+    }
+    if !key_present {
+        return (Err(DispatcherError::KeyNotFound), false);
+    }
+    (Ok(()), true)
+}
+
+// ---------- P13: remove on absent key returns KeyNotFound, no mutation ----------
+//
+// Mirrors dispatch-map `remove` (dispatch-map/src/lib.rs:310-333), the map-layer
+// step the dispatcher's `remove` (dispatcher/src/lib.rs:1908-1937) delegates to
+// and whose error it maps to `KeyNotFound`:
+//     let entry = inner.entries.get(&key).ok_or(KeyNotFound)?;      // (:312) absent -> KeyNotFound
+//     if entry.read_ref > 0 || entry.write_ref > 0 { return ActiveReferences } // (:317)
+//     inner.entries.remove(&key);                                   // (:322) only past both guards
+// The `ok_or(KeyNotFound)?` returns BEFORE `entries.remove`, so an absent-key
+// remove leaves the map untouched; a busy entry (active refs) is likewise not
+// removed. Only a present, unreferenced entry is actually deleted.
+//
+// P13 requires: remove on an absent key returns `KeyNotFound` with no mutation.
+// Modeled over a logic-level `FMap` so the "no mutation" half is the concrete
+// `(^map).ext_eq(*map)` (map extensionally unchanged), not a proxy flag. The
+// value carries `read_ref`/`write_ref` to faithfully discharge the
+// ActiveReferences guard, which also preserves the map.
+
+pub struct EntryModel {
+    pub read_ref: u32,
+    pub write_ref: u32,
+}
+
+#[check(ghost)]
+#[ensures(match result {
+    // Present + unreferenced: entry removed, key now absent.
+    Ok(_) => (*map).contains(key) && !(^map).contains(key),
+    // Absent key -> KeyNotFound, map extensionally unchanged (the P13 core).
+    Err(DispatcherError::KeyNotFound) => !(*map).contains(key) && (^map).ext_eq(*map),
+    // Busy entry -> ActiveReferences (mapped to KeyNotFound upstream), unchanged.
+    Err(DispatcherError::InvalidParameter) => (*map).contains(key) && (^map).ext_eq(*map),
+    _ => false,
+})]
+pub fn remove_entry(
+    map: &mut FMap<u64, EntryModel>,
+    key: u64,
+) -> Result<(), DispatcherError> {
+    match map.get_ghost(&key) {
+        None => Err(DispatcherError::KeyNotFound),
+        Some(e) => {
+            if e.read_ref > 0 || e.write_ref > 0 {
+                Err(DispatcherError::InvalidParameter)
+            } else {
+                let _ = map.remove_ghost(&key);
+                Ok(())
+            }
+        }
+    }
+}
+
 // ---------- P20: prepare_store argument validation ----------
 //
 // Mirrors the guard prefix of `prepare_store` (dispatcher/src/lib.rs:2130-2136):

@@ -1,0 +1,157 @@
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 311 0 314 32 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 315 10 315 29
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 318 28 318 29
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 318 47 318 48
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 321 24 321 46
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 302 10 310 1
+let%span sfmap = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 330 14 330 55
+let%span sfmap'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 445 14 445 43
+let%span sfmap'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 446 14 446 41
+let%span sfmap'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span sfmap'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 168 40 168 65
+let%span sfmap'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 171 12 171 41
+let%span sfmap'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sfmap'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 77 14 77 67
+let%span sfmap'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 78 14 78 84
+let%span sfmap'8 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 54 14 54 25
+let%span soption = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/option.rs" 814 8 817 9
+
+use creusot.int.UInt64
+use creusot.int.UInt32
+use map.Map
+use creusot.prelude.MutBorrow
+use creusot.prelude.Any
+use int.Int
+
+type t_FMap_u64_EntryModel
+
+type t_EntryModel = { read_ref: UInt32.t; write_ref: UInt32.t }
+
+type t_Option_ref_EntryModel = None | Some t_EntryModel
+
+type t_Option_EntryModel = None'0 | Some'0 t_EntryModel
+
+function map_Option_EntryModel (self: t_Option_EntryModel) (f: Map.map t_EntryModel t_EntryModel) : t_Option_ref_EntryModel
+ = [%#soption] match self with
+    | None'0 -> None
+    | Some'0 x -> Some (Map.get f x)
+    end
+
+function to_mapping_u64 (self: t_FMap_u64_EntryModel) : Map.map UInt64.t t_Option_EntryModel
+
+function get_u64 [@inline:trivial] (self: t_FMap_u64_EntryModel) (k: UInt64.t) : t_Option_EntryModel =
+  [%#sfmap'5] Map.get (to_mapping_u64 self) k
+
+meta "rewrite_def" function get_u64
+
+let get_ghost_u64 (self: t_FMap_u64_EntryModel) (key: UInt64.t) (return (x: t_Option_ref_EntryModel)) = any
+  [ return (result: t_Option_ref_EntryModel) -> {[@stop_split] [@expl:get_ghost ensures] [%#sfmap] result
+    = map_Option_EntryModel (get_u64 self key) (fun (v: t_EntryModel) -> v)}
+    (! return {result}) ]
+
+let elim_Some (_x: t_Option_ref_EntryModel) (return (f0: t_EntryModel)) = any
+  [ _k (f0: t_EntryModel) -> {Some f0 = _x} (! return {f0})
+  | _chk -> (! {[@expl:elim Some] match _x with
+      | Some _ -> true
+      | _ -> false
+      end}
+    any) ]
+
+predicate resolve_refmut_FMap_u64_EntryModel [@inline:trivial] (_1: MutBorrow.t t_FMap_u64_EntryModel) =
+  _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_FMap_u64_EntryModel
+
+type t_DispatcherError = NotInitialized | InvalidParameter | AlreadyExists | KeyNotFound | AllocationFailed | IoError
+
+type t_Result_unit_DispatcherError = Ok () | Err t_DispatcherError
+
+function len_u64 (self: t_FMap_u64_EntryModel) : int
+
+axiom len_u64_spec: forall self: t_FMap_u64_EntryModel [len_u64 self]. [%#sfmap'8] len_u64 self >= 0
+
+predicate contains_u64 [@inline:trivial] (self: t_FMap_u64_EntryModel) (k: UInt64.t) =
+  [%#sfmap'2] get_u64 self k <> None'0
+
+meta "rewrite_def" predicate contains_u64
+
+function remove_u64 (self: t_FMap_u64_EntryModel) (k: UInt64.t) : t_FMap_u64_EntryModel
+
+axiom remove_u64_spec:
+  forall self: t_FMap_u64_EntryModel, k: UInt64.t [remove_u64 self k]. [%#sfmap'6] to_mapping_u64 (remove_u64 self k)
+    = Map.set (to_mapping_u64 self) k (None'0)
+
+axiom remove_u64_spec'0:
+  forall self: t_FMap_u64_EntryModel, k: UInt64.t [remove_u64 self k]. [%#sfmap'7] len_u64 (remove_u64 self k)
+    = (if contains_u64 self k then len_u64 self - 1 else len_u64 self)
+
+let remove_ghost_u64 (self: MutBorrow.t t_FMap_u64_EntryModel) (key: UInt64.t) (return (x: t_Option_EntryModel)) = any
+  [ return (result: t_Option_EntryModel) ->
+  {[@stop_split] [@expl:remove_ghost_u64 ensures] ([@stop_split] [@expl:remove_ghost ensures #0] [%#sfmap'0] self.final
+      = remove_u64 self.current key)
+    /\ ([@stop_split] [@expl:remove_ghost ensures #1] [%#sfmap'1] result = get_u64 self.current key)}
+    (! return {result}) ]
+
+predicate ext_eq_u64 (self: t_FMap_u64_EntryModel) (other: t_FMap_u64_EntryModel) =
+  [%#sfmap'4] forall k: UInt64.t. get_u64 self k = get_u64 other k
+
+axiom ext_eq_u64_spec: forall self: t_FMap_u64_EntryModel, other: t_FMap_u64_EntryModel [self
+    = other]. [%#sfmap'3] ext_eq_u64 self other = (self = other)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let remove_entry [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 311 0 314 32]
+  (map: MutBorrow.t t_FMap_u64_EntryModel) (key: UInt64.t) (return (x: t_Result_unit_DispatcherError)) = (! bb0
+  [ bb0 = s0
+    [ s0 = [ &_9 <- key ] s1
+    | s1 = get_ghost_u64 [%#slib] {map.current} {_9} (fun (_x: t_Option_ref_EntryModel) -> [ &_6 <- _x ] s2)
+    | s2 = any [ br0 -> {_6 = None} (! bb3) | br1 (x0: t_EntryModel) -> {_6 = Some x0} (! bb4) ] ]
+  | bb4 = s0
+    [ s0 = elim_Some {_6} (fun (r0: t_EntryModel) -> [ &e <- r0 ] s1)
+    | s1 = [ &_13 <- UInt32.gt e.read_ref ([%#slib'0] (0: UInt32.t)) ] s2
+    | s2 = any [ br0 -> {_13 = false} (! bb7) | br1 -> {_13} (! bb6) ] ]
+  | bb6 = s0 [ s0 = -{resolve_refmut_FMap_u64_EntryModel map}- s1 | s1 = bb9 ]
+  | bb7 = s0
+    [ s0 = [ &_15 <- UInt32.gt e.write_ref ([%#slib'1] (0: UInt32.t)) ] s1
+    | s1 = any [ br0 -> {_15 = false} (! bb10) | br1 -> {_15} (! bb8) ] ]
+  | bb8 = s0 [ s0 = -{resolve_refmut_FMap_u64_EntryModel map}- s1 | s1 = bb9 ]
+  | bb9 = s0 [ s0 = [ &_17 <- InvalidParameter ] s1 | s1 = [ &_ret <- Err _17 ] s2 | s2 = return {_ret} ]
+  | bb10 = s0
+    [ s0 = [ &_21 <- key ] s1
+    | s1 = MutBorrow.borrow_final <t_FMap_u64_EntryModel> {map.current} {MutBorrow.get_id map}
+        (fun (_bor: MutBorrow.t t_FMap_u64_EntryModel) ->
+          [ &_19 <- _bor ] [ &map <- { map with current = _bor.final } ] s2)
+    | s2 = remove_ghost_u64 [%#slib'2] {_19} {_21} (fun (_x: t_Option_EntryModel) -> [ &_18 <- _x ] s3)
+    | s3 = -{resolve_refmut_FMap_u64_EntryModel map}- s4
+    | s4 = [ &_ret <- Ok _22 ] s5
+    | s5 = return {_ret} ]
+  | bb3 = s0
+    [ s0 = -{resolve_refmut_FMap_u64_EntryModel map}- s1
+    | s1 = [ &_11 <- KeyNotFound ] s2
+    | s2 = [ &_ret <- Err _11 ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: t_Result_unit_DispatcherError = Any.any_l ()
+  | & map: MutBorrow.t t_FMap_u64_EntryModel = map
+  | & key: UInt64.t = key
+  | & _6: t_Option_ref_EntryModel = Any.any_l ()
+  | & _9: UInt64.t = Any.any_l ()
+  | & _11: t_DispatcherError = Any.any_l ()
+  | & e: t_EntryModel = Any.any_l ()
+  | & _13: bool = Any.any_l ()
+  | & _15: bool = Any.any_l ()
+  | & _17: t_DispatcherError = Any.any_l ()
+  | & _18: t_Option_EntryModel = Any.any_l ()
+  | & _19: MutBorrow.t t_FMap_u64_EntryModel = Any.any_l ()
+  | & _21: UInt64.t = Any.any_l ()
+  | & _22: () = Any.any_l () ])
+  [ return (result: t_Result_unit_DispatcherError) ->
+  {[@stop_split] [@expl:remove_entry ensures] [%#slib'3] match result with
+      | Ok _ -> contains_u64 map.current key /\ not contains_u64 map.final key
+      | Err (KeyNotFound) -> not contains_u64 map.current key /\ ext_eq_u64 map.final map.current
+      | Err (InvalidParameter) -> contains_u64 map.current key /\ ext_eq_u64 map.final map.current
+      | _ -> false
+      end}
+    (! return {result}) ]

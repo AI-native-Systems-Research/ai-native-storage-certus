@@ -1,0 +1,8 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_lookup_miss_decision": { "prover": "alt-ergo", "time": 0.011 }
+    }
+  }
+}
