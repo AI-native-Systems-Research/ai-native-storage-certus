@@ -405,6 +405,155 @@ impl Drop for BackgroundEvictor {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Background Memory-Tier Evictor (DRAM → SSD demotion)
+// ---------------------------------------------------------------------------
+
+pub struct MemoryTierEvictorConfig {
+    pub threshold: f64,
+    pub low_watermark: f64,
+    pub batch_size: usize,
+    pub interval: Duration,
+}
+
+pub struct MemoryTierEvictor {
+    shutdown: Arc<AtomicBool>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl MemoryTierEvictor {
+    pub fn start(
+        dm: Arc<dyn IDispatchMap + Send + Sync>,
+        mt: Arc<dyn IMemoryTier + Send + Sync>,
+        config: MemoryTierEvictorConfig,
+        logger: Option<Arc<dyn ILogger + Send + Sync>>,
+        eviction_tx: Option<Sender<EvictionEvent>>,
+    ) -> Self {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_clone = Arc::clone(&shutdown);
+
+        let handle = thread::Builder::new()
+            .name("dispatcher-mt-evictor".into())
+            .spawn(move || {
+                Self::evictor_loop(
+                    &shutdown_clone,
+                    &dm,
+                    &mt,
+                    &config,
+                    logger.as_deref(),
+                    eviction_tx.as_ref(),
+                );
+            })
+            .expect("failed to spawn memory-tier evictor thread");
+
+        Self {
+            shutdown,
+            handle: Some(handle),
+        }
+    }
+
+    pub fn shutdown(&mut self) {
+        self.shutdown.store(true, Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+
+    fn evictor_loop(
+        shutdown: &AtomicBool,
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        config: &MemoryTierEvictorConfig,
+        logger: Option<&(dyn ILogger + Send + Sync)>,
+        eviction_tx: Option<&Sender<EvictionEvent>>,
+    ) {
+        loop {
+            thread::sleep(config.interval);
+
+            if shutdown.load(Ordering::Acquire) {
+                return;
+            }
+
+            let used = mt.used();
+            let capacity = mt.capacity();
+            if capacity == 0 {
+                continue;
+            }
+
+            let utilization = used as f64 / capacity as f64;
+            if utilization < config.threshold {
+                continue;
+            }
+
+            if let Some(log) = logger {
+                log.info(&format!(
+                    "mt-evictor: utilization {:.1}% exceeds threshold {:.1}%, demoting",
+                    utilization * 100.0,
+                    config.threshold * 100.0,
+                ));
+            }
+
+            let candidates = mt.oldest_keys(config.batch_size);
+            let mut demoted = 0u32;
+
+            for key in candidates {
+                if shutdown.load(Ordering::Acquire) {
+                    return;
+                }
+
+                if !dm.is_evictable(key) {
+                    continue;
+                }
+
+                if mt.remove(key).is_err() {
+                    continue;
+                }
+
+                if dm.convert_memory_tier_to_block(key).is_err() {
+                    let _ = dm.remove(key);
+                    if let Some(tx) = eviction_tx {
+                        let _ = tx.try_send(EvictionEvent {
+                            key,
+                            reason: EvictionReason::Removed,
+                        });
+                    }
+                } else {
+                    if let Some(tx) = eviction_tx {
+                        let _ = tx.try_send(EvictionEvent {
+                            key,
+                            reason: EvictionReason::Demoted,
+                        });
+                    }
+                }
+
+                demoted += 1;
+
+                let used_now = mt.used();
+                let util_now = used_now as f64 / capacity as f64;
+                if util_now < config.low_watermark {
+                    break;
+                }
+            }
+
+            if let Some(log) = logger {
+                let used_after = mt.used();
+                log.info(&format!(
+                    "mt-evictor: demoted {demoted} entries, utilization now {:.1}%",
+                    used_after as f64 / capacity as f64 * 100.0,
+                ));
+            }
+        }
+    }
+}
+
+impl Drop for MemoryTierEvictor {
+    fn drop(&mut self) {
+        if self.handle.is_some() {
+            self.shutdown();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

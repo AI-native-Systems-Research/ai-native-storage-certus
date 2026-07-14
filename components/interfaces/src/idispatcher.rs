@@ -65,6 +65,19 @@ pub struct DispatcherConfig {
     /// Size of the extended metadata partition in bytes.
     /// Default: 128 MiB.
     pub extended_metadata_partition_size: u64,
+    /// Memory-tier utilization fraction (0.0–1.0) at which background demotion starts.
+    /// Demotes LRU entries from DRAM to SSD proactively.
+    /// Default: 0.0 (disabled). Set to e.g. 0.8 to trigger at 80% full.
+    pub memory_tier_eviction_threshold: f64,
+    /// Memory-tier utilization fraction below which demotion stops (low-water mark).
+    /// Default: 0.70.
+    pub memory_tier_eviction_low_watermark: f64,
+    /// Number of entries to evaluate per memory-tier demotion sweep cycle.
+    /// Default: 64.
+    pub memory_tier_eviction_batch_size: usize,
+    /// Seconds between memory-tier utilization checks.
+    /// Default: 2.
+    pub memory_tier_eviction_interval_secs: u64,
 }
 
 impl Default for DispatcherConfig {
@@ -82,6 +95,10 @@ impl Default for DispatcherConfig {
             backfill_delay_ms: 10,
             metadata_partition_size: 128 * 1024 * 1024,
             extended_metadata_partition_size: 128 * 1024 * 1024,
+            memory_tier_eviction_threshold: 0.0,
+            memory_tier_eviction_low_watermark: 0.70,
+            memory_tier_eviction_batch_size: 64,
+            memory_tier_eviction_interval_secs: 2,
         }
     }
 }
