@@ -45,6 +45,9 @@ service Dispatcher {
 
   // Drain eviction events since the last call (non-blocking poll).
   rpc TakeEvents(TakeEventsRequest) returns (TakeEventsResponse);
+
+  // Return cumulative per-direction SSD read/write byte/op/latency counters.
+  rpc GetIoStats(GetIoStatsRequest) returns (IoStatsResponse);
 }
 
 // --- Common types ---
@@ -252,4 +255,17 @@ message EvictionEvent {
 message TakeEventsResponse {
   repeated EvictionEvent events = 1;
   uint64 dropped_count = 2;  // Events lost due to channel overflow since last drain
+}
+
+// --- GetIoStats (per-direction SSD I/O counters) ---
+
+message GetIoStatsRequest {}
+
+message IoStatsResponse {
+  uint64 read_ops = 1;
+  uint64 read_bytes = 2;
+  uint64 read_latency_ns_sum = 3;
+  uint64 write_ops = 4;
+  uint64 write_bytes = 5;
+  uint64 write_latency_ns_sum = 6;
 }

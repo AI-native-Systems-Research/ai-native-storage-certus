@@ -16,6 +16,7 @@ mod imemory_tier;
 mod ipartition_table;
 mod iremote_lookup;
 mod iremote_request_handler;
+mod izyre;
 
 pub use idispatch_map::CacheKey;
 pub use idispatch_map::DispatchMapError;
@@ -48,6 +49,13 @@ pub use iremote_lookup::RemoteLookupError;
 pub use iremote_request_handler::IRemoteRequestHandler;
 pub use iremote_request_handler::LookupRef;
 pub use iremote_request_handler::RemoteRequestHandlerError;
+pub use izyre::GossipConfig;
+pub use izyre::IZyre;
+pub use izyre::IZyreNode;
+pub use izyre::NodeConfig;
+pub use izyre::PeerId;
+pub use izyre::ZyreError;
+pub use izyre::ZyreEvent;
 
 #[cfg(feature = "spdk")]
 pub mod spdk_types;
@@ -72,7 +80,7 @@ pub use ispdk_env::ISPDKEnv;
 #[cfg(feature = "spdk")]
 pub use iblock_device::{
     ClientChannels, Command, Completion, IBlockDevice, NamespaceInfo, NvmeBlockError, OpHandle,
-    TelemetrySnapshot,
+    ReadWriteStats, TelemetrySnapshot,
 };
 
 #[cfg(feature = "spdk")]
