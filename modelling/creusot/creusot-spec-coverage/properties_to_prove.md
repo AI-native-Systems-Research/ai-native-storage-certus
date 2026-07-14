@@ -29,7 +29,7 @@ Evidence path prefixes:
 
 | Property | Plain-English requirement | Owner interface | Scope | Status | Evidence (function / artifact) | Abstraction | Notes |
 |---|---|---|---|---|---|---|---|
-| P1 | Initialize must fail when required dependencies are missing and succeed when they are bound. | `IDispatcher` | active | Unchecked | planned in `components/dispatcher/verif/src/lib.rs` | L0 target | High-priority gap. |
+| P1 | Initialize must fail when required dependencies are missing and succeed when they are bound. | `IDispatcher` | active | Verified | `initialize_dependency_guards` -> `initialize_dependency_guards.coma` (1/1 VC, 1 `.coma` file) | L0 | Mirrors `initialize` guard prefix (`dispatcher/src/lib.rs:1053-1065`): `dispatch_map`/`memory_tier` unbound → `NotInitialized`; empty `data_pci_addrs` → `InvalidParameter`; both bound + non-empty → `Ok`. Check order preserved. Pairs with P2. |
 | P2 | Operational APIs must fail with `NotInitialized` before successful init. | `IDispatcher` | active | Verified | `ensure_initialized` -> `ensure_initialized.coma` | L0 | Claude July proof; still mirrors live code. |
 | P3 | Duplicate key insertion must fail cleanly (`AlreadyExists`) without mutating existing data. | `IDispatchMap` + `IDispatcher` | active | Partial | dispatch-map local creation proofs (for example `create_memory_tier_entry.coma`, `create_staging.coma`) | L1 | Map-wide uniqueness across all keys not fully discharged. |
 | P4 | Successful populate must create a correct MemoryTier entry for that key. | `IDispatcher` | active | Partial | local entry creation evidence (`create_memory_tier_entry.coma`) | L1 | Dispatcher end-to-end populate flow not fully proved. |
