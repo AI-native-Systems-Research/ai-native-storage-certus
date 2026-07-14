@@ -1,0 +1,69 @@
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 226 0 229 40 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 236 13 236 17
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 234 51 234 56
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 231 54 231 59
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 222 10 222 102
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 223 10 223 114
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 224 10 224 85
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 225 10 225 66
+
+use creusot.prelude.Any
+
+type t_DispatcherError = NotInitialized | InvalidParameter | AlreadyExists | KeyNotFound | AllocationFailed | IoError
+
+type t_Result_unit_DispatcherError = Ok () | Err t_DispatcherError
+
+type tup2_Result_unit_DispatcherError_bool = { f0: t_Result_unit_DispatcherError; f1: bool }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let touch_decision [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 226 0 229 40]
+  (initialized: bool) (key_present: bool) (return (x: tup2_Result_unit_DispatcherError_bool)) = (! bb0
+  [ bb0 = any [ br0 -> {initialized = false} (! bb1) | br1 -> {initialized} (! bb2) ]
+  | bb2 = any [ br0 -> {key_present = false} (! bb4) | br1 -> {key_present} (! bb3) ]
+  | bb3 = s0
+    [ s0 = [ &_22 <- Ok _23 ] s1 | s1 = [ &_ret <- { f0 = _22; f1 = ([%#slib] true) } ] s2 | s2 = return {_ret} ]
+  | bb4 = s0
+    [ s0 = [ &_21 <- KeyNotFound ] s1
+    | s1 = [ &_20 <- Err _21 ] s2
+    | s2 = [ &_ret <- { f0 = _20; f1 = ([%#slib'0] false) } ] s3
+    | s3 = return {_ret} ]
+  | bb1 = s0
+    [ s0 = [ &_16 <- NotInitialized ] s1
+    | s1 = [ &_15 <- Err _16 ] s2
+    | s2 = [ &_ret <- { f0 = _15; f1 = ([%#slib'1] false) } ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: tup2_Result_unit_DispatcherError_bool = Any.any_l ()
+  | & initialized: bool = initialized
+  | & key_present: bool = key_present
+  | & _15: t_Result_unit_DispatcherError = Any.any_l ()
+  | & _16: t_DispatcherError = Any.any_l ()
+  | & _20: t_Result_unit_DispatcherError = Any.any_l ()
+  | & _21: t_DispatcherError = Any.any_l ()
+  | & _22: t_Result_unit_DispatcherError = Any.any_l ()
+  | & _23: () = Any.any_l () ])
+  [ return (result: tup2_Result_unit_DispatcherError_bool) ->
+  {[@stop_split] [@expl:touch_decision ensures] ([@stop_split] [@expl:touch_decision ensures #0] [%#slib'2] not initialized
+      -> match result.f0 with
+        | Err (NotInitialized) -> true
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:touch_decision ensures #1] [%#slib'3] initialized /\ not key_present
+      -> match result.f0 with
+        | Err (KeyNotFound) -> true
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:touch_decision ensures #2] [%#slib'4] initialized /\ key_present
+      -> match result.f0 with
+        | Ok _ -> true
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:touch_decision ensures #3] [%#slib'5] result.f1
+    = match result.f0 with
+      | Ok _ -> true
+      | _ -> false
+      end)}
+    (! return {result}) ]

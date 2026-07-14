@@ -201,6 +201,41 @@ pub fn evictor_decisions(
     (should_start, should_stop)
 }
 
+// ---------- P14: touch refreshes on hit, KeyNotFound on miss ----------
+//
+// Mirrors `touch` (dispatcher/src/lib.rs:2172-2188):
+//     self.ensure_initialized()?;                              // P2 gate
+//     let dm = self.dispatch_map.get().map_err(NotInitialized)?;
+//     dm.touch(key).map_err(|_| KeyNotFound(key))?;            // map miss -> KeyNotFound
+//     if let Ok(mt) = self.memory_tier.get() { mt.touch(key); } // best-effort
+//     Ok(())
+// and the underlying map `touch` (dispatch-map/src/lib.rs:335-347): key present
+// -> refresh eviction metadata (`ep.touch(handle)`), key absent -> KeyNotFound.
+//
+// P14 requires: touch on an existing key refreshes metadata; an absent key
+// returns `KeyNotFound`; a miss (and the pre-init path) must not mutate state.
+// Modeled at L0 with `initialized` and `key_present` as booleans. The metadata
+// refresh is represented by the second tuple element `refreshed`, proved equal
+// to "returned Ok" — so refresh happens exactly on the hit path and never on a
+// miss or before init (the "no mutation" half of the property).
+
+#[ensures(!initialized ==> match result.0 { Err(DispatcherError::NotInitialized) => true, _ => false })]
+#[ensures(initialized && !key_present ==> match result.0 { Err(DispatcherError::KeyNotFound) => true, _ => false })]
+#[ensures(initialized && key_present ==> match result.0 { Ok(_) => true, _ => false })]
+#[ensures(result.1 == match result.0 { Ok(_) => true, _ => false })]
+pub fn touch_decision(
+    initialized: bool,
+    key_present: bool,
+) -> (Result<(), DispatcherError>, bool) {
+    if !initialized {
+        return (Err(DispatcherError::NotInitialized), false);
+    }
+    if !key_present {
+        return (Err(DispatcherError::KeyNotFound), false);
+    }
+    (Ok(()), true)
+}
+
 // ---------- P20: prepare_store argument validation ----------
 //
 // Mirrors the guard prefix of `prepare_store` (dispatcher/src/lib.rs:2130-2136):

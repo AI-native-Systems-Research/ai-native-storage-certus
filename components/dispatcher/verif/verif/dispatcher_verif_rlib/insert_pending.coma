@@ -1,8 +1,8 @@
-(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 304 0 308 25 *)
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 339 0 343 25 *)
 
-let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 309 4 309 34
-let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 302 10 302 30
-let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 303 10 303 50
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 344 4 344 34
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 337 10 337 30
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 338 10 338 50
 let%span sfmap = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 420 14 420 49
 let%span sfmap'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 421 14 421 40
 let%span sfmap'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
@@ -67,7 +67,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let insert_pending [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 304 0 308 25]
+let insert_pending [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 339 0 343 25]
   (map: MutBorrow.t t_FMap_u64_PendingModel) (key: UInt64.t) (pending: t_PendingModel)
   (return (x: t_Option_PendingModel)) = (! bb0
   [ bb0 = s0
