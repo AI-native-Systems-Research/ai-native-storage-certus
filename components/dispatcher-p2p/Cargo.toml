@@ -25,6 +25,7 @@ default = ["spdk-backend"]
 spdk-backend = ["dep:block-device-spdk-nvme"]
 hardware-test = []
 pipeline-telemetry = []
+rw-telemetry = ["block-device-spdk-nvme?/telemetry"]
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

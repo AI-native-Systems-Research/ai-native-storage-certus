@@ -330,6 +330,12 @@ impl IBlockDevice for BlockDeviceKernelComponent {
             ))
         }
     }
+
+    /// Per-direction read/write counters. The kernel block device does not
+    /// track per-direction rw-telemetry, so this returns zeroed counters.
+    fn read_write_stats(&self) -> interfaces::ReadWriteStats {
+        interfaces::ReadWriteStats::default()
+    }
 }
 
 #[cfg(test)]
