@@ -54,11 +54,11 @@
         { "id": "fire-and-forget", "note": "whisper/shout to a departed UUID (spec.md:81) is untested" }
       ],
       "success_criteria": [
-        { "id": "SC-001", "status": "unverified", "note": "integration test uses 500ms sleep + 5s deadline; 2s bound not asserted" },
+        { "id": "SC-001", "status": "verified", "note": "round_trip_within_two_seconds asserts A->B->A exchange within the 2s bound (2026-07-14)" },
         { "id": "SC-002", "status": "verified", "note": "public API safe; tests/api_safety.rs guards it" },
-        { "id": "SC-003", "status": "unverified", "note": "no automated clean-build timing or CI gate" },
+        { "id": "SC-003", "status": "verified", "note": "from-scratch cargo build -p zyre incl. bindgen = 2.27s; C-deps build is separate one-time cost (2026-07-14)" },
         { "id": "SC-004", "status": "verified", "note": "9 event types lossless; single-frame payload unbounded (multi-frame gap resolved)" },
-        { "id": "SC-005", "status": "unverified", "note": "no Miri/valgrind harness; Miri cannot cross FFI boundary" }
+        { "id": "SC-005", "status": "verified", "note": "valgrind memcheck (run-valgrind.sh + valgrind.supp) over lib+integration: 0 errors/0 bytes lost attributable to bindings; Miri inapplicable (FFI). C-library-internal reports suppressed (2026-07-14)" }
       ]
     }
   ],

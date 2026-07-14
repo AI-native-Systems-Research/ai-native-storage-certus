@@ -103,8 +103,8 @@
 - [x] T032 [P] [US2] Add doc comments with `///` examples to `NodeConfig` and `GossipConfig` (public fields + constructors) in `components/interfaces/src/izyre.rs`
 - [x] T033 [P] [US2] Add doc comments with `///` examples to `ZyreError` and `PeerId` in `components/interfaces/src/izyre.rs`
 - [x] T034 [US2] Add crate-level documentation (`//!`) with quickstart example in `components/zyre/src/lib.rs`
-- [ ] T035 [US2] Verify `cargo doc --no-deps -p zyre` completes with zero warnings (requires Linux with C deps)
-- [ ] T036 [US2] Verify `cargo clippy -p zyre -- -D warnings` passes clean (requires Linux with C deps)
+- [x] T035 [US2] Verify `cargo doc --no-deps -p zyre` completes with zero warnings (requires Linux with C deps) — verified 2026-07-14
+- [x] T036 [US2] Verify `cargo clippy -p zyre -- -D warnings` passes clean (requires Linux with C deps) — verified 2026-07-14
 
 **Checkpoint**: `cargo test --doc -p zyre` passes. `cargo doc --no-deps -p zyre` is warning-free. All public APIs have examples.
 
@@ -126,7 +126,7 @@
 - [x] T039 [US3] Finalize `deps/install_zyre_deps.sh` with RHEL/Fedora package list (cmake, gcc, make, pkg-config, libtool, libclang-devel) in `deps/install_zyre_deps.sh`
 - [x] T040 [US3] Finalize `deps/build_zyre.sh` with version pinning, idempotent clone, cmake build, and local install prefix in `deps/build_zyre.sh`
 - [x] T041 [US3] Ensure `build.rs` uses `ZYRE_BUILD_DIR` env var with fallback to `deps/zyre-build/` in `components/zyre/build.rs`
-- [ ] T042 [US3] Verify end-to-end: clean `deps/zyre-build/`, run `deps/build_zyre.sh`, then `cargo build -p zyre` succeeds (requires Linux)
+- [~] T042 [US3] Verify end-to-end: clean `deps/zyre-build/`, run `deps/build_zyre.sh`, then `cargo build -p zyre` succeeds (requires Linux) — **SC-003**: a from-scratch `cargo build -p zyre` (incl. bindgen) is **2.27s**, far under the 5-minute budget (measured 2026-07-14). The C-deps build (`build_zyre.sh`) is the one-time dominant cost and was not re-run this pass (libs already at `deps/zyre-build/`).
 
 **Checkpoint**: Clean-checkout build works. No system-wide library installation required.
 
@@ -180,7 +180,8 @@
 - [x] T052 [P] Implement `ZyreNode::peer_address()` and `ZyreNode::peer_header_value()` in `components/zyre/src/node.rs`
 - [x] T053 [P] Add unit tests for peer introspection methods in `components/zyre/src/node.rs` (validation-level tests; full introspection requires running C library)
 - [x] T054 Run `cargo fmt --check -p zyre` and fix any formatting issues
-- [ ] T055 Run full CI gate: `cargo fmt --check && cargo clippy -p zyre -- -D warnings && cargo test -p zyre && cargo doc --no-deps -p zyre` (requires Linux with C deps)
+- [x] T055 Run full CI gate: `cargo fmt --check && cargo clippy -p zyre -- -D warnings && cargo test -p zyre && cargo doc --no-deps -p zyre` (requires Linux with C deps) — all green 2026-07-14 (fmt clean, clippy clean, 6 lib + 3 api_safety + 5 integration + 1 doc tests pass, doc warning-free)
+- [x] T057 **SC-005** memory safety: Miri cannot cross the FFI boundary, so validate with valgrind memcheck via `components/zyre/run-valgrind.sh` (+ `valgrind.supp`). Lib and integration suites report **0 errors / 0 bytes lost** attributable to the bindings; only C-library-internal reports are suppressed (documented in `valgrind.supp`). Verified 2026-07-14.
 - [ ] T056 Validate quickstart.md instructions end-to-end in `specs/001-zyre-bindings/quickstart.md` (requires Linux)
 
 ---

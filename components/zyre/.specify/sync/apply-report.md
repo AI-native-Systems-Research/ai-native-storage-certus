@@ -65,10 +65,22 @@ contract's own `Stop => break` loop dead code. B is the faithful mapping.
 | P4 (`research.md:84`) | Awaiting apply |
 | SC-001 / SC-003 / SC-005 | Verification follow-ups (timed test / build timing / valgrind) |
 
+## Follow-up: SC verification pass (2026-07-14)
+
+Addressed the three verification follow-ups (previously "requires Linux + C deps"):
+
+| SC | Result |
+|----|--------|
+| SC-001 (round-trip < 2 s) | **Verified.** Added `round_trip_within_two_seconds` (integration) asserting a real A→B→A exchange within 2 s. Discovery/whisper tests now resend-in-loop; added a `ZYRE_TEST_TIMEOUT_SCALE` env knob so they survive valgrind slowdown. |
+| SC-003 (clean build < 5 min) | **Verified.** From-scratch `cargo build -p zyre` (incl. bindgen) = 2.27 s. The one-time C-deps build (`build_zyre.sh`) is separate and unchanged. |
+| SC-005 (memory safety) | **Verified.** Miri can't cross the FFI boundary; added a valgrind harness (`run-valgrind.sh` + `valgrind.supp`). memcheck over lib + integration = 0 errors / 0 bytes lost attributable to the bindings; only C-library-internal reports are suppressed (incl. a benign self-overlapping `strcpy` inside czmq's `zsys_set_thread_name_prefix_str`). |
+
+New/changed files: `components/zyre/tests/integration.rs` (SC-001 test + scaling + resend loops), `components/zyre/run-valgrind.sh`, `components/zyre/valgrind.supp`; tasks T035/T036/T055 checked, T042 annotated, T057 (SC-005) added.
+
+Full CI gate re-run green: fmt clean, clippy `-D warnings` clean, tests (6 lib + 3 api_safety + 5 integration + 1 doc) pass, `cargo doc` warning-free.
+
 ## Next Steps
 
-1. Review the diff:
-   `git diff components/interfaces/src/izyre.rs components/zyre/src/node.rs components/zyre/tests/integration.rs components/zyre/specs/001-zyre-bindings/`
-2. Commit (per-component, per repo convention):
-   `git add components/interfaces components/zyre && git commit -m "feat(zyre): deliver terminal ZyreEvent::Stop as an end-of-stream sentinel"`
-3. Apply the remaining doc backfills P1–P4 (and fold the STOP drain semantics into FR-008 when P3 lands).
+1. Review the diff and commit the SC-verification pass.
+2. Remaining doc backfills P1–P4 were applied in commit `f6763fe`.
+3. Optional: add a whisper-to-departed-UUID fire-and-forget test (`spec.md:81`) — not an SC gate.

@@ -148,10 +148,12 @@ updated to match) — except P5, which needs a human design decision.
 
 ---
 
-## Follow-ups (verification tasks — require the Linux + C-deps environment)
+## Follow-ups (verification tasks) — RESOLVED 2026-07-14
 
-Not spec/code drift; carried from the drift report's SC gaps:
+All three SC gaps from the drift report were addressed:
 
-- **SC-001**: tighten `two_nodes_discover_and_shout` into a timed round-trip assertion (currently 500 ms sleep + 5 s deadline; the 2 s bound is not enforced), **or** relax SC-001's wording to "within a few seconds".
-- **SC-003**: record a clean-build timing (< 5 min) — no automated gate exists.
-- **SC-005**: add a valgrind CI job over the (serialized) integration tests; note that Miri cannot cross the FFI boundary. Optionally add a whisper-to-departed-UUID test to lock the fire-and-forget contract (`spec.md:81`).
+- **SC-001** ✓ — added `round_trip_within_two_seconds` (integration), asserting a real A→B→A exchange completes within the 2 s bound. Also made the discovery/whisper tests resend-in-loop and added a `ZYRE_TEST_TIMEOUT_SCALE` knob so they survive valgrind's slowdown.
+- **SC-003** ✓ — measured a from-scratch `cargo build -p zyre` (incl. bindgen) at 2.27 s, far under the 5-minute budget. The one-time C-deps build (`build_zyre.sh`) is separate and unchanged.
+- **SC-005** ✓ — Miri can't cross FFI, so added a committed valgrind harness (`run-valgrind.sh` + `valgrind.supp`). memcheck over the lib + integration suites reports 0 errors / 0 bytes lost attributable to the bindings (only C-library-internal reports suppressed, documented).
+
+Still open: the whisper-to-departed-UUID fire-and-forget test (`spec.md:81`) — optional, not an SC gate.

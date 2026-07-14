@@ -80,11 +80,11 @@ Code sources: `components/interfaces/src/izyre.rs` (traits + value types),
 
 #### Success Criteria — Verification Status
 
-- **SC-001** (round-trip < 2 s on localhost): ⚠️ Unverified — `integration.rs` sleeps 500 ms then polls a 5 s deadline; the 2 s bound is not asserted.
+- **SC-001** (round-trip < 2 s on localhost): ✓ Verified (2026-07-14) — `round_trip_within_two_seconds` asserts a real A→B→A exchange completes inside the 2 s bound.
 - **SC-002** (zero `unsafe` in public API): ✓ Verified — safe public surface; `tests/api_safety.rs` guards it.
-- **SC-003** (clean build < 5 min): ⚠️ Unverified — no automated measurement or CI gate.
+- **SC-003** (clean build < 5 min): ✓ Verified (2026-07-14) — from-scratch `cargo build -p zyre` (incl. bindgen) is 2.27 s. (One-time C-deps build via `build_zyre.sh` is separate.)
 - **SC-004** (all event types, no info loss): ✓ Verified — 9 event types lossless; single-frame payload is unbounded (multi-frame gap resolved).
-- **SC-005** (Miri/valgrind clean): ⚠️ Unverified — no Miri/valgrind harness. Miri cannot cross the FFI boundary; a valgrind job over the serialized integration tests is the realistic vehicle.
+- **SC-005** (Miri/valgrind clean): ✓ Verified (2026-07-14) — Miri can't cross FFI; valgrind memcheck over the lib + integration suites (`run-valgrind.sh` + `valgrind.supp`) reports 0 errors / 0 bytes lost attributable to the bindings (C-library-internal reports suppressed).
 
 ### Unspecced Code 🆕
 

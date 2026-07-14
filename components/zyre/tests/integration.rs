@@ -33,6 +33,23 @@ fn serialize() -> MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// Multiplier applied to the discovery/receive deadlines for slow environments.
+/// Under valgrind everything runs ~20-40x slower, which would blow past the
+/// wall-clock deadlines below; set e.g. `ZYRE_TEST_TIMEOUT_SCALE=40` so the
+/// memory-safety run (see `run-valgrind.sh`) still completes. Defaults to 1.
+fn timeout_scale() -> u32 {
+    std::env::var("ZYRE_TEST_TIMEOUT_SCALE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|&n| n >= 1)
+        .unwrap_or(1)
+}
+
+/// A base duration scaled by [`timeout_scale`].
+fn scaled(base: Duration) -> Duration {
+    base * timeout_scale()
+}
+
 #[test]
 fn two_nodes_discover_and_shout() {
     let _guard = serialize();
@@ -54,33 +71,34 @@ fn two_nodes_discover_and_shout() {
     node_a.join("test-group").expect("A join");
     node_b.join("test-group").expect("B join");
 
-    // Allow time for UDP beacon discovery
-    thread::sleep(Duration::from_millis(500));
-
-    // Node A shouts a message to the group
+    // A shout only reaches peers already in the group, so keep shouting until
+    // B has discovered A and joined — a single pre-timed shout races discovery
+    // (and loses that race under valgrind's slowdown).
     let payload = b"hello from A";
-    node_a
-        .shout("test-group", payload)
-        .expect("A shout to group");
-
-    // Node B should receive ENTER events and the SHOUT
     let mut received_shout = false;
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-
+    let deadline = std::time::Instant::now() + scaled(Duration::from_secs(5));
     while std::time::Instant::now() < deadline {
-        match node_b.try_recv() {
-            Ok(Some(ZyreEvent::Shout { message, group, .. })) => {
-                if group == "test-group" && message == payload {
+        node_a
+            .shout("test-group", payload)
+            .expect("A shout to group");
+        // Drain everything currently queued for B this round.
+        loop {
+            match node_b.try_recv() {
+                Ok(Some(ZyreEvent::Shout { message, group, .. }))
+                    if group == "test-group" && message == payload =>
+                {
                     received_shout = true;
                     break;
                 }
+                Ok(Some(_)) => continue,
+                Ok(None) => break,
+                Err(e) => panic!("recv error: {e}"),
             }
-            Ok(Some(_)) => continue,
-            Ok(None) => {
-                thread::sleep(Duration::from_millis(50));
-            }
-            Err(e) => panic!("recv error: {e}"),
         }
+        if received_shout {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
     }
 
     assert!(received_shout, "node B should receive shout from node A");
@@ -104,12 +122,9 @@ fn two_nodes_whisper() {
     node_a.start().expect("start A");
     node_b.start().expect("start B");
 
-    // Wait for discovery
-    thread::sleep(Duration::from_millis(500));
-
-    // Find node A's peer ID as seen by node B
+    // Find node A's peer ID as seen by node B (discovery happens as we poll).
     let mut peer_a_id = None;
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + scaled(Duration::from_secs(5));
     while std::time::Instant::now() < deadline {
         match node_b.try_recv() {
             Ok(Some(ZyreEvent::Enter { peer, name, .. })) if name == "whisper-a" => {
@@ -123,25 +138,28 @@ fn two_nodes_whisper() {
     }
     let peer_a_id = peer_a_id.expect("B should discover A");
 
-    // B whispers to A
+    // B re-whispers to A until A receives it (robust against the return path
+    // still wiring up, and against valgrind slowdown).
     let payload = b"secret message";
-    node_b.whisper(&peer_a_id, payload).expect("B whisper to A");
-
-    // A receives the whisper
     let mut received_whisper = false;
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + scaled(Duration::from_secs(5));
     while std::time::Instant::now() < deadline {
-        match node_a.try_recv() {
-            Ok(Some(ZyreEvent::Whisper { message, .. })) => {
-                if message == payload {
+        node_b.whisper(&peer_a_id, payload).expect("B whisper to A");
+        loop {
+            match node_a.try_recv() {
+                Ok(Some(ZyreEvent::Whisper { message, .. })) if message == payload => {
                     received_whisper = true;
                     break;
                 }
+                Ok(Some(_)) => continue,
+                Ok(None) => break,
+                Err(e) => panic!("recv error: {e}"),
             }
-            Ok(Some(_)) => continue,
-            Ok(None) => thread::sleep(Duration::from_millis(50)),
-            Err(e) => panic!("recv error: {e}"),
         }
+        if received_whisper {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
     }
 
     assert!(
@@ -177,7 +195,7 @@ fn gossip_discovery() {
 
     // Wait for gossip discovery (may take slightly longer than beacon)
     let mut discovered = false;
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + scaled(Duration::from_secs(10));
     while std::time::Instant::now() < deadline {
         match node_b.try_recv() {
             Ok(Some(ZyreEvent::Enter { name, .. })) if name == "gossip-a" => {
@@ -212,7 +230,7 @@ fn stop_delivers_terminal_stop_event() {
     // Drain (non-blocking) until we observe the terminal Stop event. With no
     // peers, Stop is the only queued message, but tolerate stray events.
     let mut saw_stop = false;
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + scaled(Duration::from_secs(5));
     while std::time::Instant::now() < deadline {
         match node.try_recv() {
             Ok(Some(ZyreEvent::Stop)) => {
@@ -236,5 +254,84 @@ fn stop_delivers_terminal_stop_event() {
     assert!(
         matches!(node.try_recv(), Ok(None)),
         "try_recv after Stop should return Ok(None)"
+    );
+}
+
+/// SC-001: two nodes discover each other and exchange a round-trip message
+/// within 2 seconds on localhost.
+///
+/// The clock starts before the nodes start and stops when A receives B's reply
+/// to A's message (A -> B ping, B -> A pong). We re-send each side's message
+/// while waiting so discovery latency is covered without a fixed pre-sleep.
+///
+/// This test asserts a real wall-clock bound, so it is meaningless (and would
+/// fail) under valgrind's slowdown; it skips itself when `ZYRE_TEST_TIMEOUT_SCALE`
+/// is set above 1.
+#[test]
+fn round_trip_within_two_seconds() {
+    let _guard = serialize();
+
+    if timeout_scale() > 1 {
+        eprintln!("skipping round_trip_within_two_seconds under ZYRE_TEST_TIMEOUT_SCALE > 1");
+        return;
+    }
+
+    let comp = ZyreComponent::new();
+    let izyre = query_interface!(comp, IZyre).expect("query IZyre");
+
+    let mut config_a = NodeConfig::default();
+    config_a.name = Some("rt-a".into());
+    let mut config_b = NodeConfig::default();
+    config_b.name = Some("rt-b".into());
+
+    let mut node_a = izyre.create_node(config_a).expect("create A");
+    let mut node_b = izyre.create_node(config_b).expect("create B");
+
+    let start = std::time::Instant::now();
+    node_a.start().expect("start A");
+    node_b.start().expect("start B");
+    node_a.join("rt").expect("A join");
+    node_b.join("rt").expect("B join");
+
+    let deadline = start + Duration::from_secs(2);
+    let mut b_saw_ping = false;
+    let mut a_saw_pong = false;
+
+    while std::time::Instant::now() < deadline && !a_saw_pong {
+        if !b_saw_ping {
+            node_a.shout("rt", b"ping").expect("A ping");
+        } else {
+            node_b.shout("rt", b"pong").expect("B pong");
+        }
+
+        // Drain B until it sees the ping, then drain A until it sees the pong.
+        if !b_saw_ping {
+            while let Ok(Some(ev)) = node_b.try_recv() {
+                if matches!(ev, ZyreEvent::Shout { ref message, .. } if message == b"ping") {
+                    b_saw_ping = true;
+                    break;
+                }
+            }
+        }
+        if b_saw_ping {
+            while let Ok(Some(ev)) = node_a.try_recv() {
+                if matches!(ev, ZyreEvent::Shout { ref message, .. } if message == b"pong") {
+                    a_saw_pong = true;
+                    break;
+                }
+            }
+        }
+
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    let elapsed = start.elapsed();
+    assert!(
+        a_saw_pong,
+        "round-trip did not complete within 2s (elapsed {elapsed:?})"
+    );
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "round-trip took {elapsed:?}, exceeding the SC-001 2s bound"
     );
 }
