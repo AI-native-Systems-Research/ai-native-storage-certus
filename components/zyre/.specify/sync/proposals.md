@@ -1,118 +1,157 @@
 # Drift Resolution Proposals
 
-Generated: 2026-07-09
-Based on: drift-report from 2026-07-09
-Mode: interactive
+Generated: 2026-07-14T19:52:47Z
+Based on: drift-report from 2026-07-14T19:52:47Z
 
 ## Summary
 
 | Resolution Type | Count |
 |-----------------|-------|
-| Align (Spec ↔ Code, remove feature) | 1 |
-| Backfill (Code → Spec) | 2 |
-| Human Decision | 0 |
+| Backfill (Code → Spec) | 4 |
+| Align (Spec → Code) | 0 |
+| Human Decision | 1 |
 | New Specs | 0 |
-| Remove from Spec | (folded into P1) |
+| Remove from Spec | 0 |
+| Follow-ups (verification) | 3 |
 
-User decision (2026-07-09): a single ZeroMQ frame is bounded only by memory
-(libzmq `ZMQ_MAXMSGSIZE` defaults to `-1`/unlimited; zyre sets no cap on the
-peer mailbox, confirmed in `deps/zyre/src/zyre_peer.c` and
-`deps/libzmq/src/options.cpp:191`). The single-frame `&[u8]` API therefore
-already carries arbitrarily large payloads, so the `_multi` send methods are to
-be **dropped** rather than fixing the lossy multi-frame receive path.
+**Context vs the 2026-07-09 proposals**: The prior run's P1 (drop `_multi`) and
+P3 (document `ZyreEvent` accessors) were genuinely applied — the code has no
+`_multi` methods and `data-model.md` documents the accessors. But prior **P2
+(rewrite `tasks.md` to the factory design) was marked `applied: true` yet only
+partially landed**: the superseded-design note and the T050 strike are present,
+but the individual task bodies (T015, T027-T033, T043, T046, …) still name the
+deleted `event.rs`/`builder.rs`/`error.rs`/`peer.rs` files and "builder pattern".
+P2 is re-opened below. The dominant **new** item is `plan.md`, which the prior
+run never touched and which is now the most stale artifact.
+
+All proposals below are **BACKFILL** (code + the reviewed `spec.md`/
+`data-model.md`/`contracts` are authoritative; the stale planning docs should be
+updated to match) — except P5, which needs a human design decision.
 
 ---
 
-## Proposal 1: 001-zyre-bindings / FR-004 (D-1) — Drop the multi-frame send API
+## Proposal 1: 001-zyre-bindings / plan.md — Rewrite to the factory / no-builder design
 
-**Direction**: ALIGN (remove feature from both spec and code)
+**Direction**: BACKFILL (Code → Spec)  ·  **Confidence**: HIGH
 
 **Current State**:
-- Spec says (`spec.md:90`, `data-model.md:54`): single-frame `&[u8]` primary API **plus** `_multi` variants; `ZyreEvent` Whisper/Shout have a "multi-frame variant carrying `Vec<Vec<u8>>`".
-- Code does: `shout_multi`/`whisper_multi` exist (send side), but `parse_message` reads only `zmsg_first`, so multi-frame messages are truncated to frame 0 on receive; no `Vec<Vec<u8>>` variant was ever added.
+- `plan.md:8` — "presents a Rust-native API with RAII, typed events, **builder configuration**, and Result-based errors."
+- `plan.md:34` — "6 focused modules (node, **event, builder, error, peer**, ffi)."
+- `plan.md:57-70` — source tree lists `src/event.rs`, `src/builder.rs`, `src/error.rs`, `src/peer.rs` (none exist), omits that value types live in the `interfaces` crate, and lists only `tests/integration.rs`.
+- Code does: no builder (`NodeConfig` is public-fields + `Default`, `izyre.rs:260`); the `zyre` crate has 3 files (`lib.rs`/`node.rs`/`ffi.rs`); value types + `IZyre`/`IZyreNode` traits live in `interfaces/src/izyre.rs`; tests are `integration.rs` + `api_safety.rs`.
 
-**Proposed Resolution**:
+**Proposed Resolution** (concrete edits):
 
-*Code changes*
-- Remove `shout_multi` and `whisper_multi` from the `IZyreNode` trait — `components/interfaces/src/izyre.rs:374-378` (methods + doc comments).
-- Remove both method implementations — `components/zyre/src/node.rs:238-276`.
-- No change to `parse_message` / `ZyreEvent` (already single-frame; now consistent).
+- `plan.md:8` →
+  > … and presents a Rust-native API with RAII, typed events, public-field configuration structs (`NodeConfig`/`GossipConfig`, validated at `create_node`), and Result-based errors. The `IZyre` component interface acts as a factory returning `Box<dyn IZyreNode>` handles.
+- `plan.md:34` (Maintainability row Notes) →
+  > Small crate — `lib.rs` (component + `IZyre` impl), `node.rs` (crate-private FFI-owning `ZyreNode` + event parsing), `ffi.rs` (bindgen re-export). Value types and the `IZyre`/`IZyreNode` traits live in the `interfaces` crate (`izyre.rs`) to avoid a crate cycle. Minimal public surface.
+- `plan.md:57-70` (Source Code tree) → replace with:
+  ```text
+  components/zyre/
+  ├── Cargo.toml
+  ├── src/
+  │   ├── lib.rs           # define_component! + IZyre impl; re-exports interface types
+  │   ├── node.rs          # ZyreNode (crate-private) — safe wrapper over zyre_t + event parsing
+  │   └── ffi.rs           # include! of bindgen-generated bindings
+  ├── build.rs             # bindgen invocation, link configuration
+  └── tests/
+      ├── integration.rs   # Two-node localhost discovery/shout/whisper/gossip tests
+      └── api_safety.rs    # Send / !Sync / no-unsafe compile-time assertions
 
-*Spec changes*
-- `spec.md:90` — reword **FR-004** to:
-  > **FR-004**: The crate MUST support sending messages (whisper and shout) with a single-frame `&[u8]` payload. A single ZeroMQ frame is bounded only by available memory (libzmq imposes no size cap by default and zyre sets none), so this single-frame API carries arbitrarily large payloads; no multi-frame send variants are provided.
-- `spec.md` Clarifications — add a Session 2026-07-09 entry superseding the 2026-07-01 payload-API clarification (line 125):
-  > Q: Keep the `_multi` multi-frame send variants? → A: No. A single frame is bounded only by memory (`ZMQ_MAXMSGSIZE` default `-1`, no cap set by zyre), so the single-frame `&[u8]` API already sends arbitrarily large payloads. The `_multi` methods added a send/receive asymmetry (receive only ever surfaced the first frame) for no benefit and are removed. *(Supersedes the 2026-07-01 single-frame-plus-`_multi` decision.)*
-- `spec.md:136` — remove the Assumptions bullet stating multi-frame messages are supported via `_multi`.
-- `data-model.md:54` — replace the invariant with:
-  > - `message` in Whisper/Shout is the payload of the (single) message frame. Payload size is bounded only by memory; there is no multi-frame representation.
-- `contracts/izyre.md:75-76` — delete the two `_multi` trait lines.
-- `quickstart.md:71` — replace the `shout_multi(...)` example with a single-frame `shout(...)` of a serialized payload.
-- `tasks.md:169` — mark **T050** removed/obsolete (see Proposal 2).
+  components/interfaces/src/
+  └── izyre.rs             # IZyre + IZyreNode traits; NodeConfig, GossipConfig,
+                           #   ZyreEvent, PeerId, ZyreError (here to avoid a crate cycle)
+  ```
+- `plan.md:82` (Structure Decision) → add a sentence: "The `IZyre`/`IZyreNode` traits and all value types live in the `interfaces` crate so `IZyre::create_node` can name them without a cycle; the concrete `ZyreNode` is crate-private in `zyre`."
 
-**Rationale**: The primary API already covers every payload the `_multi` methods
-could send, and the receive path can only ever reconstruct one frame. Removing
-the send-side `_multi` methods eliminates the asymmetry, fully aligns **SC-004**
-("no loss of information"), and is safe at v0.1.0 — `publish = false` and no
-component binds these methods (verified by workspace grep).
+**Rationale**: Documentation catch-up to shipped, tested code and the already-reviewed `spec.md`/`data-model.md`/`contracts/izyre.md`. No code impact. Highest value because CLAUDE.md directs contributors to read `plan.md` for structure.
 
-**Confidence**: HIGH
-
-**Action**: [x] Approve  (per user decision 2026-07-09)  ·  [ ] Reject  ·  [ ] Modify
+**Action**: [ ] Approve  ·  [ ] Reject  ·  [ ] Modify
 
 ---
 
-## Proposal 2: 001-zyre-bindings / tasks.md (D-2) — Rewrite to the factory design
+## Proposal 2: 001-zyre-bindings / tasks.md — Finish the factory rewrite (re-open prior P2)
 
-**Direction**: BACKFILL (Code → Spec)
+**Direction**: BACKFILL (Code → Spec)  ·  **Confidence**: HIGH
+
+**Current State**: The top-of-file superseded-design note (`tasks.md:39-44`) and the T050 strike (`:178`) are in place, but the task bodies were not rewritten:
+- `tasks.md:67` (T015) — "in `components/zyre/src/event.rs`"
+- `tasks.md:89,91` — phase goal / independent test reference "builder pattern" and "verify builder validates config"
+- `tasks.md:95` (T027) — "`NodeConfig` builder validation … in `components/zyre/src/builder.rs`"
+- `tasks.md:96` (T028) — doc tests in "`builder.rs`, `event.rs`"
+- `tasks.md:102-104` (T031-T033) — "`event.rs`" / "`builder.rs`" / "`error.rs` and `peer.rs`"
+- `tasks.md:143,149` (T043, T046) — `GossipConfig`/gossip docs "in `components/zyre/src/builder.rs`"
+- `tasks.md:218,233,237` — example/parallelization notes citing `event.rs`/`builder.rs`
+
+**Proposed Resolution**:
+- Replace every `src/event.rs`, `src/builder.rs`, `src/error.rs`, `src/peer.rs` reference with the actual location — value types + traits in `components/interfaces/src/izyre.rs`, component glue in `components/zyre/src/{lib,node,ffi}.rs`.
+- Replace "builder pattern" / "builder validates config" (`:89`,`:91`,`:95`) with "public-field `NodeConfig` + `Default`, validated by `create_node`".
+- Leave the `:39-44` note and the T050 strike as-is (already correct).
+
+**Rationale**: Completes the documentation catch-up the prior P2 claimed but did not fully apply. No code impact.
+
+**Note**: Correct the prior `proposals.json` P2 status — it was recorded `applied: true` but the body edits did not land.
+
+**Action**: [ ] Approve  ·  [ ] Reject  ·  [ ] Modify
+
+---
+
+## Proposal 3: 001-zyre-bindings / FR-008 wording — recv wraps `zyre_event_new`
+
+**Direction**: BACKFILL (Code → Spec)  ·  **Confidence**: HIGH
 
 **Current State**:
-- `tasks.md` T008–T013, T048–T049 describe separate source files
-  (`error.rs`/`peer.rs`/`event.rs`/`builder.rs`), a `NodeConfigBuilder` builder
-  API, and a `ping()`-only `IZyre` with consumers calling `ZyreNode::new()`
-  directly. T050 adds the `_multi` variants.
-- Code + `spec.md`/`data-model.md`/`contracts` use the factory design (types in
-  `interfaces/src/izyre.rs`, public-fields `NodeConfig`, `IZyre::create_node`,
-  crate-private `ZyreNode`) per commit `b45418d`.
+- `spec.md:94` (FR-008) — "provide a direct `recv()` method that blocks the calling thread (thin wrapper over `zyre_recv`) …"
+- Code does: `recv()` uses `zyre_event_new`/`zyre_event_destroy` (`node.rs:180-191`), the higher-level typed-event API (which internally calls `zyre_recv`).
 
-**Proposed Resolution**:
-- Rewrite T008–T013 to reflect value types + traits in `interfaces/src/izyre.rs`
-  (single file), `NodeConfig` public-fields + `Default` (drop "builder"), and the
-  actual module layout (`ffi.rs`, `node.rs`, `lib.rs`).
-- Rewrite T048–T049 to the factory `create_node` design (drop the "circular dep /
-  use `ZyreNode::new()` directly" language).
-- Remove/obsolete **T050** (multi-frame variants) per Proposal 1.
+**Proposed Resolution**: Reword the parenthetical in FR-008 to:
+  > … (wraps `zyre_event_new`, the typed-event API, which internally receives via `zyre_recv`) …
 
-**Rationale**: Documentation catch-up to the already-approved spec artifacts and
-shipped code. No code impact.
+**Rationale**: The code choice is correct (typed parsing); only the spec wording is imprecise. Trivial edit.
 
-**Confidence**: HIGH
-
-**Action**: [ ] Approve  ·  [ ] Reject  ·  [ ] Modify   *(pending user confirmation)*
+**Action**: [ ] Approve  ·  [ ] Reject  ·  [ ] Modify
 
 ---
 
-## Proposal 3: 001-zyre-bindings / data-model.md — Document ZyreEvent accessors
+## Proposal 4: 001-zyre-bindings / research.md:84 — Stale "builder" phrasing
 
-**Direction**: BACKFILL (Code → Spec)
+**Direction**: BACKFILL (Code → Spec)  ·  **Confidence**: HIGH
 
-**Current State**: `ZyreEvent::peer()` / `peer_name()` / `group()` helper accessors
-(`interfaces/src/izyre.rs:151-191`) are not mentioned in the spec's Key Entities.
+**Current State**: `research.md:84` — "`InvalidConfig(String)` — builder validation failure". There is no builder.
 
-**Proposed Resolution**: Add one line under the `ZyreEvent` entity in
-`data-model.md` noting the convenience accessors and their `Option` return shape.
+**Proposed Resolution**: Change to "`InvalidConfig(String)` — config validation failure (from `NodeConfig::validate`)".
 
-**Rationale**: Eliminates the minor unspecced-code finding; low risk.
+**Rationale**: One-word correction; keeps the error-taxonomy section consistent with the no-builder decision recorded two lines above (`research.md:56`).
 
-**Confidence**: HIGH
-
-**Action**: [ ] Approve  ·  [ ] Reject  ·  [ ] Modify   *(pending user confirmation)*
+**Action**: [ ] Approve  ·  [ ] Reject  ·  [ ] Modify
 
 ---
 
-## Follow-ups (not drift proposals — verification tasks)
+## Proposal 5: 001-zyre-bindings / ZyreEvent::Stop reachability — HUMAN DECISION
 
-Carried from the drift report; require the Linux + C-deps environment:
-- SC-001: add/adjust a timed round-trip assertion (test uses a 5s deadline, not the 2s bound).
-- SC-003: run T042/T055 (clean build < 5 min).
-- SC-005: run the suite under Miri/valgrind.
+**Direction**: HUMAN_DECISION
+
+**Current State**: `ZyreEvent::Stop` is representable (`izyre.rs:148`) but undeliverable: `recv`/`try_recv` return `NotStarted` once `stop()` flips `started` (`node.rs:114-119` vs `:180-183`). No test or doc addresses this.
+
+**Options**:
+- **A — Document as internal-only** (spec/code comment): STOP is not surfaced through `recv`; callers detect shutdown via their own control flow. Smallest change; keeps `stop()` semantics simple.
+- **B — Make STOP observable**: have `stop()` not gate `recv` immediately (or drain the pending STOP event before flipping `started`), so a caller polling `recv` sees `ZyreEvent::Stop`. Larger behavioral change; needs a test.
+
+**Questions for the human**:
+1. Is any consumer expected to observe `ZyreEvent::Stop` via `recv`, or is STOP purely a C-layer artifact the binding can hide?
+2. If hidden, should the `Stop` variant remain in the public enum (for completeness / SC-004) or be removed?
+
+**Confidence**: MEDIUM (both interpretations valid; leaning A given the single-threaded `&mut self` model).
+
+**Action**: [ ] Choose A  ·  [ ] Choose B  ·  [ ] Other
+
+---
+
+## Follow-ups (verification tasks — require the Linux + C-deps environment)
+
+Not spec/code drift; carried from the drift report's SC gaps:
+
+- **SC-001**: tighten `two_nodes_discover_and_shout` into a timed round-trip assertion (currently 500 ms sleep + 5 s deadline; the 2 s bound is not enforced), **or** relax SC-001's wording to "within a few seconds".
+- **SC-003**: record a clean-build timing (< 5 min) — no automated gate exists.
+- **SC-005**: add a valgrind CI job over the (serialized) integration tests; note that Miri cannot cross the FFI boundary. Optionally add a whisper-to-departed-UUID test to lock the fire-and-forget contract (`spec.md:81`).

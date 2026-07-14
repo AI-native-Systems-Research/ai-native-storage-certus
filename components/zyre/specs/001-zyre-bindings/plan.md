@@ -5,7 +5,7 @@
 
 ## Summary
 
-Provide safe, idiomatic Rust bindings for the zyre C library (zero-configuration LAN peer discovery and group messaging). The implementation pulls zyre and its dependencies (libzmq, czmq) into a sub-repo at `deps/zyre-build/`, generates FFI bindings via bindgen, and presents a Rust-native API with RAII, typed events, builder configuration, and Result-based errors. The `IZyre` component interface acts as a factory for `ZyreNode` instances.
+Provide safe, idiomatic Rust bindings for the zyre C library (zero-configuration LAN peer discovery and group messaging). The implementation pulls zyre and its dependencies (libzmq, czmq) into a sub-repo at `deps/zyre-build/`, generates FFI bindings via bindgen, and presents a Rust-native API with RAII, typed events, public-field configuration structs (`NodeConfig`/`GossipConfig`, validated at `create_node`), and Result-based errors. The `IZyre` component interface acts as a factory returning `Box<dyn IZyreNode>` handles.
 
 ## Technical Context
 
@@ -31,7 +31,7 @@ Provide safe, idiomatic Rust bindings for the zyre C library (zero-configuration
 | II. Comprehensive Testing | Unit + integration + doc tests; TDD preferred | PASS | Unit tests per module, integration tests (two-node localhost), doc tests on all public types. `cargo test -p zyre` must pass with zero failures. |
 | III. Performance Accountability | Criterion benchmarks for perf-sensitive code | PASS (deferred) | Justified: Rust bindings are thin FFI — performance is determined by the C library, not the wrapper. FFI overhead is negligible. Benchmarks added if message throughput becomes a concern. |
 | IV. Documentation as Contract | Doc comments with runnable examples; `cargo doc --no-deps` clean | PASS | All public types/functions/methods will have `///` doc comments with examples. |
-| V. Maintainability and Simplicity | Minimal API surface; fmt+clippy; single responsibility | PASS | 6 focused modules (node, event, builder, error, peer, ffi). Minimal public surface. |
+| V. Maintainability and Simplicity | Minimal API surface; fmt+clippy; single responsibility | PASS | Small crate — `lib.rs` (component + `IZyre` impl), `node.rs` (crate-private FFI-owning `ZyreNode` + event parsing), `ffi.rs` (bindgen re-export). Value types and the `IZyre`/`IZyreNode` traits live in the `interfaces` crate (`izyre.rs`) to avoid a crate cycle. Minimal public surface. |
 | Platform Constraints | Linux only, Rust stable, no nightly | PASS | Targets Linux. Rust stable, edition 2021, MSRV 1.75. |
 | CI Gate | fmt + clippy + test + doc | PASS | Excluded from default-members (like SPDK). CI runs when explicitly targeted with `-p zyre`. |
 
@@ -58,16 +58,17 @@ specs/001-zyre-bindings/
 components/zyre/
 ├── Cargo.toml
 ├── src/
-│   ├── lib.rs           # Component definition (define_component!, IZyre impl)
-│   ├── node.rs          # ZyreNode — safe wrapper over zyre_t
-│   ├── event.rs         # ZyreEvent enum + parsing from raw messages
-│   ├── builder.rs       # NodeBuilder / NodeConfig
-│   ├── error.rs         # ZyreError enum
-│   ├── peer.rs          # PeerId newtype + peer introspection helpers
-│   └── ffi.rs           # Re-export of generated bindings + safety wrappers
+│   ├── lib.rs           # define_component! + IZyre impl; re-exports interface types
+│   ├── node.rs          # ZyreNode (crate-private) — safe wrapper over zyre_t + event parsing
+│   └── ffi.rs           # include! of bindgen-generated bindings
 ├── build.rs             # bindgen invocation, link configuration
 └── tests/
-    └── integration.rs   # Two-node localhost tests
+    ├── integration.rs   # Two-node localhost discovery/shout/whisper/gossip tests
+    └── api_safety.rs    # Send / !Sync / no-unsafe compile-time assertions
+
+components/interfaces/src/
+└── izyre.rs             # IZyre + IZyreNode traits; NodeConfig, GossipConfig,
+                         #   ZyreEvent, PeerId, ZyreError (here to avoid a crate cycle)
 
 deps/
 ├── build_zyre.sh        # Clone + build libzmq, czmq, zyre → deps/zyre-build/
@@ -79,7 +80,7 @@ deps/
 └── install_zyre_deps.sh # System package prerequisites (cmake, pkg-config, etc.)
 ```
 
-**Structure Decision**: Single crate under `components/zyre/` following the existing component layout. C dependencies built into `deps/zyre-build/` at the workspace root, parallel to `deps/spdk-build/`. The crate is added to workspace `members` but NOT to `default-members` (requires pre-built C libraries, same gating as SPDK crates).
+**Structure Decision**: Single crate under `components/zyre/` following the existing component layout. The `IZyre`/`IZyreNode` traits and all value types live in the `interfaces` crate so `IZyre::create_node` can name them without a crate cycle; the concrete `ZyreNode` is crate-private in `zyre`. C dependencies built into `deps/zyre-build/` at the workspace root, parallel to `deps/spdk-build/`. The crate is added to workspace `members` but NOT to `default-members` (requires pre-built C libraries, same gating as SPDK crates).
 
 ## Complexity Tracking
 

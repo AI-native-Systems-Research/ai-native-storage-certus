@@ -64,7 +64,7 @@
 ### Tests for User Story 1
 
 - [x] T014 [P] [US1] Unit tests for `ZyreNode::new()`, `start()`, `stop()` lifecycle (config validation tests) in `components/zyre/src/node.rs` (inline tests module)
-- [x] T015 [P] [US1] Unit tests for `ZyreEvent` accessors (peer, peer_name, group) in `components/zyre/src/event.rs` (inline tests module)
+- [x] T015 [P] [US1] Unit tests for `ZyreEvent` accessors (peer, peer_name, group) in `components/interfaces/src/izyre.rs` (inline tests module)
 - [x] T016 [US1] Integration test: two-node discovery and shout round-trip on localhost in `components/zyre/tests/integration.rs`
 
 ### Implementation for User Story 1
@@ -86,22 +86,22 @@
 
 ## Phase 4: User Story 2 - Idiomatic Rust API (Priority: P1)
 
-**Goal**: The API follows Rust conventions: builder pattern, Result types, RAII, doc comments with examples.
+**Goal**: The API follows Rust conventions: public-field config structs, Result types, RAII, doc comments with examples.
 
-**Independent Test**: Compile user code without `unsafe`, verify nodes are cleaned up on drop, verify builder validates config.
+**Independent Test**: Compile user code without `unsafe`, verify nodes are cleaned up on drop, verify `NodeConfig` validation rejects bad config at `create_node`.
 
 ### Tests for User Story 2
 
-- [x] T027 [P] [US2] Unit tests for `NodeConfig` builder validation (invalid timeouts, empty name, gossip invariants) in `components/zyre/src/builder.rs` (inline tests module)
-- [x] T028 [P] [US2] Doc tests on all public types/methods demonstrating correct usage in `components/zyre/src/lib.rs`, `node.rs`, `builder.rs`, `event.rs`
+- [x] T027 [P] [US2] Unit tests for `NodeConfig::validate` (invalid timeouts, empty name, gossip invariants) in `components/interfaces/src/izyre.rs` (inline tests module)
+- [x] T028 [P] [US2] Doc tests on all public types/methods demonstrating correct usage in `components/zyre/src/lib.rs`, `components/zyre/src/node.rs`, and `components/interfaces/src/izyre.rs`
 - [x] T029 [US2] Compile-time test: verify no `unsafe` in public API surface and assert `ZyreNode: Send + !Sync` in `components/zyre/tests/api_safety.rs`
 
 ### Implementation for User Story 2
 
 - [x] T030 [P] [US2] Add doc comments with `///` examples to `ZyreNode` (all public methods) in `components/zyre/src/node.rs`
-- [x] T031 [P] [US2] Add doc comments with `///` examples to `ZyreEvent` and all variants in `components/zyre/src/event.rs`
-- [x] T032 [P] [US2] Add doc comments with `///` examples to `NodeConfig`, `GossipConfig`, and builder methods in `components/zyre/src/builder.rs`
-- [x] T033 [P] [US2] Add doc comments with `///` examples to `ZyreError` and `PeerId` in `components/zyre/src/error.rs` and `components/zyre/src/peer.rs`
+- [x] T031 [P] [US2] Add doc comments with `///` examples to `ZyreEvent` and all variants in `components/interfaces/src/izyre.rs`
+- [x] T032 [P] [US2] Add doc comments with `///` examples to `NodeConfig` and `GossipConfig` (public fields + constructors) in `components/interfaces/src/izyre.rs`
+- [x] T033 [P] [US2] Add doc comments with `///` examples to `ZyreError` and `PeerId` in `components/interfaces/src/izyre.rs`
 - [x] T034 [US2] Add crate-level documentation (`//!`) with quickstart example in `components/zyre/src/lib.rs`
 - [ ] T035 [US2] Verify `cargo doc --no-deps -p zyre` completes with zero warnings (requires Linux with C deps)
 - [ ] T036 [US2] Verify `cargo clippy -p zyre -- -D warnings` passes clean (requires Linux with C deps)
@@ -140,13 +140,13 @@
 
 ### Tests for User Story 4
 
-- [x] T043 [P] [US4] Unit test for `GossipConfig` validation (at least one of bind/connect required) in `components/zyre/src/builder.rs`
+- [x] T043 [P] [US4] Unit test for `GossipConfig` validation (at least one of bind/connect required) in `components/interfaces/src/izyre.rs`
 - [x] T044 [US4] Integration test: two nodes discover each other via gossip (no UDP beacon) in `components/zyre/tests/integration.rs`
 
 ### Implementation for User Story 4
 
 - [x] T045 [US4] Implement gossip configuration application in `ZyreNode::new()` — call `zyre_gossip_bind()` / `zyre_gossip_connect()` and `zyre_set_endpoint()` in `components/zyre/src/node.rs`
-- [x] T046 [US4] Add doc examples for gossip configuration in `components/zyre/src/builder.rs`
+- [x] T046 [US4] Add doc examples for gossip configuration (`GossipConfig`) in `components/interfaces/src/izyre.rs`
 
 **Checkpoint**: Gossip discovery works. Both beacon and gossip paths tested.
 
@@ -215,7 +215,7 @@
 ### Parallel Opportunities
 
 - T004 + T005 + T007 (Phase 1: independent files)
-- T010 + T011 (Phase 2: event.rs and builder.rs are independent)
+- T010 + T011 (Phase 2: the `ZyreEvent` and `NodeConfig`/`GossipConfig` types)
 - T014 + T015 (Phase 3 tests: different files)
 - T027 + T028 + T029 (Phase 4 tests: different files)
 - T030 + T031 + T032 + T033 (Phase 4: doc comments on different files)
@@ -229,12 +229,12 @@
 
 ```bash
 # After Phase 2 completes, launch tests and implementation in parallel:
-Task T014: "Unit tests for ZyreNode lifecycle in src/node.rs"
-Task T015: "Unit tests for ZyreEvent parsing in src/event.rs"
+Task T014: "Unit tests for ZyreNode lifecycle in zyre/src/node.rs"
+Task T015: "Unit tests for ZyreEvent accessors in interfaces/src/izyre.rs"
 
 # Then implement sequentially (same file dependencies):
-Task T017 → T018 → T019 → T020 → T021 → T022 → T023 → T024 (all in node.rs)
-Task T025 (event.rs, parallel with node.rs work)
+Task T017 → T018 → T019 → T020 → T021 → T022 → T023 → T024 (all in zyre/src/node.rs)
+Task T025 (event parsing, in zyre/src/node.rs)
 ```
 
 ---
@@ -256,7 +256,7 @@ Task T025 (event.rs, parallel with node.rs work)
 3. Add US2 → Full doc coverage, clippy clean → Production-ready API
 4. Add US3 → Clean-checkout build works → Contributor-friendly
 5. Add US4 → Gossip mode → Broader deployment support
-6. Polish → Multi-frame, introspection, final CI gate
+6. Polish → introspection, final CI gate
 
 ### Parallel Team Strategy
 

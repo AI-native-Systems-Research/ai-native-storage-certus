@@ -1,69 +1,74 @@
 # Sync Apply Report
 
-Applied: 2026-07-09
-Based on: proposals from 2026-07-09
-Backups: `.specify/sync/backups/2026-07-09/`
+Applied: 2026-07-14
+Based on: proposals from 2026-07-14 (P5 only)
+
+## Scope
+
+This pass applied **P5** (ZyreEvent::Stop reachability) with direction **B —
+make STOP observable**, chosen after tracing the pinned zyre C source. P1–P4
+(doc backfills for `plan.md`, `tasks.md` bodies, FR-008 wording, `research.md:84`)
+were **not** applied in this pass and remain open.
+
+## Why B (not the earlier "document-only" lean)
+
+`zyre_stop()` sends `"STOP"` to the node's actor (`zyre.c:479`); the actor's
+`zyre_node_stop()` enqueues a final `["STOP", own-uuid, own-name]` message on the
+application inbox as its last act (`zyre_node.c:337-339`), then acks. So STOP is a
+**graceful end-of-stream sentinel**, not an internal artifact — the C test at
+`zyre.c:895-901` asserts a post-`stop()` `zyre_recv` returns it. The previous
+binding set `started=false` in `stop()`, so `recv`/`try_recv` returned
+`NotStarted` and the sentinel was unreachable — a latent bug that made the
+contract's own `Stop => break` loop dead code. B is the faithful mapping.
 
 ## Changes Made
 
-### Code changed (P1 — ALIGN, feature removal)
+### Code changed
 
 | File | Change |
 |------|--------|
-| `components/interfaces/src/izyre.rs` | Removed `shout_multi` / `whisper_multi` from the `IZyreNode` trait |
-| `components/zyre/src/node.rs` | Removed both `shout_multi` / `whisper_multi` implementations |
+| `components/interfaces/src/izyre.rs` | Added `ZyreError::Stopped` variant + `Display` arm; reworded `RecvFailed` (interrupt, not stop); documented terminal `Stop` on `ZyreEvent::Stop` and on `IZyreNode::{stop,recv,try_recv}` |
+| `components/zyre/src/node.rs` | Replaced `bool started` with `Cell<State> { Created, Running, Draining, Done }`; `start()` guards double-start; `stop()` → `Draining`; `recv()` drains and flips to `Done` on `Stop` (no further `zyre_recv` after `Done`); `try_recv()` returns `Ok(None)` when `Done`; added `ensure_running()` guard used by `join`/`leave`/`shout`/`whisper` |
 
 ### Specs updated
 
-| File | Requirement | Change |
-|------|-------------|--------|
-| `spec.md` | FR-004 | Modified — single-frame only; memory-bounded; no `_multi` |
-| `spec.md` | Clarifications | Added Session 2026-07-09 entry; marked 2026-07-01 payload-API answer superseded |
-| `spec.md` | Assumptions | Modified — single-frame payload, no multi-frame variants |
-| `data-model.md` | ZyreEvent invariant | Modified — single message frame, memory-bounded, no multi-frame representation |
-| `data-model.md` | ZyreEvent (P3) | Added — documented `peer()`/`peer_name()`/`group()` accessors |
-| `contracts/izyre.md` | IZyreNode trait | Modified — removed the two `_multi` lines |
-| `quickstart.md` | example | Modified — replaced `shout_multi` example with single-frame `shout` |
-| `tasks.md` | T008–T013 (P2) | Modified — rewritten to the factory design; added a supersede note |
-| `tasks.md` | T048–T049 (P2) | Modified — rewritten to `create_node` factory + interfaces export |
-| `tasks.md` | T050 (P2) | Marked removed (multi-frame variants dropped) |
+| File | Change |
+|------|--------|
+| `contracts/izyre.md` | Rewrote the consumer example to stop-then-drain-to-`Stop`; added a "Receive lifecycle" paragraph (NotStarted → drain → Stop → Stopped; single-threaded stop caveat) |
+| `data-model.md` | `ZyreNode` field `started: bool` → `state: Cell<State>`; rewrote the state-transition diagram to `Created → Running → Draining → Done`; added the `Stop`-sentinel invariant |
 
-### New specs created
+### Tests added
 
-- (none)
+| File | Test |
+|------|------|
+| `components/zyre/src/node.rs` | `recv_before_start_is_not_started` (unit) |
+| `components/zyre/tests/integration.rs` | `stop_delivers_terminal_stop_event` — drains to `Stop`, then asserts `recv → Stopped` and `try_recv → Ok(None)` |
 
 ## Verification
 
-- `cargo build -p zyre` → **Finished** (clean)
-- `cargo test -p interfaces` → **28 passed, 0 failed**
-- `cargo test -p zyre --lib` → **5 passed, 0 failed**
-- `cargo test -p zyre --doc` → **1 passed, 0 failed**
-- `grep shout_multi|whisper_multi` over code + specs → only the intentional strikethrough in `tasks.md` T050 remains
+- `cargo clippy -p zyre --tests` → **clean** (no warnings)
+- `cargo test -p interfaces` → **28 passed, 0 failed** (incl. doctests)
+- `cargo test -p zyre -- --test-threads 1`:
+  - lib: **6 passed** (was 5; +`recv_before_start_is_not_started`)
+  - `api_safety.rs`: **3 passed**
+  - `integration.rs`: **4 passed** (was 3; +`stop_delivers_terminal_stop_event`; existing discovery/shout/whisper/gossip still pass)
+  - doc: **1 passed**
+- `cargo doc --no-deps -p interfaces -p zyre` → no zyre/izyre warnings (2 pre-existing warnings are in `igpu_services.rs`, unrelated)
 
-Networked integration tests (`tests/integration.rs`) were not run in this pass;
-they exercise real localhost discovery and do not touch the changed API surface.
-
-## Not Applied
+## Not Applied (still open)
 
 | Proposal | Reason |
 |----------|--------|
-| (none) | All three approved proposals applied |
-
-## Drift status after apply
-
-- **D-1** (multi-frame receive) — RESOLVED (feature removed; send/receive now symmetric).
-- **D-2** (stale `tasks.md`) — RESOLVED (rewritten to factory design).
-- **D-3** (stale prior report) — RESOLVED by the earlier report regeneration.
-- **SC-004** — now fully aligned (no multi-frame path → no information loss).
-- Unspecced accessors — RESOLVED (documented in `data-model.md`).
+| P1 (`plan.md` rewrite) | Awaiting apply — biggest remaining drift (CLAUDE.md points contributors here) |
+| P2 (`tasks.md` task bodies) | The 2026-07-09 apply-report claimed this "rewritten", but T015/T027/T031-T033/T043/T046 still name `event.rs`/`builder.rs`/`error.rs`/`peer.rs` — only partially landed |
+| P3 (FR-008 wording) | Awaiting apply; note FR-008 should also mention the STOP drain semantics now implemented |
+| P4 (`research.md:84`) | Awaiting apply |
+| SC-001 / SC-003 / SC-005 | Verification follow-ups (timed test / build timing / valgrind) |
 
 ## Next Steps
 
 1. Review the diff:
-   `git diff components/interfaces/src/izyre.rs components/zyre/src/node.rs components/zyre/specs/001-zyre-bindings/`
-2. Commit:
-   `git add components/interfaces components/zyre && git commit -m "sync: drop multi-frame send API; align zyre specs with factory design"`
-3. Remaining verification follow-ups (need Linux + C deps; unchanged by this pass):
-   - SC-001: tighten the round-trip test to assert the 2s bound.
-   - SC-003: run T042/T055 (clean build < 5 min).
-   - SC-005: run the suite under Miri/valgrind.
+   `git diff components/interfaces/src/izyre.rs components/zyre/src/node.rs components/zyre/tests/integration.rs components/zyre/specs/001-zyre-bindings/`
+2. Commit (per-component, per repo convention):
+   `git add components/interfaces components/zyre && git commit -m "feat(zyre): deliver terminal ZyreEvent::Stop as an end-of-stream sentinel"`
+3. Apply the remaining doc backfills P1–P4 (and fold the STOP drain semantics into FR-008 when P3 lands).

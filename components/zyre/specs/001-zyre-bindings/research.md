@@ -79,11 +79,12 @@
 
 **Variants**:
 - `CreateFailed` — zyre_new returned null
-- `StartFailed(String)` — zyre_start returned -1, includes context
+- `StartFailed(String)` — zyre_start returned -1 (or node already started), includes context
 - `NotStarted` — operation called before start
-- `InvalidConfig(String)` — builder validation failure
+- `InvalidConfig(String)` — config validation failure (from `NodeConfig::validate`)
 - `SendFailed` — whisper/shout returned -1
-- `RecvFailed` — unexpected null from zyre_recv (node stopped)
+- `RecvFailed` — receive failed unexpectedly (e.g. the calling thread was interrupted)
+- `Stopped` — node stopped; the terminal `Stop` event has already been consumed
 
 **Rationale**: A flat enum is simplest and sufficient. Each variant maps to a specific C API failure mode. The `String` context in some variants carries the detail that the C API doesn't provide (we generate it).
 
