@@ -75,7 +75,7 @@ P12, P13, P17, P18, P26, P27, P30, P31) stay in `dispatch-map/verif`.
 | P24 — commit/cancel miss ⇒ `KeyNotFound`, no mutation | dispatcher | `# Stale` (`consume_pending`) | Mirrors deleted `pending_writes` map. Retire, or reconceive against `release_memory` idempotent-cancel semantics. |
 | P25 — `clear_memory_tier` map postcondition + count | dispatcher | `# Unchecked` | Map-level loop proof. |
 | P28 — drive-index determinism (`key % num_drives`) | dispatcher | `# Verified` (`drive_index`) | 2/2 VCs discharged (`vc_drive_index`, `vc_wrapping_mul`) in 1 `.coma` proof file (`drive_index.coma`). Theorem: `num_drives>0 ==> result < num_drives` (index always in range; no OOB drive select). Determinism/stability is structural (pure fn). Splitmix64 body kept verbatim; only the `% num_drives` bound is proved. |
-| P29 — watermark/threshold consistency | dispatcher | `# Unchecked` | Config-comparison direction proof. |
+| P29 — watermark/threshold consistency | dispatcher | `# Verified (direction/hysteresis)` (`evictor_decisions`) | 1/1 VC discharged in 1 `.coma` file (`evictor_decisions.coma`). Mirrors the SSD-evictor comparisons in `background.rs`: start iff `util >= threshold` (`:299`), stop iff `util < low_watermark` (`:350`). Proves the direction is intended and `!(should_start && should_stop)` given a well-formed band `low_watermark <= threshold` — catches flipped `<`/`>=` and threshold/watermark swaps. **Abstraction:** runtime uses `f64` ratio `used/capacity` vs `f64` watermarks (0.9/0.8); modeled as integer permille to keep ordering decidable (`f64` NaN makes `<=` non-total, undischargeable). Certifies comparison direction, not exact float arithmetic. |
 
 ## Trusted / assumption ledger
 

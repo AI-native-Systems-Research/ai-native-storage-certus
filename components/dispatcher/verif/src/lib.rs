@@ -162,6 +162,45 @@ pub fn resolve_lookup(
     }
 }
 
+// ---------- P29: eviction watermark comparison direction ----------
+//
+// Mirrors the SSD-evictor comparisons in background.rs:
+//     let utilization = used as f64 / capacity as f64;
+//     if utilization < config.threshold { continue; }   // (:299) start iff util >= threshold
+//     ...
+//     if util_now < config.low_watermark { break; }      // (:350) stop iff util <  low_watermark
+//
+// P29 requires the threshold/watermark comparisons to follow the intended
+// direction: eviction is TRIGGERED at the HIGH threshold and STOPS at the LOW
+// watermark, and for a well-formed hysteresis band `low_watermark <= threshold`.
+//
+// MODELING NOTE: the runtime compares an `f64` ratio `used/capacity` against
+// two `f64` config values (defaults 0.9 / 0.8). This proof models utilization
+// and both watermarks as integer permille (0..=1000) so the ordering is
+// decidable — `f64` carries NaN and its `<=` is not a total order, which
+// Creusot/SMT cannot discharge cleanly. This certifies the COMPARISON
+// DIRECTION and hysteresis consistency, not the exact floating-point arithmetic.
+//
+// The key theorem is `!(should_start && should_stop)`: given a well-formed band
+// you can never be simultaneously told to start (util >= threshold) and stop
+// (util < low_watermark), because that would force threshold <= util <
+// low_watermark <= threshold — a contradiction. This catches the direction-bug
+// class (flipped `<`/`>=`, or threshold/low_watermark swapped).
+
+#[requires(low_watermark@ <= threshold@)]
+#[ensures(result.0 == (utilization@ >= threshold@))]
+#[ensures(result.1 == (utilization@ < low_watermark@))]
+#[ensures(!(result.0 && result.1))]
+pub fn evictor_decisions(
+    utilization: u32,
+    threshold: u32,
+    low_watermark: u32,
+) -> (bool, bool) {
+    let should_start = utilization >= threshold;
+    let should_stop = utilization < low_watermark;
+    (should_start, should_stop)
+}
+
 // ---------- P20: prepare_store argument validation ----------
 //
 // Mirrors the guard prefix of `prepare_store` (dispatcher/src/lib.rs:2130-2136):

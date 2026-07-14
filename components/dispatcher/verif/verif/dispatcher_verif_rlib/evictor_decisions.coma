@@ -1,0 +1,39 @@
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 194 0 198 17 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 190 11 190 39
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 191 10 191 50
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 192 10 192 53
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 193 10 193 33
+
+use creusot.int.UInt32
+use creusot.prelude.Any
+use int.Int
+
+type tup2_bool_bool = { f0: bool; f1: bool }
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let evictor_decisions [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 194 0 198 17]
+  (utilization: UInt32.t) (threshold: UInt32.t) (low_watermark: UInt32.t) (return (x: tup2_bool_bool)) =
+{[@stop_split] [@expl:evictor_decisions requires] [%#slib] UInt32.t'int low_watermark <= UInt32.t'int threshold}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &should_start <- UInt32.ge utilization threshold ] s1
+    | s1 = [ &should_stop <- UInt32.lt utilization low_watermark ] s2
+    | s2 = [ &_ret <- { f0 = should_start; f1 = should_stop } ] s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: tup2_bool_bool = Any.any_l ()
+  | & utilization: UInt32.t = utilization
+  | & threshold: UInt32.t = threshold
+  | & low_watermark: UInt32.t = low_watermark
+  | & should_start: bool = Any.any_l ()
+  | & should_stop: bool = Any.any_l () ])
+  [ return (result: tup2_bool_bool) ->
+  {[@stop_split] [@expl:evictor_decisions ensures] ([@stop_split] [@expl:evictor_decisions ensures #0] [%#slib'0] result.f0
+      = (UInt32.t'int utilization >= UInt32.t'int threshold))
+    /\ ([@stop_split] [@expl:evictor_decisions ensures #1] [%#slib'1] result.f1
+      = (UInt32.t'int utilization < UInt32.t'int low_watermark))
+    /\ ([@stop_split] [@expl:evictor_decisions ensures #2] [%#slib'2] not (result.f0 /\ result.f1))}
+    (! return {result}) ]
