@@ -35,6 +35,21 @@ use crate::region::{RegionState, SharedState};
 use crate::slab::FREE_KEY;
 use crate::superblock::Superblock;
 
+fn format_bytes(bytes: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = 1024 * 1024;
+    const GIB: u64 = 1024 * 1024 * 1024;
+    if bytes >= GIB {
+        format!("{:.2} GiB", bytes as f64 / GIB as f64)
+    } else if bytes >= MIB {
+        format!("{:.2} MiB", bytes as f64 / MIB as f64)
+    } else if bytes >= KIB {
+        format!("{:.2} KiB", bytes as f64 / KIB as f64)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 #[derive(Default)]
 struct CheckpointCoalesce {
     completed_seq: u64,
@@ -82,6 +97,7 @@ define_component! {
             metadata_ns_id: Mutex<Option<u32>>,
             metadata_base_lba: Mutex<u64>,
             data_base_lba: Mutex<u64>,
+            post_checkpoint_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
         },
     }
 }
@@ -152,6 +168,10 @@ impl ExtentManager {
 
     pub fn set_dma_alloc(&self, alloc: DmaAllocFn) {
         *self.dma_alloc.lock().unwrap() = Some(alloc);
+    }
+
+    pub fn set_post_checkpoint_hook(&self, hook: Arc<dyn Fn() + Send + Sync>) {
+        *self.post_checkpoint_hook.lock().unwrap() = Some(hook);
     }
 
     /// Configure which NVMe namespace ID to use for the metadata device.
@@ -300,9 +320,9 @@ impl ExtentManager {
             }
         }
 
-        let extent_count = {
+        let (extent_count, total_bytes) = {
             let regions = self.regions.read();
-            regions.as_ref().map_or(0u64, |regions| {
+            regions.as_ref().map_or((0u64, 0u64), |regions| {
                 regions
                     .iter()
                     .map(|r| {
@@ -310,20 +330,41 @@ impl ExtentManager {
                         r.slabs
                             .values()
                             .map(|slab| {
-                                (0..slab.num_slots() as usize)
+                                let occupied = (0..slab.num_slots() as usize)
                                     .filter(|&i| slab.get_key(i) != FREE_KEY)
-                                    .count() as u64
+                                    .count() as u64;
+                                (occupied, occupied * slab.element_size as u64)
                             })
-                            .sum::<u64>()
+                            .fold((0u64, 0u64), |(ac, ab), (c, b)| (ac + c, ab + b))
                     })
-                    .sum()
+                    .fold((0u64, 0u64), |(ac, ab), (c, b)| (ac + c, ab + b))
             })
+        };
+
+        let usable_data_size = {
+            let shared = self.shared.lock().unwrap();
+            shared.as_ref().map_or(0u64, |s| {
+                s.superblock
+                    .data_disk_size
+                    .saturating_sub(s.superblock.data_start_offset)
+            })
+        };
+
+        let pct_used = if usable_data_size > 0 {
+            total_bytes as f64 / usable_data_size as f64 * 100.0
+        } else {
+            0.0
         };
 
         let elapsed = t0.elapsed();
         self.log_info(&format!(
-            "checkpoint_complete ({elapsed:.2?}, {extent_count} extents)"
+            "checkpoint_complete ({elapsed:.2?}, {extent_count} extents, {}, {pct_used:.1}% used)",
+            format_bytes(total_bytes),
         ));
+
+        if let Some(hook) = self.post_checkpoint_hook.lock().unwrap().as_ref() {
+            hook();
+        }
 
         Ok(())
     }
