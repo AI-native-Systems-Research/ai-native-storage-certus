@@ -522,8 +522,9 @@ impl MemoryTierEvictor {
 
                 // Dispatch-map now shows BlockDevice — safe to free the DRAM slot.
                 if mt.remove(key).is_err() {
-                    // Slot already freed (shouldn't happen), but entry is in BlockDevice
-                    // state so data is still accessible via SSD.
+                    // Slot already freed — dispatch-map was stale (entry had
+                    // MemoryTier location but DRAM was already reclaimed).
+                    continue;
                 }
 
                 if let Some(ref tx) = *eviction_tx.lock().unwrap() {
