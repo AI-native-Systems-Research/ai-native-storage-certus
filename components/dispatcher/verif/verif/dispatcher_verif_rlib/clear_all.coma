@@ -1,0 +1,154 @@
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 573 0 573 58 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 574 27 574 28
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 575 32 575 41
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 576 14 576 23
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 579 24 579 46
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 578 16 578 38
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 577 16 577 50
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 580 17 580 18
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 580 8 580 18
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 585 18 585 32
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 586 18 586 39
+let%span slib'9 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 587 18 587 32
+let%span slib'10 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 570 11 570 38
+let%span slib'11 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 571 10 571 27
+let%span slib'12 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 572 10 572 33
+let%span sfmap = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 54 14 54 25
+let%span sfmap'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 474 14 477 5
+let%span sfmap'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 108 8 108 34
+let%span sfmap'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 45 14 45 31
+let%span sfmap'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 46 14 46 55
+let%span sfmap'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 62 14 62 70
+let%span sfmap'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 63 14 63 88
+let%span sfmap'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span sfmap'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 168 40 168 65
+let%span sfmap'8 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 171 12 171 41
+let%span sfmap'9 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span swell_founded = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+
+use creusot.int.UInt64
+use creusot.prelude.MutBorrow
+use creusot.int.UInt32
+use map.Map
+use map.Const
+use creusot.prelude.Any
+use int.Int
+
+type t_FMap_u64_EntryModel
+
+function len_u64 (self: t_FMap_u64_EntryModel) : int
+
+axiom len_u64_spec: forall self: t_FMap_u64_EntryModel [len_u64 self]. [%#sfmap] len_u64 self >= 0
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+type t_EntryModel = { read_ref: UInt32.t; write_ref: UInt32.t }
+
+type tup2_u64_EntryModel = { f0: UInt64.t; f1: t_EntryModel }
+
+type t_Option_tup2_u64_EntryModel = None | Some tup2_u64_EntryModel
+
+type t_Option_EntryModel = None'0 | Some'0 t_EntryModel
+
+function to_mapping_u64 (self: t_FMap_u64_EntryModel) : Map.map UInt64.t t_Option_EntryModel
+
+function get_u64 [@inline:trivial] (self: t_FMap_u64_EntryModel) (k: UInt64.t) : t_Option_EntryModel =
+  [%#sfmap'9] Map.get (to_mapping_u64 self) k
+
+meta "rewrite_def" function get_u64
+
+predicate ext_eq_u64 (self: t_FMap_u64_EntryModel) (other: t_FMap_u64_EntryModel) =
+  [%#sfmap'8] forall k: UInt64.t. get_u64 self k = get_u64 other k
+
+axiom ext_eq_u64_spec: forall self: t_FMap_u64_EntryModel, other: t_FMap_u64_EntryModel [self
+    = other]. [%#sfmap'7] ext_eq_u64 self other = (self = other)
+
+constant empty_u64 : t_FMap_u64_EntryModel
+
+axiom empty_u64_spec: [%#sfmap'2] len_u64 empty_u64 = 0
+
+axiom empty_u64_spec'0: [%#sfmap'3] to_mapping_u64 empty_u64 = Const.const (None'0)
+
+predicate is_empty_u64 (self: t_FMap_u64_EntryModel) = [%#sfmap'1] ext_eq_u64 self empty_u64
+
+predicate contains_u64 [@inline:trivial] (self: t_FMap_u64_EntryModel) (k: UInt64.t) =
+  [%#sfmap'6] get_u64 self k <> None'0
+
+meta "rewrite_def" predicate contains_u64
+
+function insert_u64 (self: t_FMap_u64_EntryModel) (k: UInt64.t) (v: t_EntryModel) : t_FMap_u64_EntryModel
+
+axiom insert_u64_spec:
+  forall self: t_FMap_u64_EntryModel, k: UInt64.t, v: t_EntryModel [insert_u64 self k v]. [%#sfmap'4] to_mapping_u64 (insert_u64 self k v)
+    = Map.set (to_mapping_u64 self) k (Some'0 v)
+
+axiom insert_u64_spec'0:
+  forall self: t_FMap_u64_EntryModel, k: UInt64.t, v: t_EntryModel [insert_u64 self k v]. [%#sfmap'5] len_u64 (insert_u64 self k v)
+    = (if contains_u64 self k then len_u64 self else len_u64 self + 1)
+
+let remove_one_ghost_u64 (self: MutBorrow.t t_FMap_u64_EntryModel) (return (x: t_Option_tup2_u64_EntryModel)) = any
+  [ return (result: t_Option_tup2_u64_EntryModel) ->
+  {[@stop_split] [@expl:remove_one_ghost ensures] [%#sfmap'0] match result with
+      | None -> self.current = self.final /\ is_empty_u64 self.current
+      | Some {f0 = k; f1 = v} -> self.current = insert_u64 self.final k v /\ not contains_u64 self.final k
+      end}
+    (! return {result}) ]
+
+predicate resolve_refmut_FMap_u64_EntryModel [@inline:trivial] (_1: MutBorrow.t t_FMap_u64_EntryModel) =
+  _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_FMap_u64_EntryModel
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let clear_all [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 573 0 573 58]
+  (map: MutBorrow.t t_FMap_u64_EntryModel) (return (x: UInt64.t)) =
+{[@stop_split] [@expl:clear_all requires] [%#slib'10] len_u64 map.current <= UInt64.t'int const_MAX}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &count <- [%#slib] (0: UInt64.t) ] s1
+    | s1 = [ &initial_len <- [%#slib'0] len_u64 map.current ] s2
+    | s2 = [ &_old <- map.final ] s3
+    | s3 = bb2 ]
+  | bb2 = bb2invariant
+    [ bb2 = {[@expl:loop variant] well_founded_relation_Int variant_old_bb2 ([%#slib'1] len_u64 map.current)}
+      bb2invariant
+    | bb2invariant = {[@expl:inferred invariant: unchanged value] _old = map.final}
+      {[@expl:loop invariant #0] [%#slib'4] UInt64.t'int count + len_u64 map.current = initial_len}
+      {[@expl:loop invariant #1] [%#slib'3] UInt64.t'int count <= initial_len}
+      (! [ &variant_old_bb2 <- [%#slib'1] len_u64 map.current ] s0)
+      [ s0 = MutBorrow.borrow_mut <t_FMap_u64_EntryModel> {map.current}
+          (fun (_bor: MutBorrow.t t_FMap_u64_EntryModel) ->
+            [ &_25 <- _bor ] [ &map <- { map with current = _bor.final } ] s1)
+      | s1 = remove_one_ghost_u64 [%#slib'2] {_25} (fun (_x: t_Option_tup2_u64_EntryModel) -> [ &_24 <- _x ] s2)
+      | s2 = any [ br0 -> {_24 = None} (! bb7) | br1 (x0: tup2_u64_EntryModel) -> {_24 = Some x0} (! bb6) ] ]
+      [ bb6 = s0
+        [ s0 = UInt64.add [%#slib'6] {count} {[%#slib'5] (1: UInt64.t)} (fun (_x: UInt64.t) -> [ &count <- _x ] s1)
+        | s1 = bb2 ] ] ]
+  | bb7 = s0
+    [ s0 = -{resolve_refmut_FMap_u64_EntryModel map}- s1
+    | s1 = {[@expl:assertion] [%#slib'7] is_empty_u64 map.current} s2
+    | s2 = {[@expl:assertion] [%#slib'8] map.current = empty_u64} s3
+    | s3 = {[@expl:assertion] [%#slib'9] len_u64 map.current = 0} s4
+    | s4 = [ &_ret <- count ] s5
+    | s5 = return {_ret} ] ]
+  [ & _ret: UInt64.t = Any.any_l ()
+  | & map: MutBorrow.t t_FMap_u64_EntryModel = map
+  | & count: UInt64.t = Any.any_l ()
+  | & initial_len: int = Any.any_l ()
+  | & _24: t_Option_tup2_u64_EntryModel = Any.any_l ()
+  | & _25: MutBorrow.t t_FMap_u64_EntryModel = Any.any_l ()
+  | & _old: t_FMap_u64_EntryModel = Any.any_l ()
+  | & variant_old_bb2: int = Any.any_l () ])
+  [ return (result: UInt64.t) ->
+  {[@stop_split] [@expl:clear_all ensures] ([@stop_split] [@expl:clear_all ensures #0] [%#slib'11] is_empty_u64 map.final)
+    /\ ([@stop_split] [@expl:clear_all ensures #1] [%#slib'12] UInt64.t'int result = len_u64 map.current)}
+    (! return {result}) ]

@@ -1,18 +1,18 @@
-(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 437 0 437 56 *)
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 444 0 444 56 *)
 
-let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 440 14 440 16
-let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 440 9 440 16
-let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 441 23 441 41
-let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 441 8 441 42
-let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 442 14 442 16
-let%span slib'4 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 442 9 442 16
-let%span slib'5 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 443 23 443 41
-let%span slib'6 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 443 8 443 42
-let%span slib'7 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 444 14 444 16
-let%span slib'8 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 444 9 444 16
-let%span slib'9 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 445 4 445 27
-let%span slib'10 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 435 11 435 26
-let%span slib'11 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 436 10 436 31
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 447 14 447 16
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 447 9 447 16
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 448 23 448 41
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 448 8 448 42
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 449 14 449 16
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 449 9 449 16
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 450 23 450 41
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 450 8 450 42
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 451 14 451 16
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 451 9 451 16
+let%span slib'9 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 452 4 452 27
+let%span slib'10 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 442 11 442 26
+let%span slib'11 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 443 10 443 31
 let%span snum = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/num.rs" 316 26 316 48
 
 use creusot.int.Int32
@@ -28,7 +28,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let drive_index [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 437 0 437 56]
+let drive_index [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 444 0 444 56]
   (key: UInt64.t) (num_drives: UInt64.t) (return (x: UInt64.t)) =
 {[@stop_split] [@expl:drive_index requires] [%#slib'10] UInt64.t'int num_drives > 0}
   (! bb0

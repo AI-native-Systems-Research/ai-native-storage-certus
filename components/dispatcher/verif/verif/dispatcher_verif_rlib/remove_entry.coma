@@ -1,10 +1,10 @@
-(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 311 0 314 32 *)
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 318 0 321 32 *)
 
-let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 315 10 315 29
-let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 318 28 318 29
-let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 318 47 318 48
-let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 321 24 321 46
-let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 302 10 310 1
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 322 10 322 29
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 325 28 325 29
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 325 47 325 48
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 328 24 328 46
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 309 10 317 1
 let%span sfmap = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 330 14 330 55
 let%span sfmap'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 445 14 445 43
 let%span sfmap'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 446 14 446 41
@@ -103,7 +103,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let remove_entry [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 311 0 314 32]
+let remove_entry [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 318 0 321 32]
   (map: MutBorrow.t t_FMap_u64_EntryModel) (key: UInt64.t) (return (x: t_Result_unit_DispatcherError)) = (! bb0
   [ bb0 = s0
     [ s0 = [ &_9 <- key ] s1

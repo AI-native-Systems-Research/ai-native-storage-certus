@@ -533,3 +533,57 @@ pub fn consume_once(
     let second = consume_pending(map, key);
     (first, second)
 }
+
+// ---------- P25 (+ P26): clear_memory_tier drains all entries; count matches ----------
+//
+// Mirrors `clear_memory_tier` (dispatcher/src/lib.rs:2329-2350), whose body,
+// past the init gate, is the drain loop:
+//     let mut count = 0;
+//     while let Some(key) = mt.evict_lru() {          // (:2343) pull one LRU key
+//         if dm.convert_memory_tier_to_block(key).is_err() { dm.remove(key); } // (:2344-2346)
+//         count += 1;                                  // (:2347)
+//     }
+//     Ok(count)                                        // (:2349)
+// The loop is driven entirely by `mt.evict_lru()`, which removes one entry from
+// the memory tier each call and returns `None` once the tier is empty. The
+// dispatch-map side effects (convert-to-block / remove) are per-key bookkeeping
+// on a *different* map and do not affect the memory-tier drain, so P25 ("no
+// MemoryTier entries remain") and P26 ("count == entries cleared") are properties
+// of the tier drain alone.
+//
+// `evict_lru` is modeled by `FMap::remove_one_ghost` — its contract is exactly
+// evict_lru's: `None ⇒ *self == ^self ∧ is_empty()` (empty tier, unchanged);
+// `Some((k,_)) ⇒ *self == (^self).insert(k,_) ∧ !(^self).contains(k)` (one entry
+// removed). The loop invariant `count + map.len() == initial_len` (initial_len
+// captured via `snapshot!`) is preserved because each iteration removes one entry
+// and increments count by one; the `map.len()` variant strictly decreases, so the
+// loop terminates. At exit the tier is empty, giving both:
+//   - P25: `(^map).is_empty()` — no MemoryTier entries remain.
+//   - P26: `result@ == (*map).len()` — count equals the number of entries cleared
+//          (the tier's initial size).
+
+// The `len() <= usize::MAX@` precondition captures a real invariant of the
+// runtime tier: its entry count is a `usize` (a `HashMap::len()`), so the loop's
+// `count: usize` cannot overflow. Without it the logic `FMap::len()` is an
+// unbounded `Int` and the `count += 1` in-bounds check is not dischargeable.
+#[check(ghost)]
+#[requires((*map).len() <= usize::MAX@)]
+#[ensures((^map).is_empty())]
+#[ensures(result@ == (*map).len())]
+pub fn clear_all(map: &mut FMap<u64, EntryModel>) -> usize {
+    let mut count: usize = 0;
+    let initial_len = snapshot!(map.len());
+    #[variant(map.len())]
+    #[invariant(count@ + map.len() == *initial_len)]
+    #[invariant(count@ <= *initial_len)]
+    while let Some(_) = map.remove_one_ghost() {
+        count += 1;
+    }
+    // Loop exited via the `None` branch: the tier is empty. Bridge
+    // `is_empty ⇒ len == 0` through `ext_eq` so the count invariant collapses to
+    // `count == initial_len`.
+    proof_assert!(map.is_empty());
+    proof_assert!(*map == FMap::empty());
+    proof_assert!(map.len() == 0);
+    count
+}
