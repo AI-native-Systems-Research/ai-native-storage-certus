@@ -2655,6 +2655,9 @@ mod tests {
             size: u32,
             ssd_offset: Option<u64>,
         },
+        BlockDevice {
+            offset: u64,
+        },
     }
 
     // SAFETY: pointers in MemoryTier refer to MockMemoryTier pool (test-only).
@@ -2732,6 +2735,9 @@ mod tests {
                             size: *size,
                         }),
                     },
+                    MockEntryLocation::BlockDevice { offset } => {
+                        Ok(LookupResult::BlockDevice { offset: *offset })
+                    }
                 },
             }
         }
@@ -2745,6 +2751,7 @@ mod tests {
                         MockEntryLocation::MemoryTier { ssd_offset, .. } => {
                             *ssd_offset = Some(offset);
                         }
+                        MockEntryLocation::BlockDevice { .. } => {}
                     }
                     Ok(())
                 }
@@ -2929,6 +2936,13 @@ mod tests {
                 ),
                 None => false,
             }
+        }
+
+        fn try_evict_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            if !self.is_evictable(key) {
+                return Err(DispatchMapError::InvalidState("not evictable".into()));
+            }
+            self.convert_memory_tier_to_block(key)
         }
 
         fn recover_extent(

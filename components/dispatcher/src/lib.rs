@@ -2629,6 +2629,9 @@ mod tests {
             size: u32,
             ssd_offset: Option<u64>,
         },
+        BlockDevice {
+            offset: u64,
+        },
     }
 
     // SAFETY: pointers in MemoryTier refer to MockMemoryTier pool (test-only).
@@ -2706,6 +2709,9 @@ mod tests {
                             size: *size,
                         }),
                     },
+                    MockEntryLocation::BlockDevice { offset } => {
+                        Ok(LookupResult::BlockDevice { offset: *offset })
+                    }
                 },
             }
         }
@@ -2719,6 +2725,7 @@ mod tests {
                         MockEntryLocation::MemoryTier { ssd_offset, .. } => {
                             *ssd_offset = Some(offset);
                         }
+                        MockEntryLocation::BlockDevice { .. } => {}
                     }
                     Ok(())
                 }
@@ -2904,6 +2911,27 @@ mod tests {
                     }
                 ),
                 None => false,
+            }
+        }
+
+        fn try_evict_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            let entry = inner
+                .entries
+                .get_mut(&key)
+                .ok_or(DispatchMapError::KeyNotFound(key))?;
+            match &entry.location {
+                MockEntryLocation::MemoryTier {
+                    ssd_offset: Some(offset),
+                    ..
+                } => {
+                    let offset = *offset;
+                    entry.location = MockEntryLocation::BlockDevice { offset };
+                    Ok(())
+                }
+                _ => Err(DispatchMapError::InvalidState(
+                    "not evictable".into(),
+                )),
             }
         }
 

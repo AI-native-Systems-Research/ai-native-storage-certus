@@ -567,15 +567,27 @@ impl MemoryTierEvictor {
                 continue;
             }
 
+            // Exponential aggressiveness: scale batch size as utilization approaches 1.0.
+            // At threshold (e.g. 0.8) → 1× batch_size; at 1.0 → 8× batch_size.
+            let headroom = 1.0 - config.threshold;
+            let pressure = if headroom > 0.0 {
+                ((utilization - config.threshold) / headroom).min(1.0)
+            } else {
+                1.0
+            };
+            let multiplier = 1.0 + 7.0 * pressure * pressure; // quadratic ramp 1×..8×
+            let effective_batch = ((config.batch_size as f64 * multiplier) as usize).max(1);
+
             if let Some(log) = logger {
                 log.info(&format!(
-                    "mt-evictor: utilization {:.1}% exceeds threshold {:.1}%, demoting",
+                    "mt-evictor: utilization {:.1}% exceeds threshold {:.1}%, \
+                     demoting (batch={effective_batch}, pressure={pressure:.2})",
                     utilization * 100.0,
                     config.threshold * 100.0,
                 ));
             }
 
-            let candidates = mt.oldest_keys(config.batch_size);
+            let candidates = mt.oldest_keys(effective_batch);
             let mut demoted = 0u32;
 
             for key in candidates {
@@ -583,29 +595,24 @@ impl MemoryTierEvictor {
                     return;
                 }
 
-                if !dm.is_evictable(key) {
+                // Atomically transition dispatch-map to BlockDevice BEFORE freeing DRAM.
+                // This prevents a concurrent lookup from obtaining the memory-tier pointer
+                // after we free it.
+                if dm.try_evict_to_block(key).is_err() {
                     continue;
                 }
 
+                // Dispatch-map now shows BlockDevice — safe to free the DRAM slot.
                 if mt.remove(key).is_err() {
-                    continue;
+                    // Slot already freed (shouldn't happen), but entry is in BlockDevice
+                    // state so data is still accessible via SSD.
                 }
 
-                if dm.convert_memory_tier_to_block(key).is_err() {
-                    let _ = dm.remove(key);
-                    if let Some(ref tx) = *eviction_tx.lock().unwrap() {
-                        let _ = tx.try_send(EvictionEvent {
-                            key,
-                            reason: EvictionReason::Removed,
-                        });
-                    }
-                } else {
-                    if let Some(ref tx) = *eviction_tx.lock().unwrap() {
-                        let _ = tx.try_send(EvictionEvent {
-                            key,
-                            reason: EvictionReason::Demoted,
-                        });
-                    }
+                if let Some(ref tx) = *eviction_tx.lock().unwrap() {
+                    let _ = tx.try_send(EvictionEvent {
+                        key,
+                        reason: EvictionReason::Demoted,
+                    });
                 }
 
                 demoted += 1;
