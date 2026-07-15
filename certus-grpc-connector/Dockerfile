@@ -41,8 +41,10 @@ WORKDIR /workspace
 COPY certus-grpc-connector/ /workspace/certus-grpc-connector/
 COPY certus-connector/sharegpt_12turn_450.json /workspace/certus-connector/sharegpt_12turn_450.json
 
-RUN pip install --no-cache-dir grpcio>=1.60.0 protobuf>=4.25.0 \
-    && pip install --no-cache-dir -e /workspace/certus-grpc-connector
+RUN pip install --no-cache-dir grpcio>=1.60.0
+RUN pip install --no-cache-dir protobuf>=4.25.0
+
+RUN pip install --no-cache-dir -e /workspace/certus-grpc-connector
 
 COPY certus-grpc-connector/docker-entrypoint.sh /usr/local/bin/certus-entrypoint
 RUN chmod +x /usr/local/bin/certus-entrypoint
