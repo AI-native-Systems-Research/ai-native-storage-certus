@@ -169,7 +169,7 @@ define_component! {
             warm_stream: AtomicU64,
             block_device_factory: Mutex<Option<BlockDeviceFactory>>,
             extent_manager_factory: Mutex<Option<ExtentManagerFactory>>,
-            eviction_tx: Mutex<Option<crossbeam_channel::Sender<EvictionEvent>>>,
+            eviction_tx: Arc<Mutex<Option<crossbeam_channel::Sender<EvictionEvent>>>>,
             eviction_dropped: AtomicU64,
         },
     }
@@ -1392,7 +1392,6 @@ impl IDispatcher for DispatcherP2pComponent {
                 .get()
                 .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
             let mt_evictor_logger = self.logger.get().ok();
-            let mt_evictor_eviction_tx = self.eviction_tx.lock().unwrap().clone();
             let mt_evictor = MemoryTierEvictor::start(
                 dm_for_mt_evictor,
                 mt_for_mt_evictor,
@@ -1405,7 +1404,7 @@ impl IDispatcher for DispatcherP2pComponent {
                     ),
                 },
                 mt_evictor_logger,
-                mt_evictor_eviction_tx,
+                Arc::clone(&self.eviction_tx),
             );
             *self.bg_mt_evictor.lock().unwrap() = Some(mt_evictor);
         }
@@ -3123,7 +3122,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         c.dispatch_map
@@ -3169,7 +3168,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
     }
@@ -3189,7 +3188,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher);
@@ -3211,7 +3210,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -3238,7 +3237,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -3266,7 +3265,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -3294,7 +3293,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -3317,7 +3316,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -3340,7 +3339,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -3368,7 +3367,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -3399,7 +3398,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -3421,7 +3420,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -3444,7 +3443,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         ));
 
@@ -3498,7 +3497,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         c.dispatch_map.connect(dm).unwrap();
@@ -3531,7 +3530,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         c.dispatch_map.connect(dm).unwrap();
@@ -3608,7 +3607,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         c.dispatch_map.connect(dm).unwrap();
@@ -3939,7 +3938,7 @@ mod tests {
             AtomicU64::new(0),
             Mutex::new(None),
             Mutex::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         c.dispatch_map

@@ -2,7 +2,7 @@
 
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -509,7 +509,7 @@ impl MemoryTierEvictor {
         mt: Arc<dyn IMemoryTier + Send + Sync>,
         config: MemoryTierEvictorConfig,
         logger: Option<Arc<dyn ILogger + Send + Sync>>,
-        eviction_tx: Option<Sender<EvictionEvent>>,
+        eviction_tx: Arc<Mutex<Option<Sender<EvictionEvent>>>>,
     ) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = Arc::clone(&shutdown);
@@ -523,7 +523,7 @@ impl MemoryTierEvictor {
                     &mt,
                     &config,
                     logger.as_deref(),
-                    eviction_tx.as_ref(),
+                    &eviction_tx,
                 );
             })
             .expect("failed to spawn memory-tier evictor thread");
@@ -547,7 +547,7 @@ impl MemoryTierEvictor {
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
         config: &MemoryTierEvictorConfig,
         logger: Option<&(dyn ILogger + Send + Sync)>,
-        eviction_tx: Option<&Sender<EvictionEvent>>,
+        eviction_tx: &Mutex<Option<Sender<EvictionEvent>>>,
     ) {
         loop {
             thread::sleep(config.interval);
@@ -593,14 +593,14 @@ impl MemoryTierEvictor {
 
                 if dm.convert_memory_tier_to_block(key).is_err() {
                     let _ = dm.remove(key);
-                    if let Some(tx) = eviction_tx {
+                    if let Some(ref tx) = *eviction_tx.lock().unwrap() {
                         let _ = tx.try_send(EvictionEvent {
                             key,
                             reason: EvictionReason::Removed,
                         });
                     }
                 } else {
-                    if let Some(tx) = eviction_tx {
+                    if let Some(ref tx) = *eviction_tx.lock().unwrap() {
                         let _ = tx.try_send(EvictionEvent {
                             key,
                             reason: EvictionReason::Demoted,
