@@ -591,24 +591,42 @@ impl DispatcherP2pComponent {
 
             match evict_key {
                 Some(key) => {
-                    if mt.remove(key).is_ok() {
-                        if dm.convert_memory_tier_to_block(key).is_ok() {
-                            if let Some(tx) = eviction_tx {
-                                let _ = tx.try_send(EvictionEvent { key, reason: EvictionReason::Demoted });
-                            }
+                    // Transition dispatch-map BEFORE freeing DRAM to prevent
+                    // concurrent lookups from obtaining the now-freed pointer.
+                    if dm.try_evict_to_block(key).is_ok() {
+                        let _ = mt.remove(key);
+                        if let Some(tx) = eviction_tx {
+                            let _ = tx.try_send(EvictionEvent { key, reason: EvictionReason::Demoted });
                         }
                     }
                 }
                 None => {
-                    if let Some(evicted_key) = mt.evict_lru_for_key(target_key) {
-                        if dm.convert_memory_tier_to_block(evicted_key).is_ok() {
+                    // Pick oldest candidate, transition dispatch-map first,
+                    // then free DRAM.
+                    let candidates = mt.oldest_keys(MAX_SCAN);
+                    let mut evicted = false;
+                    for &cand in &candidates {
+                        if dm.try_evict_to_block(cand).is_ok() {
+                            let _ = mt.remove(cand);
                             if let Some(tx) = eviction_tx {
-                                let _ = tx.try_send(EvictionEvent { key: evicted_key, reason: EvictionReason::Demoted });
+                                let _ = tx.try_send(EvictionEvent { key: cand, reason: EvictionReason::Demoted });
                             }
-                        } else {
-                            let _ = dm.remove(evicted_key);
-                            if let Some(tx) = eviction_tx {
-                                let _ = tx.try_send(EvictionEvent { key: evicted_key, reason: EvictionReason::Removed });
+                            evicted = true;
+                            break;
+                        }
+                    }
+                    if !evicted {
+                        // No candidates evictable — fall back to blind LRU.
+                        if let Some(evicted_key) = mt.evict_lru_for_key(target_key) {
+                            if dm.try_evict_to_block(evicted_key).is_err() {
+                                let _ = dm.remove(evicted_key);
+                                if let Some(tx) = eviction_tx {
+                                    let _ = tx.try_send(EvictionEvent { key: evicted_key, reason: EvictionReason::Removed });
+                                }
+                            } else {
+                                if let Some(tx) = eviction_tx {
+                                    let _ = tx.try_send(EvictionEvent { key: evicted_key, reason: EvictionReason::Demoted });
+                                }
                             }
                         }
                     }
@@ -2023,15 +2041,15 @@ impl IDispatcher for DispatcherP2pComponent {
             Err(_) => return Err(DispatcherError::KeyNotFound(key)),
         };
 
-        // Remove from memory-tier if present.
+        // Remove from dispatch-map first (prevents new lookups from obtaining
+        // the memory-tier pointer while we free it).
+        dm.remove(key)
+            .map_err(|_| DispatcherError::KeyNotFound(key))?;
+
+        // Now safe to free the DRAM slot — no new readers can find this entry.
         if let Ok(mt) = self.memory_tier.get() {
             let _ = mt.remove(key);
         }
-
-        // Remove from dispatch-map (fails if another reference was taken in the
-        // window after we released ours — acceptable race, caller can retry).
-        dm.remove(key)
-            .map_err(|_| DispatcherError::KeyNotFound(key))?;
 
         if let Some(offset) = block_offset {
             let drives = self.data_drives.read();
@@ -2419,11 +2437,21 @@ impl IDispatcher for DispatcherP2pComponent {
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
         let mut count = 0;
-        while let Some(key) = mt.evict_lru() {
-            if dm.convert_memory_tier_to_block(key).is_err() {
-                let _ = dm.remove(key);
+        loop {
+            let candidates = mt.oldest_keys(64);
+            if candidates.is_empty() {
+                break;
             }
-            count += 1;
+            for key in candidates {
+                if dm.try_evict_to_block(key).is_ok() {
+                    let _ = mt.remove(key);
+                } else {
+                    // Entry not evictable (no SSD copy) — force remove.
+                    let _ = mt.remove(key);
+                    let _ = dm.remove(key);
+                }
+                count += 1;
+            }
         }
         Ok(count)
     }
