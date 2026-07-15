@@ -1,6 +1,6 @@
 # Spec Drift Report
 
-Generated: 2026-07-14 (post-apply)
+Generated: 2026-07-15 (post-apply)
 Project: dispatcher (components/dispatcher)
 
 ## Summary
@@ -16,10 +16,11 @@ Project: dispatcher (components/dispatcher)
 
 ## Status
 
-All drift items identified on 2026-07-14 have been resolved:
+All drift items identified on 2026-07-15 have been resolved:
 
-- **FR-033** updated to include memory-tier eviction config fields (BACKFILL-015)
-- **MemoryTierEvictor** specified as User Story 12 + FR-046 through FR-050 (BACKFILL-016)
+- **FR-047** updated to document paced drain loop behavior (BACKFILL)
+- **FR-048** updated to document exponential batch scaling and adaptive scan widening (BACKFILL)
+- **FR-049** updated to document race-safe demotion ordering and skip-on-failure (BACKFILL)
 
 See `apply-report.md` for details.
 
