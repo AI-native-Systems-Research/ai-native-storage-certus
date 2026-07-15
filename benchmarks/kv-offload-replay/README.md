@@ -7,6 +7,11 @@ evictions without re-running the model.
 - **Generation** requires vLLM (the tracing connectors wrap live vLLM classes).
 - **Replay** is pure Python by default — no vLLM or GPU needed.
 
+> **Running the live 450×12 comparison workload?** See
+> [`RUNBOOK-cpu-and-sharedstorage.md`](RUNBOOK-cpu-and-sharedstorage.md) for the
+> CPU-offload and SharedStorage backends, and `../../certus-grpc-connector/README.md`
+> for the Certus gRPC path.
+
 ## Files
 
 | File | Purpose |
