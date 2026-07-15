@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_check_key": { "prover": "alt-ergo", "time": 0.016 },
+      "vc_contains_ghost_u64": { "prover": "alt-ergo", "time": 0.013 }
+    }
+  }
+}

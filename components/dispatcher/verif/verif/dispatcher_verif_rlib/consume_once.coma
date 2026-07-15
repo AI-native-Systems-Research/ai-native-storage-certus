@@ -1,10 +1,10 @@
-(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 485 0 491 1 *)
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 518 0 524 1 *)
 
-let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 492 16 492 41
-let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 493 17 493 42
-let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 480 11 480 31
-let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 481 10 484 1
-let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 441 10 445 1
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 525 16 525 41
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 526 17 526 42
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 513 11 513 31
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 514 10 517 1
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 474 10 478 1
 let%span sfmap = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
 let%span sfmap'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 168 40 168 65
 let%span sfmap'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 171 12 171 41
@@ -67,7 +67,7 @@ meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let consume_once [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 485 0 491 1]
+let consume_once [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 518 0 524 1]
   (map: MutBorrow.t t_FMap_u64_PendingModel) (key: UInt64.t)
   (return (x: tup2_Result_PendingModel_DispatcherError_Result_PendingModel_DispatcherError)) =
 {[@stop_split] [@expl:consume_once requires] [%#slib'1] contains_u64 map.current key}

@@ -363,6 +363,39 @@ pub fn create_entry(
     Ok(())
 }
 
+// ---------- P6: check(key) result matches membership truth ----------
+//
+// Mirrors `check` (dispatcher/src/lib.rs:1887-1906):
+//     self.ensure_initialized()?;                                 // P2 gate
+//     let dm = self.dispatch_map.get()...?;
+//     match dm.lookup(key) {
+//         Ok(result) => { let exists = !matches!(result, NotExist);
+//                         if exists { dm.release_read(key); } Ok(exists) }  // (:1898-1902)
+//         Err(_)     => Ok(false),                                 // (:1904)
+//     }
+// `exists` is true exactly when the key is present (lookup yields anything but
+// NotExist), false otherwise — so `check` reports membership truth. The
+// `release_read` on a hit adjusts a reference count only; it does not change
+// membership, so the queried state is modeled by a shared `&FMap`.
+//
+// P6 requires: `check(key)` result must match membership truth in dispatch-map.
+// Modeled at L2 over a logic-level `FMap`: init-gated, and on success the
+// returned bool equals `(*map).contains(key)` exactly.
+
+#[check(ghost)]
+#[ensures(!initialized ==> match result { Err(DispatcherError::NotInitialized) => true, _ => false })]
+#[ensures(initialized ==> match result { Ok(b) => b == (*map).contains(key), _ => false })]
+pub fn check_key(
+    initialized: bool,
+    map: &FMap<u64, EntryModel>,
+    key: u64,
+) -> Result<bool, DispatcherError> {
+    if !initialized {
+        return Err(DispatcherError::NotInitialized);
+    }
+    Ok(map.contains_ghost(&key))
+}
+
 // ---------- P20: prepare_store argument validation ----------
 //
 // Mirrors the guard prefix of `prepare_store` (dispatcher/src/lib.rs:2130-2136):
