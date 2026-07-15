@@ -325,6 +325,44 @@ pub fn remove_entry(
     }
 }
 
+// ---------- P3: duplicate-key insert fails AlreadyExists, no overwrite ----------
+//
+// Mirrors dispatch-map `create_memory_tier_entry` (dispatch-map/src/lib.rs:367-399),
+// the map-layer creation step the dispatcher's populate flow delegates to:
+//     if size == 0 { return InvalidSize }                        // (:373) validation
+//     if inner.entries.contains_key(&key) { return AlreadyExists }  // (:381) duplicate guard
+//     ...
+//     inner.entries.insert(key, entry);                          // (:399) only past the guard
+// The `contains_key` guard returns BEFORE `entries.insert`, so a duplicate key
+// never overwrites the existing entry — the map is left exactly as it was.
+//
+// P3 requires: duplicate-key insertion fails cleanly with `AlreadyExists`
+// without mutating existing data. Modeled over a logic-level `FMap`; the
+// "without mutating existing data" half is the concrete `(^map).ext_eq(*map)`
+// (map extensionally unchanged, so the existing value is preserved intact).
+// The size==0/`InvalidSize` validation guard precedes this and is a separate
+// concern (P4 territory); here we isolate the duplicate/no-overwrite property.
+
+#[check(ghost)]
+#[ensures(match result {
+    // Fresh key: inserted, now present.
+    Ok(_) => !(*map).contains(key) && (^map).contains(key),
+    // Duplicate key -> AlreadyExists, map extensionally unchanged (no overwrite).
+    Err(DispatcherError::AlreadyExists) => (*map).contains(key) && (^map).ext_eq(*map),
+    _ => false,
+})]
+pub fn create_entry(
+    map: &mut FMap<u64, EntryModel>,
+    key: u64,
+    entry: EntryModel,
+) -> Result<(), DispatcherError> {
+    if map.contains_ghost(&key) {
+        return Err(DispatcherError::AlreadyExists);
+    }
+    let _ = map.insert_ghost(key, entry);
+    Ok(())
+}
+
 // ---------- P20: prepare_store argument validation ----------
 //
 // Mirrors the guard prefix of `prepare_store` (dispatcher/src/lib.rs:2130-2136):
