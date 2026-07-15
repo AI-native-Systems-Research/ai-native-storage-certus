@@ -275,7 +275,14 @@ pub fn lookup_miss_decision(
     (Ok(()), true)
 }
 
-// ---------- P13: remove on absent key returns KeyNotFound, no mutation ----------
+// ---------- P13 (+ P12): remove on absent key returns KeyNotFound, no mutation;
+//            successful remove guarantees key absence ----------
+//
+// This single proof discharges TWO registry properties over `remove_entry`:
+//   - P13: remove on an absent key returns `KeyNotFound` with no mutation
+//          (the `Err(KeyNotFound)` arm) and a busy entry is likewise not removed.
+//   - P12: a successful remove guarantees the key is absent afterward
+//          (the `Ok` arm: `(*map).contains(key) && !(^map).contains(key)`).
 //
 // Mirrors dispatch-map `remove` (dispatch-map/src/lib.rs:310-333), the map-layer
 // step the dispatcher's `remove` (dispatcher/src/lib.rs:1908-1937) delegates to
