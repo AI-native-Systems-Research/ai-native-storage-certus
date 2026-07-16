@@ -21,7 +21,7 @@ use clap::Parser;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 
 use config::StackConfig;
-use service::DispatcherService;
+use service::{DispatcherService, ServiceCounters};
 
 /// Certus gRPC server (YAML-composed) exposing the IDispatcher interface.
 #[derive(Parser)]
@@ -175,11 +175,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         stack_config.memory_tier_size / (1024 * 1024)
     ));
 
+    let counters = ServiceCounters::new();
+
     // Start Prometheus metrics HTTP endpoint
     if cli.metrics_port > 0 {
         let mt = Arc::clone(&stack.memory_tier);
+        let disp = Arc::clone(&stack.dispatcher);
         let port = cli.metrics_port;
-        tokio::spawn(metrics::serve_metrics(port, mt));
+        tokio::spawn(metrics::serve_metrics(port, mt, disp, counters.clone()));
         logger.info(&format!(
             "certus-server-yaml: metrics endpoint on port {port}"
         ));
@@ -193,6 +196,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 endpoint,
                 &cli.otel_service_name,
                 Arc::clone(&stack.memory_tier),
+                Arc::clone(&stack.dispatcher),
+                counters.clone(),
             )
             .map_err(|e| format!("otel init failed: {e}"))?;
             logger.info(&format!(
@@ -294,6 +299,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&stack.dispatcher),
         stack.eviction_rx.clone(),
         Arc::clone(&stack.eviction_dropped),
+        counters,
     );
     let addr = cli.listen.parse()?;
 
