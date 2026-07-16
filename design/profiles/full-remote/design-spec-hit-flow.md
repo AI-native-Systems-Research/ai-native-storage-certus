@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `full-remote` lookup flow extends the `full` profile with a **remote path**: when a key is not found locally (neither DRAM nor SSD), the dispatcher can forward the miss to peer Certus nodes via the RemoteLookup component. Additionally, this node serves incoming remote lookups from peers via the RemoteRequestHandler.
+The `full-remote` lookup flow extends the `full` profile with a **remote path**: when a key is not found locally (neither DRAM nor SSD), the dispatcher can forward the miss to peer Certus nodes via the RemoteLookup component. Additionally, this node serves incoming remote lookups from peers via the RemoteLookupRdmaInitiator.
 
 ## Assumptions and Invariants
 
@@ -42,9 +42,9 @@ When the dispatch-map returns `NotExist` (key not found locally):
 
 2. **Forward to RemoteLookup.** The dispatcher calls `remote_lookup.batch_lookup(entries)` for keys that missed locally.
 
-3. **Peer resolution.** RemoteLookup queries peer Certus nodes via RDMA. Each peer's RemoteRequestHandler resolves the key against its local dispatcher.
+3. **Peer resolution.** RemoteLookup queries peer Certus nodes via RDMA. Each peer's RemoteLookupRdmaInitiator resolves the key against its local dispatcher.
 
-4. **RDMA data transfer.** If a peer has the entry, the peer's RemoteRequestHandler acquires a LookupRef (read reference) and performs an RDMA Write of the data into the requesting node's memory.
+4. **RDMA data transfer.** If a peer has the entry, the peer's RemoteLookupRdmaInitiator acquires a LookupRef (read reference) and performs an RDMA Write of the data into the requesting node's memory.
 
 5. **Local promotion (optional).** The received data may be inserted into the local memory-tier and dispatch-map so future lookups are warm/local.
 
@@ -58,7 +58,7 @@ When the dispatch-map returns `NotExist` (key not found locally):
 
 When a peer node forwards a miss to this node:
 
-1. **RemoteRequestHandler receives request.** An RDMA request arrives with one or more cache keys.
+1. **RemoteLookupRdmaInitiator receives request.** An RDMA request arrives with one or more cache keys.
 
 2. **Resolve via local dispatcher.** `handle_lookup(key)` or `handle_batch_lookup(keys)` calls through to the dispatcher's dispatch-map.
 
@@ -83,7 +83,7 @@ When a peer node forwards a miss to this node:
 
 - **Concurrent populate for same key:** Rejected by dispatch-map (AlreadyExists).
 - **DRAM eviction during lookup:** Skips entries with active read references (both local and remote LookupRefs).
-- **Remote LookupRef blocking eviction:** If RemoteRequestHandler holds a LookupRef for an entry, that entry cannot be evicted from DRAM until `release_lookup` is called. A slow or failed peer can temporarily pin entries.
+- **Remote LookupRef blocking eviction:** If RemoteLookupRdmaInitiator holds a LookupRef for an entry, that entry cannot be evicted from DRAM until `release_lookup` is called. A slow or failed peer can temporarily pin entries.
 - **Remove during lookup:** Fails with ActiveReferences if any local or remote reader holds a ref.
 - **Background write-through during lookup:** Coexists with both local and remote read refs.
 

@@ -53,7 +53,7 @@ components:
 
   remote_lookup:
     crate: remote-lookup
-    factory: "RemoteLookupComponent::new"
+    factory: "RemoteLookupComponent::new_default"
     provides: [IRemoteLookup]
 
   dispatcher:

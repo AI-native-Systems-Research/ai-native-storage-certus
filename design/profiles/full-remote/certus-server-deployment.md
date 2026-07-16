@@ -88,7 +88,7 @@
 │  └─────────────────────────────────┬─────────────────────────────────────┘   │
 │                                    │ RDMA (outgoing)                         │
 │  ┌─────────────────────────────────┼─────────────────────────────────────┐   │
-│  │ RemoteRequestHandlerComponent   │          «IRemoteRequestHandler»    │   │
+│  │ RemoteLookupRdmaInitiatorComponent   │          «IRemoteLookupRdmaInitiator»    │   │
 │  │  receptacles: [dispatcher, logger]                                    │   │
 │  │  • Accepts incoming RDMA requests from peer nodes                     │   │
 │  │  • Resolves keys via local dispatcher                                 │   │
@@ -118,7 +118,7 @@
 | ExtentManager | IExtentManager | metadata_device, logger |
 | DispatchMapComponent | IDispatchMap | eviction_policy, logger |
 | DispatcherComponent | IDispatcher | dispatch_map, memory_tier, gpu_services, spdk_env, logger, remote_lookup |
-| **RemoteRequestHandlerComponent** | **IRemoteRequestHandler** | **dispatcher, logger** |
+| **RemoteLookupRdmaInitiatorComponent** | **IRemoteLookupRdmaInitiator** | **dispatcher, logger** |
 
 ## Initialization Order
 
@@ -135,7 +135,7 @@
    - Creates **warm_stream** for async memory-tier→GPU DMA
    - Starts **ParallelBackgroundWriter** for async write-through
    - Starts **BackgroundEvictor** for SSD space reclamation
-9. **RemoteRequestHandlerComponent** — RDMA listener, resolves incoming requests via dispatcher
+9. **RemoteLookupRdmaInitiatorComponent** — RDMA listener, resolves incoming requests via dispatcher
 
 ## Data Flow
 
@@ -167,7 +167,7 @@ Local miss ──RemoteLookup.batch_lookup──▶ Peer node (via RDMA)
 
 ### Incoming Remote Request (Peer → This Node)
 ```
-Peer RDMA request ──RemoteRequestHandler.handle_lookup──▶ Dispatcher.lookup
+Peer RDMA request ──RemoteLookupRdmaInitiator.handle_lookup──▶ Dispatcher.lookup
     ──LookupRef (pinned memory-tier pointer)──▶ RDMA Write to peer
     ──release_lookup (unpin)
 ```
@@ -211,7 +211,7 @@ certus-server-yaml \
 
 ## Notes
 
-- RemoteRequestHandler is initialized last because it needs a fully-wired dispatcher
+- RemoteLookupRdmaInitiator is initialized last because it needs a fully-wired dispatcher
 - All component bindings use the COM-style `receptacle.connect(Arc<dyn Interface>)` pattern
 - The remote_lookup receptacle on the dispatcher enables miss-forwarding to peers
 - LookupRef holds a dispatch-map read reference — failure to release blocks eviction of that entry

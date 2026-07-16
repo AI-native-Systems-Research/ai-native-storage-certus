@@ -1,6 +1,6 @@
 profile:
   name: full-remote
-  description: "Production profile with SPDK NVMe + GPU acceleration + RDMA remote request handler"
+  description: "Production profile: SPDK NVMe + GPU + zyre/RDMA remote-lookup (cross-node cache fills)"
 
 components:
   logger:
@@ -51,15 +51,39 @@ components:
     provides: [IExtentManager]
     kind: factory
 
+  zyre:
+    crate: zyre
+    factory: "ZyreComponent::new"
+    provides: [IZyre]
+
+  remote_lookup_rdma_initiator:
+    crate: remote-lookup-rdma-initiator
+    factory: "RemoteLookupRdmaInitiatorComponent::new_default"
+    provides: [IRemoteLookupRdmaInitiator]
+
+  remote_lookup_rdma_responder:
+    crate: remote-lookup-rdma-responder
+    factory: "RemoteLookupRdmaResponderComponent::new_default"
+    provides: [IRemoteLookupRdmaResponder, IRemoteLookupRdmaResponderAdmin]
+
   remote_lookup:
     crate: remote-lookup
-    factory: "RemoteLookupComponent::new"
+    factory: "RemoteLookupComponent::new_default"
     provides: [IRemoteLookup]
-
-  remote_request_handler:
-    crate: remote-request-handler
-    factory: "RemoteRequestHandlerComponent::new"
-    provides: [IRemoteRequestHandler]
+    # init_remote_lookup reads these environment overrides (unset ⇒ built-in
+    # default). Tune the timeouts up for real RDMA — a cold connect can run into
+    # seconds, and the 50ms default op_deadline would finalize every cold lookup
+    # as NotFound:
+    #   CERTUS_RDMA_BIND_IP     RoCE IPv4 to bind (unset ⇒ first active device)
+    #   CERTUS_RL_OP_DEADLINE_MS  overall op deadline (default 50)
+    #   CERTUS_RL_PHASE1_MS       Phase-1 (memory) timeout (default 20)
+    #   CERTUS_RL_QUORUM_PCT      Phase-1→2 quorum percent (default 80)
+    #   CERTUS_RL_GROUP           zyre group (default "remote_lookup")
+    # Cross-subnet clusters (UDP beacon does not route) use gossip discovery:
+    #   CERTUS_RL_GOSSIP_BIND     hub node only, e.g. "tcp://*:9999"
+    #   CERTUS_RL_GOSSIP_CONNECT  every node, the hub endpoint
+    #   CERTUS_RL_NODE_ENDPOINT   this node's ZRE mailbox (required with gossip)
+    init_hook: init_remote_lookup
 
   dispatcher:
     crate: dispatcher
@@ -90,14 +114,41 @@ wiring:
     source: gpu
   - target: dispatcher.spdk_env
     source: spdk_env
-  - target: remote_lookup.logger
-    source: logger
   - target: dispatcher.remote_lookup
     source: remote_lookup
-  - target: remote_request_handler.logger
+
+  # RDMA initiator/responder provider wiring
+  - target: remote_lookup_rdma_initiator.logger
     source: logger
-  - target: remote_request_handler.dispatcher
+  - target: remote_lookup_rdma_initiator.memory_tier
+    source: memory_tier
+  - target: remote_lookup_rdma_responder.logger
+    source: logger
+  - target: remote_lookup_rdma_responder.memory_tier
+    source: memory_tier
+
+  # remote-lookup receptacles. dispatcher.remote_lookup above + this
+  # remote_lookup.dispatcher close an Arc cycle — the mainline disconnects one
+  # side at teardown (specs/002-remote-lookup-rdma/quickstart.md). responder and
+  # responder_admin come from the one responder component, so name the interface.
+  - target: remote_lookup.logger
+    source: logger
+  - target: remote_lookup.zyre
+    source: zyre
+  - target: remote_lookup.dispatch_map
+    source: dispatch_map
+  - target: remote_lookup.memory_tier
+    source: memory_tier
+  - target: remote_lookup.dispatcher
     source: dispatcher
+  - target: remote_lookup.initiator
+    source: remote_lookup_rdma_initiator
+  - target: remote_lookup.responder
+    source: remote_lookup_rdma_responder
+    interface: IRemoteLookupRdmaResponder
+  - target: remote_lookup.responder_admin
+    source: remote_lookup_rdma_responder
+    interface: IRemoteLookupRdmaResponderAdmin
 
 init_order:
   - logger
@@ -106,9 +157,11 @@ init_order:
   - eviction_policy
   - dispatch_map
   - memory_tier
+  - zyre
+  - remote_lookup_rdma_initiator
+  - remote_lookup_rdma_responder
   - remote_lookup
   - dispatcher
-  - remote_request_handler
 
 exports:
   - component: logger
