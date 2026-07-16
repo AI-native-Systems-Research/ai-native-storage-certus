@@ -13,7 +13,7 @@ dispatcher = { workspace = true, default-features = false }
 dispatcher-p2p = { workspace = true, default-features = false, optional = true }
 dispatch-map.workspace = true
 eviction-policy-lru.workspace = true
-memory-tier = { workspace = true, features = ["telemetry"] }
+memory-tier = { workspace = true, features = ["spdk", "telemetry"] }
 block-device-spdk-nvme = { workspace = true, optional = true }
 block-device-filesys = { workspace = true, optional = true }
 block-device-kernel = { workspace = true, optional = true }

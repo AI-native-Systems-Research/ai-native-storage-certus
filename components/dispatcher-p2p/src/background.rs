@@ -2,7 +2,7 @@
 
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -480,6 +480,172 @@ impl BackgroundEvictor {
 }
 
 impl Drop for BackgroundEvictor {
+    fn drop(&mut self) {
+        if self.handle.is_some() {
+            self.shutdown();
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Background Memory-Tier Evictor (DRAM → SSD demotion)
+// ---------------------------------------------------------------------------
+
+pub struct MemoryTierEvictorConfig {
+    pub threshold: f64,
+    pub low_watermark: f64,
+    pub batch_size: usize,
+    pub interval: Duration,
+}
+
+pub struct MemoryTierEvictor {
+    shutdown: Arc<AtomicBool>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl MemoryTierEvictor {
+    pub fn start(
+        dm: Arc<dyn IDispatchMap + Send + Sync>,
+        mt: Arc<dyn IMemoryTier + Send + Sync>,
+        config: MemoryTierEvictorConfig,
+        logger: Option<Arc<dyn ILogger + Send + Sync>>,
+        eviction_tx: Arc<Mutex<Option<Sender<EvictionEvent>>>>,
+    ) -> Self {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_clone = Arc::clone(&shutdown);
+
+        let handle = thread::Builder::new()
+            .name("dispatcher-mt-evictor".into())
+            .spawn(move || {
+                Self::evictor_loop(
+                    &shutdown_clone,
+                    &dm,
+                    &mt,
+                    &config,
+                    logger.as_deref(),
+                    &eviction_tx,
+                );
+            })
+            .expect("failed to spawn memory-tier evictor thread");
+
+        Self {
+            shutdown,
+            handle: Some(handle),
+        }
+    }
+
+    pub fn shutdown(&mut self) {
+        self.shutdown.store(true, Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+
+    fn evictor_loop(
+        shutdown: &AtomicBool,
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        config: &MemoryTierEvictorConfig,
+        logger: Option<&(dyn ILogger + Send + Sync)>,
+        eviction_tx: &Mutex<Option<Sender<EvictionEvent>>>,
+    ) {
+        let mut consecutive_dry_runs = 0u32;
+
+        loop {
+            if shutdown.load(Ordering::Acquire) {
+                return;
+            }
+
+            let used = mt.used();
+            let capacity = mt.capacity();
+            if capacity == 0 {
+                thread::sleep(config.interval);
+                continue;
+            }
+
+            let utilization = used as f64 / capacity as f64;
+            if utilization < config.threshold {
+                consecutive_dry_runs = 0;
+                thread::sleep(config.interval);
+                continue;
+            }
+
+            // Exponential aggressiveness: scale batch size as utilization approaches 1.0.
+            // At threshold → 1× batch_size; at 1.0 → 8× batch_size.
+            let headroom = 1.0 - config.threshold;
+            let pressure = if headroom > 0.0 {
+                ((utilization - config.threshold) / headroom).min(1.0)
+            } else {
+                1.0
+            };
+            let multiplier = 1.0 + 7.0 * pressure * pressure;
+            let effective_batch = ((config.batch_size as f64 * multiplier) as usize).max(1);
+
+            if let Some(log) = logger {
+                log.info(&format!(
+                    "mt-evictor: utilization {:.1}% exceeds threshold {:.1}%, \
+                     demoting (batch={effective_batch}, pressure={pressure:.2})",
+                    utilization * 100.0,
+                    config.threshold * 100.0,
+                ));
+            }
+
+            // Widen the scan when most candidates are unevictable (held by write-through).
+            let scan_size = effective_batch * (consecutive_dry_runs as usize + 1).min(4);
+            let candidates = mt.oldest_keys(scan_size);
+            let mut demoted = 0u32;
+
+            for key in candidates {
+                if shutdown.load(Ordering::Acquire) {
+                    return;
+                }
+
+                if dm.try_evict_to_block(key).is_err() {
+                    continue;
+                }
+
+                if mt.remove(key).is_err() {
+                    continue;
+                }
+
+                if let Some(ref tx) = *eviction_tx.lock().unwrap() {
+                    let _ = tx.try_send(EvictionEvent {
+                        key,
+                        reason: EvictionReason::Demoted,
+                    });
+                }
+
+                demoted += 1;
+
+                let used_now = mt.used();
+                let util_now = used_now as f64 / capacity as f64;
+                if util_now < config.low_watermark {
+                    break;
+                }
+            }
+
+            if let Some(log) = logger {
+                let used_after = mt.used();
+                log.info(&format!(
+                    "mt-evictor: demoted {demoted} entries, utilization now {:.1}%",
+                    used_after as f64 / capacity as f64 * 100.0,
+                ));
+            }
+
+            if demoted == 0 {
+                // No evictable entries — back off to let write-through release refs.
+                consecutive_dry_runs = consecutive_dry_runs.saturating_add(1);
+                thread::sleep(Duration::from_millis(500));
+            } else {
+                consecutive_dry_runs = 0;
+                // Pace between successful batches so we don't starve other work.
+                thread::sleep(Duration::from_millis(200));
+            }
+        }
+    }
+}
+
+impl Drop for MemoryTierEvictor {
     fn drop(&mut self) {
         if self.handle.is_some() {
             self.shutdown();

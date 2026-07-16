@@ -1,5 +1,5 @@
 # Spec Drift Report
-Generated: 2026-06-18
+Generated: 2026-07-15
 Project: dispatcher-p2p
 
 ## Summary
@@ -10,7 +10,7 @@ Project: dispatcher-p2p
 | Aligned | 10 (77%) |
 | Drifted | 2 (15%) |
 | Not Implemented | 0 (0%) |
-| Unspecced Code | 6 |
+| Unspecced Code | 7 |
 
 ## Detailed Findings
 ### Spec: 001-gpudirect-cold-path - GPUDirect Storage Cold Path
@@ -47,7 +47,8 @@ Project: dispatcher-p2p
 | DramBackfillWorker (lazy DRAM promotion after P2P) | `src/background.rs:218-296`, `src/lib.rs:1058-1133` | ~120 | Update FR-009 or add FR-014 |
 | `backfill_delay_ms` config option | `interfaces/src/idispatcher.rs:63` | 4 | Add FR-014 |
 | Background write-through to SSD | `src/background.rs` (ParallelBackgroundWriter) | ~100 | Unspecced (inherited from standard dispatcher) |
-| Background SSD evictor | `src/background.rs:300+` (BackgroundEvictor) | ~170 | Unspecced |
+| Background SSD evictor | `src/background.rs:300+` (BackgroundEvictor) | ~170 | Unspecced (inherited from standard dispatcher) |
+| **MemoryTierEvictor (background DRAM→SSD demotion)** | `src/background.rs:489-635` | ~147 | Add FR-015 through FR-019 |
 | prepare_store / commit_store / cancel_store | `src/lib.rs:1784-1943` | ~160 | Unspecced (direct-write path) |
 | Pipeline zero-copy and multi-object variants | `src/pipeline.rs:244-675` | ~430 | Unspecced (DRAM fallback pipelines) |
 
@@ -60,7 +61,8 @@ Project: dispatcher-p2p
 
 1. **Update FR-009** to: "System MUST asynchronously promote cold entries to DRAM via a throttled background worker after serving the client via P2P. The backfill delay is configurable (`backfill_delay_ms`; default 10ms; 0 = disabled). During the backfill window, repeat lookups of the same key use the P2P path (correct data, no DRAM involvement)."
 2. **Add FR-014**: "System MUST support configurable DRAM backfill throttling via `backfill_delay_ms` in `DispatcherConfig`. When set to 0, no background DRAM backfill occurs and cold-promoted keys remain as BlockDevice indefinitely (repeat lookups always use P2P)."
-3. **Clarify FR-007**: "In production (full-p2p profile), the P2P ring is always initialized. A DRAM fallback path exists in `promote_and_serve` for unit tests and staging environments where GDRCopy is unavailable."
+3. **Add FR-015 through FR-019**: Cover the `MemoryTierEvictor` background DRAM→SSD demotion feature (proactive eviction when memory-tier utilization exceeds threshold). Analogous to the standard dispatcher's User Story 10 (SSD eviction).
+4. **Clarify FR-007**: "In production (full-p2p profile), the P2P ring is always initialized. A DRAM fallback path exists in `promote_and_serve` for unit tests and staging environments where GDRCopy is unavailable."
 
 ---
 

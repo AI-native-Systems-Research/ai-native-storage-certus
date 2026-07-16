@@ -1,48 +1,83 @@
 # Sync Proposals: Dispatcher Component
 
-**Generated**: 2026-05-28
+**Generated**: 2026-07-15
 **Spec**: `components/dispatcher/specs/001-dispatcher-cache-interface/spec.md`
-**Status**: All 3 proposals approved and applied
+**Status**: 4 proposals approved
 
 ## Summary
 
 | Resolution Type | Count |
 |-----------------|-------|
-| Backfill (Code -> Spec) | 3 |
-| Align (Spec -> Code) | 0 |
+| Backfill (Code → Spec) | 4 |
+| Align (Spec → Code) | 0 |
 | Human Decision | 0 |
+| New Specs | 0 |
+| Remove from Spec | 0 |
 
 ## Proposals
 
-### Proposal 1: FR-001 — Add `batch_lookup` to method list
+### Proposal 1: FR-047 — Evictor paced drain loop
 
 **Direction**: BACKFILL
-**Status**: APPROVED and APPLIED
+**Status**: ✅ Approved
 
 **Current State**:
-- Spec says: interface provides `initialize`, `shutdown`, `lookup`, `lookup_async`, `check`, `remove`, `populate`, `prepare_store`, `commit_store`, `cancel_store`, and `touch`
-- Code does: additionally provides `batch_lookup`
+- Spec says: "The check interval MUST be configurable via memory_tier_eviction_interval_secs (default: 2 seconds)."
+- Code does: Uses config.interval as idle sleep below threshold; above threshold uses 200ms/500ms paced loop.
 
-**Resolution Applied**: Updated FR-001 to include `batch_lookup` in the method enumeration. Added FR-039 with full `batch_lookup` semantics.
+**Proposed Resolution**:
+> FR-047: The memory-tier evictor MUST use `memory_tier_eviction_interval_secs` (default: 2 seconds) as the idle polling interval when utilization is below threshold. When above threshold, the evictor MUST loop continuously with a 200ms pace between successful demotion batches and a 500ms backoff when no entries are evictable (to allow write-through to release references).
+
+**Rationale**: The paced drain loop converges to the low watermark in seconds instead of minutes. The config field remains meaningful for idle polling.
+**Confidence**: HIGH
 
 ---
 
-### Proposal 2: FR-019 — Parameterized pipeline queue depth
+### Proposal 2: FR-048 — Exponential batch scaling
 
 **Direction**: BACKFILL
-**Status**: APPROVED and APPLIED
+**Status**: ✅ Approved
 
 **Current State**:
-- Spec says: "up to 16 concurrent NVMe reads"
-- Code does: accepts `max_queue_depth` parameter (16 for single-entry, 16/num_queues for batch)
+- Spec says: "the evictor MUST demote entries using IMemoryTier::oldest_keys(batch_size)"
+- Code does: Quadratic pressure curve (1×–8×) and adaptive scan widening (up to 4× on dry runs).
 
-**Resolution Applied**: Updated FR-019 to describe the parameterized `max_queue_depth` and multi-queue sharing strategy.
+**Proposed Resolution**:
+> FR-048: When memory-tier utilization exceeds `memory_tier_eviction_threshold`, the evictor MUST scale the effective batch size using a quadratic pressure curve: `multiplier = 1.0 + 7.0 × pressure²` where `pressure = (utilization - threshold) / (1.0 - threshold)`, giving 1× to 8× the configured `batch_size`. On consecutive dry runs (no entries evictable), the scan window MUST widen up to 4× the effective batch to find evictable entries deeper in the LRU list. Demotion stops when utilization drops below `memory_tier_eviction_low_watermark` or the scan is exhausted.
+
+**Rationale**: Exponential scaling prevents stalls at high utilization; wider scans find evictable entries past write-through holdbacks.
+**Confidence**: HIGH
 
 ---
 
-### Proposal 3: New User Story 11 — Parallel Batch Cold Promotion
+### Proposal 3: FR-049 — Race-safe demotion ordering
 
-**Direction**: NEW_SPEC (backfill)
-**Status**: APPROVED and APPLIED
+**Direction**: BACKFILL
+**Status**: ✅ Approved
 
-**Resolution Applied**: Added User Story 11 describing batch parallel cold promotion with per-drive thread groups, multi-queue threads, reduced queue depth, and acceptance scenarios. Added SC-014 measuring batch throughput improvement.
+**Current State**:
+- Spec says: "Demotion path: IMemoryTier::remove(key) followed by IDispatchMap::convert_memory_tier_to_block(key)"
+- Code does: Reverse order — try_evict_to_block first, then mt.remove.
+
+**Proposed Resolution**:
+> FR-049: For each candidate, the evictor MUST call `IDispatchMap::try_evict_to_block(key)` which atomically verifies evictability (write-through complete, no active references) and transitions the entry to BlockDevice state under a single lock hold. Only after the dispatch-map reflects BlockDevice state MUST the DRAM slot be freed via `IMemoryTier::remove(key)`. This ordering prevents a race where concurrent lookups obtain a freed memory-tier pointer.
+
+**Rationale**: Fixes SPDK vtophys crash caused by TOCTOU race in the original ordering.
+**Confidence**: HIGH
+
+---
+
+### Proposal 4: FR-049 — Skip on failure (no data loss)
+
+**Direction**: BACKFILL
+**Status**: ✅ Approved
+
+**Current State**:
+- Spec says: "If BlockDevice transition fails, the dispatch-map entry is removed entirely."
+- Code does: Entry is skipped (continue) — no removal on failure.
+
+**Proposed Resolution**:
+> Add to FR-049: "If `try_evict_to_block` fails (active references or write-through not complete), the entry MUST be skipped. The evictor does NOT remove the dispatch-map entry on transition failure — the entry remains in MemoryTier state and will be re-evaluated on subsequent sweeps."
+
+**Rationale**: Removing entries with active references causes data loss; skipping is strictly safer.
+**Confidence**: HIGH
