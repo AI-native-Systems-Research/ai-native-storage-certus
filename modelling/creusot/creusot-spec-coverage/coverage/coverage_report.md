@@ -1,65 +1,79 @@
-# Coverage Report
+# Coverage Dashboard
 
 Purpose:
-- Current, human-readable coverage status for `properties_to_prove.md`.
-- Includes concrete proof artifacts so this report remains useful without `history/` docs.
+- One-screen status of the Creusot proof effort for `dispatcher` + `dispatch-map`.
+- Ground truth is `properties_to_prove.md` (registry) and the `.coma` artifacts in each verif crate.
+- To find *where* a given property's proof lives (crate, function, `.coma`, plain English), see `proof_locator.md`.
+
+_Last refreshed: 2026-07-16. Baseline: properties P1–P31._
 
 ## Status legend
 
 - **Verified**: proved and aligned with current runtime/spec.
+- **Verified (scoped)**: proved at a deliberately narrowed model scope (per-entry / single-map decision); the honest boundary is stated in the registry Notes.
 - **Partial**: useful proof evidence exists but not at full required scope.
-- **Unchecked**: no sufficient proof yet.
-- **Stale**: proof artifact exists but mirrors removed/reworked code path.
-- **Retired**: property no longer active in current spec scope.
+- **Stale**: proof artifact is green but mirrors a removed/reworked code path (legacy).
+- **Retired**: property no longer active; no artifact carried.
 
-## Snapshot (current)
+## Headline (by status)
 
-- Total properties: **31**
-- Verified: **4**
-- Partial: **14**
-- Unchecked: **11**
-- Stale: **2**
-- Retired: **2**
+| Status | Count | Properties |
+|---|---:|---|
+| Verified | 18 | P1, P2, P3, P6, P7, P11, P12, P13, P14, P15, P16, P17, P25, P26, P28, P29, P30, P31 |
+| Verified (scoped) | 7 | P4, P5, P8, P9, P18, P27, P20¹ |
+| Partial | 2 | P10¹, P19 |
+| Stale | 2 | P21¹, P24¹ |
+| Retired | 2 | P22¹, P23¹ |
+| **Total** | **31** | |
 
-## Verified properties with concrete evidence
+¹ legacy scope (direct-store / staging / pending-writes workflows removed from runtime).
 
-| Property | Component | Proof function(s) | Artifact(s) | Abstraction | Notes |
-|---|---|---|---|---|---|
-| P2 | dispatcher | `ensure_initialized` | `dispatcher_verif_rlib/ensure_initialized.coma` | L0 | Live and aligned (Claude July). |
-| P20 (legacy but still valid guard semantics) | dispatcher | `prepare_store_guards` (re-anchored to `populate` guard behavior) | `dispatcher_verif_rlib/prepare_store_guards.coma` | L0 | Live guard proof; requirement scope became legacy after direct-store removal. |
-| P18 (local strength) | dispatch-map | `convert_memory_tier_to_block`, lifecycle proofs including write-through safety | `dispatch_map_verif_rlib/convert_memory_tier_to_block.coma`, `.../lifecycle_memory_tier_to_block.coma`, `.../lifecycle_write_through_safety.coma` | L1 | Strong per-entry evidence; full dispatcher composition still partial. |
-| P27 (local strength) | dispatch-map | `recover_extent`, `lifecycle_recover_extent` | `dispatch_map_verif_rlib/recover_extent.coma`, `.../lifecycle_recover_extent.coma` | L1 | Strong per-entry recovery evidence. |
+**Bottom line:** every active, non-legacy property (P1–P19 minus legacy P10, P25–P31) now has a green proof. 25 of 31 are Verified in some form; only P19 remains deliberately Partial (its full guarantee is a cross-map concurrent invariant, out of Creusot's sequential model). The 6 legacy properties (P10, P20–P24) mirror APIs no longer in the runtime.
 
-## Stale / retired proofs captured explicitly
+## By abstraction level (project-local scale)
 
-| Property | Prior proof artifact(s) | Why stale/retired | Current action |
-|---|---|---|---|
-| P21 | `dispatcher_verif_rlib/insert_pending.coma`, `.../consume_once.coma` | Mirrors removed `pending_writes` workflow | Keep as historical evidence; do not treat as active guarantee. |
-| P24 | `dispatcher_verif_rlib/consume_pending.coma` | Same removed workflow | Same treatment. |
-| P22 | none active | Workflow removed in newer spec/runtime | Retired. |
-| P23 | none active | Workflow removed in newer spec/runtime | Retired. |
+`L0` near-runtime · `L1` per-entry/ghost-local · `L2` map-wide · `L3` bounded/opaque-oracle · `Lx` stale.
 
-## Partial coverage cluster (why still partial)
+| Level | Count | Properties |
+|---|---:|---|
+| L0 | 14 | P1, P2, P3, P6, P7, P11, P12, P13, P14, P16, P17, P20, P28, P29 |
+| L1 | 8 | P4, P5, P8, P9, P18, P27 (verified-scoped) · P10, P19 (partial) |
+| L2 | 4 | P25, P26, P30, P31 |
+| L3 | 1 | P15 |
+| Lx | 4 | P21, P22, P23, P24 (legacy) |
 
-- Most partial items are currently supported by **per-entry** dispatch-map proofs (`L1`) without complete **map-wide/system-level** composition.
-- Main partial groups: P3–P10, P12–P13, P17, P26, P30, P31.
-- Practical meaning: safety patterns are validated locally, but not all end-to-end API obligations are discharged.
+The L1 verified-scoped cluster (P4/P5, P8/P9, P18, P27) is where the next refinement work sits: lifting per-entry / single-map decisions to map-wide (L2) theorems. P30/P31 already show that lift is discharged for the three map-mutation shapes (insert-fresh / overwrite / remove) — see assumption A7 in `assumptions_and_trusted.md`.
 
-## Highest-priority next closures
+## By component (where the primary proof runs)
 
-1. **P11** hard-fail size mismatch in dispatcher lookup paths.
-2. **P1** initialization dependency gate proof.
-3. **P15/P16** eviction loop postconditions.
-4. **P30/P31** map-wide invariant lifting beyond per-entry proofs.
+| Component | Verif crate | Properties (primary proof) | `.coma` files |
+|---|---|---|---:|
+| Dispatcher | `components/dispatcher/verif` | P1, P2, P3, P4, P5, P6, P7, P8, P9, P11, P12, P13, P14, P15, P16, P17, P19, P20, P25, P26, P28, P29 (+ legacy P21, P24) | 21 |
+| Dispatch-map | `components/dispatch-map/verif` | P18, P27, P30, P31 (+ per-entry evidence for P3, P8, P9, P12, P13, and legacy P10) | 32 |
 
-## Evidence provenance (Claude + Codex)
+Full-crate replays green on both crates (dispatcher 21 `.coma`, dispatch-map 32 `.coma`).
 
-- Dispatcher proof details imported from July Claude reports (`claude_progress_report.md`, `property_coverage_dispatcher_july7.md`).
-- Dispatch-map local strength imported from cross-check coverage matrix and artifact inventory.
-- This report intentionally consolidates both to avoid dependence on archive files.
+## Ownership API (which interface owns each property)
 
-## Document Evolution Summary
+| Owner interface | Property groups | Main proof location |
+|---|---|---|
+| `IDispatcher` | P1, P2, P4, P5, P7–P11, P14–P17, P19, P25, P26, P28, P29 (+ legacy P20–P24) | `components/dispatcher/verif` |
+| `IDispatchMap` | P3, P6, P12, P13, P18, P27, P30, P31 | `components/dispatch-map/verif` |
+| Shared composition | P3, P12, P13, P18, P27 | dispatcher + dispatch-map composition argument |
 
-- Rewritten to include explicit artifact-level evidence and stale/retired context in one place.
-- Captures Claude July live/stale proof transitions directly in active documentation.
-- Intended to be the first file reviewed for “what is actually proved today”.
+Reviewer guidance:
+- If the owner is `IDispatcher`, a dispatch-map-only proof is *insufficient* on its own.
+- If the owner is `IDispatchMap`, per-entry proofs help but may still need map-wide lifting for full claim strength (see P30/P31 for the discharged pattern).
+
+## Deliberately out of scope (not gaps to close now)
+
+- **P19 (blind-evict fallback):** sequential single-map decision is proved; the real guarantee is a cross-map (mt↔dm) whole-map invariant under *concurrent* eviction — outside Creusot's sequential model. Belongs with the P30/P31 map-wide track.
+- **Cross-map (mt↔dm) consistency for P4/P5/P8/P9:** the Phase-2 "mt slot reserved but no dm entry" leak is a cross-map invariant, tracked with P30/P31, not with the per-property registration proofs.
+- **Legacy P10, P20–P24:** direct-store / staging / pending-writes workflows were removed from the runtime. Artifacts are kept as historical evidence, not active guarantees.
+- **Secondary track:** background write-through eventuality, shutdown drain/join temporal properties, async stream semantics — tracked separately from strict functional proof.
+
+## Provenance
+
+- Dispatcher proofs: July Claude reports (`property_coverage_dispatcher_july7.md`) plus this sprint's additions (P1, P3, P6, P7, P8, P9, P11, P12, P13, P14, P15, P16, P17, P19, P25, P26, P28, P29).
+- Dispatch-map map-wide lift (P30/P31) and local strength (P18, P27): cross-check coverage matrix + artifact inventory.
+- This dashboard is derived from `properties_to_prove.md`; if they disagree, the registry wins.
