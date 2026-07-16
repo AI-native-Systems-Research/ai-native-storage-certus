@@ -40,7 +40,6 @@ pub use igpu_services::GpuStream;
 pub use igpu_services::IGpuServices;
 pub use igreeter::IGreeter;
 pub use ilogger::ILogger;
-#[cfg(feature = "spdk")]
 pub use imemory_tier::IMemoryTier;
 pub use imemory_tier::MemoryTierError;
 pub use imemory_tier::MemoryTierTelemetrySnapshot;
