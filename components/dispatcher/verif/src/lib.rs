@@ -811,3 +811,63 @@ pub fn register_memory_tier(
         Err(DispatcherError::AllocationFailed)
     }
 }
+
+// ---------- P8: MemoryTier lookup hit preserves the key and refreshes eviction metadata ----------
+// Mirrors the MemoryTier arm of `lookup_async` (dispatcher/src/lib.rs:1823-1875): on a MemoryTier
+// hit the entry is served by a GPU DMA copy, `dm.release_read(key)` drops the read pin, and
+// `mt.touch(key)` refreshes the eviction metadata (tsc). The entry's dispatch-map Location is never
+// changed and the key is never removed — a read leaves the entry MemoryTier.
+//   P8: a MemoryTier hit preserves the key (stays MemoryTier) and refreshes eviction metadata.
+// Modeled over FMap<u64, TierState>. The TierState is invariant across the read: served ⇒ the
+// touch is an in-place metadata refresh that overwrites the entry with the SAME Location; not
+// served (GPU copy failed before touch) ⇒ the entry is untouched. Either way the key stays
+// MemoryTier. The metadata refresh (mt.touch) is represented by the returned `refreshed` flag,
+// proved == "the copy was served". Scope: sequential dm-level decision; refcount (read pin) and
+// the mt-slot side are abstracted, and concurrent eviction of the key is outside Creusot's model.
+#[check(ghost)]
+#[requires((*map).get(key) == Some(TierState::MemoryTier))]
+#[ensures((^map).get(key) == Some(TierState::MemoryTier))] // key preserved as MemoryTier
+#[ensures(result == served)] // eviction metadata refreshed iff the copy was served
+pub fn memtier_lookup_hit(map: &mut FMap<u64, TierState>, key: u64, served: bool) -> bool {
+    if served {
+        // mt.touch(key): refresh eviction metadata in place; Location stays MemoryTier.
+        let _ = map.insert_ghost(key, TierState::MemoryTier);
+        true
+    } else {
+        // GPU copy failed before touch: entry untouched, still MemoryTier.
+        false
+    }
+}
+
+// ---------- P9: BlockDevice lookup success promotes the entry back to MemoryTier ----------
+// Mirrors the BlockDevice arm of `lookup_async` (dispatcher/src/lib.rs:1876-1880) -> `promote_and_serve`
+// (dispatcher/src/lib.rs:409-502): on a BlockDevice hit the dispatcher evicts for space, inserts an
+// mt slot, reads the extent from SSD, then `dm.promote_block_to_memory_tier(key, ...)` (:498)
+// transitions the entry IN PLACE from BlockDevice → MemoryTier (retains the ssd_offset so it stays
+// demotable; not a remove+recreate, so it works even while pinned). On any failure (mt.insert,
+// SSD read, or the promote transition) the entry remains BlockDevice — data stays on SSD, key not lost.
+//   P9: a BlockDevice lookup success promotes the entry back to MemoryTier (not delete).
+// Modeled over FMap<u64, TierState>: success ⇒ overwrite BlockDevice with MemoryTier; failure ⇒
+// entry untouched (stays BlockDevice). Scope: sequential dm-level transition decision; the mt-slot
+// allocation / SSD read effects and concurrent access are abstracted (the cross-map mt↔dm
+// consistency during promote belongs with P30/P31).
+#[check(ghost)]
+#[requires((*map).get(key) == Some(TierState::BlockDevice))]
+#[ensures(match result {
+    Ok(_) => (^map).get(key) == Some(TierState::MemoryTier),   // promoted back to MemoryTier
+    Err(_) => (^map).get(key) == Some(TierState::BlockDevice), // stays on SSD, not lost
+})]
+pub fn promote_block_lookup(
+    map: &mut FMap<u64, TierState>,
+    key: u64,
+    promote_ok: bool,
+) -> Result<(), DispatcherError> {
+    if promote_ok {
+        // dm.promote_block_to_memory_tier: in-place BlockDevice -> MemoryTier.
+        let _ = map.insert_ghost(key, TierState::MemoryTier);
+        Ok(())
+    } else {
+        // mt.insert / SSD read / promote transition failed: entry stays BlockDevice.
+        Err(DispatcherError::AllocationFailed)
+    }
+}
