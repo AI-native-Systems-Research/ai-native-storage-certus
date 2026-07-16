@@ -12,7 +12,9 @@ Maintained source docs:
 
 Coverage reports:
 - `coverage/coverage_report.md`:
-  Current proof coverage picture (`Verified/Partial/Unchecked/Stale/Retired`) with artifact-level evidence.
+  One-screen dashboard — counts by status / abstraction level / component, plus the ownership-API table.
+- `coverage/proof_locator.md`:
+  Per-property pointer: where each Px proof lives (crate, function, `.coma`) and one line on what it proves. Answers "where is the proof for Px?" and "what does function `<odd-name>` do?".
 - `coverage/spec_drift_report.md`:
   Spec drift, ownership mapping, and status-change rationale.
 
@@ -39,6 +41,6 @@ Archive:
 
 ## Document Evolution Summary
 
-- Simplified to 2 maintained source docs + 2 coverage reports.
+- Simplified to 2 maintained source docs + 3 coverage reports (dashboard, proof locator, spec drift).
 - Active docs now include concrete proof artifact references and Claude-July stale/live transitions.
 - Goal: readers can answer “what is proved, where, and under what assumptions” without opening archived files.
