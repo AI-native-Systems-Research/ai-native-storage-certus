@@ -1,17 +1,17 @@
-(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 683 0 687 25 *)
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 691 0 695 34 *)
 
-let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 688 30 688 31
-let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 689 19 689 36
-let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 690 14 690 43
-let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 693 10 693 23
-let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 692 16 692 46
-let%span slib'4 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 691 16 691 42
-let%span slib'5 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 694 20 694 21
-let%span slib'6 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 694 8 694 21
-let%span slib'7 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 699 15 699 32
-let%span slib'8 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 676 11 676 38
-let%span slib'9 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 677 10 682 1
-let%span slib'10 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 668 10 668 42
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 696 30 696 31
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 697 19 697 36
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 698 14 698 43
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 701 10 701 23
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 700 16 700 46
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 699 16 699 42
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 702 20 702 21
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 702 8 702 21
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 709 15 709 32
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 684 11 684 38
+let%span slib'9 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 685 10 690 1
+let%span slib'10 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 676 10 676 42
 let%span swell_founded = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
 
 use creusot.int.UInt64
@@ -31,14 +31,16 @@ predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
 
 meta "rewrite_def" predicate well_founded_relation_Int
 
-type t_Result_usize_usize = Ok UInt64.t | Err UInt64.t
+type tup2_usize_usize = { f0: UInt64.t; f1: UInt64.t }
+
+type t_Result_usize_tup2_usize_usize = Ok UInt64.t | Err tup2_usize_usize
 
 meta "compute_max_steps" 1000000
 
 meta "select_lsinst" "all"
 
-let evict_for_capacity [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 683 0 687 25]
-  (needed: UInt64.t) (capacity: UInt64.t) (max_attempts: UInt64.t) (return (x: t_Result_usize_usize)) =
+let evict_for_capacity [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 691 0 695 34]
+  (needed: UInt64.t) (capacity: UInt64.t) (max_attempts: UInt64.t) (return (x: t_Result_usize_tup2_usize_usize)) =
 {[@stop_split] [@expl:evict_for_capacity requires] [%#slib'8] UInt64.t'int max_attempts < UInt64.t'int const_MAX}
   (! bb0
   [ bb0 = s0
@@ -61,12 +63,12 @@ let evict_for_capacity [#"/home/cornel/ai-native-storage-certus/components/dispa
         | s1 = [ &_31 <- UInt64.gt attempts max_attempts ] s2
         | s2 = any [ br0 -> {_31 = false} (! bb6) | br1 -> {_31} (! bb5) ] ]
       | bb6 = s0
-        [ s0 = tier_used [%#slib'7] {needed} (fun (_x: UInt64.t) -> [ &_36 <- _x ] s1)
-        | s1 = [ &used <- _36 ] s2
+        [ s0 = tier_used [%#slib'7] {needed} (fun (_x: UInt64.t) -> [ &_38 <- _x ] s1)
+        | s1 = [ &used <- _38 ] s2
         | s2 = bb2 ] ] ]
-  | bb5 = s0 [ s0 = [ &_ret <- Err attempts ] s1 | s1 = return {_ret} ]
+  | bb5 = s0 [ s0 = [ &_35 <- { f0 = attempts; f1 = used } ] s1 | s1 = [ &_ret <- Err _35 ] s2 | s2 = return {_ret} ]
   | bb8 = s0 [ s0 = [ &_ret <- Ok used ] s1 | s1 = return {_ret} ] ]
-  [ & _ret: t_Result_usize_usize = Any.any_l ()
+  [ & _ret: t_Result_usize_tup2_usize_usize = Any.any_l ()
   | & needed: UInt64.t = needed
   | & capacity: UInt64.t = capacity
   | & max_attempts: UInt64.t = max_attempts
@@ -75,11 +77,13 @@ let evict_for_capacity [#"/home/cornel/ai-native-storage-certus/components/dispa
   | & _25: bool = Any.any_l ()
   | & _26: UInt64.t = Any.any_l ()
   | & _31: bool = Any.any_l ()
-  | & _36: UInt64.t = Any.any_l ()
+  | & _35: tup2_usize_usize = Any.any_l ()
+  | & _38: UInt64.t = Any.any_l ()
   | & variant_old_bb2: int = Any.any_l () ])
-  [ return (result: t_Result_usize_usize) ->
+  [ return (result: t_Result_usize_tup2_usize_usize) ->
   {[@stop_split] [@expl:evict_for_capacity ensures] [%#slib'9] match result with
       | Ok used -> UInt64.t'int used + UInt64.t'int needed <= UInt64.t'int capacity
-      | Err attempts -> UInt64.t'int attempts = UInt64.t'int max_attempts + 1
+      | Err {f0 = attempts; f1 = used} -> UInt64.t'int attempts = UInt64.t'int max_attempts + 1
+      /\ UInt64.t'int used + UInt64.t'int needed > UInt64.t'int capacity
       end}
     (! return {result}) ]

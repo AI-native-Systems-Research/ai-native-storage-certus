@@ -640,24 +640,32 @@ pub fn evict_attempt_budget(max_attempts: usize) -> (bool, usize) {
     (false, attempts)
 }
 
-// ---------- P16: eviction success implies enough capacity was made available ----------
+// ---------- P16 + P17: eviction success ⇒ capacity available;
+//            eviction failure ⇒ capacity target NOT reached ----------
 //
 // Mirrors the SAME loop as P15 (`evict_for_space`, dispatcher/src/lib.rs:534-586),
-// but proves the postcondition on the `Ok(())` exit rather than the attempt bound.
-// The loop is `while mt.used() + needed as usize > mt.capacity() { ... }`; the only
-// way to reach the trailing `Ok(())` (:586) is for that guard to become FALSE, i.e.
-//     !(used + needed > capacity)  ==  used + needed <= capacity
-// so on success there is provably room for the pending `needed`-byte allocation.
+// proving the capacity predicate on BOTH exits (the Ok/Err dichotomy of the guard):
+//     while used + needed > capacity {           // (:534)
+//         attempts += 1; if attempts > max_attempts { return Err(..) }  // (:535-552)
+//         ... evict ...                          // (:557-584)
+//     }
+//     Ok(())                                     // (:586)
+//
+//   - P16 (Ok arm): the trailing `Ok(())` is reachable only when the guard is
+//     FALSE, so `used + needed <= capacity` — room for the pending `needed` bytes.
+//   - P17 (Err arm): the budget-exhaustion `return Err` sits INSIDE the loop body,
+//     reachable only because the guard was TRUE at the loop head; `used` is not
+//     reassigned between the head and that return, so `used + needed > capacity`
+//     still holds — the capacity target was NOT reached when eviction gave up.
 //
 // Whereas P15 abstracted the guard as an arbitrary oracle (the bound holds for any
-// pressure behavior), P16 needs the guard's MEANING, so `used`/`needed`/`capacity`
+// pressure behavior), P16/P17 need the guard's MEANING, so `used`/`needed`/`capacity`
 // are modeled as real integers and the guard is the real comparison. Eviction's
 // effect on `used` is still opaque — `tier_used` is a `#[trusted]` oracle returning
-// the post-eviction used-byte count — because P16 does not claim eviction makes
-// progress (that is the P17 liveness/failure story); it claims only that IF the
-// loop reports success THEN the capacity predicate holds. Abstraction L0 for the
-// success predicate (real comparison), with the opaque used-oracle at the trusted
-// boundary.
+// the post-eviction used-byte count — because neither property claims eviction makes
+// progress; they characterize what is TRUE of the capacity predicate at each exit.
+// Abstraction L0 for the capacity predicates (real comparison), with the opaque
+// used-oracle at the trusted boundary.
 //
 // `tier_used`'s postcondition `result@ + needed@ <= usize::MAX@` is the only trusted
 // assumption: a used-byte count plus one pending allocation never overflows a 64-bit
@@ -677,14 +685,14 @@ fn tier_used(needed: usize) -> usize {
 #[ensures(match result {
     // P16: success ⇒ the capacity predicate holds (room for `needed`).
     Ok(used) => used@ + needed@ <= capacity@,
-    // Budget-exhaustion path (runtime Err(AllocationFailed)); pairs with P15.
-    Err(attempts) => attempts@ == max_attempts@ + 1,
+    // P17: failure ⇒ capacity target NOT reached; `attempts` bound pairs with P15.
+    Err((attempts, used)) => attempts@ == max_attempts@ + 1 && used@ + needed@ > capacity@,
 })]
 pub fn evict_for_capacity(
     needed: usize,
     capacity: usize,
     max_attempts: usize,
-) -> Result<usize, usize> {
+) -> Result<usize, (usize, usize)> {
     let mut attempts: usize = 0;
     let mut used = tier_used(needed);
     #[variant(max_attempts@ + 1 - attempts@)]
@@ -693,7 +701,9 @@ pub fn evict_for_capacity(
     while used + needed > capacity {
         attempts += 1;
         if attempts > max_attempts {
-            return Err(attempts);
+            // Guard was true at the head and `used` is unchanged since:
+            // used + needed > capacity (capacity target not reached).
+            return Err((attempts, used));
         }
         // Eviction frees some space; the new used-byte count is opaque.
         used = tier_used(needed);
