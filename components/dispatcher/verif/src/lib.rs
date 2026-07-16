@@ -587,3 +587,55 @@ pub fn clear_all(map: &mut FMap<u64, EntryModel>) -> usize {
     proof_assert!(map.len() == 0);
     count
 }
+
+// ---------- P15: eviction loop has a bounded attempt budget ----------
+//
+// Mirrors the attempt-budget control flow of `evict_for_space`
+// (dispatcher/src/lib.rs:533-586):
+//     let mut attempts = 0usize;
+//     while mt.used() + needed as usize > mt.capacity() {   // (:534)
+//         attempts += 1;                                     // (:535)
+//         if attempts > max_attempts { return Err(AllocationFailed) } // (:536-552)
+//         ... evict one entry ...                            // (:557-584)
+//     }
+//     Ok(())                                                 // (:586)
+//
+// The while-guard `mt.used() + needed > mt.capacity()` reads external,
+// concurrently-mutated state whose response to eviction we do not model. The
+// budget bound does NOT depend on that: it rests solely on the `attempts`
+// counter. We therefore abstract the guard as an opaque oracle `under_pressure`
+// (a `#[trusted]` fn with no postcondition, so its result is an arbitrary bool
+// each call) — this proves the bound for EVERY possible pressure/eviction
+// behavior, including the adversarial case where pressure never clears.
+//
+// The theorem: the loop makes at most `max_attempts + 1` attempts, and the
+// exhaustion path (runtime `Err(AllocationFailed)`) is taken exactly when the
+// full budget `max_attempts + 1` has been consumed. So the loop can never stall
+// unboundedly. Abstraction L3 (opaque external guard; counter logic mirrored
+// exactly). The `max_attempts < usize::MAX` precondition guards the `+= 1` at
+// the budget boundary (the runtime `max_eviction_attempts` config is small).
+
+#[trusted]
+fn under_pressure() -> bool {
+    // Opaque model of `mt.used() + needed > mt.capacity()`: unconstrained.
+    true
+}
+
+#[requires(max_attempts@ < usize::MAX@)]
+#[ensures(result.1@ <= max_attempts@ + 1)]
+#[ensures(result.0 ==> result.1@ == max_attempts@ + 1)]
+pub fn evict_attempt_budget(max_attempts: usize) -> (bool, usize) {
+    let mut attempts: usize = 0;
+    #[variant(max_attempts@ + 1 - attempts@)]
+    #[invariant(attempts@ <= max_attempts@)]
+    while under_pressure() {
+        attempts += 1;
+        if attempts > max_attempts {
+            // Runtime: return Err(DispatcherError::AllocationFailed).
+            return (true, attempts);
+        }
+        // Eviction body abstracted: its effect on the guard is opaque.
+    }
+    // Runtime: pressure cleared within budget, return Ok(()).
+    (false, attempts)
+}

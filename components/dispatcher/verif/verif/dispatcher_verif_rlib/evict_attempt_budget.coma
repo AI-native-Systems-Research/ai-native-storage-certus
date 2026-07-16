@@ -1,0 +1,66 @@
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 627 0 627 65 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 628 30 628 31
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 629 14 629 43
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 631 10 631 26
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 630 16 630 42
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 632 20 632 21
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 632 8 632 21
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 635 20 635 24
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 640 5 640 10
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 624 11 624 38
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 625 10 625 40
+let%span slib'9 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 626 10 626 53
+let%span swell_founded = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+let under_pressure (return (x: bool)) = any [ return (result: bool) -> (! return {result}) ]
+
+type tup2_bool_usize = { f0: bool; f1: UInt64.t }
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let evict_attempt_budget [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 627 0 627 65]
+  (max_attempts: UInt64.t) (return (x: tup2_bool_usize)) =
+{[@stop_split] [@expl:evict_attempt_budget requires] [%#slib'7] UInt64.t'int max_attempts < UInt64.t'int const_MAX}
+  (! bb0
+  [ bb0 = s0 [ s0 = [ &attempts <- [%#slib] (0: UInt64.t) ] s1 | s1 = bb1 ]
+  | bb1 = bb1invariant
+    [ bb1 = {[@expl:loop variant] well_founded_relation_Int variant_old_bb1 ([%#slib'0] UInt64.t'int max_attempts + 1
+      - UInt64.t'int attempts)}
+      bb1invariant
+    | bb1invariant = {[@expl:loop invariant] [%#slib'2] UInt64.t'int attempts <= UInt64.t'int max_attempts}
+      (! [ &variant_old_bb1 <- [%#slib'0] UInt64.t'int max_attempts + 1 - UInt64.t'int attempts ] s0)
+      [ s0 = under_pressure [%#slib'1] (fun (_x: bool) -> [ &_18 <- _x ] s1)
+      | s1 = any [ br0 -> {_18 = false} (! bb7) | br1 -> {_18} (! bb4) ] ]
+      [ bb4 = s0
+        [ s0 = UInt64.add [%#slib'4] {attempts} {[%#slib'3] (1: UInt64.t)}
+            (fun (_x: UInt64.t) -> [ &attempts <- _x ] s1)
+        | s1 = [ &_19 <- UInt64.gt attempts max_attempts ] s2
+        | s2 = any [ br0 -> {_19 = false} (! bb1) | br1 -> {_19} (! bb5) ] ] ] ]
+  | bb5 = s0 [ s0 = [ &_ret <- { f0 = ([%#slib'5] true); f1 = attempts } ] s1 | s1 = return {_ret} ]
+  | bb7 = s0 [ s0 = [ &_ret <- { f0 = ([%#slib'6] false); f1 = attempts } ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: tup2_bool_usize = Any.any_l ()
+  | & max_attempts: UInt64.t = max_attempts
+  | & attempts: UInt64.t = Any.any_l ()
+  | & _18: bool = Any.any_l ()
+  | & _19: bool = Any.any_l ()
+  | & variant_old_bb1: int = Any.any_l () ])
+  [ return (result: tup2_bool_usize) ->
+  {[@stop_split] [@expl:evict_attempt_budget ensures] ([@stop_split] [@expl:evict_attempt_budget ensures #0] [%#slib'8] UInt64.t'int result.f1
+      <= UInt64.t'int max_attempts + 1)
+    /\ ([@stop_split] [@expl:evict_attempt_budget ensures #1] [%#slib'9] result.f0
+    -> UInt64.t'int result.f1 = UInt64.t'int max_attempts + 1)}
+    (! return {result}) ]

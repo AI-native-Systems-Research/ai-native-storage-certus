@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_evict_attempt_budget": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_under_pressure": { "prover": "alt-ergo", "time": 0.013 }
+    }
+  }
+}
