@@ -780,3 +780,34 @@ pub fn blind_evict_fallback(
         Err(DispatcherError::AllocationFailed)
     }
 }
+
+// ---------- P4 / P5: populate Phase-3 registration is atomic at the dispatch-map level ----------
+// Mirrors `copy_gpu_to_memory_completed` (dispatcher/src/lib.rs:2075-2123): after the mt slot is
+// reserved (Phase 1) and the GPU copy completes (Phase 2), Phase 3 registers the key in the
+// dispatch-map via `dm.create_memory_tier_entry`. On failure the runtime rolls back the mt slot
+// (`mt.remove(key)` at :2097/:2101), so the dispatch-map is left untouched.
+//   P4: success  => the key is present as a MemoryTier entry.
+//   P5: failure  => the dispatch-map is unchanged (no partial/leaked entry).
+// Scope: this is the single-map (dm) sequential decision. The Phase-2 hazard — reserve succeeds but
+// the GPU copy fails, leaving an mt slot with no dm entry and no cleanup — is a cross-map (mt<->dm)
+// invariant that lives with P30/P31 and is not covered by this sequential dm-level proof.
+#[check(ghost)]
+#[requires(!(*map).contains(key))] // fresh key; mt slot reserved in Phase 1
+#[ensures(match result {
+    Ok(_) => (^map).get(key) == Some(TierState::MemoryTier),  // P4
+    Err(_) => (^map).ext_eq(*map) && !(^map).contains(key),   // P5 (dm unchanged)
+})]
+pub fn register_memory_tier(
+    map: &mut FMap<u64, TierState>,
+    key: u64,
+    create_ok: bool,
+) -> Result<(), DispatcherError> {
+    if create_ok {
+        // dm.create_memory_tier_entry succeeded: the key is now a MemoryTier entry.
+        let _ = map.insert_ghost(key, TierState::MemoryTier);
+        Ok(())
+    } else {
+        // dm.create_memory_tier_entry failed: mt slot rolled back, dispatch-map untouched.
+        Err(DispatcherError::AllocationFailed)
+    }
+}
