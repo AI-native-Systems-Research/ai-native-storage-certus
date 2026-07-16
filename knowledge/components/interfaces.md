@@ -17,8 +17,8 @@ Centralized repository for all component interface trait definitions. Allows com
 | `IEvictionPolicy` | -- | `create_pool`, `track`, `touch`, `batch_touch`, `remove`, `pop_oldest`, `peek_oldest`, `len`, `clear_pool` |
 | `IGpuServices` | -- | `initialize`, `shutdown`, `get_devices`, `deserialize_ipc_handle`, `verify_memory`, `pin_memory`, `unpin_memory`, `create_dma_buffer`, `create_stream`, `destroy_stream`, `stream_query`, `stream_synchronize`; *(spdk)*: `dma_copy_to_host`, `dma_copy_to_device`, `dma_copy_to_device_async`, `memcpy_h2d_async`, `dma_copy_to_host_async`, `memcpy_d2h_async`, `prepare_memory_for_spdk`, `allocate_pinned_dma_buffer`, `register_host_memory`, `unregister_host_memory` |
 | `IRemoteLookup` | -- | `batch_lookup`, `join_cluster`, `leave_cluster` |
-| `IRemoteRequestHandler` | -- | `handle_lookup`, `handle_check`, `handle_batch_lookup`, `release_lookup` |
-| `IMemoryTier` | `spdk` | `initialize`, `insert`, `get`, `peek`, `evict_lru`, `evict_lru_for_key`, `oldest_keys`, `remove`, `touch`, `batch_touch`, `contains`, `capacity`, `used`, `pool_info`, `is_dma_capable`, `clear` |
+| `IRemoteLookupRdmaInitiator` | -- | `handle_lookup`, `handle_check`, `handle_batch_lookup`, `release_lookup` |
+| `IMemoryTier` | -- | `initialize`, `insert`, `get`, `peek`, `evict_lru`, `evict_lru_for_key`, `oldest_keys`, `remove`, `touch`, `batch_touch`, `contains`, `capacity`, `used`, `pool_info`, `is_dma_capable`, `clear` |
 | `ISPDKEnv` | `spdk` | `init`, `fini`, `devices`, `device_count`, `is_initialized` |
 | `IBlockDevice` | `spdk` | `connect_client`, `sector_size`, `num_sectors`, `max_queue_depth`, `num_io_queues`, `max_transfer_size`, `block_size`, `numa_node`, `nvme_version`, `telemetry` |
 | `IBlockDeviceAdmin` | `spdk` | `set_pci_address`, `set_actor_cpu`, `initialize`, `signal_stop`, `shutdown`, `detach_controller` |
@@ -87,9 +87,9 @@ Centralized repository for all component interface trait definitions. Allows com
 - `GpuDmaBuffer` — owns GPU device pointer, calls `cudaIpcCloseMemHandle` on drop
 - `GpuStream` — opaque CUDA stream handle
 
-### Remote Request Handler
+### Remote Lookup Initiator
 - `LookupRef { ptr: *const u8, size: u32, key: CacheKey }` — zero-copy reference
-- `RemoteRequestHandlerError` — `InvalidRequest`, `KeyNotFound`, `DispatchError`, `NotInitialized`
+- `RemoteLookupRdmaInitiatorError` — `InvalidRequest`, `KeyNotFound`, `DispatchError`, `NotInitialized`
 
 ### Remote Lookup
 - `RemoteLookupError` — `NotFound`, `TransportError`
