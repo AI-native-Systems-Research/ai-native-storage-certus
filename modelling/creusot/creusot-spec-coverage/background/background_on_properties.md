@@ -221,6 +221,23 @@ Each entry below gives: **What it says**, **Why it's needed**, and **What breaks
 - *What it says:* If the system falls back to a last-resort ("blind") eviction, it must still leave the map consistent — no half-moved entries.
 - *Why:* Even the emergency path must respect the atomicity theme.
 - *Without it:* Emergency eviction under pressure would be exactly when corruption creeps in.
+- *What it means to prove this one correctly — a worked example of the L1→L2 gap.* P19 is a good property to slow down on, because "leaves no dangling map state" is deceptively small and shows exactly where a proof's *scope* matters as much as its greenness.
+
+  **First, the two data structures.** Eviction juggles two separate objects, and the whole property is a claim about the *relationship between them*:
+  - **`mt` — the memory tier** (`IMemoryTier`): the in-DRAM cache. It owns the actual memory slots holding cached bytes. `mt.evict_lru_for_key(k)` frees a slot; `mt.used()`/`capacity()` are physical occupancy.
+  - **`dm` — the dispatch-map** (`IDispatchMap`): the metadata index. Per key it records *where* the data lives (`MemoryTier` vs `BlockDevice`) and its refcount. `dm.convert_memory_tier_to_block(k)` flips a key's recorded tier; `dm.remove(k)` drops the entry.
+
+  A resident key normally has an entry in **both**: `dm` says "key K is in MemoryTier" *and* `mt` holds K's bytes. "Dangling map state" is precisely these two drifting apart — `mt` frees K's slot but `dm` still claims K is resident in memory. A later `lookup(K)` would then trust `dm`, go to the memory tier, and read a slot that no longer holds K's data: a logical use-after-free.
+
+  **The actual fallback logic** (dispatcher `evict_for_space`, `lib.rs:572-583`) is one small decision after `mt` frees the slot: try `dm.convert_memory_tier_to_block(K)`; if that fails, `dm.remove(K)`. So K must end up **either** a `BlockDevice` entry (demoted, data preserved on SSD — this is why P18/P9 promotion still works) **or** absent from `dm` — but *never* left as `MemoryTier`.
+
+  **What we actually proved (L1, `Partial`).** We model just `dm` as a per-entry state map and prove that local decision: from a `MemoryTier` precondition, convert-success ⇒ the entry is now `BlockDevice`, convert-failure ⇒ the entry is gone, and in both arms it is never left `MemoryTier`. That is a faithful, machine-checked statement of the fallback's *intent* — but it is a **single-map, single-key, sequential** statement.
+
+  **What a full discharge would additionally require, and why it's harder:**
+  1. **It is fundamentally a cross-map (`mt` ↔ `dm`) invariant.** "No dangling state" is a relationship between two structures — *for every key, `mt`-residency agrees with the `dm` tier-state* — so it must be stated and maintained across the **whole map**, quantified over all keys. That is not a local per-entry fact; it is the map-wide (`L2`) theorem that P30 (each key in exactly one state) and P31 (refcount/state consistency) are about. In our abstraction-level shorthand this is the **L1→L2 lift**: supplying the map-wide gluing invariant that ties per-entry decisions to a whole-system guarantee (assumption **A7**).
+  2. **The genuinely dangerous case is concurrent — and sits outside the prover.** The code's own comment warns "another thread may have concurrently evicted this key" (`lib.rs:566`). The corruption window is a *race* between `mt` freeing a slot and `dm` being updated. Creusot proves properties of the **sequential** skeleton (§1.2–1.3); it has no model of thread interleavings. So even a perfect single-threaded proof here certifies the decision logic, **not** the interleaving that is the real hazard — the same boundary described for background write-through (liveness/concurrency ⇒ runtime tests or a model checker, not deductive proof).
+
+  The lesson worth capturing for the write-up: a green proof is only as strong as its *scope*. Here the cheap L1 proof is honest and useful (it pins down the convert-or-remove intent), but the property's real weight — a cross-map invariant maintained under concurrency — lives in the P30/P31 map-wide work and, for the racy part, on the runtime-test side of the line. We deliberately did the L1 proof first (a clean, checkable statement of intent) and then fold its meaning into P30/P31 rather than pretend the local proof closes the system-level property.
 
 ### F. Legacy direct-store workflow (P20–P24) — "an older design, kept honestly"
 
@@ -312,6 +329,55 @@ The recurring design DNA is two rules: **the map never lies about what exists an
 
 ---
 
+## 4. Creusot proof patterns — the recurring proof shapes
+
+The 31 properties are many, but the *proofs* fall into a small number of reusable shapes. This section is for the reader who wants to understand **how** these were discharged, not just what they claim. Each pattern names the shape, the trick that makes it go through, and — crucially — the trust/scope boundary it leans on.
+
+### Pattern A — Extract-the-pure-core decision proof
+- *Shape:* Model the runtime's branching (init gate, membership test, size check) as a pure function over `bool` inputs returning a `Result`/tuple, and prove one `#[ensures]` per match arm.
+- *Used by:* **P1** (`initialize_dependency_guards`), **P2** (`ensure_initialized`), **P6** (`check_key`), **P7** (`lookup_miss_decision`), **P14** (`touch_decision`).
+- *Trick:* The runtime effects (mutex acquire, I/O) are irrelevant to the *decision* — strip them and the arms become a small case analysis the SMT solver closes instantly. The "no mutation on the miss/pre-init path" half is captured by a flag proved `== is_ok`, so refresh/copy happens exactly on the success arm.
+- *Scope:* Near-runtime (L0). Faithful because the guard *ordering* is preserved (e.g. P1 checks dispatch_map, then memory_tier, then params — so the returned error variant matches live code).
+
+### Pattern B — FMap map-mutation decision proof
+- *Shape:* Thread a logic-level `FMap<K,V>` through a mirror function; model the runtime map op (`create`/`remove`/`convert`/`promote`) as `insert_ghost`/`remove_ghost` guarded by an outcome `bool`; prove the pre/post membership shape.
+- *Used by:* **P3** (`create_entry` — duplicate ⇒ `AlreadyExists`, `ext_eq` no-overwrite), **P12/P13** (`remove_entry`), **P4/P5** (`register_memory_tier` — Phase-3 registration atomicity), **P8** (`memtier_lookup_hit` — read preserves state), **P9** (`promote_block_lookup` — in-place `BlockDevice→MemoryTier`), **P19** (`blind_evict_fallback`).
+- *Trick:* `std::HashMap::insert`/`remove` carry **no** Creusot extern specs in this toolchain (only `get`/iterators do), so map state *must* be modeled with a logic-level `FMap`. The `FMap` ghost ops (`insert_ghost`, `remove_ghost`) supply exact pre/post specs (`^self == (*self).insert(k,v)`), so membership post-conditions (`(^map).get(key) == Some(...)`, `ext_eq` for no-mutation) discharge directly.
+- *Scope:* L1 (single-map, single-key, sequential). The trust boundary is that `FMap`'s ghost ops are `#[trusted]` in creusot-std — a toolchain assumption, not a project lemma.
+
+### Pattern C — Loop proof (invariant + variant)
+- *Shape:* A `while`-loop with a `#[invariant]` that ties the loop counter to map/capacity state and a `#[variant]` that strictly decreases, so termination + the post-condition fall out at the exit.
+- *Three sub-shapes:*
+  - **Drain loop** — **P25/P26** (`clear_all`): invariant `count + map.len() == initial_len`, variant `map.len()`; proves `is_empty()` at exit and `result == entries_cleared`.
+  - **Bounded-budget loop** — **P15** (`evict_attempt_budget`): the while-guard reads concurrently-mutated external state, so it is abstracted as an **opaque oracle** (`under_pressure`, `#[trusted]`, arbitrary bool each call) — proving the attempt bound for *every* pressure behavior, including adversarial. Abstraction L3.
+  - **Real-guard loop** — **P16/P17** (`evict_for_capacity`): here the guard's *meaning* is modeled (real integer `used + needed > capacity`), so BOTH exits carry the capacity predicate (success ⇒ `<=`, failure ⇒ `>`). Eviction's *effect* on `used` stays opaque since neither property claims progress.
+- *Scope:* The dial between P15 and P16/P17 (opaque guard vs. modeled guard) is the key design choice — abstract exactly as much as the property needs and no more.
+
+### Pattern D — L1→L2 map-wide lift
+- *Shape:* Define a per-entry logic predicate, quantify it over a whole `FMap` (`forall<k> m.contains(k) ==> P(m.lookup(k))`), then prove each of the three map-mutation shapes (insert-fresh, overwrite, remove) preserves the `forall`.
+- *Used by:* **P30/P31** (`map_inv` + `lemma_exclusive_state` + `map_create_entry`/`map_update_entry`/`map_remove_entry`).
+- *Trick:* This discharges the "per-entry proof + composition ⇒ whole-map theorem" gap (assumption A7). The `forall`-preservation goes through *automatically* provided the per-entry helper predicates are `#[logic(open)]` (they unfold in the SMT context alongside the `FMap` insert/remove specs). Exclusivity is made a machine-checked *fact* (`lemma_exclusive_state`, no precondition — `Location` is a single-variant enum) rather than folklore.
+- *Scope:* L2 (map-wide, sequential — the Mutex is collapsed to a ghost map). Does **not** model concurrent interleavings.
+
+### Pattern E — Integer-lifted ordering
+- *Shape:* Runtime `f64` comparisons re-modeled as integer arithmetic (permille) to keep ordering total and decidable.
+- *Used by:* **P29** (`evictor_decisions`).
+- *Trick:* `f64` NaN makes `<=` non-total, so the SMT `<=` obligation is undischargeable directly. Modeling the ratio as integer permille certifies the *comparison direction* and hysteresis band (`!(start && stop)`), catching flipped `<`/`>=` and swapped watermarks — which is the actual property — while explicitly *not* certifying float arithmetic.
+
+### Pattern F — Range / determinism on a pure function
+- *Shape:* Keep the runtime body verbatim; prove only the bound that matters for safety.
+- *Used by:* **P28** (`drive_index`): splitmix64 hash kept as-is, only `num_drives>0 ==> result < num_drives` (no out-of-bounds drive select) is proved. Determinism is structural (pure fn, no state/RNG).
+
+### Pattern G — Product-path proof (reachable vs. defensive)
+- *Shape:* Model an enum→`Result` match, prove the reachable product path, and explicitly flag the defensive/intentionally-unreachable arm.
+- *Used by:* **P11** (`resolve_lookup`): the hit path is `min`-clamped (no over-copy), the miss ⇒ `KeyNotFound`; the `MismatchSize ⇒ InvalidParameter` arm is proved but is dead in production (map `lookup` is key-only; only the mock injects it). Safety rests on a *requested==stored* invariant flagged as a pending trace.
+- *Scope:* Honest labeling — the proof is complete for the reachable path and documents which arm is defensive.
+
+### The honest-scoping idiom (cross-cutting)
+Patterns B and C repeatedly hit a boundary Creusot's *sequential* model cannot cross: **cross-map** invariants (memory-tier slot ↔ dispatch-map entry drifting apart) and **concurrency** (another thread evicting a key mid-operation). The discipline used throughout is to prove the sequential single-map decision honestly at L1 and *explicitly flag* the cross-map/concurrent part as out of scope — deferred to the map-wide P30/P31 (for cross-map) or to runtime/loom-style tests (for interleavings). P19, P4/P5, and P8/P9 all carry this caveat in their notes rather than overclaiming.
+
+---
+
 ## Document Evolution Summary
 
 - New file added under `background/` to give non-specialist readers a complete conceptual walkthrough of properties P1–P31.
@@ -319,3 +385,5 @@ The recurring design DNA is two rules: **the map never lies about what exists an
 - Companion to `properties_to_prove.md` (authoritative registry) — this file carries the "why", that file carries IDs/status/evidence.
 - To be extended alongside future global properties (P32+) as component extraction proceeds.
 - 2026-07-14: revised the P11 entry to match the current design — the size-mismatch arm is defensive/unreachable (map `lookup` is key-only), the reachable copy path is `min`-clamped (no over-copy), and safety rests on a *requested==stored* invariant that is a pending follow-up to confirm. P11 is no longer framed as an open live bug.
+- 2026-07-15: added Section 4 ("Creusot proof patterns") grouping all 31 proofs by structural shape (A pure-core decision, B FMap map-mutation, C loop invariant/variant, D L1→L2 map-wide lift, E integer-lifted ordering, F range/determinism, G product-path) plus the cross-cutting honest-scoping idiom, for blog/paper use. Also expanded the P19 entry with a worked "what it means to prove this correctly" walkthrough of the L1→L2 gap.
+- 2026-07-15: expanded the P19 entry into a worked example of the **L1→L2 gap** — introduces the `mt` (memory tier) vs `dm` (dispatch-map) distinction, explains why "no dangling state" is a cross-map whole-map invariant (belongs with P30/P31), and why the racy part sits outside Creusot's sequential model. Documents the deliberate two-step approach: an honest L1 decision proof (`blind_evict_fallback`, `Partial`) first, then fold its meaning into the P30/P31 map-wide theorem.
