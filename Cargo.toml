@@ -45,6 +45,15 @@ members = [
 # SPDK crates require pre-built native libraries at deps/spdk-build/.
 # They are excluded from default builds so `cargo build` succeeds without
 # SPDK deps. Build them explicitly with: cargo build -p block-device-spdk-nvme
+#
+# NOTE (002-remote-lookup-rdma): `remote-lookup` is moved OUT of default-members.
+# Its 002 rewrite consumes IDispatchMap/IDispatcher, which are
+# `#[cfg(feature = "spdk")]` in the `interfaces` crate, so remote-lookup enables
+# `interfaces/spdk` and thus transitively requires `spdk-sys`. This is a
+# deliberate short-term assumption ("SPDK is always enabled"); the SPDK-orthogonal
+# future is to ungate those opaque-pointer trait definitions (they reference no
+# SPDK type) as was done for IMemoryTier. See
+# specs/002-remote-lookup-rdma/research.md Decision 10.
 default-members = [
     "components/component-framework/crates/component-core",
     "components/component-framework/crates/component-macros",
@@ -56,8 +65,7 @@ default-members = [
     "apps/dynamic-loading-example",
     "components/logger",
     "components/gpu-services",
-    "components/eviction-policy-lru",
-    "components/remote-lookup"
+    "components/eviction-policy-lru"
 ]
 
 resolver = "2"
