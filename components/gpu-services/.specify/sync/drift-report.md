@@ -1,5 +1,5 @@
 # Spec Drift Report
-Generated: 2026-06-18
+Generated: 2026-07-15
 Project: gpu-services
 
 ## Summary
@@ -66,7 +66,7 @@ Project: gpu-services
 - FR-016: Calls spdk_mem_register on GPU pointer → src/dma.rs:122-128
 - FR-017: Rolls back spdk_mem_register on subsequent error → src/dma.rs:151-159
 - FR-018: Restores original CUDA device context on success and error → src/lib.rs:375-382, 388, 397, 468, 474
-- FR-019: register_host_memory with cudaHostRegister + spdk_mem_register, rollback → src/lib.rs:747-792
+- FR-019: register_host_memory with cudaHostRegister + spdk_mem_register, rollback on failure. Treats `spdk_mem_register` rc=-16 (EBUSY, already registered) as success (occurs when memory-tier allocated via spdk_zmalloc). Actual SPDK errors still trigger rollback. → src/lib.rs:868-914
 - FR-020: unregister_host_memory with reverse order → src/lib.rs:794-831
 - FR-021: create_spdk_dma_buffer_from_gpu_bar using GDRCopy (gdr_open, pin, map, spdk_mem_register), full cleanup on drop → src/dma.rs:352-466 (gated behind p2p feature)
 - FR-022: create_spdk_dma_buffer_from_phys for cross-process P2P (mmap + rte_extmem_register + VFIO DMA map) → src/dma.rs:547-617 (gated behind p2p feature)

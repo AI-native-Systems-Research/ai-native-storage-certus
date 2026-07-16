@@ -1,5 +1,5 @@
 {
-  "generated": "2026-06-18",
+  "generated": "2026-07-15",
   "component": "dispatcher-p2p",
   "specs_analyzed": 1,
   "requirements": {
@@ -8,152 +8,70 @@
     "drifted": 2,
     "not_implemented": 0
   },
-  "unspecced_code": 6,
-  "findings": [
+  "unspecced_features": 7,
+  "specs": [
     {
-      "req_id": "FR-001",
-      "spec": "001-gpudirect-cold-path",
-      "status": "aligned",
-      "description": "System MUST read evicted data from SSD directly into GPU staging buffers, bypassing host DRAM.",
-      "location": "src/pipeline.rs:703-861",
-      "notes": "pipelined_ssd_to_gpu_p2p reads NVMe directly into P2P ring GPU BAR1 slots via ReadAsync commands"
-    },
-    {
-      "req_id": "FR-002",
-      "spec": "001-gpudirect-cold-path",
-      "status": "aligned",
-      "description": "System MUST copy data from staging buffers to the client's GPU destination.",
-      "location": "src/pipeline.rs:795-807",
-      "notes": "D2D cudaMemcpyAsync from ring slot dev_ptr to gpu_dst with CUDA_MEMCPY_DEVICE_TO_DEVICE"
-    },
-    {
-      "req_id": "FR-003",
-      "spec": "001-gpudirect-cold-path",
-      "status": "aligned",
-      "description": "System MUST pre-allocate a fixed ring of 64 GPU staging buffers at initialization via cudaMalloc + GDRCopy BAR1 mapping + spdk_mem_register.",
-      "location": "src/p2p_ring.rs:19,52-126",
-      "notes": "P2P_RING_SLOTS=64, cudaMalloc + create_spdk_dma_buffer_from_gpu_bar per slot, 4 CUDA streams allocated."
-    },
-    {
-      "req_id": "FR-004",
-      "spec": "001-gpudirect-cold-path",
-      "status": "aligned",
-      "description": "System MUST partition the staging ring for concurrent thread access using ThreadPartition.",
-      "location": "src/p2p_ring.rs:160-181",
-      "notes": "ThreadPartition::new divides ring evenly, caps at MAX_QD_PER_THREAD=16."
-    },
-    {
-      "req_id": "FR-005",
-      "spec": "001-gpudirect-cold-path",
-      "status": "aligned",
-      "description": "System MUST pipeline SSD reads with D2D GPU copies using FIFO completion ordering, 4 CUDA streams round-robin.",
-      "location": "src/pipeline.rs:703-861",
-      "notes": "FIFO ordering, round-robin stream selection (completed % num_streams), sync at sync_interval boundaries, final sync."
-    },
-    {
-      "req_id": "FR-006",
-      "spec": "001-gpudirect-cold-path",
-      "status": "aligned",
-      "description": "System MUST panic on first cold lookup if the P2P ring was not initialized.",
-      "location": "src/lib.rs:1532",
-      "notes": "p2p_ref.expect() panics on first cold lookup when ring is absent."
-    },
-    {
-      "req_id": "FR-007",
-      "spec": "001-gpudirect-cold-path",
-      "status": "drifted",
-      "description": "The P2P ring is allocated once at initialization and is immutable for the component's lifetime. There is no runtime path selection.",
-      "location": "src/lib.rs:402-456",
-      "notes": "Minor drift: promote_and_serve has a runtime `if let Some(ref p2p)` check with a DRAM fallback path. The fallback only activates if P2P ring is None (test/staging only; FR-006 ensures production always has P2P).",
-      "severity": "minor"
-    },
-    {
-      "req_id": "FR-008",
-      "spec": "001-gpudirect-cold-path",
-      "status": "aligned",
-      "description": "System MUST implement the same interface as the standard dispatcher, serving as a drop-in replacement.",
-      "location": "src/lib.rs:132-155",
-      "notes": "define_component! provides [IDispatcher]. All trait methods implemented."
-    },
-    {
-      "req_id": "FR-009",
-      "spec": "001-gpudirect-cold-path",
-      "status": "drifted",
-      "description": "System MUST promote successfully read cold entries back to DRAM after completing the read.",
-      "location": "src/lib.rs:420-428, src/lib.rs:1557-1561, src/background.rs:218-296",
-      "notes": "Moderate drift: Implementation now uses lazy async backfill. After P2P cold read, key stays as BlockDevice. A background DramBackfillWorker re-reads from SSD into DRAM with configurable delay (backfill_delay_ms, default 10ms, 0=disabled). Promotion is deferred, not immediate. Rationale: immediate backfill caused 30% cold throughput regression from NVMe contention.",
-      "severity": "moderate"
-    },
-    {
-      "req_id": "FR-010",
-      "spec": "001-gpudirect-cold-path",
-      "status": "aligned",
-      "description": "System MUST release all staging resources on shutdown with no leaks.",
-      "location": "src/lib.rs:1223,1227",
-      "notes": "shutdown() destroys P2P ring, pipeline ring, warm stream, stops backfill worker."
-    },
-    {
-      "req_id": "FR-011",
-      "spec": "001-gpudirect-cold-path",
-      "status": "aligned",
-      "description": "System MUST handle read failures gracefully without corrupting ring state.",
-      "location": "src/pipeline.rs:766-786",
-      "notes": "P2P pipeline returns Err on read failure; ring slots not resubmitted; other in-flight lookups proceed independently."
-    },
-    {
-      "req_id": "FR-012",
-      "spec": "001-gpudirect-cold-path",
-      "status": "aligned",
-      "description": "Performance measurement is handled by external benchmarking tools.",
-      "location": null,
-      "notes": "Component implements IDispatcher which certus-api-bench_v2.py exercises. No in-component hooks needed."
-    },
-    {
-      "req_id": "FR-013",
-      "spec": "001-gpudirect-cold-path",
-      "status": "aligned",
-      "description": "System MUST implement promote_to_memory_tier(keys) using pipelined_ssd_to_dram_only.",
-      "location": "src/lib.rs:2050-2099",
-      "notes": "Groups keys by drive, one thread per drive, calls pipelined_ssd_to_dram_only. No P2P ring involvement."
+      "id": "001-gpudirect-cold-path",
+      "title": "GPUDirect Storage Cold Path",
+      "drifted": [
+        {
+          "requirement": "FR-009",
+          "spec_text": "System MUST promote successfully read cold entries back to DRAM after completing the read",
+          "actual": "Uses lazy async DramBackfillWorker with configurable delay (backfill_delay_ms, default 10ms, 0=disabled). Not immediate promotion.",
+          "location": "src/lib.rs:420-428, src/background.rs:218-296",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "FR-007",
+          "spec_text": "There is no runtime path selection",
+          "actual": "Runtime check with DRAM fallback in promote_and_serve for test environments. Production still panics per FR-006.",
+          "location": "src/lib.rs:402-456",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": []
     }
   ],
-  "unspecced_code_details": [
+  "unspecced": [
     {
-      "feature": "DramBackfillWorker (lazy DRAM promotion after P2P cold reads)",
-      "location": "src/background.rs:218-296, src/lib.rs:1058-1133",
-      "description": "Per-drive background threads that re-read SSD data into DRAM memory-tier slots after P2P cold reads serve the client. Throttled by configurable backfill_delay_ms.",
-      "suggested_spec": "Update FR-009 or add FR-014"
+      "feature": "DramBackfillWorker",
+      "location": "src/background.rs:218-296",
+      "lines": 120,
+      "suggested_spec": "FR-014"
     },
     {
-      "feature": "backfill_delay_ms config option",
-      "location": "interfaces/src/idispatcher.rs:63",
-      "description": "Configurable delay between background DRAM backfill jobs. Default 10ms. Set to 0 to disable backfill entirely.",
-      "suggested_spec": "Add FR-014"
+      "feature": "MemoryTierEvictor (background DRAM to SSD demotion)",
+      "location": "src/background.rs:489-635",
+      "lines": 147,
+      "suggested_spec": "FR-015 through FR-019"
     },
     {
-      "feature": "Background write-through to SSD (ParallelBackgroundWriter)",
-      "location": "src/background.rs:1-210",
-      "description": "Per-drive background writer threads that persist memory-tier entries to SSD asynchronously after populate()."
-    },
-    {
-      "feature": "Background SSD evictor (BackgroundEvictor)",
+      "feature": "Background SSD evictor",
       "location": "src/background.rs:300+",
-      "description": "Periodic thread monitoring SSD utilization and evicting cold entries when threshold exceeded."
+      "lines": 170,
+      "suggested_spec": "inherited from standard dispatcher"
     },
     {
-      "feature": "Direct-write path (prepare_store / commit_store / cancel_store)",
+      "feature": "Background write-through (ParallelBackgroundWriter)",
+      "location": "src/background.rs",
+      "lines": 100,
+      "suggested_spec": "inherited from standard dispatcher"
+    },
+    {
+      "feature": "prepare_store / commit_store / cancel_store",
       "location": "src/lib.rs:1784-1943",
-      "description": "Two-phase write API bypassing the populate->background-write path for bulk ingest."
+      "lines": 160,
+      "suggested_spec": "unspecced direct-write path"
     },
     {
       "feature": "Pipeline zero-copy and multi-object variants",
       "location": "src/pipeline.rs:244-675",
-      "description": "Additional pipeline functions for DRAM fallback path and batch operations."
+      "lines": 430,
+      "suggested_spec": "DRAM fallback pipelines"
     }
   ],
-  "recommendations": [
-    "Update FR-009 to reflect lazy async backfill design with configurable delay",
-    "Add FR-014 for backfill_delay_ms config semantics (0=disabled, >0=throttled)",
-    "Clarify FR-007 to acknowledge DRAM fallback exists for test/staging environments"
+  "conflicts": [
+    "FR-007 vs DRAM fallback (mitigated by FR-006 panic in production)",
+    "FR-009 vs lazy async promotion (spec update recommended)"
   ]
 }

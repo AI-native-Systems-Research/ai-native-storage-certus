@@ -511,6 +511,39 @@ impl IDispatchMap for DispatchMapComponent {
         }
     }
 
+    fn try_evict_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+        let mut inner = self.state.inner.lock().unwrap();
+        let entry = inner
+            .entries
+            .get_mut(&key)
+            .ok_or(DispatchMapError::KeyNotFound(key))?;
+
+        if entry.read_ref != 0 || entry.write_ref != 0 {
+            return Err(DispatchMapError::InvalidState(
+                "entry has active references".into(),
+            ));
+        }
+
+        match &entry.location {
+            Location::MemoryTier {
+                ssd_offset: Some(offset),
+                ..
+            } => {
+                let offset = *offset;
+                entry.location = Location::BlockDevice { offset };
+                Ok(())
+            }
+            Location::MemoryTier {
+                ssd_offset: None, ..
+            } => Err(DispatchMapError::InvalidState(
+                "memory-tier entry has no SSD offset (write-through not complete)".into(),
+            )),
+            _ => Err(DispatchMapError::InvalidState(
+                "entry is not in memory-tier state".into(),
+            )),
+        }
+    }
+
     fn recover_extent(
         &self,
         key: CacheKey,

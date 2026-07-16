@@ -72,6 +72,11 @@ struct Cli {
     #[arg(long = "max-eviction-attempts", default_value_t = 2048)]
     max_eviction_attempts: usize,
 
+    /// Memory-tier utilization threshold (0.0–1.0) for background DRAM→SSD demotion.
+    /// Disabled by default (0.0). Set to e.g. 0.8 to start demoting at 80% full.
+    #[arg(long = "memory-tier-eviction-threshold", default_value_t = 0.0)]
+    memory_tier_eviction_threshold: f64,
+
     /// Prometheus metrics HTTP port. Disabled by default; set > 0 to enable.
     #[arg(long = "metrics-port", default_value_t = 0)]
     metrics_port: u16,
@@ -152,6 +157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         format: cli.format,
         poller_base_cpu: cli.poller_base_cpu,
         max_eviction_attempts: cli.max_eviction_attempts,
+        memory_tier_eviction_threshold: cli.memory_tier_eviction_threshold,
         resolved_pci_addrs: std::cell::RefCell::new(Vec::new()),
         resolved_numa_node: std::cell::RefCell::new(None),
     };
