@@ -902,7 +902,9 @@ impl IGpuServices for GpuServicesComponent {
             }
 
             let rc = unsafe { spdk_mem_register(ptr, size) };
-            if rc != 0 {
+            if rc != 0 && rc != -16 {
+                // rc == -16 (EBUSY): memory already registered with SPDK (e.g. allocated
+                // via spdk_zmalloc) — treat as success.
                 if we_registered_cuda {
                     unsafe { cuda_ffi::cudaHostUnregister(ptr) };
                 }

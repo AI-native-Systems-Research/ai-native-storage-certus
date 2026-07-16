@@ -225,6 +225,13 @@ impl IDispatchMap for MockDispatchMap {
         inner.entries.contains_key(&key)
     }
 
+    fn try_evict_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+        if !self.is_evictable(key) {
+            return Err(DispatchMapError::InvalidState("not evictable".into()));
+        }
+        self.convert_memory_tier_to_block(key)
+    }
+
     fn recover_extent(
         &self,
         _key: CacheKey,

@@ -81,7 +81,10 @@ use interfaces::{
 use component_core::binding::bind;
 use spdk_env::ISPDKEnv;
 
-use crate::background::{BackgroundEvictor, EvictorConfig, ParallelBackgroundWriter, WriteJob};
+use crate::background::{
+    BackgroundEvictor, EvictorConfig, MemoryTierEvictor, MemoryTierEvictorConfig,
+    ParallelBackgroundWriter, WriteJob,
+};
 pub use crate::metrics::PipelineMetrics;
 
 #[derive(Clone, Debug)]
@@ -172,6 +175,7 @@ define_component! {
             initialized: AtomicBool,
             bg_writer: Mutex<Option<ParallelBackgroundWriter>>,
             bg_evictor: Mutex<Option<BackgroundEvictor>>,
+            bg_mt_evictor: Mutex<Option<MemoryTierEvictor>>,
             cold_pool: Mutex<Option<cold_pool::ColdReadPool>>,
             data_drives: RwLock<Vec<DataDrive>>,
             pipeline_ring: RwLock<Option<pipeline::PipelineRing>>,
@@ -180,7 +184,7 @@ define_component! {
             extent_manager_factory: Mutex<Option<ExtentManagerFactory>>,
             max_eviction_attempts: AtomicUsize,
             pipeline_metrics: RwLock<Option<Arc<dyn PipelineMetrics>>>,
-            eviction_tx: Mutex<Option<crossbeam_channel::Sender<EvictionEvent>>>,
+            eviction_tx: Arc<Mutex<Option<crossbeam_channel::Sender<EvictionEvent>>>>,
             eviction_dropped: AtomicU64,
         },
     }
@@ -578,21 +582,39 @@ impl DispatcherComponent {
 
             match evict_key {
                 Some(key) => {
-                    // Another thread may have concurrently evicted this key.
-                    if mt.remove(key).is_ok() {
-                        let _ = dm.convert_memory_tier_to_block(key);
+                    // Transition dispatch-map BEFORE freeing DRAM to prevent
+                    // concurrent lookups from obtaining the now-freed pointer.
+                    if dm.try_evict_to_block(key).is_ok() {
+                        let _ = mt.remove(key);
                         self.emit_eviction(key, EvictionReason::Demoted);
                     }
                 }
                 None => {
-                    // Targeted LRU: evict from the same shard as target_key so the
-                    // freed space is usable by the subsequent insert(target_key, ...).
-                    if let Some(evicted_key) = mt.evict_lru_for_key(target_key) {
-                        if dm.convert_memory_tier_to_block(evicted_key).is_err() {
-                            let _ = dm.remove(evicted_key);
-                            self.emit_eviction(evicted_key, EvictionReason::Removed);
-                        } else {
-                            self.emit_eviction(evicted_key, EvictionReason::Demoted);
+                    // Pick oldest candidate, transition dispatch-map first,
+                    // then free DRAM. This avoids the vtophys race where a
+                    // concurrent lookup reads the pointer between free and
+                    // dispatch-map update.
+                    let candidates = mt.oldest_keys(MAX_SCAN);
+                    let mut evicted = false;
+                    for &cand in &candidates {
+                        if dm.try_evict_to_block(cand).is_ok() {
+                            let _ = mt.remove(cand);
+                            self.emit_eviction(cand, EvictionReason::Demoted);
+                            evicted = true;
+                            break;
+                        }
+                    }
+                    if !evicted {
+                        // No candidates were evictable — fall back to blind
+                        // LRU removal (data may be lost if write-through
+                        // incomplete, but prevents deadlock under pressure).
+                        if let Some(evicted_key) = mt.evict_lru_for_key(target_key) {
+                            if dm.try_evict_to_block(evicted_key).is_err() {
+                                let _ = dm.remove(evicted_key);
+                                self.emit_eviction(evicted_key, EvictionReason::Removed);
+                            } else {
+                                self.emit_eviction(evicted_key, EvictionReason::Demoted);
+                            }
                         }
                     }
                 }
@@ -1277,6 +1299,34 @@ impl IDispatcher for DispatcherComponent {
             }
         }
 
+        // Start background memory-tier evictor (DRAM → SSD demotion) if configured.
+        if config.memory_tier_eviction_threshold > 0.0 {
+            let dm_for_mt_evictor = self
+                .dispatch_map
+                .get()
+                .map_err(|_| DispatcherError::NotInitialized("dispatch_map not bound".into()))?;
+            let mt_for_mt_evictor = self
+                .memory_tier
+                .get()
+                .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
+            let mt_evictor_logger = self.logger.get().ok();
+            let mt_evictor = MemoryTierEvictor::start(
+                dm_for_mt_evictor,
+                mt_for_mt_evictor,
+                MemoryTierEvictorConfig {
+                    threshold: config.memory_tier_eviction_threshold,
+                    low_watermark: config.memory_tier_eviction_low_watermark,
+                    batch_size: config.memory_tier_eviction_batch_size,
+                    interval: std::time::Duration::from_secs(
+                        config.memory_tier_eviction_interval_secs,
+                    ),
+                },
+                mt_evictor_logger,
+                Arc::clone(&self.eviction_tx),
+            );
+            *self.bg_mt_evictor.lock().unwrap() = Some(mt_evictor);
+        }
+
         self.initialized.store(true, Ordering::Release);
 
         if let Ok(rl) = self.remote_lookup.get() {
@@ -1292,6 +1342,10 @@ impl IDispatcher for DispatcherComponent {
 
         if let Some(mut evictor) = self.bg_evictor.lock().unwrap().take() {
             evictor.shutdown();
+        }
+
+        if let Some(mut mt_evictor) = self.bg_mt_evictor.lock().unwrap().take() {
+            mt_evictor.shutdown();
         }
 
         if let Some(mut writer) = self.bg_writer.lock().unwrap().take() {
@@ -1960,15 +2014,15 @@ impl IDispatcher for DispatcherComponent {
             Err(_) => return Err(DispatcherError::KeyNotFound(key)),
         };
 
-        // Remove from memory-tier if present.
+        // Remove from dispatch-map first (prevents new lookups from obtaining
+        // the memory-tier pointer while we free it).
+        dm.remove(key)
+            .map_err(|_| DispatcherError::KeyNotFound(key))?;
+
+        // Now safe to free the DRAM slot — no new readers can find this entry.
         if let Ok(mt) = self.memory_tier.get() {
             let _ = mt.remove(key);
         }
-
-        // Remove from dispatch-map (fails if another reference was taken in the
-        // window after we released ours — acceptable race, caller can retry).
-        dm.remove(key)
-            .map_err(|_| DispatcherError::KeyNotFound(key))?;
 
         if let Some(offset) = block_offset {
             let drives = self.data_drives.read();
@@ -2374,11 +2428,21 @@ impl IDispatcher for DispatcherComponent {
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
         let mut count = 0;
-        while let Some(key) = mt.evict_lru() {
-            if dm.convert_memory_tier_to_block(key).is_err() {
-                let _ = dm.remove(key);
+        loop {
+            let candidates = mt.oldest_keys(64);
+            if candidates.is_empty() {
+                break;
             }
-            count += 1;
+            for key in candidates {
+                if dm.try_evict_to_block(key).is_ok() {
+                    let _ = mt.remove(key);
+                } else {
+                    // Entry not evictable (no SSD copy) — force remove.
+                    let _ = mt.remove(key);
+                    let _ = dm.remove(key);
+                }
+                count += 1;
+            }
         }
         Ok(count)
     }
@@ -2593,6 +2657,9 @@ mod tests {
             size: u32,
             ssd_offset: Option<u64>,
         },
+        BlockDevice {
+            offset: u64,
+        },
     }
 
     // SAFETY: pointers in MemoryTier refer to MockMemoryTier pool (test-only).
@@ -2670,6 +2737,9 @@ mod tests {
                             size: *size,
                         }),
                     },
+                    MockEntryLocation::BlockDevice { offset } => {
+                        Ok(LookupResult::BlockDevice { offset: *offset })
+                    }
                 },
             }
         }
@@ -2683,6 +2753,7 @@ mod tests {
                         MockEntryLocation::MemoryTier { ssd_offset, .. } => {
                             *ssd_offset = Some(offset);
                         }
+                        MockEntryLocation::BlockDevice { .. } => {}
                     }
                     Ok(())
                 }
@@ -2871,6 +2942,27 @@ mod tests {
             }
         }
 
+        fn try_evict_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            let entry = inner
+                .entries
+                .get_mut(&key)
+                .ok_or(DispatchMapError::KeyNotFound(key))?;
+            match &entry.location {
+                MockEntryLocation::MemoryTier {
+                    ssd_offset: Some(offset),
+                    ..
+                } => {
+                    let offset = *offset;
+                    entry.location = MockEntryLocation::BlockDevice { offset };
+                    Ok(())
+                }
+                _ => Err(DispatchMapError::InvalidState(
+                    "not evictable".into(),
+                )),
+            }
+        }
+
         fn recover_extent(
             &self,
             key: CacheKey,
@@ -3054,6 +3146,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3061,7 +3154,7 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         c.dispatch_map
@@ -3099,6 +3192,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3106,7 +3200,7 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
     }
@@ -3118,6 +3212,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3125,7 +3220,7 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher);
@@ -3139,6 +3234,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3146,7 +3242,7 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -3165,6 +3261,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3172,7 +3269,7 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -3192,6 +3289,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3199,7 +3297,7 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -3219,6 +3317,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3226,7 +3325,7 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -3241,6 +3340,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3248,7 +3348,7 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -3263,6 +3363,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3270,7 +3371,7 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -3290,6 +3391,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3297,7 +3399,7 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -3320,6 +3422,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3327,7 +3430,7 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -3341,6 +3444,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3348,7 +3452,7 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         let d = query_interface!(c, IDispatcher).unwrap();
@@ -3363,6 +3467,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3370,7 +3475,7 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         ));
 
@@ -3416,6 +3521,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3423,7 +3529,7 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         c.dispatch_map.connect(dm).unwrap();
@@ -3448,6 +3554,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3455,7 +3562,7 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         c.dispatch_map.connect(dm).unwrap();
@@ -3524,6 +3631,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3531,7 +3639,7 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         c.dispatch_map.connect(dm).unwrap();
@@ -3823,6 +3931,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3830,7 +3939,7 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
 
@@ -3857,6 +3966,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3864,7 +3974,7 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
 
@@ -3886,6 +3996,7 @@ mod tests {
             Mutex::new(None),
             Mutex::new(None),
             Mutex::new(None),
+            Mutex::new(None),
             RwLock::new(Vec::new()),
             RwLock::new(None),
             AtomicU64::new(0),
@@ -3893,7 +4004,7 @@ mod tests {
             Mutex::new(None),
             AtomicUsize::new(2048),
             RwLock::new(None),
-            Mutex::new(None),
+            Arc::new(Mutex::new(None)),
             AtomicU64::new(0),
         );
         c.dispatch_map

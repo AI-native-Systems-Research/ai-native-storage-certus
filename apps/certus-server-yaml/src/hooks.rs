@@ -143,6 +143,7 @@ pub fn init_dispatcher(
             format_on_init: config.format,
             poller_base_cpu: config.poller_base_cpu,
             max_eviction_attempts: config.max_eviction_attempts,
+            memory_tier_eviction_threshold: config.memory_tier_eviction_threshold,
             ..Default::default()
         })
         .map_err(|e| format!("Dispatcher init failed: {e}"))

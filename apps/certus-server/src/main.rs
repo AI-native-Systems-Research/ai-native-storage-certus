@@ -68,6 +68,11 @@ struct Cli {
     #[arg(long = "max-eviction-attempts", default_value_t = 2048)]
     max_eviction_attempts: usize,
 
+    /// Memory-tier utilization threshold (0.0–1.0) for background DRAM→SSD demotion.
+    /// Disabled by default (0.0). Set to e.g. 0.8 to start demoting at 80% full.
+    #[arg(long = "memory-tier-eviction-threshold", default_value_t = 0.0)]
+    memory_tier_eviction_threshold: f64,
+
     /// OpenTelemetry OTLP endpoint (e.g. "http://localhost:4317").
     /// Enables metrics export when set. Requires --features otel.
     #[arg(long = "otel-endpoint")]
@@ -128,6 +133,7 @@ fn initialize_component_stack(
     format: bool,
     poller_base_cpu: Option<usize>,
     max_eviction_attempts: usize,
+    memory_tier_eviction_threshold: f64,
 ) -> Result<(Arc<dyn IDispatcher + Send + Sync>, Arc<dyn ILogger + Send + Sync>, Vec<String>, Arc<dispatcher::DispatcherComponent>), String> {
     let logger: Arc<dyn ILogger + Send + Sync> = logger::LoggerComponent::new_default();
 
@@ -300,6 +306,7 @@ fn initialize_component_stack(
             format_on_init: format,
             poller_base_cpu,
             max_eviction_attempts,
+            memory_tier_eviction_threshold,
             ..Default::default()
         })
         .map_err(|e| format!("Dispatcher init failed: {e}"))?;
@@ -333,7 +340,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool_size = cli.memory_tier_size.unwrap_or(DEFAULT_MEMORY_TIER_SIZE);
     let (dispatcher, logger, device_pci, disp_comp) = initialize_component_stack(
         &device_pci, cli.drive_count, pool_size, cli.format, cli.poller_base_cpu,
-        cli.max_eviction_attempts,
+        cli.max_eviction_attempts, cli.memory_tier_eviction_threshold,
     )?;
 
     logger.info(&format!("certus-server: devices={:?}", device_pci));
