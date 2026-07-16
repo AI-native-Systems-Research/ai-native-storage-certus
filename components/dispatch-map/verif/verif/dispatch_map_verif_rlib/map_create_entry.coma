@@ -1,0 +1,165 @@
+(* #"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 717 0 717 89 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 718 12 718 38
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 712 11 712 22
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 713 11 713 30
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 714 11 714 30
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 715 10 715 28
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 716 10 716 21
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 696 8 696 100
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 688 16 688 58
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 678 8 680 57
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 659 16 659 81
+let%span slib'9 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 665 16 665 85
+let%span slib'10 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 671 16 671 84
+let%span sfmap = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 420 14 420 49
+let%span sfmap'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 421 14 421 40
+let%span sfmap'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span sfmap'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 62 14 62 70
+let%span sfmap'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 63 14 63 88
+let%span sfmap'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sfmap'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 96 8 96 34
+let%span sfmap'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 54 14 54 25
+let%span soption = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/option.rs" 796 15 796 27
+let%span soption'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/std/option.rs" 798 8 801 9
+let%span slogic = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic.rs" 39 11 39 28
+let%span slogic'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic.rs" 40 10 40 19
+let%span smapping = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/mapping.rs" 66 8 66 19
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use creusot.int.UInt32
+use map.Map
+use creusot.prelude.Any
+use int.Int
+
+type t_FMap_u64_DispatchEntry
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_Location = Staging UInt64.t | BlockDevice UInt64.t | MemoryTier UInt64.t UInt32.t t_Option_u64
+
+type t_DispatchEntry = {
+  location: t_Location;
+  size_blocks: UInt32.t;
+  read_ref: UInt32.t;
+  write_ref: UInt32.t;
+  tsc: UInt64.t }
+
+type t_Option_DispatchEntry = None'0 | Some'0 t_DispatchEntry
+
+function to_mapping_u64 (self: t_FMap_u64_DispatchEntry) : Map.map UInt64.t t_Option_DispatchEntry
+
+function len_u64 (self: t_FMap_u64_DispatchEntry) : int
+
+axiom len_u64_spec: forall self: t_FMap_u64_DispatchEntry [len_u64 self]. [%#sfmap'6] len_u64 self >= 0
+
+function get_u64 [@inline:trivial] (self: t_FMap_u64_DispatchEntry) (k: UInt64.t) : t_Option_DispatchEntry =
+  [%#sfmap'4] Map.get (to_mapping_u64 self) k
+
+meta "rewrite_def" function get_u64
+
+predicate contains_u64 [@inline:trivial] (self: t_FMap_u64_DispatchEntry) (k: UInt64.t) =
+  [%#sfmap'1] get_u64 self k <> None'0
+
+meta "rewrite_def" predicate contains_u64
+
+function insert_u64 (self: t_FMap_u64_DispatchEntry) (k: UInt64.t) (v: t_DispatchEntry) : t_FMap_u64_DispatchEntry
+
+axiom insert_u64_spec:
+  forall self: t_FMap_u64_DispatchEntry, k: UInt64.t, v: t_DispatchEntry [insert_u64 self k v]. [%#sfmap'2] to_mapping_u64 (insert_u64 self k v)
+    = Map.set (to_mapping_u64 self) k (Some'0 v)
+
+axiom insert_u64_spec'0:
+  forall self: t_FMap_u64_DispatchEntry, k: UInt64.t, v: t_DispatchEntry [insert_u64 self k v]. [%#sfmap'3] len_u64 (insert_u64 self k v)
+    = (if contains_u64 self k then len_u64 self else len_u64 self + 1)
+
+let insert_ghost_u64 (self: MutBorrow.t t_FMap_u64_DispatchEntry) (key: UInt64.t) (value: t_DispatchEntry)
+  (return (x: t_Option_DispatchEntry)) = any
+  [ return (result: t_Option_DispatchEntry) ->
+  {[@stop_split] [@expl:insert_ghost_u64 ensures] ([@stop_split] [@expl:insert_ghost ensures #0] [%#sfmap] self.final
+      = insert_u64 self.current key value)
+    /\ ([@stop_split] [@expl:insert_ghost ensures #1] [%#sfmap'0] result = get_u64 self.current key)}
+    (! return {result}) ]
+
+predicate resolve_refmut_FMap_u64_DispatchEntry [@inline:trivial] (_1: MutBorrow.t t_FMap_u64_DispatchEntry) =
+  _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_FMap_u64_DispatchEntry
+
+predicate is_staging [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 658 0 658 43] (e: t_DispatchEntry) =
+  [%#slib'8] match e.location with
+    | Staging _ -> true
+    | _ -> false
+    end
+
+predicate is_block [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 664 0 664 41] (e: t_DispatchEntry) =
+  [%#slib'9] match e.location with
+    | BlockDevice _ -> true
+    | _ -> false
+    end
+
+predicate is_memtier [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 670 0 670 43] (e: t_DispatchEntry) =
+  [%#slib'10] match e.location with
+    | MemoryTier _ _ _ -> true
+    | _ -> false
+    end
+
+predicate exactly_one_state [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 676 0 676 50] (e: t_DispatchEntry) =
+  [%#slib'7] is_staging e /\ not is_block e /\ not is_memtier e
+  \/ not is_staging e /\ is_block e /\ not is_memtier e \/ not is_staging e /\ not is_block e /\ is_memtier e
+
+predicate index_Mapping_DispatchEntry_bool [@inline:trivial] (self: Map.map t_DispatchEntry bool) (a: t_DispatchEntry) =
+  [%#smapping] Map.get self a
+
+meta "rewrite_def" predicate index_Mapping_DispatchEntry_bool
+
+function such_that_DispatchEntry (p: Map.map t_DispatchEntry bool) : t_DispatchEntry
+
+axiom such_that_DispatchEntry_spec:
+  forall p: Map.map t_DispatchEntry bool [such_that_DispatchEntry p]. ([%#slogic] exists x: t_DispatchEntry. index_Mapping_DispatchEntry_bool p x)
+    -> ([%#slogic'0] index_Mapping_DispatchEntry_bool p (such_that_DispatchEntry p))
+
+function unwrap_Option_DispatchEntry (self: t_Option_DispatchEntry) : t_DispatchEntry = [%#soption'0] match self with
+    | Some'0 x -> x
+    | None'0 -> such_that_DispatchEntry (fun (__0: t_DispatchEntry) -> true)
+    end
+
+function lookup_u64 [@inline:trivial] (self: t_FMap_u64_DispatchEntry) (k: UInt64.t) : t_DispatchEntry =
+  [%#sfmap'5] unwrap_Option_DispatchEntry (get_u64 self k)
+
+meta "rewrite_def" function lookup_u64
+
+predicate write_binary [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 687 0 687 45] (e: t_DispatchEntry) =
+  [%#slib'6] e.write_ref = (0: UInt32.t) \/ e.write_ref = (1: UInt32.t)
+
+predicate map_inv [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 694 0 694 51] (m: t_FMap_u64_DispatchEntry) =
+  [%#slib'5] forall k: UInt64.t. contains_u64 m k -> exactly_one_state (lookup_u64 m k) /\ write_binary (lookup_u64 m k)
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let map_create_entry [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 717 0 717 89]
+  (m: MutBorrow.t t_FMap_u64_DispatchEntry) (key: UInt64.t) (entry: t_DispatchEntry) (return (x: ())) =
+{[@stop_split] [@expl:map_create_entry requires] ([@stop_split] [@expl:map_create_entry requires #0] [%#slib'0] map_inv m.current)
+  /\ ([@stop_split] [@expl:map_create_entry requires #1] [%#slib'1] not contains_u64 m.current key)
+  /\ ([@stop_split] [@expl:map_create_entry requires #2] [%#slib'2] write_binary entry)}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = MutBorrow.borrow_final <t_FMap_u64_DispatchEntry> {m.current} {MutBorrow.get_id m}
+        (fun (_bor: MutBorrow.t t_FMap_u64_DispatchEntry) ->
+          [ &_17 <- _bor ] [ &m <- { m with current = _bor.final } ] s1)
+    | s1 = insert_ghost_u64 [%#slib] {_17} {key} {entry} (fun (_x: t_Option_DispatchEntry) -> [ &_16 <- _x ] s2)
+    | s2 = -{resolve_refmut_FMap_u64_DispatchEntry m}- s3
+    | s3 = return {_ret} ] ]
+  [ & _ret: () = Any.any_l ()
+  | & m: MutBorrow.t t_FMap_u64_DispatchEntry = m
+  | & key: UInt64.t = key
+  | & entry: t_DispatchEntry = entry
+  | & _16: t_Option_DispatchEntry = Any.any_l ()
+  | & _17: MutBorrow.t t_FMap_u64_DispatchEntry = Any.any_l () ])
+  [ return (result: ()) ->
+  {[@stop_split] [@expl:map_create_entry ensures] ([@stop_split] [@expl:map_create_entry ensures #0] [%#slib'3] contains_u64 m.final key)
+    /\ ([@stop_split] [@expl:map_create_entry ensures #1] [%#slib'4] map_inv m.final)}
+    (! return {result}) ]

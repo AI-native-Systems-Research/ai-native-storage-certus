@@ -42,8 +42,8 @@ Scope:
 | P27 | Covered | Recovery per entry invariants/refcount safety are explicitly proved locally. |
 | P28 | Not covered | Drive-index determinism (`key % num_drives`) is dispatcher-level routing logic. |
 | P29 | Not covered | Watermark consistency is dispatcher config/policy level. |
-| P30 | Partial | Some local state exclusivity invariants exist; no full unbounded map-level global invariant proof. |
-| P31 | Partial | Strong local refcount invariants; no full global reference/state consistency across map + dispatcher workflows. |
+| P30 | Verified (L2, map-wide) | `map_inv` over `FMap<u64, DispatchEntry>` conjoins exclusive-state + binary-write_ref for every present key. `lemma_exclusive_state` proves exclusivity holds unconditionally for any entry (`Location` is a single-variant enum). `map_create_entry`/`map_update_entry`/`map_remove_entry` prove all three map-mutation shapes preserve `map_inv` — the L1→L2 gluing lift (assumption A7 discharged for these ops). 7 VCs / 7 goals across 4 `.coma` files. Sequential (Mutex collapsed to a ghost map); does not model concurrent interleavings. |
+| P31 | Verified (L2, map-wide) | Co-proved by the same `map_inv`: the binary-`write_ref` conjunct is the cross-cutting refcount well-formedness the per-entry ops preserve locally, now quantified over all present keys and shown preserved by insert-fresh / overwrite / remove. Per-entry refcount roundtrips (`take_read`/`release_read`/`take_write`/`release_write`/`downgrade_reference`) remain the L1 evidence beneath it. |
 
 ## Summary
 

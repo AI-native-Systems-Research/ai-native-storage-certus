@@ -1,0 +1,9 @@
+{
+  "profile": [],
+  "proofs": {
+    "Coma": {
+      "vc_insert_ghost_u64": { "prover": "alt-ergo", "time": 0.019 },
+      "vc_map_create_entry": { "prover": "alt-ergo", "time": 0.092 }
+    }
+  }
+}

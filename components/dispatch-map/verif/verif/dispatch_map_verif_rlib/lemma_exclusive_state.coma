@@ -1,0 +1,54 @@
+(* #"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 705 0 705 46 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 704 10 704 30
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 678 8 680 57
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 659 16 659 81
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 665 16 665 85
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 671 16 671 84
+
+use creusot.prelude.Any
+use creusot.int.UInt64
+use creusot.int.UInt32
+
+type t_Option_u64 = None | Some UInt64.t
+
+type t_Location = Staging UInt64.t | BlockDevice UInt64.t | MemoryTier UInt64.t UInt32.t t_Option_u64
+
+type t_DispatchEntry = {
+  location: t_Location;
+  size_blocks: UInt32.t;
+  read_ref: UInt32.t;
+  write_ref: UInt32.t;
+  tsc: UInt64.t }
+
+predicate is_staging [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 658 0 658 43] (e: t_DispatchEntry) =
+  [%#slib'1] match e.location with
+    | Staging _ -> true
+    | _ -> false
+    end
+
+predicate is_block [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 664 0 664 41] (e: t_DispatchEntry) =
+  [%#slib'2] match e.location with
+    | BlockDevice _ -> true
+    | _ -> false
+    end
+
+predicate is_memtier [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 670 0 670 43] (e: t_DispatchEntry) =
+  [%#slib'3] match e.location with
+    | MemoryTier _ _ _ -> true
+    | _ -> false
+    end
+
+predicate exactly_one_state [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 676 0 676 50] (e: t_DispatchEntry) =
+  [%#slib'0] is_staging e /\ not is_block e /\ not is_memtier e
+  \/ not is_staging e /\ is_block e /\ not is_memtier e \/ not is_staging e /\ not is_block e /\ is_memtier e
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let lemma_exclusive_state [#"/home/cornel/ai-native-storage-certus/components/dispatch-map/verif/src/lib.rs" 705 0 705 46]
+  (e: t_DispatchEntry) (return (x: ())) = (! bb0
+  [ bb0 = return {_ret} ] [ & _ret: () = Any.any_l () ])
+  [ return (result: ()) -> {[@stop_split] [@expl:lemma_exclusive_state ensures] [%#slib] exactly_one_state e}
+    (! return {result}) ]

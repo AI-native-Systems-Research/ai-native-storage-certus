@@ -1,4 +1,4 @@
-use creusot_std::prelude::*;
+use creusot_std::{logic::FMap, prelude::*};
 
 // ---------- Types mirroring entry.rs ----------
 
@@ -617,4 +617,123 @@ pub fn lifecycle_cold_evicted_before_hot(
     proof_assert!(result@[1].tsc@ == hot_tsc@);
     proof_assert!(tsc_sorted(&result));
     result
+}
+
+// ========== P30 / P31: map-wide invariants (the L1 -> L2 lift) ==========
+//
+// Every function above reasons about ONE `&mut DispatchEntry`. That is the
+// per-entry (L1) evidence: `inv_write_binary` is threaded through every op, and
+// the refcount roundtrips prove local consistency. What was missing is the
+// map-wide (L2) theorem: that these facts hold for EVERY key simultaneously and
+// are preserved by the operations that change map membership. That gluing step
+// -- quantifying a per-entry predicate over a whole `FMap` and showing each
+// map mutation preserves it -- is exactly assumption A7's "per-entry + composition
+// -> whole-map" gap made explicit and discharged.
+//
+// P30 (exclusive state): each present key is in exactly ONE logical Location
+//   (Staging XOR BlockDevice XOR MemoryTier). In the runtime this is enforced by
+//   construction -- `Location` is a Rust enum and each key maps to one
+//   `DispatchEntry` -- so `exactly_one_state` is provably true for ANY entry
+//   (`lemma_exclusive_state`, no precondition). Stating it explicitly turns the
+//   "exactly one state" folklore into a machine-checked fact.
+// P31 (refcount/state consistency): `write_ref` is binary (0 or 1) for every
+//   present entry -- the cross-cutting refcount well-formedness the per-entry
+//   ops already preserve locally.
+//
+// `map_inv` conjoins both over all present keys. We then prove the three shapes
+// of map mutation preserve it:
+//   * insert-fresh  (create a new key)      -> `map_create_entry`
+//   * overwrite     (replace one key's entry, e.g. after an L1 refcount op)
+//                                            -> `map_update_entry`
+//   * remove        (delete a key)          -> `map_remove_entry`
+// Any dispatch-map operation is one of these applied to a well-formed entry, so
+// closing all three closes the map-wide invariant under the whole API.
+//
+// SCOPE: this is L2 (whole-map, sequential). It does NOT model concurrent
+// interleavings -- the map is guarded by a Mutex in the runtime, collapsed to a
+// sequential ghost map here (same boundary noted for P19/write-through).
+
+/// P30 helper: the entry's location is the Staging variant.
+#[logic(open)]
+pub fn is_staging(e: DispatchEntry) -> bool {
+    pearlite! { match e.location { Location::Staging { .. } => true, _ => false } }
+}
+
+/// P30 helper: the entry's location is the BlockDevice variant.
+#[logic(open)]
+pub fn is_block(e: DispatchEntry) -> bool {
+    pearlite! { match e.location { Location::BlockDevice { .. } => true, _ => false } }
+}
+
+/// P30 helper: the entry's location is the MemoryTier variant.
+#[logic(open)]
+pub fn is_memtier(e: DispatchEntry) -> bool {
+    pearlite! { match e.location { Location::MemoryTier { .. } => true, _ => false } }
+}
+
+/// P30 per-entry: the entry is in EXACTLY ONE logical state.
+#[logic(open)]
+pub fn exactly_one_state(e: DispatchEntry) -> bool {
+    pearlite! {
+        (is_staging(e) && !is_block(e) && !is_memtier(e))
+     || (!is_staging(e) && is_block(e) && !is_memtier(e))
+     || (!is_staging(e) && !is_block(e) && is_memtier(e))
+    }
+}
+
+/// P31 per-entry: write_ref is binary (mirrors `inv_write_binary` as a by-value
+/// predicate usable inside the map-wide quantifier).
+#[logic(open)]
+pub fn write_binary(e: DispatchEntry) -> bool {
+    pearlite! { e.write_ref == 0u32 || e.write_ref == 1u32 }
+}
+
+/// The map-wide invariant: every present key satisfies P30 (exclusive state)
+/// and P31 (binary write_ref).
+#[logic(open)]
+pub fn map_inv(m: FMap<u64, DispatchEntry>) -> bool {
+    pearlite! {
+        forall<k: u64> m.contains(k) ==> exactly_one_state(m.lookup(k)) && write_binary(m.lookup(k))
+    }
+}
+
+/// P30 (unconditional): exclusive state holds for ANY entry -- a key can never be
+/// in two Locations at once, because `Location` is a single-variant enum. Proved
+/// with no precondition, so exclusivity is structural, not an assumption.
+#[check(ghost)]
+#[ensures(exactly_one_state(e))]
+pub fn lemma_exclusive_state(e: DispatchEntry) {
+    let _ = e;
+}
+
+/// P30 + P31 map-wide, insert-fresh: creating a new (absent) key with a
+/// well-formed entry preserves the map invariant.
+#[check(ghost)]
+#[requires(map_inv(*m))]
+#[requires(!(*m).contains(key))]
+#[requires(write_binary(entry))]
+#[ensures((^m).contains(key))]
+#[ensures(map_inv(^m))]
+pub fn map_create_entry(m: &mut FMap<u64, DispatchEntry>, key: u64, entry: DispatchEntry) {
+    let _ = m.insert_ghost(key, entry);
+}
+
+/// P30 + P31 map-wide, overwrite: replacing one key's entry with a well-formed
+/// entry (e.g. the result of an L1 refcount op) preserves the map invariant.
+#[check(ghost)]
+#[requires(map_inv(*m))]
+#[requires(write_binary(entry))]
+#[ensures(map_inv(^m))]
+pub fn map_update_entry(m: &mut FMap<u64, DispatchEntry>, key: u64, entry: DispatchEntry) {
+    let _ = m.insert_ghost(key, entry);
+}
+
+/// P30 + P31 map-wide, remove: deleting a key preserves the map invariant
+/// (removing a key cannot break a forall-over-present-keys property).
+#[check(ghost)]
+#[requires(map_inv(*m))]
+#[ensures(!(^m).contains(key))]
+#[ensures(map_inv(^m))]
+pub fn map_remove_entry(m: &mut FMap<u64, DispatchEntry>, key: u64) {
+    let _ = m.remove_ghost(&key);
 }
