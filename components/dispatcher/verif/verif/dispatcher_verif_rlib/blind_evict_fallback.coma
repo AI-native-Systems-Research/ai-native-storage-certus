@@ -1,0 +1,139 @@
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 768 0 772 32 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 775 16 775 61
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 779 16 779 38
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 756 11 756 57
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 757 10 764 1
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 767 10 767 56
+let%span sfmap = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 420 14 420 49
+let%span sfmap'0 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 421 14 421 40
+let%span sfmap'1 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 445 14 445 43
+let%span sfmap'2 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 446 14 446 41
+let%span sfmap'3 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 88 8 88 32
+let%span sfmap'4 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 102 8 102 27
+let%span sfmap'5 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 62 14 62 70
+let%span sfmap'6 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 63 14 63 88
+let%span sfmap'7 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 77 14 77 67
+let%span sfmap'8 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 78 14 78 84
+let%span sfmap'9 = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/fmap.rs" 54 14 54 25
+
+use creusot.prelude.MutBorrow
+use creusot.int.UInt64
+use map.Map
+use creusot.prelude.Any
+use int.Int
+
+type t_TierState = MemoryTier | BlockDevice
+
+type t_FMap_u64_TierState
+
+type t_Option_TierState = None | Some t_TierState
+
+function to_mapping_u64 (self: t_FMap_u64_TierState) : Map.map UInt64.t t_Option_TierState
+
+function len_u64 (self: t_FMap_u64_TierState) : int
+
+axiom len_u64_spec: forall self: t_FMap_u64_TierState [len_u64 self]. [%#sfmap'9] len_u64 self >= 0
+
+function get_u64 [@inline:trivial] (self: t_FMap_u64_TierState) (k: UInt64.t) : t_Option_TierState =
+  [%#sfmap'3] Map.get (to_mapping_u64 self) k
+
+meta "rewrite_def" function get_u64
+
+predicate contains_u64 [@inline:trivial] (self: t_FMap_u64_TierState) (k: UInt64.t) = [%#sfmap'4] get_u64 self k <> None
+
+meta "rewrite_def" predicate contains_u64
+
+function insert_u64 (self: t_FMap_u64_TierState) (k: UInt64.t) (v: t_TierState) : t_FMap_u64_TierState
+
+axiom insert_u64_spec:
+  forall self: t_FMap_u64_TierState, k: UInt64.t, v: t_TierState [insert_u64 self k v]. [%#sfmap'5] to_mapping_u64 (insert_u64 self k v)
+    = Map.set (to_mapping_u64 self) k (Some v)
+
+axiom insert_u64_spec'0:
+  forall self: t_FMap_u64_TierState, k: UInt64.t, v: t_TierState [insert_u64 self k v]. [%#sfmap'6] len_u64 (insert_u64 self k v)
+    = (if contains_u64 self k then len_u64 self else len_u64 self + 1)
+
+let insert_ghost_u64 (self: MutBorrow.t t_FMap_u64_TierState) (key: UInt64.t) (value: t_TierState)
+  (return (x: t_Option_TierState)) = any
+  [ return (result: t_Option_TierState) ->
+  {[@stop_split] [@expl:insert_ghost_u64 ensures] ([@stop_split] [@expl:insert_ghost ensures #0] [%#sfmap] self.final
+      = insert_u64 self.current key value)
+    /\ ([@stop_split] [@expl:insert_ghost ensures #1] [%#sfmap'0] result = get_u64 self.current key)}
+    (! return {result}) ]
+
+predicate resolve_refmut_FMap_u64_TierState [@inline:trivial] (_1: MutBorrow.t t_FMap_u64_TierState) =
+  _1.final = _1.current
+
+meta "rewrite_def" predicate resolve_refmut_FMap_u64_TierState
+
+type t_DispatcherError = NotInitialized | InvalidParameter | AlreadyExists | KeyNotFound | AllocationFailed | IoError
+
+type t_Result_unit_DispatcherError = Ok () | Err t_DispatcherError
+
+function remove_u64 (self: t_FMap_u64_TierState) (k: UInt64.t) : t_FMap_u64_TierState
+
+axiom remove_u64_spec:
+  forall self: t_FMap_u64_TierState, k: UInt64.t [remove_u64 self k]. [%#sfmap'7] to_mapping_u64 (remove_u64 self k)
+    = Map.set (to_mapping_u64 self) k (None)
+
+axiom remove_u64_spec'0:
+  forall self: t_FMap_u64_TierState, k: UInt64.t [remove_u64 self k]. [%#sfmap'8] len_u64 (remove_u64 self k)
+    = (if contains_u64 self k then len_u64 self - 1 else len_u64 self)
+
+let remove_ghost_u64 (self: MutBorrow.t t_FMap_u64_TierState) (key: UInt64.t) (return (x: t_Option_TierState)) = any
+  [ return (result: t_Option_TierState) ->
+  {[@stop_split] [@expl:remove_ghost_u64 ensures] ([@stop_split] [@expl:remove_ghost ensures #0] [%#sfmap'1] self.final
+      = remove_u64 self.current key)
+    /\ ([@stop_split] [@expl:remove_ghost ensures #1] [%#sfmap'2] result = get_u64 self.current key)}
+    (! return {result}) ]
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let blind_evict_fallback [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 768 0 772 32]
+  (map: MutBorrow.t t_FMap_u64_TierState) (key: UInt64.t) (convert_ok: bool)
+  (return (x: t_Result_unit_DispatcherError)) =
+{[@stop_split] [@expl:blind_evict_fallback requires] [%#slib'1] get_u64 map.current key = Some (MemoryTier)}
+  (! bb0
+  [ bb0 = any [ br0 -> {convert_ok = false} (! bb3) | br1 -> {convert_ok} (! bb1) ]
+  | bb1 = s0
+    [ s0 = [ &_17 <- BlockDevice ] s1
+    | s1 = MutBorrow.borrow_final <t_FMap_u64_TierState> {map.current} {MutBorrow.get_id map}
+        (fun (_bor: MutBorrow.t t_FMap_u64_TierState) ->
+          [ &_15 <- _bor ] [ &map <- { map with current = _bor.final } ] s2)
+    | s2 = insert_ghost_u64 [%#slib] {_15} {key} {_17} (fun (_x: t_Option_TierState) -> [ &_14 <- _x ] s3)
+    | s3 = -{resolve_refmut_FMap_u64_TierState map}- s4
+    | s4 = [ &_ret <- Ok _18 ] s5
+    | s5 = return {_ret} ]
+  | bb3 = s0
+    [ s0 = [ &_22 <- key ] s1
+    | s1 = MutBorrow.borrow_final <t_FMap_u64_TierState> {map.current} {MutBorrow.get_id map}
+        (fun (_bor: MutBorrow.t t_FMap_u64_TierState) ->
+          [ &_20 <- _bor ] [ &map <- { map with current = _bor.final } ] s2)
+    | s2 = remove_ghost_u64 [%#slib'0] {_20} {_22} (fun (_x: t_Option_TierState) -> [ &_19 <- _x ] s3)
+    | s3 = -{resolve_refmut_FMap_u64_TierState map}- s4
+    | s4 = [ &_23 <- AllocationFailed ] s5
+    | s5 = [ &_ret <- Err _23 ] s6
+    | s6 = return {_ret} ] ]
+  [ & _ret: t_Result_unit_DispatcherError = Any.any_l ()
+  | & map: MutBorrow.t t_FMap_u64_TierState = map
+  | & key: UInt64.t = key
+  | & convert_ok: bool = convert_ok
+  | & _14: t_Option_TierState = Any.any_l ()
+  | & _15: MutBorrow.t t_FMap_u64_TierState = Any.any_l ()
+  | & _17: t_TierState = Any.any_l ()
+  | & _18: () = Any.any_l ()
+  | & _19: t_Option_TierState = Any.any_l ()
+  | & _20: MutBorrow.t t_FMap_u64_TierState = Any.any_l ()
+  | & _22: UInt64.t = Any.any_l ()
+  | & _23: t_DispatcherError = Any.any_l () ])
+  [ return (result: t_Result_unit_DispatcherError) ->
+  {[@stop_split] [@expl:blind_evict_fallback ensures] ([@stop_split] [@expl:blind_evict_fallback ensures #0] [%#slib'2] match result with
+        | Ok _ -> get_u64 map.final key = Some (BlockDevice)
+        | Err (AllocationFailed) -> not contains_u64 map.final key
+        | _ -> false
+        end)
+    /\ ([@stop_split] [@expl:blind_evict_fallback ensures #1] [%#slib'3] get_u64 map.final key <> Some (MemoryTier))}
+    (! return {result}) ]

@@ -711,3 +711,72 @@ pub fn evict_for_capacity(
     // Guard is false here: used + needed <= capacity.
     Ok(used)
 }
+
+// ---------- P19 (L1, sequential decision skeleton): blind-eviction fallback
+//            leaves no dangling MemoryTier state ----------
+//
+// Mirrors the blind-LRU fallback of `evict_for_space` (dispatcher/src/lib.rs:572-583).
+// After `mt.evict_lru_for_key(target_key)` frees the evicted key's MEMORY slot,
+// the dispatch-map (`dm`) must be brought back into agreement with that freed
+// slot — the key must NOT be left as a `MemoryTier` entry pointing at memory that
+// no longer holds its data (a logical dangling reference). The code does exactly
+// one of two things:
+//     if dm.convert_memory_tier_to_block(evicted_key).is_err() {   // (:576)
+//         let _ = dm.remove(evicted_key);                          // (:577) demote failed -> drop the key
+//     } else { /* entry is now BlockDevice */ }                    // (:580) demoted, data preserved on SSD
+// So the evicted key ends up EITHER a `BlockDevice` entry (converted, data safe —
+// consistent with P18) OR absent from the map (removed). In neither arm is it left
+// as `MemoryTier`.
+//
+// SCOPE / abstraction (why this is L1 / Partial, not a full P19 discharge):
+//   * This models ONE map — the dispatch-map — with a per-entry tier *state*, and
+//     proves the local decision "convert-or-remove, never leave MemoryTier". The
+//     memory-tier slot is treated as already freed (the precondition: the key was
+//     a live MemoryTier entry that `mt.evict_lru_for_key` just returned).
+//   * The full P19 guarantee — "no dangling map state" across the WHOLE system —
+//     is a CROSS-MAP (mt <-> dm) invariant: for every key, mt-residency and the
+//     dm tier-state must agree. That is a map-wide (L2) theorem and belongs with
+//     P30 (exclusive-state) / P31 (refcount-state), which quantify over all keys.
+//   * The genuinely dangerous case here is CONCURRENT: the real code notes
+//     "another thread may have concurrently evicted this key" (:566). Creusot
+//     reasons about the sequential skeleton only, so a green proof here certifies
+//     the single-threaded decision, NOT the interleavings — those stay a runtime /
+//     model-checking concern (same boundary as the background write-through case).
+// Hence: strong, honest evidence for the local decision; explicitly not the
+// system-level closure.
+
+pub enum TierState {
+    MemoryTier,
+    BlockDevice,
+}
+
+#[check(ghost)]
+// Precondition: `mt.evict_lru_for_key` returned this key, i.e. it was a live
+// MemoryTier entry whose memory slot has just been freed.
+#[requires((*map).get(key) == Some(TierState::MemoryTier))]
+#[ensures(match result {
+    // convert_memory_tier_to_block succeeded: entry demoted to BlockDevice,
+    // data preserved on SSD (transition, not deletion — consistent with P18).
+    Ok(_) => (^map).get(key) == Some(TierState::BlockDevice),
+    // convert failed: the key is removed from the map entirely, no half-moved entry.
+    Err(DispatcherError::AllocationFailed) => !(^map).contains(key),
+    _ => false,
+})]
+// The P19 headline for this key: whichever branch is taken, it is NEVER left as a
+// MemoryTier entry — no dangling reference to the freed memory slot.
+#[ensures((^map).get(key) != Some(TierState::MemoryTier))]
+pub fn blind_evict_fallback(
+    map: &mut FMap<u64, TierState>,
+    key: u64,
+    convert_ok: bool,
+) -> Result<(), DispatcherError> {
+    if convert_ok {
+        // dm.convert_memory_tier_to_block succeeded: entry is now BlockDevice.
+        let _ = map.insert_ghost(key, TierState::BlockDevice);
+        Ok(())
+    } else {
+        // dm.convert_memory_tier_to_block failed: drop the key from the map.
+        let _ = map.remove_ghost(&key);
+        Err(DispatcherError::AllocationFailed)
+    }
+}
