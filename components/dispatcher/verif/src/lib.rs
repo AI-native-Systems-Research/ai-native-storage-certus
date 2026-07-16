@@ -639,3 +639,65 @@ pub fn evict_attempt_budget(max_attempts: usize) -> (bool, usize) {
     // Runtime: pressure cleared within budget, return Ok(()).
     (false, attempts)
 }
+
+// ---------- P16: eviction success implies enough capacity was made available ----------
+//
+// Mirrors the SAME loop as P15 (`evict_for_space`, dispatcher/src/lib.rs:534-586),
+// but proves the postcondition on the `Ok(())` exit rather than the attempt bound.
+// The loop is `while mt.used() + needed as usize > mt.capacity() { ... }`; the only
+// way to reach the trailing `Ok(())` (:586) is for that guard to become FALSE, i.e.
+//     !(used + needed > capacity)  ==  used + needed <= capacity
+// so on success there is provably room for the pending `needed`-byte allocation.
+//
+// Whereas P15 abstracted the guard as an arbitrary oracle (the bound holds for any
+// pressure behavior), P16 needs the guard's MEANING, so `used`/`needed`/`capacity`
+// are modeled as real integers and the guard is the real comparison. Eviction's
+// effect on `used` is still opaque — `tier_used` is a `#[trusted]` oracle returning
+// the post-eviction used-byte count — because P16 does not claim eviction makes
+// progress (that is the P17 liveness/failure story); it claims only that IF the
+// loop reports success THEN the capacity predicate holds. Abstraction L0 for the
+// success predicate (real comparison), with the opaque used-oracle at the trusted
+// boundary.
+//
+// `tier_used`'s postcondition `result@ + needed@ <= usize::MAX@` is the only trusted
+// assumption: a used-byte count plus one pending allocation never overflows a 64-bit
+// `usize` (physically ~16 EiB). It exists solely to discharge the `used + needed`
+// in-bounds check on the guard; it does not constrain the eviction logic.
+
+#[trusted]
+#[ensures(result@ + needed@ <= usize::MAX@)]
+fn tier_used(needed: usize) -> usize {
+    // Opaque model of `mt.used()` after an eviction step; value unconstrained
+    // apart from the no-overflow headroom above.
+    let _ = needed;
+    0
+}
+
+#[requires(max_attempts@ < usize::MAX@)]
+#[ensures(match result {
+    // P16: success ⇒ the capacity predicate holds (room for `needed`).
+    Ok(used) => used@ + needed@ <= capacity@,
+    // Budget-exhaustion path (runtime Err(AllocationFailed)); pairs with P15.
+    Err(attempts) => attempts@ == max_attempts@ + 1,
+})]
+pub fn evict_for_capacity(
+    needed: usize,
+    capacity: usize,
+    max_attempts: usize,
+) -> Result<usize, usize> {
+    let mut attempts: usize = 0;
+    let mut used = tier_used(needed);
+    #[variant(max_attempts@ + 1 - attempts@)]
+    #[invariant(attempts@ <= max_attempts@)]
+    #[invariant(used@ + needed@ <= usize::MAX@)]
+    while used + needed > capacity {
+        attempts += 1;
+        if attempts > max_attempts {
+            return Err(attempts);
+        }
+        // Eviction frees some space; the new used-byte count is opaque.
+        used = tier_used(needed);
+    }
+    // Guard is false here: used + needed <= capacity.
+    Ok(used)
+}

@@ -1,0 +1,85 @@
+(* #"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 683 0 687 25 *)
+
+let%span slib = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 688 30 688 31
+let%span slib'0 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 689 19 689 36
+let%span slib'1 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 690 14 690 43
+let%span slib'2 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 693 10 693 23
+let%span slib'3 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 692 16 692 46
+let%span slib'4 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 691 16 691 42
+let%span slib'5 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 694 20 694 21
+let%span slib'6 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 694 8 694 21
+let%span slib'7 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 699 15 699 32
+let%span slib'8 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 676 11 676 38
+let%span slib'9 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 677 10 682 1
+let%span slib'10 = "/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 668 10 668 42
+let%span swell_founded = "/home/cornel/ai-native-storage-certus/tools/creusot/creusot/creusot-std/src/logic/well_founded.rs" 43 8 43 33
+
+use creusot.int.UInt64
+use creusot.prelude.Any
+use int.Int
+
+constant const_MAX: UInt64.t = (18446744073709551615: UInt64.t)
+
+let tier_used (needed: UInt64.t) (return (x: UInt64.t)) = any
+  [ return (result: UInt64.t) -> {[@stop_split] [@expl:tier_used ensures] [%#slib'10] UInt64.t'int result
+      + UInt64.t'int needed
+    <= UInt64.t'int const_MAX}
+    (! return {result}) ]
+
+predicate well_founded_relation_Int [@inline:trivial] (self: int) (other: int) =
+  [%#swell_founded] self >= 0 /\ self > other
+
+meta "rewrite_def" predicate well_founded_relation_Int
+
+type t_Result_usize_usize = Ok UInt64.t | Err UInt64.t
+
+meta "compute_max_steps" 1000000
+
+meta "select_lsinst" "all"
+
+let evict_for_capacity [#"/home/cornel/ai-native-storage-certus/components/dispatcher/verif/src/lib.rs" 683 0 687 25]
+  (needed: UInt64.t) (capacity: UInt64.t) (max_attempts: UInt64.t) (return (x: t_Result_usize_usize)) =
+{[@stop_split] [@expl:evict_for_capacity requires] [%#slib'8] UInt64.t'int max_attempts < UInt64.t'int const_MAX}
+  (! bb0
+  [ bb0 = s0
+    [ s0 = [ &attempts <- [%#slib] (0: UInt64.t) ] s1
+    | s1 = tier_used [%#slib'0] {needed} (fun (_x: UInt64.t) -> [ &used <- _x ] s2)
+    | s2 = bb2 ]
+  | bb2 = bb2invariant
+    [ bb2 = {[@expl:loop variant] well_founded_relation_Int variant_old_bb2 ([%#slib'1] UInt64.t'int max_attempts + 1
+      - UInt64.t'int attempts)}
+      bb2invariant
+    | bb2invariant = {[@expl:loop invariant #0] [%#slib'4] UInt64.t'int attempts <= UInt64.t'int max_attempts}
+      {[@expl:loop invariant #1] [%#slib'3] UInt64.t'int used + UInt64.t'int needed <= UInt64.t'int const_MAX}
+      (! [ &variant_old_bb2 <- [%#slib'1] UInt64.t'int max_attempts + 1 - UInt64.t'int attempts ] s0)
+      [ s0 = UInt64.add [%#slib'2] {used} {needed} (fun (_x: UInt64.t) -> [ &_26 <- _x ] s1)
+      | s1 = [ &_25 <- UInt64.gt _26 capacity ] s2
+      | s2 = any [ br0 -> {_25 = false} (! bb8) | br1 -> {_25} (! bb4) ] ]
+      [ bb4 = s0
+        [ s0 = UInt64.add [%#slib'6] {attempts} {[%#slib'5] (1: UInt64.t)}
+            (fun (_x: UInt64.t) -> [ &attempts <- _x ] s1)
+        | s1 = [ &_31 <- UInt64.gt attempts max_attempts ] s2
+        | s2 = any [ br0 -> {_31 = false} (! bb6) | br1 -> {_31} (! bb5) ] ]
+      | bb6 = s0
+        [ s0 = tier_used [%#slib'7] {needed} (fun (_x: UInt64.t) -> [ &_36 <- _x ] s1)
+        | s1 = [ &used <- _36 ] s2
+        | s2 = bb2 ] ] ]
+  | bb5 = s0 [ s0 = [ &_ret <- Err attempts ] s1 | s1 = return {_ret} ]
+  | bb8 = s0 [ s0 = [ &_ret <- Ok used ] s1 | s1 = return {_ret} ] ]
+  [ & _ret: t_Result_usize_usize = Any.any_l ()
+  | & needed: UInt64.t = needed
+  | & capacity: UInt64.t = capacity
+  | & max_attempts: UInt64.t = max_attempts
+  | & attempts: UInt64.t = Any.any_l ()
+  | & used: UInt64.t = Any.any_l ()
+  | & _25: bool = Any.any_l ()
+  | & _26: UInt64.t = Any.any_l ()
+  | & _31: bool = Any.any_l ()
+  | & _36: UInt64.t = Any.any_l ()
+  | & variant_old_bb2: int = Any.any_l () ])
+  [ return (result: t_Result_usize_usize) ->
+  {[@stop_split] [@expl:evict_for_capacity ensures] [%#slib'9] match result with
+      | Ok used -> UInt64.t'int used + UInt64.t'int needed <= UInt64.t'int capacity
+      | Err attempts -> UInt64.t'int attempts = UInt64.t'int max_attempts + 1
+      end}
+    (! return {result}) ]
