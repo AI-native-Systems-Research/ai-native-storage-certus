@@ -45,6 +45,7 @@ pub use imemory_tier::IMemoryTier;
 pub use imemory_tier::MemoryTierError;
 pub use imemory_tier::MemoryTierTelemetrySnapshot;
 pub use iremote_lookup::IRemoteLookup;
+pub use iremote_lookup::LookupConfig;
 pub use iremote_lookup::RemoteLookupError;
 pub use iremote_lookup_rdma_responder::{
     ControlChannel, Endpoint, IRemoteLookupRdmaResponder, IRemoteLookupRdmaResponderAdmin,
