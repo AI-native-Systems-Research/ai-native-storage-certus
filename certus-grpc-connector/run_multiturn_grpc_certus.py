@@ -18,7 +18,7 @@ Environment:
     OUTPUT_TOKENS    per generation (default 150)
     MAX_NUM_SEQS     (default 64)
     GPU_MEM_UTIL     (default 0.90)
-    LOG_STATS        1 = emit vLLM engine + KV-offload stats (default 0)
+    LOG_STATS        emit vLLM engine + KV-offload stats (default 1; 0 = off)
     SLAB_SIZE_BYTES  offload block size (default 131072)
     DATASET_PATH     override dataset json
 """
@@ -92,11 +92,11 @@ if __name__ == "__main__":
         enable_prefix_caching=True,
         enforce_eager=True,
         kv_transfer_config=KV_CONFIG,
-        # LOG_STATS=1 surfaces vLLM's periodic engine stats, including the
+        # LOG_STATS surfaces vLLM's periodic engine stats, including the
         # OffloadingConnector's KVConnectorStats (per-interval blocks/tokens
-        # loaded and stored over the KV-offload API). Default off to keep the
-        # per-round output clean; the SSD I/O deltas below are always printed.
-        disable_log_stats=(os.environ.get("LOG_STATS", "0") == "0"),
+        # loaded and stored over the KV-offload API). On by default; set
+        # LOG_STATS=0 to silence it. The SSD I/O deltas below print regardless.
+        disable_log_stats=(os.environ.get("LOG_STATS", "1") == "0"),
     )
 
     sp = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=OUTPUT_TOKENS)
