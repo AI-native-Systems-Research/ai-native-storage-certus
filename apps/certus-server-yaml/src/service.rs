@@ -53,12 +53,36 @@ struct PendingStoreEntry {
 
 type PendingStores = Arc<Mutex<HashMap<u64, PendingStoreEntry>>>;
 
+/// Cumulative counters exposed to the metrics/telemetry layer.
+/// All fields are monotonic; take deltas across two reads to compute rates.
+#[derive(Clone)]
+pub struct ServiceCounters {
+    pub populates: Arc<AtomicU64>,
+    pub lookup_hits: Arc<AtomicU64>,
+    pub lookup_misses: Arc<AtomicU64>,
+    pub evictions: Arc<AtomicU64>,
+    pub gpu_bytes_transferred: Arc<AtomicU64>,
+}
+
+impl ServiceCounters {
+    pub fn new() -> Self {
+        Self {
+            populates: Arc::new(AtomicU64::new(0)),
+            lookup_hits: Arc::new(AtomicU64::new(0)),
+            lookup_misses: Arc::new(AtomicU64::new(0)),
+            evictions: Arc::new(AtomicU64::new(0)),
+            gpu_bytes_transferred: Arc::new(AtomicU64::new(0)),
+        }
+    }
+}
+
 pub struct DispatcherService {
     dispatcher: Arc<dyn IDispatcher + Send + Sync>,
     ipc_cache: IpcCache,
     pending_stores: PendingStores,
     eviction_rx: crossbeam_channel::Receiver<EvictionEvent>,
     eviction_dropped: Arc<AtomicU64>,
+    counters: ServiceCounters,
 }
 
 impl DispatcherService {
@@ -66,6 +90,7 @@ impl DispatcherService {
         dispatcher: Arc<dyn IDispatcher + Send + Sync>,
         eviction_rx: crossbeam_channel::Receiver<EvictionEvent>,
         eviction_dropped: Arc<AtomicU64>,
+        counters: ServiceCounters,
     ) -> Self {
         Self {
             dispatcher,
@@ -73,6 +98,7 @@ impl DispatcherService {
             pending_stores: Arc::new(Mutex::new(HashMap::new())),
             eviction_rx,
             eviction_dropped,
+            counters,
         }
     }
 }
@@ -201,6 +227,7 @@ impl Dispatcher for DispatcherService {
 
         let dispatcher = Arc::clone(&self.dispatcher);
         let cache = Arc::clone(&self.ipc_cache);
+        let populates_counter = Arc::clone(&self.counters.populates);
         let results = tokio::task::spawn_blocking(move || {
             let mut opened_keys: Vec<[u8; 64]> = Vec::new();
             let mut pre_errors: Vec<Option<EntryResult>> = vec![None; req.entries.len()];
@@ -271,7 +298,10 @@ impl Dispatcher for DispatcherService {
                         size: handle.size,
                     };
                     match dispatcher.populate(entry.key, ipc) {
-                        Ok(()) => success_result(entry.key),
+                        Ok(()) => {
+                            populates_counter.fetch_add(1, Ordering::Relaxed);
+                            success_result(entry.key)
+                        }
                         Err(e) => error_result(entry.key, &e),
                     }
                 })
@@ -298,6 +328,9 @@ impl Dispatcher for DispatcherService {
 
         let dispatcher = Arc::clone(&self.dispatcher);
         let cache = Arc::clone(&self.ipc_cache);
+        let hits_counter = Arc::clone(&self.counters.lookup_hits);
+        let misses_counter = Arc::clone(&self.counters.lookup_misses);
+        let gpu_bytes_counter = Arc::clone(&self.counters.gpu_bytes_transferred);
         let results = tokio::task::spawn_blocking(move || {
             let mut opened_keys: Vec<[u8; 64]> = Vec::new();
             let mut batch_entries: Vec<(u64, IpcHandle)> = Vec::with_capacity(req.entries.len());
@@ -400,7 +433,17 @@ impl Dispatcher for DispatcherService {
                     results.push(err_result);
                 } else {
                     match batch_iter.next().unwrap() {
-                        Ok(()) => results.push(success_result(entry.key)),
+                        Ok(()) => {
+                            hits_counter.fetch_add(1, Ordering::Relaxed);
+                            if let Some(h) = entry.ipc_handle.as_ref() {
+                                gpu_bytes_counter.fetch_add(h.size as u64, Ordering::Relaxed);
+                            }
+                            results.push(success_result(entry.key));
+                        }
+                        Err(ref e) if matches!(e, DispatcherError::KeyNotFound(_)) => {
+                            misses_counter.fetch_add(1, Ordering::Relaxed);
+                            results.push(error_result(entry.key, e));
+                        }
                         Err(e) => results.push(error_result(entry.key, &e)),
                     }
                 }
@@ -804,6 +847,7 @@ impl Dispatcher for DispatcherService {
         loop {
             match self.eviction_rx.try_recv() {
                 Ok(ev) => {
+                    self.counters.evictions.fetch_add(1, Ordering::Relaxed);
                     events.push(proto::EvictionEvent {
                         key: ev.key,
                         reason: match ev.reason {

@@ -1,12 +1,15 @@
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
-use interfaces::IMemoryTier;
+use interfaces::{IDispatcher, IMemoryTier};
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::Resource;
+
+use crate::service::ServiceCounters;
 
 pub struct OtelMetrics {
     _provider: Arc<SdkMeterProvider>,
@@ -17,6 +20,8 @@ impl OtelMetrics {
         endpoint: &str,
         service_name: &str,
         memory_tier: Arc<dyn IMemoryTier + Send + Sync>,
+        dispatcher: Arc<dyn IDispatcher + Send + Sync>,
+        counters: ServiceCounters,
     ) -> Result<Self, String> {
         use opentelemetry_otlp::MetricExporter;
         use opentelemetry_sdk::metrics::PeriodicReader;
@@ -47,15 +52,6 @@ impl OtelMetrics {
         // Memory-tier observable gauges
         let mt = Arc::clone(&memory_tier);
         meter
-            .u64_observable_gauge("certus.memory_tier.capacity_bytes")
-            .with_description("Total memory-tier pool capacity in bytes")
-            .with_callback(move |gauge| {
-                gauge.observe(mt.capacity() as u64, &[]);
-            })
-            .build();
-
-        let mt = Arc::clone(&memory_tier);
-        meter
             .u64_observable_gauge("certus.memory_tier.used_bytes")
             .with_description("Bytes currently allocated in memory-tier")
             .with_callback(move |gauge| {
@@ -77,15 +73,6 @@ impl OtelMetrics {
         // Memory-tier telemetry counters as observable counters
         let mt = Arc::clone(&memory_tier);
         meter
-            .u64_observable_counter("certus.memory_tier.evictions_total")
-            .with_description("Total LRU evictions from memory-tier")
-            .with_callback(move |counter| {
-                counter.observe(mt.telemetry_snapshot().evictions, &[]);
-            })
-            .build();
-
-        let mt = Arc::clone(&memory_tier);
-        meter
             .u64_observable_counter("certus.memory_tier.write_lock_contentions_total")
             .with_description("Write-lock contention events on memory-tier pool")
             .with_callback(move |counter| {
@@ -99,6 +86,89 @@ impl OtelMetrics {
             .with_description("Read-lock contention events on memory-tier pool")
             .with_callback(move |counter| {
                 counter.observe(mt.telemetry_snapshot().read_lock_contentions, &[]);
+            })
+            .build();
+
+        // Service-level counters (rates computed by collector)
+        let c = counters.populates.clone();
+        meter
+            .u64_observable_counter("certus.populates_total")
+            .with_description("Total successful populate operations")
+            .with_callback(move |counter| {
+                counter.observe(c.load(Ordering::Relaxed), &[]);
+            })
+            .build();
+
+        let c = counters.evictions.clone();
+        meter
+            .u64_observable_counter("certus.evictions_total")
+            .with_description("Total eviction events")
+            .with_callback(move |counter| {
+                counter.observe(c.load(Ordering::Relaxed), &[]);
+            })
+            .build();
+
+        let c = counters.lookup_hits.clone();
+        meter
+            .u64_observable_counter("certus.lookup_hits_total")
+            .with_description("Total successful lookup operations")
+            .with_callback(move |counter| {
+                counter.observe(c.load(Ordering::Relaxed), &[]);
+            })
+            .build();
+
+        let c = counters.lookup_misses.clone();
+        meter
+            .u64_observable_counter("certus.lookup_misses_total")
+            .with_description("Total lookup misses (key not found)")
+            .with_callback(move |counter| {
+                counter.observe(c.load(Ordering::Relaxed), &[]);
+            })
+            .build();
+
+        let c = counters.gpu_bytes_transferred.clone();
+        meter
+            .u64_observable_counter("certus.gpu_bytes_transferred_total")
+            .with_description("Total bytes transferred to GPU via lookup")
+            .with_callback(move |counter| {
+                counter.observe(c.load(Ordering::Relaxed), &[]);
+            })
+            .build();
+
+        // NVMe I/O counters
+        let d = Arc::clone(&dispatcher);
+        meter
+            .u64_observable_counter("certus.nvme.read_bytes_total")
+            .with_description("Total bytes read from NVMe drives")
+            .with_callback(move |counter| {
+                counter.observe(d.read_write_stats().read_bytes, &[]);
+            })
+            .build();
+
+        let d = Arc::clone(&dispatcher);
+        meter
+            .u64_observable_counter("certus.nvme.write_bytes_total")
+            .with_description("Total bytes written to NVMe drives")
+            .with_callback(move |counter| {
+                counter.observe(d.read_write_stats().write_bytes, &[]);
+            })
+            .build();
+
+        let d = Arc::clone(&dispatcher);
+        meter
+            .u64_observable_counter("certus.nvme.read_ops_total")
+            .with_description("Total NVMe read operations")
+            .with_callback(move |counter| {
+                counter.observe(d.read_write_stats().read_ops, &[]);
+            })
+            .build();
+
+        let d = Arc::clone(&dispatcher);
+        meter
+            .u64_observable_counter("certus.nvme.write_ops_total")
+            .with_description("Total NVMe write operations")
+            .with_callback(move |counter| {
+                counter.observe(d.read_write_stats().write_ops, &[]);
             })
             .build();
 
