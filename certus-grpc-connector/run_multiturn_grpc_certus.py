@@ -18,6 +18,7 @@ Environment:
     OUTPUT_TOKENS    per generation (default 150)
     MAX_NUM_SEQS     (default 64)
     GPU_MEM_UTIL     (default 0.90)
+    LOG_STATS        emit vLLM engine + KV-offload stats (default 1; 0 = off)
     TENSOR_PARALLEL_SIZE    GPUs to shard each layer across (default 1)
     PIPELINE_PARALLEL_SIZE  pipeline stages across GPUs/nodes (default 1)
     ENFORCE_EAGER    "1" (default) keeps eager mode; "0" enables CUDA graphs
