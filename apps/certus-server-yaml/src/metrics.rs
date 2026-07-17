@@ -1,10 +1,18 @@
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use interfaces::IMemoryTier;
+use interfaces::{IDispatcher, IMemoryTier};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 
-pub async fn serve_metrics(port: u16, mt: Arc<dyn IMemoryTier + Send + Sync>) {
+use crate::service::ServiceCounters;
+
+pub async fn serve_metrics(
+    port: u16,
+    mt: Arc<dyn IMemoryTier + Send + Sync>,
+    dispatcher: Arc<dyn IDispatcher + Send + Sync>,
+    counters: ServiceCounters,
+) {
     let listener = match TcpListener::bind(("0.0.0.0", port)).await {
         Ok(l) => l,
         Err(e) => {
@@ -20,7 +28,7 @@ pub async fn serve_metrics(port: u16, mt: Arc<dyn IMemoryTier + Send + Sync>) {
             Err(_) => continue,
         };
 
-        let body = render_metrics(&*mt);
+        let body = render_metrics(&*mt, &*dispatcher, &counters);
 
         let (reader, mut writer) = stream.split();
         let mut buf_reader = BufReader::new(reader);
@@ -43,36 +51,68 @@ pub async fn serve_metrics(port: u16, mt: Arc<dyn IMemoryTier + Send + Sync>) {
     }
 }
 
-fn render_metrics(mt: &dyn IMemoryTier) -> String {
+fn render_metrics(
+    mt: &dyn IMemoryTier,
+    dispatcher: &dyn IDispatcher,
+    counters: &ServiceCounters,
+) -> String {
     let snap = mt.telemetry_snapshot();
-    let capacity = mt.capacity();
     let used = mt.used();
-    let free = capacity.saturating_sub(used);
+    let free = mt.capacity().saturating_sub(used);
+    let rw = dispatcher.read_write_stats();
 
     format!(
-        "# HELP certus_memory_tier_evictions_total Total LRU evictions\n\
-         # TYPE certus_memory_tier_evictions_total counter\n\
-         certus_memory_tier_evictions_total {}\n\
-         # HELP certus_memory_tier_write_lock_contentions_total Write-lock contention events\n\
+        "# HELP certus_memory_tier_write_lock_contentions_total Write-lock contention events\n\
          # TYPE certus_memory_tier_write_lock_contentions_total counter\n\
          certus_memory_tier_write_lock_contentions_total {}\n\
          # HELP certus_memory_tier_read_lock_contentions_total Read-lock contention events\n\
          # TYPE certus_memory_tier_read_lock_contentions_total counter\n\
          certus_memory_tier_read_lock_contentions_total {}\n\
-         # HELP certus_memory_tier_capacity_bytes Total pool capacity in bytes\n\
-         # TYPE certus_memory_tier_capacity_bytes gauge\n\
-         certus_memory_tier_capacity_bytes {}\n\
          # HELP certus_memory_tier_used_bytes Bytes currently allocated\n\
          # TYPE certus_memory_tier_used_bytes gauge\n\
          certus_memory_tier_used_bytes {}\n\
          # HELP certus_memory_tier_free_bytes Bytes available for allocation\n\
          # TYPE certus_memory_tier_free_bytes gauge\n\
-         certus_memory_tier_free_bytes {}\n",
-        snap.evictions,
+         certus_memory_tier_free_bytes {}\n\
+         # HELP certus_populates_total Total successful populate operations\n\
+         # TYPE certus_populates_total counter\n\
+         certus_populates_total {}\n\
+         # HELP certus_evictions_total Total eviction events\n\
+         # TYPE certus_evictions_total counter\n\
+         certus_evictions_total {}\n\
+         # HELP certus_lookup_hits_total Total successful lookup operations\n\
+         # TYPE certus_lookup_hits_total counter\n\
+         certus_lookup_hits_total {}\n\
+         # HELP certus_lookup_misses_total Total lookup misses (key not found)\n\
+         # TYPE certus_lookup_misses_total counter\n\
+         certus_lookup_misses_total {}\n\
+         # HELP certus_gpu_bytes_transferred_total Total bytes transferred to GPU\n\
+         # TYPE certus_gpu_bytes_transferred_total counter\n\
+         certus_gpu_bytes_transferred_total {}\n\
+         # HELP certus_nvme_read_bytes_total Total bytes read from NVMe\n\
+         # TYPE certus_nvme_read_bytes_total counter\n\
+         certus_nvme_read_bytes_total {}\n\
+         # HELP certus_nvme_write_bytes_total Total bytes written to NVMe\n\
+         # TYPE certus_nvme_write_bytes_total counter\n\
+         certus_nvme_write_bytes_total {}\n\
+         # HELP certus_nvme_read_ops_total Total NVMe read operations\n\
+         # TYPE certus_nvme_read_ops_total counter\n\
+         certus_nvme_read_ops_total {}\n\
+         # HELP certus_nvme_write_ops_total Total NVMe write operations\n\
+         # TYPE certus_nvme_write_ops_total counter\n\
+         certus_nvme_write_ops_total {}\n",
         snap.write_lock_contentions,
         snap.read_lock_contentions,
-        capacity,
         used,
         free,
+        counters.populates.load(Ordering::Relaxed),
+        counters.evictions.load(Ordering::Relaxed),
+        counters.lookup_hits.load(Ordering::Relaxed),
+        counters.lookup_misses.load(Ordering::Relaxed),
+        counters.gpu_bytes_transferred.load(Ordering::Relaxed),
+        rw.read_bytes,
+        rw.write_bytes,
+        rw.read_ops,
+        rw.write_ops,
     )
 }
