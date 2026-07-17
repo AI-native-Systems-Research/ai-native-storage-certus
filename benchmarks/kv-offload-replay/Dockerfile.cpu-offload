@@ -59,6 +59,7 @@ ENV PYTHONUNBUFFERED=1 \
     MAX_NUM_SEQS=64 \
     GPU_MEM_UTIL=0.90 \
     CPU_BYTES=17179869184 \
+    TRACE_OFFLOAD=0 \
     HF_HUB_OFFLINE=1 \
     WORKLOAD=/workspace/bench/run_multiturn_offloading.py
 
