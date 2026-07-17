@@ -10,8 +10,12 @@ every prior vLLM-generated response (NOT the dataset's gpt response — using
 vLLM's own output is what makes prefix tokens match exactly turn-to-turn so
 the offload cache sees real read-path traffic), and the k'th human turn.
 
+Defaults to the 450-conversation / 12-turn ShareGPT dataset shared with the
+gRPC connector (../../certus-connector/sharegpt_12turn_450.json).
+
 Configurable via env vars:
-    NUM_CONVS      number of conversations to run     (default 500)
+    DATASET_PATH   override ShareGPT-format json       (default 450x12 dataset)
+    NUM_CONVS      number of conversations to run     (default 450)
     MAX_MODEL_LEN  vLLM context window (tokens)       (default 8192)
     OUTPUT_TOKENS  max generated tokens per round     (default 200)
     MAX_NUM_SEQS   vLLM batch parallelism             (default 64)
@@ -33,12 +37,18 @@ if __name__ == "__main__":
     if _here not in sys.path:
         sys.path.insert(0, _here)
 
-    SUBSET_PATH = os.path.join(_here, "sharegpt_subset_5000.json")
+    # Default to the 450-conversation / 12-turn ShareGPT workload shared with
+    # the gRPC connector (certus-connector/sharegpt_12turn_450.json). Override
+    # with DATASET_PATH to point at a different ShareGPT-format json.
+    DEFAULT_DATASET = os.path.join(
+        _here, "..", "..", "certus-connector", "sharegpt_12turn_450.json"
+    )
+    SUBSET_PATH = os.environ.get("DATASET_PATH", DEFAULT_DATASET)
     if not os.path.exists(SUBSET_PATH):
         print(f"[run] missing {SUBSET_PATH}", file=sys.stderr)
         sys.exit(1)
 
-    NUM_CONVS = int(os.environ.get("NUM_CONVS", 500))
+    NUM_CONVS = int(os.environ.get("NUM_CONVS", 450))
     MAX_MODEL_LEN = int(os.environ.get("MAX_MODEL_LEN", 8192))
     OUTPUT_TOKENS = int(os.environ.get("OUTPUT_TOKENS", 200))
     MAX_NUM_SEQS = int(os.environ.get("MAX_NUM_SEQS", 64))
