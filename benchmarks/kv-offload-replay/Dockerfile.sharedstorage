@@ -31,9 +31,11 @@ WORKDIR /workspace
 # The compiled llmd_fs_backend wheel, built by build-sharedstorage.sh against
 # this base's torch (2.11.0/cu130) + the target GPU arch. Installed --no-deps:
 # torch/vllm already present, and the wheel must NOT replace them.
+# The wheel's distribution name is llmd_fs_connector-*, but the import module is
+# llmd_fs_backend (verified below). wheels/ holds only this one wheel.
 COPY benchmarks/kv-offload-replay/wheels/ /tmp/wheels/
-RUN pip install --no-cache-dir --no-deps /tmp/wheels/llmd_fs_backend-*.whl \
-    && python -c "import llmd_fs_backend.spec; print('llmd_fs_backend import OK')" \
+RUN python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl \
+    && python3 -c "import llmd_fs_backend.spec; print('llmd_fs_backend import OK')" \
     && rm -rf /tmp/wheels
 
 # Driver + shared dataset (torch/vllm come from the base image).

@@ -42,12 +42,12 @@ echo "[build] fs-backend wheel: torch=${TORCH_VERSION} ${TORCH_CUDA_INDEX} cuda-
 
 # ── Extract the built wheel into ./wheels/ (build context for step 2) ─────────
 mkdir -p "${WHEELS_DIR}"
-rm -f "${WHEELS_DIR}"/llmd_fs_backend-*.whl
+rm -f "${WHEELS_DIR}"/*.whl
 cid="$("${ENGINE}" create "${WHEEL_IMG}")"
 # The wheel lands in /workspace/dist (auditwheel-repaired) in Dockerfile.wheel.
 "${ENGINE}" cp "${cid}:/workspace/dist/." "${WHEELS_DIR}/"
 "${ENGINE}" rm "${cid}" >/dev/null
-echo "[build] wheel(s) extracted:"; ls -1 "${WHEELS_DIR}"/llmd_fs_backend-*.whl
+echo "[build] wheel(s) extracted:"; ls -1 "${WHEELS_DIR}"/*.whl
 
 # ── Step 2: build the runtime image (context = repo root) ─────────────────────
 "${ENGINE}" build -f "${_here}/Dockerfile.sharedstorage" -t "${RUNTIME_IMG}" "${repo_root}"
