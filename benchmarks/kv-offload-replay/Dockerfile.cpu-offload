@@ -1,0 +1,65 @@
+# vLLM workload-driver image for the CPU-offload KV backend.
+#
+# Unlike the Certus gRPC image (certus-grpc-connector/Dockerfile), this backend
+# is SELF-CONTAINED: a single vLLM process whose KV-offload tier lives in host
+# RAM (a CUDA pinned buffer) via the in-process TracingCPUOffloadingSpec. There
+# is NO separate server, NO gRPC, and NO CUDA IPC — so no --ipc=host and no
+# CERTUS_SERVER. It runs the same 450-conversation / 12-turn ShareGPT workload
+# as the other backends, for head-to-head comparison.
+#
+# Build (context = repo root — needs benchmarks/kv-offload-replay/ + the dataset):
+#   podman build -f benchmarks/kv-offload-replay/Dockerfile.cpu-offload -t certus-cpu-offload-bench .
+#
+# Run (GPU required; the CPU tier is pinned host RAM so size CPU_BYTES < free RAM;
+# if the host was in Certus mode, free the 1G hugepages first or the tier OOMs):
+#   podman run --rm --device nvidia.com/gpu=all \
+#       -e HF_TOKEN=<token> \
+#       -v $HOME/.cache/huggingface:/root/.cache/huggingface \
+#       certus-cpu-offload-bench
+#   # docker equivalent: --gpus all
+
+FROM docker.io/vllm/vllm-openai:v0.20.0
+ENTRYPOINT []
+
+# GPU is REQUIRED at run time (vLLM loads the model on the GPU). WHICH GPU is a
+# run-time choice — select it on the run command, not here (do NOT bake
+# NVIDIA_VISIBLE_DEVICES into the image):
+#   docker:  --gpus all   |  --gpus '"device=0"'
+#   podman:  --device nvidia.com/gpu=all  |  --device nvidia.com/gpu=0
+# Those flags trigger the NVIDIA container runtime to inject the chosen GPU +
+# the host's libcuda.so — a HOST prerequisite (nvidia-container-toolkit / CDI).
+LABEL org.certus.gpu-required="true" \
+      org.certus.host-prereq="nvidia-container-toolkit (docker --gpus / podman CDI)"
+
+WORKDIR /workspace
+
+# The self-contained driver + its two in-process connector modules, plus the
+# shared dataset (paths relative to the repo-root build context). torch/numpy/
+# vllm come from the base image; this backend needs no extra pip deps.
+COPY benchmarks/kv-offload-replay/run_multiturn_offloading.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/tracing_offloading_connector.py /workspace/bench/
+COPY benchmarks/kv-offload-replay/tracing_offloading_manager.py /workspace/bench/
+COPY certus-connector/sharegpt_12turn_450.json /workspace/certus-connector/sharegpt_12turn_450.json
+
+COPY benchmarks/kv-offload-replay/docker-entrypoint-cpu-offload.sh /usr/local/bin/cpu-offload-entrypoint
+RUN chmod +x /usr/local/bin/cpu-offload-entrypoint
+
+# Defaults match the 450x12 runbook (RUNBOOK-cpu-and-sharedstorage.md, Backend 1).
+# DATASET_PATH + NUM_CONVS are set explicitly so the container runs the 450x12
+# workload regardless of the driver's baked-in default. CPU_BYTES is the pinned
+# host-RAM offload tier — must be < free RAM (16 GiB here); shrink for smaller
+# hosts. PYTHONPATH lets vLLM import the two connector modules by name.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/workspace/bench \
+    MODEL=NousResearch/Meta-Llama-3-8B \
+    DATASET_PATH=/workspace/certus-connector/sharegpt_12turn_450.json \
+    NUM_CONVS=450 \
+    MAX_MODEL_LEN=8192 \
+    OUTPUT_TOKENS=150 \
+    MAX_NUM_SEQS=64 \
+    GPU_MEM_UTIL=0.90 \
+    CPU_BYTES=17179869184 \
+    HF_HUB_OFFLINE=1 \
+    WORKLOAD=/workspace/bench/run_multiturn_offloading.py
+
+ENTRYPOINT ["/usr/local/bin/cpu-offload-entrypoint"]
