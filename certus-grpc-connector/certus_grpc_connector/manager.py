@@ -50,6 +50,13 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         self._stub = stub
         self._block_size_bytes = int(block_size_bytes)
 
+    def set_block_size_bytes(self, block_size_bytes: int) -> None:
+        """Update the per-block Reserve size once the true KV-cache tensor
+        stride is known (the manager is constructed before get_handlers can
+        resolve it). Reserve sizes are per-call, so changing this affects only
+        subsequent stores."""
+        self._block_size_bytes = int(block_size_bytes)
+
     # ── lookup / touch ──
 
     def lookup(self, key: OffloadKey, req_context=None) -> bool | None:
