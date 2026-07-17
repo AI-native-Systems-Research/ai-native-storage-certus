@@ -48,13 +48,13 @@ Reviewer guidance:
 - If property owner is dispatcher, dispatch-map-only proof is insufficient.
 - If property owner is dispatch-map, per-entry proofs are helpful but may still require map-wide lifting for full claim strength.
 
-## 4) Claude July proof details preserved in active docs
+## 4) Proof status snapshot (2026-07-16)
 
 Now captured in active maintained files (not only history):
-- Live dispatcher verified: P2 (`ensure_initialized.coma`), P20 (`prepare_store_guards.coma`, re-anchored).
-- Stale dispatcher proofs: P21/P24 artifacts (`insert_pending`, `consume_once`, `consume_pending`).
-- Retired properties: P22/P23.
-- Current next keystone target: P11 (size mismatch hard-fail in lookup paths).
+- **All active non-legacy properties are Verified in some form.** 25 of 31 are Verified (18 full + 7 verified-scoped L1); P19 is the only deliberately Partial active property (cross-map concurrent invariant, out of Creusot's sequential model). See `coverage_report.md` for the full breakdown.
+- Legacy dispatcher: P20 Verified (guard semantics, re-anchored to `populate`), P21/P24 Stale (`insert_pending`, `consume_once`, `consume_pending`), P22/P23 Retired, P10 Partial (staging).
+- Map-wide milestone: P30/P31 lifted to L2 via `map_inv` (exclusive-state + binary write_ref, preserved by insert-fresh/overwrite/remove).
+- **Next keystone target:** cross-map (mt↔dm) consistency — the invariant that P4/P5/P8/P9/P19 currently flag as out of scope — plus lifting the remaining L1 verified-scoped cluster to map-wide claims.
 
 ## 5) Open drift-sensitive risks
 
