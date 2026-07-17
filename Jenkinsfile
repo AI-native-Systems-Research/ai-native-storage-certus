@@ -52,7 +52,7 @@ pipeline {
       steps {
         script {
           sh '. ~/.cargo/env ; cargo r -r -p certus-server -- --device-pci 0000:86:00.0 --format &'
-          sh 'for i in $(seq 1 60); do nc -z localhost 50051 && break || sleep 2; done'
+          sh 'for i in $(seq 1 10); do nc -z localhost 50051 && break || sleep 5; done'
 
           def output1 = sh(script: 'cd apps/python && python3 test-promote.py', returnStdout: true).trim()
           echo output1

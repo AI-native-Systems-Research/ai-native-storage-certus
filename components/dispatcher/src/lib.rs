@@ -436,14 +436,9 @@ impl DispatcherComponent {
     ) -> Result<(), DispatcherError> {
         let total_bytes = ipc_handle.size as usize;
 
-        // Evict if needed to make space.
+        // Evict and insert into memory-tier (retries on shard fragmentation).
         let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
-        self.evict_for_space(dm, mt, ipc_handle.size, key, max_attempts)?;
-
-        // Insert into memory-tier.
-        let mem_ptr = mt.insert(key, ipc_handle.size).map_err(|e| {
-            DispatcherError::AllocationFailed(format!("promote insert failed: {e}"))
-        })?;
+        let mem_ptr = self.evict_and_insert(dm, mt, key, ipc_handle.size, max_attempts)?;
 
         // Read from SSD into memory-tier using pipelined reader.
         let drives = self.data_drives.read();
@@ -621,6 +616,51 @@ impl DispatcherComponent {
             }
         }
         Ok(())
+    }
+
+    /// Evict and insert into memory-tier, retrying on fragmentation-induced PoolFull.
+    ///
+    /// After `evict_for_space` ensures global capacity, `mt.insert()` can still
+    /// fail if the freed space is non-contiguous (shard-level fragmentation).
+    /// This helper retries by force-evicting from the same shard until a
+    /// contiguous slot is available.
+    fn evict_and_insert(
+        &self,
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        key: CacheKey,
+        size: u32,
+        max_attempts: usize,
+    ) -> Result<*mut u8, DispatcherError> {
+        let mut attempts = 0usize;
+        loop {
+            self.evict_for_space(dm, mt, size, key, max_attempts.saturating_sub(attempts))?;
+            match mt.insert(key, size) {
+                Ok(ptr) => return Ok(ptr),
+                Err(interfaces::MemoryTierError::PoolFull) => {
+                    attempts += 1;
+                    if attempts >= max_attempts {
+                        return Err(DispatcherError::AllocationFailed(
+                            "memory-tier pool full (fragmentation after eviction)".into(),
+                        ));
+                    }
+                    if let Some(evicted_key) = mt.evict_lru_for_key(key) {
+                        if dm.try_evict_to_block(evicted_key).is_err() {
+                            let _ = dm.remove(evicted_key);
+                            self.emit_eviction(evicted_key, EvictionReason::Removed);
+                        } else {
+                            self.emit_eviction(evicted_key, EvictionReason::Demoted);
+                        }
+                    }
+                }
+                Err(interfaces::MemoryTierError::AlreadyExists(k)) => {
+                    return Err(DispatcherError::AlreadyExists(k));
+                }
+                Err(e) => {
+                    return Err(DispatcherError::AllocationFailed(e.to_string()));
+                }
+            }
+        }
     }
 
     fn process_write_job(
@@ -1687,14 +1727,8 @@ impl IDispatcher for DispatcherComponent {
                             let entry = &cold_entries[ci];
                             let ipc_size = entry.ipc_handle_size;
 
-                            let prep = (|| -> Result<*mut u8, DispatcherError> {
-                                self.evict_for_space(&dm, &mt, ipc_size, entry.key, max_attempts)?;
-                                mt.insert(entry.key, ipc_size).map_err(|e| {
-                                    DispatcherError::AllocationFailed(format!(
-                                        "promote insert failed: {e}"
-                                    ))
-                                })
-                            })();
+                            let prep =
+                                self.evict_and_insert(&dm, &mt, entry.key, ipc_size, max_attempts);
 
                             match prep {
                                 Ok(mem_ptr) => {
@@ -2099,15 +2133,7 @@ impl IDispatcher for DispatcherComponent {
             .map_err(|_| DispatcherError::NotInitialized("memory_tier not bound".into()))?;
 
         let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
-        self.evict_for_space(&dm, &mt, size, key, max_attempts)?;
-
-        let mem_ptr = mt.insert(key, size).map_err(|e| match e {
-            interfaces::MemoryTierError::AlreadyExists(k) => DispatcherError::AlreadyExists(k),
-            interfaces::MemoryTierError::PoolFull => {
-                DispatcherError::AllocationFailed("memory-tier pool full after eviction".into())
-            }
-            other => DispatcherError::AllocationFailed(other.to_string()),
-        })?;
+        let mem_ptr = self.evict_and_insert(&dm, &mt, key, size, max_attempts)?;
 
         Ok(mem_ptr)
     }
