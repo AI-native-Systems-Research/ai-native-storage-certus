@@ -117,6 +117,40 @@ Same workload knobs as above, plus: `DRAM` (staging buffer bytes →
 `/sys/block/<dev>/stat` byte accounting, default `md0`) · `BENCH_NUMA_NODE` (0) ·
 `BENCH_CPUS` (`0-15,32-47`) · `SKIP_PREFLIGHT=1` to bypass the host checks.
 
+### Container
+`Dockerfile.sharedstorage` packages the driver + dataset on the same
+`vllm/vllm-openai:v0.20.0` base as the other backends. The catch: the
+`llmd_fs_backend` connector is a **compiled torch C++ extension** living in a
+separate repo, so it must be built into a wheel whose torch/CUDA/GPU-arch match
+this base image. `build-sharedstorage.sh` does that in two steps — it reuses the
+connector repo's *own* `Dockerfile.wheel` (no bespoke build logic) with build
+args overridden to match, then builds the runtime image installing that wheel.
+
+```bash
+# 1+2. Build the wheel (matched args) then the image. Defaults target this host
+#      (torch 2.11.0/cu130, A30 = sm_80). Override via env if the base image's
+#      torch or the GPU differs:
+#        TORCH_VERSION / TORCH_CUDA_INDEX  — match the base image's torch
+#          (check: <venv>/bin/python -c "import torch;print(torch.__version__,torch.version.cuda)")
+#        CUDA_BASE_TAG                     — CUDA devel base for that cu index
+#        TORCH_CUDA_ARCH_LIST              — target GPU compute cap
+#          (check: nvidia-smi --query-gpu=compute_cap --format=csv,noheader)
+#        FS_BACKEND_DIR                    — path to the llmd_fs_backend repo
+benchmarks/kv-offload-replay/build-sharedstorage.sh
+
+# Run: bind-mount the host RAID (from configure-bench.sh sharedstorage) + HF cache.
+# The KV tier path (/mnt/fs-backend-bench/shared-kv) is fixed in the driver.
+podman run --rm --device nvidia.com/gpu=all \
+    -v /mnt/fs-backend-bench:/mnt/fs-backend-bench \
+    -v $HOME/.cache/huggingface:/root/.cache/huggingface \
+    certus-sharedstorage-bench
+#   docker: --gpus all. Add -e SKIP_PREFLIGHT=1 to bypass the mount/RAM-cap
+#   checks (e.g. a smoke run where the bind mount isn't a real mountpoint).
+```
+The built wheel lands in `benchmarks/kv-offload-replay/wheels/` (gitignored —
+rebuilt by the script, not committed). The wheel is installed `--no-deps` so it
+can't replace the base image's torch/vLLM.
+
 ### Notes / gotchas
 - **Preflight checks, does not configure** — it verifies the RAID is mounted, the
   KV path is writable, and RAM is capped, then exits loud if not. Fix with
