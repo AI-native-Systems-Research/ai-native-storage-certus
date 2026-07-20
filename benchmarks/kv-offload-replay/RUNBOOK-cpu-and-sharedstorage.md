@@ -20,7 +20,12 @@ KV offload tier lives in **host RAM** (a CUDA pinned buffer). No NVMe, no server
 — it is a single self-contained vLLM process. "IO" for this backend is
 virtual-memory paging (`/proc/vmstat`), captured by the `_iostat` variant.
 
-**Driver:** `run_multiturn_offloading.py`
+**Driver:** `run_multiturn_offloading.py` — uses vLLM's built-in
+`OffloadingConnector` + `CPUOffloadingSpec` by default (the same connector
+family the Certus gRPC driver uses, so the two are directly comparable). Set
+`TRACE_OFFLOAD=1` to swap in the local `Tracing*` wrappers, which additionally
+write per-op offload traces (`offloading_mgr_<pid>.jsonl` etc.) at some overhead
+— use that only when you want the traces, not for a throughput baseline.
 
 ### Host setup
 None strictly required — CPU offload needs only RAM + a free GPU. **But** if the
@@ -46,7 +51,22 @@ $V run_multiturn_offloading.py 2>&1 | tee cpu_offload_450.log
 ### Env knobs
 `NUM_CONVS` (450) · `MAX_MODEL_LEN` (8192) · `OUTPUT_TOKENS` (150) ·
 `MAX_NUM_SEQS` (64) · `GPU_MEM_UTIL` (0.90) · `CPU_BYTES` (offload tier bytes,
-default 4 GiB) · `MODEL` · `DATASET_PATH`.
+default 4 GiB) · `TRACE_OFFLOAD` (0 = built-in connector, no tracing — default;
+1 = Tracing* wrappers) · `MODEL` · `DATASET_PATH`.
+
+### Container
+A self-contained image (`Dockerfile.cpu-offload`) packages the driver + dataset
+on the same `vllm/vllm-openai:v0.20.0` base as the Certus gRPC image. No server,
+no gRPC, no `--ipc=host`. Its `ENV` defaults match this section (`NUM_CONVS=450`,
+`CPU_BYTES=16 GiB`, `TRACE_OFFLOAD=0`, 450×12 dataset).
+```bash
+# build from the repo root (context needs the bench dir + dataset)
+podman build -f benchmarks/kv-offload-replay/Dockerfile.cpu-offload -t certus-cpu-offload-bench .
+# run (GPU required; mount the HF cache; free hugepages first if host was in Certus mode)
+podman run --rm --device nvidia.com/gpu=all \
+    -v $HOME/.cache/huggingface:/root/.cache/huggingface \
+    certus-cpu-offload-bench
+```
 
 ### Notes / gotchas
 - **No preflight.** If the host is mis-set (hugepages eating RAM, GPU busy) the
