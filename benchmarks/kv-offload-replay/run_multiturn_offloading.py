@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """run_multiturn_offloading.py — drive multi-turn chat through vLLM offline
-inference with TracingOffloadingConnector + TracingCPUOffloadingSpec, capturing
-KV cache offload behavior under realistic prefix-growing chat workload.
+inference with the CPU-offload KV connector under a realistic prefix-growing
+chat workload.
+
+By default this uses vLLM's built-in OffloadingConnector + CPUOffloadingSpec
+(host-RAM offload tier, no tracing) — the clean baseline for comparing against
+the Certus gRPC backend, which also uses the plain OffloadingConnector. Set
+TRACE_OFFLOAD=1 to swap in the local Tracing* wrappers, which additionally
+record per-op offload traces (offloading_mgr_<pid>.jsonl etc.) at some overhead.
 
 For each ShareGPT conversation, the driver runs one generation per human turn,
 batched across all active conversations per round. Round k's prompt for a
@@ -21,6 +27,8 @@ Configurable via env vars:
     MAX_NUM_SEQS   vLLM batch parallelism             (default 64)
     GPU_MEM_UTIL   vLLM gpu_memory_utilization        (default 0.90)
     CPU_BYTES      offload tier size (bytes)          (default 4 GiB)
+    TRACE_OFFLOAD  1 = use Tracing* connector (writes offload traces);
+                   0 = built-in OffloadingConnector, no tracing  (default 0)
     MODEL          HF model id                        (default NousResearch/Meta-Llama-3-8B)
 
 Conversations whose next prompt would exceed MAX_MODEL_LEN - OUTPUT_TOKENS are
@@ -82,18 +90,38 @@ if __name__ == "__main__":
           f"max={max(len(c) for c in convs)})",
           file=sys.stderr)
 
-    # ── Init vLLM with tracing connector ──────────────────────────────────
-    KV_CONFIG = {
-        "kv_connector": "TracingOffloadingConnector",
-        "kv_connector_module_path": "tracing_offloading_connector",
-        "kv_role": "kv_both",
-        "kv_connector_extra_config": {
-            "cpu_bytes_to_use": CPU_BYTES,
-            "spec_name": "TracingCPUOffloadingSpec",
-            "spec_module_path": "tracing_offloading_manager",
-            "eviction_policy": "lru",
-        },
-    }
+    # ── Init vLLM with the CPU-offload connector ──────────────────────────
+    # Default is vLLM's built-in OffloadingConnector + CPUOffloadingSpec (no
+    # tracing) — this is the clean baseline for comparing against the Certus
+    # gRPC backend, which also uses the plain OffloadingConnector. Set
+    # TRACE_OFFLOAD=1 to instead use the local Tracing* wrappers, which record
+    # per-op offload traces (offloading_mgr_<pid>.jsonl etc.) at some overhead.
+    if os.environ.get("TRACE_OFFLOAD", "0") == "1":
+        KV_CONFIG = {
+            "kv_connector": "TracingOffloadingConnector",
+            "kv_connector_module_path": "tracing_offloading_connector",
+            "kv_role": "kv_both",
+            "kv_connector_extra_config": {
+                "cpu_bytes_to_use": CPU_BYTES,
+                "spec_name": "TracingCPUOffloadingSpec",
+                "spec_module_path": "tracing_offloading_manager",
+                "eviction_policy": "lru",
+            },
+        }
+    else:
+        # CPUOffloadingSpec is registered by name in vLLM's OffloadingSpecFactory,
+        # so no spec_module_path is needed.
+        KV_CONFIG = {
+            "kv_connector": "OffloadingConnector",
+            "kv_role": "kv_both",
+            "kv_connector_extra_config": {
+                "cpu_bytes_to_use": CPU_BYTES,
+                "spec_name": "CPUOffloadingSpec",
+                "eviction_policy": "lru",
+            },
+        }
+    print(f"[run] kv_connector={KV_CONFIG['kv_connector']} "
+          f"(TRACE_OFFLOAD={os.environ.get('TRACE_OFFLOAD', '0')})", file=sys.stderr)
 
     # Clear stale trace files
     for f in os.listdir(_here):
