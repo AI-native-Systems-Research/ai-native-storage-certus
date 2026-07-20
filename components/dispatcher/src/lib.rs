@@ -663,6 +663,107 @@ impl DispatcherComponent {
         }
     }
 
+    /// Copy a resident memory-tier slot to a GPU block via DMA. Shared by the
+    /// `batch_lookup` warm fast-path and the concurrent-promotion recovery
+    /// serve. Uses the warm CUDA stream when one is bound, else the synchronous
+    /// `DmaBuffer` fallback (matching the no-warm-stream test/CPU path). When
+    /// `synchronize` is set and the warm stream is used, blocks until the copy
+    /// completes; the fast path passes `false` and defers to one batched sync.
+    fn serve_memory_tier_to_gpu(
+        &self,
+        gpu: &Arc<dyn IGpuServices + Send + Sync>,
+        pointer: *mut u8,
+        size: u32,
+        ipc_handle: &IpcHandle,
+        synchronize: bool,
+    ) -> Result<(), DispatcherError> {
+        let copy_size = (ipc_handle.size as usize).min(size as usize);
+        let raw = self.warm_stream.load(Ordering::Acquire);
+        if raw != 0 {
+            let s = GpuStream(raw as *mut std::ffi::c_void);
+            gpu.memcpy_h2d_async(
+                pointer as *const std::ffi::c_void,
+                ipc_handle.address as *mut std::ffi::c_void,
+                copy_size,
+                s,
+            )
+            .map_err(|e| {
+                DispatcherError::IoError(format!("GPU DMA copy (memory-tier→device) failed: {e}"))
+            })?;
+            if synchronize {
+                gpu.stream_synchronize(s).map_err(|e| {
+                    DispatcherError::IoError(format!("stream_synchronize failed: {e}"))
+                })?;
+            }
+            Ok(())
+        } else {
+            let aligned = copy_size.next_multiple_of(4096).max(4096);
+            let buf = unsafe {
+                DmaBuffer::from_raw(pointer as *mut std::ffi::c_void, aligned, noop_free, -1)
+            }
+            .map_err(|e| DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}")))?;
+            let r = gpu
+                .dma_copy_to_device(&buf, ipc_handle.address as *mut std::ffi::c_void, copy_size)
+                .map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "GPU DMA copy (memory-tier→device) failed: {e}"
+                    ))
+                });
+            std::mem::forget(buf);
+            r
+        }
+    }
+
+    /// Serve a key whose promotion lost the `mt.insert` race to a concurrent
+    /// lookup — e.g. the other tensor-parallel rank requesting the same
+    /// content-hash key at the same time. When two `batch_lookup` calls both
+    /// classify a cold key as `BlockDevice`, both try to promote it; the loser
+    /// gets `MemoryTierError::AlreadyExists`. That is a hit, not a failure: the
+    /// winner flips the dispatch-map entry to `MemoryTier` only *after* its
+    /// SSD→DRAM read completes, so observing `MemoryTier` means the data is
+    /// resident. Wait (bounded) for that transition, then DMA to the GPU.
+    ///
+    /// The caller's load pin (`take_read` from `prepare_load`) keeps the entry
+    /// from being evicted while we wait.
+    fn serve_concurrently_promoted(
+        &self,
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        gpu: &Arc<dyn IGpuServices + Send + Sync>,
+        key: CacheKey,
+        ipc_handle: &IpcHandle,
+    ) -> Result<(), DispatcherError> {
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(5);
+        loop {
+            match dm.lookup(key) {
+                Ok(LookupResult::MemoryTier { pointer, size }) => {
+                    let res = self.serve_memory_tier_to_gpu(gpu, pointer, size, ipc_handle, true);
+                    let _ = dm.release_read(key);
+                    let _ = dm.touch(key);
+                    return res;
+                }
+                Ok(LookupResult::BlockDevice { .. }) => {
+                    // Winner hasn't finished its SSD→DRAM read yet: release the
+                    // read-ref this lookup took and back off briefly.
+                    let _ = dm.release_read(key);
+                    if start.elapsed() >= timeout {
+                        return Err(DispatcherError::KeyNotFound(key));
+                    }
+                    std::thread::sleep(std::time::Duration::from_micros(50));
+                }
+                Ok(LookupResult::MismatchSize) => {
+                    let _ = dm.release_read(key);
+                    return Err(DispatcherError::InvalidParameter(
+                        "size mismatch on concurrent-promotion recovery".into(),
+                    ));
+                }
+                // NotExist does not take a read-ref, so nothing to release.
+                Ok(LookupResult::NotExist) => return Err(DispatcherError::KeyNotFound(key)),
+                Err(e) => return Err(DispatcherError::IoError(e.to_string())),
+            }
+        }
+    }
+
     fn process_write_job(
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
@@ -1559,54 +1660,11 @@ impl IDispatcher for DispatcherComponent {
                         )));
                     }
                     LookupResult::MemoryTier { pointer, size } => {
-                        let copy_size = (ipc_handle.size as usize).min(size as usize);
                         let t_hot = std::time::Instant::now();
-                        let raw = self.warm_stream.load(Ordering::Acquire);
-                        let res = if raw != 0 {
-                            let s = GpuStream(raw as *mut std::ffi::c_void);
-                            gpu.memcpy_h2d_async(
-                                pointer as *const std::ffi::c_void,
-                                ipc_handle.address as *mut std::ffi::c_void,
-                                copy_size,
-                                s,
-                            )
-                            .map_err(|e| {
-                                DispatcherError::IoError(format!(
-                                    "GPU DMA copy (memory-tier→device) failed: {e}"
-                                ))
-                            })
-                        } else {
-                            let aligned = copy_size.next_multiple_of(4096).max(4096);
-                            let temp_buf = unsafe {
-                                DmaBuffer::from_raw(
-                                    pointer as *mut std::ffi::c_void,
-                                    aligned,
-                                    noop_free,
-                                    -1,
-                                )
-                            }
-                            .map_err(|e| {
-                                DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}"))
-                            });
-                            match temp_buf {
-                                Ok(buf) => {
-                                    let r = gpu
-                                        .dma_copy_to_device(
-                                            &buf,
-                                            ipc_handle.address as *mut std::ffi::c_void,
-                                            copy_size,
-                                        )
-                                        .map_err(|e| {
-                                            DispatcherError::IoError(format!(
-                                                "GPU DMA copy (memory-tier→device) failed: {e}"
-                                            ))
-                                        });
-                                    std::mem::forget(buf);
-                                    r
-                                }
-                                Err(e) => Err(e),
-                            }
-                        };
+                        // Warm hit: defer the stream sync to one batched sync
+                        // after the classification loop (synchronize = false).
+                        let res =
+                            self.serve_memory_tier_to_gpu(&gpu, pointer, size, ipc_handle, false);
                         if let Some(ref m) = *self.pipeline_metrics.read() {
                             m.record_hot_gpu_dma(t_hot.elapsed().as_micros() as f64);
                         }
@@ -1672,8 +1730,15 @@ impl IDispatcher for DispatcherComponent {
                                 entry.ipc_handle_size,
                             );
                         })
-                        .map_err(|e| {
-                            DispatcherError::AllocationFailed(format!("promote insert failed: {e}"))
+                        .map_err(|e| match e {
+                            // Preserve AlreadyExists so the recovery pass below
+                            // can re-serve the block warm (concurrent promotion).
+                            interfaces::MemoryTierError::AlreadyExists(k) => {
+                                DispatcherError::AlreadyExists(k)
+                            }
+                            other => DispatcherError::AllocationFailed(format!(
+                                "promote insert failed: {other}"
+                            )),
                         });
                     results[entry.idx] = Some(res);
                 }
@@ -1899,6 +1964,16 @@ impl IDispatcher for DispatcherComponent {
                             .map_err(|e| DispatcherError::IoError(format!("remote lookup: {e}"))),
                     );
                 }
+            }
+        }
+
+        // Recover concurrent-promotion losers: an entry left as AlreadyExists
+        // means a sibling lookup (e.g. the other TP rank) won the mt.insert
+        // race for this key. The block is resident (or being read in); wait for
+        // the MemoryTier transition and serve the DMA warm instead of failing.
+        for (i, (key, ipc_handle)) in entries.iter().enumerate() {
+            if matches!(results[i], Some(Err(DispatcherError::AlreadyExists(_)))) {
+                results[i] = Some(self.serve_concurrently_promoted(&dm, &gpu, *key, ipc_handle));
             }
         }
 
@@ -2701,6 +2776,11 @@ mod tests {
     struct MockDmInner {
         entries: HashMap<CacheKey, MockEntry>,
         mismatch_keys: HashSet<CacheKey>,
+        // Keys that should flip BlockDevice -> MemoryTier the *next* time they
+        // are looked up, simulating a concurrent promotion winner finishing its
+        // SSD->DRAM read between our classification and recovery. Pointer stored
+        // as usize to keep MockDmInner Send without an unsafe impl.
+        flip_on_next_lookup: HashMap<CacheKey, (usize, u32)>,
     }
 
     struct MockDispatchMap {
@@ -2713,6 +2793,7 @@ mod tests {
                 inner: Mutex::new(MockDmInner {
                     entries: HashMap::new(),
                     mismatch_keys: HashSet::new(),
+                    flip_on_next_lookup: HashMap::new(),
                 }),
             }
         }
@@ -2723,6 +2804,18 @@ mod tests {
 
         fn set_mismatch_key(&self, key: CacheKey) {
             self.inner.lock().unwrap().mismatch_keys.insert(key);
+        }
+
+        /// Arm a one-shot flip: the next `lookup(key)` still reports the current
+        /// (BlockDevice) classification, but installs a MemoryTier pointer so the
+        /// *following* lookup observes MemoryTier — mimicking the racing lookup
+        /// that won the `mt.insert` and finished promoting.
+        fn flip_to_memory_tier_on_next_lookup(&self, key: CacheKey, pointer: *mut u8, size: u32) {
+            self.inner
+                .lock()
+                .unwrap()
+                .flip_on_next_lookup
+                .insert(key, (pointer as usize, size));
         }
 
         fn convert_entry_to_block(&self, key: CacheKey, offset: u64) {
@@ -2743,12 +2836,12 @@ mod tests {
         }
 
         fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {
-            let inner = self.inner.lock().unwrap();
+            let mut inner = self.inner.lock().unwrap();
             if inner.mismatch_keys.contains(&key) {
                 return Ok(LookupResult::MismatchSize);
             }
-            match inner.entries.get(&key) {
-                None => Ok(LookupResult::NotExist),
+            let result = match inner.entries.get(&key) {
+                None => return Ok(LookupResult::NotExist),
                 Some(entry) => match &entry.location {
                     MockEntryLocation::MemoryTier {
                         pointer,
@@ -2756,18 +2849,32 @@ mod tests {
                         ssd_offset,
                     } => match ssd_offset {
                         Some(offset) if pointer.is_null() => {
-                            Ok(LookupResult::BlockDevice { offset: *offset })
+                            LookupResult::BlockDevice { offset: *offset }
                         }
-                        _ => Ok(LookupResult::MemoryTier {
+                        _ => LookupResult::MemoryTier {
                             pointer: *pointer,
                             size: *size,
-                        }),
+                        },
                     },
                     MockEntryLocation::BlockDevice { offset } => {
-                        Ok(LookupResult::BlockDevice { offset: *offset })
+                        LookupResult::BlockDevice { offset: *offset }
                     }
                 },
+            };
+            // One-shot promotion race simulation: after classifying this key as
+            // cold, install a MemoryTier pointer so the recovery lookup sees it.
+            if matches!(result, LookupResult::BlockDevice { .. }) {
+                if let Some((ptr, size)) = inner.flip_on_next_lookup.remove(&key) {
+                    if let Some(entry) = inner.entries.get_mut(&key) {
+                        entry.location = MockEntryLocation::MemoryTier {
+                            pointer: ptr as *mut u8,
+                            size,
+                            ssd_offset: Some(0),
+                        };
+                    }
+                }
             }
+            Ok(result)
         }
 
         fn convert_to_storage(&self, key: CacheKey, offset: u64) -> Result<(), DispatchMapError> {
@@ -3758,6 +3865,42 @@ mod tests {
         let mut buf = vec![0u8; 4096];
         let err = d.lookup(999, make_handle(&mut buf));
         assert!(matches!(err, Err(DispatcherError::KeyNotFound(999))));
+        d.shutdown().unwrap();
+    }
+
+    /// Regression: a `batch_lookup` whose promotion lost the `mt.insert` race to
+    /// a concurrent lookup (the other TP rank) must recover and serve the block
+    /// warm rather than failing the load with AlreadyExists (`error_code=3`).
+    #[test]
+    fn batch_lookup_recovers_from_concurrent_promotion_race() {
+        let (c, dm) = setup_initialized();
+        let d = query_interface!(c, IDispatcher).unwrap();
+
+        // Populate key 1 — dispatch-map = MemoryTier, and the memory-tier slot
+        // holds 0xCD. This slot stands in for the "winner's" resident promotion.
+        let mut buf = vec![0xCDu8; 4096];
+        d.populate(1, make_handle(&mut buf)).unwrap();
+        let mt = c.memory_tier.get().unwrap();
+        let (mem_ptr, size) = mt.peek(1).expect("key 1 should be resident");
+
+        // Reproduce the divergence the race produces:
+        //  - classify key 1 as cold (BlockDevice) so batch_lookup tries to promote,
+        //  - leave the memory-tier slot in place so mt.insert() -> AlreadyExists,
+        //  - arm a one-shot flip so the *recovery* lookup observes MemoryTier
+        //    (the concurrent winner having finished promoting).
+        dm.convert_entry_to_block(1, 0x1000);
+        dm.flip_to_memory_tier_on_next_lookup(1, mem_ptr, size);
+
+        let mut out = vec![0u8; 4096];
+        let results = d.batch_lookup(&[(1, make_handle(&mut out))]);
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].is_ok(),
+            "concurrent-promotion loser should be served warm, got: {:?}",
+            results[0]
+        );
+        assert_eq!(out[0], 0xCD, "recovered block must carry the resident data");
+
         d.shutdown().unwrap();
     }
 
