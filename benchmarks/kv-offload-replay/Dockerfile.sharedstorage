@@ -1,0 +1,63 @@
+# vLLM workload-driver image for the SharedStorage KV backend (llmd_fs_backend).
+#
+# The KV offload tier is a FILESYSTEM on a host RAID0 (XFS), mounted into the
+# container at /mnt/fs-backend-bench. The connector is the external, COMPILED
+# `llmd_fs_backend` package (a torch C++ extension) — built separately by
+# build-sharedstorage.sh using that package's OWN Dockerfile.wheel, with the
+# torch/CUDA/arch build args matched to THIS base image so the extension ABI
+# matches at runtime. The prebuilt wheel is dropped in ./wheels/ (build context)
+# and installed here --no-deps (so it can't pull a conflicting torch).
+#
+# Build (use the helper — it builds the wheel first, then this image):
+#   benchmarks/kv-offload-replay/build-sharedstorage.sh
+#
+# Run (host RAID from `configure-bench.sh sharedstorage` bind-mounted in; GPU
+# required; SKIP_PREFLIGHT=1 bypasses the host RAID/RAM-cap checks if needed):
+#   podman run --rm --device nvidia.com/gpu=all \
+#       -v /mnt/fs-backend-bench:/mnt/fs-backend-bench \
+#       -v $HOME/.cache/huggingface:/root/.cache/huggingface \
+#       certus-sharedstorage-bench
+
+FROM docker.io/vllm/vllm-openai:v0.20.0
+ENTRYPOINT []
+
+# GPU required at run time. Select it on the run command (docker: --gpus;
+# podman: --device nvidia.com/gpu=...), NOT baked into the image.
+LABEL org.certus.gpu-required="true" \
+      org.certus.host-prereq="nvidia-container-toolkit; host RAID at /mnt/fs-backend-bench (configure-bench.sh sharedstorage)"
+
+WORKDIR /workspace
+
+# The compiled llmd_fs_backend wheel, built by build-sharedstorage.sh against
+# this base's torch (2.11.0/cu130) + the target GPU arch. Installed --no-deps:
+# torch/vllm already present, and the wheel must NOT replace them.
+# The wheel's distribution name is llmd_fs_connector-*, but the import module is
+# llmd_fs_backend (verified below). wheels/ holds only this one wheel.
+COPY benchmarks/kv-offload-replay/wheels/ /tmp/wheels/
+RUN python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl \
+    && python3 -c "import llmd_fs_backend.spec; print('llmd_fs_backend import OK')" \
+    && rm -rf /tmp/wheels
+
+# Driver + shared dataset (torch/vllm come from the base image).
+COPY benchmarks/kv-offload-replay/run_fs_bench_450.py /workspace/bench/
+COPY certus-connector/sharegpt_12turn_450.json /workspace/certus-connector/sharegpt_12turn_450.json
+
+COPY benchmarks/kv-offload-replay/docker-entrypoint-sharedstorage.sh /usr/local/bin/ss-entrypoint
+RUN chmod +x /usr/local/bin/ss-entrypoint
+
+# Defaults match RUNBOOK-cpu-and-sharedstorage.md Backend 2. DRAM is the staging
+# buffer (max_staging_memory_gb). The KV tier path (/mnt/fs-backend-bench/shared-kv)
+# is fixed in the driver and must be bind-mounted from the host RAID.
+ENV PYTHONUNBUFFERED=1 \
+    MODEL=NousResearch/Meta-Llama-3-8B \
+    DATASET_PATH=/workspace/certus-connector/sharegpt_12turn_450.json \
+    NUM_CONVS=450 \
+    MAX_MODEL_LEN=8192 \
+    OUTPUT_TOKENS=150 \
+    MAX_NUM_SEQS=64 \
+    GPU_MEM_UTIL=0.90 \
+    DRAM=8589934592 \
+    HF_HUB_OFFLINE=1 \
+    WORKLOAD=/workspace/bench/run_fs_bench_450.py
+
+ENTRYPOINT ["/usr/local/bin/ss-entrypoint"]
