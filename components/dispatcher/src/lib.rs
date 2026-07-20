@@ -640,6 +640,103 @@ impl DispatcherComponent {
         Ok(())
     }
 
+    /// Serve one cold key through a transient staging buffer (no caching).
+    ///
+    /// Used when the memory tier is saturated and `evict_and_insert` can't get a
+    /// slot: reads `SSD → staging buffer → GPU` and leaves the dispatch-map entry
+    /// as `BlockDevice`. Holds exactly one staging lease, for the duration of the
+    /// read only, and takes no other lock while blocked on `checkout` — so the
+    /// blocking checkout is deadlock-free (buffers are released independently of
+    /// any memory-tier pin).
+    #[allow(clippy::too_many_arguments)]
+    fn serve_cold_staged(
+        &self,
+        gpu: &Arc<dyn IGpuServices + Send + Sync>,
+        key: CacheKey,
+        offset: u64,
+        ipc_addr: *mut u8,
+        ipc_size: u32,
+        device: i32,
+    ) -> Result<(), DispatcherError> {
+        let sp = match self
+            .pipeline_ring
+            .read()
+            .as_ref()
+            .and_then(|r| r.staging.clone())
+        {
+            Some(s) if ipc_size as usize <= s.buf_bytes() => s,
+            _ => {
+                return Err(DispatcherError::AllocationFailed(
+                    "no staging buffer available for cold load".into(),
+                ))
+            }
+        };
+        let lease = sp.checkout();
+        let total_bytes = ipc_size as usize;
+
+        let drives = self.data_drives.read();
+        if drives.is_empty() {
+            return Err(DispatcherError::IoError(
+                "staged cold read requires a data drive".into(),
+            ));
+        }
+        let idx = Self::drive_index(key, drives.len());
+        let drive = &drives[idx];
+        let block_size = drive.block_dev_iface.block_size();
+        let start_lba = offset / block_size as u64;
+        let block_dev = Arc::clone(&drive.block_dev_iface);
+        let channels = match &drive.cached_channels {
+            Some(ch) => ch,
+            None => {
+                drop(drives);
+                return Err(DispatcherError::IoError(
+                    "no cached channels for drive".into(),
+                ));
+            }
+        };
+
+        // Device-correct streams (multi-GPU), falling back to the ring's streams.
+        let chunk_size = {
+            let ring_guard = self.pipeline_ring.read();
+            ring_guard.as_ref().map_or(131072, |r| r.chunk_size)
+        };
+        let dev_streams = device_streams_for(&**gpu, device);
+        let streams: [GpuStream; 2] = match &dev_streams {
+            Some(s) => [
+                GpuStream(s.pipe[0] as *mut std::ffi::c_void),
+                GpuStream(s.pipe[1] as *mut std::ffi::c_void),
+            ],
+            None => {
+                let ring_guard = self.pipeline_ring.read();
+                let ring_ref = ring_guard.as_ref().ok_or_else(|| {
+                    DispatcherError::NotInitialized("pipeline ring not allocated".into())
+                })?;
+                ring_ref.streams
+            }
+        };
+
+        // SAFETY: lease.ptr() is a valid CUDA-pinned + SPDK-registered buffer for
+        // `total_bytes`; ipc_addr is the GPU destination. The lease keeps the
+        // buffer alive until after the read completes below.
+        let res = unsafe {
+            pipeline::pipelined_ssd_to_gpu_zero_copy(
+                &*block_dev,
+                &**gpu,
+                &streams,
+                channels,
+                lease.ptr(),
+                ipc_addr as *mut std::ffi::c_void,
+                start_lba,
+                total_bytes,
+                chunk_size,
+                16,
+            )
+        };
+        drop(drives);
+        drop(lease); // return the staging buffer; do NOT promote (stays BlockDevice)
+        res
+    }
+
     /// Free one pin-safe LRU victim, returning `true` if a slot was freed.
     ///
     /// Scans the `scan` oldest keys. For each candidate, in order of preference:
@@ -1922,26 +2019,26 @@ impl IDispatcher for DispatcherComponent {
                 let pm_arc: Option<Arc<dyn PipelineMetrics>> = pm.as_ref().map(Arc::clone);
                 drop(pm);
 
-                // Cold-load staging pool: when the tier is saturated (all slots
-                // pinned by in-flight loads) a cold load can't get a tier slot.
-                // Rather than fail it (which crashes vLLM), stage it through a
-                // dedicated registered buffer and don't cache it. Cloning the
-                // Arc lets us release the pipeline_ring lock before blocking on
-                // a checkout.
-                let staging = self
+                // Cold-load staging: when the tier is saturated (all slots pinned
+                // by in-flight loads) a cold load can't get a tier slot. Rather
+                // than fail it (which crashes vLLM), such entries are deferred to
+                // `staged` and served after the pooled tier jobs, one staging
+                // buffer at a time — see the post-pass below. We do NOT check out
+                // buffers here: blocking on a checkout while holding `pool_guard`
+                // (and accumulating leases that only release at batch end)
+                // deadlocks the server.
+                let staging_available = self
                     .pipeline_ring
                     .read()
                     .as_ref()
-                    .and_then(|r| r.staging.clone());
+                    .is_some_and(|r| r.staging.is_some());
+                let mut staged: Vec<usize> = Vec::new();
 
                 // For each drive, prepare ColdReadJobs and submit to pool (or fallback).
-                // `leases` parallels `job_ci`: Some(lease) marks a staged (uncached)
-                // job whose buffer must be returned — and NOT promoted — after the DMA.
                 #[allow(clippy::type_complexity)]
                 let mut pending_results: Vec<(
-                    Vec<usize>,                          // job_ci mapping
-                    Vec<*mut u8>,                        // mem_ptrs
-                    Vec<Option<pipeline::StagingLease>>, // per-job staging lease
+                    Vec<usize>,   // job_ci mapping
+                    Vec<*mut u8>, // mem_ptrs
                     crossbeam_channel::Receiver<Vec<Result<(), DispatcherError>>>,
                 )> = Vec::new();
                 let mut prep_failures: Vec<(usize, Result<(), DispatcherError>)> = Vec::new();
@@ -1964,8 +2061,6 @@ impl IDispatcher for DispatcherComponent {
                         let mut jobs: Vec<pipeline::ColdReadJob> = Vec::with_capacity(chunk.len());
                         let mut job_ci: Vec<usize> = Vec::with_capacity(chunk.len());
                         let mut mem_ptrs: Vec<*mut u8> = Vec::with_capacity(chunk.len());
-                        let mut leases: Vec<Option<pipeline::StagingLease>> =
-                            Vec::with_capacity(chunk.len());
 
                         for &ci in chunk {
                             let entry = &cold_entries[ci];
@@ -1984,29 +2079,15 @@ impl IDispatcher for DispatcherComponent {
                                     });
                                     job_ci.push(ci);
                                     mem_ptrs.push(mem_ptr);
-                                    leases.push(None);
                                 }
-                                // Tier saturated: stage through a dedicated buffer so
-                                // the load still succeeds (served uncached). Only for
-                                // AllocationFailed — AlreadyExists is a concurrent
-                                // promotion handled by the recovery pass.
-                                Err(DispatcherError::AllocationFailed(_))
-                                    if staging
-                                        .as_ref()
-                                        .is_some_and(|s| ipc_size as usize <= s.buf_bytes()) =>
-                                {
-                                    let sp = staging.as_ref().unwrap();
-                                    let lease = sp.checkout();
-                                    let mem_ptr = lease.ptr();
-                                    jobs.push(pipeline::ColdReadJob {
-                                        mem_ptr,
-                                        gpu_dst: entry.ipc_handle_addr as *mut std::ffi::c_void,
-                                        start_lba: entry.offset / block_size as u64,
-                                        total_bytes: ipc_size as usize,
-                                    });
-                                    job_ci.push(ci);
-                                    mem_ptrs.push(mem_ptr);
-                                    leases.push(Some(lease));
+                                // Tier saturated: defer to the staging post-pass
+                                // (served uncached, one buffer at a time) so the
+                                // load still succeeds. Only for AllocationFailed —
+                                // AlreadyExists is a concurrent promotion handled
+                                // by the recovery pass. Do NOT check out a buffer
+                                // here (would block under pool_guard → deadlock).
+                                Err(DispatcherError::AllocationFailed(_)) if staging_available => {
+                                    staged.push(ci);
                                 }
                                 Err(e) => {
                                     prep_failures.push((ci, Err(e)));
@@ -2084,7 +2165,7 @@ impl IDispatcher for DispatcherComponent {
                             }
                         }
 
-                        pending_results.push((job_ci, mem_ptrs, leases, result_rx));
+                        pending_results.push((job_ci, mem_ptrs, result_rx));
                     }
                 }
 
@@ -2096,7 +2177,7 @@ impl IDispatcher for DispatcherComponent {
                 }
 
                 // Collect pipeline results and finalize dispatch-map state.
-                for (job_ci, mem_ptrs, mut leases, result_rx) in pending_results {
+                for (job_ci, mem_ptrs, result_rx) in pending_results {
                     let pipeline_results = result_rx.recv().unwrap_or_else(|_| {
                         (0..job_ci.len())
                             .map(|_| {
@@ -2108,12 +2189,7 @@ impl IDispatcher for DispatcherComponent {
                     for (job_idx, result) in pipeline_results.into_iter().enumerate() {
                         let ci = job_ci[job_idx];
                         let entry = &cold_entries[ci];
-                        // Staged jobs (Some lease) are served uncached: the DMA is
-                        // done, so return the buffer to the pool and leave the entry
-                        // as BlockDevice — do NOT promote. Tier jobs promote as usual.
-                        let staged = leases[job_idx].is_some();
                         let res = match result {
-                            Ok(()) if staged => Ok(()),
                             Ok(()) => {
                                 // In-place BlockDevice->MemoryTier: preserves the
                                 // load's pin (read_ref) and keeps the SSD offset,
@@ -2132,9 +2208,27 @@ impl IDispatcher for DispatcherComponent {
                             }
                             Err(e) => Err(e),
                         };
-                        // Release the staging buffer now that its DMA has completed.
-                        leases[job_idx] = None;
                         results[cold_entries[ci].idx] = Some(res);
+                    }
+                }
+
+                // Staging post-pass (pool_guard released): serve tier-saturated
+                // cold entries one buffer at a time. Each serve checks out a
+                // single staging buffer, does SSD→staging→GPU, and releases it —
+                // so at most one lease is held per call and never while holding a
+                // lock, making the blocking checkout deadlock-free.
+                if !staged.is_empty() {
+                    for &ci in &staged {
+                        let entry = &cold_entries[ci];
+                        let res = self.serve_cold_staged(
+                            &gpu,
+                            entry.key,
+                            entry.offset,
+                            entry.ipc_handle_addr,
+                            entry.ipc_handle_size,
+                            batch_device,
+                        );
+                        results[entry.idx] = Some(res);
                     }
                 }
             }
