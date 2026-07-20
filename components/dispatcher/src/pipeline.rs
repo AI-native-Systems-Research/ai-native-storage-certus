@@ -440,6 +440,23 @@ pub unsafe fn pipelined_multi_object_zero_copy(
                     drop(guard);
 
                     if let Err(e) = dma_result {
+                        // DIAGNOSTIC (temporary): distinguish a stream/device
+                        // mismatch from an out-of-bounds segment on the cold path.
+                        let dst = unsafe { (job.gpu_dst as *mut u8).add(seg.buffer_offset) };
+                        let base_dev = gpu.device_of_ptr(job.gpu_dst).unwrap_or(-99);
+                        let dst_dev = gpu
+                            .device_of_ptr(dst as *const std::ffi::c_void)
+                            .unwrap_or(-99);
+                        eprintln!(
+                            "[pipeline] COLD DMA FAIL obj={obj_idx} seg={seg_idx} err='{e}' \
+                             gpu_dst={:p} base_dev={base_dev} dst={dst:p} dst_dev={dst_dev} \
+                             buf_offset={} seg_len={} copy_len={copy_len} total_bytes={} stream={:p}",
+                            job.gpu_dst,
+                            seg.buffer_offset,
+                            seg.length,
+                            job.total_bytes,
+                            current_stream.0,
+                        );
                         results[obj_idx] = Err(DispatcherError::IoError(format!(
                             "GPU DMA obj={obj_idx} seg={seg_idx}: {e}"
                         )));
