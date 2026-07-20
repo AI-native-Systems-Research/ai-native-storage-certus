@@ -194,6 +194,76 @@ define_component! {
 /// The memory-tier component owns the memory; this wrapper must not free it.
 unsafe extern "C" fn noop_free(_ptr: *mut std::ffi::c_void) {}
 
+/// Per-GPU-device CUDA streams for the load/store DMA paths.
+///
+/// A CUDA stream is bound to the device that was current when it was created,
+/// and `cudaMemcpyAsync` rejects a source/destination pointer that lives on a
+/// different device than the stream. Under tensor parallelism the server DMAs
+/// to more than one GPU, so a single shared stream fails ("invalid argument")
+/// for every transfer whose peer GPU isn't the stream's device. We therefore
+/// keep one warm stream and one pair of pipeline streams per device.
+///
+/// Process-global by design: there is a single dispatcher instance serving all
+/// local GPUs, and CUDA streams are process-wide resources. Entries are created
+/// lazily on first use for each device and live until the process exits.
+pub(crate) struct DeviceStreams {
+    /// Warm-path stream for memory-tier <-> GPU async copies.
+    warm: u64,
+    /// Dual streams for the pipelined SSD -> GPU cold path.
+    pub(crate) pipe: [u64; 2],
+}
+
+static DEVICE_STREAMS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<i32, DeviceStreams>>,
+> = std::sync::OnceLock::new();
+
+/// Ensure per-device streams exist for `device`, creating them on that device.
+/// Returns `None` if `device` is negative (no GPU association) or stream setup
+/// fails — callers then fall back to the synchronous `DmaBuffer` path.
+pub(crate) fn device_streams_for(gpu: &dyn IGpuServices, device: i32) -> Option<DeviceStreams> {
+    if device < 0 {
+        return None;
+    }
+    let map =
+        DEVICE_STREAMS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let mut guard = map.lock().unwrap();
+    if let Some(s) = guard.get(&device) {
+        return Some(DeviceStreams {
+            warm: s.warm,
+            pipe: s.pipe,
+        });
+    }
+    // Create all streams on the target device (streams inherit the current device).
+    gpu.set_device(device).ok()?;
+    let warm = gpu.create_stream().ok()?;
+    let pipe_a = gpu.create_stream().ok()?;
+    let pipe_b = gpu.create_stream().ok()?;
+    let entry = DeviceStreams {
+        warm: warm.0 as u64,
+        pipe: [pipe_a.0 as u64, pipe_b.0 as u64],
+    };
+    let ret = DeviceStreams {
+        warm: entry.warm,
+        pipe: entry.pipe,
+    };
+    guard.insert(device, entry);
+    Some(ret)
+}
+
+/// Resolve the GPU device a batch's blocks live on from the first block's IPC
+/// address, and make it the calling thread's current device (CUDA tracks the
+/// current device per thread). Returns the device ordinal, or -1 if unknown.
+/// All entries in one RPC come from a single rank, hence a single device.
+fn set_batch_device(gpu: &dyn IGpuServices, addr: *mut u8) -> i32 {
+    match gpu.device_of_ptr(addr as *const std::ffi::c_void) {
+        Ok(dev) if dev >= 0 => {
+            let _ = gpu.set_device(dev);
+            dev
+        }
+        _ => -1,
+    }
+}
+
 impl DispatcherComponent {
     fn log_info(&self, msg: &str) {
         if let Ok(logger) = self.logger.get() {
@@ -433,6 +503,7 @@ impl DispatcherComponent {
         gpu: &Arc<dyn IGpuServices + Send + Sync>,
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        device: i32,
     ) -> Result<(), DispatcherError> {
         let total_bytes = ipc_handle.size as usize;
 
@@ -483,25 +554,43 @@ impl DispatcherComponent {
         // Zero-copy pipelined reader: NVMe → memory-tier slot → GPU (no intermediate ring copy).
         // SAFETY: mem_ptr is a valid, CUDA-pinned, SPDK-registered memory-tier slot.
         // ipc_handle.address is a valid GPU destination pointer.
-        let ring_guard = self.pipeline_ring.read();
-        let ring_ref = ring_guard
-            .as_ref()
-            .ok_or_else(|| DispatcherError::NotInitialized("pipeline ring not allocated".into()))?;
+        //
+        // Use CUDA streams bound to the destination GPU's device (multi-GPU): the
+        // shared init-device pipeline_ring streams would fail cudaMemcpyAsync for
+        // a block on another GPU. Fall back to the ring's streams only when the
+        // device is unknown.
+        let chunk_size = {
+            let ring_guard = self.pipeline_ring.read();
+            ring_guard.as_ref().map_or(131072, |r| r.chunk_size)
+        };
+        let dev_streams = device_streams_for(&**gpu, device);
+        let streams: [GpuStream; 2] = match &dev_streams {
+            Some(s) => [
+                GpuStream(s.pipe[0] as *mut std::ffi::c_void),
+                GpuStream(s.pipe[1] as *mut std::ffi::c_void),
+            ],
+            None => {
+                let ring_guard = self.pipeline_ring.read();
+                let ring_ref = ring_guard.as_ref().ok_or_else(|| {
+                    DispatcherError::NotInitialized("pipeline ring not allocated".into())
+                })?;
+                ring_ref.streams
+            }
+        };
         unsafe {
             pipeline::pipelined_ssd_to_gpu_zero_copy(
                 &*block_dev,
                 &**gpu,
-                &ring_ref.streams,
+                &streams,
                 channels,
                 mem_ptr,
                 ipc_handle.address as *mut std::ffi::c_void,
                 start_lba,
                 total_bytes,
-                ring_ref.chunk_size,
+                chunk_size,
                 16,
             )?;
         }
-        drop(ring_guard);
         drop(drives);
 
         // In-place BlockDevice->MemoryTier transition (retains the SSD offset so
@@ -680,10 +769,14 @@ impl DispatcherComponent {
         pointer: *mut u8,
         size: u32,
         ipc_handle: &IpcHandle,
+        warm_raw: u64,
         synchronize: bool,
     ) -> Result<(), DispatcherError> {
         let copy_size = (ipc_handle.size as usize).min(size as usize);
-        let raw = self.warm_stream.load(Ordering::Acquire);
+        // Use the caller-resolved warm stream for the destination's device; the
+        // stream must be on the same GPU as `ipc_handle.address` or the async
+        // copy fails with "invalid argument" under multi-GPU.
+        let raw = warm_raw;
         if raw != 0 {
             let s = GpuStream(raw as *mut std::ffi::c_void);
             gpu.memcpy_h2d_async(
@@ -736,13 +829,15 @@ impl DispatcherComponent {
         gpu: &Arc<dyn IGpuServices + Send + Sync>,
         key: CacheKey,
         ipc_handle: &IpcHandle,
+        warm_raw: u64,
     ) -> Result<(), DispatcherError> {
         let start = std::time::Instant::now();
         let timeout = std::time::Duration::from_secs(5);
         loop {
             match dm.lookup(key) {
                 Ok(LookupResult::MemoryTier { pointer, size }) => {
-                    let res = self.serve_memory_tier_to_gpu(gpu, pointer, size, ipc_handle, true);
+                    let res = self
+                        .serve_memory_tier_to_gpu(gpu, pointer, size, ipc_handle, warm_raw, true);
                     let _ = dm.release_read(key);
                     let _ = dm.touch(key);
                     return res;
@@ -1057,8 +1152,7 @@ impl DispatcherComponent {
                         })?;
                     if let Ok(mt) = self.memory_tier.get() {
                         let mt_hook = Arc::clone(&mt);
-                        let logger_hook =
-                            Arc::clone(&logger) as Arc<dyn ILogger + Send + Sync>;
+                        let logger_hook = Arc::clone(&logger) as Arc<dyn ILogger + Send + Sync>;
                         em.set_post_checkpoint_hook(Arc::new(move || {
                             let used = mt_hook.used();
                             let capacity = mt_hook.capacity();
@@ -1634,6 +1728,19 @@ impl IDispatcher for DispatcherComponent {
 
         let mut results: Vec<Option<Result<(), DispatcherError>>> = vec![None; entries.len()];
 
+        // Resolve the GPU device this batch's blocks live on (all entries come
+        // from a single rank → a single device) and make it current on this
+        // thread. Pick the warm/pipeline streams bound to that device: a stream
+        // on another GPU makes cudaMemcpyAsync fail with "invalid argument"
+        // under tensor parallelism.
+        let batch_device = entries
+            .iter()
+            .map(|(_, h)| h.address)
+            .find(|a| !a.is_null())
+            .map_or(-1, |addr| set_batch_device(&*gpu, addr));
+        let dev_streams = device_streams_for(&*gpu, batch_device);
+        let warm_raw = dev_streams.as_ref().map_or(0, |s| s.warm);
+
         // Classify entries and handle fast paths inline.
         struct ColdEntry {
             idx: usize,
@@ -1668,8 +1775,9 @@ impl IDispatcher for DispatcherComponent {
                         let t_hot = std::time::Instant::now();
                         // Warm hit: defer the stream sync to one batched sync
                         // after the classification loop (synchronize = false).
-                        let res =
-                            self.serve_memory_tier_to_gpu(&gpu, pointer, size, ipc_handle, false);
+                        let res = self.serve_memory_tier_to_gpu(
+                            &gpu, pointer, size, ipc_handle, warm_raw, false,
+                        );
                         if let Some(ref m) = *self.pipeline_metrics.read() {
                             m.record_hot_gpu_dma(t_hot.elapsed().as_micros() as f64);
                         }
@@ -1695,10 +1803,10 @@ impl IDispatcher for DispatcherComponent {
         }
 
         // Batched stream sync: wait for all submitted async DMA copies at once.
+        // Sync the same per-device warm stream the fast path issued them on.
         if !deferred_touch_keys.is_empty() {
-            let raw = self.warm_stream.load(Ordering::Acquire);
-            if raw != 0 {
-                let s = GpuStream(raw as *mut std::ffi::c_void);
+            if warm_raw != 0 {
+                let s = GpuStream(warm_raw as *mut std::ffi::c_void);
                 if let Err(e) = gpu.stream_synchronize(s) {
                     self.log_info(&format!("batch stream_synchronize failed: {e}"));
                 }
@@ -1829,6 +1937,7 @@ impl IDispatcher for DispatcherComponent {
                             queue_depth,
                             metrics: pm_arc.clone(),
                             result_tx,
+                            gpu_device: batch_device,
                         };
 
                         if let Some(p) = pool {
@@ -1978,7 +2087,8 @@ impl IDispatcher for DispatcherComponent {
         // the MemoryTier transition and serve the DMA warm instead of failing.
         for (i, (key, ipc_handle)) in entries.iter().enumerate() {
             if matches!(results[i], Some(Err(DispatcherError::AlreadyExists(_)))) {
-                results[i] = Some(self.serve_concurrently_promoted(&dm, &gpu, *key, ipc_handle));
+                results[i] =
+                    Some(self.serve_concurrently_promoted(&dm, &gpu, *key, ipc_handle, warm_raw));
             }
         }
 
@@ -2011,6 +2121,11 @@ impl IDispatcher for DispatcherComponent {
 
         let null_stream = GpuStream(std::ptr::null_mut());
 
+        // Make this block's GPU device current and use its warm stream — a
+        // stream on another GPU fails cudaMemcpyAsync under multi-GPU.
+        let device = set_batch_device(&*gpu, ipc_handle.address);
+        let warm_raw = device_streams_for(&*gpu, device).map_or(0, |s| s.warm);
+
         match result {
             Ok(lookup_result) => {
                 use interfaces::LookupResult;
@@ -2023,61 +2138,22 @@ impl IDispatcher for DispatcherComponent {
                         ))
                     }
                     LookupResult::MemoryTier { pointer, size } => {
-                        let copy_size = (ipc_handle.size as usize).min(size as usize);
-
-                        // Use dedicated warm stream (lock-free AtomicU64 load).
-                        let raw = self.warm_stream.load(Ordering::Acquire);
-                        if raw != 0 {
-                            let s = GpuStream(raw as *mut std::ffi::c_void);
-                            gpu.memcpy_h2d_async(
-                                pointer as *const std::ffi::c_void,
-                                ipc_handle.address as *mut std::ffi::c_void,
-                                copy_size,
-                                s,
-                            )
-                            .map_err(|e| {
-                                let _ = dm.release_read(key);
-                                DispatcherError::IoError(format!(
-                                    "GPU DMA copy (memory-tier→device) failed: {e}"
-                                ))
-                            })?;
-                            let _ = dm.release_read(key);
-                            mt.touch(key);
-                            Ok(s)
-                        } else {
-                            // Fallback: sync copy via DmaBuffer wrapper.
-                            let aligned = copy_size.next_multiple_of(4096).max(4096);
-                            let temp_buf = unsafe {
-                                DmaBuffer::from_raw(
-                                    pointer as *mut std::ffi::c_void,
-                                    aligned,
-                                    noop_free,
-                                    -1,
-                                )
-                            }
-                            .map_err(|e| {
-                                let _ = dm.release_read(key);
-                                DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}"))
-                            })?;
-                            let copy_result = gpu.dma_copy_to_device(
-                                &temp_buf,
-                                ipc_handle.address as *mut std::ffi::c_void,
-                                copy_size,
-                            );
-                            std::mem::forget(temp_buf);
-                            let _ = dm.release_read(key);
-                            mt.touch(key);
-                            copy_result.map_err(|e| {
-                                DispatcherError::IoError(format!(
-                                    "GPU DMA copy (memory-tier→device) failed: {e}"
-                                ))
-                            })?;
-                            Ok(null_stream)
-                        }
+                        // Synchronous serve via the shared, device-correct helper.
+                        let r = self.serve_memory_tier_to_gpu(
+                            &gpu,
+                            pointer,
+                            size,
+                            &ipc_handle,
+                            warm_raw,
+                            true,
+                        );
+                        let _ = dm.release_read(key);
+                        mt.touch(key);
+                        r.map(|()| null_stream)
                     }
                     LookupResult::BlockDevice { offset } => {
                         let _ = dm.release_read(key);
-                        self.promote_and_serve(key, offset, &ipc_handle, &gpu, &dm, &mt)?;
+                        self.promote_and_serve(key, offset, &ipc_handle, &gpu, &dm, &mt, device)?;
                         Ok(null_stream)
                     }
                 }
@@ -2177,7 +2253,12 @@ impl IDispatcher for DispatcherComponent {
             .gpu_services
             .get()
             .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
-        let stream = GpuStream(self.warm_stream.load(Ordering::Acquire) as *mut std::ffi::c_void);
+        // D2H source is on the GPU (ipc_handle.address); make that device current
+        // and use its warm stream so cudaMemcpyAsync doesn't reject a cross-GPU
+        // stream under tensor parallelism.
+        let device = set_batch_device(&*gpu, ipc_handle.address);
+        let warm_raw = device_streams_for(&*gpu, device).map_or(0, |s| s.warm);
+        let stream = GpuStream(warm_raw as *mut std::ffi::c_void);
         self.copy_gpu_to_memory_async(key, ipc_handle, stream)?;
         gpu.stream_synchronize(stream)
             .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
@@ -2429,7 +2510,10 @@ impl IDispatcher for DispatcherComponent {
         if num_drives == 0 {
             let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
             for entry in &cold_entries {
-                if self.evict_for_space(&dm, &mt, entry.size, entry.key, max_attempts).is_err() {
+                if self
+                    .evict_for_space(&dm, &mt, entry.size, entry.key, max_attempts)
+                    .is_err()
+                {
                     continue;
                 }
                 if let Ok(mem_ptr) = mt.insert(entry.key, entry.size) {
@@ -2477,7 +2561,8 @@ impl IDispatcher for DispatcherComponent {
                         let block_size = block_dev.block_size() as u64;
                         let start_lba = entry.offset / block_size;
 
-                        if self.evict_for_space(dm, mt, entry.size, entry.key, max_attempts)
+                        if self
+                            .evict_for_space(dm, mt, entry.size, entry.key, max_attempts)
                             .is_err()
                         {
                             continue;
@@ -3199,6 +3284,12 @@ mod tests {
         }
         fn create_stream(&self) -> Result<GpuStream, String> {
             Ok(GpuStream(0x1 as *mut std::ffi::c_void))
+        }
+        fn set_device(&self, _device: i32) -> Result<(), String> {
+            Ok(())
+        }
+        fn device_of_ptr(&self, _ptr: *const std::ffi::c_void) -> Result<i32, String> {
+            Ok(0)
         }
         fn stream_query(&self, _stream: GpuStream) -> Result<bool, String> {
             Ok(true)
