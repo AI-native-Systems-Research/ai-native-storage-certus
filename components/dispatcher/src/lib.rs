@@ -508,8 +508,35 @@ impl DispatcherComponent {
         let total_bytes = ipc_handle.size as usize;
 
         // Evict and insert into memory-tier (retries on shard fragmentation).
+        // On tier saturation, fall back to a staging buffer so the load still
+        // succeeds (served uncached) instead of failing — see StagingPool.
         let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
-        let mem_ptr = self.evict_and_insert(dm, mt, key, ipc_handle.size, max_attempts)?;
+        let has_drives = !self.data_drives.read().is_empty();
+        let (mem_ptr, staging_lease) =
+            match self.evict_and_insert(dm, mt, key, ipc_handle.size, max_attempts) {
+                Ok(p) => (p, None),
+                Err(DispatcherError::AllocationFailed(_)) if has_drives => {
+                    let sp = self
+                        .pipeline_ring
+                        .read()
+                        .as_ref()
+                        .and_then(|r| r.staging.clone());
+                    match sp {
+                        Some(sp) if total_bytes <= sp.buf_bytes() => {
+                            let lease = sp.checkout();
+                            (lease.ptr(), Some(lease))
+                        }
+                        _ => {
+                            return Err(DispatcherError::AllocationFailed(
+                                "memory-tier full and no staging buffer available for cold load"
+                                    .into(),
+                            ))
+                        }
+                    }
+                }
+                Err(e) => return Err(e),
+            };
+        let staged = staging_lease.is_some();
 
         // Read from SSD into memory-tier using pipelined reader.
         let drives = self.data_drives.read();
@@ -592,6 +619,15 @@ impl DispatcherComponent {
             )?;
         }
         drop(drives);
+
+        // Staged (uncached) serve: the DMA is done and the data was delivered to
+        // the GPU, but it lives in a transient staging buffer, not a tier slot —
+        // leave the entry as BlockDevice and return the buffer to the pool (the
+        // lease drops here). Do NOT promote.
+        if staged {
+            drop(staging_lease);
+            return Ok(());
+        }
 
         // In-place BlockDevice->MemoryTier transition (retains the SSD offset so
         // the entry stays demotable). Unlike the old remove+recreate, this works
@@ -1408,8 +1444,21 @@ impl IDispatcher for DispatcherComponent {
                             .map(|d| d.block_dev_iface.max_transfer_size() as usize)
                             .unwrap_or(131072)
                     };
-                    match pipeline::PipelineRing::new(&*gpu, chunk_size) {
+                    match pipeline::PipelineRing::new(
+                        &*gpu,
+                        chunk_size,
+                        config.cold_staging_slots,
+                        config.cold_staging_buf_bytes,
+                    ) {
                         Ok(ring) => {
+                            if let Some(ref s) = ring.staging {
+                                self.log_info(&format!(
+                                    "dispatcher: cold-load staging pool ready ({} slots × {} KiB)",
+                                    config.cold_staging_slots,
+                                    config.cold_staging_buf_bytes / 1024,
+                                ));
+                                let _ = s;
+                            }
                             *self.pipeline_ring.write() = Some(ring);
                         }
                         Err(e) => {
@@ -1873,11 +1922,26 @@ impl IDispatcher for DispatcherComponent {
                 let pm_arc: Option<Arc<dyn PipelineMetrics>> = pm.as_ref().map(Arc::clone);
                 drop(pm);
 
+                // Cold-load staging pool: when the tier is saturated (all slots
+                // pinned by in-flight loads) a cold load can't get a tier slot.
+                // Rather than fail it (which crashes vLLM), stage it through a
+                // dedicated registered buffer and don't cache it. Cloning the
+                // Arc lets us release the pipeline_ring lock before blocking on
+                // a checkout.
+                let staging = self
+                    .pipeline_ring
+                    .read()
+                    .as_ref()
+                    .and_then(|r| r.staging.clone());
+
                 // For each drive, prepare ColdReadJobs and submit to pool (or fallback).
+                // `leases` parallels `job_ci`: Some(lease) marks a staged (uncached)
+                // job whose buffer must be returned — and NOT promoted — after the DMA.
                 #[allow(clippy::type_complexity)]
                 let mut pending_results: Vec<(
-                    Vec<usize>,   // job_ci mapping
-                    Vec<*mut u8>, // mem_ptrs
+                    Vec<usize>,                          // job_ci mapping
+                    Vec<*mut u8>,                        // mem_ptrs
+                    Vec<Option<pipeline::StagingLease>>, // per-job staging lease
                     crossbeam_channel::Receiver<Vec<Result<(), DispatcherError>>>,
                 )> = Vec::new();
                 let mut prep_failures: Vec<(usize, Result<(), DispatcherError>)> = Vec::new();
@@ -1900,6 +1964,8 @@ impl IDispatcher for DispatcherComponent {
                         let mut jobs: Vec<pipeline::ColdReadJob> = Vec::with_capacity(chunk.len());
                         let mut job_ci: Vec<usize> = Vec::with_capacity(chunk.len());
                         let mut mem_ptrs: Vec<*mut u8> = Vec::with_capacity(chunk.len());
+                        let mut leases: Vec<Option<pipeline::StagingLease>> =
+                            Vec::with_capacity(chunk.len());
 
                         for &ci in chunk {
                             let entry = &cold_entries[ci];
@@ -1918,6 +1984,29 @@ impl IDispatcher for DispatcherComponent {
                                     });
                                     job_ci.push(ci);
                                     mem_ptrs.push(mem_ptr);
+                                    leases.push(None);
+                                }
+                                // Tier saturated: stage through a dedicated buffer so
+                                // the load still succeeds (served uncached). Only for
+                                // AllocationFailed — AlreadyExists is a concurrent
+                                // promotion handled by the recovery pass.
+                                Err(DispatcherError::AllocationFailed(_))
+                                    if staging
+                                        .as_ref()
+                                        .is_some_and(|s| ipc_size as usize <= s.buf_bytes()) =>
+                                {
+                                    let sp = staging.as_ref().unwrap();
+                                    let lease = sp.checkout();
+                                    let mem_ptr = lease.ptr();
+                                    jobs.push(pipeline::ColdReadJob {
+                                        mem_ptr,
+                                        gpu_dst: entry.ipc_handle_addr as *mut std::ffi::c_void,
+                                        start_lba: entry.offset / block_size as u64,
+                                        total_bytes: ipc_size as usize,
+                                    });
+                                    job_ci.push(ci);
+                                    mem_ptrs.push(mem_ptr);
+                                    leases.push(Some(lease));
                                 }
                                 Err(e) => {
                                     prep_failures.push((ci, Err(e)));
@@ -1995,7 +2084,7 @@ impl IDispatcher for DispatcherComponent {
                             }
                         }
 
-                        pending_results.push((job_ci, mem_ptrs, result_rx));
+                        pending_results.push((job_ci, mem_ptrs, leases, result_rx));
                     }
                 }
 
@@ -2007,7 +2096,7 @@ impl IDispatcher for DispatcherComponent {
                 }
 
                 // Collect pipeline results and finalize dispatch-map state.
-                for (job_ci, mem_ptrs, result_rx) in pending_results {
+                for (job_ci, mem_ptrs, mut leases, result_rx) in pending_results {
                     let pipeline_results = result_rx.recv().unwrap_or_else(|_| {
                         (0..job_ci.len())
                             .map(|_| {
@@ -2019,7 +2108,12 @@ impl IDispatcher for DispatcherComponent {
                     for (job_idx, result) in pipeline_results.into_iter().enumerate() {
                         let ci = job_ci[job_idx];
                         let entry = &cold_entries[ci];
+                        // Staged jobs (Some lease) are served uncached: the DMA is
+                        // done, so return the buffer to the pool and leave the entry
+                        // as BlockDevice — do NOT promote. Tier jobs promote as usual.
+                        let staged = leases[job_idx].is_some();
                         let res = match result {
+                            Ok(()) if staged => Ok(()),
                             Ok(()) => {
                                 // In-place BlockDevice->MemoryTier: preserves the
                                 // load's pin (read_ref) and keeps the SSD offset,
@@ -2038,6 +2132,8 @@ impl IDispatcher for DispatcherComponent {
                             }
                             Err(e) => Err(e),
                         };
+                        // Release the staging buffer now that its DMA has completed.
+                        leases[job_idx] = None;
                         results[cold_entries[ci].idx] = Some(res);
                     }
                 }
@@ -4386,6 +4482,11 @@ mod tests {
 
         d.shutdown().unwrap();
     }
+
+    // Note: StagingPool allocates SPDK-registered DMA buffers, which require an
+    // initialized SPDK environment, so it isn't unit-testable in the no-hardware
+    // CI env — it's exercised by the kv-offload hardware bench. Its checkout/RAII
+    // logic is a plain free-list + condvar (see pipeline::StagingPool).
 
     // -----------------------------------------------------------------------
     // Background SSD Evictor tests

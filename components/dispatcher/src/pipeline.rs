@@ -58,17 +58,124 @@ pub const PIPELINE_RING_SIZE: usize = 8;
 /// Timeout for async NVMe read operations (ms).
 const READ_TIMEOUT_MS: u64 = 5000;
 
+/// Fixed pool of pre-registered DMA buffers for staging cold loads when the
+/// memory tier is saturated (all slots pinned by in-flight loads).
+///
+/// A cold load normally promotes into a memory-tier slot, but under pressure no
+/// slot can be freed (see `evict_for_space`). Rather than fail the load — which
+/// crashes vLLM (`assert transfer_result.success`) — we stage it through one of
+/// these buffers: `SSD → staging → GPU`, then return the buffer to the pool
+/// without caching. Loads therefore never fail on tier pressure.
+///
+/// Each buffer is CUDA-pinned + SPDK-registered (via `allocate_pinned_dma_buffer`)
+/// so NVMe can DMA into it and the GPU can DMA from it, exactly like a tier slot.
+/// `checkout` blocks until a buffer is free; this is deadlock-free because a
+/// buffer is held only for the duration of one cold read and released
+/// independently of any memory-tier pin.
+pub struct StagingPool {
+    // Buffers are owned here for their lifetime (freed + unregistered on drop);
+    // callers only ever touch the raw pointers via a StagingLease.
+    _buffers: Vec<DmaBuffer>,
+    ptrs: Vec<*mut u8>,
+    buf_bytes: usize,
+    free: Mutex<Vec<usize>>,
+    cv: std::sync::Condvar,
+}
+
+// SAFETY: the raw pointers refer to CUDA-pinned + SPDK-registered host memory
+// that is valid for cross-thread DMA use for the pool's lifetime; the owning
+// DmaBuffers are never mutated or moved after construction, and free-list access
+// is serialized by the Mutex.
+unsafe impl Send for StagingPool {}
+unsafe impl Sync for StagingPool {}
+
+impl StagingPool {
+    /// Allocate `slots` registered buffers of `buf_bytes` each.
+    pub fn new(
+        gpu: &dyn IGpuServices,
+        slots: usize,
+        buf_bytes: usize,
+    ) -> Result<Self, DispatcherError> {
+        let mut buffers = Vec::with_capacity(slots);
+        let mut ptrs = Vec::with_capacity(slots);
+        for i in 0..slots {
+            let buf = gpu.allocate_pinned_dma_buffer(buf_bytes).map_err(|e| {
+                DispatcherError::AllocationFailed(format!("staging buffer {i} alloc: {e}"))
+            })?;
+            ptrs.push(buf.as_ptr() as *mut u8);
+            buffers.push(buf);
+        }
+        Ok(Self {
+            _buffers: buffers,
+            ptrs,
+            buf_bytes,
+            free: Mutex::new((0..slots).collect()),
+            cv: std::sync::Condvar::new(),
+        })
+    }
+
+    /// Per-buffer capacity in bytes. A cold load larger than this can't be
+    /// staged (the caller must fall back).
+    pub fn buf_bytes(&self) -> usize {
+        self.buf_bytes
+    }
+
+    /// Check out a free buffer, blocking until one is available. The returned
+    /// lease owns a clone of the pool `Arc` (so it has no borrow lifetime and
+    /// can be stored freely) and returns the buffer to the pool when dropped.
+    pub fn checkout(self: &Arc<Self>) -> StagingLease {
+        let mut free = self.free.lock().unwrap();
+        while free.is_empty() {
+            free = self.cv.wait(free).unwrap();
+        }
+        let idx = free.pop().unwrap();
+        StagingLease {
+            pool: Arc::clone(self),
+            idx,
+            ptr: self.ptrs[idx],
+        }
+    }
+}
+
+/// RAII lease of one staging buffer; returns it to the pool on drop.
+pub struct StagingLease {
+    pool: Arc<StagingPool>,
+    idx: usize,
+    ptr: *mut u8,
+}
+
+impl StagingLease {
+    /// Raw pointer to the leased buffer (registered host memory).
+    pub fn ptr(&self) -> *mut u8 {
+        self.ptr
+    }
+}
+
+impl Drop for StagingLease {
+    fn drop(&mut self) {
+        self.pool.free.lock().unwrap().push(self.idx);
+        self.pool.cv.notify_one();
+    }
+}
+
 /// Pre-allocated dual CUDA streams and chunk size for pipelined SSD→GPU transfers.
 ///
 /// Constructed once at dispatcher init and reused across all cold-path reads.
 pub struct PipelineRing {
     pub streams: [GpuStream; 2],
     pub chunk_size: usize,
+    /// Staging pool for cold loads that can't get a memory-tier slot.
+    pub staging: Option<Arc<StagingPool>>,
 }
 
 impl PipelineRing {
-    /// Allocate CUDA streams for pipeline use.
-    pub fn new(gpu: &dyn IGpuServices, chunk_size: usize) -> Result<Self, DispatcherError> {
+    /// Allocate CUDA streams and the cold-load staging pool for pipeline use.
+    pub fn new(
+        gpu: &dyn IGpuServices,
+        chunk_size: usize,
+        staging_slots: usize,
+        staging_buf_bytes: usize,
+    ) -> Result<Self, DispatcherError> {
         let stream_a = gpu
             .create_stream()
             .map_err(|e| DispatcherError::IoError(format!("create_stream failed: {e}")))?;
@@ -77,9 +184,23 @@ impl PipelineRing {
             DispatcherError::IoError(format!("create_stream failed: {e}"))
         })?;
 
+        let staging = if staging_slots > 0 {
+            match StagingPool::new(gpu, staging_slots, staging_buf_bytes) {
+                Ok(p) => Some(Arc::new(p)),
+                Err(e) => {
+                    let _ = gpu.destroy_stream(stream_a);
+                    let _ = gpu.destroy_stream(stream_b);
+                    return Err(e);
+                }
+            }
+        } else {
+            None
+        };
+
         Ok(Self {
             streams: [stream_a, stream_b],
             chunk_size,
+            staging,
         })
     }
 
