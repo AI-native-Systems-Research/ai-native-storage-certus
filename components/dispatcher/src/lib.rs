@@ -515,21 +515,60 @@ impl DispatcherComponent {
         Ok(())
     }
 
-    /// Evict entries from the memory-tier until enough space is available.
+    /// Free one pin-safe LRU victim, returning `true` if a slot was freed.
     ///
-    /// Each evicted entry transitions from MemoryTier to BlockDevice in the
-    /// dispatch-map. If write-through hasn't completed (no ssd_offset), the
-    /// dispatch-map entry is removed entirely so lookups get NotExist rather
-    /// than a dangling memory-tier pointer.
-    /// Evict entries from memory-tier until `needed` bytes are free.
+    /// Scans the `scan` oldest keys. For each candidate, in order of preference:
+    ///  1. **Demote** to BlockDevice via `dm.try_evict_to_block` (keeps the data
+    ///     on SSD and the entry resolvable). Succeeds only when write-through is
+    ///     complete and the entry is unpinned.
+    ///  2. Otherwise **drop** it via `dm.remove` (write-through not yet done, so
+    ///     the block is lost from cache and recomputed on next miss).
     ///
-    /// Strategy: alternate between blind O(1) LRU eviction (fast path) and
-    /// small-batch candidate scanning (every 8th attempt) to find cleanly
-    /// evictable entries (write-through complete). Gives up after
-    /// `max_attempts` iterations to avoid unbounded stalls.
+    /// Both dispatch-map operations reject entries with `read_ref > 0`, and in
+    /// both branches the dispatch-map transition happens *before* the DRAM slot
+    /// is freed. So this NEVER frees a slot that a pinned, in-flight load still
+    /// points at — the bug that let the old blind `evict_lru` path reclaim a
+    /// pinned slot and corrupt the concurrent load (invalid H2D DMA / stale
+    /// data). A pinned candidate is skipped; the next one is tried.
     ///
-    /// Evicted entries transition from MemoryTier → BlockDevice in the
-    /// dispatch-map (data remains on SSD from the prior write-through).
+    /// Returns `false` only when every scanned candidate is pinned — the caller
+    /// must surface pool-full rather than blind-free.
+    fn evict_one_clean(
+        &self,
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        mt: &Arc<dyn IMemoryTier + Send + Sync>,
+        scan: usize,
+    ) -> bool {
+        for cand in mt.oldest_keys(scan) {
+            // Preferred: demote to block (data preserved, entry stays resolvable).
+            if dm.try_evict_to_block(cand).is_ok() {
+                let _ = mt.remove(cand);
+                self.emit_eviction(cand, EvictionReason::Demoted);
+                return true;
+            }
+            // Fallback: write-through incomplete so it can't be demoted. Drop it
+            // entirely — but only if unpinned. `dm.remove` returns an error for
+            // pinned entries, so a success means no in-flight load points at it;
+            // only then is it safe to free the DRAM slot.
+            if dm.remove(cand).is_ok() {
+                let _ = mt.remove(cand);
+                self.emit_eviction(cand, EvictionReason::Removed);
+                return true;
+            }
+            // Pinned by an in-flight load — leave it and try the next candidate.
+        }
+        false
+    }
+
+    /// Evict entries from the memory-tier until `needed` bytes are free.
+    ///
+    /// Every iteration frees one pin-safe LRU victim via [`Self::evict_one_clean`],
+    /// widening the scan as pressure persists. Evicted entries transition
+    /// MemoryTier → BlockDevice in the dispatch-map (data remains on SSD from the
+    /// prior write-through). If no candidate in the widening scan is evictable —
+    /// every oldest entry is pinned by an in-flight load or not yet written
+    /// through — this returns `AllocationFailed` rather than corrupt a pinned
+    /// slot; the caller leaves the block uncached.
     // NOTE: This only handles global capacity pressure. If keys are heavily skewed
     // to one shard (e.g., all keys ≡ 0 mod 16), the target shard can fill while
     // global used() < capacity(). In that case insert() will return PoolFull after
@@ -539,7 +578,7 @@ impl DispatcherComponent {
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
         mt: &Arc<dyn IMemoryTier + Send + Sync>,
         needed: u32,
-        target_key: CacheKey,
+        _target_key: CacheKey,
         max_attempts: usize,
     ) -> Result<(), DispatcherError> {
         const MAX_SCAN: usize = 4;
@@ -565,54 +604,17 @@ impl DispatcherComponent {
                 ));
             }
 
-            // Every 8th attempt probe a small batch for a clean eviction
-            // (write-through complete, no data loss).  All other iterations
-            // fall straight through to blind LRU to minimise lock hold time.
-            let evict_key = if attempts % 8 == 0 {
-                let candidates = mt.oldest_keys(MAX_SCAN);
-                candidates.iter().find(|&&k| dm.is_evictable(k)).copied()
-            } else {
-                None
-            };
-
-            match evict_key {
-                Some(key) => {
-                    // Transition dispatch-map BEFORE freeing DRAM to prevent
-                    // concurrent lookups from obtaining the now-freed pointer.
-                    if dm.try_evict_to_block(key).is_ok() {
-                        let _ = mt.remove(key);
-                        self.emit_eviction(key, EvictionReason::Demoted);
-                    }
-                }
-                None => {
-                    // Pick oldest candidate, transition dispatch-map first,
-                    // then free DRAM. This avoids the vtophys race where a
-                    // concurrent lookup reads the pointer between free and
-                    // dispatch-map update.
-                    let candidates = mt.oldest_keys(MAX_SCAN);
-                    let mut evicted = false;
-                    for &cand in &candidates {
-                        if dm.try_evict_to_block(cand).is_ok() {
-                            let _ = mt.remove(cand);
-                            self.emit_eviction(cand, EvictionReason::Demoted);
-                            evicted = true;
-                            break;
-                        }
-                    }
-                    if !evicted {
-                        // No candidates were evictable — fall back to blind
-                        // LRU removal (data may be lost if write-through
-                        // incomplete, but prevents deadlock under pressure).
-                        if let Some(evicted_key) = mt.evict_lru_for_key(target_key) {
-                            if dm.try_evict_to_block(evicted_key).is_err() {
-                                let _ = dm.remove(evicted_key);
-                                self.emit_eviction(evicted_key, EvictionReason::Removed);
-                            } else {
-                                self.emit_eviction(evicted_key, EvictionReason::Demoted);
-                            }
-                        }
-                    }
-                }
+            // Free one pin-safe victim, widening the scan as pressure persists so
+            // we look deeper into the LRU past pinned/unpersisted entries.
+            let scan = (MAX_SCAN * attempts).min(1024);
+            if !self.evict_one_clean(dm, mt, scan) {
+                // Every scanned candidate is pinned by an in-flight load. Do NOT
+                // blind-free — that would reclaim DRAM a load still points at.
+                // Surface pool-full; the caller leaves the block uncached.
+                return Err(DispatcherError::AllocationFailed(
+                    "memory-tier full: all eviction candidates are pinned by in-flight loads"
+                        .into(),
+                ));
             }
         }
         Ok(())
@@ -632,6 +634,7 @@ impl DispatcherComponent {
         size: u32,
         max_attempts: usize,
     ) -> Result<*mut u8, DispatcherError> {
+        const MAX_SCAN: usize = 4;
         let mut attempts = 0usize;
         loop {
             self.evict_for_space(dm, mt, size, key, max_attempts.saturating_sub(attempts))?;
@@ -644,13 +647,15 @@ impl DispatcherComponent {
                             "memory-tier pool full (fragmentation after eviction)".into(),
                         ));
                     }
-                    if let Some(evicted_key) = mt.evict_lru_for_key(key) {
-                        if dm.try_evict_to_block(evicted_key).is_err() {
-                            let _ = dm.remove(evicted_key);
-                            self.emit_eviction(evicted_key, EvictionReason::Removed);
-                        } else {
-                            self.emit_eviction(evicted_key, EvictionReason::Demoted);
-                        }
+                    // Force-evict one more pin-safe victim to relieve shard
+                    // fragmentation. If nothing is evictable (all pinned or
+                    // unpersisted), fail rather than blind-free a slot an
+                    // in-flight load still points at.
+                    if !self.evict_one_clean(dm, mt, MAX_SCAN * attempts) {
+                        return Err(DispatcherError::AllocationFailed(
+                            "memory-tier full: no evictable (unpinned, persisted) entry to relieve fragmentation"
+                                .into(),
+                        ));
                     }
                 }
                 Err(interfaces::MemoryTierError::AlreadyExists(k)) => {
@@ -3081,6 +3086,11 @@ mod tests {
                 .entries
                 .get_mut(&key)
                 .ok_or(DispatchMapError::KeyNotFound(key))?;
+            // Mirror the real dispatch-map: a pinned entry (read/write ref held
+            // by an in-flight load or write-back) is not evictable.
+            if entry.read_refs > 0 || entry.write_ref {
+                return Err(DispatchMapError::ActiveReferences(key));
+            }
             match &entry.location {
                 MockEntryLocation::MemoryTier {
                     ssd_offset: Some(offset),
@@ -3090,9 +3100,7 @@ mod tests {
                     entry.location = MockEntryLocation::BlockDevice { offset };
                     Ok(())
                 }
-                _ => Err(DispatchMapError::InvalidState(
-                    "not evictable".into(),
-                )),
+                _ => Err(DispatchMapError::InvalidState("not evictable".into())),
             }
         }
 
@@ -4196,12 +4204,94 @@ mod tests {
         let mut buf2 = vec![0u8; 4096];
         d.populate(2, make_handle(&mut buf2)).unwrap();
 
-        // Third populate should trigger eviction of one entry and succeed.
+        // Simulate completed write-through so the two entries are cleanly
+        // evictable: persisted to SSD (has an offset) and the write-back's
+        // read-pin (from downgrade_reference during populate) released.
+        // Eviction must only reclaim entries that are neither read- nor
+        // write-pinned — freeing an in-flight slot corrupts the concurrent
+        // load/write-back — so without this the pool is legitimately stuck.
+        dm.convert_to_storage(1, 0x1000).unwrap();
+        dm.release_read(1).unwrap();
+        dm.convert_to_storage(2, 0x2000).unwrap();
+        dm.release_read(2).unwrap();
+
+        // Third populate should now trigger eviction of one entry and succeed.
         let mut buf3 = vec![0u8; 4096];
         d.populate(3, make_handle(&mut buf3)).unwrap();
 
-        // Total entries in dispatch-map: at most 3 (one may have been converted to block).
+        // Total entries in dispatch-map: at most 3 (one demoted to block, not removed).
         assert!(dm.entry_count() <= 3);
+
+        d.shutdown().unwrap();
+    }
+
+    /// Regression: eviction under memory pressure must never free the DRAM slot
+    /// of a pinned entry. The old blind-LRU fallback freed the LRU victim before
+    /// checking the pin, leaving the dispatch-map pointing at reclaimed DRAM and
+    /// corrupting a concurrent load (observed as cudaMemcpyAsync H2D
+    /// "invalid argument" / key-not-found and an engine crash under TP).
+    #[test]
+    fn eviction_never_frees_pinned_slot() {
+        let dm = Arc::new(MockDispatchMap::new());
+        let logger: Arc<dyn ILogger + Send + Sync> = Arc::new(MockLogger);
+        let gpu: Arc<dyn IGpuServices + Send + Sync> = Arc::new(MockGpuServices);
+        // Pool holds exactly one 4 KiB entry, so the next insert must evict.
+        let mt: Arc<dyn IMemoryTier + Send + Sync> = Arc::new(MockMemoryTier::new(4096));
+        let mt_probe = Arc::clone(&mt);
+        let c = DispatcherComponent::new(
+            AtomicBool::new(false),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            Mutex::new(None),
+            RwLock::new(Vec::new()),
+            RwLock::new(None),
+            AtomicU64::new(0),
+            Mutex::new(None),
+            Mutex::new(None),
+            AtomicUsize::new(2048),
+            RwLock::new(None),
+            Arc::new(Mutex::new(None)),
+            AtomicU64::new(0),
+        );
+        c.dispatch_map
+            .connect(Arc::clone(&dm) as Arc<dyn IDispatchMap + Send + Sync>)
+            .unwrap();
+        c.logger.connect(logger).unwrap();
+        c.gpu_services.connect(gpu).unwrap();
+        c.memory_tier.connect(mt).unwrap();
+
+        let d = query_interface!(c, IDispatcher).unwrap();
+        d.initialize(DispatcherConfig {
+            data_pci_addrs: vec!["0000:02:00.0".to_string()],
+            ..Default::default()
+        })
+        .unwrap();
+
+        // Resident, fully persisted key 1 — normally the perfect eviction
+        // victim (write-back complete: persisted and its read-pin released).
+        let mut buf = vec![0u8; 4096];
+        d.populate(1, make_handle(&mut buf)).unwrap();
+        dm.convert_to_storage(1, 0x1000).unwrap();
+        dm.release_read(1).unwrap();
+        // ...but pin it, as an in-flight load would (prepare_load -> Pin).
+        dm.take_read(1).unwrap();
+
+        // Populating key 2 needs the only slot, held by pinned key 1. Eviction
+        // must refuse and surface pool-full rather than free the pinned slot.
+        let mut buf2 = vec![0u8; 4096];
+        let res = d.populate(2, make_handle(&mut buf2));
+        assert!(
+            matches!(res, Err(DispatcherError::AllocationFailed(_))),
+            "populate should fail (pool full of pinned data), got: {res:?}"
+        );
+
+        // The critical invariant: key 1's slot was NOT reclaimed.
+        assert!(
+            mt_probe.peek(1).is_some(),
+            "pinned entry's DRAM slot must survive eviction pressure"
+        );
+        assert!(matches!(dm.lookup(1), Ok(LookupResult::MemoryTier { .. })));
 
         d.shutdown().unwrap();
     }
