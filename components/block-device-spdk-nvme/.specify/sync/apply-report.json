@@ -1,0 +1,8 @@
+{
+  "applied": "2026-07-21",
+  "specs_updated": [
+    {"spec": "001-spdk-nvme-block-device", "requirement": "FR-026", "change": "added"},
+    {"spec": "001-spdk-nvme-block-device", "requirement": "Completion Callback entity", "change": "modified"}
+  ],
+  "not_applied": []
+}

@@ -1,0 +1,20 @@
+{
+  "generated": "2026-07-21",
+  "component": "dispatcher-p2p",
+  "spec": "001-gpudirect-cold-path",
+  "base_commit": "833e9f36e01f1df8a0e0fc57d5cd223d823d3199",
+  "proposals": [
+    {
+      "id": 1,
+      "requirement": "FR-015",
+      "direction": "BACKFILL",
+      "classification": "unspecced-new-behavior",
+      "title": "Multi-GPU device selection via IGpuServices",
+      "current_state": "IGpuServices gained set_device(i32) and device_of_ptr(*const c_void)->i32 (interfaces/src/igpu_services.rs:555,577). dispatcher-p2p implements both in its MockGpuServices test mock (src/lib.rs:3091-3096); rest of diff is rustfmt reflow. Production cold-path code does not yet call these methods. No existing FR covers GPU device selection.",
+      "proposed_resolution": "FR-015: The component's IGpuServices receptacle MUST provide multi-GPU device selection - set_device(device) to bind the active CUDA device and device_of_ptr(ptr) to resolve the GPU a device pointer resides on - so that cold-path staging-ring D2D copies and CUDA streams can target the client destination's GPU in multi-GPU deployments.",
+      "rationale": "The IGpuServices contract now includes device selection and the component's mock was updated to match, confirming the dependency at the interface boundary. FR-015 records the capability so future cold-path per-device routing has a spec anchor. Scoped to the capability present in code (interface + mock), not to routing behavior not yet implemented.",
+      "confidence": "high-for-interface-dependency; medium-for-routing-intent (production P2P code does not yet call these methods)",
+      "approved": true
+    }
+  ]
+}

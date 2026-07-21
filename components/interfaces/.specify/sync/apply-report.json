@@ -1,0 +1,17 @@
+{
+  "applied": "2026-07-21",
+  "spec": "components/interfaces/specs/001-interfaces/spec.md",
+  "base_commit": "833e9f36e01f1df8a0e0fc57d5cd223d823d3199",
+  "backup": "components/interfaces/.specify/sync/backups/spec.md.bak",
+  "direction": "BACKFILL",
+  "changes": [
+    { "proposal": "P1", "fr": "FR-027", "action": "added", "detail": "New FR: IDispatcher Cold-Load Staging Configuration (feature: spdk) documenting cold_staging_slots and cold_staging_buf_bytes." },
+    { "proposal": "P1", "fr": "FR-018", "action": "amended", "detail": "Field count 14 -> 16; description mentions cold-load staging slots and buffer size." },
+    { "proposal": "P2", "fr": "FR-028", "action": "added", "detail": "New FR: IGpuServices Multi-GPU Device Routing documenting set_device and device_of_ptr." },
+    { "proposal": "P2", "fr": "FR-011", "action": "amended", "detail": "Appended set_device and device_of_ptr method bullets to the IGpuServices method list." },
+    { "proposal": "P3", "fr": "FR-017", "action": "amended", "detail": "Completion bullet records Clone derive for non-blocking completion delivery." },
+    { "proposal": "P3", "fr": "NFR-003", "action": "amended", "detail": "Thread-safety bullet now states Completion is Send + Clone." }
+  ],
+  "source_code_modified": false,
+  "fr_range_after": "FR-001..FR-028"
+}

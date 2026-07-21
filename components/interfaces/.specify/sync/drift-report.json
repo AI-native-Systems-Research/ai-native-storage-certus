@@ -1,0 +1,51 @@
+{
+  "generated": "2026-07-21",
+  "spec": "components/interfaces/specs/001-interfaces/spec.md",
+  "base_commit": "833e9f36e01f1df8a0e0fc57d5cd223d823d3199",
+  "head": "HEAD",
+  "scope": [
+    "components/interfaces/src/idispatcher.rs",
+    "components/interfaces/src/igpu_services.rs",
+    "components/interfaces/src/iblock_device.rs"
+  ],
+  "summary": {
+    "frs_total": 26,
+    "aligned": 24,
+    "drifted": 2,
+    "entity_attribute_drift": 1,
+    "not_implemented": 0,
+    "conflicts": 0,
+    "unspecced_features": 3
+  },
+  "per_spec": [
+    { "id": "FR-008", "subject": "IDispatcher methods", "status": "aligned" },
+    { "id": "FR-011", "subject": "IGpuServices methods", "status": "drifted", "note": "set_device and device_of_ptr not listed" },
+    { "id": "FR-017", "subject": "Supporting Types - Block Device", "status": "drifted_entity_attribute", "note": "Completion now derives Clone" },
+    { "id": "FR-018", "subject": "Supporting Types - Dispatcher", "status": "drifted", "note": "DispatcherConfig now 16 fields (spec says 14); cold_staging_slots + cold_staging_buf_bytes missing" },
+    { "id": "FR-022", "subject": "Supporting Types - GPU Services", "status": "aligned" },
+    { "id": "NFR-003", "subject": "Thread Safety", "status": "aligned", "note": "Completion still Send; Clone is additive" }
+  ],
+  "unspecced_code": [
+    {
+      "feature": "DispatcherConfig::cold_staging_slots (usize, default 64) + cold_staging_buf_bytes (usize, default 4 MiB): bounded pinned-DRAM staging pool for SSD->GPU cold reads",
+      "location": "components/interfaces/src/idispatcher.rs:81-87 (defaults :109-110)",
+      "suggested_fr": "FR-027 (and update FR-018 field count to 16)"
+    },
+    {
+      "feature": "IGpuServices::set_device(device: i32) -> Result<(), String> and device_of_ptr(ptr: *const c_void) -> Result<i32, String>: per-thread CUDA device selection + device-ownership query for multi-GPU routing",
+      "location": "components/interfaces/src/igpu_services.rs:532-578",
+      "suggested_fr": "FR-028 (and append both to FR-011 list)"
+    },
+    {
+      "feature": "Completion enum derives Clone (was Debug only): enables try_send of a completion clone on a full ring without consuming the original",
+      "location": "components/interfaces/src/iblock_device.rs:350",
+      "suggested_fr": "amend FR-017 entity note and NFR-003"
+    }
+  ],
+  "conflicts": [],
+  "recommendations": [
+    { "direction": "BACKFILL", "action": "Add FR-027 (IDispatcher cold-load staging config) and update FR-018 to 16 fields" },
+    { "direction": "BACKFILL", "action": "Add FR-028 (IGpuServices multi-GPU device routing) and append set_device/device_of_ptr to FR-011" },
+    { "direction": "BACKFILL", "action": "Amend FR-017 and NFR-003 to record Completion Clone derive" }
+  ]
+}

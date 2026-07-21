@@ -1,64 +1,41 @@
-# Sync Apply Report
+# Spec Sync Apply Report
+Applied: 2026-07-21
+Project: gpu-services
+Based on: proposals from 2026-07-21
 
-Generated: 2026-05-29
-Component: gpu-services
-Based on: drift-report from 2026-05-29
+## Summary
 
-## Applied Changes
+| Item | Value |
+|------|-------|
+| Target spec | 001-gpu-cuda-services |
+| Proposals applied | 2 (both BACKFILL) |
+| FRs added | FR-021, FR-022 |
+| Spec files modified | specs/001-gpu-cuda-services/spec.md |
+| Backup | .specify/sync/backups/spec.md.bak |
 
-### 1. Backfill open_ipc_handle Caller Precondition (spec 001)
+## Changes Applied
 
-**File modified**: `specs/001-gpu-cuda-services/spec.md`
+### FR-021 - set_device (BACKFILL, HIGH confidence)
+Added after FR-020 in spec 001-gpu-cuda-services. Documents the existing
+`set_device(device)` method (src/lib.rs:566-592,
+interfaces/src/igpu_services.rs:555) that binds the calling thread's CUDA
+device context via `cudaSetDevice`.
 
-**Change 1 — Assumptions section (last bullet, replaced)**:
+### FR-022 - device_of_ptr (BACKFILL, HIGH confidence)
+Added after FR-021 in spec 001-gpu-cuda-services. Documents the existing
+`device_of_ptr(ptr)` method (src/lib.rs:594-633,
+interfaces/src/igpu_services.rs:577) that returns the owning CUDA device
+ordinal via `cudaPointerGetAttributes`, returning -1 when no device
+association exists.
 
-Removed the inaccurate assumption that "GPU device selection for IPC
-operations is implicit — the IPC handle carries the originating device
-context and the component follows it automatically."
+## Before / After
 
-Replaced with accurate language documenting that:
-- `open_ipc_handle` (and `deserialize_ipc_handle`) does NOT call
-  `cudaSetDevice`
-- It is a low-level function with an explicit caller precondition:
-  the caller must set the CUDA device context via `cudaSetDevice` before
-  calling `deserialize_ipc_handle`
-- In the certus-server integration, `service.rs` fulfills this
-  precondition
-- The high-level `prepare_memory_for_spdk` (FR-013) handles device
-  context internally and is exempt from this requirement
+- Before: spec 001 Functional Requirements ended at FR-020 (20 FRs).
+- After: spec 001 Functional Requirements end at FR-022 (22 FRs). FR-021 and
+  FR-022 inserted between FR-020 and the "Key Entities" section. No existing
+  FR text was modified. Numbering and Markdown format match surrounding FRs.
 
-**Change 2 — FR-003 (augmented with precondition note)**:
-
-Added a **Precondition** clause to FR-003 stating that the caller is
-responsible for setting the correct CUDA device context before calling
-`deserialize_ipc_handle`, and that `open_ipc_handle` does not call
-`cudaSetDevice` internally. The high-level `prepare_memory_for_spdk`
-path is identified as exempt.
-
-**Effect**: The drift between the Assumptions section and actual code
-behavior of `src/ipc.rs open_ipc_handle()` is now resolved. No code
-changes required — the code is correct, the spec was inaccurate.
-
-## Not Applied
-
-None. The single drift item has been fully addressed by spec backfill.
-
-## Post-Apply Drift Status
-
-| Category | Before | After |
-|----------|--------|-------|
-| Aligned (requirements) | 43 | 44 |
-| Drifted | 1 | 0 |
-| Not Implemented | 0 | 0 |
-| Unspecced | 0 | 0 |
-
-## Notes
-
-The previous sync (2026-05-21) had already resolved all prior drift and
-unspecced features. This sync addresses a single documentation-level
-drift: an inaccurate Assumption about device context selection for
-`open_ipc_handle`. The correction clarifies the architectural boundary
-between the low-level IPC path (caller-managed device context) and the
-high-level `prepare_memory_for_spdk` path (self-managing device
-context). This is particularly important for future callers who use
-`deserialize_ipc_handle` directly in multi-GPU scenarios.
+## Verification
+- Backup created at .specify/sync/backups/spec.md.bak before edit.
+- proposals.json: both proposals set to "approved": true.
+- No other spec (002-gpu-ssd-dma-prepare) was modified.

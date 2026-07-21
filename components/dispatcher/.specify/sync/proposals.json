@@ -1,66 +1,87 @@
 {
-  "generated": "2026-05-21",
+  "generated": "2026-07-21",
   "spec": "components/dispatcher/specs/001-dispatcher-cache-interface/spec.md",
+  "base_commit": "833e9f36e01f1df8a0e0fc57d5cd223d823d3199",
   "proposals": [
     {
-      "id": "BACKFILL-001",
-      "type": "backfill",
-      "status": "approved-and-applied",
-      "drift_ref": "drift-2",
-      "requirement": "FR-026",
-      "title": "Remove BlockDeviceVersion selection requirement",
-      "rationale": "The implementation hardcodes a single block device component. There is no version multiplexing in the codebase — only one version exists. The config field was removed intentionally.",
-      "action": "Mark FR-026 as REMOVED/superseded in spec.md",
-      "files_modified": [
-        "components/dispatcher/specs/001-dispatcher-cache-interface/spec.md",
-        "components/dispatcher/specs/001-dispatcher-cache-interface/contracts/idispatcher.md"
-      ]
+      "id": "ALIGN-024",
+      "type": "align",
+      "direction": "align",
+      "requirement": "FR-024",
+      "drift_ref": "FR-024",
+      "title": "Pin-safe memory-tier eviction (rewrite FR-024)",
+      "current_state": "FR-024 documents sparse-probe + shard-targeted blind-LRU-primary (evict_lru_for_key(target_key)) with a blind-LRU fallback that removes the dispatch-map entry on failed transition (data loss accepted).",
+      "proposed_resolution": "Rewrite FR-024: evict_for_space frees one pin-safe victim per iteration via evict_one_clean over a widening oldest_keys(4*attempts, cap 1024) scan; demote (try_evict_to_block) or drop (dm.remove) only unpinned entries; dispatch-map transition before DRAM free; blind evict_lru/evict_lru_for_key fallback removed; returns AllocationFailed if all candidates pinned (caller leaves uncached or uses staging per FR-053). Update US7 scenarios, Edge Cases, and 2026-05-22/2026-05-08 clarifications accordingly.",
+      "rationale": "Blind-free was a data-corruption bug under TP (freeing a slot an in-flight load pointed at). Fix is intentional and regression-tested (eviction_never_frees_pinned_slot); spec's data-loss-accepted fallback is now wrong.",
+      "confidence": "high",
+      "approved": true
     },
     {
-      "id": "BACKFILL-002",
-      "type": "backfill",
-      "status": "approved-and-applied",
-      "drift_ref": "drift-3",
-      "requirement": "FR-027",
-      "title": "Remove ExtentManagerVersion selection requirement",
-      "rationale": "The implementation hardcodes a single extent manager. There is no version multiplexing — only one version exists. The config field was removed intentionally.",
-      "action": "Mark FR-027 as REMOVED/superseded in spec.md",
-      "files_modified": [
-        "components/dispatcher/specs/001-dispatcher-cache-interface/spec.md",
-        "components/dispatcher/specs/001-dispatcher-cache-interface/contracts/idispatcher.md"
-      ]
+      "id": "ALIGN-037",
+      "type": "align",
+      "direction": "align",
+      "requirement": "FR-037",
+      "drift_ref": "FR-037",
+      "title": "Per-device warm stream (update FR-037)",
+      "current_state": "FR-037 states a single warm CUDA stream stored as AtomicU64, multi-stream reserved for future.",
+      "proposed_resolution": "Amend FR-037: the AtomicU64 warm_stream is now a fallback; the warm hot path and D2H populate path resolve the destination GPU device from the IPC pointer and use the per-device warm stream from DEVICE_STREAMS (cross-reference FR-052).",
+      "rationale": "Multi-GPU / tensor-parallel support forced the single-stream model to per-device. Code is authoritative.",
+      "confidence": "high",
+      "approved": true
     },
     {
-      "id": "BACKFILL-003",
+      "id": "BACKFILL-051",
       "type": "backfill",
-      "status": "approved-and-applied",
+      "direction": "backfill",
+      "requirement": "FR-051",
       "drift_ref": null,
-      "requirement": null,
-      "title": "Rename DispatcherComponentV0 to DispatcherComponent",
-      "rationale": "The component type was renamed to DispatcherComponent in code. The V0 suffix was vestigial and misleading since v1 is the current implementation.",
-      "action": "Replace all references to DispatcherComponentV0 with DispatcherComponent in spec companion files",
-      "files_modified": [
-        "components/dispatcher/specs/001-dispatcher-cache-interface/quickstart.md",
-        "components/dispatcher/specs/001-dispatcher-cache-interface/contracts/idispatcher.md",
-        "components/dispatcher/design/DESIGN.md",
-        "components/dispatcher/CLAUDE.md"
-      ]
+      "title": "Concurrent-promotion-race recovery",
+      "current_state": "Unspecced. FR-039 does not cover two concurrent lookups racing to promote the same cold key.",
+      "proposed_resolution": "Add FR-051: a batch_lookup promotion that loses the mt.insert race (MemoryTierError::AlreadyExists) is mapped to DispatcherError::AlreadyExists and recovered by serve_concurrently_promoted, which bounded-waits (<=5s, 50us backoff) for the winner's MemoryTier transition and serves the resident slot via serve_memory_tier_to_gpu; timeout -> KeyNotFound, MismatchSize -> InvalidParameter. Add SC-015.",
+      "rationale": "Regression-tested (batch_lookup_recovers_from_concurrent_promotion_race); prevents an engine crash under TP where sibling ranks request the same content-hash key.",
+      "confidence": "high",
+      "approved": true
+    },
+    {
+      "id": "BACKFILL-052",
+      "type": "backfill",
+      "direction": "backfill",
+      "requirement": "FR-052",
+      "drift_ref": null,
+      "title": "Per-GPU-device CUDA stream routing (multi-GPU)",
+      "current_state": "Unspecced. Spec assumes a single GPU/stream.",
+      "proposed_resolution": "Add FR-052: cold and warm DMA transfers use CUDA streams bound to the destination GPU device via the process-global DEVICE_STREAMS map (device_streams_for); device resolved per request from the IPC pointer (device_of_ptr/set_batch_device) and made current; batch_lookup resolves one device per batch; cold_pool::ColdReadRequest.gpu_device drives set_device in the worker; unknown device (-1) falls back to shared streams.",
+      "rationale": "Required for tensor-parallel deployments spanning multiple local GPUs; a stream on another GPU fails cudaMemcpyAsync with 'invalid argument'. Code is authoritative.",
+      "confidence": "high",
+      "approved": true
+    },
+    {
+      "id": "BACKFILL-053",
+      "type": "backfill",
+      "direction": "backfill",
+      "requirement": "FR-053",
+      "drift_ref": null,
+      "title": "Cold-load staging pool",
+      "current_state": "Unspecced. A cold load that could not obtain a memory-tier slot previously failed with AllocationFailed, crashing the client under bursts of concurrent cold reads.",
+      "proposed_resolution": "Add FR-053: bounded StagingPool of cold_staging_slots pinned+registered host DRAM buffers of cold_staging_buf_bytes each (RAII StagingLease). On tier saturation a cold BlockDevice load is served SSD->staging->GPU (serve_cold_staged) and left as BlockDevice (uncached, not promoted) instead of failing; batch_lookup defers such entries to a lock-free one-lease-at-a-time post-pass. Amend FR-033 to add cold_staging_slots (usize, default 64) and cold_staging_buf_bytes (usize, default 4 MiB); 0 slots disables staging.",
+      "rationale": "Prevents fatal AllocationFailed load failures under memory-tier saturation; mirrors the interfaces-crate DispatcherConfig backfill. Code is authoritative.",
+      "confidence": "high",
+      "approved": true
+    },
+    {
+      "id": "BACKFILL-054",
+      "type": "backfill",
+      "direction": "backfill",
+      "requirement": "FR-054",
+      "drift_ref": null,
+      "title": "Cold-read drain-to-completion / no early break",
+      "current_state": "Unspecced robustness. FR-019 does not describe pipeline error/completion draining; the paths previously broke early on the first error.",
+      "proposed_resolution": "Add FR-054: pipelined_ssd_to_gpu_zero_copy and pipelined_multi_object_zero_copy MUST drain until completed==submitted and MUST NOT break early on error; on error set stop_submitting (submit no new reads, mark un-submitted work failed) but keep draining outstanding completions; return the first error. Breaking early orphans completions in the client's SPSC ring and deadlocks the next client reusing the NVMe queue.",
+      "rationale": "Fixes a client hang from orphaned in-flight reads; complements FR-019 and US11 scenario 4. Code is authoritative.",
+      "confidence": "high",
+      "approved": true
     }
   ],
-  "deferred": [
-    {
-      "id": "DEFER-001",
-      "drift_ref": "drift-1",
-      "requirement": "FR-001",
-      "title": "lookup_async not in spec",
-      "reason": "Requires human decision: add lookup_async to FR-001 method list, or create a new FR-036."
-    },
-    {
-      "id": "DEFER-002",
-      "drift_ref": "drift-4",
-      "requirement": "User Story 5, Scenario 4",
-      "title": "initialize() rejects empty data_pci_addrs before checking spdk_env",
-      "reason": "Requires human decision: either move the check inside the spdk_env block, or update the spec to match current behavior."
-    }
-  ]
+  "deferred": [],
+  "applied": "2026-07-21"
 }

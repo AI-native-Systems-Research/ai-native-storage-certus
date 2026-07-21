@@ -1,68 +1,17 @@
 {
-  "generated": "2026-05-21T00:00:00Z",
-  "based_on": "drift-report.json 2026-05-21",
+  "generated": "2026-07-21",
+  "based_on": "drift-report 2026-07-21",
   "proposals": [
     {
-      "id": "P7",
-      "direction": "backfill",
-      "status": "applied",
-      "applied_date": "2026-05-21",
-      "spec": "002-iops-benchmark",
-      "artifact": "tasks.md",
-      "requirement": null,
-      "title": "Rename BlockDeviceSpdkNvmeComponentV1 to BlockDeviceSpdkNvmeComponent",
-      "description": "Source code uses BlockDeviceSpdkNvmeComponent (no version suffix). Spec 002 tasks.md T016 referenced the old BlockDeviceSpdkNvmeComponentV1 name. Updated to match current source.",
-      "files_changed": [
-        "specs/002-iops-benchmark/tasks.md"
-      ],
-      "auto_approved": true
-    },
-    {
-      "id": "P8",
-      "direction": "implement",
-      "status": "pending",
+      "id": "001-spdk-nvme-block-device/FR-026",
+      "direction": "BACKFILL",
+      "type": "new_requirement",
       "spec": "001-spdk-nvme-block-device",
-      "requirement": "SC-008",
-      "title": "Missing Criterion benchmarks for performance-sensitive paths",
-      "description": "SC-008 requires benchmarks for IO submission, batch processing, and qpair selection. No benches/ directory exists in the block-device-spdk-nvme crate.",
-      "severity": "minor",
-      "options": [
-        "Create benches/ with Criterion microbenchmarks (qpair selection, context pool, batch dispatch)",
-        "Relax SC-008 wording to accept IOPS benchmark app as sufficient",
-        "Defer until hardware CI is available"
-      ],
-      "auto_approved": false,
-      "reason_not_auto": "Requires human decision on approach — adding benchmarks vs relaxing spec"
-    },
-    {
-      "id": "P9",
-      "direction": "backfill",
-      "status": "pending",
-      "spec": "002-iops-benchmark",
-      "requirement": null,
-      "title": "Three unspecced features in IOPS benchmark app",
-      "description": "Mixed block sizes (comma-separated --block-size), --batch-size flag, and NUMA worker thread pinning are implemented but not specified.",
-      "unspecced_features": [
-        {
-          "feature": "Mixed block sizes",
-          "location": "apps/iops-benchmark/src/config.rs:74-75"
-        },
-        {
-          "feature": "--batch-size flag",
-          "location": "apps/iops-benchmark/src/config.rs:80-82"
-        },
-        {
-          "feature": "NUMA worker thread pinning",
-          "location": "apps/iops-benchmark/src/main.rs:176-206"
-        }
-      ],
-      "options": [
-        "Add FR-023, FR-024, FR-025 to spec 002",
-        "Add FR-023 and FR-024 only; treat NUMA pinning as implementation detail",
-        "Defer until features stabilize"
-      ],
-      "auto_approved": false,
-      "reason_not_auto": "Requires human decision on which features to formally specify"
+      "requirement": "FR-026",
+      "proposed_text": "The actor MUST deliver completions to a client's callback channel without blocking. Because a single actor thread serves all clients on a controller, it MUST NOT block delivering a completion to one client, as that would head-of-line-block completion delivery to every other client on the same controller. Completions that cannot be delivered immediately (callback ring full) MUST be buffered per-client in FIFO order and retried on subsequent poll cycles. Per-client backlog is bounded by that client's outstanding operations.",
+      "note": "Completion enum derives Clone to enable non-consuming try_send.",
+      "confidence": "HIGH",
+      "approved": true
     }
   ]
 }
