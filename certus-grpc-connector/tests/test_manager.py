@@ -170,16 +170,48 @@ def test_prepare_store_all_existing_is_noop():
     assert _calls_of(stub, "Reserve") == []
 
 
-def test_prepare_store_returns_none_on_reserve_failure_and_rolls_back():
+def test_prepare_store_partial_reserve_keeps_reserved_drops_failed():
+    # Best-effort: reserve is per-key independent, so a partial failure stores
+    # the keys that fit and drops the rest (rather than rejecting the whole
+    # request, which triggers a vLLM retry+warning storm).
     stub = FakeStub()
-    stub.reserve_fail = {3}  # key 3 fails to reserve
+    stub.reserve_fail = {3}  # key 3 fails to reserve; key 2 succeeds
     mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
     keys = [(2).to_bytes(8, "big"), (3).to_bytes(8, "big")]
     out = mgr.prepare_store(keys)
-    assert out is None
-    # key 2 reserved successfully -> must be rolled back via AbortStore
-    (abort,) = _calls_of(stub, "AbortStore")
-    assert list(abort.keys) == [2]
+    assert out is not None
+    # Only the reserved key is offered for storage, in offload order.
+    assert out.keys_to_store == [keys[0]]
+    assert out.store_spec.keys == [2]
+    # The reserved key is kept (to be committed later), so no rollback; the
+    # failed key allocated nothing, so it needs no abort either.
+    assert _calls_of(stub, "AbortStore") == []
+
+
+def test_prepare_store_all_reserve_fail_returns_empty_not_none():
+    # When nothing fits, return an empty (non-None) result so vLLM advances past
+    # these tokens quietly instead of retrying and warning every scheduler step.
+    stub = FakeStub()
+    stub.reserve_fail = {2, 3}
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    keys = [(2).to_bytes(8, "big"), (3).to_bytes(8, "big")]
+    out = mgr.prepare_store(keys)
+    assert out is not None
+    assert out.keys_to_store == []
+    assert out.store_spec.keys == []
+    assert _calls_of(stub, "AbortStore") == []
+
+
+def test_prepare_store_preserves_offload_order_in_partial():
+    # store_spec must stay in offload order for the scheduler's positional zip
+    # of src GPU block ids with dst keys to line up on a partial subset.
+    stub = FakeStub()
+    stub.reserve_fail = {20}  # drop the middle key
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    keys = [(10).to_bytes(8, "big"), (20).to_bytes(8, "big"), (30).to_bytes(8, "big")]
+    out = mgr.prepare_store(keys)
+    assert out.keys_to_store == [keys[0], keys[2]]
+    assert out.store_spec.keys == [10, 30]
 
 
 # ── manager: complete_store / load ──

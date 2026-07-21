@@ -1,33 +1,35 @@
-# Sync Apply Report: Dispatcher Component
+# Spec Sync Apply Report
 
-**Date**: 2026-07-15  
-**Operator**: speckit-sync-apply  
-**Spec**: `components/dispatcher/specs/001-dispatcher-cache-interface/spec.md`  
+Generated: 2026-07-21
+Spec: components/dispatcher/specs/001-dispatcher-cache-interface/spec.md
+Backup: components/dispatcher/.specify/sync/backups/spec.md.bak
+Base commit: 833e9f36e01f1df8a0e0fc57d5cd223d823d3199 .. HEAD
 
-## Changes Made
+All 6 proposals (ALIGN-024, ALIGN-037, BACKFILL-051, BACKFILL-052, BACKFILL-053,
+BACKFILL-054) were approved and applied to spec.md.
 
-### Specs Updated
+## Specs Updated
 
-| Spec | Requirement | Change Type | Description |
-|------|-------------|-------------|-------------|
-| 001-dispatcher-cache-interface | FR-047 | Modified | Documented paced drain loop (200ms/500ms) instead of fixed interval when above threshold |
-| 001-dispatcher-cache-interface | FR-048 | Modified | Added exponential batch scaling (quadratic pressure 1×–8×) and adaptive scan widening |
-| 001-dispatcher-cache-interface | FR-049 | Modified | Reversed demotion ordering (try_evict_to_block before mt.remove) for race safety; skip on failure instead of remove |
-| 001-dispatcher-cache-interface | User Story 12, Scenario 1-2 | Modified | Updated acceptance scenarios to match new evictor behavior |
+| Requirement | Change Type | Before -> After (summary) |
+|-------------|-------------|---------------------------|
+| FR-019 | Refine (backfill link) | Pipeline description unchanged; added a sentence noting the zero-copy paths drain to completion and do not break early on error (cross-reference FR-054). |
+| FR-024 | Amend (align, High drift) | Sparse-probe + shard-targeted blind-LRU-primary (`evict_lru_for_key(target_key)`) with blind-LRU fallback removing dispatch-map entry on failure ("data loss accepted") -> pin-safe `evict_one_clean` per iteration over a widening `oldest_keys(4×attempts, cap 1024)` scan; demote (`try_evict_to_block`) or drop (`dm.remove`) only unpinned entries; transition before DRAM free; blind fallback REMOVED (`target_key` unused); returns `AllocationFailed` when all candidates pinned (caller leaves uncached or uses staging FR-053); `evict_and_insert` fragmentation relief also pin-safe. |
+| FR-033 | Amend (config) | Added `cold_staging_slots` (usize, default 64) and `cold_staging_buf_bytes` (usize, default 4 MiB) to the enumerated `DispatcherConfig` fields; noted `cold_staging_slots = 0` disables the staging pool. |
+| FR-037 | Amend (align, Medium drift) | "Single warm CUDA stream (AtomicU64); multi-stream reserved for future" -> AtomicU64 `warm_stream` is now a fallback; warm hot path + D2H populate resolve the destination GPU device from the IPC pointer and use the per-device warm stream from `DEVICE_STREAMS` (cross-reference FR-052). |
+| FR-051 | Add (backfill) | NEW: concurrent-promotion-race recovery — a `batch_lookup` promotion losing the `mt.insert` race (`AlreadyExists`) is served warm from the winner's resident slot after a bounded wait, instead of failing. |
+| FR-052 | Add (backfill) | NEW: per-GPU-device CUDA stream routing (`DEVICE_STREAMS`, `device_streams_for`, `set_batch_device`, `ColdReadRequest.gpu_device`) for multi-GPU / tensor-parallel loads. |
+| FR-053 | Add (backfill) | NEW: bounded cold-load staging pool (`StagingPool`/`StagingLease`) serves cold reads uncached (`SSD→staging→GPU`) when the tier is saturated instead of failing `AllocationFailed`; config fields via FR-033. |
+| FR-054 | Add (backfill, refines FR-019) | NEW: cold-read drain-to-completion — pipelines drain until `completed == submitted` using a `stop_submitting` flag on error, never breaking early (prevents orphaned completions that deadlocked reused NVMe queues). |
+| SC-015 | Add (backfill) | NEW success criterion: concurrent `batch_lookup` promotions of the same cold key both succeed (loser served the winner's data) rather than failing with `AlreadyExists`. |
 
-### New Specs Created
+## Inter-Spec Conflicts
 
 None.
 
-### Implementation Tasks Generated
+## Notes
 
-None — all proposals were BACKFILL (spec updated to match code).
-
-### Not Applied
-
-None — all 4 proposals were approved.
-
-## Next Steps
-
-1. Run `speckit-sync-analyze` to verify 0 drift remaining
-2. Run same sync flow for `dispatcher-p2p` and `gpu-services` components
+- Active requirement count after apply: FR-001..FR-054 (5 REMOVED: FR-020/021/022/026/027)
+  and SC-001..SC-015 (1 REMOVED: SC-008).
+- Companion artifacts (US7 acceptance scenarios, Edge Cases, and the 2026-05-22 / 2026-05-08
+  clarifications) still reference the old blind-`evict_lru` / shard-targeted `evict_lru_for_key`
+  wording; FR-024 is now authoritative. A follow-up pass may reconcile those narrative sections.

@@ -563,6 +563,75 @@ impl IGpuServices for GpuServicesComponent {
         }
     }
 
+    fn set_device(&self, device: i32) -> Result<(), String> {
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = device;
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            let state = self.state().lock().map_err(|e| e.to_string())?;
+            if !state.initialized {
+                return Err("Not initialized: call initialize() first".to_string());
+            }
+            drop(state);
+
+            // SAFETY: cudaSetDevice takes a device ordinal; validity is checked
+            // by the runtime, which returns an error for out-of-range values.
+            let err = unsafe { cuda_ffi::cudaSetDevice(device) };
+            if err != cuda_ffi::CUDA_SUCCESS {
+                return Err(format!(
+                    "cudaSetDevice({device}) failed: {}",
+                    cuda_ffi::cuda_error_string(err)
+                ));
+            }
+            Ok(())
+        }
+    }
+
+    fn device_of_ptr(&self, ptr: *const std::ffi::c_void) -> Result<i32, String> {
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = ptr;
+            Err("GPU support not compiled (enable --features gpu)".to_string())
+        }
+
+        #[cfg(feature = "gpu")]
+        {
+            let state = self.state().lock().map_err(|e| e.to_string())?;
+            if !state.initialized {
+                return Err("Not initialized: call initialize() first".to_string());
+            }
+            drop(state);
+
+            let mut attr = cuda_ffi::cudaPointerAttributes {
+                r#type: -1,
+                device: -1,
+                device_pointer: std::ptr::null_mut(),
+                host_pointer: std::ptr::null_mut(),
+            };
+            // SAFETY: attr is a valid out-param; ptr is only inspected, not
+            // dereferenced, by cudaPointerGetAttributes.
+            let err = unsafe {
+                cuda_ffi::cudaPointerGetAttributes(&mut attr, ptr as *mut std::ffi::c_void)
+            };
+            if err != cuda_ffi::CUDA_SUCCESS {
+                return Err(format!(
+                    "cudaPointerGetAttributes failed: {}",
+                    cuda_ffi::cuda_error_string(err)
+                ));
+            }
+            // type 0 (unregistered) / 1 (host) have no device association.
+            if attr.r#type == cuda_ffi::CUDA_MEMORY_TYPE_DEVICE {
+                Ok(attr.device)
+            } else {
+                Ok(-1)
+            }
+        }
+    }
+
     fn destroy_stream(&self, stream: interfaces::GpuStream) -> Result<(), String> {
         #[cfg(not(feature = "gpu"))]
         {
@@ -1175,7 +1244,10 @@ mod tests {
             let result = gpu.prepare_memory_for_spdk(&payload, None);
             assert!(result.is_err(), "expected Err, got Ok");
             let err = result.unwrap_err();
-            assert!(err.contains("72 bytes"), "expected '72 bytes' in error, got: {err:?}");
+            assert!(
+                err.contains("72 bytes"),
+                "expected '72 bytes' in error, got: {err:?}"
+            );
         }
     }
 

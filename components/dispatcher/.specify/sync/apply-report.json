@@ -1,0 +1,19 @@
+{
+  "generated": "2026-07-21",
+  "spec": "components/dispatcher/specs/001-dispatcher-cache-interface/spec.md",
+  "backup": "components/dispatcher/.specify/sync/backups/spec.md.bak",
+  "base_commit": "833e9f36e01f1df8a0e0fc57d5cd223d823d3199",
+  "proposals_applied": 6,
+  "conflicts": [],
+  "updates": [
+    { "requirement": "FR-019", "change_type": "refine", "summary": "Added note that zero-copy pipelines drain to completion and do not break early on error (cross-reference FR-054)." },
+    { "requirement": "FR-024", "change_type": "amend", "drift_severity": "high", "summary": "Rewrote to pin-safe eviction via evict_one_clean over a widening scan; removed blind-LRU/evict_lru_for_key data-loss fallback; AllocationFailed when all candidates pinned; target_key unused; evict_and_insert fragmentation relief pin-safe." },
+    { "requirement": "FR-033", "change_type": "amend", "summary": "Added cold_staging_slots (default 64) and cold_staging_buf_bytes (default 4 MiB) config fields; 0 slots disables staging." },
+    { "requirement": "FR-037", "change_type": "amend", "drift_severity": "medium", "summary": "AtomicU64 warm_stream is now a fallback; warm/D2H paths use per-device streams from DEVICE_STREAMS (cross-reference FR-052)." },
+    { "requirement": "FR-051", "change_type": "add", "summary": "Concurrent-promotion-race recovery: AlreadyExists on a lost mt.insert race served warm from the winner's resident slot after a bounded wait." },
+    { "requirement": "FR-052", "change_type": "add", "summary": "Per-GPU-device CUDA stream routing (DEVICE_STREAMS/device_streams_for/set_batch_device/ColdReadRequest.gpu_device) for multi-GPU / tensor-parallel." },
+    { "requirement": "FR-053", "change_type": "add", "summary": "Bounded cold-load staging pool (StagingPool/StagingLease) serves cold reads uncached when the tier is saturated instead of failing AllocationFailed." },
+    { "requirement": "FR-054", "change_type": "add", "summary": "Cold-read drain-to-completion: pipelines drain until completed==submitted using stop_submitting, never breaking early." },
+    { "requirement": "SC-015", "change_type": "add", "summary": "Concurrent batch_lookup promotions of the same cold key both succeed (loser served the winner's data)." }
+  ]
+}

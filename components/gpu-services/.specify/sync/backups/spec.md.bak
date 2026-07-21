@@ -306,26 +306,6 @@ by a verification read-back.
   buffer is suitable as both an NVMe DMA target and a source for async
   GPU H2D copies. On drop, the buffer unregisters from SPDK and frees
   via `cudaFreeHost`.
-- **FR-021**: Component MUST provide a `set_device(device)` method that
-  binds the calling thread's current CUDA device context to the
-  specified GPU ordinal via `cudaSetDevice`, so that subsequently-created
-  streams and issued transfers target that GPU. This is required for
-  multi-GPU / tensor-parallel operation, where each device must be
-  selected before a stream is created on it or a `cudaMemcpyAsync` is
-  issued to a pointer resident on it (a stream is bound to the device
-  that was current at creation, and `cudaMemcpyAsync` rejects a
-  destination pointer on a different device). CUDA tracks the current
-  device per OS thread. MUST return an error if GPU support is not
-  compiled, the component is not initialized, or the device ordinal is
-  invalid.
-- **FR-022**: Component MUST provide a `device_of_ptr(ptr)` method that
-  returns the CUDA device ordinal owning a given device pointer via
-  `cudaPointerGetAttributes`. It MUST return `-1` for a pointer with no
-  device association (e.g. plain host or unregistered memory). This is
-  used to route a transfer to a stream on the pointer's own device and to
-  reject cross-device pointers. MUST return an error if GPU support is
-  not compiled, the component is not initialized, or the attribute query
-  fails.
 
 ### Key Entities
 
