@@ -136,6 +136,7 @@ if __name__ == "__main__":
 
     from vllm import LLM, SamplingParams
 
+    print("Running across ", TENSOR_PARALLEL_SIZE, " GPUs")
     llm = LLM(
         model=MODEL,
         max_model_len=MAX_MODEL_LEN,

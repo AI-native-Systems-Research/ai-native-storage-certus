@@ -98,12 +98,13 @@ else
 fi
 
 echo "[run-bench] image=${IMAGE} gpu=${GPU} server=${CERTUS_SERVER}"
-echo "[run-bench] num_convs=${NUM_CONVS} model=${MODEL}"
+echo "[run-bench] num_convs=${NUM_CONVS} model=${MODEL} tensor_parallel_size=${TENSOR_PARALLEL_SIZE}"
 
 # NOTE: `exec` bypasses the podman() shell function, so the store flags must be
 # passed explicitly here — otherwise `run` hits the DEFAULT store (where the
 # image isn't) and fails with "image not known" even though the preflight (which
 # goes through the function) found it in the custom store.
+
 exec command podman "${store_flags[@]}" run --rm \
     --pull=never \
     --device "nvidia.com/gpu=${GPU}" \
@@ -113,5 +114,6 @@ exec command podman "${store_flags[@]}" run --rm \
     -e "CERTUS_SERVER=${CERTUS_SERVER}" \
     -e "NUM_CONVS=${NUM_CONVS}" \
     -e "MODEL=${MODEL}" \
+    -e "TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE}"\
     -e "SLAB_SIZE_BYTES=${SLAB_SIZE_BYTES}" \
     "${IMAGE}"

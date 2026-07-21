@@ -529,6 +529,53 @@ define_interface! {
         /// ```
         fn create_stream(&self) -> Result<GpuStream, String>;
 
+        /// Set the calling thread's current CUDA device.
+        ///
+        /// Required before creating streams or issuing DMAs for a specific GPU:
+        /// a CUDA stream is bound to the device that was current when it was
+        /// created, and `cudaMemcpyAsync` rejects a destination pointer that
+        /// lives on a different device than the stream (multi-GPU / tensor
+        /// parallelism). CUDA tracks the current device per OS thread.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if GPU support is not compiled in, the component is
+        /// not initialized, or the device index is invalid.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # use interfaces::IGpuServices;
+        /// # fn example(gpu: &dyn IGpuServices) {
+        /// gpu.set_device(1).unwrap();
+        /// let stream = gpu.create_stream().unwrap(); // bound to device 1
+        /// gpu.destroy_stream(stream).unwrap();
+        /// # }
+        /// ```
+        fn set_device(&self, device: i32) -> Result<(), String>;
+
+        /// Return the CUDA device index that a device pointer resides on.
+        ///
+        /// Uses `cudaPointerGetAttributes`. Used to route a DMA to a stream on
+        /// the pointer's own device. Returns `-1` for a pointer with no device
+        /// association (e.g. plain host memory).
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if GPU support is not compiled in, the component is
+        /// not initialized, or the attribute query fails.
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # use interfaces::IGpuServices;
+        /// # fn example(gpu: &dyn IGpuServices, gpu_ptr: *const std::ffi::c_void) {
+        /// let device = gpu.device_of_ptr(gpu_ptr).unwrap();
+        /// gpu.set_device(device).unwrap();
+        /// # }
+        /// ```
+        fn device_of_ptr(&self, ptr: *const std::ffi::c_void) -> Result<i32, String>;
+
         /// Destroy a CUDA stream previously created with [`create_stream`].
         ///
         /// # Errors

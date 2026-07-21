@@ -107,6 +107,12 @@ impl IGpuServices for MockGpuServices {
         // 0x1 is a non-null sentinel for a fake stream; the mock ignores the value.
         Ok(GpuStream(0x1 as *mut std::ffi::c_void))
     }
+    fn set_device(&self, _device: i32) -> Result<(), String> {
+        Ok(())
+    }
+    fn device_of_ptr(&self, _ptr: *const std::ffi::c_void) -> Result<i32, String> {
+        Ok(0)
+    }
     fn stream_query(&self, _stream: GpuStream) -> Result<bool, String> {
         Ok(true)
     }
@@ -517,7 +523,9 @@ impl IDispatchMap for MockDispatchMap {
     }
 
     fn try_evict_to_block(&self, _key: CacheKey) -> Result<(), DispatchMapError> {
-        Err(DispatchMapError::InvalidState("not supported in mock".into()))
+        Err(DispatchMapError::InvalidState(
+            "not supported in mock".into(),
+        ))
     }
 
     fn recover_extent(

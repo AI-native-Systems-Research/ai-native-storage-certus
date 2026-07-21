@@ -211,7 +211,10 @@ impl DispatcherP2pComponent {
         *self.extent_manager_factory.lock().unwrap() = Some(factory);
     }
 
-    pub fn create_eviction_channel(&self, capacity: usize) -> crossbeam_channel::Receiver<EvictionEvent> {
+    pub fn create_eviction_channel(
+        &self,
+        capacity: usize,
+    ) -> crossbeam_channel::Receiver<EvictionEvent> {
         let (tx, rx) = crossbeam_channel::bounded(capacity);
         *self.eviction_tx.lock().unwrap() = Some(tx);
         rx
@@ -596,7 +599,10 @@ impl DispatcherP2pComponent {
                     if dm.try_evict_to_block(key).is_ok() {
                         let _ = mt.remove(key);
                         if let Some(tx) = eviction_tx {
-                            let _ = tx.try_send(EvictionEvent { key, reason: EvictionReason::Demoted });
+                            let _ = tx.try_send(EvictionEvent {
+                                key,
+                                reason: EvictionReason::Demoted,
+                            });
                         }
                     }
                 }
@@ -609,7 +615,10 @@ impl DispatcherP2pComponent {
                         if dm.try_evict_to_block(cand).is_ok() {
                             let _ = mt.remove(cand);
                             if let Some(tx) = eviction_tx {
-                                let _ = tx.try_send(EvictionEvent { key: cand, reason: EvictionReason::Demoted });
+                                let _ = tx.try_send(EvictionEvent {
+                                    key: cand,
+                                    reason: EvictionReason::Demoted,
+                                });
                             }
                             evicted = true;
                             break;
@@ -621,11 +630,17 @@ impl DispatcherP2pComponent {
                             if dm.try_evict_to_block(evicted_key).is_err() {
                                 let _ = dm.remove(evicted_key);
                                 if let Some(tx) = eviction_tx {
-                                    let _ = tx.try_send(EvictionEvent { key: evicted_key, reason: EvictionReason::Removed });
+                                    let _ = tx.try_send(EvictionEvent {
+                                        key: evicted_key,
+                                        reason: EvictionReason::Removed,
+                                    });
                                 }
                             } else {
                                 if let Some(tx) = eviction_tx {
-                                    let _ = tx.try_send(EvictionEvent { key: evicted_key, reason: EvictionReason::Demoted });
+                                    let _ = tx.try_send(EvictionEvent {
+                                        key: evicted_key,
+                                        reason: EvictionReason::Demoted,
+                                    });
                                 }
                             }
                         }
@@ -924,8 +939,7 @@ impl DispatcherP2pComponent {
                         })?;
                     if let Ok(mt) = self.memory_tier.get() {
                         let mt_hook = Arc::clone(&mt);
-                        let logger_hook =
-                            Arc::clone(&logger) as Arc<dyn ILogger + Send + Sync>;
+                        let logger_hook = Arc::clone(&logger) as Arc<dyn ILogger + Send + Sync>;
                         em.set_post_checkpoint_hook(Arc::new(move || {
                             let used = mt_hook.used();
                             let capacity = mt_hook.capacity();
@@ -1695,7 +1709,8 @@ impl IDispatcher for DispatcherP2pComponent {
 
             if num_drives == 0 {
                 for entry in &cold_entries {
-                    self.evict_for_space_emit(&dm, &mt, entry.ipc_handle_size, entry.key).ok();
+                    self.evict_for_space_emit(&dm, &mt, entry.ipc_handle_size, entry.key)
+                        .ok();
                     let res = mt
                         .insert(entry.key, entry.ipc_handle_size)
                         .map(|mem_ptr| {
@@ -2372,7 +2387,10 @@ impl IDispatcher for DispatcherP2pComponent {
 
         if num_drives == 0 {
             for entry in &cold_entries {
-                if self.evict_for_space_emit(&dm, &mt, entry.size, entry.key).is_err() {
+                if self
+                    .evict_for_space_emit(&dm, &mt, entry.size, entry.key)
+                    .is_err()
+                {
                     continue;
                 }
                 match mt.insert(entry.key, entry.size) {
@@ -2426,7 +2444,8 @@ impl IDispatcher for DispatcherP2pComponent {
                         let block_size = block_dev.block_size() as u64;
                         let start_lba = entry.offset / block_size;
 
-                        if Self::evict_for_space_inner(dm, mt, entry.size, entry.key, etx).is_err() {
+                        if Self::evict_for_space_inner(dm, mt, entry.size, entry.key, etx).is_err()
+                        {
                             continue;
                         }
 
@@ -3114,6 +3133,12 @@ mod tests {
         }
         fn create_stream(&self) -> Result<GpuStream, String> {
             Ok(GpuStream(0x1 as *mut std::ffi::c_void))
+        }
+        fn set_device(&self, _device: i32) -> Result<(), String> {
+            Ok(())
+        }
+        fn device_of_ptr(&self, _ptr: *const std::ffi::c_void) -> Result<i32, String> {
+            Ok(0)
         }
         fn stream_query(&self, _stream: GpuStream) -> Result<bool, String> {
             Ok(true)

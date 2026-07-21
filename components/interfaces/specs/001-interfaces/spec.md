@@ -206,6 +206,8 @@ The crate has two Cargo features:
 - **Method**: `dma_copy_to_device(&self, src, dst, size) -> Result<(), String>` (feature: spdk) - Sync host-to-GPU copy.
 - **Method**: `prepare_memory_for_spdk(&self, base64_payload, device_index) -> Result<DmaBuffer, String>` (feature: spdk) - One-call P2P preparation.
 - **Method**: `create_stream(&self) -> Result<GpuStream, String>` - Create CUDA stream.
+- **Method**: `set_device(&self, device: i32) -> Result<(), String>` - Select the calling thread's current CUDA device.
+- **Method**: `device_of_ptr(&self, ptr: *const c_void) -> Result<i32, String>` - Return the CUDA device ordinal owning a device pointer (-1 if unknown).
 - **Method**: `destroy_stream(&self, stream: GpuStream) -> Result<(), String>` - Destroy CUDA stream.
 - **Method**: `stream_query(&self, stream: GpuStream) -> Result<bool, String>` - Non-blocking completion check.
 - **Method**: `stream_synchronize(&self, stream: GpuStream) -> Result<(), String>` - Block until stream completes.
@@ -257,11 +259,11 @@ The crate has two Cargo features:
 - `OpHandle`: Unique async operation identifier.
 - `NamespaceInfo`: NVMe namespace metadata.
 - `Command`: 11-variant enum for all NVMe operations.
-- `Completion`: 10-variant enum for operation results.
+- `Completion`: 10-variant enum for operation results; derives `Clone` (in addition to `Debug`) so the block-device actor can `try_send` a clone of a completion on a full ring without consuming the original, enabling non-blocking completion delivery.
 - `ClientChannels`: Channel pair (command_tx, completion_rx).
 
 #### FR-018: Supporting Types - Dispatcher
-- `DispatcherConfig`: 14-field configuration (PCI addrs, cache size, eviction params, poller CPU, backfill delay, partition sizes).
+- `DispatcherConfig`: 16-field configuration (PCI addrs, cache size, eviction params, poller CPU, backfill delay, partition sizes, cold-load staging slots and buffer size).
 - `IpcHandle`: Opaque GPU memory handle (pointer + size).
 - `DispatcherError`: 7-variant error enum.
 - `CacheKey`: Type alias for `u64`.
@@ -307,6 +309,12 @@ The crate has two Cargo features:
 #### FR-026: Supporting Types - Dispatch Map
 - `DispatchMapError`: 11-variant error enum with reference counting semantics.
 
+#### FR-027: IDispatcher Cold-Load Staging Configuration (feature: spdk)
+- The dispatcher SHALL maintain a bounded pool of pre-registered pinned host DRAM staging buffers for SSD→GPU cold loads that cannot obtain a memory-tier slot under pressure, sized by `DispatcherConfig::cold_staging_slots` (buffer count, default 64; 0 disables staging so cold loads fail on a full memory tier) and `DispatcherConfig::cold_staging_buf_bytes` (per-buffer byte capacity, must be ≥ the largest per-block transfer size, default 4 MiB), bounding concurrent cold-read parallelism so a burst cannot exhaust the memory tier.
+
+#### FR-028: IGpuServices Multi-GPU Device Routing
+- `IGpuServices` SHALL provide `set_device(device: i32) -> Result<(), String>` to bind the calling OS thread's current CUDA device (CUDA tracks the current device per thread; required before creating a stream or issuing a DMA for a specific GPU) and `device_of_ptr(ptr: *const c_void) -> Result<i32, String>` to return the CUDA device ordinal owning a device pointer via `cudaPointerGetAttributes` (`-1` for a pointer with no device association, e.g. host memory), so DMAs can be routed to a stream on the pointer's own device under multi-GPU / tensor parallelism.
+
 ### Non-Functional Requirements
 
 #### NFR-001: Zero Implementation Coupling
@@ -319,7 +327,7 @@ The crate has two Cargo features:
 #### NFR-003: Thread Safety
 - All types that cross thread boundaries implement `Send` (with documented SAFETY justifications for unsafe impls).
 - `DmaBuffer`, `GpuIpcHandle`, `GpuDmaBuffer`, `GpuStream`, `LookupResult`, `LookupRef` are `Send + Sync`.
-- `Command` and `Completion` are `Send`.
+- `Command` is `Send`; `Completion` is `Send + Clone` (Clone enables non-blocking completion delivery on a full ring).
 
 #### NFR-004: Documentation
 - All public types and methods have doc comments with runnable examples.

@@ -378,6 +378,17 @@ impl BlockDeviceHandler {
         const MAX_COMMANDS_PER_CLIENT_PER_POLL: usize = 64;
 
         let mut did_work = false;
+
+        // First, retry any completions buffered when a client's callback ring
+        // was full. Delivery is non-blocking (see ClientSession::deliver), so a
+        // slow client can't head-of-line-block the actor for the others; its
+        // completions drain here as space frees.
+        for client in &mut self.clients {
+            if client.session.flush_pending() {
+                did_work = true;
+            }
+        }
+
         let num_clients = self.clients.len();
         let start = if num_clients > 0 {
             self.poll_start_idx % num_clients
@@ -497,7 +508,7 @@ impl BlockDeviceHandler {
                         result: entry.result,
                     }
                 };
-                let _ = client.session.callback_tx.send(completion);
+                client.session.deliver(completion);
             }
         }
 
@@ -516,7 +527,7 @@ impl BlockDeviceHandler {
             }
             for &handle in &self.timeout_scratch {
                 client.pending_ops.remove(&handle);
-                let _ = client.session.callback_tx.send(Completion::Timeout {
+                client.session.deliver(Completion::Timeout {
                     handle: OpHandle(handle),
                 });
             }
@@ -530,7 +541,7 @@ impl BlockDeviceHandler {
         ));
         for client in &mut self.clients {
             for (&h, _) in client.pending_ops.iter() {
-                let _ = client.session.callback_tx.send(Completion::Error {
+                client.session.deliver(Completion::Error {
                     handle: Some(OpHandle(h)),
                     error: NvmeBlockError::Aborted("cancelled due to controller reset".into()),
                 });
@@ -602,7 +613,7 @@ impl BlockDeviceHandler {
                     telemetry.record(tsc.ticks_to_ns(tsc.now() - start), bytes, true);
                 }
 
-                let _ = session.callback_tx.send(Completion::ReadDone {
+                session.deliver(Completion::ReadDone {
                     handle: OpHandle(handle),
                     tag: 0,
                     result,
@@ -625,7 +636,7 @@ impl BlockDeviceHandler {
                     telemetry.record(tsc.ticks_to_ns(tsc.now() - start), bytes, false);
                 }
 
-                let _ = session.callback_tx.send(Completion::WriteDone {
+                session.deliver(Completion::WriteDone {
                     handle: OpHandle(handle),
                     tag: 0,
                     result,
@@ -644,7 +655,7 @@ impl BlockDeviceHandler {
                 // Validate and extract buffer pointer in a single lock.
                 let validation = Self::validate_async_read(controller, ns_id, lba, &buf);
                 if let Err(e) = validation {
-                    let _ = session.callback_tx.send(Completion::ReadDone {
+                    session.deliver(Completion::ReadDone {
                         handle: OpHandle(handle),
                         tag,
                         result: Err(e),
@@ -729,7 +740,7 @@ impl BlockDeviceHandler {
                     let ctx = unsafe { Box::from_raw(ctx_raw) };
                     context_pool.release(ctx);
                     pending_ops.remove(&handle);
-                    let _ = session.callback_tx.send(Completion::ReadDone {
+                    session.deliver(Completion::ReadDone {
                         handle: OpHandle(handle),
                         tag,
                         result: Err(NvmeBlockError::BlockDevice(
@@ -759,7 +770,7 @@ impl BlockDeviceHandler {
                 // Validate before async submission.
                 let validation = Self::validate_async_write(controller, ns_id, lba, &buf);
                 if let Err(e) = validation {
-                    let _ = session.callback_tx.send(Completion::WriteDone {
+                    session.deliver(Completion::WriteDone {
                         handle: OpHandle(handle),
                         tag,
                         result: Err(e),
@@ -841,7 +852,7 @@ impl BlockDeviceHandler {
                     let ctx = unsafe { Box::from_raw(ctx_raw) };
                     context_pool.release(ctx);
                     pending_ops.remove(&handle);
-                    let _ = session.callback_tx.send(Completion::WriteDone {
+                    session.deliver(Completion::WriteDone {
                         handle: OpHandle(handle),
                         tag,
                         result: Err(NvmeBlockError::BlockDevice(
@@ -868,7 +879,7 @@ impl BlockDeviceHandler {
 
                 let result = Self::do_write_zeros(controller, ns_id, lba, num_blocks);
 
-                let _ = session.callback_tx.send(Completion::WriteZerosDone {
+                session.deliver(Completion::WriteZerosDone {
                     handle: OpHandle(handle),
                     result,
                 });
@@ -897,7 +908,7 @@ impl BlockDeviceHandler {
                 let h = handle.0;
                 // Remove from pending if present; ack regardless.
                 let _ = pending_ops.remove(&h);
-                let _ = session.callback_tx.send(Completion::AbortAck { handle });
+                session.deliver(Completion::AbortAck { handle });
             }
             Command::NsProbe => {
                 let namespaces = namespace::to_namespace_info_list(&controller.namespaces);
@@ -913,10 +924,10 @@ impl BlockDeviceHandler {
                 match result {
                     Ok(ns_id) => {
                         controller.refresh_namespaces();
-                        let _ = session.callback_tx.send(Completion::NsCreated { ns_id });
+                        session.deliver(Completion::NsCreated { ns_id });
                     }
                     Err(e) => {
-                        let _ = session.callback_tx.send(Completion::Error {
+                        session.deliver(Completion::Error {
                             handle: None,
                             error: e,
                         });
@@ -932,10 +943,10 @@ impl BlockDeviceHandler {
                         // so the new LBA format is visible.
                         unsafe { spdk_sys::spdk_nvme_ctrlr_reset(controller.as_ptr()) };
                         controller.refresh_namespaces();
-                        let _ = session.callback_tx.send(Completion::NsFormatted { ns_id });
+                        session.deliver(Completion::NsFormatted { ns_id });
                     }
                     Err(e) => {
-                        let _ = session.callback_tx.send(Completion::Error {
+                        session.deliver(Completion::Error {
                             handle: None,
                             error: e,
                         });
@@ -948,10 +959,10 @@ impl BlockDeviceHandler {
                 match result {
                     Ok(()) => {
                         controller.refresh_namespaces();
-                        let _ = session.callback_tx.send(Completion::NsDeleted { ns_id });
+                        session.deliver(Completion::NsDeleted { ns_id });
                     }
                     Err(e) => {
-                        let _ = session.callback_tx.send(Completion::Error {
+                        session.deliver(Completion::Error {
                             handle: None,
                             error: e,
                         });
@@ -1262,9 +1273,10 @@ impl ActorHandler<ControlMessage> for BlockDeviceHandler {
         }
         self.async_completions.clear();
 
-        for client in &self.clients {
-            for &h in client.pending_ops.keys() {
-                let _ = client.session.callback_tx.send(Completion::Error {
+        for client in &mut self.clients {
+            let handles: Vec<u64> = client.pending_ops.keys().copied().collect();
+            for h in handles {
+                client.session.deliver(Completion::Error {
                     handle: Some(OpHandle(h)),
                     error: NvmeBlockError::Aborted("actor shutting down".into()),
                 });

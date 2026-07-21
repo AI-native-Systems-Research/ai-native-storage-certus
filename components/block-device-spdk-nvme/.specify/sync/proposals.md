@@ -1,72 +1,47 @@
 # Drift Resolution Proposals
 
-Generated: 2026-05-21
-Based on: drift-report from 2026-05-21
+Generated: 2026-07-21
+Based on: drift-report 2026-07-21
 
 ## Summary
 
-| Resolution Type | Count | Applied |
-|-----------------|-------|---------|
-| Backfill (Code -> Spec) | 1 | 1 applied (P7 — naming) |
-| Pending Human Decision | 2 | — |
+| Resolution Type | Count |
+|-----------------|-------|
+| Backfill (Code -> Spec) | 1 |
+| Align (Spec -> Code) | 0 |
+| Human Decision | 0 |
+| New Specs | 0 |
 
----
+## Proposals
 
-## Applied Proposals
+### Proposal 1: 001-spdk-nvme-block-device/FR-026 (new)
 
-### Proposal 7: 002/tasks — Rename BlockDeviceSpdkNvmeComponentV1 to BlockDeviceSpdkNvmeComponent
+Direction: BACKFILL (Code -> Spec)
 
-**Direction**: BACKFILL (naming alignment)
-**Status**: APPLIED (2026-05-21)
+Current State:
+- Spec says: nothing about completion-delivery back-pressure. FR-002/FR-014 only
+  say each client has a callback channel and the actor polls all clients.
+- Code does: the single-threaded actor delivers completions non-blocking
+  (try_send + per-client FIFO backlog drained each poll cycle), so a client that
+  stops draining its ring cannot head-of-line-block delivery to other clients.
 
-The source code uses `BlockDeviceSpdkNvmeComponent` (no version suffix) as the component struct name. The spec 002 tasks.md at T016 still referenced the old `BlockDeviceSpdkNvmeComponentV1` name. Updated to match the current source.
+Proposed Resolution (add FR-026):
+- FR-026: The actor MUST deliver completions to a client's callback channel
+  without blocking. Because a single actor thread serves all clients on a
+  controller, it MUST NOT block delivering a completion to one client, as that
+  would head-of-line-block completion delivery to every other client on the same
+  controller. Completions that cannot be delivered immediately (callback ring
+  full) MUST be buffered per-client in FIFO order and retried on subsequent poll
+  cycles. Per-client backlog is bounded by that client's outstanding operations.
 
-**File changed**: `specs/002-iops-benchmark/tasks.md` line 59
+Also note in the Completion Callback entity: `Completion` derives `Clone`.
 
----
+Rationale: Non-blocking delivery is a tested fix for a whole-drive deadlock
+observed under concurrent multi-client cold-read load. Code is authoritative.
 
-## Pending Proposals (require human decision)
+Confidence: HIGH
 
-### Proposal 8: 001/SC-008 — Missing Criterion benchmarks
-
-**Direction**: IMPLEMENT
-**Status**: PENDING
-
-SC-008 requires "Performance-sensitive paths (IO submission, batch processing, qpair selection) MUST have benchmarks." No `benches/` directory exists in the block-device-spdk-nvme crate. The IOPS benchmark app measures aggregate throughput but is not a per-function microbenchmark.
-
-**Options**:
-- A) Create `benches/` with Criterion benchmarks for qpair selection, context pool acquire/release, and batch dispatch overhead (can run without hardware using detached queue pairs).
-- B) Relax SC-008 wording to accept the IOPS benchmark app as sufficient coverage.
-- C) Defer until hardware CI is available for meaningful latency benchmarks.
-
----
-
-### Proposal 9: 002/ — Unspecced features in IOPS benchmark
-
-**Direction**: BACKFILL (three unspecced features)
-**Status**: PENDING
-
-Three features in the IOPS benchmark application have no corresponding spec requirements:
-
-1. **Mixed block sizes** (`config.rs:74-75`): `--block-size` accepts comma-separated values for random mixed-size workloads. Spec FR-002 says "IO block size in bytes" (singular).
-2. **Batch submit flag** (`config.rs:80-82`): `--batch-size` groups commands into `BatchSubmit` messages. Not mentioned in spec 002.
-3. **NUMA worker pinning** (`main.rs:176-206`): Worker threads pinned round-robin to NUMA-local cores, skipping the actor core. Not specified.
-
-**Options**:
-- A) Add FR-023 (mixed block sizes), FR-024 (batch-size), FR-025 (NUMA worker pinning) to spec 002.
-- B) Add FR-023 and FR-024 only; treat NUMA pinning as an implementation optimization (no spec entry needed).
-- C) Defer until the features stabilize further.
-
----
-
-## Previously Applied (history)
-
-| # | Proposal | Applied |
-|---|----------|---------|
-| P1 | 001/FR-003 sync timeout wording | Deferred (user chose not to apply) |
-| P2 | 001/SC-008 benchmark wording update | 2026-04-23 |
-| P3 | 001/NEW FR-021 IBlockDeviceAdmin | 2026-04-23 |
-| P4 | 002/NEW FR-022 --io-mode | 2026-04-23 |
-| P5 | Cleanup stale WriteAsync comment | 2026-04-23 |
-| P6 | SC-001/SC-002/SC-006 placeholder tests | 2026-04-23 |
-| P7 | 002/tasks naming V1->no suffix | 2026-05-21 |
+Action:
+- [ ] Approve
+- [ ] Reject
+- [ ] Modify

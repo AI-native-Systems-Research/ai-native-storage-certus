@@ -215,6 +215,7 @@ confirm functionality is restored.
 - **FR-023**: The actor MUST use a `ContextPool` slab allocator for async IO context objects, eliminating per-IO heap allocation. Contexts are acquired at submission and returned to the pool in the SPDK completion callback. The pool allocates on first use and reaches steady-state after warmup, eliminating allocation in the hot path. Full pre-allocation at construction is not required.
 - **FR-024**: The actor MUST use pre-allocated scratch buffers (`completion_scratch`, `timeout_scratch`) for draining completions and collecting timed-out handles, avoiding allocation in the hot path.
 - **FR-025**: When an asynchronous NVMe command submission fails with ENOMEM (rc=-12, indicating the submission queue or internal tracker pool is full), the actor MUST retry the submission in a tight loop for up to `min(op.timeout_ms, 1000ms)` as a dynamic cap that adapts per-operation, avoiding premature timeouts under heavy load. On each retry iteration the actor MUST poll all queue pairs for hardware completions to free submission slots. If the deadline expires without a successful submit, the operation MUST be failed with an error completion sent to the client.
+- **FR-026**: The actor MUST deliver completions to a client's callback channel without blocking. Because a single actor thread serves all clients on a controller, it MUST NOT block delivering a completion to one client, as that would head-of-line-block completion delivery to every other client on the same controller. Completions that cannot be delivered immediately (callback ring full) MUST be buffered per-client in FIFO order and retried on subsequent poll cycles. Per-client backlog is bounded by that client's outstanding operations. (Implemented by `ClientSession::deliver`/`flush_pending`; the `Completion` type derives `Clone` so a completion can be `try_send`-cloned without being consumed on a full ring.)
 
 ### Key Entities
 
@@ -224,7 +225,7 @@ confirm functionality is restored.
 - **DmaBuffer**: Client-allocated DMA-capable memory used for read/write data transfer. Defined in spdk_types.rs.
 - **Operation Handle**: A unique identifier assigned by the component to each async operation at submission time. Used by the client for abort requests and by the component in completion callbacks.
 - **IO Command**: A message on the ingress channel specifying operation type, namespace, LBA, buffer, and (for async) timeout.
-- **Completion Callback**: A message on the callback channel indicating operation success, failure, or abort acknowledgement, tagged with the corresponding operation handle.
+- **Completion Callback**: A message on the callback channel indicating operation success, failure, or abort acknowledgement, tagged with the corresponding operation handle. Derives `Clone` so the actor can `try_send` a clone onto a full callback ring without consuming the original (see FR-026).
 
 ## Success Criteria *(mandatory)*
 
