@@ -296,55 +296,69 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
         submitted += 1;
     }
 
-    // Process completions: on each ReadDone, issue the GPU DMA for that
-    // segment immediately, then submit the next read if any remain.
-    while completed < num_chunks {
+    // Process completions: on each ReadDone, issue the GPU DMA for that segment,
+    // then submit the next read if any remain.
+    //
+    // Drain until every *submitted* read is accounted for (`completed <
+    // submitted`) — never returning early while reads are outstanding, or those
+    // reads' completions would be orphaned in the client ring and block the
+    // single-threaded block-device actor for the whole drive. On error we record
+    // it, stop submitting new reads, and keep draining; the first error wins.
+    let mut outcome: Result<(), DispatcherError> = Ok(());
+    let mut stop_submitting = false;
+    while completed < submitted {
         match channels.completion_rx.recv() {
             Ok(Completion::ReadDone {
                 handle,
                 tag,
                 result,
             }) => {
-                result.map_err(|e| {
-                    DispatcherError::IoError(format!("SSD read (handle {:?}): {e}", handle))
-                })?;
-
-                let seg_idx = tag as usize;
-                let seg = &segments[seg_idx];
-                let copy_len = seg
-                    .length
-                    .min(total_bytes.saturating_sub(seg.buffer_offset));
-                let current_stream = streams[completed % 2];
-
-                let guard = chunk_bufs[seg_idx].lock().unwrap();
-                gpu.dma_copy_to_device_async(
-                    &guard,
-                    unsafe { (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void },
-                    copy_len,
-                    current_stream,
-                )
-                .map_err(|e| {
-                    DispatcherError::IoError(format!(
-                        "GPU async DMA copy (seg {seg_idx}) failed: {e}"
-                    ))
-                })?;
-                drop(guard);
-
                 completed += 1;
+                match result {
+                    Err(e) => {
+                        if outcome.is_ok() {
+                            outcome = Err(DispatcherError::IoError(format!(
+                                "SSD read (handle {handle:?}): {e}"
+                            )));
+                        }
+                        stop_submitting = true;
+                    }
+                    Ok(()) => {
+                        let seg_idx = tag as usize;
+                        let seg = &segments[seg_idx];
+                        let copy_len = seg
+                            .length
+                            .min(total_bytes.saturating_sub(seg.buffer_offset));
+                        let current_stream = streams[(completed - 1) % 2];
 
-                // Sync the "older" stream periodically to bound GPU queue depth.
-                if completed % PIPELINE_RING_SIZE == 0 {
-                    gpu.stream_synchronize(streams[0]).map_err(|e| {
-                        DispatcherError::IoError(format!("stream_synchronize failed: {e}"))
-                    })?;
-                    gpu.stream_synchronize(streams[1]).map_err(|e| {
-                        DispatcherError::IoError(format!("stream_synchronize failed: {e}"))
-                    })?;
+                        let guard = chunk_bufs[seg_idx].lock().unwrap();
+                        let dma = gpu.dma_copy_to_device_async(
+                            &guard,
+                            unsafe {
+                                (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void
+                            },
+                            copy_len,
+                            current_stream,
+                        );
+                        drop(guard);
+                        if let Err(e) = dma {
+                            if outcome.is_ok() {
+                                outcome = Err(DispatcherError::IoError(format!(
+                                    "GPU async DMA copy (seg {seg_idx}) failed: {e}"
+                                )));
+                            }
+                            stop_submitting = true;
+                        } else if completed % PIPELINE_RING_SIZE == 0 {
+                            // Periodically bound GPU queue depth (best-effort).
+                            let _ = gpu.stream_synchronize(streams[0]);
+                            let _ = gpu.stream_synchronize(streams[1]);
+                        }
+                    }
                 }
 
-                // Submit next read to keep the pipeline full.
-                if submitted < num_chunks {
-                    channels
+                // Keep the pipeline full unless we've hit an error.
+                if !stop_submitting && submitted < num_chunks {
+                    if channels
                         .command_tx
                         .send(Command::ReadAsync {
                             ns_id: 1,
@@ -353,36 +367,53 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
                             timeout_ms: READ_TIMEOUT_MS,
                             tag: submitted as u64,
                         })
-                        .map_err(|e| {
-                            DispatcherError::IoError(format!("ReadAsync send #{submitted}: {e}"))
-                        })?;
-                    submitted += 1;
+                        .is_ok()
+                    {
+                        submitted += 1;
+                    } else {
+                        if outcome.is_ok() {
+                            outcome = Err(DispatcherError::IoError("ReadAsync send failed".into()));
+                        }
+                        stop_submitting = true;
+                    }
                 }
             }
             Ok(Completion::Timeout { handle }) => {
-                return Err(DispatcherError::IoError(format!(
-                    "NVMe read timeout (handle {:?})",
-                    handle
-                )));
+                if outcome.is_ok() {
+                    outcome = Err(DispatcherError::IoError(format!(
+                        "NVMe read timeout (handle {handle:?})"
+                    )));
+                }
+                stop_submitting = true;
+                completed += 1;
             }
             Ok(other) => {
-                return Err(DispatcherError::IoError(format!(
-                    "unexpected completion: {other:?}"
-                )));
+                if outcome.is_ok() {
+                    outcome = Err(DispatcherError::IoError(format!(
+                        "unexpected completion: {other:?}"
+                    )));
+                }
+                stop_submitting = true;
+                completed += 1;
             }
             Err(_) => {
-                return Err(DispatcherError::IoError(
-                    "completion channel disconnected".into(),
-                ));
+                // Actor gone — no further completions will arrive; safe to stop.
+                if outcome.is_ok() {
+                    outcome = Err(DispatcherError::IoError(
+                        "completion channel disconnected".into(),
+                    ));
+                }
+                break;
             }
         }
     }
 
-    // Sync both streams to ensure all GPU copies are complete.
+    // Sync both streams to ensure all in-flight GPU copies are complete
+    // (best-effort; the read outcome above is authoritative).
     for s in streams {
-        gpu.stream_synchronize(*s)
-            .map_err(|e| DispatcherError::IoError(format!("final stream_synchronize: {e}")))?;
+        let _ = gpu.stream_synchronize(*s);
     }
+    outcome?;
 
     // Forget all DmaBuffer wrappers (noop_free, but avoid double-free logic).
     for buf in chunk_bufs {
@@ -523,7 +554,15 @@ pub unsafe fn pipelined_multi_object_zero_copy(
     //   2. Issue async H2D GPU DMA from memory-tier slot to client GPU
     //   3. Sync both CUDA streams every PIPELINE_RING_SIZE completions
     //   4. Submit the next NVMe read to keep the queue saturated
-    while completed < work.len() {
+    //
+    // Drain until every *submitted* read is accounted for (`completed <
+    // submitted`), never `break`ing while reads are still outstanding: those
+    // reads would complete later and the actor would block forever pushing their
+    // completions into this client's (now-undrained) SPSC ring, deadlocking the
+    // single-threaded block-device actor for the whole drive. On error we stop
+    // submitting new reads (`stop_submitting`) but keep draining the rest.
+    let mut stop_submitting = false;
+    while completed < submitted {
         let t0 = std::time::Instant::now();
         match channels.completion_rx.recv() {
             Ok(Completion::ReadDone { tag, result, .. }) => {
@@ -594,44 +633,81 @@ pub unsafe fn pipelined_multi_object_zero_copy(
                     }
                 }
 
-                if submitted < work.len() {
+                if !stop_submitting && submitted < work.len() {
                     let tr = std::time::Instant::now();
                     let (next_obj, next_seg) = work[submitted];
                     let next_obj_data = &all_objs[next_obj];
                     let next_tag = (next_obj * max_segments_per_obj + next_seg) as u64;
 
-                    let _ = channels.command_tx.send(Command::ReadAsync {
-                        ns_id: 1,
-                        lba: next_obj_data.segments[next_seg].lba,
-                        buf: Arc::clone(&next_obj_data.chunk_bufs[next_seg]),
-                        timeout_ms: READ_TIMEOUT_MS,
-                        tag: next_tag,
-                    });
-                    submitted += 1;
+                    if channels
+                        .command_tx
+                        .send(Command::ReadAsync {
+                            ns_id: 1,
+                            lba: next_obj_data.segments[next_seg].lba,
+                            buf: Arc::clone(&next_obj_data.chunk_bufs[next_seg]),
+                            timeout_ms: READ_TIMEOUT_MS,
+                            tag: next_tag,
+                        })
+                        .is_ok()
+                    {
+                        submitted += 1;
+                    } else {
+                        // Can't submit more — stop, but keep draining what's out.
+                        stop_submitting = true;
+                    }
                     _t_resub_ns += tr.elapsed().as_nanos() as u64;
                 }
             }
             Ok(Completion::Timeout { handle }) => {
+                // One outstanding read timed out. Record it, stop submitting new
+                // reads, but KEEP draining the rest (they will still complete or
+                // time out) so no completion is orphaned in the client ring.
                 for r in results.iter_mut() {
                     if r.is_ok() {
                         *r = Err(DispatcherError::IoError(format!(
-                            "NVMe read timeout (handle {:?})",
-                            handle
+                            "NVMe read timeout (handle {handle:?})"
                         )));
                     }
                 }
-                break;
+                stop_submitting = true;
+                completed += 1;
             }
-            Ok(_) | Err(_) => {
+            Ok(_) => {
+                // Unexpected completion type on the cold-read channel. Count it so
+                // draining still terminates; stop submitting.
                 for r in results.iter_mut() {
                     if r.is_ok() {
                         *r = Err(DispatcherError::IoError(
-                            "unexpected completion or channel disconnect".into(),
+                            "unexpected completion on cold-read channel".into(),
+                        ));
+                    }
+                }
+                stop_submitting = true;
+                completed += 1;
+            }
+            Err(_) => {
+                // Channel disconnected: the actor is gone, so no further
+                // completions will arrive — draining more would hang. Safe to
+                // stop; no completions can be orphaned against a dead actor.
+                for r in results.iter_mut() {
+                    if r.is_ok() {
+                        *r = Err(DispatcherError::IoError(
+                            "block-device channel disconnected".into(),
                         ));
                     }
                 }
                 break;
             }
+        }
+    }
+
+    // Any work never submitted (we stopped early on error) has no data on the
+    // GPU — mark those objects failed so they aren't reported as loaded.
+    for &(obj_idx, _seg_idx) in work.iter().skip(submitted) {
+        if results[obj_idx].is_ok() {
+            results[obj_idx] = Err(DispatcherError::IoError(
+                "cold read aborted before segment was submitted".into(),
+            ));
         }
     }
 
