@@ -1,73 +1,79 @@
 # Drift Resolution Proposals
 
-Generated: 2026-05-21
-Based on: drift-report from 2026-05-21
+Generated: 2026-07-21
+Based on: drift-report from 2026-07-21
 
 ## Summary
 
 | Resolution Type | Count |
 |-----------------|-------|
 | Backfill (Code -> Spec) | 2 |
-| Human Decision | 5 |
+| Human Decision | 0 |
 
-## Auto-Approved (Applied)
+Both proposals add new functional requirements to spec
+`001-gpu-cuda-services`. They document capabilities already present in the code
+(`set_device`, `device_of_ptr`) and do not contradict any existing requirement.
 
-### Proposal 1: Naming - GpuServicesComponentV0 -> GpuServicesComponent
+## Proposals (Awaiting Approval)
 
-**Direction**: BACKFILL (Code -> Spec)
-
-**Current State**:
-- Spec quickstart files reference `GpuServicesComponentV0`
-- Code uses `GpuServicesComponent` (no V0 suffix)
-
-**Applied Resolution**: Renamed all occurrences of `GpuServicesComponentV0` to `GpuServicesComponent` in quickstart.md files for specs 001 and 002. Also updated constructor from `::new()` to `::new_default()` to match current API.
-
-**Rationale**: The component was renamed during development. The V0 suffix is part of the directory path (`gpu-services/v0/`) not the type name. Specs must match the public API.
-
-**Confidence**: HIGH
-**Status**: applied
-
----
-
-### Proposal 2: 001-gpu-cuda-services/FR-005 - Verification Caching
+### Proposal 1: 001-gpu-cuda-services / FR-021 - set_device
 
 **Direction**: BACKFILL (Code -> Spec)
 
 **Current State**:
-- Spec says: "pin verifies device-residency and tracks state"
-- Code does: `pin_memory` only calls `check_memory_attributes` if the pointer is NOT already in the verified set (optimization shortcut)
+- Spec 001 has no requirement for selecting the calling thread's CUDA device.
+- Code provides `set_device(device)` (src/lib.rs:566-592;
+  interfaces/src/igpu_services.rs:555), wrapping `cudaSetDevice`.
 
-**Applied Resolution**: Added sentence to FR-005:
+**Proposed Resolution**: Add FR-021 to spec 001-gpu-cuda-services:
 
-> As an optimization, `pin_memory` MAY skip re-verification (via `cudaPointerGetAttributes`) for pointers already present in the verified set, since verification is a prerequisite in the standard IPC workflow.
+> **FR-021**: Component MUST provide a `set_device(device)` method that binds
+> the calling thread's current CUDA device context to the specified GPU ordinal
+> via `cudaSetDevice`, so that subsequently-created streams and issued transfers
+> target that GPU. This is required for multi-GPU / tensor-parallel operation,
+> where each device must be selected before a stream is created on it or a
+> `cudaMemcpyAsync` is issued to a pointer resident on it (a stream is bound to
+> the device that was current at creation, and `cudaMemcpyAsync` rejects a
+> destination pointer on a different device). CUDA tracks the current device per
+> OS thread. MUST return an error if GPU support is not compiled, the component
+> is not initialized, or the device ordinal is invalid.
 
-**Rationale**: This is a performance optimization, not a behavioral change. In the standard IPC workflow, `verify_memory` is always called before `pin_memory`, so re-verification is redundant. The spec now documents this as an intentional optimization.
+**Rationale**: New multi-GPU capability. `cudaSetDevice` is a per-thread CUDA
+requirement; without an explicit selection method the interface cannot direct
+stream creation or transfers to a chosen device. No existing FR covered device
+selection.
 
 **Confidence**: HIGH
-**Status**: applied
+
+**Approval**: [x] Approved (applied 2026-07-21)
 
 ---
 
-## Human Decision Required (Not Applied)
+### Proposal 2: 001-gpu-cuda-services / FR-022 - device_of_ptr
 
-The following 5 unspecced features require human decision on whether to write new specs:
+**Direction**: BACKFILL (Code -> Spec)
 
-1. **CUDA Stream API** (`create_stream`, `destroy_stream`, `stream_synchronize`)
-   - Location: `src/lib.rs:539-605`, `interfaces/src/igpu_services.rs:486-537`
-   - Suggested spec: `003-gpu-async-stream-ops` or `004-gpu-pipeline`
+**Current State**:
+- Spec 001 has no requirement for querying the owning device of a pointer.
+- Code provides `device_of_ptr(ptr)` (src/lib.rs:594-633;
+  interfaces/src/igpu_services.rs:577), wrapping `cudaPointerGetAttributes`.
 
-2. **Async DMA copy** (`dma_copy_to_device_async`)
-   - Location: `src/lib.rs:608-660`
-   - Suggested spec: `003-gpu-async-stream-ops` or `004-gpu-pipeline`
+**Proposed Resolution**: Add FR-022 to spec 001-gpu-cuda-services:
 
-3. **Raw pointer async copy** (`memcpy_h2d_async`)
-   - Location: `src/lib.rs:662-704`
-   - Suggested spec: `003-gpu-async-stream-ops` or `004-gpu-pipeline`
+> **FR-022**: Component MUST provide a `device_of_ptr(ptr)` method that returns
+> the CUDA device ordinal owning a given device pointer via
+> `cudaPointerGetAttributes`. It MUST return `-1` for a pointer with no device
+> association (e.g. plain host or unregistered memory). This is used to route a
+> transfer to a stream on the pointer's own device and to reject cross-device
+> pointers. MUST return an error if GPU support is not compiled, the component
+> is not initialized, or the attribute query fails.
 
-4. **Pinned DMA buffer allocation** (`allocate_pinned_dma_buffer`)
-   - Location: `src/lib.rs:706-744`
-   - Suggested spec: `003-gpu-async-stream-ops` or `004-gpu-pipeline`
+**Rationale**: New multi-GPU routing/safety capability. Complements FR-021: to
+issue a transfer correctly, the caller must know which device owns the target
+pointer and select that device. No existing FR exposed device ownership of a
+pointer (FR-004 only verifies device-type residency for DMA gating).
 
-5. **GDRCopy P2P DMA path** (BAR1 mapping, VFIO IOMMU, cross-process physical address DMA)
-   - Location: `src/dma.rs:353-720`, `src/bin/p2p_server.rs`, `tests/gpu_nvme_p2p.rs`
-   - Suggested spec: `003-gpu-p2p-dma`
+**Confidence**: HIGH
+
+**Approval**: [x] Approved (applied 2026-07-21)
+</content>

@@ -78,6 +78,13 @@ pub struct DispatcherConfig {
     /// Seconds between memory-tier utilization checks.
     /// Default: 2.
     pub memory_tier_eviction_interval_secs: u64,
+    /// Number of pre-registered staging buffers for cold loads that can't get a
+    /// memory-tier slot under pressure. Bounds concurrent cold-read parallelism.
+    /// Default: 64. Set to 0 to disable staging (cold loads then fail on a full tier).
+    pub cold_staging_slots: usize,
+    /// Byte capacity of each cold-load staging buffer. Must be >= the largest
+    /// per-block transfer size. Default: 4 MiB.
+    pub cold_staging_buf_bytes: usize,
 }
 
 impl Default for DispatcherConfig {
@@ -99,6 +106,8 @@ impl Default for DispatcherConfig {
             memory_tier_eviction_low_watermark: 0.70,
             memory_tier_eviction_batch_size: 64,
             memory_tier_eviction_interval_secs: 2,
+            cold_staging_slots: 64,
+            cold_staging_buf_bytes: 4 * 1024 * 1024,
         }
     }
 }
