@@ -21,6 +21,11 @@ pub struct ColdReadRequest {
     pub queue_depth: usize,
     pub metrics: Option<Arc<dyn PipelineMetrics>>,
     pub result_tx: Sender<Vec<Result<(), DispatcherError>>>,
+    /// GPU device the job destinations live on. The worker makes this device
+    /// current and DMAs on streams bound to it — a pre-created stream on another
+    /// device fails `cudaMemcpyAsync` with "invalid argument" under multi-GPU.
+    /// `-1` means unknown; the worker falls back to its own streams.
+    pub gpu_device: i32,
 }
 
 // SAFETY: ColdReadJob contains raw pointers that are valid for the duration
@@ -177,11 +182,27 @@ impl ColdReadPool {
                 break;
             }
 
+            // Make the destination GPU current and use streams bound to it. The
+            // worker's own `streams` were created on the init device; DMAing to
+            // another GPU on them fails "invalid argument" under multi-GPU. Fall
+            // back to the worker's streams when the device is unknown.
+            if request.gpu_device >= 0 {
+                let _ = gpu.set_device(request.gpu_device);
+            }
+            let dev_streams = crate::device_streams_for(gpu, request.gpu_device);
+            let active_streams: [GpuStream; 2] = match &dev_streams {
+                Some(s) => [
+                    GpuStream(s.pipe[0] as *mut std::ffi::c_void),
+                    GpuStream(s.pipe[1] as *mut std::ffi::c_void),
+                ],
+                None => *streams,
+            };
+
             let results = unsafe {
                 pipeline::pipelined_multi_object_zero_copy(
                     drive,
                     gpu,
-                    streams,
+                    &active_streams,
                     &channels,
                     &request.jobs,
                     request.chunk_size,

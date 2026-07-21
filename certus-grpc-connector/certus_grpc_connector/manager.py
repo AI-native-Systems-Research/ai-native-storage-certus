@@ -6,7 +6,8 @@ between vLLM's Python types and the server's u64-keyed batch RPCs, per the
 mapping:
 
     lookup        -> Check
-    prepare_store -> Check (filter) + Reserve (server-side LRU eviction)
+    prepare_store -> Check (filter) + Reserve (best-effort: store the subset
+                     that fits, drop blocks the saturated tier can't reserve)
     complete_store-> CommitStore (success) / AbortStore (failure)
     prepare_load  -> Pin(promote=true)
     complete_load -> Unpin
@@ -28,7 +29,6 @@ from vllm.v1.kv_offload.abstract import (
 )
 
 from . import dispatcher_pb2 as pb
-from .client import all_success
 from .mediums import BlockLocation, CertusLoadStoreSpec
 
 
@@ -48,6 +48,19 @@ class GrpcCertusOffloadingManager(OffloadingManager):
 
     def __init__(self, stub, block_size_bytes: int):
         self._stub = stub
+        self._block_size_bytes = int(block_size_bytes)
+        # Cumulative count of blocks we could not offload because the server's
+        # memory tier was saturated (Reserve failed). Logged in throttled
+        # summaries rather than per-request, so a persistently-full tier does
+        # not produce a warning storm.
+        self._store_dropped_blocks = 0
+        self._store_drop_log_next = 1000
+
+    def set_block_size_bytes(self, block_size_bytes: int) -> None:
+        """Update the per-block Reserve size once the true KV-cache tensor
+        stride is known (the manager is constructed before get_handlers can
+        resolve it). Reserve sizes are per-call, so changing this affects only
+        subsequent stores."""
         self._block_size_bytes = int(block_size_bytes)
 
     # ── lookup / touch ──
@@ -85,13 +98,20 @@ class GrpcCertusOffloadingManager(OffloadingManager):
                 evicted_keys=[],
             )
 
-        to_store_orig = [orig for orig, _ in to_store_pairs]
         to_store_ints = [k for _, k in to_store_pairs]
 
-        # Reserve DRAM slots (server evicts LRU internally to make room). Any
-        # per-key failure means the server cannot free enough space -> hard
-        # reject with None (vLLM's worker asserts store success, so we must not
-        # let a store proceed that would fail at CopyToStore).
+        # Reserve DRAM slots (server evicts LRU internally to make room). A
+        # per-key failure means the server could not free enough space for that
+        # block — the memory tier is saturated (e.g. capped at its max size with
+        # a working set larger than it, or the evictable set is small because
+        # entries are pinned by in-flight loads or not yet written through to
+        # SSD). Reserve is per-key independent, so we treat this as best-effort:
+        # keep the keys that reserved and drop the rest, rather than rejecting
+        # the whole request. A whole-request reject (return None) does NOT
+        # advance vLLM's stored-block index, so the same blocks are retried
+        # every scheduler step, each logging "cannot store blocks" — a warning
+        # storm under sustained pressure. Storing the subset that fits advances
+        # the index and offloads what it can.
         reserve = self._stub.Reserve(
             pb.BatchReserveRequest(
                 entries=[
@@ -100,20 +120,57 @@ class GrpcCertusOffloadingManager(OffloadingManager):
                 ]
             )
         )
-        if not all_success(reserve.results):
-            # Roll back any slots that did reserve, so we don't leak reservations.
-            reserved_ok = [r.key for r in reserve.results if r.success]
-            if reserved_ok:
-                self._stub.AbortStore(pb.BatchAbortStoreRequest(keys=reserved_ok))
-            return None
+        reserved_ok = {r.key for r in reserve.results if r.success}
 
-        locations = [BlockLocation(key=k) for k in to_store_ints]
+        # Keep reserved keys in the original offload order (the scheduler
+        # positionally zips src GPU block ids with dst keys, deriving src order
+        # from offload_keys filtered by keys_to_store — so store_spec must stay
+        # in offload order for a partial subset to line up).
+        stored_pairs = [
+            (orig, k) for orig, k in to_store_pairs if k in reserved_ok
+        ]
+        dropped = len(to_store_pairs) - len(stored_pairs)
+        if dropped:
+            self._note_store_drops(dropped)
+
+        # Keys that reserved but that we are not going to store this round would
+        # leak a reservation; here every reserved key IS kept (we only drop keys
+        # whose Reserve failed, which allocated nothing), so no rollback needed.
+
+        if not stored_pairs:
+            # Nothing fit. Return an empty (non-None) result so vLLM advances
+            # past these tokens quietly instead of retrying + warning every step.
+            return PrepareStoreOutput(
+                keys_to_store=[],
+                store_spec=CertusLoadStoreSpec([]),
+                evicted_keys=[],
+            )
+
+        stored_orig = [orig for orig, _ in stored_pairs]
+        stored_ints = [k for _, k in stored_pairs]
+        locations = [BlockLocation(key=k) for k in stored_ints]
         return PrepareStoreOutput(
-            keys_to_store=to_store_orig,
+            keys_to_store=stored_orig,
             store_spec=CertusLoadStoreSpec(locations),
             # Evictions are surfaced asynchronously via take_events()/TakeEvents.
             evicted_keys=[],
         )
+
+    def _note_store_drops(self, dropped: int) -> None:
+        """Account for blocks skipped due to a saturated memory tier and emit a
+        throttled summary (never per-request, to avoid a warning storm)."""
+        self._store_dropped_blocks += dropped
+        if self._store_dropped_blocks >= self._store_drop_log_next:
+            print(
+                f"[certus-grpc] memory tier saturated: skipped offloading "
+                f"{self._store_dropped_blocks} blocks so far (best-effort store; "
+                f"blocks stay in GPU). Consider a larger --memory-tier-size or "
+                f"lower concurrency.",
+                file=sys.stderr,
+                flush=True,
+            )
+            # Back off the log cadence so a persistently-full tier stays quiet.
+            self._store_drop_log_next = self._store_dropped_blocks * 2
 
     def complete_store(self, keys: Iterable[OffloadKey], success: bool = True) -> None:
         int_keys = _keys_to_u64s(keys)

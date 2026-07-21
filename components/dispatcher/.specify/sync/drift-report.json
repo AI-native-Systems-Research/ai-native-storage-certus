@@ -1,22 +1,65 @@
 {
-  "generated": "2026-07-15",
+  "generated": "2026-07-21",
   "component": "dispatcher",
+  "spec": "components/dispatcher/specs/001-dispatcher-cache-interface/spec.md",
+  "base_commit": "833e9f36e01f1df8a0e0fc57d5cd223d823d3199",
+  "sources_analyzed": [
+    "components/dispatcher/src/lib.rs",
+    "components/dispatcher/src/pipeline.rs",
+    "components/dispatcher/src/cold_pool.rs"
+  ],
   "specs_analyzed": 1,
   "requirements": {
     "total": 50,
-    "aligned": 50,
-    "drifted": 0,
+    "aligned": 48,
+    "drifted": 2,
     "not_implemented": 0
   },
-  "unspecced_features": 0,
+  "unspecced_features": 4,
   "specs": [
     {
       "id": "001-dispatcher-cache-interface",
       "title": "Dispatcher Cache Interface (Memory-Tier Architecture)",
-      "drifted": [],
+      "drifted": [
+        {
+          "requirement": "FR-024",
+          "severity": "high",
+          "spec": "evict_for_space uses sparse-probe + shard-targeted blind LRU primary (evict_lru_for_key(target_key)); blind-frees the LRU victim and removes the dispatch-map entry on failed BlockDevice transition (data loss accepted).",
+          "code": "evict_for_space frees one pin-safe victim per iteration via evict_one_clean over a widening oldest_keys(4*attempts, cap 1024) scan; demote (try_evict_to_block) or drop (dm.remove) only unpinned entries; blind evict_lru/evict_lru_for_key fallback removed; returns AllocationFailed if all candidates pinned. target_key now unused.",
+          "location": "components/dispatcher/src/lib.rs: evict_one_clean, evict_for_space, evict_and_insert"
+        },
+        {
+          "requirement": "FR-037",
+          "severity": "medium",
+          "spec": "Single warm CUDA stream stored as AtomicU64; multi-stream reserved for future.",
+          "code": "Per-GPU-device streams from process-global DEVICE_STREAMS map (device_streams_for); device resolved per request from IPC pointer (device_of_ptr/set_batch_device) and made current; warm_stream AtomicU64 is now fallback only.",
+          "location": "components/dispatcher/src/lib.rs: DeviceStreams, DEVICE_STREAMS, device_streams_for, set_batch_device"
+        }
+      ],
       "not_implemented": []
     }
   ],
-  "unspecced": [],
+  "unspecced": [
+    {
+      "feature": "Concurrent-promotion-race recovery: AlreadyExists on a lost mt.insert race is served warm from the winner's resident slot after a bounded wait.",
+      "location": "components/dispatcher/src/lib.rs: serve_concurrently_promoted, serve_memory_tier_to_gpu, batch_lookup recovery post-pass",
+      "suggested_fr": "FR-051"
+    },
+    {
+      "feature": "Per-GPU-device CUDA stream routing for multi-GPU / tensor-parallel loads.",
+      "location": "components/dispatcher/src/lib.rs: DeviceStreams/DEVICE_STREAMS/device_streams_for/set_batch_device; components/dispatcher/src/cold_pool.rs: ColdReadRequest.gpu_device",
+      "suggested_fr": "FR-052"
+    },
+    {
+      "feature": "Cold-load staging pool: bounded pinned-DRAM buffers serve cold reads uncached (SSD->staging->GPU) when the memory tier is saturated instead of failing AllocationFailed. Config cold_staging_slots (default 64), cold_staging_buf_bytes (default 4 MiB).",
+      "location": "components/dispatcher/src/pipeline.rs: StagingPool/StagingLease, PipelineRing::new; components/dispatcher/src/lib.rs: serve_cold_staged, promote_and_serve staging fallback, batch_lookup staging post-pass",
+      "suggested_fr": "FR-053"
+    },
+    {
+      "feature": "Cold-read drain-to-completion / no early break: pipelined cold paths drain until completed==submitted using a stop_submitting flag, preventing orphaned completions that deadlocked reused NVMe queues.",
+      "location": "components/dispatcher/src/pipeline.rs: pipelined_ssd_to_gpu_zero_copy, pipelined_multi_object_zero_copy",
+      "suggested_fr": "FR-054"
+    }
+  ],
   "conflicts": []
 }

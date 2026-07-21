@@ -1,10 +1,10 @@
 {
-  "generated": "2026-05-21T00:00:00Z",
-  "based_on": "drift-report from 2026-05-21",
+  "generated": "2026-07-21",
+  "based_on": "drift-report from 2026-07-21",
   "summary": {
     "backfill": 2,
     "align": 0,
-    "human_decision": 5,
+    "human_decision": 0,
     "new_specs": 0,
     "remove_from_spec": 0
   },
@@ -12,62 +12,32 @@
     {
       "id": 1,
       "spec_id": "001-gpu-cuda-services",
-      "requirement": "naming",
+      "requirement": "FR-021",
       "direction": "BACKFILL",
       "severity": "minor",
-      "spec_text": "Quickstart references GpuServicesComponentV0",
-      "actual_behavior": "Component is named GpuServicesComponent with new_default() constructor",
-      "proposed_change": "Rename GpuServicesComponentV0 to GpuServicesComponent in all spec files",
-      "location": "specs/001-gpu-cuda-services/quickstart.md, specs/002-gpu-ssd-dma-prepare/quickstart.md",
-      "rationale": "Component renamed during development; specs must match public API",
+      "current_state": "Spec 001 has no requirement for selecting the calling thread's CUDA device.",
+      "actual_behavior": "Code provides set_device(device) wrapping cudaSetDevice.",
+      "proposed_change": "Component MUST provide a `set_device(device)` method that binds the calling thread's current CUDA device context to the specified GPU ordinal via `cudaSetDevice`, so that subsequently-created streams and issued transfers target that GPU. This is required for multi-GPU / tensor-parallel operation, where each device must be selected before a stream is created on it or a `cudaMemcpyAsync` is issued to a pointer resident on it (a stream is bound to the device that was current at creation, and `cudaMemcpyAsync` rejects a destination pointer on a different device). CUDA tracks the current device per OS thread. MUST return an error if GPU support is not compiled, the component is not initialized, or the device ordinal is invalid.",
+      "location": "src/lib.rs:566-592, interfaces/src/igpu_services.rs:555",
+      "rationale": "New multi-GPU capability; cudaSetDevice is a per-thread CUDA requirement and no existing FR covered device selection.",
       "confidence": "HIGH",
-      "status": "applied"
+      "approved": true
     },
     {
       "id": 2,
       "spec_id": "001-gpu-cuda-services",
-      "requirement": "FR-005",
+      "requirement": "FR-022",
       "direction": "BACKFILL",
       "severity": "minor",
-      "spec_text": "pin verifies device-residency and tracks state in internal HashSet",
-      "actual_behavior": "pin_memory skips re-verification for pointers already in verified set (optimization)",
-      "proposed_change": "Add MAY clause to FR-005 noting verification caching optimization",
-      "location": "src/lib.rs:193-225",
-      "rationale": "Performance optimization; verification is always a prerequisite in standard workflow",
+      "current_state": "Spec 001 has no requirement for querying the owning device of a pointer.",
+      "actual_behavior": "Code provides device_of_ptr(ptr) wrapping cudaPointerGetAttributes; returns -1 when no device association.",
+      "proposed_change": "Component MUST provide a `device_of_ptr(ptr)` method that returns the CUDA device ordinal owning a given device pointer via `cudaPointerGetAttributes`. It MUST return `-1` for a pointer with no device association (e.g. plain host or unregistered memory). This is used to route a transfer to a stream on the pointer's own device and to reject cross-device pointers. MUST return an error if GPU support is not compiled, the component is not initialized, or the attribute query fails.",
+      "location": "src/lib.rs:594-633, interfaces/src/igpu_services.rs:577",
+      "rationale": "New multi-GPU routing/safety capability complementing FR-021; no existing FR exposed device ownership of a pointer (FR-004 only verifies device-type residency for DMA gating).",
       "confidence": "HIGH",
-      "status": "applied"
+      "approved": true
     }
   ],
-  "unspecced_awaiting_decision": [
-    {
-      "feature": "CUDA Stream API",
-      "description": "create_stream, destroy_stream, stream_synchronize methods for async GPU operations",
-      "location": "src/lib.rs:539-605, interfaces/src/igpu_services.rs:486-537",
-      "suggested_spec": "003-gpu-async-stream-ops"
-    },
-    {
-      "feature": "Async DMA copy (dma_copy_to_device_async)",
-      "description": "cudaMemcpyAsync H2D with CUDA stream for concurrent GPU/CPU work",
-      "location": "src/lib.rs:608-660",
-      "suggested_spec": "003-gpu-async-stream-ops"
-    },
-    {
-      "feature": "Raw pointer async copy (memcpy_h2d_async)",
-      "description": "Raw *const c_void to *mut c_void async memcpy without DmaBuffer wrapper",
-      "location": "src/lib.rs:662-704",
-      "suggested_spec": "003-gpu-async-stream-ops"
-    },
-    {
-      "feature": "Pinned DMA buffer allocation (allocate_pinned_dma_buffer)",
-      "description": "cudaHostAlloc + spdk_mem_register for page-locked host buffers usable by both NVMe and GPU DMA",
-      "location": "src/lib.rs:706-744",
-      "suggested_spec": "003-gpu-async-stream-ops"
-    },
-    {
-      "feature": "GDRCopy P2P DMA path",
-      "description": "Full GDRCopy BAR1 mapping for true NVMe-to-GPU P2P DMA via gdr_pin_buffer/gdr_map, DPDK IOMMU programming, and cross-process physical address DMA",
-      "location": "src/dma.rs:353-720, src/bin/p2p_server.rs, tests/gpu_nvme_p2p.rs, src/gdrcopy_ffi.rs",
-      "suggested_spec": "003-gpu-p2p-dma"
-    }
-  ]
+  "unspecced_awaiting_decision": []
 }
+</content>

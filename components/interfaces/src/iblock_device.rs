@@ -347,7 +347,7 @@ unsafe impl Send for Command {}
 /// let c = Completion::AbortAck { handle: OpHandle(7) };
 /// assert!(matches!(c, Completion::AbortAck { handle } if handle.0 == 7));
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Completion {
     /// A read operation completed.
     ReadDone {

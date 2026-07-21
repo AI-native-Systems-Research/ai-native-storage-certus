@@ -1,30 +1,35 @@
 {
-  "generated": "2026-07-15",
+  "generated": "2026-07-21",
   "component": "gpu-services",
+  "scope": "Focused re-analysis after addition of set_device and device_of_ptr on branch base 833e9f36",
   "specs_analyzed": 2,
   "requirements": {
     "total": 44,
-    "aligned": 43,
-    "drifted": 1,
+    "aligned": 44,
+    "drifted": 0,
     "not_implemented": 0
   },
   "unspecced_code": 2,
+  "inter_spec_conflicts": 0,
   "findings": [
     {
-      "req_id": "FR-005",
+      "feature": "set_device",
       "spec": "001-gpu-cuda-services",
-      "status": "drifted",
-      "description": "Pin/unpin operations for GPU memory with idempotent pin and error on unpin of non-pinned",
-      "location": "src/lib.rs:227-245",
-      "notes": "Minor: unpin path only removes from HashSet without cudaHostUnregister. Semantically correct for IPC-opened device memory (inherently pinned by CUDA runtime), but spec language is slightly ambiguous about underlying unpin system call"
+      "status": "unspecced",
+      "direction": "BACKFILL",
+      "description": "Binds the calling thread's CUDA device context to a specific GPU ordinal via cudaSetDevice. Required for multi-GPU / tensor parallelism: a stream is bound to the device current at creation, and cudaMemcpyAsync rejects a destination on a different device.",
+      "location": "src/lib.rs:566-592, interfaces/src/igpu_services.rs:555",
+      "suggested_fr": "FR-021"
     },
     {
-      "req_id": "FR-019",
-      "spec": "002-gpu-ssd-dma-prepare",
-      "status": "aligned",
-      "description": "register_host_memory with cudaHostRegister + spdk_mem_register, rollback on partial failure. Now treats spdk_mem_register rc=-16 (EBUSY, already registered) as success.",
-      "location": "src/lib.rs:904",
-      "notes": "rc=-16 occurs when memory-tier pool is allocated via spdk_zmalloc (already SPDK-registered). Treating as success is correct — no rollback needed. Actual SPDK failures (rc != 0 && rc != -16) still trigger cudaHostUnregister rollback per spec."
+      "feature": "device_of_ptr",
+      "spec": "001-gpu-cuda-services",
+      "status": "unspecced",
+      "direction": "BACKFILL",
+      "description": "Returns the CUDA device ordinal owning a device pointer via cudaPointerGetAttributes; returns -1 for pointers with no device association. Used to route a transfer to the correct device/stream and to reject cross-device pointers.",
+      "location": "src/lib.rs:594-633, interfaces/src/igpu_services.rs:577",
+      "suggested_fr": "FR-022"
     }
   ]
 }
+</content>

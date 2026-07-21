@@ -417,6 +417,7 @@ impl IBlockDevice for BlockDeviceSpdkNvmeComponent {
             id: client_id,
             ingress_rx,
             callback_tx,
+            pending: std::collections::VecDeque::new(),
         };
 
         handle

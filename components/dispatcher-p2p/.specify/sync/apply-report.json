@@ -1,0 +1,23 @@
+{
+  "applied": "2026-07-21",
+  "component": "dispatcher-p2p",
+  "spec": "001-gpudirect-cold-path",
+  "base_commit": "833e9f36e01f1df8a0e0fc57d5cd223d823d3199",
+  "backup": ".specify/sync/backups/spec.md.bak",
+  "actions": [
+    "Backed up spec.md to .specify/sync/backups/spec.md.bak",
+    "Added FR-015 to spec.md after FR-014 (IGpuServices receptacle exposes set_device/device_of_ptr; interface keep-up, production cold path does not yet route by device)",
+    "Set proposals.json proposal 1 approved=true"
+  ],
+  "results": [
+    {
+      "proposal": 1,
+      "requirement": "FR-015",
+      "direction": "BACKFILL",
+      "status": "applied",
+      "spec_modified": true
+    }
+  ],
+  "conflicts": [],
+  "spec_fr_range_after": "FR-001..FR-015"
+}
