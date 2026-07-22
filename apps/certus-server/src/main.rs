@@ -261,7 +261,7 @@ fn initialize_component_stack(
     }
 
     // --- Create remote lookup ---
-    let rl_comp = remote_lookup::RemoteLookupComponent::new();
+    let rl_comp = remote_lookup::RemoteLookupComponent::new_default();
     rl_comp
         .logger
         .connect(Arc::clone(&logger))

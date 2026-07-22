@@ -15,7 +15,8 @@ mod ilogger;
 mod imemory_tier;
 mod ipartition_table;
 mod iremote_lookup;
-mod iremote_request_handler;
+mod iremote_lookup_rdma_responder;
+mod iremote_lookup_rdma_initiator;
 mod izyre;
 
 pub use idispatch_map::CacheKey;
@@ -40,15 +41,20 @@ pub use igpu_services::GpuStream;
 pub use igpu_services::IGpuServices;
 pub use igreeter::IGreeter;
 pub use ilogger::ILogger;
-#[cfg(feature = "spdk")]
 pub use imemory_tier::IMemoryTier;
 pub use imemory_tier::MemoryTierError;
 pub use imemory_tier::MemoryTierTelemetrySnapshot;
 pub use iremote_lookup::IRemoteLookup;
+pub use iremote_lookup::LookupConfig;
 pub use iremote_lookup::RemoteLookupError;
-pub use iremote_request_handler::IRemoteRequestHandler;
-pub use iremote_request_handler::LookupRef;
-pub use iremote_request_handler::RemoteRequestHandlerError;
+pub use iremote_lookup_rdma_responder::{
+    ControlChannel, Endpoint, IRemoteLookupRdmaResponder, IRemoteLookupRdmaResponderAdmin,
+    LocalRegion, RemoteLookupRdmaResponderError, ResponderCommand, ResponderEvent,
+};
+pub use iremote_lookup_rdma_initiator::IRemoteLookupRdmaInitiator;
+pub use iremote_lookup_rdma_initiator::PushStatus;
+pub use iremote_lookup_rdma_initiator::RemoteLookupRdmaInitiatorError;
+pub use iremote_lookup_rdma_initiator::RemoteRegion;
 pub use izyre::GossipConfig;
 pub use izyre::IZyre;
 pub use izyre::IZyreNode;

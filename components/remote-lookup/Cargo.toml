@@ -5,8 +5,45 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+default = []
+# Gates the `#[ignore]` hardware loopback test (T034, tests/mesh_rdma.rs), which
+# swaps the mock RDMA seams for the real initiator/responder crates over
+# single-host RDMA loopback. Pulls those two crates (with their own `rdma`
+# feature) as optional deps only when enabled, so the default test layer needs
+# no rdma-core. That default layer (research Decision 8) is a multi-node mesh
+# over the *real* `zyre` component with only the NIC and local state mocked
+# (`seams.rs`); it needs no NIC and runs with this feature off.
+rdma = [
+    "dep:remote-lookup-rdma-initiator",
+    "dep:remote-lookup-rdma-responder",
+]
+
 [dependencies]
 component-framework.workspace = true
 component-core.workspace = true
 component-macros.workspace = true
-interfaces.workspace = true
+# NOTE (002): remote-lookup consumes IDispatchMap/IDispatcher, which are gated
+# behind the `interfaces` crate's `spdk` feature, so we enable it here. This
+# transitively pulls `spdk-sys`, so remote-lookup is NOT in the workspace
+# default-members (see root Cargo.toml) and requires a built SPDK at
+# deps/spdk-build/. Short-term assumption; see specs/002-remote-lookup-rdma/
+# research.md Decision 10 for the SPDK-orthogonal follow-up (ungate the traits).
+interfaces = { workspace = true, features = ["spdk"] }
+# Optional, test-only: the real RDMA components, pulled in (with their own
+# `rdma` feature) by this crate's `rdma` feature for the T034 hardware loopback
+# test. Off by default — production wires these via receptacles at the app
+# level, so remote-lookup does not depend on them in a normal build.
+remote-lookup-rdma-initiator = { workspace = true, optional = true, features = ["rdma"] }
+remote-lookup-rdma-responder = { workspace = true, optional = true, features = ["rdma"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+# The multi-node mesh harness (tests/mesh.rs, research Decision 8) drives real
+# zyre nodes discovering each other via gossip over TCP loopback. Requires the
+# zyre native libs built at deps/zyre-build (deps/build_zyre.sh).
+zyre = { workspace = true }
+
+[[bench]]
+name = "correlation"
+harness = false

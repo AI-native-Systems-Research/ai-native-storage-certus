@@ -1,9 +1,79 @@
 //! IRemoteLookup interface and associated types.
 
 use std::fmt;
+use std::time::Duration;
 
 use crate::idispatch_map::CacheKey;
-use crate::idispatcher::IpcHandle;
+use crate::izyre::GossipConfig;
+
+/// Configuration for `remote-lookup` supplied to
+/// [`IRemoteLookup::initialize`].
+///
+/// A public value type (mirrors `DispatcherConfig`): it derives no serde but
+/// implements [`Default`] so integrating mainlines can build it with
+/// `..Default::default()` and stay robust to config growth. Every field has a
+/// sensible default.
+///
+/// # Examples
+///
+/// ```
+/// use interfaces::LookupConfig;
+///
+/// let cfg = LookupConfig { quorum_pct: 90, ..Default::default() };
+/// assert_eq!(cfg.quorum_pct, 90);
+/// assert_eq!(LookupConfig::default().max_keys_per_query, 256);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LookupConfig {
+    /// zyre group joined on activation.
+    pub group: String,
+    /// Percentage of group peers that must reply to trigger the Phase-1→Phase-2
+    /// transition (0–100).
+    pub quorum_pct: u8,
+    /// Phase-1 cap before falling through to Phase-2 regardless of quorum.
+    pub phase1_timeout: Duration,
+    /// Overall operation deadline: how long `batch_lookup` blocks before
+    /// finalizing unsatisfied keys as `NotFound`.
+    pub op_deadline: Duration,
+    /// Maximum number of retry rounds re-targeting alternate peers.
+    pub max_retry_rounds: u32,
+    /// Maximum keys per KEY_QUERY message before splitting into multiple SHOUTs.
+    pub max_keys_per_query: usize,
+    /// RoCE IPv4 the responder binds to (handed to the responder admin).
+    pub bind_ip: String,
+    /// Optional NUMA/CPU pin for the actor + responder loop.
+    pub actor_cpu: Option<usize>,
+    /// Peer-discovery mode for the zyre node. `None` (the default) uses zyre's
+    /// UDP-beacon discovery, appropriate for a single broadcast domain. `Some`
+    /// selects gossip-based discovery over an explicit hub endpoint — required
+    /// for clusters that span subnets (where UDP broadcast does not reach) and
+    /// used by the in-process multi-node test mesh over TCP loopback. Maps to
+    /// [`NodeConfig::gossip`](crate::NodeConfig).
+    pub discovery: Option<GossipConfig>,
+    /// This node's own ZRE data-mailbox endpoint (e.g. `"tcp://127.0.0.1:0"`).
+    /// Required by zyre when [`discovery`](Self::discovery) is `Some` (gossip
+    /// mode disables beaconing, so the node must publish its endpoint
+    /// explicitly); ignored in beacon mode. Maps to
+    /// [`NodeConfig::endpoint`](crate::NodeConfig).
+    pub node_endpoint: Option<String>,
+}
+
+impl Default for LookupConfig {
+    fn default() -> Self {
+        Self {
+            group: "remote_lookup".to_string(),
+            quorum_pct: 80,
+            phase1_timeout: Duration::from_millis(20),
+            op_deadline: Duration::from_millis(50),
+            max_retry_rounds: 2,
+            max_keys_per_query: 256,
+            bind_ip: String::new(),
+            actor_cpu: None,
+            discovery: None,
+            node_endpoint: None,
+        }
+    }
+}
 
 /// Errors returned by `IRemoteLookup` operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,28 +97,50 @@ impl std::error::Error for RemoteLookupError {}
 
 component_macros::define_interface! {
     pub IRemoteLookup {
-        /// Batch lookup: retrieve multiple cache entries from remote nodes.
+        /// Configure and bring up the component.
         ///
-        /// Accepts the same parameter types as `IDispatcher::batch_lookup`.
-        /// Returns one `Result` per input entry, preserving positional order.
+        /// Supplies [`LookupConfig`] and starts the actor: joins the zyre group
+        /// and drives RDMA-responder bring-up (bind IP + pool registration) via
+        /// the component's responder-admin receptacle. Mirrors
+        /// `IDispatcher::initialize(DispatcherConfig)`. Must be called before
+        /// `batch_lookup`; calling it more than once returns a transport error.
         ///
         /// # Examples
         ///
         /// ```
-        /// use interfaces::{CacheKey, IpcHandle, IRemoteLookup, RemoteLookupError};
+        /// use interfaces::{IRemoteLookup, LookupConfig, RemoteLookupError};
+        ///
+        /// # fn example(rl: &dyn IRemoteLookup) -> Result<(), RemoteLookupError> {
+        /// rl.initialize(LookupConfig::default())?;
+        /// # Ok(())
+        /// # }
+        /// ```
+        fn initialize(&self, config: LookupConfig) -> Result<(), RemoteLookupError>;
+
+        /// Batch lookup: fetch multiple cache entries from remote nodes into the
+        /// local DRAM memory tier.
+        ///
+        /// Each entry is a `(key, size)` pair — `size` is the expected value
+        /// length in bytes, not an address. remote-lookup works exclusively in
+        /// CPU/DRAM: on success it makes the key resident in the local memory
+        /// tier and returns `Ok(())` for it; the caller (the dispatcher) performs
+        /// any subsequent DRAM→GPU delivery. Returns one `Result` per input
+        /// entry, preserving positional order.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// use interfaces::{CacheKey, IRemoteLookup, RemoteLookupError};
         ///
         /// # fn example(rl: &dyn IRemoteLookup) {
-        /// let mut buf = vec![0u8; 4096];
-        /// let entries: Vec<(CacheKey, IpcHandle)> = vec![
-        ///     (1, IpcHandle { address: buf.as_mut_ptr(), size: 4096 }),
-        /// ];
+        /// let entries: Vec<(CacheKey, u32)> = vec![(1, 4096), (2, 8192)];
         /// let results = rl.batch_lookup(&entries);
         /// assert_eq!(results.len(), entries.len());
         /// # }
         /// ```
         fn batch_lookup(
             &self,
-            entries: &[(CacheKey, IpcHandle)],
+            entries: &[(CacheKey, u32)],
         ) -> Vec<Result<(), RemoteLookupError>>;
 
         /// Join a cluster of Certus nodes at the given endpoint.

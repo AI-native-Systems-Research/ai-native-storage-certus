@@ -67,7 +67,6 @@ impl std::error::Error for MemoryTierError {}
 //
 // Total: 10 properties, 21 verification conditions discharged by SMT solvers.
 
-#[cfg(feature = "spdk")]
 component_macros::define_interface! {
     pub IMemoryTier {
         /// Initialize the memory-tier pool with the given size in bytes.

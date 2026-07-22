@@ -4,7 +4,7 @@
 
 The put flow in the `full-remote` profile is identical to the `full` profile. Populate operations are **local-only** — data is not propagated to peer nodes on write. Remote nodes discover entries only when a peer issues a remote lookup.
 
-The put flow moves a GPU tensor (cache block) from client GPU memory into a DRAM memory-tier pool, then asynchronously persists it to SSD via write-through. The entry is immediately available for lookups from DRAM (both local and from remote peers via RemoteRequestHandler).
+The put flow moves a GPU tensor (cache block) from client GPU memory into a DRAM memory-tier pool, then asynchronously persists it to SSD via write-through. The entry is immediately available for lookups from DRAM (both local and from remote peers via RemoteLookupRdmaInitiator).
 
 ## Assumptions and Invariants
 
@@ -24,7 +24,7 @@ The put flow moves a GPU tensor (cache block) from client GPU memory into a DRAM
 
 4. **GPU → DRAM DMA.** `cudaMemcpy` (D2H) from the client's GPU memory into the memory-tier slot.
 
-5. **Dispatch-map registration.** The entry is atomically registered as a MemoryTier entry, acquiring a write reference. The entry is now visible to local lookups AND incoming remote requests via RemoteRequestHandler.
+5. **Dispatch-map registration.** The entry is atomically registered as a MemoryTier entry, acquiring a write reference. The entry is now visible to local lookups AND incoming remote requests via RemoteLookupRdmaInitiator.
 
 6. **Client receives acknowledgement.** The gRPC response is returned.
 
@@ -46,9 +46,9 @@ Same as `full` profile:
 
 Once step 5 completes (dispatch-map registration), the entry is visible to:
 - Local lookups via gRPC
-- Remote lookups from peer nodes via RemoteRequestHandler
+- Remote lookups from peer nodes via RemoteLookupRdmaInitiator
 
-The RemoteRequestHandler resolves keys through the dispatcher, so any entry in the dispatch-map (MemoryTier or BlockDevice state) is accessible to peers.
+The RemoteLookupRdmaInitiator resolves keys through the dispatcher, so any entry in the dispatch-map (MemoryTier or BlockDevice state) is accessible to peers.
 
 ## Duplicate Key Handling
 
@@ -56,7 +56,7 @@ Same as `full`: AlreadyExists returned. Client must `remove` before re-populatin
 
 ## Eviction
 
-- **DRAM eviction:** LRU-based. Entries pinned by remote LookupRefs (from RemoteRequestHandler) are not evictable until `release_lookup` is called.
+- **DRAM eviction:** LRU-based. Entries pinned by remote LookupRefs (from RemoteLookupRdmaInitiator) are not evictable until `release_lookup` is called.
 - **SSD eviction:** Threshold-based background evictor. Entries removed from SSD are no longer visible to remote peers.
 
 ## Crash Recovery
