@@ -1,0 +1,82 @@
+{
+  "generated": "2026-07-09T22:50:03Z",
+  "project": "remote-lookup-rdma-initiator",
+  "summary": {
+    "specs_analyzed": 2,
+    "requirements_checked": 40,
+    "aligned": 16,
+    "drifted": 0,
+    "not_implemented": 24,
+    "unspecced_features": 4
+  },
+  "specs": [
+    {
+      "id": "002-rdma-push-initiator",
+      "title": "RDMA Push Initiator",
+      "status": "current",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
+        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013",
+        "SC-001", "SC-002", "SC-003"
+      ],
+      "drifted": [],
+      "not_implemented": ["SC-004"],
+      "notes": "16/17 aligned (94%). SC-004 (telemetry <5% overhead benchmark) is an acknowledged open task recorded in the spec itself, not silent drift."
+    },
+    {
+      "id": "001-rdma-remote-lookup-rdma-initiator",
+      "title": "RDMA Remote Lookup Initiator",
+      "status": "superseded",
+      "superseded_by": "002-rdma-push-initiator",
+      "aligned": [],
+      "drifted": [],
+      "not_implemented": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
+        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
+        "FR-015", "FR-016", "FR-017",
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006"
+      ],
+      "notes": "Old passive-responder design (inbound listener/session/handshake/binary batch protocol). Deliberately removed in the rework into an outbound push initiator. All requirements obsolete by design; a few low-level primitives linger in rdma.rs (see unspecced)."
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "RdmaListener (bind/listen/accept)",
+      "location": "src/rdma.rs:517-690",
+      "lines": 174,
+      "suggested_spec": "remote-lookup (accept side)"
+    },
+    {
+      "feature": "send_msg/recv_msg message path",
+      "location": "src/rdma.rs:201-239",
+      "lines": 39,
+      "suggested_spec": "remote-lookup or remove"
+    },
+    {
+      "feature": "post_rdma_write_unsignaled pipelining",
+      "location": "src/rdma.rs:297-320",
+      "lines": 24,
+      "suggested_spec": "future perf spec or remove"
+    },
+    {
+      "feature": "integration-test Cargo feature (empty)",
+      "location": "Cargo.toml:11",
+      "lines": 1,
+      "suggested_spec": "implement loopback test or drop feature"
+    }
+  ],
+  "conflicts": [
+    {
+      "between": ["001-rdma-remote-lookup-rdma-initiator", "002-rdma-push-initiator"],
+      "description": "Role inversion: 001 defines a passive inbound responder; 002 defines an outbound push initiator for the same component. Resolved by supersession, but 001 lacks its own superseded banner.",
+      "resolution": "archive-001"
+    }
+  ],
+  "recommendations": [
+    "Archive spec-001 or add a SUPERSEDED banner; it accounts for the entire not-implemented count.",
+    "Decide fate of 001-era primitives (RdmaListener, send/recv, unsignaled write): relocate to remote-lookup or remove.",
+    "Resolve the empty integration-test feature and correct the README's stale #[ignore] HW-test claim.",
+    "Add a Criterion benchmark to close SC-004 (telemetry overhead).",
+    "No code changes required for spec-002 alignment."
+  ]
+}

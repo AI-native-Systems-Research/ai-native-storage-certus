@@ -2264,27 +2264,73 @@ impl IDispatcher for DispatcherComponent {
                 .collect();
 
             if !not_found.is_empty() {
-                let remote_entries: Vec<(CacheKey, IpcHandle)> = not_found
+                // remote-lookup works in CPU/DRAM only: it takes (key, size) and,
+                // on success, makes the value resident in the local memory tier.
+                // The dispatcher owns the subsequent DRAM->GPU delivery.
+                let remote_entries: Vec<(CacheKey, u32)> = not_found
                     .iter()
                     .map(|&i| {
                         let (key, handle) = &entries[i];
-                        (
-                            *key,
-                            IpcHandle {
-                                address: handle.address,
-                                size: handle.size,
-                            },
-                        )
+                        (*key, handle.size)
                     })
                     .collect();
 
                 let remote_results = rl.batch_lookup(&remote_entries);
 
+                // On a successful remote fetch the value is now resident in the
+                // local memory tier; deliver it to the caller's GPU buffer with the
+                // same memory-tier->device copy used for a local hot-path hit.
+                let deliver = |key: CacheKey,
+                               ipc_handle: &IpcHandle|
+                 -> Result<(), DispatcherError> {
+                    match dm.lookup(key) {
+                        Ok(LookupResult::MemoryTier { pointer, size }) => {
+                            let copy_size = (ipc_handle.size as usize).min(size as usize);
+                            let aligned = copy_size.next_multiple_of(4096).max(4096);
+                            let r = match unsafe {
+                                DmaBuffer::from_raw(
+                                    pointer as *mut std::ffi::c_void,
+                                    aligned,
+                                    noop_free,
+                                    -1,
+                                )
+                            } {
+                                Ok(buf) => {
+                                    let res = gpu
+                                        .dma_copy_to_device(
+                                            &buf,
+                                            ipc_handle.address as *mut std::ffi::c_void,
+                                            copy_size,
+                                        )
+                                        .map_err(|e| {
+                                            DispatcherError::IoError(format!(
+                                                "GPU DMA copy (memory-tier->device) failed: {e}"
+                                            ))
+                                        });
+                                    std::mem::forget(buf);
+                                    res
+                                }
+                                Err(e) => Err(DispatcherError::IoError(format!(
+                                    "DmaBuffer wrap failed: {e}"
+                                ))),
+                            };
+                            let _ = dm.release_read(key);
+                            r
+                        }
+                        Ok(_) => {
+                            let _ = dm.release_read(key);
+                            Err(DispatcherError::KeyNotFound(key))
+                        }
+                        Err(e) => Err(DispatcherError::IoError(format!("post-remote lookup: {e}"))),
+                    }
+                };
+
                 for (pos, remote_res) in not_found.iter().zip(remote_results.into_iter()) {
-                    results[*pos] = Some(
-                        remote_res
-                            .map_err(|e| DispatcherError::IoError(format!("remote lookup: {e}"))),
-                    );
+                    let res = match remote_res {
+                        Ok(()) => deliver(entries[*pos].0, &entries[*pos].1),
+                        Err(e) => Err(DispatcherError::IoError(format!("remote lookup: {e}"))),
+                    };
+                    results[*pos] = Some(res);
                 }
             }
         }

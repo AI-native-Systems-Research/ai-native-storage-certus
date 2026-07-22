@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(components/component-framework/**)",
+      "Read(components/interfaces/**)",
+      "Read(components/logger/**)",
+      "Write(components/interfaces/**)",
+      "Write(components/remote-lookup-rdma-responder/**)"
+    ],
+    "deny": [],
+    "additionalDirectories": [
+      "../../interfaces",
+      "../../component-framework",
+      "../../logger"
+    ]
+  }
+}

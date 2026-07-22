@@ -25,7 +25,7 @@ fn main() {
                 // Project-local GDRCopy build (kernel/modules/gdrcopy/src/).
                 let manifest_dir =
                     std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-                let gdrcopy_lib = manifest_dir.join("../../../kernel/modules/gdrcopy/src");
+                let gdrcopy_lib = manifest_dir.join("../../kernel/modules/gdrcopy/src");
                 if gdrcopy_lib.exists() {
                     println!(
                         "cargo:rustc-link-search=native={}",
