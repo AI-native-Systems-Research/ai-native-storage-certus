@@ -32,7 +32,7 @@ use interfaces::{
     CacheKey, ControlChannel, DispatchMapError, DispatcherConfig, DispatcherError, Endpoint,
     GpuStream, IDispatchMap, IDispatcher, IMemoryTier, IRemoteLookupRdmaInitiator,
     IRemoteLookupRdmaResponder, IRemoteLookupRdmaResponderAdmin, IpcHandle, LocalRegion,
-    LookupResult, MemoryTierError, MemoryTierTelemetrySnapshot, PeerId, PushStatus,
+    LookupResult, MemoryTierError, MemoryTierTelemetrySnapshot, PeerId, PushStatus, ReadWriteStats,
     RemoteLookupRdmaInitiatorError, RemoteLookupRdmaResponderError, RemoteRegion, ResponderCommand,
     ResponderEvent,
 };
@@ -469,6 +469,10 @@ impl IDispatchMap for MockDispatchMap {
     ) -> Result<(), DispatchMapError> {
         unimplemented!("mock: IDispatchMap::recover_extent not needed by remote-lookup tests")
     }
+
+    fn try_evict_to_block(&self, _key: CacheKey) -> Result<(), DispatchMapError> {
+        unimplemented!("mock: IDispatchMap::try_evict_to_block not needed by remote-lookup tests")
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -703,6 +707,12 @@ impl IDispatcher for MockDispatcher {
 
     fn flush_to_ssd(&self) -> Result<usize, DispatcherError> {
         unimplemented!("mock: IDispatcher::flush_to_ssd not needed by remote-lookup tests")
+    }
+
+    fn read_write_stats(&self) -> ReadWriteStats {
+        // Telemetry is not exercised by remote-lookup tests; return zeroed
+        // counters, matching the disabled-telemetry contract on the real device.
+        ReadWriteStats::default()
     }
 }
 
