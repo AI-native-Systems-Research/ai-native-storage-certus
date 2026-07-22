@@ -1373,7 +1373,25 @@ impl DispatcherComponent {
                     ))
                 })?;
 
-            // Configure extent-manager with partition offsets
+            // Configure extent-manager with partition offsets.
+            // The Certus layout requires exactly three partitions:
+            //   [0] metadata, [1] extended metadata (reserved), [2] data.
+            // A disk with a valid-but-incompatible GPT (e.g. an empty or
+            // non-Certus partition table) reads back with fewer entries, so
+            // guard against out-of-bounds access and fail with a clear error
+            // instead of panicking.
+            const EXPECTED_PARTITIONS: usize = 3;
+            if table.partitions.len() < EXPECTED_PARTITIONS {
+                return Err(DispatcherError::IoError(format!(
+                    "data drive {i} has an incompatible partition table: expected \
+                     {EXPECTED_PARTITIONS} Certus partitions (metadata, extended \
+                     metadata, data) but found {}. The disk has a valid GPT that is \
+                     not a Certus layout; re-run with format_on_init to (destructively) \
+                     format it.",
+                    table.partitions.len()
+                )));
+            }
+
             iem.set_metadata_base_lba(table.partitions[0].start_lba);
             // partition[1] = extended metadata (reserved for future use)
             iem.set_data_base_lba(table.partitions[2].start_lba);
