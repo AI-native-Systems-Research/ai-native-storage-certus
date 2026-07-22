@@ -7,7 +7,7 @@ This document describes the architecture of the Certus `full-remote` deployment:
 The `full-remote` profile extends the base `full` profile with **inter-node cache cooperation**. Each Certus node operates a local SPDK NVMe + DRAM cache and additionally:
 
 - **Forwards local misses** to peer nodes via the RemoteLookup component
-- **Serves incoming requests** from peers via the RemoteRequestHandler (RDMA-based)
+- **Serves incoming requests** from peers via the RemoteLookupRdmaInitiator (RDMA-based)
 
 This enables a cluster of Certus nodes to function as a shared distributed cache — a miss on one node may be a hit on another, avoiding expensive GPU recomputation.
 
@@ -16,7 +16,7 @@ This enables a cluster of Certus nodes to function as a shared distributed cache
 ```
 ┌──────────────┐   gRPC/IPC    ┌─────────────────────────────────────────────┐
 │  GPU Client  │◄─────────────►│              certus-server                   │
-│  (vLLM)      │               │  (Dispatcher + Remote Request Handler)       │
+│  (vLLM)      │               │  (Dispatcher + Remote Lookup Initiator)       │
 └──────────────┘               └──────────┬───────────────────────────────────┘
                                           │
               ┌───────────────────────────┬┴──────────────────────┐
@@ -36,7 +36,7 @@ This enables a cluster of Certus nodes to function as a shared distributed cache
     │  Remote Cache Layer                                           │
     │                                                              │
     │  ┌─────────────────────┐      ┌────────────────────────────┐ │
-    │  │ RemoteLookup        │      │ RemoteRequestHandler       │ │
+    │  │ RemoteLookup        │      │ RemoteLookupRdmaInitiator       │ │
     │  │ (client: forward    │      │ (server: handle incoming   │ │
     │  │  misses to peers)   │      │  RDMA requests from peers) │ │
     │  └─────────┬───────────┘      └──────────────┬─────────────┘ │
@@ -84,7 +84,7 @@ When a key is not found locally (neither DRAM nor SSD):
 
 ### Incoming Remote Request (Peer → This Node)
 
-1. RemoteRequestHandler receives RDMA request from a peer
+1. RemoteLookupRdmaInitiator receives RDMA request from a peer
 2. Resolves the key against the local dispatcher (acquires read reference)
 3. Returns a zero-copy LookupRef (pointer into memory-tier)
 4. RDMA Write sends data to the requesting peer
@@ -111,7 +111,7 @@ When a key is not found locally (neither DRAM nor SSD):
 | Component | Interface | Description |
 |-----------|-----------|-------------|
 | RemoteLookupComponent | IRemoteLookup | Client-side: forwards local misses to peer nodes |
-| RemoteRequestHandlerComponent | IRemoteRequestHandler | Server-side: handles incoming RDMA lookup requests |
+| RemoteLookupRdmaInitiatorComponent | IRemoteLookupRdmaInitiator | Server-side: handles incoming RDMA lookup requests |
 
 ### RemoteLookupComponent (`components/remote-lookup/`)
 
@@ -137,15 +137,15 @@ define_component! {
 
 **Error type:** `RemoteLookupError` — `NotFound`, `TransportError(String)`
 
-### RemoteRequestHandlerComponent (`components/remote-request-handler/`)
+### RemoteLookupRdmaInitiatorComponent (`components/remote-lookup-rdma-initiator/`)
 
 Handles incoming RDMA-based cache lookup requests from peer Certus nodes. Resolves keys against the local dispatcher and provides zero-copy data references for RDMA Write.
 
 ```rust
 define_component! {
-    pub RemoteRequestHandlerComponent {
+    pub RemoteLookupRdmaInitiatorComponent {
         version: "0.1.0",
-        provides: [IRemoteRequestHandler],
+        provides: [IRemoteLookupRdmaInitiator],
         receptacles: {
             logger: ILogger,
             dispatcher: IDispatcher,
@@ -154,7 +154,7 @@ define_component! {
 }
 ```
 
-**IRemoteRequestHandler methods:**
+**IRemoteLookupRdmaInitiator methods:**
 
 | Method | Description |
 |--------|-------------|
@@ -174,7 +174,7 @@ pub struct LookupRef {
 
 The LookupRef holds a read reference in the dispatch-map — the entry cannot be evicted until `release_lookup` is called.
 
-**Error type:** `RemoteRequestHandlerError` — `InvalidRequest`, `KeyNotFound`, `DispatchError`, `NotInitialized`
+**Error type:** `RemoteLookupRdmaInitiatorError` — `InvalidRequest`, `KeyNotFound`, `DispatchError`, `NotInitialized`
 
 ## 4. Wiring and Initialization Order
 
@@ -186,15 +186,15 @@ The LookupRef holds a read reference in the dispatch-map — the entry cannot be
 6. **MemoryTierComponent** — mmap DRAM pool (bound to eviction_policy)
 7. **RemoteLookupComponent** — cluster client (bound to logger)
 8. **DispatcherComponent** — orchestrator (bound to dispatch_map, memory_tier, gpu, spdk_env, remote_lookup)
-9. **RemoteRequestHandlerComponent** — RDMA server (bound to dispatcher, logger)
+9. **RemoteLookupRdmaInitiatorComponent** — RDMA server (bound to dispatcher, logger)
 
-Note: RemoteRequestHandler is initialized **after** the dispatcher because it needs a fully-initialized dispatcher to resolve incoming lookups.
+Note: RemoteLookupRdmaInitiator is initialized **after** the dispatcher because it needs a fully-initialized dispatcher to resolve incoming lookups.
 
 ## 5. Concurrency Model
 
 Same as `full` profile, plus:
 
-- **RemoteRequestHandler** operates an async RDMA listener that accepts connections from peer nodes. Each connection runs as a session with its own state machine.
+- **RemoteLookupRdmaInitiator** operates an async RDMA listener that accepts connections from peer nodes. Each connection runs as a session with its own state machine.
 - **LookupRef lifetime**: A read reference is held from `handle_lookup` until `release_lookup`. This pins the memory-tier entry (prevents eviction) during the RDMA Write window. Failure to release blocks eviction.
 - **No cross-node locking**: Each node manages its own dispatch-map independently. Consistency is eventual — a populate on node A is not immediately visible to lookups forwarded from node B until the cluster state propagates.
 

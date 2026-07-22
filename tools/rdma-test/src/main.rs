@@ -158,7 +158,7 @@ fn check_ibverbs_available() -> Vec<DeviceInfo> {
     if entries.is_empty() {
         eprintln!(
             "ERROR: No RDMA devices found in /sys/class/infiniband/.\n\
-             Ensure RDMA drivers are loaded (mlx5_ib, rxe, etc.)."
+             Ensure an RDMA driver is loaded and a device is present."
         );
         process::exit(1);
     }

@@ -1,0 +1,32 @@
+[package]
+name = "remote-lookup-rdma-responder"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+default = []
+telemetry = []
+# Enables the real rdma-core (libibverbs/librdmacm) accept + registration path.
+# Off by default: the crate builds and unit-tests over the in-process mock seam
+# with no rdma-core libraries present. Mainline apps that wire the responder
+# enable this; CI/default-members never do.
+rdma = []
+
+[dependencies]
+component-framework.workspace = true
+component-core.workspace = true
+component-macros.workspace = true
+interfaces.workspace = true
+
+[build-dependencies]
+cc = "1"
+pkg-config = "0.3"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "connection_telemetry"
+harness = false

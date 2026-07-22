@@ -43,7 +43,7 @@ echo
 FOUND=0
 
 # Parse "rdma link show" output directly — format:
-#   link mlx5_0/1 state ACTIVE physical_state LINK_UP netdev ens3f0np0
+#   link <device>/<port> state ACTIVE physical_state LINK_UP netdev <netdev>
 while read -r _ devport _ state _ _ rest; do
     dev=$(echo "$devport" | cut -d'/' -f1)
     port=$(echo "$devport" | cut -d'/' -f2)

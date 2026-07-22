@@ -46,6 +46,12 @@ struct ComponentDecl {
 struct WiringEntry {
     target: String,
     source: String,
+    /// Which interface of the source component to wire. Defaults to the source's
+    /// first `provides` entry; specify explicitly when a source provides several
+    /// interfaces (e.g. a responder exposing both `IRemoteLookupRdmaResponder`
+    /// and `IRemoteLookupRdmaResponderAdmin`).
+    #[serde(default)]
+    interface: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -244,9 +250,10 @@ fn generate_composition(manifest: &ProfileManifest) -> String {
         let receptacle = parts[1];
         let source_comp = &entry.source;
 
-        // Find the interface provided by the source that matches
+        // Interface to wire: the entry's explicit choice, else the source's
+        // first provided interface.
         let source_decl = &manifest.components[source_comp];
-        let source_iface = &source_decl.provides[0]; // Use first provided interface
+        let source_iface = entry.interface.as_ref().unwrap_or(&source_decl.provides[0]);
         let iface_var = format!(
             "iface_{}_{}",
             source_comp,

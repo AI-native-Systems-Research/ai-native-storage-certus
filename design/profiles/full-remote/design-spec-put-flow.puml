@@ -51,6 +51,6 @@ note right of dm: ssd_offset set;\nentry now durable
 
 bgw -> dm: release_read(key)
 
-note over mt, ssd: Entry exists in BOTH DRAM and SSD.\nLookups served from DRAM (warm).\nIf evicted from DRAM -> served from SSD (cold).\nRemote peers can access via RemoteRequestHandler.
+note over mt, ssd: Entry exists in BOTH DRAM and SSD.\nLookups served from DRAM (warm).\nIf evicted from DRAM -> served from SSD (cold).\nRemote peers can access via RemoteLookupRdmaInitiator.
 
 @enduml
