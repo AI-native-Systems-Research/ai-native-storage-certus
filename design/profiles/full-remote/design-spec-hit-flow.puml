@@ -86,7 +86,7 @@ end
 
 == Incoming Remote Request (Peer -> This Node) ==
 
-peer -> peer: RemoteRequestHandler\n.handle_lookup(key)
+peer -> peer: RemoteLookupRdmaInitiator\n.handle_lookup(key)
 peer -> dm: lookup(key) + take_read
 dm --> peer: MemoryTier { ptr, size }
 note right of peer: LookupRef returned\n(entry pinned until release)

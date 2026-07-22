@@ -4,8 +4,12 @@
 //! performing component-specific initialization logic.
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use interfaces::{DispatcherConfig, IDispatchMap, IDispatcher, IGpuServices, IMemoryTier};
+use interfaces::{
+    DispatcherConfig, GossipConfig, IDispatchMap, IDispatcher, IGpuServices, IMemoryTier,
+    IRemoteLookup, LookupConfig,
+};
 
 use crate::config::StackConfig;
 
@@ -119,6 +123,71 @@ pub fn init_memory_tier(
     }
 
     Ok(())
+}
+
+// Only the full-remote profile's generated composition calls this hook.
+#[allow(dead_code)]
+pub fn init_remote_lookup(
+    iface: &Arc<dyn IRemoteLookup + Send + Sync>,
+    config: &StackConfig,
+) -> Result<(), String> {
+    // Create/join the zyre node, bring up the RDMA responder, and spawn the
+    // actor. The responder binds the RoCE device named by CERTUS_RDMA_BIND_IP,
+    // or auto-detects the first active RDMA device when it is unset (empty
+    // bind_ip). The actor CPU pin tracks the poller base when set.
+    //
+    // Timing and discovery are tunable from the environment because the built-in
+    // defaults (op_deadline 50ms, UDP-beacon discovery) are wrong for real RDMA
+    // (cold connects run long) and for cross-subnet clusters (beacon does not
+    // route). Unset variables keep the LookupConfig default.
+    let bind_ip = std::env::var("CERTUS_RDMA_BIND_IP").unwrap_or_default();
+    let mut cfg = LookupConfig {
+        bind_ip,
+        actor_cpu: config.poller_base_cpu,
+        ..Default::default()
+    };
+
+    if let Some(g) = env_str("CERTUS_RL_GROUP") {
+        cfg.group = g;
+    }
+    if let Some(ms) = env_parse::<u64>("CERTUS_RL_OP_DEADLINE_MS") {
+        cfg.op_deadline = Duration::from_millis(ms);
+    }
+    if let Some(ms) = env_parse::<u64>("CERTUS_RL_PHASE1_MS") {
+        cfg.phase1_timeout = Duration::from_millis(ms);
+    }
+    if let Some(pct) = env_parse::<u8>("CERTUS_RL_QUORUM_PCT") {
+        cfg.quorum_pct = pct;
+    }
+    // Gossip discovery for clusters that span subnets (UDP beacon does not
+    // reach): the hub node sets CERTUS_RL_GOSSIP_BIND (e.g. "tcp://*:9999"),
+    // every node sets CERTUS_RL_GOSSIP_CONNECT to the hub endpoint. Bind wins if
+    // both are set. Gossip mode also needs this node's own ZRE data mailbox.
+    if let Some(bind) = env_str("CERTUS_RL_GOSSIP_BIND") {
+        cfg.discovery = Some(GossipConfig::bind(bind));
+    } else if let Some(connect) = env_str("CERTUS_RL_GOSSIP_CONNECT") {
+        cfg.discovery = Some(GossipConfig::connect(connect));
+    }
+    if let Some(ep) = env_str("CERTUS_RL_NODE_ENDPOINT") {
+        cfg.node_endpoint = Some(ep);
+    }
+
+    iface
+        .initialize(cfg)
+        .map_err(|e| format!("RemoteLookup init failed: {e}"))
+}
+
+/// Read an environment variable, treating unset or empty as absent.
+fn env_str(key: &str) -> Option<String> {
+    match std::env::var(key) {
+        Ok(v) if !v.trim().is_empty() => Some(v.trim().to_string()),
+        _ => None,
+    }
+}
+
+/// Read and parse an environment variable, ignoring unset/empty/unparseable.
+fn env_parse<T: std::str::FromStr>(key: &str) -> Option<T> {
+    env_str(key).and_then(|v| v.parse::<T>().ok())
 }
 
 pub fn init_dispatcher(

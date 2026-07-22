@@ -146,11 +146,14 @@ fn ipc_cache_open(
         return Err("cudaIpcOpenMemHandle returned null".to_string());
     }
 
-    map.insert(*handle_bytes, IpcCacheEntry {
-        dev_ptr,
-        gpu_device_id,
-        refcount: 1,
-    });
+    map.insert(
+        *handle_bytes,
+        IpcCacheEntry {
+            dev_ptr,
+            gpu_device_id,
+            refcount: 1,
+        },
+    );
     Ok(dev_ptr)
 }
 
@@ -183,9 +186,7 @@ fn check_duplicate_keys(keys: &[u64]) -> Result<(), Status> {
 fn map_dispatcher_error(err: &DispatcherError) -> (ErrorCode, String) {
     match err {
         DispatcherError::NotInitialized(msg) => (ErrorCode::NotInitialized, msg.clone()),
-        DispatcherError::KeyNotFound(k) => {
-            (ErrorCode::KeyNotFound, format!("key not found: {k}"))
-        }
+        DispatcherError::KeyNotFound(k) => (ErrorCode::KeyNotFound, format!("key not found: {k}")),
         DispatcherError::AlreadyExists(k) => {
             (ErrorCode::AlreadyExists, format!("key already exists: {k}"))
         }
@@ -417,10 +418,13 @@ impl Dispatcher for DispatcherService {
                 .iter()
                 .map(|&i| {
                     let (key, ref ipc) = batch_entries[i];
-                    (key, IpcHandle {
-                        address: ipc.address,
-                        size: ipc.size,
-                    })
+                    (
+                        key,
+                        IpcHandle {
+                            address: ipc.address,
+                            size: ipc.size,
+                        },
+                    )
                 })
                 .collect();
 

@@ -46,7 +46,7 @@ rectangle "**Server Host**" as server_box #FAFAFA {
 
         rectangle "**Remote Cache Layer**" as remote_box #FEE2E2 {
             agent "RemoteLookup\n<<IRemoteLookup>>\nforward misses" as remote_lookup
-            agent "RemoteRequestHandler\n<<IRemoteRequestHandler>>\nserve RDMA requests" as remote_handler
+            agent "RemoteLookupRdmaInitiator\n<<IRemoteLookupRdmaInitiator>>\nserve RDMA requests" as remote_handler
         }
     }
 

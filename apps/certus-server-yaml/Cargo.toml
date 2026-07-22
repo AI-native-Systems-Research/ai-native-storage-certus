@@ -22,7 +22,9 @@ spdk-env = { workspace = true, optional = true }
 gpu-services = { workspace = true, features = ["gpu"] }
 logger.workspace = true
 remote-lookup.workspace = true
-remote-request-handler = { workspace = true, optional = true }
+remote-lookup-rdma-initiator = { workspace = true, optional = true }
+remote-lookup-rdma-responder = { workspace = true, optional = true }
+zyre = { workspace = true, optional = true }
 
 tonic = { version = "0.12", features = ["tls"] }
 prost = "0.13"
@@ -43,7 +45,10 @@ spdk-mem = ["dep:spdk-env"]
 filesys = ["dep:block-device-filesys", "spdk-mem"]
 kernel = ["dep:block-device-kernel", "spdk-mem"]
 p2p-native = ["dep:dispatcher-p2p", "spdk", "gpu-services/p2p", "dispatcher-p2p/spdk-backend"]
-rdma = ["dep:remote-request-handler"]
+# Enables the remote-lookup transport stack (full-remote profile). The
+# initiator/responder crates build in stub mode here; add their own `rdma`
+# features for real hardware RDMA. zyre pulls the native zyre libraries.
+rdma = ["dep:remote-lookup-rdma-initiator", "dep:remote-lookup-rdma-responder", "dep:zyre"]
 otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp"]
 rw-telemetry = ["dispatcher/rw-telemetry"]
 

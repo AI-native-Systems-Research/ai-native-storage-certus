@@ -133,7 +133,7 @@ components/
 ├── extent-manager/          # Disk space allocator (IExtentManager)
 ├── eviction-policy-lru/     # LRU eviction policy (IEvictionPolicy)
 ├── remote-lookup/           # Remote cache lookups (IRemoteLookup)
-├── remote-request-handler/  # Remote request handling
+├── remote-lookup-rdma-initiator/  # Remote request handling
 ├── spdk-env/                # SPDK environment wrapper (ISPDKEnv)
 ├── spdk-sys/                # Raw FFI bindings to SPDK
 ├── gpu-services/            # CUDA operations (IGpuServices)

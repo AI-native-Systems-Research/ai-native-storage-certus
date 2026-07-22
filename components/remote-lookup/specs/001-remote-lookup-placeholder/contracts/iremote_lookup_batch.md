@@ -11,7 +11,7 @@
 ```rust
 fn batch_lookup(
     &self,
-    entries: &[(CacheKey, IpcHandle)],
+    entries: &[(CacheKey, u32)],
 ) -> Vec<Result<(), RemoteLookupError>>;
 ```
 
@@ -19,7 +19,7 @@ fn batch_lookup(
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `entries` | `&[(CacheKey, IpcHandle)]` | Slice of (key, destination) pairs to look up |
+| `entries` | `&[(CacheKey, u32)]` | Slice of `(key, size)` pairs — `size` is the expected value length in bytes (not an address); on success the key becomes resident in the local memory tier |
 
 ## Return Value
 
