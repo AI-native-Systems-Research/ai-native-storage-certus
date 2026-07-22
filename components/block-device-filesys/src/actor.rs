@@ -5,7 +5,7 @@
 //! On each `on_idle()` call it polls all connected client ingress channels
 //! for IO commands and harvests io_uring completions.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::os::unix::io::{AsRawFd, OwnedFd};
 use std::sync::Arc;
 use std::time::Instant;
@@ -28,6 +28,57 @@ pub struct ClientSession {
     pub id: u64,
     pub ingress_rx: Receiver<Command>,
     pub callback_tx: Sender<Completion>,
+    /// Completions that couldn't be delivered because the client's callback
+    /// ring was full. Retried by [`Self::flush_pending`] each poll cycle.
+    ///
+    /// This makes completion delivery non-blocking: the single-threaded actor
+    /// must never block sending to one client, or a slow/stalled client would
+    /// head-of-line-block completion delivery to every other client on the
+    /// drive (a whole-drive deadlock). Bounded in practice by the client's
+    /// outstanding operations.
+    pub pending: VecDeque<Completion>,
+}
+
+impl ClientSession {
+    /// Create a session with an empty backlog.
+    pub fn new(
+        id: u64,
+        ingress_rx: Receiver<Command>,
+        callback_tx: Sender<Completion>,
+    ) -> Self {
+        Self {
+            id,
+            ingress_rx,
+            callback_tx,
+            pending: VecDeque::new(),
+        }
+    }
+
+    /// Deliver a completion without ever blocking the actor. Fast path is a
+    /// single `try_send`; on a full ring (or an existing backlog) the completion
+    /// is buffered in FIFO order and retried by [`Self::flush_pending`].
+    fn deliver(&mut self, completion: Completion) {
+        if self.pending.is_empty() && self.callback_tx.try_send(completion.clone()).is_ok() {
+            return;
+        }
+        self.pending.push_back(completion);
+    }
+
+    /// Retry delivering buffered completions, oldest first, stopping at the
+    /// first that still can't be sent (ring full) to preserve ordering.
+    /// Returns true if any were delivered.
+    fn flush_pending(&mut self) -> bool {
+        let mut delivered = false;
+        while let Some(front) = self.pending.front() {
+            if self.callback_tx.try_send(front.clone()).is_ok() {
+                self.pending.pop_front();
+                delivered = true;
+            } else {
+                break;
+            }
+        }
+        delivered
+    }
 }
 
 /// Control messages sent to the actor's MPSC channel.
@@ -783,17 +834,28 @@ impl FilesysHandler {
         }
     }
 
-    fn send_completion(&self, client_id: u64, completion: Completion) {
-        if let Some(session) = self.clients.get(&client_id) {
-            if session.callback_tx.send(completion).is_err() {
-                if let Some(ref log) = self.logger {
-                    log.warn(&format!("client {client_id} callback channel disconnected"));
-                }
-            }
+    /// Deliver a completion to a client without blocking the actor thread.
+    ///
+    /// A blocking send here would head-of-line-block the single-threaded actor
+    /// on one slow/stalled client, freezing completion delivery for every other
+    /// client on the drive (a whole-drive deadlock). Delivery is therefore
+    /// non-blocking: [`ClientSession::deliver`] buffers on a full ring and
+    /// [`Self::poll_clients`] drains the backlog as ring space frees.
+    fn send_completion(&mut self, client_id: u64, completion: Completion) {
+        if let Some(session) = self.clients.get_mut(&client_id) {
+            session.deliver(completion);
         }
     }
 
     fn poll_clients(&mut self) {
+        // First, retry any completions buffered when a client's callback ring
+        // was full. Non-blocking delivery (see ClientSession::deliver) means a
+        // slow client can't head-of-line-block the actor for the others; its
+        // completions drain here as space frees.
+        for session in self.clients.values_mut() {
+            session.flush_pending();
+        }
+
         let client_ids: Vec<u64> = self.clients.keys().copied().collect();
         for client_id in client_ids {
             loop {
