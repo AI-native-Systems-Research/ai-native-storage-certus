@@ -107,7 +107,76 @@ struct DataDrive {
     block_dev_iface: Arc<dyn IBlockDevice + Send + Sync>,
     _extent_mgr_component: Arc<dyn component_core::IUnknown + Send + Sync>,
     extent_mgr: Arc<dyn IExtentManager + Send + Sync>,
-    cached_channels: Option<ClientChannels>,
+    channel_pool: ChannelPool,
+}
+
+/// A pool of per-drive client channels for the read pipeline.
+///
+/// Each [`ClientChannels`] is an SPSC pair (single producer / single consumer)
+/// and must be used by exactly one thread at a time. `batch_lookup` and the
+/// prefetch path run concurrently on separate `spawn_blocking` threads, so a
+/// single shared channel would let one thread's completions be dequeued by
+/// another (completion theft → the victim waits on `completion_rx` forever).
+/// Each concurrent reader therefore checks out its own channel; channels are
+/// reused across checkouts and the pool grows on demand up to peak concurrency.
+struct ChannelPool {
+    block_dev: Arc<dyn IBlockDevice + Send + Sync>,
+    free: Mutex<Vec<ClientChannels>>,
+}
+
+impl ChannelPool {
+    fn new(block_dev: Arc<dyn IBlockDevice + Send + Sync>) -> Self {
+        Self {
+            block_dev,
+            free: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Check out an exclusive channel, connecting a fresh one if the pool is
+    /// empty. The returned lease returns the channel to the pool on drop.
+    fn checkout(&self) -> Result<ChannelLease<'_>, DispatcherError> {
+        let reused = self.free.lock().unwrap_or_else(|e| e.into_inner()).pop();
+        let channels = match reused {
+            Some(ch) => ch,
+            None => self.block_dev.connect_client().map_err(|e| {
+                DispatcherError::IoError(format!("channel pool connect_client failed: {e}"))
+            })?,
+        };
+        // Discard any late completions left by a prior user that errored out, so
+        // the next pipeline starts from a clean completion stream (tags from an
+        // old op must never be matched against a new op's segments).
+        while channels.completion_rx.try_recv().is_ok() {}
+        Ok(ChannelLease {
+            pool: self,
+            channels: Some(channels),
+        })
+    }
+}
+
+/// RAII guard for a checked-out [`ClientChannels`]; returns it to the pool on drop.
+struct ChannelLease<'a> {
+    pool: &'a ChannelPool,
+    channels: Option<ClientChannels>,
+}
+
+impl ChannelLease<'_> {
+    fn channels(&self) -> &ClientChannels {
+        self.channels
+            .as_ref()
+            .expect("channel lease used after channel taken")
+    }
+}
+
+impl Drop for ChannelLease<'_> {
+    fn drop(&mut self) {
+        if let Some(ch) = self.channels.take() {
+            self.pool
+                .free
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(ch);
+        }
+    }
 }
 
 fn format_bytes(bytes: usize) -> String {
@@ -567,16 +636,10 @@ impl DispatcherComponent {
         let start_lba = offset / block_size as u64;
         let block_dev = Arc::clone(&drive.block_dev_iface);
 
-        // Use cached channels if available, otherwise create new ones.
-        let channels = match &drive.cached_channels {
-            Some(ch) => ch,
-            None => {
-                drop(drives);
-                return Err(DispatcherError::IoError(
-                    "no cached channels for drive".into(),
-                ));
-            }
-        };
+        // Check out an exclusive channel for this read. A single shared SPSC
+        // channel across concurrent readers lets one thread dequeue another's
+        // completions (completion theft → permanent hang); see ChannelPool.
+        let lease = drive.channel_pool.checkout()?;
 
         // Zero-copy pipelined reader: NVMe → memory-tier slot → GPU (no intermediate ring copy).
         // SAFETY: mem_ptr is a valid, CUDA-pinned, SPDK-registered memory-tier slot.
@@ -609,7 +672,7 @@ impl DispatcherComponent {
                 &*block_dev,
                 &**gpu,
                 &streams,
-                channels,
+                lease.channels(),
                 mem_ptr,
                 ipc_handle.address as *mut std::ffi::c_void,
                 start_lba,
@@ -618,6 +681,7 @@ impl DispatcherComponent {
                 16,
             )?;
         }
+        drop(lease);
         drop(drives);
 
         // Staged (uncached) serve: the DMA is done and the data was delivered to
@@ -685,15 +749,9 @@ impl DispatcherComponent {
         let block_size = drive.block_dev_iface.block_size();
         let start_lba = offset / block_size as u64;
         let block_dev = Arc::clone(&drive.block_dev_iface);
-        let channels = match &drive.cached_channels {
-            Some(ch) => ch,
-            None => {
-                drop(drives);
-                return Err(DispatcherError::IoError(
-                    "no cached channels for drive".into(),
-                ));
-            }
-        };
+        // Exclusive channel for this read (see ChannelPool: sharing one SPSC
+        // channel across concurrent readers causes completion theft).
+        let chan_lease = drive.channel_pool.checkout()?;
 
         // Device-correct streams (multi-GPU), falling back to the ring's streams.
         let chunk_size = {
@@ -723,7 +781,7 @@ impl DispatcherComponent {
                 &*block_dev,
                 &**gpu,
                 &streams,
-                channels,
+                chan_lease.channels(),
                 lease.ptr(),
                 ipc_addr as *mut std::ffi::c_void,
                 start_lba,
@@ -732,6 +790,7 @@ impl DispatcherComponent {
                 16,
             )
         };
+        drop(chan_lease); // return the channel to the pool
         drop(drives);
         drop(lease); // return the staging buffer; do NOT promote (stays BlockDevice)
         res
@@ -1463,7 +1522,7 @@ impl DispatcherComponent {
                 "dispatcher: data drive {i} initialized at {addr_str}{cpu_msg}"
             ));
 
-            let cached_channels = ibd.connect_client().ok();
+            let channel_pool = ChannelPool::new(Arc::clone(&ibd));
 
             drives.push(DataDrive {
                 _block_dev: block_dev_component,
@@ -1472,7 +1531,7 @@ impl DispatcherComponent {
                 _extent_mgr_component: extent_mgr
                     as Arc<dyn component_core::IUnknown + Send + Sync>,
                 extent_mgr: iem,
-                cached_channels,
+                channel_pool,
             });
         }
 
@@ -2753,10 +2812,7 @@ impl IDispatcher for DispatcherComponent {
                 }
 
                 let drive = &drives[drive_idx];
-                let channels = match &drive.cached_channels {
-                    Some(ch) => ch,
-                    None => continue,
-                };
+                let channel_pool = &drive.channel_pool;
                 let block_dev = Arc::clone(&drive.block_dev_iface);
                 let dm = &dm;
                 let mt = &mt;
@@ -2764,6 +2820,14 @@ impl IDispatcher for DispatcherComponent {
                 let logger = &logger;
 
                 s.spawn(move || {
+                    // Exclusive channel for this prefetch thread. This runs
+                    // concurrently with batch_lookup on the same drive, so it
+                    // must not share one SPSC channel (see ChannelPool).
+                    let chan_lease = match channel_pool.checkout() {
+                        Ok(l) => l,
+                        Err(_) => return,
+                    };
+                    let channels = chan_lease.channels();
                     for &ci in entry_indices {
                         let entry = &cold[ci];
                         let block_size = block_dev.block_size() as u64;
