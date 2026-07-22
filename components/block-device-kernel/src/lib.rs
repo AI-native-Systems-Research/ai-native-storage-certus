@@ -239,11 +239,7 @@ impl IBlockDevice for BlockDeviceKernelComponent {
             NvmeBlockError::ClientDisconnected("failed to create callback channel".into())
         })?;
 
-        let session = actor::ClientSession {
-            id: client_id,
-            ingress_rx,
-            callback_tx,
-        };
+        let session = actor::ClientSession::new(client_id, ingress_rx, callback_tx);
 
         handle
             .send(ControlMessage::ConnectClient { session })
