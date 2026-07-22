@@ -147,9 +147,21 @@ pub fn init_remote_lookup(
         ..Default::default()
     };
 
-    if let Some(g) = env_str("CERTUS_RL_GROUP") {
-        cfg.group = g;
-    }
+    // Cluster membership: an explicit group (CLI --rl-group or CERTUS_RL_GROUP,
+    // resolved by clap in main) joins the named cluster; otherwise generate a
+    // process-unique group so this node forms its own single-node cluster and
+    // does not interfere with other users sharing the test fabric.
+    cfg.group = match &config.rl_group {
+        Some(g) => g.clone(),
+        None => {
+            let g = random_group();
+            eprintln!(
+                "remote-lookup: no --rl-group/CERTUS_RL_GROUP set; using isolated \
+                 group \"{g}\" (single-node). Set --rl-group to cluster nodes."
+            );
+            g
+        }
+    };
     if let Some(ms) = env_parse::<u64>("CERTUS_RL_OP_DEADLINE_MS") {
         cfg.op_deadline = Duration::from_millis(ms);
     }
@@ -175,6 +187,19 @@ pub fn init_remote_lookup(
     iface
         .initialize(cfg)
         .map_err(|e| format!("RemoteLookup init failed: {e}"))
+}
+
+/// Generate a process-unique zyre group so an unconfigured node forms its own
+/// single-node cluster instead of colliding with other users' nodes on a shared
+/// test fabric. Uses PID + wall-clock nanoseconds — no extra crate dependency.
+fn random_group() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let pid = std::process::id();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("remote_lookup_{pid:x}_{nanos:x}")
 }
 
 /// Read an environment variable, treating unset or empty as absent.
