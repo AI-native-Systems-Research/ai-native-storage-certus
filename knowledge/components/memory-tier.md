@@ -2,7 +2,8 @@
 
 **Crate**: `memory-tier`
 **Path**: `components/memory-tier/`
-**Version**: 0.2.0
+**Version**: 0.3.0
+**Features**: `spdk` (SPDK allocation path), `telemetry` (contention/eviction counters)
 
 ## Description
 
@@ -44,6 +45,7 @@ define_interface! {
         fn pool_info(&self) -> Option<(*mut u8, usize)>;
         fn is_dma_capable(&self) -> bool;
         fn clear(&self) -> Result<usize, MemoryTierError>;
+        fn telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot;
     }
 }
 ```

@@ -6,14 +6,9 @@
 
 ## Description
 
-In-memory dispatch map that tracks where each extent's data currently lives — either in a DMA staging buffer (awaiting writeback to the block device), in the DRAM memory-tier pool, or at a committed byte offset on the block device.
+In-memory dispatch map that tracks where each extent's data currently lives — either in the DRAM memory-tier pool or at a committed byte offset on the block device (SSD). Implements readers-writer reference counting with blocking (`Condvar`) semantics and 2-second timeout. Delegates eviction ordering to an `IEvictionPolicy` receptacle.
 
-Implements readers-writer reference counting with blocking (`Condvar`) semantics:
-- `take_read` blocks until no writer is active
-- `take_write` blocks until no readers or writers are active
-- 100ms timeout returns `DispatchMapError::Timeout`
-
-On `initialize`, recovers all committed extents from the bound `IExtentManager` into the map. Delegates eviction ordering to an `IEvictionPolicy` receptacle.
+On `initialize`, recovers all committed extents from the bound `IExtentManager` into the map (if extent_manager is connected).
 
 ## Component Definition
 
@@ -34,9 +29,7 @@ DispatchMapComponent {
 ```rust
 define_interface! {
     pub IDispatchMap {
-        fn set_dma_alloc(&self, alloc: DmaAllocFn);
         fn initialize(&self) -> Result<(), DispatchMapError>;
-        fn create_staging(&self, key: CacheKey, size: u32) -> Result<Arc<DmaBuffer>, DispatchMapError>;
         fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError>;
         fn convert_to_storage(&self, key: CacheKey, offset: u64) -> Result<(), DispatchMapError>;
         fn take_read(&self, key: CacheKey) -> Result<(), DispatchMapError>;
@@ -50,7 +43,9 @@ define_interface! {
         fn oldest_keys(&self, n: usize) -> Vec<CacheKey>;
         fn create_memory_tier_entry(&self, key: CacheKey, pointer: *mut u8, size: u32) -> Result<(), DispatchMapError>;
         fn convert_memory_tier_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError>;
+        fn promote_block_to_memory_tier(&self, key: CacheKey, pointer: *mut u8, size: u32) -> Result<(), DispatchMapError>;
         fn is_evictable(&self, key: CacheKey) -> bool;
+        fn try_evict_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError>;
         fn recover_extent(&self, key: CacheKey, offset: u64, size_blocks: u32) -> Result<(), DispatchMapError>;
     }
 }
@@ -68,8 +63,8 @@ The following invariants are formally proved with Creusot (see `components/dispa
 | P4 | downgrade-requires-write | `downgrade_reference` fails without active write ref |
 | P5 | downgrade-conservation | downgrade preserves total ref count (write+read constant) |
 | P6 | remove-zero-refs | `remove` fails if any read or write references are active |
-| P7 | create-no-duplicates | `create_staging` / `create_memory_tier_entry` reject existing keys |
-| P8 | size-nonzero | `create_staging` / `create_memory_tier_entry` reject size == 0 |
+| P7 | create-no-duplicates | `create_memory_tier_entry` rejects existing keys |
+| P8 | size-nonzero | `create_memory_tier_entry` rejects size == 0 |
 | P9 | lookup-increments-read | successful lookup increments read_ref by exactly 1 |
 | P10 | convert-requires-ssd-offset | `convert_memory_tier_to_block` requires ssd_offset present |
 
@@ -80,11 +75,17 @@ Total: 10 properties, 24 verification conditions discharged by SMT solvers.
 | Name | Interface | Required | Purpose |
 |------|-----------|----------|---------|
 | `logger` | `ILogger` | No | Optional logging |
-| `extent_manager` | `IExtentManager` | Yes | Source of committed extents for recovery |
+| `extent_manager` | `IExtentManager` | No | Source of committed extents for recovery; starts empty if unbound |
 | `eviction_policy` | `IEvictionPolicy` | Yes | LRU ordering for eviction decisions |
 
 ## Key Types
 
 - `CacheKey = u64`
-- `LookupResult` — `NotExist`, `MismatchSize`, `Staging { buffer: Arc<DmaBuffer> }`, `BlockDevice { offset: u64 }`, `MemoryTier { pointer: *mut u8, size: u32 }`
+- `LookupResult` — `NotExist`, `MismatchSize`, `BlockDevice { offset: u64 }`, `MemoryTier { pointer: *mut u8, size: u32 }`
 - `DispatchMapError` — `KeyNotFound`, `AlreadyExists`, `ActiveReferences`, `Timeout`, `AllocationFailed`, `InvalidSize`, `NotInitialized`, `RefCountUnderflow`, `RefCountOverflow`, `NoWriteReference`, `InvalidState`
+
+## Key Design Decisions
+
+- **Two-tier location model**: `Location::BlockDevice { offset }` or `Location::MemoryTier { pointer, size, ssd_offset }`. The `ssd_offset` field tracks whether write-through to SSD completed (prerequisite for eviction).
+- **Atomic eviction**: `try_evict_to_block` checks evictability and transitions under single lock hold (no TOCTOU).
+- **Entry lifecycle**: `create_memory_tier_entry` → `convert_to_storage` (marks SSD offset) → `convert_memory_tier_to_block` (flips to BlockDevice). Reverse: `promote_block_to_memory_tier`.

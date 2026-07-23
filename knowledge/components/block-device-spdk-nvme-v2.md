@@ -42,6 +42,7 @@ define_interface! {
         fn numa_node(&self) -> i32;
         fn nvme_version(&self) -> String;
         fn telemetry(&self) -> Result<TelemetrySnapshot, NvmeBlockError>;
+        fn read_write_stats(&self) -> ReadWriteStats;
     }
 }
 
