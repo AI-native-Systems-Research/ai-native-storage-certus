@@ -3,7 +3,7 @@
 **Crate**: `gpu-services`
 **Path**: `components/gpu-services/`
 **Version**: 0.1.0
-**Features**: `gpu` (CUDA runtime FFI), `spdk` (DMA copy methods and `prepare_memory_for_spdk`)
+**Features**: `gpu` (CUDA runtime FFI), `spdk` (DMA copy methods and `prepare_memory_for_spdk`), `p2p` (GDRCopy BAR1 P2P DMA)
 
 ## Description
 
@@ -48,6 +48,8 @@ define_interface! {
         fn destroy_stream(&self, stream: GpuStream) -> Result<(), String>;
         fn stream_query(&self, stream: GpuStream) -> Result<bool, String>;
         fn stream_synchronize(&self, stream: GpuStream) -> Result<(), String>;
+        fn set_device(&self, device: i32) -> Result<(), String>;
+        fn device_of_ptr(&self, ptr: *const c_void) -> Result<i32, String>;
 
         // spdk feature methods:
         fn dma_copy_to_host(&self, src: *const c_void, dst: &DmaBuffer, size: usize) -> Result<(), String>;
