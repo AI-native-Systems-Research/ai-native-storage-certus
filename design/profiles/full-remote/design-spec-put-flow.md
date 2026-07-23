@@ -4,7 +4,7 @@
 
 The put flow in the `full-remote` profile is identical to the `full` profile. Populate operations are **local-only** — data is not propagated to peer nodes on write. Remote nodes discover entries only when a peer issues a remote lookup.
 
-The put flow moves a GPU tensor (cache block) from client GPU memory into a DRAM memory-tier pool, then asynchronously persists it to SSD via write-through. The entry is immediately available for lookups from DRAM (both local and from remote peers via RemoteLookupRdmaInitiator).
+The put flow moves a GPU tensor (cache block) from client GPU memory into a DRAM memory-tier pool, then asynchronously persists it to SSD via write-through. The entry is immediately available for local lookups from DRAM, and for peers that later query its key — when a peer queries, this node (the data-holder) RDMA-writes the value out via its RemoteLookupRdmaInitiator.
 
 ## Assumptions and Invariants
 
@@ -24,7 +24,7 @@ The put flow moves a GPU tensor (cache block) from client GPU memory into a DRAM
 
 4. **GPU → DRAM DMA.** `cudaMemcpy` (D2H) from the client's GPU memory into the memory-tier slot.
 
-5. **Dispatch-map registration.** The entry is atomically registered as a MemoryTier entry, acquiring a write reference. The entry is now visible to local lookups AND incoming remote requests via RemoteLookupRdmaInitiator.
+5. **Dispatch-map registration.** The entry is atomically registered as a MemoryTier entry, acquiring a write reference. The entry is now visible to local lookups AND resolvable when a peer queries its key (served by the RemoteLookupRdmaInitiator push path).
 
 6. **Client receives acknowledgement.** The gRPC response is returned.
 
@@ -46,9 +46,9 @@ Same as `full` profile:
 
 Once step 5 completes (dispatch-map registration), the entry is visible to:
 - Local lookups via gRPC
-- Remote lookups from peer nodes via RemoteLookupRdmaInitiator
+- Peers that query the key: on receiving a `KeyQuery`, this node resolves the value in its memory-tier and RDMA-writes it out via the RemoteLookupRdmaInitiator
 
-The RemoteLookupRdmaInitiator resolves keys through the dispatcher, so any entry in the dispatch-map (MemoryTier or BlockDevice state) is accessible to peers.
+Any entry resolvable in the local memory-tier (whether MemoryTier or promoted from BlockDevice state) can be served to a querying peer. Populate itself does **not** notify peers — discovery is pull-driven by peer queries.
 
 ## Duplicate Key Handling
 
@@ -56,9 +56,9 @@ Same as `full`: AlreadyExists returned. Client must `remove` before re-populatin
 
 ## Eviction
 
-- **DRAM eviction:** LRU-based. Entries pinned by remote LookupRefs (from RemoteLookupRdmaInitiator) are not evictable until `release_lookup` is called.
-- **SSD eviction:** Threshold-based background evictor. Entries removed from SSD are no longer visible to remote peers.
+- **DRAM eviction:** LRU-based. Serving a peer uses one-sided RDMA WRITE out of the source entry and does not pin it, so remote traffic does not block eviction.
+- **SSD eviction:** Threshold-based background evictor. Entries removed from both DRAM and SSD can no longer be served to querying peers.
 
 ## Crash Recovery
 
-Same as `full` profile. On restart, dispatch-map rebuilt from finalized extents. Remote peers will get KeyNotFound for entries that were DRAM-only (not yet written through). Cluster membership must be re-established via `join_cluster`.
+Same as `full` profile. On restart, dispatch-map rebuilt from finalized extents. Querying peers get no reply (NotFound) for keys that were DRAM-only (not yet written through). Cluster membership re-establishes automatically via Zyre discovery once the node rejoins the mesh.
