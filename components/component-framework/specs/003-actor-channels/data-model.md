@@ -19,8 +19,11 @@ An `Actor<M>` wraps a component that owns a dedicated thread and processes messa
 **State transitions**:
 - `Idle` → `Running`: via `activate()` — spawns the thread, starts message loop
 - `Running` → `Idle`: via `deactivate()` — sets shutdown flag, closes inbound channel sender, joins thread
+- `Running` → `Idle` (signal only): via `signal_stop()` — closes the inbound channel without joining the thread; the actor thread exits on its next loop iteration; the caller still joins later via `deactivate()`/drop
 - `Idle` → `Idle` (deactivate): returns `ActorError::NotActive`
 - `Running` → `Running` (activate): returns `ActorError::AlreadyActive`
+
+**Message-loop idle behavior**: when the inbound channel is empty, the loop invokes the handler's `on_idle()` hook (default no-op). After a bounded run of consecutive iterations where neither a message nor `on_idle()` reported useful work, the loop registers the receiver for an unpark notification and parks the thread with a timeout, to avoid busy-spinning while still waking promptly on the next enqueue.
 
 ### ActorHandle
 

@@ -18,7 +18,7 @@ for compact ISO 8601 with millisecond precision. Lightweight for our use
 ## R2: ANSI Colorization Approach
 
 **Decision**: Hand-rolled ANSI escape codes (no external crate).
-**Rationale**: Only 4 colors needed (red=error, yellow=warn, green=info,
+**Rationale**: Only 4 colors needed (red=error, orange=warn, green=info,
 cyan=debug). A small helper function with `\x1b[31m` etc. is simpler
 than adding a dependency. TTY detection uses `libc::isatty(2)` (stderr fd).
 **Alternatives considered**:
@@ -56,14 +56,14 @@ ILogger has no trace method.
 
 ## R5: Configuration Mechanism
 
-**Decision**: Construction-time configuration. `LoggerComponentV1::new()`
+**Decision**: Construction-time configuration. `LoggerComponent::new_default()`
 creates a console logger (default). A separate constructor or builder
 method creates a file logger. Configuration is immutable after
 construction.
 **Rationale**: Matches the component-framework pattern where components
 are configured at creation and then used via their interface. Runtime
 switching between console/file adds complexity with no clear use case.
-The `define_component!` macro generates `new()` returning `Arc<Self>` —
+The `define_component!` macro generates `new_default()` returning `Arc<Self>` —
 we add a `new_with_file(path)` associated function for file mode.
 **Alternatives considered**:
 - Runtime-switchable output — adds interior mutability complexity for

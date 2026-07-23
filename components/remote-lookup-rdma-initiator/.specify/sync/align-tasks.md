@@ -1,0 +1,80 @@
+# Spec Sync — Align Tasks
+
+Generated: 2026-07-22T23:21:48Z
+Component: remote-lookup-rdma-initiator
+Source: `.specify/sync/drift-report.md` (2026-07-22), applied via AUTO-BACKFILL sync-apply.
+
+Note: spec-001's 23 "Not Implemented" requirements (FR-001..FR-017, SC-001..SC-006)
+are **not** listed here — they describe the passive-responder design that spec-001
+itself marks superseded-by-design; there is nothing to align, the role was replaced
+wholesale by spec-002. See spec-001's banner and the drift report's
+"Not Implemented (obsolete by design)" table for the full list.
+
+---
+
+## Task: Align 002-rdma-push-initiator/SC-004 — stale benchmark header comment
+
+**Spec Requirement**: SC-004 (telemetry overhead)
+
+**Current Code**: `benches/push_telemetry.rs:1-18`'s header doc comment still states
+the pre-revision pass/fail bar verbatim: "SC-004 requires that enabling the
+telemetry feature adds less than 5% overhead to push versus the disabled build
+... SC-004 holds when every push/* case is within +5%."
+
+**Required Change**: Update the header comment to match the spec's 2026-07-15
+revision — SC-004 is now "small fixed absolute cost / ZST-when-off", not a literal
+<5%-of-mock gate (a straight <5% read against the ~200–700ns mock push cannot hold
+by construction; measured on/off deltas were +8–13% at push/16..64). Reword the
+comment so a future contributor running the benchmark doesn't chase a bar the spec
+itself says is unmeetable against the mock baseline.
+
+**Files to Modify**: `components/remote-lookup-rdma-initiator/benches/push_telemetry.rs`
+(lines 1-18, doc comment only — no benchmark logic changes)
+
+**Estimated Effort**: small
+
+**Severity**: minor (doc-comment only; benchmark mechanics and shipped behavior
+already match the spec — only the stated pass/fail bar in the comment is outdated)
+
+**Note**: This file is Rust source, not Markdown, so it is out of scope for this
+spec-sync-apply pass (hard rule: edit only Markdown under `specs/**` and
+`.specify/sync/**`). Tracked here as a follow-up code change.
+
+### Acceptance Criteria
+- [ ] `benches/push_telemetry.rs` header comment states the "fixed absolute cost /
+      ZST-when-off" criterion instead of the literal "<5% vs disabled" framing
+- [ ] Comment cross-references `specs/002-rdma-push-initiator/spec.md` SC-004's
+      2026-07-15 measurement note
+
+---
+
+## Task: DEFERRED — spec note for `tests/mr_registration_bench.rs` investigation
+
+**Spec Requirement**: None currently (unspecced code, drift-report "Unspecced Code"
+table, item 2)
+
+**Current Code**: `components/remote-lookup-rdma-initiator/tests/mr_registration_bench.rs`
+(248 lines) — an `#[ignore]`d, `--features rdma`-gated hardware benchmark sweeping
+`ibv_reg_mr` cost by pool size/page type, to inform whether FR-004's per-connection
+pool MR re-registration should become a single shared MR. Its own header already
+frames this as an open design trade-off.
+
+**Required Change**: Unresolved. Two options were identified by the drift report:
+(a) add a line to `002-rdma-push-initiator/spec.md`'s Known Limitations section
+referencing this investigation as informing FR-004, or (b) leave it as internal
+tooling with a comment noting it is deliberately unspecced research, not a
+requirement. This task's directions did not specify which; **deferred** rather
+than guessed.
+
+**Files to Modify**: possibly `specs/002-rdma-push-initiator/spec.md` (Known
+Limitations section) — no source file changes implied either way.
+
+**Estimated Effort**: small
+
+**Severity**: low (informational; no drift, no incorrect spec text — purely a
+"should this be mentioned" documentation question)
+
+### Acceptance Criteria
+- [ ] Human decision: does `tests/mr_registration_bench.rs` warrant a Known
+      Limitations line in spec-002, or is it fine to remain unspecced research?
+- [ ] If yes, add one bullet under spec-002 "Known Limitations / Follow-ups"

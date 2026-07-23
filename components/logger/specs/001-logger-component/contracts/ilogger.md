@@ -70,7 +70,7 @@ Log a message at Debug level.
 ## Component Integration
 
 ```rust
-// Query ILogger from LoggerComponentV1
+// Query ILogger from LoggerComponent
 let logger = query_interface!(component, ILogger).unwrap();
 logger.info("system ready");
 

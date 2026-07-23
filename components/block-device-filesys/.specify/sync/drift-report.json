@@ -1,56 +1,100 @@
 {
-  "generated": "2026-06-18T00:00:00Z",
+  "generated": "2026-07-22T21:28:32Z",
   "project": "block-device-filesys",
   "summary": {
     "specs_analyzed": 1,
-    "requirements_checked": 18,
-    "aligned": 16,
-    "drifted": 1,
-    "not_implemented": 1,
-    "unspecced_features": 1
+    "requirements_checked": 26,
+    "aligned": 18,
+    "drifted": 5,
+    "not_implemented": 3,
+    "unspecced_features": 3
   },
   "specs": [
     {
       "id": "001-block-device-filesys",
       "title": "Block Device Filesys Component",
       "aligned": [
-        "FR-001",
-        "FR-002",
-        "FR-003",
-        "FR-005",
-        "FR-006",
-        "FR-007",
-        "FR-008",
-        "FR-009",
-        "FR-010",
-        "FR-011",
-        "FR-012",
-        "FR-013",
-        "FR-014",
-        "FR-016",
-        "FR-017",
-        "FR-018"
+        "FR-001: Implements IBlockDevice — src/lib.rs:224 `impl IBlockDevice for BlockDeviceFilesysComponent`.",
+        "FR-003: Uses define_component! macro — src/lib.rs:54-70. (Component consumes pre-existing define_interface!-defined traits IBlockDevice/IBlockDeviceAdmin from the interfaces crate rather than defining new ones itself, which satisfies the intent.)",
+        "FR-004: create()/initialize()/shutdown() are public convenience methods mirroring IBlockDeviceAdmin; config module (DeviceConfig, open_or_create_backing_file) is public — src/lib.rs:82-203, src/config.rs.",
+        "FR-005: Uses a regular file on a Linux filesystem via std::fs::OpenOptions — src/config.rs:114-197.",
+        "FR-007: Sync read/write via pread/pwrite with O_DIRECT|O_SYNC and fdatasync fallback to buffered IO on EINVAL — src/actor.rs:265-385 (handle_read_sync/handle_write_sync), src/config.rs:171-197 (try_open_direct).",
+        "FR-008: Async read/write via io_uring with IO_LINK write+fdatasync chaining, timeout/OpHandle tracking, and sync fallback when io_uring unavailable — src/actor.rs:387-634.",
+        "FR-009: WriteZeros writes zero-filled blocks with fdatasync — src/actor.rs:636-709.",
+        "FR-010: BatchSubmit executes ops sequentially via recursive process_command call — src/actor.rs:237-241.",
+        "FR-011: AbortOp issues io_uring AsyncCancel and removes the op from inflight tracking — src/actor.rs:711-724.",
+        "FR-012: NsProbe returns a single namespace with configured geometry — src/actor.rs:726-738.",
+        "FR-013: Actor model (dedicated thread, Actor/ActorHandler) running an io_uring event loop in on_idle() — src/actor.rs:876-908, src/lib.rs:168-172.",
+        "FR-014: Criterion benchmarks present for latency and throughput — benches/latency.rs, benches/throughput.rs, Cargo.toml:19-24.",
+        "FR-016: Backing file created via fallocate if absent, opened with size check if present; mismatch returns an error — src/config.rs:114-167.",
+        "FR-017: DmaBuffer byte slices accessed directly (as_slice/as_mut_slice) for all IO, no intermediate copies — src/actor.rs (throughout, e.g. 296-306, 345-354).",
+        "FR-018: Depends on io-uring crate 0.7 (tokio-rs/io-uring) — Cargo.toml:16.",
+        "SC-001: Read-after-write integrity verified for multiple patterns/block sizes with durable writes — tests/integration.rs (write_sync_read_sync_roundtrip, data_integrity_multi_block_patterns).",
+        "SC-004: Unit/integration tests use tempfile::tempdir() only, no hardware/root required — tests/integration.rs:34-51, src/config.rs tests, src/lib.rs tests.",
+        "SC-006: IBlockDevice trait fully implemented and compiler-enforced interchangeable with block-device-spdk-nvme consumers — src/lib.rs:224-343."
       ],
       "drifted": [
         {
-          "requirement": "FR-004",
-          "spec_text": "Component MUST NOT expose any public functions outside its interface definitions",
-          "actual": "pub mod config exposes DeviceConfig and open_or_create_backing_file publicly; pub use re-exports interface types",
-          "location": "src/lib.rs:27",
+          "requirement": "FR-002 (logging levels for queue-full and disconnection events)",
+          "spec_text": "Queue-full and disconnection events are logged at warn level.",
+          "actual": "Client disconnection is logged at debug level, not warn (`log.debug(&format!(\"actor: disconnecting client {client_id}\"))`). The two 'io_uring submission queue full' paths (async read and async write SQE push failure) do not call the logger at all — they only return an error Completion to the client. Only the io_uring-ring-creation-fallback and the fsync-SQE-push-failure paths actually use warn level.",
+          "location": "components/block-device-filesys/src/actor.rs:432-444 (read queue-full, no log call), src/actor.rs:548-567 (write queue-full, no log call), src/actor.rs:885-889 (disconnect logged at debug, not warn)",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "FR-006 (configurable block size, default 512 bytes)",
+          "spec_text": "Component MUST support configurable block size (default 512 bytes) and device capacity (number of blocks).",
+          "actual": "block_size is a required, always-explicit constructor parameter (`create(file_path, block_size, num_blocks)`); there is no default-value mechanism that applies 512 automatically. DeviceConfig::new only enforces a *minimum* of 512, not a default.",
+          "location": "components/block-device-filesys/src/lib.rs:82-91 (create signature has no default), src/config.rs:58-79 (validates minimum, not default)",
           "severity": "minor"
+        },
+        {
+          "requirement": "FR-015 (doc examples on create(), DeviceConfig, open_or_create_backing_file)",
+          "spec_text": "The create() constructor, DeviceConfig, and open_or_create_backing_file have doc examples.",
+          "actual": "open_or_create_backing_file has no doc example at all (prose only). create()'s doc example is present but fenced with ```ignore, so it is never compiled/run as a doctest, unlike DeviceConfig::new's example which is a real, runnable doctest. This also conflicts with the project-wide CLAUDE.md convention that public APIs require *runnable* doc examples.",
+          "location": "components/block-device-filesys/src/config.rs:106-114 (open_or_create_backing_file, no example), src/lib.rs:74-81 (create(), example marked ```ignore)",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "Edge Case: io_uring submission queue full",
+          "spec_text": "What happens when io_uring submission queue is full? The actor MUST back-pressure by waiting for completions before submitting new operations.",
+          "actual": "There is no backpressure/wait logic anywhere in the actor. On SQE push failure the actor immediately returns an error completion (`NvmeBlockError::NotInitialized(\"io_uring submission queue full\")`) to the client rather than waiting for completions and retrying the submission.",
+          "location": "components/block-device-filesys/src/actor.rs:430-444 (handle_read_async), src/actor.rs:546-561 (handle_write_async)",
+          "severity": "major"
+        },
+        {
+          "requirement": "Assumptions: telemetry feature gate behavior matches block-device-spdk-nvme",
+          "spec_text": "The `telemetry` feature gate behavior matches block-device-spdk-nvme (returns FeatureNotEnabled when not compiled in).",
+          "actual": "The FeatureNotEnabled behavior itself matches, but the telemetry *data* does not: every call site passes a hard-coded latency of 0 to `record_op(0, bytes)` (sync and async paths, and in harvest_completions), so min/max/mean_latency_ns in TelemetrySnapshot are always 0 regardless of real IO latency. The `InflightOp.start_ns` field is computed as `Instant::now().elapsed().as_nanos()` — elapsed() on a freshly-created Instant is ~0, and the field is never read when a completion is harvested, so no real per-op latency is ever measured. By contrast, block-device-spdk-nvme's telemetry measures real per-op latency via TSC timestamps (`tsc.ticks_to_ns(tsc.now() - start)` at components/block-device-spdk-nvme/src/actor.rs:613,636) and records it. This makes filesys telemetry latency figures meaningless while appearing valid.",
+          "location": "components/block-device-filesys/src/actor.rs:318-321,379-382,494-497,627-630 (record_op(0, ...) calls), src/actor.rs:101-104,462-466,585-589 (unused/buggy start_ns), src/actor.rs:773-776 (harvest_completions)",
+          "severity": "major"
         }
       ],
       "not_implemented": [
-        "FR-015"
+        "SC-002: '100 concurrent operations per second from a single client without data corruption' — no test or benchmark asserts this throughput/concurrency threshold; only functional correctness (not rate) is exercised in tests/integration.rs.",
+        "SC-003: 'IO latency for 4KB blocks ... under 1ms for synchronous operations' — no test or CI check asserts a latency bound; benches/latency.rs produces measurements but nothing enforces the <1ms criterion.",
+        "SC-005: 'Criterion benchmarks produce stable, reproducible measurements with coefficient of variation under 15%' — no automated check parses/enforces Criterion's CV output; this is left to manual inspection."
       ]
     }
   ],
   "unspecced": [
     {
-      "feature": "O_DIRECT + O_SYNC file open with tmpfs fallback",
-      "location": "src/config.rs:171-197",
+      "feature": "TelemetryStats latency/throughput tracking (min/max/mean latency, mean throughput, atomics-based counters)",
+      "location": "components/block-device-filesys/src/telemetry.rs:1-104",
+      "lines": 104,
+      "suggested_spec": "Add an FR describing the exact telemetry counters, units, and computation semantics (min/max/mean latency in ns, mean throughput in MB/s), and require that latency be measured from real op start/finish timestamps (not a placeholder value) — mirroring the block-device-spdk-nvme telemetry contract instead of only asserting feature-gate parity in Assumptions."
+    },
+    {
+      "feature": "O_DIRECT-unsupported fallback warning printed via eprintln! instead of the ILogger receptacle",
+      "location": "components/block-device-filesys/src/config.rs:171-197 (try_open_direct)",
       "lines": 27,
-      "suggested_spec": "Update FR-007/FR-008 to document O_DIRECT/O_SYNC strategy"
+      "suggested_spec": "Clarify in FR-002/FR-007 whether config-module functions (which have no access to the logger receptacle) are permitted to bypass ILogger via eprintln!, or whether the fallback warning must be threaded through to the actor/component so it goes through ILogger like other events."
+    },
+    {
+      "feature": "Non-blocking per-client completion delivery with FIFO backlog (ClientSession::deliver/flush_pending) to avoid head-of-line blocking across clients",
+      "location": "components/block-device-filesys/src/actor.rs:26-82,850-873",
+      "lines": 57,
+      "suggested_spec": "Add a requirement/edge-case entry describing multi-client completion delivery semantics: that a full callback channel for one client must not block completion delivery to other clients, and that buffered completions are retried in FIFO order each poll cycle."
     }
   ],
   "conflicts": []

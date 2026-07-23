@@ -1,0 +1,72 @@
+{
+  "generated": "2026-07-22T21:28:01Z",
+  "project": "spdk-sys",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 13,
+    "aligned": 13,
+    "drifted": 3,
+    "not_implemented": 0,
+    "unspecced_features": 2
+  },
+  "specs": [
+    {
+      "id": "001-spdk-sys",
+      "title": "spdk-sys",
+      "aligned": [
+        "FR-1: Env API bindings (spdk_env_opts_init, spdk_env_init, spdk_env_fini) — build.rs:165-167",
+        "FR-2: PCI enumeration/accessor bindings — build.rs:169-182",
+        "FR-3: NVMe probe/detach lifecycle bindings — build.rs:184-185",
+        "FR-4: NVMe controller ops (ns mgmt, qpair alloc, admin cmds) — build.rs:187-202",
+        "FR-5: NVMe I/O ops (read/write/write_zeroes/flush/completions) — build.rs:210-214",
+        "FR-6: DMA allocation bindings — build.rs:216-219",
+        "FR-7: Linker directives for SPDK/DPDK/system libs — build.rs:58-138",
+        "FR-8: Conditional ISA-L linking — build.rs:40-42,123-125",
+        "NFR-1: Clear build failure if SPDK missing — build.rs:13-19,21-28,33-39",
+        "NFR-2: Rebuild on wrapper.h/lib-dir change — build.rs:256-260",
+        "NFR-3: Layout tests disabled — build.rs:246",
+        "NFR-4: All SPDK libs use +whole-archive — build.rs:58-76,124",
+        "NFR-5: GCC internal include path detected — build.rs:142-153,160-162"
+      ],
+      "drifted": [
+        {
+          "requirement": "Implementation Notes (DPDK library count)",
+          "spec_text": "28 DPDK rte_* libraries are linked statically with +whole-archive.",
+          "actual": "The dpdk_libs array contains 30 entries, not 28.",
+          "location": "components/spdk-sys/build.rs:83-114; components/spdk-sys/README.md:33",
+          "severity": "low"
+        },
+        {
+          "requirement": "Dependencies table (system libs)",
+          "spec_text": "System libs: pthread, dl, numa, uuid, ssl, crypto, fuse3",
+          "actual": "Build also dynamically links libm (m), which is omitted from the spec's dependency table.",
+          "location": "components/spdk-sys/build.rs:134",
+          "severity": "low"
+        },
+        {
+          "requirement": "Success Criteria (sanity test coverage)",
+          "spec_text": "cargo test -p spdk-sys passes all sanity tests (type sizes, field access, function pointer existence).",
+          "actual": "tests/bindings_sanity.rs only covers spdk_env_opts, spdk_pci_addr, spdk_pci_id, spdk_pci_device and their functions. No NVMe types/functions from P1 FR-3/4/5 (spdk_nvme_ctrlr, spdk_nvme_ns, spdk_nvme_qpair, spdk_nvme_cpl, spdk_nvme_probe, spdk_nvme_ctrlr_alloc_io_qpair, etc.) are covered.",
+          "location": "components/spdk-sys/tests/bindings_sanity.rs:1-97",
+          "severity": "medium"
+        }
+      ],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "FFI types allowlisted but absent from the spec's Key Entities table: spdk_pci_driver, spdk_nvme_io_qpair_opts, spdk_nvme_cmd, spdk_nvme_format, spdk_nvme_ctrlr_list",
+      "location": "components/spdk-sys/build.rs",
+      "lines": 5,
+      "suggested_spec": "Add these 5 rows to the Key Entities table in spec.md; they already back in-scope FR-3/FR-4/FR-5 functionality."
+    },
+    {
+      "feature": "Constant/enum bindings via allowlist_var (SPDK_PCI_*, SPDK_NVME_TRANSPORT_*) — no FR covers exporting constants",
+      "location": "components/spdk-sys/build.rs:239-240",
+      "lines": 2,
+      "suggested_spec": "Add an FR (e.g. FR-9) covering generated constant/enum bindings needed by callers."
+    }
+  ],
+  "conflicts": []
+}

@@ -2,7 +2,9 @@
 
 **Feature Branch**: `002-remote-lookup-rdma`
 **Created**: 2026-07-12
-**Status**: Draft
+**Status**: Synced (2026-07-22) — implementation matches this spec (see
+`.specify/sync/drift-report.md`); two prior low-severity drift items (FR-023, FR-009) were
+backfilled into the text below on that date.
 **Supersedes**: `001-remote-lookup-placeholder` (placeholder implementation)
 **Input**: Refresh of the remote-lookup design against the two now-built RDMA components
 (`remote-lookup-rdma-initiator`, `remote-lookup-rdma-responder`). The remote-lookup
@@ -320,8 +322,13 @@ one-sided write into a reclaimed slot).
 - **FR-008** (client, success): On RDMA_STATUS(Success) for a key, the actor MUST publish the
   landing slot (per FR-006) and mark the key satisfied.
 - **FR-009** (client, failure): On RDMA_STATUS(UnableToConnect | KeyNoLongerAvailable) for a key,
-  the actor MUST return the key from in-progress to unsatisfied, eligible for retry, and MUST NOT
-  yet reclaim the landing slot if a late write could still be in flight (see FR-014).
+  the actor MUST return the key from in-progress to unsatisfied, eligible for retry. Per the wire
+  protocol's ordering & safety invariants (`contracts/wire-protocol.md`), a serving peer sends
+  RDMA_STATUS only after reaping its RDMA completions, and a non-success status means zero bytes
+  were written for that key — so the landing slot MAY be reclaimed immediately on receipt of any
+  RDMA_STATUS (success or failure) while the peer remains a live zyre member. The
+  teardown-before-reclaim gate of FR-014 (blocking for `DisconnectAck`) applies only to the
+  peer-departure path (no RDMA_STATUS was received at all), not to this RDMA_STATUS-received path.
 - **FR-010** (client, Phase 2): After the Phase-1 transition (quorum% of the group's peers
   replied, or Phase-1 timeout), the actor MUST re-scan the **cached** replies (no new SHOUT) and,
   for still-unsatisfied keys, whisper RDMA_REQUESTs to peers that reported the key on **disk**,
@@ -377,13 +384,15 @@ one-sided write into a reclaimed slot).
   `..Default::default()` so config growth never breaks the mainline.
 - **FR-023** (receptacles): The component MUST declare receptacles for `IZyre`, `IDispatchMap`,
   `IMemoryTier`, `IDispatcher` (US4 disk promotion — see FR-016), `IRemoteLookupRdmaInitiator`,
-  `IRemoteLookupRdmaResponder`, and `ILogger`.
+  `IRemoteLookupRdmaResponder`, `IRemoteLookupRdmaResponderAdmin` (lifecycle: bind/init/shutdown of
+  the responder — see FR-025), and `ILogger`.
 - **FR-024** (no direct RDMA): The component MUST NOT contain RDMA transport logic. Outbound
   writes go through `IRemoteLookupRdmaInitiator`; the inbound accept side and its teardown go
   through `IRemoteLookupRdmaResponder`.
-- **FR-025** (responder wiring & rkey): On startup the actor MUST initialize the responder (bind
-  IP set by mainline), read its bound `Endpoint` (to advertise) and its pool-wide `rkey` (to place
-  in RDMA_REQUESTs), and open its control channel to issue `Disconnect` and receive
+- **FR-025** (responder wiring & rkey): On startup the actor MUST initialize the responder via the
+  `responder_admin: IRemoteLookupRdmaResponderAdmin` receptacle (bind IP set by mainline), read its
+  bound `Endpoint` (to advertise) and its pool-wide `rkey` (to place in RDMA_REQUESTs), and open its
+  control channel (via `responder: IRemoteLookupRdmaResponder`) to issue `Disconnect` and receive
   `DisconnectAck`/`Connected`/errors. *(This assumes the responder registers the memory-tier pool
   and exposes its rkey — see Dependencies.)*
 - **FR-026** (single-flight): Concurrent `batch_lookup` operations requesting the same
@@ -401,6 +410,23 @@ one-sided write into a reclaimed slot).
   otherwise stall all zyre event, status, and teardown processing. It MUST hand these to an
   off-loop worker and continue polling; the worker returns each serve's per-key statuses to the
   poll loop, which owns the zyre node and whispers the RDMA_STATUS.
+- **FR-029** (out-of-interface lifecycle/test hooks): `RemoteLookupComponent` MAY expose a small
+  set of `pub fn`s outside `IRemoteLookup` for lifecycle control and test coordination that cannot
+  be expressed through the interface (which has no mutable-borrow or thread-join surface). These
+  are implementation-facing, not part of the `IRemoteLookup` contract, and MUST NOT be relied on by
+  other components except for actor teardown ordering:
+  - `peers_seen() -> usize` — the count of peers currently visible to the actor's zyre node (ENTER
+    minus EXIT). Used by tests as a discovery barrier before driving the protocol; not used in
+    production wiring.
+  - `signal_shutdown()` — signals the actor to stop polling **without** waiting for it to exit.
+    Idempotent and safe to call before `initialize`. Needed for two-phase multi-actor teardown: all
+    actors sharing a `zyre`/`czmq` context must stop polling before any one node is destroyed, or a
+    live actor's `try_recv` on a torn-down context trips a `zpoller` assertion. Used in production
+    wiring (e.g. `apps/certus-server`) when multiple zyre-backed components share a process.
+  - `shutdown()` — calls `signal_shutdown()`, then joins the actor thread, then joins the initiator
+    worker thread (in that order, so the worker's channel closes deterministically once the actor —
+    the sole sender — has exited). Idempotent and safe to call before `initialize`; also invoked
+    from `Drop`.
 
 ### Key Entities
 

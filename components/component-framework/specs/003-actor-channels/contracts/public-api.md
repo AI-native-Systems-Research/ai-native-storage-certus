@@ -29,6 +29,12 @@ pub trait ActorHandler<M: Send + 'static>: Send + 'static {
     /// Called once when the actor is shutting down (after the message loop exits).
     /// Default: no-op.
     fn on_stop(&mut self) {}
+
+    /// Called when the actor's inbound channel is empty. Override for actors
+    /// with background work (e.g., polling I/O) that must run even when no
+    /// messages are pending. Return `true` if useful work was done.
+    /// Default: no-op, returns `false`.
+    fn on_idle(&mut self) -> bool { false }
 }
 
 /// Handle to a running actor. Returned by `Actor::activate()`.
@@ -40,6 +46,11 @@ impl<M: Send + 'static> ActorHandle<M> {
 
     /// Try to send without blocking. Returns Err if channel is full.
     pub fn try_send(&self, msg: M) -> Result<(), ActorError>;
+
+    /// Signal the actor to stop by closing its channel, without joining the
+    /// thread. Use to stop multiple actors concurrently (signal all, then
+    /// join all via `deactivate` or by dropping the handle).
+    pub fn signal_stop(&mut self);
 
     /// Deactivate the actor: signal shutdown, join thread.
     pub fn deactivate(self) -> Result<(), ActorError>;

@@ -57,11 +57,11 @@ The crate has two Cargo features:
 
 ### User Story 5 - Remote Cache Lookups (Priority: P2)
 
-**As the** remote lookup component, **I want** interfaces for both outbound lookups and inbound request handling **so that** cache misses can be served from other Certus nodes in a cluster.
+**As the** remote lookup component, **I want** interfaces for outbound lookups plus a split RDMA push/accept pair **so that** cache misses can be served from other Certus nodes in a cluster.
 
 **Acceptance Criteria:**
-- `IRemoteLookup` provides `batch_lookup`, `join_cluster`, and `leave_cluster`.
-- `IRemoteRequestHandler` provides `handle_lookup`, `handle_check`, `handle_batch_lookup`, and `release_lookup` with zero-copy `LookupRef` semantics.
+- `IRemoteLookup` provides `initialize`, `batch_lookup`, `join_cluster`, and `leave_cluster`.
+- `IRemoteLookupRdmaInitiator` (outbound) RDMA-writes local values into a remote requester's memory; `IRemoteLookupRdmaResponder`/`IRemoteLookupRdmaResponderAdmin` (inbound) accept connections and expose the requester's landing-slot region and control channel. (Supersedes the earlier single `IRemoteRequestHandler` interface and its zero-copy `LookupRef`; see FR-013, FR-030, FR-031.)
 
 ### User Story 6 - Extent Management (Priority: P1)
 
@@ -70,6 +70,15 @@ The crate has two Cargo features:
 **Acceptance Criteria:**
 - `IExtentManager` provides `format`, `initialize`, `reserve_extent`, `get_extents`, `for_each_extent`, `remove_extent`, `checkpoint`, `get_instance_id`, `set_checkpoint_interval`, `used_bytes`, `capacity_bytes`, `set_metadata_base_lba`, `set_data_base_lba`, and `data_base_lba`.
 - `WriteHandle` implements publish/abort semantics with auto-abort on drop.
+
+### User Story 7 - Peer Discovery and Messaging (Priority: P2)
+
+**As the** remote lookup component (and any other component needing LAN peer discovery), **I want** a factory/handle interface pair over zyre **so that** I can discover cluster peers and exchange group/direct messages without depending on the zyre implementation crate.
+
+**Acceptance Criteria:**
+- `IZyre` provides `ping` and `create_node(config: NodeConfig) -> Box<dyn IZyreNode>`.
+- `IZyreNode` provides lifecycle (`start`, `stop`), group membership (`join`, `leave`), messaging (`shout`, `whisper`), event reception (`recv`, `try_recv`), and peer/group introspection.
+- Discovery supports both UDP beaconing (default) and gossip-based discovery (`GossipConfig`) for clusters spanning subnets.
 
 ## Requirements
 
@@ -103,6 +112,7 @@ The crate has two Cargo features:
 - **Method**: `numa_node(&self) -> i32` - Return NUMA node ID of the controller.
 - **Method**: `nvme_version(&self) -> String` - Return NVMe specification version.
 - **Method**: `telemetry(&self) -> Result<TelemetrySnapshot, NvmeBlockError>` - Return telemetry statistics.
+- **Method**: `read_write_stats(&self) -> ReadWriteStats` - Return cumulative per-direction read/write byte, op, and latency counters (zeroed unless built with the `telemetry` feature; monotonic, take deltas across two calls for a window).
 
 #### FR-005: IBlockDeviceAdmin Interface (feature: spdk)
 - **Method**: `set_pci_address(&self, addr: PciAddress)` - Set PCI address for controller attachment.
@@ -140,6 +150,8 @@ The crate has two Cargo features:
 - **Method**: `convert_memory_tier_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError>` - Convert memory-tier to block-device state.
 - **Method**: `is_evictable(&self, key: CacheKey) -> bool` - Check if entry can be evicted.
 - **Method**: `recover_extent(&self, key: CacheKey, offset: u64, size_blocks: u32) -> Result<(), DispatchMapError>` - Insert recovered extent.
+- **Method**: `promote_block_to_memory_tier(&self, key: CacheKey, pointer: *mut u8, size: u32) -> Result<(), DispatchMapError>` - Promote a block-device entry to a memory-tier location **in place**, preserving the entry's eviction handle and all reference counts (works while pinned, unlike remove+recreate); retains `ssd_offset` so the promoted entry stays demotable.
+- **Method**: `try_evict_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError>` - Atomically check evictability (MemoryTier state, `ssd_offset: Some(_)`, zero read/write refs) and, if evictable, transition to BlockDevice under a single lock hold.
 
 #### FR-008: IDispatcher Interface (feature: spdk)
 - **Method**: `initialize(&self, config: DispatcherConfig) -> Result<(), DispatcherError>` - Initialize with PCI addresses and config.
@@ -158,6 +170,9 @@ The crate has two Cargo features:
 - **Method**: `promote_to_memory_tier(&self, keys: &[CacheKey])` - Promote SSD-resident entries to DRAM.
 - **Method**: `clear_memory_tier(&self) -> Result<usize, DispatcherError>` - Evict all memory-tier entries.
 - **Method**: `flush_to_ssd(&self) -> Result<usize, DispatcherError>` - Flush pending writes to SSD.
+- **Method**: `pin(&self, key: CacheKey) -> Result<(), DispatcherError>` - Take an eviction-protection reference on a cache entry; multiple pins on the same key stack (ref-count increments).
+- **Method**: `unpin(&self, key: CacheKey) -> Result<(), DispatcherError>` - Release an eviction-protection reference; the entry becomes evictable again once all pins are released.
+- **Method**: `read_write_stats(&self) -> ReadWriteStats` - Return cumulative per-direction SSD read/write byte, op, and latency counters aggregated across all data drives (zeroed unless built with the `telemetry` feature; monotonic).
 
 #### FR-009: IMemoryTier Interface (feature: spdk)
 - **Method**: `initialize(&self, pool_size: usize, numa_node: Option<i32>) -> Result<(), MemoryTierError>` - Initialize pool with NUMA binding.
@@ -176,6 +191,7 @@ The crate has two Cargo features:
 - **Method**: `pool_info(&self) -> Option<(*mut u8, usize)>` - Return pool base pointer and size.
 - **Method**: `is_dma_capable(&self) -> bool` - Check if pool supports direct NVMe DMA.
 - **Method**: `clear(&self) -> Result<usize, MemoryTierError>` - Remove all entries.
+- **Method**: `telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot` - Return a snapshot of cumulative eviction and lock-contention counters (zeroed unless built with the `telemetry` feature).
 
 #### FR-010: IExtentManager Interface (feature: spdk)
 - **Method**: `format(&self, params: FormatParams) -> Result<(), ExtentManagerError>` - Format with validated params.
@@ -220,15 +236,35 @@ The crate has two Cargo features:
 - **Method**: `unregister_host_memory(&self, ptr, size) -> Result<(), String>` (feature: spdk) - Unregister host memory.
 
 #### FR-012: IRemoteLookup Interface
-- **Method**: `batch_lookup(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), RemoteLookupError>>` - Batch lookup from remote nodes.
+
+> **Amended** (002 remote-lookup rewrite): `batch_lookup`'s second tuple element
+> changed from a GPU `IpcHandle` to a plain `u32` size hint, and an `initialize`
+> method plus its `LookupConfig` type were added. `remote-lookup` is now
+> CPU/DRAM-only; the GPU-facing zero-copy path moved to
+> `IRemoteLookupRdmaInitiator`/`IRemoteLookupRdmaResponder` (see FR-030/FR-031).
+
+- **Method**: `initialize(&self, config: LookupConfig) -> Result<(), RemoteLookupError>` - Configure and activate the component: join the configured zyre group, start peer discovery, and prepare the query/response state machine. Must be called before `batch_lookup`.
+- **Method**: `batch_lookup(&self, entries: &[(CacheKey, u32)]) -> Vec<Result<(), RemoteLookupError>>` - Batch lookup from remote nodes; the `u32` is the expected value size (a size hint used to validate the RDMA-written region), not a GPU IPC handle.
 - **Method**: `join_cluster(&self, endpoint: &str) -> Result<(), RemoteLookupError>` - Join a cluster.
 - **Method**: `leave_cluster(&self) -> Result<(), RemoteLookupError>` - Leave the cluster.
 
-#### FR-013: IRemoteRequestHandler Interface
-- **Method**: `handle_lookup(&self, key: CacheKey) -> Result<LookupRef, RemoteRequestHandlerError>` - Zero-copy lookup returning pinned reference.
-- **Method**: `handle_check(&self, key: CacheKey) -> Result<bool, RemoteRequestHandlerError>` - Check key existence.
-- **Method**: `handle_batch_lookup(&self, keys: &[CacheKey]) -> Vec<Result<LookupRef, RemoteRequestHandlerError>>` - Batch zero-copy lookup.
-- **Method**: `release_lookup(&self, key: CacheKey)` - Release read reference after data consumption.
+#### FR-013: Remote Request Handling (RDMA Initiator/Responder Split)
+
+> **SUPERSEDED**: The `IRemoteRequestHandler` interface (`handle_lookup`,
+> `handle_check`, `handle_batch_lookup`, `release_lookup`, zero-copy `LookupRef`)
+> described in earlier versions of this FR was removed from the codebase and
+> does not exist in any form. It has been replaced by a two-interface split
+> that separates the outbound (serving) side from the inbound (requesting)
+> side of a remote lookup:
+> - **`IRemoteLookupRdmaInitiator`** — see **FR-030**. Outbound: RDMA-writes
+>   local cache values directly into a remote requester's memory.
+> - **`IRemoteLookupRdmaResponder`** / **`IRemoteLookupRdmaResponderAdmin`** —
+>   see **FR-031**. Inbound: accepts RDMA connections and exposes the
+>   requester's landing-slot region and control channel; a one-sided write
+>   path, so this interface carries control traffic only, never data.
+>
+> Do not re-implement `IRemoteRequestHandler`; this FR number is retained only
+> as a pointer to FR-030/FR-031 for historical traceability.
 
 #### FR-014: IExtendedMetadataStore Interface
 - **Method**: `put(&self, key: &str, value: &[u8]) -> Result<(), ExtendedMetadataStoreError>` - Store metadata entry.
@@ -258,12 +294,13 @@ The crate has two Cargo features:
 - `TelemetrySnapshot`: IO statistics (ops, latency, throughput).
 - `OpHandle`: Unique async operation identifier.
 - `NamespaceInfo`: NVMe namespace metadata.
-- `Command`: 11-variant enum for all NVMe operations.
-- `Completion`: 10-variant enum for operation results; derives `Clone` (in addition to `Debug`) so the block-device actor can `try_send` a clone of a completion on a full ring without consuming the original, enabling non-blocking completion delivery.
+- `Command`: 12-variant enum for all NVMe operations (ReadSync, WriteSync, ReadAsync, WriteAsync, WriteZeros, BatchSubmit, AbortOp, NsProbe, NsCreate, NsFormat, NsDelete, ControllerReset).
+- `Completion`: 11-variant enum for operation results (ReadDone, WriteDone, WriteZerosDone, AbortAck, Timeout, NsProbeResult, NsCreated, NsFormatted, NsDeleted, ResetDone, Error); derives `Clone` (in addition to `Debug`) so the block-device actor can `try_send` a clone of a completion on a full ring without consuming the original, enabling non-blocking completion delivery.
 - `ClientChannels`: Channel pair (command_tx, completion_rx).
+- `ReadWriteStats`: Cumulative per-direction (read/write) byte, op, and latency-sum counters with `total_ops`/`total_bytes`/`mean_read_latency_ns`/`mean_write_latency_ns` helpers; returned by `IBlockDevice::read_write_stats` and `IDispatcher::read_write_stats` (see FR-004/FR-008).
 
 #### FR-018: Supporting Types - Dispatcher
-- `DispatcherConfig`: 16-field configuration (PCI addrs, cache size, eviction params, poller CPU, backfill delay, partition sizes, cold-load staging slots and buffer size).
+- `DispatcherConfig`: 18-field configuration — `data_pci_addrs`, `max_cache_entries`, `format_on_init`, SSD eviction params (`ssd_eviction_threshold`, `ssd_eviction_low_watermark`, `ssd_eviction_batch_size`, `ssd_eviction_interval_secs`), `poller_base_cpu`, `max_eviction_attempts`, `backfill_delay_ms`, partition sizes (`metadata_partition_size`, `extended_metadata_partition_size`), memory-tier proactive DRAM→SSD demotion params (`memory_tier_eviction_threshold`, `memory_tier_eviction_low_watermark`, `memory_tier_eviction_batch_size`, `memory_tier_eviction_interval_secs` — analogous to the SSD eviction sweep, disabled by default via threshold 0.0), and cold-load staging (`cold_staging_slots`, `cold_staging_buf_bytes`).
 - `IpcHandle`: Opaque GPU memory handle (pointer + size).
 - `DispatcherError`: 7-variant error enum.
 - `CacheKey`: Type alias for `u64`.
@@ -271,6 +308,7 @@ The crate has two Cargo features:
 
 #### FR-019: Supporting Types - Memory Tier
 - `MemoryTierError`: 7-variant error enum.
+- `MemoryTierTelemetrySnapshot`: `Copy + Default` 3-field cumulative counter snapshot (`evictions`, `write_lock_contentions`, `read_lock_contentions`), returned by `IMemoryTier::telemetry_snapshot` (see FR-009); zeroed unless the `telemetry` feature is enabled.
 
 #### FR-020: Supporting Types - Eviction Policy
 - `EvictionHandle`: Opaque handle with pool_id and index.
@@ -291,9 +329,9 @@ The crate has two Cargo features:
 - `GpuStream`: Opaque CUDA stream handle.
 
 #### FR-023: Supporting Types - Remote
-- `RemoteLookupError`: 2-variant error enum.
-- `LookupRef`: Zero-copy reference (pointer, size, key).
-- `RemoteRequestHandlerError`: 4-variant error enum.
+- `RemoteLookupError`: 2-variant error enum (`NotFound`, `TransportError`).
+- `LookupConfig`: 10-field configuration for `IRemoteLookup::initialize` — `group`, `quorum_pct`, `phase1_timeout`, `op_deadline`, `max_retry_rounds`, `max_keys_per_query`, `bind_ip`, `actor_cpu`, `discovery` (optional `GossipConfig`, see FR-032), `node_endpoint`. Implements `Default`.
+- ~~`LookupRef`~~ / ~~`RemoteRequestHandlerError`~~ — **SUPERSEDED**, removed together with `IRemoteRequestHandler` (see FR-013). No replacement type exists: the RDMA split's writes are one-sided (no zero-copy handle is returned to a caller) and its errors are `RemoteLookupRdmaInitiatorError`/`RemoteLookupRdmaResponderError` (FR-033/FR-034).
 
 #### FR-024: Supporting Types - Partition Table
 - `PartitionInfo`: Partition metadata (index, start LBA, sectors, GUIDs, name).
@@ -315,6 +353,69 @@ The crate has two Cargo features:
 #### FR-028: IGpuServices Multi-GPU Device Routing
 - `IGpuServices` SHALL provide `set_device(device: i32) -> Result<(), String>` to bind the calling OS thread's current CUDA device (CUDA tracks the current device per thread; required before creating a stream or issuing a DMA for a specific GPU) and `device_of_ptr(ptr: *const c_void) -> Result<i32, String>` to return the CUDA device ordinal owning a device pointer via `cudaPointerGetAttributes` (`-1` for a pointer with no device association, e.g. host memory), so DMAs can be routed to a stream on the pointer's own device under multi-GPU / tensor parallelism.
 
+#### FR-029: IZyre / IZyreNode Interfaces (Peer Discovery and Messaging)
+- `IZyre` is a **factory** component interface (`define_interface!`, discoverable via `IUnknown`):
+  - **Method**: `ping(&self) -> Result<String, ZyreError>` - Check that the zyre subsystem is available and healthy.
+  - **Method**: `create_node(&self, config: NodeConfig) -> Result<Box<dyn IZyreNode>, ZyreError>` - Construct a new, un-started node from `config`.
+- `IZyreNode` is a **plain trait handle** (deliberately not a `define_interface!` component interface — `Send` but not `Sync`, since the underlying zyre C API is not thread-safe for concurrent access to a single node, and it needs `&mut self` methods), returned by `create_node`:
+  - **Method**: `start(&mut self) -> Result<(), ZyreError>` - Begin network discovery and messaging.
+  - **Method**: `stop(&mut self)` - Signal departure to peers; enters a draining state (queued events, then a terminal `ZyreEvent::Stop` sentinel, are still deliverable via `recv`/`try_recv`).
+  - **Method**: `join(&mut self, group: &str) -> Result<(), ZyreError>` - Join a named group.
+  - **Method**: `leave(&mut self, group: &str) -> Result<(), ZyreError>` - Leave a named group.
+  - **Method**: `shout(&self, group: &str, data: &[u8]) -> Result<(), ZyreError>` - Send a message to all peers in a group.
+  - **Method**: `whisper(&self, peer: &PeerId, data: &[u8]) -> Result<(), ZyreError>` - Send a message directly to a specific peer.
+  - **Method**: `recv(&self) -> Result<ZyreEvent, ZyreError>` - Receive the next event (blocking).
+  - **Method**: `try_recv(&self) -> Result<Option<ZyreEvent>, ZyreError>` - Receive the next event without blocking.
+  - **Method**: `uuid(&self) -> PeerId` - This node's own UUID.
+  - **Method**: `name(&self) -> String` - This node's own name.
+  - **Method**: `peers(&self) -> Vec<PeerId>` - All known peers.
+  - **Method**: `peers_by_group(&self, group: &str) -> Vec<PeerId>` - Peers belonging to a group.
+  - **Method**: `own_groups(&self) -> Vec<String>` - Groups this node has joined.
+  - **Method**: `peer_groups(&self) -> Vec<String>` - All groups known from any peer.
+  - **Method**: `peer_address(&self, peer: &PeerId) -> Option<String>` - Network address of a peer.
+  - **Method**: `peer_header_value(&self, peer: &PeerId, key: &str) -> Option<String>` - A specific header value for a peer.
+
+#### FR-030: IRemoteLookupRdmaInitiator Interface (Outbound RDMA Push)
+- `IRemoteLookupRdmaInitiator` is the outbound (serving) side of a remote RDMA lookup: given a target host endpoint and a batch of `(key, remote-region)` pairs, it looks each key up in the local memory tier and, when present with a matching size, RDMA-writes the value directly into the remote host's memory (one-sided; the responder's CPU never touches the data).
+  - **Method**: `push(&self, endpoint: &str, items: &[(CacheKey, RemoteRegion)]) -> Result<Vec<PushStatus>, RemoteLookupRdmaInitiatorError>` - Ensure a connection to `endpoint` (reusing/repairing as needed), then for each item look up the key locally and RDMA-write it into the remote region if present and size-matched. Returns one `PushStatus` per input item, in order.
+  - **Method**: `connect(&self, endpoint: &str) -> Result<(), RemoteLookupRdmaInitiatorError>` - Proactively warm a connection to `endpoint` without writing anything; idempotent, and a failed connect attempt is reported as `Ok(())` with nothing cached (retried on next `connect`/`push`).
+  - **Method**: `disconnect(&self, endpoint: &str)` - Tear down the connection to a single host, if any (idempotent).
+  - **Method**: `disconnect_all(&self)` - Tear down all connections in the table.
+  - **Method**: `set_local_peer_id(&self, peer: PeerId)` - Supply this node's own zyre `PeerId`, stamped into the `rdma_cm` connect `private_data` on every outbound connection so the remote responder can correlate an inbound queue pair to this peer (required for teardown-before-reclaim). Should be called once, before the first `push`.
+
+#### FR-031: IRemoteLookupRdmaResponder / IRemoteLookupRdmaResponderAdmin Interfaces (Inbound RDMA Accept)
+- These interfaces belong to the **requesting** instance — the passive (accept) counterpart of `IRemoteLookupRdmaInitiator` (FR-030). The responder is an actor owning a dedicated thread running an `rdma_cm` accept loop; because writes are one-sided, this interface carries control traffic only, never data.
+- `IRemoteLookupRdmaResponder` (runtime control surface, used by `remote-lookup`):
+  - **Method**: `open_control_channel(&self) -> Result<ControlChannel, RemoteLookupRdmaResponderError>` - Open the channel for issuing `ResponderCommand`s and receiving `ResponderEvent`s. Fails if not initialized.
+  - **Method**: `local_endpoint(&self) -> Result<Endpoint, RemoteLookupRdmaResponderError>` - Return the bound `{ip, port}` so `remote-lookup` can advertise it in whispers.
+  - **Method**: `local_region(&self) -> Result<LocalRegion, RemoteLookupRdmaResponderError>` - Return the pre-registered memory-tier pool region (base address, length, pool-wide `rkey`) so `remote-lookup` can advertise it, paired with each landing-slot address, in its RDMA requests.
+- `IRemoteLookupRdmaResponderAdmin` (lifecycle/configuration, driven by the application/mainline, not by `remote-lookup`):
+  - **Method**: `set_actor_cpu(&self, cpu: usize)` - Pin the accept-loop thread to `cpu`; must be called before `initialize`.
+  - **Method**: `set_bind_ip(&self, ip: String)` - Supply the local RoCE IPv4 the listener binds to; must be called before `initialize`. The responder never auto-detects the address.
+  - **Method**: `initialize(&self) -> Result<(), RemoteLookupRdmaResponderError>` - Bind an ephemeral port, register the whole memory-tier pool (via `IMemoryTier::pool_info`) as a `REMOTE_WRITE` memory region, and start the accept loop.
+  - **Method**: `signal_stop(&self)` - Signal the accept loop to stop without joining its thread.
+  - **Method**: `shutdown(&self) -> Result<(), RemoteLookupRdmaResponderError>` - Stop the accept loop, join its thread, and tear down all connections and the listener.
+
+#### FR-032: Supporting Types - Zyre
+- `PeerId`: Newtype wrapper over a UUID `String`; `Debug + Clone + PartialEq + Eq + Hash`; `Display`; `From<String>`/`From<&str>`.
+- `ZyreEvent`: 9-variant enum (`Enter`, `Exit`, `Evasive`, `Silent`, `Join`, `Leave`, `Whisper`, `Shout`, `Stop`) with `peer()`/`peer_name()`/`group()` accessors; `Stop` is the terminal end-of-stream sentinel with no peer.
+- `NodeConfig`: `#[non_exhaustive]` 9-field configuration for `IZyre::create_node` (`name`, `headers`, `port`, `interface`, `evasive_timeout_ms`, `expired_timeout_ms`, `beacon_interval_ms`, `endpoint`, `gossip`); implements `Default` and a `validate()` used internally by `create_node`.
+- `GossipConfig`: `#[non_exhaustive]` 2-field configuration (`bind: Option<String>`, `connect: Vec<String>`) for gossip-based discovery (used instead of UDP beaconing when subnets are crossed); constructed via `GossipConfig::bind(endpoint)` or `GossipConfig::connect(endpoint)`.
+- `ZyreError`: 7-variant error enum (`CreateFailed`, `StartFailed`, `NotStarted`, `InvalidConfig`, `SendFailed`, `RecvFailed`, `Stopped`).
+
+#### FR-033: Supporting Types - Remote Lookup RDMA Initiator
+- `RemoteRegion`: `Copy` 3-field remote memory descriptor (`addr: u64`, `rkey: u32`, `length: u32`) supplied by the requesting node, identifying where a matching local value may be RDMA-written.
+- `PushStatus`: `Copy` 4-variant per-item outcome of `push` (`Success`, `UnableToConnect`, `KeyNotFound`, `SizeMismatch`).
+- `RemoteLookupRdmaInitiatorError`: 2-variant error enum (`NotInitialized`, `InvalidEndpoint`) for method-level (not per-item) failures.
+
+#### FR-034: Supporting Types - Remote Lookup RDMA Responder
+- `Endpoint`: 2-field bound listening endpoint (`ip: String`, `port: u16`); `Display` as `"ip:port"`.
+- `LocalRegion`: `Copy` 3-field registered pool region (`addr: u64`, `rkey: u32`, `length: usize`); `length` is `usize` (unlike `RemoteRegion::length`) since the whole pool can exceed 4 GiB.
+- `ControlChannel`: Channel pair (`command_tx: Sender<ResponderCommand>`, `event_rx: Receiver<ResponderEvent>`) returned by `open_control_channel`.
+- `ResponderCommand`: 1-variant enum (`Disconnect { node: PeerId }`) — control commands sent to the responder actor.
+- `ResponderEvent`: 3-variant enum (`ConnectionEstablished { node: Option<PeerId> }`, `DisconnectAck { node: PeerId }`, `Error { message: String }`) — events emitted by the responder actor; `DisconnectAck` signals teardown-before-reclaim is complete.
+- `RemoteLookupRdmaResponderError`: 6-variant error enum (`NotInitialized`, `AlreadyInitialized`, `Bind`, `Registration`, `ChannelClosed`, `Internal`).
+
 ### Non-Functional Requirements
 
 #### NFR-001: Zero Implementation Coupling
@@ -326,8 +427,9 @@ The crate has two Cargo features:
 
 #### NFR-003: Thread Safety
 - All types that cross thread boundaries implement `Send` (with documented SAFETY justifications for unsafe impls).
-- `DmaBuffer`, `GpuIpcHandle`, `GpuDmaBuffer`, `GpuStream`, `LookupResult`, `LookupRef` are `Send + Sync`.
+- `DmaBuffer`, `GpuIpcHandle`, `GpuDmaBuffer`, `GpuStream`, `LookupResult` are `Send + Sync`.
 - `Command` is `Send`; `Completion` is `Send + Clone` (Clone enables non-blocking completion delivery on a full ring).
+- `IZyreNode` is `Send` but deliberately **not** `Sync` (the underlying zyre C API is not safe for concurrent access to a single node).
 
 #### NFR-004: Documentation
 - All public types and methods have doc comments with runnable examples.
@@ -353,10 +455,11 @@ The crate has two Cargo features:
 | `DmaBuffer` | DMA-safe buffer with pluggable allocator and NUMA awareness |
 | `WriteHandle` | Publish-or-abort handle for extent reservations |
 | `IpcHandle` | GPU memory reference for DMA transfers |
-| `LookupRef` | Zero-copy reference to memory-tier data |
 | `ClientChannels` | Channel pair for block device client connections |
 | `EvictionHandle` | O(1) handle for eviction policy operations |
 | `GpuStream` | Opaque CUDA stream for async GPU operations |
+| `PeerId` | UUID identifier for a zyre network peer |
+| `RemoteRegion` / `LocalRegion` | Remote/local RDMA memory descriptors (addr, rkey, length) for one-sided writes |
 
 ## Dependencies
 

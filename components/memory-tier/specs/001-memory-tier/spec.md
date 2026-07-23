@@ -120,6 +120,26 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 **Test Coverage:**
 - No dedicated test currently (relies on integration with eviction-policy-lru)
 
+### User Story 7 - Operational Telemetry (Priority: P3)
+
+**As** an operator or monitoring subsystem,
+**I want** to observe eviction counts and lock-contention counters for the pool,
+**so that** I can diagnose contention hotspots and tune eviction/allocation behavior.
+
+**Acceptance Criteria:**
+- When compiled with the optional `telemetry` Cargo feature, the component tracks:
+  - total eviction count
+  - write-lock contention count (lock not acquired on first attempt)
+  - read-lock contention count (lock not acquired on first attempt)
+- `telemetry_snapshot()` (interface method, always available) returns the current counters, or all-zero when the `telemetry` feature is disabled
+- `telemetry()` / `reset_telemetry()` (inherent methods, feature-gated) expose and reset the same counters
+- The feature is zero-cost when disabled: no atomics are allocated or updated
+
+**Test Coverage:**
+- No dedicated test currently (feature-gated; not exercised by the default `cargo test -p memory-tier` run)
+
+**Backfill note**: This user story documents functionality identified during spec-drift analysis (`speckit.sync.backfill`, 2026-07-22) that existed in code but was not previously captured in this spec.
+
 ## Requirements
 
 ### Functional Requirements
@@ -152,6 +172,9 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 | FR-024 | Eviction policy is an external receptacle (IEvictionPolicy) | Implementation |
 | FR-025 | Logger is an optional receptacle (ILogger) | Implementation |
 | FR-026 | Free-list allocator coalesces adjacent free regions on deallocation | Unit test |
+| FR-027 | When compiled with the optional `telemetry` feature, the component tracks eviction count, write-lock contention count, and read-lock contention count | Implementation *(backfilled)* |
+| FR-028 | `telemetry_snapshot()` returns the current telemetry counters (all-zero if the `telemetry` feature is disabled); `telemetry()`/`reset_telemetry()` provide feature-gated inherent access and reset | Implementation *(backfilled)* |
+| FR-029 | `free_capacity()` returns `capacity() - used()` for proactive-eviction triggers | Implementation *(backfilled)* |
 
 ### Non-Functional Requirements
 
@@ -167,6 +190,7 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 | NFR-008 | Component version is 0.2.0 | Cargo.toml |
 | NFR-009 | SPDK feature is optional (compile-time gated) | Cargo.toml |
 | NFR-010 | Returned pointers are DMA-suitable (page-aligned, contiguous) | Architecture |
+| NFR-011 | `telemetry` feature is zero-cost when disabled (counters compiled out entirely, not just unused) | Cargo.toml *(backfilled)* |
 
 ## Key Entities
 
@@ -184,6 +208,8 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 | `IMemoryTier` | Interface trait | Public API exposed to other components |
 | `IEvictionPolicy` | Receptacle | External eviction strategy (required) |
 | `ILogger` | Receptacle | Optional operational logging |
+| `MemoryTierTelemetry` | Internal struct *(backfilled)* | Feature-gated (`telemetry`) eviction/lock-contention counters |
+| `TelemetrySnapshot` | Struct *(backfilled)* | Point-in-time copy of telemetry counters |
 
 ## Dependencies
 
@@ -216,3 +242,13 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 - When SPDK has already shut down at Drop time, the pool is intentionally leaked (same pattern as DmaBuffer) to avoid use-after-free in the SPDK allocator.
 - The allocator rounds all sizes up to 4 KiB, which means small objects waste up to 4095 bytes. This is acceptable because the primary use case is large extent-sized allocations (typically 4 KiB or multiples thereof).
 - `oldest_keys()` samples per-shard with `(n / NUM_SHARDS).max(1)` which may return fewer than N keys if shards are unevenly populated.
+- `DEFAULT_POOL_SIZE` (256 MiB) is declared as a public constant but is currently unused by any call site — `initialize()` always requires an explicit `pool_size` argument. It is reserved for a future default-constructor path (same reserved-for-future status as the `NotEvictable` error variant below). *(backfilled 2026-07-22)*
+
+## Spec-Sync Notes (2026-07-22)
+
+> The following items are known drift between this spec and the current implementation. They are **intentionally left unresolved** in this document pending a design decision — see `.specify/sync/align-tasks.md` for the deferred alignment tasks and options. This spec continues to describe the originally-intended 16-way sharded architecture; it has **not** been rewritten to match the current single-pool implementation, because it is unclear whether sharding was deliberately dropped or is unfinished work.
+>
+> - FR-005, FR-006, FR-007, NFR-002 (16-way sharding), FR-013 (round-robin eviction counter), FR-021 (per-shard `oldest_keys` sampling), and SC-3 (16-thread concurrency via shard locks) describe a sharded pool that does not exist in `src/lib.rs` (single `RwLock<Pool>`, no shards). See align-task "sharding-not-implemented".
+> - FR-014 (`evict_lru_for_key` targets the key's shard) does not hold: the `key` parameter is ignored in the current implementation, making it a pure alias for `evict_lru()`. See align-task "evict-lru-for-key-ignores-key".
+> - SC-8 (10 Creusot-verified formal properties, 21 verification conditions) has no corresponding proof artifacts anywhere under `components/memory-tier/`. The `IMemoryTier` interface doc comments (`components/interfaces/src/imemory_tier.rs`) also assert "Verified: P4/P5/P10" claims that are stale. See align-task "creusot-proofs-absent".
+> - NFR-008 (component version `0.2.0`) does not match either `Cargo.toml` (`0.1.0`) or the `define_component!` macro's `version:` field (`0.3.0`). See align-task "version-mismatch".

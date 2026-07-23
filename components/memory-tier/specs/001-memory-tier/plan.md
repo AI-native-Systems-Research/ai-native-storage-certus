@@ -84,6 +84,7 @@ All error cases are captured in the `MemoryTierError` enum:
 - `AllocationFailed(msg)` - mmap or SPDK allocation failure
 - `NotInitialized(msg)` - operation before initialize()
 - `NotEvictable(key)` - reserved for future write-through protection
+- `DEFAULT_POOL_SIZE` (256 MiB) - public constant, reserved for a future default-constructor path; not consumed by any call site today (`initialize()` always takes an explicit `pool_size`) *(backfilled 2026-07-22)*
 
 ## Dependencies
 
@@ -176,3 +177,8 @@ All error cases are captured in the `MemoryTierError` enum:
 6. **Large allocation support**: The free-list first-fit strategy may fragment under mixed-size workloads. A buddy allocator or size-class approach could improve utilization.
 
 7. **GPU integration**: `pool_info()` exposes the base pointer for CUDA host registration, but no cuMemHostRegister call is made within this component.
+
+## Spec-Sync Notes (2026-07-22)
+
+- An optional `telemetry` Cargo feature (eviction count, read/write lock-contention counters, exposed via `telemetry()`/`reset_telemetry()`/`telemetry_snapshot()`) exists in `src/lib.rs` and is now captured in `spec.md` FR-027/FR-028/NFR-011 *(backfilled)*.
+- The 16-way sharding design described throughout this plan (Memory Layout, Pointer Arithmetic, Concurrency Model, Key Design Decision #1 and #6) does **not** match the current single-pool implementation. This plan has been left as-is (describing the original sharded design) rather than rewritten, pending a decision on whether sharding is unfinished work or was intentionally dropped. See `.specify/sync/align-tasks.md` ("sharding-not-implemented") before treating this plan's architecture sections as current.

@@ -1,17 +1,38 @@
 {
-  "applied": "2026-07-21",
+  "applied": "2026-07-22",
   "spec": "components/interfaces/specs/001-interfaces/spec.md",
-  "base_commit": "833e9f36e01f1df8a0e0fc57d5cd223d823d3199",
-  "backup": "components/interfaces/.specify/sync/backups/spec.md.bak",
-  "direction": "BACKFILL",
+  "head": "bb9569dde029cc7cd98306e88f7904b8cd4cdbee",
+  "backup": "components/interfaces/.specify/sync/backups/spec.md.20260722T232124Z.bak",
+  "direction": "AUTO-BACKFILL",
+  "supersedes": "apply-report (2026-07-21)",
   "changes": [
-    { "proposal": "P1", "fr": "FR-027", "action": "added", "detail": "New FR: IDispatcher Cold-Load Staging Configuration (feature: spdk) documenting cold_staging_slots and cold_staging_buf_bytes." },
-    { "proposal": "P1", "fr": "FR-018", "action": "amended", "detail": "Field count 14 -> 16; description mentions cold-load staging slots and buffer size." },
-    { "proposal": "P2", "fr": "FR-028", "action": "added", "detail": "New FR: IGpuServices Multi-GPU Device Routing documenting set_device and device_of_ptr." },
-    { "proposal": "P2", "fr": "FR-011", "action": "amended", "detail": "Appended set_device and device_of_ptr method bullets to the IGpuServices method list." },
-    { "proposal": "P3", "fr": "FR-017", "action": "amended", "detail": "Completion bullet records Clone derive for non-blocking completion delivery." },
-    { "proposal": "P3", "fr": "NFR-003", "action": "amended", "detail": "Thread-safety bullet now states Completion is Send + Clone." }
+    { "fr": "FR-004", "action": "amended", "detail": "Added read_write_stats(&self) -> ReadWriteStats to IBlockDevice." },
+    { "fr": "FR-007", "action": "amended", "detail": "Added promote_block_to_memory_tier and try_evict_to_block to IDispatchMap." },
+    { "fr": "FR-008", "action": "amended", "detail": "Added pin, unpin, read_write_stats to IDispatcher." },
+    { "fr": "FR-009", "action": "amended", "detail": "Added telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot to IMemoryTier." },
+    { "fr": "FR-012", "action": "amended", "detail": "batch_lookup signature IpcHandle -> u32; added initialize(config: LookupConfig); noted 002 rewrite." },
+    { "fr": "FR-013", "action": "superseded", "detail": "IRemoteRequestHandler removed from code; replaced with pointer to FR-030/FR-031." },
+    { "fr": "FR-014", "action": "not_modified", "detail": "Code defect (module not wired into lib.rs); routed to align-tasks.md instead of backfilled." },
+    { "fr": "FR-017", "action": "amended", "detail": "Command 11->12 variants, Completion 10->11 variants, listed; added ReadWriteStats type." },
+    { "fr": "FR-018", "action": "amended", "detail": "DispatcherConfig field count 16->18; all fields enumerated." },
+    { "fr": "FR-019", "action": "amended", "detail": "Added MemoryTierTelemetrySnapshot type." },
+    { "fr": "FR-023", "action": "amended", "detail": "Removed LookupRef/RemoteRequestHandlerError (superseded); added LookupConfig type." },
+    { "fr": "FR-025", "action": "not_modified", "detail": "Code defect (same module-wiring issue as FR-014); routed to align-tasks.md." },
+    { "fr": "FR-029", "action": "added", "detail": "New FR: IZyre / IZyreNode Interfaces (Peer Discovery and Messaging)." },
+    { "fr": "FR-030", "action": "added", "detail": "New FR: IRemoteLookupRdmaInitiator Interface (Outbound RDMA Push)." },
+    { "fr": "FR-031", "action": "added", "detail": "New FR: IRemoteLookupRdmaResponder / IRemoteLookupRdmaResponderAdmin Interfaces (Inbound RDMA Accept)." },
+    { "fr": "FR-032", "action": "added", "detail": "New FR: Supporting Types - Zyre." },
+    { "fr": "FR-033", "action": "added", "detail": "New FR: Supporting Types - Remote Lookup RDMA Initiator." },
+    { "fr": "FR-034", "action": "added", "detail": "New FR: Supporting Types - Remote Lookup RDMA Responder." },
+    { "fr": "NFR-003", "action": "amended", "detail": "Removed LookupRef from Send+Sync list; added IZyreNode Send-not-Sync note." },
+    { "fr": "user_story_5", "action": "amended", "detail": "Rewritten for RDMA initiator/responder split and IRemoteLookup::initialize." },
+    { "fr": "user_story_7", "action": "added", "detail": "New: Peer Discovery and Messaging (IZyre/IZyreNode)." },
+    { "fr": "key_entities", "action": "amended", "detail": "Removed LookupRef; added PeerId, RemoteRegion/LocalRegion." }
+  ],
+  "align_tasks_routed": [
+    { "severity": "MAJOR", "spec_id": "001-interfaces/FR-014", "summary": "src/lib.rs never declares mod iextended_metadata_store; trait not compiled into crate." },
+    { "severity": "MAJOR", "spec_id": "001-interfaces/FR-014", "summary": "components/extended-metadata-store absent from root Cargo.toml workspace members." }
   ],
   "source_code_modified": false,
-  "fr_range_after": "FR-001..FR-028"
+  "fr_range_after": "FR-001..FR-034"
 }

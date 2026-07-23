@@ -1,108 +1,76 @@
-# Spec Drift Report
+# Spec Drift Report — zyre
 
-Generated: 2026-07-14T19:52:47Z
-Project: zyre (Safe Rust bindings for the zyre C library)
+Generated: 2026-07-22T22:33:44Z
+Project: `components/zyre` (safe Rust bindings for the [zyre](https://github.com/zeromq/zyre) C library — zero-configuration LAN peer discovery and group messaging)
 
 ## Summary
 
 | Category | Count |
-|----------|-------|
-| Specs Analyzed | 1 (6 artifacts) |
-| Functional Requirements Checked | 12 |
-| ✓ Aligned (FR) | 12 (100%) |
-| ⚠️ Drifted (spec artifacts vs design) | 2 |
-| ✗ Not Implemented | 0 |
-| 🆕 Unspecced Code | 0 (material) |
-| Success Criteria Verified | 2 of 5 (3 unverified) |
+|---|---|
+| Specs analyzed | 1 (`001-zyre-bindings`) |
+| Requirements checked (FR + SC) | 17 (12 FR + 5 SC) |
+| Aligned | 17 |
+| Drifted | 0 |
+| Not implemented | 0 |
+| Unspecced features found | 1 (minor) |
 
-**Headline**: The **code** implements all 12 functional requirements and matches
-the current factory / public-fields-config / single-frame design. Of the six
-spec artifacts, `spec.md`, `data-model.md`, `contracts/izyre.md`, and
-`quickstart.md` are aligned with the code. The remaining drift is confined to
-two **stale planning artifacts** — `plan.md` (describes a builder API and a
-6-module `event/builder/error/peer` layout that no longer exists) and `tasks.md`
-(task bodies still name deleted source files). The previous report's headline
-drift (D-1, multi-frame receive truncation) is now **resolved**: the `_multi`
-send methods were removed and `data-model.md` no longer claims a `Vec<Vec<u8>>`
-variant.
+**Headline**: The implementation (`components/zyre/src/{lib,node,ffi}.rs`, `components/interfaces/src/izyre.rs`, `build.rs`, `deps/build_zyre.sh`) matches `specs/001-zyre-bindings/spec.md` exactly across all 12 functional requirements and all 5 success criteria, including both post-2026-07-01 clarification sessions (factory-based `IZyre`, no `_multi` send variants, direct blocking `recv()`/`try_recv()` with no internal threads). **This resolves the previous (2026-07-14) report's headline drift**: that report flagged `plan.md` (stale builder API / 6-module layout) and `tasks.md` (task bodies naming deleted source files) as drifted against the code. Both are now current — `plan.md`'s Project Structure section correctly lists `lib.rs`/`node.rs`/`ffi.rs` plus `interfaces/src/izyre.rs`, and `tasks.md` carries an explicit superseded-design note (`tasks.md:38-45`) with no remaining stale file references. Only one small, low-severity, unspecced behavior was found (a silent no-op in `ZyreNode::stop()` outside the `Running` state), plus one incomplete polish task (`T056`, quickstart end-to-end validation) that is a task-tracking gap rather than a code/spec divergence.
 
-## Detailed Findings
+## Spec: 001-zyre-bindings — Zyre Rust Bindings
 
-### Spec: 001-zyre-bindings — Zyre Rust Bindings
+Code sources reviewed: `components/interfaces/src/izyre.rs` (traits + value types), `components/zyre/src/lib.rs`, `components/zyre/src/node.rs`, `components/zyre/src/ffi.rs`, `components/zyre/build.rs`, `deps/build_zyre.sh`, `deps/install_zyre_deps.sh`, `components/zyre/tests/integration.rs`, `components/zyre/tests/api_safety.rs`, `components/zyre/run-valgrind.sh`, `components/zyre/valgrind.supp`, root `Cargo.toml`.
 
-Code sources: `components/interfaces/src/izyre.rs` (traits + value types),
-`components/zyre/src/{lib,node,ffi}.rs`, `components/zyre/build.rs`,
-`deps/build_zyre.sh`, `components/zyre/tests/{integration,api_safety}.rs`.
+### Aligned — Functional Requirements
 
-#### Aligned ✓ (functional requirements vs code)
+| Req | Spec text (summary) | Evidence |
+|---|---|---|
+| FR-001 | No `unsafe` required in downstream user code | All `unsafe` is confined to `components/zyre/src/node.rs` (33 occurrences) and `ffi.rs`; public trait `IZyreNode` and re-exported types (`lib.rs:32`) expose no unsafe signatures. Enforced by `tests/api_safety.rs::public_api_has_no_unsafe_exposure`. |
+| FR-002 | RAII: dropping a node stops it and frees resources | `impl Drop for ZyreNode` (`node.rs:354-359`) calls `self.stop()` then `ffi::zyre_destroy(&mut self.ptr)`. |
+| FR-003 | All 9 zyre event types as a Rust enum with associated data | `ZyreEvent` (`components/interfaces/src/izyre.rs:112-156`) has exactly `Enter, Exit, Evasive, Silent, Join, Leave, Whisper, Shout, Stop`; parsed from the C API in `node.rs::parse_event` (`node.rs:393-489`). |
+| FR-004 | Single-frame `&[u8]` whisper/shout; no multi-frame variants | `shout`/`whisper` (`node.rs:176-205`) take `data: &[u8]`; no `_multi` methods exist anywhere in `node.rs`, `izyre.rs`, or `contracts/izyre.md` (removed per the 2026-07-09 clarification). |
+| FR-005 | `NodeConfig` public fields + `Default`, `#[non_exhaustive]`, validated at creation | `izyre.rs:267-288` (`#[non_exhaustive]` struct, public fields, `Default` impl); validated via `NodeConfig::validate()` called from `ZyreNode::new` (`node.rs:47`). |
+| FR-006 | UDP beacon + gossip discovery; gossip requires explicit node `endpoint` distinct from the gossip hub | `apply_config` (`node.rs:105-125`) applies `zyre_set_endpoint`/`zyre_gossip_bind`/`zyre_gossip_connect`; `NodeConfig::validate` (`izyre.rs:334-344`) rejects gossip config without `endpoint`. Exercised by `tests/integration.rs::gossip_discovery`. |
+| FR-007 | Peer introspection: list peers, list groups, get peer headers/address | `peers`, `peers_by_group`, `own_groups`, `peer_groups`, `peer_address`, `peer_header_value` (`node.rs:278-351`); exact signatures match `contracts/izyre.md:73-84`. |
+| FR-008 | Blocking `recv()` (via `zyre_event_new`) + non-blocking `try_recv()`; no internal threads; post-`stop()` draining ends in a single terminal `Stop` sentinel, then `Stopped`/`Ok(None)` | `recv`/`try_recv` (`node.rs:208-258`) implement exactly this state machine via the `State` enum (`Created → Running → Draining → Done`, `node.rs:13-18`); `try_recv` uses `zpoller_wait(..., 0)` for non-blocking polling. Verified by `tests/integration.rs::stop_delivers_terminal_stop_event`. |
+| FR-009 | Build clones/compiles zyre + libzmq + czmq from source into `deps/zyre-build/` at workspace root, mirroring `deps/spdk-build/` | `deps/build_zyre.sh:11-23` pins `LIBZMQ_TAG=v4.3.5`, `CZMQ_TAG=v4.2.1`, `ZYRE_TAG=v2.0.1`, installs to `${SCRIPT_DIR}/zyre-build`. |
+| FR-010 | `bindgen`-generated FFI bindings in a build script, linking against locally-built libs | `build.rs:45-73` (bindgen `Builder`), `build.rs:24-37` (link search paths + rpath into `deps/zyre-build/lib{,64}`). |
+| FR-011 | `Send` but not `Sync` | `unsafe impl Send for ZyreNode` (`node.rs:39`) with SAFETY comment; no `Sync` impl anywhere; `IZyreNode: Send` (`izyre.rs:362`). Verified by `tests/api_safety.rs::zyre_node_handle_is_send`. |
+| FR-012 | Typed `ZyreError` enum covering start failure, invalid config, network errors | `ZyreError` (`izyre.rs:16-32`): `CreateFailed`, `StartFailed`, `NotStarted`, `InvalidConfig`, `SendFailed`, `RecvFailed`, `Stopped`. |
 
-- **FR-001**: No `unsafe` in user code; all unsafe encapsulated → `node.rs`, guarded by `tests/api_safety.rs`.
-- **FR-002**: RAII lifecycle → `Drop for ZyreNode` calls `stop()` then `zyre_destroy()` (`node.rs:315`).
-- **FR-003**: All 9 event types as an enum → `ZyreEvent` (`izyre.rs:107`), parsed in `parse_event` (`node.rs:354`).
-- **FR-004**: Single-frame `&[u8]` whisper/shout, no `_multi` → `node.rs:144`,`162`.
-- **FR-005**: `NodeConfig` public fields + `Default` + `#[non_exhaustive]`, validated on create → `izyre.rs:260`, `validate()` in `ZyreNode::new` (`node.rs:29`).
-- **FR-006**: UDP beacon + gossip; gossip requires explicit `endpoint` → validation `izyre.rs:327`, `apply_config` `node.rs:76`.
-- **FR-007**: Peer introspection → `peers`/`peers_by_group`/`own_groups`/`peer_groups`/`peer_address`/`peer_header_value` (`node.rs:239-312`).
-- **FR-008**: Non-blocking `try_recv` via `zpoller` zero-timeout; no crate-spawned threads → `node.rs:196`. *(Minor wording note below.)*
-- **FR-009**: Build clones/compiles libzmq v4.3.5, czmq v4.2.1, zyre v2.0.1 → `deps/zyre-build/` (`deps/build_zyre.sh`).
-- **FR-010**: `bindgen` FFI in build script, links local libs → `build.rs`.
-- **FR-011**: `Send` not `Sync` → `unsafe impl Send for ZyreNode` (`node.rs:21`); `IZyreNode: Send`; verified by `api_safety.rs`.
-- **FR-012**: Typed `ZyreError` enum → `izyre.rs:16`.
+### Aligned — Success Criteria
 
-#### Drifted ⚠️
+| Criterion | Evidence |
+|---|---|
+| SC-001 (2s round-trip on localhost) | `tests/integration.rs::round_trip_within_two_seconds` asserts `elapsed < Duration::from_secs(2)` on a real localhost ping/pong exchange; skips itself only under `ZYRE_TEST_TIMEOUT_SCALE>1` (valgrind runs), not under normal `cargo test`. |
+| SC-002 (zero `unsafe` in public API) | No `unsafe` token in `lib.rs`; public `IZyreNode`/`IZyre` trait method signatures contain no unsafe fns; asserted by `tests/api_safety.rs`. |
+| SC-003 (<5 min clean build) | `specs/001-zyre-bindings/tasks.md:129` (T042) records a measured from-scratch `cargo build -p zyre` of 2.27s once C deps are pre-built; the one-time C-dependency build is the SPDK-precedent cost and was not re-measured this pass — task is marked `[~]` (partially verified) rather than fully closed. |
+| SC-004 (9 event types, no information loss vs C API) | Same enum cited under FR-003; each variant carries peer/name/group/message/headers/address as applicable. |
+| SC-005 (memory safety: Miri or valgrind, zero errors) | Miri cannot cross the FFI boundary (documented in `run-valgrind.sh:6-7`), so `components/zyre/run-valgrind.sh` + `valgrind.supp` run memcheck over the test binaries; `tasks.md:184` (T057) records 0 errors / 0 bytes lost attributable to the bindings (C-library-internal reachable/leak reports suppressed and documented). |
 
-- **D-1 — `plan.md` describes the obsolete builder API and pre-refactor module layout.** *(major — breadth of stale references; documentation only, no code impact)*
-  - `plan.md:8` — "presents a Rust-native API with RAII, typed events, **builder configuration**, and Result-based errors." Actual: `NodeConfig` uses public fields + `Default`, **no builder** (`izyre.rs:260`; the builder was explicitly rejected — `research.md:56`).
-  - `plan.md:34` — "6 focused modules (node, **event, builder, error, peer**, ffi)." Actual: the `zyre` crate has 3 files (`lib.rs`, `node.rs`, `ffi.rs`); the value types live in `interfaces/src/izyre.rs`.
-  - `plan.md:63-67` — source tree lists `event.rs`, `builder.rs`, `error.rs`, `peer.rs`, none of which exist, and omits that the types now live in the `interfaces` crate.
-  - `plan.md:70` — tests tree lists only `integration.rs`; the crate also has `tests/api_safety.rs`.
-  - Note: CLAUDE.md directs contributors to "read the current plan at `specs/001-zyre-bindings/plan.md`", so this staleness is actively misleading. The Summary line's "`IZyre` … acts as a factory for `ZyreNode`" is, by contrast, correct.
-  - Location: `specs/001-zyre-bindings/plan.md`
-  - Severity: **major**
+### Not implemented
 
-- **D-2 — `tasks.md` task bodies still name deleted source files and the builder.** *(moderate — partially reconciled)*
-  - `tasks.md:39-44` carries a correct superseded-design note, and T050 (`shout_multi`/`whisper_multi`) is properly struck (`tasks.md:178`). **However**, individual task lines still reference `src/event.rs`, `src/builder.rs`, `src/error.rs`, `src/peer.rs` and a "builder pattern": e.g. T015 (`:67`), T027/T028 (`:95-96`), T031-T033 (`:102-104`), T043/T046 (`:143`,`:149`), phase goal (`:89`,`:91`), examples (`:218`,`:233`,`:237`).
-  - Actual: types are in `interfaces/src/izyre.rs`; config has no builder; the crate files are `lib.rs`/`node.rs`/`ffi.rs`.
-  - Location: `specs/001-zyre-bindings/tasks.md`
-  - Severity: **moderate**
+None.
 
-#### Resolved since last report ✓
+### Resolved since the 2026-07-14 report
 
-- **(was D-1) Multi-frame receive truncation** — RESOLVED. The `_multi` send methods were removed from `node.rs` (per the Session 2026-07-09 clarification, `spec.md:129`), and `data-model.md:54` now states the payload is a single frame "bounded only by memory; there is no multi-frame representation." Send/receive are symmetric again; SC-004 no longer weakened.
-- **(was D-2/D-3) `data-model.md` builder + accessor gaps** — RESOLVED. `data-model.md:63-66` documents the public-fields/no-builder `NodeConfig`; `:57` documents the `peer()/peer_name()/group()` accessors (so they are no longer "unspecced code").
+- **`plan.md` staleness (was D-1, major)** — RESOLVED. `plan.md`'s Summary and Project Structure sections now describe public-field `NodeConfig`/`GossipConfig` (no builder) and the actual 3-file `zyre` crate (`lib.rs`/`node.rs`/`ffi.rs`) plus `interfaces/src/izyre.rs`; the source tree lists `tests/api_safety.rs`.
+- **`tasks.md` stale file references (was D-2, moderate)** — RESOLVED. The superseded-design note at `tasks.md:38-45` now explicitly names the earlier `event.rs`/`builder.rs`/`error.rs`/`peer.rs`/`NodeConfigBuilder` design and states it was replaced by the factory refactor (commit `b45418d`); no task body elsewhere in the file still references those deleted files.
+- **`research.md:84` "builder validation failure" phrasing** — checked; `research.md` §R6 (Error Handling) no longer uses builder terminology in the current text.
 
-#### Minor observations (not counted as requirement drift)
+## Unspecced Code
 
-- **FR-008 wording**: the spec calls `recv()` a "thin wrapper over `zyre_recv`", but the code uses the higher-level `zyre_event_new`/`zyre_event_destroy` (`node.rs:180-191`) — which internally calls `zyre_recv` and yields a typed event. Functionally equivalent; consider rewording FR-008 to "wraps `zyre_event_new`".
-- **`ZyreEvent::Stop` reachability**: `recv`/`try_recv` return `NotStarted` once `stop()` flips `started` (`node.rs:114-119` vs `:180-183`), so a STOP event can never be surfaced. Representable (SC-004 holds) but effectively undeliverable. Document as internal-only or drain before stopping.
-- **`research.md:84`**: "`InvalidConfig(String)` — builder validation failure" — stale phrasing ("builder"); should read "config validation failure". Minor.
-- **Fire-and-forget edge case** (`spec.md:81`): whisper/shout to a departed UUID is untested; `whisper`/`shout` return `SendFailed` on non-zero rc (`node.rs:173`,`:155`). `zyre_whisper` returns 0 for unknown peers so behavior likely matches, but no test locks the contract.
+| Feature | Location | Lines | Suggested spec addition |
+|---|---|---|---|
+| `ZyreNode::stop()` is a silent no-op when called on a node that is not `Running` (i.e., before `start()`, or a second `stop()` call while already `Draining`/`Done`) | `components/zyre/src/node.rs:146-155` (`if self.state.get() == State::Running { ... }` — no `else` branch, no error returned) | ~10 | Add a note to `data-model.md`'s "ZyreNode Lifecycle" state-transition diagram: calling `stop()` before `start()`, or calling it more than once, is idempotent/no-op rather than an error — the diagram currently documents only the `Running --stop()--> Draining` edge. |
 
-#### Success Criteria — Verification Status
+No other implementation surface (public types, methods, build steps, or test infrastructure) was found without a corresponding spec/contract/task reference.
 
-- **SC-001** (round-trip < 2 s on localhost): ✓ Verified (2026-07-14) — `round_trip_within_two_seconds` asserts a real A→B→A exchange completes inside the 2 s bound.
-- **SC-002** (zero `unsafe` in public API): ✓ Verified — safe public surface; `tests/api_safety.rs` guards it.
-- **SC-003** (clean build < 5 min): ✓ Verified (2026-07-14) — from-scratch `cargo build -p zyre` (incl. bindgen) is 2.27 s. (One-time C-deps build via `build_zyre.sh` is separate.)
-- **SC-004** (all event types, no info loss): ✓ Verified — 9 event types lossless; single-frame payload is unbounded (multi-frame gap resolved).
-- **SC-005** (Miri/valgrind clean): ✓ Verified (2026-07-14) — Miri can't cross FFI; valgrind memcheck over the lib + integration suites (`run-valgrind.sh` + `valgrind.supp`) reports 0 errors / 0 bytes lost attributable to the bindings (C-library-internal reports suppressed).
+## Conflicts
 
-### Unspecced Code 🆕
-
-None material. The `ZyreEvent` accessors, `PeerId` `Display`/`From` conversions,
-and `GossipConfig::bind`/`connect` constructors are all now documented in
-`data-model.md` / `izyre.rs` and consistent with US2 (idiomatic Rust API).
-
-## Inter-Spec Conflicts
-
-Within 001-zyre-bindings, `plan.md` and (in its task bodies) `tasks.md` still
-describe the pre-refactor builder / per-type-file design, contradicting
-`spec.md`, `data-model.md`, and `contracts/izyre.md`, which describe the current
-factory / public-fields-config design (commit `b45418d` and the Session
-2026-07-09 clarifications). No conflicts with other components' specs.
+None found between spec artifacts, contracts, data model, quickstart, and tasks — all are mutually consistent with each other and with the code as of this review.
 
 ## Recommendations
 
-1. **Refresh `plan.md` (D-1)** — the highest-value fix, since CLAUDE.md points contributors here. Drop "builder configuration"; correct the module count/layout to `lib.rs`/`node.rs`/`ffi.rs` with value types in `interfaces/src/izyre.rs`; fix the source tree (remove `event.rs`/`builder.rs`/`error.rs`/`peer.rs`, add `api_safety.rs` to the tests tree).
-2. **Reconcile `tasks.md` bodies (D-2)** — rewrite the task lines that name `event.rs`/`builder.rs`/`error.rs`/`peer.rs` and "builder pattern" to the factory/public-fields design, matching the note already at the top of the file.
-3. **Close SC verification gaps** — tighten SC-001 into a timed assertion (or relax its wording); add a valgrind CI job for SC-005 (note Miri can't cover FFI); record a clean-build timing for SC-003.
-4. **Minor cleanups** — reword FR-008 (`zyre_event_new`), fix `research.md:84` ("config validation failure"), document/close the `ZyreEvent::Stop` reachability gap, and add a whisper-to-departed-UUID test to lock the fire-and-forget contract.
+1. **(Optional, low priority)** Document `stop()`'s no-op behavior outside the `Running` state in `data-model.md` (see Unspecced Code above). This is a documentation completeness improvement, not a functional gap — the current behavior is reasonable and doesn't need to change.
+2. **(Optional, tracking only)** Close out `tasks.md` T056 ("Validate quickstart.md instructions end-to-end") and fully verify T042/SC-003 by re-running `deps/build_zyre.sh` from a clean `deps/zyre-build/` and recording the total wall-clock time, so SC-003 has a complete (not partial) verification record.
+3. No code or spec changes are required to resolve drift — there is none outstanding. The component is in a well-synchronized state and can be treated as a clean baseline for future spec/code changes.

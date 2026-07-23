@@ -5,7 +5,7 @@
 
 ## Summary
 
-Build LoggerComponentV1 — a thread-safe logging component for the Certus
+Build LoggerComponent — a thread-safe logging component for the Certus
 storage system providing console (stderr) and file output with ANSI
 colorization, RUST_LOG-based level filtering, and timestamped messages.
 The ILogger interface is added to the shared interfaces crate; the
@@ -41,7 +41,7 @@ definition, 1 component implementation
 | I. Code Correctness | PASS | Unit tests for all log methods, edge cases, level filtering. clippy -D warnings enforced. |
 | II. Comprehensive Testing | PASS | Unit + integration + doc tests planned for all public API. |
 | III. Performance Accountability | PASS | Criterion benchmarks for log formatting throughput in `benches/`. |
-| IV. Component Framework Conformance | PASS | `define_component!` for LoggerComponentV1, `define_interface!` for ILogger, IUnknown auto-generated. |
+| IV. Component Framework Conformance | PASS | `define_component!` for LoggerComponent, `define_interface!` for ILogger, IUnknown auto-generated. |
 | V. Interface-Driven Design | PASS | All public functions exposed only through ILogger trait. |
 | VI. Documentation as Contract | PASS | Doc comments with runnable examples on all public types/methods. README.md included. |
 | VII. Maintainability | PASS | `cargo fmt`, `cargo clippy`, minimal public API surface. |
@@ -64,11 +64,11 @@ specs/001-logger-component/
 ### Source Code (repository root)
 
 ```text
-components/logger/v1/
+components/logger/
 ├── Cargo.toml
 ├── README.md
 ├── src/
-│   └── lib.rs           # ILogger impl, LoggerComponentV1, log level
+│   └── lib.rs           # ILogger impl, LoggerComponent, log level
 │                        # parsing, console/file writers, colorization
 ├── benches/
 │   └── log_throughput.rs # Criterion benchmark for log formatting
@@ -85,9 +85,9 @@ components/interfaces/
 
 ```text
 Cargo.toml (workspace root)
-  members += ["components/logger/v1"]
-  default-members += ["components/logger/v1"]
-  [workspace.dependencies] += logger = { path = "components/logger/v1" }
+  members += ["components/logger"]
+  default-members += ["components/logger"]
+  [workspace.dependencies] += logger = { path = "components/logger" }
 ```
 
 **Structure Decision**: Single-crate Rust library component following the

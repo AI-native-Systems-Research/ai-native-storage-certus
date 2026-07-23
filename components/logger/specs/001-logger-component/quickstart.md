@@ -27,12 +27,12 @@ cargo bench -p logger
 ## Usage: Console Logging (default)
 
 ```rust
-use logger::LoggerComponentV1;
+use logger::LoggerComponent;
 use interfaces::ILogger;
 use component_core::query_interface;
 
 // Create a console logger (reads RUST_LOG for level filtering)
-let component = LoggerComponentV1::new();
+let component = LoggerComponent::new_default();
 
 // Query the ILogger interface
 let logger = query_interface!(component, ILogger).unwrap();
@@ -55,11 +55,11 @@ Output (with RUST_LOG=info):
 ## Usage: File Logging
 
 ```rust
-use logger::LoggerComponentV1;
+use logger::LoggerComponent;
 use interfaces::ILogger;
 use component_core::query_interface;
 
-let component = LoggerComponentV1::new_with_file("/tmp/app.log").unwrap();
+let component = LoggerComponent::new_with_file("/tmp/app.log").unwrap();
 let logger = query_interface!(component, ILogger).unwrap();
 
 logger.info("logging to file");
@@ -69,10 +69,10 @@ logger.info("logging to file");
 ## Usage: Component Wiring
 
 ```rust
-use logger::LoggerComponentV1;
+use logger::LoggerComponent;
 
 // Create logger component
-let logger_comp = LoggerComponentV1::new();
+let logger_comp = LoggerComponent::new_default();
 
 // Bind to another component's ILogger receptacle
 consumer_component.connect_receptacle_raw("logger", &*logger_comp).unwrap();

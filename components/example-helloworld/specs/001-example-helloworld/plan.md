@@ -9,7 +9,7 @@ This component is fully implemented. It provides a minimal reference demonstrati
 
 ## Technical Context
 
-The component lives at `components/example-helloworld/` and consists of a single source file (`src/lib.rs`, ~110 lines). It depends on the workspace's `component-framework`, `component-core`, `interfaces`, and `logger` crates. It is consumed by the `apps/helloworld-mainline/` application which demonstrates full wiring.
+The component lives at `components/example-helloworld/` and consists of a single source file (`src/lib.rs`, ~110 lines). It depends on the workspace's `component-framework`, `component-core`, `interfaces`, and `logger` crates. It is consumed by the `apps/helloworld-mainline/` application, which activates the actor and sends greeting requests but does not wire a logger (see Testing section below).
 
 ### File Structure
 
@@ -55,12 +55,12 @@ components/example-helloworld/
 | `component-framework` | `Actor`, `ActorHandler`, `define_component!`, `define_interface!` |
 | `component-core` | `IUnknown` base trait (auto-derived) |
 | `interfaces` | `ILogger` trait definition |
-| `logger` | Concrete logger (used transitively in `apps/helloworld-mainline`) |
+| `logger` | Concrete logger crate dependency; not currently exercised by `apps/helloworld-mainline` (that app does not wire a logger) |
 
 ## Testing
 
 - **Doc test**: The module-level `Quick start` example is a runnable doc test exercising actor creation, message sending, and deactivation.
-- **Integration**: The `apps/helloworld-mainline/` application provides a full integration test with logger wiring.
+- **Integration**: The `apps/helloworld-mainline/` application activates the actor and drives it with `GreetRequest` messages, but constructs the handler via `GreeterHandler::new()` (no logger) and does not depend on the `logger` crate. It does not exercise `ILogger` wiring; that is currently demonstrated only via unit/doc-test-level construction (`GreeterHandler::with_logger(...)`) within this component. (Corrected 2026-07-22 via spec-sync; previously claimed the app provided full logger-wiring integration coverage.)
 - **CI**: Included in `cargo test --all` (default workspace members).
 
 ## Future Considerations

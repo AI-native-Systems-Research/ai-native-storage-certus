@@ -1,372 +1,87 @@
 {
-  "spec": "components/extent-manager/specs/001-extent-manager-v2/spec.md",
-  "generated": "2026-06-18",
+  "generated": "2026-07-22T22:37:58Z",
+  "project": "extent-manager",
   "summary": {
-    "aligned": 27,
-    "drifted": 5,
-    "not_implemented": 2,
-    "unspecified_code": 2
+    "specs_analyzed": 1,
+    "requirements_checked": 41,
+    "aligned": 37,
+    "drifted": 4,
+    "not_implemented": 0,
+    "unspecced_features": 3
   },
-  "requirements": [
+  "specs": [
     {
-      "id": "FR-001",
-      "title": "Component naming and definition",
-      "status": "aligned",
-      "spec_says": "Component MUST be named ExtentManager with receptacles metadata_device: IBlockDevice and logger: ILogger",
-      "code_does": "define_component! with ExtentManager, IExtentManager, metadata_device, logger",
-      "files": ["components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-002",
-      "title": "FormatParams validation",
-      "status": "aligned",
-      "spec_says": "format() MUST validate all FormatParams fields",
-      "code_does": "Validates sector_size > 0, slab_size multiple, max_extent_size <= slab_size, region_count power-of-two, metadata device large enough",
-      "files": ["components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-003",
-      "title": "Superblock write at LBA 0",
-      "status": "aligned",
-      "spec_says": "format() MUST write superblock at LBA 0 with CRC32",
-      "code_does": "Superblock serialized with CRC32 and written to LBA 0",
-      "files": ["components/extent-manager/src/superblock.rs", "components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-004",
-      "title": "initialize() reads and validates superblock",
-      "status": "aligned",
-      "spec_says": "initialize() MUST read superblock, validate magic/CRC, recover from active checkpoint, rebuild state",
-      "code_does": "Recovery reads superblock, validates magic+CRC, recovers checkpoint, rebuilds regions/buddies/bitmaps",
-      "files": ["components/extent-manager/src/recovery.rs", "components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-005",
-      "title": "reserve_extent returns WriteHandle",
-      "status": "aligned",
-      "spec_says": "reserve_extent MUST allocate sector-aligned slot, return WriteHandle, not visible until publish",
-      "code_does": "Allocates via region, sector-aligns size, returns WriteHandle with publish/abort closures",
-      "files": ["components/extent-manager/src/lib.rs", "components/extent-manager/src/region.rs"]
-    },
-    {
-      "id": "FR-006",
-      "title": "FREE_KEY publish is silent discard",
-      "status": "aligned",
-      "spec_says": "If key equals FREE_KEY, slot MUST be freed, call returns Ok, no visibility",
-      "code_does": "publish_fn checks key == FREE_KEY, calls free_slot, returns Ok(Extent)",
-      "files": ["components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-007",
-      "title": "Abort/drop releases slot",
-      "status": "aligned",
-      "spec_says": "abort() or drop MUST release slot without writing key",
-      "code_does": "WriteHandle::abort() and Drop impl call abort_fn which frees the slot",
-      "files": ["components/interfaces/src/iextent_manager.rs"]
-    },
-    {
-      "id": "FR-008",
-      "title": "remove_extent with deferred free",
-      "status": "aligned",
-      "spec_says": "remove_extent sets key to FREE_KEY, hides from enumeration, slot freed after checkpoint",
-      "code_does": "Sets key to FREE_KEY, adds to pending_frees, flush_pending_frees after checkpoint; OffsetNotFound returned for invalid",
-      "files": ["components/extent-manager/src/region.rs", "components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-009",
-      "title": "Enumeration filters FREE_KEY",
-      "status": "aligned",
-      "spec_says": "get_extents returns all non-FREE_KEY; for_each_extent invokes callback for each",
-      "code_does": "Both methods iterate slabs, filter key != FREE_KEY",
-      "files": ["components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-010",
-      "title": "Per-slab key vectors",
-      "status": "aligned",
-      "spec_says": "Each Slab MUST maintain dense Vec<u64> parallel to bitmap",
-      "code_does": "Slab struct has keys: Vec<u64> initialized to FREE_KEY, no separate HashMap",
-      "files": ["components/extent-manager/src/slab.rs"]
-    },
-    {
-      "id": "FR-011",
-      "title": "FREE_KEY sentinel",
-      "status": "aligned",
-      "spec_says": "FREE_KEY = u64::MAX marks unoccupied slots",
-      "code_does": "pub const FREE_KEY: u64 = u64::MAX",
-      "files": ["components/extent-manager/src/slab.rs"]
-    },
-    {
-      "id": "FR-012",
-      "title": "BTreeMap keyed by start_offset",
-      "status": "aligned",
-      "spec_says": "Slabs in BTreeMap<u64, Slab> with range(..=offset).next_back() for O(log n)",
-      "code_does": "slabs: BTreeMap<u64, Slab> in RegionState; remove uses range(..=offset).next_back()",
-      "files": ["components/extent-manager/src/region.rs"]
-    },
-    {
-      "id": "FR-013",
-      "title": "Checkpoint serialization with CRC32",
-      "status": "aligned",
-      "spec_says": "checkpoint MUST serialize regions with CRC32, write to inactive, switch superblock",
-      "code_does": "write_checkpoint serializes all regions, builds CRC32 header+payload, writes inactive, updates active_copy",
-      "files": ["components/extent-manager/src/checkpoint.rs"]
-    },
-    {
-      "id": "FR-014",
-      "title": "Skip checkpoint when clean",
-      "status": "aligned",
-      "spec_says": "checkpoint MUST skip I/O if no region modified",
-      "code_does": "run_checkpoint checks any_dirty, returns Ok early if all clean",
-      "files": ["components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-015",
-      "title": "Checkpoint coalescing",
-      "status": "aligned",
-      "spec_says": "Concurrent calls coalesced; at most two active checkpoint I/O operations",
-      "code_does": "CheckpointCoalesce with in_progress/completed_seq; waiters compute needed = seq+2 max, block on condvar",
-      "files": ["components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-016",
-      "title": "Background checkpoint thread default interval",
-      "status": "drifted",
-      "severity": "moderate",
-      "spec_says": "Background thread MUST call checkpoint at configurable interval (default 300 seconds / 5 minutes)",
-      "code_does": "Default interval is Duration::from_secs(30) (30 seconds) in new_inner()",
-      "impact": "Systems using default will checkpoint 10x more frequently than spec states; increased metadata write amplification",
-      "files": ["components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-017",
-      "title": "Dual-copy fallback recovery",
-      "status": "aligned",
-      "spec_says": "Recovery MUST try active first, fall back to inactive on failure",
-      "code_does": "recover() tries active_offset, on error tries inactive with prev_seq",
-      "files": ["components/extent-manager/src/recovery.rs"]
-    },
-    {
-      "id": "FR-018",
-      "title": "Recovery rebuilds from key vectors",
-      "status": "aligned",
-      "spec_says": "initialize MUST restore extents by reading key vectors, marking non-FREE slots allocated",
-      "code_does": "slab_from_descriptor iterates keys, marks allocated for non-FREE entries",
-      "files": ["components/extent-manager/src/recovery.rs"]
-    },
-    {
-      "id": "FR-019",
-      "title": "Buddy allocator per region",
-      "status": "aligned",
-      "spec_says": "Each region MUST use buddy allocator for slab-sized chunks",
-      "code_does": "BuddyAllocator per RegionState with alloc/free/mark_allocated",
-      "files": ["components/extent-manager/src/buddy.rs", "components/extent-manager/src/region.rs"]
-    },
-    {
-      "id": "FR-020",
-      "title": "Bitmap allocator with rover",
-      "status": "aligned",
-      "spec_says": "Each slab MUST use bitmap allocator with rover",
-      "code_does": "AllocationBitmap with find_free_from(rover); rover wraps on alloc",
-      "files": ["components/extent-manager/src/slab.rs", "components/extent-manager/src/bitmap.rs"]
-    },
-    {
-      "id": "FR-021",
-      "title": "Size-class manager",
-      "status": "aligned",
-      "spec_says": "Size-class manager MUST index slabs by element size for O(1) lookup",
-      "code_does": "SizeClassManager with HashMap<u32, Vec<u64>>",
-      "files": ["components/extent-manager/src/slab.rs"]
-    },
-    {
-      "id": "FR-022",
-      "title": "Key sharding",
-      "status": "aligned",
-      "spec_says": "Keys sharded by key & (region_count - 1)",
-      "code_does": "let idx = key as usize & (regions.len() - 1)",
-      "files": ["components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-023",
-      "title": "Independent region locking",
-      "status": "aligned",
-      "spec_says": "Each region independently locked with parking_lot::RwLock; hot-path only acquires target",
-      "code_does": "Vec<Arc<RwLock<RegionState>>> with parking_lot::RwLock; reserve_extent touches only outer read + target write",
-      "files": ["components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-024",
-      "title": "Send + Sync",
-      "status": "aligned",
-      "spec_says": "Component MUST be Send + Sync",
-      "code_does": "Implicitly Send+Sync via Arc/Mutex/RwLock composition; concurrent tests validate",
-      "files": ["components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-025",
-      "title": "Deferred free crash safety",
-      "status": "aligned",
-      "spec_says": "Freed slot MUST NOT be reallocated until checkpoint persists removal",
-      "code_does": "pending_frees accumulates removals; flush_pending_frees called only after successful checkpoint",
-      "files": ["components/extent-manager/src/region.rs", "components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-026",
-      "title": "get_instance_id",
-      "status": "aligned",
-      "spec_says": "MUST provide get_instance_id() returning superblock instance_id",
-      "code_does": "fn get_instance_id() reads shared.superblock.instance_id",
-      "files": ["components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-027",
-      "title": "set_checkpoint_interval",
-      "status": "aligned",
-      "spec_says": "MUST provide set_checkpoint_interval(duration)",
-      "code_does": "On IExtentManager trait; delegates to CheckpointTimerState",
-      "files": ["components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-028",
-      "title": "set_metadata_ns_id",
-      "status": "aligned",
-      "spec_says": "MUST provide set_metadata_ns_id(ns_id: u32)",
-      "code_does": "pub fn set_metadata_ns_id on concrete ExtentManager type",
-      "files": ["components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-029",
-      "title": "set_dma_alloc",
-      "status": "aligned",
-      "spec_says": "MUST provide set_dma_alloc(alloc)",
-      "code_does": "pub fn set_dma_alloc on concrete ExtentManager type",
-      "files": ["components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-030",
-      "title": "volatile_write_cache feature gate",
-      "status": "aligned",
-      "spec_says": "MAY support volatile_write_cache controlling flush calls",
-      "code_does": "Feature in Cargo.toml; cfg guards on flush calls in checkpoint and superblock write",
-      "files": ["components/extent-manager/Cargo.toml", "components/extent-manager/src/lib.rs", "components/extent-manager/src/checkpoint.rs"]
-    },
-    {
-      "id": "FR-031",
-      "title": "used_bytes()",
-      "status": "drifted",
-      "severity": "minor",
-      "spec_says": "used_bytes() returns total bytes currently allocated (sum of all published extent sizes)",
-      "code_does": "Returns buddy total_usable_size - total_free, which is slab-level allocation not per-extent sum",
-      "impact": "Reports slab-granularity usage; a 1GiB slab with one 4KiB extent reports 1GiB used",
-      "files": ["components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-032",
-      "title": "capacity_bytes()",
-      "status": "aligned",
-      "spec_says": "capacity_bytes() returns total data device capacity",
-      "code_does": "Sums buddy.total_usable_size() across all regions",
-      "files": ["components/extent-manager/src/lib.rs"]
-    },
-    {
-      "id": "FR-033",
-      "title": "WriteHandle in interfaces crate",
-      "status": "aligned",
-      "spec_says": "WriteHandle MUST be defined in interfaces crate with RAII semantics",
-      "code_does": "WriteHandle struct in interfaces/src/iextent_manager.rs with publish/abort/Drop",
-      "files": ["components/interfaces/src/iextent_manager.rs"]
-    },
-    {
-      "id": "FR-034",
-      "title": "Fault injection test infrastructure",
-      "status": "drifted",
-      "severity": "minor",
-      "spec_says": "Fault injection behind a 'test-only' feature gate",
-      "code_does": "Feature gate named 'testing' (not 'test-only'); full FaultConfig/MockBlockDevice implemented",
-      "impact": "Feature gate naming inconsistency only; functionality is complete",
-      "files": ["components/extent-manager/Cargo.toml", "components/extent-manager/src/test_support.rs"]
-    },
-    {
-      "id": "Superblock-Layout",
-      "title": "On-disk superblock format",
-      "status": "drifted",
-      "severity": "major",
-      "spec_says": "Magic 0x4345_5254_5553_5635 (CERTUSV5), version 5, CRC at offset 84, no data_start_offset field",
-      "code_does": "Magic 0x4345_5254_5553_5634 (CERTUSV4), FORMAT_VERSION=6, data_start_offset at offset 84 (8 bytes), CRC at offset 92",
-      "impact": "Any tool using spec's documented binary layout will misparse. Magic, version, and field offsets all differ.",
-      "files": ["components/extent-manager/src/superblock.rs"]
-    },
-    {
-      "id": "SC-005",
-      "title": "100M extent scale validation",
-      "status": "drifted",
-      "severity": "moderate",
-      "spec_says": "Component supports ~100 million extents on 10 TB data device",
-      "code_does": "No test validates this scale; largest test uses ~800 extents",
-      "impact": "Scalability claim is architecturally plausible but unverified",
-      "files": ["components/extent-manager/tests/"]
+      "id": "001-extent-manager-v2",
+      "title": "Extent Manager V2",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
+        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
+        "FR-017", "FR-018", "FR-019", "FR-020", "FR-021", "FR-022", "FR-023",
+        "FR-024", "FR-025", "FR-026", "FR-027", "FR-028", "FR-029", "FR-031",
+        "FR-032", "FR-033", "FR-034",
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-016",
+          "spec_text": "A background thread MUST call checkpoint() at a configurable interval (default 30 seconds). Note: the IExtentManager interface doc comment incorrectly states \"five minutes\" — the actual default is 30 seconds as set in the constructor.",
+          "actual": "Code default is 30s (matches spec) via ExtentManager::new_inner, src/lib.rs:109-112. However, the spec's disclosure of the stale doc string covers only the trait doc comment in components/interfaces/src/iextent_manager.rs:244; README.md:12 independently repeats the same wrong '5 minutes' claim, which the spec does not mention.",
+          "location": "components/extent-manager/README.md:12 (undisclosed second stale-doc site); components/extent-manager/src/lib.rs:109-112 (actual, correct default)",
+          "severity": "low"
+        },
+        {
+          "requirement": "FR-030",
+          "spec_text": "The component supports a volatile_write_cache feature gate that controls whether BlockDeviceClient::flush() calls are issued to the metadata device. When enabled, flush calls in checkpoint and format paths are conditionally compiled out, improving performance on devices with volatile write caches where the caller accepts the associated durability risk.",
+          "actual": "Polarity is inverted: the #[cfg(feature = \"volatile_write_cache\")] guard causes the flush() call to be compiled IN when the feature is enabled (and entirely absent/compiled-out by default) -- i.e. enabling the feature makes flushing happen, the opposite of 'compiled out'. Scope is also wrong: format() never calls flush() under any feature configuration; both feature-gated flush sites live in the checkpoint path only.",
+          "location": "components/extent-manager/src/checkpoint.rs:99-103; components/extent-manager/src/lib.rs:308-310 (checkpoint path); components/extent-manager/src/lib.rs:383-512 (format(), no flush call present)",
+          "severity": "medium"
+        },
+        {
+          "requirement": "SC-006",
+          "spec_text": "Checkpoint coalescing limits concurrent checkpoint I/O to at most two active operations regardless of caller count.",
+          "actual": "checkpoint_coalesce.in_progress is a bool, not a counter: at most ONE run_checkpoint() call is ever physically executing at any instant. The 'two' in the spec refers to the max number of sequential checkpoint rounds (completed_seq + 2) needed to satisfy a burst of waiting callers, not two concurrently-active I/O operations. As worded, this contradicts FR-015 ('at most one actual checkpoint I/O operation executes at a time... serializes all checkpoint I/O through a single writer'). README.md:13 repeats the same ambiguous phrasing.",
+          "location": "components/extent-manager/src/lib.rs:729-761",
+          "severity": "medium"
+        },
+        {
+          "requirement": "Key Entities (Superblock)",
+          "spec_text": "Superblock ... Magic: 0x4345_5254_5553_5634 (\"CERTUSV4\"), version 6.",
+          "actual": "Code matches the spec (FORMAT_VERSION: u32 = 6, src/superblock.rs:6), but README.md:19 still describes the on-disk format as 'format version (5)', stale from an earlier revision and inconsistent with both the spec and the code.",
+          "location": "components/extent-manager/README.md:19 vs components/extent-manager/src/superblock.rs:6",
+          "severity": "low"
+        }
+      ],
+      "not_implemented": []
     }
   ],
-  "not_implemented": [
+  "unspecced": [
     {
-      "id": "FR-024-assertion",
-      "title": "Compile-time Send+Sync assertion",
-      "description": "No static assertion guaranteeing Send+Sync. Component is Send+Sync via field composition, but a future refactor could silently break this.",
-      "severity": "low",
-      "files": ["components/extent-manager/src/lib.rs"]
+      "feature": "FormatParams.metadata_region_size and the shared metadata/data-device co-location mode (non-zero value shifts data_start_offset past the checkpoint regions so metadata and data can share one NVMe namespace)",
+      "location": "components/interfaces/src/iextent_manager.rs:62-66 (field); components/extent-manager/src/lib.rs:425-446 (format() branch); components/extent-manager/src/lib.rs:530 (initialize() reconstruction)",
+      "lines": 40,
+      "suggested_spec": "New FR under 'Initialization & Format': document metadata_region_size semantics, default (128 MiB), and the data_start_offset computation when metadata and data coexist on one device."
     },
     {
-      "id": "FR-030-flush-method",
-      "title": "BlockDeviceClient::flush() for volatile_write_cache",
-      "description": "The volatile_write_cache feature gates calls to metadata_client.flush() but no flush() method exists in block_io.rs. Feature may not compile when enabled.",
-      "severity": "low",
-      "files": ["components/extent-manager/src/block_io.rs"]
+      "feature": "Partition-relative base-LBA addressing (set_metadata_base_lba, set_data_base_lba, data_base_lba) on IExtentManager, letting the component operate on a sub-range of an NVMe namespace instead of owning it entirely; used in production by components/dispatcher, components/dispatcher-p2p, and components/dispatch-map",
+      "location": "components/interfaces/src/iextent_manager.rs:253-260; components/extent-manager/src/lib.rs:717-727",
+      "lines": 15,
+      "suggested_spec": "New FR under 'Instance & Configuration': partition offset support for shared-namespace deployments."
+    },
+    {
+      "feature": "set_post_checkpoint_hook(Arc<dyn Fn() + Send + Sync>) -- inherent method registering a callback invoked once after each successful checkpoint() completes; used by components/dispatcher/src/lib.rs:1348 and components/dispatcher-p2p/src/lib.rs:943",
+      "location": "components/extent-manager/src/lib.rs:173-175 (setter); components/extent-manager/src/lib.rs:365-367 (invocation)",
+      "lines": 6,
+      "suggested_spec": "New FR under 'Persistence & Recovery': post-checkpoint hook callback mechanism."
     }
   ],
-  "unspecified_code": [
+  "conflicts": [
     {
-      "feature": "data_start_offset in Superblock",
-      "description": "Enables metadata and data coexistence on same NVMe device by recording where data begins after metadata reservation",
-      "files": ["components/extent-manager/src/superblock.rs", "components/extent-manager/src/lib.rs"]
-    },
-    {
-      "feature": "metadata_region_size in FormatParams",
-      "description": "Caps metadata area size (default 128 MiB) so metadata+data can share a single SSD. Not listed in spec's FormatParams entity.",
-      "files": ["components/interfaces/src/iextent_manager.rs"]
-    }
-  ],
-  "recommendations": [
-    {
-      "priority": "high",
-      "action": "Update spec superblock on-disk format to match implementation: magic 0x4345_5254_5553_5634, version 6, add data_start_offset field at offset 84, CRC at offset 92"
-    },
-    {
-      "priority": "medium",
-      "action": "Reconcile default checkpoint interval: spec says 300s, code uses 30s. Update spec to 30s or provide rationale for either value."
-    },
-    {
-      "priority": "medium",
-      "action": "Add large-scale benchmark for SC-005 validating memory and performance at 100M extent count"
-    },
-    {
-      "priority": "low",
-      "action": "Add metadata_region_size and data_start_offset to spec FormatParams and superblock layout"
-    },
-    {
-      "priority": "low",
-      "action": "Align feature gate name: rename spec 'test-only' to 'testing' or rename code feature to 'test-only'"
-    },
-    {
-      "priority": "low",
-      "action": "Clarify used_bytes() semantics in spec to match slab-level implementation or change code to sum actual extent sizes"
-    },
-    {
-      "priority": "low",
-      "action": "Add static_assertions::assert_impl_all!(ExtentManager: Send, Sync) for compile-time safety"
-    },
-    {
-      "priority": "low",
-      "action": "Verify volatile_write_cache feature compiles by implementing BlockDeviceClient::flush() or confirming it is gated out"
+      "description": "FR-015 vs SC-006: FR-015 asserts single-writer serialization ('at most one actual checkpoint I/O operation executes at a time'), while SC-006 asserts 'at most two active operations' of 'concurrent checkpoint I/O'. The implementation (src/lib.rs:729-761) matches FR-015 exactly (a single in-flight boolean, never two concurrent checkpoints); SC-006's 'two' is only valid if reinterpreted as 'two sequential rounds to drain a burst of waiters', a materially different claim than what its own wording says. README.md inherits the same ambiguous phrasing.",
+      "locations": [
+        "components/extent-manager/specs/001-extent-manager-v2/spec.md (FR-015, SC-006)",
+        "components/extent-manager/src/lib.rs:729-761",
+        "components/extent-manager/README.md:13"
+      ]
     }
   ]
 }

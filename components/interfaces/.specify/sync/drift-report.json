@@ -1,51 +1,146 @@
 {
-  "generated": "2026-07-21",
-  "spec": "components/interfaces/specs/001-interfaces/spec.md",
-  "base_commit": "833e9f36e01f1df8a0e0fc57d5cd223d823d3199",
-  "head": "HEAD",
-  "scope": [
-    "components/interfaces/src/idispatcher.rs",
-    "components/interfaces/src/igpu_services.rs",
-    "components/interfaces/src/iblock_device.rs"
-  ],
+  "generated": "2026-07-22T22:41:32Z",
+  "project": "interfaces",
   "summary": {
-    "frs_total": 26,
-    "aligned": 24,
-    "drifted": 2,
-    "entity_attribute_drift": 1,
-    "not_implemented": 0,
-    "conflicts": 0,
-    "unspecced_features": 3
+    "specs_analyzed": 1,
+    "requirements_checked": 28,
+    "aligned": 17,
+    "drifted": 8,
+    "not_implemented": 3,
+    "unspecced_features": 8
   },
-  "per_spec": [
-    { "id": "FR-008", "subject": "IDispatcher methods", "status": "aligned" },
-    { "id": "FR-011", "subject": "IGpuServices methods", "status": "drifted", "note": "set_device and device_of_ptr not listed" },
-    { "id": "FR-017", "subject": "Supporting Types - Block Device", "status": "drifted_entity_attribute", "note": "Completion now derives Clone" },
-    { "id": "FR-018", "subject": "Supporting Types - Dispatcher", "status": "drifted", "note": "DispatcherConfig now 16 fields (spec says 14); cold_staging_slots + cold_staging_buf_bytes missing" },
-    { "id": "FR-022", "subject": "Supporting Types - GPU Services", "status": "aligned" },
-    { "id": "NFR-003", "subject": "Thread Safety", "status": "aligned", "note": "Completion still Send; Clone is additive" }
-  ],
-  "unspecced_code": [
+  "specs": [
     {
-      "feature": "DispatcherConfig::cold_staging_slots (usize, default 64) + cold_staging_buf_bytes (usize, default 4 MiB): bounded pinned-DRAM staging pool for SSD->GPU cold reads",
-      "location": "components/interfaces/src/idispatcher.rs:81-87 (defaults :109-110)",
-      "suggested_fr": "FR-027 (and update FR-018 field count to 16)"
-    },
-    {
-      "feature": "IGpuServices::set_device(device: i32) -> Result<(), String> and device_of_ptr(ptr: *const c_void) -> Result<i32, String>: per-thread CUDA device selection + device-ownership query for multi-GPU routing",
-      "location": "components/interfaces/src/igpu_services.rs:532-578",
-      "suggested_fr": "FR-028 (and append both to FR-011 list)"
-    },
-    {
-      "feature": "Completion enum derives Clone (was Debug only): enables try_send of a completion clone on a full ring without consuming the original",
-      "location": "components/interfaces/src/iblock_device.rs:350",
-      "suggested_fr": "amend FR-017 entity note and NFR-003"
+      "id": "001-interfaces",
+      "title": "Shared Interface Trait Definitions",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-005", "FR-006", "FR-010", "FR-011",
+        "FR-015", "FR-016", "FR-019", "FR-020", "FR-021", "FR-022", "FR-024",
+        "FR-026", "FR-027", "FR-028"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-004",
+          "spec_text": "IBlockDevice provides 10 methods: connect_client, sector_size, num_sectors, max_queue_depth, num_io_queues, max_transfer_size, block_size, numa_node, nvme_version, telemetry.",
+          "actual": "Interface has an 11th method, read_write_stats(&self) -> ReadWriteStats, returning cumulative SSD read/write byte, op, and latency counters. New ReadWriteStats type is also unlisted.",
+          "location": "components/interfaces/src/iblock_device.rs:494 (method), :134-176 (ReadWriteStats)",
+          "severity": "medium"
+        },
+        {
+          "requirement": "FR-007",
+          "spec_text": "IDispatchMap provides 16 methods (initialize, lookup, convert_to_storage, take_read, take_write, release_read, release_write, downgrade_reference, remove, touch, entry_size, oldest_keys, create_memory_tier_entry, convert_memory_tier_to_block, is_evictable, recover_extent).",
+          "actual": "Two additional methods exist: promote_block_to_memory_tier(key, pointer, size) - in-place BlockDevice->MemoryTier promotion preserving ref counts - and try_evict_to_block(key) - atomic evictability check + demotion to BlockDevice.",
+          "location": "components/interfaces/src/idispatch_map.rs:234-239,262",
+          "severity": "medium"
+        },
+        {
+          "requirement": "FR-008",
+          "spec_text": "IDispatcher provides 16 methods (initialize, shutdown, lookup, lookup_async, batch_lookup, check, remove, populate, reserve_memory, copy_gpu_to_memory_async, copy_gpu_to_memory_completed, release_memory, touch, promote_to_memory_tier, clear_memory_tier, flush_to_ssd).",
+          "actual": "Three additional methods exist: pin(key)/unpin(key) for eviction-protection reference counting, and read_write_stats(&self) -> ReadWriteStats for cumulative SSD telemetry.",
+          "location": "components/interfaces/src/idispatcher.rs:546,557,652",
+          "severity": "medium"
+        },
+        {
+          "requirement": "FR-009",
+          "spec_text": "IMemoryTier provides 16 methods (initialize, insert, get, peek, evict_lru, evict_lru_for_key, oldest_keys, remove, touch, batch_touch, contains, capacity, used, pool_info, is_dma_capable, clear).",
+          "actual": "An additional method telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot exists and is exported from lib.rs; the MemoryTierTelemetrySnapshot type has no FR entry.",
+          "location": "components/interfaces/src/imemory_tier.rs:12-19,206",
+          "severity": "low"
+        },
+        {
+          "requirement": "FR-012",
+          "spec_text": "IRemoteLookup provides batch_lookup(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), RemoteLookupError>>, join_cluster, and leave_cluster.",
+          "actual": "batch_lookup signature is now &[(CacheKey, u32)] (a size hint, not a GPU IpcHandle), reflecting remote-lookup's CPU/DRAM-only 002 rewrite. A new initialize(&self, config: LookupConfig) -> Result<(), RemoteLookupError> method and the LookupConfig type (10 fields: group, quorum_pct, phase1_timeout, op_deadline, max_retry_rounds, max_keys_per_query, bind_ip, actor_cpu, discovery, node_endpoint) are entirely unlisted.",
+          "location": "components/interfaces/src/iremote_lookup.rs:27-59,118,141-144",
+          "severity": "high"
+        },
+        {
+          "requirement": "FR-017",
+          "spec_text": "Command: 11-variant enum for all NVMe operations. Completion: 10-variant enum for operation results.",
+          "actual": "Command has 12 variants (ReadSync, WriteSync, ReadAsync, WriteAsync, WriteZeros, BatchSubmit, AbortOp, NsProbe, NsCreate, NsFormat, NsDelete, ControllerReset); Completion has 11 (ReadDone, WriteDone, WriteZerosDone, AbortAck, Timeout, NsProbeResult, NsCreated, NsFormatted, NsDeleted, ResetDone, Error). Both counts have been off since the enums' original commit; ReadWriteStats (see FR-004) is also missing from this FR.",
+          "location": "components/interfaces/src/iblock_device.rs:241-436",
+          "severity": "low"
+        },
+        {
+          "requirement": "FR-018",
+          "spec_text": "DispatcherConfig: 16-field configuration (PCI addrs, cache size, eviction params, poller CPU, backfill delay, partition sizes, cold-load staging slots and buffer size).",
+          "actual": "DispatcherConfig has 18 fields. Four fields are entirely undocumented: memory_tier_eviction_threshold, memory_tier_eviction_low_watermark, memory_tier_eviction_batch_size, memory_tier_eviction_interval_secs (a DRAM-to-SSD proactive demotion sweep, analogous to the existing SSD eviction sweep), plus extended_metadata_partition_size.",
+          "location": "components/interfaces/src/idispatcher.rs:26-88",
+          "severity": "medium"
+        },
+        {
+          "requirement": "FR-023",
+          "spec_text": "RemoteLookupError: 2-variant error enum. LookupRef: Zero-copy reference (pointer, size, key). RemoteRequestHandlerError: 4-variant error enum.",
+          "actual": "RemoteLookupError (2 variants: NotFound, TransportError) still matches. LookupRef and RemoteRequestHandlerError no longer exist anywhere in the crate - removed together with IRemoteRequestHandler (FR-013) by commit 29902a2.",
+          "location": "components/interfaces/src/iremote_lookup.rs:80-85 (surviving type); FR-013's types absent crate-wide",
+          "severity": "high"
+        }
+      ],
+      "not_implemented": [
+        {
+          "requirement": "FR-013",
+          "detail": "IRemoteRequestHandler (handle_lookup, handle_check, handle_batch_lookup, release_lookup) does not exist in the crate. Removed by commit 29902a2 ('refactor: split remote-request-handler into remote-lookup-rdma-{initiator,responder}') and replaced by the unspecced IRemoteLookupRdmaInitiator/IRemoteLookupRdmaResponder pair."
+        },
+        {
+          "requirement": "FR-014",
+          "detail": "IExtendedMetadataStore is implemented in components/interfaces/src/iextended_metadata_store.rs (put/get/delete/iterate_all/force_flush, added in commit 9f1f6d5) but src/lib.rs has no `mod iextended_metadata_store;` declaration or re-exports, so the trait is not part of the compiled interfaces crate. The consuming crate components/extended-metadata-store (which does `use interfaces::{ExtendedMetadataStoreError, IExtendedMetadataStore, ILogger};`) is also absent from the root Cargo.toml workspace `members` list - neither crate builds today."
+        },
+        {
+          "requirement": "FR-025",
+          "detail": "ExtendedMetadataStoreError (4 variants: NotFound, StorageError, CapacityExhausted, ValueTooLarge) is correctly defined in src/iextended_metadata_store.rs:6-16 but is unreachable for the same reason as FR-014 - the module is not wired into lib.rs."
+        }
+      ]
     }
   ],
-  "conflicts": [],
-  "recommendations": [
-    { "direction": "BACKFILL", "action": "Add FR-027 (IDispatcher cold-load staging config) and update FR-018 to 16 fields" },
-    { "direction": "BACKFILL", "action": "Add FR-028 (IGpuServices multi-GPU device routing) and append set_device/device_of_ptr to FR-011" },
-    { "direction": "BACKFILL", "action": "Amend FR-017 and NFR-003 to record Completion Clone derive" }
-  ]
+  "unspecced": [
+    {
+      "feature": "IZyre (factory) + IZyreNode (handle) interfaces, plus PeerId, ZyreEvent, NodeConfig, GossipConfig, ZyreError - LAN/gossip peer discovery and messaging",
+      "location": "components/interfaces/src/izyre.rs",
+      "lines": 438,
+      "suggested_spec": "New FR (e.g. FR-029) / user story: Peer Discovery and Messaging via zyre."
+    },
+    {
+      "feature": "IRemoteLookupRdmaInitiator interface + RemoteRegion, PushStatus, RemoteLookupRdmaInitiatorError - outbound RDMA push of local cache values to remote hosts",
+      "location": "components/interfaces/src/iremote_lookup_rdma_initiator.rs",
+      "lines": 205,
+      "suggested_spec": "New FR replacing part of removed FR-013 (outbound/serving side of remote lookup)."
+    },
+    {
+      "feature": "IRemoteLookupRdmaResponder + IRemoteLookupRdmaResponderAdmin interfaces + ControlChannel, Endpoint, LocalRegion, RemoteLookupRdmaResponderError, ResponderCommand, ResponderEvent - accept side of RDMA lookups",
+      "location": "components/interfaces/src/iremote_lookup_rdma_responder.rs",
+      "lines": 285,
+      "suggested_spec": "New FR replacing the other part of removed FR-013 (inbound/requesting side, teardown-before-reclaim handshake)."
+    },
+    {
+      "feature": "LookupConfig type + IRemoteLookup::initialize(config) method",
+      "location": "components/interfaces/src/iremote_lookup.rs:9-118",
+      "lines": 110,
+      "suggested_spec": "Fold into amended FR-012."
+    },
+    {
+      "feature": "IDispatchMap::promote_block_to_memory_tier / try_evict_to_block",
+      "location": "components/interfaces/src/idispatch_map.rs:234-262",
+      "lines": 29,
+      "suggested_spec": "Fold into amended FR-007."
+    },
+    {
+      "feature": "IDispatcher::pin / unpin (eviction-protection reference counting)",
+      "location": "components/interfaces/src/idispatcher.rs:546,557",
+      "lines": 12,
+      "suggested_spec": "Fold into amended FR-008."
+    },
+    {
+      "feature": "IDispatcher::read_write_stats / IBlockDevice::read_write_stats + ReadWriteStats type",
+      "location": "components/interfaces/src/idispatcher.rs:652; components/interfaces/src/iblock_device.rs:134-176,494",
+      "lines": 48,
+      "suggested_spec": "Fold into amended FR-004/FR-008/FR-017."
+    },
+    {
+      "feature": "IMemoryTier::telemetry_snapshot + MemoryTierTelemetrySnapshot type",
+      "location": "components/interfaces/src/imemory_tier.rs:12-19,206",
+      "lines": 8,
+      "suggested_spec": "Fold into amended FR-009/FR-019."
+    }
+  ],
+  "conflicts": []
 }

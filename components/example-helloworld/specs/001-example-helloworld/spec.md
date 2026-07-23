@@ -83,7 +83,7 @@ The component serves as a reference implementation and onboarding tool for devel
 | `component-framework` | Core framework (Actor, ActorHandler, macros) |
 | `component-core` | Base traits (IUnknown) |
 | `interfaces` | Shared interface definitions (ILogger) |
-| `logger` | Logger component implementation (for wiring in apps) |
+| `logger` | Logger component implementation; a dependency of this component's `Cargo.toml`, but not currently wired by `apps/helloworld-mainline` (see Implementation Notes) |
 
 ## Success Criteria
 
@@ -96,4 +96,4 @@ The component serves as a reference implementation and onboarding tool for devel
 - The `IGreeter` interface is defined locally in `lib.rs` rather than in the shared `interfaces` crate, demonstrating that interfaces can be component-local.
 - The actor handler uses `eprintln!` for lifecycle status and `println!` for greeting output, separating concerns between diagnostic and application output.
 - The `Default` impl delegates to `new()`, satisfying `clippy::new_without_default`.
-- A full integration example wiring this component with a logger lives in `apps/helloworld-mainline/`.
+- `apps/helloworld-mainline/` runs the component's actor without a logger wired (`GreeterHandler::new()`); it does not depend on the `logger` crate and does not demonstrate `ILogger` wiring. Logger integration (`GreeterHandler::with_logger(...)`) is currently exercised only at the unit/doc-test level within this component, not by the mainline app. (Corrected 2026-07-22 via spec-sync; previously stated a full logger-wiring integration example existed in the app.)

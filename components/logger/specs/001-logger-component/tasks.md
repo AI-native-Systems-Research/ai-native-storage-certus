@@ -16,9 +16,9 @@ data-model.md, contracts/ilogger.md
 
 **Purpose**: Project initialization and workspace integration
 
-- [x] T001 Add `logger` to workspace `Cargo.toml` at `/home/dwaddington/ai-native-storage-certus/Cargo.toml`: add `"components/logger/v1"` to both `members` and `default-members` arrays, and add `logger = { path = "components/logger/v1" }` to `[workspace.dependencies]`
-- [x] T002 Create `Cargo.toml` at `/home/dwaddington/ai-native-storage-certus/components/logger/v1/Cargo.toml` with package name `logger`, version `0.1.0`, `edition.workspace = true`, `rust-version.workspace = true`, `publish = false`, dependencies on `component-framework.workspace`, `component-core.workspace`, `component-macros.workspace`, `interfaces.workspace`, `chrono` (with `clock` feature), and dev-dependencies on `criterion` with `[[bench]]` entry for `log_throughput`
-- [x] T003 [P] Create directory structure: `src/`, `benches/`, `tests/` under `/home/dwaddington/ai-native-storage-certus/components/logger/v1/`
+- [x] T001 Add `logger` to workspace `Cargo.toml` at `/home/dwaddington/ai-native-storage-certus/Cargo.toml`: add `"components/logger"` to both `members` and `default-members` arrays, and add `logger = { path = "components/logger" }` to `[workspace.dependencies]`
+- [x] T002 Create `Cargo.toml` at `/home/dwaddington/ai-native-storage-certus/components/logger/Cargo.toml` with package name `logger`, version `0.1.0`, `edition.workspace = true`, `rust-version.workspace = true`, `publish = false`, dependencies on `component-framework.workspace`, `component-core.workspace`, `component-macros.workspace`, `interfaces.workspace`, `chrono` (with `clock` feature), and dev-dependencies on `criterion` with `[[bench]]` entry for `log_throughput`
+- [x] T003 [P] Create directory structure: `src/`, `benches/`, `tests/` under `/home/dwaddington/ai-native-storage-certus/components/logger/`
 
 ---
 
@@ -30,9 +30,9 @@ data-model.md, contracts/ilogger.md
 
 - [x] T004 Define `ILogger` interface in `/home/dwaddington/ai-native-storage-certus/components/interfaces/src/ilogger.rs` using `define_interface!` macro with methods: `fn error(&self, msg: &str)`, `fn warn(&self, msg: &str)`, `fn info(&self, msg: &str)`, `fn debug(&self, msg: &str)`. Follow the same pattern as `igreeter.rs`
 - [x] T005 Export `ILogger` from `/home/dwaddington/ai-native-storage-certus/components/interfaces/src/lib.rs`: add `mod ilogger;` and `pub use ilogger::ILogger;`
-- [x] T006 Implement `LogLevel` enum in `/home/dwaddington/ai-native-storage-certus/components/logger/v1/src/lib.rs` with variants `Error`, `Warn`, `Info`, `Debug`, numeric ordering, `Display` impl (5-char padded uppercase), and `from_env()` function that reads `RUST_LOG`, parses case-insensitively, maps "trace" to Debug, defaults to Info on missing/invalid values
-- [x] T007 Implement ANSI color helper in `/home/dwaddington/ai-native-storage-certus/components/logger/v1/src/lib.rs`: function `colorize(level: &LogLevel, text: &str) -> String` that wraps text in ANSI escape codes (red=`\x1b[31m` for Error, yellow=`\x1b[33m` for Warn, green=`\x1b[32m` for Info, cyan=`\x1b[36m` for Debug, reset=`\x1b[0m`)
-- [x] T008 Implement `LoggerComponentV1` struct and `define_component!` in `/home/dwaddington/ai-native-storage-certus/components/logger/v1/src/lib.rs`: fields `writer: Mutex<Box<dyn Write + Send>>`, `level: LogLevel`, `use_color: bool`. Use `define_component!` macro with `version: "0.1.0"` and `provides: [ILogger]`. Implement constructor `new() -> Arc<Self>` that creates a stderr writer, detects TTY via `libc::isatty(2)`, and reads RUST_LOG
+- [x] T006 Implement `LogLevel` enum in `/home/dwaddington/ai-native-storage-certus/components/logger/src/lib.rs` with variants `Error`, `Warn`, `Info`, `Debug`, numeric ordering, `Display` impl (5-char padded uppercase), and `from_env()` function that reads `RUST_LOG`, parses case-insensitively, maps "trace" to Debug, defaults to Info on missing/invalid values
+- [x] T007 Implement ANSI color helper in `/home/dwaddington/ai-native-storage-certus/components/logger/src/lib.rs`: function `colorize(level: &LogLevel, text: &str) -> String` that wraps text in ANSI escape codes (red=`\x1b[31m` for Error, orange=`\x1b[38;5;208m` for Warn, green=`\x1b[32m` for Info, cyan=`\x1b[36m` for Debug, reset=`\x1b[0m`)
+- [x] T008 Implement `LoggerComponent` struct and `define_component!` in `/home/dwaddington/ai-native-storage-certus/components/logger/src/lib.rs`: fields `writer: Mutex<Box<dyn Write + Send>>`, `level: LogLevel`, `use_color: bool`. Use `define_component!` macro with `version: "0.1.0"` and `provides: [ILogger]`. Implement constructor `new_default() -> Arc<Self>` that creates a stderr writer, detects TTY via `libc::isatty(2)`, and reads RUST_LOG
 
 **Checkpoint**: Foundation ready — ILogger defined, LogLevel parsing works, component skeleton compiles
 
@@ -43,15 +43,15 @@ data-model.md, contracts/ilogger.md
 **Goal**: Developers can use ILogger to emit log messages to stderr with
 timestamps, colored level indicators, and RUST_LOG-based filtering
 
-**Independent Test**: Create LoggerComponentV1, call each log method,
+**Independent Test**: Create LoggerComponent, call each log method,
 verify output format and level filtering
 
 ### Implementation for User Story 1
 
-- [x] T009 [US1] Implement `ILogger` trait for `LoggerComponentV1` in `/home/dwaddington/ai-native-storage-certus/components/logger/v1/src/lib.rs`: each method (error, warn, info, debug) checks level threshold, formats line as `{chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)} {LEVEL} {msg}\n` with optional ANSI color wrapping the level, acquires mutex, writes to output, flushes
-- [x] T010 [US1] Add unit tests in `/home/dwaddington/ai-native-storage-certus/components/logger/v1/src/lib.rs` (inline `#[cfg(test)] mod tests`): test LogLevel ordering, test `from_env()` parsing for all level names including "trace" and invalid values, test log format output by creating a logger with a `Vec<u8>` writer (inject via internal constructor) and verifying output contains timestamp pattern, level string, and message
+- [x] T009 [US1] Implement `ILogger` trait for `LoggerComponent` in `/home/dwaddington/ai-native-storage-certus/components/logger/src/lib.rs`: each method (error, warn, info, debug) checks level threshold, formats line as `{chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)} {LEVEL} {msg}\n` with optional ANSI color wrapping the level, acquires mutex, writes to output, flushes
+- [x] T010 [US1] Add unit tests in `/home/dwaddington/ai-native-storage-certus/components/logger/src/lib.rs` (inline `#[cfg(test)] mod tests`): test LogLevel ordering, test `from_env()` parsing for all level names including "trace" and invalid values, test log format output by creating a logger with a `Vec<u8>` writer (inject via internal constructor) and verifying output contains timestamp pattern, level string, and message
 - [x] T011 [US1] Add unit tests for color output: test that console logger with `use_color=true` includes ANSI escape codes in output, and `use_color=false` does not
-- [x] T012 [US1] Add doc tests with runnable examples on all public types and methods in `/home/dwaddington/ai-native-storage-certus/components/logger/v1/src/lib.rs`: `LoggerComponentV1::new()` example showing console usage, `LogLevel` enum documentation, module-level doc example showing basic usage pattern
+- [x] T012 [US1] Add doc tests with runnable examples on all public types and methods in `/home/dwaddington/ai-native-storage-certus/components/logger/src/lib.rs`: `LoggerComponent::new_default()` example showing console usage, `LogLevel` enum documentation, module-level doc example showing basic usage pattern
 
 **Checkpoint**: Console logging fully functional — `cargo test -p logger` passes, `cargo doc -p logger --no-deps` is warning-free
 
@@ -59,7 +59,7 @@ verify output format and level filtering
 
 ## Phase 4: User Story 2 — File-Based Logging (Priority: P2)
 
-**Goal**: Developers can configure LoggerComponentV1 to write logs to
+**Goal**: Developers can configure LoggerComponent to write logs to
 a file instead of stderr, with same format but no ANSI codes
 
 **Independent Test**: Create file logger, emit messages, verify file
@@ -67,9 +67,9 @@ contains correctly formatted entries without ANSI escape sequences
 
 ### Implementation for User Story 2
 
-- [x] T013 [US2] Implement `LoggerComponentV1::new_with_file(path: &str) -> io::Result<Arc<Self>>` in `/home/dwaddington/ai-native-storage-certus/components/logger/v1/src/lib.rs`: opens file in append+create mode, sets `use_color = false`, reads RUST_LOG for level
-- [x] T014 [US2] Add unit tests for file logging in `/home/dwaddington/ai-native-storage-certus/components/logger/v1/src/lib.rs`: test that `new_with_file` creates the file, test that output contains no ANSI escape sequences (`\x1b[` pattern absent), test that log level filtering works with file output, test error case when file path is in a non-existent directory
-- [x] T015 [US2] Add doc test for `new_with_file` in `/home/dwaddington/ai-native-storage-certus/components/logger/v1/src/lib.rs` showing file logging usage with cleanup
+- [x] T013 [US2] Implement `LoggerComponent::new_with_file(path: &str) -> io::Result<Arc<Self>>` in `/home/dwaddington/ai-native-storage-certus/components/logger/src/lib.rs`: opens file in append+create mode, sets `use_color = false`, reads RUST_LOG for level
+- [x] T014 [US2] Add unit tests for file logging in `/home/dwaddington/ai-native-storage-certus/components/logger/src/lib.rs`: test that `new_with_file` creates the file, test that output contains no ANSI escape sequences (`\x1b[` pattern absent), test that log level filtering works with file output, test error case when file path is in a non-existent directory
+- [x] T015 [US2] Add doc test for `new_with_file` in `/home/dwaddington/ai-native-storage-certus/components/logger/src/lib.rs` showing file logging usage with cleanup
 
 **Checkpoint**: File logging works independently — all tests pass
 
@@ -77,7 +77,7 @@ contains correctly formatted entries without ANSI escape sequences
 
 ## Phase 5: User Story 3 — Component Integration via ILogger (Priority: P3)
 
-**Goal**: LoggerComponentV1 can be queried for ILogger via IUnknown and
+**Goal**: LoggerComponent can be queried for ILogger via IUnknown and
 bound to other components' receptacles
 
 **Independent Test**: Create component, query ILogger interface, bind
@@ -85,9 +85,9 @@ to a test component's receptacle, verify logging through the receptacle
 
 ### Implementation for User Story 3
 
-- [x] T016 [US3] Add integration test in `/home/dwaddington/ai-native-storage-certus/components/logger/v1/tests/integration.rs`: create LoggerComponentV1, call `query_interface!(component, ILogger)` and verify it returns `Some`, call log methods through the queried interface and verify output
-- [x] T017 [US3] Add integration test for receptacle binding in `/home/dwaddington/ai-native-storage-certus/components/logger/v1/tests/integration.rs`: define a test component with `define_component!` that has `receptacles: { logger: ILogger }`, create LoggerComponentV1, bind via `connect_receptacle_raw("logger", &*logger_comp)`, verify receptacle `get()` succeeds, call log methods through the receptacle
-- [x] T018 [US3] Add thread safety integration test in `/home/dwaddington/ai-native-storage-certus/components/logger/v1/tests/integration.rs`: spawn 4+ threads, each logging 100 messages through the same ILogger reference, verify all messages appear in output without interleaving (each line is complete)
+- [x] T016 [US3] Add integration test in `/home/dwaddington/ai-native-storage-certus/components/logger/tests/integration.rs`: create LoggerComponent, call `query_interface!(component, ILogger)` and verify it returns `Some`, call log methods through the queried interface and verify output
+- [x] T017 [US3] Add integration test for receptacle binding in `/home/dwaddington/ai-native-storage-certus/components/logger/tests/integration.rs`: define a test component with `define_component!` that has `receptacles: { logger: ILogger }`, create LoggerComponent, bind via `connect_receptacle_raw("logger", &*logger_comp)`, verify receptacle `get()` succeeds, call log methods through the receptacle
+- [x] T018 [US3] Add thread safety integration test in `/home/dwaddington/ai-native-storage-certus/components/logger/tests/integration.rs`: spawn 4+ threads, each logging 100 messages through the same ILogger reference, verify all messages appear in output without interleaving (each line is complete)
 
 **Checkpoint**: Component integration verified — IUnknown query, receptacle binding, and concurrent access all tested
 
@@ -97,8 +97,8 @@ to a test component's receptacle, verify logging through the receptacle
 
 **Purpose**: Documentation, benchmarks, and final quality gates
 
-- [x] T019 [P] Create Criterion benchmark in `/home/dwaddington/ai-native-storage-certus/components/logger/v1/benches/log_throughput.rs`: benchmark log formatting throughput (message formatting + write to `Vec<u8>` sink), benchmark with level filtering (messages below threshold), benchmark with 4 concurrent threads. Use `criterion_group!` and `criterion_main!` macros following the pattern in `components/component-framework/crates/component-framework/benches/method_dispatch.rs`
-- [x] T020 [P] Create README.md at `/home/dwaddington/ai-native-storage-certus/components/logger/v1/README.md` following the pattern of `components/example-helloworld/README.md`: describe the component, its ILogger interface, public API (new, new_with_file, log methods), build instructions (`cargo build -p logger`), test instructions (`cargo test -p logger`), benchmark instructions (`cargo bench -p logger`), usage examples for console and file logging, environment variables (RUST_LOG)
+- [x] T019 [P] Create Criterion benchmark in `/home/dwaddington/ai-native-storage-certus/components/logger/benches/log_throughput.rs`: benchmark log formatting throughput (message formatting + write to `Vec<u8>` sink), benchmark with level filtering (messages below threshold), benchmark with 4 concurrent threads. Use `criterion_group!` and `criterion_main!` macros following the pattern in `components/component-framework/crates/component-framework/benches/method_dispatch.rs`
+- [x] T020 [P] Create README.md at `/home/dwaddington/ai-native-storage-certus/components/logger/README.md` following the pattern of `components/example-helloworld/README.md`: describe the component, its ILogger interface, public API (new, new_with_file, log methods), build instructions (`cargo build -p logger`), test instructions (`cargo test -p logger`), benchmark instructions (`cargo bench -p logger`), usage examples for console and file logging, environment variables (RUST_LOG)
 - [x] T021 Run full CI gate: `cargo fmt -p logger --check && cargo clippy -p logger -- -D warnings && cargo test -p logger && cargo doc -p logger --no-deps && cargo bench -p logger --no-run`
 
 ---

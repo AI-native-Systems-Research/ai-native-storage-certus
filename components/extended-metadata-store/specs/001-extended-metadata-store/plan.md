@@ -60,7 +60,11 @@ default (no features) -> pure in-memory store
 lib.rs (component definition + IExtendedMetadataStore impl)
   |
   +-- on_disk.rs (Superblock, RegionHeader, EntryRecord, serialize/deserialize)
-  |     [always compiled]
+  |     [always compiled — intentional; see NFR-05 in spec.md. This module holds only
+  |      on-disk format/data-structure definitions with no I/O dependency, so it is
+  |      distinct from the "persistence I/O" modules (block_io/flush/recovery/test_support)
+  |      below, which are gated. Resolves the historical ambiguity tracked as tasks.md
+  |      Review Backfilled Spec item T057.]
   |
   +-- block_io.rs (BlockDeviceClient - sector I/O via IBlockDevice channels)
   |     [cfg(feature = "testing")]
@@ -88,7 +92,7 @@ Application -> put(key, value)
   -> release lock
   -> increment dirty_count (atomic)
 
-FlushManager (background) OR force_flush() (explicit):
+FlushManager (background) OR flush::flush_to_disk() (explicit, via the FR-17 wiring API):
   -> snapshot_entries() [acquire read lock, clone HashMap, release]
   -> serialize_region(entries, flush_seq, sector_size)
   -> write to inactive region via BlockDeviceClient
@@ -96,6 +100,8 @@ FlushManager (background) OR force_flush() (explicit):
   -> write Superblock to LBA 0 (ATOMIC COMMIT POINT)
   -> mark_flushed(new_seq) [reset dirty_count]
 ```
+
+> **Note**: `IExtendedMetadataStore::force_flush()` (the public trait method) is currently *not* wired into this path in any build configuration — it is an unconditional no-op. A caller/dispatcher must instead hold a reference to the component's FR-17 inherent API and drive `FlushManager::trigger_flush()` (or call `flush::flush_to_disk()` directly) to actually invoke this data flow. See spec.md FR-05 Known Gaps and `.specify/sync/align-tasks.md` (Task ALIGN-002) for the code-fix tracking this gap.
 
 ### Data Flow: Recovery
 
@@ -134,14 +140,14 @@ None. The component has zero external crate dependencies. CRC32 is implemented i
 ### Test Layers
 
 1. **Unit tests** (`src/lib.rs`, `src/on_disk.rs`): Pure in-memory, no features required
-   - 8 tests in `lib.rs`: put/get, not_found, delete, overwrite, iterate, flush, size limit, dirty count
-   - 5 tests in `on_disk.rs`: superblock round-trip, corruption detection, entry round-trip, region round-trip, padding
+   - 9 tests in `lib.rs`: put/get, not_found, delete, overwrite, iterate, flush, size limit, dirty count (put+put+delete)
+   - 6 tests in `on_disk.rs`: superblock round-trip, superblock corruption detection, entry round-trip, entry corruption detection, region round-trip, padding
 
 2. **Persistence tests** (`tests/persistence.rs`, `--features testing`): MockBlockDevice-based
    - 20+ tests covering: flush/verify, region alternation, reboot recovery, corruption fallback, delete persistence, iterate correctness, concurrent stress, FlushManager, capacity exhaustion, crash mid-flush
 
 3. **SSD integration tests** (`tests/integration_ssd.rs`, `--features spdk`): Real NVMe hardware
-   - 12 tests: put/get varied sizes, overwrite, delete, persistence after flush, iterate, bulk integrity, capacity
+   - 14 tests: put/get varied sizes, overwrite, delete, persistence after flush, iterate, bulk integrity, capacity
 
 ### Test Infrastructure
 
@@ -152,6 +158,8 @@ None. The component has zero external crate dependencies. CRC32 is implemented i
 - `create_test_component()` / `create_test_component_from_state()`: Wiring helpers
 
 ### Running Tests
+
+> **Note**: The commands below require `components/extended-metadata-store` to be a member of the root workspace `Cargo.toml`. It currently is **not** (see `.specify/sync/align-tasks.md` Task ALIGN-001), so `cargo test -p extended-metadata-store` presently fails with "package ID specification did not match any packages", and running `cargo test`/`clippy`/`doc` from inside the crate directory fails with "current package believes it's in a workspace when it's not."
 
 ```bash
 # Unit tests (no features, always available)

@@ -1,16 +1,13 @@
 {
-  "generated": "2026-07-14T19:52:47Z",
+  "generated": "2026-07-22T22:33:44Z",
   "project": "zyre",
   "summary": {
     "specs_analyzed": 1,
-    "artifacts_analyzed": 6,
-    "requirements_checked": 12,
-    "aligned": 12,
-    "drifted": 2,
+    "requirements_checked": 17,
+    "aligned": 17,
+    "drifted": 0,
     "not_implemented": 0,
-    "unspecced_features": 0,
-    "success_criteria_verified": 2,
-    "success_criteria_unverified": 3
+    "unspecced_features": 1
   },
   "specs": [
     {
@@ -18,56 +15,20 @@
       "title": "Zyre Rust Bindings",
       "aligned": [
         "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006",
-        "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-012"
+        "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-012",
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005"
       ],
-      "drifted": [
-        {
-          "requirement": "plan.md architecture (builder API + module layout)",
-          "spec_text": "plan.md: 'presents a Rust-native API with ... builder configuration'; '6 focused modules (node, event, builder, error, peer, ffi)'; source tree lists event.rs/builder.rs/error.rs/peer.rs.",
-          "actual": "NodeConfig uses public fields + Default (no builder); zyre crate has 3 files (lib.rs/node.rs/ffi.rs) with value types in interfaces/src/izyre.rs; event.rs/builder.rs/error.rs/peer.rs do not exist; api_safety.rs test not listed.",
-          "location": "specs/001-zyre-bindings/plan.md:8,34,63-70",
-          "severity": "major"
-        },
-        {
-          "requirement": "tasks.md task bodies (deleted files + builder)",
-          "spec_text": "Task lines reference src/event.rs, src/builder.rs, src/error.rs, src/peer.rs and a 'builder pattern' (T015, T027-T028, T031-T033, T043, T046).",
-          "actual": "Types live in interfaces/src/izyre.rs; config has no builder; crate files are lib.rs/node.rs/ffi.rs. A superseded-design note exists at the top (tasks.md:39-44) and T050 (_multi) is struck, but the task bodies were not rewritten.",
-          "location": "specs/001-zyre-bindings/tasks.md",
-          "severity": "moderate"
-        }
-      ],
-      "resolved_since_last_report": [
-        {
-          "was": "D-1 multi-frame receive truncation",
-          "note": "_multi send methods removed from node.rs (spec.md:129 clarification); data-model.md:54 now states single-frame payload with no multi-frame representation. Send/receive symmetric; SC-004 no longer weakened."
-        },
-        {
-          "was": "data-model.md builder claim + unspecced accessors",
-          "note": "data-model.md:63-66 documents public-fields/no-builder NodeConfig; :57 documents peer()/peer_name()/group() accessors."
-        }
-      ],
-      "not_implemented": [],
-      "minor_observations": [
-        { "id": "FR-008-wording", "note": "recv() wraps zyre_event_new (typed event API), not raw zyre_recv as spec text says; functionally equivalent" },
-        { "id": "stop-unreachable", "note": "ZyreEvent::Stop representable but undeliverable: recv/try_recv return NotStarted once stop() flips the started flag" },
-        { "id": "research.md-84", "note": "'InvalidConfig(String) — builder validation failure' is stale phrasing; should be 'config validation failure'" },
-        { "id": "fire-and-forget", "note": "whisper/shout to a departed UUID (spec.md:81) is untested" }
-      ],
-      "success_criteria": [
-        { "id": "SC-001", "status": "verified", "note": "round_trip_within_two_seconds asserts A->B->A exchange within the 2s bound (2026-07-14)" },
-        { "id": "SC-002", "status": "verified", "note": "public API safe; tests/api_safety.rs guards it" },
-        { "id": "SC-003", "status": "verified", "note": "from-scratch cargo build -p zyre incl. bindgen = 2.27s; C-deps build is separate one-time cost (2026-07-14)" },
-        { "id": "SC-004", "status": "verified", "note": "9 event types lossless; single-frame payload unbounded (multi-frame gap resolved)" },
-        { "id": "SC-005", "status": "verified", "note": "valgrind memcheck (run-valgrind.sh + valgrind.supp) over lib+integration: 0 errors/0 bytes lost attributable to bindings; Miri inapplicable (FFI). C-library-internal reports suppressed (2026-07-14)" }
-      ]
+      "drifted": [],
+      "not_implemented": []
     }
   ],
-  "unspecced": [],
-  "conflicts": [
+  "unspecced": [
     {
-      "spec": "001-zyre-bindings",
-      "between": ["plan.md + tasks.md task bodies", "spec.md/data-model.md/contracts/izyre.md"],
-      "description": "plan.md and tasks.md task bodies describe the pre-refactor builder / per-type-file design; spec.md, data-model.md, and contracts/izyre.md (and the code) use the factory create_node / public-fields-config / single-frame design (commit b45418d + Session 2026-07-09 clarifications)."
+      "feature": "ZyreNode::stop() is a silent no-op when the node is not in the Running state (before start(), or on a repeated stop() call while Draining/Done) rather than erroring or being documented as idempotent",
+      "location": "components/zyre/src/node.rs",
+      "lines": 10,
+      "suggested_spec": "Add a note to specs/001-zyre-bindings/data-model.md's 'ZyreNode Lifecycle' state-transition diagram documenting that stop() outside the Running state is a no-op (idempotent), not an error."
     }
-  ]
+  ],
+  "conflicts": []
 }

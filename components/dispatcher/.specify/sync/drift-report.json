@@ -1,39 +1,49 @@
 {
-  "generated": "2026-07-21",
-  "component": "dispatcher",
-  "spec": "components/dispatcher/specs/001-dispatcher-cache-interface/spec.md",
-  "base_commit": "833e9f36e01f1df8a0e0fc57d5cd223d823d3199",
-  "sources_analyzed": [
-    "components/dispatcher/src/lib.rs",
-    "components/dispatcher/src/pipeline.rs",
-    "components/dispatcher/src/cold_pool.rs"
-  ],
-  "specs_analyzed": 1,
-  "requirements": {
-    "total": 50,
-    "aligned": 48,
-    "drifted": 2,
-    "not_implemented": 0
+  "generated": "2026-07-22T21:27:54Z",
+  "project": "dispatcher",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 50,
+    "aligned": 47,
+    "drifted": 3,
+    "not_implemented": 0,
+    "unspecced_features": 5
   },
-  "unspecced_features": 4,
   "specs": [
     {
       "id": "001-dispatcher-cache-interface",
       "title": "Dispatcher Cache Interface (Memory-Tier Architecture)",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
+        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
+        "FR-015", "FR-016", "FR-017", "FR-018", "FR-019", "FR-023", "FR-025",
+        "FR-028", "FR-029", "FR-030", "FR-031", "FR-032", "FR-033", "FR-035",
+        "FR-036", "FR-038", "FR-039", "FR-040", "FR-041", "FR-042", "FR-043",
+        "FR-044", "FR-045", "FR-046", "FR-047", "FR-048", "FR-049", "FR-050",
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006", "SC-007",
+        "SC-009", "SC-010", "SC-011", "SC-012", "SC-013", "SC-014", "SC-015"
+      ],
       "drifted": [
         {
+          "requirement": "FR-034",
+          "spec_text": "During initialize(), after GPU and memory-tier are ready, the dispatcher MUST call IGpuServices::register_host_memory... The dispatcher SHOULD also cache block-device ClientChannels per data drive at init time to avoid per-operation connection overhead.",
+          "actual": "DataDrive.cached_channels: Option<ClientChannels> (a single channel cached at init) has been replaced by DataDrive.channel_pool: ChannelPool. The pool starts empty at init -- no channel is connected eagerly -- and instead grows lazily on demand: each concurrent reader calls channel_pool.checkout() to obtain an exclusive, RAII-leased ClientChannels (connected on first checkout, drained of stale completions, returned to the pool on Drop). This was a deliberate fix for a hang: a single shared channel let two concurrent readers on the same drive (batch_lookup and the prefetch path) dequeue each other's NVMe completions ('completion theft'), which never timed out because the reads had already completed. The spec's 'single instance cached at init' model no longer matches the code.",
+          "location": "components/dispatcher/src/lib.rs:110 (DataDrive.channel_pool), lib.rs:122-163 (ChannelPool/ChannelLease), lib.rs:641-642 (promote_and_serve checkout), lib.rs:752-754 (serve_cold_staged checkout), lib.rs:1525 (ChannelPool::new at init, no eager connect), lib.rs:2861-2876 (promote_to_memory_tier per-drive prefetch checkout)",
+          "severity": "high"
+        },
+        {
           "requirement": "FR-024",
-          "severity": "high",
-          "spec": "evict_for_space uses sparse-probe + shard-targeted blind LRU primary (evict_lru_for_key(target_key)); blind-frees the LRU victim and removes the dispatch-map entry on failed BlockDevice transition (data loss accepted).",
-          "code": "evict_for_space frees one pin-safe victim per iteration via evict_one_clean over a widening oldest_keys(4*attempts, cap 1024) scan; demote (try_evict_to_block) or drop (dm.remove) only unpinned entries; blind evict_lru/evict_lru_for_key fallback removed; returns AllocationFailed if all candidates pinned. target_key now unused.",
-          "location": "components/dispatcher/src/lib.rs: evict_one_clean, evict_for_space, evict_and_insert"
+          "spec_text": "evict_for_space uses sparse-probe + shard-targeted blind LRU primary (evict_lru_for_key(target_key)); when no clean candidate is found it blind-frees the LRU victim and removes the dispatch-map entry if the BlockDevice transition fails ('data loss accepted').",
+          "actual": "evict_for_space now frees one pin-safe victim per iteration via evict_one_clean, scanning a widening oldest_keys(4x attempts, cap 1024) window; each candidate is demoted (try_evict_to_block) or, if unpinned, dropped (dm.remove); pinned candidates are skipped. The blind evict_lru/evict_lru_for_key(target_key) fallback is removed -- target_key is unused. If every scanned candidate is pinned, returns AllocationFailed instead of freeing a pinned slot. evict_and_insert's fragmentation-relief path likewise uses evict_one_clean.",
+          "location": "components/dispatcher/src/lib.rs: evict_one_clean, evict_for_space, evict_and_insert",
+          "severity": "high"
         },
         {
           "requirement": "FR-037",
-          "severity": "medium",
-          "spec": "Single warm CUDA stream stored as AtomicU64; multi-stream reserved for future.",
-          "code": "Per-GPU-device streams from process-global DEVICE_STREAMS map (device_streams_for); device resolved per request from IPC pointer (device_of_ptr/set_batch_device) and made current; warm_stream AtomicU64 is now fallback only.",
-          "location": "components/dispatcher/src/lib.rs: DeviceStreams, DEVICE_STREAMS, device_streams_for, set_batch_device"
+          "spec_text": "The dispatcher MUST pre-allocate a single warm CUDA stream during initialize() ... stored as an AtomicU64 ... Multi-stream round-robin is reserved for future scaling.",
+          "actual": "The warm/pipeline paths now select per-GPU-device streams from a process-global DEVICE_STREAMS map (device_streams_for): one warm stream + one pipeline pair per device, created lazily on the target device. The device is resolved per request from the IPC destination pointer (device_of_ptr/set_batch_device) and made current before issuing the copy; the shared warm_stream AtomicU64 is now a fallback only (used when the device is unknown, -1).",
+          "location": "components/dispatcher/src/lib.rs: DeviceStreams, DEVICE_STREAMS, device_streams_for, set_batch_device",
+          "severity": "medium"
         }
       ],
       "not_implemented": []
@@ -41,24 +51,34 @@
   ],
   "unspecced": [
     {
-      "feature": "Concurrent-promotion-race recovery: AlreadyExists on a lost mt.insert race is served warm from the winner's resident slot after a bounded wait.",
-      "location": "components/dispatcher/src/lib.rs: serve_concurrently_promoted, serve_memory_tier_to_gpu, batch_lookup recovery post-pass",
-      "suggested_fr": "FR-051"
+      "feature": "Per-drive ChannelPool / ChannelLease for concurrent cold-path readers: replaces the single per-drive cached channel with a lazily-grown pool of exclusive, RAII-leased ClientChannels; checkout drains stale completions so a recycled channel never matches an old op's tag against a new op's segments; connect_client runs outside the pool lock.",
+      "location": "components/dispatcher/src/lib.rs",
+      "lines": 92,
+      "suggested_spec": "Rewrite FR-034's second sentence to describe the ChannelPool and the completion-theft hazard it fixes"
     },
     {
-      "feature": "Per-GPU-device CUDA stream routing for multi-GPU / tensor-parallel loads.",
-      "location": "components/dispatcher/src/lib.rs: DeviceStreams/DEVICE_STREAMS/device_streams_for/set_batch_device; components/dispatcher/src/cold_pool.rs: ColdReadRequest.gpu_device",
-      "suggested_fr": "FR-052"
+      "feature": "Init-time partition-table compatibility guard: validates that a data drive's GPT has the expected 3 Certus partitions (metadata, extended metadata, data) before indexing table.partitions[0]/[2], returning a descriptive DispatcherError instead of panicking with an out-of-bounds index on a disk with a valid-but-non-Certus GPT.",
+      "location": "components/dispatcher/src/lib.rs (initialize(), EXPECTED_PARTITIONS check)",
+      "lines": 19,
+      "suggested_spec": "New FR-055 (edge case / refinement of FR-025)"
     },
     {
-      "feature": "Cold-load staging pool: bounded pinned-DRAM buffers serve cold reads uncached (SSD->staging->GPU) when the memory tier is saturated instead of failing AllocationFailed. Config cold_staging_slots (default 64), cold_staging_buf_bytes (default 4 MiB).",
-      "location": "components/dispatcher/src/pipeline.rs: StagingPool/StagingLease, PipelineRing::new; components/dispatcher/src/lib.rs: serve_cold_staged, promote_and_serve staging fallback, batch_lookup staging post-pass",
-      "suggested_fr": "FR-053"
+      "feature": "Concurrent-promotion-race recovery: a batch_lookup cold promotion that loses the mt.insert race (MemoryTierError::AlreadyExists) is treated as a hit and served warm from the winner's resident slot after a bounded wait. Already documented as FR-051; listed for traceability, not new drift.",
+      "location": "components/dispatcher/src/lib.rs: serve_concurrently_promoted, serve_memory_tier_to_gpu",
+      "lines": 0,
+      "suggested_spec": "Already covered by FR-051"
     },
     {
-      "feature": "Cold-read drain-to-completion / no early break: pipelined cold paths drain until completed==submitted using a stop_submitting flag, preventing orphaned completions that deadlocked reused NVMe queues.",
+      "feature": "Cold-load staging pool (StagingPool/StagingLease) serving cold reads uncached via SSD->staging->GPU when the memory tier is saturated. Already documented as FR-053; listed for traceability, not new drift.",
+      "location": "components/dispatcher/src/pipeline.rs: StagingPool/StagingLease; components/dispatcher/src/lib.rs: serve_cold_staged",
+      "lines": 0,
+      "suggested_spec": "Already covered by FR-053"
+    },
+    {
+      "feature": "Cold-read drain-to-completion / no-early-break in pipelined cold paths. Already documented as FR-054; listed for traceability, not new drift.",
       "location": "components/dispatcher/src/pipeline.rs: pipelined_ssd_to_gpu_zero_copy, pipelined_multi_object_zero_copy",
-      "suggested_fr": "FR-054"
+      "lines": 0,
+      "suggested_spec": "Already covered by FR-054"
     }
   ],
   "conflicts": []
