@@ -68,32 +68,34 @@ disp -> dm: lookup(key)
 dm --> disp: NotExist
 note right of disp: Key not found locally
 
-disp -> rl: batch_lookup(key, IpcHandle)
-rl -> peer: RDMA request (key)
-note right of peer: Peer resolves via its\nown Dispatcher + DispatchMap
+disp -> rl: batch_lookup([(key, expected_size)])
+rl -> rl: reserve landing slot in\nresponder-registered memory
+rl -> peer: SHOUT KeyQuery(key) via Zyre
+note right of peer: Peer resolves via its\nown MemoryTier + DispatchMap
 
 alt Peer has the entry
-    peer --> rl: RDMA Write (data)
+    rl -> peer: WHISPER RdmaRequest\n(endpoint, rkey, slot)
+    peer -> rl: RDMA Write (data) INTO slot\n(peer = data-holder, via its Initiator)
+    note right of rl: Data lands in local memory\nvia this node's Responder
     rl --> disp: Ok
     disp --> grpc: Ok
     grpc --> client: BatchLookupResponse\n(success)
 else Peer miss
-    peer --> rl: NotFound
+    peer --> rl: no KeyQuery reply
     rl --> disp: NotFound
     disp --> grpc: KeyNotFound
     grpc --> client: BatchLookupResponse\n(key_not_found)
 end
 
-== Incoming Remote Request (Peer -> This Node) ==
+== Incoming Remote Request (Peer -> This Node, this node is the data-holder) ==
 
-peer -> peer: RemoteLookupRdmaInitiator\n.handle_lookup(key)
-peer -> dm: lookup(key) + take_read
-dm --> peer: MemoryTier { ptr, size }
-note right of peer: LookupRef returned\n(entry pinned until release)
-
-peer -> peer: RDMA Write to requester\n(ptr, size)
-
-peer -> dm: release_read(key)
-note right of dm: Entry unpinned,\neviction allowed
+peer -> rl: SHOUT KeyQuery(key) via Zyre
+rl -> rl: handle_key_query\n(key present in MemoryTier?)
+peer -> rl: WHISPER RdmaRequest\n(peer endpoint, rkey, slot)
+rl -> rl: handle_rdma_request\n-> InitiatorCmd::Serve
+rl -> mt: resolve value (ptr, size)
+rl -> peer: Initiator.push:\nRDMA Write value OUT into peer slot
+note right of rl: One-sided write; no read-ref\npinning of the source entry
+rl -> rl: PushComplete
 
 @enduml
