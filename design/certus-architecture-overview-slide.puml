@@ -1,0 +1,79 @@
+@startuml
+skinparam dpi 200
+skinparam defaultTextAlignment center
+skinparam padding 3
+skinparam nodesep 30
+skinparam ranksep 32
+skinparam shadowing false
+skinparam defaultFontSize 13
+skinparam rectangle {
+    RoundCorner 14
+}
+skinparam agent {
+    RoundCorner 9
+}
+skinparam database {
+    RoundCorner 8
+}
+hide stereotype
+
+' ============================================================
+' CLIENT
+' ============================================================
+rectangle "**Client Host**" as client_box #F5F5F5 {
+    agent "GPU App\n(vLLM / PyTorch)" as pyclient
+    agent "Client GPU\n(KV-cache)" as client_gpu #BBF7D0
+}
+
+' ============================================================
+' SERVER
+' ============================================================
+rectangle "**Certus Server**" as server_box #FAFAFA {
+
+    agent "gRPC Service\nPopulate | Lookup | Check | Remove" as grpc #F0F0F0
+
+    rectangle "**Dispatcher**  (4)\ndispatcher | dispatcher-p2p" as dispatcher #DBEAFE {
+        agent "BackgroundWriter  (1)\nBackgroundEvictor\nPipelineRing" as bg #EFF6FF
+    }
+
+    agent "MemoryTier  (2)(5)\nCUDA-pinned DRAM pool" as mt #DBEAFE
+    agent "DispatchMap\nkey -> location" as dm #DBEAFE
+    agent "EvictionPolicy  (6)\nplug-in (LRU)" as evict #E5E7EB
+    agent "GpuServices\nCUDA DMA" as gpu #BBF7D0
+
+    rectangle "**Storage tier** — DataDrive[0..N]" as storage #FEF3C7 {
+        agent "BlockDevice backend  (3)\nSPDK-NVMe | filesys | kernel" as blk #FDE68A
+        agent "ExtentManager" as em #FDE68A
+    }
+
+    rectangle "**Remote Cache Layer**  (7)\noptional (full-remote)" as remote #FEE2E2 {
+        agent "RemoteLookup +\nRdmaInitiator / Responder +\nZyre discovery" as rl
+    }
+
+    database "NVMe SSD [0..N]" as ssd #FEF3C7
+}
+
+cloud "**Peer Certus Nodes**" as peers #FEE2E2
+
+' ============================================================
+' PATHS
+' ============================================================
+pyclient -down-> grpc : gRPC
+client_gpu .down.> gpu : CUDA IPC
+grpc -down-> dispatcher
+
+dispatcher -down-> mt
+dispatcher -down-> dm
+dispatcher -right-> gpu
+mt -down-> evict
+dm -down-> evict
+
+dispatcher -down-> blk
+em -right-> blk : metadata
+blk -down-> ssd : I/O
+ssd .up.> mt : promote on cold hit  (5)
+
+dispatcher -right-> rl
+rl -right-> peers : RDMA WRITE
+
+@enduml

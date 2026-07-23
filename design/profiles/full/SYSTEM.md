@@ -132,8 +132,10 @@ components/
 ├── block-device-kernel/     # Kernel block device (IBlockDevice)
 ├── extent-manager/          # Disk space allocator (IExtentManager)
 ├── eviction-policy-lru/     # LRU eviction policy (IEvictionPolicy)
-├── remote-lookup/           # Remote cache lookups (IRemoteLookup)
-├── remote-lookup-rdma-initiator/  # Remote request handling
+├── remote-lookup/           # Remote-cache orchestrator (IRemoteLookup)
+├── remote-lookup-rdma-initiator/  # Outbound RDMA push / data-holder side (IRemoteLookupRdmaInitiator)
+├── remote-lookup-rdma-responder/  # Passive RDMA accept side / requester (IRemoteLookupRdmaResponder[Admin])
+├── zyre/                    # Gossip/beacon peer discovery (IZyre)
 ├── spdk-env/                # SPDK environment wrapper (ISPDKEnv)
 ├── spdk-sys/                # Raw FFI bindings to SPDK
 ├── gpu-services/            # CUDA operations (IGpuServices)
@@ -360,7 +362,7 @@ Persistent space allocator with crash consistency:
 - **Buddy allocator**: Power-of-two extent sizes within each region
 - **Regions**: Configurable count (power of two), each independently managed
 - **WriteHandle**: RAII pattern — `publish()` commits, `Drop` auto-aborts
-- **Background checkpoint thread**: Periodic persistence (default: 5 minutes)
+- **Background checkpoint thread**: Periodic persistence (default: 30 seconds)
 
 ### 5.6 GPU Services (`components/gpu-services/`)
 
