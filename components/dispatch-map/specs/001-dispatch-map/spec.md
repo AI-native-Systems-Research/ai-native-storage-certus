@@ -3,6 +3,7 @@
 **Feature Branch**: `dispatch-map`  
 **Created**: 2026-04-27  
 **Status**: Complete  
+**Last Synced**: 2026-07-22 — backfilled User Story 10/11, FR-025, FR-026 (`promote_block_to_memory_tier`, `try_evict_to_block`) from implemented, consumed code per `.specify/sync/drift-report.md`  
 **Input**: User description: "FUNCTIONAL-DESIGN.md — dispatch map component for the Certus storage system"
 
 ## User Scenarios & Testing *(mandatory)*
@@ -160,6 +161,42 @@ The dispatcher's eviction logic needs to determine whether a specific memory-tie
 
 ---
 
+### User Story 10 - Promoting a Cold Block-Device Entry Back to Memory Tier (Priority: P2)
+
+The dispatcher, on a read miss for a block-device-resident extent, allocates a DRAM buffer, stages the data transfer from SSD, and then needs the dispatch map to reflect that the extent is now available in the memory tier — without disturbing any reference already held on the entry (the entry is typically pinned by the in-flight load itself). It calls `promote_block_to_memory_tier(key, pointer, size)`, which flips the entry from `BlockDevice` to `MemoryTier` **in place**: the eviction handle and all active read/write reference counts are preserved, and the original block-device offset is retained as the entry's `ssd_offset` so the promoted entry remains demotable back to `BlockDevice` without requiring a fresh write-through.
+
+**Why this priority**: This is the read-miss promotion path that lets the dispatcher's SSD-resident cold data become memory-tier hot data for subsequent low-latency access. It is consumed by both `dispatcher` and `dispatcher-p2p` for on-demand cold-block promotion, but it follows the core read/write and reference-counting paths (P1) in priority.
+
+**Independent Test**: Can be tested by inserting a `BlockDevice` entry (e.g. via `recover_extent`), optionally taking a read reference on it, calling `promote_block_to_memory_tier(key, pointer, size)`, and verifying the entry is now `MemoryTier` with `ssd_offset` equal to the original block offset, the reference count is unchanged, and a subsequent `lookup` returns the new memory-tier pointer/size.
+
+**Acceptance Scenarios**:
+
+1. **Given** key 42 is a `BlockDevice` entry at offset 8192, **When** `promote_block_to_memory_tier(key=42, pointer, size=16384)` is called, **Then** the entry transitions to `MemoryTier { pointer, size: 16384, ssd_offset: Some(8192) }`, `size_blocks` is recomputed from the new size, and the call returns `Ok(())`.
+2. **Given** key 42 is a `BlockDevice` entry with an active read reference (`read_ref=1`, held by an in-flight load), **When** `promote_block_to_memory_tier(key=42, pointer, size=16384)` is called, **Then** the promotion succeeds in place and `read_ref` remains `1` afterward (the reference and eviction handle are preserved, not reset).
+3. **Given** key 42 is already a `MemoryTier` entry, **When** `promote_block_to_memory_tier(key=42, pointer, size=16384)` is called, **Then** an `InvalidState` error is returned and the entry is left unchanged.
+4. **Given** key 99 does not exist, **When** `promote_block_to_memory_tier(key=99, pointer, size=16384)` is called, **Then** a `KeyNotFound` error is returned.
+5. **Given** `size=0` is passed, **When** `promote_block_to_memory_tier(key=42, pointer, size=0)` is called, **Then** an `InvalidSize` error is returned and the entry is left unchanged.
+
+---
+
+### User Story 11 - Atomically Evicting a Memory-Tier Entry to Block Device (Priority: P2)
+
+The dispatcher's SSD-evictor background path needs to demote a memory-tier entry back to block-device state to free its DRAM slot, but only if it is safe to do so — no active references and write-through already complete. Rather than calling `is_evictable(key)` and `convert_memory_tier_to_block(key)` as two separate steps (which would leave a race window between the check and the transition), it calls `try_evict_to_block(key)`, which performs the check and the state transition atomically under a single lock hold. Once this call returns `Ok(())`, no new reader can obtain the memory-tier pointer, so the caller may safely free the DRAM slot.
+
+**Why this priority**: This is the eviction-safety counterpart to `promote_block_to_memory_tier` and closes the loop on the memory-tier/block-device lifecycle used by the dispatcher's and dispatcher-p2p's SSD-evictor paths. It follows the core reference-counting and eviction paths (P1/P3) in priority.
+
+**Independent Test**: Can be tested by creating a memory-tier entry, setting its `ssd_offset` via `convert_to_storage`, releasing all references, calling `try_evict_to_block(key)`, and verifying the entry is now `BlockDevice` at the expected offset. Separately, verify the call is rejected when references are active, when `ssd_offset` is not yet set, or when the entry is already `BlockDevice`.
+
+**Acceptance Scenarios**:
+
+1. **Given** key 42 is a `MemoryTier` entry with `ssd_offset: Some(8192)` and `read_ref == 0 && write_ref == 0`, **When** `try_evict_to_block(key=42)` is called, **Then** the entry transitions to `BlockDevice { offset: 8192 }` and the call returns `Ok(())`.
+2. **Given** key 42 is a `MemoryTier` entry with `ssd_offset: Some(8192)` but `read_ref=1`, **When** `try_evict_to_block(key=42)` is called, **Then** an `InvalidState` error is returned and the entry remains `MemoryTier` (no partial transition).
+3. **Given** key 42 is a `MemoryTier` entry with `ssd_offset: None` (write-through not complete) and no active references, **When** `try_evict_to_block(key=42)` is called, **Then** an `InvalidState` error is returned and the entry remains `MemoryTier`.
+4. **Given** key 42 is already a `BlockDevice` entry, **When** `try_evict_to_block(key=42)` is called, **Then** an `InvalidState` error is returned.
+5. **Given** key 99 does not exist, **When** `try_evict_to_block(key=99)` is called, **Then** a `KeyNotFound` error is returned.
+
+---
+
 ### Edge Cases
 
 - `create_memory_tier_entry` with a null pointer returns an error; no entry is recorded in the map.
@@ -169,6 +206,9 @@ The dispatcher's eviction logic needs to determine whether a specific memory-tie
 - High contention (hundreds of threads) on a single key is handled by the blocking semantics of `take_read`/`take_write`; no special throttling or fairness guarantee is required for v0.
 - `convert_to_storage` while a write reference is held by another thread: the caller performing the conversion is expected to hold the write reference itself; concurrent write references are prevented by `take_write` semantics.
 - `recover_extent` for a key that already exists returns `AlreadyExists`.
+- `promote_block_to_memory_tier` on an entry with active references preserves those references and the eviction handle across the transition (the entry may be pinned by an in-flight load).
+- `promote_block_to_memory_tier` with `size=0` returns `InvalidSize` and leaves the entry unchanged.
+- `try_evict_to_block` performs its evictability check and the `MemoryTier`→`BlockDevice` transition under a single lock hold, so no other thread can observe or acquire a reference between the check and the transition.
 
 ## Requirements *(mandatory)*
 
@@ -198,6 +238,8 @@ The dispatcher's eviction logic needs to determine whether a specific memory-tie
 - **FR-022**: System MUST provide `is_evictable(key)` that returns `true` if and only if: the key exists in the map, the entry is in `MemoryTier` state with `ssd_offset: Some(_)` (write-through complete), and both `read_ref == 0` and `write_ref == 0` (no active references). Returns `false` for non-existent keys, non-MemoryTier entries, MemoryTier entries without `ssd_offset`, or entries with any active references.
 - **FR-023**: System MUST provide `entry_size(key)` that returns the stored size of an entry in block-aligned bytes (`size_blocks * 4096`) without acquiring any reference. MUST return `KeyNotFound` if the key does not exist. Used by the dispatcher's `promote_to_memory_tier` to determine memory-tier allocation size for SSD-resident entries. Note: for memory-tier entries where the original size was not block-aligned, the returned value is rounded up to the nearest block boundary.
 - **FR-024**: System MUST provide `recover_extent(key, offset, size_blocks)` that directly inserts a `BlockDevice` entry with the given offset and size (in 4KiB blocks), registers it with the eviction policy, and returns success. MUST return `AlreadyExists` if the key is already present. Used for incremental recovery (inserting individual extents) as an alternative to the bulk `initialize()` walk via `IExtentManager::for_each_extent`.
+- **FR-025**: System MUST provide `promote_block_to_memory_tier(key, pointer, size)` that transitions a `BlockDevice` entry to `MemoryTier` **in place**, preserving the entry's `EvictionHandle` and ALL active reference counts (read_ref and write_ref are not reset or reinitialized). The entry's `MemoryTier.ssd_offset` MUST be set to `Some(original_offset)` so the promoted entry remains demotable back to `BlockDevice` without a fresh write-through. This is the inverse of `convert_memory_tier_to_block`, and — unlike `create_memory_tier_entry` followed by `remove` — it does not require the entry to be unreferenced first, so it works while the entry is pinned (`read_ref > 0`) during an in-flight load. MUST return `KeyNotFound` if the key is absent, `InvalidSize` if `size == 0`, and `InvalidState` if the entry is already in `MemoryTier` state. Consumed by the dispatcher's and dispatcher-p2p's on-demand cold-block promotion path on a read miss for SSD-resident data.
+- **FR-026**: System MUST provide `try_evict_to_block(key)` that, under a single lock hold, atomically verifies the entry is in `MemoryTier` state with `ssd_offset: Some(_)` (write-through complete) and `read_ref == 0 && write_ref == 0` (no active references), then transitions it to `BlockDevice { offset }` using the recorded `ssd_offset`. This combines the `is_evictable` predicate (FR-022) and the `convert_memory_tier_to_block` transition (FR-018) into one atomic operation, eliminating the check-then-act race window that exists when calling them separately. MUST return `KeyNotFound` if the key is absent, or `InvalidState` if the entry is not evictable (active references held, no `ssd_offset` recorded, or the entry is not in `MemoryTier` state) — with no partial state change on error. After a successful call, no new reader can obtain the memory-tier pointer, so the caller may safely free the associated DRAM slot. Consumed by the dispatcher's and dispatcher-p2p's SSD-evictor background paths.
 
 ### Key Entities
 
@@ -225,6 +267,10 @@ The dispatcher's eviction logic needs to determine whether a specific memory-tie
 - Q: What is the error behavior for invalid reference operations (underflow, no-write downgrade, size=0)? → A: Return error for all invalid operations. No panics or silent no-ops.
 - Q: Should `take_read`/`take_write` block indefinitely or support a timeout? → A: Hardcoded default timeout of 2000ms (`DEFAULT_TIMEOUT`). Methods do not accept a per-call timeout parameter; the constant is used for all blocking operations.
 
+### Session 2026-07-22 (spec-sync backfill)
+
+- Q: The 2026-04-27 clarification states the `MemoryTier → BlockDevice` transition is one-way and that returning data to the memory tier requires remove-and-recreate. Does that still hold now that `promote_block_to_memory_tier` exists? → A: No — that clarification is superseded. `promote_block_to_memory_tier` (FR-025) provides an explicit, supported in-place `BlockDevice → MemoryTier` transition that preserves the eviction handle and all active references, specifically so a caller does not need to remove and re-create the entry while it may be pinned by an in-flight load. The full lifecycle is therefore bidirectional: `MemoryTier ⇄ BlockDevice` via `convert_memory_tier_to_block`/`try_evict_to_block` (MemoryTier→BlockDevice) and `promote_block_to_memory_tier` (BlockDevice→MemoryTier).
+
 ## Assumptions
 
 - The caller is responsible for performing actual I/O to/from the memory-tier buffer and block device; the dispatch map only tracks metadata and locations.
@@ -236,3 +282,5 @@ The dispatcher's eviction logic needs to determine whether a specific memory-tie
 - The `MemoryTier` location variant supports a DRAM caching tier where data resides in host memory before being written through to SSD.
 - `convert_to_storage` on a MemoryTier entry sets the `ssd_offset` field rather than transitioning to BlockDevice; `convert_memory_tier_to_block` is the explicit transition method.
 - The read_ref decrement in `convert_to_storage` is conditional — it only decrements if the current read_ref > 0, preventing underflow when no read reference is held at conversion time.
+- The caller of `promote_block_to_memory_tier` is responsible for allocating the DRAM buffer and copying/staging the extent's data into it before (or as part of) the call; the dispatch map only updates the entry's location metadata.
+- `promote_block_to_memory_tier` and `try_evict_to_block` are consumed by the `dispatcher` and `dispatcher-p2p` components as the read-miss promotion path and the SSD-evictor demotion path, respectively; the dispatch map itself has no scheduling or policy logic for when to promote or evict — that decision is made by the caller.

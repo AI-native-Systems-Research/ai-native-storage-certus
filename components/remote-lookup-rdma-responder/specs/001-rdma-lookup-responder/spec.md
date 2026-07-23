@@ -368,9 +368,11 @@ cycles over the loopback/mock CM seam, and read the recorded metrics.
 ### Key Entities
 
 - **Endpoint**: `{ ip: String, port: u16 }` — the bound listening endpoint; `ip` is
-  supplied by the mainline via `set_bind_ip()` before `initialize()` (never
-  auto-detected), and `port` is ephemeral (assigned at bind, read back via
-  `rdma_get_src_port`). Advertised by `remote-lookup` in whispers.
+  the *effective* bind address resolved per FR-002a's precedence — an explicit
+  address supplied by the mainline via `set_bind_ip()` before `initialize()`,
+  else auto-detected from the first RDMA device with an active port — and
+  `port` is ephemeral (assigned at bind, read back via `rdma_get_src_port`).
+  Advertised by `remote-lookup` in whispers.
 - **PeerId**: a zyre node identity (UUID). Owned by `remote-lookup`; used by the
   responder as the connection-table key, resolved from connect `private_data`.
 - **ResponderCommand**: control command *to* the actor — `Disconnect { node }`. No
@@ -435,6 +437,23 @@ cycles over the loopback/mock CM seam, and read the recorded metrics.
 - The QP→ERROR transition is always legal from any QP state and fails only on a fatal
   HCA or programming fault, so asserting it (fail-stop on failure) is safe and keeps
   `DisconnectAck` an unconditional guarantee.
+
+## Build & Feature Flags
+
+- **`rdma` Cargo feature** gates the entire production `rdma_cm`/`ibv_reg_mr`
+  implementation (real `bind`/`rdma_listen`/`rdma_get_src_port`, `epoll` over the
+  CM fd, `private_data` read, whole-pool `ibv_reg_mr`, real QP teardown). It is
+  off by default: without it the crate builds and unit-tests entirely over the
+  in-process mock CM seam, with no `rdma-core` (`libibverbs`/`librdmacm`)
+  libraries present, and `initialize()` is unavailable — it returns `Bind` with a
+  message stating the crate was built without the `rdma` feature. This is a
+  **build-configuration** failure mode, distinct from the FR-002/FR-010 runtime
+  `Bind`/`Registration` failures (missing/unusable IP, no active device,
+  `ibv_reg_mr` failure) that occur when the feature *is* enabled. Mainline apps
+  that wire the responder to real hardware enable `rdma`; CI and the workspace
+  default-members build do not (mirrors `remote-lookup-rdma-initiator` and
+  `block-device-spdk-nvme`'s SPDK-gating pattern).
+- **`telemetry` Cargo feature** — see FR-016 / User Story 6.
 
 ## Known Limitations / Follow-ups
 

@@ -1,0 +1,67 @@
+{
+  "generated": "2026-07-22T22:39:05Z",
+  "project": "remote-lookup-rdma-responder",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 25,
+    "aligned": 22,
+    "drifted": 3,
+    "not_implemented": 0,
+    "unspecced_features": 1
+  },
+  "specs": [
+    {
+      "id": "001-rdma-lookup-responder",
+      "title": "RDMA Lookup Responder",
+      "aligned": [
+        "FR-001", "FR-002", "FR-002a", "FR-003", "FR-004", "FR-005", "FR-006",
+        "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-011a", "FR-012",
+        "FR-013", "FR-015",
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-016",
+          "spec_text": "The component MUST optionally collect telemetry behind a `telemetry` feature... Metric set: inbound connections accepted, identified vs unidentified (node: None), teardowns (disconnect-acks emitted), and accept-loop errors.",
+          "actual": "TelemetryCollector::record_accept_loop_error()/accept_loop_errors() are defined and unit-tested in isolation but never called from any production code path (RealCmSeam::bind, RealCmSeam::drain_cm_events, ConnectionTable). The counter is permanently 0.",
+          "location": "components/remote-lookup-rdma-responder/src/telemetry.rs:58-60,107 (defined, no call sites in src/rdma.rs or src/connection.rs)",
+          "severity": "medium"
+        },
+        {
+          "requirement": "ResponderEvent::Error (spec Key Entities; contracts/responder-control-interface.md §3 rule 3)",
+          "spec_text": "`Error { message }` reports a non-fatal accept-loop error.",
+          "actual": "ResponderEvent::Error is never constructed anywhere in the crate. The only candidate non-fatal failure in production code (QP-creation failure in the accept path) is silently rejected via rdma_reject with no Error event, no log, and no telemetry.",
+          "location": "components/remote-lookup-rdma-responder/src/rdma.rs:373-382 (accept_child error branch)",
+          "severity": "medium"
+        },
+        {
+          "requirement": "FR-014",
+          "spec_text": "Diagnostics MUST route through an optional `ILogger` receptacle; a missing logger MUST NOT turn any operation into an error.",
+          "actual": "Only initialize()/shutdown() call log_debug(); the accept-loop closure captures no logger reference, so internal accept-loop failures (RealCmSeam::next_events/drain_cm_events/accept_child) can never reach ILogger. The 'missing logger is not an error' half is satisfied; the 'route diagnostics through it' half is not, for most of the module.",
+          "location": "components/remote-lookup-rdma-responder/src/lib.rs:115-120,244,334 (only call sites); src/rdma.rs has no ILogger reference",
+          "severity": "low"
+        }
+      ],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "Cargo feature `rdma` gating the whole real rdma_cm/ibv_reg_mr implementation; `initialize()` returns a hard-coded Bind error when built without it",
+      "location": "components/remote-lookup-rdma-responder/Cargo.toml; components/remote-lookup-rdma-responder/src/lib.rs",
+      "lines": 20,
+      "suggested_spec": "Add a 'Build & feature flags' subsection naming the `rdma` Cargo feature explicitly, and document the build-configuration Bind error as distinct from the FR-002/FR-010 runtime failure modes it currently shares an error variant with."
+    }
+  ],
+  "conflicts": [
+    {
+      "description": "IRemoteLookupRdmaResponderAdmin::set_bind_ip/initialize doc comments in the shared interfaces crate state the responder 'never auto-detects the address' and that initialize() fails with Bind if no IP was supplied — this is the pre-clarification (2026-07-10) behavior. It contradicts FR-002a in spec.md (explicit-IP-else-auto-detect precedence) and the shipped code/tests (src/rdma.rs first_active_rdma_ipv4; src/lib.rs initialize_without_bind_ip_defers_to_autodetect test), which both implement auto-detection.",
+      "locations": [
+        "components/interfaces/src/iremote_lookup_rdma_responder.rs:256-262",
+        "components/remote-lookup-rdma-responder/specs/001-rdma-lookup-responder/spec.md:297-305",
+        "components/remote-lookup-rdma-responder/src/rdma.rs:184-189",
+        "components/remote-lookup-rdma-responder/src/lib.rs:421-429"
+      ]
+    }
+  ]
+}

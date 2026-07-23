@@ -1,0 +1,45 @@
+{
+  "generated": "2026-07-22T22:39:23Z",
+  "project": "example-helloworld-dylib",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 7,
+    "aligned": 6,
+    "drifted": 1,
+    "not_implemented": 0,
+    "unspecced_features": 0
+  },
+  "specs": [
+    {
+      "id": "001-example-helloworld-dylib",
+      "title": "example-helloworld-dylib",
+      "aligned": [
+        "FR-1: Export a #[no_mangle] function named create_component (src/lib.rs:20-21)",
+        "FR-2: create_component returns a ComponentRef wrapping a HelloWorldComponent (src/lib.rs:21-24)",
+        "FR-3: Returned component supports IGreeter via query_interface (verified end-to-end via apps/dynamic-loading-example/src/main.rs:75-76)",
+        "NFR-1: Must be compiled as crate-type = [\"dylib\"] (Cargo.toml:9)",
+        "NFR-2: Host and dylib must use the same rustc version (documented in src/lib.rs:9-10)",
+        "NFR-3: No C-ABI shim or FFI boundary required (no unsafe/#[repr(C)] in src/lib.rs)"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-4 / Overview",
+          "spec_text": "spec.md:15-17 and FR-4 (spec.md:42): 'Because both the dylib and the host binary dynamically link the same component-core and example-helloworld shared libraries, TypeId values remain consistent across the dylib boundary' / 'TypeId consistency is maintained by dynamically linking shared dependencies.' plan.md:16-27 architecture diagram also shows component-core.so and example-helloworld.so as shared deps.",
+          "actual": "Neither component-core nor example-helloworld declares crate-type = [\"dylib\"] (no [lib] section in either Cargo.toml, default is rlib-only). Clean rebuild + ldd on target/debug/libexample_helloworld_dylib.so shows only libgcc_s.so.1, libc.so.6, ld-linux-x86-64.so.2 as dynamic deps (no component_core/example_helloworld .so). nm confirms component_core/example_helloworld symbols are statically linked directly into the .so. ldd + nm on target/debug/dynamic-loading-example show the same: an independent, separately-embedded static copy, no shared .so dependency. TypeId consistency in practice comes from both sides using the same rustc version (NFR-2), not from dynamic linking.",
+          "location": "components/example-helloworld/Cargo.toml (no [lib]/crate-type); components/component-framework/crates/component-core/Cargo.toml (no [lib]/crate-type); target/debug/libexample_helloworld_dylib.so and target/debug/dynamic-loading-example (ldd/nm output)",
+          "severity": "medium"
+        }
+      ],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [],
+  "conflicts": [
+    {
+      "description": "plan.md's Architecture diagram (lines 16-27) restates the same 'shared deps: component-core.so, example-helloworld.so' claim as spec.md's Overview/FR-4; both design artifacts are mutually consistent but diverge from the actual build graph (see drifted FR-4 above)."
+    },
+    {
+      "description": "tasks.md's unresolved checklist item 'Validate that the dylib is exercised by at least one integration test in the workspace' — apps/dynamic-loading-example/src/main.rs is a demo fn main() binary with no #[test], not run under cargo test; the dylib-loading path has no automated test coverage."
+    }
+  ]
+}

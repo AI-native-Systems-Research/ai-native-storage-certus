@@ -41,6 +41,12 @@ tier, and RDMA-write matching values directly into the peer's memory.
   component.
 - This component owns only the **outbound RDMA data path** and is invoked via the
   `IRemoteLookupRdmaInitiator` interface.
+- This component's half of the responder's "teardown-before-reclaim" contract is
+  peer identification: `set_local_peer_id` (FR-015) stamps this node's zyre
+  `PeerId` into every outbound connect so the `remote-lookup-rdma-responder` on
+  the far end can correlate an inbound queue pair to the connecting peer before
+  reclaiming it. Reading and acting on that correlation is the responder's
+  responsibility, not this component's.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -176,6 +182,8 @@ mock transport, and read metrics via `RemoteLookupRdmaInitiatorComponent::teleme
   data-freshness concern, not memory safety).
 - An empty `items` slice (→ empty status vector, no connection required beyond what
   the implementation already does).
+- `push`/`connect` is called before `set_local_peer_id` — the resulting connection
+  carries no peer identification in its `private_data` (responder sees `node: None`).
 
 ## Requirements *(mandatory)*
 
@@ -231,6 +239,15 @@ mock transport, and read metrics via `RemoteLookupRdmaInitiatorComponent::teleme
   application-level authentication is required.
 - **FR-013**: System MUST include unit tests covering the connection-table state
   machine, `PushStatus` mapping, a mock RDMA transport seam, and telemetry wiring.
+- **FR-015**: System MUST expose `set_local_peer_id(peer: PeerId)` to record this
+  node's zyre `PeerId`. From that point on, every outbound `rdma_cm` connect
+  established by `push`/`connect` MUST stamp `peer` into the connection's
+  `private_data` so the remote `remote-lookup-rdma-responder` can correlate the
+  inbound queue pair to the connecting peer — required for the responder's
+  teardown-before-reclaim flow. It SHOULD be called once, before the first
+  `push`; connections established before it is set carry no peer identification
+  (the responder sees `node: None` for them, reclaimable only via its backstop
+  shutdown).
 
 ### Key Entities
 
@@ -245,6 +262,10 @@ mock transport, and read metrics via `RemoteLookupRdmaInitiatorComponent::teleme
   `rdma_cm`-backed transport in production, a mock in tests.
 - **RemoteLookupRdmaInitiatorError**: method-level failure — `NotInitialized` or
   `InvalidEndpoint`. Per-item conditions are reported via `PushStatus`, not here.
+- **PeerId**: This node's zyre discovery-layer identifier, supplied once via
+  `set_local_peer_id` and stamped into the `rdma_cm` connect `private_data` of
+  every subsequent outbound connection so the responder can correlate an inbound
+  queue pair back to the connecting peer (teardown-before-reclaim).
 
 ## Success Criteria *(mandatory)*
 

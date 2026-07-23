@@ -1,8 +1,23 @@
 {
-  "applied": "2026-07-21",
+  "applied": "2026-07-22",
+  "mode": "AUTO-BACKFILL",
+  "based_on": "drift-report.md (2026-07-22T22:46:53Z)",
   "specs_updated": [
-    {"spec": "001-spdk-nvme-block-device", "requirement": "FR-026", "change": "added"},
-    {"spec": "001-spdk-nvme-block-device", "requirement": "Completion Callback entity", "change": "modified"}
+    {"spec": "001-spdk-nvme-block-device", "requirement": "FR-027", "change": "added"},
+    {"spec": "001-spdk-nvme-block-device", "requirement": "FR-028", "change": "added"},
+    {"spec": "001-spdk-nvme-block-device", "requirement": "FR-029", "change": "added"},
+    {"spec": "001-spdk-nvme-block-device", "requirement": "Assumptions section", "change": "modified"},
+    {"spec": "001-spdk-nvme-block-device", "requirement": "research.md R-002", "change": "modified"},
+    {"spec": "002-iops-benchmark", "requirement": "FR-026", "change": "added"}
   ],
+  "deferred_to_align_tasks": [
+    {"spec": "001-spdk-nvme-block-device", "requirement": "FR-013/SC-007", "severity": "High", "reason": "NUMA node hardcoded to 0 (code defect)"},
+    {"spec": "001-spdk-nvme-block-device", "requirement": "FR-010/SC-005", "severity": "Medium", "reason": "nvme_version/max_transfer_size hardcoded (code defect)"},
+    {"spec": "001-spdk-nvme-block-device", "requirement": "FR-011/SC-008", "severity": "High", "reason": "telemetry test suite compile failure (code defect)"},
+    {"spec": "001-spdk-nvme-block-device", "requirement": "dead-code-DisconnectClient", "severity": "Low", "reason": "unreachable ControlMessage variant"},
+    {"spec": "001-spdk-nvme-block-device", "requirement": "unused-crossbeam-dependency", "severity": "Low", "reason": "unused dependency + stale bench doc comments"},
+    {"spec": "001-spdk-nvme-block-device", "requirement": "readme-channel-capacity", "severity": "Low", "reason": "README.md out of edit scope for this pass"}
+  ],
+  "new_specs_created": [],
   "not_applied": []
 }

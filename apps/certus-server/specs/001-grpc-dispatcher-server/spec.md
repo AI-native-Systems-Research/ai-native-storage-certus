@@ -120,9 +120,10 @@ A Python client submits a batch of cache keys to `touch`. The server calls the d
 - **FR-017**: The server MUST expose a `ClearMemoryTier` gRPC method that accepts an empty request and calls the dispatcher's `clear_memory_tier()` method. The response MUST include the number of entries cleared (`entries_cleared: uint64`). This operation evicts all entries from the server's DRAM memory-tier, demoting them to SSD-backed state in the dispatch map.
 - **FR-018**: The server MUST maintain a global, process-lifetime IPC handle cache (keyed by the 64-byte CUDA IPC handle bytes) on the `DispatcherService` instance. Each cache entry stores the opened device pointer (`dev_ptr`), the `gpu_device_id` used when opening, and a reference count. When a batch operation requires an IPC handle: if the handle is already in the cache the existing device pointer is reused and the reference count is incremented; if the handle is not cached, the server opens it via `cudaIpcOpenMemHandle` (after calling `cudaSetDevice`, per FR-019), inserts it with `refcount = 1`, and records the opened pointer. After processing a batch, the server decrements the reference count for each handle opened during that batch; when the reference count reaches zero, the server calls `cudaIpcCloseMemHandle` and removes the entry from the cache. This design eliminates "resource already mapped" errors from concurrent batches and removes serialization on CUDA's global IPC lock.
 - **FR-019**: Before calling `cudaIpcOpenMemHandle` for a handle that is not already in the IPC cache, the server MUST call `cudaSetDevice(gpu_device_id)` when the `gpu_device_id` field of the `IpcHandle` message is non-negative (>= 0). If `cudaSetDevice` fails, the server MUST propagate the error as an `IoError` for that entry without opening the handle. This ensures the server CUDA context is associated with the correct device before the handle is opened, which is required for correct operation on multi-GPU systems.
-- **FR-020**: The server MUST expose a split-phase store protocol via four RPCs: `Reserve`, `CopyToStore`, `CommitStore`, and `AbortStore`. The phases are: (1) **Reserve** allocates memory-tier slots without performing DMA or creating dispatch-map entries; (2) **CopyToStore** performs GPU-to-host DMA into reserved slots and synchronizes the CUDA stream; (3) **CommitStore** finalizes the operation by registering entries in the dispatch map and enqueuing SSD write-through; (4) **AbortStore** cancels a pending reservation and releases memory (idempotent). Pending stores are tracked per-reservation in a `PendingStores` map keyed by a server-assigned reservation ID (`u64`).
+- **FR-020**: The server MUST expose a split-phase store protocol via four RPCs: `Reserve`, `CopyToStore`, `CommitStore`, and `AbortStore`. The phases are: (1) **Reserve** allocates memory-tier slots without performing DMA or creating dispatch-map entries; (2) **CopyToStore** performs GPU-to-host DMA into reserved slots and synchronizes the CUDA stream; (3) **CommitStore** finalizes the operation by registering entries in the dispatch map and enqueuing SSD write-through; (4) **AbortStore** cancels a pending reservation and releases memory (idempotent). Pending stores are tracked in a `PendingStores` map (`HashMap<u64, PendingStoreEntry>`) keyed by the **client-supplied cache key** (the same `key` field used by `Populate`/`Lookup`/etc.), not by a separate server-generated reservation ID. `ReserveEntry` carries only `key` and `size`; `CommitStore`/`AbortStore` take a list of cache `keys`. There is no reservation-ID allocation anywhere in the protocol or service — the cache key itself is the reservation handle, and `check_duplicate_keys()` pre-validation (FR-015) prevents two concurrent reservations from colliding on the same key.
 - **FR-021**: The server MUST expose `Pin` and `Unpin` gRPC methods. `Pin` increments the reference count on cache entries to prevent eviction; `Unpin` decrements it (eviction allowed when zero). Both accept a batch of keys with duplicate-key pre-validation and return per-entry results. The `Pin` request MUST accept a `promote` boolean field; when true, the server fires a background `promote_to_memory_tier(&keys)` call after pinning, combining pin and prefetch into a single round-trip.
 - **FR-022**: The server MUST expose a `TakeEvents` gRPC method that performs a non-blocking drain of eviction events from a bounded crossbeam channel (capacity 16384, created at startup via `create_eviction_channel`). The request accepts `max_events` (0 = drain all available). The response includes a list of `EvictionEvent` (key + reason: `Demoted` or `Removed`) and a `dropped_count` field reporting events lost to channel overflow since the last drain (tracked via `AtomicU64`).
+- **FR-023**: The server MAY expose a `GetIoStats` gRPC method, compiled in only when the optional `rw-telemetry` Cargo feature is enabled (`rw-telemetry = ["dispatcher/rw-telemetry"]` in `Cargo.toml`). It accepts an empty `GetIoStatsRequest` and returns an `IoStatsResponse` with per-direction SSD I/O counters sourced from `dispatcher.read_write_stats()`: `read_ops`, `read_bytes`, `read_latency_ns_sum`, `write_ops`, `write_bytes`, `write_latency_ns_sum` (all `uint64`). This is a point-in-time diagnostics query distinct from the periodic OTel metrics export described in spec 003; it is available regardless of whether the `otel` feature is enabled, and is a no-op/unavailable RPC when the server is built without `rw-telemetry`.
 
 ## Implementation Details
 
@@ -140,52 +141,58 @@ A Python client submits a batch of cache keys to `touch`. The server calls the d
 
 **CLI Options**:
 ```
-test_client.py [--server ADDRESS:PORT] [--skip-tests] [--benchmark]
-  --server       gRPC server address (default: localhost:50051)
-  --skip-tests   Skip functional tests, run benchmark only
-  --benchmark    Run performance benchmarks (throughput/latency measurement)
+test_client.py [--server ADDRESS:PORT] [--skip-large-batch] [--bench] [--bench-only]
+               [--bench-object-size BYTES] [--bench-num-objects N] [--bench-iterations N]
+  --server              gRPC server address (default: localhost:50051)
+  --skip-large-batch    Skip the 1000-entry large batch test
+  --bench               Run lookup latency benchmark (memory-tier vs SSD) after functional tests
+  --bench-only          Skip functional tests, run only the benchmark
+  --bench-object-size   Object size in bytes for benchmark (default: 1048576 = 1 MiB)
+  --bench-num-objects   Number of objects per batch to benchmark (default: 50)
+  --bench-iterations    Number of lookup iterations per tier (default: 10)
 ```
 
-**Functional Test Suite** (9 test cases):
-1. **test_populate**: Batch populate with 100 entries, verify per-entry success
-2. **test_populate_duplicate_key**: Reject batch with duplicate keys
-3. **test_populate_already_exists**: Handle AlreadyExists error for duplicate key in second batch
-4. **test_check**: Verify check returns correct boolean for existing/missing keys
-5. **test_lookup**: Retrieve entries and verify data integrity
-6. **test_lookup_not_found**: Handle KeyNotFound error for missing keys
-7. **test_remove**: Batch remove and verify entries no longer exist
-8. **test_remove_not_found**: Handle KeyNotFound error during removal
-9. **test_touch**: Touch entries and verify success
+**Functional Test Suite** (10 test cases):
+1. **test_batch_populate**: Batch populate 10 entries, verify per-entry success
+2. **test_batch_check**: Verify check returns correct boolean for existing/missing keys
+3. **test_batch_touch**: Touch populated entries to refresh their eviction timestamps
+4. **test_batch_lookup**: Retrieve entries and verify data integrity
+5. **test_batch_remove**: Batch remove and verify entries no longer exist
+6. **test_check_after_remove**: Verify entries are gone after removal
+7. **test_duplicate_key_rejection**: Reject batch with duplicate keys (FR-015)
+8. **test_nonexistent_key_handling**: Handle KeyNotFound error on remove for a missing key
+9. **test_touch_nonexistent**: Handle KeyNotFound error on touch for a missing key
+10. **test_large_batch**: Populate/check/remove a 1000-entry batch without timeout (SC-002); skippable via `--skip-large-batch`
 
-**Benchmark Suite**:
-- **Memory-Tier Lookup Latency**: Measure lookup latency for hot (in-memory) entries
-- **SSD-Tier Lookup Latency**: Measure lookup latency for cold (SSD-backed) entries
-- **Throughput**: Measure sustained lookup throughput (GB/s) for mixed workload
-- **Batch Scaling**: Measure throughput vs batch size (10, 100, 1000+ entries)
+There is no dedicated AlreadyExists test case; `Populate` on an already-existing key is not exercised by the suite.
 
-**Benchmark Output**:
-```
-Memory-tier lookup: 12.34 µs/op (avg of 10000 ops)
-SSD-tier lookup: 234.56 µs/op (avg of 1000 ops)
-Throughput: 456.78 GB/s
-```
+**Benchmark Suite** (`bench_lookup_latency`, run via `--bench` or `--bench-only`):
+- **Memory-Tier Lookup Latency**: Measure lookup latency for hot (in-memory) entries still resident in the memory-tier pool
+- **SSD-Tier Lookup Latency**: Measure lookup latency for cold (SSD-backed) entries evicted by LRU pressure, using a fresh slice of never-before-promoted keys per iteration to guarantee a true NVMe read
+- Object size, object count per batch, and iteration count are configurable via `--bench-object-size`, `--bench-num-objects`, and `--bench-iterations`
 
 **Exit Codes**:
-- `0`: All tests passed
-- `1`: Functional test failed
-- `2`: Benchmark failed
-- `3`: Connection error
+- `0`: All tests passed (or, with `--bench-only`, the benchmark ran to completion)
+- `1`: One or more functional tests failed
+
+Only `sys.exit(0)`/`sys.exit(1)` are used; there are no distinct exit codes for a failed benchmark or a connection error.
 
 **Example Invocations**:
 ```bash
-# Run full test suite and benchmark
+# Run full functional test suite (no benchmark)
 python3 test_client.py --server localhost:50051
 
-# Benchmark only (skip functional tests)
-python3 test_client.py --skip-tests --benchmark
+# Run functional tests, skip the 1000-entry large-batch test
+python3 test_client.py --skip-large-batch
 
-# Run against remote server
-python3 test_client.py --server remote-host:50051
+# Run functional tests followed by the lookup latency benchmark
+python3 test_client.py --bench
+
+# Benchmark only (skip functional tests)
+python3 test_client.py --bench-only
+
+# Run against remote server, with custom benchmark object size
+python3 test_client.py --server remote-host:50051 --bench --bench-object-size 4194304
 ```
 
 ### FR-014: TLS Support
@@ -272,6 +279,7 @@ channel = grpc.secure_channel('localhost:50051', credentials)
 - **CheckResult**: Per-entry outcome for check operations containing the key and a boolean `exists` field.
 - **BatchRequest**: A list of operation parameters (key + optional ipc_handle) sent in a single gRPC call.
 - **BatchResponse**: A list of per-entry results returned from a single gRPC call.
+- **IoStatsResponse**: Per-direction SSD I/O counters (`read_ops`, `read_bytes`, `read_latency_ns_sum`, `write_ops`, `write_bytes`, `write_latency_ns_sum`) returned by `GetIoStats` (FR-023); only populated when built with the `rw-telemetry` Cargo feature.
 
 ## Component Stack
 
@@ -316,6 +324,11 @@ The server initializes components in the following order:
 - Q: How does the server avoid "resource already mapped" errors when multiple concurrent batches reference the same CUDA IPC handle? → A: A global persistent IPC handle cache on `DispatcherService` keyed by the 64-byte handle bytes deduplicates open/close calls. Concurrent batches sharing a handle increment/decrement a reference count; `cudaIpcCloseMemHandle` is only called when the count reaches zero. This removes serialization on CUDA's global IPC lock and eliminates the "resource already mapped" error class entirely.
 - Q: When must the server call `cudaSetDevice`? → A: Immediately before calling `cudaIpcOpenMemHandle` for any handle not already in the cache, using the `gpu_device_id` provided in the `IpcHandle` message. Required for multi-GPU correctness; skipped when `gpu_device_id < 0` (sentinel value meaning "not specified").
 - Q: Does the IpcHandle proto message need a device identifier? → A: Yes. Field 3 (`gpu_device_id: int32`) was added to carry the CUDA device ordinal from the client so the server can call `cudaSetDevice` correctly before opening the handle.
+
+### Session 2026-07-22
+
+- Q: Does `PendingStores` key on a server-assigned reservation ID or the client-supplied cache key? → A: The client-supplied cache key. There is no separate reservation-ID concept anywhere in the protocol (`ReserveEntry` has no ID field; `CommitStore`/`AbortStore` take `keys`). This is intentional: the cache key is already unique per entry and duplicate-key pre-validation (FR-015) makes it a safe reservation handle, so a second ID would be redundant. FR-020 has been corrected to describe this actual, intended behavior.
+- Q: Is the `GetIoStats` RPC in scope for this spec? → A: Yes, added as FR-023. It is a diagnostics RPC (not an OTel metric) gated by the optional `rw-telemetry` Cargo feature, distinct from the `otel` feature covered in spec 003.
 
 ## Assumptions
 

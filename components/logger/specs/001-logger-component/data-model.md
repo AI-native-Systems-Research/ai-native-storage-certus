@@ -11,7 +11,7 @@ Severity levels for log messages, ordered by increasing verbosity.
 | Variant | Numeric | Display | Color (console) |
 |---------|---------|---------|-----------------|
 | Error   | 0       | "ERROR" | Red (\x1b[31m)  |
-| Warn    | 1       | "WARN " | Yellow (\x1b[33m) |
+| Warn    | 1       | "WARN " | Orange (\x1b[38;5;208m) |
 | Info    | 2       | "INFO " | Green (\x1b[32m) |
 | Debug   | 3       | "DEBUG" | Cyan (\x1b[36m) |
 
@@ -32,7 +32,7 @@ Defined in `interfaces` crate via `define_interface!`.
 | info   | `fn info(&self, msg: &str)`  | Log at Info level |
 | debug  | `fn debug(&self, msg: &str)` | Log at Debug level |
 
-### LoggerComponentV1 (component)
+### LoggerComponent (component)
 
 Defined via `define_component!`. Provides: `[ILogger]`. No receptacles.
 
@@ -43,8 +43,8 @@ Defined via `define_component!`. Provides: `[ILogger]`. No receptacles.
 | use_color | `bool` | Whether to emit ANSI codes (TTY detection) |
 
 **Construction**:
-- `LoggerComponentV1::new()` → console logger (stderr), color if TTY
-- `LoggerComponentV1::new_with_file(path: &str) -> io::Result<Arc<Self>>`
+- `LoggerComponent::new_default()` → console logger (stderr), color if TTY
+- `LoggerComponent::new_with_file(path: &str) -> io::Result<Arc<Self>>`
   → file logger, no color
 
 **Lifecycle**: Immutable after construction. No state transitions.
@@ -52,10 +52,10 @@ Defined via `define_component!`. Provides: `[ILogger]`. No receptacles.
 ## Relationships
 
 ```text
-LoggerComponentV1 --provides--> ILogger
-LoggerComponentV1 --contains--> LogLevel (threshold)
-LoggerComponentV1 --contains--> Mutex<Writer> (output sink)
+LoggerComponent --provides--> ILogger
+LoggerComponent --contains--> LogLevel (threshold)
+LoggerComponent --contains--> Mutex<Writer> (output sink)
 ```
 
 Other components declare `receptacles: { logger: ILogger }` and bind
-to LoggerComponentV1 at wiring time via `connect_receptacle_raw`.
+to LoggerComponent at wiring time via `connect_receptacle_raw`.

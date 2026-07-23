@@ -141,10 +141,12 @@ Key design properties:
 - When no entries are dirty, `force_flush()` returns immediately (no-op)
 
 **Tests:**
-- `flush_manager_force_flush_persists` (persistence): explicit flush durability
+- `flush_manager_force_flush_persists` (persistence): explicit flush durability — exercises `FlushManager::trigger_flush()` directly, not `IExtendedMetadataStore::force_flush()`
 - `flush_manager_dirty_threshold_triggers` (persistence): threshold-based flush
 - `flush_manager_no_dirty_no_op` (persistence): no-op when clean
 - `force_flush_succeeds` (unit): in-memory mode no-op
+
+> **Note**: The first acceptance criterion above ("`force_flush()` triggers an immediate flush and blocks until durable") describes the intended contract of `IExtendedMetadataStore::force_flush()`. The method does not currently meet this contract in any build configuration — see FR-05 Known Gaps and `.specify/sync/align-tasks.md` (Task ALIGN-002).
 
 ## Requirements
 
@@ -156,7 +158,7 @@ Key design properties:
 | FR-02 | `get(key)` returns a clone of the stored value or `NotFound` error | Implemented |
 | FR-03 | `delete(key)` removes entry from store; idempotent for missing keys | Implemented |
 | FR-04 | `iterate_all()` returns a consistent snapshot of all entries | Implemented |
-| FR-05 | `force_flush()` ensures all mutations are durable on disk | Implemented |
+| FR-05 | `force_flush()` ensures all mutations are durable on disk | **Partially Implemented** — see Known Gaps below and `.specify/sync/align-tasks.md` (Task ALIGN-002) |
 | FR-06 | Value size limit of 128 KiB enforced with `ValueTooLarge` error | Implemented |
 | FR-07 | Dual-region ping-pong flush: writes to inactive region, then flips superblock | Implemented |
 | FR-08 | Recovery reads superblock, loads active region entries into memory | Implemented |
@@ -168,6 +170,11 @@ Key design properties:
 | FR-14 | Dirty count tracks mutations since last flush | Implemented |
 | FR-15 | Component uses `define_component!` macro with `IExtendedMetadataStore` interface | Implemented |
 | FR-16 | Optional `ILogger` receptacle for debug logging of operations | Implemented |
+| FR-17 | External persistence-wiring API (`initialize_from_client`, `snapshot_entries`, `mark_flushed`, `load_entries`, `dirty_count()`, `flush_seq()` on `ExtendedMetadataStoreComponent`) provides the startup-recovery and flush-on-demand mechanism for persistent-mode deployments; a caller/dispatcher wires a `BlockDeviceClient` and drives these methods (directly or via `FlushManager`) to obtain durability | Implemented |
+
+### Known Gaps
+
+- **FR-05 / `force_flush()` is currently a no-op in every build configuration** (default, `testing`, `spdk`). It does not call `flush::flush_to_disk` or `FlushManager::trigger_flush`, so a caller that only holds the `IExtendedMetadataStore` interface gets no actual durability guarantee from `force_flush()`. Real durability for persistent-mode deployments today is obtained only by driving the FR-17 wiring API (`flush::flush_to_disk()` / `FlushManager::trigger_flush()`) directly — this is how every persistence/SSD test in this repository achieves durability. This is tracked as a code defect requiring a fix, not a spec change; see `.specify/sync/align-tasks.md` (Task ALIGN-002).
 
 ### Non-Functional Requirements
 
@@ -177,7 +184,7 @@ Key design properties:
 | NFR-02 | On-disk format uses CRC32 integrity checks on superblock, region headers, and entry records | Implemented |
 | NFR-03 | All on-disk structures are sector-aligned (4096 bytes default) | Implemented |
 | NFR-04 | Crash consistency: partial flush never corrupts previously-committed data | Implemented |
-| NFR-05 | Persistence modules gated behind `testing`/`spdk` feature flags | Implemented |
+| NFR-05 | Persistence I/O and runtime modules (`block_io`, `flush`, `recovery`, `test_support`) are gated behind `testing`/`spdk` feature flags; the on-disk format definitions module (`on_disk.rs`, defining `Superblock`/`RegionHeader`/`EntryRecord`) is intentionally always compiled since it contains pure data-format code with no I/O dependency, and downstream consumers need the format types available without enabling `testing`/`spdk` | Implemented |
 | NFR-06 | In-memory mode works without SPDK (default compilation) | Implemented |
 | NFR-07 | Test infrastructure provides `MockBlockDevice` with fault injection for deterministic testing | Implemented |
 | NFR-08 | DMA memory allocation abstracted via `DmaAllocFn` for portability between test (heap) and production (hugepages) | Implemented |
@@ -228,17 +235,20 @@ Key design properties:
 
 ### Interface Contracts
 - **Provides**: `IExtendedMetadataStore` (put, get, delete, iterate_all, force_flush)
+- **Inherent API** (`ExtendedMetadataStoreComponent`, FR-17): `initialize_from_client`, `snapshot_entries`, `mark_flushed`, `load_entries`, `dirty_count()`, `flush_seq()` — the persistence-wiring contract used by callers/dispatchers to drive recovery-on-startup and flush-on-demand
 - **Receptacles**: `ILogger` (optional, for debug logging)
 
 ## Success Criteria
 
-1. All 8 unit tests in `src/lib.rs` pass (in-memory mode, no features)
+1. All 9 unit tests in `src/lib.rs` pass (in-memory mode, no features)
 2. All persistence tests in `tests/persistence.rs` pass with `--features testing`
 3. All SSD integration tests in `tests/integration_ssd.rs` pass with `--features spdk` on NVMe hardware
 4. Data survives simulated crashes (fault injection) with recovery to last-good state
 5. No panics under 8-thread concurrent stress (1000 ops/thread)
 6. `cargo clippy -- -D warnings` passes clean
 7. All public items have doc comments; `cargo doc --no-deps` is warning-free
+
+> **Note**: Success Criteria 1, 2, 3, 6, and 7 cannot currently be exercised by `cargo build`/`cargo test --all` or by CI, because the crate is not a member of the workspace `[workspace] members` array in the root `Cargo.toml`. This is a build-wiring defect, not a documentation issue; see `.specify/sync/align-tasks.md` (Task ALIGN-001).
 
 ## Implementation Notes
 
@@ -286,4 +296,5 @@ This ensures that a crash at any point leaves either the old or new data intact:
 
 - `testing` feature: enables `block_io`, `flush`, `recovery`, `test_support` modules and activates `interfaces/spdk`
 - `spdk` feature: implies `testing`, adds runtime dependencies (`block-device-spdk-nvme`, `disk-partition-manager`, `spdk-env`, `logger`)
-- Default (no features): pure in-memory store with `force_flush()` as no-op
+- Default (no features): pure in-memory store with `force_flush()` as no-op (intended and correct in this mode — there is no disk to flush to)
+- **Currently, `IExtendedMetadataStore::force_flush()` is also an unconditional no-op under `testing` and `spdk`**, where it is not intended to be a no-op (see FR-05 Known Gaps). Durability under `testing`/`spdk` today requires calling the FR-17 wiring API (`flush::flush_to_disk()` / `FlushManager::trigger_flush()`) directly rather than `force_flush()`.

@@ -46,13 +46,17 @@ On client node:
 
 ### Throughput Only (Large Messages)
 
+The `-t`/`--test` flag accepts `write`, `read`, `send`, `recv`, `latency`, or `all` (default). `write` and `read` are one-sided RDMA operations; `send` and `recv` are two-sided bandwidth tests using `ibv_post_send`/`ibv_post_recv`.
+
 ```bash
 # Server
-rdma-test server -t throughput
+rdma-test server -t write
 
 # Client
-rdma-test client -a 10.0.0.1 -t throughput -s 65536 -n 50000
+rdma-test client -a 10.0.0.1 -t write -s 65536 -n 50000
 ```
+
+Other bandwidth variants work the same way, e.g. `-t read`, `-t send`, `-t recv`.
 
 ### Latency Only (Small Messages)
 

@@ -1,74 +1,89 @@
 # Spec Drift Report
-Generated: 2026-07-10
+
+Generated: 2026-07-22T21:28:13Z
 Project: dispatch-map
 
+> Note: A prior drift report existed in this file (dated 2026-07-10). It is superseded by this analysis, which found it had drifted itself — e.g. it claimed FR-014's error-logging requirement was satisfied, but no `logger.error(...)` call exists anywhere in the component, and it did not account for `promote_block_to_memory_tier` / `try_evict_to_block`, which are real, consumed public API surface.
+
 ## Summary
+
 | Category | Count |
 |----------|-------|
 | Specs Analyzed | 1 |
-| Requirements Checked | 29 |
-| Aligned | 27 (93%) |
-| Drifted | 1 (3%) |
-| Not Implemented | 0 (0%) |
-| Unspecced Code | 1 |
-
-## Sync Actions Applied (2026-07-10)
-
-The following drift was resolved by updating the spec to match the implementation:
-
-- **FR-002**: Removed `Staging` variant from Location enum; now specifies only `BlockDevice` and `MemoryTier`.
-- **FR-003**: Replaced `create_staging(key, size)` with `create_memory_tier_entry(key, pointer, size)`.
-- **FR-004**: Removed `Staging(DmaBuffer)` from lookup return variants; now returns `NotExist`, `BlockDevice`, or `MemoryTier`.
-- **FR-005**: Updated to describe MemoryTier `ssd_offset` setting (removed staging buffer transition language).
-- **FR-018**: Simplified to cover only `convert_memory_tier_to_block`; `create_memory_tier_entry` now under FR-003.
-- **FR-019**: Marked as removed (DMA allocator injection no longer needed).
-- **FR-021**: Marked as merged into FR-005 (redundant).
-- **FR-024**: Added for `recover_extent(key, offset, size_blocks)`.
-- **SC-004**: Updated to reference BlockDevice/MemoryTier size variation instead of Staging.
-- User Stories 1-3, 6-8, Edge Cases, Key Entities, Clarifications, Assumptions: Updated to remove all Staging/DMA buffer references.
+| Requirements Checked (FR/SC + tracked acceptance scenarios) | 30 |
+| Aligned | 26 (87%) |
+| Drifted | 2 (7%) |
+| Not Implemented | 2 (7%) |
+| Unspecced Code | 4 |
 
 ## Detailed Findings
-### Spec: 001-dispatch-map - Dispatch Map Component
+
+### Spec: 001-dispatch-map — Dispatch Map Component
+
 #### Aligned
-- FR-001: CacheKey type as u64 → `interfaces::CacheKey` (re-exported from interfaces crate at src/lib.rs:25)
-- FR-002: Location enum with BlockDevice and MemoryTier variants → `src/entry.rs:7-17`
-- FR-003: create_memory_tier_entry(key, pointer, size) creates MemoryTier entry with write_ref=1 → `src/lib.rs:362-405`
-- FR-004: lookup returns NotExist, BlockDevice, or MemoryTier; increments read_ref; blocks on active write with 2000ms timeout → `src/lib.rs:113-155`
-- FR-005: convert_to_storage on MemoryTier sets ssd_offset, conditional read_ref decrement, error on BlockDevice → `src/lib.rs:157-188`
-- FR-006: take_read waits for write_ref=0 with 2000ms timeout, increments read_ref → `src/lib.rs:191-213`
-- FR-007: take_write waits for read_ref=0 and write_ref=0 with 2000ms timeout, sets write_ref=1 → `src/lib.rs:216-238`
-- FR-008: release_read decrements read_ref, returns RefCountUnderflow if already 0 → `src/lib.rs:241-258`
-- FR-009: release_write sets write_ref=0, returns RefCountUnderflow if already 0 → `src/lib.rs:261-278`
-- FR-010: downgrade_reference atomically transitions write to read in single critical section, error if no write ref → `src/lib.rs:281-303`
-- FR-011: remove deletes entry, returns ActiveReferences error if read_ref>0 or write_ref>0 → `src/lib.rs:305-328`
-- FR-012: initialize requires IEvictionPolicy connected (error if unbound), recovers from IExtentManager via for_each_extent, returns Ok(()) when no IExtentManager bound → `src/lib.rs:67-111`
-- FR-013: All methods thread-safe via Mutex<Inner> and Condvar blocking semantics → `src/state.rs` (entire module)
-- FR-014: ILogger receptacle used for info, debug, and error logging throughout the component → used in initialize, lookup, convert_to_storage, take_read, take_write, release_read, release_write, downgrade_reference, remove, create_memory_tier_entry, convert_memory_tier_to_block
-- FR-015: define_component! with IDispatchMap provider, ILogger/IExtentManager/IEvictionPolicy receptacles → `src/lib.rs:32-45`
-- FR-016: touch(key) delegates to IEvictionPolicy ep.touch(handle), no ref count changes, returns KeyNotFound if missing → `src/lib.rs:330-342`
-- FR-017: oldest_keys(n) delegates to IEvictionPolicy::peek_oldest(pool_id, n), thread-safe → `src/lib.rs:353-359`
-- FR-018: MemoryTier variant has pointer/size/ssd_offset; convert_memory_tier_to_block(key) reads offset from ssd_offset field → `src/lib.rs:407-443, src/entry.rs:11-16`
-- FR-020: initialize() is explicit public API, not called during construction → `src/lib.rs:67` (must be called after binding receptacles)
-- FR-022: is_evictable returns true iff key exists, MemoryTier state, ssd_offset: Some(_), read_ref==0, write_ref==0; false for all other cases → `src/lib.rs:445-458`
-- FR-023: entry_size(key) returns size_blocks * 4096 without acquiring references, KeyNotFound on missing key → `src/lib.rs:344-351`
-- FR-024: recover_extent(key, offset, size_blocks) inserts BlockDevice entry, returns AlreadyExists if key present, tracked by eviction policy → `src/lib.rs:460-483`
-- SC-001: All committed extents recoverable via initialize() with for_each_extent → `src/lib.rs:90-103`
-- SC-002: Concurrent readers experience no data corruption or deadlocks — enforced by Mutex/Condvar design in `src/state.rs`
-- SC-003: Write-to-read downgrade is atomic in single critical section → `src/lib.rs:281-303`
-- SC-004: Per-entry metadata compact; size varies between BlockDevice (offset: u64) and MemoryTier (pointer + size + ssd_offset) → `src/entry.rs:27-35`
-- SC-005: Lookup completes without blocking when no writer is active — condvar satisfied immediately → `src/lib.rs:114-119`
-- SC-006: All ref count operations maintain consistent counts — no leaks or underflows → verified across all methods
+
+- FR-001 (`CacheKey = u64`) → `components/interfaces/src/idispatch_map.rs:6`
+- FR-002 (per-entry metadata: Location, size_blocks, read_ref, write_ref, EvictionHandle, Mutex/Condvar) → `components/dispatch-map/src/entry.rs:9-38`, `components/dispatch-map/src/state.rs:12-21`
+- FR-003 (`create_memory_tier_entry` core behavior: MemoryTier location, write_ref=1, AlreadyExists on dup, eviction registration) → `components/dispatch-map/src/lib.rs:367-408`
+- FR-004 (`lookup` returns NotExist/BlockDevice/MemoryTier, increments read_ref, blocks on write_ref with 2s default timeout, MismatchSize unused, size not exposed on BlockDevice, eviction priority refreshed on success) → `components/dispatch-map/src/lib.rs:115-158`
+- FR-005 (`convert_to_storage` sets `ssd_offset`, conditional read_ref decrement, errors on missing key / already-BlockDevice) → `components/dispatch-map/src/lib.rs:160-192`
+- FR-006 (`take_read` blocks on write_ref, 2s timeout) → `components/dispatch-map/src/lib.rs:194-218`
+- FR-007 (`take_write` blocks on read_ref/write_ref, 2s timeout) → `components/dispatch-map/src/lib.rs:220-243`
+- FR-008 (`release_read` underflow error) → `components/dispatch-map/src/lib.rs:245-263`
+- FR-009 (`release_write` underflow error) → `components/dispatch-map/src/lib.rs:265-283`
+- FR-010 (`downgrade_reference` atomic write→read, error if no write ref) → `components/dispatch-map/src/lib.rs:285-308`
+- FR-011 (`remove` errors on active refs) → `components/dispatch-map/src/lib.rs:310-333`
+- FR-012 (`initialize`: eviction_policy mandatory, extent_manager optional, empty map + `Ok(())` when unbound) → `components/dispatch-map/src/lib.rs:68-113`
+- FR-013 (thread-safe/re-entrant via `Mutex`/`Condvar`) → `components/dispatch-map/src/state.rs`
+- FR-015 (`define_component!` with `IDispatchMap` provided, `ILogger`/`IExtentManager`/`IEvictionPolicy` receptacles) → `components/dispatch-map/src/lib.rs:33-46`
+- FR-016 (`touch` via `IEvictionPolicy`, no ref change, `KeyNotFound`) → `components/dispatch-map/src/lib.rs:335-347`
+- FR-017 (`oldest_keys` delegates to `IEvictionPolicy::peek_oldest`) → `components/dispatch-map/src/lib.rs:358-365`
+- FR-018 (`MemoryTier{pointer,size,ssd_offset}`, `convert_memory_tier_to_block` reads internal `ssd_offset`) → `components/dispatch-map/src/entry.rs:13-19`, `lib.rs:410-449`
+- FR-020 (`initialize()` explicit, not called from constructor) → `components/dispatch-map/src/lib.rs:68` (not invoked in `new`/`new_default`)
+- FR-022 (`is_evictable` predicate exact match) → `components/dispatch-map/src/lib.rs:499-512`
+- FR-023 (`entry_size` = `size_blocks * 4096`, rounds up via `div_ceil`) → `components/dispatch-map/src/lib.rs:349-356,392`
+- FR-024 (`recover_extent` inserts BlockDevice entry, `AlreadyExists` guard) → `components/dispatch-map/src/lib.rs:547-571`
+- SC-001 (recoverable extents) → tested in `components/dispatch-map/tests/integration.rs:476-522` (`recovery_populated`)
+- SC-002 (concurrent readers, no corruption/deadlock) → tested in `tests/integration.rs:42-62,354-384`
+- SC-003 (atomic write→read downgrade) → `components/dispatch-map/src/lib.rs:285-308` (single mutex hold)
+- SC-005 (lookup non-blocking when no writer active) → `wait_for` predicate short-circuits in `state.rs:43-63`
+- SC-006 (ref-count consistency under concurrency) → covered extensively by `tests/integration.rs`
 
 #### Drifted
-- **FR-018 (minor)**: `create_memory_tier_entry` stores `size_blocks: size.div_ceil(4096)` which interprets `size` as bytes and divides by 4096 to get blocks. However FR-023 says `entry_size` returns `size_blocks * 4096`. This means if `size` is not block-aligned (e.g., 5000 bytes), size_blocks becomes 2, and entry_size returns 8192 (rounded up). The spec notes this behavior in FR-023 ("for memory-tier entries where the original size was not block-aligned, the returned value is rounded up to the nearest block boundary") but the MemoryTier's raw `size` field in the Location variant still stores the original byte count passed to create_memory_tier_entry.
-  - Location: src/lib.rs:387
-  - Severity: **informational** — documented rounding behavior, not a bug
 
-## Unspecced Code
-- `entry_size()` module-level free function: Returns `std::mem::size_of::<DispatchEntry>()` — the struct size in bytes. Defined at `src/lib.rs:16-18`. Intended for benchmarks/assertions. Distinct from the FR-023 `entry_size(key)` instance method which returns the data size for a specific key. Left unspecced intentionally as a diagnostic utility.
+- **FR-014**: Spec says "System MUST use the `ILogger` receptacle for **info, debug, and error** logging throughout the component."
+  Actual: Only `logger.info(...)` and `logger.debug(...)` are called; `logger.error(...)` is never invoked anywhere in the component, despite numerous fallible paths (`KeyNotFound`, `Timeout`, `ActiveReferences`, `RefCountUnderflow`/`Overflow`, `InvalidState`, `InvalidSize`) that return `Err` without logging.
+  - Location: `components/dispatch-map/src/lib.rs` (no `logger.error` call sites anywhere; error returns e.g. at lines 130, 165, 203, 232, 250, 270, 290, 315, 340, 415, 458, 519, 558 log nothing)
+  - Severity: moderate
+
+- **SC-004**: Spec says "The `DispatchEntry` struct size **varies** by `Location` variant (`BlockDevice` stores a `u64` offset; `MemoryTier` stores a pointer, size, and optional offset)."
+  Actual: `Location` is a Rust `enum`; the compiler sizes `DispatchEntry` to fit its largest variant (`MemoryTier`) at compile time. `std::mem::size_of::<DispatchEntry>()` (exposed via the free function `entry_size()` in `lib.rs:16-18`) is a fixed constant — it does not vary per-instance based on which variant is active.
+  - Location: `components/dispatch-map/src/entry.rs:9-19,28-38`; `components/dispatch-map/src/lib.rs:16-18`
+  - Severity: minor (spec wording is imprecise about Rust enum layout, not a functional defect)
+
+#### Not Implemented
+
+- **User Story 1 / Acceptance Scenario 3 + Edge Cases item 1** — "`create_memory_tier_entry` with a null pointer returns an error; no entry is recorded in the map." No null-pointer check exists in `create_memory_tier_entry` (`components/dispatch-map/src/lib.rs:367-408`), and `DispatchMapError` (`components/interfaces/src/idispatch_map.rs:38-62`) has no dedicated null-pointer variant. A null `*mut u8` is currently accepted and stored without error.
+- **User Story 2 / Acceptance Scenario 4** — "size mismatch → `ErrorMismatchSize`." `lookup(key)` (`components/interfaces/src/idispatch_map.rs:117`; `lib.rs:115-158`) takes no expected-size parameter, so a caller has no way to trigger this path. FR-004 itself already flags `MismatchSize` as "not currently triggered," so this is a spec-acknowledged (but still open) gap rather than a surprise.
+
+### Unspecced Code
+
+| Feature | Location | Lines | Suggested Spec |
+|---------|----------|-------|----------------|
+| `promote_block_to_memory_tier(key, pointer, size)` — in-place BlockDevice→MemoryTier promotion preserving refs/eviction handle; consumed by `components/dispatcher/src/lib.rs` and `components/dispatcher-p2p/src/lib.rs` for on-demand cold-block promotion | `components/interfaces/src/idispatch_map.rs:234-239`; `components/dispatch-map/src/lib.rs:451-497` | ~47 | 001-dispatch-map (new FR + user story for the promotion path) |
+| `try_evict_to_block(key)` — atomic evictability check + BlockDevice transition under one lock hold; consumed by dispatcher/dispatcher-p2p SSD-evictor paths | `components/interfaces/src/idispatch_map.rs:251-262`; `components/dispatch-map/src/lib.rs:514-545` | ~32 | 001-dispatch-map (new FR alongside FR-022 `is_evictable`) |
+| `reuse_count: AtomicU32` field — incremented on `lookup`/`take_read`/`downgrade_reference` but never read or exposed through any `IDispatchMap` method; dead metric | `components/dispatch-map/src/entry.rs:37,49-51`; `components/dispatch-map/src/lib.rs:101,137,213,301,396,567` | ~10 | Wire into a new FR (expose reuse metrics), or remove |
+| Formal-verification claims (P1–P10, "24 verification conditions") referencing `components/dispatch-map/verif/`, a directory that does not exist anywhere under this component | `components/interfaces/src/idispatch_map.rs:84-99` | 16 | Add a verification section to spec.md, or correct/remove the stale comment |
+
+## Inter-Spec Conflicts
+
+None — only one spec (`001-dispatch-map`) exists for this component.
 
 ## Recommendations
 
-1. **FR-018 rounding note**: The minor informational drift about size_blocks rounding is already documented in FR-023. No action needed unless the size field semantics change.
-
-2. **Module-level entry_size() utility**: This is a benchmark/diagnostic utility returning struct size. Left unspecced intentionally.
+1. Add `logger.error(...)` calls on the component's error-return paths (timeouts, invalid-state transitions, ref-count violations) to satisfy FR-014, or narrow FR-014's wording to match the current info/debug-only logging behavior.
+2. Add null-pointer validation to `create_memory_tier_entry` (e.g. a new `DispatchMapError::NullPointer` variant) to close the gap against User Story 1 AS3 and the Edge Cases list, or explicitly drop that acceptance scenario if the check was intentionally omitted as an unsafe-caller contract.
+3. Write a new spec increment (e.g. `002-dispatch-map-promotion`) covering `promote_block_to_memory_tier` and `try_evict_to_block` — real, actively consumed public API surface (by `dispatcher` and `dispatcher-p2p`) with zero requirements coverage in the current spec.
+4. Decide the fate of `reuse_count`: expose it through a new interface method (e.g. cache-hit telemetry) or remove the dead instrumentation.
+5. Correct or remove the Creusot verification-properties comment block in `components/interfaces/src/idispatch_map.rs:84-99` — it references a `verif/` directory that does not exist in this component.
+6. `components/dispatch-map/README.md` is stale relative to both the spec and the code: it describes a `Staging`/`DmaBuffer` location variant and RDTSC `tsc` timestamps that no longer exist (current code has only `BlockDevice`/`MemoryTier` and delegates ordering to `IEvictionPolicy`), and never mentions the `IEvictionPolicy` receptacle, `promote_block_to_memory_tier`, `try_evict_to_block`, `is_evictable`, `recover_extent`, or `entry_size`. `components/dispatch-map/CLAUDE.md`'s "Component Wiring" diagram likewise omits the `IEvictionPolicy` receptacle that is present (and mandatory) in the code. Both should be refreshed — see the `component-update-docs` skill.

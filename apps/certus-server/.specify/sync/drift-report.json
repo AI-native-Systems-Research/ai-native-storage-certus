@@ -1,12 +1,12 @@
 {
-  "generated": "2026-07-10T00:00:00Z",
+  "generated": "2026-07-22T21:29:44Z",
   "project": "certus-server",
   "summary": {
     "specs_analyzed": 3,
-    "requirements_checked": 42,
-    "aligned": 37,
-    "drifted": 3,
-    "not_implemented": 2,
+    "requirements_checked": 61,
+    "aligned": 57,
+    "drifted": 4,
+    "not_implemented": 0,
     "unspecced_features": 5
   },
   "specs": [
@@ -14,158 +14,102 @@
       "id": "001-grpc-dispatcher-server",
       "title": "gRPC Dispatcher Server",
       "aligned": [
-        "FR-001",
-        "FR-002",
-        "FR-003",
-        "FR-004",
-        "FR-005",
-        "FR-005b",
-        "FR-006",
-        "FR-007",
-        "FR-008",
-        "FR-008b",
-        "FR-008c",
-        "FR-009",
-        "FR-010",
-        "FR-011",
-        "FR-013",
-        "FR-014",
-        "FR-015",
-        "FR-016",
-        "FR-017",
-        "FR-018",
-        "FR-019"
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-005b", "FR-006",
+        "FR-007", "FR-008b", "FR-008c", "FR-009", "FR-013", "FR-014", "FR-015",
+        "FR-016", "FR-017", "FR-018", "FR-019", "FR-021", "FR-022",
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006"
       ],
       "drifted": [
         {
-          "requirement": "FR-013",
-          "spec_text": "Server MUST accept multiple client connections but serialize request processing (one request at a time). Serialization is achieved via a Mutex around the dispatcher reference.",
-          "actual": "The dispatcher reference is wrapped in Arc (not Mutex). Serialization only occurs at the IPC cache Mutex and pending_stores Mutex. Multiple gRPC requests can execute concurrently on the tokio runtime via spawn_blocking; they only serialize on shared state access. This is actually better behavior but diverges from the stated serialization guarantee.",
-          "location": "src/service.rs:54-86",
-          "severity": "minor"
+          "requirement": "FR-008",
+          "spec_text": "The component initialization stack is: SPDK environment init, GPU services init, dispatch map init (ephemeral, no persistence), memory-tier init with CUDA host registration, then dispatcher init with data PCI addresses.",
+          "actual": "Init order also creates and binds an EvictionPolicyLru component (shared by dispatch-map and memory-tier) and a RemoteLookup component (bound to the dispatcher). Neither is mentioned in the FR-008 stack description or the 'Component Stack' section.",
+          "location": "apps/certus-server/src/main.rs:187-270",
+          "severity": "low"
+        },
+        {
+          "requirement": "FR-010",
+          "spec_text": "Implementation Details for FR-010 document the Python test client CLI as `test_client.py [--server ADDRESS:PORT] [--skip-tests] [--benchmark]` with a 9-case functional suite (test_populate, test_populate_duplicate_key, test_populate_already_exists, test_check, test_lookup, test_lookup_not_found, test_remove, test_remove_not_found, test_touch) and exit codes 0/1/2/3 (3 = connection error).",
+          "actual": "Actual CLI flags are `--server`, `--skip-large-batch`, `--bench`, `--bench-only`, `--bench-object-size`, `--bench-num-objects`, `--bench-iterations` (no `--skip-tests` or `--benchmark`). The suite has 10 differently-named functions (test_batch_populate, test_batch_check, test_batch_touch, test_batch_lookup, test_batch_remove, test_check_after_remove, test_duplicate_key_rejection, test_nonexistent_key_handling, test_touch_nonexistent, test_large_batch); there is no test_populate_already_exists / AlreadyExists case. Only sys.exit(0)/sys.exit(1) are used; no distinct exit codes 2 or 3.",
+          "location": "apps/certus-server/python-client/test_client.py:465-543 (argparse), 87-303 (test functions)",
+          "severity": "medium"
+        },
+        {
+          "requirement": "FR-011",
+          "spec_text": "The IPC handle in the gRPC protocol MUST be represented as a serializable structure containing: (1) cuda_ipc_handle (bytes), (2) size (uint32), (3) gpu_device_id (int32).",
+          "actual": "The `IpcHandle` proto message also defines a 4th field, `offset` (uint64), used throughout service.rs to address a sub-block within a shared allocation (`dev_ptr + offset`). This field is functionally load-bearing but is not part of the FR-011 field list.",
+          "location": "apps/certus-server/proto/dispatcher.proto:59-70; apps/certus-server/src/service.rs:275,375,651",
+          "severity": "low"
+        },
+        {
+          "requirement": "FR-020",
+          "spec_text": "Pending stores are tracked per-reservation in a `PendingStores` map keyed by a server-assigned reservation ID (`u64`).",
+          "actual": "`PendingStores` (`HashMap<u64, PendingStoreEntry>`) is keyed by the client-supplied cache key from `ReserveEntry.key`, not a server-generated reservation ID. `CommitStore`/`AbortStore` proto messages also take `keys` (cache keys); there is no reservation-ID allocation anywhere in the service.",
+          "location": "apps/certus-server/src/service.rs:48-52,546-559,691-720; apps/certus-server/proto/dispatcher.proto:161-193",
+          "severity": "medium"
         }
       ],
-      "not_implemented": [],
-      "success_criteria": {
-        "SC-001": "aligned",
-        "SC-002": "aligned",
-        "SC-003": "aligned",
-        "SC-004": "aligned",
-        "SC-005": "aligned",
-        "SC-006": "aligned"
-      }
+      "not_implemented": []
     },
     {
       "id": "002-operational-config",
       "title": "Operational Configuration & Lifecycle",
       "aligned": [
-        "FR-001",
-        "FR-002",
-        "FR-003",
-        "FR-004",
-        "FR-005",
-        "FR-006",
-        "FR-007",
-        "FR-008",
-        "FR-009",
-        "FR-010",
-        "FR-011",
-        "FR-012"
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
+        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013",
+        "SC-001", "SC-002", "SC-003", "SC-004"
       ],
-      "drifted": [
-        {
-          "requirement": "FR-006",
-          "spec_text": "System MUST support --memory-tier-size accepting human-readable sizes (K/M/G suffixes, case-insensitive). Default is 2 GiB.",
-          "actual": "The parse_size() function supports K/M/G suffixes correctly. However, the CLI help text says 'Defaults to 256M' (line 44 comment) while the actual default constant DEFAULT_MEMORY_TIER_SIZE is 2 GiB (2 * 1024 * 1024 * 1024). The code is correct (2 GiB default) but the help text is misleading.",
-          "location": "src/main.rs:44,332",
-          "severity": "minor"
-        }
-      ],
-      "not_implemented": [],
-      "success_criteria": {
-        "SC-001": "aligned",
-        "SC-002": "aligned",
-        "SC-003": "aligned",
-        "SC-004": "aligned"
-      }
+      "drifted": [],
+      "not_implemented": []
     },
     {
       "id": "003-otel-observability",
       "title": "OpenTelemetry Observability",
       "aligned": [
-        "FR-001",
-        "FR-002",
-        "FR-003",
-        "FR-004",
-        "FR-005",
-        "FR-006",
-        "FR-007",
-        "FR-008",
-        "FR-009",
-        "FR-010",
-        "FR-011"
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
+        "FR-008", "FR-009", "FR-010", "FR-011",
+        "SC-001", "SC-002", "SC-003"
       ],
-      "drifted": [
-        {
-          "requirement": "FR-005",
-          "spec_text": "certus.dispatcher.batch.size histogram with op attribute",
-          "actual": "The batch_size histogram is recorded via record_op() which passes the 'op' attribute correctly. However, the ops_total counter records the total entry count per batch rather than incrementing by 1 per batch operation. This means ops_total counts entries, not operations. The metric semantics are: 1 batch of 100 entries records ops_total += 100 rather than ops_total += 1.",
-          "location": "src/telemetry.rs:166-174",
-          "severity": "minor"
-        }
-      ],
-      "not_implemented": [
-        {
-          "requirement": "SC-002",
-          "spec_text": "Pipeline stage metrics correlate with hardware-measured latencies (within 10% for NVMe read, GPU DMA)",
-          "reason": "No validation harness exists to verify metric correlation with hardware measurements",
-          "severity": "low"
-        },
-        {
-          "requirement": "SC-003",
-          "spec_text": "Disabling the otel feature produces a binary with zero OTel dependencies and no runtime overhead",
-          "reason": "Not validated via CI/test; assumed correct from conditional compilation but no explicit check exists",
-          "severity": "low"
-        }
-      ],
-      "success_criteria": {
-        "SC-001": "aligned",
-        "SC-002": "not_implemented",
-        "SC-003": "not_implemented"
-      }
+      "drifted": [],
+      "not_implemented": []
     }
   ],
   "unspecced": [
     {
-      "feature": "Split-phase store protocol (Reserve/CopyToStore/CommitStore/AbortStore RPCs)",
-      "location": "src/service.rs:528-763, proto/dispatcher.proto:22-32",
-      "description": "A 3-phase store protocol allowing clients to reserve memory, DMA copy from GPU, then commit or abort. Not covered by any spec.",
-      "suggested_spec": "Create new spec 004-split-phase-store or add to 001-grpc-dispatcher-server"
+      "feature": "GetIoStats gRPC method returning per-direction SSD read/write op/byte/latency counters, gated by an optional rw-telemetry Cargo feature",
+      "location": "apps/certus-server/proto/dispatcher.proto (GetIoStats/IoStatsResponse); apps/certus-server/src/service.rs:910-927; apps/certus-server/Cargo.toml:16",
+      "lines": 25,
+      "suggested_spec": "Add an FR to spec 003 (otel-observability) or a new spec covering the GetIoStats RPC and the rw-telemetry feature flag"
     },
     {
-      "feature": "Pin/Unpin RPCs with promote semantics",
-      "location": "src/service.rs:807-863, proto/dispatcher.proto:40-44",
-      "description": "Pin increments a reference count to prevent eviction; Unpin decrements it. Pin supports a 'promote' field that fire-and-forget promotes SSD-resident entries to memory tier after pinning. Not covered by any spec.",
-      "suggested_spec": "Create new spec 005-pinning or add to 001-grpc-dispatcher-server"
+      "feature": "--memory-tier-eviction-threshold CLI flag controlling a background DRAM->SSD demotion utilization threshold, passed into DispatcherConfig",
+      "location": "apps/certus-server/src/main.rs:71-74,136,309",
+      "lines": 4,
+      "suggested_spec": "Add FR + CLI Interface table row to spec 002 (operational-config)"
     },
     {
-      "feature": "TakeEvents RPC (eviction event drain)",
-      "location": "src/service.rs:865-901, proto/dispatcher.proto:47",
-      "description": "Non-blocking poll that drains eviction events from a crossbeam channel. Reports dropped_count for events lost due to channel overflow. Constructor accepts eviction_rx and eviction_dropped. Not covered by any spec.",
-      "suggested_spec": "Create new spec 006-eviction-events or add to 001-grpc-dispatcher-server"
+      "feature": "IpcHandle.offset field enabling sub-block addressing within one shared CUDA allocation",
+      "location": "apps/certus-server/proto/dispatcher.proto:59-70",
+      "lines": 12,
+      "suggested_spec": "Add offset to the FR-011 field list in spec 001 (grpc-dispatcher-server)"
     },
     {
-      "feature": "Eviction channel setup in main",
-      "location": "src/main.rs:350-351",
-      "description": "Creates a bounded crossbeam channel (capacity 16384) via disp_comp.create_eviction_channel() and tracks dropped events via AtomicU64. Infrastructure supporting TakeEvents.",
-      "suggested_spec": "Fold into TakeEvents spec"
+      "feature": "EvictionPolicyLru and RemoteLookup components wired into the startup stack (shared by dispatch-map/memory-tier, and bound to the dispatcher) but absent from the documented Component Stack list",
+      "location": "apps/certus-server/src/main.rs:187-196 (eviction policy), 263-270 (remote lookup)",
+      "lines": 20,
+      "suggested_spec": "Extend the Component Stack section of spec 001 to include eviction-policy-lru and remote-lookup"
     },
     {
-      "feature": "NUMA-aware memory-tier binding",
-      "location": "src/main.rs:225-232",
-      "description": "Memory-tier pool is bound to the NUMA node of the first selected drive (resolves via SPDK device list). Not mentioned in any spec.",
-      "suggested_spec": "Add to 002-operational-config as a new FR covering NUMA affinity"
+      "feature": "ErrorCode.ERROR_CODE_DUPLICATE_KEY enum value defined in the proto but never returned; duplicate-key rejection actually uses a tonic Status::invalid_argument with a free-text message",
+      "location": "apps/certus-server/proto/dispatcher.proto:77; apps/certus-server/src/service.rs:151-162",
+      "lines": 1,
+      "suggested_spec": "Either wire ERROR_CODE_DUPLICATE_KEY into the duplicate-key rejection path, or remove it from the proto and document the actual invalid_argument behavior in spec 001 FR-015"
     }
   ],
-  "conflicts": []
+  "conflicts": [
+    {
+      "description": "README.md's 'Component Stack' section and architecture diagram describe a metadata NVMe device plus an IExtentManager persistence layer backing the dispatch map, and its gRPC API table lists only 4 of the 15 defined RPCs (missing Touch, Reserve, CopyToStore, CommitStore, AbortStore, ClearMemoryTier, FlushToSsd, Pin, Unpin, TakeEvents, GetIoStats). Its CLI Options table also omits --drive-count, --format, --memory-tier-size, --poller-base-cpu, --max-eviction-attempts, --memory-tier-eviction-threshold, --otel-endpoint, --otel-service-name. This contradicts spec 002's explicit clarification that there is no metadata device and no extent-manager-backed persistence, and understates the current implementation.",
+      "location": "apps/certus-server/README.md:9-72,100-108"
+    }
+  ]
 }
