@@ -1,16 +1,16 @@
 # dispatcher (v1)
 
-**Crate**: `dispatcher-v1`
+**Crate**: `dispatcher`
 **Path**: `components/dispatcher/`
-**Version**: 0.1.0
+**Version**: 1.0.0
 
 ## Description
 
-Memory-tier dispatcher component that manages the GPU-to-DRAM-to-SSD storage pipeline. Orchestrates a DRAM memory pool (via `IMemoryTier`), block devices, extent managers, and the dispatch map to provide a high-level cache API with LRU eviction and write-through persistence.
+Central data-plane cache orchestrator for the Certus storage pipeline. Manages a two-tier cache (DRAM + SSD) and routes GPU-to-DRAM-to-SSD data movement. Implements zero-copy cold-path reads where SPDK DMA writes directly into CUDA-pinned memory-tier buffers.
 
-On `populate`, copies GPU data via DMA into a memory-tier slot, then queues an asynchronous write-through to SSD. When the memory pool is full, evicts LRU entries whose write-through has completed. On `lookup`, serves from memory-tier (fast path), promotes from SSD back to memory-tier (with pipelined read), or falls back to legacy staging buffers.
+On `populate`, copies GPU data via DMA into a memory-tier slot, then queues asynchronous write-through to SSD. On `lookup`, serves from memory-tier (hot path), or promotes from SSD with pipelined NVMe reads directly into the memory-tier pool (cold path). On capacity exhaustion, evicts LRU entries whose write-through has completed.
 
-On `initialize`, creates and initializes N data block devices and N extent managers from provided PCI addresses, and starts a background write-through worker. On `shutdown`, completes all in-flight writes then tears down managed subsystems.
+On `initialize`, creates and initializes N data block devices and N extent managers from provided PCI addresses, manages GPT partition tables per drive, and starts background write-through workers and evictors. On `shutdown`, completes all in-flight writes then tears down managed subsystems.
 
 ## Component Definition
 
@@ -46,13 +46,13 @@ define_interface! {
         fn copy_gpu_to_memory_async(&self, key: CacheKey, ipc_handle: IpcHandle, stream: GpuStream) -> Result<(), DispatcherError>;
         fn copy_gpu_to_memory_completed(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>;
         fn release_memory(&self, key: CacheKey) -> Result<(), DispatcherError>;
-        fn prepare_store(&self, key: CacheKey, size: u32) -> Result<Arc<DmaBuffer>, DispatcherError>;
-        fn commit_store(&self, key: CacheKey) -> Result<(), DispatcherError>;
-        fn cancel_store(&self, key: CacheKey) -> Result<(), DispatcherError>;
+        fn pin(&self, key: CacheKey) -> Result<(), DispatcherError>;
+        fn unpin(&self, key: CacheKey) -> Result<(), DispatcherError>;
         fn touch(&self, key: CacheKey) -> Result<(), DispatcherError>;
         fn promote_to_memory_tier(&self, keys: &[CacheKey]);
         fn clear_memory_tier(&self) -> Result<usize, DispatcherError>;
         fn flush_to_ssd(&self) -> Result<usize, DispatcherError>;
+        fn read_write_stats(&self) -> ReadWriteStats;
     }
 }
 ```
@@ -82,7 +82,7 @@ Total: 10 properties, 24 verification conditions discharged by SMT solvers.
 |------|-----------|----------|---------|
 | `logger` | `ILogger` | No | Optional logging |
 | `dispatch_map` | `IDispatchMap` | Yes | Extent-to-location tracking and reference counting |
-| `gpu_services` | `IGpuServices` | Yes | GPU DMA copy operations |
+| `gpu_services` | `IGpuServices` | Yes | GPU DMA copy operations and stream management |
 | `spdk_env` | `ISPDKEnv` | No | SPDK environment; if unconnected, operates in staging-only mode |
 | `memory_tier` | `IMemoryTier` | Yes | DRAM pool for caching data between GPU and SSD |
 | `remote_lookup` | `IRemoteLookup` | No | Remote node lookup for cache misses |
@@ -92,9 +92,11 @@ Total: 10 properties, 24 verification conditions discharged by SMT solvers.
 - `DispatcherConfig { data_pci_addrs, max_cache_entries, eviction_threshold, format_on_init, ssd_eviction_threshold, ssd_eviction_low_watermark, ssd_eviction_batch_size, ssd_eviction_interval_secs, poller_base_cpu, max_eviction_attempts, backfill_delay_ms }`
 - `IpcHandle { address: *mut u8, size: u32 }` — opaque GPU memory pointer for DMA transfers
 - `DispatcherError` — `NotInitialized`, `KeyNotFound`, `AlreadyExists`, `AllocationFailed`, `IoError`, `Timeout`, `InvalidParameter`
+- `ReadWriteStats` — per-direction byte and latency counters aggregated across drives
 
 ## Internal Modules
 
-- `background` — parallel memory-tier-to-SSD write-through worker threads
+- `background` — parallel memory-tier-to-SSD write-through workers, SSD evictor, memory-tier evictor
 - `io_segmenter` — splits large DMA transfers into block-device-aligned segments (128 KiB default)
-- `pipeline` — pipelined SSD-to-GPU reads with ring-buffer reader for lookup promotion
+- `pipeline` — pipelined SSD-to-GPU reads with zero-copy into memory-tier
+- `cold_pool` — persistent worker pool with pre-connected NVMe channels + CUDA streams per drive

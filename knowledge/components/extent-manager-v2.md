@@ -46,6 +46,9 @@ define_interface! {
         fn set_checkpoint_interval(&self, interval: Option<std::time::Duration>);
         fn used_bytes(&self) -> u64;
         fn capacity_bytes(&self) -> u64;
+        fn set_metadata_base_lba(&self, base_lba: u64);
+        fn set_data_base_lba(&self, base_lba: u64);
+        fn data_base_lba(&self) -> u64;
     }
 }
 ```
