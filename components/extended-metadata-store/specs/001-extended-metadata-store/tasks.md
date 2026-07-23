@@ -10,8 +10,13 @@
 
 ## Documentation and Lint Compliance
 
-- [ ] T056 Run `cargo doc --no-deps` and ensure all public items have doc comments without warnings
-- [ ] T057 Consider whether `on_disk.rs` should remain always-compiled or be gated behind a feature flag
+- [ ] T056 Run `cargo doc --no-deps` and ensure all public items have doc comments without warnings — blocked on Task ALIGN-001 (crate not in workspace) in `.specify/sync/align-tasks.md`
+- [x] T057 Consider whether `on_disk.rs` should remain always-compiled or be gated behind a feature flag — **Resolved** via spec-sync (2026-07-22): keep `on_disk.rs` always-compiled. It contains only on-disk format/data-structure definitions with no I/O dependency, distinct from the gated persistence I/O modules (`block_io`/`flush`/`recovery`/`test_support`). spec.md NFR-05 reworded accordingly; see `.specify/sync/apply-report.md`.
+
+## Known Code Defects (tracked in `.specify/sync/align-tasks.md`)
+
+- [ ] ALIGN-001 (MAJOR): `components/extended-metadata-store` is missing from the root `Cargo.toml` `[workspace] members` array — crate is not built or tested by `cargo build`/`cargo test --all`/CI.
+- [ ] ALIGN-002 (MAJOR): `IExtendedMetadataStore::force_flush()` is an unconditional no-op in all build configurations, contradicting FR-05.
 
 ## Capacity Management Improvements
 

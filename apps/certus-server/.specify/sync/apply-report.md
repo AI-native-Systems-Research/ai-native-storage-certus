@@ -1,85 +1,136 @@
 # Spec Apply Report
 
-Generated: 2026-05-29
+Generated: 2026-07-22
 Project: certus-server
-Based on: drift-report.md (2026-05-29)
+Based on: drift-report.md / drift-report.json (generated 2026-07-22T21:29:44Z)
+Mode: AUTO-BACKFILL
 
 ## Summary
 
 | Action | Count |
 |--------|-------|
-| Requirements Added (Backfill) | 2 |
-| Requirements Updated (Backfill) | 2 |
-| Requirements Left for Human Decision | 1 |
-| Spec File Modified | specs/001-grpc-dispatcher-server/spec.md |
+| Requirements Updated (Backfill) | 2 (FR-010, FR-020) |
+| Requirements Added (Backfill) | 2 (FR-023 in spec 001; FR-014 in spec 002) |
+| Requirements Left for Human Decision (Align Tasks) | 4 |
+| Spec Files Modified | `specs/001-grpc-dispatcher-server/spec.md`, `specs/002-operational-config/spec.md` |
+| Spec Files Unmodified (no drift) | `specs/003-otel-observability/spec.md` |
+| Backups Created | 3 (see `.specify/sync/backups/`) |
 
 ## Applied Changes
 
-### 1. FR-011 Updated — IpcHandle gains gpu_device_id field
+### 1. FR-010 Updated — Python test client CLI/tests corrected to match actual code
 
-**Direction**: BACKFILL (code -> spec)
+**Direction**: BACKFILL (code → spec)
 **Status**: APPLIED
+**File**: `specs/001-grpc-dispatcher-server/spec.md`
 
-**Before**: FR-011 described IpcHandle as containing a 64-byte CUDA IPC handle and a uint32 size only.
+**Before**: Documented CLI as `[--server ADDRESS:PORT] [--skip-tests] [--benchmark]` with a
+9-case functional suite (`test_populate`, `test_populate_duplicate_key`,
+`test_populate_already_exists`, `test_check`, `test_lookup`, `test_lookup_not_found`,
+`test_remove`, `test_remove_not_found`, `test_touch`) and exit codes 0/1/2/3.
 
-**After**: FR-011 now specifies three fields: (1) `bytes cuda_ipc_handle` (64-byte opaque blob), (2) `uint32 size` (data size in bytes), (3) `int32 gpu_device_id` (CUDA device ordinal). The requirement now states that the client MUST populate `gpu_device_id` to enable correct `cudaSetDevice` behavior on the server.
+**After**: Documented CLI now matches `python-client/test_client.py`'s actual argparse
+flags (`--server`, `--skip-large-batch`, `--bench`, `--bench-only`,
+`--bench-object-size`, `--bench-num-objects`, `--bench-iterations`), the real
+10-function test suite (`test_batch_populate`, `test_batch_check`, `test_batch_touch`,
+`test_batch_lookup`, `test_batch_remove`, `test_check_after_remove`,
+`test_duplicate_key_rejection`, `test_nonexistent_key_handling`,
+`test_touch_nonexistent`, `test_large_batch`), an explicit note that there is no
+AlreadyExists test case, and the real exit codes (`0`/`1` only).
 
-**Rationale**: The proto field was added to fix multi-GPU correctness. The spec was silent on this field entirely, leaving clients without guidance on whether to populate it.
+**Rationale**: Client code and test names are authoritative per task direction; the
+spec's Implementation Details section actively misled anyone trying to invoke the
+client or map test names to acceptance scenarios.
 
 ---
 
-### 2. FR-018 Added — Global persistent IPC handle cache
+### 2. FR-020 Updated — PendingStores keyed by client-supplied cache key, not a reservation ID
 
-**Direction**: BACKFILL (code -> spec)
+**Direction**: BACKFILL (code → spec)
 **Status**: APPLIED
+**File**: `specs/001-grpc-dispatcher-server/spec.md`
 
-**Before**: No requirement covered the global IPC cache. FR-003 mentioned within-batch handle deduplication only, which is a narrower and qualitatively different property.
+**Before**: "Pending stores are tracked per-reservation in a `PendingStores` map keyed
+by a server-assigned reservation ID (`u64`)."
 
-**After**: FR-018 specifies the global process-lifetime `IpcCache` structure (keyed by 64-byte handle bytes, storing `dev_ptr`, `gpu_device_id`, and `refcount`), the open/cache/increment protocol, the decrement/close/evict protocol, and the motivation (eliminates "resource already mapped" errors; removes CUDA IPC lock serialization).
+**After**: Corrected to state `PendingStores` is keyed by the client-supplied cache key
+(the same `key` used by `Populate`/`Lookup`/etc.); `ReserveEntry` carries only `key` +
+`size`, `CommitStore`/`AbortStore` take `keys`, and there is no reservation-ID
+allocation anywhere in the protocol. A Clarifications entry (Session 2026-07-22) was
+added explaining this is intentional: the cache key is already unique per entry, and
+FR-015's duplicate-key pre-validation makes it safe to use directly as the reservation
+handle, making a separate server-generated ID redundant.
 
-**Rationale**: This is a significant architectural change to the IPC lifecycle. It affects how clients reason about handle lifetimes and how concurrent requests interact. Speccing it correctly prevents future regressions.
+**Judgment**: Treated as **intentional design**, not a lost feature — verified that
+no reservation-ID field or allocation exists anywhere in `service.rs` or
+`dispatcher.proto`, and that all four split-phase RPCs (`Reserve`/`CopyToStore`/
+`CommitStore`/`AbortStore`) consistently use cache keys end-to-end. BACKFILL was
+applied per task direction's guidance for this case.
 
 ---
 
-### 3. FR-019 Added — cudaSetDevice before cudaIpcOpenMemHandle
+### 3. FR-023 Added — `GetIoStats` RPC and `rw-telemetry` Cargo feature (spec 001)
 
-**Direction**: BACKFILL (code -> spec)
+**Direction**: BACKFILL (code → spec, new requirement)
 **Status**: APPLIED
+**File**: `specs/001-grpc-dispatcher-server/spec.md`
 
-**Before**: No requirement covered CUDA device selection before opening IPC handles. The CUDA IPC mechanism requires the server to be on the correct device, but this was entirely absent from the spec.
+**Before**: No requirement covered the `GetIoStats` gRPC method or the `rw-telemetry`
+Cargo feature that gates it.
 
-**After**: FR-019 specifies that the server MUST call `cudaSetDevice(gpu_device_id)` before `cudaIpcOpenMemHandle` for any uncached handle when `gpu_device_id >= 0`. It further specifies that a `cudaSetDevice` failure MUST propagate as an `IoError` for that entry. The `gpu_device_id < 0` sentinel case (meaning "not specified") is also covered.
+**After**: New FR-023 documents `GetIoStats` (empty request → `IoStatsResponse` with
+`read_ops`/`read_bytes`/`read_latency_ns_sum`/`write_ops`/`write_bytes`/
+`write_latency_ns_sum`), gated by the optional `rw-telemetry` Cargo feature
+(`rw-telemetry = ["dispatcher/rw-telemetry"]`), sourced from
+`dispatcher.read_write_stats()`. Added `IoStatsResponse` to Key Entities and a
+Clarifications note distinguishing this point-in-time diagnostics RPC from spec 003's
+periodic OTel metrics export.
 
-**Rationale**: Without this requirement, implementations could omit the `cudaSetDevice` call and produce subtly wrong behavior on multi-GPU machines where the server CUDA context is not on the same device as the allocated memory.
+**Placement rationale**: Placed in spec 001 (gRPC API surface) rather than spec 003
+(OTel observability) because `GetIoStats` is a plain gRPC RPC returning raw counters
+on demand — it has no dependency on the `otel` feature and is not part of the
+periodic OTLP export pipeline; it sits alongside spec 001's other diagnostic RPCs
+(`TakeEvents`, FR-022).
 
 ---
 
-### 4. Key Entities IpcHandle Updated
+### 4. FR-014 Added — `--memory-tier-eviction-threshold` CLI flag (spec 002)
 
-**Direction**: BACKFILL (code -> spec)
+**Direction**: BACKFILL (code → spec, new requirement)
 **Status**: APPLIED
+**File**: `specs/002-operational-config/spec.md`
 
-**Before**: "Opaque handle to client GPU memory containing a 64-byte CUDA IPC memory handle and a size (uint32)."
+**Before**: No requirement or CLI table row covered `--memory-tier-eviction-threshold`.
 
-**After**: Updated to list all three fields including `gpu_device_id: int32` and cross-references FR-019.
+**After**: New FR-014 documents the flag (`f64`, default `0.0` = disabled; range
+`(0.0, 1.0]` triggers background DRAM→SSD demotion at that memory-tier utilization
+level), added a CLI Interface table row, and extended User Story 5 (Eviction Tuning)
+with a third acceptance scenario covering the threshold-triggered demotion behavior.
 
 ---
 
-### 5. Clarifications Session Added (2026-05-29)
+## Deferred to Align Tasks (Human Decision Required)
 
-**Direction**: DOCUMENTATION
-**Status**: APPLIED
+See `apps/certus-server/.specify/sync/align-tasks.md` for full detail. Summary:
 
-Added three Q&A entries covering the IPC handle cache design rationale, the `cudaSetDevice` requirement, and the `gpu_device_id` proto field addition.
+| # | Severity | Item | Reason Deferred |
+|---|----------|------|------------------|
+| 1 | Medium | Stale `README.md` (metadata-device/extent-manager architecture, incomplete RPC/CLI tables) | Not under `specs/**` — out of this pass's edit scope by hard rule |
+| 2 | Low | FR-008: `EvictionPolicyLru`/`RemoteLookup` missing from spec 001 Component Stack | Outside this pass's explicit backfill scope (FR-010/FR-020/GetIoStats+rw-telemetry/eviction-threshold only) |
+| 3 | Low | FR-011: `IpcHandle.offset` field undocumented | Outside this pass's explicit backfill scope |
+| 4 | Low | Unused `ERROR_CODE_DUPLICATE_KEY` proto enum value | Ambiguous code-vs-spec resolution; any fix requires a `.proto`/`.rs` change this pass cannot make |
 
----
+## Not Applicable
 
-## Deferred (Human Decision Required)
+- **SUPERSEDE**: n/a — no spec was superseded by another in this pass.
+- **NEW_SPEC**: Not warranted. Both unspecced items assigned an FR home (`GetIoStats`/
+  `rw-telemetry` → spec 001 FR-023; `--memory-tier-eviction-threshold` → spec 002
+  FR-014) fit naturally as additions to existing specs; neither represents a
+  sufficiently distinct feature area to justify a new spec 004.
 
-### FR-009 — SIGTERM handling not implemented
+## Backups
 
-**Finding**: Spec requires SIGTERM/SIGINT handling; code only catches SIGINT via `tokio::signal::ctrl_c()`.
-
-**Why Deferred**: This is a code bug relative to an existing spec requirement — the spec is correct and the code needs to be fixed. This is out of scope for a backfill pass (which only updates spec to match code). A separate issue should be filed to add SIGTERM handling.
-
-**Suggested Fix**: Use `tokio::signal::unix::{signal, SignalKind}` to also catch `SIGTERM` alongside `ctrl_c()`.
+Pre-edit copies saved to `apps/certus-server/.specify/sync/backups/`:
+- `001-grpc-dispatcher-server.spec.md.20260722T162211.bak`
+- `002-operational-config.spec.md.20260722T162211.bak`
+- `apply-report.md.20260722T162211.bak` (previous report, from 2026-05-29 run)

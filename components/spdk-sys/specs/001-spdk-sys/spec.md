@@ -54,6 +54,7 @@ This crate is consumed by higher-level safe wrappers (`spdk-env`, `block-device-
 | FR-6 | Generate bindings for DMA memory allocation (`spdk_dma_zmalloc`, `spdk_dma_free`, `spdk_zmalloc`, `spdk_free`) | P1 |
 | FR-7 | Export all necessary SPDK/DPDK/system linker directives | P1 |
 | FR-8 | Detect and conditionally link Intel ISA-L based on SPDK build configuration | P2 |
+| FR-9 | Generate bindings for SPDK PCI and NVMe transport constants needed by callers (`SPDK_PCI_*`, `SPDK_NVME_TRANSPORT_*` via `allowlist_var`) | P2 |
 
 ### Non-Functional Requirements
 
@@ -81,6 +82,11 @@ This crate is consumed by higher-level safe wrappers (`spdk-env`, `block-device-
 | `spdk_nvme_ctrlr_opts` | Controller attachment options |
 | `spdk_nvme_ctrlr_data` | Controller identify data (opaque) |
 | `spdk_nvme_ns_data` | Namespace identify data |
+| `spdk_pci_driver` | Opaque PCI driver registration handle |
+| `spdk_nvme_io_qpair_opts` | I/O queue pair allocation options |
+| `spdk_nvme_cmd` | Raw NVMe admin/I/O command structure |
+| `spdk_nvme_format` | NVMe format command parameters |
+| `spdk_nvme_ctrlr_list` | List of controller identifiers used by namespace attach/detach |
 
 ## Dependencies
 
@@ -90,7 +96,7 @@ This crate is consumed by higher-level safe wrappers (`spdk-env`, `block-device-
 | SPDK source (`deps/spdk/`) | External | Provides C header files |
 | SPDK build (`deps/spdk-build/`) | External | Provides compiled static libraries and `config.h` |
 | GCC | System | Provides internal include paths for bindgen/clang |
-| System libs: pthread, dl, numa, uuid, ssl, crypto, fuse3 | System | Runtime dependencies of SPDK/DPDK |
+| System libs: pthread, dl, numa, uuid, ssl, crypto, fuse3, m | System | Runtime dependencies of SPDK/DPDK |
 
 ## Success Criteria
 
@@ -103,5 +109,5 @@ This crate is consumed by higher-level safe wrappers (`spdk-env`, `block-device-
 
 - The crate uses `links = "spdk"` in `Cargo.toml` to ensure only one crate in the dependency graph links SPDK.
 - `spdk_nvme_ctrlr_data` is marked as an opaque type because its C layout includes complex bitfields.
-- 28 DPDK `rte_*` libraries are linked statically with `+whole-archive`.
+- 30 DPDK `rte_*` libraries are linked statically with `+whole-archive`.
 - The `wrapper.h` file includes `spdk/env.h`, `spdk/env_dpdk.h`, and `spdk/nvme.h`.

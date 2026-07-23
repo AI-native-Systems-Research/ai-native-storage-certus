@@ -2,7 +2,7 @@
 
 **Feature Branch**: `001-extent-manager-v2`
 **Created**: 2026-04-23
-**Updated**: 2026-04-29
+**Updated**: 2026-07-22
 **Status**: Active
 **Source**: Generated from implementation, updated for index-free key-vector design
 
@@ -271,6 +271,18 @@ again to verify the old slot is now reusable.
   metadata device, validate its magic and CRC, recover the extent
   mapping from the active checkpoint region, and rebuild all in-memory
   allocation state from the slab key vectors.
+- **FR-035**: `FormatParams` MUST support an optional
+  `metadata_region_size` field (`u64`, default 128 MiB). When
+  non-zero, `format()` and `initialize()` treat the metadata device
+  as also hosting extent data on the same block device / NVMe
+  namespace: the reserved metadata area (superblock plus both
+  checkpoint regions) is capped to `metadata_region_size` bytes, and
+  `data_start_offset` is computed to begin immediately after that
+  reserved area rather than at offset 0. When `metadata_region_size`
+  is `0`, metadata and data continue to occupy independent devices
+  with `data_start_offset = 0`, as described elsewhere in this spec.
+  This enables shared-device deployments where a single NVMe
+  namespace hosts both extent-manager metadata and extent data.
 
 #### Extent Lifecycle
 
@@ -326,10 +338,13 @@ again to verify the old slot is now reusable.
   current (or next) checkpoint rather than starting a parallel one.
   This serializes all checkpoint I/O through a single writer.
 - **FR-016**: A background thread MUST call `checkpoint()` at a
-  configurable interval (default 30 seconds). Note: the
-  `IExtentManager` interface doc comment incorrectly states "five
-  minutes" — the actual default is 30 seconds as set in the
-  constructor.
+  configurable interval (default 30 seconds). Note: both the
+  `IExtentManager` interface doc comment
+  (`components/interfaces/src/iextent_manager.rs`) and this
+  component's `README.md` incorrectly state "five minutes" — the
+  actual default is 30 seconds as set in the constructor
+  (`ExtentManager::new_inner`). These are stale doc strings that
+  should be corrected to reference the true 30-second default.
 - **FR-017**: Recovery MUST attempt the active checkpoint copy first;
   if it is unreadable (CRC failure, media error), recovery MUST fall
   back to the inactive copy.
@@ -338,6 +353,15 @@ again to verify the old slot is now reusable.
   the checkpoint by reading each slab's key vector and marking any
   slot whose key is not FREE_KEY as allocated in the bitmap. Internal
   consistency MUST always be maintained.
+- **FR-037**: The component MUST provide a
+  `set_post_checkpoint_hook(hook: Arc<dyn Fn() + Send + Sync>)`
+  method to register a callback that is invoked once, synchronously,
+  immediately after each successful `checkpoint()` completes (after
+  the superblock update but before `checkpoint()` returns). This
+  supports use cases such as cross-node invalidation or sync
+  notifications that must only fire once durability has been
+  established. At most one hook may be registered at a time; calling
+  this method again replaces any previously registered hook.
 
 #### Space Management
 
@@ -393,6 +417,18 @@ again to verify the old slot is now reusable.
   checkpoint and format paths are conditionally compiled out,
   improving performance on devices with volatile write caches where
   the caller accepts the associated durability risk.
+- **FR-036**: The component MUST provide
+  `set_metadata_base_lba(base_lba: u64)`, `set_data_base_lba(base_lba:
+  u64)`, and `data_base_lba() -> u64` methods on `IExtentManager` for
+  partition-relative addressing. These let the component operate on
+  a sub-range (partition) of an NVMe namespace rather than owning an
+  entire namespace: `metadata_base_lba` shifts all metadata-device
+  I/O (superblock, checkpoint regions) by the given LBA offset, and
+  `data_base_lba` shifts all data-device I/O similarly. Both default
+  to `0` (whole-namespace addressing) until explicitly set. Used by
+  `dispatcher` and `dispatcher-p2p` to host multiple logical
+  extent-manager instances on distinct partitions of a shared
+  physical NVMe namespace.
 
 #### Capacity Reporting
 
@@ -439,7 +475,8 @@ again to verify the old slot is now reusable.
   are in bytes: `data_disk_size` (u64), `slab_size` (u64),
   `max_extent_size` (u32), `sector_size` (u32),
   `metadata_alignment` (u64), `region_count` (u32),
-  `instance_id` (Option<u64>), and `metadata_disk_ns_id` (u32).
+  `instance_id` (Option<u64>), `metadata_disk_ns_id` (u32), and
+  `metadata_region_size` (u64, default 128 MiB — see FR-035).
 - **Superblock**: On-disk header at LBA 0 of the metadata device
   (4096 bytes). Contains format parameters, active checkpoint
   indicator, checkpoint region layout, sequence number, and CRC32.
@@ -471,8 +508,13 @@ again to verify the old slot is now reusable.
   (architectural target scale, not yet verified by benchmark). At
   1 GiB/slab this implies ~10,000 slabs; BTreeMap O(log n) lookup is
   efficient at this scale.
-- **SC-006**: Checkpoint coalescing limits concurrent checkpoint
-  I/O to at most two active operations regardless of caller count.
+- **SC-006**: A burst of concurrent `checkpoint()` callers is
+  satisfied by at most two sequential checkpoint I/O executions (the
+  in-flight one, plus at most one additional round to pick up any
+  state modified while it was running) — never by launching
+  parallel checkpoint I/O. This is consistent with FR-015: exactly
+  zero or one checkpoint I/O operation is physically in flight at any
+  instant, regardless of caller count.
 
 ## On-Disk Format Reference
 

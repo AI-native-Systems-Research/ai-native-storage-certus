@@ -21,6 +21,9 @@ A framework user creates an actor component that owns its own thread and process
 2. **Given** a running actor, **When** the actor is deactivated, **Then** it finishes processing any in-progress message, stops its thread, and releases all resources.
 3. **Given** a running actor, **When** multiple messages arrive, **Then** messages are processed one at a time in the order they were received.
 4. **Given** an actor component, **When** inspected via the framework's introspection (provided interfaces, receptacles, version), **Then** it reports the same metadata as any other component.
+5. **Given** an actor whose handler overrides the idle hook, **When** the inbound channel has no pending messages, **Then** the actor's idle hook runs repeatedly on the actor's thread, and the actor's thread parks (backs off) only after a bounded number of consecutive idle iterations in which the hook reports no useful work was done.
+6. **Given** a running actor, **When** the caller signals shutdown without joining (rather than calling the blocking deactivate), **Then** the actor's inbound channel closes immediately, the call returns without waiting for the thread to exit, and the actor's thread exits on its next loop iteration; the caller MAY subsequently join by calling deactivate or dropping the handle.
+7. **Given** a running actor with a full inbound channel, **When** the caller sends a message using the non-blocking send variant, **Then** the call returns an error immediately (channel full or closed) instead of blocking the caller.
 
 ---
 
@@ -102,6 +105,9 @@ The framework includes runnable examples demonstrating actor components. Example
 - What happens when all senders disconnect from a channel? The receiver gets a "closed" signal after draining remaining queued messages.
 - What happens when an actor is deactivated while messages are queued in its inbound channel? The actor finishes its current message, then stops. Remaining messages stay in the channel.
 - What happens when activate is called on an already-active actor? An error is returned. Same for deactivate on an already-stopped actor.
+- What happens when an actor's handler has background work but no queued messages (e.g., polling I/O completions)? The actor's idle hook is invoked on every loop iteration where the inbound channel is empty, so the actor can make progress on that work without waiting for a message. After many consecutive iterations report no useful work, the thread parks with a bounded timeout to avoid busy-spinning; it registers for an unpark notification first so an incoming message wakes it immediately rather than waiting out the full timeout.
+- What happens when a caller wants to stop several actors concurrently instead of joining each one serially? The caller can signal each actor to stop (closing its channel immediately, without blocking) and then join each handle afterward — a signal-all-then-join-all pattern that avoids stalling on the first actor's thread join before signaling the rest.
+- What happens when a sender cannot afford to block on a full channel? A non-blocking send variant is available that returns an error immediately if the channel is full or closed, leaving the message unsent, instead of blocking as the default send does.
 
 ## Requirements
 
@@ -121,6 +127,9 @@ The framework includes runnable examples demonstrating actor components. Example
 - **FR-004**: An actor MUST support explicit activation (start thread) and deactivation (stop thread with graceful shutdown). Calling activate on an already-active actor MUST return an error. Double-deactivation MUST be prevented — either by returning a runtime error or by using type-level enforcement (e.g., consuming the handle on deactivation so that a second call is impossible at compile time).
 - **FR-005**: An actor MUST be discoverable via the existing introspection mechanism (provided interfaces, receptacles, version).
 - **FR-006**: An actor's message handler panic MUST be caught by the framework and MUST NOT crash the host process. The panic MUST be reported via a user-provided error callback set at actor creation time. The actor MUST remain alive and continue processing subsequent messages after a panic.
+- **FR-028**: The framework MUST support an idle hook on the actor's message-handler trait, invoked whenever the actor's inbound channel has no pending message. The hook MUST return whether it performed useful work; the default implementation MUST be a no-op that reports no work, preserving fully backward-compatible behavior for handlers that do not override it. This hook exists to support actors with background work (e.g., polling I/O completions) that must make progress even when no messages are queued.
+- **FR-029**: The framework MUST provide a way to signal an actor to stop without blocking the caller to join its thread, so that a caller can signal multiple actors to stop and then join each afterward (signal-all-then-join-all). Signaling MUST close the actor's inbound channel immediately; the actor's thread MUST exit on its next loop iteration. The caller remains responsible for joining the thread afterward (via the blocking deactivation call or by dropping the handle).
+- **FR-030**: The framework MUST provide a non-blocking send variant on both the actor handle and the channel sender endpoint, as an alternative to the default blocking `send()`. The non-blocking variant MUST return an error immediately if the channel is full or closed rather than blocking the caller.
 
 **Channel Components**:
 
@@ -158,6 +167,10 @@ The framework includes runnable examples demonstrating actor components. Example
 - **FR-026**: The framework MUST provide a simplified actor constructor (`Actor::simple()`) that uses default channel capacity (1024) and silently catches panics, for use cases where custom error handling is not needed.
 - **FR-027**: Channel components MUST provide a `split()` method that returns both sender and receiver endpoints as a tuple in a single call.
 
+**Internal Implementation Notes**:
+
+- **FR-031**: The MPSC channel's receiver endpoint MUST support registering for an unpark notification, used internally by the actor's message loop to arm thread parking after a bounded run of consecutive idle iterations (see FR-028) without missing a wakeup when a new message is enqueued immediately afterward. This is an implementation detail of the actor poll loop's park/unpark optimization and is not part of the channel's public sender/receiver contract described in FR-007..FR-012; it MUST NOT be required for correct use of channels outside the actor message loop.
+
 ### Key Entities
 
 - **Actor**: A component that owns a dedicated thread and processes messages sequentially. Extends the basic component model with activation/deactivation lifecycle and a message handler.
@@ -182,7 +195,7 @@ The framework includes runnable examples demonstrating actor components. Example
 
 - Actors use one OS thread per actor. Thread pooling or async runtimes are out of scope for this feature.
 - Messages are owned values that are moved (not shared) through channels. The message type must be sendable across threads.
-- Channel capacity (queue depth) is finite and configurable. The default capacity is 1024 elements. The default behavior when the queue is full is that the sender blocks until space is available.
+- Channel capacity (queue depth) is finite and configurable. The default capacity is 1024 elements. The default behavior when the queue is full is that the sender blocks until space is available. A non-blocking `try_send()` alternative is also provided for callers that must not block (see FR-030).
 - The lock-free queue implementation will be built in-house (no external dependencies beyond what the project already uses), consistent with the project constitution's minimal-dependency approach.
 - "Deactivation" means the actor finishes its current message, drains no further messages, and joins its thread. Queued messages remain in the channel for potential future consumers.
 - SPMC (single-producer, multi-consumer) channels are out of scope for this feature but the design should not preclude adding them later.

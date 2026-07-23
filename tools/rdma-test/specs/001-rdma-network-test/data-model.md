@@ -23,7 +23,7 @@ Configuration for a benchmark run, derived from CLI arguments.
 | Field | Type | Constraints |
 |-------|------|-------------|
 | mode | Enum(Server, Client) | Required subcommand |
-| test_type | Enum(Throughput, Latency, All) | Default: All |
+| test_type | Enum(Write, Read, Send, Recv, Latency, All) | Default: All |
 | address | String | Server: bind address; Client: target address |
 | port | u16 | Default: 7471 |
 | message_size | usize | Must be > 0, default: 4096 |

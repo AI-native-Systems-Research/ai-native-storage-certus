@@ -8,6 +8,8 @@
 
 **Source**: Generated from existing implementation
 
+**Last Synced**: 2026-07-22 (spec-sync AUTO-BACKFILL — see `.specify/sync/apply-report.md`)
+
 ## Backfill Notice
 
 > This spec was generated from existing code via `speckit.sync.backfill`.
@@ -98,7 +100,7 @@ A developer needs to benchmark the kernel block device to compare latency and th
 - **Device size not multiple of block size**: Auto-detect returns error.
 - **io_uring submission queue full**: Synchronous operations return an error completion; the ring is not silently dropped.
 - **Async operation timeout**: Timed-out operations produce `Completion::Timeout` and an `AsyncCancel` is submitted to io_uring.
-- **Client callback channel disconnected**: Logged at warn level, completion silently dropped.
+- **Client callback channel full or disconnected**: Never dropped. Whenever `try_send` fails (ring full, or the client's receiver has been dropped without an explicit `DisconnectClient`), `ClientSession::deliver()` buffers the completion in a FIFO backlog (`pending: VecDeque<Completion>`) and `KernelHandler::poll_clients()` retries oldest-first on every idle-loop tick until delivery succeeds, so one slow/stalled client cannot head-of-line-block completion delivery to any other client on the drive. The backlog is unbounded: a permanently full-or-disconnected client's completions accumulate without limit until either the ring frees up or `ControlMessage::DisconnectClient` removes the session (dropping the backlog with it).
 - **connect_client before initialize**: Returns `NotInitialized` error.
 - **Telemetry without feature**: Returns `FeatureNotEnabled` error.
 
@@ -107,7 +109,7 @@ A developer needs to benchmark the kernel block device to compare latency and th
 ### Functional Requirements
 
 - **FR-001**: Component MUST implement `IBlockDevice` and `IBlockDeviceAdmin` as defined in `components/interfaces/`.
-- **FR-002**: Component MUST declare a receptacle for `ILogger` and log initialization at info level, operations at debug level, and channel disconnections at warn level.
+- **FR-002**: Component MUST declare a receptacle for `ILogger` and log initialization at info level and client connect/disconnect operations at debug level. *(Amended 2026-07-22: the original text additionally required channel disconnections to log at warn level; no `warn()` call exists anywhere in the crate, and client disconnection is logged at debug — see FR-025 for why a full/disconnected callback channel is not treated as a warn-worthy event.)*
 - **FR-003**: Component MUST use `define_component!` macro from the component-framework with `provides: [IBlockDevice, IBlockDeviceAdmin]` and `receptacles: { logger: ILogger }`.
 - **FR-004**: Component MUST open the backing block device with `O_DIRECT | O_DSYNC` flags to bypass the page cache and guarantee write durability without explicit fsync.
 - **FR-005**: Component MUST use `io_uring` (via the `io-uring` crate v0.7) as the sole IO mechanism — no `pread`/`pwrite` fallback.
@@ -130,6 +132,7 @@ A developer needs to benchmark the kernel block device to compare latency and th
 - **FR-022**: Component MUST provide Criterion benchmarks for latency (command construction + sync 4KB IO) and throughput (write + read at 1/8/32/128 block transfer sizes).
 - **FR-023**: `IBlockDeviceAdmin` methods `set_pci_address`, `set_actor_cpu`, `signal_stop`, and `detach_controller` MUST be no-ops (not applicable to kernel block devices).
 - **FR-024**: Component MUST support graceful shutdown via `ControlMessage::Shutdown` which causes `on_idle()` to return `false`, terminating the actor loop.
+- **FR-025**: Component MUST deliver completions to clients without ever blocking the actor thread. `ClientSession::deliver()` attempts a non-blocking `try_send`; on failure (callback ring full, or receiver disconnected) the completion is appended to an unbounded per-client FIFO backlog (`pending: VecDeque<Completion>`) instead of being dropped. `KernelHandler::poll_clients()` retries the backlog oldest-first on every idle-loop tick (`ClientSession::flush_pending`), stopping at the first entry that still can't be sent to preserve ordering. *(Backfilled 2026-07-22 — this is deliberate anti-head-of-line-blocking behavior: a slow or stalled client must never block completion delivery to every other client sharing the device.)*
 
 ### Non-Functional Requirements
 
@@ -147,7 +150,7 @@ A developer needs to benchmark the kernel block device to compare latency and th
 - **`BlockDeviceKernelComponent`**: The component struct, created via `define_component!`. Holds device path, block size, num_blocks, actor handle, client ID counter, and optional telemetry stats. Version "0.1.0".
 - **`KernelHandler`**: The actor handler implementing `ActorHandler<ControlMessage>`. Owns the file descriptor (`OwnedFd`), `DeviceConfig`, `IoUring` ring, client sessions map, inflight operations map, and optional logger.
 - **`DeviceConfig`**: Configuration struct holding device path, block size, num_blocks, and total_bytes. Validates block size (>= 512, power of 2) and optionally auto-detects device size.
-- **`ClientSession`**: Per-client state held by the actor: client ID, ingress receiver, callback sender.
+- **`ClientSession`**: Per-client state held by the actor: client ID, ingress receiver, callback sender, and an unbounded FIFO completion backlog (`pending`) used for non-blocking delivery retry (see FR-025).
 - **`ControlMessage`**: Enum with variants `ConnectClient`, `DisconnectClient`, `Shutdown`.
 - **`InflightOp`**: Tracking state for in-flight async operations: handle, client_id, deadline, is_read flag, and optional telemetry fields.
 - **`TelemetryStats`**: Feature-gated atomic counters for IO statistics (total_ops, min/max/total latency, total_bytes, start time).

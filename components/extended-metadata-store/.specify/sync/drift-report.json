@@ -1,0 +1,82 @@
+{
+  "generated": "2026-07-22T21:30:28Z",
+  "project": "extended-metadata-store",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 33,
+    "aligned": 28,
+    "drifted": 5,
+    "not_implemented": 0,
+    "unspecced_features": 1
+  },
+  "specs": [
+    {
+      "id": "001-extended-metadata-store",
+      "title": "Extended Metadata Store",
+      "aligned": [
+        "FR-01", "FR-02", "FR-03", "FR-04", "FR-06", "FR-07", "FR-08", "FR-09",
+        "FR-10", "FR-11", "FR-12", "FR-13", "FR-14", "FR-15", "FR-16",
+        "NFR-01", "NFR-02", "NFR-03", "NFR-04", "NFR-06", "NFR-07", "NFR-08",
+        "NFR-09", "NFR-10",
+        "SC-4", "SC-5"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-05",
+          "spec_text": "`force_flush()` ensures all mutations are durable on disk | Implemented (spec.md:159); interface doc: \"Flush all pending writes to persistent storage. Returns when all data is durable.\" (components/interfaces/src/iextended_metadata_store.rs:44)",
+          "actual": "IExtendedMetadataStore::force_flush() is an unconditional no-op in every build configuration (default, testing, spdk). It never calls flush::flush_to_disk or FlushManager::trigger_flush. The only call site of `.force_flush()` in the whole crate is a unit test asserting the no-op returns Ok. All persistence/SSD tests achieve durability by calling flush::flush_to_disk() or FlushManager::trigger_flush() directly, bypassing the public trait method entirely.",
+          "location": "src/lib.rs:177-184",
+          "severity": "high"
+        },
+        {
+          "requirement": "SC-1, SC-2, SC-3, SC-6, SC-7",
+          "spec_text": "1. All 8 unit tests in src/lib.rs pass... 2. All persistence tests in tests/persistence.rs pass with --features testing 3. All SSD integration tests ... pass with --features spdk ... 6. cargo clippy -- -D warnings passes clean 7. ... cargo doc --no-deps is warning-free (spec.md:235-241)",
+          "actual": "components/extended-metadata-store is absent from the [workspace] members array in the root Cargo.toml (confirmed via grep and via `git log -p -- Cargo.toml`, which shows no history of the crate name ever appearing there). `cargo test -p extended-metadata-store` fails with 'package ID specification did not match any packages'; running cargo test/clippy/doc directly inside the crate directory fails with 'current package believes it's in a workspace when it's not'. None of these Success Criteria are currently exercised by cargo build / cargo test --all / CI (.github/workflows/rust.yml).",
+          "location": "Cargo.toml (workspace root, members array); components/extended-metadata-store/Cargo.toml",
+          "severity": "high"
+        },
+        {
+          "requirement": "SC-1",
+          "spec_text": "All 8 unit tests in `src/lib.rs` pass (in-memory mode, no features) (spec.md:235)",
+          "actual": "src/lib.rs contains 9 #[test] functions; `dirty_count_increments` is not accounted for in the stated count or in User Story 1's test list.",
+          "location": "src/lib.rs:290-303",
+          "severity": "low"
+        },
+        {
+          "requirement": "plan.md Testing / on_disk.rs test inventory",
+          "spec_text": "5 tests in on_disk.rs: superblock round-trip, corruption detection, entry round-trip, region round-trip, padding (plan.md:138)",
+          "actual": "src/on_disk.rs contains 6 #[test] functions (superblock_round_trip, superblock_corrupt_rejected, entry_record_round_trip, entry_record_corrupt_rejected, region_round_trip, pad_to_sector_works) — corruption detection is two separate tests, not one.",
+          "location": "src/on_disk.rs:405-473",
+          "severity": "low"
+        },
+        {
+          "requirement": "plan.md Testing / integration_ssd.rs test inventory",
+          "spec_text": "12 tests: put/get varied sizes, overwrite, delete, persistence after flush, iterate, bulk integrity, capacity (plan.md:144)",
+          "actual": "tests/integration_ssd.rs contains 14 #[test] functions.",
+          "location": "tests/integration_ssd.rs",
+          "severity": "low"
+        }
+      ],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "External persistence-wiring API (ExtendedMetadataStoreComponent::initialize_from_client, snapshot_entries, mark_flushed, load_entries, dirty_count(), flush_seq()) that is the actual mechanism by which a caller achieves recovery-on-startup and flush-on-demand, since IExtendedMetadataStore::force_flush() does not. Only informally described via plan.md's Data Flow diagrams, not codified as an FR/NFR.",
+      "location": "src/lib.rs",
+      "lines": 74,
+      "suggested_spec": "Add an FR describing the startup/runtime wiring contract for persistent-mode deployments: who calls initialize_from_client, who owns/drives a FlushManager, and an explicit statement that force_flush() on the public interface is currently a no-op and must not be relied on for durability."
+    }
+  ],
+  "conflicts": [
+    {
+      "description": "NFR-05 in spec.md states 'Persistence modules gated behind testing/spdk feature flags — Implemented', but plan.md's own Module Dependency Graph documents on_disk.rs (defines Superblock/RegionHeader/EntryRecord, unambiguously a persistence module) as '[always compiled]', and src/lib.rs:26 confirms `pub mod on_disk;` carries no #[cfg(feature = ...)] gate (unlike block_io/flush/recovery/test_support, all gated on `testing`). tasks.md T057 already lists this exact ambiguity as an open backlog item ('Consider whether on_disk.rs should remain always-compiled or be gated behind a feature flag'), confirming it is an unresolved inconsistency between spec.md's 'Implemented' claim and the documented/actual design in plan.md.",
+      "locations": [
+        "specs/001-extended-metadata-store/spec.md:180",
+        "specs/001-extended-metadata-store/plan.md:63-64",
+        "src/lib.rs:26",
+        "specs/001-extended-metadata-store/tasks.md:14"
+      ]
+    }
+  ]
+}

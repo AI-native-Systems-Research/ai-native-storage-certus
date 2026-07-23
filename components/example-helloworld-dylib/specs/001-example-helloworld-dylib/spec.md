@@ -14,7 +14,7 @@
 
 The `example-helloworld-dylib` component is a dynamic library (dylib) wrapper around the `example-helloworld` component. It exports a Rust-ABI factory function (`create_component`) that returns a `ComponentRef`, enabling runtime component loading without a C-ABI shim.
 
-Because both the dylib and the host binary dynamically link the same `component-core` and `example-helloworld` shared libraries, `TypeId` values remain consistent across the dylib boundary. This allows the host to use `query_interface` directly on the returned `ComponentRef`.
+`TypeId` values remain consistent across the dylib boundary because both the dylib and the host binary are compiled against the same `component-core` and `example-helloworld` source with the same `rustc` version — each side statically embeds its own copy of these crates as `rlib`s (neither crate declares `crate-type = ["dylib"]`, so no `.so` for them is actually shared at runtime). `TypeId` equality is derived from compile-time type identity, not from runtime linkage, so this works even though the dependencies are not dynamically shared. This allows the host to use `query_interface` directly on the returned `ComponentRef`.
 
 ## User Scenarios & Testing
 
@@ -39,7 +39,7 @@ Because both the dylib and the host binary dynamically link the same `component-
 | FR-1 | Export a `#[no_mangle]` function named `create_component` | P1 |
 | FR-2 | `create_component` returns a `ComponentRef` wrapping a `HelloWorldComponent` | P1 |
 | FR-3 | The returned component supports `IGreeter` via `query_interface` | P1 |
-| FR-4 | TypeId consistency is maintained by dynamically linking shared dependencies | P1 |
+| FR-4 | TypeId consistency is maintained by compiling both the dylib and host against the same `component-core`/`example-helloworld` source with the same `rustc` version (each side statically embeds its own copy; no shared `.so` linkage is involved) | P1 |
 
 ### Non-Functional Requirements
 

@@ -47,7 +47,7 @@
 
 **Goal**: Perform RDMA Write throughput measurement between two nodes and report bandwidth, message rate, and total data
 
-**Independent Test**: Launch server on one RDMA host, client on another with `--test throughput`, verify bandwidth results are produced
+**Independent Test**: Launch server on one RDMA host, client on another with `--test write`, verify bandwidth results are produced
 
 ### Implementation for User Story 1
 
@@ -124,6 +124,18 @@
 - [X] T034 [P] Add tracing/logging with RUST_LOG env var support for debug output in src/main.rs
 - [X] T035 Run cargo clippy -- -D warnings and fix all warnings across all source files
 - [ ] T036 Validate quickstart.md scenarios work end-to-end on RDMA-capable hardware
+
+**Note (spec-sync, 2026-07-22)**: T032 is checked off as complete, but the drift report found that connection-level retry and `partial: true` reporting (FR-012) are not actually implemented in the current code (`src/rdma.rs`, `src/client.rs`, `src/main.rs`). This is tracked as an align task, not re-opened here — see `.specify/sync/align-tasks.md`.
+
+---
+
+## Phase 8: Backfilled Bandwidth Test Variants (Read/Send/Recv) [spec-sync backfill]
+
+**Purpose**: These tasks document already-implemented functionality (RDMA Read, Send, and Recv bandwidth tests) discovered during spec-sync drift analysis (2026-07-22) and newly captured as FR-014/FR-015/FR-016/FR-017 in `spec.md`. No code changes were made; this phase exists for traceability only.
+
+- [X] T037 [P] RDMA Read one-sided throughput benchmark (`run_read_client`) in src/throughput.rs, wired in src/client.rs and src/server.rs
+- [X] T038 [P] Two-sided Send bandwidth benchmark in src/send_bw.rs, wired in src/client.rs and src/server.rs
+- [X] T039 [P] Two-sided Recv bandwidth benchmark in src/recv_bw.rs, wired in src/client.rs and src/server.rs
 
 ---
 

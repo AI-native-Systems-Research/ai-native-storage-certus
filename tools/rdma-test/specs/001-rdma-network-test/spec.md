@@ -4,7 +4,7 @@
 
 **Created**: 2026-06-05
 
-**Status**: Draft
+**Status**: Draft (spec-sync backfill applied 2026-07-22 — FR-014/FR-015/FR-016/FR-017 and related scenarios/text backfilled from implementation; see `.specify/sync/apply-report.md`)
 
 **Input**: User description: "Create a RDMA network test program in Rust, that allows one to measure throughput and latency/jitter across the network. The program should select between client and server nodes with a command line parameter. You should create a script to launch client/server pairs using ssh to perform a remote launch. The program should use ibverbs and check its availability."
 
@@ -20,17 +20,21 @@
 
 ### User Story 1 - Measure RDMA Throughput Between Two Nodes (Priority: P1)
 
-A network engineer wants to measure the maximum RDMA throughput between two nodes to validate fabric performance. They run the tool in server mode on one machine and client mode on the other, specifying a throughput test. The tool performs bulk one-sided RDMA Write operations and reports sustained bandwidth.
+A network engineer wants to measure the maximum RDMA throughput between two nodes to validate fabric performance. They run the tool in server mode on one machine and client mode on the other, specifying a throughput test. The tool supports four bandwidth-measurement variants — one-sided RDMA Write, one-sided RDMA Read, two-sided Send, and two-sided Recv — and reports sustained bandwidth for whichever variant (or `all`) is selected.
 
 **Why this priority**: Throughput is the primary metric for validating RDMA fabric health and is the most common reason to run a network benchmark.
 
-**Independent Test**: Can be fully tested by launching the server on one RDMA-capable host and the client on another, running the throughput test, and verifying that bandwidth results are produced and within expected hardware limits.
+**Independent Test**: Can be fully tested by launching the server on one RDMA-capable host and the client on another, running a bandwidth test variant, and verifying that bandwidth results are produced and within expected hardware limits.
 
 **Acceptance Scenarios**:
 
-1. **Given** two nodes with RDMA-capable NICs on the same fabric, **When** the user runs the tool in server mode on node A and client mode on node B with `--test throughput`, **Then** the tool reports bandwidth in GB/s, message rate, and total data transferred.
+1. **Given** two nodes with RDMA-capable NICs on the same fabric, **When** the user runs the tool in server mode on node A and client mode on node B with `--test write`, **Then** the tool reports bandwidth in GB/s, message rate, and total data transferred for a one-sided RDMA Write test.
 2. **Given** the user specifies a custom message size (e.g., 65536 bytes), **When** the throughput test completes, **Then** the results reflect the configured message size and corresponding bandwidth.
-3. **Given** the user specifies a number of iterations, **When** the test runs, **Then** exactly that number of RDMA Write operations are performed during measurement (excluding warmup).
+3. **Given** the user specifies a number of iterations, **When** the test runs, **Then** exactly that number of operations are performed during measurement (excluding warmup).
+4. **Given** two connected RDMA nodes, **When** the user runs the tool with `--test read`, **Then** the tool performs a one-sided RDMA Read bandwidth test and reports bandwidth, message rate, and total data transferred.
+5. **Given** two connected RDMA nodes, **When** the user runs the tool with `--test send`, **Then** the tool performs a two-sided Send bandwidth test (client posts sends against a pre-posted server recv window) and reports bandwidth, message rate, and total data transferred.
+6. **Given** two connected RDMA nodes, **When** the user runs the tool with `--test recv`, **Then** the tool performs a two-sided Recv bandwidth test (server posts sends against a pre-posted client recv window) and reports bandwidth, message rate, and total data transferred.
+7. **Given** two connected RDMA nodes, **When** the user runs the tool with `--test all` (the default), **Then** the tool runs Write, Read, Send, Recv, and Latency tests sequentially in a single session and reports results for each.
 
 ---
 
@@ -97,6 +101,10 @@ A user runs the tool on a machine where RDMA may not be properly configured. The
 
 - **FR-001**: System MUST operate in either server (listener) or client (connector) mode, selected via a command-line subcommand.
 - **FR-002**: System MUST perform RDMA Write operations for throughput measurement and report bandwidth (GB/s), message rate (Mmsg/s), and total data transferred.
+- **FR-014**: System MUST perform one-sided RDMA Read operations for throughput measurement (`--test read`) and report bandwidth (GB/s), message rate (Mmsg/s), and total data transferred, using the same metrics as FR-002.
+- **FR-015**: System MUST perform a two-sided Send bandwidth test (`--test send`), where the client posts `ibv_post_send` operations against a recv window pre-posted by the server, and report bandwidth (GB/s), message rate (Mmsg/s), and total data transferred.
+- **FR-016**: System MUST perform a two-sided Recv bandwidth test (`--test recv`), where the client pre-posts a recv window and the server drives the send side, and report bandwidth (GB/s), message rate (Mmsg/s), and total data transferred.
+- **FR-017**: The `--test` parameter MUST accept exactly the values `write`, `read`, `send`, `recv`, `latency`, and `all`; `all` (the default) MUST run all five test kinds sequentially within a single client/server session and report results for each.
 - **FR-003**: System MUST perform Send/Recv ping-pong for latency measurement and report min, max, mean, median, P95, P99 latency, and jitter (standard deviation).
 - **FR-004**: System MUST check for ibverbs library presence and RDMA device availability at startup, providing actionable diagnostic messages if either is missing.
 - **FR-005**: System MUST allow configuration of message size, iteration count, warmup count, test type, port, output format, and optionally the RDMA device name via command-line parameters.
@@ -127,11 +135,11 @@ A user runs the tool on a machine where RDMA may not be properly configured. The
 **Arguments**:
 - `<server-host>`: Hostname or IP of server node (SSH-accessible)
 - `<client-host>`: Hostname or IP of client node (SSH-accessible)
-- `[options]`: Arbitrary options forwarded to both server and client (e.g., `--test throughput --message-size 65536 --iterations 10000`)
+- `[options]`: Arbitrary options forwarded to both server and client (e.g., `--test write --message-size 65536 --iterations 10000`)
 
 **Environment Variables**:
 - `RDMA_TEST_BIN`: Path to compiled rdma-test binary (default: `./target/release/rdma-test`)
-- `RDMA_TEST_PORT`: Server listen port (default: `50000`)
+- `RDMA_TEST_PORT`: Server listen port (default: `7471`)
 - `RDMA_TEST_STARTUP_DELAY`: Delay after server launch before client starts (seconds, default: `2`)
 
 **Behavior**:
@@ -148,8 +156,8 @@ A user runs the tool on a machine where RDMA may not be properly configured. The
 
 **Example Invocations**:
 ```bash
-# Throughput test with default settings
-./scripts/launch.sh node1.example.com node2.example.com --test throughput
+# RDMA Write throughput test with default settings
+./scripts/launch.sh node1.example.com node2.example.com --test write
 
 # Latency test with custom message size and warmup
 ./scripts/launch.sh node1 node2 --test latency --message-size 1024 --warmup 100
@@ -157,6 +165,25 @@ A user runs the tool on a machine where RDMA may not be properly configured. The
 # Custom iterations and JSON output
 ./scripts/launch.sh node1 node2 --iterations 50000 --output json
 ```
+
+### FR-014/FR-015/FR-016/FR-017: Bandwidth Test Variants and `--test` Enum
+
+**Location**: `src/main.rs` (`TestType` enum), `src/throughput.rs` (`run_read_client`), `src/send_bw.rs`, `src/recv_bw.rs`, wired via `src/client.rs` and `src/server.rs`.
+
+**Status**: Backfilled from implementation — Production-ready.
+
+**Synopsis**: The `--test`/`-t` flag accepts six values, each dispatched to a dedicated benchmark module:
+
+| Value | Behavior | Module |
+|-------|----------|--------|
+| `write` | One-sided RDMA Write throughput (client writes into a server-registered MR) | `src/throughput.rs::run_write_client` |
+| `read` | One-sided RDMA Read throughput (client reads from a server-registered MR) | `src/throughput.rs::run_read_client` |
+| `send` | Two-sided Send bandwidth (client posts sends against a server-side pre-posted recv window) | `src/send_bw.rs` |
+| `recv` | Two-sided Recv bandwidth (server drives sends against a client-side pre-posted recv window) | `src/recv_bw.rs` |
+| `latency` | Send/Recv ping-pong latency (see FR-003) | `src/latency.rs` |
+| `all` (default) | Runs write, read, send, recv, and latency sequentially in one session | `src/client.rs`, `src/server.rs` |
+
+All four bandwidth variants (`write`, `read`, `send`, `recv`) report the same metrics: bandwidth (GB/s), message rate (Mmsg/s), total bytes, and elapsed seconds, using the shared `ThroughputStats` type. JSON output includes a `results.write` / `results.read` / `results.send` / `results.recv` / `results.latency` key for each test kind that was run (omitted when not selected); see `contracts/cli-interface.md`.
 
 ### Key Entities
 

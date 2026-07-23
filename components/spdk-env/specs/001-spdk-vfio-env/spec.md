@@ -1,8 +1,16 @@
-# Feature Specification: [FEATURE NAME]
+> **SUPERSEDED**: This spec was never filled in (raw `spec-template.md` scaffold,
+> committed as-is). The feature area it was meant to cover — SPDK/DPDK
+> environment initialization and VFIO device iteration — is fully specified in
+> [`002-spdk-env-vfio-init`](../002-spdk-env-vfio-init/spec.md). Do not implement
+> against this document; it is retained only for history. See
+> `.specify/sync/drift-report.md` (spec `001-spdk-vfio-env`) for the sync
+> analysis that identified this as an unfilled template.
+
+# Feature Specification: [FEATURE NAME] (SUPERSEDED — see banner above)
 
 **Feature Branch**: `[###-feature-name]`  
 **Created**: [DATE]  
-**Status**: Draft  
+**Status**: Superseded by `002-spdk-env-vfio-init`  
 **Input**: User description: "$ARGUMENTS"
 
 ## User Scenarios & Testing *(mandatory)*

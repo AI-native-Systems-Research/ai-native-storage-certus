@@ -18,7 +18,7 @@
 
 **Alternatives considered**:
 - MPSC for ingress — rejected per design requirement of per-client channels.
-- Crossbeam bounded channel — viable for benchmarking (design mentions "crossbeam bounded to 64 slots"); will use for test/bench configurations.
+- Crossbeam bounded channel — originally considered for benchmarking (design mentioned "crossbeam bounded to 64 slots"); in practice the production `SpscChannel` (bounded to `CLIENT_CHANNEL_CAPACITY` = 256) is used uniformly for client channels, including in benchmarks/tests, so the `crossbeam-channel` dependency was never wired into the channel path (see align-tasks for removing the now-unused dependency).
 
 ## R-003: Actor Thread Polling Multiple Channels
 

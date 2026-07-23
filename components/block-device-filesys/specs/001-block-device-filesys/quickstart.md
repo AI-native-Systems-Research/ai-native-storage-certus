@@ -34,13 +34,9 @@ use block_device_filesys::BlockDeviceFilesysComponent;
 use component_framework::iunknown::query;
 use interfaces::{IBlockDevice, Command, Completion};
 
-// Create and configure the component
-let comp = BlockDeviceFilesysComponent::new(/* fields */);
-
-// Configure: file path, block size, number of blocks
-comp.set_file_path("/tmp/test-device.img");
-comp.set_block_size(4096);
-comp.set_num_blocks(1024); // 4MB device
+// Create the component: file path, block size, number of blocks are all
+// required, explicit constructor arguments — there is no default block size.
+let comp = BlockDeviceFilesysComponent::create("/tmp/test-device.img", 4096, 1024); // 4MB device
 
 // Initialize (creates backing file, starts actor)
 comp.initialize().expect("init failed");
@@ -66,10 +62,12 @@ comp.shutdown().expect("shutdown failed");
 
 ## Configuration
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
+All parameters are supplied explicitly to `BlockDeviceFilesysComponent::create(file_path, block_size, num_blocks)` — none have an implicit default.
+
+| Parameter | Constraint | Description |
+|-----------|------------|--------------|
 | file_path | (required) | Path to backing file |
-| block_size | 512 | Sector size in bytes (must be power of 2) |
+| block_size | (required) minimum 512, must be power of 2 | Sector size in bytes |
 | num_blocks | (required) | Total block count |
 
 ## Feature Flags
