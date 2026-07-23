@@ -1,0 +1,145 @@
+@startuml
+skinparam defaultTextAlignment center
+skinparam padding 4
+skinparam nodesep 45
+skinparam ranksep 45
+skinparam shadowing false
+skinparam rectangle {
+    RoundCorner 15
+}
+skinparam agent {
+    RoundCorner 10
+}
+skinparam database {
+    RoundCorner 8
+}
+hide stereotype
+
+title Certus — High-Level Architecture & Key Features
+
+' ============================================================
+' CLIENT
+' ============================================================
+rectangle "**Client Host**" as client_box #F5F5F5 {
+    agent "GPU Application\n(vLLM / PyTorch)" as pyclient
+    agent "Client GPU Memory\n(KV-cache blocks)" as client_gpu #BBF7D0
+}
+
+' ============================================================
+' SERVER
+' ============================================================
+rectangle "**Certus Server Host**" as server_box #FAFAFA {
+
+    agent "gRPC Service (tonic)\nPopulate | Lookup | Check | Remove | Touch | Flush" as grpc #F0F0F0
+
+    rectangle "**Dispatcher** (core orchestrator)\n// variant: dispatcher  |  dispatcher-p2p (GPUDirect) //" as dispatcher #DBEAFE {
+        agent "warm stream +\nPipelineRing\n(cold reads)" as pipe #EFF6FF
+        agent "ParallelBackgroundWriter\n(async write-through)" as bgw #EFF6FF
+        agent "BackgroundEvictor\n(SSD reclaim)" as bge #EFF6FF
+    }
+
+    agent "MemoryTier\n<<IMemoryTier>>\nmmap'd CUDA-pinned DRAM pool" as mt #DBEAFE
+    agent "DispatchMap\n<<IDispatchMap>>\nkey -> location index" as dm #DBEAFE
+    agent "EvictionPolicy (plug-in)\n<<IEvictionPolicy>>\ne.g. LRU" as evict #E5E7EB
+
+    rectangle "**Storage tier** — DataDrive [0..N]" as storage #FEF3C7 {
+        rectangle "Block-device backend (pluggable)\n<<IBlockDevice>>\nSPDK-NVMe  |  filesystem  |  kernel" as blk #FDE68A
+        agent "ExtentManager\n<<IExtentManager>>\ncrash-consistent alloc" as em #FDE68A
+    }
+
+    agent "GpuServices\n<<IGpuServices>>\nCUDA DMA / streams" as gpu #BBF7D0
+
+    rectangle "**Remote Cache Layer** (optional — full-remote)" as remote #FEE2E2 {
+        agent "RemoteLookup\n<<IRemoteLookup>>\norchestrator" as rl
+        agent "RdmaInitiator\npush values OUT" as rinit
+        agent "RdmaResponder\naccept writes IN" as rresp
+        agent "Zyre\npeer discovery" as zyre
+    }
+
+    database "NVMe SSD [0..N]" as ssd #FEF3C7
+}
+
+cloud "**Peer Certus Nodes**" as peers #FEE2E2
+
+' ============================================================
+' CORE DATA PATHS
+' ============================================================
+pyclient -down-> grpc : gRPC
+client_gpu .down.> gpu : CUDA IPC
+grpc -down-> dispatcher
+
+dispatcher -down-> dm
+dispatcher -down-> mt
+dispatcher -right-> gpu
+dm -down-> evict : <<plug-in>>
+mt -down-> evict : <<plug-in>>
+
+dispatcher --> blk
+blk --> ssd : NVMe / file / kernel I/O
+em --> blk : metadata
+
+dispatcher -right-> rl
+rl -down-> rinit
+rl -down-> rresp
+rl -down-> zyre
+rinit -down-> peers : RDMA WRITE out (data-holder)
+peers -up-> rresp : RDMA WRITE in (requester)
+zyre <-down-> peers : gossip (KeyQuery / RdmaRequest)
+
+' ============================================================
+' KEY FEATURE CALLOUTS
+' ============================================================
+note right of bgw #FEFCE8
+  **(1) Lazy write-through**
+  Populate returns after D2H into the
+  DRAM slot; the block is persisted to
+  SSD **asynchronously** in the background.
+end note
+
+note bottom of mt #FEFCE8
+  **(2) Memory-tier-full handling**
+  When the DRAM pool is saturated, LRU
+  blocks with completed write-through are
+  **demoted to SSD-only** to free space;
+  new/cold data is served straight from SSD.
+end note
+
+note right of blk #FEFCE8
+  **(3) Pluggable block-device backends**
+  Any impl of <<IBlockDevice>> —
+  SPDK userspace NVMe, filesystem-backed,
+  or kernel block device.
+end note
+
+note left of pipe #FEFCE8
+  **(4) Optional GPUDirect P2P**
+  The dispatcher-p2p variant streams
+  SSD <-> GPU through a BAR1-mapped ring,
+  bypassing the DRAM staging copy.
+end note
+
+note bottom of ssd #FEFCE8
+  **(5) Cold-hit promotion**
+  A lookup that hits on SSD is pipelined
+  into DRAM and **promoted** back into the
+  memory tier for future warm hits.
+end note
+
+note right of evict #FEFCE8
+  **(6) Pluggable eviction policy**
+  MemoryTier & DispatchMap delegate victim
+  selection to <<IEvictionPolicy>> (LRU today).
+end note
+
+note right of rl #FEFCE8
+  **(7) Remote peers via RDMA**
+  Local misses query peers (Zyre discovery);
+  the holding peer RDMA-writes the value
+  directly into this node's memory.
+end note
+
+legend bottom
+  Core cache path (DRAM/SSD)   ....   Optional: GPUDirect P2P + Remote RDMA cooperation
+endlegend
+
+@enduml

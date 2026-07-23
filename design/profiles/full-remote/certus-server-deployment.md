@@ -82,26 +82,29 @@
 │                                                                              │
 │  ┌───────────────────────────────────────────────────────────────────────┐   │
 │  │ RemoteLookupComponent                           «IRemoteLookup»       │   │
-│  │  receptacles: [logger]                                                │   │
-│  │  • Forwards local cache misses to peer nodes                          │   │
-│  │  • batch_lookup / join_cluster / leave_cluster                        │   │
-│  └─────────────────────────────────┬─────────────────────────────────────┘   │
-│                                    │ RDMA (outgoing)                         │
-│  ┌─────────────────────────────────┼─────────────────────────────────────┐   │
-│  │ RemoteLookupRdmaInitiatorComponent   │          «IRemoteLookupRdmaInitiator»    │   │
-│  │  receptacles: [dispatcher, logger]                                    │   │
-│  │  • Accepts incoming RDMA requests from peer nodes                     │   │
-│  │  • Resolves keys via local dispatcher                                 │   │
-│  │  • Returns zero-copy LookupRef for RDMA Write                         │   │
-│  │  • handle_lookup / handle_check / handle_batch_lookup / release_lookup│   │
-│  └─────────────────────────────────┼─────────────────────────────────────┘   │
-│                                    │ RDMA (incoming)                         │
-└────────────────────────────────────┼─────────────────────────────────────────┘
-                                     ▼
-                         ┌───────────────────────┐
-                         │  Peer Certus Nodes    │
-                         │  (full-remote)        │
-                         └───────────────────────┘
+│  │  receptacles: [zyre, dispatch_map, memory_tier, dispatcher,           │   │
+│  │                initiator, responder, responder_admin, logger]         │   │
+│  │  • Orchestrator: reserve landing slot, query peers, drive push        │   │
+│  │  • initialize / batch_lookup([(key,size)]) / join_cluster / leave     │   │
+│  └───────┬───────────────────┬────────────────────┬─────────────────────┘   │
+│          │ drives            │ reserves            │ discovers/queries       │
+│  ┌───────▼──────────┐ ┌──────▼───────────┐ ┌───────▼──────────────────────┐   │
+│  │ RdmaInitiator    │ │ RdmaResponder    │ │ ZyreComponent    «IZyre»     │   │
+│  │ «...RdmaInitiator»│ │ «...RdmaResponder»│ │  receptacles: []            │   │
+│  │  recepts:        │ │  «...ResponderAdmin»│ │  • gossip/beacon discovery │   │
+│  │  [logger,        │ │  recepts:         │ │  • create IZyreNode handle  │   │
+│  │   memory_tier]   │ │  [logger,         │ └──────────────┬──────────────┘   │
+│  │  • push OUT to   │ │   memory_tier]    │                │ gossip           │
+│  │    peer memory   │ │  • register pool, │                │ (KeyQuery /      │
+│  │    (data-holder) │ │    accept writes  │                │  RdmaRequest)    │
+│  └───────┬──────────┘ │    IN (requester) │                │                  │
+│          │ RDMA OUT   └──────▲───────────┘                 │                  │
+└──────────┼───────────────────┼──────────────────────────────┼──────────────────┘
+           │                   │ RDMA IN                       │
+           ▼                   │                               ▼
+         ┌─────────────────────┴───────────────────────────────────┐
+         │  Peer Certus Nodes (full-remote)                        │
+         └─────────────────────────────────────────────────────────┘
 ```
 
 ## Component Summary
@@ -113,12 +116,14 @@
 | GpuServicesComponent | IGpuServices | logger |
 | EvictionPolicyLruComponent | IEvictionPolicy | logger |
 | MemoryTierComponent | IMemoryTier | logger, eviction_policy |
-| RemoteLookupComponent | IRemoteLookup | logger |
 | BlockDeviceSpdkNvme | IBlockDevice, IBlockDeviceAdmin | spdk_env, logger |
 | ExtentManager | IExtentManager | metadata_device, logger |
 | DispatchMapComponent | IDispatchMap | eviction_policy, logger |
 | DispatcherComponent | IDispatcher | dispatch_map, memory_tier, gpu_services, spdk_env, logger, remote_lookup |
-| **RemoteLookupRdmaInitiatorComponent** | **IRemoteLookupRdmaInitiator** | **dispatcher, logger** |
+| **ZyreComponent** | **IZyre** | **—** |
+| **RemoteLookupRdmaInitiatorComponent** | **IRemoteLookupRdmaInitiator** | **logger, memory_tier** |
+| **RemoteLookupRdmaResponderComponent** | **IRemoteLookupRdmaResponder, IRemoteLookupRdmaResponderAdmin** | **logger, memory_tier** |
+| **RemoteLookupComponent** | **IRemoteLookup** | **zyre, dispatch_map, memory_tier, dispatcher, initiator, responder, responder_admin, logger** |
 
 ## Initialization Order
 
@@ -128,14 +133,16 @@
 4. **EvictionPolicyLruComponent** — shared LRU policy
 5. **DispatchMapComponent** — key→location table
 6. **MemoryTierComponent** — mmap DRAM pool, CUDA-pinned via `cudaHostRegister`
-7. **RemoteLookupComponent** — cluster client, joins peer network
-8. **DispatcherComponent** — top-level orchestrator
-   - Internally creates **DataDrive[0..N]**: one (BlockDeviceSpdkNvme + ExtentManager) per `--device-pci`
-   - Allocates **PipelineRing** for pipelined cold reads
-   - Creates **warm_stream** for async memory-tier→GPU DMA
-   - Starts **ParallelBackgroundWriter** for async write-through
-   - Starts **BackgroundEvictor** for SSD space reclamation
-9. **RemoteLookupRdmaInitiatorComponent** — RDMA listener, resolves incoming requests via dispatcher
+7. **ZyreComponent** — peer-discovery factory
+8. **RemoteLookupRdmaInitiatorComponent** — outbound push side (bound to logger, memory_tier)
+9. **RemoteLookupRdmaResponderComponent** — passive accept side (bound to logger, memory_tier)
+10. **RemoteLookupComponent** — orchestrator; `init_hook` brings up the responder, advertises the local RDMA endpoint via Zyre, spawns the initiator worker, and joins the discovery group
+11. **DispatcherComponent** — top-level orchestrator
+    - Internally creates **DataDrive[0..N]**: one (BlockDeviceSpdkNvme + ExtentManager) per `--device-pci`
+    - Allocates **PipelineRing** for pipelined cold reads (8-deep, 2 CUDA streams)
+    - Creates **warm_stream** for async memory-tier→GPU DMA
+    - Starts **ParallelBackgroundWriter** for async write-through
+    - Starts **BackgroundEvictor** for SSD space reclamation
 
 ## Data Flow
 
@@ -158,18 +165,20 @@ NVMe data drive ──PipelineRing (async chunked reads)──▶ Memory-tier DR
     ──cudaMemcpyAsync H2D──▶ Client GPU
 ```
 
-### Lookup — Remote Path (Peer Node → This Node → GPU)
+### Lookup — Remote Path (this node is the requester)
 ```
-Local miss ──RemoteLookup.batch_lookup──▶ Peer node (via RDMA)
-    ──RDMA Write──▶ Local memory ──(optional promote)──▶ Memory-tier
-    ──cudaMemcpyAsync H2D──▶ Client GPU
+Local miss ──RemoteLookup.batch_lookup([(key,size)])──▶ reserve landing slot
+    ──SHOUT KeyQuery via Zyre──▶ Peer node
+    ──WHISPER RdmaRequest(endpoint,rkey,slot)──▶ holding peer
+    ──peer RDMA-writes value IN via this node's Responder──▶ Local memory
+    ──(optional promote)──▶ Memory-tier ──cudaMemcpyAsync H2D──▶ Client GPU
 ```
 
-### Incoming Remote Request (Peer → This Node)
+### Incoming Remote Request (this node is the data-holder)
 ```
-Peer RDMA request ──RemoteLookupRdmaInitiator.handle_lookup──▶ Dispatcher.lookup
-    ──LookupRef (pinned memory-tier pointer)──▶ RDMA Write to peer
-    ──release_lookup (unpin)
+Peer KeyQuery/RdmaRequest ──handle_rdma_request ──▶ InitiatorCmd::Serve
+    ──resolve value in Memory-tier──▶ RdmaInitiator.push
+    ──RDMA Write value OUT into peer's advertised slot──▶ PushComplete
 ```
 
 ### Eviction
@@ -211,9 +220,9 @@ certus-server-yaml \
 
 ## Notes
 
-- RemoteLookupRdmaInitiator is initialized last because it needs a fully-wired dispatcher
+- RemoteLookup initializes before the dispatcher; `dispatcher.remote_lookup` and `remote_lookup.dispatcher` form a deliberate `Arc` cycle, severed at teardown
 - All component bindings use the COM-style `receptacle.connect(Arc<dyn Interface>)` pattern
 - The remote_lookup receptacle on the dispatcher enables miss-forwarding to peers
-- LookupRef holds a dispatch-map read reference — failure to release blocks eviction of that entry
-- Memory-tier pool is registered with CUDA (`cudaHostRegister`) and SPDK (`spdk_mem_register`) for zero-copy
-- Cluster membership managed via `join_cluster`/`leave_cluster` on RemoteLookupComponent
+- Remote transfer is one-sided RDMA WRITE performed by the data-holder's Initiator; the requester's Responder registers the landing memory and never touches the data
+- Memory-tier pool is registered with CUDA (`cudaHostRegister`) and SPDK (`spdk_mem_register`) for zero-copy, and registered `REMOTE_WRITE` by the Responder for inbound RDMA
+- Peer discovery is automatic via Zyre (UDP beacon or ZeroMQ gossip); `join_cluster`/`leave_cluster` operate on named Zyre groups and are supplementary

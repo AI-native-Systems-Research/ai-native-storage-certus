@@ -45,8 +45,10 @@ rectangle "**Server Host**" as server_box #FAFAFA {
         agent "SPDKEnv\n<<ISPDKEnv>>" as spdk_env #E5E7EB
 
         rectangle "**Remote Cache Layer**" as remote_box #FEE2E2 {
-            agent "RemoteLookup\n<<IRemoteLookup>>\nforward misses" as remote_lookup
-            agent "RemoteLookupRdmaInitiator\n<<IRemoteLookupRdmaInitiator>>\nserve RDMA requests" as remote_handler
+            agent "RemoteLookup\n<<IRemoteLookup>>\norchestrator: query + reserve" as remote_lookup
+            agent "RdmaInitiator\n<<IRemoteLookupRdmaInitiator>>\npush values OUT to peers" as remote_initiator
+            agent "RdmaResponder\n<<IRemoteLookupRdmaResponder>>\naccept writes IN from peers" as remote_responder
+            agent "Zyre\n<<IZyre>>\npeer discovery" as remote_zyre
         }
     }
 
@@ -77,14 +79,17 @@ disp_bg --> blkdev
 blkdev -down-> spdk_env
 extmgr --> blkdev : metadata
 
-remote_handler -up-> dispatcher
+remote_lookup -down-> remote_initiator : drive push
+remote_lookup -down-> remote_responder : reserve slot
+remote_lookup -down-> remote_zyre : discover / query
 
 gpu_svc -right-> server_gpu : DMA
 
 spdk_env -down-> nvme_data : VFIO
 blkdev .down.> nvme_data : NVMe I/O
 
-remote_lookup -down-> peers : RDMA out
-peers -up-> remote_handler : RDMA in
+remote_zyre <-down-> peers : gossip (KeyQuery / RdmaRequest)
+remote_initiator -down-> peers : RDMA write OUT (data-holder)
+peers -up-> remote_responder : RDMA write IN (requester)
 
 @enduml
