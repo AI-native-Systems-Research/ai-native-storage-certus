@@ -1,33 +1,57 @@
 {
-  "applied": "2026-04-17T00:00:00Z",
-  "proposals_applied": 3,
+  "applied": "2026-07-22T23:20:52Z",
+  "mode": "AUTO-BACKFILL",
+  "based_on": "drift-report.md generated 2026-07-22T21:30:10Z",
+  "backup_dir": "components/logger/.specify/sync/backups/20260722T232052Z/",
+  "proposals_applied": 7,
   "proposals_skipped": 0,
   "changes": [
     {
-      "proposal": 1,
-      "type": "ALIGN",
-      "file": "src/lib.rs",
-      "description": "Added doc test to new_with_writer()",
-      "requirement": "SC-007"
+      "type": "BACKFILL",
+      "file": "specs/001-logger-component/plan.md",
+      "description": "LoggerComponentV1 -> LoggerComponent; components/logger/v1 -> components/logger path references"
     },
     {
-      "proposal": 2,
+      "type": "BACKFILL",
+      "file": "specs/001-logger-component/tasks.md",
+      "description": "LoggerComponentV1 -> LoggerComponent; v1 path references; new() -> new_default(); Warn color yellow -> orange"
+    },
+    {
+      "type": "BACKFILL",
+      "file": "specs/001-logger-component/data-model.md",
+      "description": "LoggerComponentV1 -> LoggerComponent; new() -> new_default(); Warn color yellow (\\x1b[33m) -> orange (\\x1b[38;5;208m)"
+    },
+    {
+      "type": "BACKFILL",
+      "file": "specs/001-logger-component/quickstart.md",
+      "description": "LoggerComponentV1 -> LoggerComponent; new() -> new_default() in usage examples"
+    },
+    {
+      "type": "BACKFILL",
+      "file": "specs/001-logger-component/research.md",
+      "description": "R2 Warn color yellow -> orange; R5 LoggerComponentV1::new() -> LoggerComponent::new_default()"
+    },
+    {
+      "type": "BACKFILL",
+      "file": "specs/001-logger-component/contracts/ilogger.md",
+      "description": "LoggerComponentV1 -> LoggerComponent in inline example comment"
+    },
+    {
       "type": "BACKFILL",
       "file": "specs/001-logger-component/spec.md",
-      "section": "Key Entities",
-      "description": "Expanded LogLevel entry with from_env_str(), Display, Ord documentation"
-    },
-    {
-      "proposal": 3,
-      "type": "ALIGN",
-      "file": "CLAUDE.md",
-      "description": "Updated stale 'not yet implemented' text to reflect implementation status"
+      "section": "User Story 3 / Acceptance Scenario 2",
+      "description": "connect_receptacle -> connect_receptacle_raw"
     }
   ],
+  "align_defect_ambiguous": [],
+  "new_specs": [],
+  "supersede": [],
   "verification": {
-    "tests_passed": 27,
-    "tests_failed": 0,
-    "clippy_clean": true,
-    "doc_tests_passed": 5
+    "code_files_modified": 0,
+    "spec_files_modified": 7,
+    "residual_LoggerComponentV1_refs": 0,
+    "residual_v1_path_refs": 0,
+    "residual_yellow_33m_refs": 0,
+    "residual_connect_receptacle_bare_refs": 0
   }
 }

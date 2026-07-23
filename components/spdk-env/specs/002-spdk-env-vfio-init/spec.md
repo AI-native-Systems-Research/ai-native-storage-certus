@@ -120,12 +120,52 @@ A developer integrates the SPDKEnv component with other Certus components via th
   `spdk-env` crate does not import the `interfaces` version for its
   own implementation — it uses its local definition. Both definitions
   MUST be kept in sync manually.
+- **FR-019**: The `ISPDKEnv` interface MUST provide an explicit `fini(&self)`
+  method that tears down the SPDK/DPDK environment (calls `spdk_env_fini()`
+  and clears the process-global singleton flag) without requiring the
+  component to be dropped. Callers MUST detach all NVMe controllers and free
+  all `DmaBuffer` instances before calling `fini()`, since DPDK's `atexit`
+  handlers may otherwise access freed resources on process exit. `fini()` is
+  idempotent with respect to the singleton flag: it is a no-op if the
+  component is not currently initialized. Drop-based cleanup (FR-012) calls
+  the same underlying teardown if `fini()` was not already called explicitly.
+- **FR-020**: System MUST provide a `DmaBuffer` type (re-exported from the
+  shared `interfaces` crate at `interfaces::DmaBuffer` via
+  `spdk_env::dma::DmaBuffer`) representing a DMA-safe buffer for direct NVMe
+  I/O. `DmaBuffer::new(size, align, numa_node)` allocates zero-initialized,
+  hugepage-backed memory via SPDK (`spdk_dma_zmalloc`/`spdk_zmalloc`) and
+  requires the SPDK environment to already be initialized. `unsafe fn
+  DmaBuffer::from_raw(ptr, len, free_fn, numa_node)` wraps caller-supplied
+  memory (e.g. GPU device memory) with a caller-supplied deallocation
+  function, transferring ownership to the `DmaBuffer`. `DmaBuffer` implements
+  `Deref`/`DerefMut` to `[u8]` for direct byte access and calls its stored
+  `free_fn` on `Drop`. To prevent a `Drop` from calling into SPDK after the
+  environment has been torn down (which would crash), a process-global
+  "SPDK active" flag (`interfaces::set_spdk_env_active`/`is_spdk_env_active`)
+  is set to `true` by `init()` (`init_spdk_env()`) and to `false` by `fini()`/
+  `do_fini()` before `spdk_env_fini()` is called; `DmaBuffer::drop` checks this
+  flag and skips calling `free_fn` if the environment is no longer active.
+- **FR-021**: System MUST provide operator setup scripts under
+  `components/spdk-env/scripts/` as sanctioned tooling for the external
+  configuration referenced in the Assumptions section: `bind_vfio.sh`
+  (interactive and scripted `status`/`bind <BDF>...`/`reset <BDF>...`/
+  `bind-all`/`reset-all` workflow for detaching NVMe SSDs from their kernel
+  driver and binding them to `vfio-pci`, or reversing that), `add_kernel_options.sh`
+  (sets IOMMU and 1G-hugepage kernel boot parameters via `grubby`),
+  `cfg_user_spdk.sh` (grants non-root read/write access to `/dev/vfio` and
+  `/dev/hugepages`, tunes `net.core.rmem_max`), `show_spdk_devices.sh` (lists
+  PCI devices currently bound to `vfio-pci`, table or quiet BDF-only output),
+  and `fix_dnf_cache.sh` (diagnoses/repairs DNF cache issues that can block
+  `deps/install_deps.sh`). These scripts are not part of the component's
+  runtime code path; they are developer/operator convenience tooling for the
+  external configuration steps FR-008/Assumptions already require.
 
 ### Key Entities
 
 - **VfioDevice**: Represents a discovered VFIO-attached device. Key attributes: `address: PciAddress` (domain:bus:dev.func), `id: PciId` (class_id, vendor_id, device_id, subvendor_id, subdevice_id), `numa_node: i32` (-1 = unknown), `device_type: String` (e.g., "nvme").
-- **ISPDKEnv**: The component interface providing device iteration, environment status queries, and an explicit `init()` method.
+- **ISPDKEnv**: The component interface providing device iteration, environment status queries, and explicit `init()`/`fini()` methods.
 - **SPDKEnvComponent**: The concrete component implementing ISPDKEnv, managing SPDK/DPDK lifecycle with singleton enforcement.
+- **DmaBuffer**: A DMA-safe, hugepage- or externally-backed byte buffer (see FR-020) used by downstream components (e.g. NVMe block device I/O) for zero-copy transfers; owns a deallocation function invoked on `Drop`, gated by the process-global SPDK-active flag.
 
 ## Success Criteria *(mandatory)*
 
@@ -135,15 +175,15 @@ A developer integrates the SPDKEnv component with other Certus components via th
 - **SC-002**: On a misconfigured system (no VFIO, wrong permissions, no hugepages, missing logger), the component reports the specific issue within its first error message, enabling the user to resolve the problem without additional debugging.
 - **SC-003**: The example main.rs compiles and runs successfully as a non-root user on a system with correct VFIO permissions, printing device information to the console.
 - **SC-004**: All component operations complete synchronously without spawning threads, confirming procedural (non-actor) behavior.
-- **SC-005**: The component produces structured log messages through the framework's logging system during initialization and device discovery, including warnings for skipped devices.
+- **SC-005**: The component produces diagnostic output via `eprintln!` during initialization and device discovery (progress messages, permission/hugepage/VFIO check failures, enumeration warnings). Per FR-007/Clarifications, the component has no logger receptacle and does not route diagnostics through the component-framework logging actor; "structured log messages through the framework's logging system" in earlier drafts of this criterion was stale and has been corrected here to match FR-007 and the implementation (`eprintln!` in `src/env.rs`).
 
 ## Assumptions
 
 - SPDK and DPDK libraries are pre-built and available at the paths configured by `../../deps/build_spdk.sh` (i.e., `../../deps/spdk-build/`).
 - The target platform is Linux with IOMMU support (Intel VT-d or AMD-Vi).
 - The host system uses a RHEL/Fedora-family distribution consistent with the existing `install_deps.sh` script.
-- VFIO device binding (e.g., via `dpdk-devbind.py` or manual sysfs writes) is performed externally before the component is used.
-- Hugepage configuration is performed externally (e.g., via kernel boot parameters or sysctl).
+- VFIO device binding (e.g., via `dpdk-devbind.py`, manual sysfs writes, or the sanctioned `scripts/bind_vfio.sh` helper — see FR-021) is performed externally before the component is used.
+- Hugepage configuration is performed externally (e.g., via kernel boot parameters set through `scripts/add_kernel_options.sh`, or sysctl); non-root `/dev/vfio` and `/dev/hugepages` access can be granted via `scripts/cfg_user_spdk.sh`, and currently-bound devices can be listed via `scripts/show_spdk_devices.sh` (see FR-021).
 - The component links against SPDK/DPDK C libraries via Rust FFI (bindgen or manual bindings).
 - The component-framework crate is available as a workspace dependency.
 - The component uses `eprintln!` for all diagnostic output. There is no logging receptacle; the component has no receptacles.

@@ -11,7 +11,7 @@ The top-level component struct produced by `define_component!`.
 | Field | Type | Description |
 |-------|------|-------------|
 | file_path | `RwLock<Option<PathBuf>>` | Path to the backing file |
-| block_size | `AtomicU32` | Block/sector size in bytes (default 512) |
+| block_size | `AtomicU32` | Block/sector size in bytes (caller-supplied; enforced minimum 512, no implicit default) |
 | num_blocks | `AtomicU64` | Total number of blocks (device capacity) |
 | actor_handle | `Mutex<Option<ActorHandle<ControlMessage>>>` | Handle to the actor thread |
 | next_client_id | `AtomicU64` | Monotonically increasing client ID counter |
@@ -69,6 +69,7 @@ Per-client channel state held by the actor.
 | id | `u64` | Unique client identifier |
 | ingress_rx | `Receiver<Command>` | Receive commands from client |
 | callback_tx | `Sender<Completion>` | Send completions to client |
+| pending | `VecDeque<Completion>` | FIFO backlog of completions that couldn't be delivered because the client's callback channel was full; retried by `flush_pending` each poll cycle so a stalled client doesn't head-of-line-block delivery to others |
 
 ### InflightOp
 
@@ -80,6 +81,9 @@ Tracking state for an in-flight async io_uring operation.
 | client_id | `u64` | Which client submitted this |
 | deadline | `Option<Instant>` | Timeout deadline (if timeout_ms > 0) |
 | is_read | `bool` | Whether this is a read or write |
+| tag | `u64` | io_uring user_data tag correlating CQEs back to this op |
+| start_ns *(telemetry feature only)* | `u64` | Intended op-start timestamp for latency accounting — currently computed as a freshly-created `Instant`'s `elapsed()` (~0) and never read on completion; see align-tasks (telemetry-latency defect) |
+| bytes *(telemetry feature only)* | `u64` | Byte count recorded for this op |
 
 ## State Transitions
 

@@ -1,0 +1,90 @@
+{
+  "generated": "2026-07-22T21:28:04Z",
+  "project": "memory-tier",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 44,
+    "aligned": 34,
+    "drifted": 5,
+    "not_implemented": 5,
+    "unspecced_features": 3
+  },
+  "specs": [
+    {
+      "id": "001-memory-tier",
+      "title": "Memory Tier (DRAM Cache Pool)",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-008", "FR-009", "FR-010",
+        "FR-011", "FR-012", "FR-015", "FR-016", "FR-017", "FR-018", "FR-019",
+        "FR-020", "FR-022", "FR-023", "FR-024", "FR-025", "FR-026",
+        "NFR-001", "NFR-003", "NFR-004", "NFR-005", "NFR-006", "NFR-007", "NFR-009", "NFR-010",
+        "SC-1", "SC-2", "SC-4", "SC-5", "SC-6", "SC-7"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-013",
+          "spec_text": "evict_lru() cycles through shards via atomic counter (round-robin)",
+          "actual": "No evict_counter or shards exist; evict_lru() calls ep.pop_oldest(state.pool_id) on the single global pool",
+          "location": "components/memory-tier/src/lib.rs:431-463",
+          "severity": "high"
+        },
+        {
+          "requirement": "FR-014",
+          "spec_text": "evict_lru_for_key() evicts from the same shard as the target key",
+          "actual": "The key argument is ignored (bound as _key); function is a pure alias for evict_lru() with no shard-targeted behavior",
+          "location": "components/memory-tier/src/lib.rs:465-467",
+          "severity": "high"
+        },
+        {
+          "requirement": "FR-021",
+          "spec_text": "oldest_keys(n) peeks at N oldest keys across shards, sampling (n / NUM_SHARDS).max(1) per shard",
+          "actual": "Single call to ep.peek_oldest(state.pool_id, n); no per-shard sampling logic exists",
+          "location": "components/memory-tier/src/lib.rs:421-429",
+          "severity": "medium"
+        },
+        {
+          "requirement": "NFR-008",
+          "spec_text": "Component version is 0.2.0",
+          "actual": "Cargo.toml package version is 0.1.0; define_component! macro version field is 0.3.0; neither matches 0.2.0",
+          "location": "components/memory-tier/Cargo.toml:3; components/memory-tier/src/lib.rs:139",
+          "severity": "medium"
+        },
+        {
+          "requirement": "SC-3",
+          "spec_text": "Concurrent access from 16+ threads does not deadlock or corrupt state",
+          "actual": "Correctness likely holds via single RwLock<Pool>, but the claimed 16-way shard-lock parallelism mechanism does not exist; all keys contend for one lock instead of one of 16",
+          "location": "components/memory-tier/src/lib.rs:75-89",
+          "severity": "medium"
+        }
+      ],
+      "not_implemented": [
+        "FR-005 (pool divided into 16 independent shards)",
+        "FR-006 (shard selection uses key modulo 16)",
+        "FR-007 (each shard has its own Mutex-protected allocator and slot map)",
+        "NFR-002 (per-shard locking, 16-way parallelism)",
+        "SC-8 (10 formal properties verified with Creusot, 21 verification conditions)"
+      ]
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "telemetry Cargo feature: MemoryTierTelemetry / TelemetrySnapshot / telemetry() / reset_telemetry() / telemetry_snapshot() (eviction count, write/read lock-contention counters)",
+      "location": "components/memory-tier/Cargo.toml:10; components/memory-tier/src/lib.rs:19-20,35-67,164-176,341-351,386-396,439-449,479-489,530-540,612-632; components/interfaces/src/imemory_tier.rs:7-16,202-206",
+      "lines": 90,
+      "suggested_spec": "Add a User Story / FR block documenting the optional telemetry feature: eviction count and read/write lock-contention counters exposed via telemetry_snapshot()."
+    },
+    {
+      "feature": "free_capacity() inherent method (capacity - used)",
+      "location": "components/memory-tier/src/lib.rs:178-186",
+      "lines": 9,
+      "suggested_spec": "Add FR under Capacity Monitoring: free_capacity() returns capacity() minus used() for proactive eviction triggers."
+    },
+    {
+      "feature": "DEFAULT_POOL_SIZE constant declared but never consumed by any call site (initialize() always requires an explicit pool_size argument)",
+      "location": "components/memory-tier/src/lib.rs:33",
+      "lines": 1,
+      "suggested_spec": "Either wire DEFAULT_POOL_SIZE into a default constructor/initialize path, or document it in plan.md as reserved-for-future (as done for the NotEvictable error variant)."
+    }
+  ],
+  "conflicts": []
+}

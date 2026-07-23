@@ -25,7 +25,7 @@ This document specifies how block-device-filesys fulfills the IBlockDevice inter
 
 ### max_queue_depth() → u32
 
-- Returns io_uring SQ size (configurable, default 128)
+- Returns io_uring SQ size (fixed constant `DEFAULT_RING_DEPTH` = 128; not currently caller-configurable)
 
 ### num_io_queues() → u32
 

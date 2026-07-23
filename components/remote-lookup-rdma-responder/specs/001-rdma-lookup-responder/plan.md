@@ -52,13 +52,17 @@ pool once with `ibv_reg_mr` (`REMOTE_WRITE`) at `initialize()` — read via the
 shutdown; there is no per-request registration.
 
 **Testing**: `cargo test -p remote-lookup-rdma-responder` (unit tests over the
-mock CM seam, no hardware); `--features telemetry` for telemetry-wiring tests;
-`cargo bench` for SC-006; a hardware-gated `#[ignore]` loopback test for the real
-accept path.
+mock CM seam, no hardware, `rdma` feature off); `--features telemetry` for
+telemetry-wiring tests; `--features rdma` to compile the real `rdma_cm` path
+(required for the hardware-gated `#[ignore]` loopback tests); `cargo bench` for
+SC-006.
 
 **Target Platform**: Linux (RHEL/Fedora), RDMA-capable NIC (RoCE/IB) on an
 isolated, trusted fabric. Not a workspace default member (links rdma-core);
-built/tested explicitly with `-p remote-lookup-rdma-responder`.
+built/tested explicitly with `-p remote-lookup-rdma-responder`. The `rdma`
+Cargo feature gates the entire real `rdma_cm`/`ibv_reg_mr` path (see spec.md
+"Build & Feature Flags"); without it, `initialize()` returns `Bind` as a
+build-configuration failure.
 
 **Project Type**: Single Rust component crate within the Certus COM-style
 component workspace.

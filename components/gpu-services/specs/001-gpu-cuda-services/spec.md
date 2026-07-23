@@ -326,6 +326,36 @@ by a verification read-back.
   reject cross-device pointers. MUST return an error if GPU support is
   not compiled, the component is not initialized, or the attribute query
   fails.
+- **FR-023**: Component MUST provide a `stream_query(stream)` method that
+  performs a non-blocking check of whether all operations queued on a
+  `GpuStream` have completed, via `cudaStreamQuery`. It MUST return
+  `Ok(true)` when all queued work is complete and `Ok(false)` when work
+  is still in-flight, distinct from the blocking behavior of
+  `stream_synchronize` (FR-017). MUST return an error if GPU support is
+  not compiled or the stream handle is invalid.
+  *(Backfilled 2026-07-22 from `src/lib.rs:656-678`,
+  `interfaces/src/igpu_services.rs:596-619`.)*
+- **FR-024**: Component MUST provide `dma_copy_to_host_async` (gated
+  behind `spdk` feature) that issues a `cudaMemcpyAsync`
+  device-to-host copy from a GPU device pointer to an SPDK `DmaBuffer`
+  on a specified `GpuStream`, mirroring `dma_copy_to_device_async`
+  (FR-018) for the opposite direction. The caller must synchronize the
+  stream before reading the destination buffer. MUST return an error if
+  `size` exceeds the destination buffer length, GPU support is not
+  compiled, the component is not initialized, or the CUDA async memcpy
+  operation fails.
+  *(Backfilled 2026-07-22 from `src/lib.rs:799-851`,
+  `interfaces/src/igpu_services.rs:694-714`.)*
+- **FR-025**: Component MUST provide `memcpy_d2h_async` (gated behind
+  `spdk` feature) that issues a `cudaMemcpyAsync` device-to-host copy
+  from a GPU device pointer to a raw CUDA-pinned host pointer on a
+  specified `GpuStream`, mirroring `memcpy_h2d_async` (FR-019) for the
+  opposite direction and avoiding the need to wrap pre-existing pinned
+  memory in a `DmaBuffer`. MUST return an error if GPU support is not
+  compiled, the component is not initialized, or the CUDA async memcpy
+  operation fails.
+  *(Backfilled 2026-07-22 from `src/lib.rs:853-895`,
+  `interfaces/src/igpu_services.rs:716-735`.)*
 
 ### Key Entities
 

@@ -1,37 +1,72 @@
 {
-  "generated": "2026-07-21",
-  "component": "dispatcher-p2p",
-  "base_commit": "833e9f36e01f1df8a0e0fc57d5cd223d823d3199",
-  "scope": "components/dispatcher-p2p/src/lib.rs",
-  "specs_analyzed": 1,
-  "requirements": {
-    "total": 14,
-    "aligned": 14,
-    "drifted": 0,
-    "not_implemented": 0
-  },
-  "unspecced_features": 1,
-  "change_summary": {
-    "substantive": [
-      "MockGpuServices test mock gained set_device(i32)->Result<(),String> and device_of_ptr(*const c_void)->Result<i32,String> to satisfy expanded IGpuServices trait (src/lib.rs:3091-3096)"
-    ],
-    "non_substantive": "~40 lines of rustfmt reflow (argument/struct-literal wrapping, method-chain breaks), no behavioral change",
-    "note": "Production cold-path code does not yet call set_device/device_of_ptr; methods appear only in the test mock. Interface source: components/interfaces/src/igpu_services.rs:555,577."
+  "generated": "2026-07-22T22:35:42Z",
+  "project": "dispatcher-p2p",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 21,
+    "aligned": 21,
+    "drifted": 2,
+    "not_implemented": 0,
+    "unspecced_features": 2
   },
   "specs": [
     {
       "id": "001-gpudirect-cold-path",
       "title": "GPUDirect Storage Cold Path",
-      "drifted": [],
+      "aligned": [
+        "FR-001",
+        "FR-002",
+        "FR-003",
+        "FR-004",
+        "FR-005",
+        "FR-006",
+        "FR-007",
+        "FR-008",
+        "FR-009",
+        "FR-010",
+        "FR-011",
+        "FR-012",
+        "FR-013",
+        "FR-014",
+        "FR-015",
+        "SC-001",
+        "SC-002",
+        "SC-003",
+        "SC-004",
+        "SC-005",
+        "SC-006"
+      ],
+      "drifted": [
+        {
+          "requirement": "data-model.md: P2pRing.streams",
+          "spec_text": "streams | [GpuStream; 2] | Alternating CUDA streams for D2D copies",
+          "actual": "NUM_STREAMS = 4; ring allocates 4 (min 2) CUDA streams, matching spec.md FR-003/FR-005",
+          "location": "components/dispatcher-p2p/specs/001-gpudirect-cold-path/data-model.md:12",
+          "severity": "minor"
+        },
+        {
+          "requirement": "data-model.md: PathSelection / OnceLock<PathSelection>",
+          "spec_text": "One-time decision stored for component lifetime ... Storage: OnceLock<PathSelection> — set during initialization, immutable thereafter.",
+          "actual": "Component stores two independent fields, p2p_ring: RwLock<Option<P2pRing>> and pipeline_ring: RwLock<Option<PipelineRing>>, not a single enum in a OnceLock; path is chosen per-call.",
+          "location": "components/dispatcher-p2p/src/lib.rs:167-168,458-522",
+          "severity": "moderate"
+        }
+      ],
       "not_implemented": []
     }
   ],
   "unspecced": [
     {
-      "feature": "IGpuServices receptacle now requires multi-GPU device selection (set_device, device_of_ptr) for cold-path P2P routing; currently satisfied by test mock, production wiring pending",
-      "location": "src/lib.rs:3091-3096; interfaces/src/igpu_services.rs:555,577",
-      "lines": 6,
-      "suggested_spec": "FR-015"
+      "feature": "P2pColdReadPool persistent cold-path worker pool (pre-connected ClientChannels per drive/queue-slot, long-lived worker threads, ~24% cold-path throughput improvement per commit 959fdd4)",
+      "location": "components/dispatcher-p2p/src/cold_pool.rs; components/dispatcher-p2p/src/lib.rs:1247-1256,1743-1842,1473",
+      "lines": 271,
+      "suggested_spec": "001-gpudirect-cold-path (new FR near FR-004/FR-005)"
+    },
+    {
+      "feature": "Eviction-event notification channel: create_eviction_channel(), EvictionEvent/EvictionReason, eviction_dropped_count(), emitted on every memory-tier eviction",
+      "location": "components/dispatcher-p2p/src/lib.rs:50-60,172-173,213-232,546-650",
+      "lines": 110,
+      "suggested_spec": "002-eviction-telemetry (new spec)"
     }
   ],
   "conflicts": []

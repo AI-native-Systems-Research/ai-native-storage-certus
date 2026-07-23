@@ -14,7 +14,7 @@ rdma-test [GLOBAL OPTIONS] <SUBCOMMAND> <SUBCOMMAND OPTIONS>
 | `--port` | `-p` | u16 | 7471 | Connection management port |
 | `--size` | `-s` | usize | 4096 | Message size in bytes (>0) |
 | `--iterations` | `-n` | u64 | 10000 | Number of test iterations (>0) |
-| `--test` | `-t` | Enum | all | Test type: throughput, latency, all |
+| `--test` | `-t` | Enum | all | Test type: write, read, send, recv, latency, all |
 | `--warmup` | `-w` | u64 | 100 | Warmup iterations |
 | `--output` | `-o` | Enum | human | Output format: human, json |
 
@@ -46,6 +46,8 @@ Connect to a server and run benchmarks.
 
 ## Output Contract (Human-Readable)
 
+For bandwidth test kinds, the section heading's parenthetical label reflects which test ran: `RDMA Write` (`--test write`), `RDMA Read` (`--test read`), `Send` (`--test send`), or `Recv` (`--test recv`). Under `--test all`, one such section is printed per test kind, in the order write, read, send, recv, latency.
+
 ```
 === RDMA Device Check ===
   libibverbs: found
@@ -74,6 +76,8 @@ Connect to a server and run benchmarks.
 
 ## Output Contract (JSON)
 
+The `results` object contains one key per test kind that was actually run (`write`, `read`, `send`, `recv`, `latency`); keys for test kinds that were not selected are omitted entirely (not `null`). Under `--test all` (the default) all five keys are present; under a single test kind (e.g. `--test write`) only that one key is present.
+
 ```json
 {
   "device": "mlx5_0",
@@ -85,11 +89,29 @@ Connect to a server and run benchmarks.
     "warmup": 100
   },
   "results": {
-    "throughput": {
+    "write": {
       "bandwidth_gbps": 12.45,
       "message_rate_mpps": 3.04,
       "total_bytes": 40960000,
       "elapsed_seconds": 0.328
+    },
+    "read": {
+      "bandwidth_gbps": 11.80,
+      "message_rate_mpps": 2.88,
+      "total_bytes": 40960000,
+      "elapsed_seconds": 0.347
+    },
+    "send": {
+      "bandwidth_gbps": 10.95,
+      "message_rate_mpps": 2.67,
+      "total_bytes": 40960000,
+      "elapsed_seconds": 0.374
+    },
+    "recv": {
+      "bandwidth_gbps": 10.90,
+      "message_rate_mpps": 2.66,
+      "total_bytes": 40960000,
+      "elapsed_seconds": 0.376
     },
     "latency": {
       "min_us": 1.23,
@@ -108,6 +130,8 @@ Connect to a server and run benchmarks.
 ```
 
 When `"partial": true`, results reflect only completed iterations before failure. The `"error"` field contains a description string.
+
+> **Known gap** (tracked in `.specify/sync/align-tasks.md`): as of this writing, `"partial"` is never actually set to `true` by the implementation, and a mid-test failure aborts without emitting this JSON object at all. Treat the `partial`/`error` fields as the target contract, not yet the observed behavior.
 
 ## Launch Script Contract
 

@@ -129,6 +129,11 @@ In [Draining]/[Done]: send/join/leave --> Error::Stopped.
 After [Done]: recv() --> Error::Stopped; try_recv() --> Ok(None) (no further
 zyre_recv is issued — the actor has exited).
 Drop stops a Running node and destroys it regardless of drain progress.
+
+stop() outside [Running] (before start(), or a repeated call while already
+[Draining]/[Done]) is a silent no-op: it does not error and does not change
+state. Only the [Running] --stop()--> [Draining] edge shown above issues
+zyre_stop(); calling stop() is otherwise idempotent.
 ```
 
 ### Peer States (as observed by a running node)

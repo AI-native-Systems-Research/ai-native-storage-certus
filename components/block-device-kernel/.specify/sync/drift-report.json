@@ -1,0 +1,61 @@
+{
+  "generated": "2026-07-22T22:33:43Z",
+  "project": "block-device-kernel",
+  "summary": {
+    "specs_analyzed": 1,
+    "requirements_checked": 41,
+    "aligned": 38,
+    "drifted": 3,
+    "not_implemented": 0,
+    "unspecced_features": 1
+  },
+  "specs": [
+    {
+      "id": "001-block-device-kernel",
+      "title": "Block Device Kernel Component",
+      "aligned": [
+        "FR-001", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007", "FR-008",
+        "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014", "FR-015",
+        "FR-016", "FR-017", "FR-018", "FR-019", "FR-020", "FR-022", "FR-023",
+        "FR-024",
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-007", "SC-008",
+        "SC-009",
+        "NFR-001", "NFR-002", "NFR-003", "NFR-004", "NFR-005", "NFR-006",
+        "NFR-007", "NFR-008"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-021 / SC-006",
+          "spec_text": "Component MUST provide feature-gated telemetry that tracks total ops, min/max/mean latency, total bytes, and mean throughput. ... Feature-gated telemetry produces accurate TelemetrySnapshot values when enabled.",
+          "actual": "Every call site passes a hardcoded literal 0 for latency_ns into TelemetryStats::record_op(), so min_latency_ns/max_latency_ns/mean_latency_ns are always 0 regardless of actual IO latency. InflightOp.start_ns is computed via Instant::now().elapsed() (elapsed time since a freshly-created Instant, i.e. always ~0ns) and is never read back to compute a real duration at completion time. Only total_ops, total_bytes, and mean_throughput_mbps are actually accurate; latency statistics are non-functional.",
+          "location": "src/actor.rs:312,373,456,530,609,689,747",
+          "severity": "major"
+        },
+        {
+          "requirement": "FR-002",
+          "spec_text": "Component MUST declare a receptacle for ILogger and log initialization at info level, operations at debug level, and channel disconnections at warn level.",
+          "actual": "No `log.warn(...)` call exists anywhere in the crate (grep for \"warn\" across src/*.rs returns nothing), despite ILogger exposing a warn() method (components/interfaces/src/ilogger.rs:6). Client disconnection in the actor is logged at debug level (`actor: disconnecting client {client_id}`), not warn.",
+          "location": "src/actor.rs:858 (should be warn per spec, is debug); no warn call exists in src/lib.rs or src/actor.rs",
+          "severity": "moderate"
+        },
+        {
+          "requirement": "Edge case: \"Client callback channel disconnected\"",
+          "spec_text": "Client callback channel disconnected: Logged at warn level, completion silently dropped.",
+          "actual": "When a client's callback channel ring is full, the completion is not dropped and nothing is logged. Instead ClientSession::deliver() buffers the completion in a FIFO VecDeque (`pending`) and KernelHandler::poll_clients() retries delivery (flush_pending()) on every idle-loop iteration until it succeeds. This is an intentional, documented non-blocking-delivery improvement over the spec's described drop behavior, but the spec text does not reflect it and no warn-level log is emitted anywhere in this path.",
+          "location": "src/actor.rs:26-81 (ClientSession::deliver/flush_pending), src/actor.rs:815-828 (send_completion/poll_clients)",
+          "severity": "moderate"
+        }
+      ],
+      "not_implemented": []
+    }
+  ],
+  "unspecced": [
+    {
+      "feature": "Non-blocking per-client completion backlog (ClientSession.pending + flush_pending)",
+      "location": "components/block-device-kernel/src/actor.rs:26-81,815-828",
+      "lines": 60,
+      "suggested_spec": "001-block-device-kernel (amend FR-002 / edge cases section)"
+    }
+  ],
+  "conflicts": []
+}

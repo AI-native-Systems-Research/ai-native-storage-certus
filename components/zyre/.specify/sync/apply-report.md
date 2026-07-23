@@ -84,3 +84,44 @@ Full CI gate re-run green: fmt clean, clippy `-D warnings` clean, tests (6 lib +
 1. Review the diff and commit the SC-verification pass.
 2. Remaining doc backfills P1–P4 were applied in commit `f6763fe`.
 3. Optional: add a whisper-to-departed-UUID fire-and-forget test (`spec.md:81`) — not an SC gate.
+
+---
+
+## Pass: 2026-07-22 (AUTO-BACKFILL)
+
+Applied: 2026-07-22
+Based on: `.specify/sync/drift-report.{json,md}` generated 2026-07-22T22:33:44Z
+
+### Scope
+
+This component reported **0 drift** (17/17 FR+SC aligned) and **1 unspecced
+feature**: `ZyreNode::stop()` (`src/node.rs:146-155`) is a silent no-op when
+called outside the `Running` state (before `start()`, or a repeated call
+while already `Draining`/`Done`) — a documentation gap in `data-model.md`'s
+state-transition diagram, not a code or spec defect. No ALIGN/DEFECT items
+were identified; `align-tasks.md` was not created.
+
+### Backup
+
+`specs/001-zyre-bindings/data-model.md` backed up to
+`.specify/sync/backups/data-model.md.20260722162005.bak` before editing.
+
+### Changes Made
+
+| File | Change |
+|------|--------|
+| `specs/001-zyre-bindings/data-model.md` | Appended a note to the "ZyreNode Lifecycle" state-transition diagram documenting that `stop()` outside `[Running]` is a silent no-op/idempotent, not an error, and that only the `[Running] --stop()--> [Draining]` edge issues `zyre_stop()`. |
+
+No source code was touched (source is read-only for this workflow).
+
+### Counts
+
+| Category | Count |
+|---|---|
+| BACKFILL applied | 1 (`data-model.md`) |
+| SUPERSEDE/NEW_SPEC | 0 |
+| ALIGN/DEFECT tasks appended | 0 (`align-tasks.md` not created — none qualified) |
+
+### Deferred
+
+None.

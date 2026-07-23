@@ -4,7 +4,21 @@
 
 **Created**: 2026-06-19
 
-**Status**: Synced (2026-06-19)
+**Status**: Superseded (2026-07-22) — see [Supersession Notice](#supersession-notice)
+
+## Supersession Notice
+
+> ⚠️ **This spec is superseded by [`002-remote-lookup-rdma`](../002-remote-lookup-rdma/spec.md).**
+> The shipped component no longer implements the placeholder behavior described below: it performs
+> real network I/O over zyre + one-sided RDMA rather than logging and returning `NotFound`, and
+> `IRemoteLookup::batch_lookup` takes `&[(CacheKey, u32 /* size */)]`, not `&[(CacheKey,
+> IpcHandle)]` — 002 deliberately drops `IpcHandle` from the `IRemoteLookup` boundary because
+> remote-lookup is CPU/DRAM-only (see 002's Clarifications, Q1). That divergence from this spec's
+> FR-001/SC-002 is therefore **intentional and resolved by 002**, not drift to fix here. This
+> document is retained for history only; do not use it as the current design-of-record — read
+> `002-remote-lookup-rdma/spec.md` instead. It was previously mis-stamped `Status: Synced
+> (2026-06-19)`; that stamp was incorrect and is corrected here as part of a spec-sync pass
+> (see `.specify/sync/drift-report.md`, conflict 1).
 
 **Input**: User description: "The component is a placeholder for performing remote lookups to other nodes running Certus on the same network. The component has an ILogger receptacle. The IRemoteLookup interface should support the batch_lookup function with the same parameters as IDispatch export. For the moment, the lookup implementation should only output some logging statement--this is a placeholder."
 

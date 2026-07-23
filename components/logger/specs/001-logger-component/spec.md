@@ -91,7 +91,7 @@ methods through the receptacle and verify output.
 1. **Given** a LoggerComponent, **When** `query_interface!(component,
    ILogger)` is called, **Then** it returns a valid ILogger reference.
 2. **Given** a component with an ILogger receptacle, **When** the
-   LoggerComponent is bound via `connect_receptacle`, **Then** the
+   LoggerComponent is bound via `connect_receptacle_raw`, **Then** the
    receptacle's `get()` returns the ILogger implementation.
 3. **Given** a bound ILogger receptacle, **When** the consuming component
    calls `logger.info("operation complete")`, **Then** the message is

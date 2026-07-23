@@ -1,33 +1,18 @@
 {
-  "generated": "2026-07-09T22:50:03Z",
+  "generated": "2026-07-22T21:31:30Z",
   "project": "remote-lookup-rdma-initiator",
   "summary": {
     "specs_analyzed": 2,
-    "requirements_checked": 40,
-    "aligned": 16,
-    "drifted": 0,
-    "not_implemented": 24,
-    "unspecced_features": 4
+    "requirements_checked": 41,
+    "aligned": 17,
+    "drifted": 1,
+    "not_implemented": 23,
+    "unspecced_features": 2
   },
   "specs": [
     {
-      "id": "002-rdma-push-initiator",
-      "title": "RDMA Push Initiator",
-      "status": "current",
-      "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
-        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013",
-        "SC-001", "SC-002", "SC-003"
-      ],
-      "drifted": [],
-      "not_implemented": ["SC-004"],
-      "notes": "16/17 aligned (94%). SC-004 (telemetry <5% overhead benchmark) is an acknowledged open task recorded in the spec itself, not silent drift."
-    },
-    {
-      "id": "001-rdma-remote-lookup-rdma-initiator",
-      "title": "RDMA Remote Lookup Initiator",
-      "status": "superseded",
-      "superseded_by": "002-rdma-push-initiator",
+      "id": "001-rdma-remote-request-handler",
+      "title": "RDMA Remote Lookup Initiator (SUPERSEDED by 002-rdma-push-initiator)",
       "aligned": [],
       "drifted": [],
       "not_implemented": [
@@ -35,48 +20,41 @@
         "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
         "FR-015", "FR-016", "FR-017",
         "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006"
+      ]
+    },
+    {
+      "id": "002-rdma-push-initiator",
+      "title": "RDMA Push Initiator",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
+        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
+        "SC-001", "SC-002", "SC-003"
       ],
-      "notes": "Old passive-responder design (inbound listener/session/handshake/binary batch protocol). Deliberately removed in the rework into an outbound push initiator. All requirements obsolete by design; a few low-level primitives linger in rdma.rs (see unspecced)."
+      "drifted": [
+        {
+          "requirement": "SC-004",
+          "spec_text": "Telemetry overhead criterion revised (2026-07-15 measurement) to 'small fixed absolute cost / ZST-when-off, not a percentage against the mock', explicitly superseding the original '< 5% vs disabled build' wording because the mock push is a ~200-700ns no-op.",
+          "actual": "benches/push_telemetry.rs header doc comment still states the superseded criterion verbatim: 'SC-004 requires that enabling the telemetry feature adds less than 5% overhead ... SC-004 holds when every push/* case is within +5%.'",
+          "location": "components/remote-lookup-rdma-initiator/benches/push_telemetry.rs:1-18",
+          "severity": "minor"
+        }
+      ],
+      "not_implemented": []
     }
   ],
   "unspecced": [
     {
-      "feature": "RdmaListener (bind/listen/accept)",
-      "location": "src/rdma.rs:517-690",
-      "lines": 174,
-      "suggested_spec": "remote-lookup (accept side)"
+      "feature": "set_local_peer_id(PeerId) + zyre-peer stamping into rdma_cm connect private_data for responder teardown-before-reclaim correlation",
+      "location": "interfaces/src/iremote_lookup_rdma_initiator.rs:161-168; components/remote-lookup-rdma-initiator/src/lib.rs:81,114-120,223-228; components/remote-lookup-rdma-initiator/src/connection.rs:440-461; components/remote-lookup-rdma-initiator/src/rdma.rs:386-495",
+      "lines": 40,
+      "suggested_spec": "Add a User Story + FR + Key Entity to specs/002-rdma-push-initiator/spec.md describing PeerId-based connection stamping and its role in the remote-lookup-rdma-responder teardown-before-reclaim protocol."
     },
     {
-      "feature": "send_msg/recv_msg message path",
-      "location": "src/rdma.rs:201-239",
-      "lines": 39,
-      "suggested_spec": "remote-lookup or remove"
-    },
-    {
-      "feature": "post_rdma_write_unsignaled pipelining",
-      "location": "src/rdma.rs:297-320",
-      "lines": 24,
-      "suggested_spec": "future perf spec or remove"
-    },
-    {
-      "feature": "integration-test Cargo feature (empty)",
-      "location": "Cargo.toml:11",
-      "lines": 1,
-      "suggested_spec": "implement loopback test or drop feature"
+      "feature": "mr_registration_cost hardware benchmark investigating single-MR vs per-connection MR registration",
+      "location": "components/remote-lookup-rdma-initiator/tests/mr_registration_bench.rs",
+      "lines": 248,
+      "suggested_spec": "Reference this investigation from specs/002-rdma-push-initiator/spec.md 'Known Limitations / Follow-ups', since it directly informs FR-004's per-connection MR registration choice."
     }
   ],
-  "conflicts": [
-    {
-      "between": ["001-rdma-remote-lookup-rdma-initiator", "002-rdma-push-initiator"],
-      "description": "Role inversion: 001 defines a passive inbound responder; 002 defines an outbound push initiator for the same component. Resolved by supersession, but 001 lacks its own superseded banner.",
-      "resolution": "archive-001"
-    }
-  ],
-  "recommendations": [
-    "Archive spec-001 or add a SUPERSEDED banner; it accounts for the entire not-implemented count.",
-    "Decide fate of 001-era primitives (RdmaListener, send/recv, unsignaled write): relocate to remote-lookup or remove.",
-    "Resolve the empty integration-test feature and correct the README's stale #[ignore] HW-test claim.",
-    "Add a Criterion benchmark to close SC-004 (telemetry overhead).",
-    "No code changes required for spec-002 alignment."
-  ]
+  "conflicts": []
 }

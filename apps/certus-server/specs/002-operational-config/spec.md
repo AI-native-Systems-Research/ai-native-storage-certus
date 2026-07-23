@@ -69,14 +69,15 @@ An operator pins NVMe poller threads to dedicated CPU cores via `--poller-base-c
 
 ### User Story 5 - Eviction Tuning (Priority: P3)
 
-An operator tunes the maximum number of eviction attempts before the memory tier returns a pool-full error, via `--max-eviction-attempts`.
+An operator tunes the maximum number of eviction attempts before the memory tier returns a pool-full error, via `--max-eviction-attempts`, and/or tunes a proactive utilization threshold that triggers background DRAM→SSD demotion before the pool fills up, via `--memory-tier-eviction-threshold`.
 
 **Why this priority**: Allows trading latency for availability under memory pressure.
 
 **Acceptance Scenarios**:
 
-1. **Given** no explicit setting, **When** the server starts, **Then** `max_eviction_attempts` defaults to 2048.
+1. **Given** no explicit setting, **When** the server starts, **Then** `max_eviction_attempts` defaults to 2048 and `memory_tier_eviction_threshold` defaults to `0.0` (background demotion disabled).
 2. **Given** `--max-eviction-attempts 100`, **When** the memory tier is full, **Then** the dispatcher attempts at most 100 evictions before failing with an allocation error.
+3. **Given** `--memory-tier-eviction-threshold 0.8`, **When** the memory-tier pool reaches 80% utilization, **Then** the dispatcher begins background demotion of entries to SSD ahead of hitting the hard capacity limit.
 
 ---
 
@@ -123,6 +124,7 @@ A Python client calls `Touch` with `promote = true`. The server touches each ent
 - **FR-011**: The gRPC `Touch` method MUST accept a `promote` boolean field. When true, touched entries that are SSD-resident are asynchronously promoted to the memory tier after the touch response is sent.
 - **FR-012**: The memory-tier pool MUST be registered with CUDA via `cudaHostRegister` after allocation. If registration fails, the server MUST log a warning and continue (fallback to staged transfer path).
 - **FR-013**: The memory-tier pool MUST be allocated on the NUMA node of the first selected NVMe drive. The server resolves the NUMA node by matching the first PCI address against the SPDK device list and passes the node ID to memory-tier initialization. This ensures DRAM and the primary NVMe drive share a NUMA domain for optimal DMA performance.
+- **FR-014**: System MUST support `--memory-tier-eviction-threshold FLOAT` (default `0.0`, meaning disabled). When set to a value in `(0.0, 1.0]`, the value is passed to `DispatcherConfig` and used as the memory-tier utilization threshold that triggers background DRAM→SSD demotion (e.g. `0.8` starts demoting once the pool is 80% full).
 
 ### CLI Interface
 
@@ -137,6 +139,7 @@ A Python client calls `Touch` with `promote = true`. The server touches each ent
 | `--tls-key` | Path | — | TLS private key file |
 | `--poller-base-cpu` | usize | — | Base CPU core for poller pinning |
 | `--max-eviction-attempts` | usize | 2048 | Max eviction retries |
+| `--memory-tier-eviction-threshold` | f64 | `0.0` (disabled) | Utilization threshold (0.0-1.0) that triggers background DRAM→SSD demotion |
 | `--otel-endpoint` | String | — | OTLP endpoint (requires `otel` feature) |
 | `--otel-service-name` | String | `certus-server` | OTel service identity |
 

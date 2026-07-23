@@ -1,58 +1,141 @@
 {
-  "generated": "2026-06-19T19:30:00Z",
+  "generated": "2026-07-22T22:40:55Z",
   "project": "remote-lookup",
   "summary": {
-    "specs_analyzed": 1,
-    "requirements_checked": 8,
-    "aligned": 5,
-    "drifted": 3,
-    "not_implemented": 0,
-    "unspecced_features": 2
+    "specs_analyzed": 2,
+    "requirements_checked": 53,
+    "aligned": 42,
+    "drifted": 9,
+    "not_implemented": 2,
+    "unspecced_features": 3
   },
   "specs": [
     {
       "id": "001-remote-lookup-placeholder",
       "title": "Remote Lookup Batch Interface",
-      "aligned": ["FR-001", "FR-002", "FR-004", "FR-006", "FR-007"],
+      "aligned": [
+        "FR-002",
+        "FR-006",
+        "FR-007",
+        "SC-001",
+        "SC-003",
+        "SC-004",
+        "SC-005"
+      ],
       "drifted": [
         {
-          "requirement": "FR-003",
-          "spec_text": "When connected, each entry in batch_lookup MUST produce a log message via the ILogger receptacle",
-          "actual": "Logging is unconditional — no connection state exists. Logs for every entry always.",
-          "location": "components/remote-lookup/src/lib.rs:48-54",
-          "severity": "minor"
+          "requirement": "FR-001",
+          "spec_text": "The IRemoteLookup interface MUST expose a batch_lookup method with signature fn batch_lookup(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), RemoteLookupError>>.",
+          "actual": "Signature is fn batch_lookup(&self, entries: &[(CacheKey, u32)]) -> Vec<Result<(), RemoteLookupError>> -- IpcHandle removed, replaced by an expected-size u32 (per 002 Clarification Q1).",
+          "location": "components/interfaces/src/iremote_lookup.rs:141-144",
+          "severity": "high"
         },
         {
-          "requirement": "FR-005",
-          "spec_text": "When not connected, batch_lookup MUST return Err(RemoteLookupError::NotConnected) for every entry",
-          "actual": "NotConnected variant removed from RemoteLookupError. No connection state in interface.",
-          "location": "components/interfaces/src/iremote_lookup.rs:10-15",
-          "severity": "major"
+          "requirement": "FR-003",
+          "spec_text": "Each entry in batch_lookup MUST produce a log message via the ILogger receptacle (placeholder behavior).",
+          "actual": "No per-entry log call exists; batch_lookup submits to the actor, which SHOUTs a KEY_QUERY instead of logging each entry.",
+          "location": "components/remote-lookup/src/lib.rs:271-300; components/remote-lookup/src/actor.rs:264-292",
+          "severity": "medium"
+        },
+        {
+          "requirement": "FR-004",
+          "spec_text": "When connected, the placeholder implementation MUST return Err(RemoteLookupError::NotFound) for each entry (no actual network I/O).",
+          "actual": "Real network I/O occurs: zyre SHOUT/WHISPER plus one-sided RDMA writes via the initiator/responder receptacles.",
+          "location": "components/remote-lookup/src/actor.rs (on_submit, on_key_response, on_rdma_status)",
+          "severity": "high"
         },
         {
           "requirement": "FR-008",
-          "spec_text": "Component MUST expose functionality only through IRemoteLookup interface",
-          "actual": "Interface now includes join_cluster and leave_cluster (not in original spec but are interface methods, not external public functions)",
-          "location": "components/interfaces/src/iremote_lookup.rs:66,80",
-          "severity": "minor"
+          "spec_text": "The component MUST expose functionality only through the IRemoteLookup interface -- no public functions outside the interface.",
+          "actual": "RemoteLookupComponent has three pub fns outside IRemoteLookup: peers_seen, signal_shutdown, shutdown.",
+          "location": "components/remote-lookup/src/lib.rs:325,334,342",
+          "severity": "low"
+        },
+        {
+          "requirement": "FR-009",
+          "spec_text": "The placeholder implementation MUST log the endpoint and return Ok(()).",
+          "actual": "join_cluster routes to the actor (ActorMsg::Join) which really calls node.join; returns Err if uninitialized rather than always Ok.",
+          "location": "components/remote-lookup/src/lib.rs:304-310; components/remote-lookup/src/actor.rs:202-203",
+          "severity": "medium"
+        },
+        {
+          "requirement": "FR-010",
+          "spec_text": "The placeholder implementation MUST log the call and return Ok(()).",
+          "actual": "leave_cluster really leaves the zyre group via the actor; returns Err if uninitialized.",
+          "location": "components/remote-lookup/src/lib.rs:313-319; components/remote-lookup/src/actor.rs:205-206",
+          "severity": "medium"
+        },
+        {
+          "requirement": "SC-002",
+          "spec_text": "The interface compiles with the same (CacheKey, IpcHandle) parameter types as IDispatcher::batch_lookup.",
+          "actual": "IDispatcher::batch_lookup still uses IpcHandle; IRemoteLookup::batch_lookup uses u32. dispatcher-p2p explicitly converts between them before calling remote-lookup.",
+          "location": "components/interfaces/src/idispatcher.rs:371-374 vs components/interfaces/src/iremote_lookup.rs:141-144; components/dispatcher-p2p/src/lib.rs:1888-1899",
+          "severity": "high"
         }
       ],
-      "not_implemented": []
+      "not_implemented": [
+        "IpcHandle key entity -- 002 removes it entirely from the IRemoteLookup boundary; remote-lookup is CPU/DRAM-only and no longer carries a GPU DMA handle."
+      ]
+    },
+    {
+      "id": "002-remote-lookup-rdma",
+      "title": "Remote Lookup over Zyre + RDMA",
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-006a",
+        "FR-007", "FR-008", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
+        "FR-015", "FR-016", "FR-017", "FR-018", "FR-019", "FR-020", "FR-021",
+        "FR-022", "FR-024", "FR-025", "FR-026", "FR-027", "FR-028",
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-006", "SC-007", "SC-008"
+      ],
+      "drifted": [
+        {
+          "requirement": "FR-009",
+          "spec_text": "On RDMA_STATUS(UnableToConnect | KeyNoLongerAvailable) for a key ... the actor MUST NOT yet reclaim the landing slot if a late write could still be in flight (see FR-014).",
+          "actual": "on_rdma_status reclaims the slot immediately on any failure status, matching contracts/wire-protocol.md ('frees a slot exposed to a peer only on (1) RDMA_STATUS received, or (2) peer Exit after DisconnectAck') rather than FR-009's more conservative prose.",
+          "location": "components/remote-lookup/src/actor.rs::on_rdma_status vs specs/002-remote-lookup-rdma/contracts/wire-protocol.md:73-76",
+          "severity": "low"
+        },
+        {
+          "requirement": "FR-023",
+          "spec_text": "The component MUST declare receptacles for IZyre, IDispatchMap, IMemoryTier, IDispatcher, IRemoteLookupRdmaInitiator, IRemoteLookupRdmaResponder, and ILogger.",
+          "actual": "The component declares 8 receptacles: the same 7 plus responder_admin: IRemoteLookupRdmaResponderAdmin (required by FR-025). responder_admin is documented in data-model.md/contracts/iremote_lookup.md/tasks.md -- only spec.md's FR-023 list omits it.",
+          "location": "components/remote-lookup/src/lib.rs:38-51 vs specs/002-remote-lookup-rdma/spec.md:378-380",
+          "severity": "low"
+        }
+      ],
+      "not_implemented": [
+        "tasks.md T025 (User Story 7 mesh test): a tests/mesh.rs scenario for peer Exit during an operation -- cached-reply drop, in-progress-to-unsatisfied transition, and DisconnectAck-gated slot reclaim (backs SC-005/SC-006). The underlying implementation (ActorState::on_exit, ::teardown_peer) exists and reviews as correct, but no such test exists in tests/mesh.rs -- a test-coverage gap, not a missing feature."
+      ]
     }
   ],
   "unspecced": [
     {
-      "feature": "join_cluster",
-      "location": "components/interfaces/src/iremote_lookup.rs:66",
-      "lines": 8,
-      "suggested_spec": "001-remote-lookup-placeholder"
+      "feature": "RemoteLookupComponent::peers_seen() -- public peer-count accessor used as a test discovery barrier",
+      "location": "components/remote-lookup/src/lib.rs",
+      "lines": 6,
+      "suggested_spec": "Document as an out-of-interface test/observability hook in 002's Key Entities, or restrict to test builds if no production caller needs it."
     },
     {
-      "feature": "leave_cluster",
-      "location": "components/interfaces/src/iremote_lookup.rs:80",
-      "lines": 8,
-      "suggested_spec": "001-remote-lookup-placeholder"
+      "feature": "RemoteLookupComponent::signal_shutdown() -- non-blocking actor-stop signal for two-phase multi-node teardown",
+      "location": "components/remote-lookup/src/lib.rs",
+      "lines": 10,
+      "suggested_spec": "Add an explicit teardown-ordering FR to 002 covering multiple actors sharing a zyre/czmq context; it is used in production wiring (apps/certus-server), not just tests."
+    },
+    {
+      "feature": "RemoteLookupComponent::shutdown() -- public join-actor-and-worker teardown, also invoked from Drop",
+      "location": "components/remote-lookup/src/lib.rs",
+      "lines": 14,
+      "suggested_spec": "Add a component-teardown/Drop-ordering FR to 002 (actor joined before worker, so the worker's channel closes deterministically)."
     }
   ],
-  "conflicts": []
+  "conflicts": [
+    {
+      "description": "001-remote-lookup-placeholder's spec.md header reads 'Status: Synced (2026-06-19)' but 002-remote-lookup-rdma explicitly supersedes it and the shipped code implements 002's contract (different batch_lookup signature, real network I/O), not 001's placeholder behavior.",
+      "location": "specs/001-remote-lookup-placeholder/spec.md:7 vs specs/002-remote-lookup-rdma/spec.md:6"
+    },
+    {
+      "description": "FR-009 in 002's spec.md and contracts/wire-protocol.md disagree on when a landing slot exposed to a live peer may be reclaimed after a failure status; the code follows the contract, not FR-009's literal prose.",
+      "location": "specs/002-remote-lookup-rdma/spec.md (FR-009) vs specs/002-remote-lookup-rdma/contracts/wire-protocol.md:73-76"
+    }
+  ]
 }
