@@ -14,8 +14,64 @@ use crate::ffi;
 const MAX_CQ_ENTRIES: c_int = 128;
 const MAX_SEND_WR: u32 = 128;
 const MAX_RECV_WR: u32 = 64;
-const MAX_RETRIES: u32 = 3;
-const POLL_TIMEOUT_SECS: u64 = 10;
+
+// Wall-clock cap on the busy-poll for one write's completion. rdma_cm owns the
+// QP's RTR/RTS transition and leaves the hardware ACK timeout at its (large)
+// default, so the first write on a stale/idle warm connection would otherwise
+// burn ~15s of retransmit before RETRY_EXC. This software cap abandons a stuck
+// write far sooner, letting the caller's reconnect-on-failure path rebuild a
+// fresh QP and retry within the operation deadline. It sits far above healthy
+// completion latency (a 4 MiB write is ~hundreds of µs on 200G RoCE — 2s is a
+// ~4 MB/s floor), so only a genuinely stuck write trips it. (The QP ACK timeout
+// itself is not tunable here: `ibv_modify_qp` cannot change `timeout`/`retry_cnt`
+// in the RTS→RTS transition, and rdma_cm has already reached RTS by ESTABLISHED.)
+const POLL_TIMEOUT_SECS: u64 = 2;
+
+/// Human-readable name for an `ibv_wc_status` code, so completion-error logs are
+/// diagnosable without cross-referencing rdma-core headers. `RETRY_EXC_ERR`
+/// (transport retry exhausted) and `RNR_RETRY_EXC_ERR` are the two that most
+/// often signal a peer/QP problem rather than a local one.
+fn wc_status_name(status: c_int) -> &'static str {
+    match status {
+        0 => "SUCCESS",
+        1 => "LOC_LEN_ERR",
+        2 => "LOC_QP_OP_ERR",
+        3 => "LOC_EEC_OP_ERR",
+        4 => "LOC_PROT_ERR",
+        5 => "WR_FLUSH_ERR",
+        6 => "MW_BIND_ERR",
+        7 => "BAD_RESP_ERR",
+        8 => "LOC_ACCESS_ERR",
+        9 => "REM_INV_REQ_ERR",
+        10 => "REM_ACCESS_ERR",
+        11 => "REM_OP_ERR",
+        12 => "RETRY_EXC_ERR",
+        13 => "RNR_RETRY_EXC_ERR",
+        14 => "LOC_RDD_VIOL_ERR",
+        15 => "REM_INV_RD_REQ_ERR",
+        16 => "REM_ABORT_ERR",
+        17 => "INV_EECN_ERR",
+        18 => "INV_EEC_STATE_ERR",
+        19 => "FATAL_ERR",
+        20 => "RESP_TIMEOUT_ERR",
+        21 => "GENERAL_ERR",
+        _ => "UNKNOWN",
+    }
+}
+
+/// Human-readable name for an `ibv_qp_state` code (the `IBV_QPS_*` constants).
+fn qp_state_name(state: c_int) -> &'static str {
+    match state {
+        ffi::IBV_QPS_RESET => "RESET",
+        ffi::IBV_QPS_INIT => "INIT",
+        ffi::IBV_QPS_RTR => "RTR",
+        ffi::IBV_QPS_RTS => "RTS",
+        ffi::IBV_QPS_SQD => "SQD",
+        ffi::IBV_QPS_SQE => "SQE",
+        ffi::IBV_QPS_ERR => "ERR",
+        _ => "UNKNOWN",
+    }
+}
 
 /// A registered memory region for RDMA operations.
 ///
@@ -196,7 +252,9 @@ impl RdmaConnection {
         if ret != 0 {
             bail!("ibv_post_send (RDMA_WRITE) failed: {}", ret);
         }
-        self.poll_completion_with_retry()
+        self.poll_completion().with_context(|| {
+            format!("RDMA_WRITE len={len} remote_addr=0x{remote_addr:x} rkey=0x{rkey:x}")
+        })
     }
 
     /// Perform an RDMA Write from an offset within a pre-registered MR.
@@ -224,7 +282,9 @@ impl RdmaConnection {
         if ret != 0 {
             bail!("ibv_post_send (RDMA_WRITE pool) failed: {}", ret);
         }
-        self.poll_completion_with_retry()
+        self.poll_completion().with_context(|| {
+            format!("RDMA_WRITE(pool) len={len} remote_addr=0x{remote_addr:x} rkey=0x{rkey:x}")
+        })
     }
 
     /// Poll the completion queue for one entry with timeout.
@@ -256,11 +316,18 @@ impl RdmaConnection {
             }
             if ret > 0 {
                 if wc.status != ffi::IBV_WC_SUCCESS {
+                    // SAFETY: qp is valid for the connection's lifetime.
+                    let qp_state = unsafe { (*self.qp).state };
                     bail!(
-                        "work completion error: status={}, opcode={}, vendor_err={}",
+                        "work completion error: status={} ({}), opcode={}, vendor_err=0x{:x}, \
+                         wc.qp_num={}, qp_state={} ({})",
                         wc.status,
+                        wc_status_name(wc.status),
                         wc.opcode,
-                        wc.vendor_err
+                        wc.vendor_err,
+                        wc.qp_num,
+                        qp_state,
+                        qp_state_name(qp_state),
                     );
                 }
                 return Ok(());
@@ -270,19 +337,6 @@ impl RdmaConnection {
             }
             std::hint::spin_loop();
         }
-    }
-
-    fn poll_completion_with_retry(&self) -> Result<()> {
-        for attempt in 0..MAX_RETRIES {
-            match self.poll_completion() {
-                Ok(()) => return Ok(()),
-                Err(e) if attempt < MAX_RETRIES - 1 => {
-                    eprintln!("poll failed (attempt {}): {}, retrying", attempt + 1, e);
-                }
-                Err(e) => return Err(e),
-            }
-        }
-        unreachable!()
     }
 
     /// Drain any pending completions from the CQ.
