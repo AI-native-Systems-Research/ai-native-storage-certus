@@ -212,7 +212,7 @@ impl ConnectionTable {
         // A single reconnect is allowed per batch to recover from a QP error.
         let mut reconnect_used = false;
 
-        for item in &resolved {
+        for (idx, item) in resolved.iter().enumerate() {
             let (status, bytes) = match item {
                 ItemPlan::Done(status) => (*status, 0),
                 ItemPlan::Write {
@@ -221,6 +221,13 @@ impl ConnectionTable {
                     remote_addr,
                     rkey,
                 } if !give_up => {
+                    // Per-write trace (addr/rkey/len): useful when correlating a
+                    // failing write against the preceding successful ones. Debug
+                    // level — the hot path must not log at info.
+                    logger.debug(&format!(
+                        "remote-lookup-rdma-initiator: write #{idx} -> {addr}:{port} \
+                         remote_addr=0x{remote_addr:x} rkey=0x{rkey:x} len={len}"
+                    ));
                     // Attempt the write, reconnecting at most once on failure.
                     let status = loop {
                         if !ensure_connected(
@@ -238,6 +245,7 @@ impl ConnectionTable {
                         // SAFETY: `local`/`len` came from the caller's memory-tier
                         // peek, which returns a pointer and size within the
                         // registered pool that backs this connection.
+                        let w_start = Instant::now();
                         let write_res = match &*state {
                             ConnState::Connected(conn) => unsafe {
                                 conn.write(*local, *len, *remote_addr, *rkey)
@@ -245,16 +253,27 @@ impl ConnectionTable {
                             // ensure_connected returned true, so we are Connected.
                             _ => unreachable!("ensure_connected guarantees Connected"),
                         };
+                        // Per-write wall-clock (post_send + poll). A 4 MiB write is
+                        // ~hundreds of µs on 200G RoCE; a slow/stale connection
+                        // shows up here. Debug level — hot path.
+                        let w_us = w_start.elapsed().as_micros();
 
                         match write_res {
-                            Ok(()) => break PushStatus::Success,
+                            Ok(()) => {
+                                logger.debug(&format!(
+                                    "remote-lookup-rdma-initiator: write #{idx} OK in {w_us}us \
+                                     ({len} bytes)"
+                                ));
+                                break PushStatus::Success;
+                            }
                             Err(e) => {
                                 // Drop the (likely error-state) connection so the
                                 // retry rebuilds it.
                                 *state = ConnState::Disconnected;
                                 if reconnect_used {
                                     logger.warn(&format!(
-                                        "remote-lookup-rdma-initiator: write to {addr}:{port} failed \
+                                        "remote-lookup-rdma-initiator: write to {addr}:{port} \
+                                         (remote_addr=0x{remote_addr:x} len={len}) failed \
                                          after reconnect: {e}"
                                     ));
                                     give_up = true;
@@ -263,7 +282,8 @@ impl ConnectionTable {
                                 reconnect_used = true;
                                 self.telemetry.record_reconnect();
                                 logger.warn(&format!(
-                                    "remote-lookup-rdma-initiator: write to {addr}:{port} failed ({e}); \
+                                    "remote-lookup-rdma-initiator: write to {addr}:{port} \
+                                     (remote_addr=0x{remote_addr:x} len={len}) failed ({e}); \
                                      reconnecting"
                                 ));
                             }
@@ -468,11 +488,11 @@ impl RdmaTransport for RealTransport {
         port: u16,
     ) -> Result<(Box<dyn RdmaConn>, ConnectTiming), RdmaError> {
         let (conn, cm) = rdma::client_connect(addr, port, &self.local_peer_id)
-            .map_err(|e| RdmaError::ConnectionFailed(e.to_string()))?;
+            .map_err(|e| RdmaError::ConnectionFailed(format!("{e:#}")))?;
         let mr_start = Instant::now();
         let pool_mr = conn
             .register_existing_mr(self.pool_base as *const u8, self.pool_size)
-            .map_err(|e| RdmaError::AllocationFailed(e.to_string()))?;
+            .map_err(|e| RdmaError::AllocationFailed(format!("{e:#}")))?;
         let timing = ConnectTiming {
             resolve_addr_us: cm.resolve_addr_us,
             resolve_route_us: cm.resolve_route_us,
@@ -505,7 +525,10 @@ impl RdmaConn for RealConn {
     ) -> Result<(), RdmaError> {
         self.conn
             .rdma_write_from_pool(&self.pool_mr, local, len, remote_addr, rkey)
-            .map_err(|e| RdmaError::WriteFailed(e.to_string()))
+            // `{e:#}` renders the full anyhow source chain (e.g. the underlying
+            // "work completion error: status=12 (RETRY_EXC_ERR) … qp_state=…"),
+            // not just the top context — otherwise the WC status is lost.
+            .map_err(|e| RdmaError::WriteFailed(format!("{e:#}")))
     }
 }
 

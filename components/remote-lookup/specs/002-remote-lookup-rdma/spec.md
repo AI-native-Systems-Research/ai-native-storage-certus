@@ -292,9 +292,11 @@ one-sided write into a reclaimed slot).
   *(The prior `IpcHandle` parameter is removed — remote-lookup never touches GPU memory.)*
 - **FR-002**: The component MUST run as an actor on a dedicated OS thread that owns an
   `IZyreNode` (from the `IZyre` factory) and polls it in its event loop.
-- **FR-003**: On activation the actor MUST join a fixed zyre group (e.g. `"remote_lookup"`); on
-  deactivation it MUST leave it. `join_cluster`/`leave_cluster` gossip-bind or connect the
-  underlying zyre node to the cluster.
+- **FR-003**: On activation the actor MUST join the single configured zyre group
+  (`LookupConfig.group`, default `"remote_lookup"`); on deactivation it MUST leave it. The
+  group name is configuration, not a constant — an integrating deployment MAY override it
+  (e.g. per-cluster or per-tester) to isolate meshes. `join_cluster`/`leave_cluster`
+  gossip-bind or connect the underlying zyre node to the cluster.
 - **FR-004**: The wire identity of an entry MUST be the tuple `(key, size)`. KEY_QUERY MUST carry
   `(key, size)` pairs; a peer that holds `key` at a different size MUST report it as not
   available (no size-mismatch status exists on the wire).

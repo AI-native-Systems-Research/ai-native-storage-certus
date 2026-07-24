@@ -505,35 +505,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Check that required features are enabled for the profile's crates
     for (name, decl) in &manifest.components {
         match decl.crate_name.as_str() {
-            "block-device-filesys" => {
-                if env::var("CARGO_FEATURE_FILESYS").is_err() {
-                    panic!(
-                        "profile '{profile}' uses block-device-filesys (component '{name}') \
-                         but the 'filesys' feature is not enabled.\n\
-                         Build with: CERTUS_PROFILE={profile} cargo build -p certus-server-yaml \
-                         --features filesys --no-default-features"
-                    );
-                }
+            "block-device-filesys" if env::var("CARGO_FEATURE_FILESYS").is_err() => {
+                panic!(
+                    "profile '{profile}' uses block-device-filesys (component '{name}') \
+                     but the 'filesys' feature is not enabled.\n\
+                     Build with: CERTUS_PROFILE={profile} cargo build -p certus-server-yaml \
+                     --features filesys --no-default-features"
+                );
             }
-            "block-device-spdk-nvme" => {
-                if env::var("CARGO_FEATURE_SPDK").is_err() {
-                    panic!(
-                        "profile '{profile}' uses block-device-spdk-nvme (component '{name}') \
-                         but the 'spdk' feature is not enabled.\n\
-                         Build with: CERTUS_PROFILE={profile} cargo build -p certus-server-yaml \
-                         --features spdk"
-                    );
-                }
+            "block-device-spdk-nvme" if env::var("CARGO_FEATURE_SPDK").is_err() => {
+                panic!(
+                    "profile '{profile}' uses block-device-spdk-nvme (component '{name}') \
+                     but the 'spdk' feature is not enabled.\n\
+                     Build with: CERTUS_PROFILE={profile} cargo build -p certus-server-yaml \
+                     --features spdk"
+                );
             }
-            "block-device-kernel" => {
-                if env::var("CARGO_FEATURE_KERNEL").is_err() {
-                    panic!(
-                        "profile '{profile}' uses block-device-kernel (component '{name}') \
-                         but the 'kernel' feature is not enabled.\n\
-                         Build with: CERTUS_PROFILE={profile} cargo build -p certus-server-yaml \
-                         --features kernel --no-default-features"
-                    );
-                }
+            "block-device-kernel" if env::var("CARGO_FEATURE_KERNEL").is_err() => {
+                panic!(
+                    "profile '{profile}' uses block-device-kernel (component '{name}') \
+                     but the 'kernel' feature is not enabled.\n\
+                     Build with: CERTUS_PROFILE={profile} cargo build -p certus-server-yaml \
+                     --features kernel --no-default-features"
+                );
             }
             _ => {}
         }

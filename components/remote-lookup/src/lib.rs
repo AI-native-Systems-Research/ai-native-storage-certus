@@ -294,9 +294,19 @@ impl IRemoteLookup for RemoteLookupComponent {
         if tx.send(ActorMsg::Submit(req)).is_err() {
             return all_not_found();
         }
-        // Block until the actor finalizes the operation. (The actor bounds this
-        // with `op_deadline`; a dropped actor closes the channel.)
-        done_rx.recv().unwrap_or_else(|_| all_not_found())
+        // `caller_wait` decouples the caller's patience from the operation's
+        // lifetime. `None` keeps the historical behavior — block until the actor
+        // finalizes at `op_deadline` (a dropped actor closes the channel).
+        // `Some(w)` returns NotFound after `w`, but the operation keeps running to
+        // `op_deadline`: it goes on fetching/retrying and publishes any landed key
+        // to the local tier (publish-on-success), so a slow or recovering fetch
+        // populates the cache for the next lookup rather than blocking this caller.
+        match self.config.get().and_then(|c| c.caller_wait) {
+            Some(wait) => done_rx
+                .recv_timeout(wait)
+                .unwrap_or_else(|_| all_not_found()),
+            None => done_rx.recv().unwrap_or_else(|_| all_not_found()),
+        }
     }
 
     /// Join an additional zyre group. Routed to the actor thread, which owns the
