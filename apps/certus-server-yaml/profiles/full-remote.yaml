@@ -78,7 +78,11 @@ components:
     #   CERTUS_RL_OP_DEADLINE_MS  overall op deadline (default 50)
     #   CERTUS_RL_PHASE1_MS       Phase-1 (memory) timeout (default 20)
     #   CERTUS_RL_QUORUM_PCT      Phase-1→2 quorum percent (default 80)
-    #   CERTUS_RL_GROUP           zyre group (default "remote_lookup")
+    #   CERTUS_RL_GROUP           zyre group / cluster name (or --rl-group; the
+    #                             flag wins). Default: a random per-process group
+    #                             ⇒ the node is its own single-node cluster. Set
+    #                             the same value on every node that should form
+    #                             one cluster together.
     # Cross-subnet clusters (UDP beacon does not route) use gossip discovery:
     #   CERTUS_RL_GOSSIP_BIND     hub node only, e.g. "tcp://*:9999"
     #   CERTUS_RL_GOSSIP_CONNECT  every node, the hub endpoint

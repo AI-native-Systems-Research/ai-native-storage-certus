@@ -89,6 +89,14 @@ struct Cli {
     /// OTel service name for this instance.
     #[arg(long = "otel-service-name", default_value = "certus-server-yaml")]
     otel_service_name: String,
+
+    /// zyre group (cluster name) for remote-lookup clustering. Defaults to a
+    /// unique random group per process, so an unconfigured node forms its own
+    /// single-node cluster and does not interfere with other users' nodes. Set
+    /// the same value on every node that should share a cluster. Env fallback:
+    /// CERTUS_RL_GROUP (this flag takes precedence).
+    #[arg(long = "rl-group", env = "CERTUS_RL_GROUP")]
+    rl_group: Option<String>,
 }
 
 fn parse_size(s: &str) -> Result<usize, String> {
@@ -152,6 +160,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         poller_base_cpu: cli.poller_base_cpu,
         max_eviction_attempts: cli.max_eviction_attempts,
         memory_tier_eviction_threshold: cli.memory_tier_eviction_threshold,
+        rl_group: cli.rl_group.clone(),
         resolved_pci_addrs: std::cell::RefCell::new(Vec::new()),
         resolved_numa_node: std::cell::RefCell::new(None),
     };

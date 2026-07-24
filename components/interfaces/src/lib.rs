@@ -15,8 +15,8 @@ mod ilogger;
 mod imemory_tier;
 mod ipartition_table;
 mod iremote_lookup;
-mod iremote_lookup_rdma_responder;
 mod iremote_lookup_rdma_initiator;
+mod iremote_lookup_rdma_responder;
 mod izyre;
 
 pub use idispatch_map::CacheKey;
@@ -47,14 +47,14 @@ pub use imemory_tier::MemoryTierTelemetrySnapshot;
 pub use iremote_lookup::IRemoteLookup;
 pub use iremote_lookup::LookupConfig;
 pub use iremote_lookup::RemoteLookupError;
-pub use iremote_lookup_rdma_responder::{
-    ControlChannel, Endpoint, IRemoteLookupRdmaResponder, IRemoteLookupRdmaResponderAdmin,
-    LocalRegion, RemoteLookupRdmaResponderError, ResponderCommand, ResponderEvent,
-};
 pub use iremote_lookup_rdma_initiator::IRemoteLookupRdmaInitiator;
 pub use iremote_lookup_rdma_initiator::PushStatus;
 pub use iremote_lookup_rdma_initiator::RemoteLookupRdmaInitiatorError;
 pub use iremote_lookup_rdma_initiator::RemoteRegion;
+pub use iremote_lookup_rdma_responder::{
+    ControlChannel, Endpoint, IRemoteLookupRdmaResponder, IRemoteLookupRdmaResponderAdmin,
+    LocalRegion, RemoteLookupRdmaResponderError, ResponderCommand, ResponderEvent,
+};
 pub use izyre::GossipConfig;
 pub use izyre::IZyre;
 pub use izyre::IZyreNode;
