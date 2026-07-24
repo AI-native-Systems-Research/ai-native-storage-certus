@@ -105,6 +105,11 @@ class DispatcherStub(object):
                 request_serializer=dispatcher__pb2.TakeEventsRequest.SerializeToString,
                 response_deserializer=dispatcher__pb2.TakeEventsResponse.FromString,
                 _registered_method=True)
+        self.GetIoStats = channel.unary_unary(
+                '/certus.dispatcher.v1.Dispatcher/GetIoStats',
+                request_serializer=dispatcher__pb2.GetIoStatsRequest.SerializeToString,
+                response_deserializer=dispatcher__pb2.IoStatsResponse.FromString,
+                _registered_method=True)
 
 
 class DispatcherServicer(object):
@@ -182,7 +187,7 @@ class DispatcherServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def FlushToSsd(self, request, context):
-        """Flush all pending background write-through jobs to SSD and block until done.
+        """Flush all pending background write-through jobs to SSD and block until complete.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -204,6 +209,13 @@ class DispatcherServicer(object):
 
     def TakeEvents(self, request, context):
         """Drain eviction events since the last call (non-blocking poll).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetIoStats(self, request, context):
+        """Return cumulative per-direction SSD read/write byte/op/latency counters.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -281,6 +293,11 @@ def add_DispatcherServicer_to_server(servicer, server):
                     servicer.TakeEvents,
                     request_deserializer=dispatcher__pb2.TakeEventsRequest.FromString,
                     response_serializer=dispatcher__pb2.TakeEventsResponse.SerializeToString,
+            ),
+            'GetIoStats': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetIoStats,
+                    request_deserializer=dispatcher__pb2.GetIoStatsRequest.FromString,
+                    response_serializer=dispatcher__pb2.IoStatsResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -662,6 +679,33 @@ class Dispatcher(object):
             '/certus.dispatcher.v1.Dispatcher/TakeEvents',
             dispatcher__pb2.TakeEventsRequest.SerializeToString,
             dispatcher__pb2.TakeEventsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetIoStats(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/certus.dispatcher.v1.Dispatcher/GetIoStats',
+            dispatcher__pb2.GetIoStatsRequest.SerializeToString,
+            dispatcher__pb2.IoStatsResponse.FromString,
             options,
             channel_credentials,
             insecure,
