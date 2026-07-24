@@ -293,6 +293,14 @@ extern "C" {
     // Returns 0 on success, else the errno-style return of ibv_modify_qp.
     pub fn responder_qp_to_error(qp: *mut ibv_qp) -> c_int;
 
+    // Async-event instrumentation shims (src/wrapper.c).
+    // `responder_async_fd` returns `ctx->async_fd` (added to the accept-loop
+    // epoll set). `responder_drain_async_event` acks one queued async event and
+    // returns its `ibv_event_type` (or -1 if none), writing the offending QP
+    // number to `*out_qp_num` for QP-scoped events.
+    pub fn responder_async_fd(ctx: *mut ibv_context) -> c_int;
+    pub fn responder_drain_async_event(ctx: *mut ibv_context, out_qp_num: *mut c_uint) -> c_int;
+
     // libc helpers.
     pub fn htons(hostshort: u16) -> u16;
     pub fn ntohs(netshort: u16) -> u16;
