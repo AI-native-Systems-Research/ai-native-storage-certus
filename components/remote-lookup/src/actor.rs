@@ -30,6 +30,12 @@ use crate::server;
 use crate::wire::{RdmaStatusCode, SlotDesc, WireMessage};
 use crate::worker::InitiatorCmd;
 
+/// Bounded wait for a responder `DisconnectAck` after sending `Disconnect`, so
+/// `teardown_peer` cannot hang the actor if the ack is lost. This is the
+/// ack-handshake bound only — distinct from `connection_teardown_timeout`, which
+/// is the grace before an orphan is force-torn-down in the first place.
+const DISCONNECT_ACK_TIMEOUT: Duration = Duration::from_millis(500);
+
 /// zyre ENTER header key carrying a peer's RDMA responder endpoint (`"ip:port"`),
 /// used to warm a connection to that peer at discovery time (connect-hardening).
 pub(crate) const RDMA_ENDPOINT_HEADER: &str = "rl_rdma_ep";
@@ -103,11 +109,15 @@ struct InFlight {
 
 /// A landing slot whose operation finalized before its fetch resolved, while the
 /// exposed peer was still a live member. Per SC-005 it must NOT be reclaimed on
-/// the timeout (a late one-sided write could still land); it is reclaimed only on
-/// a late RDMA_STATUS or when the peer exits (after a responder DisconnectAck).
+/// the timeout (a late one-sided write could still land); it is reclaimed on a
+/// late RDMA_STATUS, when the peer exits (after a responder DisconnectAck), or —
+/// as a backstop against a peer that neither reports nor leaves — when its
+/// `deadline` elapses (force teardown-before-reclaim in [`ActorState::tick_orphans`]).
 struct Orphan {
     /// The peer the slot was exposed to (its initiator may still write here).
     peer: PeerId,
+    /// Force-reclaim no earlier than this instant (finalize + `connection_teardown_timeout`).
+    deadline: Instant,
 }
 
 /// Resolved receptacle handles the actor needs on the poll-loop thread. The
@@ -248,6 +258,12 @@ pub(crate) fn run(init: ActorInit, rx: MpscReceiver<ActorMsg>) {
 
         // 3. Finalize operations whose deadline has elapsed.
         if state.tick_deadlines() {
+            idle = false;
+        }
+
+        // 3b. Force-reclaim orphaned slots whose teardown grace has elapsed
+        // (backstop for a peer that neither reports a late status nor exits).
+        if state.tick_orphans() {
             idle = false;
         }
 
@@ -414,6 +430,15 @@ impl ActorState {
                         inf.followers.push(op_id);
                     }
                     op.set_state(key, KeyState::InProgress);
+                    continue;
+                }
+                // Orphan-reuse guard (memory safety): a prior op's landing slot
+                // for this key may still be orphaned and exposed to a peer that
+                // could DMA into it. Reserving the key again risks aliasing that
+                // buffer, which the orphan's later teardown-reclaim would free out
+                // from under this op. Leave the key Unsatisfied this round — the
+                // orphan is reclaimed on teardown and a later lookup re-fetches.
+                if self.orphans.contains_key(&key) {
                     continue;
                 }
                 match self.deps.memory_tier.insert(key, size) {
@@ -600,6 +625,11 @@ impl ActorState {
             return false;
         };
 
+        // Orphan-reuse guard (see `on_key_response`): don't reserve a key whose
+        // prior landing slot is still orphaned and exposed to a peer.
+        if self.orphans.contains_key(&key) {
+            return false;
+        }
         let Ok(ptr) = self.deps.memory_tier.insert(key, size) else {
             return false;
         };
@@ -738,6 +768,10 @@ impl ActorState {
             let Some(peer) = disk_peer else {
                 continue;
             };
+            // Orphan-reuse guard (see `on_key_response`).
+            if self.orphans.contains_key(&key) {
+                continue;
+            }
             let Ok(ptr) = self.deps.memory_tier.insert(key, size) else {
                 continue;
             };
@@ -803,6 +837,53 @@ impl ActorState {
         !expired.is_empty() || !transition.is_empty()
     }
 
+    /// Backstop reclaim for orphaned landing slots whose teardown grace has
+    /// elapsed (SC-005). Orphans are normally reclaimed by a late RDMA_STATUS or
+    /// the peer's exit; this covers a peer that neither reports nor leaves, which
+    /// would otherwise leak the buffer forever. Expired orphans are grouped by
+    /// peer so each peer is torn down at most once (bounding the per-tick
+    /// DisconnectAck wait), and reclaim strictly follows teardown — the peer's QP
+    /// is severed (Disconnect → DisconnectAck) before any buffer it could DMA into
+    /// is freed, exactly as [`Self::on_exit`] does. A peer a live operation still
+    /// depends on is not severed; its orphans wait for a later tick.
+    fn tick_orphans(&mut self) -> bool {
+        let now = Instant::now();
+        let mut peers: Vec<PeerId> = Vec::new();
+        for orphan in self.orphans.values() {
+            if now >= orphan.deadline && !peers.contains(&orphan.peer) {
+                peers.push(orphan.peer.clone());
+            }
+        }
+
+        let mut reclaimed = false;
+        for peer in peers {
+            // Never sever a peer a live op is still fetching from — that would
+            // abort its in-flight write. Defer; a later tick retries.
+            let peer_in_use = self
+                .ops
+                .values()
+                .any(|op| op.slots.values().any(|s| s.peer == peer));
+            if peer_in_use {
+                continue;
+            }
+            // Teardown-before-reclaim: the peer's QP is in ERROR (no more DMA)
+            // before we free any buffer it was exposed to.
+            self.teardown_peer(&peer);
+            let keys: Vec<CacheKey> = self
+                .orphans
+                .iter()
+                .filter(|(_, o)| o.peer == peer && now >= o.deadline)
+                .map(|(k, _)| *k)
+                .collect();
+            for key in keys {
+                self.orphans.remove(&key);
+                let _ = self.deps.memory_tier.remove(key);
+                reclaimed = true;
+            }
+        }
+        reclaimed
+    }
+
     /// Finalize an operation: reclaim unpublished landing slots, deliver the
     /// positional result vector to the blocked caller, and drop the state.
     fn finalize(&mut self, op_id: u64) {
@@ -842,9 +923,16 @@ impl ActorState {
             .copied()
             .filter(|k| op.state_of(*k) != KeyState::Satisfied)
             .collect();
+        let orphan_deadline = Instant::now() + self.config.connection_teardown_timeout;
         for key in exposed {
             if let Some(slot) = op.slots.remove(&key) {
-                self.orphans.insert(key, Orphan { peer: slot.peer });
+                self.orphans.insert(
+                    key,
+                    Orphan {
+                        peer: slot.peer,
+                        deadline: orphan_deadline,
+                    },
+                );
             }
         }
         let results = op.results();
@@ -929,7 +1017,7 @@ impl ActorState {
             .control
             .command_tx
             .send(ResponderCommand::Disconnect { node: peer.clone() });
-        let deadline = Instant::now() + Duration::from_millis(500);
+        let deadline = Instant::now() + DISCONNECT_ACK_TIMEOUT;
         loop {
             match self.control.event_rx.try_recv() {
                 Ok(ResponderEvent::DisconnectAck { node }) if &node == peer => break,

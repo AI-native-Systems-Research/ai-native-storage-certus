@@ -22,6 +22,8 @@ use crate::izyre::GossipConfig;
 /// let cfg = LookupConfig { quorum_pct: 90, ..Default::default() };
 /// assert_eq!(cfg.quorum_pct, 90);
 /// assert_eq!(LookupConfig::default().max_keys_per_query, 256);
+/// // By default the caller is coupled to `op_deadline` (no separate wait).
+/// assert_eq!(LookupConfig::default().caller_wait, None);
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LookupConfig {
@@ -32,9 +34,27 @@ pub struct LookupConfig {
     pub quorum_pct: u8,
     /// Phase-1 cap before falling through to Phase-2 regardless of quorum.
     pub phase1_timeout: Duration,
-    /// Overall operation deadline: how long `batch_lookup` blocks before
-    /// finalizing unsatisfied keys as `NotFound`.
+    /// Overall operation deadline: how long the actor keeps an operation alive —
+    /// fetching, retrying, and publishing landed keys to the local tier — before
+    /// finalizing remaining keys as `NotFound`. Decoupled from how long the caller
+    /// blocks (see [`caller_wait`](Self::caller_wait)): after the caller returns,
+    /// the operation keeps running to this deadline so a slow/recovering fetch
+    /// still populates the cache for the next lookup.
     pub op_deadline: Duration,
+    /// How long `batch_lookup` blocks the calling thread before returning
+    /// `NotFound` for unsatisfied keys. `None` couples the caller to
+    /// [`op_deadline`](Self::op_deadline) (the historical behavior — block until
+    /// the operation finalizes). `Some(w)` lets the caller give up after `w` while
+    /// the operation continues in the background (publish-on-success fills the
+    /// cache for the next lookup). Should be `<= op_deadline`.
+    pub caller_wait: Option<Duration>,
+    /// Grace period, measured from an operation's finalize, before an orphaned
+    /// landing slot (one exposed to a still-live peer whose one-sided write never
+    /// resolved) is force-reclaimed: the peer's QP is torn down (Disconnect →
+    /// DisconnectAck) and only then is the buffer freed. Bounds the lifetime of a
+    /// buffer that a peer could still DMA into, without ever freeing one under a
+    /// possibly-pending write.
+    pub connection_teardown_timeout: Duration,
     /// Maximum number of retry rounds re-targeting alternate peers.
     pub max_retry_rounds: u32,
     /// Maximum keys per KEY_QUERY message before splitting into multiple SHOUTs.
@@ -65,6 +85,8 @@ impl Default for LookupConfig {
             quorum_pct: 80,
             phase1_timeout: Duration::from_millis(20),
             op_deadline: Duration::from_millis(50),
+            caller_wait: None,
+            connection_teardown_timeout: Duration::from_millis(1000),
             max_retry_rounds: 2,
             max_keys_per_query: 256,
             bind_ip: String::new(),

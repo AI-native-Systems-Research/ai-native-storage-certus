@@ -70,10 +70,17 @@ struct TestMesh {
 }
 
 impl TestMesh {
+    /// Build an `n`-node mesh with the default per-node config.
+    fn new(n: usize) -> Self {
+        Self::new_with(n, |_cfg| {})
+    }
+
     /// Build an `n`-node mesh. Node 0 binds the gossip hub; the rest connect to
     /// it. Every node gets a distinct data-mailbox endpoint. All instances are
-    /// initialized and joined to a shared group.
-    fn new(n: usize) -> Self {
+    /// initialized and joined to a shared group. `tweak` customizes each node's
+    /// [`LookupConfig`] before `initialize` (e.g. to set `caller_wait` or
+    /// `connection_teardown_timeout` for the decoupling/teardown tests).
+    fn new_with(n: usize, tweak: impl Fn(&mut LookupConfig)) -> Self {
         assert!(n >= 2, "a mesh needs at least two nodes");
         let guard = mesh_lock();
         let group = "mesh".to_string();
@@ -130,7 +137,7 @@ impl TestMesh {
             } else {
                 GossipConfig::connect(hub_endpoint.clone())
             };
-            let cfg = LookupConfig {
+            let mut cfg = LookupConfig {
                 group: group.clone(),
                 discovery: Some(discovery),
                 node_endpoint: Some(format!("tcp://127.0.0.1:{}", free_port())),
@@ -138,6 +145,7 @@ impl TestMesh {
                 op_deadline: Duration::from_millis(200),
                 ..Default::default()
             };
+            tweak(&mut cfg);
 
             comp.initialize(cfg).expect("initialize node");
             nodes.push(comp);
@@ -585,5 +593,107 @@ fn total_miss_returns_not_found_within_deadline() {
         start.elapsed() < Duration::from_secs(2),
         "should finalize promptly, took {:?}",
         start.elapsed()
+    );
+}
+
+#[test]
+fn caller_wait_returns_fast_then_background_op_fills_cache() {
+    // The caller's patience (caller_wait) is decoupled from the operation's
+    // lifetime (op_deadline). A slow fetch that outlasts caller_wait but finishes
+    // within op_deadline must (a) let the caller return NotFound promptly, and
+    // (b) still land and publish for the next lookup.
+    let mesh = TestMesh::new_with(2, |cfg| {
+        cfg.op_deadline = Duration::from_millis(2000);
+        cfg.caller_wait = Some(Duration::from_millis(50));
+    });
+    assert!(
+        mesh.await_discovery(Duration::from_secs(15)),
+        "mesh did not form"
+    );
+
+    // Node 1 holds key 70 but serves slower than caller_wait (50ms) yet well
+    // within op_deadline (2000ms).
+    mesh.worlds[1].with_memory(70, 4096);
+    mesh.worlds[1].set_serve_delay(Duration::from_millis(300));
+
+    let rl: Arc<dyn IRemoteLookup + Send + Sync> =
+        query_interface!(Arc::clone(&mesh.nodes[0]), IRemoteLookup).unwrap();
+
+    let start = Instant::now();
+    let results = rl.batch_lookup(&[(70, 4096)]);
+    let waited = start.elapsed();
+
+    // (a) Returned on caller_wait, not op_deadline (and not the 300ms serve).
+    assert_eq!(results, vec![Err(interfaces::RemoteLookupError::NotFound)]);
+    assert!(
+        waited < Duration::from_millis(250),
+        "caller should return ~caller_wait (50ms), not op_deadline; waited {waited:?}"
+    );
+
+    // (b) The operation kept running after the caller left; publish-on-success
+    // makes the key resident on node 0 once the peer finishes serving.
+    let mut filled = false;
+    for _ in 0..100 {
+        if mesh.worlds[0].is_memory_resident(70) {
+            filled = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        filled,
+        "background op should publish the key after the caller returned"
+    );
+}
+
+#[test]
+fn stuck_orphan_is_force_reclaimed_after_teardown_timeout() {
+    // Backstop for a peer that neither reports a late RDMA_STATUS nor exits: the
+    // orphaned landing slot must be force-reclaimed once the teardown grace
+    // elapses — but only after the peer's QP is torn down (teardown-before-
+    // reclaim). Without the timer this slot would leak forever.
+    let mesh = TestMesh::new_with(2, |cfg| {
+        cfg.op_deadline = Duration::from_millis(150);
+        // Force-reclaim an orphan 200ms after the op finalizes.
+        cfg.connection_teardown_timeout = Duration::from_millis(200);
+    });
+    assert!(
+        mesh.await_discovery(Duration::from_secs(15)),
+        "mesh did not form"
+    );
+
+    // Node 1 holds key 88 but "serves" far longer than the whole test window, so
+    // no RDMA_STATUS ever comes back — the only reclaim path is the timer.
+    mesh.worlds[1].with_memory(88, 4096);
+    mesh.worlds[1].set_serve_delay(Duration::from_secs(30));
+
+    let rl: Arc<dyn IRemoteLookup + Send + Sync> =
+        query_interface!(Arc::clone(&mesh.nodes[0]), IRemoteLookup).unwrap();
+    let results = rl.batch_lookup(&[(88, 4096)]);
+    assert_eq!(
+        results,
+        vec![Err(interfaces::RemoteLookupError::NotFound)],
+        "op should time out with the fetch still in flight"
+    );
+
+    // The slot must survive the op's finalize (SC-005) — no reclaim yet.
+    assert!(
+        mesh.worlds[0].has_reservation(88),
+        "orphaned slot must survive finalize while the peer is still live"
+    );
+
+    // After the teardown grace, the timer severs the peer and reclaims the slot.
+    // (Node 1 never sent a status, so only the timer can have freed it.)
+    let mut reclaimed = false;
+    for _ in 0..100 {
+        if !mesh.worlds[0].has_reservation(88) {
+            reclaimed = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        reclaimed,
+        "orphan should be force-reclaimed after connection_teardown_timeout"
     );
 }

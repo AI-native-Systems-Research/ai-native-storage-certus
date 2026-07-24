@@ -40,7 +40,7 @@ fn leave_cluster(&self) -> Result<(), RemoteLookupError>;
 
 ### `join_cluster(endpoint) / leave_cluster()`
 
-Gossip-bind/connect the underlying zyre node to the cluster and join/leave the fixed group
+Gossip-bind/connect the underlying zyre node to the cluster and join/leave the configured group
 (FR-003). Idempotent; safe before/after activation.
 
 ## Provider obligations (behavioral)

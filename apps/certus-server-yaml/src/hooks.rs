@@ -147,14 +147,36 @@ pub fn init_remote_lookup(
         ..Default::default()
     };
 
-    if let Some(g) = env_str("CERTUS_RL_GROUP") {
-        cfg.group = g;
-    }
+    // Cluster membership: an explicit group (CLI --rl-group or CERTUS_RL_GROUP,
+    // resolved by clap in main) joins the named cluster; otherwise generate a
+    // process-unique group so this node forms its own single-node cluster and
+    // does not interfere with other users sharing the test fabric.
+    cfg.group = match &config.rl_group {
+        Some(g) => g.clone(),
+        None => {
+            let g = random_group();
+            eprintln!(
+                "remote-lookup: no --rl-group/CERTUS_RL_GROUP set; using isolated \
+                 group \"{g}\" (single-node). Set --rl-group to cluster nodes."
+            );
+            g
+        }
+    };
     if let Some(ms) = env_parse::<u64>("CERTUS_RL_OP_DEADLINE_MS") {
         cfg.op_deadline = Duration::from_millis(ms);
     }
     if let Some(ms) = env_parse::<u64>("CERTUS_RL_PHASE1_MS") {
         cfg.phase1_timeout = Duration::from_millis(ms);
+    }
+    // How long batch_lookup blocks the caller (decoupled from op_deadline). Unset
+    // keeps the caller coupled to op_deadline; set it shorter for async fill.
+    if let Some(ms) = env_parse::<u64>("CERTUS_RL_CALLER_WAIT_MS") {
+        cfg.caller_wait = Some(Duration::from_millis(ms));
+    }
+    // Grace after finalize before an orphaned landing slot is force-reclaimed
+    // (peer QP torn down, then buffer freed).
+    if let Some(ms) = env_parse::<u64>("CERTUS_RL_TEARDOWN_MS") {
+        cfg.connection_teardown_timeout = Duration::from_millis(ms);
     }
     if let Some(pct) = env_parse::<u8>("CERTUS_RL_QUORUM_PCT") {
         cfg.quorum_pct = pct;
@@ -175,6 +197,19 @@ pub fn init_remote_lookup(
     iface
         .initialize(cfg)
         .map_err(|e| format!("RemoteLookup init failed: {e}"))
+}
+
+/// Generate a process-unique zyre group so an unconfigured node forms its own
+/// single-node cluster instead of colliding with other users' nodes on a shared
+/// test fabric. Uses PID + wall-clock nanoseconds — no extra crate dependency.
+fn random_group() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let pid = std::process::id();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("remote_lookup_{pid:x}_{nanos:x}")
 }
 
 /// Read an environment variable, treating unset or empty as absent.

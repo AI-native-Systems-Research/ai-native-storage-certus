@@ -18,7 +18,7 @@
 
 use std::collections::VecDeque;
 use std::ffi::CString;
-use std::os::raw::c_int;
+use std::os::raw::{c_int, c_uint};
 use std::ptr;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -38,6 +38,36 @@ const MAX_EPOLL_EVENTS: usize = 8;
 const TAG_CM: u64 = 1;
 const TAG_CMD: u64 = 2;
 const TAG_STOP: u64 = 3;
+const TAG_ASYNC: u64 = 4;
+
+/// Human-readable name for an `ibv_event_type` (device async events). Only the
+/// events worth acting on during a transfer are named; the rest log as their
+/// numeric code. QP_FATAL/QP_REQ_ERR/QP_ACCESS_ERR on a child QP are the
+/// responder-side signature of an initiator transport `RETRY_EXC`.
+fn async_event_name(etype: c_int) -> &'static str {
+    match etype {
+        0 => "CQ_ERR",
+        1 => "QP_FATAL",
+        2 => "QP_REQ_ERR",
+        3 => "QP_ACCESS_ERR",
+        4 => "COMM_EST",
+        5 => "SQ_DRAINED",
+        6 => "PATH_MIG",
+        7 => "PATH_MIG_ERR",
+        8 => "DEVICE_FATAL",
+        9 => "PORT_ACTIVE",
+        10 => "PORT_ERR",
+        11 => "LID_CHANGE",
+        12 => "PKEY_CHANGE",
+        13 => "SM_CHANGE",
+        14 => "SRQ_ERR",
+        15 => "SRQ_LIMIT_REACHED",
+        16 => "QP_LAST_WQE_REACHED",
+        17 => "CLIENT_REREGISTER",
+        18 => "GID_CHANGE",
+        _ => "UNKNOWN",
+    }
+}
 
 /// Discover the IPv4 of the first RDMA device with an active port — the default
 /// bind address when none is configured. The RoCE IPv4 is read from the port's
@@ -313,6 +343,18 @@ impl RealCmSeam {
             epoll_add(epfd, cmd_eventfd, TAG_CMD);
             epoll_add(epfd, stop_eventfd, TAG_STOP);
 
+            // Diagnostic: watch the device async-event fd so QP async errors on
+            // child queue pairs (IBV_EVENT_QP_FATAL etc.) are observed the moment
+            // the HCA raises them. The fd belongs to `ctx` and is NOT closed by
+            // this seam (epoll drops it when `epfd` closes). Best-effort — if it
+            // can't be made non-blocking we simply skip it.
+            let async_fd = ffi::responder_async_fd(ctx);
+            if async_fd >= 0 {
+                let af = ffi::fcntl(async_fd, ffi::F_GETFL, 0);
+                ffi::fcntl(async_fd, ffi::F_SETFL, af | ffi::O_NONBLOCK);
+                epoll_add(epfd, async_fd, TAG_ASYNC);
+            }
+
             // Bridge the SPSC command inbox (no fd) onto the command eventfd.
             let cmd_queue: CommandQueue = Arc::new(Mutex::new(VecDeque::new()));
             let bridge_queue = Arc::clone(&cmd_queue);
@@ -381,14 +423,42 @@ impl RealCmSeam {
                         }
                     }
                 }
-                // ESTABLISHED / DISCONNECTED / others: ack and ignore — teardown
-                // is command-driven, not peer-driven.
+                // ESTABLISHED / DISCONNECTED / others: ack and ignore — teardown is
+                // command-driven, not peer-driven.
                 _ => {
                     ffi::rdma_ack_cm_event(event);
                 }
             }
         }
         out
+    }
+
+    /// Drain and log all pending device async events (diagnostic, non-blocking).
+    /// A child QP raising `QP_FATAL`/`QP_REQ_ERR`/`QP_ACCESS_ERR` here is the
+    /// responder-side signature of the initiator seeing a transport `RETRY_EXC`,
+    /// so surfacing it pins the failure to this side of the connection.
+    ///
+    /// # Safety
+    /// `self.listen_id` must be live (guaranteed for the seam's lifetime); its
+    /// `verbs` context owns the async-event queue for every child QP.
+    unsafe fn drain_async_events(&self) {
+        let ctx = (*self.listen_id).verbs;
+        if ctx.is_null() {
+            return;
+        }
+        loop {
+            let mut qp_num: c_uint = 0;
+            let etype = ffi::responder_drain_async_event(ctx, &mut qp_num);
+            if etype < 0 {
+                break; // nothing queued
+            }
+            eprintln!(
+                "remote-lookup-rdma-responder: async event {} ({}) qp_num={}",
+                etype,
+                async_event_name(etype),
+                qp_num
+            );
+        }
     }
 
     /// Create the child queue pair on the shared PD/CQ and accept the connection.
@@ -466,6 +536,11 @@ impl CmListener for RealCmSeam {
                     TAG_CM => {
                         // SAFETY: seam pointers are live for its whole lifetime.
                         out.extend(unsafe { self.drain_cm_events() });
+                    }
+                    TAG_ASYNC => {
+                        // SAFETY: listen_id (and its verbs ctx) is live for the
+                        // seam's lifetime. Produces no CmEvent — logs only.
+                        unsafe { self.drain_async_events() };
                     }
                     _ => {}
                 }
