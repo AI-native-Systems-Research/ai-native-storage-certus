@@ -20,6 +20,13 @@
 #   --object-size SIZE   Per-key size, e.g. 64K/4M (default 1M).
 #   --server-args "..."  Args passed to every server, esp. device selection
 #                        (default "--drive-count 1"). [CERTUS_TEST_SERVER_ARGS]
+#                        NOTE: --format is ALWAYS appended (whatever you pass
+#                        here) — it wipes the extent managers on startup so each
+#                        run gets a clean keyspace. Without it, keys populated by
+#                        a prior run persist on the NVMe drives (recovered at
+#                        startup) and populate fails with "key already exists".
+#                        The test cannot run correctly without it, so it is not
+#                        optional.
 #   --verify             Check DMA'd bytes match the holder's per-key pattern.
 #   --python PATH        Python interpreter on each node (default python3).
 #   -h, --help           Show this help.
@@ -27,13 +34,30 @@
 # Environment:
 #   CERTUS_SERVER_BIN        certus-server-yaml path on each node
 #                            (default <repo>/target/release/certus-server-yaml)
+#   CERTUS_LD_LIBRARY_PATH   dirs holding libzyre/libczmq/libzmq on each node
+#                            (default <repo>/deps/zyre-build/{lib,lib64}); the
+#                            server binary is not rpath'd against them.
 #   CERTUS_TEST_GROUP        shared zyre group (default clustertest_<uid>_<pid>,
 #                            unique so concurrent testers do not collide)
 #   CERTUS_TEST_GRPC_PORT    gRPC listen port on every node (default 50051)
 #   CERTUS_RDMA_BIND_IP      RoCE IPv4 the responder binds (default: auto-detect)
-#   CERTUS_RL_OP_DEADLINE_MS overall op deadline (default 2000; the built-in
-#                            50ms is too low for cold RDMA connects)
+#   CERTUS_RL_OP_DEADLINE_MS overall op deadline (default 5000; the built-in
+#                            50ms is too low for cold RDMA connects). This is how
+#                            long the actor keeps fetching/retrying + publishing,
+#                            NOT how long the caller blocks (see CALLER_WAIT_MS).
 #   CERTUS_RL_PHASE1_MS      Phase-1 memory-quorum timeout (default 500)
+#   CERTUS_RL_CALLER_WAIT_MS how long batch_lookup blocks the caller before
+#                            returning NotFound (default: empty = coupled to
+#                            op_deadline, so this single-pass test waits for each
+#                            key). Set a short value to exercise the async-fill
+#                            path (caller returns fast, background op fills the
+#                            cache); a single-pass run then reports cold-connect
+#                            misses, which is expected, not a failure.
+#   CERTUS_RL_TEARDOWN_MS    grace after finalize before an orphaned landing slot
+#                            is force-reclaimed (peer QP torn down, then freed)
+#                            (default 2000). Empty = server default (1000).
+#   CERTUS_TEST_RUST_LOG     RUST_LOG level for every launched server
+#                            (default info; set debug for per-write RDMA traces)
 #   CERTUS_TEST_SSH_OPTS     extra ssh options
 #
 # Prerequisites (per node, same as tools/rdma-test/scripts/launch.sh style):
@@ -53,12 +77,33 @@ PYDIR="$REPO_ROOT/apps/python"
 
 # --- defaults (env-overridable) ---
 SERVER_BIN="${CERTUS_SERVER_BIN:-$REPO_ROOT/target/release/certus-server-yaml}"
+# The binary is NOT rpath'd against the in-tree zyre/czmq/zmq build, so every
+# launched server needs these on its LD_LIBRARY_PATH. Split across lib/ (zyre,
+# czmq) and lib64/ (zmq). Assumes the same repo layout on every node, exactly
+# like the SERVER_BIN same-path assumption above.
+LIB_PATH="${CERTUS_LD_LIBRARY_PATH:-$REPO_ROOT/deps/zyre-build/lib:$REPO_ROOT/deps/zyre-build/lib64}"
 GROUP="${CERTUS_TEST_GROUP:-clustertest_${UID:-$(id -u)}_$$}"
 GRPC_PORT="${CERTUS_TEST_GRPC_PORT:-50051}"
 RDMA_BIND_IP="${CERTUS_RDMA_BIND_IP:-}"
-OP_DEADLINE_MS="${CERTUS_RL_OP_DEADLINE_MS:-2000}"
+OP_DEADLINE_MS="${CERTUS_RL_OP_DEADLINE_MS:-5000}"
 PHASE1_MS="${CERTUS_RL_PHASE1_MS:-500}"
+# Caller-wait (short) and connection-teardown grace (long), decoupled from the
+# op deadline. CALLER_WAIT defaults to EMPTY so the caller stays coupled to
+# op_deadline — this test verifies the data path synchronously in a single pass,
+# so it must wait for each key. Set CERTUS_RL_CALLER_WAIT_MS to a short value to
+# exercise the async-fill path (the caller returns fast, the background op fills
+# the cache; a single-pass run then reports misses during a cold connect — that
+# is expected, not a failure). `${VAR-}` keeps an explicitly-empty value empty.
+CALLER_WAIT_MS="${CERTUS_RL_CALLER_WAIT_MS-}"
+TEARDOWN_MS="${CERTUS_RL_TEARDOWN_MS:-2000}"
 SERVER_ARGS="${CERTUS_TEST_SERVER_ARGS:---drive-count 1}"
+# --format is mandatory (clean keyspace per run) and always appended to whatever
+# device-selection args the caller chose. Append only if absent so a caller who
+# includes it explicitly does not pass a duplicate flag.
+case " $SERVER_ARGS " in
+    *" --format "*) ;;
+    *) SERVER_ARGS="$SERVER_ARGS --format" ;;
+esac
 KEYS="1-16"
 OBJECT_SIZE="1M"
 VERIFY=""
@@ -139,7 +184,11 @@ log "Keys:      $KEYS   object-size: $OBJECT_SIZE"
 log "Server args: $SERVER_ARGS"
 
 # --- 1. Launch a server on every node, all sharing $GROUP (beacon discovery) ---
-REMOTE_ENV="CERTUS_RL_OP_DEADLINE_MS=$OP_DEADLINE_MS CERTUS_RL_PHASE1_MS=$PHASE1_MS"
+# LD_LIBRARY_PATH is expanded by the REMOTE shell (\$ is escaped here) so we
+# prepend our deps dirs without discarding whatever the node already sets.
+REMOTE_ENV="RUST_LOG=${CERTUS_TEST_RUST_LOG:-info} LD_LIBRARY_PATH=\"$LIB_PATH:\${LD_LIBRARY_PATH:-}\" CERTUS_RL_OP_DEADLINE_MS=$OP_DEADLINE_MS CERTUS_RL_PHASE1_MS=$PHASE1_MS"
+[[ -n "$CALLER_WAIT_MS" ]] && REMOTE_ENV="$REMOTE_ENV CERTUS_RL_CALLER_WAIT_MS=$CALLER_WAIT_MS"
+[[ -n "$TEARDOWN_MS" ]] && REMOTE_ENV="$REMOTE_ENV CERTUS_RL_TEARDOWN_MS=$TEARDOWN_MS"
 [[ -n "$RDMA_BIND_IP" ]] && REMOTE_ENV="$REMOTE_ENV CERTUS_RDMA_BIND_IP=$RDMA_BIND_IP"
 
 for node in "${NODES[@]}"; do
