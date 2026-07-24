@@ -168,6 +168,16 @@ pub fn init_remote_lookup(
     if let Some(ms) = env_parse::<u64>("CERTUS_RL_PHASE1_MS") {
         cfg.phase1_timeout = Duration::from_millis(ms);
     }
+    // How long batch_lookup blocks the caller (decoupled from op_deadline). Unset
+    // keeps the caller coupled to op_deadline; set it shorter for async fill.
+    if let Some(ms) = env_parse::<u64>("CERTUS_RL_CALLER_WAIT_MS") {
+        cfg.caller_wait = Some(Duration::from_millis(ms));
+    }
+    // Grace after finalize before an orphaned landing slot is force-reclaimed
+    // (peer QP torn down, then buffer freed).
+    if let Some(ms) = env_parse::<u64>("CERTUS_RL_TEARDOWN_MS") {
+        cfg.connection_teardown_timeout = Duration::from_millis(ms);
+    }
     if let Some(pct) = env_parse::<u8>("CERTUS_RL_QUORUM_PCT") {
         cfg.quorum_pct = pct;
     }
