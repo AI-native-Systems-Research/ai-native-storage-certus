@@ -17,6 +17,8 @@ mapping:
 
 from __future__ import annotations
 
+import collections
+import os
 import sys
 from collections.abc import Iterable
 
@@ -56,12 +58,120 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         self._store_dropped_blocks = 0
         self._store_drop_log_next = 1000
 
+        # Distribution of the `keys` batch length, tracked separately for
+        # prepare_store and prepare_load. Keyed by exact length so percentiles
+        # are exact. The distribution is flushed (printed + reset) per benchmark
+        # *conversation round*: this manager runs scheduler-side in vLLM's
+        # EngineCore process, a different process from the benchmark driver that
+        # loops llm.generate(), so the driver signals the current round by
+        # writing an integer to the file named by CERTUS_ROUND_FILE (inherited
+        # across the EngineCore spawn). When that value advances, we print the
+        # round that just ended and start fresh. Without the env var the samples
+        # simply accumulate and are printed once at shutdown().
+        self._round_signal_path = os.environ.get("CERTUS_ROUND_FILE")
+        self._current_round = 0
+        self._key_len_counts = {
+            "prepare_store": collections.Counter(),
+            "prepare_load": collections.Counter(),
+        }
+        self._key_dist_total = {"prepare_store": 0, "prepare_load": 0}
+
     def set_block_size_bytes(self, block_size_bytes: int) -> None:
         """Update the per-block Reserve size once the true KV-cache tensor
         stride is known (the manager is constructed before get_handlers can
         resolve it). Reserve sizes are per-call, so changing this affects only
         subsequent stores."""
         self._block_size_bytes = int(block_size_bytes)
+
+    # ── instrumentation ──
+
+    def _read_round(self) -> int:
+        """Read the current benchmark round from the signal file. Returns the
+        last known round on any error (path unset, file missing, or an empty
+        read caught mid-write by the driver)."""
+        if not self._round_signal_path:
+            return self._current_round
+        try:
+            with open(self._round_signal_path) as f:
+                return int(f.read().strip() or self._current_round)
+        except (OSError, ValueError):
+            return self._current_round
+
+    def _flush_distributions(self) -> None:
+        """Print and reset both ops' accumulated distributions."""
+        for op in ("prepare_store", "prepare_load"):
+            self._print_key_distribution(op)
+            self._key_len_counts[op].clear()
+            self._key_dist_total[op] = 0
+
+    def _maybe_roll_round(self) -> None:
+        """If the driver has advanced to a new conversation round, print the
+        distribution of the round that just ended and reset for the new one."""
+        r = self._read_round()
+        if r != self._current_round:
+            self._flush_distributions()
+            self._current_round = r
+
+    def _record_key_count(self, op: str, n: int) -> None:
+        """Record one observation of the `keys` batch length for ``op``
+        (``"prepare_store"`` or ``"prepare_load"``), first flushing the prior
+        round's distribution if the benchmark has moved on to a new round."""
+        self._maybe_roll_round()
+        self._key_len_counts[op][n] += 1
+        self._key_dist_total[op] += 1
+
+    def _print_key_distribution(self, op: str) -> None:
+        """Print a histogram (power-of-two buckets) plus summary stats for the
+        distribution of ``op``'s `keys` batch lengths in the current round."""
+        counts = self._key_len_counts[op]
+        total = self._key_dist_total[op]
+        if not total:
+            return
+        rnd = self._current_round
+
+        lengths = sorted(counts)
+        min_len, max_len = lengths[0], lengths[-1]
+        total_keys = sum(n * c for n, c in counts.items())
+        mean = total_keys / total
+
+        def percentile(p: float) -> int:
+            target = p * total
+            cum = 0
+            for n in lengths:
+                cum += counts[n]
+                if cum >= target:
+                    return n
+            return max_len
+
+        # Aggregate exact lengths into power-of-two buckets for display:
+        # {0}, {1}, [2,3], [4,7], [8,15], ...
+        buckets: dict = {}
+        for n in lengths:
+            if n == 0:
+                lo, label = 0, "0"
+            else:
+                e = n.bit_length() - 1
+                lo, hi = 1 << e, (1 << (e + 1)) - 1
+                label = str(lo) if lo == hi else f"{lo}-{hi}"
+            slot = buckets.setdefault(lo, [label, 0])
+            slot[1] += counts[n]
+
+        peak = max(c for _, c in buckets.values())
+        bar_width = 40
+
+        lines = [
+            f"[certus-grpc] {op} keys-length distribution — round {rnd} "
+            f"({total} calls)",
+            f"  calls={total} keys_total={total_keys} min={min_len} "
+            f"max={max_len} mean={mean:.1f} p50={percentile(0.50)} "
+            f"p90={percentile(0.90)} p99={percentile(0.99)}",
+        ]
+        for lo in sorted(buckets):
+            label, c = buckets[lo]
+            bar = "#" * max(1, round(bar_width * c / peak))
+            pct = 100.0 * c / total
+            lines.append(f"  {label:>10} | {bar:<{bar_width}} {c:>10}  {pct:5.1f}%")
+        print("\n".join(lines), flush=True)
 
     # ── lookup / touch ──
 
@@ -82,13 +192,16 @@ class GrpcCertusOffloadingManager(OffloadingManager):
     ) -> PrepareStoreOutput | None:
         keys_list = list(keys)
         int_keys = _keys_to_u64s(keys_list)
+        self._record_key_count("prepare_store", len(keys_list))
 
         # Filter out keys already cached (consecutive dedup is vLLM's concern;
         # here we just avoid re-storing existing entries).
         check = self._stub.Check(pb.BatchCheckRequest(keys=int_keys))
         exists = {r.key: r.exists for r in check.results}
         to_store_pairs = [
-            (orig, k) for orig, k in zip(keys_list, int_keys) if not exists.get(k, False)
+            (orig, k)
+            for orig, k in zip(keys_list, int_keys)
+            if not exists.get(k, False)
         ]
 
         if not to_store_pairs:
@@ -126,9 +239,7 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         # positionally zips src GPU block ids with dst keys, deriving src order
         # from offload_keys filtered by keys_to_store — so store_spec must stay
         # in offload order for a partial subset to line up).
-        stored_pairs = [
-            (orig, k) for orig, k in to_store_pairs if k in reserved_ok
-        ]
+        stored_pairs = [(orig, k) for orig, k in to_store_pairs if k in reserved_ok]
         dropped = len(to_store_pairs) - len(stored_pairs)
         if dropped:
             self._note_store_drops(dropped)
@@ -183,8 +294,11 @@ class GrpcCertusOffloadingManager(OffloadingManager):
 
     # ── load ──
 
-    def prepare_load(self, keys: Iterable[OffloadKey], req_context=None) -> LoadStoreSpec:
+    def prepare_load(
+        self, keys: Iterable[OffloadKey], req_context=None
+    ) -> LoadStoreSpec:
         int_keys = _keys_to_u64s(keys)
+        self._record_key_count("prepare_load", len(int_keys))
         # Pin (promote=FALSE) only takes the eviction-protecting read-ref. We must
         # NOT ask Pin to promote: Pin's promote is async/fire-and-forget, and the
         # Lookup that immediately follows (in the load handler) already promotes
@@ -240,5 +354,6 @@ class GrpcCertusOffloadingManager(OffloadingManager):
             )
 
     def shutdown(self) -> None:
-        # Channel is owned by the spec singleton; nothing per-manager to close.
-        pass
+        # Flush the final (in-progress) round, which no later round-advance will
+        # trigger. Channel is owned by the spec singleton; nothing to close.
+        self._flush_distributions()

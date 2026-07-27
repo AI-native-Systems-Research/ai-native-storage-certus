@@ -134,6 +134,25 @@ if __name__ == "__main__":
             file=sys.stderr,
         )
 
+    # Signal conversation-round boundaries to the offloading manager, which
+    # runs in vLLM's EngineCore process (separate from this driver). We write
+    # the current round index to a small file; the manager reads it and flushes
+    # its per-round keys-length distribution when the value advances. Set the
+    # env var *before* constructing LLM so the spawned EngineCore inherits it.
+    import tempfile
+
+    _round_file = os.path.join(tempfile.gettempdir(), f"certus_round_{os.getpid()}")
+    os.environ["CERTUS_ROUND_FILE"] = _round_file
+    with open(_round_file, "w") as _rf:
+        _rf.write("0")
+
+    def signal_round(r: int) -> None:
+        try:
+            with open(_round_file, "w") as f:
+                f.write(str(r))
+        except OSError:
+            pass
+
     from vllm import LLM, SamplingParams
 
     print("Running across ", TENSOR_PARALLEL_SIZE, " GPUs")
@@ -228,6 +247,10 @@ if __name__ == "__main__":
         if not active_prompts:
             break
 
+        # Mark the round about to run so the manager attributes this round's
+        # prepare_store/prepare_load key batches to it and flushes the previous
+        # round's distribution.
+        signal_round(rounds_done + 1)
         outputs = llm.generate(active_prompts, sp)
         for j, out in enumerate(outputs):
             i = active_idx[j]
