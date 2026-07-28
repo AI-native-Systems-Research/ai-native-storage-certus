@@ -1,6 +1,7 @@
 # LMCache long_doc_qa benchmark — CLIENT image.
 #
-# long_doc_qa.py is a pure OpenAI-API client (vendored from LMCache @ dev):
+# long_doc_qa.py is a pure OpenAI-API client (fetched at build time from a
+# pinned LMCache commit — see the ADD below — not vendored into this repo):
 # it connects to an ALREADY-RUNNING vLLM / OpenAI-compatible server and drives
 # a long-document QA workload (generate N docs of --document-length "hi" tokens,
 # repeat them --repeat-count times to exercise prefix-cache / KV reuse, then
@@ -22,8 +23,10 @@
 #   docker run --rm --network host long-doc-qa-bench \
 #       --base-url http://localhost:8000/v1 --num-documents 16 --json-output
 #
-# Source: https://github.com/LMCache/LMCache/blob/dev/benchmarks/long_doc_qa/long_doc_qa.py
-# (Apache-2.0; upstream header preserved in long_doc_qa.py). Re-vendor to bump.
+# Source (Apache-2.0): LMCache benchmarks/long_doc_qa/long_doc_qa.py, pinned to
+# commit ed56197172aaf22d8806328c30f3923eddfa314c. To bump: change the commit in
+# the ADD URL and the sha256 in --checksum (compute with `sha256sum` on the new
+# file). The build fails on mismatch, so the pin is enforced.
 
 FROM docker.io/library/python:3.11-slim
 
@@ -35,7 +38,12 @@ RUN pip install --no-cache-dir \
         "matplotlib>=3.7,<4"
 
 WORKDIR /workspace
-COPY long_doc_qa.py /workspace/long_doc_qa.py
+# Fetch the workload client from a pinned LMCache commit, integrity-checked
+# against its sha256. --checksum makes the build fail if the remote bytes ever
+# change, so this is reproducible without vendoring the file into the repo.
+ADD --checksum=sha256:a998c801937023d804d2293da314e39fc71e6b68ecedccde5e3b11adeb251d6c \
+    https://raw.githubusercontent.com/LMCache/LMCache/ed56197172aaf22d8806328c30f3923eddfa314c/benchmarks/long_doc_qa/long_doc_qa.py \
+    /workspace/long_doc_qa.py
 COPY docker-entrypoint.sh /usr/local/bin/long-doc-qa-entrypoint
 RUN chmod +x /usr/local/bin/long-doc-qa-entrypoint
 

@@ -5,7 +5,7 @@ throughput/latency benchmark that exercises **KV-cache reuse** by repeating
 generated documents and measuring the second ("query") round against a cold
 warmup round.
 
-[src]: https://github.com/LMCache/LMCache/blob/dev/benchmarks/long_doc_qa/long_doc_qa.py
+[src]: https://github.com/LMCache/LMCache/blob/ed56197172aaf22d8806328c30f3923eddfa314c/benchmarks/long_doc_qa/long_doc_qa.py
 
 ## What it is
 
@@ -22,8 +22,10 @@ It **connects to an already-running server** — it does not start one and needs
 no GPU, model weights, or tokenizer. That makes this image reusable against
 **any** OpenAI-compatible backend: Certus, LMCache, CPU-offload, or plain vLLM.
 
-The script is vendored (`long_doc_qa.py`, Apache-2.0, upstream header intact),
-pinned to LMCache `dev`. Re-copy from upstream to bump.
+The script is **not vendored** — the image `ADD`s it at build time from a pinned
+LMCache commit (`ed56197…`, Apache-2.0) with a `sha256` checksum, so the build is
+reproducible and fails if the remote bytes change. To bump, update the commit +
+checksum in the `Dockerfile` (see the `ADD` there).
 
 ## Build
 
@@ -91,6 +93,5 @@ Output files (`warmup_round.csv`, `query_round.csv`, optional PNGs) land in
 - **`--help` crashes** with `ValueError: incomplete format`. This is an upstream
   bug in `long_doc_qa.py` (the `--trim-fraction` help text contains bare `%`
   signs that argparse tries to interpret). It only affects `--help`; every real
-  run is fine. Use the flag/env table above instead of `--help`. The vendored
-  script is kept byte-for-byte identical to upstream, so this is intentionally
-  not patched here.
+  run is fine. Use the flag/env table above instead of `--help`. The script is
+  fetched verbatim from the pinned upstream commit (not patched here).
