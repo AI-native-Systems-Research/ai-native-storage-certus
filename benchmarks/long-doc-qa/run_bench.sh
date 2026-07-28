@@ -31,12 +31,17 @@ set -euo pipefail
 
 # ---- workload params (defaults = the requested calibration run) ----------
 MODEL=${MODEL:-NousResearch/Meta-Llama-3-8B}
-NUM_DOCUMENTS=${NUM_DOCUMENTS:-5}
+# Defaults = the tier-exercising run: 51 docs x 10k tokens overflows the GPU KV
+# budget so evicted blocks are re-fetched from the offload tier (External prefix
+# cache hit ~100%), unlike 5 docs where the working set stays GPU-resident and
+# Certus is written but never read. out=100 + 4-way inflight give a realistic
+# generation-bound wall clock. See results/certus-51docs/.
+NUM_DOCUMENTS=${NUM_DOCUMENTS:-51}
 DOCUMENT_LENGTH=${DOCUMENT_LENGTH:-10000}
-OUTPUT_LEN=${OUTPUT_LEN:-1}
+OUTPUT_LEN=${OUTPUT_LEN:-100}
 REPEAT_COUNT=${REPEAT_COUNT:-1}
 REPEAT_MODE=${REPEAT_MODE:-tile}
-MAX_INFLIGHT_REQUESTS=${MAX_INFLIGHT_REQUESTS:-1}
+MAX_INFLIGHT_REQUESTS=${MAX_INFLIGHT_REQUESTS:-4}
 
 # ---- server / client plumbing --------------------------------------------
 PORT=${PORT:-8000}
@@ -75,12 +80,44 @@ READY_TIMEOUT=${READY_TIMEOUT:-600}     # seconds to wait for model load
 # prefix-cache hit rate. Must exceed vLLM's ~10s stats-logging interval.
 STATS_SETTLE=${STATS_SETTLE:-15}
 
+# ---- KV-offload connector (optional) --------------------------------------
+# CONNECTOR=none   -> plain baseline vLLM (the control; default).
+# CONNECTOR=certus -> attach Certus' gRPC OffloadingConnector. The certus-server
+#   must ALREADY be running on the host (target/release/certus-server ...
+#   --listen 0.0.0.0:50051 --format) — this script does NOT start it. Requires:
+#     * the connector-equipped image (certus-grpc-bench = vllm-openai + the
+#       certus_grpc_connector package). Its ENTRYPOINT runs the multiturn driver,
+#       so we reset it to `vllm serve` below.
+#     * --ipc=host, so the host certus-server can open the CUDA IPC handles the
+#       container's vLLM process exports for its KV cache.
+#   With --network host the container's localhost IS the host, so the default
+#   CERTUS_SERVER=localhost:50051 reaches the server.
+CONNECTOR=${CONNECTOR:-none}
+CERTUS_SERVER=${CERTUS_SERVER:-localhost:50051}
+# MUST be >= the per-block Reserve stride (block_bytes = KV page_size x num_layers,
+# e.g. 917504 for Qwen2.5-7B). If slab_size < block_bytes the server's CopyToStore
+# D2H bounds check fails on every block and offload silently dies (see the
+# certus-grpc CopyToStore size bug). 2 MiB clears Qwen; bump for larger models.
+SLAB_SIZE_BYTES=${SLAB_SIZE_BYTES:-2097152}
+ENFORCE_EAGER=${ENFORCE_EAGER:-1}       # connectors are more robust without cudagraphs
+
 ENGINE=${ENGINE:-podman}
-SERVER_IMAGE=${SERVER_IMAGE:-docker.io/vllm/vllm-openai:v0.20.0}
+# Connector-aware defaults: Certus needs the connector-equipped image (stock
+# vllm-openai lacks certus_grpc_connector) and its own result/container names.
+if [ "${CONNECTOR}" = "certus" ]; then
+    _def_server_image=localhost/certus-grpc-bench:latest
+    _def_server_name=ldq-vllm-certus
+    _def_results=$PWD/results/certus-smoke
+else
+    _def_server_image=docker.io/vllm/vllm-openai:v0.20.0
+    _def_server_name=ldq-vllm-llama3
+    _def_results=$PWD/results/llama3-smoke
+fi
+SERVER_IMAGE=${SERVER_IMAGE:-$_def_server_image}
 CLIENT_IMAGE=${CLIENT_IMAGE:-localhost/long-doc-qa-bench:latest}
-SERVER_NAME=${SERVER_NAME:-ldq-vllm-llama3}
+SERVER_NAME=${SERVER_NAME:-$_def_server_name}
 HF_CACHE=${HF_CACHE:-$HOME/.cache/huggingface}
-RESULTS=${RESULTS:-$PWD/results/llama3-smoke}
+RESULTS=${RESULTS:-$_def_results}
 
 mkdir -p "$RESULTS"
 
@@ -92,9 +129,26 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# ---- 1. launch baseline vLLM OpenAI server (unless SERVE=0) ---------------
+# ---- connector-specific podman + vLLM flags -------------------------------
+# server_extra_run  : extra `podman run` flags (placed among the run flags,
+#                     BEFORE the image); server_extra_args : extra vLLM CLI args
+#                     (placed AFTER the image). entrypoint_flag resets the
+#                     connector image's driver ENTRYPOINT back to `vllm serve`.
+server_extra_run=()
+server_extra_args=()
+entrypoint_flag=()
+if [ "${CONNECTOR}" = "certus" ]; then
+    entrypoint_flag=(--entrypoint '["vllm","serve"]')
+    server_extra_run+=(--ipc=host)
+    kv_cfg="{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_connector_extra_config\":{\"spec_name\":\"CertusGrpcOffloadingSpec\",\"spec_module_path\":\"certus_grpc_connector.spec\",\"server\":\"${CERTUS_SERVER}\",\"slab_size_bytes\":${SLAB_SIZE_BYTES}}}"
+    server_extra_args+=(--kv-transfer-config "${kv_cfg}")
+    [ "${ENFORCE_EAGER}" = "1" ] && server_extra_args+=(--enforce-eager)
+fi
+
+# ---- 1. launch vLLM OpenAI server (unless SERVE=0) ------------------------
 if [ "${SERVE}" = "1" ]; then
-    echo ">> launching baseline vLLM server for ${MODEL} on :${PORT}" >&2
+    echo ">> launching vLLM server (connector=${CONNECTOR}) for ${MODEL} on :${PORT}" >&2
+    [ "${CONNECTOR}" = "certus" ] && echo ">> Certus offload -> ${CERTUS_SERVER} (slab=${SLAB_SIZE_BYTES}B); server must be up" >&2
     ${ENGINE} rm -f "${SERVER_NAME}" >/dev/null 2>&1 || true
     # host networking: rootless-podman `-p` publishing is unreliable on this
     # box, and the client already uses --network host — so bind vLLM straight
@@ -102,6 +156,8 @@ if [ "${SERVE}" = "1" ]; then
     ${ENGINE} run -d --name "${SERVER_NAME}" \
         --device "nvidia.com/gpu=${GPU}" \
         --network host \
+        "${server_extra_run[@]}" \
+        "${entrypoint_flag[@]}" \
         -v "${HF_CACHE}:/root/.cache/huggingface:z" \
         -e HF_HUB_OFFLINE=1 \
         -e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
@@ -116,6 +172,7 @@ if [ "${SERVE}" = "1" ]; then
         --gpu-memory-utilization "${GPU_MEM_UTIL}" \
         --enable-prefix-caching \
         --enable-log-requests \
+        "${server_extra_args[@]}" \
         --port "${PORT}" >/dev/null
     echo ">> waiting up to ${READY_TIMEOUT}s for /v1/models ..." >&2
     deadline=$((SECONDS + READY_TIMEOUT))
