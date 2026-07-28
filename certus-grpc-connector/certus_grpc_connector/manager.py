@@ -45,6 +45,34 @@ def _keys_to_u64s(keys: Iterable[OffloadKey]) -> list[int]:
     return [_key_to_u64(k) for k in keys]
 
 
+def _select_dist_ops(value: str | None) -> tuple[str, ...]:
+    """Resolve CERTUS_KEY_DIST_OP into the tuple of ops whose keys-length
+    distribution should be collected. Accepts "prepare_store"/"store" or
+    "prepare_load"/"load" for a single op; unset, empty, or "both"/"all"
+    collects both. An unrecognized value falls back to both with a warning."""
+    both = ("prepare_store", "prepare_load")
+    if value is None:
+        return both
+    key = value.strip().lower()
+    aliases = {
+        "prepare_store": "prepare_store",
+        "store": "prepare_store",
+        "prepare_load": "prepare_load",
+        "load": "prepare_load",
+    }
+    if key in ("", "both", "all"):
+        return both
+    if key in aliases:
+        return (aliases[key],)
+    print(
+        f"[certus-grpc] ignoring unrecognized CERTUS_KEY_DIST_OP={value!r} "
+        f"(use prepare_store|store|prepare_load|load|both); collecting both",
+        file=sys.stderr,
+        flush=True,
+    )
+    return both
+
+
 class GrpcCertusOffloadingManager(OffloadingManager):
     """Manager delegating to a remote certus-server via a DispatcherStub."""
 
@@ -75,6 +103,12 @@ class GrpcCertusOffloadingManager(OffloadingManager):
             "prepare_load": collections.Counter(),
         }
         self._key_dist_total = {"prepare_store": 0, "prepare_load": 0}
+        # Which op(s) to collect the distribution for. Set CERTUS_KEY_DIST_OP to
+        # "prepare_store"/"store" or "prepare_load"/"load" to restrict collection
+        # to a single op; unset (or "both"/"all") collects both.
+        self._key_dist_ops = _select_dist_ops(
+            os.environ.get("CERTUS_KEY_DIST_OP")
+        )
 
     def set_block_size_bytes(self, block_size_bytes: int) -> None:
         """Update the per-block Reserve size once the true KV-cache tensor
@@ -98,8 +132,8 @@ class GrpcCertusOffloadingManager(OffloadingManager):
             return self._current_round
 
     def _flush_distributions(self) -> None:
-        """Print and reset both ops' accumulated distributions."""
-        for op in ("prepare_store", "prepare_load"):
+        """Print and reset the accumulated distributions of the enabled ops."""
+        for op in self._key_dist_ops:
             self._print_key_distribution(op)
             self._key_len_counts[op].clear()
             self._key_dist_total[op] = 0
@@ -115,8 +149,14 @@ class GrpcCertusOffloadingManager(OffloadingManager):
     def _record_key_count(self, op: str, n: int) -> None:
         """Record one observation of the `keys` batch length for ``op``
         (``"prepare_store"`` or ``"prepare_load"``), first flushing the prior
-        round's distribution if the benchmark has moved on to a new round."""
+        round's distribution if the benchmark has moved on to a new round.
+
+        Rounds still roll on every call so round boundaries stay accurate even
+        when only the other op is enabled; the sample itself is recorded only
+        for ops selected via CERTUS_KEY_DIST_OP."""
         self._maybe_roll_round()
+        if op not in self._key_dist_ops:
+            return
         self._key_len_counts[op][n] += 1
         self._key_dist_total[op] += 1
 
