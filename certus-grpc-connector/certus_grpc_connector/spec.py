@@ -55,21 +55,65 @@ class CertusGrpcOffloadingSpec(OffloadingSpec):
         )
         gpu_bs = self.gpu_block_size[0]
         self._offloaded_block_size = gpu_bs * self.block_size_factor
-        # slab_size_bytes is only a *fallback* for the Reserve allocation size
-        # used before the KV-cache tensor stride is known (get_manager can run
-        # before get_handlers). It must NOT be used as the per-block transfer
-        # size: the real per-block byte size is the tensor's stride(0), and the
-        # server addresses blocks at block_id * stride. Copying more than stride
-        # per block overruns the IPC allocation (H2D "invalid argument") and
-        # corrupts neighbouring blocks. See _extract_gpu_ptrs / get_handlers.
+
+        # Per-block Reserve size. CRITICAL: the manager (which issues Reserve) and
+        # the handlers (which issue the GPU->DRAM copy) live in SEPARATE spec
+        # instances — vLLM instantiates the connector twice, once per role
+        # (scheduler builds the manager, worker builds the handlers). The
+        # scheduler-side instance NEVER calls get_handlers, so it can't learn the
+        # KV tensor stride; if the manager Reserves a slot smaller than the copy
+        # size, the server's D2H copy fails its bounds check ("size (X) exceeds
+        # destination buffer length (Y)") for EVERY block and nothing is ever
+        # cached — silently, because the store handler must report success.
+        #
+        # So derive the true per-block byte size from the KV-cache config here
+        # (available to BOTH roles at construction), not from the tensor. It is
+        # the offloaded page size = per-GPU-block page_size_bytes * block_size_factor.
+        # slab_size_bytes is a last-resort fallback only.
         self._slab_size_bytes = int(self.extra_config.get("slab_size_bytes", 131072))
-        self._block_bytes: int | None = None
+        self._block_bytes: int | None = self._block_bytes_from_config(kv_cache_config)
         self._server = str(self.extra_config.get("server", "localhost:50051"))
 
         self._stub = None
         self._manager: GrpcCertusOffloadingManager | None = None
         self._gpu_to_certus: GpuToCertusHandler | None = None
         self._certus_to_gpu: CertusToGpuHandler | None = None
+
+    def _block_bytes_from_config(self, kv_cache_config: KVCacheConfig) -> int | None:
+        """True offloaded per-block size in bytes, derived from the KV-cache
+        config (not the GPU tensor, which only the worker role can see).
+
+        = per-GPU-block ``page_size_bytes`` * ``block_size_factor``. Returns
+        None if the config can't be read, in which case get_manager falls back
+        to slab_size_bytes."""
+        try:
+            groups = kv_cache_config.kv_cache_groups
+            if len(groups) != 1:
+                return None
+            # page_size_bytes is PER LAYER (2 * block_size * kv_heads * head_dim
+            # * dtype). This connector offloads one GPU block across ALL layers
+            # in the group per key — the KV tensor's stride(0) spans every layer
+            # — so the per-block Reserve size is page_size_bytes * num_layers.
+            # (Confirmed: granite 65536/layer * 40 layers = 2621440 = stride(0).)
+            num_layers = len(groups[0].layer_names)
+            page = int(groups[0].kv_cache_spec.page_size_bytes)
+            block_bytes = page * num_layers * self.block_size_factor
+            print(
+                f"[certus-grpc] per-block Reserve size from KV-cache config: "
+                f"page_size_bytes={page} * num_layers={num_layers} * "
+                f"block_size_factor={self.block_size_factor} = {block_bytes} bytes",
+                flush=True,
+            )
+            return block_bytes
+        except Exception as e:  # noqa: BLE001 - fall back to slab_size_bytes
+            print(
+                f"[certus-grpc] WARNING: could not derive per-block size from "
+                f"KV-cache config ({e}); falling back to slab_size_bytes "
+                f"{self._slab_size_bytes}. If it is smaller than the real block, "
+                f"stores will fail their D2H bounds check.",
+                flush=True,
+            )
+            return None
 
     def _get_stub(self):
         if self._stub is None:
@@ -104,19 +148,27 @@ class CertusGrpcOffloadingSpec(OffloadingSpec):
             # stride: the server addresses each block at block_id * stride, and
             # the handlers map one block_id per key (1:1). Copying `stride` bytes
             # per block is the only size that stays within each block's extent
-            # in the IPC allocation. Do NOT use slab_size_bytes here.
+            # in the IPC allocation. This is the authoritative COPY size.
             block_bytes = stride
-            self._block_bytes = block_bytes
-            if self._manager is not None:
-                # Manager was created before the stride was known; correct its
-                # Reserve size so DRAM/SSD slots match the actual block size.
-                self._manager.set_block_size_bytes(block_bytes)
-            if block_bytes > self._slab_size_bytes:
+            # Cross-check against the config-derived Reserve size the manager
+            # uses (a DIFFERENT spec instance in the scheduler role). If these
+            # disagree, the server will Reserve a slot that doesn't match the
+            # copy and every store fails its D2H bounds check — the exact
+            # silent-offload bug this connector hit on the granite model swap.
+            if self._block_bytes is not None and self._block_bytes != block_bytes:
                 print(
-                    f"[certus-grpc] WARNING: per-block size {block_bytes} exceeds "
-                    f"slab_size_bytes {self._slab_size_bytes}; using {block_bytes}",
+                    f"[certus-grpc] WARNING: tensor stride {block_bytes} != "
+                    f"config-derived Reserve size {self._block_bytes}. Reserve "
+                    f"slots will not match the copy size and stores may fail "
+                    f"their D2H bounds check. Using {block_bytes} for the copy.",
                     flush=True,
                 )
+            self._block_bytes = block_bytes
+            if self._manager is not None:
+                # If a manager exists in this instance, keep its Reserve size in
+                # sync with the copy size (belt-and-suspenders; the scheduler-role
+                # instance already sized itself from the config in __init__).
+                self._manager.set_block_size_bytes(block_bytes)
             print(
                 f"[certus-grpc] KV base=0x{data_ptr:x} stride={stride} "
                 f"block_bytes={block_bytes} slab_size_bytes={self._slab_size_bytes} "
