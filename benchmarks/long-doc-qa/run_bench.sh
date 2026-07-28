@@ -70,6 +70,10 @@ GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.90}
 # other dict/set-order-sensitive path) is reproducible across runs.
 PYTHONHASHSEED=${PYTHONHASHSEED:-0}
 READY_TIMEOUT=${READY_TIMEOUT:-600}     # seconds to wait for model load
+# After the client finishes, wait this long before scraping/teardown so vLLM
+# emits its post-run idle stats tick — that tick carries the settled cumulative
+# prefix-cache hit rate. Must exceed vLLM's ~10s stats-logging interval.
+STATS_SETTLE=${STATS_SETTLE:-15}
 
 ENGINE=${ENGINE:-podman}
 SERVER_IMAGE=${SERVER_IMAGE:-docker.io/vllm/vllm-openai:v0.20.0}
@@ -150,19 +154,24 @@ ${ENGINE} run --rm --network host \
 
 # ---- 3. collect server-side cache/offload stats (before teardown) --------
 if [ "${SERVE}" = "1" ]; then
+    # let vLLM log its post-run idle tick (settled prefix-cache hit rate) before
+    # we scrape the logs and tear the server down.
+    echo ">> waiting ${STATS_SETTLE}s for vLLM's settling engine-stats tick ..." >&2
+    sleep "${STATS_SETTLE}"
     echo ">> scraping server /metrics + logs into ${RESULTS}" >&2
     curl -fsS --max-time 5 "http://localhost:${PORT}/metrics" \
         > "${RESULTS}/metrics.txt" 2>/dev/null || true
     ${ENGINE} logs "${SERVER_NAME}" > "${RESULTS}/server.log" 2>&1 || true
 
-    # --- per-iteration engine stats emitted by vLLM's loggers.py: throughput,
-    #     KV cache usage and prefix-cache hit rate, one line per stats interval.
-    #     These are the driver's primary offload/cache readout. Strip the
-    #     "(APIServer pid=N)" prefix and drop fully-idle ticks (0 tok/s AND
-    #     0% KV) so only lines with real activity survive.
+    # --- per-interval engine stats emitted by vLLM's loggers.py: prompt & gen
+    #     throughput, GPU KV cache usage and prefix-cache hit rate, one line per
+    #     stats interval. Capture EVERY line (only strip the "(APIServer pid=N)"
+    #     prefix). Do NOT drop idle ticks: the trailing "Running: 0" tick carries
+    #     the SETTLED cumulative prefix-cache hit rate (e.g. "... Prefix cache hit
+    #     rate: 47.6%") — the whole point of the warm round. Filtering idle lines
+    #     would throw away exactly that number.
     grep -E "Engine [0-9]+: Avg prompt throughput" "${RESULTS}/server.log" 2>/dev/null \
         | sed -E 's/^\(APIServer pid=[0-9]+\) //' \
-        | grep -vE "Avg prompt throughput: 0.0 tokens/s.*GPU KV cache usage: 0.0%" \
         > "${RESULTS}/engine_stats.txt" || true
 
     echo "==== engine stats — throughput / KV / prefix-cache hit rate (per interval) ====" >&2
