@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
-# Run the long_doc_qa benchmark against Llama-3-8B with a small calibration
-# workload. By default this launches a BASELINE plain-vLLM OpenAI server
+# Run the long_doc_qa benchmark against an OpenAI-compatible server with a small
+# calibration workload. MODEL is a param (defaults to Llama-3-8B; e.g. set
+# MODEL=Qwen/Qwen2.5-7B-Instruct). By default this launches a BASELINE plain-vLLM
+# OpenAI server
 # (no KV offload — the control), waits for it, runs the client, and tears the
 # server down. Point it at another backend (Certus / LMCache / CPU-offload)
 # by exporting SERVE=0 and BASE_URL=<that server's /v1> — then no server is
 # launched here.
 #
-#   ./run_llama3.sh                       # baseline llama3, requested params
-#   SERVE=0 BASE_URL=http://host:8000/v1 ./run_llama3.sh   # use an existing server
+#   ./run_bench.sh                        # baseline (default MODEL=Llama-3-8B)
+#   SERVE=0 BASE_URL=http://host:8000/v1 ./run_bench.sh   # use an existing server
+#
+# MODEL is a param (env-overridable, defaults to Llama-3-8B) — e.g.
+#   MODEL=Qwen/Qwen2.5-7B-Instruct ./run_bench.sh
+# RoPE scaling below is applied automatically only for models that need it
+# (Llama-3-8B); large-context models like Qwen2.5 (131072) get none.
 #
 # NOTE on doc-length vs context: Llama-3-8B's native context is 8192, but
 # DOCUMENT_LENGTH (10000) produces a ~10000-token prompt. Simply forcing a bigger
@@ -37,10 +44,17 @@ BASE_URL=${BASE_URL:-http://localhost:${PORT}/v1}
 SERVE=${SERVE:-1}                       # 1 = launch baseline vLLM here; 0 = use BASE_URL
 GPU=${GPU:-all}                         # podman CDI device selector (all | 0 | ...)
 MAX_MODEL_LEN=${MAX_MODEL_LEN:-32768}   # forced > 8192 to fit the 10k-token docs
-# RoPE scaling to extend Llama-3's 8192 rotary table to cover MAX_MODEL_LEN.
-# Linear x4 -> 8192*4 = 32768. REQUIRED for DOCUMENT_LENGTH > ~7800 (see header).
-# Set HF_OVERRIDES="" to disable (only safe when all prompts stay under 8192).
-HF_OVERRIDES=${HF_OVERRIDES:-'{"rope_scaling":{"rope_type":"linear","factor":4.0}}'}
+# RoPE scaling is MODEL-SPECIFIC. Llama-3-8B has an 8192-wide rotary table, so
+# DOCUMENT_LENGTH > ~7800 needs linear x4 (-> 32768) or vLLM device-asserts (see
+# header). Models with a natively-large context (Qwen2.5 = 131072) must NOT be
+# scaled — it would corrupt their positions. So default the override ON only for
+# Llama-3; empty otherwise. Override explicitly with HF_OVERRIDES=... ; use
+# HF_OVERRIDES="" (exported empty) to force-disable for a small-context model.
+case "${MODEL}" in
+    *Meta-Llama-3-8B*|*Llama-3-8B*) _def_hf_overrides='{"rope_scaling":{"rope_type":"linear","factor":4.0}}' ;;
+    *)                              _def_hf_overrides='' ;;
+esac
+HF_OVERRIDES=${HF_OVERRIDES-$_def_hf_overrides}
 TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE:-1}
 # NOTE: --load-format dummy (random weights) is TEMPTING here — output text is
 # irrelevant (filler docs; we only measure TTFT/throughput/prefix-cache) and it
@@ -52,6 +66,9 @@ TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE:-1}
 LOAD_FORMAT=${LOAD_FORMAT:-auto}
 DTYPE=${DTYPE:-bfloat16}
 GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.90}
+# Fix Python's hash seed in the server so prefix-cache block hashing (and any
+# other dict/set-order-sensitive path) is reproducible across runs.
+PYTHONHASHSEED=${PYTHONHASHSEED:-0}
 READY_TIMEOUT=${READY_TIMEOUT:-600}     # seconds to wait for model load
 
 ENGINE=${ENGINE:-podman}
@@ -84,6 +101,7 @@ if [ "${SERVE}" = "1" ]; then
         -v "${HF_CACHE}:/root/.cache/huggingface:z" \
         -e HF_HUB_OFFLINE=1 \
         -e VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+        -e PYTHONHASHSEED="${PYTHONHASHSEED}" \
         "${SERVER_IMAGE}" \
         --model "${MODEL}" \
         --dtype "${DTYPE}" \
