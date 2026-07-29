@@ -271,13 +271,15 @@ def test_take_events_surfaces_removed_not_demoted():
 
 
 def test_store_handler_sends_offsets_per_block():
-    from certus_grpc_connector.handler import GpuToCertusHandler
+    from certus_grpc_connector.handler import worker_class
     from vllm.v1.kv_offload.mediums import GPULoadStoreSpec
 
     stub = FakeStub()
     kv = KvCacheIpc(handle_bytes=b"z" * 64, gpu_device_id=1, stride_bytes=1024, base_delta=0)
     executor = ThreadPoolExecutor(max_workers=1)
-    h = GpuToCertusHandler(stub, kv, block_size_bytes=1024, executor=executor)
+    # One worker serves both directions; transfer_async routes a store by the
+    # source spec being a GPULoadStoreSpec (≤0.24 medium-pair entrypoint).
+    h = worker_class()(stub, kv, block_size_bytes=1024, executor=executor)
 
     src = GPULoadStoreSpec(block_ids=[3, 7])
     dst = CertusLoadStoreSpec([BlockLocation(key=30), BlockLocation(key=70)])
@@ -298,14 +300,14 @@ def test_store_handler_never_reports_failure_and_aborts_failed_keys():
     """Regression: a failed CopyToStore must NOT surface success=False (vLLM's
     offloading worker asserts transfer_result.success and crashes the engine).
     The failed keys are rolled back via AbortStore; the job reports success."""
-    from certus_grpc_connector.handler import GpuToCertusHandler
+    from certus_grpc_connector.handler import worker_class
     from vllm.v1.kv_offload.mediums import GPULoadStoreSpec
 
     stub = FakeStub()
     stub.copy_fail = {70}  # one of two blocks fails to copy
     kv = KvCacheIpc(handle_bytes=b"z" * 64, gpu_device_id=0, stride_bytes=1024, base_delta=0)
     executor = ThreadPoolExecutor(max_workers=1)
-    h = GpuToCertusHandler(stub, kv, block_size_bytes=1024, executor=executor)
+    h = worker_class()(stub, kv, block_size_bytes=1024, executor=executor)
 
     src = GPULoadStoreSpec(block_ids=[3, 7])
     dst = CertusLoadStoreSpec([BlockLocation(key=30), BlockLocation(key=70)])

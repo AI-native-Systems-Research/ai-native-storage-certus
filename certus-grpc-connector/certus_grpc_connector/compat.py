@@ -92,9 +92,11 @@ FEATURES: dict[str, "callable"] = {
     # both eras. This flag records where the arg actually starts being passed;
     # it is declarative (the superset signature needs no runtime branch).
     "req_context_arg": lambda v: v >= (0, 22),  # verified @0.20 (absent), @0.22 (present)
-    # ``TransferResult`` carries the 5th ``transfer_type`` field. Confirmed on
-    # 0.20 and 0.22 (worker.worker.TransferResult has all 5 fields on both).
-    "transfer_result_has_type": lambda v: v >= (0, 20),  # verified @0.20,0.22; TODO(verify @0.24/0.26)
+    # ``TransferResult`` carries the 5th ``transfer_type`` field. Present on
+    # 0.20/0.22/0.24; 0.26 DROPPED it (worker direction is explicit via
+    # submit_store/submit_load, so the medium pair is no longer carried on the
+    # result). ``make_transfer_result`` builds the 4-field shape when this is off.
+    "transfer_result_has_type": lambda v: v < (0, 26),  # verified @0.20,0.22,0.24 (present), @0.26 (dropped)
     # ``get_handlers`` receives an object exposing ``.tensors[i].tensor``.
     # True on 0.20; re-confirm per hop (attention/cache-layout churn is the
     # highest-risk silent break).
@@ -125,6 +127,26 @@ FEATURES: dict[str, "callable"] = {
     # older bases neither declare nor call the method. Declarative flag (the method
     # is defined unconditionally; it is simply never invoked before 0.24).
     "has_on_new_request": lambda v: v >= (0, 24),  # verified @0.24 (abstract; instantiation fails without it)
+    # ── 0.26 offloading-API rewrite (four related breaks, all ≥0.26) ──
+    # vLLM 0.26 rewrote vllm.v1.kv_offload.* ("experimental, subject to change").
+    # The worker interface changed from a per-direction OffloadingHandler with
+    # ``transfer_async(job_id, spec)`` (dispatched by (src_medium, dst_medium)
+    # tuples from ``get_handlers``) to a SINGLE ``OffloadingWorker`` with explicit
+    # ``submit_store(job_id, src, dst)`` / ``submit_load(job_id, src, dst)``,
+    # returned by ``get_worker``. Verified @0.26 (ImportError: worker.worker gone).
+    "worker_split_submit": lambda v: v >= (0, 26),
+    # ``OffloadingSpec.__init__`` takes a single ``OffloadingConfig`` (exposing
+    # ``worker_kv_bytes_per_block``, ``extra_config``, ``groups``, ``cache``)
+    # instead of ``(vllm_config, kv_cache_config)``; the old base's
+    # ``gpu_block_size`` / ``block_size_factor`` attributes are gone.
+    "spec_config_object": lambda v: v >= (0, 26),
+    # ``OffloadingManager.lookup`` returns a ``LookupResult`` enum
+    # (MISS/HIT/HIT_PENDING/RETRY) rather than ``bool | None``.
+    "lookup_returns_enum": lambda v: v >= (0, 26),
+    # ``get_worker`` receives ``CanonicalKVCaches`` (a list of per-block
+    # ``(num_blocks, page_size_bytes)`` int8 tensors + per-group refs) rather than
+    # the raw kv_caches object ``get_handlers`` used to get.
+    "canonical_kv_caches": lambda v: v >= (0, 26),
 }
 
 
@@ -137,6 +159,10 @@ class Caps:
     needs_disable_hybrid_kv_cache_manager: bool
     needs_disable_async_scheduling: bool
     has_on_new_request: bool
+    worker_split_submit: bool
+    spec_config_object: bool
+    lookup_returns_enum: bool
+    canonical_kv_caches: bool
 
 
 def caps_for(v: tuple[int, int]) -> Caps:
@@ -187,6 +213,15 @@ def _import_error(what: str, exc: Exception) -> ImportError:
 #   0.22  — all of the above consolidated into ``vllm.v1.kv_offload.base``
 #           (``abstract``/``mediums``/``spec`` modules removed). ``worker.worker``
 #           unchanged. Confirmed empirically against the v0.22.0 image.
+#   0.26  — offloading-API rewrite. ``TransferResult`` moved into ``base`` too;
+#           the worker base class became ``OffloadingWorker`` (in ``base``) and
+#           ``worker.worker`` was removed, so ``OffloadingHandler`` no longer
+#           exists — it is resolved via ``worker_base_class()`` (which also serves
+#           the ≤0.24 ``OffloadingHandler``) rather than the mandatory ladder,
+#           because a symbol that is absent on some supported version cannot live
+#           here (``_load_vllm_symbols`` resolves the whole dict at once).
+#           ``TransferSpec`` (a ≤0.24 type-only alias) is likewise not resolved
+#           here; it is only used as a string annotation.
 _SYMBOL_PATHS: dict[str, tuple[str, ...]] = {
     "LoadStoreSpec": ("vllm.v1.kv_offload.base", "vllm.v1.kv_offload.abstract"),
     "OffloadingEvent": ("vllm.v1.kv_offload.base", "vllm.v1.kv_offload.abstract"),
@@ -195,9 +230,10 @@ _SYMBOL_PATHS: dict[str, tuple[str, ...]] = {
     "PrepareStoreOutput": ("vllm.v1.kv_offload.base", "vllm.v1.kv_offload.abstract"),
     "GPULoadStoreSpec": ("vllm.v1.kv_offload.base", "vllm.v1.kv_offload.mediums"),
     "OffloadingSpec": ("vllm.v1.kv_offload.base", "vllm.v1.kv_offload.spec"),
-    "OffloadingHandler": ("vllm.v1.kv_offload.worker.worker",),
-    "TransferResult": ("vllm.v1.kv_offload.worker.worker",),
-    "TransferSpec": ("vllm.v1.kv_offload.worker.worker",),
+    "TransferResult": (
+        "vllm.v1.kv_offload.base",  # 0.26
+        "vllm.v1.kv_offload.worker.worker",  # <=0.24
+    ),
 }
 
 # Symbols whose module path has been stable across every supported version.
@@ -262,9 +298,7 @@ _VLLM_LAZY_NAMES = frozenset(
         "PrepareStoreOutput",
         "GPULoadStoreSpec",
         "OffloadingSpec",
-        "OffloadingHandler",
         "TransferResult",
-        "TransferSpec",
     ]
 )
 
@@ -284,14 +318,15 @@ __all__ = [
     "PrepareStoreOutput",
     "GPULoadStoreSpec",
     "OffloadingSpec",
-    "OffloadingHandler",
     "TransferResult",
-    "TransferSpec",
     "make_transfer_result",
     "extract_gpu_ptrs",
     "block_bytes_from_config",
+    "block_bytes_from_offloading_config",
     "gpu_block_ids",
     "new_request_offloading_context",
+    "lookup_result",
+    "worker_base_class",
 ]
 
 
@@ -327,15 +362,63 @@ def make_transfer_result(
     )
 
 
+def _lazy_base_attr(name: str):
+    """Resolve a symbol from ``vllm.v1.kv_offload.base`` on demand.
+
+    Used for 0.26-only types (``OffloadingWorker``, ``LookupResult``,
+    ``RequestOffloadingContext``) that must NOT sit in the mandatory
+    ``_SYMBOL_PATHS`` ladder — that resolves the whole dict at once, so a symbol
+    absent on an older supported version would break resolution there. These are
+    only ever touched on the versions that have them.
+    """
+    import importlib
+
+    try:
+        return getattr(importlib.import_module("vllm.v1.kv_offload.base"), name)
+    except (ImportError, AttributeError) as _e:
+        raise _import_error(f"{name} (from vllm.v1.kv_offload.base)", _e)
+
+
 def extract_gpu_ptrs(kv_caches) -> tuple[int, int]:
     """GPU base pointer + per-block stride (bytes) from the KV-cache handoff.
 
-    On the known layout, ``get_handlers`` receives an object exposing
-    ``.tensors[0].tensor``; the per-block stride is ``stride(0)`` in bytes. This
-    is the single highest-risk silent-break point across vLLM versions — a new
-    attention/cache backend can change the shape — so it is isolated here and
-    gated on ``CAPS.kv_caches_tensors_attr``.
+    The per-block stride is ``stride(0)`` of the block tensor, in bytes. This is
+    the single highest-risk silent-break point across vLLM versions — a new
+    attention/cache backend can change the shape — so it is isolated here.
+
+    Two shapes:
+
+    * **0.26+ ``CanonicalKVCaches``** (``CAPS.canonical_kv_caches``): a list of
+      unique block tensors, each ``(num_blocks, page_size_bytes)`` int8, plus
+      per-group refs. The connector's model is one contiguous IPC region per key
+      (one block, all layers), so it requires a SINGLE canonical tensor — the
+      shapes are logged and a split (per-layer / K-V) raises so it is caught
+      before any numbers are trusted, rather than silently copying one layer.
+    * **≤0.24** (``CAPS.kv_caches_tensors_attr``): the object ``get_handlers``
+      receives exposes ``.tensors[0].tensor`` directly.
     """
+    if CAPS.canonical_kv_caches:
+        tensors = kv_caches.tensors
+        shapes = [
+            (tuple(t.tensor.shape), int(t.page_size_bytes)) for t in tensors
+        ]
+        print(
+            f"[certus-grpc] CanonicalKVCaches: {len(tensors)} tensor(s); "
+            f"(shape, page_size_bytes)={shapes}; "
+            f"groups={len(kv_caches.group_data_refs)}",
+            flush=True,
+        )
+        if len(tensors) != 1:
+            raise NotImplementedError(
+                f"certus-grpc-connector: CanonicalKVCaches presented "
+                f"{len(tensors)} tensors {shapes} on vLLM {VERSION[0]}.{VERSION[1]}. "
+                f"The connector maps one contiguous IPC region per key (one block, "
+                f"all layers) and needs a single canonical tensor. Add a "
+                f"multi-tensor branch (per-tensor IPC handles) before trusting a run."
+            )
+        tensor = tensors[0].tensor
+        stride_bytes = tensor.stride(0) * tensor.element_size()
+        return tensor.data_ptr(), stride_bytes
     if CAPS.kv_caches_tensors_attr:
         tensor = kv_caches.tensors[0].tensor
         stride_bytes = tensor.stride(0) * tensor.element_size()
@@ -402,13 +485,68 @@ def new_request_offloading_context():
     only exists on 0.24+; loading it there would break symbol resolution on 0.20/0.22.
     Only ever called on ``CAPS.has_on_new_request`` versions.
     """
+    return _lazy_base_attr("RequestOffloadingContext")()
+
+
+def lookup_result(exists: bool):
+    """Return the shape ``OffloadingManager.lookup`` must yield for this version.
+
+    * **0.26+** (``CAPS.lookup_returns_enum``): a ``LookupResult`` enum —
+      ``HIT`` when the key is present, ``MISS`` otherwise. (The richer
+      ``HIT_PENDING`` / ``RETRY`` states model in-flight/backpressure cases the
+      connector's synchronous certus-server lookup never produces.)
+    * **≤0.24**: a plain ``bool``.
+    """
+    if CAPS.lookup_returns_enum:
+        LookupResult = _lazy_base_attr("LookupResult")
+        return LookupResult.HIT if exists else LookupResult.MISS
+    return bool(exists)
+
+
+def block_bytes_from_offloading_config(config) -> int:
+    """Per-block offload size in bytes on 0.26, read straight off the
+    ``OffloadingConfig``.
+
+    0.26 exposes ``worker_kv_bytes_per_block`` directly (the full per-block bytes
+    across all layers in the group), so the connector no longer has to reconstruct
+    it from ``KVCacheConfig`` groups the way ``block_bytes_from_config`` does for
+    ≤0.24. Used to size the certus-server Reserve and cross-checked against the
+    canonical tensor's ``stride(0)`` at ``get_worker`` time.
+    """
+    block_bytes = int(config.worker_kv_bytes_per_block)
+    print(
+        f"[certus-grpc] per-block Reserve size from OffloadingConfig: "
+        f"worker_kv_bytes_per_block = {block_bytes} bytes",
+        flush=True,
+    )
+    return block_bytes
+
+
+def worker_base_class():
+    """The base class the connector's worker must subclass on this version.
+
+    * **0.26+** (``CAPS.worker_split_submit``): ``OffloadingWorker`` (in
+      ``vllm.v1.kv_offload.base``) — one instance, explicit
+      ``submit_store`` / ``submit_load``.
+    * **≤0.24**: ``OffloadingHandler`` (in ``vllm.v1.kv_offload.worker.worker``)
+      — per-direction ``transfer_async(job_id, spec)``.
+
+    Resolved lazily and referenced ONLY from the worker factory, so the base
+    absent on the other era is never imported. It cannot live in the mandatory
+    ``_SYMBOL_PATHS`` ladder for the same reason (that resolves the whole dict at
+    once).
+    """
+    if CAPS.worker_split_submit:
+        return _lazy_base_attr("OffloadingWorker")
     import importlib
 
     try:
-        base = importlib.import_module("vllm.v1.kv_offload.base")
-        return base.RequestOffloadingContext()
-    except (ImportError, AttributeError) as _e:  # pragma: no cover - 0.24+ only path
-        raise _import_error("RequestOffloadingContext (from vllm.v1.kv_offload.base)", _e)
+        mod = importlib.import_module("vllm.v1.kv_offload.worker.worker")
+        return mod.OffloadingHandler
+    except (ImportError, AttributeError) as _e:
+        raise _import_error(
+            "OffloadingHandler (from vllm.v1.kv_offload.worker.worker)", _e
+        )
 
 
 # ── matrix CLI ─────────────────────────────────────────────────────────────

@@ -17,6 +17,7 @@ of check:
 from __future__ import annotations
 
 import importlib
+import os
 
 import pytest
 
@@ -37,10 +38,45 @@ def test_supported_versions_match_conftest():
 @pytest.mark.parametrize("version", compat.SUPPORTED_VERSIONS)
 def test_caps_for_every_supported_version(version):
     caps = compat.caps_for(version)
-    # Features true across the whole supported range today.
-    assert caps.transfer_result_has_type is True
+    # Features true across the whole supported range today. (transfer_result_has_type
+    # is NOT here — the 0.26 rewrite dropped the field; pinned separately below.)
     assert caps.kv_caches_tensors_attr is True
     assert caps.kv_cache_group_attrs is True
+
+
+@pytest.mark.parametrize(
+    "version,expected",
+    [
+        ((0, 20), True),
+        ((0, 22), True),
+        ((0, 24), True),
+        ((0, 26), False),  # 0.26 rewrite: submit_store/submit_load carry direction
+    ],
+)
+def test_transfer_result_has_type_dropped_at_0_26(version, expected):
+    # TransferResult lost its 5th ``transfer_type`` field in the 0.26 API rewrite
+    # (direction now lives in the method name). Pin the threshold so a matrix edit
+    # that moves it is caught.
+    assert compat.caps_for(version).transfer_result_has_type is expected
+
+
+@pytest.mark.parametrize(
+    "version,expected",
+    [
+        ((0, 20), False),
+        ((0, 22), False),
+        ((0, 24), False),
+        ((0, 26), True),
+    ],
+)
+def test_new_0_26_capabilities_gate_from_0_26(version, expected):
+    # The four capabilities the 0.26 offloading-API rewrite introduced, all keyed
+    # to the same v>=(0,26) threshold. Pin each so a matrix edit is caught.
+    caps = compat.caps_for(version)
+    assert caps.worker_split_submit is expected
+    assert caps.spec_config_object is expected
+    assert caps.lookup_returns_enum is expected
+    assert caps.canonical_kv_caches is expected
 
 
 @pytest.mark.parametrize(
@@ -186,8 +222,15 @@ def test_make_transfer_result_omits_type_when_capability_unset(monkeypatch):
 def restore_compat():
     """Rebuild the 0.20 baseline fakes and reload compat after a test that
     reloaded it against a different version, so modules that imported compat
-    symbols at collection time keep valid references."""
+    symbols at collection time keep valid references.
+
+    Clears ``CERTUS_VLLM_VERSION`` FIRST: this fixture's teardown runs before the
+    ``monkeypatch`` fixture's (teardown is reverse-of-setup order), so the env
+    override set by test_env_override_beats_installed_version would otherwise
+    still be live and make this reload re-detect 0.26 — leaving CAPS stuck at
+    0.26 and breaking every later test that touches a 0.26-only symbol."""
     yield
+    os.environ.pop("CERTUS_VLLM_VERSION", None)
     conftest.build_fake_vllm((0, 20))
     importlib.reload(compat)
 
