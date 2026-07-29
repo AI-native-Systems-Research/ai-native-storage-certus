@@ -28,6 +28,37 @@ from .gpu import KvCacheIpc
 from .mediums import CertusLoadStoreSpec
 
 
+import threading
+
+# Diagnostic rate-limiter for CopyToStore failures: print each DISTINCT
+# error_message once (with a sample key), plus a hard cap on total lines, so a
+# run where every copy fails surfaces the real reason without emitting 48k lines.
+_COPY_FAIL_LOCK = threading.Lock()
+_COPY_FAIL_SEEN: set[str] = set()
+_COPY_FAIL_LINES = 0
+_COPY_FAIL_MAX_LINES = 40
+
+
+def _log_copy_failure(failed_results, batch_len: int) -> None:
+    global _COPY_FAIL_LINES
+    with _COPY_FAIL_LOCK:
+        for r in failed_results:
+            if _COPY_FAIL_LINES >= _COPY_FAIL_MAX_LINES:
+                return
+            msg = getattr(r, "error_message", "") or "(empty)"
+            code = getattr(r, "error_code", "?")
+            if msg in _COPY_FAIL_SEEN:
+                continue
+            _COPY_FAIL_SEEN.add(msg)
+            _COPY_FAIL_LINES += 1
+            print(
+                f"[certus-grpc] CopyToStore SERVER ERROR (distinct #{_COPY_FAIL_LINES}) "
+                f"key={r.key} error_code={code} msg={msg!r} "
+                f"(batch had {batch_len} keys)",
+                flush=True,
+            )
+
+
 @dataclass
 class _PendingJob:
     job_id: int
@@ -142,8 +173,16 @@ class GpuToCertusHandler(_GrpcHandler):
         # CopyToStore -> CommitStore), we must roll back any key whose copy
         # failed, so the subsequent CommitStore can't publish an unpopulated
         # slot as a valid entry. Abort the failed keys; report success.
-        failed = [r.key for r in resp.results if not r.success]
+        failed_results = [r for r in resp.results if not r.success]
+        failed = [r.key for r in failed_results]
         if failed:
+            # DIAGNOSTIC: the server already returns the real reason per key in
+            # error_message (e.g. "GPU async DMA copy failed: cudaMemcpyAsync
+            # D2H failed: ..." or "size (N) exceeds destination buffer length
+            # (M)"). We normally discard it; surface the first few distinct
+            # messages so a store-path regression isn't silent. Rate-limited so
+            # a 48k-failure run doesn't spew.
+            _log_copy_failure(failed_results, len(keys))
             print(
                 f"[certus-grpc] CopyToStore failed for {len(failed)}/{len(keys)} "
                 f"blocks — aborting those reservations, leaving them uncached",
