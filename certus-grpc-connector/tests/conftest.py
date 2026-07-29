@@ -37,9 +37,17 @@ def _transfer_result_has_type(version: tuple[int, int]) -> bool:
     Mirrors ``compat.FEATURES['transfer_result_has_type']``. Duplicated here (not
     imported) for the load-order reason above; the fake's field set MUST track
     the real one so the ``make_transfer_result`` adapter is tested against the
-    shape it will actually meet.
+    shape it will actually meet. 0.20/0.22/0.24 carry it; the 0.26 API rewrite
+    dropped it (direction is explicit via submit_store/submit_load).
     """
-    return version >= (0, 20)
+    return version < (0, 26)
+
+
+def _is_0_26(version: tuple[int, int]) -> bool:
+    """Whether this version uses the 0.26 consolidated-``base`` rewrite (single
+    OffloadingWorker, OffloadingConfig ctor, LookupResult enum, CanonicalKVCaches).
+    Mirrors the ``worker_split_submit`` / ``spec_config_object`` predicates."""
+    return version >= (0, 26)
 
 
 def _module(name: str) -> types.ModuleType:
@@ -66,21 +74,16 @@ def build_fake_vllm(version: tuple[int, int] = (0, 20)) -> None:
 
     vllm = _module("vllm")
     vllm.__version__ = f"{version[0]}.{version[1]}.0"
-    _module("vllm.config")
+    _module("vllm.config").VllmConfig = object
     _module("vllm.v1")
-    _module("vllm.v1.kv_cache_interface")
+    _module("vllm.v1.kv_cache_interface").KVCacheConfig = object
     _module("vllm.v1.kv_offload")
-    abstract = _module("vllm.v1.kv_offload.abstract")
-    mediums = _module("vllm.v1.kv_offload.mediums")
-    _module("vllm.v1.kv_offload.spec")
-    _module("vllm.v1.kv_offload.worker")
-    worker = _module("vllm.v1.kv_offload.worker.worker")
 
-    sys.modules["vllm.config"].VllmConfig = object
-    sys.modules["vllm.v1.kv_cache_interface"].KVCacheConfig = object
+    import numpy as np
+
+    # ── classes shared by every version (only their MODULE LOCATION moves) ──
 
     OffloadKey = Any
-    abstract.OffloadKey = OffloadKey
 
     class LoadStoreSpec:  # noqa: D401 - stub
         pass
@@ -100,28 +103,13 @@ def build_fake_vllm(version: tuple[int, int] = (0, 20)) -> None:
     class OffloadingManager:
         pass
 
-    abstract.LoadStoreSpec = LoadStoreSpec
-    abstract.OffloadingEvent = OffloadingEvent
-    abstract.PrepareStoreOutput = PrepareStoreOutput
-    abstract.OffloadingManager = OffloadingManager
-
-    import numpy as np
-
     class GPULoadStoreSpec(LoadStoreSpec):
-        # Mirror vLLM 0.20.0: block_ids stored as an np.int64 array.
+        # Mirror vLLM: block_ids stored as an np.int64 array. 0.26 added required
+        # group_sizes/block_indices; the connector only reads .block_ids.
         def __init__(self, block_ids, group_sizes=None, block_indices=None):
             self.block_ids = np.array(block_ids, dtype=np.int64)
-
-    mediums.GPULoadStoreSpec = GPULoadStoreSpec
-
-    class OffloadingSpec:
-        def __init__(self, *a, **k):
-            pass
-
-    sys.modules["vllm.v1.kv_offload.spec"].OffloadingSpec = OffloadingSpec
-
-    class OffloadingHandler:
-        pass
+            self.group_sizes = group_sizes
+            self.block_indices = block_indices
 
     # TransferResult's field set is version-varying: the ``transfer_type`` field
     # is present iff the matching FEATURES predicate says so, so the fake matches
@@ -136,10 +124,118 @@ def build_fake_vllm(version: tuple[int, int] = (0, 20)) -> None:
         tr_fields.append(("transfer_type", Any))
     TransferResult = make_dataclass("TransferResult", tr_fields)
 
-    worker.OffloadingHandler = OffloadingHandler
-    worker.TransferResult = TransferResult
-    worker.TransferSpec = tuple
-    worker.TransferType = tuple
+    if _is_0_26(version):
+        # ── 0.26 rewrite: everything consolidated into vllm.v1.kv_offload.base;
+        # abstract/mediums/spec/worker.worker are GONE. ──
+        base = _module("vllm.v1.kv_offload.base")
+        config_mod = _module("vllm.v1.kv_offload.config")
+
+        from enum import Enum, auto
+
+        class LookupResult(Enum):
+            MISS = auto()
+            HIT = auto()
+            HIT_PENDING = auto()
+            RETRY = auto()
+
+        @dataclass
+        class RequestOffloadingContext:
+            policy: Any = None
+
+        # OffloadingSpec base takes a single OffloadingConfig and exposes
+        # extra_config (the connector reads server/slab_size_bytes from it).
+        class OffloadingSpec:
+            def __init__(self, config):
+                self.config = config
+                self.extra_config = getattr(config, "extra_config", {})
+
+        # OffloadingWorker: the single-worker ABC. Not marked abstract in the
+        # fake (the connector subclass provides every method anyway).
+        class OffloadingWorker:
+            def submit_store(self, job_id, src_spec, dst_spec):  # noqa: D401
+                raise NotImplementedError
+
+            def submit_load(self, job_id, src_spec, dst_spec):
+                raise NotImplementedError
+
+            def get_finished(self):
+                raise NotImplementedError
+
+            def wait(self, job_ids):
+                raise NotImplementedError
+
+        @dataclass
+        class CanonicalKVCacheTensor:
+            tensor: Any
+            page_size_bytes: int
+
+        @dataclass
+        class CanonicalKVCaches:
+            tensors: list
+            group_data_refs: list
+
+        @dataclass
+        class OffloadingConfig:
+            worker_kv_bytes_per_block: int
+            extra_config: Any
+
+        for name, obj in {
+            "OffloadKey": OffloadKey,
+            "LoadStoreSpec": LoadStoreSpec,
+            "OffloadingEvent": OffloadingEvent,
+            "PrepareStoreOutput": PrepareStoreOutput,
+            "OffloadingManager": OffloadingManager,
+            "GPULoadStoreSpec": GPULoadStoreSpec,
+            "OffloadingSpec": OffloadingSpec,
+            "TransferResult": TransferResult,
+            "OffloadingWorker": OffloadingWorker,
+            "LookupResult": LookupResult,
+            "RequestOffloadingContext": RequestOffloadingContext,
+            "CanonicalKVCacheTensor": CanonicalKVCacheTensor,
+            "CanonicalKVCaches": CanonicalKVCaches,
+        }.items():
+            setattr(base, name, obj)
+        config_mod.OffloadingConfig = OffloadingConfig
+    else:
+        # ── ≤0.24 layout: split modules (abstract/mediums/spec/worker.worker).
+        # 0.24 added an abstract on_new_request whose return type
+        # RequestOffloadingContext lives in the consolidated ``base`` module, so
+        # a partial base is provided from 0.24 for the lazy resolver to find. ──
+        abstract = _module("vllm.v1.kv_offload.abstract")
+        mediums = _module("vllm.v1.kv_offload.mediums")
+        spec = _module("vllm.v1.kv_offload.spec")
+        _module("vllm.v1.kv_offload.worker")
+        worker = _module("vllm.v1.kv_offload.worker.worker")
+
+        abstract.OffloadKey = OffloadKey
+        abstract.LoadStoreSpec = LoadStoreSpec
+        abstract.OffloadingEvent = OffloadingEvent
+        abstract.PrepareStoreOutput = PrepareStoreOutput
+        abstract.OffloadingManager = OffloadingManager
+        mediums.GPULoadStoreSpec = GPULoadStoreSpec
+
+        class OffloadingSpec:
+            def __init__(self, *a, **k):
+                pass
+
+        spec.OffloadingSpec = OffloadingSpec
+
+        class OffloadingHandler:
+            pass
+
+        worker.OffloadingHandler = OffloadingHandler
+        worker.TransferResult = TransferResult
+        worker.TransferSpec = tuple
+        worker.TransferType = tuple
+
+        if version >= (0, 24):
+            base = _module("vllm.v1.kv_offload.base")
+
+            @dataclass
+            class RequestOffloadingContext:
+                policy: Any = None
+
+            base.RequestOffloadingContext = RequestOffloadingContext
 
 
 # Auto-install the baseline (0.20) fakes at collection time so the version-blind

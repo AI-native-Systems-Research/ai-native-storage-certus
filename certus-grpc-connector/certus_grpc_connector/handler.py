@@ -1,15 +1,33 @@
 # SPDX-License-Identifier: Apache-2.0
-"""OffloadingHandlers that move KV blocks GPU <-> Certus over gRPC.
+"""The worker that moves KV blocks GPU <-> Certus over gRPC.
 
-Each ``transfer_async`` submits one gRPC call to a background thread pool and
-returns immediately; ``get_finished`` reaps completed futures. Per block we
-build a proto ``IpcHandle`` sharing the KV-cache allocation's IPC handle and
-setting ``offset`` to the block's byte offset, so the server DMAs at
-``open(handle) + offset``.
+One class, ``CertusGrpcWorker``, serves every supported vLLM version by
+implementing BOTH worker interfaces the plugin API has had:
+
+* **≤0.24** — a per-direction ``OffloadingHandler`` with
+  ``transfer_async(job_id, spec)`` dispatched by the ``(src_medium, dst_medium)``
+  pair the spec's ``get_handlers`` advertised. The spec yields the SAME worker
+  instance for both medium pairs; ``transfer_async`` routes to the store or load
+  body by the source spec's type.
+* **0.26+** — a single ``OffloadingWorker`` with explicit
+  ``submit_store(job_id, src, dst)`` / ``submit_load(job_id, src, dst)`` (the
+  direction is in the method name, so there is no medium-pair routing and
+  ``TransferResult`` no longer carries a ``transfer_type``).
+
+Both interfaces share one background thread pool, one pending-job deque, and the
+same store/load RPC bodies. The base class is resolved lazily via
+``compat.worker_base_class()`` (a factory builds the subclass on first use) so the
+base that is absent on the other era is never imported.
+
+Each submit enqueues one gRPC call onto the pool and returns immediately;
+``get_finished`` reaps completed futures in FIFO order. Per block we build a proto
+``IpcHandle`` sharing the KV-cache allocation's IPC handle with ``offset`` set to
+the block's byte offset, so the server DMAs at ``open(handle) + offset``.
 """
 
 from __future__ import annotations
 
+import threading
 import time
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -17,11 +35,9 @@ from dataclasses import dataclass
 
 from .compat import (
     GPULoadStoreSpec,
-    OffloadingHandler,
-    TransferResult,
-    TransferSpec,
     gpu_block_ids,
     make_transfer_result,
+    worker_base_class,
 )
 
 from . import dispatcher_pb2 as pb
@@ -29,8 +45,10 @@ from .client import all_success
 from .gpu import KvCacheIpc
 from .mediums import CertusLoadStoreSpec
 
-
-import threading
+# Direction tags. Only used to populate the ≤0.24 ``TransferResult.transfer_type``
+# (dropped on 0.26); kept as the natural label for a job's direction either way.
+_STORE_TYPE = ("GPU", "Certus")
+_LOAD_TYPE = ("Certus", "GPU")
 
 # Diagnostic rate-limiter for CopyToStore failures: print each DISTINCT
 # error_message once (with a sample key), plus a hard cap on total lines, so a
@@ -67,6 +85,9 @@ class _PendingJob:
     future: Future
     start_time: float
     num_blocks: int
+    # Direction of this job; carried per-job because one deque now holds both
+    # store and load jobs (≤0.24 used two separate handler instances).
+    transfer_type: tuple[str, str]
 
 
 def _ipc_handle(kv: KvCacheIpc, block_id: int, size: int) -> pb.IpcHandle:
@@ -78,159 +99,208 @@ def _ipc_handle(kv: KvCacheIpc, block_id: int, size: int) -> pb.IpcHandle:
     )
 
 
-class _GrpcHandler(OffloadingHandler):
-    """Common async plumbing for the store and load handlers."""
+# Cache of the built worker class (base resolved once, lazily).
+_WORKER_CLASS = None
 
-    def __init__(self, stub, kv: KvCacheIpc, block_size_bytes: int, executor: ThreadPoolExecutor):
-        self._stub = stub
-        self._kv = kv
-        self._block_size_bytes = int(block_size_bytes)
-        self._executor = executor
-        self._pending: deque[_PendingJob] = deque()
 
-    # Subclasses implement the actual RPC call.
-    def _do_transfer(self, gpu_block_ids: list[int], keys: list[int]) -> bool:
-        raise NotImplementedError
+def _build_worker_class():
+    """Build ``CertusGrpcWorker`` subclassing the version-appropriate base.
 
-    def _submit(self, job_id: int, gpu_block_ids: list[int], keys: list[int]) -> bool:
-        future = self._executor.submit(self._do_transfer, gpu_block_ids, keys)
-        self._pending.append(
-            _PendingJob(
-                job_id=job_id,
-                future=future,
-                start_time=time.monotonic(),
-                num_blocks=len(gpu_block_ids),
-            )
-        )
-        return True
+    Done in a factory (not at import) so ``compat.worker_base_class()`` — which
+    touches a symbol that exists on only one era — is resolved on first real use,
+    keeping the pure-matrix import path vLLM-free.
+    """
+    base = worker_base_class()
 
-    def get_finished(self) -> list[TransferResult]:
-        results: list[TransferResult] = []
-        now = time.monotonic()
-        # Reap completed jobs in submission order (FIFO), stopping at the first
-        # still-running job so we preserve ordering guarantees.
-        while self._pending and self._pending[0].future.done():
-            job = self._pending.popleft()
-            try:
-                success = bool(job.future.result())
-            except Exception as e:  # noqa: BLE001 - report as a failed transfer
-                print(f"[certus-grpc] transfer job {job.job_id} failed: {e}", flush=True)
-                success = False
-            results.append(
-                make_transfer_result(
-                    job_id=job.job_id,
-                    success=success,
-                    transfer_size=job.num_blocks * self._block_size_bytes,
-                    transfer_time=now - job.start_time,
-                    transfer_type=self._transfer_type,
+    class CertusGrpcWorker(base):  # type: ignore[misc, valid-type]
+        """Moves KV blocks GPU <-> Certus, serving both plugin-API eras."""
+
+        def __init__(
+            self,
+            stub,
+            kv: KvCacheIpc,
+            block_size_bytes: int,
+            executor: ThreadPoolExecutor,
+        ):
+            self._stub = stub
+            self._kv = kv
+            self._block_size_bytes = int(block_size_bytes)
+            self._executor = executor
+            self._pending: deque[_PendingJob] = deque()
+
+        # ── shared async plumbing ──
+
+        def _submit(
+            self,
+            job_id: int,
+            gpu_block_ids: list[int],
+            keys: list[int],
+            fn,
+            transfer_type: tuple[str, str],
+        ) -> bool:
+            future = self._executor.submit(fn, gpu_block_ids, keys)
+            self._pending.append(
+                _PendingJob(
+                    job_id=job_id,
+                    future=future,
+                    start_time=time.monotonic(),
+                    num_blocks=len(gpu_block_ids),
+                    transfer_type=transfer_type,
                 )
             )
-        return results
-
-    def wait(self, job_ids: set[int]) -> None:
-        for job in list(self._pending):
-            if job.job_id in job_ids:
-                job.future.result()
-
-
-class GpuToCertusHandler(_GrpcHandler):
-    """Store: GPU -> Certus DRAM/NVMe via CopyToStore."""
-
-    _transfer_type = ("GPU", "Certus")
-
-    def transfer_async(self, job_id: int, spec: TransferSpec) -> bool:
-        src_spec, dst_spec = spec
-        assert isinstance(src_spec, GPULoadStoreSpec)
-        assert isinstance(dst_spec, CertusLoadStoreSpec)
-        block_ids = gpu_block_ids(src_spec)
-        keys = dst_spec.keys
-        return self._submit(job_id, block_ids, keys)
-
-    def _do_transfer(self, gpu_block_ids: list[int], keys: list[int]) -> bool:
-        entries = [
-            pb.CopyToStoreEntry(
-                key=key,
-                ipc_handle=_ipc_handle(self._kv, block_id, self._block_size_bytes),
-            )
-            for block_id, key in zip(gpu_block_ids, keys)
-        ]
-        try:
-            resp = self._stub.CopyToStore(pb.BatchCopyToStoreRequest(entries=entries))
-        except Exception as e:  # noqa: BLE001 - store failure must not crash vLLM
-            # A whole-batch RPC failure: roll back all reservations and report
-            # success (see the invariant note below). Blocks stay uncached.
-            print(f"[certus-grpc] CopyToStore RPC error: {e} — aborting {len(keys)} keys",
-                  flush=True)
-            try:
-                self._stub.AbortStore(pb.BatchAbortStoreRequest(keys=keys))
-            except Exception:  # noqa: BLE001
-                pass
             return True
 
-        # CRITICAL: the store handler must NEVER report success=False. vLLM's
-        # offloading worker asserts transfer_result.success (worker.py) and a
-        # False return kills the engine. A failed CopyToStore only means "this
-        # block won't be cached" — the KV data is still valid in GPU memory, so
-        # it is safe to drop. But because store is split-phase (Reserve ->
-        # CopyToStore -> CommitStore), we must roll back any key whose copy
-        # failed, so the subsequent CommitStore can't publish an unpopulated
-        # slot as a valid entry. Abort the failed keys; report success.
-        failed_results = [r for r in resp.results if not r.success]
-        failed = [r.key for r in failed_results]
-        if failed:
-            # DIAGNOSTIC: the server already returns the real reason per key in
-            # error_message (e.g. "GPU async DMA copy failed: cudaMemcpyAsync
-            # D2H failed: ..." or "size (N) exceeds destination buffer length
-            # (M)"). We normally discard it; surface the first few distinct
-            # messages so a store-path regression isn't silent. Rate-limited so
-            # a 48k-failure run doesn't spew.
-            _log_copy_failure(failed_results, len(keys))
-            print(
-                f"[certus-grpc] CopyToStore failed for {len(failed)}/{len(keys)} "
-                f"blocks — aborting those reservations, leaving them uncached",
-                flush=True,
-            )
-            try:
-                self._stub.AbortStore(pb.BatchAbortStoreRequest(keys=failed))
-            except Exception as e:  # noqa: BLE001 - best-effort rollback
-                print(f"[certus-grpc] AbortStore rollback failed: {e}", flush=True)
-        return True
-
-
-class CertusToGpuHandler(_GrpcHandler):
-    """Load: Certus DRAM/NVMe -> GPU via Lookup."""
-
-    _transfer_type = ("Certus", "GPU")
-
-    def transfer_async(self, job_id: int, spec: TransferSpec) -> bool:
-        src_spec, dst_spec = spec
-        assert isinstance(src_spec, CertusLoadStoreSpec)
-        assert isinstance(dst_spec, GPULoadStoreSpec)
-        block_ids = gpu_block_ids(dst_spec)
-        keys = src_spec.keys
-        return self._submit(job_id, block_ids, keys)
-
-    def _do_transfer(self, gpu_block_ids: list[int], keys: list[int]) -> bool:
-        entries = [
-            pb.LookupEntry(
-                key=key,
-                ipc_handle=_ipc_handle(self._kv, block_id, self._block_size_bytes),
-            )
-            for block_id, key in zip(gpu_block_ids, keys)
-        ]
-        resp = self._stub.Lookup(pb.BatchLookupRequest(entries=entries))
-        # Diagnostic: a load must not fail (vLLM asserts), and it shouldn't be
-        # able to — prepare_load pinned these keys. If the server reports any
-        # per-key failure, dump exactly which key + error so we can see WHY a
-        # Lookup missed a key that lookup()/Check said was present.
-        if not all_success(resp.results):
-            for r in resp.results:
-                if not r.success:
+        def get_finished(self) -> "list":
+            results = []
+            now = time.monotonic()
+            # Reap completed jobs in submission order (FIFO), stopping at the
+            # first still-running job so ordering guarantees are preserved.
+            while self._pending and self._pending[0].future.done():
+                job = self._pending.popleft()
+                try:
+                    success = bool(job.future.result())
+                except Exception as e:  # noqa: BLE001 - report as a failed transfer
                     print(
-                        f"[certus-grpc] LOAD FAILURE key={r.key} "
-                        f"error_code={r.error_code} msg={r.error_message!r} "
-                        f"(this key was Check-hit and Pinned in prepare_load)",
+                        f"[certus-grpc] transfer job {job.job_id} failed: {e}",
                         flush=True,
                     )
-            return False
-        return True
+                    success = False
+                results.append(
+                    make_transfer_result(
+                        job_id=job.job_id,
+                        success=success,
+                        transfer_size=job.num_blocks * self._block_size_bytes,
+                        transfer_time=now - job.start_time,
+                        transfer_type=job.transfer_type,
+                    )
+                )
+            return results
+
+        def wait(self, job_ids: set) -> None:
+            for job in list(self._pending):
+                if job.job_id in job_ids:
+                    job.future.result()
+
+        def shutdown(self) -> None:
+            return
+
+        # ── 0.26 explicit-direction interface ──
+
+        def submit_store(self, job_id: int, src_spec, dst_spec) -> bool:
+            """Async GPU -> Certus (0.26). src=GPU spec, dst=Certus spec."""
+            block_ids = gpu_block_ids(src_spec)
+            return self._submit(
+                job_id, block_ids, dst_spec.keys, self._do_store, _STORE_TYPE
+            )
+
+        def submit_load(self, job_id: int, src_spec, dst_spec) -> bool:
+            """Async Certus -> GPU (0.26). src=Certus spec, dst=GPU spec."""
+            block_ids = gpu_block_ids(dst_spec)
+            return self._submit(
+                job_id, block_ids, src_spec.keys, self._do_load, _LOAD_TYPE
+            )
+
+        # ── ≤0.24 medium-pair interface ──
+
+        def transfer_async(self, job_id: int, spec) -> bool:
+            """Route a (src_spec, dst_spec) pair to the store or load body by the
+            source medium type — the spec yields this one instance for both
+            medium pairs, so the direction is recovered from the spec shapes."""
+            src_spec, dst_spec = spec
+            if isinstance(src_spec, GPULoadStoreSpec):
+                assert isinstance(dst_spec, CertusLoadStoreSpec)
+                return self.submit_store(job_id, src_spec, dst_spec)
+            assert isinstance(src_spec, CertusLoadStoreSpec)
+            assert isinstance(dst_spec, GPULoadStoreSpec)
+            return self.submit_load(job_id, src_spec, dst_spec)
+
+        # ── RPC bodies (run on the pool; identical across versions) ──
+
+        def _do_store(self, gpu_block_ids: list[int], keys: list[int]) -> bool:
+            entries = [
+                pb.CopyToStoreEntry(
+                    key=key,
+                    ipc_handle=_ipc_handle(self._kv, block_id, self._block_size_bytes),
+                )
+                for block_id, key in zip(gpu_block_ids, keys)
+            ]
+            try:
+                resp = self._stub.CopyToStore(
+                    pb.BatchCopyToStoreRequest(entries=entries)
+                )
+            except Exception as e:  # noqa: BLE001 - store failure must not crash vLLM
+                # A whole-batch RPC failure: roll back all reservations and report
+                # success (see the invariant note below). Blocks stay uncached.
+                print(
+                    f"[certus-grpc] CopyToStore RPC error: {e} — aborting {len(keys)} keys",
+                    flush=True,
+                )
+                try:
+                    self._stub.AbortStore(pb.BatchAbortStoreRequest(keys=keys))
+                except Exception:  # noqa: BLE001
+                    pass
+                return True
+
+            # CRITICAL: the store path must NEVER report success=False. vLLM's
+            # offloading worker asserts transfer_result.success and a False
+            # return kills the engine. A failed CopyToStore only means "this block
+            # won't be cached" — the KV data is still valid in GPU memory, so it
+            # is safe to drop. But because store is split-phase (Reserve ->
+            # CopyToStore -> CommitStore), we must roll back any key whose copy
+            # failed, so the subsequent CommitStore can't publish an unpopulated
+            # slot as a valid entry. Abort the failed keys; report success.
+            failed_results = [r for r in resp.results if not r.success]
+            failed = [r.key for r in failed_results]
+            if failed:
+                # DIAGNOSTIC: the server already returns the real reason per key in
+                # error_message (e.g. "GPU async DMA copy failed: cudaMemcpyAsync
+                # D2H failed: ..." or "size (N) exceeds destination buffer length
+                # (M)"). We normally discard it; surface the first few distinct
+                # messages so a store-path regression isn't silent. Rate-limited so
+                # a 48k-failure run doesn't spew.
+                _log_copy_failure(failed_results, len(keys))
+                print(
+                    f"[certus-grpc] CopyToStore failed for {len(failed)}/{len(keys)} "
+                    f"blocks — aborting those reservations, leaving them uncached",
+                    flush=True,
+                )
+                try:
+                    self._stub.AbortStore(pb.BatchAbortStoreRequest(keys=failed))
+                except Exception as e:  # noqa: BLE001 - best-effort rollback
+                    print(f"[certus-grpc] AbortStore rollback failed: {e}", flush=True)
+            return True
+
+        def _do_load(self, gpu_block_ids: list[int], keys: list[int]) -> bool:
+            entries = [
+                pb.LookupEntry(
+                    key=key,
+                    ipc_handle=_ipc_handle(self._kv, block_id, self._block_size_bytes),
+                )
+                for block_id, key in zip(gpu_block_ids, keys)
+            ]
+            resp = self._stub.Lookup(pb.BatchLookupRequest(entries=entries))
+            # Diagnostic: a load must not fail (vLLM asserts), and it shouldn't be
+            # able to — prepare_load pinned these keys. If the server reports any
+            # per-key failure, dump exactly which key + error so we can see WHY a
+            # Lookup missed a key that lookup()/Check said was present.
+            if not all_success(resp.results):
+                for r in resp.results:
+                    if not r.success:
+                        print(
+                            f"[certus-grpc] LOAD FAILURE key={r.key} "
+                            f"error_code={r.error_code} msg={r.error_message!r} "
+                            f"(this key was Check-hit and Pinned in prepare_load)",
+                            flush=True,
+                        )
+                return False
+            return True
+
+    return CertusGrpcWorker
+
+
+def worker_class():
+    """Return the (cached) version-appropriate ``CertusGrpcWorker`` class."""
+    global _WORKER_CLASS
+    if _WORKER_CLASS is None:
+        _WORKER_CLASS = _build_worker_class()
+    return _WORKER_CLASS

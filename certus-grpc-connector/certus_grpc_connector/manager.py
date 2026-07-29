@@ -81,10 +81,16 @@ class GrpcCertusOffloadingManager(OffloadingManager):
 
     # ── lookup / touch ──
 
-    def lookup(self, key: OffloadKey, req_context=None) -> bool | None:
+    def lookup(self, key: OffloadKey, req_context=None):
+        # Returns ``bool`` on ≤0.24 and a ``LookupResult`` enum (HIT/MISS) on
+        # 0.26+, which rewrote ``lookup``'s return type. The shim absorbs the
+        # difference so this body stays a single Check RPC.
+        from .compat import lookup_result
+
         int_key = _key_to_u64(key)
         resp = self._stub.Check(pb.BatchCheckRequest(keys=[int_key]))
-        return bool(resp.results and resp.results[0].exists)
+        exists = bool(resp.results and resp.results[0].exists)
+        return lookup_result(exists)
 
     def touch(self, keys: Iterable[OffloadKey], req_context=None) -> None:
         int_keys = _keys_to_u64s(keys)
