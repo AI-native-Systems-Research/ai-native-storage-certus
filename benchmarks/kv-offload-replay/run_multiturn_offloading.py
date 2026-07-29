@@ -61,7 +61,7 @@ if __name__ == "__main__":
     OUTPUT_TOKENS = int(os.environ.get("OUTPUT_TOKENS", 200))
     MAX_NUM_SEQS = int(os.environ.get("MAX_NUM_SEQS", 64))
     GPU_MEM_UTIL = float(os.environ.get("GPU_MEM_UTIL", 0.90))
-    CPU_BYTES = int(os.environ.get("CPU_BYTES", 4 * (1 << 30)))
+    CPU_BYTES = int(os.environ.get("CPU_BYTES", 32 * (1 << 30)))
     MODEL = os.environ.get("MODEL", "NousResearch/Meta-Llama-3-8B")
 
     PROMPT_BUDGET = MAX_MODEL_LEN - OUTPUT_TOKENS

@@ -1,123 +1,178 @@
 # Certus Codebase Summary
 
-Generated: 2026-06-18
+Generated: 2026-07-23 (previous run: 2026-06-18)
+Scope: repository root — excludes `deps/spdk-build` and `target`.
 
-## Overall SLOC by Language
+> **Note on Rust totals:** `tools/creusot/creusot` (the vendored Creusot verifier)
+> is **gitignored**, so tokei already excludes it. The 70,781 Rust figure below is
+> effectively first-party plus `tools/rdma-test` (~1,807 lines). Scoped to
+> first-party only (excluding all of `tools/`), Rust is **68,974 code lines** across
+> 272 files — see the dedicated section below.
+> (The per-component `complexity.sh` script uses raw `find`, which does NOT respect
+> gitignore, so it reports Creusot's ~66k lines — ignore that row as vendored.)
 
-| Language | Files | Code | Comments | Blanks | Total Lines |
-|----------|-------|------|----------|--------|-------------|
-| **Rust** | 228 | 52,832 | 2,508 | 8,276 | 63,616 |
-| Python | 41 | 9,799 | 538 | 1,659 | 11,996 |
-| JSON | 10 | 7,398 | 0 | 0 | 7,398 |
-| C | 10 | 2,980 | 522 | 553 | 4,055 |
-| C++ | 6 | 2,886 | 493 | 729 | 4,108 |
-| Shell | 49 | 2,680 | 585 | 494 | 3,759 |
-| YAML | 24 | 1,179 | 52 | 147 | 1,378 |
-| CUDA | 3 | 817 | 46 | 123 | 986 |
-| TOML | 40 | 834 | 12 | 131 | 977 |
-| Markdown (docs) | 269 | — | 80,176 | 59,752 | 139,928 |
-| **Total** | **727** | **87,678** | **105,304** | **75,823** | **268,805** |
+## Overall SLOC by Language (top)
 
-## Rust Breakdown (Primary Language)
+| Language | Files | Code | Comments | Blanks |
+|----------|-------|------|----------|--------|
+| C | 290 | 149,644 | 14,115 | 29,470 |
+| **Rust** | 286 | 70,781 | 3,643 | 10,748 |
+| C Header | 243 | 50,351 | 13,627 | 9,972 |
+| Python | 155 | 36,889 | 1,657 | 5,590 |
+| Cython | 83 | 14,472 | 265 | 2,322 |
+| JSON | 59 | 8,009 | 0 | 0 |
+| Shell | 78 | 4,581 | 1,107 | 842 |
+| CMake | 72 | 3,381 | 424 | 421 |
+| C++ | 6 | 2,886 | 493 | 729 |
+| YAML | 29 | 1,755 | 84 | 211 |
+| TOML | 48 | 1,025 | 60 | 159 |
+| Protocol Buffers | 8 | 797 | 217 | 325 |
+| CUDA | 3 | 817 | 46 | 123 |
+| Markdown (docs) | 651 | — | 125,711 | 84,817 |
+| **Total** | **2,196** | **363,980** | **185,551** | **152,612** |
 
-| Metric | Value |
-|--------|-------|
-| Total Rust code lines | 52,832 |
-| Doc comments (in Rust) | 5,822 |
-| Inline comments | 2,508 |
-| Test code (est.) | ~16,300 |
-| Production code (est.) | ~36,500 |
-| Test-to-code ratio | ~0.45 |
-| Comment-to-code ratio | ~0.16 |
+The large C / C-Header / Python / Cython counts are dominated by **vendored
+dependencies** (SPDK sources, Creusot tooling), not first-party Certus code.
 
 ## Component Breakdown (Rust, by code lines)
 
-| Component | Code | Tests | Total | Test % |
-|-----------|------|-------|-------|--------|
-| component-framework | 5,034 | 3,875 | 8,909 | 43% |
-| dispatcher-p2p | 2,781 | 1,917 | 4,698 | 41% |
-| dispatcher | 2,471 | 1,936 | 4,407 | 44% |
-| gpu-services | 1,989 | 192 | 2,181 | 9% |
-| block-device-spdk-nvme | 1,972 | 475 | 2,447 | 19% |
-| extent-manager | 1,828 | 359 | 2,187 | 16% |
-| block-device-filesys | 1,181 | 96 | 1,277 | 8% |
-| block-device-kernel | 1,162 | 91 | 1,253 | 7% |
-| interfaces | 1,062 | 145 | 1,207 | 12% |
-| eviction-policy-lru | 520 | 310 | 830 | 37% |
-| dispatch-map | 503 | 324 | 827 | 39% |
-| memory-tier | 496 | 286 | 782 | 37% |
-| spdk-env | 356 | 607 | 963 | 63% |
-| remote-lookup | 180 | 120 | 300 | 40% |
-| logger | 135 | 170 | 305 | 56% |
+| Component | Code | Tests | Total |
+|-----------|------|-------|-------|
+| component-framework/crates | 5,034 | 3,875 | 8,909 |
+| dispatcher-p2p | 3,512 | 2,226 | 5,738 |
+| dispatcher | 3,304 | 2,308 | 5,612 |
+| remote-lookup | 2,219 | 214 | 2,433 |
+| gpu-services | 2,154 | 195 | 2,349 |
+| block-device-spdk-nvme | 2,061 | 475 | 2,536 |
+| extent-manager | 1,914 | 387 | 2,301 |
+| interfaces | 1,741 | 361 | 2,102 |
+| remote-lookup-rdma-initiator | 1,663 | 447 | 2,110 |
+| remote-lookup-rdma-responder | 1,329 | 511 | 1,840 |
+| block-device-filesys | 1,215 | 96 | 1,311 |
+| block-device-kernel | 1,193 | 91 | 1,284 |
+| extended-metadata-store | 1,062 | 161 | 1,223 |
+| memory-tier | 595 | 195 | 790 |
+| disk-partition-manager | 582 | 0 | 582 |
+| dispatch-map | 562 | 287 | 849 |
+| block-device-memory | 506 | 149 | 655 |
+| zyre | 473 | 57 | 530 |
+| spdk-env | 356 | 607 | 963 |
+| eviction-policy-lru | 271 | 270 | 541 |
+| logger | 135 | 170 | 305 |
+
+_The above table uses `complexity.sh`'s src/tests split. The authoritative
+first-party totals (tokei, excluding all of `tools/`) are below._
+
+## First-Party Rust Only (tokei, excludes `tools/`, `deps/`, `target/`)
+
+Files: 272 · Code: **68,974** · Comments: 3,570 · Blanks: 10,476 ·
+Embedded doc-Markdown: 10,322
+By area: components 58,789 · apps 9,534 · certus-connector 651
+
+| Component / App | Code | Comments |
+|---|---|---|
+| component-framework | 9,853 | 445 |
+| dispatcher | 9,452 | 694 |
+| dispatcher-p2p | 6,902 | 341 |
+| block-device-spdk-nvme | 3,826 | 243 |
+| gpu-services | 3,338 | 241 |
+| extent-manager | 3,257 | 93 |
+| remote-lookup | 3,114 | 241 |
+| remote-lookup-rdma-initiator | 2,387 | 135 |
+| extended-metadata-store | 2,172 | 167 |
+| interfaces | 2,101 | 154 |
+| block-device-filesys | 1,986 | 47 |
+| certus-server-yaml | 1,904 | 74 |
+| remote-lookup-rdma-responder | 1,898 | 155 |
+| certus-server | 1,889 | 27 |
+| block-device-kernel | 1,865 | 38 |
+| iops-benchmark-md | 1,535 | 33 |
+| iops-benchmark | 1,397 | 45 |
+| dispatch-map | 1,341 | 49 |
+| spdk-env | 1,003 | 50 |
+| zyre | 884 | 54 |
+| memory-tier | 790 | 12 |
+| extent-benchmark | 719 | 22 |
+| block-device-memory | 655 | 3 |
+| certus-connector | 651 | 28 |
+| disk-partition-manager | 582 | 29 |
+| gpu-bb-vs-p2p | 581 | 43 |
+| eviction-policy-lru | 541 | 2 |
+| nvme-bar1-bench | 503 | 16 |
+| baseline-generalized-fs | 485 | 13 |
+| logger | 480 | 2 |
+| nvme-ns-manager | 315 | 5 |
+| spdk-sys | 280 | 47 |
+| gpu-handle-test-server | 76 | 9 |
+| example-helloworld | 74 | 2 |
+| dynamic-loading-example | 54 | 8 |
+| gpu-show | 50 | 0 |
+| helloworld-mainline | 26 | 3 |
+| example-helloworld-dylib | 8 | 0 |
+
+Top 3 (component-framework, dispatcher, dispatcher-p2p) = 26,207 lines (~38%).
 
 ## Applications (Rust)
 
-| App | Code | Tests | Total |
-|-----|------|-------|-------|
-| iops-benchmark-md | 1,221 | 314 | 1,535 |
-| certus-server | 953 | 0 | 953 |
-| iops-benchmark | 931 | 298 | 1,229 |
-| certus-server-yaml | 724 | 0 | 724 |
-| extent-benchmark | 630 | 0 | 630 |
-| gpu-bb-vs-p2p | 581 | 0 | 581 |
-| nvme-bar1-bench | 502 | 0 | 502 |
-| baseline-generalized-fs | 420 | 0 | 420 |
-| nvme-ns-manager | 315 | 0 | 315 |
-
-## Benchmarks (Rust, dedicated bench files)
-
-| Component | Bench Lines |
-|-----------|-------------|
-| dispatcher-p2p | 1,730 |
-| dispatcher | 1,710 |
-| gpu-services | 418 |
-| block-device-spdk-nvme | 350 |
-| block-device-filesys | 193 |
-| block-device-kernel | 176 |
-| extent-manager | 110 |
-| dispatch-map | 108 |
-| logger | 69 |
+| App | Code | Tests |
+|-----|------|-------|
+| certus-server-yaml | 1,443 | 0 |
+| certus-server | 1,338 | 491 |
+| iops-benchmark-md | 1,221 | 314 |
+| iops-benchmark | 1,093 | 304 |
+| extent-benchmark | 719 | 0 |
+| gpu-bb-vs-p2p | 581 | 0 |
+| nvme-bar1-bench | 503 | 0 |
+| baseline-generalized-fs | 420 | 0 |
+| nvme-ns-manager | 315 | 0 |
 
 ## Complexity Indicators
 
-### Largest Source Files
+### Largest source files (first-party, by code lines)
 
 | File | Lines |
 |------|-------|
-| `components/dispatcher/src/lib.rs` | 3,992 |
-| `components/dispatcher-p2p/src/lib.rs` | 3,747 |
-| `components/block-device-spdk-nvme/src/actor.rs` | 1,286 |
+| `components/dispatcher/src/lib.rs` | 4,981 |
+| `components/dispatcher-p2p/src/lib.rs` | 4,260 |
+| `apps/certus-server/src/service.rs` | 1,488 |
+| `components/dispatcher-p2p/src/pipeline.rs` | 1,402 |
+| `components/block-device-spdk-nvme/src/actor.rs` | 1,313 |
+| `components/gpu-services/src/lib.rs` | 1,280 |
 | `components/component-framework/.../actor.rs` | 1,273 |
-| `components/dispatcher-p2p/src/pipeline.rs` | 1,155 |
-| `components/gpu-services/src/lib.rs` | 1,084 |
 
-### Highest Function Count
+### Highest function count (first-party)
 
 | File | Functions |
 |------|-----------|
-| `components/dispatcher/src/lib.rs` | 142 |
-| `components/dispatcher-p2p/src/lib.rs` | 137 |
+| `components/dispatcher/src/lib.rs` | 170 |
+| `components/dispatcher-p2p/src/lib.rs` | 155 |
+| `components/remote-lookup/src/seams.rs` | 98 |
 | `components/component-framework/.../actor.rs` | 62 |
 
-### Deepest Nesting
+### Deepest nesting (first-party)
 
 | File | Max Depth |
 |------|-----------|
-| `apps/certus-server-yaml/build.rs` | 16 |
-| `components/dispatcher/src/lib.rs` | 14 |
-| `components/dispatcher-p2p/src/lib.rs` | 12 |
+| `apps/certus-server-yaml/build.rs` | 16 (codegen) |
+| `components/dispatcher/src/lib.rs` | 11 |
+| `components/dispatcher-p2p/src/lib.rs` | 11 |
 
-### Unsafe Usage
+### Unsafe usage
 
-- **125 files** contain `unsafe` blocks
-- **989 total** `unsafe` occurrences
-- Concentrated in: SPDK FFI bindings, io_uring operations, CUDA interop, DMA buffer management
+- **138 files** contain `unsafe`
+- **1,096 total** `unsafe` occurrences
+- Concentrated in: SPDK FFI, RDMA, io_uring, CUDA/GPU interop, DMA buffers
 
-## Key Ratios
+## Complexity Hotspots
 
-| Ratio | Value | Assessment |
-|-------|-------|------------|
-| Test / Production code | 0.45 | Good coverage |
-| Comments / Code | 0.16 | Concise, relies on naming |
-| Docs (markdown) / Code | 1.6x | Heavily documented |
-| Unsafe density | 989 / 52,832 = 1.9% | Reasonable for systems code |
+The two dispatchers (`dispatcher/src/lib.rs`, `dispatcher-p2p/src/lib.rs`) are the
+clear complexity concentration: largest files, highest function counts, and deepest
+nesting. Both grew notably since the last run (dispatcher 3,992 → 4,981 lines;
+dispatcher-p2p 3,747 → 4,260). Candidates for modularization.
+
+## Delta Since 2026-06-18
+
+- New first-party components: `remote-lookup-rdma-initiator/responder`,
+  `extended-metadata-store`, `disk-partition-manager`, `block-device-memory`, `zyre`.
+- `remote-lookup` grew from ~180 → 2,219 code lines (RDMA remote lookup work).
+- Vendored Creusot verifier (`tools/creusot`) added — dominates raw language totals.
