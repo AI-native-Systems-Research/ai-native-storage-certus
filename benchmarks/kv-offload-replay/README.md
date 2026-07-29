@@ -20,6 +20,7 @@ evictions without re-running the model.
 | `tracing_offloading_manager.py` | Drop-in `CPUOffloadingSpec` that wraps the underlying `OffloadingManager` + `OffloadingHandler`. Writes `offloading_mgr_<pid>.jsonl` (lookup/touch/prepare_store/…) and `offloading_handler_<pid>.jsonl` (GPU↔CPU transfer jobs). |
 | `run_sharegpt_offloading.py` | Driver: runs `vllm bench throughput` on ShareGPT with the tracing connectors attached. |
 | `run_multiturn_offloading.py` | Driver: the multi-turn 450×12 CPU-offload workload for head-to-head vs Certus. Uses the built-in `OffloadingConnector` by default (no tracing); `TRACE_OFFLOAD=1` switches to the tracing wrappers above. See [`RUNBOOK-cpu-and-sharedstorage.md`](RUNBOOK-cpu-and-sharedstorage.md). |
+| `run_multiturn_nooffload.py` | Driver: the multi-turn 450×12 **no-offload** (GPU-only) baseline — same workload with no `kv_transfer_config`, so evicted KV is recomputed rather than fetched. The reference point for the offload backends. Containerized by `Dockerfile.nooffload`. See [`RUNBOOK-cpu-and-sharedstorage.md`](RUNBOOK-cpu-and-sharedstorage.md). |
 | `replay_offloading_traces.py` | Replays manager and/or handler traces against a pluggable target. Built-in manager targets: pure-Python LRU (default), vLLM `CPUOffloadingManager`, Certus via `CertusOffloadingSpec` (native or policy-only), and `llmd_fs_backend`. Built-in handler targets: `fs-backend`, Certus via `CertusOffloadingSpec.get_handlers()`. |
 
 ## Prerequisites
