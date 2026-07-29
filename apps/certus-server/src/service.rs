@@ -178,6 +178,34 @@ fn map_dispatcher_error(err: &DispatcherError) -> (ErrorCode, String) {
 }
 
 
+/// Throttled diagnostic for store copies that fail server-side. A whole run's
+/// worth of per-key failures is returned to the client (in `error_message`) but
+/// was otherwise invisible in the server log — a silent-offload regression (e.g.
+/// a Reserve slot smaller than the copy size) could run to completion looking
+/// healthy. Log the first `COPY_FAIL_LOG_MAX` failures with their real reason,
+/// then a throttled tail, so the server self-documents.
+static COPY_FAIL_LOGGED: AtomicU64 = AtomicU64::new(0);
+const COPY_FAIL_LOG_MAX: u64 = 20;
+
+fn log_copy_failures(results: &[EntryResult], batch_len: usize) {
+    let first = match results.iter().find(|r| !r.success) {
+        Some(r) => r,
+        None => return,
+    };
+    let failed = results.iter().filter(|r| !r.success).count();
+    let n = COPY_FAIL_LOGGED.fetch_add(1, Ordering::Relaxed);
+    if n < COPY_FAIL_LOG_MAX || n.is_power_of_two() {
+        eprintln!(
+            "[certus-server] WARN copy_to_store: {failed}/{batch_len} blocks failed \
+             (occurrence #{}); first: key={} error_code={} msg={:?}",
+            n + 1,
+            first.key,
+            first.error_code,
+            first.error_message,
+        );
+    }
+}
+
 fn success_result(key: u64) -> EntryResult {
     EntryResult {
         key,
@@ -577,6 +605,7 @@ impl Dispatcher for DispatcherService {
         let req = request.into_inner();
         let keys: Vec<u64> = req.entries.iter().map(|e| e.key).collect();
         check_duplicate_keys(&keys)?;
+        let req_len = req.entries.len();
         #[cfg(feature = "otel")]
         let _t0 = std::time::Instant::now();
 
@@ -669,6 +698,10 @@ impl Dispatcher for DispatcherService {
         })
         .await
         .map_err(|e| Status::internal(format!("task join error: {e}")))?;
+
+        if results.iter().any(|r| !r.success) {
+            log_copy_failures(&results, req_len);
+        }
 
         #[cfg(feature = "otel")]
         if let Some(ref m) = self.metrics {
