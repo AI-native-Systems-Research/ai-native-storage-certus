@@ -14,6 +14,55 @@ per-round time and IO are directly comparable. Dataset:
 
 ---
 
+## Backend 0 — No offload (GPU-only baseline)
+
+The reference point for the other three: a single vLLM process with **no
+`kv_transfer_config` at all**. Prefix caching stays on (matching the offload
+runs), so the only difference is that evicted KV is **recomputed on the GPU**
+rather than fetched from an offload tier. No tier, no server, no IO.
+
+**Driver:** `run_multiturn_nooffload.py` — same workload/driver loop as the
+other backends (same dataset/turns/sampling), just with the connector removed.
+
+### Host setup
+None. It needs only a free GPU. (Hugepages left over from Certus mode don't hurt
+this backend — there is no host-RAM tier to squeeze.)
+
+### Run
+```bash
+V=~/kvconn-trace/.venv-v0.20.0/bin/python   # vLLM 0.20.0 venv
+DATASET_PATH=$PWD/../../certus-connector/sharegpt_12turn_450.json \
+NUM_CONVS=450 MAX_MODEL_LEN=8192 OUTPUT_TOKENS=150 MAX_NUM_SEQS=64 GPU_MEM_UTIL=0.90 \
+MODEL=NousResearch/Meta-Llama-3-8B HF_HUB_OFFLINE=1 \
+$V run_multiturn_nooffload.py 2>&1 | tee nooffload_450.log
+```
+
+### Env knobs
+`NUM_CONVS` (450) · `MAX_MODEL_LEN` (8192) · `OUTPUT_TOKENS` (150) ·
+`MAX_NUM_SEQS` (64) · `GPU_MEM_UTIL` (0.90) · `MODEL` · `DATASET_PATH`.
+There is no offload tier, so no `CPU_BYTES` / `DRAM`.
+
+### Container
+A self-contained image (`Dockerfile.nooffload`) packages the driver + dataset on
+the same `vllm/vllm-openai:v0.20.0` base as the other bench images. No server, no
+gRPC, no `--ipc=host`, and no offload tier to size. Its `ENV` defaults match this
+section (`NUM_CONVS=450`, 450×12 dataset).
+```bash
+# build from the repo root (context needs the bench dir + dataset)
+podman build -f benchmarks/kv-offload-replay/Dockerfile.nooffload -t certus-nooffload-bench .
+# run (GPU required; mount the HF cache)
+podman run --rm --device nvidia.com/gpu=all \
+    -v $HOME/.cache/huggingface:/root/.cache/huggingface \
+    certus-nooffload-bench
+```
+
+### Notes / gotchas
+- This is the **upper bound on recompute cost** — every KV miss is a full GPU
+  recompute. The offload backends should beat it once the tier hit rate is high
+  enough to offset transfer cost; if one doesn't, the tier isn't paying for itself.
+
+---
+
 ## Backend 1 — CPU offload (vLLM built-in `CPUOffloadingSpec`)
 
 KV offload tier lives in **host RAM** (a CUDA pinned buffer). No NVMe, no server
@@ -177,10 +226,11 @@ Same invocation as the base driver, just swap the script name. Use these when yo
 need to explain *why* a backend is slow (tier misses → recompute, preemptions)
 rather than only *how much* IO it moved.
 
-## The three backends at a glance
+## The backends at a glance
 
 | Backend | Driver (this dir unless noted) | Offload tier | Host setup |
 |---|---|---|---|
+| No offload | `run_multiturn_nooffload.py` | none (GPU recompute) | none |
 | Certus | `certus-grpc-connector/run_multiturn_grpc_certus.py` + `run-bench.sh` | DRAM (SPDK hugepages) + NVMe | `configure-bench.sh certus` |
 | CPU offload | `run_multiturn_offloading.py` | host RAM (pinned) | free hugepages; else none |
 | SharedStorage | `run_fs_bench_450.py` | RAID0 XFS filesystem | `configure-bench.sh sharedstorage` |
