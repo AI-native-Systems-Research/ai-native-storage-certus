@@ -22,7 +22,7 @@
 #   GPU=all                     GPU selector (all | 0 | 0,1 | <uuid>)
 #   CERTUS_SERVER=host.containers.internal:50051  (host-gateway; NOT localhost —
 #                               that is the container's own loopback)
-#   NUM_CONVS=450  MODEL=NousResearch/Meta-Llama-3-8B  SLAB_SIZE_BYTES=2097152
+#   NUM_CONVS=450  MODEL=ibm-granite/granite-4.1-8b  SLAB_SIZE_BYTES=2097152
 #   HF_CACHE=$HOME/.cache/huggingface
 #   HF_TOKEN=<token>            passed through if set
 #   PODMAN_STORE / PODMAN_RUNROOT   override rootless storage location (this
@@ -40,7 +40,7 @@ GPU="${GPU:-all}"
 # with an explicit IP if this name doesn't resolve on an older podman.
 CERTUS_SERVER="${CERTUS_SERVER:-host.containers.internal:50051}"
 NUM_CONVS="${NUM_CONVS:-450}"
-MODEL="${MODEL:-NousResearch/Meta-Llama-3-8B}"
+MODEL="${MODEL:-ibm-granite/granite-4.1-8b}"
 SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"
 HF_CACHE="${HF_CACHE:-$HOME/.cache/huggingface}"
 

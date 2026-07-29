@@ -14,8 +14,11 @@ dependencies = [
     "numpy",
 ]
 # vLLM is provided by the runtime environment (heavy GPU dependency); the
-# connector targets its v1 kv_offload OffloadingSpec API as of this release.
-# vllm==0.20.0
+# connector targets its v1 kv_offload OffloadingSpec API. Multiple versions are
+# supported from this single package via certus_grpc_connector.compat (version
+# detection + capability matrix); select the base image with the Dockerfile's
+# VLLM_VERSION build arg.
+# Supported (built + smoke-tested): vllm in {0.20.0, 0.22.0, 0.24.0, 0.26.0}
 
 [project.optional-dependencies]
 dev = ["pytest", "grpcio-tools>=1.60.0"]

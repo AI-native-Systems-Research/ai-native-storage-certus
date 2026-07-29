@@ -5,14 +5,41 @@ The connector's manager/handler/spec/mediums import a handful of vLLM classes at
 module load. vLLM is a heavy GPU dependency not present in unit-test CI, so we
 register just-enough stand-ins here. These stubs mirror only the attributes the
 connector actually touches; they are not a functional vLLM.
+
+The fakes are produced by a per-version *factory* (``build_fake_vllm``) so a
+future vLLM whose plugin surface diverges gets its shape encoded in ONE place,
+alongside the ``compat.FEATURES`` entry that gates the connector's adaptation.
+Today the four supported even versions (0.20/0.22/0.24/0.26) share the 0.20
+shape for everything except engine flags (``needs_disable_hybrid_kv_cache_manager``,
+which is a run-driver concern, not an import-surface one), so the factory
+currently emits the same modules for every version — but the seam is here, keyed
+off the same predicates the connector branches on, so the fakes and the adapters
+cannot silently drift apart.
 """
 
 from __future__ import annotations
 
 import sys
 import types
-from dataclasses import dataclass, field
+from dataclasses import dataclass, make_dataclass
 from typing import Any
+
+# The even versions we produce fakes for. Mirrors compat.SUPPORTED_VERSIONS, but
+# defined locally: compat imports vllm at module load, so it cannot be imported
+# until AFTER a fake vllm is installed. Keep the two lists in sync (test_compat
+# asserts they match).
+SUPPORTED_VERSIONS: tuple[tuple[int, int], ...] = ((0, 20), (0, 22), (0, 24), (0, 26))
+
+
+def _transfer_result_has_type(version: tuple[int, int]) -> bool:
+    """Whether ``TransferResult`` carries the 5th ``transfer_type`` field.
+
+    Mirrors ``compat.FEATURES['transfer_result_has_type']``. Duplicated here (not
+    imported) for the load-order reason above; the fake's field set MUST track
+    the real one so the ``make_transfer_result`` adapter is tested against the
+    shape it will actually meet.
+    """
+    return version >= (0, 20)
 
 
 def _module(name: str) -> types.ModuleType:
@@ -21,11 +48,24 @@ def _module(name: str) -> types.ModuleType:
     return mod
 
 
-def _install_fake_vllm() -> None:
-    if "vllm" in sys.modules:
-        return
+def _purge_fake_vllm() -> None:
+    """Remove any previously-installed fake vllm modules from sys.modules so a
+    fresh factory build (a different version) is picked up on the next import."""
+    for name in [n for n in sys.modules if n == "vllm" or n.startswith("vllm.")]:
+        del sys.modules[name]
 
-    _module("vllm")
+
+def build_fake_vllm(version: tuple[int, int] = (0, 20)) -> None:
+    """Install fake ``vllm`` modules shaped for the given (major, minor) version.
+
+    Idempotent per interpreter state: purges any prior fake first, so callers can
+    rebuild for a different version between imports. Sets ``vllm.__version__`` so
+    ``compat._detect_version`` resolves to ``version`` when reloaded.
+    """
+    _purge_fake_vllm()
+
+    vllm = _module("vllm")
+    vllm.__version__ = f"{version[0]}.{version[1]}.0"
     _module("vllm.config")
     _module("vllm.v1")
     _module("vllm.v1.kv_cache_interface")
@@ -83,13 +123,18 @@ def _install_fake_vllm() -> None:
     class OffloadingHandler:
         pass
 
-    @dataclass
-    class TransferResult:
-        job_id: int
-        success: bool
-        transfer_size: int
-        transfer_time: float
-        transfer_type: Any
+    # TransferResult's field set is version-varying: the ``transfer_type`` field
+    # is present iff the matching FEATURES predicate says so, so the fake matches
+    # exactly the shape make_transfer_result will construct on this version.
+    tr_fields = [
+        ("job_id", int),
+        ("success", bool),
+        ("transfer_size", int),
+        ("transfer_time", float),
+    ]
+    if _transfer_result_has_type(version):
+        tr_fields.append(("transfer_type", Any))
+    TransferResult = make_dataclass("TransferResult", tr_fields)
 
     worker.OffloadingHandler = OffloadingHandler
     worker.TransferResult = TransferResult
@@ -97,4 +142,8 @@ def _install_fake_vllm() -> None:
     worker.TransferType = tuple
 
 
-_install_fake_vllm()
+# Auto-install the baseline (0.20) fakes at collection time so the version-blind
+# tests (test_manager, test_handler) import cleanly. Parametrized tests that need
+# a specific version rebuild via build_fake_vllm + importlib.reload(compat).
+if "vllm" not in sys.modules:
+    build_fake_vllm((0, 20))
