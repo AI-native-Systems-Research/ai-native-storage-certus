@@ -605,7 +605,7 @@ fn reserve_memory_happy_path_returns_nonnull_pointer() {
     let d = query_interface!(c, IDispatcher).unwrap();
 
     let ptr = d
-        .reserve_memory(1, 4096)
+        .reserve_memory(1, 4096, 0)
         .expect("reserve_memory should succeed");
 
     assert!(
@@ -620,7 +620,9 @@ fn reserve_memory_zero_size_returns_invalid_parameter() {
     let (c, _dm) = setup_initialized();
     let d = query_interface!(c, IDispatcher).unwrap();
 
-    let err = d.reserve_memory(1, 0).expect_err("size=0 must be rejected");
+    let err = d
+        .reserve_memory(1, 0, 0)
+        .expect_err("size=0 must be rejected");
 
     assert!(
         matches!(err, DispatcherError::InvalidParameter(_)),
@@ -635,7 +637,7 @@ fn reserve_memory_full_pool_returns_allocation_failed() {
     let d = query_interface!(c, IDispatcher).unwrap();
 
     let err = d
-        .reserve_memory(1, 4096)
+        .reserve_memory(1, 4096, 0)
         .expect_err("exhausted pool must fail");
 
     assert!(
@@ -650,10 +652,10 @@ fn reserve_memory_duplicate_key_returns_error() {
     let (c, _dm) = setup_initialized();
     let d = query_interface!(c, IDispatcher).unwrap();
 
-    d.reserve_memory(42, 4096).unwrap();
+    d.reserve_memory(42, 4096, 0).unwrap();
 
     let err = d
-        .reserve_memory(42, 4096)
+        .reserve_memory(42, 4096, 0)
         .expect_err("duplicate key must fail");
 
     assert!(
@@ -668,7 +670,7 @@ fn release_memory_frees_reserved_slot() {
     let (c, _dm) = setup_initialized();
     let d = query_interface!(c, IDispatcher).unwrap();
 
-    d.reserve_memory(10, 4096).unwrap();
+    d.reserve_memory(10, 4096, 0).unwrap();
     d.release_memory(10)
         .expect("release_memory on a reserved slot must succeed");
 
@@ -694,7 +696,7 @@ fn copy_gpu_to_memory_completed_makes_key_visible() {
     let key: CacheKey = 7;
     let size: u32 = 4096;
 
-    d.reserve_memory(key, size).unwrap();
+    d.reserve_memory(key, size, 0).unwrap();
 
     let mut src = vec![0u8; size as usize];
     d.copy_gpu_to_memory_async(key, make_handle(&mut src), null_stream())
@@ -733,7 +735,7 @@ fn copy_gpu_to_memory_async_copies_data_to_dram_slot() {
     let size: u32 = 512;
 
     // Reserve the DRAM slot; keep the returned pointer for readback.
-    let ptr = d.reserve_memory(key, size).unwrap();
+    let ptr = d.reserve_memory(key, size, 0).unwrap();
     assert!(!ptr.is_null());
 
     // Fill source buffer with a deterministic pattern.
@@ -767,7 +769,7 @@ fn full_three_phase_store_lifecycle() {
     let size: u32 = 4096;
 
     // Phase 1: reserve — allocates DRAM slot, does NOT register in dispatch-map.
-    let ptr = d.reserve_memory(key, size).unwrap();
+    let ptr = d.reserve_memory(key, size, 0).unwrap();
     assert!(!ptr.is_null());
     assert!(
         !d.check(key).unwrap(),
@@ -803,7 +805,7 @@ fn reserve_release_re_reserve_sequence() {
     let key: CacheKey = 5;
 
     // First reservation.
-    let ptr1 = d.reserve_memory(key, 4096).unwrap();
+    let ptr1 = d.reserve_memory(key, 4096, 0).unwrap();
     assert!(!ptr1.is_null());
 
     // Release — slot is freed.
@@ -811,7 +813,7 @@ fn reserve_release_re_reserve_sequence() {
 
     // Re-reserve the same key; must succeed after release.
     let ptr2 = d
-        .reserve_memory(key, 4096)
+        .reserve_memory(key, 4096, 0)
         .expect("re-reserve after release must succeed");
     assert!(!ptr2.is_null(), "re-reserved pointer must be non-null");
 

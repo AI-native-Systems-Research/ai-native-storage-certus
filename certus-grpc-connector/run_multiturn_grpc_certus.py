@@ -209,6 +209,7 @@ if __name__ == "__main__":
             break
         active_idx = []
         active_prompts = []
+        active_sps = []
         for i, conv in enumerate(convs):
             if not alive[i]:
                 continue
@@ -224,11 +225,19 @@ if __name__ == "__main__":
             contexts[i] = candidate
             active_idx.append(i)
             active_prompts.append(candidate)
+            # Tag each request with its conversation as the KV-offload session_id.
+            # The conversation index is stable across rounds, so every turn of
+            # the same conversation shares one session_id; the connector forwards
+            # it (hashed to u64) on Reserve -> the dispatcher logs it.
+            # +1 so conversation 0 gets a non-zero id (0 == "unset" sentinel).
+            sp_i = sp.clone()
+            sp_i.extra_args = {"kv_transfer_params": {"session_id": i + 1}}
+            active_sps.append(sp_i)
 
         if not active_prompts:
             break
 
-        outputs = llm.generate(active_prompts, sp)
+        outputs = llm.generate(active_prompts, active_sps)
         for j, out in enumerate(outputs):
             i = active_idx[j]
             gen = out.outputs[0].text

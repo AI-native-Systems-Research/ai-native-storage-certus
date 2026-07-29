@@ -158,6 +158,9 @@ message BatchTouchResponse {
 message ReserveEntry {
   uint64 key = 1;
   uint32 size = 2;    // Data size in bytes to reserve
+  // Opaque session identifier (e.g. a hash of vLLM's session_id string).
+  // 0 = unset. Propagated to the dispatcher for per-session observability.
+  uint64 session_id = 3;
 }
 
 message BatchReserveRequest {

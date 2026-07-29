@@ -42,6 +42,7 @@ CERTUS_SERVER="${CERTUS_SERVER:-host.containers.internal:50051}"
 NUM_CONVS="${NUM_CONVS:-450}"
 MODEL="${MODEL:-NousResearch/Meta-Llama-3-8B}"
 SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"
+TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
 HF_CACHE="${HF_CACHE:-$HOME/.cache/huggingface}"
 
 # This host keeps the (large) image on the /mnt/certus1 filesystem, so podman
