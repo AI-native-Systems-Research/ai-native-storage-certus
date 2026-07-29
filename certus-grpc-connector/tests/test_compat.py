@@ -90,6 +90,22 @@ def test_disable_async_scheduling_from_0_22(version, expected):
     assert compat.caps_for(version).needs_disable_async_scheduling is expected
 
 
+@pytest.mark.parametrize(
+    "version,expected",
+    [
+        ((0, 20), False),
+        ((0, 22), False),
+        ((0, 24), True),   # 0.24 added the on_new_request abstract method
+        ((0, 26), True),
+    ],
+)
+def test_on_new_request_from_0_24(version, expected):
+    # 0.24 made OffloadingManager.on_new_request abstract; the manager must
+    # implement it or vLLM can't instantiate it. Pin the threshold so a matrix
+    # edit that moves it is caught.
+    assert compat.caps_for(version).has_on_new_request is expected
+
+
 def test_features_and_caps_have_identical_keys():
     # Caps must expose exactly the FEATURES names — a new predicate without a
     # matching dataclass field (or vice versa) would raise at caps_for() time,

@@ -115,6 +115,16 @@ FEATURES: dict[str, "callable"] = {
     # pass ``async_scheduling=False`` to opt out. 0.20 did not default it on, so
     # the flag (and the kwarg itself) only applies from 0.22.
     "needs_disable_async_scheduling": lambda v: v >= (0, 22),  # verified @0.22 (assert crash w/o it)
+    # 0.24 added a new ABSTRACT method OffloadingManager.on_new_request(req_context)
+    # -> RequestOffloadingContext(policy=...), called once when the scheduler first
+    # sees a request. Without an implementation the manager is abstract and vLLM
+    # can't instantiate it (TypeError at engine init). We return the default
+    # BLOCK_LEVEL context (offload newly-computed blocks, skip prefix hits — which
+    # matches our prepare_store Check filter). The return type only exists on
+    # 0.24+, so the manager builds it lazily via ``new_request_offloading_context``;
+    # older bases neither declare nor call the method. Declarative flag (the method
+    # is defined unconditionally; it is simply never invoked before 0.24).
+    "has_on_new_request": lambda v: v >= (0, 24),  # verified @0.24 (abstract; instantiation fails without it)
 }
 
 
@@ -126,6 +136,7 @@ class Caps:
     kv_cache_group_attrs: bool
     needs_disable_hybrid_kv_cache_manager: bool
     needs_disable_async_scheduling: bool
+    has_on_new_request: bool
 
 
 def caps_for(v: tuple[int, int]) -> Caps:
@@ -280,6 +291,7 @@ __all__ = [
     "extract_gpu_ptrs",
     "block_bytes_from_config",
     "gpu_block_ids",
+    "new_request_offloading_context",
 ]
 
 
@@ -378,6 +390,25 @@ def gpu_block_ids(load_store_spec) -> list[int]:
     """Ordered GPU block ids from a ``GPULoadStoreSpec``. Isolated so a change to
     how vLLM stores block ids (np array vs list, attribute name) lives in one place."""
     return [int(b) for b in load_store_spec.block_ids]
+
+
+def new_request_offloading_context():
+    """Default per-request offloading context for ``OffloadingManager.on_new_request``
+    (0.24+). Returns ``RequestOffloadingContext()`` — the BLOCK_LEVEL policy: offload
+    newly-computed blocks and skip prefix hits, which matches the connector's Check
+    filter in ``prepare_store``.
+
+    Resolved lazily (not via the mandatory ``_SYMBOL_PATHS`` ladder) because the type
+    only exists on 0.24+; loading it there would break symbol resolution on 0.20/0.22.
+    Only ever called on ``CAPS.has_on_new_request`` versions.
+    """
+    import importlib
+
+    try:
+        base = importlib.import_module("vllm.v1.kv_offload.base")
+        return base.RequestOffloadingContext()
+    except (ImportError, AttributeError) as _e:  # pragma: no cover - 0.24+ only path
+        raise _import_error("RequestOffloadingContext (from vllm.v1.kv_offload.base)", _e)
 
 
 # ── matrix CLI ─────────────────────────────────────────────────────────────

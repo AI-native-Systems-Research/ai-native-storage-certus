@@ -63,6 +63,22 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         subsequent stores."""
         self._block_size_bytes = int(block_size_bytes)
 
+    # ── request lifecycle ──
+
+    def on_new_request(self, req_context=None):
+        """Called once when the scheduler first sees a request (vLLM 0.24+).
+
+        Returns the default ``RequestOffloadingContext`` (BLOCK_LEVEL policy:
+        offload newly-computed blocks, skip prefix hits already offloaded by a
+        prior request) — matching the Check filter in ``prepare_store``. This
+        method is a no-op contract on <0.24 (the base neither declares nor calls
+        it); the return type is built lazily through compat because it does not
+        exist before 0.24.
+        """
+        from .compat import new_request_offloading_context
+
+        return new_request_offloading_context()
+
     # ── lookup / touch ──
 
     def lookup(self, key: OffloadKey, req_context=None) -> bool | None:
