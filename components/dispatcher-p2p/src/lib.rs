@@ -2135,7 +2135,8 @@ impl IDispatcher for DispatcherP2pComponent {
         let size: u32 = ipc_handle.size;
 
         // Phase 1: Evict if needed and allocate memory-tier slot.
-        let _mem_ptr = self.reserve_memory(key, size)?;
+        // Internal populate path has no client session context.
+        let _mem_ptr = self.reserve_memory(key, size, 0)?;
 
         // Phase 2: Async DMA into the reserved slot, then synchronize.
         let gpu = self
@@ -2153,8 +2154,30 @@ impl IDispatcher for DispatcherP2pComponent {
         Ok(())
     }
 
-    fn reserve_memory(&self, key: CacheKey, size: u32) -> Result<*mut u8, DispatcherError> {
+    fn reserve_memory(
+        &self,
+        key: CacheKey,
+        size: u32,
+        session_id: u64,
+    ) -> Result<*mut u8, DispatcherError> {
         self.ensure_initialized()?;
+
+        // Per-call reserve logging is opt-in: it is noisy under load and only
+        // useful for session-id observability. Enable by setting
+        // CERTUS_LOG_RESERVE to a truthy value (1/true/yes/on). Read once.
+        fn reserve_logging_enabled() -> bool {
+            static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            *ENABLED.get_or_init(|| {
+                std::env::var("CERTUS_LOG_RESERVE")
+                    .map(|v| matches!(v.trim(), "1" | "true" | "TRUE" | "yes" | "on"))
+                    .unwrap_or(false)
+            })
+        }
+        if reserve_logging_enabled() {
+            self.log_info(&format!(
+                "reserve_memory: key={key} size={size} session_id={session_id}"
+            ));
+        }
 
         if size == 0 {
             return Err(DispatcherError::InvalidParameter("size must be > 0".into()));

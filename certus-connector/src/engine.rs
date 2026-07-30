@@ -11,8 +11,8 @@ use pyo3::types::PyDict;
 
 use component_core::query_interface;
 use interfaces::{
-    CacheKey, DispatcherConfig, GpuStream, IDispatchMap,
-    IDispatcher, IEvictionPolicy, IGpuServices, ILogger, IMemoryTier, IpcHandle, LookupResult,
+    CacheKey, DispatcherConfig, GpuStream, IDispatchMap, IDispatcher, IEvictionPolicy,
+    IGpuServices, ILogger, IMemoryTier, IpcHandle, LookupResult,
 };
 
 use crate::keys;
@@ -127,28 +127,44 @@ impl EngineInner {
         dm_comp
             .logger
             .connect(Arc::clone(&log) as Arc<dyn ILogger + Send + Sync>)
-            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire logger for dispatch map: {e}")))?;
+            .map_err(|e| {
+                PyRuntimeError::new_err(format!("failed to wire logger for dispatch map: {e}"))
+            })?;
         dm_comp
             .eviction_policy
             .connect(Arc::clone(&eviction_policy))
-            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire eviction_policy for dispatch map: {e}")))?;
+            .map_err(|e| {
+                PyRuntimeError::new_err(format!(
+                    "failed to wire eviction_policy for dispatch map: {e}"
+                ))
+            })?;
         let dm: Arc<dyn IDispatchMap + Send + Sync> = query_interface!(dm_comp, IDispatchMap)
             .ok_or_else(|| PyRuntimeError::new_err("failed to query IDispatchMap"))?;
         dm.initialize()
             .map_err(|e| PyRuntimeError::new_err(format!("DispatchMap init failed: {e}")))?;
 
-        let numa_opt = if numa_node >= 0 { Some(numa_node as i32) } else { None };
+        let numa_opt = if numa_node >= 0 {
+            Some(numa_node as i32)
+        } else {
+            None
+        };
 
         // --- Create memory tier ---
         let mt_comp = memory_tier::MemoryTierComponent::new_default();
         mt_comp
             .logger
             .connect(Arc::clone(&log) as Arc<dyn ILogger + Send + Sync>)
-            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire logger for memory-tier: {e}")))?;
+            .map_err(|e| {
+                PyRuntimeError::new_err(format!("failed to wire logger for memory-tier: {e}"))
+            })?;
         mt_comp
             .eviction_policy
             .connect(Arc::clone(&eviction_policy))
-            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire eviction_policy for memory-tier: {e}")))?;
+            .map_err(|e| {
+                PyRuntimeError::new_err(format!(
+                    "failed to wire eviction_policy for memory-tier: {e}"
+                ))
+            })?;
         let memory_tier: Arc<dyn IMemoryTier + Send + Sync> =
             query_interface!(mt_comp, IMemoryTier)
                 .ok_or_else(|| PyRuntimeError::new_err("failed to query IMemoryTier"))?;
@@ -166,7 +182,9 @@ impl EngineInner {
         disp_comp
             .logger
             .connect(Arc::clone(&log) as Arc<dyn ILogger + Send + Sync>)
-            .map_err(|e| PyRuntimeError::new_err(format!("failed to wire logger for dispatcher: {e}")))?;
+            .map_err(|e| {
+                PyRuntimeError::new_err(format!("failed to wire logger for dispatcher: {e}"))
+            })?;
         disp_comp
             .dispatch_map
             .connect(Arc::clone(&dm))
@@ -203,9 +221,9 @@ impl EngineInner {
             })
             .map_err(|e| PyRuntimeError::new_err(format!("Dispatcher init failed: {e}")))?;
 
-        let store_stream = gpu.create_stream().map_err(|e| {
-            PyRuntimeError::new_err(format!("failed to create store stream: {e}"))
-        })?;
+        let store_stream = gpu
+            .create_stream()
+            .map_err(|e| PyRuntimeError::new_err(format!("failed to create store stream: {e}")))?;
 
         Ok(Self {
             dispatcher,
@@ -280,7 +298,7 @@ impl EngineInner {
         let size = self.gpu_block_size as u32;
         let mut reserved = Vec::new();
         for key in &to_store_cache_keys {
-            match self.dispatcher.reserve_memory(*key, size) {
+            match self.dispatcher.reserve_memory(*key, size, 0) {
                 Ok(_ptr) => {
                     reserved.push(*key);
                 }
@@ -443,9 +461,10 @@ impl EngineInner {
             ));
         }
 
-        let stream = self.gpu_services.create_stream().map_err(|e| {
-            PyRuntimeError::new_err(format!("load_dma: create_stream failed: {e}"))
-        })?;
+        let stream = self
+            .gpu_services
+            .create_stream()
+            .map_err(|e| PyRuntimeError::new_err(format!("load_dma: create_stream failed: {e}")))?;
 
         let mut all_ok = true;
         for (i, src_ptr) in src_ptrs.iter().enumerate() {
@@ -511,7 +530,10 @@ impl EngineInner {
             };
 
             // Async DMA from GPU into the DRAM slot reserved by prepare_store.
-            match self.dispatcher.copy_gpu_to_memory_async(*key, handle, stream) {
+            match self
+                .dispatcher
+                .copy_gpu_to_memory_async(*key, handle, stream)
+            {
                 Ok(()) => {}
                 Err(interfaces::DispatcherError::AlreadyExists(_)) => continue,
                 Err(e) => {
@@ -643,7 +665,9 @@ impl EngineInner {
                         Err(interfaces::DispatcherError::KeyNotFound(_)) => {}
                         Err(interfaces::DispatcherError::AlreadyExists(_)) => {}
                         Err(e) => {
-                            eprintln!("[certus] copy_gpu_to_memory_completed failed key={key}: {e:?}");
+                            eprintln!(
+                                "[certus] copy_gpu_to_memory_completed failed key={key}: {e:?}"
+                            );
                             all_ok = false;
                         }
                     }
@@ -722,7 +746,6 @@ impl EngineInner {
 
         Ok(())
     }
-
 
     /// Shut down the engine, releasing all resources.
     pub fn shutdown(&self) -> PyResult<()> {
