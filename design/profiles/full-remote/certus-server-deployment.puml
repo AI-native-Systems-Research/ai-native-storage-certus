@@ -46,7 +46,7 @@ rectangle "**Server Host**" as server_box #FAFAFA {
 
         rectangle "**Remote Cache Layer**" as remote_box #FEE2E2 {
             agent "RemoteLookup\n<<IRemoteLookup>>\norchestrator: query + reserve" as remote_lookup
-            agent "RdmaInitiator\n<<IRemoteLookupRdmaInitiator>>\npush values OUT to peers" as remote_initiator
+            agent "RdmaInitiator\n<<IRemoteLookupRdmaInitiator>>\npush values OUT to peers\n(async: one connection thread per peer)" as remote_initiator
             agent "RdmaResponder\n<<IRemoteLookupRdmaResponder>>\naccept writes IN from peers" as remote_responder
             agent "Zyre\n<<IZyre>>\npeer discovery" as remote_zyre
         }
@@ -79,7 +79,8 @@ disp_bg --> blkdev
 blkdev -down-> spdk_env
 extmgr --> blkdev : metadata
 
-remote_lookup -down-> remote_initiator : drive push
+remote_lookup -down-> remote_initiator : submit push (push_async)
+remote_initiator .up.> remote_lookup : completion callback\n(statuses; releases read pins)
 remote_lookup -down-> remote_responder : reserve slot
 remote_lookup -down-> remote_zyre : discover / query
 

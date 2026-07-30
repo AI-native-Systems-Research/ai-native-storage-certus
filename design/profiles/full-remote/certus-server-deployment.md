@@ -84,7 +84,7 @@
 │  │ RemoteLookupComponent                           «IRemoteLookup»       │   │
 │  │  receptacles: [zyre, dispatch_map, memory_tier, dispatcher,           │   │
 │  │                initiator, responder, responder_admin, logger]         │   │
-│  │  • Orchestrator: reserve landing slot, query peers, drive push        │   │
+│  │  • Orchestrator: reserve landing slot, query peers, submit push       │   │
 │  │  • initialize / batch_lookup([(key,size)]) / join_cluster / leave     │   │
 │  └───────┬───────────────────┬────────────────────┬─────────────────────┘   │
 │          │ drives            │ reserves            │ discovers/queries       │
@@ -94,7 +94,7 @@
 │  │  recepts:        │ │  «...ResponderAdmin»│ │  • gossip/beacon discovery │   │
 │  │  [logger,        │ │  recepts:         │ │  • create IZyreNode handle  │   │
 │  │   memory_tier]   │ │  [logger,         │ └──────────────┬──────────────┘   │
-│  │  • push OUT to   │ │   memory_tier]    │                │ gossip           │
+│  │  • async push to │ │   memory_tier]    │                │ gossip           │
 │  │    peer memory   │ │  • register pool, │                │ (KeyQuery /      │
 │  │    (data-holder) │ │    accept writes  │                │  RdmaRequest)    │
 │  └───────┬──────────┘ │    IN (requester) │                │                  │
@@ -134,7 +134,7 @@
 5. **DispatchMapComponent** — key→location table
 6. **MemoryTierComponent** — mmap DRAM pool, CUDA-pinned via `cudaHostRegister`
 7. **ZyreComponent** — peer-discovery factory
-8. **RemoteLookupRdmaInitiatorComponent** — outbound push side (bound to logger, memory_tier)
+8. **RemoteLookupRdmaInitiatorComponent** — outbound push side (bound to logger, memory_tier); its per-peer connection threads are spawned lazily on first use, not at initialization
 9. **RemoteLookupRdmaResponderComponent** — passive accept side (bound to logger, memory_tier)
 10. **RemoteLookupComponent** — orchestrator; `init_hook` brings up the responder, advertises the local RDMA endpoint via Zyre, spawns the initiator worker, and joins the discovery group
 11. **DispatcherComponent** — top-level orchestrator
@@ -177,9 +177,14 @@ Local miss ──RemoteLookup.batch_lookup([(key,size)])──▶ reserve landin
 ### Incoming Remote Request (this node is the data-holder)
 ```
 Peer KeyQuery/RdmaRequest ──handle_rdma_request ──▶ InitiatorCmd::Serve
-    ──resolve value in Memory-tier──▶ RdmaInitiator.push
-    ──RDMA Write value OUT into peer's advertised slot──▶ PushComplete
+    ──resolve value in Memory-tier, pin it──▶ RdmaInitiator.push_async (returns at once)
+    ──[peer's connection thread] RDMA Write value OUT into peer's advertised slot
+    ──completion callback: release pins──▶ PushComplete ──▶ WHISPER RdmaStatus
 ```
+
+Submission returns as soon as the batch is queued; the per-peer connection thread posts
+and reaps, then runs the completion callback. The read pins are owned by that callback
+because the NIC keeps reading the pinned buffers after submission returns.
 
 ### Eviction
 ```
@@ -224,5 +229,6 @@ certus-server-yaml \
 - All component bindings use the COM-style `receptacle.connect(Arc<dyn Interface>)` pattern
 - The remote_lookup receptacle on the dispatcher enables miss-forwarding to peers
 - Remote transfer is one-sided RDMA WRITE performed by the data-holder's Initiator; the requester's Responder registers the landing memory and never touches the data
+- The Initiator's `push_async` enqueues and returns; each peer endpoint has one connection thread that owns its queue pair, posts, reaps, and invokes the batch's completion callback. Send-queue credits (`PUSH_WINDOW` = 128) let successive batches pipeline, and a full submit queue is rejected rather than queued so that held read pins cannot accumulate behind an unresponsive peer
 - Memory-tier pool is registered with CUDA (`cudaHostRegister`) and SPDK (`spdk_mem_register`) for zero-copy, and registered `REMOTE_WRITE` by the Responder for inbound RDMA
 - Peer discovery is automatic via Zyre (UDP beacon or ZeroMQ gossip); `join_cluster`/`leave_cluster` operate on named Zyre groups and are supplementary

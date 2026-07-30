@@ -18,7 +18,7 @@ Centralized repository for all component interface trait definitions. Allows com
 | `IGpuServices` | -- | `initialize`, `shutdown`, `get_devices`, `deserialize_ipc_handle`, `verify_memory`, `pin_memory`, `unpin_memory`, `create_dma_buffer`, `create_stream`, `set_device`, `device_of_ptr`, `destroy_stream`, `stream_query`, `stream_synchronize`; *(spdk)*: `dma_copy_to_host`, `dma_copy_to_device`, `dma_copy_to_device_async`, `memcpy_h2d_async`, `dma_copy_to_host_async`, `memcpy_d2h_async`, `prepare_memory_for_spdk`, `allocate_pinned_dma_buffer`, `register_host_memory`, `unregister_host_memory` |
 | `IMemoryTier` | -- | `initialize`, `insert`, `get`, `peek`, `evict_lru`, `evict_lru_for_key`, `oldest_keys`, `remove`, `touch`, `batch_touch`, `contains`, `capacity`, `used`, `pool_info`, `is_dma_capable`, `clear`, `telemetry_snapshot` |
 | `IRemoteLookup` | -- | `initialize`, `batch_lookup`, `join_cluster`, `leave_cluster` |
-| `IRemoteLookupRdmaInitiator` | -- | `push`, `connect`, `disconnect`, `disconnect_all`, `set_local_peer_id` |
+| `IRemoteLookupRdmaInitiator` | -- | `push_async`, `push`, `connect`, `disconnect`, `disconnect_all`, `set_local_peer_id` |
 | `IRemoteLookupRdmaResponder` | -- | `open_control_channel`, `local_endpoint`, `local_region` |
 | `IRemoteLookupRdmaResponderAdmin` | -- | `set_actor_cpu`, `set_bind_ip`, `initialize`, `signal_stop`, `shutdown` |
 | `IZyre` | -- | `ping`, `create_node` |
@@ -70,7 +70,7 @@ Centralized repository for all component interface trait definitions. Allows com
 
 ### Remote Lookup
 - `LookupConfig`, `RemoteLookupError`
-- `RemoteRegion`, `PushStatus`, `RemoteLookupRdmaInitiatorError`
+- `RemoteRegion`, `PushStatus`, `PushCompletion` (`Box<dyn FnOnce(Vec<PushStatus>) + Send>` — `push_async` completion callback; owns whatever keeps the source buffers alive), `RemoteLookupRdmaInitiatorError`
 - `Endpoint`, `LocalRegion`, `ControlChannel`, `ResponderCommand`, `ResponderEvent`, `RemoteLookupRdmaResponderError`
 
 ### Partition Table

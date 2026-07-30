@@ -60,7 +60,7 @@ None. No formal verification model exists for this component.
 | `dispatch_map` | `IDispatchMap` | Yes | Classify/serve keys; publish fetched values. |
 | `memory_tier` | `IMemoryTier` | Yes | Reserve landing slots for inbound RDMA writes. |
 | `dispatcher` | `IDispatcher` | No | Promote disk-only keys before serving (US4). |
-| `initiator` | `IRemoteLookupRdmaInitiator` | Yes | One-sided RDMA writes to a peer. |
+| `initiator` | `IRemoteLookupRdmaInitiator` | Yes | One-sided RDMA writes to a peer; `push_async` submits and reports back on a completion callback. |
 | `responder` | `IRemoteLookupRdmaResponder` | Yes | Local pool registration + endpoint/rkey. |
 | `responder_admin` | `IRemoteLookupRdmaResponderAdmin` | Yes | Responder lifecycle/config. |
 | `logger` | `ILogger` | No | Diagnostic logging (skipped if unbound). |
@@ -75,6 +75,8 @@ None. No formal verification model exists for this component.
 
 - **Actor model**: one poll-loop thread owns the zyre node and all operation state (research Decision 1/2); `batch_lookup` submits over an MPSC channel and blocks on a per-op `std::sync::mpsc` one-shot.
 - **Protocol**: SHOUT KEY_QUERY → peers classify each `(key, size)` (memory / disk / not-available; a size mismatch is a miss) → on a memory hit the requester reserves a private landing slot and whispers RDMA_REQUEST (its own responder endpoint + pool rkey + slot addr) → the holder RDMA-writes and whispers RDMA_STATUS.
+- **Asynchronous serve**: `serve_rdma_request` classifies/pins/promotes, calls `IRemoteLookupRdmaInitiator::push_async`, and returns as soon as the writes are submitted; it takes an `on_done` callback instead of returning statuses. The callback runs on the initiator's connection thread and posts `ActorMsg::PushComplete` back to the poll loop, which owns the zyre node and whispers the RDMA_STATUS. The single initiator worker therefore no longer blocks on an RDMA transfer, so transfers to many peers overlap; its remaining blocking work is `promote_to_memory_tier` for disk-tier keys, which still head-of-line-blocks (a worker pool would be the fix, future work).
+- **Read pins outlive submission**: dispatch-map read pins are owned by a `PinnedBatch` RAII guard held by the completion callback, because the NIC keeps reading the pinned buffers after submission returns — releasing them at the submission site would be a use-after-free. Dropping the callback (a rejected submission, or teardown) releases them just the same, and a `ServeReport` guard reports `UnableToConnect` on drop so the requester always gets an answer rather than waiting out its deadline. A missed release is unrecoverable: `read_ref` carries no owner identity, so a leaked pin makes its entry permanently unevictable.
 - **Publish-on-success** (research Decision 5): a fetched value is published to dispatch-map only after RDMA_STATUS(Success); an `AlreadyExists` at a different size is treated as a key collision (unsatisfied, slot reclaimed, existing entry never evicted — see `knowledge/size-mismatch-handling.md`). D1 dropped (no dispatch-map change).
 - **Single-flight**: a per-key in-flight index coalesces concurrent fetches of the same key onto one RDMA; followers complete when the fill resolves.
 - **Retry (US5)** and **Phase-2 disk fallback (US4)**: a failed fetch re-targets an untried cached peer (memory preferred, then disk), bounded by `max_retry_rounds`; keys satisfiable only from disk are fetched once the memory phase stalls, with the serving peer promoting via `IDispatcher::promote_to_memory_tier`.
