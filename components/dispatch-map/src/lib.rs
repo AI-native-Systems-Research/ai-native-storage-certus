@@ -358,7 +358,7 @@ impl IDispatchMap for DispatchMapComponent {
     fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
         let pool_id = self.get_pool_id();
         if let Ok(ep) = self.eviction_policy.get() {
-            ep.peek_oldest(pool_id, n)
+            ep.get_eviction_candidates(pool_id, n)
         } else {
             Vec::new()
         }

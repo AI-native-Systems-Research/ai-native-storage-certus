@@ -425,7 +425,7 @@ impl IMemoryTier for MemoryTierComponent {
         }
 
         let ep = self.eviction_policy.get().unwrap();
-        ep.peek_oldest(state.pool_id, n)
+        ep.get_eviction_candidates(state.pool_id, n)
     }
 
     fn evict_lru(&self) -> Option<CacheKey> {
@@ -435,7 +435,7 @@ impl IMemoryTier for MemoryTierComponent {
         }
 
         let ep = self.eviction_policy.get().unwrap();
-        if let Some(key) = ep.pop_oldest(state.pool_id) {
+        if let Some(key) = ep.identify_next_to_evict(state.pool_id) {
             #[cfg(feature = "telemetry")]
             let mut pool = match state.pool.try_write() {
                 Ok(guard) => guard,
