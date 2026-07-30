@@ -1,0 +1,27 @@
+[package]
+name = "remote-lookup-bench"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# Per-node load generator for the multi-node remote-lookup performance test.
+# Rust rather than Python: the fabric and the NVMe drives are fast enough that a
+# Python driver measures the interpreter (see the notes in
+# scripts/bench-remote-lookup-multinode.sh).
+
+# Deliberately does NOT depend on `gpu-services`. That crate's `IGpuServices`
+# impl is only complete when its own `spdk` feature is on, because the trait's
+# SPDK methods are `#[cfg(feature = "spdk")]` in `interfaces`. Any cargo
+# invocation that also builds a crate enabling `interfaces/spdk` (e.g.
+# `remote-lookup`) would unify features and leave `gpu-services` an incomplete
+# impl. This bench is a pure gRPC client and needs six CUDA symbols, not a
+# component — so it declares them itself, as apps/baseline-generalized-fs does.
+[dependencies]
+tonic = "0.12"
+prost = "0.13"
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive", "env"] }
+
+[build-dependencies]
+tonic-build = "0.12"
