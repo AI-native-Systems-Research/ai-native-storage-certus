@@ -16,7 +16,7 @@ fulfills the request by pushing the data out over RDMA.
 ```
 This Node (has the data)                 Remote Node (wants the data)
 ┌───────────────────────────┐            ┌──────────────────────────┐
-│  remote-lookup  ──push()─▶ │            │  remote-lookup           │
+│  remote-lookup ─push_async▶│            │  remote-lookup           │
 │  remote-lookup-rdma-initiator    │            │  (rdma_cm accept +       │
 │  ┌──────────────────────┐  │            │   registered recv bufs)  │
 │  │  ConnectionTable     │──rdma_connect─▶                          │
@@ -36,20 +36,28 @@ This Node (has the data)                 Remote Node (wants the data)
 | --------------- | ------------------------------------------------------------------------------------------------------------- |
 | `ffi.rs`        | Raw FFI bindings to libibverbs and librdmacm                                                                  |
 | `wrapper.c`     | C helpers for inline ibverbs functions (`poll_cq`, `rdma_write`)                                              |
-| `rdma.rs`       | Safe wrappers: `client_connect`, `RdmaConnection`, `MemoryRegion` (RAII), QP-health check, `post_write_from_pool` + `reap` |
-| `connection.rs` | `ConnectionTable` + per-host state machine, the `RdmaTransport`/`RdmaConn` seam (real + test mock), `ItemPlan` |
-| `lib.rs`        | `RemoteLookupRdmaInitiatorComponent` implementing `IRemoteLookupRdmaInitiator` (`push`/`disconnect`/`disconnect_all`/`set_local_peer_id`)    |
+| `rdma.rs`       | Safe wrappers: `client_connect`, `RdmaConnection`, `MemoryRegion` (RAII), QP-health check, `post_write_from_pool` + non-blocking `poll_completions` |
+| `connection.rs` | `ConnectionTable` + the per-host submit/completion thread, the `RdmaTransport`/`RdmaConn` seam (real + test mock), `ItemPlan`, `Completion` |
+| `lib.rs`        | `RemoteLookupRdmaInitiatorComponent` implementing `IRemoteLookupRdmaInitiator` (`push_async`/`push`/`connect`/`disconnect`/`disconnect_all`/`set_local_peer_id`) |
 | `telemetry.rs`  | Feature-gated (`telemetry`) atomic counters                                                                   |
 
 ### Interface
 
 `IRemoteLookupRdmaInitiator` (in the `interfaces` crate):
 
+- `push_async(endpoint, items, on_complete) -> Result<(), RemoteLookupRdmaInitiatorError>` —
+  queue the batch and return without waiting. Connect (reuse/repair), look up each
+  key locally, RDMA-write matches; `on_complete` then receives one `PushStatus`
+  (`Success` / `UnableToConnect` / `KeyNotFound` / `SizeMismatch`) per item, in
+  order. Invoked exactly once per accepted batch, on every outcome — including
+  teardown with the batch still in flight. Because the NIC keeps reading the local
+  buffers after submission returns, whatever keeps them alive (a dispatch-map read
+  pin, in practice) must be owned by `on_complete`, not released at the call site.
 - `push(endpoint, items) -> Result<Vec<PushStatus>, RemoteLookupRdmaInitiatorError>` —
-  connect (reuse/repair), look up each key locally, RDMA-write matches. Returns
-  one `PushStatus` (`Success` / `UnableToConnect` / `KeyNotFound` / `SizeMismatch`)
-  per item, in order.
-- `disconnect(endpoint)` — tear down one host's connection (idempotent).
+  blocking convenience wrapper over `push_async`, for callers with nothing to
+  overlap.
+- `disconnect(endpoint)` — tear down one host's connection (idempotent). Blocks
+  until that host's thread has exited, so on return its queue pair is destroyed.
 - `disconnect_all()` — tear down all connections.
 - `set_local_peer_id(peer)` — supply this node's zyre `PeerId`; it is stamped into
   the `rdma_cm` connect `private_data` on every outbound connection so the remote

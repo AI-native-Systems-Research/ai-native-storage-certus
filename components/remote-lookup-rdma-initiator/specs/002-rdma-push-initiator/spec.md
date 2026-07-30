@@ -190,8 +190,16 @@ mock transport, and read metrics via `RemoteLookupRdmaInitiatorComponent::teleme
 ### Functional Requirements
 
 - **FR-001**: System MUST expose
-  `push(endpoint, items: &[(CacheKey, RemoteRegion)]) -> Result<Vec<PushStatus>, RemoteLookupRdmaInitiatorError>`,
-  returning exactly one status per item in input order.
+  `push_async(endpoint, items: &[(CacheKey, RemoteRegion)], on_complete: PushCompletion) -> Result<(), RemoteLookupRdmaInitiatorError>`,
+  which enqueues the batch and returns without waiting for the transfer. Its
+  `on_complete` callback MUST receive exactly one status per item in input order.
+- **FR-001a**: System MUST invoke `on_complete` exactly once for every batch it
+  accepts, on every outcome — full success, per-item failure, connection loss, or
+  teardown while the batch is still in flight. When `push_async` returns `Err`, the
+  callback MUST be dropped without being invoked.
+- **FR-001b**: System MUST continue to expose
+  `push(endpoint, items) -> Result<Vec<PushStatus>, RemoteLookupRdmaInitiatorError>`
+  as a blocking wrapper over `push_async` with identical per-item semantics.
 - **FR-002**: System MUST resolve each key against the local memory tier via
   `IMemoryTier::peek`, mapping absent keys to `KeyNotFound` and size mismatches
   (value size ≠ `region.length`) to `SizeMismatch` before attempting any write.
@@ -201,17 +209,35 @@ mock transport, and read metrics via `RemoteLookupRdmaInitiatorComponent::teleme
   base + size) as an RDMA memory region once per connection; writes issue from the
   `peek` pointer, which lies within that registered region.
 - **FR-005**: System MUST hold connections in a table keyed by the normalized
-  `"ip:port"` endpoint, with per-host state
-  (disconnected / connecting / connected / disconnecting), establishing lazily and
-  reusing established connections across calls.
-- **FR-006**: System MUST allow pushes to different hosts to proceed concurrently
-  while serializing pushes to the same host on that host's slot (a queue pair is not
-  safe for concurrent use).
-- **FR-007**: System MUST detect a queue pair in the error state or a failed
-  in-flight write, tear down and rebuild the connection **once**, and retry the
-  batch; a second failure yields `UnableToConnect` for the affected items.
+  `"ip:port"` endpoint, with per-host state (disconnected / connected), establishing
+  lazily and reusing established connections across calls. Each entry MUST own a
+  single thread that performs both the posting and the reaping for that host's queue
+  pair, since a queue pair is `Send` but not `Sync`.
+- **FR-006**: System MUST allow submissions to different hosts to proceed
+  concurrently, and submissions to the same host to queue rather than block. It MUST
+  keep multiple batches to one host in flight together, bounded by the send queue's
+  depth, so successive batches overlap instead of the send queue draining between
+  them.
+- **FR-006a**: System MUST bound both the per-host submit queue and the number of
+  batches a connection thread holds, and MUST report `UnableToConnect` for a batch
+  rejected because those bounds are reached rather than queueing it. Rationale: a
+  queued batch holds its submitter's read pins and a pinned entry cannot be evicted,
+  so an unbounded backlog would let one unreachable peer stall the local memory
+  tier.
+- **FR-007**: System MUST detect a queue pair in the error state, a failed
+  in-flight write, or a transfer whose posted writes have stopped completing; destroy
+  the queue pair **before** allowing any batch to report (so the NIC has provably
+  stopped reading pool memory); rebuild the connection **once**; and replay *every*
+  batch that was outstanding, not merely one. A second consecutive failure yields
+  `UnableToConnect` for all held batches. Rationale: a queue-pair error flushes all
+  outstanding writes, so per-write blame is unknowable; replay is idempotent because
+  the pins keep the source bytes unchanged and the remote landing buffers stay
+  reserved until status is reported.
 - **FR-008**: System MUST expose `disconnect(endpoint)` (idempotent) and
-  `disconnect_all()` to tear down host-level connections.
+  `disconnect_all()` to tear down host-level connections. Both MUST block until the
+  affected connection threads have exited, and MUST report every batch those threads
+  were holding, so teardown is a barrier a caller can rely on before reclaiming
+  memory the NIC could have been reading.
 - **FR-009**: System MUST parse endpoints as `"ip:port"` and return
   `InvalidEndpoint` for anything that does not parse.
 - **FR-010**: System MUST route diagnostics through an optional `ILogger`
@@ -271,9 +297,14 @@ mock transport, and read metrics via `RemoteLookupRdmaInitiatorComponent::teleme
 
 ### Measurable Outcomes
 
-- **SC-001**: `push` returns exactly one `PushStatus` per input item, in order, with
-  correct terminal statuses for absent keys and size mismatches (validated by unit
-  tests against the mock transport).
+- **SC-001**: A push reports exactly one `PushStatus` per input item, in order, with
+  correct terminal statuses for absent keys and size mismatches — whether delivered
+  via `push_async`'s callback or `push`'s return value (validated by unit tests
+  against the mock transport).
+- **SC-001a**: Every accepted batch reports exactly once, including when its
+  submission is rejected or the connection is torn down mid-flight; and multiple
+  batches to one host are in flight simultaneously (validated by unit tests against
+  the mock transport, which records the high-water mark of outstanding writes).
 - **SC-002**: A second push to an already-connected host reuses the connection (no
   new CM connect), avoiding the measured >2 s establishment cost.
 - **SC-003**: A queue-pair error triggers exactly one reconnect-and-retry before an

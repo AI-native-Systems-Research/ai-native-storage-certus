@@ -1,30 +1,51 @@
-//! Outbound RDMA connection table and per-host connection state machine.
+//! Outbound RDMA connection table and per-connection submit/completion engine.
 //!
 //! The [`ConnectionTable`] keeps one entry per remote host, keyed by its
-//! normalized `"ip:port"` endpoint. A host absent from the table is
-//! *disconnected*; a present entry is *connecting*, *connected*, or
-//! *disconnecting* (see `ConnState`). Connections are established lazily on
-//! first [`push`](ConnectionTable::push), reused across calls, and repaired
-//! automatically when a queue pair enters the error state.
+//! normalized `"ip:port"` endpoint, and each entry owns a dedicated thread that
+//! drives that host's queue pair. Callers do not touch the queue pair at all:
+//! [`push_async`](ConnectionTable::push_async) hands a batch to the host's thread
+//! through a bounded queue and returns, and the thread posts the work requests,
+//! reaps their completions, and invokes the batch's completion callback.
 //!
-//! # Concurrency
+//! # Why a thread per connection
 //!
-//! The outer `Mutex<HashMap<..>>` is held only briefly to look up or insert a
-//! host slot. Each slot carries its own `Mutex<ConnState>`, so pushes to
-//! *different* hosts proceed concurrently, while pushes to the *same* host
-//! serialize on that slot's lock (required: an [`RdmaConn`]'s underlying queue
-//! pair is `Send` but not `Sync`). Because establishing a RoCE/CM connection
-//! takes seconds, a same-host caller blocks on the slot lock until the in-flight
-//! connect completes and then reuses the resulting connection. The transient
-//! `Connecting`/`Disconnecting` states are set by the thread holding the slot
-//! lock as it drives the transition.
+//! Verbs is asynchronous, and the throughput that matters comes from keeping many
+//! writes in flight while their control plane (discovery, status round trips, local
+//! lookups) proceeds in parallel. A synchronous `push` cannot do that: it must hold
+//! the queue pair from the first post until the last completion, so exactly one
+//! batch per peer is ever on the wire.
+//!
+//! The connection thread does **both** the posting and the reaping. That is
+//! deliberate: an [`RdmaConn`]'s underlying queue pair is `Send` but not `Sync`, and
+//! keeping every access on one thread preserves that invariant exactly, rather than
+//! trading it for new synchronization around the queue pair. Submitters only enqueue.
+//!
+//! Because the connection is owned by exactly one thread, the transient
+//! "connecting"/"disconnecting" states the old shared state machine needed are gone
+//! — there is no other thread to publish them to. Recovery is likewise a phase of
+//! the thread's execution rather than an observable state: batches submitted while it
+//! reconnects simply wait in the queue.
+//!
+//! # Flow control
+//!
+//! Two bounds apply. The queue pair's send queue admits at most [`PUSH_WINDOW`]
+//! outstanding writes, which the thread tracks as credits and tops up as completions
+//! free them — that is what pipelines successive batches instead of draining the send
+//! queue between them. The submit queue itself is bounded too, and a full one is
+//! reported as [`PushStatus::UnableToConnect`] rather than queued: every queued batch
+//! holds its submitter's resources (typically read pins, which block eviction), so an
+//! unbounded queue would let one sick peer stall the local memory tier.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
-use interfaces::{ILogger, PushStatus, RemoteLookupRdmaInitiatorError};
+use component_core::channel::mpsc::{MpscChannel, MpscReceiver, MpscSender};
+use component_core::channel::ChannelError;
+use interfaces::{ILogger, PushCompletion, PushStatus, RemoteLookupRdmaInitiatorError};
 
 #[cfg(feature = "rdma")]
 use crate::rdma;
@@ -66,6 +87,54 @@ impl fmt::Display for RdmaError {
 
 impl std::error::Error for RdmaError {}
 
+/// One reaped work completion.
+///
+/// Carries no notion of which batch it belongs to: correlating a completion back to
+/// its submitter is the reaper's job, via the `wr_id` chosen when posting.
+#[derive(Debug, Clone)]
+pub struct Completion {
+    /// The tag passed to [`RdmaConn::post_write`].
+    pub wr_id: u64,
+    /// `None` when the write succeeded; otherwise a diagnosable description
+    /// including the completion status and queue-pair state.
+    pub error: Option<String>,
+}
+
+/// How long a posted write may go uncompleted before its connection is declared
+/// stuck and rebuilt.
+///
+/// rdma_cm owns the queue pair's RTR/RTS transition and leaves the hardware ACK
+/// timeout at its (large) default, so the first write on a stale but nominally warm
+/// connection would otherwise burn ~15s of retransmit before `RETRY_EXC`. This
+/// software cap abandons a stuck transfer far sooner, so reconnect-and-replay
+/// finishes inside the caller's operation deadline. It sits far above healthy latency
+/// (a full send queue of 64 KiB writes completes in ~200us on 200G RoCE), so only a
+/// genuinely stuck transfer trips it.
+///
+/// Measured from the moment a batch's *first* write is posted, not from submission —
+/// a batch waiting its turn behind others is queued, not stuck.
+pub const STALL_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Depth of each host's submit queue, in batches.
+///
+/// A power of two, as the underlying ring buffer requires. Sized so a caller can run
+/// well ahead of the wire without the backlog of held read pins growing without
+/// bound; beyond this, submissions are rejected rather than queued.
+const SUBMIT_QUEUE_DEPTH: usize = 256;
+
+/// How many submitted batches a connection thread will hold at once.
+///
+/// This is what makes [`SUBMIT_QUEUE_DEPTH`] mean anything. Without it the thread
+/// would drain the whole channel into its own tracking map on every iteration, so the
+/// channel would never be full, submissions would never be rejected, and the backlog
+/// of held read pins — the thing the bound exists to limit — would grow without
+/// bound anyway. Stopping the drain here is what pushes back-pressure into the
+/// channel, and from there to the submitter.
+///
+/// Comfortably more than the send queue can hold in flight, so it never throttles a
+/// healthy connection; it only bites when completions have stopped arriving.
+const MAX_TRACKED_BATCHES: usize = 64;
+
 /// Per-phase breakdown of one connect, in microseconds, for telemetry
 /// attribution of cold-connect latency. All zero when the transport does not
 /// measure (e.g. the mock).
@@ -88,7 +157,7 @@ impl ConnectTiming {
     }
 }
 
-/// Establishes outbound RDMA connections. A seam so the connection table can be
+/// Establishes outbound RDMA connections. A seam so the connection engine can be
 /// unit-tested without RDMA hardware.
 pub trait RdmaTransport: Send + Sync {
     /// Connect to `addr:port` and return a ready-to-use connection plus the
@@ -100,8 +169,8 @@ pub trait RdmaTransport: Send + Sync {
     ) -> Result<(Box<dyn RdmaConn>, ConnectTiming), RdmaError>;
 }
 
-/// One RDMA write within a window: `len` bytes at local pool address `local`,
-/// destined for the remote region (`remote_addr`, `rkey`).
+/// One RDMA write: `len` bytes at local pool address `local`, destined for the
+/// remote region (`remote_addr`, `rkey`).
 #[derive(Clone, Copy)]
 pub struct WindowWrite {
     /// Local pool address of the value (from `IMemoryTier::peek`).
@@ -114,12 +183,23 @@ pub struct WindowWrite {
     pub rkey: u32,
 }
 
-/// Largest number of writes handed to [`RdmaConn::write_window`] at once, bounded
-/// by the queue pair's send-queue and completion-queue depths.
+// SAFETY: `local` addresses the memory-tier pool, which the submitter is required to
+// keep valid and unevicted until its completion callback runs — see the
+// `IRemoteLookupRdmaInitiator` documentation. The pointer is handed to the NIC and is
+// never dereferenced in Rust, so moving the descriptor to the connection thread
+// creates no aliasing and no race.
+unsafe impl Send for WindowWrite {}
+
+/// Largest number of writes that may be outstanding on one queue pair at a time,
+/// bounded by its send-queue and completion-queue depths.
 ///
-/// Kept here (not only in the feature-gated `rdma` module) so the windowing logic
-/// and its tests exist in the non-`rdma` build too; the assertion below stops the
-/// two definitions drifting apart.
+/// The connection thread treats this as a credit limit: it posts up to this many
+/// writes and then posts more only as completions retire earlier ones, so successive
+/// batches overlap instead of the send queue draining to empty between them.
+///
+/// Kept here (not only in the feature-gated `rdma` module) so the flow-control logic
+/// and its tests exist in the non-`rdma` build too; the assertion below stops the two
+/// definitions drifting apart.
 pub const PUSH_WINDOW: usize = 128;
 
 #[cfg(feature = "rdma")]
@@ -127,46 +207,46 @@ const _: () = assert!(PUSH_WINDOW == rdma::WINDOW);
 
 /// A live outbound connection capable of RDMA-writing from the local
 /// memory-tier pool into a remote region.
+///
+/// Posting and reaping are separate so a caller can keep many writes in flight. An
+/// implementation may assume both are only ever called from one thread at a time.
 pub trait RdmaConn: Send {
     /// Returns `false` if the queue pair has entered the error state and the
     /// connection must be rebuilt.
     fn qp_healthy(&self) -> bool;
 
-    /// RDMA-write every entry in `writes`, posting the whole window before waiting
-    /// on any completion, and block until all of them have completed.
+    /// Post one RDMA write tagged `wr_id`, without waiting for it to complete.
     ///
-    /// All-or-nothing by design. `Err` means *the window* is lost, not that one
-    /// member of it is: a failing RDMA_WRITE drives the queue pair into the error
-    /// state, which flushes every other outstanding request with `WR_FLUSH_ERR`,
-    /// so per-write blame cannot be assigned. The caller replays the whole window
-    /// after reconnecting instead — safe because the remote landing buffers stay
-    /// reserved and unpublished until per-key status is reported.
+    /// `wr_id` is echoed back by [`poll_completions`](Self::poll_completions).
+    /// Returning `Err` means this write was not queued; earlier ones may still be in
+    /// flight, so the caller must still tear the connection down before releasing
+    /// anything the NIC could be reading.
     ///
     /// # Safety
     ///
-    /// Each entry's `local` must point to `len` valid bytes inside the registered
-    /// memory-tier pool region that backs this connection, and must remain valid
-    /// until this call returns — the NIC reads those buffers asynchronously while
-    /// the window is in flight.
-    unsafe fn write_window(&self, writes: &[WindowWrite]) -> Result<(), RdmaError>;
+    /// `write.local` must point to `write.len` valid bytes inside the registered
+    /// memory-tier pool region backing this connection, and must remain valid until
+    /// this write's completion has been reaped or the connection has been destroyed —
+    /// the NIC reads the buffer asynchronously.
+    unsafe fn post_write(&self, write: &WindowWrite, wr_id: u64) -> Result<(), RdmaError>;
+
+    /// Reap up to `max` ready completions without blocking, returning however many
+    /// were available — possibly none.
+    ///
+    /// A failed write is reported as a [`Completion`] carrying an error, not as `Err`;
+    /// `Err` means the completion queue itself could not be polled. Note that one
+    /// genuinely failing write drives the queue pair into the error state, which
+    /// flushes every other outstanding write with a flush error, so a burst of failed
+    /// completions is expected and only one of them names the original cause.
+    fn poll_completions(&self, max: usize) -> Result<Vec<Completion>, RdmaError>;
 }
 
-/// Per-host connection state. Absence of a slot in the table means the host is
-/// disconnected.
+/// Connection state, owned exclusively by one connection thread.
 enum ConnState {
     /// No live connection (initial state, or after a failed connect / teardown).
     Disconnected,
-    /// A connection attempt is in progress (held only by the connecting thread).
-    Connecting,
     /// A healthy, established connection ready for writes.
     Connected(Box<dyn RdmaConn>),
-    /// A teardown is in progress (held only by the disconnecting thread).
-    Disconnecting,
-}
-
-/// One remote host's connection slot.
-struct HostSlot {
-    state: Mutex<ConnState>,
 }
 
 /// A per-item action decided by the caller after the local memory-tier lookup.
@@ -187,222 +267,355 @@ pub enum ItemPlan {
     },
 }
 
-/// A table of outbound RDMA connections keyed by `"ip:port"` endpoint.
-pub struct ConnectionTable {
-    transport: Box<dyn RdmaTransport>,
-    slots: Mutex<HashMap<String, Arc<HostSlot>>>,
-    telemetry: Arc<TelemetryCollector>,
+/// One submitted batch, tracked by the connection thread until every write in it
+/// has completed.
+struct Batch {
+    /// Monotonic identity, used to correlate completions back to this batch.
+    seq: u64,
+    /// The writes to perform, in submission order. Retained for the whole batch
+    /// lifetime because recovery replays them.
+    writes: Vec<WindowWrite>,
+    /// For each write, the index in `statuses` its outcome belongs at.
+    slots: Vec<usize>,
+    /// Statuses in caller order. Items resolved before RDMA already hold their final
+    /// status; writes start pessimistic and are upgraded as completions arrive.
+    statuses: Vec<PushStatus>,
+    /// Bytes attributable to each caller-order item, for telemetry.
+    item_bytes: Vec<u64>,
+    /// Index of the next write in `writes` to post.
+    posted: usize,
+    /// Writes posted and not yet completed.
+    outstanding: usize,
+    /// When the first write was posted, for the stall deadline.
+    first_post: Option<Instant>,
+    /// When the batch was submitted, for push-latency telemetry.
+    submitted: Instant,
+    /// Invoked exactly once, when the batch reaches a terminal outcome.
+    on_complete: Option<PushCompletion>,
 }
 
-impl ConnectionTable {
-    /// Create a table that establishes connections via `transport` and records
-    /// metrics into `telemetry` (a no-op unless the `telemetry` feature is on).
-    pub fn new(transport: Box<dyn RdmaTransport>, telemetry: Arc<TelemetryCollector>) -> Self {
-        Self {
-            transport,
-            slots: Mutex::new(HashMap::new()),
-            telemetry,
-        }
-    }
+impl Batch {
+    /// Split `resolved` into pre-decided statuses and the writes to perform.
+    fn new(seq: u64, resolved: Vec<ItemPlan>, on_complete: PushCompletion) -> Self {
+        let mut statuses = Vec::with_capacity(resolved.len());
+        let mut item_bytes = Vec::with_capacity(resolved.len());
+        let mut writes = Vec::new();
+        let mut slots = Vec::new();
 
-    /// Ensure a connection to `endpoint`, then carry out each planned write.
-    ///
-    /// Returns one [`PushStatus`] per item in `resolved`, in order. If the host
-    /// cannot be connected, every [`ItemPlan::Write`] item is reported as
-    /// [`PushStatus::UnableToConnect`] (already-decided [`ItemPlan::Done`] items
-    /// keep their status).
-    pub fn push(
-        &self,
-        endpoint: &str,
-        resolved: Vec<ItemPlan>,
-        logger: &dyn ILogger,
-    ) -> Result<Vec<PushStatus>, RemoteLookupRdmaInitiatorError> {
-        let (addr, port) = parse_endpoint(endpoint)?;
-        let key = format!("{addr}:{port}");
-        let start = Instant::now();
-
-        let slot = {
-            let mut slots = self.slots.lock().unwrap();
-            Arc::clone(slots.entry(key).or_insert_with(|| {
-                Arc::new(HostSlot {
-                    state: Mutex::new(ConnState::Disconnected),
-                })
-            }))
-        };
-
-        // Serialize all operations to this host on its slot lock. A thread that
-        // starts a (re)connect holds this across the whole attempt, which is what
-        // makes same-host pushes queue behind a reconnect rather than pile more
-        // work onto a dead queue pair.
-        let mut state = slot.state.lock().unwrap();
-
-        // Statuses in caller order. `Done` items already know their answer; each
-        // `Write` starts pessimistic and is upgraded once its window completes.
-        let mut out: Vec<PushStatus> = Vec::with_capacity(resolved.len());
-        // The writes to perform, plus where each one's status lives in `out`. Held
-        // as parallel vectors so `chunks` hands `write_window` a borrowed slice
-        // with no per-attempt copying.
-        let mut writes: Vec<WindowWrite> = Vec::new();
-        let mut slots: Vec<usize> = Vec::new();
-
-        for item in &resolved {
+        for item in resolved {
             match item {
-                ItemPlan::Done(status) => out.push(*status),
+                ItemPlan::Done(status) => {
+                    statuses.push(status);
+                    item_bytes.push(0);
+                }
                 ItemPlan::Write {
                     local,
                     len,
                     remote_addr,
                     rkey,
                 } => {
-                    slots.push(out.len());
+                    slots.push(statuses.len());
+                    statuses.push(PushStatus::UnableToConnect);
+                    item_bytes.push(len as u64);
                     writes.push(WindowWrite {
-                        local: *local,
-                        len: *len,
-                        remote_addr: *remote_addr,
-                        rkey: *rkey,
+                        local,
+                        len,
+                        remote_addr,
+                        rkey,
                     });
-                    out.push(PushStatus::UnableToConnect);
                 }
             }
         }
 
-        // Once the connection is deemed unrecoverable for this batch, remaining
-        // windows short-circuit to UnableToConnect.
-        let mut give_up = false;
-        // A single reconnect is allowed per batch to recover from a QP error.
-        let mut reconnect_used = false;
-
-        for (window, positions) in writes.chunks(PUSH_WINDOW).zip(slots.chunks(PUSH_WINDOW)) {
-            if give_up {
-                break;
-            }
-            let bytes: usize = window.iter().map(|w| w.len).sum();
-            // Per-window trace: one line per window, not per write. At a 64-key
-            // window, per-write logging would put 64 formatted strings on the hot
-            // path for every RDMA_REQUEST.
-            logger.debug(&format!(
-                "remote-lookup-rdma-initiator: window of {} -> {addr}:{port} ({bytes} bytes)",
-                window.len()
-            ));
-
-            // Attempt the window, reconnecting and replaying it at most once.
-            loop {
-                if !ensure_connected(
-                    &mut state,
-                    self.transport.as_ref(),
-                    &addr,
-                    port,
-                    logger,
-                    &self.telemetry,
-                ) {
-                    give_up = true;
-                    break;
-                }
-
-                // SAFETY: every `local`/`len` came from the caller's memory-tier
-                // peek, which returns a pointer and size within the registered pool
-                // that backs this connection. The pool stays pinned by the caller
-                // until `push` returns, and `write_window` does not return until
-                // every completion is reaped or the connection is torn down.
-                let w_start = Instant::now();
-                let write_res = match &*state {
-                    ConnState::Connected(conn) => unsafe { conn.write_window(window) },
-                    // ensure_connected returned true, so we are Connected.
-                    _ => unreachable!("ensure_connected guarantees Connected"),
-                };
-                let w_us = w_start.elapsed().as_micros();
-
-                match write_res {
-                    Ok(()) => {
-                        logger.debug(&format!(
-                            "remote-lookup-rdma-initiator: window of {} OK in {w_us}us \
-                             ({bytes} bytes)",
-                            window.len()
-                        ));
-                        for &pos in positions {
-                            out[pos] = PushStatus::Success;
-                        }
-                        break;
-                    }
-                    Err(e) => {
-                        // Drop the (likely error-state) connection so the replay
-                        // rebuilds it. Dropping it also destroys the queue pair,
-                        // which flushes any request the NIC has not finished with —
-                        // the barrier that lets the caller release its read pins
-                        // once `push` returns.
-                        *state = ConnState::Disconnected;
-                        if reconnect_used {
-                            logger.warn(&format!(
-                                "remote-lookup-rdma-initiator: window of {} to {addr}:{port} \
-                                 ({bytes} bytes) failed after reconnect: {e}",
-                                window.len()
-                            ));
-                            give_up = true;
-                            break;
-                        }
-                        reconnect_used = true;
-                        self.telemetry.record_reconnect();
-                        logger.warn(&format!(
-                            "remote-lookup-rdma-initiator: window of {} to {addr}:{port} \
-                             ({bytes} bytes) failed ({e}); reconnecting and replaying it",
-                            window.len()
-                        ));
-                    }
-                }
-            }
+        Self {
+            seq,
+            writes,
+            slots,
+            statuses,
+            item_bytes,
+            posted: 0,
+            outstanding: 0,
+            first_post: None,
+            submitted: Instant::now(),
+            on_complete: Some(on_complete),
         }
-
-        for (item, status) in resolved.iter().zip(&out) {
-            let bytes = match item {
-                ItemPlan::Write { len, .. } if *status == PushStatus::Success => *len as u64,
-                _ => 0,
-            };
-            self.telemetry.record_item(*status, bytes);
-        }
-
-        self.telemetry
-            .record_push(start.elapsed().as_micros() as u64);
-        Ok(out)
     }
 
-    /// Proactively establish (warm) the connection to `endpoint` without
-    /// writing. Reuses a healthy existing connection; otherwise runs the full
-    /// connect (the same path [`push`](Self::push) takes lazily). A failed
-    /// connect leaves the slot disconnected (nothing cached) and still returns
-    /// `Ok(())` — warming must not surface a transient failure as an error.
-    /// Errors only on an unparseable endpoint.
-    pub fn connect(
+    /// True once every write has been posted and completed.
+    fn is_finished(&self) -> bool {
+        self.posted == self.writes.len() && self.outstanding == 0
+    }
+
+    /// Reset for a replay after the connection was rebuilt. Statuses for writes go
+    /// back to pessimistic; already-final `Done` items are untouched.
+    fn rewind(&mut self) {
+        self.posted = 0;
+        self.outstanding = 0;
+        self.first_post = None;
+        for &slot in &self.slots {
+            self.statuses[slot] = PushStatus::UnableToConnect;
+        }
+    }
+
+    /// Mark every write with `status` — used when the connection is unrecoverable.
+    fn set_all_writes(&mut self, status: PushStatus) {
+        for &slot in &self.slots {
+            self.statuses[slot] = status;
+        }
+    }
+
+    /// Fire the completion callback, recording per-item and per-push telemetry.
+    ///
+    /// Idempotent: the callback is taken, so a second call does nothing.
+    fn finish(&mut self, telemetry: &TelemetryCollector) {
+        let Some(callback) = self.on_complete.take() else {
+            return;
+        };
+        for (status, bytes) in self.statuses.iter().zip(&self.item_bytes) {
+            let attributed = if *status == PushStatus::Success {
+                *bytes
+            } else {
+                0
+            };
+            telemetry.record_item(*status, attributed);
+        }
+        telemetry.record_push(self.submitted.elapsed().as_micros() as u64);
+        callback(std::mem::take(&mut self.statuses));
+    }
+}
+
+impl Drop for Batch {
+    /// A batch dropped without having been finished still owes its submitter a
+    /// callback — the submitter may be holding read pins that only the callback (or
+    /// its drop) releases. Report the writes as unable-to-connect rather than
+    /// silently discarding the batch.
+    fn drop(&mut self) {
+        if let Some(callback) = self.on_complete.take() {
+            self.set_all_writes(PushStatus::UnableToConnect);
+            callback(std::mem::take(&mut self.statuses));
+        }
+    }
+}
+
+/// Work handed to a connection thread.
+enum ConnCmd {
+    /// Post a batch of writes and report its per-item outcome.
+    Push(Batch),
+    /// Establish the connection now, so a later push skips the cold connect.
+    Warm,
+    /// Stop: fail everything still owed a callback, tear the connection down, exit.
+    Shutdown,
+}
+
+/// One remote host's submit queue and the thread serving it.
+struct HostSlot {
+    /// Bounded submit queue into the connection thread.
+    tx: MpscSender<ConnCmd>,
+    /// Set to ask the thread to stop.
+    ///
+    /// Out of band rather than a queued command, because the queue can be full
+    /// exactly when teardown matters most — a peer whose completions have stopped is
+    /// both the reason the queue backed up and the reason we are tearing down. A
+    /// `Shutdown` message behind 256 pushes would not be seen for a long time.
+    stopping: Arc<AtomicBool>,
+    /// Taken at teardown so the thread can be joined exactly once.
+    thread: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl HostSlot {
+    /// Signal the thread to stop and wait for it, so that by the time this returns
+    /// the queue pair is destroyed and the NIC is no longer reading pool memory.
+    ///
+    /// Joining is the point: it is what makes teardown a barrier the caller can rely
+    /// on before reclaiming anything the NIC could have been reading.
+    ///
+    /// This can still take as long as one in-flight `connect` attempt, since that call
+    /// is blocking and rdma_cm owns its timeout; the flag is checked before starting a
+    /// connect but cannot interrupt one already under way.
+    fn shutdown_and_join(&self) {
+        self.stopping.store(true, Ordering::SeqCst);
+        // Best-effort nudge so a parked thread wakes at once rather than after its
+        // poll interval. The flag, not this message, is what stops it.
+        let _ = self.tx.try_send(ConnCmd::Shutdown);
+        if let Some(handle) = self.thread.lock().expect("thread lock poisoned").take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+/// A table of outbound RDMA connections keyed by `"ip:port"` endpoint.
+pub struct ConnectionTable {
+    transport: Arc<dyn RdmaTransport>,
+    slots: Mutex<HashMap<String, Arc<HostSlot>>>,
+    telemetry: Arc<TelemetryCollector>,
+    logger: Arc<dyn ILogger + Send + Sync>,
+    /// Source of batch identities, shared across hosts so a `seq` is unique
+    /// process-wide and stays meaningful in logs.
+    next_seq: Mutex<u64>,
+}
+
+impl ConnectionTable {
+    /// Create a table that establishes connections via `transport`, records metrics
+    /// into `telemetry` (a no-op unless the `telemetry` feature is on), and logs
+    /// through `logger`.
+    ///
+    /// The logger is owned rather than passed per call because the work is done on
+    /// per-connection threads that outlive any one call.
+    pub fn new(
+        transport: Arc<dyn RdmaTransport>,
+        telemetry: Arc<TelemetryCollector>,
+        logger: Arc<dyn ILogger + Send + Sync>,
+    ) -> Self {
+        Self {
+            transport,
+            slots: Mutex::new(HashMap::new()),
+            telemetry,
+            logger,
+            next_seq: Mutex::new(0),
+        }
+    }
+
+    /// Look up `endpoint`'s slot, spawning its connection thread on first use.
+    fn slot(&self, addr: &str, port: u16) -> Arc<HostSlot> {
+        let key = format!("{addr}:{port}");
+        let mut slots = self.slots.lock().expect("slots lock poisoned");
+        if let Some(slot) = slots.get(&key) {
+            return Arc::clone(slot);
+        }
+
+        let channel = MpscChannel::<ConnCmd>::new(SUBMIT_QUEUE_DEPTH);
+        // A freshly created channel has no receiver bound and at least one sender
+        // available, so neither endpoint can fail here.
+        let tx = channel.sender().expect("fresh channel rejected a sender");
+        let rx = channel
+            .receiver()
+            .expect("fresh channel rejected a receiver");
+
+        let stopping = Arc::new(AtomicBool::new(false));
+        let mut worker = ConnWorker {
+            addr: addr.to_string(),
+            port,
+            transport: Arc::clone(&self.transport),
+            telemetry: Arc::clone(&self.telemetry),
+            logger: Arc::clone(&self.logger),
+            stopping: Arc::clone(&stopping),
+            state: ConnState::Disconnected,
+            batches: HashMap::new(),
+            to_post: VecDeque::new(),
+            wr_slots: vec![None; PUSH_WINDOW],
+            free_wr_slots: (0..PUSH_WINDOW).rev().collect(),
+            recoveries: 0,
+        };
+        let thread = thread::Builder::new()
+            .name(format!("rl-rdma-{addr}:{port}"))
+            .spawn(move || {
+                // `channel` is moved in so its shared state outlives the endpoints.
+                let _channel = channel;
+                worker.run(rx);
+            })
+            .expect("failed to spawn RDMA connection thread");
+
+        let slot = Arc::new(HostSlot {
+            tx,
+            stopping,
+            thread: Mutex::new(Some(thread)),
+        });
+        slots.insert(key, Arc::clone(&slot));
+        slot
+    }
+
+    /// Take the next batch identity.
+    fn take_seq(&self) -> u64 {
+        let mut next = self.next_seq.lock().expect("next_seq lock poisoned");
+        let seq = *next;
+        *next = next.wrapping_add(1);
+        seq
+    }
+
+    /// Queue a batch of planned writes for `endpoint` and return without waiting.
+    ///
+    /// `on_complete` is invoked exactly once with one [`PushStatus`] per item in
+    /// `resolved`, in order. Items that arrived already decided
+    /// ([`ItemPlan::Done`]) keep their status and never reach the wire.
+    ///
+    /// If the host's submit queue is full the batch is not queued: every write is
+    /// reported as [`PushStatus::UnableToConnect`] and `on_complete` runs
+    /// synchronously, on the calling thread, before this returns.
+    ///
+    /// # Errors
+    ///
+    /// [`RemoteLookupRdmaInitiatorError::InvalidEndpoint`] if `endpoint` is not a
+    /// valid `"ip:port"`. The callback is dropped rather than invoked, which for a
+    /// callback that releases resources on drop is equivalent.
+    pub fn push_async(
         &self,
         endpoint: &str,
-        logger: &dyn ILogger,
+        resolved: Vec<ItemPlan>,
+        on_complete: PushCompletion,
     ) -> Result<(), RemoteLookupRdmaInitiatorError> {
         let (addr, port) = parse_endpoint(endpoint)?;
-        let key = format!("{addr}:{port}");
+        let batch = Batch::new(self.take_seq(), resolved, on_complete);
+        let slot = self.slot(&addr, port);
 
-        let slot = {
-            let mut slots = self.slots.lock().unwrap();
-            Arc::clone(slots.entry(key).or_insert_with(|| {
-                Arc::new(HostSlot {
-                    state: Mutex::new(ConnState::Disconnected),
-                })
-            }))
-        };
+        if let Err(e) = slot.tx.try_send(ConnCmd::Push(batch)) {
+            // `Batch::drop` owes the callback its statuses, so the rejected batch
+            // reports itself; nothing is silently dropped.
+            self.logger.warn(&format!(
+                "remote-lookup-rdma-initiator: submit queue to {addr}:{port} \
+                 unavailable ({e:?}); reporting the batch as unable-to-connect"
+            ));
+        }
+        Ok(())
+    }
 
-        let mut state = slot.state.lock().unwrap();
-        // Best-effort: ensure_connected records telemetry and leaves the slot
-        // Disconnected on failure, so a later connect/push retries.
-        let _ = ensure_connected(
-            &mut state,
-            self.transport.as_ref(),
-            &addr,
-            port,
-            logger,
-            &self.telemetry,
-        );
+    /// Push planned writes to `endpoint`, blocking until every write has completed.
+    ///
+    /// A convenience wrapper over [`push_async`](Self::push_async); see the interface
+    /// documentation for why callers on a latency-sensitive path should prefer the
+    /// asynchronous form.
+    pub fn push(
+        &self,
+        endpoint: &str,
+        resolved: Vec<ItemPlan>,
+    ) -> Result<Vec<PushStatus>, RemoteLookupRdmaInitiatorError> {
+        let items = resolved.len();
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.push_async(
+            endpoint,
+            resolved,
+            Box::new(move |statuses| {
+                let _ = tx.send(statuses);
+            }),
+        )?;
+        // The callback is guaranteed to run exactly once for an accepted batch, so
+        // this only fails if the connection thread died without honoring it.
+        Ok(rx.recv().unwrap_or_else(|_| {
+            self.logger.error(
+                "remote-lookup-rdma-initiator: connection thread dropped a batch \
+                 without reporting it",
+            );
+            vec![PushStatus::UnableToConnect; items]
+        }))
+    }
+
+    /// Proactively establish (warm) the connection to `endpoint` without writing.
+    ///
+    /// Returns as soon as the request is queued; the connection thread performs the
+    /// connect. A failed warm caches nothing, so a later push retries it. Errors only
+    /// on an unparseable endpoint.
+    pub fn connect(&self, endpoint: &str) -> Result<(), RemoteLookupRdmaInitiatorError> {
+        let (addr, port) = parse_endpoint(endpoint)?;
+        let slot = self.slot(&addr, port);
+        // Best-effort: a full queue means real work is already pending, which warms
+        // the connection anyway.
+        let _ = slot.tx.try_send(ConnCmd::Warm);
         Ok(())
     }
 
     /// Tear down the connection to a single host, if present. Idempotent.
+    ///
+    /// Blocks until the host's thread has exited, so on return its queue pair is
+    /// destroyed and every batch it held has reported its outcome.
     pub fn disconnect(&self, endpoint: &str) {
         let (addr, port) = match parse_endpoint(endpoint) {
             Ok(hp) => hp,
@@ -410,84 +623,451 @@ impl ConnectionTable {
             Err(_) => return,
         };
         let key = format!("{addr}:{port}");
-        let slot = self.slots.lock().unwrap().remove(&key);
+        let slot = self.slots.lock().expect("slots lock poisoned").remove(&key);
         if let Some(slot) = slot {
-            let mut state = slot.state.lock().unwrap();
-            if matches!(*state, ConnState::Connected(_)) {
-                self.telemetry.record_disconnect();
-            }
-            *state = ConnState::Disconnecting;
-            // Dropping the connection (via replacing the state) runs the RDMA
-            // teardown in RdmaConnection::drop.
-            *state = ConnState::Disconnected;
+            slot.shutdown_and_join();
         }
     }
 
-    /// Tear down all connections.
+    /// Tear down all connections, blocking until every thread has exited.
     pub fn disconnect_all(&self) {
         let drained: Vec<Arc<HostSlot>> = {
-            let mut slots = self.slots.lock().unwrap();
+            let mut slots = self.slots.lock().expect("slots lock poisoned");
             slots.drain().map(|(_, slot)| slot).collect()
         };
         for slot in drained {
-            let mut state = slot.state.lock().unwrap();
-            if matches!(*state, ConnState::Connected(_)) {
-                self.telemetry.record_disconnect();
-            }
-            *state = ConnState::Disconnecting;
-            *state = ConnState::Disconnected;
+            slot.shutdown_and_join();
         }
     }
 }
 
-/// Ensure `state` holds a healthy `Connected` connection, connecting if needed.
-///
-/// Returns `true` if the state is `Connected` on return, `false` if the connect
-/// attempt failed (state left `Disconnected`).
-fn ensure_connected(
-    state: &mut ConnState,
-    transport: &dyn RdmaTransport,
-    addr: &str,
+impl Drop for ConnectionTable {
+    /// Joining every connection thread here is what guarantees no NIC is still
+    /// reading pool memory once the table is gone.
+    fn drop(&mut self) {
+        self.disconnect_all();
+    }
+}
+
+/// Which batch and which of its writes a posted `wr_id` refers to.
+#[derive(Clone, Copy)]
+struct PostedRef {
+    seq: u64,
+    write_idx: usize,
+}
+
+/// The per-connection engine: owns the queue pair, posts writes, reaps completions.
+struct ConnWorker {
+    addr: String,
     port: u16,
-    logger: &dyn ILogger,
-    telemetry: &TelemetryCollector,
-) -> bool {
-    if matches!(state, ConnState::Connected(conn) if conn.qp_healthy()) {
-        return true;
+    transport: Arc<dyn RdmaTransport>,
+    telemetry: Arc<TelemetryCollector>,
+    logger: Arc<dyn ILogger + Send + Sync>,
+    /// Set by [`HostSlot::shutdown_and_join`] to ask this thread to stop.
+    stopping: Arc<AtomicBool>,
+    state: ConnState,
+    /// Every accepted batch that has not yet reported, keyed by `seq`.
+    batches: HashMap<u64, Batch>,
+    /// Batches with writes still to post, in submission order.
+    to_post: VecDeque<u64>,
+    /// `wr_id` slab. A slot is free exactly when its completion has been reaped, and
+    /// there are as many slots as the send queue is deep, so an outstanding `wr_id`
+    /// is always unique. Slot reuse cannot be confused with a stale completion
+    /// because recovery destroys the completion queue along with the queue pair.
+    wr_slots: Vec<Option<PostedRef>>,
+    /// Indices into `wr_slots` that are currently free.
+    free_wr_slots: Vec<usize>,
+    /// Recovery attempts since the last fully successful batch, to bound replay.
+    recoveries: u32,
+}
+
+impl ConnWorker {
+    /// Drive submissions and completions until told to stop.
+    fn run(&mut self, rx: MpscReceiver<ConnCmd>) {
+        self.logger.debug(&format!(
+            "remote-lookup-rdma-initiator: connection thread for {}:{} started",
+            self.addr, self.port
+        ));
+        // Let submitters unpark us so a queued batch is picked up promptly.
+        rx.register_for_unpark();
+
+        loop {
+            if self.stopping.load(Ordering::SeqCst) {
+                self.shutdown();
+                return;
+            }
+            let mut progress = false;
+
+            // 1. Accept queued work, but only up to the backlog cap — beyond that,
+            //    leave it in the channel so the bound reaches the submitter.
+            while self.batches.len() < MAX_TRACKED_BATCHES {
+                match rx.try_recv() {
+                    Ok(ConnCmd::Push(batch)) => {
+                        self.accept(batch);
+                        progress = true;
+                    }
+                    Ok(ConnCmd::Warm) => {
+                        self.ensure_connected();
+                        progress = true;
+                    }
+                    Ok(ConnCmd::Shutdown) => {
+                        self.shutdown();
+                        return;
+                    }
+                    Err(ChannelError::Empty) => break,
+                    // The table dropped the sender: same as Shutdown.
+                    Err(_) => {
+                        self.shutdown();
+                        return;
+                    }
+                }
+            }
+
+            // 2. Fill the send queue.
+            if self.post_ready() {
+                progress = true;
+            }
+
+            // 3. Retire completions.
+            if self.reap() {
+                progress = true;
+            }
+
+            // 4. Abandon a transfer the NIC has stopped making progress on.
+            self.check_stalled();
+
+            // 5. Spin while writes are outstanding — that is when latency matters
+            //    and the completion queue is worth polling hot. Park only when there
+            //    is nothing in flight and nothing waiting, so an idle peer costs no
+            //    CPU.
+            if !progress && self.batches.is_empty() {
+                thread::park_timeout(Duration::from_millis(1));
+            }
+        }
     }
 
-    // Drop any stale/error-state connection before reconnecting.
-    *state = ConnState::Connecting;
-    match transport.connect(addr, port) {
-        Ok((conn, timing)) => {
-            *state = ConnState::Connected(conn);
-            telemetry.record_connection_established();
-            if timing.is_measured() {
-                telemetry.record_connect_phases(
-                    timing.resolve_addr_us,
-                    timing.resolve_route_us,
-                    timing.handshake_us,
-                    timing.mr_reg_us,
-                );
-                logger.info(&format!(
-                    "remote-lookup-rdma-initiator: connected {addr}:{port} in \
-                     resolve_addr={}us route={}us handshake={}us mr_reg={}us",
-                    timing.resolve_addr_us,
-                    timing.resolve_route_us,
-                    timing.handshake_us,
-                    timing.mr_reg_us,
-                ));
+    /// Take ownership of a submitted batch.
+    fn accept(&mut self, batch: Batch) {
+        let seq = batch.seq;
+        if batch.writes.is_empty() {
+            // Nothing to send; report immediately rather than tracking it.
+            let mut batch = batch;
+            batch.finish(&self.telemetry);
+            return;
+        }
+        self.batches.insert(seq, batch);
+        self.to_post.push_back(seq);
+    }
+
+    /// Post as many queued writes as send-queue credits allow.
+    ///
+    /// Returns whether anything was posted. Batches are posted in submission order,
+    /// and a batch too large for the remaining credits is posted partially and
+    /// resumed as completions free them.
+    fn post_ready(&mut self) -> bool {
+        if self.to_post.is_empty() {
+            return false;
+        }
+        if !self.ensure_connected() {
+            // Unreachable host: nothing queued can be served.
+            self.fail_all(PushStatus::UnableToConnect);
+            return true;
+        }
+
+        let mut posted_any = false;
+        while let Some(&seq) = self.to_post.front() {
+            if self.free_wr_slots.is_empty() {
+                break; // Send queue full; resume when completions land.
             }
-            true
+            let Some(batch) = self.batches.get_mut(&seq) else {
+                // Already reported and removed; drop its posting entry.
+                self.to_post.pop_front();
+                continue;
+            };
+
+            let mut failure = None;
+            while batch.posted < batch.writes.len() {
+                let Some(wr_slot) = self.free_wr_slots.pop() else {
+                    break;
+                };
+                let write_idx = batch.posted;
+                let write = batch.writes[write_idx];
+
+                // SAFETY: `local`/`len` came from the submitter's memory-tier peek,
+                // which the interface requires stay valid and unevicted until this
+                // batch's callback runs. The write is not reported complete — and so
+                // the callback cannot run — until its completion is reaped or the
+                // connection is destroyed, which quiesces the NIC.
+                let result = match &self.state {
+                    ConnState::Connected(conn) => unsafe {
+                        conn.post_write(&write, wr_slot as u64)
+                    },
+                    // ensure_connected returned true above.
+                    ConnState::Disconnected => {
+                        unreachable!("ensure_connected guarantees Connected")
+                    }
+                };
+
+                match result {
+                    Ok(()) => {
+                        self.wr_slots[wr_slot] = Some(PostedRef { seq, write_idx });
+                        batch.posted += 1;
+                        batch.outstanding += 1;
+                        batch.first_post.get_or_insert_with(Instant::now);
+                        posted_any = true;
+                    }
+                    Err(e) => {
+                        // The slot was never used; give it back before recovering.
+                        self.free_wr_slots.push(wr_slot);
+                        failure = Some(e);
+                        break;
+                    }
+                }
+            }
+
+            if let Some(e) = failure {
+                self.logger.warn(&format!(
+                    "remote-lookup-rdma-initiator: posting to {}:{} failed ({e}); \
+                     rebuilding the connection",
+                    self.addr, self.port
+                ));
+                self.recover();
+                return true;
+            }
+
+            if batch.posted == batch.writes.len() {
+                self.to_post.pop_front();
+                let n = batch.writes.len();
+                self.logger.debug(&format!(
+                    "remote-lookup-rdma-initiator: batch {seq} fully posted to {}:{} \
+                     ({n} writes)",
+                    self.addr, self.port
+                ));
+            } else {
+                break; // Out of credits mid-batch.
+            }
         }
-        Err(e) => {
-            logger.warn(&format!(
-                "remote-lookup-rdma-initiator: connect to {addr}:{port} failed: {e}"
+        posted_any
+    }
+
+    /// Reap whatever the completion queue has ready, retiring writes and reporting
+    /// batches that finish. Returns whether any completion was processed.
+    fn reap(&mut self) -> bool {
+        let outstanding = PUSH_WINDOW - self.free_wr_slots.len();
+        if outstanding == 0 {
+            return false;
+        }
+
+        let completions = match &self.state {
+            ConnState::Connected(conn) => conn.poll_completions(outstanding),
+            ConnState::Disconnected => return false,
+        };
+        let completions = match completions {
+            Ok(c) => c,
+            Err(e) => {
+                self.logger.warn(&format!(
+                    "remote-lookup-rdma-initiator: polling {}:{} failed ({e}); \
+                     rebuilding the connection",
+                    self.addr, self.port
+                ));
+                self.recover();
+                return true;
+            }
+        };
+        if completions.is_empty() {
+            return false;
+        }
+
+        let mut first_error = None;
+        for completion in &completions {
+            let wr_slot = completion.wr_id as usize;
+            let Some(posted) = self.wr_slots.get(wr_slot).copied().flatten() else {
+                // Not a tag we issued (or already retired) — nothing to attribute.
+                continue;
+            };
+            self.wr_slots[wr_slot] = None;
+            self.free_wr_slots.push(wr_slot);
+
+            if let Some(detail) = &completion.error {
+                if first_error.is_none() {
+                    first_error = Some(detail.clone());
+                }
+                continue;
+            }
+
+            if let Some(batch) = self.batches.get_mut(&posted.seq) {
+                batch.outstanding -= 1;
+                batch.statuses[batch.slots[posted.write_idx]] = PushStatus::Success;
+            }
+        }
+
+        if let Some(detail) = first_error {
+            self.logger.warn(&format!(
+                "remote-lookup-rdma-initiator: write to {}:{} failed ({detail}); \
+                 rebuilding the connection and replaying",
+                self.addr, self.port
             ));
-            telemetry.record_connection_failed();
-            *state = ConnState::Disconnected;
-            false
+            self.recover();
+            return true;
         }
+
+        // Report every batch whose writes have all landed.
+        let finished: Vec<u64> = self
+            .batches
+            .iter()
+            .filter(|(_, b)| b.is_finished())
+            .map(|(seq, _)| *seq)
+            .collect();
+        for seq in finished {
+            if let Some(mut batch) = self.batches.remove(&seq) {
+                batch.finish(&self.telemetry);
+            }
+            // A batch completed cleanly, so earlier trouble is behind us.
+            self.recoveries = 0;
+        }
+        true
+    }
+
+    /// Rebuild the connection and replay everything that was in flight.
+    ///
+    /// Ordering is the point. The queue pair is destroyed **first**: outstanding
+    /// writes are discarded rather than delivered as completions, so there is nothing
+    /// to wait for, and destroying the queue pair is what synchronously guarantees the
+    /// NIC has stopped reading pool memory. Only then is it safe to let any batch
+    /// report — which is what releases the submitter's pins.
+    ///
+    /// Replay is whole-batch and idempotent: the same bytes go to the same remote
+    /// addresses, the submitter's pins keep the source unchanged, and the remote
+    /// landing buffers stay reserved and unpublished until status is reported. Per-write
+    /// blame is not attempted because a queue-pair error flushes every outstanding
+    /// write, making it unknowable.
+    fn recover(&mut self) {
+        // Destroying the connection destroys the queue pair: the quiesce barrier.
+        self.state = ConnState::Disconnected;
+        for slot in self.wr_slots.iter_mut() {
+            *slot = None;
+        }
+        self.free_wr_slots = (0..PUSH_WINDOW).rev().collect();
+
+        self.recoveries += 1;
+        if self.recoveries > 1 {
+            self.logger.warn(&format!(
+                "remote-lookup-rdma-initiator: {}:{} failed again after a rebuild; \
+                 failing {} batch(es)",
+                self.addr,
+                self.port,
+                self.batches.len()
+            ));
+            self.fail_all(PushStatus::UnableToConnect);
+            // Let a future batch start from a clean slate rather than inheriting
+            // this episode's budget.
+            self.recoveries = 0;
+            return;
+        }
+
+        self.telemetry.record_reconnect();
+
+        // Rewind every batch and re-queue it in submission order.
+        let mut seqs: Vec<u64> = self.batches.keys().copied().collect();
+        seqs.sort_unstable();
+        self.to_post.clear();
+        for seq in seqs {
+            if let Some(batch) = self.batches.get_mut(&seq) {
+                batch.rewind();
+                self.to_post.push_back(seq);
+            }
+        }
+    }
+
+    /// Abandon a connection whose posted writes have stopped completing.
+    fn check_stalled(&mut self) {
+        let stalled = self.batches.values().any(|b| {
+            b.outstanding > 0 && b.first_post.is_some_and(|t| t.elapsed() > STALL_TIMEOUT)
+        });
+        if stalled {
+            self.logger.warn(&format!(
+                "remote-lookup-rdma-initiator: no completion from {}:{} within {}s; \
+                 rebuilding the connection",
+                self.addr,
+                self.port,
+                STALL_TIMEOUT.as_secs()
+            ));
+            self.recover();
+        }
+    }
+
+    /// Report every tracked batch with `status` for its writes and forget them.
+    fn fail_all(&mut self, status: PushStatus) {
+        self.to_post.clear();
+        for (_, mut batch) in self.batches.drain() {
+            batch.set_all_writes(status);
+            batch.finish(&self.telemetry);
+        }
+    }
+
+    /// Establish the connection if it is not already healthy. Returns whether a
+    /// usable connection exists.
+    fn ensure_connected(&mut self) -> bool {
+        if matches!(&self.state, ConnState::Connected(conn) if conn.qp_healthy()) {
+            return true;
+        }
+
+        // Drop any stale/error-state connection before reconnecting.
+        self.state = ConnState::Disconnected;
+        if self.stopping.load(Ordering::SeqCst) {
+            // Tearing down: do not start a connect that teardown would then have to
+            // wait out. The caller reports its batches as unable-to-connect.
+            return false;
+        }
+        match self.transport.connect(&self.addr, self.port) {
+            Ok((conn, timing)) => {
+                self.state = ConnState::Connected(conn);
+                self.telemetry.record_connection_established();
+                if timing.is_measured() {
+                    self.telemetry.record_connect_phases(
+                        timing.resolve_addr_us,
+                        timing.resolve_route_us,
+                        timing.handshake_us,
+                        timing.mr_reg_us,
+                    );
+                    self.logger.info(&format!(
+                        "remote-lookup-rdma-initiator: connected {}:{} in \
+                         resolve_addr={}us route={}us handshake={}us mr_reg={}us",
+                        self.addr,
+                        self.port,
+                        timing.resolve_addr_us,
+                        timing.resolve_route_us,
+                        timing.handshake_us,
+                        timing.mr_reg_us,
+                    ));
+                }
+                true
+            }
+            Err(e) => {
+                self.logger.warn(&format!(
+                    "remote-lookup-rdma-initiator: connect to {}:{} failed: {e}",
+                    self.addr, self.port
+                ));
+                self.telemetry.record_connection_failed();
+                false
+            }
+        }
+    }
+
+    /// Tear down: quiesce the NIC, then report everything still owed a callback.
+    fn shutdown(&mut self) {
+        let had_connection = matches!(self.state, ConnState::Connected(_));
+        // Destroy the queue pair before reporting anything, so no submitter can
+        // reclaim memory the NIC might still be reading.
+        self.state = ConnState::Disconnected;
+        if had_connection {
+            self.telemetry.record_disconnect();
+        }
+        self.fail_all(PushStatus::UnableToConnect);
+        self.logger.debug(&format!(
+            "remote-lookup-rdma-initiator: connection thread for {}:{} stopped",
+            self.addr, self.port
+        ));
     }
 }
 
@@ -573,36 +1153,34 @@ impl RdmaConn for RealConn {
         self.conn.is_qp_healthy()
     }
 
-    unsafe fn write_window(&self, writes: &[WindowWrite]) -> Result<(), RdmaError> {
+    unsafe fn post_write(&self, write: &WindowWrite, wr_id: u64) -> Result<(), RdmaError> {
         // `{e:#}` renders the full anyhow source chain (e.g. the underlying
-        // "work completion error: status=12 (RETRY_EXC_ERR) … qp_state=…"),
-        // not just the top context — otherwise the WC status is lost.
-        let wrap = |e: anyhow::Error| RdmaError::WriteFailed(format!("{e:#}"));
+        // "ibv_post_send (RDMA_WRITE) failed: …"), not just the top context.
+        self.conn
+            .post_write_from_pool(
+                &self.pool_mr,
+                write.local,
+                write.len,
+                write.remote_addr,
+                write.rkey,
+                wr_id,
+            )
+            .map_err(|e| RdmaError::WriteFailed(format!("{e:#}")))
+    }
 
-        // Post the whole window first, then wait once. A post can fail locally
-        // (full send queue) part-way through; the already-posted requests are
-        // abandoned to the caller's teardown, which destroys the queue pair and so
-        // flushes them before any pool memory is released.
-        for (i, w) in writes.iter().enumerate() {
-            self.conn
-                .post_write_from_pool(
-                    &self.pool_mr,
-                    w.local,
-                    w.len,
-                    w.remote_addr,
-                    w.rkey,
-                    i as u64,
-                )
-                .map_err(wrap)?;
-        }
-        self.conn.reap(writes.len()).map_err(wrap)
+    fn poll_completions(&self, max: usize) -> Result<Vec<Completion>, RdmaError> {
+        self.conn
+            .poll_completions(max)
+            .map_err(|e| RdmaError::WriteFailed(format!("{e:#}")))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::mpsc;
 
     /// A logger that discards everything (tests don't assert on log output).
     struct NullLogger;
@@ -613,18 +1191,28 @@ mod tests {
         fn debug(&self, _msg: &str) {}
     }
 
-    /// Every window a mock connection was asked to write, as its list of remote
-    /// addresses — recording *granularity* as well as outcome, so a test can assert
-    /// that a batch went out as one window and that a replay carries the same
-    /// writes. Shared across the transport and the connections it hands out,
-    /// because `push` owns the connection by the time the test inspects it.
-    type WindowLog = Arc<Mutex<Vec<Vec<u64>>>>;
+    /// What a mock transport's connections did, shared across every connection it
+    /// hands out so a test can see across a reconnect.
+    #[derive(Default)]
+    struct MockLog {
+        /// Remote addresses in the order they were posted. A replay therefore shows
+        /// as the same run of addresses appearing twice.
+        posted: Vec<u64>,
+        /// High-water mark of writes posted but not yet reaped. This is the
+        /// pipelining measure: 1 would mean we serialize on every completion.
+        max_outstanding: usize,
+    }
+
+    type SharedLog = Arc<Mutex<MockLog>>;
 
     struct MockConn {
         healthy: AtomicBool,
-        /// If set, the next window fails and drives the QP unhealthy.
-        fail_next_window: AtomicBool,
-        windows: WindowLog,
+        /// If set, the next poll that would return completions fails them all and
+        /// drives the queue pair unhealthy — as a real queue-pair error does.
+        fail_next_completions: AtomicBool,
+        /// Posted `wr_id`s awaiting completion.
+        pending: Mutex<VecDeque<u64>>,
+        log: SharedLog,
     }
 
     impl RdmaConn for MockConn {
@@ -632,16 +1220,32 @@ mod tests {
             self.healthy.load(Ordering::SeqCst)
         }
 
-        unsafe fn write_window(&self, writes: &[WindowWrite]) -> Result<(), RdmaError> {
-            self.windows
-                .lock()
-                .unwrap()
-                .push(writes.iter().map(|w| w.remote_addr).collect());
-            if self.fail_next_window.swap(false, Ordering::SeqCst) {
-                self.healthy.store(false, Ordering::SeqCst);
-                return Err(RdmaError::WriteFailed("mock window failure".into()));
-            }
+        unsafe fn post_write(&self, write: &WindowWrite, wr_id: u64) -> Result<(), RdmaError> {
+            let mut pending = self.pending.lock().unwrap();
+            pending.push_back(wr_id);
+            let mut log = self.log.lock().unwrap();
+            log.posted.push(write.remote_addr);
+            log.max_outstanding = log.max_outstanding.max(pending.len());
             Ok(())
+        }
+
+        fn poll_completions(&self, max: usize) -> Result<Vec<Completion>, RdmaError> {
+            let mut pending = self.pending.lock().unwrap();
+            let take = max.min(pending.len());
+            if take == 0 {
+                return Ok(Vec::new());
+            }
+            let failed = self.fail_next_completions.swap(false, Ordering::SeqCst);
+            if failed {
+                self.healthy.store(false, Ordering::SeqCst);
+            }
+            Ok(pending
+                .drain(..take)
+                .map(|wr_id| Completion {
+                    wr_id,
+                    error: failed.then(|| "mock completion failure".to_string()),
+                })
+                .collect())
         }
     }
 
@@ -651,10 +1255,9 @@ mod tests {
         connect_attempts: Arc<AtomicUsize>,
         /// Number of initial connect attempts that should fail.
         fail_first_n_connects: usize,
-        /// The first successfully-connected conn will fail its first window.
-        fail_first_window: AtomicBool,
-        /// Windows seen by every conn this transport produced, in order.
-        windows: WindowLog,
+        /// The first successfully-connected conn fails its first completions.
+        fail_first_completions: AtomicBool,
+        log: SharedLog,
     }
 
     impl RdmaTransport for MockTransport {
@@ -669,10 +1272,11 @@ mod tests {
             }
             let conn = MockConn {
                 healthy: AtomicBool::new(true),
-                fail_next_window: AtomicBool::new(
-                    self.fail_first_window.swap(false, Ordering::SeqCst),
+                fail_next_completions: AtomicBool::new(
+                    self.fail_first_completions.swap(false, Ordering::SeqCst),
                 ),
-                windows: Arc::clone(&self.windows),
+                pending: Mutex::new(VecDeque::new()),
+                log: Arc::clone(&self.log),
             };
             // The mock does not measure phases; timing is left zeroed.
             Ok((Box::new(conn), ConnectTiming::default()))
@@ -690,7 +1294,17 @@ mod tests {
 
     /// Build a table with a fresh (no-op unless `telemetry` feature) collector.
     fn table_with(transport: MockTransport) -> ConnectionTable {
-        ConnectionTable::new(Box::new(transport), Arc::new(TelemetryCollector::new()))
+        ConnectionTable::new(
+            Arc::new(transport),
+            Arc::new(TelemetryCollector::new()),
+            Arc::new(NullLogger),
+        )
+    }
+
+    /// Build a table plus a handle on what its connections did.
+    fn table_with_log(transport: MockTransport) -> (ConnectionTable, SharedLog) {
+        let log = Arc::clone(&transport.log);
+        (table_with(transport), log)
     }
 
     #[test]
@@ -719,7 +1333,7 @@ mod tests {
             write_plan(0x1000, 7, 256),
             ItemPlan::Done(PushStatus::SizeMismatch),
         ];
-        let out = table.push("10.0.0.1:5000", resolved, &NullLogger).unwrap();
+        let out = table.push("10.0.0.1:5000", resolved).unwrap();
         assert_eq!(
             out,
             vec![
@@ -742,7 +1356,7 @@ mod tests {
             write_plan(0x2000, 1, 64),
             write_plan(0x3000, 2, 64),
         ];
-        let out = table.push("10.0.0.2:5000", resolved, &NullLogger).unwrap();
+        let out = table.push("10.0.0.2:5000", resolved).unwrap();
         assert_eq!(
             out,
             vec![
@@ -753,85 +1367,69 @@ mod tests {
         );
     }
 
+    /// The point of posting without waiting: a batch of writes must all be in flight
+    /// at once, not serialized one completion at a time. A 64 KiB write is ~2.6 µs of
+    /// wire time but ~28 µs of post/poll overhead, so a max-outstanding of 1 would cap
+    /// a flow near 9% of line rate however much work the caller offers.
     #[test]
-    fn write_failure_triggers_single_reconnect_then_succeeds() {
-        let attempts = Arc::new(AtomicUsize::new(0));
-        let transport = MockTransport {
-            connect_attempts: Arc::clone(&attempts),
-            fail_first_window: AtomicBool::new(true),
-            ..Default::default()
-        };
-        let table = table_with(transport);
-        // Two writes: the first fails (QP goes unhealthy), forcing a reconnect;
-        // the retry and the second write both succeed.
-        let resolved = vec![write_plan(0xA000, 3, 128), write_plan(0xB000, 4, 128)];
-        let out = table.push("10.0.0.3:5000", resolved, &NullLogger).unwrap();
-        assert_eq!(out, vec![PushStatus::Success, PushStatus::Success]);
-        // Exactly one reconnect: the initial connect plus one repair.
-        assert_eq!(attempts.load(Ordering::SeqCst), 2);
-    }
-
-    /// Build a table plus a handle on the windows its connections will see.
-    fn table_with_window_log(transport: MockTransport) -> (ConnectionTable, WindowLog) {
-        let log = Arc::clone(&transport.windows);
-        (table_with(transport), log)
-    }
-
-    /// The regression test for the serialization this windowing replaced: a batch
-    /// of writes must reach the transport as ONE window, not one window per write.
-    /// Posting the whole window before waiting is the entire performance win — a
-    /// 64 KiB write is ~2.6 µs of wire time but ~28 µs of post/poll overhead.
-    #[test]
-    fn whole_batch_is_posted_as_one_window() {
-        let (table, windows) = table_with_window_log(MockTransport::default());
+    fn a_whole_batch_is_in_flight_at_once() {
+        let (table, log) = table_with_log(MockTransport::default());
         let addrs: Vec<u64> = (1..=64).map(|i| i * 0x1000).collect();
         let resolved: Vec<ItemPlan> = addrs.iter().map(|&a| write_plan(a, 9, 65536)).collect();
 
-        let out = table.push("10.0.0.9:5000", resolved, &NullLogger).unwrap();
+        let out = table.push("10.0.0.9:5000", resolved).unwrap();
 
         assert_eq!(out, vec![PushStatus::Success; 64]);
-        let seen = windows.lock().unwrap();
-        assert_eq!(seen.len(), 1, "expected one window, got {}", seen.len());
+        let seen = log.lock().unwrap();
+        assert_eq!(seen.posted, addrs, "every write, in order");
         assert_eq!(
-            seen[0], addrs,
-            "the window must carry every write, in order"
+            seen.max_outstanding, 64,
+            "all 64 writes should be outstanding together, not reaped one by one"
         );
     }
 
-    /// A batch larger than the queue depth is split, but only as much as the depth
-    /// requires — the remainder still travels as one window, not write-by-write.
+    /// A batch deeper than the send queue is posted in full, resuming as completions
+    /// free credits — and never exceeds the queue depth.
     #[test]
-    fn batch_larger_than_the_window_is_chunked() {
-        let (table, windows) = table_with_window_log(MockTransport::default());
+    fn a_batch_deeper_than_the_send_queue_still_completes() {
+        let (table, log) = table_with_log(MockTransport::default());
         let total = PUSH_WINDOW + 72;
-        let resolved: Vec<ItemPlan> = (0..total)
-            .map(|i| write_plan((i as u64 + 1) * 0x100, 9, 4096))
-            .collect();
+        let addrs: Vec<u64> = (0..total).map(|i| (i as u64 + 1) * 0x100).collect();
+        let resolved: Vec<ItemPlan> = addrs.iter().map(|&a| write_plan(a, 9, 4096)).collect();
 
-        let out = table.push("10.0.0.10:5000", resolved, &NullLogger).unwrap();
+        let out = table.push("10.0.0.10:5000", resolved).unwrap();
 
         assert_eq!(out, vec![PushStatus::Success; total]);
-        let sizes: Vec<usize> = windows.lock().unwrap().iter().map(|w| w.len()).collect();
-        assert_eq!(sizes, vec![PUSH_WINDOW, 72]);
+        let seen = log.lock().unwrap();
+        assert_eq!(seen.posted, addrs, "every write, in order");
+        assert!(
+            seen.max_outstanding <= PUSH_WINDOW,
+            "credits must cap in-flight writes at the send-queue depth, saw {}",
+            seen.max_outstanding
+        );
+        assert_eq!(
+            seen.max_outstanding, PUSH_WINDOW,
+            "and should fill it rather than trickling"
+        );
     }
 
-    /// On a lost window the whole window is replayed after one reconnect, rather
-    /// than the failure being attributed to individual writes. A queue-pair error
-    /// flushes every outstanding request, so per-write blame is not knowable — and
-    /// replay is safe because the remote landing buffers stay reserved and
-    /// unpublished until status is reported.
+    /// On a failed completion every outstanding write is replayed after one
+    /// reconnect, rather than the failure being blamed on individual writes. A
+    /// queue-pair error flushes every outstanding request, so per-write blame is not
+    /// knowable — and replay is safe because the remote landing buffers stay reserved
+    /// and unpublished until status is reported.
     #[test]
-    fn lost_window_is_replayed_in_full_after_one_reconnect() {
+    fn lost_writes_are_replayed_in_full_after_one_reconnect() {
         let attempts = Arc::new(AtomicUsize::new(0));
-        let (table, windows) = table_with_window_log(MockTransport {
+        let (table, log) = table_with_log(MockTransport {
             connect_attempts: Arc::clone(&attempts),
-            fail_first_window: AtomicBool::new(true),
+            fail_first_completions: AtomicBool::new(true),
             ..Default::default()
         });
         let addrs: Vec<u64> = (1..=8).map(|i| i * 0x2000).collect();
         let resolved: Vec<ItemPlan> = addrs.iter().map(|&a| write_plan(a, 5, 1024)).collect();
 
-        let out = table.push("10.0.0.11:5000", resolved, &NullLogger).unwrap();
+        let out = table.push("10.0.0.11:5000", resolved).unwrap();
 
         assert_eq!(out, vec![PushStatus::Success; 8]);
         assert_eq!(
@@ -839,25 +1437,24 @@ mod tests {
             2,
             "one connect, one repair"
         );
-        let seen = windows.lock().unwrap();
-        assert_eq!(seen.len(), 2, "the failed window plus its replay");
-        assert_eq!(seen[0], addrs);
+        let seen = log.lock().unwrap();
+        let mut expected = addrs.clone();
+        expected.extend_from_slice(&addrs);
         assert_eq!(
-            seen[1], addrs,
-            "the replay must be identical to what was lost"
+            seen.posted, expected,
+            "the replay must repost exactly what was lost"
         );
     }
 
-    /// The one-reconnect-per-batch budget survives the move to window granularity:
-    /// a window that fails again after the repair fails its keys rather than
-    /// looping.
+    /// The one-repair budget: writes that fail again after the reconnect fail their
+    /// keys rather than looping forever.
     #[test]
-    fn window_failing_after_the_reconnect_gives_up() {
-        // Every connection this transport hands out fails its first window, so the
-        // replay fails too.
+    fn failing_again_after_the_reconnect_gives_up() {
+        // Every connection this transport hands out fails its first completions, so
+        // the replay fails too.
         struct AlwaysFailing {
             attempts: Arc<AtomicUsize>,
-            windows: WindowLog,
+            log: SharedLog,
         }
         impl RdmaTransport for AlwaysFailing {
             fn connect(
@@ -869,8 +1466,9 @@ mod tests {
                 Ok((
                     Box::new(MockConn {
                         healthy: AtomicBool::new(true),
-                        fail_next_window: AtomicBool::new(true),
-                        windows: Arc::clone(&self.windows),
+                        fail_next_completions: AtomicBool::new(true),
+                        pending: Mutex::new(VecDeque::new()),
+                        log: Arc::clone(&self.log),
                     }),
                     ConnectTiming::default(),
                 ))
@@ -878,37 +1476,41 @@ mod tests {
         }
 
         let attempts = Arc::new(AtomicUsize::new(0));
-        let windows: WindowLog = Arc::default();
+        let log: SharedLog = Arc::default();
         let table = ConnectionTable::new(
-            Box::new(AlwaysFailing {
+            Arc::new(AlwaysFailing {
                 attempts: Arc::clone(&attempts),
-                windows: Arc::clone(&windows),
+                log: Arc::clone(&log),
             }),
             Arc::new(TelemetryCollector::new()),
+            Arc::new(NullLogger),
         );
 
         let out = table
             .push(
                 "10.0.0.12:5000",
                 vec![write_plan(0x1000, 1, 512), write_plan(0x2000, 1, 512)],
-                &NullLogger,
             )
             .unwrap();
 
         assert_eq!(
             out,
             vec![PushStatus::UnableToConnect; 2],
-            "a window lost twice fails its keys"
+            "writes lost twice fail their keys"
         );
         assert_eq!(attempts.load(Ordering::SeqCst), 2, "no third attempt");
-        assert_eq!(windows.lock().unwrap().len(), 2, "attempt plus one replay");
+        assert_eq!(
+            log.lock().unwrap().posted.len(),
+            4,
+            "the attempt plus one replay"
+        );
     }
 
     /// Items resolved before any RDMA (absent key, size mismatch) keep their status
-    /// and must never occupy a slot in a window.
+    /// and must never be posted.
     #[test]
-    fn done_items_never_enter_a_window() {
-        let (table, windows) = table_with_window_log(MockTransport::default());
+    fn done_items_are_never_posted() {
+        let (table, log) = table_with_log(MockTransport::default());
         let resolved = vec![
             ItemPlan::Done(PushStatus::KeyNotFound),
             write_plan(0xC000, 2, 64),
@@ -916,7 +1518,7 @@ mod tests {
             write_plan(0xD000, 2, 64),
         ];
 
-        let out = table.push("10.0.0.13:5000", resolved, &NullLogger).unwrap();
+        let out = table.push("10.0.0.13:5000", resolved).unwrap();
 
         assert_eq!(
             out,
@@ -927,9 +1529,382 @@ mod tests {
                 PushStatus::Success,
             ]
         );
-        let seen = windows.lock().unwrap();
-        assert_eq!(seen.len(), 1);
-        assert_eq!(seen[0], vec![0xC000, 0xD000], "only the writes");
+        assert_eq!(
+            log.lock().unwrap().posted,
+            vec![0xC000, 0xD000],
+            "only the writes"
+        );
+    }
+
+    /// A batch with nothing to write reports immediately and never connects.
+    #[test]
+    fn a_batch_with_no_writes_reports_without_connecting() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let table = table_with(MockTransport {
+            connect_attempts: Arc::clone(&attempts),
+            ..Default::default()
+        });
+
+        let out = table
+            .push(
+                "10.0.0.14:5000",
+                vec![ItemPlan::Done(PushStatus::KeyNotFound)],
+            )
+            .unwrap();
+
+        assert_eq!(out, vec![PushStatus::KeyNotFound]);
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            0,
+            "nothing to send, so nothing to connect for"
+        );
+    }
+
+    /// The completion callback must fire exactly once — never twice, never not at
+    /// all. Everything the submitter owns (read pins, above all) hangs off it.
+    #[test]
+    fn the_callback_fires_exactly_once() {
+        let table = table_with(MockTransport::default());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&calls);
+        let (tx, rx) = mpsc::channel();
+
+        table
+            .push_async(
+                "10.0.0.15:5000",
+                vec![write_plan(0x1000, 1, 64), write_plan(0x2000, 1, 64)],
+                Box::new(move |statuses| {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    let _ = tx.send(statuses);
+                }),
+            )
+            .unwrap();
+
+        let statuses = rx.recv().expect("callback should report");
+        assert_eq!(statuses, vec![PushStatus::Success; 2]);
+        // The sender is dropped inside the callback, so a second invocation would
+        // both bump the counter and be visible as an extra message.
+        assert!(rx.recv().is_err(), "callback must not fire twice");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// A full submit queue is reported as unable-to-connect rather than queued.
+    /// Queuing without bound would pile up held read pins behind a sick peer, and a
+    /// pinned entry cannot be evicted — one unreachable peer would stall the local
+    /// memory tier.
+    #[test]
+    fn a_full_submit_queue_fails_fast() {
+        /// Stalls in `connect` until released, so nothing drains the queue and the
+        /// backlog fills — the state a peer that has gone away puts us in.
+        struct Wedged {
+            release: Arc<AtomicBool>,
+        }
+        impl RdmaTransport for Wedged {
+            fn connect(
+                &self,
+                _addr: &str,
+                _port: u16,
+            ) -> Result<(Box<dyn RdmaConn>, ConnectTiming), RdmaError> {
+                while !self.release.load(Ordering::SeqCst) {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(RdmaError::ConnectionFailed("released".into()))
+            }
+        }
+        let release = Arc::new(AtomicBool::new(false));
+        let table = ConnectionTable::new(
+            Arc::new(Wedged {
+                release: Arc::clone(&release),
+            }),
+            Arc::new(TelemetryCollector::new()),
+            Arc::new(NullLogger),
+        );
+
+        // Submit well past what the channel and the thread's backlog can hold. Every
+        // batch reports exactly once either way, so counting reports tells us the
+        // rejected ones were not swallowed.
+        let reports = Arc::new(Mutex::new(Vec::new()));
+        let submissions = SUBMIT_QUEUE_DEPTH + MAX_TRACKED_BATCHES + 64;
+        for _ in 0..submissions {
+            let sink = Arc::clone(&reports);
+            table
+                .push_async(
+                    "10.0.0.16:5000",
+                    vec![write_plan(0x1000, 1, 64)],
+                    Box::new(move |statuses| sink.lock().unwrap().push(statuses)),
+                )
+                .unwrap();
+        }
+
+        {
+            let rejected = reports.lock().unwrap();
+            assert!(
+                !rejected.is_empty(),
+                "submissions past the queue depth must be rejected, not queued: \
+                 without that, the backlog of held read pins grows without bound"
+            );
+            assert!(
+                rejected
+                    .iter()
+                    .all(|s| s == &vec![PushStatus::UnableToConnect]),
+                "a rejected batch reports unable-to-connect for its writes"
+            );
+        }
+
+        // Let the wedged connect return so teardown can join the thread.
+        release.store(true, Ordering::SeqCst);
+        drop(table);
+
+        // Nothing may be left unreported: the rejected batches plus every batch the
+        // thread was holding.
+        assert_eq!(
+            reports.lock().unwrap().len(),
+            submissions,
+            "every submitted batch must report exactly once"
+        );
+    }
+
+    /// Teardown must report every batch it is still holding. A submitter that never
+    /// hears back never releases its read pins, and a leaked pin makes its entry
+    /// permanently unevictable.
+    #[test]
+    fn teardown_reports_batches_it_still_holds() {
+        // Connects succeed, but completions never arrive, so the batch stays in
+        // flight until teardown.
+        struct NeverCompletes;
+        struct SilentConn;
+        impl RdmaConn for SilentConn {
+            fn qp_healthy(&self) -> bool {
+                true
+            }
+            unsafe fn post_write(
+                &self,
+                _write: &WindowWrite,
+                _wr_id: u64,
+            ) -> Result<(), RdmaError> {
+                Ok(())
+            }
+            fn poll_completions(&self, _max: usize) -> Result<Vec<Completion>, RdmaError> {
+                Ok(Vec::new())
+            }
+        }
+        impl RdmaTransport for NeverCompletes {
+            fn connect(
+                &self,
+                _addr: &str,
+                _port: u16,
+            ) -> Result<(Box<dyn RdmaConn>, ConnectTiming), RdmaError> {
+                Ok((Box::new(SilentConn), ConnectTiming::default()))
+            }
+        }
+
+        let table = ConnectionTable::new(
+            Arc::new(NeverCompletes),
+            Arc::new(TelemetryCollector::new()),
+            Arc::new(NullLogger),
+        );
+        let (tx, rx) = mpsc::channel();
+        table
+            .push_async(
+                "10.0.0.17:5000",
+                vec![write_plan(0x1000, 1, 64)],
+                Box::new(move |statuses| {
+                    let _ = tx.send(statuses);
+                }),
+            )
+            .unwrap();
+
+        // Nothing has completed, so nothing has been reported yet.
+        assert!(rx.try_recv().is_err());
+
+        table.disconnect("10.0.0.17:5000");
+
+        assert_eq!(
+            rx.recv().expect("teardown must report the held batch"),
+            vec![PushStatus::UnableToConnect],
+        );
+    }
+
+    /// A connection whose writes stop completing is abandoned and rebuilt, rather
+    /// than waiting out the hardware's multi-second retransmit budget.
+    #[test]
+    fn a_stalled_transfer_is_abandoned_and_the_connection_rebuilt() {
+        /// Stalls the first connection's completions forever; later ones work.
+        struct StallOnce {
+            attempts: Arc<AtomicUsize>,
+            log: SharedLog,
+        }
+        struct StallingConn;
+        impl RdmaConn for StallingConn {
+            fn qp_healthy(&self) -> bool {
+                true
+            }
+            unsafe fn post_write(
+                &self,
+                _write: &WindowWrite,
+                _wr_id: u64,
+            ) -> Result<(), RdmaError> {
+                Ok(())
+            }
+            fn poll_completions(&self, _max: usize) -> Result<Vec<Completion>, RdmaError> {
+                Ok(Vec::new())
+            }
+        }
+        impl RdmaTransport for StallOnce {
+            fn connect(
+                &self,
+                _addr: &str,
+                _port: u16,
+            ) -> Result<(Box<dyn RdmaConn>, ConnectTiming), RdmaError> {
+                let n = self.attempts.fetch_add(1, Ordering::SeqCst);
+                if n == 0 {
+                    return Ok((Box::new(StallingConn), ConnectTiming::default()));
+                }
+                Ok((
+                    Box::new(MockConn {
+                        healthy: AtomicBool::new(true),
+                        fail_next_completions: AtomicBool::new(false),
+                        pending: Mutex::new(VecDeque::new()),
+                        log: Arc::clone(&self.log),
+                    }),
+                    ConnectTiming::default(),
+                ))
+            }
+        }
+
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let table = ConnectionTable::new(
+            Arc::new(StallOnce {
+                attempts: Arc::clone(&attempts),
+                log: Arc::default(),
+            }),
+            Arc::new(TelemetryCollector::new()),
+            Arc::new(NullLogger),
+        );
+
+        // The stall detector fires after STALL_TIMEOUT, then the replay lands on a
+        // healthy connection.
+        let out = table
+            .push("10.0.0.18:5000", vec![write_plan(0x1000, 1, 64)])
+            .unwrap();
+
+        assert_eq!(
+            out,
+            vec![PushStatus::Success],
+            "the replay on a fresh connection should succeed"
+        );
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            2,
+            "the stalled connection is abandoned and rebuilt exactly once"
+        );
+    }
+
+    /// Successive batches to one peer overlap on the wire. This is the property the
+    /// whole asynchronous design exists for: with a synchronous push, batch N+1
+    /// cannot start until batch N's last completion is reaped, so max-outstanding
+    /// could never exceed a single batch.
+    #[test]
+    fn successive_batches_overlap_on_the_wire() {
+        /// Holds completions back until released, so several batches accumulate.
+        struct Gated {
+            conn_log: SharedLog,
+            release: Arc<AtomicBool>,
+        }
+        struct GatedConn {
+            pending: Mutex<VecDeque<u64>>,
+            log: SharedLog,
+            release: Arc<AtomicBool>,
+        }
+        impl RdmaConn for GatedConn {
+            fn qp_healthy(&self) -> bool {
+                true
+            }
+            unsafe fn post_write(&self, write: &WindowWrite, wr_id: u64) -> Result<(), RdmaError> {
+                let mut pending = self.pending.lock().unwrap();
+                pending.push_back(wr_id);
+                let mut log = self.log.lock().unwrap();
+                log.posted.push(write.remote_addr);
+                log.max_outstanding = log.max_outstanding.max(pending.len());
+                Ok(())
+            }
+            fn poll_completions(&self, max: usize) -> Result<Vec<Completion>, RdmaError> {
+                if !self.release.load(Ordering::SeqCst) {
+                    return Ok(Vec::new());
+                }
+                let mut pending = self.pending.lock().unwrap();
+                let take = max.min(pending.len());
+                Ok(pending
+                    .drain(..take)
+                    .map(|wr_id| Completion { wr_id, error: None })
+                    .collect())
+            }
+        }
+        impl RdmaTransport for Gated {
+            fn connect(
+                &self,
+                _addr: &str,
+                _port: u16,
+            ) -> Result<(Box<dyn RdmaConn>, ConnectTiming), RdmaError> {
+                Ok((
+                    Box::new(GatedConn {
+                        pending: Mutex::new(VecDeque::new()),
+                        log: Arc::clone(&self.conn_log),
+                        release: Arc::clone(&self.release),
+                    }),
+                    ConnectTiming::default(),
+                ))
+            }
+        }
+
+        let log: SharedLog = Arc::default();
+        let release = Arc::new(AtomicBool::new(false));
+        let table = ConnectionTable::new(
+            Arc::new(Gated {
+                conn_log: Arc::clone(&log),
+                release: Arc::clone(&release),
+            }),
+            Arc::new(TelemetryCollector::new()),
+            Arc::new(NullLogger),
+        );
+
+        // Four batches of 8, submitted without waiting for any of them.
+        let batches = 4;
+        let per_batch = 8;
+        let done = Arc::new(AtomicUsize::new(0));
+        for b in 0..batches {
+            let counter = Arc::clone(&done);
+            let resolved: Vec<ItemPlan> = (0..per_batch)
+                .map(|i| write_plan(((b * per_batch + i) as u64 + 1) * 0x1000, 1, 64))
+                .collect();
+            table
+                .push_async(
+                    "10.0.0.19:5000",
+                    resolved,
+                    Box::new(move |_| {
+                        counter.fetch_add(1, Ordering::SeqCst);
+                    }),
+                )
+                .unwrap();
+        }
+
+        // Wait until every write has been posted while completions are still gated.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while log.lock().unwrap().posted.len() < batches * per_batch {
+            assert!(Instant::now() < deadline, "writes were never all posted");
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            log.lock().unwrap().max_outstanding > per_batch,
+            "more than one batch must be in flight at once, saw {}",
+            log.lock().unwrap().max_outstanding
+        );
+
+        release.store(true, Ordering::SeqCst);
+        while done.load(Ordering::SeqCst) < batches {
+            assert!(Instant::now() < deadline, "batches never completed");
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 
     #[test]
@@ -942,7 +1917,7 @@ mod tests {
         let table = table_with(transport);
 
         let out1 = table
-            .push("10.0.0.4:5000", vec![write_plan(1, 1, 8)], &NullLogger)
+            .push("10.0.0.4:5000", vec![write_plan(1, 1, 8)])
             .unwrap();
         assert_eq!(out1, vec![PushStatus::Success]);
         assert_eq!(attempts.load(Ordering::SeqCst), 1);
@@ -950,7 +1925,7 @@ mod tests {
         table.disconnect("10.0.0.4:5000");
 
         let out2 = table
-            .push("10.0.0.4:5000", vec![write_plan(2, 2, 8)], &NullLogger)
+            .push("10.0.0.4:5000", vec![write_plan(2, 2, 8)])
             .unwrap();
         assert_eq!(out2, vec![PushStatus::Success]);
         // Disconnect dropped the slot, so a second connect was required.
@@ -967,10 +1942,10 @@ mod tests {
         let table = table_with(transport);
         // First push connects; second push to the same endpoint reuses it.
         table
-            .push("10.0.0.5:5000", vec![write_plan(1, 1, 8)], &NullLogger)
+            .push("10.0.0.5:5000", vec![write_plan(1, 1, 8)])
             .unwrap();
         let out = table
-            .push("10.0.0.5:5000", vec![write_plan(2, 2, 8)], &NullLogger)
+            .push("10.0.0.5:5000", vec![write_plan(2, 2, 8)])
             .unwrap();
         assert_eq!(out, vec![PushStatus::Success]);
         // A single connect served both pushes.
@@ -980,11 +1955,42 @@ mod tests {
     #[test]
     fn invalid_endpoint_is_method_error() {
         let table = table_with(MockTransport::default());
-        let err = table.push("garbage", vec![], &NullLogger).unwrap_err();
+        let err = table.push("garbage", vec![]).unwrap_err();
         assert!(matches!(
             err,
             RemoteLookupRdmaInitiatorError::InvalidEndpoint(_)
         ));
+    }
+
+    /// A rejected submission drops the callback rather than invoking it. The
+    /// interface documents that as equivalent for a callback that releases on drop,
+    /// which is what makes an unparseable endpoint safe.
+    #[test]
+    fn invalid_endpoint_drops_the_callback() {
+        let table = table_with(MockTransport::default());
+        let dropped = Arc::new(AtomicBool::new(false));
+
+        struct DropFlag(Arc<AtomicBool>);
+        impl Drop for DropFlag {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let flag = DropFlag(Arc::clone(&dropped));
+
+        let err = table.push_async(
+            "garbage",
+            vec![write_plan(1, 1, 8)],
+            Box::new(move |_| {
+                // Captured so the guard's lifetime is the callback's.
+                let _ = &flag;
+            }),
+        );
+        assert!(err.is_err());
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "the callback (and whatever it owns) must be released"
+        );
     }
 
     #[test]
@@ -995,12 +2001,17 @@ mod tests {
             ..Default::default()
         };
         let table = table_with(transport);
-        // Warm establishes the connection up front...
-        table.connect("10.0.0.5:5000", &NullLogger).unwrap();
+        // Warming is queued to the connection thread, so wait for it to land.
+        table.connect("10.0.0.5:5000").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while attempts.load(Ordering::SeqCst) == 0 {
+            assert!(Instant::now() < deadline, "warm never connected");
+            thread::sleep(Duration::from_millis(5));
+        }
         assert_eq!(attempts.load(Ordering::SeqCst), 1);
         // ...so a subsequent push to the same endpoint reuses it (no reconnect).
         let out = table
-            .push("10.0.0.5:5000", vec![write_plan(1, 1, 8)], &NullLogger)
+            .push("10.0.0.5:5000", vec![write_plan(1, 1, 8)])
             .unwrap();
         assert_eq!(out, vec![PushStatus::Success]);
         assert_eq!(attempts.load(Ordering::SeqCst), 1);
@@ -1016,11 +2027,15 @@ mod tests {
         };
         let table = table_with(transport);
         // A failed warm still returns Ok (never surfaces a transient failure)...
-        table.connect("10.0.0.7:5000", &NullLogger).unwrap();
-        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+        table.connect("10.0.0.7:5000").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while attempts.load(Ordering::SeqCst) == 0 {
+            assert!(Instant::now() < deadline, "warm never attempted a connect");
+            thread::sleep(Duration::from_millis(5));
+        }
         // ...and caches nothing, so the next push retries the connect and wins.
         let out = table
-            .push("10.0.0.7:5000", vec![write_plan(1, 1, 8)], &NullLogger)
+            .push("10.0.0.7:5000", vec![write_plan(1, 1, 8)])
             .unwrap();
         assert_eq!(out, vec![PushStatus::Success]);
         assert_eq!(attempts.load(Ordering::SeqCst), 2);
@@ -1029,7 +2044,7 @@ mod tests {
     #[test]
     fn warm_connect_invalid_endpoint_is_method_error() {
         let table = table_with(MockTransport::default());
-        let err = table.connect("garbage", &NullLogger).unwrap_err();
+        let err = table.connect("garbage").unwrap_err();
         assert!(matches!(
             err,
             RemoteLookupRdmaInitiatorError::InvalidEndpoint(_)
@@ -1043,7 +2058,11 @@ mod tests {
         transport: MockTransport,
     ) -> (ConnectionTable, Arc<TelemetryCollector>) {
         let telemetry = Arc::new(TelemetryCollector::new());
-        let table = ConnectionTable::new(Box::new(transport), Arc::clone(&telemetry));
+        let table = ConnectionTable::new(
+            Arc::new(transport),
+            Arc::clone(&telemetry),
+            Arc::new(NullLogger),
+        );
         (table, telemetry)
     }
 
@@ -1056,7 +2075,7 @@ mod tests {
             write_plan(0x1000, 7, 256),
             ItemPlan::Done(PushStatus::SizeMismatch),
         ];
-        table.push("10.0.0.9:5000", resolved, &NullLogger).unwrap();
+        table.push("10.0.0.9:5000", resolved).unwrap();
         assert_eq!(tm.items_success(), 1);
         assert_eq!(tm.items_key_not_found(), 1);
         assert_eq!(tm.items_size_mismatch(), 1);
@@ -1069,12 +2088,12 @@ mod tests {
     #[test]
     fn telemetry_records_reconnect() {
         let transport = MockTransport {
-            fail_first_window: AtomicBool::new(true),
+            fail_first_completions: AtomicBool::new(true),
             ..Default::default()
         };
         let (table, tm) = table_with_telemetry(transport);
         table
-            .push("10.0.0.10:5000", vec![write_plan(1, 1, 64)], &NullLogger)
+            .push("10.0.0.10:5000", vec![write_plan(1, 1, 64)])
             .unwrap();
         assert_eq!(tm.reconnects(), 1);
         // Initial connect + one repair.
@@ -1090,7 +2109,7 @@ mod tests {
         };
         let (table, tm) = table_with_telemetry(transport);
         table
-            .push("10.0.0.11:5000", vec![write_plan(1, 1, 64)], &NullLogger)
+            .push("10.0.0.11:5000", vec![write_plan(1, 1, 64)])
             .unwrap();
         assert!(tm.connection_failures() >= 1);
         assert_eq!(tm.items_unable_to_connect(), 1);
@@ -1101,7 +2120,7 @@ mod tests {
     fn telemetry_records_disconnect() {
         let (table, tm) = table_with_telemetry(MockTransport::default());
         table
-            .push("10.0.0.12:5000", vec![write_plan(1, 1, 8)], &NullLogger)
+            .push("10.0.0.12:5000", vec![write_plan(1, 1, 8)])
             .unwrap();
         table.disconnect("10.0.0.12:5000");
         assert_eq!(tm.disconnects(), 1);

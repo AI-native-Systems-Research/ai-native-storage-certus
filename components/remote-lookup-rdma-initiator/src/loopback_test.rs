@@ -373,12 +373,13 @@ fn loopback_push_writes_into_remote_buffer() {
 
     // Drive the real outbound path at the ConnectionTable/RealTransport level.
     let table = ConnectionTable::new(
-        Box::new(RealTransport::new(
+        Arc::new(RealTransport::new(
             src.as_ptr() as *mut u8,
             src.len(),
             INITIATOR_UUID.as_bytes().to_vec(),
         )),
         Arc::new(TelemetryCollector::new()),
+        Arc::new(NullLogger),
     );
     let endpoint = format!("{ip}:{TEST_PORT}");
     // Split the payload into WRITES pieces and push them as one window, so this
@@ -399,7 +400,7 @@ fn loopback_push_writes_into_remote_buffer() {
         })
         .collect();
     let statuses = table
-        .push(&endpoint, resolved, &NullLogger)
+        .push(&endpoint, resolved)
         .expect("push returns statuses");
     assert_eq!(
         statuses,

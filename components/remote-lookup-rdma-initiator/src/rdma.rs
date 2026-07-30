@@ -29,19 +29,17 @@ pub const WINDOW: usize = if (MAX_SEND_WR as usize) < (MAX_CQ_ENTRIES as usize) 
     MAX_CQ_ENTRIES as usize
 };
 
-// Wall-clock cap on the busy-poll for a whole window's completions — not per
-// completion, which would multiply the cap by the window depth and undo the fast
-// reconnect this exists for. rdma_cm owns the QP's RTR/RTS transition and leaves
-// the hardware ACK timeout at its (large) default, so the first write on a
-// stale/idle warm connection would otherwise burn ~15s of retransmit before
-// RETRY_EXC. This software cap abandons a stuck window far sooner, letting the
-// caller's reconnect-and-replay path rebuild a fresh QP within the operation
-// deadline. It sits far above healthy latency (a full 128 x 4 MiB window is
-// ~milliseconds on 200G RoCE), so only a genuinely stuck window trips it. (The QP
-// ACK timeout itself is not tunable here: `ibv_modify_qp` cannot change
-// `timeout`/`retry_cnt` in the RTS→RTS transition, and rdma_cm has already
+// The stall deadline that used to live here as `POLL_TIMEOUT_SECS` now belongs to
+// the caller: with several batches in flight there is no single "window" to time, so
+// `connection::STALL_TIMEOUT` is applied to the age of the oldest posted write
+// instead. The reason it exists is unchanged — rdma_cm leaves the hardware ACK
+// timeout at its large default, so a write on a stale but nominally warm connection
+// would otherwise burn ~15s of retransmit before RETRY_EXC, far past any operation
+// deadline. (The QP ACK timeout itself is not tunable here: `ibv_modify_qp` cannot
+// change `timeout`/`retry_cnt` in the RTS→RTS transition, and rdma_cm has already
 // reached RTS by ESTABLISHED.)
-const POLL_TIMEOUT_SECS: u64 = 2;
+
+use crate::connection::Completion;
 
 /// A zeroed work completion, for buffers `ibv_poll_cq` is about to fill.
 ///
@@ -329,73 +327,58 @@ impl RdmaConnection {
         Ok(())
     }
 
-    /// Reap exactly `count` completions, failing on the first unsuccessful one.
+    /// Reap up to `max` ready completions **without blocking**, returning however
+    /// many the completion queue had available — possibly none.
     ///
-    /// The poll-timeout cap bounds the *whole* call, not each completion, so a deep
-    /// window cannot stretch the abandon-and-reconnect deadline.
+    /// This is the primitive an asynchronous poster needs: with several batches
+    /// outstanding on one queue pair, the caller cannot know in advance how many
+    /// completions the next poll will yield, so it cannot wait for a fixed count.
+    /// Each returned [`Completion`] carries its `wr_id` and, when the completion
+    /// failed, a description — the caller decides what a failure means for the batch
+    /// that `wr_id` belongs to.
     ///
-    /// Returning `Err` means the window is lost, not that one member of it is: a
-    /// failing RDMA_WRITE drives the queue pair into the error state, which flushes
-    /// every other outstanding work request with `WR_FLUSH_ERR`. There is
-    /// deliberately no attempt to sort the original failure from the flushed
-    /// bystanders — the caller replays the whole window instead, which is safe
-    /// because the remote landing buffers stay reserved and unpublished until the
-    /// caller reports per-key status.
-    pub fn reap(&self, count: usize) -> Result<()> {
-        if count == 0 {
-            return Ok(());
+    /// A failed completion is reported, not raised: `Err` is reserved for
+    /// `ibv_poll_cq` itself failing. Note that one genuinely failing RDMA_WRITE
+    /// drives the queue pair into the error state, which flushes every other
+    /// outstanding request with `WR_FLUSH_ERR`, so a caller should expect a burst of
+    /// failed completions of which only one names the original cause — and cannot
+    /// tell which.
+    pub fn poll_completions(&self, max: usize) -> Result<Vec<Completion>> {
+        if max == 0 {
+            return Ok(Vec::new());
         }
 
-        let mut wcs: Vec<ffi::ibv_wc> = (0..count).map(|_| blank_wc()).collect();
-        let start = std::time::Instant::now();
-        let timeout = std::time::Duration::from_secs(POLL_TIMEOUT_SECS);
-        let mut reaped = 0usize;
-
-        while reaped < count {
-            let want = (count - reaped) as c_int;
-            // SAFETY: cq is valid and wcs has `count` entries, so writing up to
-            // `want` entries starting at `reaped` stays in bounds.
-            let ret = unsafe { ffi::rdma_test_poll_cq(self.cq, want, wcs[reaped..].as_mut_ptr()) };
-            if ret < 0 {
-                bail!("ibv_poll_cq failed: {}", ret);
-            }
-            if ret > 0 {
-                let got = ret as usize;
-                for wc in &wcs[reaped..reaped + got] {
-                    if wc.status != ffi::IBV_WC_SUCCESS {
-                        // SAFETY: qp is valid for the connection's lifetime.
-                        let qp_state = unsafe { (*self.qp).state };
-                        bail!(
-                            "work completion error: status={} ({}), opcode={}, \
-                             vendor_err=0x{:x}, wr_id={}, wc.qp_num={}, qp_state={} ({}), \
-                             window={}, reaped={}",
-                            wc.status,
-                            wc_status_name(wc.status),
-                            wc.opcode,
-                            wc.vendor_err,
-                            wc.wr_id,
-                            wc.qp_num,
-                            qp_state,
-                            qp_state_name(qp_state),
-                            count,
-                            reaped,
-                        );
-                    }
-                }
-                reaped += got;
-                continue;
-            }
-            if start.elapsed() > timeout {
-                bail!(
-                    "reap timed out after {}s with {}/{} completions",
-                    POLL_TIMEOUT_SECS,
-                    reaped,
-                    count
-                );
-            }
-            std::hint::spin_loop();
+        let mut wcs: Vec<ffi::ibv_wc> = (0..max).map(|_| blank_wc()).collect();
+        // SAFETY: cq is valid and wcs has `max` entries, so writing up to `max`
+        // entries stays in bounds.
+        let ret = unsafe { ffi::rdma_test_poll_cq(self.cq, max as c_int, wcs.as_mut_ptr()) };
+        if ret < 0 {
+            bail!("ibv_poll_cq failed: {}", ret);
         }
-        Ok(())
+
+        let got = ret as usize;
+        Ok(wcs[..got]
+            .iter()
+            .map(|wc| Completion {
+                wr_id: wc.wr_id,
+                error: (wc.status != ffi::IBV_WC_SUCCESS).then(|| {
+                    // SAFETY: qp is valid for the connection's lifetime.
+                    let qp_state = unsafe { (*self.qp).state };
+                    format!(
+                        "work completion error: status={} ({}), opcode={}, \
+                         vendor_err=0x{:x}, wr_id={}, wc.qp_num={}, qp_state={} ({})",
+                        wc.status,
+                        wc_status_name(wc.status),
+                        wc.opcode,
+                        wc.vendor_err,
+                        wc.wr_id,
+                        wc.qp_num,
+                        qp_state,
+                        qp_state_name(qp_state),
+                    )
+                }),
+            })
+            .collect())
     }
 
     /// Drain any pending completions from the CQ.
