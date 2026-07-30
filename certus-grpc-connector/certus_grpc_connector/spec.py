@@ -18,13 +18,17 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from vllm.config import VllmConfig
-from vllm.v1.kv_cache_interface import KVCacheConfig
-from vllm.v1.kv_offload.abstract import LoadStoreSpec, OffloadingManager
-from vllm.v1.kv_offload.mediums import GPULoadStoreSpec
-from vllm.v1.kv_offload.spec import OffloadingSpec
-from vllm.v1.kv_offload.worker.worker import OffloadingHandler
-
+from .compat import (
+    GPULoadStoreSpec,
+    KVCacheConfig,
+    LoadStoreSpec,
+    OffloadingHandler,
+    OffloadingManager,
+    OffloadingSpec,
+    VllmConfig,
+    block_bytes_from_config,
+    extract_gpu_ptrs,
+)
 from .client import make_stub
 from .gpu import current_device, ipc_for_tensor
 from .handler import CertusToGpuHandler, GpuToCertusHandler
@@ -83,37 +87,9 @@ class CertusGrpcOffloadingSpec(OffloadingSpec):
         """True offloaded per-block size in bytes, derived from the KV-cache
         config (not the GPU tensor, which only the worker role can see).
 
-        = per-GPU-block ``page_size_bytes`` * ``block_size_factor``. Returns
-        None if the config can't be read, in which case get_manager falls back
-        to slab_size_bytes."""
-        try:
-            groups = kv_cache_config.kv_cache_groups
-            if len(groups) != 1:
-                return None
-            # page_size_bytes is PER LAYER (2 * block_size * kv_heads * head_dim
-            # * dtype). This connector offloads one GPU block across ALL layers
-            # in the group per key — the KV tensor's stride(0) spans every layer
-            # — so the per-block Reserve size is page_size_bytes * num_layers.
-            # (Confirmed: granite 65536/layer * 40 layers = 2621440 = stride(0).)
-            num_layers = len(groups[0].layer_names)
-            page = int(groups[0].kv_cache_spec.page_size_bytes)
-            block_bytes = page * num_layers * self.block_size_factor
-            print(
-                f"[certus-grpc] per-block Reserve size from KV-cache config: "
-                f"page_size_bytes={page} * num_layers={num_layers} * "
-                f"block_size_factor={self.block_size_factor} = {block_bytes} bytes",
-                flush=True,
-            )
-            return block_bytes
-        except Exception as e:  # noqa: BLE001 - fall back to slab_size_bytes
-            print(
-                f"[certus-grpc] WARNING: could not derive per-block size from "
-                f"KV-cache config ({e}); falling back to slab_size_bytes "
-                f"{self._slab_size_bytes}. If it is smaller than the real block, "
-                f"stores will fail their D2H bounds check.",
-                flush=True,
-            )
-            return None
+        Delegates to the version-compat shim; the KVCacheConfig group/spec
+        attribute names are version-sensitive, so they live in one place."""
+        return block_bytes_from_config(kv_cache_config, self.block_size_factor)
 
     def _get_stub(self):
         if self._stub is None:
@@ -142,7 +118,7 @@ class CertusGrpcOffloadingSpec(OffloadingSpec):
 
         stub = self._get_stub()
         if self._gpu_to_certus is None:
-            data_ptr, stride = self._extract_gpu_ptrs(kv_caches)
+            data_ptr, stride = extract_gpu_ptrs(kv_caches)
             kv = ipc_for_tensor(data_ptr, stride, current_device())
             # The per-block transfer size is exactly the tensor's per-block
             # stride: the server addresses each block at block_id * stride, and
@@ -184,10 +160,3 @@ class CertusGrpcOffloadingSpec(OffloadingSpec):
             )
         yield GPULoadStoreSpec, CertusLoadStoreSpec, self._gpu_to_certus
         yield CertusLoadStoreSpec, GPULoadStoreSpec, self._certus_to_gpu
-
-    @staticmethod
-    def _extract_gpu_ptrs(kv_caches) -> tuple[int, int]:
-        """Extract GPU base pointer and per-block stride (bytes) from the first tensor."""
-        tensor = kv_caches.tensors[0].tensor
-        stride_bytes = tensor.stride(0) * tensor.element_size()
-        return tensor.data_ptr(), stride_bytes
