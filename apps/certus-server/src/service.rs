@@ -20,12 +20,12 @@ use proto::dispatcher_server::{Dispatcher, DispatcherServer};
 use proto::{
     BatchAbortStoreRequest, BatchAbortStoreResponse, BatchCheckRequest, BatchCheckResponse,
     BatchCommitStoreRequest, BatchCommitStoreResponse, BatchCopyToStoreRequest,
-    BatchCopyToStoreResponse, BatchLookupRequest, BatchLookupResponse, BatchPopulateRequest,
-    BatchPopulateResponse, BatchRemoveRequest, BatchRemoveResponse, BatchReserveRequest,
-    BatchReserveResponse, BatchTouchRequest, BatchTouchResponse, CheckResult,
-    BatchPinRequest, BatchPinResponse, BatchUnpinRequest, BatchUnpinResponse,
-    ClearMemoryTierRequest, ClearMemoryTierResponse, EntryResult, ErrorCode, FlushToSsdRequest,
-    FlushToSsdResponse, GetIoStatsRequest, IoStatsResponse, TakeEventsRequest, TakeEventsResponse,
+    BatchCopyToStoreResponse, BatchLookupRequest, BatchLookupResponse, BatchPinRequest,
+    BatchPinResponse, BatchPopulateRequest, BatchPopulateResponse, BatchRemoveRequest,
+    BatchRemoveResponse, BatchReserveRequest, BatchReserveResponse, BatchTouchRequest,
+    BatchTouchResponse, BatchUnpinRequest, BatchUnpinResponse, CheckResult, ClearMemoryTierRequest,
+    ClearMemoryTierResponse, EntryResult, ErrorCode, FlushToSsdRequest, FlushToSsdResponse,
+    GetIoStatsRequest, IoStatsResponse, TakeEventsRequest, TakeEventsResponse,
 };
 
 pub fn dispatcher_server(svc: DispatcherService) -> DispatcherServer<DispatcherService> {
@@ -129,11 +129,14 @@ fn ipc_cache_open(
         return Err("cudaIpcOpenMemHandle returned null".to_string());
     }
 
-    map.insert(*handle_bytes, IpcCacheEntry {
-        dev_ptr,
-        gpu_device_id,
-        refcount: 1,
-    });
+    map.insert(
+        *handle_bytes,
+        IpcCacheEntry {
+            dev_ptr,
+            gpu_device_id,
+            refcount: 1,
+        },
+    );
     Ok(dev_ptr)
 }
 
@@ -142,7 +145,9 @@ fn ipc_cache_close(cache: &IpcCache, handle_bytes: &[u8; 64]) {
     if let Some(entry) = map.get_mut(handle_bytes) {
         entry.refcount -= 1;
         if entry.refcount == 0 {
-            unsafe { cuda_ffi::cudaIpcCloseMemHandle(entry.dev_ptr); }
+            unsafe {
+                cuda_ffi::cudaIpcCloseMemHandle(entry.dev_ptr);
+            }
             map.remove(handle_bytes);
         }
     }
@@ -164,9 +169,7 @@ fn check_duplicate_keys(keys: &[u64]) -> Result<(), Status> {
 fn map_dispatcher_error(err: &DispatcherError) -> (ErrorCode, String) {
     match err {
         DispatcherError::NotInitialized(msg) => (ErrorCode::NotInitialized, msg.clone()),
-        DispatcherError::KeyNotFound(k) => {
-            (ErrorCode::KeyNotFound, format!("key not found: {k}"))
-        }
+        DispatcherError::KeyNotFound(k) => (ErrorCode::KeyNotFound, format!("key not found: {k}")),
         DispatcherError::AlreadyExists(k) => {
             (ErrorCode::AlreadyExists, format!("key already exists: {k}"))
         }
@@ -176,7 +179,6 @@ fn map_dispatcher_error(err: &DispatcherError) -> (ErrorCode, String) {
         DispatcherError::InvalidParameter(msg) => (ErrorCode::InvalidParameter, msg.clone()),
     }
 }
-
 
 /// Throttled diagnostic for store copies that fail server-side. A whole run's
 /// worth of per-key failures is returned to the client (in `error_message`) but
@@ -285,29 +287,36 @@ impl Dispatcher for DispatcherService {
                 }
             }
 
-            let results: Vec<EntryResult> = req.entries.iter().enumerate().map(|(i, entry)| {
-                if let Some(err) = pre_errors[i].take() {
-                    return err;
-                }
-                let handle = entry.ipc_handle.as_ref().unwrap();
-                let key: [u8; 64] = handle.cuda_ipc_handle.as_slice().try_into().unwrap();
-                let dev_ptr = match local_ptrs.get(&key) {
-                    Some(&ptr) => ptr,
-                    None => return error_result(
-                        entry.key,
-                        &DispatcherError::IoError("IPC handle not cached".into()),
-                    ),
-                };
-                let ipc = IpcHandle {
-                    // dev_ptr is the allocation base; offset addresses this block within it.
-                    address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
-                    size: handle.size,
-                };
-                match dispatcher.populate(entry.key, ipc) {
-                    Ok(()) => success_result(entry.key),
-                    Err(e) => error_result(entry.key, &e),
-                }
-            }).collect();
+            let results: Vec<EntryResult> = req
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(i, entry)| {
+                    if let Some(err) = pre_errors[i].take() {
+                        return err;
+                    }
+                    let handle = entry.ipc_handle.as_ref().unwrap();
+                    let key: [u8; 64] = handle.cuda_ipc_handle.as_slice().try_into().unwrap();
+                    let dev_ptr = match local_ptrs.get(&key) {
+                        Some(&ptr) => ptr,
+                        None => {
+                            return error_result(
+                                entry.key,
+                                &DispatcherError::IoError("IPC handle not cached".into()),
+                            )
+                        }
+                    };
+                    let ipc = IpcHandle {
+                        // dev_ptr is the allocation base; offset addresses this block within it.
+                        address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
+                        size: handle.size,
+                    };
+                    match dispatcher.populate(entry.key, ipc) {
+                        Ok(()) => success_result(entry.key),
+                        Err(e) => error_result(entry.key, &e),
+                    }
+                })
+                .collect();
 
             for key in &opened_keys {
                 ipc_cache_close(&cache, key);
@@ -320,7 +329,12 @@ impl Dispatcher for DispatcherService {
         #[cfg(feature = "otel")]
         if let Some(ref m) = self.metrics {
             let errors = results.iter().filter(|r| !r.success).count() as u64;
-            m.record_op("populate", results.len() as u64, errors, _t0.elapsed().as_micros() as f64);
+            m.record_op(
+                "populate",
+                results.len() as u64,
+                errors,
+                _t0.elapsed().as_micros() as f64,
+            );
         }
 
         Ok(Response::new(BatchPopulateResponse { results }))
@@ -352,10 +366,13 @@ impl Dispatcher for DispatcherService {
                             entry.key,
                             &DispatcherError::InvalidParameter("missing ipc_handle".into()),
                         ));
-                        batch_entries.push((entry.key, IpcHandle {
-                            address: std::ptr::null_mut(),
-                            size: 0,
-                        }));
+                        batch_entries.push((
+                            entry.key,
+                            IpcHandle {
+                                address: std::ptr::null_mut(),
+                                size: 0,
+                            },
+                        ));
                         continue;
                     }
                 };
@@ -369,10 +386,13 @@ impl Dispatcher for DispatcherService {
                                 handle.cuda_ipc_handle.len()
                             )),
                         ));
-                        batch_entries.push((entry.key, IpcHandle {
-                            address: std::ptr::null_mut(),
-                            size: 0,
-                        }));
+                        batch_entries.push((
+                            entry.key,
+                            IpcHandle {
+                                address: std::ptr::null_mut(),
+                                size: 0,
+                            },
+                        ));
                         continue;
                     }
                 };
@@ -389,20 +409,26 @@ impl Dispatcher for DispatcherService {
                                 entry.key,
                                 &DispatcherError::IoError(format!("IPC open failed: {e}")),
                             ));
-                            batch_entries.push((entry.key, IpcHandle {
-                                address: std::ptr::null_mut(),
-                                size: 0,
-                            }));
+                            batch_entries.push((
+                                entry.key,
+                                IpcHandle {
+                                    address: std::ptr::null_mut(),
+                                    size: 0,
+                                },
+                            ));
                             continue;
                         }
                     },
                 };
-                batch_entries.push((entry.key, IpcHandle {
-                    // dev_ptr is the allocation base (deduped per handle); offset is
-                    // per-entry, so apply it here to address this block within the alloc.
-                    address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
-                    size: handle.size,
-                }));
+                batch_entries.push((
+                    entry.key,
+                    IpcHandle {
+                        // dev_ptr is the allocation base (deduped per handle); offset is
+                        // per-entry, so apply it here to address this block within the alloc.
+                        address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
+                        size: handle.size,
+                    },
+                ));
             }
 
             // Filter to valid entries and call batch_lookup.
@@ -413,7 +439,13 @@ impl Dispatcher for DispatcherService {
                 .iter()
                 .map(|&i| {
                     let (key, ref ipc) = batch_entries[i];
-                    (key, IpcHandle { address: ipc.address, size: ipc.size })
+                    (
+                        key,
+                        IpcHandle {
+                            address: ipc.address,
+                            size: ipc.size,
+                        },
+                    )
                 })
                 .collect();
 
@@ -445,7 +477,12 @@ impl Dispatcher for DispatcherService {
         #[cfg(feature = "otel")]
         if let Some(ref m) = self.metrics {
             let errors = results.iter().filter(|r| !r.success).count() as u64;
-            m.record_op("lookup", results.len() as u64, errors, _t0.elapsed().as_micros() as f64);
+            m.record_op(
+                "lookup",
+                results.len() as u64,
+                errors,
+                _t0.elapsed().as_micros() as f64,
+            );
         }
 
         Ok(Response::new(BatchLookupResponse { results }))
@@ -509,7 +546,12 @@ impl Dispatcher for DispatcherService {
         #[cfg(feature = "otel")]
         if let Some(ref m) = self.metrics {
             let errors = results.iter().filter(|r| !r.success).count() as u64;
-            m.record_op("remove", results.len() as u64, errors, _t0.elapsed().as_micros() as f64);
+            m.record_op(
+                "remove",
+                results.len() as u64,
+                errors,
+                _t0.elapsed().as_micros() as f64,
+            );
         }
 
         Ok(Response::new(BatchRemoveResponse { results }))
@@ -543,7 +585,6 @@ impl Dispatcher for DispatcherService {
         .await
         .map_err(|e| Status::internal(format!("task join error: {e}")))?;
 
-
         if promote {
             tokio::task::spawn_blocking(move || {
                 dispatcher.promote_to_memory_tier(&keys);
@@ -553,7 +594,12 @@ impl Dispatcher for DispatcherService {
         #[cfg(feature = "otel")]
         if let Some(ref m) = self.metrics {
             let errors = results.iter().filter(|r| !r.success).count() as u64;
-            m.record_op("touch", results.len() as u64, errors, _t0.elapsed().as_micros() as f64);
+            m.record_op(
+                "touch",
+                results.len() as u64,
+                errors,
+                _t0.elapsed().as_micros() as f64,
+            );
         }
 
         Ok(Response::new(BatchTouchResponse { results }))
@@ -574,15 +620,17 @@ impl Dispatcher for DispatcherService {
         let results = tokio::task::spawn_blocking(move || {
             req.entries
                 .iter()
-                .map(|entry| match dispatcher.reserve_memory(entry.key, entry.size) {
-                    Ok(_ptr) => {
-                        pending
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .insert(entry.key, PendingStoreEntry { size: entry.size });
-                        success_result(entry.key)
+                .map(|entry| {
+                    match dispatcher.reserve_memory(entry.key, entry.size, entry.session_id) {
+                        Ok(_ptr) => {
+                            pending
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .insert(entry.key, PendingStoreEntry { size: entry.size });
+                            success_result(entry.key)
+                        }
+                        Err(e) => error_result(entry.key, &e),
                     }
-                    Err(e) => error_result(entry.key, &e),
                 })
                 .collect::<Vec<_>>()
         })
@@ -592,7 +640,12 @@ impl Dispatcher for DispatcherService {
         #[cfg(feature = "otel")]
         if let Some(ref m) = self.metrics {
             let errors = results.iter().filter(|r| !r.success).count() as u64;
-            m.record_op("reserve", results.len() as u64, errors, _t0.elapsed().as_micros() as f64);
+            m.record_op(
+                "reserve",
+                results.len() as u64,
+                errors,
+                _t0.elapsed().as_micros() as f64,
+            );
         }
 
         Ok(Response::new(BatchReserveResponse { results }))
@@ -706,7 +759,12 @@ impl Dispatcher for DispatcherService {
         #[cfg(feature = "otel")]
         if let Some(ref m) = self.metrics {
             let errors = results.iter().filter(|r| !r.success).count() as u64;
-            m.record_op("copy_to_store", results.len() as u64, errors, _t0.elapsed().as_micros() as f64);
+            m.record_op(
+                "copy_to_store",
+                results.len() as u64,
+                errors,
+                _t0.elapsed().as_micros() as f64,
+            );
         }
 
         Ok(Response::new(BatchCopyToStoreResponse { results }))
@@ -731,12 +789,7 @@ impl Dispatcher for DispatcherService {
                         let map = pending.lock().unwrap_or_else(|e| e.into_inner());
                         match map.get(&key) {
                             Some(entry) => entry.size,
-                            None => {
-                                return error_result(
-                                    key,
-                                    &DispatcherError::KeyNotFound(key),
-                                )
-                            }
+                            None => return error_result(key, &DispatcherError::KeyNotFound(key)),
                         }
                     };
                     match dispatcher.copy_gpu_to_memory_completed(key, size) {
@@ -758,7 +811,12 @@ impl Dispatcher for DispatcherService {
         #[cfg(feature = "otel")]
         if let Some(ref m) = self.metrics {
             let errors = results.iter().filter(|r| !r.success).count() as u64;
-            m.record_op("commit_store", results.len() as u64, errors, _t0.elapsed().as_micros() as f64);
+            m.record_op(
+                "commit_store",
+                results.len() as u64,
+                errors,
+                _t0.elapsed().as_micros() as f64,
+            );
         }
 
         Ok(Response::new(BatchCommitStoreResponse { results }))
@@ -796,7 +854,12 @@ impl Dispatcher for DispatcherService {
         #[cfg(feature = "otel")]
         if let Some(ref m) = self.metrics {
             let errors = results.iter().filter(|r| !r.success).count() as u64;
-            m.record_op("abort_store", results.len() as u64, errors, _t0.elapsed().as_micros() as f64);
+            m.record_op(
+                "abort_store",
+                results.len() as u64,
+                errors,
+                _t0.elapsed().as_micros() as f64,
+            );
         }
 
         Ok(Response::new(BatchAbortStoreResponse { results }))
@@ -807,12 +870,10 @@ impl Dispatcher for DispatcherService {
         _request: Request<ClearMemoryTierRequest>,
     ) -> Result<Response<ClearMemoryTierResponse>, Status> {
         let dispatcher = Arc::clone(&self.dispatcher);
-        let entries_cleared = tokio::task::spawn_blocking(move || {
-            dispatcher.clear_memory_tier()
-        })
-        .await
-        .map_err(|e| Status::internal(format!("task join error: {e}")))?
-        .map_err(|e| Status::internal(format!("clear_memory_tier failed: {e}")))?;
+        let entries_cleared = tokio::task::spawn_blocking(move || dispatcher.clear_memory_tier())
+            .await
+            .map_err(|e| Status::internal(format!("task join error: {e}")))?
+            .map_err(|e| Status::internal(format!("clear_memory_tier failed: {e}")))?;
 
         #[cfg(feature = "otel")]
         if let Some(ref m) = self.metrics {
@@ -1011,7 +1072,9 @@ mod tests {
 
     impl MockDispatcher {
         fn new(state: MockDispatcherState) -> Self {
-            Self { state: Mutex::new(state) }
+            Self {
+                state: Mutex::new(state),
+            }
         }
     }
 
@@ -1079,7 +1142,12 @@ mod tests {
             state.populate_results.get(&key).cloned().unwrap_or(Ok(()))
         }
 
-        fn reserve_memory(&self, _key: u64, _size: u32) -> Result<*mut u8, DispatcherError> {
+        fn reserve_memory(
+            &self,
+            _key: u64,
+            _size: u32,
+            _session_id: u64,
+        ) -> Result<*mut u8, DispatcherError> {
             Ok(std::ptr::null_mut())
         }
 
@@ -1092,7 +1160,11 @@ mod tests {
             Ok(())
         }
 
-        fn copy_gpu_to_memory_completed(&self, _key: u64, _size: u32) -> Result<(), DispatcherError> {
+        fn copy_gpu_to_memory_completed(
+            &self,
+            _key: u64,
+            _size: u32,
+        ) -> Result<(), DispatcherError> {
             Ok(())
         }
 
@@ -1219,14 +1291,18 @@ mod tests {
         let mut ipc_handle = proto_ipc_handle(2);
         ipc_handle.offset = OFFSET;
         let key = handle_key(&ipc_handle);
-        service.ipc_cache.lock().unwrap_or_else(|e| e.into_inner()).insert(
-            key,
-            IpcCacheEntry {
-                dev_ptr: BASE as *mut std::ffi::c_void,
-                gpu_device_id: -1,
-                refcount: 1,
-            },
-        );
+        service
+            .ipc_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                key,
+                IpcCacheEntry {
+                    dev_ptr: BASE as *mut std::ffi::c_void,
+                    gpu_device_id: -1,
+                    refcount: 1,
+                },
+            );
 
         let request = BatchPopulateRequest {
             entries: vec![proto::PopulateEntry {
@@ -1272,13 +1348,12 @@ mod tests {
         assert!(!result.success);
         assert_eq!(result.error_code, ErrorCode::IoError as i32);
         assert!(result.error_message.contains("IPC open failed"));
-        assert!(
-            mock.state
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .populate_calls
-                .is_empty()
-        );
+        assert!(mock
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .populate_calls
+            .is_empty());
     }
 
     #[tokio::test]
@@ -1354,12 +1429,19 @@ mod tests {
                 },
             ],
         };
-        let response = service.lookup(Request::new(request)).await.unwrap().into_inner();
+        let response = service
+            .lookup(Request::new(request))
+            .await
+            .unwrap()
+            .into_inner();
 
         assert_eq!(response.results.len(), 3);
         assert!(response.results[0].success);
         assert!(!response.results[1].success);
-        assert_eq!(response.results[1].error_code, ErrorCode::KeyNotFound as i32);
+        assert_eq!(
+            response.results[1].error_code,
+            ErrorCode::KeyNotFound as i32
+        );
         assert!(!response.results[2].success);
         assert_eq!(response.results[2].error_code, ErrorCode::Timeout as i32);
         assert_eq!(
@@ -1386,7 +1468,11 @@ mod tests {
         let request = BatchCheckRequest {
             keys: vec![31, 32, 33, 34],
         };
-        let response = service.check(Request::new(request)).await.unwrap().into_inner();
+        let response = service
+            .check(Request::new(request))
+            .await
+            .unwrap()
+            .into_inner();
 
         assert_eq!(
             response
@@ -1417,12 +1503,19 @@ mod tests {
         let request = BatchRemoveRequest {
             keys: vec![41, 42, 43],
         };
-        let response = service.remove(Request::new(request)).await.unwrap().into_inner();
+        let response = service
+            .remove(Request::new(request))
+            .await
+            .unwrap()
+            .into_inner();
 
         assert_eq!(response.results.len(), 3);
         assert!(response.results[0].success);
         assert!(!response.results[1].success);
-        assert_eq!(response.results[1].error_code, ErrorCode::KeyNotFound as i32);
+        assert_eq!(
+            response.results[1].error_code,
+            ErrorCode::KeyNotFound as i32
+        );
         assert!(response.results[2].success);
     }
 
@@ -1439,12 +1532,19 @@ mod tests {
             keys: vec![51, 52],
             promote: false,
         };
-        let response = service.touch(Request::new(request)).await.unwrap().into_inner();
+        let response = service
+            .touch(Request::new(request))
+            .await
+            .unwrap()
+            .into_inner();
 
         assert_eq!(response.results.len(), 2);
         assert!(response.results[0].success);
         assert!(!response.results[1].success);
-        assert_eq!(response.results[1].error_code, ErrorCode::KeyNotFound as i32);
+        assert_eq!(
+            response.results[1].error_code,
+            ErrorCode::KeyNotFound as i32
+        );
     }
 
     #[test]

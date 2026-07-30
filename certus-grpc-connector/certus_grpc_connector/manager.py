@@ -17,6 +17,7 @@ mapping:
 
 from __future__ import annotations
 
+import hashlib
 import sys
 from collections.abc import Iterable
 
@@ -41,6 +42,28 @@ def _key_to_u64(key: OffloadKey) -> int:
 
 def _keys_to_u64s(keys: Iterable[OffloadKey]) -> list[int]:
     return [_key_to_u64(k) for k in keys]
+
+
+def _session_id_to_u64(req_context) -> int:
+    """Extract a session id from the request context and fold it to a u64.
+
+    vLLM exposes per-request custom params via ``req_context.kv_transfer_params``
+    (a dict populated from ``SamplingParams.extra_args["kv_transfer_params"]``).
+    A caller opts in by setting ``{"session_id": <str|int>}`` there. The server
+    and Certus are u64-keyed, so a string id is folded to u64 with a stable hash
+    (BLAKE2b, first 8 bytes big-endian). Returns 0 (== "unset") when absent, so
+    clients that don't set it stay wire-compatible.
+    """
+    kv_params = getattr(req_context, "kv_transfer_params", None)
+    if not kv_params:
+        return 0
+    sid = kv_params.get("session_id")
+    if sid is None:
+        return 0
+    if isinstance(sid, int):
+        return sid & 0xFFFFFFFFFFFFFFFF
+    digest = hashlib.blake2b(str(sid).encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, "big")
 
 
 class GrpcCertusOffloadingManager(OffloadingManager):
@@ -104,6 +127,7 @@ class GrpcCertusOffloadingManager(OffloadingManager):
     ) -> PrepareStoreOutput | None:
         keys_list = list(keys)
         int_keys = _keys_to_u64s(keys_list)
+        session_id = _session_id_to_u64(req_context)
 
         # Filter out keys already cached (consecutive dedup is vLLM's concern;
         # here we just avoid re-storing existing entries).
@@ -137,7 +161,9 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         reserve = self._stub.Reserve(
             pb.BatchReserveRequest(
                 entries=[
-                    pb.ReserveEntry(key=k, size=self._block_size_bytes)
+                    pb.ReserveEntry(
+                        key=k, size=self._block_size_bytes, session_id=session_id
+                    )
                     for k in to_store_ints
                 ]
             )

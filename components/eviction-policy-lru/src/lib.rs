@@ -125,14 +125,14 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
         Ok(())
     }
 
-    fn pop_oldest(&self, pool: PoolId) -> Option<CacheKey> {
+    fn identify_next_to_evict(&self, pool: PoolId) -> Option<CacheKey> {
         let state = self.state.read().unwrap();
         let pool_mutex = state.pools.get(pool as usize)?;
         let mut pool_guard = pool_mutex.lock().unwrap();
         pool_guard.lru.pop_front()
     }
 
-    fn peek_oldest(&self, pool: PoolId, n: usize) -> Vec<CacheKey> {
+    fn get_eviction_candidates(&self, pool: PoolId, n: usize) -> Vec<CacheKey> {
         let state = self.state.read().unwrap();
         match state.pools.get(pool as usize) {
             Some(pool_mutex) => {
@@ -183,7 +183,7 @@ mod tests {
     }
 
     #[test]
-    fn track_and_pop_oldest_fifo() {
+    fn track_and_evict_fifo_order() {
         let comp = setup();
         let ep: std::sync::Arc<dyn IEvictionPolicy + Send + Sync> =
             query_interface!(comp, IEvictionPolicy).unwrap();
@@ -193,10 +193,10 @@ mod tests {
         ep.track(pool, 200).unwrap();
         ep.track(pool, 300).unwrap();
 
-        assert_eq!(ep.pop_oldest(pool), Some(100));
-        assert_eq!(ep.pop_oldest(pool), Some(200));
-        assert_eq!(ep.pop_oldest(pool), Some(300));
-        assert_eq!(ep.pop_oldest(pool), None);
+        assert_eq!(ep.identify_next_to_evict(pool), Some(100));
+        assert_eq!(ep.identify_next_to_evict(pool), Some(200));
+        assert_eq!(ep.identify_next_to_evict(pool), Some(300));
+        assert_eq!(ep.identify_next_to_evict(pool), None);
     }
 
     #[test]
@@ -212,9 +212,9 @@ mod tests {
 
         ep.touch(h1).unwrap();
 
-        assert_eq!(ep.pop_oldest(pool), Some(200));
-        assert_eq!(ep.pop_oldest(pool), Some(300));
-        assert_eq!(ep.pop_oldest(pool), Some(100));
+        assert_eq!(ep.identify_next_to_evict(pool), Some(200));
+        assert_eq!(ep.identify_next_to_evict(pool), Some(300));
+        assert_eq!(ep.identify_next_to_evict(pool), Some(100));
     }
 
     #[test]
@@ -230,13 +230,13 @@ mod tests {
 
         ep.remove(h2).unwrap();
 
-        assert_eq!(ep.pop_oldest(pool), Some(100));
-        assert_eq!(ep.pop_oldest(pool), Some(300));
-        assert_eq!(ep.pop_oldest(pool), None);
+        assert_eq!(ep.identify_next_to_evict(pool), Some(100));
+        assert_eq!(ep.identify_next_to_evict(pool), Some(300));
+        assert_eq!(ep.identify_next_to_evict(pool), None);
     }
 
     #[test]
-    fn peek_oldest_does_not_remove() {
+    fn get_eviction_candidates_does_not_remove() {
         let comp = setup();
         let ep: std::sync::Arc<dyn IEvictionPolicy + Send + Sync> =
             query_interface!(comp, IEvictionPolicy).unwrap();
@@ -246,7 +246,7 @@ mod tests {
         ep.track(pool, 20).unwrap();
         ep.track(pool, 30).unwrap();
 
-        assert_eq!(ep.peek_oldest(pool, 2), vec![10, 20]);
+        assert_eq!(ep.get_eviction_candidates(pool, 2), vec![10, 20]);
         assert_eq!(ep.len(pool), 3);
     }
 
@@ -264,7 +264,7 @@ mod tests {
 
         assert_eq!(ep.len(pool_a), 2);
         assert_eq!(ep.len(pool_b), 1);
-        assert_eq!(ep.pop_oldest(pool_b), Some(99));
+        assert_eq!(ep.identify_next_to_evict(pool_b), Some(99));
         assert_eq!(ep.len(pool_a), 2);
     }
 
@@ -281,11 +281,11 @@ mod tests {
 
         ep.clear_pool(pool);
         assert_eq!(ep.len(pool), 0);
-        assert_eq!(ep.pop_oldest(pool), None);
+        assert_eq!(ep.identify_next_to_evict(pool), None);
 
         // Can still track after clear
         ep.track(pool, 10).unwrap();
-        assert_eq!(ep.pop_oldest(pool), Some(10));
+        assert_eq!(ep.identify_next_to_evict(pool), Some(10));
     }
 
     #[test]
@@ -295,8 +295,8 @@ mod tests {
             query_interface!(comp, IEvictionPolicy).unwrap();
 
         assert!(ep.track(99, 1).is_err());
-        assert_eq!(ep.pop_oldest(99), None);
-        assert_eq!(ep.peek_oldest(99, 5), Vec::<CacheKey>::new());
+        assert_eq!(ep.identify_next_to_evict(99), None);
+        assert_eq!(ep.get_eviction_candidates(99, 5), Vec::<CacheKey>::new());
         assert_eq!(ep.len(99), 0);
     }
 
