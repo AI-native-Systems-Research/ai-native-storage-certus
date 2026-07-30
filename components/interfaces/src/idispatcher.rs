@@ -488,7 +488,11 @@ component_macros::define_interface! {
         /// The pointer is valid pinned DRAM co-registered with CUDA and SPDK.
         /// Correctness depends on memory-tier pool lifetime.
         /// Suggested technique: Miri or ASAN integration test.
-        fn reserve_memory(&self, key: CacheKey, size: u32) -> Result<*mut u8, DispatcherError>;
+        ///
+        /// `session_id` is an opaque per-request identifier (0 = unset) supplied
+        /// by the client (e.g. a hash of vLLM's `session_id`). It carries no
+        /// allocation semantics today and is used only for observability.
+        fn reserve_memory(&self, key: CacheKey, size: u32, session_id: u64) -> Result<*mut u8, DispatcherError>;
 
         /// DMA-copy from GPU into a previously reserved memory-tier slot.
         ///

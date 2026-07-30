@@ -53,25 +53,30 @@ component_macros::define_interface! {
         /// Create a new independent eviction tracking pool.
         fn create_pool(&self) -> PoolId;
 
-        /// Register a key in the pool, marking it as most-recently-used.
+        /// Register a key in the pool for eviction tracking.
         /// Returns a handle for O(1) touch/remove.
         fn track(&self, pool: PoolId, key: CacheKey) -> Result<EvictionHandle, EvictionPolicyError>;
 
-        /// Mark the entry as most-recently-used (O(1)).
+        /// Record an access to the entry, updating its eviction ranking.
+        /// (For a recency policy this marks it most-recently-used; other
+        /// policies may update a frequency count or score.)
         fn touch(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError>;
 
-        /// Mark multiple entries as most-recently-used in a single lock acquisition.
+        /// Record accesses to multiple entries in a single lock acquisition.
         /// Amortizes lock overhead over the batch for hot-path throughput.
         fn batch_touch(&self, handles: &[EvictionHandle]) -> Result<(), EvictionPolicyError>;
 
         /// Stop tracking the entry (O(1) removal from the ordering).
         fn remove(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError>;
 
-        /// Remove and return the least-recently-used key from the pool (O(1)).
-        fn pop_oldest(&self, pool: PoolId) -> Option<CacheKey>;
+        /// Select the next key the policy would evict, remove it from tracking,
+        /// and return it. Returns `None` if the pool is empty. The choice is
+        /// policy-defined (e.g. least-recently-used for LRU).
+        fn identify_next_to_evict(&self, pool: PoolId) -> Option<CacheKey>;
 
-        /// Return up to `n` oldest keys from the pool without removing them (O(n)).
-        fn peek_oldest(&self, pool: PoolId, n: usize) -> Vec<CacheKey>;
+        /// Return up to `n` keys the policy would evict next, in eviction
+        /// order, without removing them. The ordering is policy-defined.
+        fn get_eviction_candidates(&self, pool: PoolId, n: usize) -> Vec<CacheKey>;
 
         /// Return the number of tracked entries in the pool.
         fn len(&self, pool: PoolId) -> usize;

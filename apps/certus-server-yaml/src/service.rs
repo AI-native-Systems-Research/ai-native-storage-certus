@@ -559,7 +559,7 @@ impl Dispatcher for DispatcherService {
         let results = tokio::task::spawn_blocking(move || {
             req.entries
                 .iter()
-                .map(|entry| match dispatcher.reserve_memory(entry.key, entry.size) {
+                .map(|entry| match dispatcher.reserve_memory(entry.key, entry.size, entry.session_id) {
                     Ok(_ptr) => {
                         pending
                             .lock()
