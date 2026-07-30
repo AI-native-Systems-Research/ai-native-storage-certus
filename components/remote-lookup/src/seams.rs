@@ -660,7 +660,12 @@ impl IDispatcher for MockDispatcher {
         unimplemented!("mock: IDispatcher::populate not needed by remote-lookup tests")
     }
 
-    fn reserve_memory(&self, _key: CacheKey, _size: u32) -> Result<*mut u8, DispatcherError> {
+    fn reserve_memory(
+        &self,
+        _key: CacheKey,
+        _size: u32,
+        _session_id: u64,
+    ) -> Result<*mut u8, DispatcherError> {
         unimplemented!("mock: IDispatcher::reserve_memory not needed by remote-lookup tests")
     }
 

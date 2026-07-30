@@ -126,7 +126,7 @@ component_macros::define_interface! {
         /// starting from evict_counter % 16.
         ///
         /// # Unchecked: Eviction selects truly oldest entry
-        /// Depends on IEvictionPolicy::pop_oldest correctness.
+        /// Depends on IEvictionPolicy::identify_next_to_evict correctness.
         /// Suggested technique: property-based test with known insertion order.
         fn evict_lru(&self) -> Option<CacheKey>;
 
