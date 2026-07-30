@@ -108,9 +108,10 @@ FEATURES: dict[str, "callable"] = {
     # whole range — but its length is a runtime KV-allocation property that changed:
     # measured 0.20/0.22 coalesce all layers into ONE tensor (stride = full block),
     # while 0.23+ split it per-layer (Llama-3: 32 tensors). ``extract_gpu_ptrs``
-    # refuses len!=1 loudly on every version, so this flag only gates the access
-    # pattern, not the (single-vs-split) layout. Verified @0.20,0.22 (len==1),
-    # @0.23,0.24,0.26 (len==32).
+    # maps EACH tensor to its own IPC region (multi-region offload), so both the
+    # single-tensor (N==1) and per-layer-split (N==32) layouts are handled — this
+    # flag only gates the access pattern, not the layout. Verified @0.20,0.22
+    # (len==1), @0.23,0.24,0.26 (len==32).
     "kv_caches_tensors_attr": lambda v: v >= (0, 20),
     # ``KVCacheConfig.kv_cache_groups[i]`` exposes ``.layer_names`` and
     # ``.kv_cache_spec.page_size_bytes``. True on 0.20; re-confirm per hop.
@@ -392,26 +393,28 @@ def _lazy_base_attr(name: str):
         raise _import_error(f"{name} (from vllm.v1.kv_offload.base)", _e)
 
 
-def extract_gpu_ptrs(kv_caches) -> tuple[int, int]:
-    """GPU base pointer + per-block stride (bytes) from the KV-cache handoff.
+def extract_gpu_ptrs(kv_caches) -> list[tuple[int, int]]:
+    """(base pointer, per-block stride bytes) for EACH KV-cache tensor.
 
-    The per-block stride is ``stride(0)`` of the block tensor, in bytes. This is
+    The per-block stride is ``stride(0)`` of each block tensor, in bytes. This is
     the single highest-risk silent-break point across vLLM versions — a new
     attention/cache backend can change the shape — so it is isolated here.
 
-    Two shapes:
+    Measured 2026-07-30: vLLM 0.20/0.22 present ONE coalesced tensor (all layers,
+    stride = full 2 MiB block); 0.23+ split the KV cache into N per-layer tensors
+    (Llama-3-8B: 32 x ``(num_blocks, 65536)`` int8), each a SEPARATE allocation
+    with its own ``data_ptr``. We return one ``(ptr, stride)`` per tensor: the
+    caller opens one IPC handle per region and the block is stored/loaded as N
+    colocated regions in one slot. A single-tensor layout is simply ``N == 1`` —
+    there is no version branch here, only a per-tensor loop.
+
+    Two object shapes expose the same per-tensor layout:
 
     * **0.26+ ``CanonicalKVCaches``** (``CAPS.canonical_kv_caches``): a list of
       unique block tensors, each ``(num_blocks, page_size_bytes)`` int8, plus
-      per-group refs. The connector's model is one contiguous IPC region per key
-      (one block, all layers), so it requires a SINGLE canonical tensor — the
-      shapes are logged and a split (per-layer / K-V) raises so it is caught
-      before any numbers are trusted, rather than silently copying one layer.
+      per-group refs.
     * **≤0.24** (``CAPS.kv_caches_tensors_attr``): the object ``get_handlers``
-      receives exposes the same ``.tensors[i].tensor`` layout. 0.20/0.22 present
-      ONE coalesced tensor (all layers, stride = full block); 0.23/0.24 split it
-      per-layer (Llama-3: 32 tensors), which reading ``tensors[0]`` would silently
-      truncate to layer 0 — so this branch guards len!=1 the same way as 0.26.
+      receives exposes the same ``.tensors[i].tensor`` layout.
     """
     if CAPS.canonical_kv_caches:
         tensors = kv_caches.tensors
@@ -424,26 +427,21 @@ def extract_gpu_ptrs(kv_caches) -> tuple[int, int]:
             f"groups={len(kv_caches.group_data_refs)}",
             flush=True,
         )
-        if len(tensors) != 1:
-            raise NotImplementedError(
-                f"certus-grpc-connector: CanonicalKVCaches presented "
-                f"{len(tensors)} tensors {shapes} on vLLM {VERSION[0]}.{VERSION[1]}. "
-                f"The connector maps one contiguous IPC region per key (one block, "
-                f"all layers) and needs a single canonical tensor. Add a "
-                f"multi-tensor branch (per-tensor IPC handles) before trusting a run."
-            )
-        tensor = tensors[0].tensor
-        stride_bytes = tensor.stride(0) * tensor.element_size()
-        return tensor.data_ptr(), stride_bytes
+        # One IPC region per canonical tensor; the server lands the N regions
+        # colocated in a single N*page slot. A single-tensor layout is N == 1.
+        regions: list[tuple[int, int]] = []
+        for t in tensors:
+            tensor = t.tensor
+            stride_bytes = tensor.stride(0) * tensor.element_size()
+            regions.append((tensor.data_ptr(), stride_bytes))
+        return regions
     if CAPS.kv_caches_tensors_attr:
-        # ≤0.24 shares the CanonicalKVCaches-style ``.tensors`` layout. The
-        # connector historically read ``tensors[0]`` with no length check. Measured
+        # ≤0.24 shares the CanonicalKVCaches-style ``.tensors`` layout. Measured
         # 2026-07-30: 0.20/0.22 present ONE coalesced tensor (all layers, stride =
-        # full 2 MiB block), but 0.23/0.24 split the KV cache into per-layer tensors
-        # (Llama-3: 32 x (num_blocks, 65536) int8). Reading ``tensors[0]`` on 0.23+
-        # would silently offload layer 0 only — the one-IPC-region-per-key server
-        # contract can't address a per-layer split. Guard len!=1 loudly (before any
-        # store), exactly like the 0.26 branch, rather than truncating.
+        # full 2 MiB block); 0.23/0.24 split the KV cache into per-layer tensors
+        # (Llama-3: 32 x (num_blocks, 65536) int8). We export one IPC region per
+        # tensor and the server lands the N regions colocated in a single N*page
+        # slot — no truncation to layer 0, no version branch (N == 1 for 0.20/0.22).
         tensors = kv_caches.tensors
         shapes = [
             (tuple(t.tensor.shape), int(t.page_size_bytes)) for t in tensors
@@ -454,20 +452,12 @@ def extract_gpu_ptrs(kv_caches) -> tuple[int, int]:
             f"groups={len(kv_caches.group_data_refs)}",
             flush=True,
         )
-        if len(tensors) != 1:
-            raise NotImplementedError(
-                f"certus-grpc-connector: the KV-cache handoff presented "
-                f"{len(tensors)} tensors {shapes} on vLLM {VERSION[0]}.{VERSION[1]}. "
-                f"The per-layer split entered at 0.23 (0.20/0.22 coalesce to one "
-                f"tensor). The connector maps one contiguous IPC region per key "
-                f"(one block, all layers) and needs a single backing tensor; reading "
-                f"tensors[0] would silently offload layer 0 only. Add a multi-tensor "
-                f"branch (per-layer IPC handles or a staging-buffer gather) before "
-                f"trusting a run on this version."
-            )
-        tensor = tensors[0].tensor
-        stride_bytes = tensor.stride(0) * tensor.element_size()
-        return tensor.data_ptr(), stride_bytes
+        regions = []
+        for t in tensors:
+            tensor = t.tensor
+            stride_bytes = tensor.stride(0) * tensor.element_size()
+            regions.append((tensor.data_ptr(), stride_bytes))
+        return regions
     raise NotImplementedError(
         f"certus-grpc-connector: KV-cache tensor layout for vLLM {VERSION[0]}.{VERSION[1]} "
         f"is not yet mapped in compat.extract_gpu_ptrs. Inspect the object passed to "

@@ -278,8 +278,9 @@ def test_store_handler_sends_offsets_per_block():
     kv = KvCacheIpc(handle_bytes=b"z" * 64, gpu_device_id=1, stride_bytes=1024, base_delta=0)
     executor = ThreadPoolExecutor(max_workers=1)
     # One worker serves both directions; transfer_async routes a store by the
-    # source spec being a GPULoadStoreSpec (≤0.24 medium-pair entrypoint).
-    h = worker_class()(stub, kv, block_size_bytes=1024, executor=executor)
+    # source spec being a GPULoadStoreSpec (≤0.24 medium-pair entrypoint). The
+    # worker holds a LIST of KV regions (N==1 here — single-tensor block).
+    h = worker_class()(stub, [kv], block_size_bytes=1024, executor=executor)
 
     src = GPULoadStoreSpec(block_ids=[3, 7])
     dst = CertusLoadStoreSpec([BlockLocation(key=30), BlockLocation(key=70)])
@@ -290,9 +291,11 @@ def test_store_handler_sends_offsets_per_block():
 
     (req,) = _calls_of(stub, "CopyToStore")
     assert [e.key for e in req.entries] == [30, 70]
-    assert [e.ipc_handle.offset for e in req.entries] == [3 * 1024, 7 * 1024]
-    assert all(e.ipc_handle.cuda_ipc_handle == b"z" * 64 for e in req.entries)
-    assert all(e.ipc_handle.gpu_device_id == 1 for e in req.entries)
+    # Single-region (N==1): the one region lands in ipc_handles[0].
+    assert all(len(e.ipc_handles) == 1 for e in req.entries)
+    assert [e.ipc_handles[0].offset for e in req.entries] == [3 * 1024, 7 * 1024]
+    assert all(e.ipc_handles[0].cuda_ipc_handle == b"z" * 64 for e in req.entries)
+    assert all(e.ipc_handles[0].gpu_device_id == 1 for e in req.entries)
     executor.shutdown()
 
 
@@ -307,7 +310,7 @@ def test_store_handler_never_reports_failure_and_aborts_failed_keys():
     stub.copy_fail = {70}  # one of two blocks fails to copy
     kv = KvCacheIpc(handle_bytes=b"z" * 64, gpu_device_id=0, stride_bytes=1024, base_delta=0)
     executor = ThreadPoolExecutor(max_workers=1)
-    h = worker_class()(stub, kv, block_size_bytes=1024, executor=executor)
+    h = worker_class()(stub, [kv], block_size_bytes=1024, executor=executor)
 
     src = GPULoadStoreSpec(block_ids=[3, 7])
     dst = CertusLoadStoreSpec([BlockLocation(key=30), BlockLocation(key=70)])

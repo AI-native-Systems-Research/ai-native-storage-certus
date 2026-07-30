@@ -699,7 +699,7 @@ fn copy_gpu_to_memory_completed_makes_key_visible() {
     d.reserve_memory(key, size, 0).unwrap();
 
     let mut src = vec![0u8; size as usize];
-    d.copy_gpu_to_memory_async(key, make_handle(&mut src), null_stream())
+    d.copy_gpu_to_memory_async(key, &[make_handle(&mut src)], null_stream())
         .unwrap();
 
     d.copy_gpu_to_memory_completed(key, size).unwrap();
@@ -746,7 +746,7 @@ fn copy_gpu_to_memory_async_copies_data_to_dram_slot() {
         size,
     };
 
-    d.copy_gpu_to_memory_async(key, handle, null_stream())
+    d.copy_gpu_to_memory_async(key, &[handle], null_stream())
         .unwrap();
 
     // The mock dma_copy_to_host_async is a plain memcpy, so the bytes must match.
@@ -778,7 +778,7 @@ fn full_three_phase_store_lifecycle() {
 
     // Phase 2: async DMA from a fake GPU buffer into the reserved slot.
     let mut src = vec![0xCDu8; size as usize];
-    d.copy_gpu_to_memory_async(key, make_handle(&mut src), null_stream())
+    d.copy_gpu_to_memory_async(key, &[make_handle(&mut src)], null_stream())
         .unwrap();
 
     // Phase 3: finalize — registers key in dispatch-map and enqueues SSD write-through.

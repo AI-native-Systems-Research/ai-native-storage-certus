@@ -215,27 +215,28 @@ class _FakeKVCaches:
         self.group_data_refs = [object()]
 
 
-def test_extract_gpu_ptrs_single_tensor_returns_ptr_and_stride():
-    # 0.20/0.22 present ONE coalesced tensor (all layers). The default test
-    # baseline is 0.20, so extract_gpu_ptrs takes the ≤0.24 (kv_caches_tensors_attr)
-    # branch — the single-tensor case the connector's one-region-per-key model needs.
+def test_extract_gpu_ptrs_single_tensor_returns_one_region():
+    # 0.20/0.22 present ONE coalesced tensor (all layers). extract_gpu_ptrs
+    # returns a LIST regardless of version; the single-tensor case is just N==1,
+    # the one region the connector's one-region-per-key model started with.
     kv = _FakeKVCaches(
         [_FakeCanonicalTensor(_FakeTensor(2097152, ptr=0xDEAD000), 2097152)]
     )
-    ptr, stride = compat.extract_gpu_ptrs(kv)
-    assert ptr == 0xDEAD000
-    assert stride == 2097152
+    regions = compat.extract_gpu_ptrs(kv)
+    assert regions == [(0xDEAD000, 2097152)]
 
 
-def test_extract_gpu_ptrs_refuses_per_layer_split():
-    # 0.23+ split the KV cache into per-layer tensors (Llama-3: 32). Reading
-    # tensors[0] would silently offload layer 0 only, so the guard must refuse
-    # loudly before any store rather than truncate.
+def test_extract_gpu_ptrs_returns_one_region_per_layer_tensor():
+    # 0.23+ split the KV cache into per-layer tensors (Llama-3: 32). Multi-region
+    # offload maps each to its own IPC region colocated in one slot, so this
+    # returns a 32-element list (one (ptr, stride) per tensor) instead of the
+    # pre-multiregion guard that refused a split (see multi-region-kv-offload.md).
     kv = _FakeKVCaches(
         [_FakeCanonicalTensor(_FakeTensor(65536), 65536) for _ in range(32)]
     )
-    with pytest.raises(NotImplementedError, match="per-layer split entered at 0.23"):
-        compat.extract_gpu_ptrs(kv)
+    regions = compat.extract_gpu_ptrs(kv)
+    assert len(regions) == 32
+    assert regions == [(0x1000, 65536)] * 32
 
 
 # ── adapters: make_transfer_result, both CAPS branches ──

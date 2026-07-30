@@ -90,13 +90,24 @@ class _PendingJob:
     transfer_type: tuple[str, str]
 
 
-def _ipc_handle(kv: KvCacheIpc, block_id: int, size: int) -> pb.IpcHandle:
-    return pb.IpcHandle(
-        cuda_ipc_handle=kv.handle_bytes,
-        size=size,
-        gpu_device_id=kv.gpu_device_id,
-        offset=kv.block_offset(block_id),
-    )
+def _ipc_handles(regions: list[KvCacheIpc], block_id: int) -> list[pb.IpcHandle]:
+    """One proto IpcHandle per KV region for this block.
+
+    0.23+ splits a block into N per-layer allocations, so we emit N handles (each
+    carrying its own IPC handle, per-layer ``size`` = stride, and per-region
+    ``offset``); the server lays them out contiguously in the one reserved slot.
+    A single-tensor block (0.20/0.22) is just ``N == 1``. Handles are ordered by
+    region so store and load scatter/gather use the same slot layout.
+    """
+    return [
+        pb.IpcHandle(
+            cuda_ipc_handle=r.handle_bytes,
+            size=r.stride_bytes,
+            gpu_device_id=r.gpu_device_id,
+            offset=r.block_offset(block_id),
+        )
+        for r in regions
+    ]
 
 
 # Cache of the built worker class (base resolved once, lazily).
@@ -118,12 +129,12 @@ def _build_worker_class():
         def __init__(
             self,
             stub,
-            kv: KvCacheIpc,
+            kv_regions: list[KvCacheIpc],
             block_size_bytes: int,
             executor: ThreadPoolExecutor,
         ):
             self._stub = stub
-            self._kv = kv
+            self._kv_regions = kv_regions
             self._block_size_bytes = int(block_size_bytes)
             self._executor = executor
             self._pending: deque[_PendingJob] = deque()
@@ -220,7 +231,7 @@ def _build_worker_class():
             entries = [
                 pb.CopyToStoreEntry(
                     key=key,
-                    ipc_handle=_ipc_handle(self._kv, block_id, self._block_size_bytes),
+                    ipc_handles=_ipc_handles(self._kv_regions, block_id),
                 )
                 for block_id, key in zip(gpu_block_ids, keys)
             ]
@@ -274,7 +285,7 @@ def _build_worker_class():
             entries = [
                 pb.LookupEntry(
                     key=key,
-                    ipc_handle=_ipc_handle(self._kv, block_id, self._block_size_bytes),
+                    ipc_handles=_ipc_handles(self._kv_regions, block_id),
                 )
                 for block_id, key in zip(gpu_block_ids, keys)
             ]

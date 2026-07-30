@@ -125,25 +125,30 @@ class CertusGrpcOffloadingSpec(OffloadingSpec):
             return self._worker
 
         stub = self._get_stub()
-        data_ptr, stride = extract_gpu_ptrs(kv_caches)
-        kv = ipc_for_tensor(data_ptr, stride, current_device())
-        # The per-block transfer size is exactly the tensor's per-block stride:
-        # the server addresses each block at block_id * stride, and the worker
-        # maps one block_id per key (1:1). Copying `stride` bytes per block is the
-        # only size that stays within each block's extent in the IPC allocation.
-        # This is the authoritative COPY size.
-        block_bytes = stride
+        # 0.23+ splits a block into N per-layer tensors, each a separate GPU
+        # allocation; 0.20/0.22 present one coalesced tensor (N==1). We open one
+        # IPC handle per region and store/load the block as N colocated regions in
+        # one slot — see docs/multi-region-kv-offload.md. extract_gpu_ptrs returns
+        # a list of (ptr, stride) either way, so there is no version branch here.
+        regions = extract_gpu_ptrs(kv_caches)
+        kv_regions = [
+            ipc_for_tensor(ptr, stride, current_device())
+            for ptr, stride in regions
+        ]
+        # The authoritative per-block COPY size is the SUM of the per-region
+        # strides: the server lays the N regions out contiguously in one slot of
+        # this many bytes (single-tensor case: the one stride == full block). Each
+        # region copies its own stride bytes; the worker maps one block_id per key
+        # (1:1), so total bytes per block is Σ stride.
+        block_bytes = sum(stride for _, stride in regions)
         # Cross-check against the config-derived Reserve size the manager uses (a
         # DIFFERENT spec instance in the scheduler role). If these disagree, the
         # server will Reserve a slot that doesn't match the copy and every store
         # fails its D2H bounds check — the exact silent-offload bug this connector
-        # hit on the granite model swap. On 0.26 the config value is
-        # ``worker_kv_bytes_per_block``, which should equal the single canonical
-        # tensor's stride; a mismatch here means the canonical layout is not the
-        # one contiguous block the connector assumes.
+        # hit on the granite model swap.
         if self._block_bytes is not None and self._block_bytes != block_bytes:
             print(
-                f"[certus-grpc] WARNING: tensor stride {block_bytes} != "
+                f"[certus-grpc] WARNING: summed region strides {block_bytes} != "
                 f"config-derived Reserve size {self._block_bytes}. Reserve slots "
                 f"will not match the copy size and stores may fail their D2H "
                 f"bounds check. Using {block_bytes} for the copy.",
@@ -156,22 +161,23 @@ class CertusGrpcOffloadingSpec(OffloadingSpec):
             # already sized itself from the config in __init__).
             self._manager.set_block_size_bytes(block_bytes)
         print(
-            f"[certus-grpc] KV base=0x{data_ptr:x} stride={stride} "
-            f"block_bytes={block_bytes} slab_size_bytes={self._slab_size_bytes} "
-            f"device={kv.gpu_device_id} base_delta={kv.base_delta}",
+            f"[certus-grpc] KV {len(kv_regions)} region(s) block_bytes={block_bytes} "
+            f"slab_size_bytes={self._slab_size_bytes} "
+            f"device={kv_regions[0].gpu_device_id} "
+            f"per-region strides={[r.stride_bytes for r in kv_regions]}",
             flush=True,
         )
         executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="certus-grpc")
-        self._worker = worker_class()(stub, kv, block_bytes, executor)
+        self._worker = worker_class()(stub, kv_regions, block_bytes, executor)
         return self._worker
 
     def get_worker(self, kv_caches):
         """0.26+: return the single ``OffloadingWorker`` for this spec.
 
         ``kv_caches`` is a ``CanonicalKVCaches``; ``extract_gpu_ptrs`` (inside
-        ``_ensure_worker``) logs its tensor layout and refuses a split (multi-
-        tensor) layout the one-IPC-region-per-key model can't represent, so a
-        mismatch is caught before any store rather than silently truncated."""
+        ``_ensure_worker``) returns one (ptr, stride) per layer tensor, which the
+        worker stores as N colocated regions per block — a split (multi-tensor)
+        layout is handled, not refused (see docs/multi-region-kv-offload.md)."""
         return self._ensure_worker(kv_caches)
 
     def get_handlers(
