@@ -24,6 +24,102 @@ use interfaces::{
 
 use crate::wire::{Avail, RdmaStatusCode, SlotDesc};
 
+/// Receives a serve's per-key statuses once the RDMA writes have completed.
+///
+/// Boxed and `Send` because it is invoked from the initiator's connection thread,
+/// not the thread that started the serve.
+pub(crate) type ServeCompletion = Box<dyn FnOnce(Vec<(CacheKey, RdmaStatusCode)>) + Send>;
+
+/// A batch of dispatch-map read pins, released together when this is dropped.
+///
+/// Pins have to outlive the *completion* of an RDMA write, not merely the call that
+/// submits it — the NIC reads the pinned buffers asynchronously, and the pin is what
+/// stops the memory tier evicting them out from under it. Since submission is
+/// asynchronous, the set of paths that must release is large (success, per-key
+/// failure, rejected submission, connection loss, teardown), and a missed release is
+/// unrecoverable: `read_ref` carries no owner identity, so a leaked pin makes its
+/// entry permanently unevictable and is indistinguishable from a live reader. There
+/// is no leak detector to catch it.
+///
+/// Hence a guard rather than hand-rolled release loops: whoever owns the completion
+/// callback owns this, and dropping the callback — however that happens — releases
+/// every pin in it.
+pub(crate) struct PinnedBatch {
+    dispatch_map: Arc<dyn IDispatchMap + Send + Sync>,
+    keys: Vec<CacheKey>,
+}
+
+impl PinnedBatch {
+    /// An empty batch pinning nothing.
+    fn new(dispatch_map: Arc<dyn IDispatchMap + Send + Sync>) -> Self {
+        Self {
+            dispatch_map,
+            keys: Vec::new(),
+        }
+    }
+
+    /// Take ownership of an already-held read pin on `key`.
+    ///
+    /// The caller must have obtained the pin (via `lookup` or `take_read`) and must
+    /// not release it itself.
+    fn adopt(&mut self, key: CacheKey) {
+        self.keys.push(key);
+    }
+}
+
+impl Drop for PinnedBatch {
+    fn drop(&mut self) {
+        for key in self.keys.drain(..) {
+            // Errors are not actionable here: a failed release means the entry is
+            // already gone, which is the outcome we wanted.
+            let _ = self.dispatch_map.release_read(key);
+        }
+    }
+}
+
+/// Reports a serve's statuses exactly once, and holds the read pins until it does.
+///
+/// The completion callback handed to the initiator owns one of these. If the
+/// initiator instead *drops* that callback — a rejected submission, or teardown with
+/// the batch still queued — `Drop` reports the pushed keys as unable-to-connect, so
+/// the requester always hears an answer rather than waiting out its deadline.
+struct ServeReport {
+    /// Statuses decided before any RDMA (absent, size-mismatched, cold-and-lost).
+    decided: Vec<(CacheKey, RdmaStatusCode)>,
+    /// Keys handed to the initiator, in the order their statuses come back.
+    pushed: Vec<CacheKey>,
+    /// Taken when reported, so `Drop` knows whether it still owes an answer.
+    on_done: Option<ServeCompletion>,
+    /// Released once the report is made — after the NIC is done with the buffers.
+    _pinned: PinnedBatch,
+}
+
+impl ServeReport {
+    /// Report the outcome of a completed push.
+    fn complete(&mut self, results: Vec<PushStatus>) {
+        let Some(on_done) = self.on_done.take() else {
+            return;
+        };
+        let mut out = std::mem::take(&mut self.decided);
+        for (key, status) in self.pushed.iter().zip(results) {
+            out.push((*key, map_push_status(status)));
+        }
+        on_done(out);
+    }
+}
+
+impl Drop for ServeReport {
+    fn drop(&mut self) {
+        if let Some(on_done) = self.on_done.take() {
+            let mut out = std::mem::take(&mut self.decided);
+            for key in &self.pushed {
+                out.push((*key, RdmaStatusCode::UnableToConnect));
+            }
+            on_done(out);
+        }
+    }
+}
+
 /// Classify each queried `(key, size)` against the local dispatch map (US2,
 /// FR-015): memory-resident at the requested size ⇒ [`Avail::Memory`], on the
 /// block/disk tier at the requested size ⇒ [`Avail::Disk`], otherwise
@@ -77,12 +173,19 @@ enum Resolved {
 }
 
 /// Serve a peer's RDMA_REQUEST (US3, FR-016): for each requested slot, pin the
-/// value, delegate the one-sided write to `initiator.push`, and map the per-key
+/// value, delegate the one-sided write to `initiator.push_async`, and map the per-key
 /// [`PushStatus`] to an [`RdmaStatusCode`]. `BlockDevice` keys are promoted to the
 /// memory tier via `dispatcher.promote_to_memory_tier` and re-looked-up (US4,
 /// FR-016/FR-017); a key that is still not memory-resident at the requested size
 /// (evicted, size-mismatched, or promotion failed) reports
-/// [`RdmaStatusCode::KeyNoLongerAvailable`]. Pins are released after the push.
+/// [`RdmaStatusCode::KeyNoLongerAvailable`].
+///
+/// **Returns as soon as the writes are submitted, not when they land.** `on_done`
+/// receives the per-key statuses later, on the initiator's connection thread, and is
+/// invoked exactly once however the push turns out. Read pins are owned by that
+/// callback and released when it runs (or is dropped), because the NIC keeps reading
+/// the pinned buffers after submission returns — releasing them here would be a
+/// use-after-free with the NIC as the reader.
 ///
 /// Promotion is **batched across the whole request**: every block-tier key in
 /// `slots` goes through a single `promote_to_memory_tier` call, because that
@@ -99,9 +202,10 @@ pub(crate) fn serve_rdma_request(
     requester_endpoint: &Endpoint,
     rkey: u32,
     slots: &[SlotDesc],
-) -> Vec<(CacheKey, RdmaStatusCode)> {
+    on_done: ServeCompletion,
+) {
     let mut statuses: Vec<(CacheKey, RdmaStatusCode)> = Vec::with_capacity(slots.len());
-    let mut pinned: Vec<CacheKey> = Vec::new();
+    let mut pinned = PinnedBatch::new(Arc::clone(dispatch_map));
     let mut to_push: Vec<(CacheKey, RemoteRegion)> = Vec::new();
 
     // Pass 1: classify every slot with no SSD I/O. A memory hit at the requested
@@ -164,7 +268,7 @@ pub(crate) fn serve_rdma_request(
     for (slot, outcome) in slots.iter().zip(&resolved) {
         match outcome {
             Resolved::Servable => {
-                pinned.push(slot.key);
+                pinned.adopt(slot.key);
                 to_push.push((
                     slot.key,
                     RemoteRegion {
@@ -182,28 +286,33 @@ pub(crate) fn serve_rdma_request(
         }
     }
 
-    if !to_push.is_empty() {
-        let endpoint = format!("{}:{}", requester_endpoint.ip, requester_endpoint.port);
-        match initiator.push(&endpoint, &to_push) {
-            Ok(results) => {
-                for ((key, _), status) in to_push.iter().zip(results) {
-                    statuses.push((*key, map_push_status(status)));
-                }
-            }
-            Err(_) => {
-                // A method-level failure applies to the whole batch.
-                for (key, _) in &to_push {
-                    statuses.push((*key, RdmaStatusCode::UnableToConnect));
-                }
-            }
-        }
+    if to_push.is_empty() {
+        // Nothing to write, so nothing to wait for — and `pinned` is empty.
+        on_done(statuses);
+        return;
     }
 
-    for key in pinned {
-        let _ = dispatch_map.release_read(key);
-    }
+    let endpoint = format!("{}:{}", requester_endpoint.ip, requester_endpoint.port);
+    let mut report = ServeReport {
+        decided: statuses,
+        pushed: to_push.iter().map(|(key, _)| *key).collect(),
+        on_done: Some(on_done),
+        _pinned: pinned,
+    };
 
-    statuses
+    // The callback owns the report, and therefore the pins: running it reports and
+    // releases; dropping it (a rejected batch, or teardown) reports
+    // unable-to-connect and releases just the same. Either way nothing is leaked and
+    // the requester is never left waiting on its deadline.
+    let submitted = initiator.push_async(
+        &endpoint,
+        &to_push,
+        Box::new(move |results| report.complete(results)),
+    );
+    if submitted.is_err() {
+        // `push_async` documents that an `Err` drops the callback without invoking
+        // it, so `ServeReport::drop` has already reported the batch.
+    }
 }
 
 /// Map an initiator [`PushStatus`] to the wire [`RdmaStatusCode`] (FR-016):
@@ -257,6 +366,36 @@ mod tests {
         }
     }
 
+    /// Run a serve and return the statuses it reported.
+    ///
+    /// The mock initiator completes synchronously unless a test stages a serve
+    /// delay, so the report has already landed by the time this returns; an
+    /// unreported serve is a bug and panics rather than returning an empty result.
+    fn serve(
+        dm: &Arc<dyn IDispatchMap + Send + Sync>,
+        disp: Option<&Arc<dyn IDispatcher + Send + Sync>>,
+        init: &Arc<dyn IRemoteLookupRdmaInitiator + Send + Sync>,
+        rkey: u32,
+        slots: &[SlotDesc],
+    ) -> Vec<(CacheKey, RdmaStatusCode)> {
+        let reported = Arc::new(std::sync::Mutex::new(None));
+        let sink = Arc::clone(&reported);
+        serve_rdma_request(
+            dm,
+            disp,
+            init,
+            &endpoint(),
+            rkey,
+            slots,
+            Box::new(move |statuses| {
+                *sink.lock().expect("sink poisoned") = Some(statuses);
+            }),
+        );
+        // Bound to a local so the guard drops before `reported` does.
+        let statuses = reported.lock().expect("sink poisoned").take();
+        statuses.expect("serve did not report any statuses")
+    }
+
     /// Every disk-resident key in one RDMA_REQUEST must be promoted by a *single*
     /// `promote_to_memory_tier` call. Promoting key-by-key confines each SSD read
     /// to the one drive owning that key, so the dispatcher's per-drive fan-out
@@ -270,8 +409,7 @@ mod tests {
         }
         let (dm, disp, init) = node(&world);
 
-        let statuses =
-            serve_rdma_request(&dm, Some(&disp), &init, &endpoint(), 0x42, &slots(&keys));
+        let statuses = serve(&dm, Some(&disp), &init, 0x42, &slots(&keys));
 
         let calls = world.promote_calls();
         assert_eq!(
@@ -298,8 +436,7 @@ mod tests {
         }
         let (dm, disp, init) = node(&world);
 
-        let statuses =
-            serve_rdma_request(&dm, Some(&disp), &init, &endpoint(), 0x42, &slots(&keys));
+        let statuses = serve(&dm, Some(&disp), &init, 0x42, &slots(&keys));
 
         assert!(world.promote_calls().is_empty());
         for (_, code) in &statuses {
@@ -316,14 +453,7 @@ mod tests {
         world.with_disk(2, SIZE, 0).with_disk(4, SIZE, SIZE as u64);
         let (dm, disp, init) = node(&world);
 
-        let statuses = serve_rdma_request(
-            &dm,
-            Some(&disp),
-            &init,
-            &endpoint(),
-            0x42,
-            &slots(&[1, 2, 3, 4]),
-        );
+        let statuses = serve(&dm, Some(&disp), &init, 0x42, &slots(&[1, 2, 3, 4]));
 
         let calls = world.promote_calls();
         assert_eq!(calls.len(), 1);
@@ -343,14 +473,7 @@ mod tests {
         world.with_disk(7, SIZE, 0);
         let (dm, disp, init) = node(&world);
 
-        let _ = serve_rdma_request(
-            &dm,
-            Some(&disp),
-            &init,
-            &endpoint(),
-            0x42,
-            &slots(&[7, 7, 7]),
-        );
+        let _ = serve(&dm, Some(&disp), &init, 0x42, &slots(&[7, 7, 7]));
 
         let calls = world.promote_calls();
         assert_eq!(calls.len(), 1);
@@ -365,7 +488,7 @@ mod tests {
         world.with_disk(1, SIZE, 0);
         let (dm, _disp, init) = node(&world);
 
-        let statuses = serve_rdma_request(&dm, None, &init, &endpoint(), 0x42, &slots(&[1]));
+        let statuses = serve(&dm, None, &init, 0x42, &slots(&[1]));
 
         assert!(world.promote_calls().is_empty());
         assert_eq!(statuses, vec![(1, RdmaStatusCode::KeyNoLongerAvailable)]);
@@ -380,8 +503,7 @@ mod tests {
         world.fail_promote(1);
         let (dm, disp, init) = node(&world);
 
-        let statuses =
-            serve_rdma_request(&dm, Some(&disp), &init, &endpoint(), 0x42, &slots(&[1, 2]));
+        let statuses = serve(&dm, Some(&disp), &init, 0x42, &slots(&[1, 2]));
 
         assert_eq!(world.promote_calls(), vec![vec![1, 2]]);
         let by_key: std::collections::HashMap<_, _> = statuses.into_iter().collect();

@@ -357,10 +357,19 @@ one-sided write into a reclaimed slot).
   reports as disk-only (`BlockDevice`), the actor MUST first promote it to the memory tier via
   `dispatcher.promote_to_memory_tier(&[key])` (batching all such keys in the request) and re-consult
   `dm.lookup` to obtain the resulting `MemoryTier{ptr,size}`. It MUST then pin each requested value
-  (read reference), delegate the write to `IRemoteLookupRdmaInitiator::push(endpoint,
-  [(key, RemoteRegion)])`, release pins, and whisper a per-key RDMA_STATUS mapped from the returned
-  `PushStatus` (`Success`→Success, `UnableToConnect`→UnableToConnect,
+  (read reference), delegate the write to `IRemoteLookupRdmaInitiator::push_async(endpoint,
+  [(key, RemoteRegion)], on_complete)`, and whisper a per-key RDMA_STATUS mapped from the
+  `PushStatus` values `on_complete` reports (`Success`→Success, `UnableToConnect`→UnableToConnect,
   `KeyNotFound`→KeyNoLongerAvailable, `SizeMismatch`→KeyNoLongerAvailable defensively).
+- **FR-016a** (server, pin lifetime): Because `push_async` returns before the NIC has finished
+  reading the pinned values, the read references MUST be owned by the completion callback and
+  released when it runs — never at the submission site. They MUST also be released if that callback
+  is dropped rather than invoked (a rejected submission, or teardown), so no path can leak a pin: a
+  leaked read reference makes its entry permanently unevictable and is indistinguishable from a live
+  reader, and there is no leak detector.
+- **FR-016b** (server, always answers): Every RDMA_REQUEST MUST produce exactly one RDMA_STATUS
+  whisper, including when the push is rejected before submission, so the requester never has to wait
+  out its operation deadline to learn the outcome.
 - **FR-017** (server, promotion failure): If after `promote_to_memory_tier` a key is still not
   `MemoryTier`-resident (promotion failed or the entry was evicted — the call is best-effort and
   does not propagate per-key errors), the actor MUST report that key as `KeyNoLongerAvailable`
