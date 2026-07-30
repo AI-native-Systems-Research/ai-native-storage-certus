@@ -12,7 +12,7 @@ in-process connector:
 
 Environment:
     CERTUS_SERVER    gRPC server address (default localhost:50051)
-    MODEL            HF model id (default NousResearch/Meta-Llama-3-8B)
+    MODEL            HF model id (default ibm-granite/granite-4.1-8b)
     NUM_CONVS        conversations to load (default 450)
     MAX_MODEL_LEN    (default 8192)
     OUTPUT_TOKENS    per generation (default 150)
@@ -67,7 +67,7 @@ if __name__ == "__main__":
     #
     # Constraints:
     #   - TENSOR_PARALLEL_SIZE must divide the model's attention head counts.
-    #     Llama-3-8B has 32 attention heads / 8 KV heads, so TP in {1,2,4,8}.
+    #     granite-4.1-8b has 32 attention heads / 8 KV heads, so TP in {1,2,4,8}.
     #   - Total GPUs used = TP * PP; must be <= visible GPU count. Restrict which
     #     GPUs are used with CUDA_VISIBLE_DEVICES, e.g.
     #     CUDA_VISIBLE_DEVICES=0,1 TENSOR_PARALLEL_SIZE=2.
@@ -78,7 +78,7 @@ if __name__ == "__main__":
     TENSOR_PARALLEL_SIZE = int(os.environ.get("TENSOR_PARALLEL_SIZE", 1))
     PIPELINE_PARALLEL_SIZE = int(os.environ.get("PIPELINE_PARALLEL_SIZE", 1))
     SLAB_SIZE_BYTES = int(os.environ.get("SLAB_SIZE_BYTES", 131072))
-    MODEL = os.environ.get("MODEL", "NousResearch/Meta-Llama-3-8B")
+    MODEL = os.environ.get("MODEL", "ibm-granite/granite-4.1-8b")
     # Replicate the conversation set to raise the concurrent working set per
     # round, and cap rounds to keep total generations constant. Default 1/0 =
     # original 450x12 behaviour. E.g. CONV_MULTIPLIER=4 MAX_ROUNDS=3 gives
@@ -136,6 +136,31 @@ if __name__ == "__main__":
 
     from vllm import LLM, SamplingParams
 
+    from certus_grpc_connector.compat import CAPS as _CAPS
+    from certus_grpc_connector.compat import VERSION as _VLLM_VERSION
+
+    # Version-specific engine flags, resolved from the compat capability matrix.
+    # v0.26's OffloadingConnector requires the hybrid KV-cache manager to be
+    # disabled (the connector assumes a single, uniform KV-cache group).
+    _engine_kwargs = {}
+    if _CAPS.needs_disable_hybrid_kv_cache_manager:
+        _engine_kwargs["disable_hybrid_kv_cache_manager"] = True
+        print(
+            f"[run] vLLM {_VLLM_VERSION[0]}.{_VLLM_VERSION[1]}: "
+            f"disable_hybrid_kv_cache_manager=True (OffloadingConnector requirement)",
+            file=sys.stderr,
+        )
+    if _CAPS.needs_disable_async_scheduling:
+        # 0.22+ auto-enables async scheduling, which breaks the OffloadingConnector's
+        # per-request transfer serialization (a re-scheduled load races an in-flight
+        # store -> `assert not req_status.transfer_jobs` -> EngineDeadError). Opt out.
+        _engine_kwargs["async_scheduling"] = False
+        print(
+            f"[run] vLLM {_VLLM_VERSION[0]}.{_VLLM_VERSION[1]}: "
+            f"async_scheduling=False (OffloadingConnector serializes transfers per request)",
+            file=sys.stderr,
+        )
+
     print("Running across ", TENSOR_PARALLEL_SIZE, " GPUs")
     llm = LLM(
         model=MODEL,
@@ -144,9 +169,10 @@ if __name__ == "__main__":
         tensor_parallel_size=TENSOR_PARALLEL_SIZE,
         pipeline_parallel_size=PIPELINE_PARALLEL_SIZE,
         gpu_memory_utilization=GPU_MEM_UTIL,
-        dtype="float16",
+        dtype=os.environ.get("DTYPE", "bfloat16"),
         enable_prefix_caching=True,
         enforce_eager=(os.environ.get("ENFORCE_EAGER", "1") != "0"),
+        **_engine_kwargs,
         # KV_CACHE_DTYPE="fp8" stores KV-cache blocks in 8-bit, halving the
         # per-sequence KV footprint so larger MAX_NUM_SEQS fits before OOM.
         # Default "auto" = same as model dtype (fp16 here).
@@ -218,7 +244,8 @@ if __name__ == "__main__":
                 continue
             human = conv[k]
             candidate = human if k == 0 else contexts[i] + "\n\n" + human
-            if n_tokens(candidate) > PROMPT_BUDGET:
+            nt = n_tokens(candidate)
+            if nt == 0 or nt > PROMPT_BUDGET:
                 alive[i] = False
                 continue
             contexts[i] = candidate

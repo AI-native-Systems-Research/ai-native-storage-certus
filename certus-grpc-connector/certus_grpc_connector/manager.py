@@ -20,7 +20,7 @@ from __future__ import annotations
 import sys
 from collections.abc import Iterable
 
-from vllm.v1.kv_offload.abstract import (
+from .compat import (
     LoadStoreSpec,
     OffloadingEvent,
     OffloadingManager,
@@ -63,6 +63,22 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         subsequent stores."""
         self._block_size_bytes = int(block_size_bytes)
 
+    # ── request lifecycle ──
+
+    def on_new_request(self, req_context=None):
+        """Called once when the scheduler first sees a request (vLLM 0.24+).
+
+        Returns the default ``RequestOffloadingContext`` (BLOCK_LEVEL policy:
+        offload newly-computed blocks, skip prefix hits already offloaded by a
+        prior request) — matching the Check filter in ``prepare_store``. This
+        method is a no-op contract on <0.24 (the base neither declares nor calls
+        it); the return type is built lazily through compat because it does not
+        exist before 0.24.
+        """
+        from .compat import new_request_offloading_context
+
+        return new_request_offloading_context()
+
     # ── lookup / touch ──
 
     def lookup(self, key: OffloadKey, req_context=None) -> bool | None:
@@ -70,7 +86,7 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         resp = self._stub.Check(pb.BatchCheckRequest(keys=[int_key]))
         return bool(resp.results and resp.results[0].exists)
 
-    def touch(self, keys: Iterable[OffloadKey]) -> None:
+    def touch(self, keys: Iterable[OffloadKey], req_context=None) -> None:
         int_keys = _keys_to_u64s(keys)
         if int_keys:
             self._stub.Touch(pb.BatchTouchRequest(keys=int_keys, promote=False))
@@ -172,7 +188,9 @@ class GrpcCertusOffloadingManager(OffloadingManager):
             # Back off the log cadence so a persistently-full tier stays quiet.
             self._store_drop_log_next = self._store_dropped_blocks * 2
 
-    def complete_store(self, keys: Iterable[OffloadKey], success: bool = True) -> None:
+    def complete_store(
+        self, keys: Iterable[OffloadKey], req_context=None, success: bool = True
+    ) -> None:
         int_keys = _keys_to_u64s(keys)
         if not int_keys:
             return
@@ -208,7 +226,7 @@ class GrpcCertusOffloadingManager(OffloadingManager):
                 )
         return CertusLoadStoreSpec([BlockLocation(key=k) for k in int_keys])
 
-    def complete_load(self, keys: Iterable[OffloadKey]) -> None:
+    def complete_load(self, keys: Iterable[OffloadKey], req_context=None) -> None:
         int_keys = _keys_to_u64s(keys)
         if int_keys:
             self._stub.Unpin(pb.BatchUnpinRequest(keys=int_keys))
