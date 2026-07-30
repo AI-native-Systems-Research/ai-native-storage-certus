@@ -28,7 +28,13 @@ from typing import Any
 # defined locally: compat imports vllm at module load, so it cannot be imported
 # until AFTER a fake vllm is installed. Keep the two lists in sync (test_compat
 # asserts they match).
-SUPPORTED_VERSIONS: tuple[tuple[int, int], ...] = ((0, 20), (0, 22), (0, 24), (0, 26))
+SUPPORTED_VERSIONS: tuple[tuple[int, int], ...] = (
+    (0, 20),
+    (0, 22),
+    (0, 23),
+    (0, 24),
+    (0, 26),
+)
 
 
 def _transfer_result_has_type(version: tuple[int, int]) -> bool:
@@ -198,9 +204,9 @@ def build_fake_vllm(version: tuple[int, int] = (0, 20)) -> None:
         config_mod.OffloadingConfig = OffloadingConfig
     else:
         # ── ≤0.24 layout: split modules (abstract/mediums/spec/worker.worker).
-        # 0.24 added an abstract on_new_request whose return type
+        # 0.23 added an abstract on_new_request whose return type
         # RequestOffloadingContext lives in the consolidated ``base`` module, so
-        # a partial base is provided from 0.24 for the lazy resolver to find. ──
+        # a partial base is provided from 0.23 for the lazy resolver to find. ──
         abstract = _module("vllm.v1.kv_offload.abstract")
         mediums = _module("vllm.v1.kv_offload.mediums")
         spec = _module("vllm.v1.kv_offload.spec")

@@ -19,7 +19,7 @@
 #       certus-grpc-bench
 
 # vLLM base-image version. Supported (built + smoke-tested): 0.20.0, 0.22.0,
-# 0.24.0, 0.26.0. The connector self-adapts at RUN time via
+# 0.23.0, 0.24.0, 0.26.0. The connector self-adapts at RUN time via
 # certus_grpc_connector.compat (version detection + capability matrix) — this
 # arg only selects the base image, no code keys off it. Build another version:
 #   podman build --build-arg VLLM_VERSION=0.22.0 -f certus-grpc-connector/Dockerfile \

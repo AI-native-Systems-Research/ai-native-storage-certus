@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import importlib
 import os
+from dataclasses import dataclass
 
 import pytest
 
@@ -49,6 +50,7 @@ def test_caps_for_every_supported_version(version):
     [
         ((0, 20), True),
         ((0, 22), True),
+        ((0, 23), True),
         ((0, 24), True),
         ((0, 26), False),  # 0.26 rewrite: submit_store/submit_load carry direction
     ],
@@ -65,6 +67,7 @@ def test_transfer_result_has_type_dropped_at_0_26(version, expected):
     [
         ((0, 20), False),
         ((0, 22), False),
+        ((0, 23), False),
         ((0, 24), False),
         ((0, 26), True),
     ],
@@ -84,6 +87,7 @@ def test_new_0_26_capabilities_gate_from_0_26(version, expected):
     [
         ((0, 20), False),  # 0.20 scheduler calls manager methods without req_context
         ((0, 22), True),   # req_context added to every OffloadingManager method
+        ((0, 23), True),
         ((0, 24), True),
         ((0, 26), True),
     ],
@@ -100,6 +104,7 @@ def test_req_context_arg_from_0_22(version, expected):
     [
         ((0, 20), False),
         ((0, 22), False),
+        ((0, 23), False),
         ((0, 24), False),
         ((0, 26), True),
     ],
@@ -115,6 +120,7 @@ def test_disable_hybrid_kv_cache_manager_only_from_0_26(version, expected):
     [
         ((0, 20), False),  # 0.20 did not default async scheduling on
         ((0, 22), True),   # 0.22+ auto-enables it; breaks OffloadingConnector serialization
+        ((0, 23), True),
         ((0, 24), True),
         ((0, 26), True),
     ],
@@ -131,14 +137,15 @@ def test_disable_async_scheduling_from_0_22(version, expected):
     [
         ((0, 20), False),
         ((0, 22), False),
-        ((0, 24), True),   # 0.24 added the on_new_request abstract method
+        ((0, 23), True),   # 0.23 added the on_new_request abstract method
+        ((0, 24), True),
         ((0, 26), True),
     ],
 )
-def test_on_new_request_from_0_24(version, expected):
-    # 0.24 made OffloadingManager.on_new_request abstract; the manager must
-    # implement it or vLLM can't instantiate it. Pin the threshold so a matrix
-    # edit that moves it is caught.
+def test_on_new_request_from_0_23(version, expected):
+    # 0.23 made OffloadingManager.on_new_request abstract; the manager must
+    # implement it or vLLM can't instantiate it. (Measured: abstract at 0.23, not
+    # 0.24.) Pin the threshold so a matrix edit that moves it is caught.
     assert compat.caps_for(version).has_on_new_request is expected
 
 
@@ -170,6 +177,65 @@ def test_gpu_block_ids_coerces_to_plain_int_list():
     out = compat.gpu_block_ids(spec)
     assert out == [3, 7, 11]
     assert all(type(b) is int for b in out)  # not np.int64
+
+
+# ── adapters: extract_gpu_ptrs guards the per-layer split (≤0.24 branch) ──
+
+
+class _FakeTensor:
+    """Just-enough torch.Tensor stand-in for extract_gpu_ptrs: a per-block
+    ``stride(0)`` in elements, an element size, a data pointer, and a shape."""
+
+    def __init__(self, stride0: int, elem: int = 1, ptr: int = 0x1000):
+        self._stride0 = stride0
+        self._elem = elem
+        self._ptr = ptr
+        self.shape = (2740, stride0)
+
+    def stride(self, dim: int) -> int:
+        assert dim == 0
+        return self._stride0
+
+    def element_size(self) -> int:
+        return self._elem
+
+    def data_ptr(self) -> int:
+        return self._ptr
+
+
+@dataclass
+class _FakeCanonicalTensor:
+    tensor: object
+    page_size_bytes: int
+
+
+class _FakeKVCaches:
+    def __init__(self, tensors: list):
+        self.tensors = tensors
+        self.group_data_refs = [object()]
+
+
+def test_extract_gpu_ptrs_single_tensor_returns_ptr_and_stride():
+    # 0.20/0.22 present ONE coalesced tensor (all layers). The default test
+    # baseline is 0.20, so extract_gpu_ptrs takes the ≤0.24 (kv_caches_tensors_attr)
+    # branch — the single-tensor case the connector's one-region-per-key model needs.
+    kv = _FakeKVCaches(
+        [_FakeCanonicalTensor(_FakeTensor(2097152, ptr=0xDEAD000), 2097152)]
+    )
+    ptr, stride = compat.extract_gpu_ptrs(kv)
+    assert ptr == 0xDEAD000
+    assert stride == 2097152
+
+
+def test_extract_gpu_ptrs_refuses_per_layer_split():
+    # 0.23+ split the KV cache into per-layer tensors (Llama-3: 32). Reading
+    # tensors[0] would silently offload layer 0 only, so the guard must refuse
+    # loudly before any store rather than truncate.
+    kv = _FakeKVCaches(
+        [_FakeCanonicalTensor(_FakeTensor(65536), 65536) for _ in range(32)]
+    )
+    with pytest.raises(NotImplementedError, match="per-layer split entered at 0.23"):
+        compat.extract_gpu_ptrs(kv)
 
 
 # ── adapters: make_transfer_result, both CAPS branches ──

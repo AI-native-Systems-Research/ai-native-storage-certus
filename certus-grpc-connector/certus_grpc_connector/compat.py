@@ -22,10 +22,10 @@ Three techniques, each handling a different kind of change:
    touching vLLM's shapes directly. Each version branch lives in exactly one
    place.
 
-Supported (built + smoke-tested) versions: 0.20, 0.22, 0.24, 0.26. Values in the
-matrix are seeded from the 0.20 baseline; each is confirmed or corrected as the
-even-version walk builds and smoke-tests that release. Entries still awaiting
-empirical confirmation on a given version are marked ``# TODO(verify @0.xx)``.
+Supported (built + smoke-tested) versions: 0.20, 0.22, 0.23, 0.24, 0.26. Values in
+the matrix are seeded from the 0.20 baseline; each is confirmed or corrected as the
+version walk builds and smoke-tests that release. Entries still awaiting empirical
+confirmation on a given version are marked ``# TODO(verify @0.xx)``.
 """
 
 from __future__ import annotations
@@ -35,8 +35,14 @@ import sys
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version as _dist_version
 
-# Even versions we support as first-class, runnable rows.
-SUPPORTED_VERSIONS: tuple[tuple[int, int], ...] = ((0, 20), (0, 22), (0, 24), (0, 26))
+# Versions we support as first-class, runnable rows.
+SUPPORTED_VERSIONS: tuple[tuple[int, int], ...] = (
+    (0, 20),
+    (0, 22),
+    (0, 23),
+    (0, 24),
+    (0, 26),
+)
 
 
 # ── version detection ──────────────────────────────────────────────────────
@@ -97,10 +103,15 @@ FEATURES: dict[str, "callable"] = {
     # submit_store/submit_load, so the medium pair is no longer carried on the
     # result). ``make_transfer_result`` builds the 4-field shape when this is off.
     "transfer_result_has_type": lambda v: v < (0, 26),  # verified @0.20,0.22,0.24 (present), @0.26 (dropped)
-    # ``get_handlers`` receives an object exposing ``.tensors[i].tensor``.
-    # True on 0.20; re-confirm per hop (attention/cache-layout churn is the
-    # highest-risk silent break).
-    "kv_caches_tensors_attr": lambda v: v >= (0, 20),  # TODO(verify @0.22/0.24/0.26)
+    # ``get_handlers``/``get_worker`` receives an object exposing ``.tensors[i]``
+    # (each ``.tensor`` + ``.page_size_bytes``). The ATTRIBUTE is present across the
+    # whole range — but its length is a runtime KV-allocation property that changed:
+    # measured 0.20/0.22 coalesce all layers into ONE tensor (stride = full block),
+    # while 0.23+ split it per-layer (Llama-3: 32 tensors). ``extract_gpu_ptrs``
+    # refuses len!=1 loudly on every version, so this flag only gates the access
+    # pattern, not the (single-vs-split) layout. Verified @0.20,0.22 (len==1),
+    # @0.23,0.24,0.26 (len==32).
+    "kv_caches_tensors_attr": lambda v: v >= (0, 20),
     # ``KVCacheConfig.kv_cache_groups[i]`` exposes ``.layer_names`` and
     # ``.kv_cache_spec.page_size_bytes``. True on 0.20; re-confirm per hop.
     "kv_cache_group_attrs": lambda v: v >= (0, 20),  # TODO(verify @0.22/0.24/0.26)
@@ -117,16 +128,18 @@ FEATURES: dict[str, "callable"] = {
     # pass ``async_scheduling=False`` to opt out. 0.20 did not default it on, so
     # the flag (and the kwarg itself) only applies from 0.22.
     "needs_disable_async_scheduling": lambda v: v >= (0, 22),  # verified @0.22 (assert crash w/o it)
-    # 0.24 added a new ABSTRACT method OffloadingManager.on_new_request(req_context)
+    # 0.23 added a new ABSTRACT method OffloadingManager.on_new_request(req_context)
     # -> RequestOffloadingContext(policy=...), called once when the scheduler first
     # sees a request. Without an implementation the manager is abstract and vLLM
     # can't instantiate it (TypeError at engine init). We return the default
     # BLOCK_LEVEL context (offload newly-computed blocks, skip prefix hits — which
-    # matches our prepare_store Check filter). The return type only exists on
-    # 0.24+, so the manager builds it lazily via ``new_request_offloading_context``;
-    # older bases neither declare nor call the method. Declarative flag (the method
-    # is defined unconditionally; it is simply never invoked before 0.24).
-    "has_on_new_request": lambda v: v >= (0, 24),  # verified @0.24 (abstract; instantiation fails without it)
+    # matches our prepare_store Check filter). The return type first appears in the
+    # consolidated ``base`` module at 0.23, so the manager builds it lazily via
+    # ``new_request_offloading_context``; older bases neither declare nor call the
+    # method. Declarative flag (the method is defined unconditionally; it is simply
+    # never invoked before 0.23). Measured @0.23 (abstract in base.py) — the
+    # abstract method landed at 0.23, NOT 0.24, so the threshold is (0, 23).
+    "has_on_new_request": lambda v: v >= (0, 23),  # verified @0.23 (abstract; instantiation fails without it)
     # ── 0.26 offloading-API rewrite (four related breaks, all ≥0.26) ──
     # vLLM 0.26 rewrote vllm.v1.kv_offload.* ("experimental, subject to change").
     # The worker interface changed from a per-direction OffloadingHandler with
@@ -395,7 +408,10 @@ def extract_gpu_ptrs(kv_caches) -> tuple[int, int]:
       shapes are logged and a split (per-layer / K-V) raises so it is caught
       before any numbers are trusted, rather than silently copying one layer.
     * **≤0.24** (``CAPS.kv_caches_tensors_attr``): the object ``get_handlers``
-      receives exposes ``.tensors[0].tensor`` directly.
+      receives exposes the same ``.tensors[i].tensor`` layout. 0.20/0.22 present
+      ONE coalesced tensor (all layers, stride = full block); 0.23/0.24 split it
+      per-layer (Llama-3: 32 tensors), which reading ``tensors[0]`` would silently
+      truncate to layer 0 — so this branch guards len!=1 the same way as 0.26.
     """
     if CAPS.canonical_kv_caches:
         tensors = kv_caches.tensors
@@ -420,7 +436,36 @@ def extract_gpu_ptrs(kv_caches) -> tuple[int, int]:
         stride_bytes = tensor.stride(0) * tensor.element_size()
         return tensor.data_ptr(), stride_bytes
     if CAPS.kv_caches_tensors_attr:
-        tensor = kv_caches.tensors[0].tensor
+        # ≤0.24 shares the CanonicalKVCaches-style ``.tensors`` layout. The
+        # connector historically read ``tensors[0]`` with no length check. Measured
+        # 2026-07-30: 0.20/0.22 present ONE coalesced tensor (all layers, stride =
+        # full 2 MiB block), but 0.23/0.24 split the KV cache into per-layer tensors
+        # (Llama-3: 32 x (num_blocks, 65536) int8). Reading ``tensors[0]`` on 0.23+
+        # would silently offload layer 0 only — the one-IPC-region-per-key server
+        # contract can't address a per-layer split. Guard len!=1 loudly (before any
+        # store), exactly like the 0.26 branch, rather than truncating.
+        tensors = kv_caches.tensors
+        shapes = [
+            (tuple(t.tensor.shape), int(t.page_size_bytes)) for t in tensors
+        ]
+        print(
+            f"[certus-grpc] KV tensors: {len(tensors)} tensor(s); "
+            f"(shape, page_size_bytes)={shapes}; "
+            f"groups={len(kv_caches.group_data_refs)}",
+            flush=True,
+        )
+        if len(tensors) != 1:
+            raise NotImplementedError(
+                f"certus-grpc-connector: the KV-cache handoff presented "
+                f"{len(tensors)} tensors {shapes} on vLLM {VERSION[0]}.{VERSION[1]}. "
+                f"The per-layer split entered at 0.23 (0.20/0.22 coalesce to one "
+                f"tensor). The connector maps one contiguous IPC region per key "
+                f"(one block, all layers) and needs a single backing tensor; reading "
+                f"tensors[0] would silently offload layer 0 only. Add a multi-tensor "
+                f"branch (per-layer IPC handles or a staging-buffer gather) before "
+                f"trusting a run on this version."
+            )
+        tensor = tensors[0].tensor
         stride_bytes = tensor.stride(0) * tensor.element_size()
         return tensor.data_ptr(), stride_bytes
     raise NotImplementedError(
