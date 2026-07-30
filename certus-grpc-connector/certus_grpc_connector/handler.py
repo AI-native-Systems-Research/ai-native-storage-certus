@@ -15,11 +15,13 @@ from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 
-from vllm.v1.kv_offload.mediums import GPULoadStoreSpec
-from vllm.v1.kv_offload.worker.worker import (
+from .compat import (
+    GPULoadStoreSpec,
     OffloadingHandler,
     TransferResult,
     TransferSpec,
+    gpu_block_ids,
+    make_transfer_result,
 )
 
 from . import dispatcher_pb2 as pb
@@ -115,7 +117,7 @@ class _GrpcHandler(OffloadingHandler):
                 print(f"[certus-grpc] transfer job {job.job_id} failed: {e}", flush=True)
                 success = False
             results.append(
-                TransferResult(
+                make_transfer_result(
                     job_id=job.job_id,
                     success=success,
                     transfer_size=job.num_blocks * self._block_size_bytes,
@@ -140,9 +142,9 @@ class GpuToCertusHandler(_GrpcHandler):
         src_spec, dst_spec = spec
         assert isinstance(src_spec, GPULoadStoreSpec)
         assert isinstance(dst_spec, CertusLoadStoreSpec)
-        gpu_block_ids = [int(b) for b in src_spec.block_ids]
+        block_ids = gpu_block_ids(src_spec)
         keys = dst_spec.keys
-        return self._submit(job_id, gpu_block_ids, keys)
+        return self._submit(job_id, block_ids, keys)
 
     def _do_transfer(self, gpu_block_ids: list[int], keys: list[int]) -> bool:
         entries = [
@@ -204,9 +206,9 @@ class CertusToGpuHandler(_GrpcHandler):
         src_spec, dst_spec = spec
         assert isinstance(src_spec, CertusLoadStoreSpec)
         assert isinstance(dst_spec, GPULoadStoreSpec)
-        gpu_block_ids = [int(b) for b in dst_spec.block_ids]
+        block_ids = gpu_block_ids(dst_spec)
         keys = src_spec.keys
-        return self._submit(job_id, gpu_block_ids, keys)
+        return self._submit(job_id, block_ids, keys)
 
     def _do_transfer(self, gpu_block_ids: list[int], keys: list[int]) -> bool:
         entries = [
