@@ -100,6 +100,31 @@ pub trait RdmaTransport: Send + Sync {
     ) -> Result<(Box<dyn RdmaConn>, ConnectTiming), RdmaError>;
 }
 
+/// One RDMA write within a window: `len` bytes at local pool address `local`,
+/// destined for the remote region (`remote_addr`, `rkey`).
+#[derive(Clone, Copy)]
+pub struct WindowWrite {
+    /// Local pool address of the value (from `IMemoryTier::peek`).
+    pub local: *const u8,
+    /// Number of bytes to write.
+    pub len: usize,
+    /// Remote destination address.
+    pub remote_addr: u64,
+    /// Remote key authorizing the write.
+    pub rkey: u32,
+}
+
+/// Largest number of writes handed to [`RdmaConn::write_window`] at once, bounded
+/// by the queue pair's send-queue and completion-queue depths.
+///
+/// Kept here (not only in the feature-gated `rdma` module) so the windowing logic
+/// and its tests exist in the non-`rdma` build too; the assertion below stops the
+/// two definitions drifting apart.
+pub const PUSH_WINDOW: usize = 128;
+
+#[cfg(feature = "rdma")]
+const _: () = assert!(PUSH_WINDOW == rdma::WINDOW);
+
 /// A live outbound connection capable of RDMA-writing from the local
 /// memory-tier pool into a remote region.
 pub trait RdmaConn: Send {
@@ -107,20 +132,23 @@ pub trait RdmaConn: Send {
     /// connection must be rebuilt.
     fn qp_healthy(&self) -> bool;
 
-    /// RDMA-write `len` bytes starting at local pool address `local` into the
-    /// remote region (`remote_addr`, `rkey`). Blocks until completion.
+    /// RDMA-write every entry in `writes`, posting the whole window before waiting
+    /// on any completion, and block until all of them have completed.
+    ///
+    /// All-or-nothing by design. `Err` means *the window* is lost, not that one
+    /// member of it is: a failing RDMA_WRITE drives the queue pair into the error
+    /// state, which flushes every other outstanding request with `WR_FLUSH_ERR`,
+    /// so per-write blame cannot be assigned. The caller replays the whole window
+    /// after reconnecting instead — safe because the remote landing buffers stay
+    /// reserved and unpublished until per-key status is reported.
     ///
     /// # Safety
     ///
-    /// `local` must point to `len` valid bytes inside the registered
-    /// memory-tier pool region that backs this connection.
-    unsafe fn write(
-        &self,
-        local: *const u8,
-        len: usize,
-        remote_addr: u64,
-        rkey: u32,
-    ) -> Result<(), RdmaError>;
+    /// Each entry's `local` must point to `len` valid bytes inside the registered
+    /// memory-tier pool region that backs this connection, and must remain valid
+    /// until this call returns — the NIC reads those buffers asynchronously while
+    /// the window is in flight.
+    unsafe fn write_window(&self, writes: &[WindowWrite]) -> Result<(), RdmaError>;
 }
 
 /// Per-host connection state. Absence of a slot in the table means the host is
@@ -202,105 +230,134 @@ impl ConnectionTable {
             }))
         };
 
-        // Serialize all operations to this host on its slot lock.
+        // Serialize all operations to this host on its slot lock. A thread that
+        // starts a (re)connect holds this across the whole attempt, which is what
+        // makes same-host pushes queue behind a reconnect rather than pile more
+        // work onto a dead queue pair.
         let mut state = slot.state.lock().unwrap();
 
-        let mut out = Vec::with_capacity(resolved.len());
-        // Once the connection is deemed unrecoverable for this batch, remaining
-        // writes short-circuit to UnableToConnect.
-        let mut give_up = false;
-        // A single reconnect is allowed per batch to recover from a QP error.
-        let mut reconnect_used = false;
+        // Statuses in caller order. `Done` items already know their answer; each
+        // `Write` starts pessimistic and is upgraded once its window completes.
+        let mut out: Vec<PushStatus> = Vec::with_capacity(resolved.len());
+        // The writes to perform, plus where each one's status lives in `out`. Held
+        // as parallel vectors so `chunks` hands `write_window` a borrowed slice
+        // with no per-attempt copying.
+        let mut writes: Vec<WindowWrite> = Vec::new();
+        let mut slots: Vec<usize> = Vec::new();
 
-        for (idx, item) in resolved.iter().enumerate() {
-            let (status, bytes) = match item {
-                ItemPlan::Done(status) => (*status, 0),
+        for item in &resolved {
+            match item {
+                ItemPlan::Done(status) => out.push(*status),
                 ItemPlan::Write {
                     local,
                     len,
                     remote_addr,
                     rkey,
-                } if !give_up => {
-                    // Per-write trace (addr/rkey/len): useful when correlating a
-                    // failing write against the preceding successful ones. Debug
-                    // level — the hot path must not log at info.
-                    logger.debug(&format!(
-                        "remote-lookup-rdma-initiator: write #{idx} -> {addr}:{port} \
-                         remote_addr=0x{remote_addr:x} rkey=0x{rkey:x} len={len}"
-                    ));
-                    // Attempt the write, reconnecting at most once on failure.
-                    let status = loop {
-                        if !ensure_connected(
-                            &mut state,
-                            self.transport.as_ref(),
-                            &addr,
-                            port,
-                            logger,
-                            &self.telemetry,
-                        ) {
-                            give_up = true;
-                            break PushStatus::UnableToConnect;
-                        }
-
-                        // SAFETY: `local`/`len` came from the caller's memory-tier
-                        // peek, which returns a pointer and size within the
-                        // registered pool that backs this connection.
-                        let w_start = Instant::now();
-                        let write_res = match &*state {
-                            ConnState::Connected(conn) => unsafe {
-                                conn.write(*local, *len, *remote_addr, *rkey)
-                            },
-                            // ensure_connected returned true, so we are Connected.
-                            _ => unreachable!("ensure_connected guarantees Connected"),
-                        };
-                        // Per-write wall-clock (post_send + poll). A 4 MiB write is
-                        // ~hundreds of µs on 200G RoCE; a slow/stale connection
-                        // shows up here. Debug level — hot path.
-                        let w_us = w_start.elapsed().as_micros();
-
-                        match write_res {
-                            Ok(()) => {
-                                logger.debug(&format!(
-                                    "remote-lookup-rdma-initiator: write #{idx} OK in {w_us}us \
-                                     ({len} bytes)"
-                                ));
-                                break PushStatus::Success;
-                            }
-                            Err(e) => {
-                                // Drop the (likely error-state) connection so the
-                                // retry rebuilds it.
-                                *state = ConnState::Disconnected;
-                                if reconnect_used {
-                                    logger.warn(&format!(
-                                        "remote-lookup-rdma-initiator: write to {addr}:{port} \
-                                         (remote_addr=0x{remote_addr:x} len={len}) failed \
-                                         after reconnect: {e}"
-                                    ));
-                                    give_up = true;
-                                    break PushStatus::UnableToConnect;
-                                }
-                                reconnect_used = true;
-                                self.telemetry.record_reconnect();
-                                logger.warn(&format!(
-                                    "remote-lookup-rdma-initiator: write to {addr}:{port} \
-                                     (remote_addr=0x{remote_addr:x} len={len}) failed ({e}); \
-                                     reconnecting"
-                                ));
-                            }
-                        }
-                    };
-                    let bytes = if status == PushStatus::Success {
-                        *len as u64
-                    } else {
-                        0
-                    };
-                    (status, bytes)
+                } => {
+                    slots.push(out.len());
+                    writes.push(WindowWrite {
+                        local: *local,
+                        len: *len,
+                        remote_addr: *remote_addr,
+                        rkey: *rkey,
+                    });
+                    out.push(PushStatus::UnableToConnect);
                 }
-                // give_up already set: the host is unreachable for this batch.
-                ItemPlan::Write { .. } => (PushStatus::UnableToConnect, 0),
+            }
+        }
+
+        // Once the connection is deemed unrecoverable for this batch, remaining
+        // windows short-circuit to UnableToConnect.
+        let mut give_up = false;
+        // A single reconnect is allowed per batch to recover from a QP error.
+        let mut reconnect_used = false;
+
+        for (window, positions) in writes.chunks(PUSH_WINDOW).zip(slots.chunks(PUSH_WINDOW)) {
+            if give_up {
+                break;
+            }
+            let bytes: usize = window.iter().map(|w| w.len).sum();
+            // Per-window trace: one line per window, not per write. At a 64-key
+            // window, per-write logging would put 64 formatted strings on the hot
+            // path for every RDMA_REQUEST.
+            logger.debug(&format!(
+                "remote-lookup-rdma-initiator: window of {} -> {addr}:{port} ({bytes} bytes)",
+                window.len()
+            ));
+
+            // Attempt the window, reconnecting and replaying it at most once.
+            loop {
+                if !ensure_connected(
+                    &mut state,
+                    self.transport.as_ref(),
+                    &addr,
+                    port,
+                    logger,
+                    &self.telemetry,
+                ) {
+                    give_up = true;
+                    break;
+                }
+
+                // SAFETY: every `local`/`len` came from the caller's memory-tier
+                // peek, which returns a pointer and size within the registered pool
+                // that backs this connection. The pool stays pinned by the caller
+                // until `push` returns, and `write_window` does not return until
+                // every completion is reaped or the connection is torn down.
+                let w_start = Instant::now();
+                let write_res = match &*state {
+                    ConnState::Connected(conn) => unsafe { conn.write_window(window) },
+                    // ensure_connected returned true, so we are Connected.
+                    _ => unreachable!("ensure_connected guarantees Connected"),
+                };
+                let w_us = w_start.elapsed().as_micros();
+
+                match write_res {
+                    Ok(()) => {
+                        logger.debug(&format!(
+                            "remote-lookup-rdma-initiator: window of {} OK in {w_us}us \
+                             ({bytes} bytes)",
+                            window.len()
+                        ));
+                        for &pos in positions {
+                            out[pos] = PushStatus::Success;
+                        }
+                        break;
+                    }
+                    Err(e) => {
+                        // Drop the (likely error-state) connection so the replay
+                        // rebuilds it. Dropping it also destroys the queue pair,
+                        // which flushes any request the NIC has not finished with —
+                        // the barrier that lets the caller release its read pins
+                        // once `push` returns.
+                        *state = ConnState::Disconnected;
+                        if reconnect_used {
+                            logger.warn(&format!(
+                                "remote-lookup-rdma-initiator: window of {} to {addr}:{port} \
+                                 ({bytes} bytes) failed after reconnect: {e}",
+                                window.len()
+                            ));
+                            give_up = true;
+                            break;
+                        }
+                        reconnect_used = true;
+                        self.telemetry.record_reconnect();
+                        logger.warn(&format!(
+                            "remote-lookup-rdma-initiator: window of {} to {addr}:{port} \
+                             ({bytes} bytes) failed ({e}); reconnecting and replaying it",
+                            window.len()
+                        ));
+                    }
+                }
+            }
+        }
+
+        for (item, status) in resolved.iter().zip(&out) {
+            let bytes = match item {
+                ItemPlan::Write { len, .. } if *status == PushStatus::Success => *len as u64,
+                _ => 0,
             };
-            self.telemetry.record_item(status, bytes);
-            out.push(status);
+            self.telemetry.record_item(*status, bytes);
         }
 
         self.telemetry
@@ -516,19 +573,29 @@ impl RdmaConn for RealConn {
         self.conn.is_qp_healthy()
     }
 
-    unsafe fn write(
-        &self,
-        local: *const u8,
-        len: usize,
-        remote_addr: u64,
-        rkey: u32,
-    ) -> Result<(), RdmaError> {
-        self.conn
-            .rdma_write_from_pool(&self.pool_mr, local, len, remote_addr, rkey)
-            // `{e:#}` renders the full anyhow source chain (e.g. the underlying
-            // "work completion error: status=12 (RETRY_EXC_ERR) … qp_state=…"),
-            // not just the top context — otherwise the WC status is lost.
-            .map_err(|e| RdmaError::WriteFailed(format!("{e:#}")))
+    unsafe fn write_window(&self, writes: &[WindowWrite]) -> Result<(), RdmaError> {
+        // `{e:#}` renders the full anyhow source chain (e.g. the underlying
+        // "work completion error: status=12 (RETRY_EXC_ERR) … qp_state=…"),
+        // not just the top context — otherwise the WC status is lost.
+        let wrap = |e: anyhow::Error| RdmaError::WriteFailed(format!("{e:#}"));
+
+        // Post the whole window first, then wait once. A post can fail locally
+        // (full send queue) part-way through; the already-posted requests are
+        // abandoned to the caller's teardown, which destroys the queue pair and so
+        // flushes them before any pool memory is released.
+        for (i, w) in writes.iter().enumerate() {
+            self.conn
+                .post_write_from_pool(
+                    &self.pool_mr,
+                    w.local,
+                    w.len,
+                    w.remote_addr,
+                    w.rkey,
+                    i as u64,
+                )
+                .map_err(wrap)?;
+        }
+        self.conn.reap(writes.len()).map_err(wrap)
     }
 }
 
@@ -546,10 +613,18 @@ mod tests {
         fn debug(&self, _msg: &str) {}
     }
 
+    /// Every window a mock connection was asked to write, as its list of remote
+    /// addresses — recording *granularity* as well as outcome, so a test can assert
+    /// that a batch went out as one window and that a replay carries the same
+    /// writes. Shared across the transport and the connections it hands out,
+    /// because `push` owns the connection by the time the test inspects it.
+    type WindowLog = Arc<Mutex<Vec<Vec<u64>>>>;
+
     struct MockConn {
         healthy: AtomicBool,
-        /// If set, the next write fails and drives the QP unhealthy.
-        fail_next_write: AtomicBool,
+        /// If set, the next window fails and drives the QP unhealthy.
+        fail_next_window: AtomicBool,
+        windows: WindowLog,
     }
 
     impl RdmaConn for MockConn {
@@ -557,16 +632,14 @@ mod tests {
             self.healthy.load(Ordering::SeqCst)
         }
 
-        unsafe fn write(
-            &self,
-            _local: *const u8,
-            _len: usize,
-            _remote_addr: u64,
-            _rkey: u32,
-        ) -> Result<(), RdmaError> {
-            if self.fail_next_write.swap(false, Ordering::SeqCst) {
+        unsafe fn write_window(&self, writes: &[WindowWrite]) -> Result<(), RdmaError> {
+            self.windows
+                .lock()
+                .unwrap()
+                .push(writes.iter().map(|w| w.remote_addr).collect());
+            if self.fail_next_window.swap(false, Ordering::SeqCst) {
                 self.healthy.store(false, Ordering::SeqCst);
-                return Err(RdmaError::WriteFailed("mock write failure".into()));
+                return Err(RdmaError::WriteFailed("mock window failure".into()));
             }
             Ok(())
         }
@@ -578,8 +651,10 @@ mod tests {
         connect_attempts: Arc<AtomicUsize>,
         /// Number of initial connect attempts that should fail.
         fail_first_n_connects: usize,
-        /// The first successfully-connected conn will fail its first write.
-        fail_first_write: AtomicBool,
+        /// The first successfully-connected conn will fail its first window.
+        fail_first_window: AtomicBool,
+        /// Windows seen by every conn this transport produced, in order.
+        windows: WindowLog,
     }
 
     impl RdmaTransport for MockTransport {
@@ -594,9 +669,10 @@ mod tests {
             }
             let conn = MockConn {
                 healthy: AtomicBool::new(true),
-                fail_next_write: AtomicBool::new(
-                    self.fail_first_write.swap(false, Ordering::SeqCst),
+                fail_next_window: AtomicBool::new(
+                    self.fail_first_window.swap(false, Ordering::SeqCst),
                 ),
+                windows: Arc::clone(&self.windows),
             };
             // The mock does not measure phases; timing is left zeroed.
             Ok((Box::new(conn), ConnectTiming::default()))
@@ -682,7 +758,7 @@ mod tests {
         let attempts = Arc::new(AtomicUsize::new(0));
         let transport = MockTransport {
             connect_attempts: Arc::clone(&attempts),
-            fail_first_write: AtomicBool::new(true),
+            fail_first_window: AtomicBool::new(true),
             ..Default::default()
         };
         let table = table_with(transport);
@@ -693,6 +769,167 @@ mod tests {
         assert_eq!(out, vec![PushStatus::Success, PushStatus::Success]);
         // Exactly one reconnect: the initial connect plus one repair.
         assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    }
+
+    /// Build a table plus a handle on the windows its connections will see.
+    fn table_with_window_log(transport: MockTransport) -> (ConnectionTable, WindowLog) {
+        let log = Arc::clone(&transport.windows);
+        (table_with(transport), log)
+    }
+
+    /// The regression test for the serialization this windowing replaced: a batch
+    /// of writes must reach the transport as ONE window, not one window per write.
+    /// Posting the whole window before waiting is the entire performance win — a
+    /// 64 KiB write is ~2.6 µs of wire time but ~28 µs of post/poll overhead.
+    #[test]
+    fn whole_batch_is_posted_as_one_window() {
+        let (table, windows) = table_with_window_log(MockTransport::default());
+        let addrs: Vec<u64> = (1..=64).map(|i| i * 0x1000).collect();
+        let resolved: Vec<ItemPlan> = addrs.iter().map(|&a| write_plan(a, 9, 65536)).collect();
+
+        let out = table.push("10.0.0.9:5000", resolved, &NullLogger).unwrap();
+
+        assert_eq!(out, vec![PushStatus::Success; 64]);
+        let seen = windows.lock().unwrap();
+        assert_eq!(seen.len(), 1, "expected one window, got {}", seen.len());
+        assert_eq!(
+            seen[0], addrs,
+            "the window must carry every write, in order"
+        );
+    }
+
+    /// A batch larger than the queue depth is split, but only as much as the depth
+    /// requires — the remainder still travels as one window, not write-by-write.
+    #[test]
+    fn batch_larger_than_the_window_is_chunked() {
+        let (table, windows) = table_with_window_log(MockTransport::default());
+        let total = PUSH_WINDOW + 72;
+        let resolved: Vec<ItemPlan> = (0..total)
+            .map(|i| write_plan((i as u64 + 1) * 0x100, 9, 4096))
+            .collect();
+
+        let out = table.push("10.0.0.10:5000", resolved, &NullLogger).unwrap();
+
+        assert_eq!(out, vec![PushStatus::Success; total]);
+        let sizes: Vec<usize> = windows.lock().unwrap().iter().map(|w| w.len()).collect();
+        assert_eq!(sizes, vec![PUSH_WINDOW, 72]);
+    }
+
+    /// On a lost window the whole window is replayed after one reconnect, rather
+    /// than the failure being attributed to individual writes. A queue-pair error
+    /// flushes every outstanding request, so per-write blame is not knowable — and
+    /// replay is safe because the remote landing buffers stay reserved and
+    /// unpublished until status is reported.
+    #[test]
+    fn lost_window_is_replayed_in_full_after_one_reconnect() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let (table, windows) = table_with_window_log(MockTransport {
+            connect_attempts: Arc::clone(&attempts),
+            fail_first_window: AtomicBool::new(true),
+            ..Default::default()
+        });
+        let addrs: Vec<u64> = (1..=8).map(|i| i * 0x2000).collect();
+        let resolved: Vec<ItemPlan> = addrs.iter().map(|&a| write_plan(a, 5, 1024)).collect();
+
+        let out = table.push("10.0.0.11:5000", resolved, &NullLogger).unwrap();
+
+        assert_eq!(out, vec![PushStatus::Success; 8]);
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            2,
+            "one connect, one repair"
+        );
+        let seen = windows.lock().unwrap();
+        assert_eq!(seen.len(), 2, "the failed window plus its replay");
+        assert_eq!(seen[0], addrs);
+        assert_eq!(
+            seen[1], addrs,
+            "the replay must be identical to what was lost"
+        );
+    }
+
+    /// The one-reconnect-per-batch budget survives the move to window granularity:
+    /// a window that fails again after the repair fails its keys rather than
+    /// looping.
+    #[test]
+    fn window_failing_after_the_reconnect_gives_up() {
+        // Every connection this transport hands out fails its first window, so the
+        // replay fails too.
+        struct AlwaysFailing {
+            attempts: Arc<AtomicUsize>,
+            windows: WindowLog,
+        }
+        impl RdmaTransport for AlwaysFailing {
+            fn connect(
+                &self,
+                _addr: &str,
+                _port: u16,
+            ) -> Result<(Box<dyn RdmaConn>, ConnectTiming), RdmaError> {
+                self.attempts.fetch_add(1, Ordering::SeqCst);
+                Ok((
+                    Box::new(MockConn {
+                        healthy: AtomicBool::new(true),
+                        fail_next_window: AtomicBool::new(true),
+                        windows: Arc::clone(&self.windows),
+                    }),
+                    ConnectTiming::default(),
+                ))
+            }
+        }
+
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let windows: WindowLog = Arc::default();
+        let table = ConnectionTable::new(
+            Box::new(AlwaysFailing {
+                attempts: Arc::clone(&attempts),
+                windows: Arc::clone(&windows),
+            }),
+            Arc::new(TelemetryCollector::new()),
+        );
+
+        let out = table
+            .push(
+                "10.0.0.12:5000",
+                vec![write_plan(0x1000, 1, 512), write_plan(0x2000, 1, 512)],
+                &NullLogger,
+            )
+            .unwrap();
+
+        assert_eq!(
+            out,
+            vec![PushStatus::UnableToConnect; 2],
+            "a window lost twice fails its keys"
+        );
+        assert_eq!(attempts.load(Ordering::SeqCst), 2, "no third attempt");
+        assert_eq!(windows.lock().unwrap().len(), 2, "attempt plus one replay");
+    }
+
+    /// Items resolved before any RDMA (absent key, size mismatch) keep their status
+    /// and must never occupy a slot in a window.
+    #[test]
+    fn done_items_never_enter_a_window() {
+        let (table, windows) = table_with_window_log(MockTransport::default());
+        let resolved = vec![
+            ItemPlan::Done(PushStatus::KeyNotFound),
+            write_plan(0xC000, 2, 64),
+            ItemPlan::Done(PushStatus::SizeMismatch),
+            write_plan(0xD000, 2, 64),
+        ];
+
+        let out = table.push("10.0.0.13:5000", resolved, &NullLogger).unwrap();
+
+        assert_eq!(
+            out,
+            vec![
+                PushStatus::KeyNotFound,
+                PushStatus::Success,
+                PushStatus::SizeMismatch,
+                PushStatus::Success,
+            ]
+        );
+        let seen = windows.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0], vec![0xC000, 0xD000], "only the writes");
     }
 
     #[test]
@@ -832,7 +1069,7 @@ mod tests {
     #[test]
     fn telemetry_records_reconnect() {
         let transport = MockTransport {
-            fail_first_write: AtomicBool::new(true),
+            fail_first_window: AtomicBool::new(true),
             ..Default::default()
         };
         let (table, tm) = table_with_telemetry(transport);

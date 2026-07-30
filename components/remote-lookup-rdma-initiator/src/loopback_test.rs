@@ -2,7 +2,8 @@
 //!
 //! This exercises the real outbound data path end-to-end on one machine:
 //! `ConnectionTable::push` → `RealTransport::connect` → `rdma::client_connect`
-//! → register the pool as an MR → `rdma_write_from_pool`. Because an RDMA write
+//! → register the pool as an MR → a window of `post_write_from_pool` calls
+//! followed by one `reap`. Because an RDMA write
 //! is one-sided and needs the destination `rkey` at write time, the responder
 //! (accept) side must register its buffer and publish the `rkey` *before* the
 //! initiator connects. The accept side normally belongs to the `remote-lookup`
@@ -53,6 +54,9 @@ extern "C" {
 
 const TEST_PORT: u16 = 18515;
 const PAYLOAD_LEN: usize = 4096;
+/// Number of separate writes the payload is split into, so the push under test is
+/// a real window rather than a single request. Must divide `PAYLOAD_LEN`.
+const WRITES: usize = 8;
 /// The initiator's zyre PeerId, stamped into the connect `private_data` and
 /// asserted on the accept side (D2 identity correlation).
 const INITIATOR_UUID: &str = "uuid-initiator-loopback";
@@ -377,29 +381,40 @@ fn loopback_push_writes_into_remote_buffer() {
         Arc::new(TelemetryCollector::new()),
     );
     let endpoint = format!("{ip}:{TEST_PORT}");
-    let resolved = vec![ItemPlan::Write {
-        local: src.as_ptr(),
-        len: PAYLOAD_LEN,
-        remote_addr: dst_addr as u64,
-        rkey,
-    }];
+    // Split the payload into WRITES pieces and push them as one window, so this
+    // exercises a genuinely pipelined push (many requests posted before any
+    // completion is reaped) rather than the degenerate window of one. Each piece
+    // has its own local offset and remote address, so a window that mismatched
+    // sources to destinations would corrupt the comparison below rather than
+    // silently pass.
+    let piece = PAYLOAD_LEN / WRITES;
+    let resolved: Vec<ItemPlan> = (0..WRITES)
+        .map(|i| ItemPlan::Write {
+            // SAFETY-adjacent: offset stays inside `src`, which is the registered
+            // pool MR for this connection.
+            local: unsafe { src.as_ptr().add(i * piece) },
+            len: piece,
+            remote_addr: (dst_addr + i * piece) as u64,
+            rkey,
+        })
+        .collect();
     let statuses = table
         .push(&endpoint, resolved, &NullLogger)
         .expect("push returns statuses");
     assert_eq!(
         statuses,
-        vec![PushStatus::Success],
-        "the RDMA write should report Success"
+        vec![PushStatus::Success; WRITES],
+        "every RDMA write in the window should report Success"
     );
 
-    // The initiator's signaled completion guarantees the bytes reached buffer B.
+    // The initiator's signaled completions guarantee every piece reached buffer B.
     assert_eq!(
         dst, src,
-        "destination buffer must equal source after the RDMA write"
+        "destination buffer must equal source after the RDMA window"
     );
 
     let _ = done_tx.send(());
     responder.join().expect("responder thread panicked");
 
-    eprintln!("loopback test OK: {PAYLOAD_LEN} bytes written and verified");
+    eprintln!("loopback test OK: {PAYLOAD_LEN} bytes in {WRITES} writes, verified");
 }

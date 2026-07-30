@@ -28,13 +28,13 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 
 use interfaces::ILogger;
 use remote_lookup_rdma_initiator::connection::{
-    ConnectTiming, ConnectionTable, ItemPlan, RdmaConn, RdmaError, RdmaTransport,
+    ConnectTiming, ConnectionTable, ItemPlan, RdmaConn, RdmaError, RdmaTransport, WindowWrite,
 };
 use remote_lookup_rdma_initiator::telemetry::TelemetryCollector;
 
 const ENDPOINT: &str = "10.0.0.1:5000";
 
-/// A connection whose write always succeeds without touching hardware.
+/// A connection whose writes always succeed without touching hardware.
 struct BenchConn;
 
 impl RdmaConn for BenchConn {
@@ -42,13 +42,7 @@ impl RdmaConn for BenchConn {
         true
     }
 
-    unsafe fn write(
-        &self,
-        _local: *const u8,
-        _len: usize,
-        _remote_addr: u64,
-        _rkey: u32,
-    ) -> Result<(), RdmaError> {
+    unsafe fn write_window(&self, _writes: &[WindowWrite]) -> Result<(), RdmaError> {
         Ok(())
     }
 }

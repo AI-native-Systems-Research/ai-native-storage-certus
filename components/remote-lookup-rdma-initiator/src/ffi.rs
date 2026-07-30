@@ -316,7 +316,9 @@ extern "C" {
     // Wrappers for inline ibverbs functions (defined in wrapper.c)
     pub fn rdma_test_poll_cq(cq: *mut ibv_cq, num_entries: c_int, wc: *mut ibv_wc) -> c_int;
 
-    // Higher-level C helper that constructs a proper RDMA-write work request.
+    // Higher-level C helper that constructs a proper RDMA-write work request and
+    // posts it without waiting. `wr_id` is echoed back in the completion so a
+    // reaper can tell one window member's completion from another's.
     pub fn rdma_test_rdma_write(
         qp: *mut ibv_qp,
         buf: *mut c_void,
@@ -324,6 +326,7 @@ extern "C" {
         lkey: u32,
         remote_addr: u64,
         rkey: u32,
+        wr_id: u64,
     ) -> c_int;
 
     // RDMA CM functions

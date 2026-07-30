@@ -36,7 +36,7 @@ This Node (has the data)                 Remote Node (wants the data)
 | --------------- | ------------------------------------------------------------------------------------------------------------- |
 | `ffi.rs`        | Raw FFI bindings to libibverbs and librdmacm                                                                  |
 | `wrapper.c`     | C helpers for inline ibverbs functions (`poll_cq`, `rdma_write`)                                              |
-| `rdma.rs`       | Safe wrappers: `client_connect`, `RdmaConnection`, `MemoryRegion` (RAII), QP-health check, `rdma_write_from_pool` |
+| `rdma.rs`       | Safe wrappers: `client_connect`, `RdmaConnection`, `MemoryRegion` (RAII), QP-health check, `post_write_from_pool` + `reap` |
 | `connection.rs` | `ConnectionTable` + per-host state machine, the `RdmaTransport`/`RdmaConn` seam (real + test mock), `ItemPlan` |
 | `lib.rs`        | `RemoteLookupRdmaInitiatorComponent` implementing `IRemoteLookupRdmaInitiator` (`push`/`disconnect`/`disconnect_all`/`set_local_peer_id`)    |
 | `telemetry.rs`  | Feature-gated (`telemetry`) atomic counters                                                                   |
@@ -62,9 +62,25 @@ Connections are kept in a table keyed by `"ip:port"`. A host absent from the
 table is *disconnected*; an entry is *connecting*, *connected*, or
 *disconnecting*. Establishing a RoCE/CM connection takes seconds, so connections
 are reused across calls. Pushes to different hosts run concurrently; pushes to
-the same host serialize on that host's slot. If a queue pair enters the error
-state (or a write fails), the connection is torn down and rebuilt once, then the
-batch is retried.
+the same host serialize on that host's slot, which is also what makes them queue
+behind an in-progress reconnect rather than pile onto a dead queue pair.
+
+### Write windowing
+
+A push posts up to `PUSH_WINDOW` (128, the queue pair's send/completion depth)
+writes before waiting on any completion, then reaps them all. Waiting on each
+write individually caps a flow near 9% of a 200 Gb/s link, because a 64 KiB write
+is ~2.6 µs of wire time but ~28 µs of post/poll overhead. Batches larger than the
+window are split into successive windows.
+
+Recovery is per window, not per write: a failing RDMA_WRITE drives the queue pair
+into the error state, which flushes every other outstanding request, so per-write
+blame cannot be assigned. On a lost window the connection is torn down, rebuilt
+once, and the **entire window replayed**. That replay is safe because a push is
+idempotent until its status is reported — the requester's landing buffers stay
+reserved and unpublished, and it cannot reclaim them without first tearing down
+the connection (SC-005, teardown-before-reclaim). A window that fails again after
+the rebuild reports `UnableToConnect` for its keys.
 
 ### Security Model
 
