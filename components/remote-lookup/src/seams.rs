@@ -101,6 +101,11 @@ struct NodeWorldInner {
     /// Every endpoint this node's initiator was asked to warm via `connect`, in
     /// order — lets tests assert warm-at-discovery (connect-hardening).
     warm_log: Vec<String>,
+    /// Key slices passed to `IDispatcher::promote_to_memory_tier`, one entry per
+    /// call, in order — lets tests assert the responder batches disk→memory
+    /// promotion into a single call per RDMA_REQUEST (so the dispatcher can fan
+    /// the SSD reads out across drives) rather than promoting key-by-key.
+    promote_log: Vec<Vec<CacheKey>>,
     /// Artificial delay applied inside `push` before it returns, so a serve (and
     /// thus the RDMA_STATUS) can be held while other events are processed
     /// (research Decision 8 app-level delays; used by the single-flight test).
@@ -169,6 +174,7 @@ impl NodeWorld {
             rkey: MOCK_RKEY,
             push_log: Vec::new(),
             warm_log: Vec::new(),
+            promote_log: Vec::new(),
             serve_delay: Duration::ZERO,
             lookup_delay: Duration::ZERO,
         };
@@ -274,6 +280,13 @@ impl NodeWorld {
     /// order — used to assert warm-at-discovery (connect-hardening).
     pub fn warms(&self) -> Vec<String> {
         self.lock().warm_log.clone()
+    }
+
+    /// Key slices passed to `IDispatcher::promote_to_memory_tier`, one entry per
+    /// call, in call order — used to assert that a served RDMA_REQUEST promotes
+    /// all of its disk-resident keys in a single batched call.
+    pub fn promote_calls(&self) -> Vec<Vec<CacheKey>> {
+        self.lock().promote_log.clone()
     }
 
     /// Whether a memory-tier landing-slot reservation for `key` is still held
@@ -610,6 +623,7 @@ impl IDispatcher for MockDispatcher {
 
     fn promote_to_memory_tier(&self, keys: &[CacheKey]) {
         let mut inner = self.0.lock();
+        inner.promote_log.push(keys.to_vec());
         for &key in keys {
             if inner.promote_failures.contains(&key) {
                 continue;
