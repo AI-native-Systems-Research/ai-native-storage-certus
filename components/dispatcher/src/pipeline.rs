@@ -326,32 +326,40 @@ pub unsafe fn pipelined_ssd_to_gpu_zero_copy(
                     Ok(()) => {
                         let seg_idx = tag as usize;
                         let seg = &segments[seg_idx];
-                        let copy_len = seg
-                            .length
-                            .min(total_bytes.saturating_sub(seg.buffer_offset));
-                        let current_stream = streams[(completed - 1) % 2];
+                        // The SSD read already landed in the DRAM slot (chunk_bufs
+                        // wrap mem_tier_ptr). A null gpu_dst means "fill the DRAM
+                        // slot only" — the multi-region cold path scatters the slot
+                        // to its N GPU allocations afterwards, so skip the fused
+                        // copy here but keep draining/refilling the read pipeline.
+                        if !gpu_dst.is_null() {
+                            let copy_len = seg
+                                .length
+                                .min(total_bytes.saturating_sub(seg.buffer_offset));
+                            let current_stream = streams[(completed - 1) % 2];
 
-                        let guard = chunk_bufs[seg_idx].lock().unwrap();
-                        let dma = gpu.dma_copy_to_device_async(
-                            &guard,
-                            unsafe {
-                                (gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void
-                            },
-                            copy_len,
-                            current_stream,
-                        );
-                        drop(guard);
-                        if let Err(e) = dma {
-                            if outcome.is_ok() {
-                                outcome = Err(DispatcherError::IoError(format!(
-                                    "GPU async DMA copy (seg {seg_idx}) failed: {e}"
-                                )));
+                            let guard = chunk_bufs[seg_idx].lock().unwrap();
+                            let dma = gpu.dma_copy_to_device_async(
+                                &guard,
+                                unsafe {
+                                    (gpu_dst as *mut u8).add(seg.buffer_offset)
+                                        as *mut std::ffi::c_void
+                                },
+                                copy_len,
+                                current_stream,
+                            );
+                            drop(guard);
+                            if let Err(e) = dma {
+                                if outcome.is_ok() {
+                                    outcome = Err(DispatcherError::IoError(format!(
+                                        "GPU async DMA copy (seg {seg_idx}) failed: {e}"
+                                    )));
+                                }
+                                stop_submitting = true;
+                            } else if completed % PIPELINE_RING_SIZE == 0 {
+                                // Periodically bound GPU queue depth (best-effort).
+                                let _ = gpu.stream_synchronize(streams[0]);
+                                let _ = gpu.stream_synchronize(streams[1]);
                             }
-                            stop_submitting = true;
-                        } else if completed % PIPELINE_RING_SIZE == 0 {
-                            // Periodically bound GPU queue depth (best-effort).
-                            let _ = gpu.stream_synchronize(streams[0]);
-                            let _ = gpu.stream_synchronize(streams[1]);
                         }
                     }
                 }
@@ -579,57 +587,64 @@ pub unsafe fn pipelined_multi_object_zero_copy(
                 } else {
                     completed += 1;
 
-                    let tg = std::time::Instant::now();
                     let job = &jobs[obj_idx];
-                    let obj = &all_objs[obj_idx];
-                    let seg = &obj.segments[seg_idx];
-                    let copy_len = seg
-                        .length
-                        .min(job.total_bytes.saturating_sub(seg.buffer_offset));
-                    let current_stream = streams[stream_idx % 2];
+                    // The SSD read already landed in the DRAM slot (chunk_bufs wrap
+                    // job.mem_ptr). A null gpu_dst means "fill the DRAM slot only" —
+                    // the multi-region cold path scatters the slot to its N GPU
+                    // allocations afterwards, so skip the fused copy here.
+                    if !job.gpu_dst.is_null() {
+                        let tg = std::time::Instant::now();
+                        let obj = &all_objs[obj_idx];
+                        let seg = &obj.segments[seg_idx];
+                        let copy_len = seg
+                            .length
+                            .min(job.total_bytes.saturating_sub(seg.buffer_offset));
+                        let current_stream = streams[stream_idx % 2];
 
-                    let guard = obj.chunk_bufs[seg_idx].lock().unwrap();
-                    let dma_result = gpu.dma_copy_to_device_async(
-                        &guard,
-                        unsafe {
-                            (job.gpu_dst as *mut u8).add(seg.buffer_offset) as *mut std::ffi::c_void
-                        },
-                        copy_len,
-                        current_stream,
-                    );
-                    drop(guard);
-
-                    if let Err(e) = dma_result {
-                        // DIAGNOSTIC (temporary): distinguish a stream/device
-                        // mismatch from an out-of-bounds segment on the cold path.
-                        let dst = unsafe { (job.gpu_dst as *mut u8).add(seg.buffer_offset) };
-                        let base_dev = gpu.device_of_ptr(job.gpu_dst).unwrap_or(-99);
-                        let dst_dev = gpu
-                            .device_of_ptr(dst as *const std::ffi::c_void)
-                            .unwrap_or(-99);
-                        eprintln!(
-                            "[pipeline] COLD DMA FAIL obj={obj_idx} seg={seg_idx} err='{e}' \
-                             gpu_dst={:p} base_dev={base_dev} dst={dst:p} dst_dev={dst_dev} \
-                             buf_offset={} seg_len={} copy_len={copy_len} total_bytes={} stream={:p}",
-                            job.gpu_dst,
-                            seg.buffer_offset,
-                            seg.length,
-                            job.total_bytes,
-                            current_stream.0,
+                        let guard = obj.chunk_bufs[seg_idx].lock().unwrap();
+                        let dma_result = gpu.dma_copy_to_device_async(
+                            &guard,
+                            unsafe {
+                                (job.gpu_dst as *mut u8).add(seg.buffer_offset)
+                                    as *mut std::ffi::c_void
+                            },
+                            copy_len,
+                            current_stream,
                         );
-                        results[obj_idx] = Err(DispatcherError::IoError(format!(
-                            "GPU DMA obj={obj_idx} seg={seg_idx}: {e}"
-                        )));
-                    }
-                    t_gpu_ns += tg.elapsed().as_nanos() as u64;
+                        drop(guard);
 
-                    stream_idx += 1;
+                        if let Err(e) = dma_result {
+                            // DIAGNOSTIC (temporary): distinguish a stream/device
+                            // mismatch from an out-of-bounds segment on the cold path.
+                            let dst = unsafe { (job.gpu_dst as *mut u8).add(seg.buffer_offset) };
+                            let base_dev = gpu.device_of_ptr(job.gpu_dst).unwrap_or(-99);
+                            let dst_dev = gpu
+                                .device_of_ptr(dst as *const std::ffi::c_void)
+                                .unwrap_or(-99);
+                            eprintln!(
+                                "[pipeline] COLD DMA FAIL obj={obj_idx} seg={seg_idx} err='{e}' \
+                                 gpu_dst={:p} base_dev={base_dev} dst={dst:p} dst_dev={dst_dev} \
+                                 buf_offset={} seg_len={} copy_len={copy_len} total_bytes={} stream={:p}",
+                                job.gpu_dst,
+                                seg.buffer_offset,
+                                seg.length,
+                                job.total_bytes,
+                                current_stream.0,
+                            );
+                            results[obj_idx] = Err(DispatcherError::IoError(format!(
+                                "GPU DMA obj={obj_idx} seg={seg_idx}: {e}"
+                            )));
+                        }
+                        t_gpu_ns += tg.elapsed().as_nanos() as u64;
 
-                    if stream_idx % PIPELINE_RING_SIZE == 0 {
-                        let ts = std::time::Instant::now();
-                        let _ = gpu.stream_synchronize(streams[0]);
-                        let _ = gpu.stream_synchronize(streams[1]);
-                        t_sync_ns += ts.elapsed().as_nanos() as u64;
+                        stream_idx += 1;
+
+                        if stream_idx % PIPELINE_RING_SIZE == 0 {
+                            let ts = std::time::Instant::now();
+                            let _ = gpu.stream_synchronize(streams[0]);
+                            let _ = gpu.stream_synchronize(streams[1]);
+                            t_sync_ns += ts.elapsed().as_nanos() as u64;
+                        }
                     }
                 }
 

@@ -1561,7 +1561,10 @@ impl IDispatcher for DispatcherP2pComponent {
         Ok(())
     }
 
-    fn batch_lookup(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> {
+    fn batch_lookup(
+        &self,
+        entries: &[(CacheKey, Vec<IpcHandle>)],
+    ) -> Vec<Result<(), DispatcherError>> {
         if entries.is_empty() {
             return Vec::new();
         }
@@ -1611,8 +1614,19 @@ impl IDispatcher for DispatcherP2pComponent {
 
         let mut cold_entries: Vec<ColdEntry> = Vec::new();
 
-        for (i, (key, ipc_handle)) in entries.iter().enumerate() {
+        for (i, (key, regions)) in entries.iter().enumerate() {
             let key = *key;
+            // dispatcher-p2p performs a single contiguous P2P read straight into the
+            // caller's GPU buffer; it has no DRAM-staging scatter path, so it cannot
+            // land N non-contiguous per-layer regions. Multi-region (N>1) blocks are
+            // unsupported here — fail cleanly rather than silently offloading region 0.
+            if regions.len() != 1 {
+                results[i] = Some(Err(DispatcherError::InvalidParameter(
+                    "dispatcher-p2p does not support multi-region (N>1) blocks".into(),
+                )));
+                continue;
+            }
+            let ipc_handle = &regions[0];
             match dm.lookup(key) {
                 Ok(lookup_result) => match lookup_result {
                     LookupResult::NotExist => {
@@ -1891,8 +1905,10 @@ impl IDispatcher for DispatcherP2pComponent {
                 let remote_entries: Vec<(CacheKey, u32)> = not_found
                     .iter()
                     .map(|&i| {
-                        let (key, handle) = &entries[i];
-                        (*key, handle.size)
+                        // Only single-region entries reach KeyNotFound (N>1 short-circuits
+                        // to InvalidParameter above), so regions[0] is always present here.
+                        let (key, regions) = &entries[i];
+                        (*key, regions[0].size)
                     })
                     .collect();
 
@@ -1948,7 +1964,7 @@ impl IDispatcher for DispatcherP2pComponent {
 
                 for (pos, remote_res) in not_found.iter().zip(remote_results.into_iter()) {
                     let res = match remote_res {
-                        Ok(()) => deliver(entries[*pos].0, &entries[*pos].1),
+                        Ok(()) => deliver(entries[*pos].0, &entries[*pos].1[0]),
                         Err(e) => Err(DispatcherError::IoError(format!("remote lookup: {e}"))),
                     };
                     results[*pos] = Some(res);
@@ -2144,7 +2160,7 @@ impl IDispatcher for DispatcherP2pComponent {
             .get()
             .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
         let stream = GpuStream(self.warm_stream.load(Ordering::Acquire) as *mut std::ffi::c_void);
-        self.copy_gpu_to_memory_async(key, ipc_handle, stream)?;
+        self.copy_gpu_to_memory_async(key, std::slice::from_ref(&ipc_handle), stream)?;
         gpu.stream_synchronize(stream)
             .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
 
@@ -2209,10 +2225,20 @@ impl IDispatcher for DispatcherP2pComponent {
     fn copy_gpu_to_memory_async(
         &self,
         key: CacheKey,
-        ipc_handle: IpcHandle,
+        regions: &[IpcHandle],
         stream: GpuStream,
     ) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
+
+        // dispatcher-p2p wraps the whole slot in a single DmaBuffer for one contiguous
+        // GPU->DRAM copy; it has no per-region gather path. Multi-region (N>1) blocks
+        // are unsupported here — fail cleanly rather than storing only region 0.
+        if regions.len() != 1 {
+            return Err(DispatcherError::InvalidParameter(
+                "dispatcher-p2p does not support multi-region (N>1) blocks".into(),
+            ));
+        }
+        let ipc_handle = &regions[0];
 
         let mt = self
             .memory_tier
