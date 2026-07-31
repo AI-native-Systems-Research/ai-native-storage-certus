@@ -55,7 +55,8 @@ fn populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), Dispatche
     let size: u32 = ipc_handle.size;
 
     // Phase 1: Evict if needed and RESERVE a memory-tier slot (mt.insert inside).
-    let _mem_ptr = self.reserve_memory(key, size)?;                    // (1)
+    // Internal populate path has no client session context (session_id = 0).
+    let _mem_ptr = self.reserve_memory(key, size, 0)?;                 // (1)
 
     // Phase 2: Async DMA copy GPU -> reserved slot, then wait for it.
     self.copy_gpu_to_memory_async(key, ipc_handle, stream)?;          // (2a)  <-- can fail

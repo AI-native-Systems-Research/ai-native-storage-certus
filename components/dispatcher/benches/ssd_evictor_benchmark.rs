@@ -122,7 +122,9 @@ impl IDispatchMap for EvictorBenchMap {
     }
 
     fn try_evict_to_block(&self, _key: CacheKey) -> Result<(), DispatchMapError> {
-        Err(DispatchMapError::InvalidState("not supported in mock".into()))
+        Err(DispatchMapError::InvalidState(
+            "not supported in mock".into(),
+        ))
     }
 
     fn recover_extent(
@@ -158,11 +160,11 @@ impl IMemoryTier for NoopMemoryTier {
         None
     }
 
-    fn evict_lru(&self) -> Option<CacheKey> {
+    fn evict_next(&self) -> Option<CacheKey> {
         None
     }
 
-    fn evict_lru_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+    fn evict_next_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
         None
     }
 

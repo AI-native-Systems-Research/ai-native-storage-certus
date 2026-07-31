@@ -465,15 +465,15 @@ impl IMemoryTier for MockMemoryTier {
         inner.slots.keys().take(n).copied().collect()
     }
 
-    fn evict_lru(&self) -> Option<CacheKey> {
+    fn evict_next(&self) -> Option<CacheKey> {
         let mut inner = self.inner.lock().unwrap();
         let key = inner.slots.keys().next().copied()?;
         inner.slots.remove(&key);
         Some(key)
     }
 
-    fn evict_lru_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
-        self.evict_lru()
+    fn evict_next_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+        self.evict_next()
     }
 
     fn remove(&self, key: CacheKey) -> Result<(), MemoryTierError> {

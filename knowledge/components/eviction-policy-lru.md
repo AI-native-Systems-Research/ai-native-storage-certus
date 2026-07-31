@@ -6,7 +6,7 @@
 
 ## Description
 
-LRU eviction policy component. Manages multiple independent eviction pools, each backed by an intrinsic doubly-linked list. Provides O(1) track/touch/remove and O(1) pop-oldest for eviction. Used by the memory-tier and dispatch-map components to determine which cache entries to evict when capacity is exhausted.
+LRU eviction policy component. Manages multiple independent eviction pools, each backed by an intrinsic doubly-linked list. Provides O(1) track/touch/remove and O(1) identify-next-to-evict. Used by the memory-tier and dispatch-map components to determine which cache entries to evict when capacity is exhausted.
 
 ## Component Definition
 
@@ -30,8 +30,8 @@ define_interface! {
         fn touch(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError>;
         fn batch_touch(&self, handles: &[EvictionHandle]) -> Result<(), EvictionPolicyError>;
         fn remove(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError>;
-        fn pop_oldest(&self, pool: PoolId) -> Option<CacheKey>;
-        fn peek_oldest(&self, pool: PoolId, n: usize) -> Vec<CacheKey>;
+        fn identify_next_to_evict(&self, pool: PoolId) -> Option<CacheKey>;
+        fn get_eviction_candidates(&self, pool: PoolId, n: usize) -> Vec<CacheKey>;
         fn len(&self, pool: PoolId) -> usize;
         fn clear_pool(&self, pool: PoolId);
     }

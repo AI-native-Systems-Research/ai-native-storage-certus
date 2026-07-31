@@ -55,7 +55,7 @@ pub enum DispatchMapError {
 | `downgrade_reference` | `(&self, key: CacheKey) -> Result<(), DispatchMapError>` | Atomically: write_ref=0, read_ref+=1. Error (`NoWriteReference`) if no write ref held. Notifies via condvar. |
 | `remove` | `(&self, key: CacheKey) -> Result<(), DispatchMapError>` | Delete entry. Error (`ActiveReferences`) if any refs active; error (`KeyNotFound`) if key not found. |
 | `touch` | `(&self, key: CacheKey) -> Result<(), DispatchMapError>` | Refresh the entry's eviction priority via `IEvictionPolicy::touch(handle)` without taking any reference. Error (`KeyNotFound`) if key not found. |
-| `oldest_keys` | `(&self, n: usize) -> Vec<CacheKey>` | Delegates to `IEvictionPolicy::peek_oldest(pool, n)`; returns up to `n` keys oldest-first. Used by the dispatcher's eviction logic to select victims. |
+| `oldest_keys` | `(&self, n: usize) -> Vec<CacheKey>` | Delegates to `IEvictionPolicy::get_eviction_candidates(pool, n)`; returns up to `n` keys oldest-first. Used by the dispatcher's eviction logic to select victims. |
 | `entry_size` | `(&self, key: CacheKey) -> Result<u32, DispatchMapError>` | Returns the stored size in block-aligned bytes (`size_blocks * 4096`) without acquiring any reference. Error (`KeyNotFound`) if key not found. |
 | `recover_extent` | `(&self, key: CacheKey, offset: u64, size_blocks: u32) -> Result<(), DispatchMapError>` | Directly inserts a `BlockDevice` entry and registers it with `IEvictionPolicy`, for incremental recovery. Error (`AlreadyExists`) if key already present. |
 

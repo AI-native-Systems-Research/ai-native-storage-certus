@@ -1,13 +1,14 @@
 //! Memory-tier component for the Certus storage system.
 //!
-//! Provides a DRAM-resident cache pool with LRU eviction. Objects are
+//! Provides a DRAM-resident cache pool with pluggable eviction (delegated to a
+//! bound `IEvictionPolicy`). Objects are
 //! allocated from a contiguous pre-allocated pool and tracked by key.
 //! The pool uses a first-fit free-list allocator with 4 KiB alignment.
 //!
 //! Uses a single `RwLock<Pool>` for concurrency: read operations (`get`,
 //! `peek`, `batch_touch`, `contains`) take a shared lock while mutations
-//! (`insert`, `remove`, `evict`) take an exclusive lock. LRU touches are
-//! performed after releasing the pool lock (the eviction policy has its
+//! (`insert`, `remove`, `evict`) take an exclusive lock. Eviction-order touches
+//! are performed after releasing the pool lock (the eviction policy has its
 //! own internal synchronization).
 //!
 //! Provides the [`IMemoryTier`] interface with receptacles for [`ILogger`]
@@ -428,7 +429,7 @@ impl IMemoryTier for MemoryTierComponent {
         ep.get_eviction_candidates(state.pool_id, n)
     }
 
-    fn evict_lru(&self) -> Option<CacheKey> {
+    fn evict_next(&self) -> Option<CacheKey> {
         let state = self.state.read().unwrap();
         if !state.initialized.load(Ordering::Acquire) {
             return None;
@@ -462,8 +463,8 @@ impl IMemoryTier for MemoryTierComponent {
         }
     }
 
-    fn evict_lru_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
-        self.evict_lru()
+    fn evict_next_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+        self.evict_next()
     }
 
     fn remove(&self, key: CacheKey) -> Result<(), MemoryTierError> {
@@ -697,12 +698,12 @@ mod tests {
     }
 
     #[test]
-    fn evict_lru_returns_some() {
+    fn evict_next_returns_some() {
         let c = setup();
         let mt = query_interface!(c, IMemoryTier).unwrap();
         mt.insert(0, 4096).unwrap();
         mt.insert(1, 4096).unwrap();
-        let evicted = mt.evict_lru();
+        let evicted = mt.evict_next();
         assert!(evicted.is_some());
     }
 
@@ -749,7 +750,7 @@ mod tests {
     }
 
     #[test]
-    fn touch_updates_lru() {
+    fn touch_updates_eviction_order() {
         let c = setup();
         let mt = query_interface!(c, IMemoryTier).unwrap();
         mt.insert(0, 4096).unwrap();
@@ -758,11 +759,11 @@ mod tests {
         // Touch key 0 — makes it most recently used.
         mt.touch(0);
         // Evict should return key 1 (oldest untouched).
-        assert_eq!(mt.evict_lru(), Some(1));
+        assert_eq!(mt.evict_next(), Some(1));
     }
 
     #[test]
-    fn peek_does_not_update_lru() {
+    fn peek_does_not_update_eviction_order() {
         let c = setup();
         let mt = query_interface!(c, IMemoryTier).unwrap();
         mt.insert(0, 4096).unwrap();
