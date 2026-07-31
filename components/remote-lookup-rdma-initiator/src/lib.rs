@@ -56,7 +56,7 @@ use crate::connection::{ConnectionTable, ItemPlan, RealTransport};
 /// A no-op logger used when the `logger` receptacle is unbound, so that a
 /// missing (optional) logger never turns a `push` into an error.
 #[cfg(feature = "rdma")]
-struct NoopLogger;
+pub(crate) struct NoopLogger;
 #[cfg(feature = "rdma")]
 impl ILogger for NoopLogger {
     fn error(&self, _msg: &str) {}
@@ -64,8 +64,6 @@ impl ILogger for NoopLogger {
     fn info(&self, _msg: &str) {}
     fn debug(&self, _msg: &str) {}
 }
-#[cfg(feature = "rdma")]
-static NOOP_LOGGER: NoopLogger = NoopLogger;
 
 define_component! {
     pub RemoteLookupRdmaInitiatorComponent {
@@ -118,9 +116,16 @@ impl RemoteLookupRdmaInitiatorComponent {
             .as_ref()
             .map(|p| p.as_str().as_bytes().to_vec())
             .unwrap_or_default();
+        // The connection threads outlive any single call, so the table owns a logger
+        // rather than borrowing one per push.
+        let logger: Arc<dyn ILogger + Send + Sync> = match self.logger.get() {
+            Ok(l) => l,
+            Err(_) => Arc::new(NoopLogger),
+        };
         let built = Arc::new(ConnectionTable::new(
-            Box::new(RealTransport::new(base, size, peer_bytes)),
+            Arc::new(RealTransport::new(base, size, peer_bytes)),
             Arc::clone(&self.telemetry),
+            logger,
         ));
         // If another thread won the race, its table is the canonical one and
         // ours is dropped; either way `get()` returns the winner.
@@ -129,35 +134,24 @@ impl RemoteLookupRdmaInitiatorComponent {
     }
 }
 
-impl IRemoteLookupRdmaInitiator for RemoteLookupRdmaInitiatorComponent {
-    #[cfg(not(feature = "rdma"))]
-    fn push(
+#[cfg(feature = "rdma")]
+impl RemoteLookupRdmaInitiatorComponent {
+    /// Resolve each item against the local memory tier, returning the connection
+    /// table and a per-item plan.
+    ///
+    /// Absent keys and size mismatches get a terminal status here and never reach the
+    /// wire; a match becomes a planned write from the pool pointer `peek` returns.
+    /// Deliberately `peek` and not `get`, so serving a remote request does not
+    /// refresh local LRU position.
+    fn plan(
         &self,
-        _endpoint: &str,
-        _items: &[(CacheKey, RemoteRegion)],
-    ) -> Result<Vec<PushStatus>, RemoteLookupRdmaInitiatorError> {
-        // Built without the real rdma-core path; the outbound RDMA push is
-        // unavailable. (The connection-table logic is still unit-tested over the
-        // mock transport in `connection`.)
-        Err(RemoteLookupRdmaInitiatorError::NotInitialized(
-            "remote-lookup-rdma-initiator built without the `rdma` feature".into(),
-        ))
-    }
-
-    #[cfg(feature = "rdma")]
-    fn push(
-        &self,
-        endpoint: &str,
         items: &[(CacheKey, RemoteRegion)],
-    ) -> Result<Vec<PushStatus>, RemoteLookupRdmaInitiatorError> {
+    ) -> Result<(Arc<ConnectionTable>, Vec<ItemPlan>), RemoteLookupRdmaInitiatorError> {
         let memory_tier = self.memory_tier.get().map_err(|_| {
             RemoteLookupRdmaInitiatorError::NotInitialized("memory_tier receptacle unbound".into())
         })?;
         let table = self.table(memory_tier.as_ref())?;
 
-        // Resolve each item against the local memory tier before touching RDMA:
-        // absent keys and size mismatches get a terminal status; matches become
-        // a planned write from the pool pointer returned by `peek`.
         let mut resolved = Vec::with_capacity(items.len());
         for (key, region) in items {
             match memory_tier.peek(*key) {
@@ -176,13 +170,58 @@ impl IRemoteLookupRdmaInitiator for RemoteLookupRdmaInitiatorComponent {
                 }
             }
         }
+        Ok((table, resolved))
+    }
+}
 
-        let logger = self.logger.get().ok();
-        let log_ref: &dyn ILogger = match logger.as_deref() {
-            Some(l) => l,
-            None => &NOOP_LOGGER,
-        };
-        table.push(endpoint, resolved, log_ref)
+impl IRemoteLookupRdmaInitiator for RemoteLookupRdmaInitiatorComponent {
+    #[cfg(not(feature = "rdma"))]
+    fn push_async(
+        &self,
+        _endpoint: &str,
+        _items: &[(CacheKey, RemoteRegion)],
+        _on_complete: interfaces::PushCompletion,
+    ) -> Result<(), RemoteLookupRdmaInitiatorError> {
+        // Built without the real rdma-core path; the outbound RDMA push is
+        // unavailable. (The submit/completion engine is still unit-tested over the
+        // mock transport in `connection`.) Returning `Err` drops the callback
+        // without invoking it, which the interface documents as equivalent for a
+        // callback that releases its resources on drop.
+        Err(RemoteLookupRdmaInitiatorError::NotInitialized(
+            "remote-lookup-rdma-initiator built without the `rdma` feature".into(),
+        ))
+    }
+
+    #[cfg(feature = "rdma")]
+    fn push_async(
+        &self,
+        endpoint: &str,
+        items: &[(CacheKey, RemoteRegion)],
+        on_complete: interfaces::PushCompletion,
+    ) -> Result<(), RemoteLookupRdmaInitiatorError> {
+        let (table, resolved) = self.plan(items)?;
+        table.push_async(endpoint, resolved, on_complete)
+    }
+
+    #[cfg(not(feature = "rdma"))]
+    fn push(
+        &self,
+        _endpoint: &str,
+        _items: &[(CacheKey, RemoteRegion)],
+    ) -> Result<Vec<PushStatus>, RemoteLookupRdmaInitiatorError> {
+        Err(RemoteLookupRdmaInitiatorError::NotInitialized(
+            "remote-lookup-rdma-initiator built without the `rdma` feature".into(),
+        ))
+    }
+
+    #[cfg(feature = "rdma")]
+    fn push(
+        &self,
+        endpoint: &str,
+        items: &[(CacheKey, RemoteRegion)],
+    ) -> Result<Vec<PushStatus>, RemoteLookupRdmaInitiatorError> {
+        let (table, resolved) = self.plan(items)?;
+        table.push(endpoint, resolved)
     }
 
     #[cfg(not(feature = "rdma"))]
@@ -199,13 +238,7 @@ impl IRemoteLookupRdmaInitiator for RemoteLookupRdmaInitiatorComponent {
             RemoteLookupRdmaInitiatorError::NotInitialized("memory_tier receptacle unbound".into())
         })?;
         let table = self.table(memory_tier.as_ref())?;
-
-        let logger = self.logger.get().ok();
-        let log_ref: &dyn ILogger = match logger.as_deref() {
-            Some(l) => l,
-            None => &NOOP_LOGGER,
-        };
-        table.connect(endpoint, log_ref)
+        table.connect(endpoint)
     }
 
     fn disconnect(&self, endpoint: &str) {

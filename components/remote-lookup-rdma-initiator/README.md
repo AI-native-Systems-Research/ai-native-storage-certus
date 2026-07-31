@@ -16,7 +16,7 @@ fulfills the request by pushing the data out over RDMA.
 ```
 This Node (has the data)                 Remote Node (wants the data)
 ┌───────────────────────────┐            ┌──────────────────────────┐
-│  remote-lookup  ──push()─▶ │            │  remote-lookup           │
+│  remote-lookup ─push_async▶│            │  remote-lookup           │
 │  remote-lookup-rdma-initiator    │            │  (rdma_cm accept +       │
 │  ┌──────────────────────┐  │            │   registered recv bufs)  │
 │  │  ConnectionTable     │──rdma_connect─▶                          │
@@ -36,20 +36,28 @@ This Node (has the data)                 Remote Node (wants the data)
 | --------------- | ------------------------------------------------------------------------------------------------------------- |
 | `ffi.rs`        | Raw FFI bindings to libibverbs and librdmacm                                                                  |
 | `wrapper.c`     | C helpers for inline ibverbs functions (`poll_cq`, `rdma_write`)                                              |
-| `rdma.rs`       | Safe wrappers: `client_connect`, `RdmaConnection`, `MemoryRegion` (RAII), QP-health check, `rdma_write_from_pool` |
-| `connection.rs` | `ConnectionTable` + per-host state machine, the `RdmaTransport`/`RdmaConn` seam (real + test mock), `ItemPlan` |
-| `lib.rs`        | `RemoteLookupRdmaInitiatorComponent` implementing `IRemoteLookupRdmaInitiator` (`push`/`disconnect`/`disconnect_all`/`set_local_peer_id`)    |
+| `rdma.rs`       | Safe wrappers: `client_connect`, `RdmaConnection`, `MemoryRegion` (RAII), QP-health check, `post_write_from_pool` + non-blocking `poll_completions` |
+| `connection.rs` | `ConnectionTable` + the per-host submit/completion thread, the `RdmaTransport`/`RdmaConn` seam (real + test mock), `ItemPlan`, `Completion` |
+| `lib.rs`        | `RemoteLookupRdmaInitiatorComponent` implementing `IRemoteLookupRdmaInitiator` (`push_async`/`push`/`connect`/`disconnect`/`disconnect_all`/`set_local_peer_id`) |
 | `telemetry.rs`  | Feature-gated (`telemetry`) atomic counters                                                                   |
 
 ### Interface
 
 `IRemoteLookupRdmaInitiator` (in the `interfaces` crate):
 
+- `push_async(endpoint, items, on_complete) -> Result<(), RemoteLookupRdmaInitiatorError>` —
+  queue the batch and return without waiting. Connect (reuse/repair), look up each
+  key locally, RDMA-write matches; `on_complete` then receives one `PushStatus`
+  (`Success` / `UnableToConnect` / `KeyNotFound` / `SizeMismatch`) per item, in
+  order. Invoked exactly once per accepted batch, on every outcome — including
+  teardown with the batch still in flight. Because the NIC keeps reading the local
+  buffers after submission returns, whatever keeps them alive (a dispatch-map read
+  pin, in practice) must be owned by `on_complete`, not released at the call site.
 - `push(endpoint, items) -> Result<Vec<PushStatus>, RemoteLookupRdmaInitiatorError>` —
-  connect (reuse/repair), look up each key locally, RDMA-write matches. Returns
-  one `PushStatus` (`Success` / `UnableToConnect` / `KeyNotFound` / `SizeMismatch`)
-  per item, in order.
-- `disconnect(endpoint)` — tear down one host's connection (idempotent).
+  blocking convenience wrapper over `push_async`, for callers with nothing to
+  overlap.
+- `disconnect(endpoint)` — tear down one host's connection (idempotent). Blocks
+  until that host's thread has exited, so on return its queue pair is destroyed.
 - `disconnect_all()` — tear down all connections.
 - `set_local_peer_id(peer)` — supply this node's zyre `PeerId`; it is stamped into
   the `rdma_cm` connect `private_data` on every outbound connection so the remote
@@ -62,9 +70,25 @@ Connections are kept in a table keyed by `"ip:port"`. A host absent from the
 table is *disconnected*; an entry is *connecting*, *connected*, or
 *disconnecting*. Establishing a RoCE/CM connection takes seconds, so connections
 are reused across calls. Pushes to different hosts run concurrently; pushes to
-the same host serialize on that host's slot. If a queue pair enters the error
-state (or a write fails), the connection is torn down and rebuilt once, then the
-batch is retried.
+the same host serialize on that host's slot, which is also what makes them queue
+behind an in-progress reconnect rather than pile onto a dead queue pair.
+
+### Write windowing
+
+A push posts up to `PUSH_WINDOW` (128, the queue pair's send/completion depth)
+writes before waiting on any completion, then reaps them all. Waiting on each
+write individually caps a flow near 9% of a 200 Gb/s link, because a 64 KiB write
+is ~2.6 µs of wire time but ~28 µs of post/poll overhead. Batches larger than the
+window are split into successive windows.
+
+Recovery is per window, not per write: a failing RDMA_WRITE drives the queue pair
+into the error state, which flushes every other outstanding request, so per-write
+blame cannot be assigned. On a lost window the connection is torn down, rebuilt
+once, and the **entire window replayed**. That replay is safe because a push is
+idempotent until its status is reported — the requester's landing buffers stay
+reserved and unpublished, and it cannot reclaim them without first tearing down
+the connection (SC-005, teardown-before-reclaim). A window that fails again after
+the rebuild reports `UnableToConnect` for its keys.
 
 ### Security Model
 

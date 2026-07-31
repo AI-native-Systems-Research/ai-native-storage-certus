@@ -30,6 +30,45 @@ use queue::RingBuffer;
 
 pub use spsc::SpscChannel;
 
+/// Iterations of `spin_loop` hinting before escalating to yielding.
+///
+/// Covers the common case where the peer is about to make progress on another
+/// core, so the wait costs no syscall at all.
+const SPIN_LIMIT: u32 = 64;
+
+/// Iterations before escalating from yielding to parking.
+///
+/// Yielding hands the core to a peer that may be runnable but not scheduled.
+/// It is a syscall, so it is a *transition* strategy, never a resting state.
+const YIELD_LIMIT: u32 = 256;
+
+/// How long a blocked sender/receiver parks before re-checking.
+///
+/// A bound on the wake-up race, not the wake-up mechanism: the peer calls
+/// `unpark` as soon as it makes the queue non-empty (or non-full), so this only
+/// caps the window where the peer acted between our last check and our park.
+const PARK_INTERVAL: std::time::Duration = std::time::Duration::from_micros(50);
+
+/// Advance the wait counter, saturating once parking is reached.
+///
+/// Saturating is the point. An earlier version reset the counter to
+/// [`SPIN_LIMIT`] after parking, intending "stop spinning, keep yielding and
+/// parking" — but [`SPIN_LIMIT`] is the *bottom* of the yield band, so a waiter
+/// that had already parked went back to roughly 191 `sched_yield` calls per 50 µs
+/// park, forever. An idle waiter never settled into blocking and burned most of a
+/// core. Saturating here keeps a waiter that has parked once parking from then on.
+///
+/// It also stops the counter growing without bound, which would overflow in a
+/// debug build for a waiter blocked long enough.
+#[inline]
+fn escalate(spins: u32) -> u32 {
+    if spins >= YIELD_LIMIT {
+        YIELD_LIMIT
+    } else {
+        spins + 1
+    }
+}
+
 /// Interface trait for sending typed messages through a channel.
 ///
 /// This is the component-model interface for message producers. Components
@@ -219,10 +258,10 @@ impl<T: Send + 'static> Sender<T> {
                 }
                 Err(returned) => {
                     val = returned;
-                    spins += 1;
-                    if spins < 64 {
+                    spins = escalate(spins);
+                    if spins < SPIN_LIMIT {
                         std::hint::spin_loop();
-                    } else if spins < 256 {
+                    } else if spins < YIELD_LIMIT {
                         thread::yield_now();
                     } else {
                         {
@@ -230,7 +269,7 @@ impl<T: Send + 'static> Sender<T> {
                             *guard = Some(thread::current());
                         }
                         self.state.sender_parked.store(true, Ordering::Release);
-                        thread::park_timeout(std::time::Duration::from_micros(50));
+                        thread::park_timeout(PARK_INTERVAL);
                         self.state.sender_parked.store(false, Ordering::Relaxed);
                     }
                 }
@@ -386,10 +425,10 @@ impl<T: Send + 'static> Receiver<T> {
                 return Err(ChannelError::Closed);
             }
 
-            spins += 1;
-            if spins < 64 {
+            spins = escalate(spins);
+            if spins < SPIN_LIMIT {
                 std::hint::spin_loop();
-            } else if spins < 256 {
+            } else if spins < YIELD_LIMIT {
                 thread::yield_now();
             } else {
                 {
@@ -397,9 +436,8 @@ impl<T: Send + 'static> Receiver<T> {
                     *guard = Some(thread::current());
                 }
                 self.state.receiver_parked.store(true, Ordering::Release);
-                thread::park_timeout(std::time::Duration::from_micros(50));
+                thread::park_timeout(PARK_INTERVAL);
                 self.state.receiver_parked.store(false, Ordering::Relaxed);
-                spins = 64; // don't re-spin, but keep yielding/parking
             }
         }
     }
@@ -479,6 +517,86 @@ unsafe impl<T: Send + 'static> Sync for Receiver<T> {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The wait counter must saturate rather than fall back into the yield band,
+    /// which is what made an idle waiter spin on `sched_yield` indefinitely.
+    #[test]
+    fn escalate_saturates_at_the_park_threshold() {
+        assert_eq!(escalate(0), 1, "starts in the spin band");
+        assert_eq!(
+            escalate(SPIN_LIMIT - 1),
+            SPIN_LIMIT,
+            "crosses into yielding"
+        );
+        assert_eq!(
+            escalate(YIELD_LIMIT - 1),
+            YIELD_LIMIT,
+            "crosses into parking"
+        );
+        assert_eq!(
+            escalate(YIELD_LIMIT),
+            YIELD_LIMIT,
+            "stays parked once parking: never drops back to yielding"
+        );
+        assert_eq!(escalate(u32::MAX), YIELD_LIMIT, "cannot overflow");
+    }
+
+    /// CPU time of the thread identified by `tid`, in microseconds, from
+    /// `utime + stime` in `/proc`. Linux-only, like the rest of this crate.
+    fn thread_cpu_us(tid: i64) -> u64 {
+        let stat = std::fs::read_to_string(format!("/proc/self/task/{tid}/stat")).unwrap();
+        // Fields after the (possibly space-containing) comm are positional:
+        // utime is 14th and stime 15th overall, i.e. 12th and 13th after ')'.
+        let after = &stat[stat.rfind(')').unwrap() + 2..];
+        let f: Vec<&str> = after.split_whitespace().collect();
+        let ticks: u64 = f[11].parse::<u64>().unwrap() + f[12].parse::<u64>().unwrap();
+        // USER_HZ is 100 on every Linux target this runs on.
+        ticks * 10_000
+    }
+
+    /// A receiver blocked on an empty channel must actually *block*, not spin.
+    ///
+    /// This is a regression test for a real bug with a real cost: the escalation
+    /// counter used to reset into the yield band after parking, so an idle
+    /// receiver issued roughly 191 `sched_yield` syscalls per 50 µs park and burned
+    /// most of a core forever. One such thread — a channel-to-eventfd bridge that
+    /// relays a handful of teardown messages — was measured at 65% of a core on an
+    /// otherwise idle server.
+    ///
+    /// Asserts on CPU time rather than wall time so a loaded machine cannot make it
+    /// flaky, with a wide margin: parked should be ~1% of wall, spinning was ~65%.
+    #[test]
+    fn an_idle_receiver_blocks_instead_of_spinning() {
+        let ch = SpscChannel::<u32>::new(4);
+        let rx = ch.receiver().unwrap();
+        let _tx = ch.sender().unwrap(); // keep the channel open so recv waits
+
+        let (tid_tx, tid_rx) = std::sync::mpsc::channel();
+        let waiter = thread::spawn(move || {
+            // SAFETY: `gettid` takes no arguments and only reads the caller's id.
+            tid_tx.send(unsafe { libc::gettid() } as i64).unwrap();
+            // Blocks until the channel closes when `_tx`/`ch` drop.
+            let _ = rx.recv();
+        });
+        let tid = tid_rx.recv().unwrap();
+
+        let wall = std::time::Duration::from_millis(400);
+        let before = thread_cpu_us(tid);
+        thread::sleep(wall);
+        let used = thread_cpu_us(tid).saturating_sub(before);
+
+        let budget = wall.as_micros() as u64 / 4; // 25% of wall
+        assert!(
+            used < budget,
+            "idle receiver burned {used}us of CPU over {}us of wall clock \
+             (budget {budget}us) — it is spinning, not blocking",
+            wall.as_micros()
+        );
+
+        drop(_tx);
+        drop(ch);
+        waiter.join().unwrap();
+    }
 
     #[test]
     fn channel_error_display() {

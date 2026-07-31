@@ -14,10 +14,18 @@
 //!   [`ActorMsg::PushComplete`]; the poll loop owns the zyre node and whispers
 //!   the RDMA_STATUS.
 //!
-//! Mirrors the responder's command-channel thread pattern. A single worker
-//! serializes serves, so a cold serve can briefly head-of-line-block a serve to
-//! another peer; warming makes connections hot before real traffic, keeping that
-//! window small. (A per-endpoint worker pool is a possible later refinement.)
+//! Mirrors the responder's command-channel thread pattern.
+//!
+//! A single worker is enough for the memory-tier path: since
+//! [`IRemoteLookupRdmaInitiator::push_async`] only *enqueues* the writes, a serve no
+//! longer occupies this thread for the duration of its RDMA transfer, and many
+//! transfers to many peers proceed concurrently on the initiator's per-connection
+//! threads. What remains on this thread is the local bookkeeping — the dispatch-map
+//! lookups and, for block-tier keys, the promotion.
+//!
+//! That promotion is still blocking, so a disk-tier serve does head-of-line-block
+//! other serves; a worker pool would be the fix there. Warming keeps cold connects
+//! off this thread already.
 //!
 //! The worker exits when its command channel closes — i.e. when the actor thread
 //! ends and drops the sole [`InitiatorCmd`] sender.
@@ -77,20 +85,26 @@ pub(crate) fn run(deps: ServerDeps, rx: Receiver<InitiatorCmd>, back: MpscSender
                 rkey,
                 slots,
             } => {
-                let statuses = server::serve_rdma_request(
+                let back = back.clone();
+                server::serve_rdma_request(
                     &deps.dispatch_map,
                     deps.dispatcher.as_ref(),
                     &deps.initiator,
                     &requester_endpoint,
                     rkey,
                     &slots,
+                    // Runs on the initiator's connection thread once the writes have
+                    // landed. The poll loop owns the zyre node, so it whispers the
+                    // status; a closed channel means the actor is shutting down and
+                    // the requester's deadline backstops it.
+                    Box::new(move |statuses| {
+                        let _ = back.send(ActorMsg::PushComplete {
+                            from,
+                            op_id,
+                            statuses,
+                        });
+                    }),
                 );
-                // The poll loop owns the zyre node; it whispers the status.
-                let _ = back.send(ActorMsg::PushComplete {
-                    from,
-                    op_id,
-                    statuses,
-                });
             }
         }
     }

@@ -64,9 +64,11 @@ When a peer forwards a miss whose key this node holds:
 
 2. **Dispatch a serve command.** The actor sends `InitiatorCmd::Serve` to its off-loop initiator worker.
 
-3. **Resolve and push.** The RemoteLookupRdmaInitiator connects to the requesting peer (or reuses a warmed connection), resolves the value in the local memory-tier, and RDMA-**writes** it into the peer's advertised slot via `push`.
+3. **Resolve and submit.** The worker pins each requested value in the local memory-tier (a dispatch-map read reference) and hands the batch to the RemoteLookupRdmaInitiator via `push_async`, which queues it and returns. A thread dedicated to that peer connects (or reuses a warmed connection) and RDMA-**writes** the values into the peer's advertised slots.
 
-4. **Completion.** The push result returns to the actor as `PushComplete`. The transfer is one-sided; the source entry is not held under a read reference for the RDMA window.
+4. **Completion.** When every write in the batch has landed, the initiator invokes the batch's completion callback on that connection thread. The callback releases the read references and hands the per-key statuses to the actor as `PushComplete`.
+
+   The transfer is one-sided, but the source entry **is** held under a read reference for the whole RDMA window, and the callback is what releases it. That is not incidental: the NIC reads the source buffer asynchronously after submission has returned, so releasing the reference any earlier would let the memory tier evict the value out from under an in-flight write.
 
 **If key not found locally:** the `KeyQuery` is simply not answered; the requesting peer eventually observes `NotFound`.
 
