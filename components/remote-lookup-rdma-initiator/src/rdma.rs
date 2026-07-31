@@ -15,17 +15,53 @@ const MAX_CQ_ENTRIES: c_int = 128;
 const MAX_SEND_WR: u32 = 128;
 const MAX_RECV_WR: u32 = 64;
 
-// Wall-clock cap on the busy-poll for one write's completion. rdma_cm owns the
-// QP's RTR/RTS transition and leaves the hardware ACK timeout at its (large)
-// default, so the first write on a stale/idle warm connection would otherwise
-// burn ~15s of retransmit before RETRY_EXC. This software cap abandons a stuck
-// write far sooner, letting the caller's reconnect-on-failure path rebuild a
-// fresh QP and retry within the operation deadline. It sits far above healthy
-// completion latency (a 4 MiB write is ~hundreds of µs on 200G RoCE — 2s is a
-// ~4 MB/s floor), so only a genuinely stuck write trips it. (The QP ACK timeout
-// itself is not tunable here: `ibv_modify_qp` cannot change `timeout`/`retry_cnt`
-// in the RTS→RTS transition, and rdma_cm has already reached RTS by ESTABLISHED.)
-const POLL_TIMEOUT_SECS: u64 = 2;
+/// Largest number of RDMA writes that may be outstanding on one queue pair at a
+/// time. Every write is signaled, so the bound is whichever of the send queue and
+/// the completion queue fills first.
+///
+/// This is the whole point of posting a window rather than one write at a time: a
+/// 64 KiB write is ~2.6 µs of wire time on a 200G link but ~28 µs of post/poll
+/// overhead, so serializing on each completion caps a flow near 9% of line rate
+/// regardless of how much work the caller offers.
+pub const WINDOW: usize = if (MAX_SEND_WR as usize) < (MAX_CQ_ENTRIES as usize) {
+    MAX_SEND_WR as usize
+} else {
+    MAX_CQ_ENTRIES as usize
+};
+
+// The stall deadline that used to live here as `POLL_TIMEOUT_SECS` now belongs to
+// the caller: with several batches in flight there is no single "window" to time, so
+// `connection::STALL_TIMEOUT` is applied to the age of the oldest posted write
+// instead. The reason it exists is unchanged — rdma_cm leaves the hardware ACK
+// timeout at its large default, so a write on a stale but nominally warm connection
+// would otherwise burn ~15s of retransmit before RETRY_EXC, far past any operation
+// deadline. (The QP ACK timeout itself is not tunable here: `ibv_modify_qp` cannot
+// change `timeout`/`retry_cnt` in the RTS→RTS transition, and rdma_cm has already
+// reached RTS by ESTABLISHED.)
+
+use crate::connection::Completion;
+
+/// A zeroed work completion, for buffers `ibv_poll_cq` is about to fill.
+///
+/// Written out field-by-field rather than derived because `ffi::ibv_wc` is a bare
+/// `#[repr(C)]` mirror of the rdma-core struct, matching the rest of `ffi.rs`.
+fn blank_wc() -> ffi::ibv_wc {
+    ffi::ibv_wc {
+        wr_id: 0,
+        status: 0,
+        opcode: 0,
+        vendor_err: 0,
+        byte_len: 0,
+        imm_data: 0,
+        qp_num: 0,
+        src_qp: 0,
+        wc_flags: 0,
+        pkey_index: 0,
+        slid: 0,
+        sl: 0,
+        dlid_path_bits: 0,
+    }
+}
 
 /// Human-readable name for an `ibv_wc_status` code, so completion-error logs are
 /// diagnosable without cross-referencing rdma-core headers. `RETRY_EXC_ERR`
@@ -230,132 +266,124 @@ impl RdmaConnection {
         })
     }
 
-    /// Perform an RDMA Write to remote memory (blocks until completion).
-    pub fn rdma_write(
-        &self,
-        local_mr: &MemoryRegion,
-        len: usize,
-        remote_addr: u64,
-        rkey: u32,
-    ) -> Result<()> {
-        // SAFETY: qp and local_mr are valid, registered_addr within MR bounds.
-        let ret = unsafe {
-            ffi::rdma_test_rdma_write(
-                self.qp,
-                local_mr.registered_addr as *mut c_void,
-                len as u32,
-                local_mr.lkey(),
-                remote_addr,
-                rkey,
-            )
-        };
-        if ret != 0 {
-            bail!("ibv_post_send (RDMA_WRITE) failed: {}", ret);
-        }
-        self.poll_completion().with_context(|| {
-            format!("RDMA_WRITE len={len} remote_addr=0x{remote_addr:x} rkey=0x{rkey:x}")
-        })
-    }
-
-    /// Perform an RDMA Write from an offset within a pre-registered MR.
-    /// `local_addr` must be within the bounds of `pool_mr`.
-    /// Blocks until completion (signaled).
-    pub fn rdma_write_from_pool(
+    /// Post one RDMA Write from within the pre-registered pool MR **without**
+    /// waiting for its completion, so a whole window can be in flight at once.
+    ///
+    /// `wr_id` is echoed back by [`reap`](Self::reap); callers pass the write's
+    /// index within its window. Posting can fail locally (a full send queue), in
+    /// which case nothing was queued for this write.
+    ///
+    /// # Safety
+    ///
+    /// `local_addr` must point to `len` valid bytes inside `pool_mr`'s registered
+    /// region, and must stay valid until the matching completion is reaped — the
+    /// NIC reads the buffer asynchronously.
+    pub unsafe fn post_write_from_pool(
         &self,
         pool_mr: &MemoryRegion,
         local_addr: *const u8,
         len: usize,
         remote_addr: u64,
         rkey: u32,
+        wr_id: u64,
     ) -> Result<()> {
-        // SAFETY: local_addr is within the pool_mr's registered region.
-        let ret = unsafe {
-            ffi::rdma_test_rdma_write(
-                self.qp,
-                local_addr as *mut c_void,
-                len as u32,
-                pool_mr.lkey(),
-                remote_addr,
-                rkey,
-            )
-        };
-        if ret != 0 {
-            bail!("ibv_post_send (RDMA_WRITE pool) failed: {}", ret);
-        }
-        self.poll_completion().with_context(|| {
-            format!("RDMA_WRITE(pool) len={len} remote_addr=0x{remote_addr:x} rkey=0x{rkey:x}")
-        })
+        self.post_write(local_addr, len, pool_mr.lkey(), remote_addr, rkey, wr_id)
     }
 
-    /// Poll the completion queue for one entry with timeout.
-    pub fn poll_completion(&self) -> Result<()> {
-        let mut wc = ffi::ibv_wc {
-            wr_id: 0,
-            status: 0,
-            opcode: 0,
-            vendor_err: 0,
-            byte_len: 0,
-            imm_data: 0,
-            qp_num: 0,
-            src_qp: 0,
-            wc_flags: 0,
-            pkey_index: 0,
-            slid: 0,
-            sl: 0,
-            dlid_path_bits: 0,
-        };
+    /// Shared posting path for both MR flavors.
+    ///
+    /// # Safety
+    ///
+    /// As [`post_write_from_pool`](Self::post_write_from_pool); `lkey` must belong
+    /// to the MR covering `local_addr`.
+    unsafe fn post_write(
+        &self,
+        local_addr: *const u8,
+        len: usize,
+        lkey: u32,
+        remote_addr: u64,
+        rkey: u32,
+        wr_id: u64,
+    ) -> Result<()> {
+        let ret = ffi::rdma_test_rdma_write(
+            self.qp,
+            local_addr as *mut c_void,
+            len as u32,
+            lkey,
+            remote_addr,
+            rkey,
+            wr_id,
+        );
+        if ret != 0 {
+            bail!(
+                "ibv_post_send (RDMA_WRITE) failed: {} (wr_id={}, len={}, \
+                 remote_addr=0x{:x})",
+                ret,
+                wr_id,
+                len,
+                remote_addr
+            );
+        }
+        Ok(())
+    }
 
-        let start = std::time::Instant::now();
-        let timeout = std::time::Duration::from_secs(POLL_TIMEOUT_SECS);
+    /// Reap up to `max` ready completions **without blocking**, returning however
+    /// many the completion queue had available — possibly none.
+    ///
+    /// This is the primitive an asynchronous poster needs: with several batches
+    /// outstanding on one queue pair, the caller cannot know in advance how many
+    /// completions the next poll will yield, so it cannot wait for a fixed count.
+    /// Each returned [`Completion`] carries its `wr_id` and, when the completion
+    /// failed, a description — the caller decides what a failure means for the batch
+    /// that `wr_id` belongs to.
+    ///
+    /// A failed completion is reported, not raised: `Err` is reserved for
+    /// `ibv_poll_cq` itself failing. Note that one genuinely failing RDMA_WRITE
+    /// drives the queue pair into the error state, which flushes every other
+    /// outstanding request with `WR_FLUSH_ERR`, so a caller should expect a burst of
+    /// failed completions of which only one names the original cause — and cannot
+    /// tell which.
+    pub fn poll_completions(&self, max: usize) -> Result<Vec<Completion>> {
+        if max == 0 {
+            return Ok(Vec::new());
+        }
 
-        loop {
-            // SAFETY: cq is valid, wc is a properly-sized buffer.
-            let ret = unsafe { ffi::rdma_test_poll_cq(self.cq, 1, &mut wc) };
-            if ret < 0 {
-                bail!("ibv_poll_cq failed: {}", ret);
-            }
-            if ret > 0 {
-                if wc.status != ffi::IBV_WC_SUCCESS {
+        let mut wcs: Vec<ffi::ibv_wc> = (0..max).map(|_| blank_wc()).collect();
+        // SAFETY: cq is valid and wcs has `max` entries, so writing up to `max`
+        // entries stays in bounds.
+        let ret = unsafe { ffi::rdma_test_poll_cq(self.cq, max as c_int, wcs.as_mut_ptr()) };
+        if ret < 0 {
+            bail!("ibv_poll_cq failed: {}", ret);
+        }
+
+        let got = ret as usize;
+        Ok(wcs[..got]
+            .iter()
+            .map(|wc| Completion {
+                wr_id: wc.wr_id,
+                error: (wc.status != ffi::IBV_WC_SUCCESS).then(|| {
                     // SAFETY: qp is valid for the connection's lifetime.
                     let qp_state = unsafe { (*self.qp).state };
-                    bail!(
-                        "work completion error: status={} ({}), opcode={}, vendor_err=0x{:x}, \
-                         wc.qp_num={}, qp_state={} ({})",
+                    format!(
+                        "work completion error: status={} ({}), opcode={}, \
+                         vendor_err=0x{:x}, wr_id={}, wc.qp_num={}, qp_state={} ({})",
                         wc.status,
                         wc_status_name(wc.status),
                         wc.opcode,
                         wc.vendor_err,
+                        wc.wr_id,
                         wc.qp_num,
                         qp_state,
                         qp_state_name(qp_state),
-                    );
-                }
-                return Ok(());
-            }
-            if start.elapsed() > timeout {
-                bail!("poll_completion timed out after {}s", POLL_TIMEOUT_SECS);
-            }
-            std::hint::spin_loop();
-        }
+                    )
+                }),
+            })
+            .collect())
     }
 
     /// Drain any pending completions from the CQ.
     pub fn drain_cq(&self) {
-        let mut wc = ffi::ibv_wc {
-            wr_id: 0,
-            status: 0,
-            opcode: 0,
-            vendor_err: 0,
-            byte_len: 0,
-            imm_data: 0,
-            qp_num: 0,
-            src_qp: 0,
-            wc_flags: 0,
-            pkey_index: 0,
-            slid: 0,
-            sl: 0,
-            dlid_path_bits: 0,
-        };
+        let mut wc = blank_wc();
         loop {
             // SAFETY: cq is valid.
             let ret = unsafe { ffi::rdma_test_poll_cq(self.cq, 1, &mut wc) };

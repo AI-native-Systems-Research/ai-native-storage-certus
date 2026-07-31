@@ -93,9 +93,10 @@ peer -> rl: SHOUT KeyQuery(key) via Zyre
 rl -> rl: handle_key_query\n(key present in MemoryTier?)
 peer -> rl: WHISPER RdmaRequest\n(peer endpoint, rkey, slot)
 rl -> rl: handle_rdma_request\n-> InitiatorCmd::Serve
-rl -> mt: resolve value (ptr, size)
-rl -> peer: Initiator.push:\nRDMA Write value OUT into peer slot
-note right of rl: One-sided write; no read-ref\npinning of the source entry
+rl -> mt: resolve value (ptr, size)\nand pin it (read ref)
+rl -> peer: Initiator.push_async:\nsubmit RDMA Write OUT into peer slot
+note right of rl: Submission returns at once; a per-peer\nconnection thread posts and reaps.\nThe read ref is held until completion —\nthe NIC reads the source asynchronously.
+peer --> rl: completion callback\n(per-key statuses; releases the read refs)
 rl -> rl: PushComplete
 
 @enduml

@@ -15,32 +15,144 @@ outbound RDMA data path.
 
 `IRemoteLookupRdmaInitiator`:
 
-- `push(endpoint, items)` where `items` is a list of `(CacheKey, RemoteRegion)`
-  and `RemoteRegion` is the remote `(addr, rkey, length)`. Ensures a connection
-  to `endpoint` (an `"ip:port"` string), looks each key up in the local memory
-  tier via `IMemoryTier::peek`, and, if present with a matching size, RDMA-writes
-  the value into the remote region. Returns one status per item:
-  `Success` / `UnableToConnect` / `KeyNotFound` / `SizeMismatch`.
+- `push_async(endpoint, items, on_complete)` where `items` is a list of
+  `(CacheKey, RemoteRegion)` and `RemoteRegion` is the remote
+  `(addr, rkey, length)`. *Enqueues* the batch against `endpoint` (an `"ip:port"`
+  string) and returns without waiting. Each key is looked up in the local memory
+  tier via `IMemoryTier::peek` and, if present with a matching size, RDMA-written
+  into the remote region. `on_complete` then receives one status per item, in
+  order: `Success` / `UnableToConnect` / `KeyNotFound` / `SizeMismatch`.
+- `push(endpoint, items)` — blocking convenience wrapper over `push_async`, for
+  callers with nothing to overlap. Same semantics; returns the statuses directly.
 - `disconnect(endpoint)` — tear down a single host's connection. Used, e.g., when
   a host is known to have left the cluster. Note the many-to-one relationship
   between discovery-layer peers and hosts: only disconnect once the host (not
-  merely one peer) is gone.
+  merely one peer) is gone. Blocks until that host's thread has exited.
 - `disconnect_all()` — tear down all connections.
+
+### Why submission is asynchronous
+
+Verbs is natively asynchronous; the original synchronous `push` was a layer on top
+that could not exploit it. It held the queue pair from the first post until the
+last completion, so exactly one operation per peer was ever on the wire, and the
+control plane around it — zyre round trips, dispatch-map lookups, status whispers
+— could not overlap the transfer.
+
+That was measured, not assumed. On a 200 Gb/s (25 GB/s) RoCE link, per-flow
+throughput sat at 3.24 GB/s and did not respond to offered concurrency: a sweep
+from 16 to 1024 in-flight client requests moved it by 3.6% while latency scaled
+linearly. Meanwhile the write path itself was fast — 4 MiB posted *and* reaped in
+212 µs mean (185 µs p50), about 16-20 GB/s, so roughly 80% of per-batch
+wall-clock was being spent outside RDMA altogether. Deepening the window could not
+help; only overlapping the control plane with the data plane could.
+
+### What the completion callback must own
+
+The NIC reads the local value buffers asynchronously, so they must stay valid and
+unevicted until the completion fires — not merely until `push_async` returns.
+Whatever guarantees that (a dispatch-map read pin, in practice) therefore has to be
+owned by the callback rather than released at the submission site.
+
+The callback is invoked exactly once for every accepted batch, on every outcome,
+including teardown with the batch still in flight. If `push_async` returns `Err`
+the callback is dropped instead of invoked, so a callback that releases resources
+must do so on drop as well as on call. A batch rejected because the host's submit
+queue is full is not an error: it reports `UnableToConnect` for every item, and may
+invoke the callback synchronously on the calling thread.
 
 ## Connection table
 
-Connections are held in a table keyed by the normalized `"ip:port"` endpoint. A
-host absent from the table is *disconnected*; an entry is *connecting*,
-*connected*, or *disconnecting*. Establishing an RDMA connection over RoCE with
-CM was measured to take more than two seconds, so connections are established
-lazily and reused across calls.
+Connections are held in a table keyed by the normalized `"ip:port"` endpoint, and
+each entry owns a dedicated thread that drives that host's queue pair.
+Establishing an RDMA connection over RoCE with CM was measured to take more than
+two seconds, so connections are established lazily and reused across calls.
 
-Calls are re-entrant: the connection table uses a brief lock to look up/insert a
-per-host slot, and each slot has its own lock. Pushes to different hosts proceed
-concurrently; pushes to the same host serialize on that host's slot (required
-because a queue pair is not safe for concurrent use). If a cached connection's
-queue pair is found in the error state — or an in-flight write fails — the
-connection is torn down and rebuilt once, and the batch is retried.
+That thread does **both** the posting and the reaping. An `RdmaConn`'s underlying
+queue pair is `Send` but not `Sync`, and keeping every access on a single thread
+preserves that invariant exactly rather than trading it for new synchronization
+around the queue pair. Callers never touch the queue pair; they only enqueue.
+
+Because the connection has exactly one owner, the transient *connecting* and
+*disconnecting* states the old shared state machine needed are gone — there is no
+other thread to publish them to. A host absent from the table is *disconnected*;
+an entry is *disconnected* or *connected*. Recovery is likewise a phase of the
+thread's execution rather than an observable state: batches submitted while it
+reconnects simply wait in the queue.
+
+## Flow control
+
+Three bounds, each for a different reason.
+
+The queue pair's send queue admits at most `PUSH_WINDOW` (128) outstanding writes.
+The thread tracks these as credits and tops them up as completions retire earlier
+writes, which is what lets *successive batches* overlap instead of the send queue
+draining to empty between them. 128 × 64 KiB is 8 MiB in flight, roughly 32× this
+fabric's ~250 KB bandwidth-delay product, so the depth is not the limiting factor
+and does not need raising.
+
+The submit queue is bounded at `SUBMIT_QUEUE_DEPTH` (256 batches per host), and the
+thread holds at most `MAX_TRACKED_BATCHES` (64) at once. The second bound is what
+makes the first mean anything: without it the thread would drain the whole channel
+into its own tracking map every iteration, the channel would never fill, and the
+backlog would grow without bound regardless.
+
+A full queue reports `UnableToConnect` rather than queueing, deliberately. Every
+queued batch holds its submitter's read pins, and a pinned entry cannot be evicted
+— so an unbounded queue would let a single unreachable peer stall the local memory
+tier.
+
+Calls are re-entrant: the connection table takes a brief lock to look up or insert a
+per-host slot, then hands the batch to that host's thread. Submissions to different
+hosts are independent, and submissions to the same host queue rather than block,
+since the queue pair is reached only by its owning thread.
+
+## Recovery
+
+A failed completion, a failed post, or a stalled transfer all lead to the same
+sequence, and the *order* is what makes it safe:
+
+1. **Destroy the queue pair first.** Outstanding writes are discarded rather than
+   delivered as completions, so there is nothing to wait for — and destroying the
+   queue pair is what synchronously guarantees the NIC has stopped reading pool
+   memory. Only afterwards may any batch report, because reporting is what releases
+   the submitter's pins. This is the `QP-teardown-before-reclaim` invariant applied
+   to the initiator side.
+2. **Reconnect**, blocking this one host's thread. That isolates a slow reconnect to
+   the peer it concerns.
+3. **Replay every batch that was outstanding**, not just one. A queue-pair error
+   flushes all outstanding writes with a flush error, so which write actually failed
+   is unknowable; there is deliberately no attempt to guess. Replay is idempotent —
+   the same bytes go to the same remote addresses, the submitter's pins keep the
+   source unchanged, and the remote landing buffers stay reserved and unpublished
+   until status is reported. The blast radius is a single peer, since a queue pair is
+   keyed by requester endpoint.
+4. One repair per episode. A second consecutive failure reports every held batch as
+   `UnableToConnect` and returns the connection to *disconnected*, rather than
+   looping.
+
+A transfer is judged stalled when the oldest posted write has gone uncompleted for
+`STALL_TIMEOUT` (2 s). This exists because rdma_cm owns the queue pair's RTR/RTS
+transition and leaves the hardware ACK timeout at its large default: a write on a
+stale but nominally warm connection would otherwise burn ~15 s of retransmit before
+`RETRY_EXC`, far past any operation deadline. The cap sits far above healthy latency
+(a full send queue of 64 KiB writes completes in ~200 µs), so only a genuinely stuck
+transfer trips it.
+
+## Teardown
+
+`disconnect`/`disconnect_all` set an out-of-band flag on the host slot and then
+**join** the thread. Joining is the point — it is what makes teardown a barrier a
+caller can rely on before reclaiming anything the NIC could have been reading. On
+return, the queue pair is destroyed and every batch the thread was holding has
+reported its outcome, so no submitter is left waiting and no pin is left held.
+
+The flag is out of band rather than a queued command because the queue can be full
+exactly when teardown matters most: a peer whose completions have stopped is both
+the reason the queue backed up and the reason we are tearing down, and a shutdown
+message sitting behind 256 pushes would not be seen for a long time. Teardown can
+still take as long as one in-flight `connect`, which is blocking and whose timeout
+rdma_cm owns; the flag is checked before starting a connect but cannot interrupt one
+already under way.
 
 ## Memory registration
 

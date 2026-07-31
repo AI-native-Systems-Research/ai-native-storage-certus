@@ -1,16 +1,42 @@
 //! IRemoteLookupRdmaInitiator interface for pushing local cache values to remote nodes.
 //!
 //! This interface is an **outbound initiator**: given a target host endpoint and
-//! a batch of `(key, remote-region)` pairs, [`IRemoteLookupRdmaInitiator::push`]
-//! connects to the host (reusing an established connection when possible), looks
-//! each key up in the local memory tier, and — when the key is present and its
-//! size matches the remote region — RDMA-writes the value directly into the
-//! remote host's memory.
+//! a batch of `(key, remote-region)` pairs, it connects to the host (reusing an
+//! established connection when possible), looks each key up in the local memory
+//! tier, and — when the key is present and its size matches the remote region —
+//! RDMA-writes the value directly into the remote host's memory.
 //!
 //! The component maintains a table of connections keyed by endpoint. A host that
 //! is absent from the table is "disconnected"; entries are otherwise
-//! "connecting" or "connected". Connections are reused across calls and repaired
-//! automatically if their queue pair enters an error state.
+//! "connecting", "connected", or "recovering". Connections are reused across
+//! calls and repaired automatically if their queue pair enters an error state.
+//!
+//! # Submission is asynchronous
+//!
+//! The underlying verbs interface is asynchronous, and so is this one.
+//! [`IRemoteLookupRdmaInitiator::push_async`] *enqueues* a batch and returns
+//! immediately; a per-connection thread posts the work requests, reaps their
+//! completions, and then invokes the caller's completion callback. This lets a
+//! caller keep many batches in flight per peer, so control-plane latency
+//! (discovery, status round trips, local lookups) overlaps data transfer instead
+//! of serializing against it.
+//!
+//! [`IRemoteLookupRdmaInitiator::push`] remains as a blocking convenience wrapper
+//! that submits and waits.
+//!
+//! ## The callback owns whatever keeps the source buffers alive
+//!
+//! The NIC reads the local value buffers asynchronously, so they must stay valid
+//! and must not be evicted or relocated until the completion fires — *not* merely
+//! until `push_async` returns. Whatever the caller uses to guarantee that (a
+//! dispatch-map read pin, for instance) must therefore be owned by the callback,
+//! not released at the submission site.
+//!
+//! The callback is invoked exactly once for every accepted batch, on every
+//! outcome — success, per-item failure, connection loss, or teardown. If the
+//! initiator is torn down with batches still outstanding, their callbacks are
+//! invoked (or dropped, which must be equally safe) rather than forgotten, so a
+//! caller can rely on the callback firing to release what it holds.
 
 use std::fmt;
 
@@ -42,9 +68,11 @@ pub struct RemoteRegion {
     pub length: u32,
 }
 
-/// Per-item outcome of [`IRemoteLookupRdmaInitiator::push`].
+/// Per-item outcome of a push.
 ///
-/// Returned once per input item, in the same order as the request.
+/// Reported once per input item, in the same order as the request — whether
+/// delivered as the return value of [`IRemoteLookupRdmaInitiator::push`] or as the
+/// argument to a [`IRemoteLookupRdmaInitiator::push_async`] completion callback.
 ///
 /// # Examples
 ///
@@ -100,19 +128,66 @@ impl fmt::Display for RemoteLookupRdmaInitiatorError {
 
 impl std::error::Error for RemoteLookupRdmaInitiatorError {}
 
+/// Completion callback for [`IRemoteLookupRdmaInitiator::push_async`].
+///
+/// Receives one [`PushStatus`] per submitted item, in request order. Invoked
+/// exactly once per accepted batch (see the trait method for the precise
+/// guarantee), and boxed rather than generic so the interface stays object-safe.
+///
+/// The callback runs on the initiator's per-connection thread, so it must not
+/// block: that thread is what posts work requests and reaps completions for every
+/// batch queued to that peer. In particular it must not perform an operation that
+/// can wait on a lock held across I/O.
+///
+/// Whatever keeps the pushed values alive for the NIC — typically a read pin on
+/// each key — must be *owned* by this callback, so that running it (or dropping
+/// it) is what releases them. See the module documentation.
+///
+/// # Examples
+///
+/// ```
+/// use interfaces::{PushCompletion, PushStatus};
+///
+/// let seen: std::sync::Arc<std::sync::Mutex<Vec<PushStatus>>> = Default::default();
+/// let sink = std::sync::Arc::clone(&seen);
+/// let cb: PushCompletion = Box::new(move |statuses| *sink.lock().unwrap() = statuses);
+///
+/// cb(vec![PushStatus::Success]);
+/// assert_eq!(*seen.lock().unwrap(), vec![PushStatus::Success]);
+/// ```
+pub type PushCompletion = Box<dyn FnOnce(Vec<PushStatus>) + Send>;
+
 component_macros::define_interface! {
     pub IRemoteLookupRdmaInitiator {
-        /// Push local cache values to a remote host over RDMA.
+        /// Submit a batch of local cache values to be pushed to a remote host over
+        /// RDMA, and return without waiting for the transfer.
         ///
-        /// Ensures a connection to `endpoint` (an `"ip:port"` string), reusing an
-        /// established connection or repairing one whose queue pair has entered an
-        /// error state. For each `(key, region)` item, the key is looked up in the
-        /// local memory tier; if present and its size equals `region.length`, the
-        /// value is RDMA-written into the remote region.
+        /// The batch is queued against `endpoint` (an `"ip:port"` string), whose
+        /// connection is established, reused, or repaired as needed. For each
+        /// `(key, region)` item the key is looked up in the local memory tier; if
+        /// present and its size equals `region.length`, the value is RDMA-written
+        /// into the remote region. When every write in the batch has completed,
+        /// `on_complete` is invoked with one [`PushStatus`] per input item, in
+        /// request order.
         ///
-        /// Returns one [`PushStatus`] per input item, in order. If no connection
-        /// to the host can be established, every item is reported as
-        /// [`PushStatus::UnableToConnect`].
+        /// Because submission returns before the NIC has read the local buffers,
+        /// the caller must keep those buffers valid until `on_complete` runs —
+        /// which is why whatever guarantees that should be owned by the callback.
+        /// See the module documentation.
+        ///
+        /// # Completion guarantee
+        ///
+        /// If this returns `Ok(())`, `on_complete` is invoked **exactly once**, on
+        /// every outcome: full success, per-item failure, connection loss, or
+        /// teardown with the batch still outstanding. If it returns `Err`, the
+        /// callback is dropped without being invoked, so a callback that releases
+        /// resources must do so on drop as well as on call.
+        ///
+        /// A batch rejected because the peer's submit queue is full is *not* an
+        /// error: it reports [`PushStatus::UnableToConnect`] for every item, and
+        /// may do so by invoking `on_complete` synchronously on the calling
+        /// thread before returning `Ok(())`. Callers must tolerate that
+        /// reentrancy.
         ///
         /// # Errors
         ///
@@ -120,6 +195,29 @@ component_macros::define_interface! {
         /// receptacle is unbound or its pool is not initialized, or
         /// [`RemoteLookupRdmaInitiatorError::InvalidEndpoint`] if `endpoint` is not a
         /// valid `"ip:port"`.
+        fn push_async(
+            &self,
+            endpoint: &str,
+            items: &[(CacheKey, RemoteRegion)],
+            on_complete: PushCompletion,
+        ) -> Result<(), RemoteLookupRdmaInitiatorError>;
+
+        /// Push local cache values to a remote host over RDMA, blocking until every
+        /// write in the batch has completed.
+        ///
+        /// A convenience wrapper over [`push_async`](Self::push_async) with
+        /// identical semantics, for callers that have nothing to overlap and would
+        /// only wait anyway. It holds the calling thread for the whole transfer, so
+        /// it must not be used from a thread that also needs to make progress on
+        /// other work — notably not from a completion callback.
+        ///
+        /// Returns one [`PushStatus`] per input item, in order. If no connection
+        /// to the host can be established, every item is reported as
+        /// [`PushStatus::UnableToConnect`].
+        ///
+        /// # Errors
+        ///
+        /// As [`push_async`](Self::push_async).
         fn push(
             &self,
             endpoint: &str,
