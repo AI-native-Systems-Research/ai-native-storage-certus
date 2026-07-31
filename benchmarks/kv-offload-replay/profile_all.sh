@@ -59,7 +59,10 @@ IMG_GRPC="localhost/certus-grpc-bench"
 
 DATASET_HOST="${SCRIPT_DIR}/sharegpt_12turn_450.json"
 SERVER_BIN="${REPO_ROOT}/target/release/certus-server-yaml"
-FS_BACKEND_DIR="${FS_BACKEND_DIR:-$HOME/llm-d-kv-cache/kv_connectors/llmd_fs_backend}"
+# llmd_fs_backend repo (for --build of the SharedStorage image). Empty = auto:
+# resolved after --model-fs is parsed, preferring <model-fs>/llm-d-kv-cache/...
+# (where it lives on this host) with a $HOME fallback. Override via env.
+FS_BACKEND_DIR="${FS_BACKEND_DIR:-}"
 
 usage() {
     cat <<'EOF'
@@ -128,6 +131,17 @@ PODMAN_STORE="${MODEL_FS}/podman/storage"
 PODMAN_RUNROOT="${MODEL_FS}/podman/run"
 RUNID="$(date +%H%M%S 2>/dev/null || echo run)_$$"
 [[ -z "$LOGDIR" ]] && LOGDIR="${MODEL_FS}/kvprofile-${RUNID}"
+
+# Auto-resolve the fs-backend repo if not set: prefer the model-fs copy (this
+# host keeps it at <model-fs>/llm-d-kv-cache/kv_connectors/llmd_fs_backend),
+# fall back to $HOME.
+if [[ -z "$FS_BACKEND_DIR" ]]; then
+    if [[ -f "${MODEL_FS}/llm-d-kv-cache/kv_connectors/llmd_fs_backend/Dockerfile.wheel" ]]; then
+        FS_BACKEND_DIR="${MODEL_FS}/llm-d-kv-cache/kv_connectors/llmd_fs_backend"
+    else
+        FS_BACKEND_DIR="$HOME/llm-d-kv-cache/kv_connectors/llmd_fs_backend"
+    fi
+fi
 
 # ── Result accumulation (parallel arrays keyed by index) ──────────────────────
 declare -a R_VARIANT=() R_STATUS=() R_WALL=() R_ROUNDS=() R_GENS=() R_TPS=() R_NATIVE=() R_REASON=() R_LOG=()

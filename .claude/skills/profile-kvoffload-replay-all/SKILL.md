@@ -49,8 +49,11 @@ previews what will run, launches the orchestrator, and formats the result.
      (`podman --root <model-fs>/podman/storage image exists localhost/certus-grpc-bench`).
    - SharedStorage needs `--shared-fs` pointing at a real dir; Certus-SPDK needs
      `--device-pci` and a built `target/release/certus-server-yaml`.
-   - If images are missing, note that `--build` will build them (SharedStorage
-     needs `FS_BACKEND_DIR` with the `llmd_fs_backend` repo). Offer to add `--build`.
+   - If images are missing, note that `--build` will build them. The SharedStorage
+     image build needs the `llmd_fs_backend` repo; the script auto-discovers it at
+     `<model-fs>/llm-d-kv-cache/kv_connectors/llmd_fs_backend` (its location on this
+     host), falling back to `$HOME/...`. Override with the `FS_BACKEND_DIR` env var.
+     Offer to add `--build`.
 
 3. **Launch** `benchmarks/kv-offload-replay/profile_all.sh` with the resolved
    flags. A full four-variant run takes ~15–60 min (each variant loads the model
@@ -75,5 +78,8 @@ previews what will run, launches the orchestrator, and formats the result.
   kernel driver.
 - SharedStorage requires the RAID/XFS mount to exist; host RAID/XFS/hugepage
   setup (`tools/configure-bench.sh` and friends) is a prerequisite, out of scope.
+  Building its image needs the `llmd_fs_backend` repo (auto-discovered under
+  `<model-fs>/llm-d-kv-cache/...`, or set `FS_BACKEND_DIR`). The build compiles a
+  torch C++ extension (~10–30 min) whose CUDA arch must match the GPU (A100 = sm_80).
 - The HF cache lives on `--model-fs` (default `/mnt/certus1`), not `/home` — the
   small `/home` partition fills up mid-download otherwise.
