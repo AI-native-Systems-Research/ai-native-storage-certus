@@ -676,6 +676,9 @@ async fn run_batches(
                     .map(|(i, &key)| pb::LookupEntry {
                         key,
                         ipc_handle: Some(buf.ipc(slot, i)),
+                        // Single-region bench: leave the multi-region list empty
+                        // so the server falls back to `ipc_handle`.
+                        ipc_handles: Vec::new(),
                     })
                     .collect();
                 client

@@ -334,99 +334,86 @@ impl Dispatcher for DispatcherService {
         let gpu_bytes_counter = Arc::clone(&self.counters.gpu_bytes_transferred);
         let results = tokio::task::spawn_blocking(move || {
             let mut opened_keys: Vec<[u8; 64]> = Vec::new();
-            let mut batch_entries: Vec<(u64, IpcHandle)> = Vec::with_capacity(req.entries.len());
+            let mut batch_entries: Vec<(u64, Vec<IpcHandle>)> =
+                Vec::with_capacity(req.entries.len());
             let mut pre_errors: Vec<Option<EntryResult>> = vec![None; req.entries.len()];
             let mut local_ptrs: HashMap<[u8; 64], *mut std::ffi::c_void> = HashMap::new();
 
-            for (i, entry) in req.entries.iter().enumerate() {
-                let handle = match entry.ipc_handle.as_ref() {
-                    Some(h) => h,
-                    None => {
-                        pre_errors[i] = Some(error_result(
-                            entry.key,
-                            &DispatcherError::InvalidParameter("missing ipc_handle".into()),
-                        ));
-                        batch_entries.push((
-                            entry.key,
-                            IpcHandle {
-                                address: std::ptr::null_mut(),
-                                size: 0,
-                            },
-                        ));
-                        continue;
-                    }
-                };
-                let handle_key: [u8; 64] = match handle.cuda_ipc_handle.as_slice().try_into() {
-                    Ok(k) => k,
-                    Err(_) => {
-                        pre_errors[i] = Some(error_result(
-                            entry.key,
-                            &DispatcherError::InvalidParameter(format!(
-                                "cuda_ipc_handle must be 64 bytes, got {}",
-                                handle.cuda_ipc_handle.len()
-                            )),
-                        ));
-                        batch_entries.push((
-                            entry.key,
-                            IpcHandle {
-                                address: std::ptr::null_mut(),
-                                size: 0,
-                            },
-                        ));
-                        continue;
-                    }
-                };
-                let dev_ptr = match local_ptrs.get(&handle_key) {
-                    Some(&ptr) => ptr,
-                    None => match ipc_cache_open(&cache, &handle_key, handle.gpu_device_id) {
-                        Ok(ptr) => {
-                            local_ptrs.insert(handle_key, ptr);
-                            opened_keys.push(handle_key);
-                            ptr
-                        }
-                        Err(e) => {
+            // One KV block = N per-layer regions (0.23+); a coalesced block
+            // (0.20/0.22) is N==1. Read the repeated `ipc_handles` if present,
+            // else fall back to the singular `ipc_handle`. The N regions scatter
+            // from one resident slot to the N GPU allocations (load scatter).
+            fn handles_of(entry: &proto::LookupEntry) -> Vec<&proto::IpcHandle> {
+                if !entry.ipc_handles.is_empty() {
+                    entry.ipc_handles.iter().collect()
+                } else {
+                    entry.ipc_handle.as_ref().into_iter().collect()
+                }
+            }
+
+            'entries: for (i, entry) in req.entries.iter().enumerate() {
+                let handles = handles_of(entry);
+                if handles.is_empty() {
+                    pre_errors[i] = Some(error_result(
+                        entry.key,
+                        &DispatcherError::InvalidParameter("missing ipc_handle".into()),
+                    ));
+                    batch_entries.push((entry.key, Vec::new()));
+                    continue;
+                }
+                let mut regions: Vec<IpcHandle> = Vec::with_capacity(handles.len());
+                for handle in handles {
+                    let handle_key: [u8; 64] = match handle.cuda_ipc_handle.as_slice().try_into() {
+                        Ok(k) => k,
+                        Err(_) => {
                             pre_errors[i] = Some(error_result(
                                 entry.key,
-                                &DispatcherError::IoError(format!("IPC open failed: {e}")),
+                                &DispatcherError::InvalidParameter(format!(
+                                    "cuda_ipc_handle must be 64 bytes, got {}",
+                                    handle.cuda_ipc_handle.len()
+                                )),
                             ));
-                            batch_entries.push((
-                                entry.key,
-                                IpcHandle {
-                                    address: std::ptr::null_mut(),
-                                    size: 0,
-                                },
-                            ));
-                            continue;
+                            batch_entries.push((entry.key, Vec::new()));
+                            continue 'entries;
                         }
-                    },
-                };
-                batch_entries.push((
-                    entry.key,
-                    IpcHandle {
-                        // dev_ptr is the allocation base (deduped per handle); offset is
-                        // per-entry, so apply it here to address this block within the alloc.
+                    };
+                    let dev_ptr = match local_ptrs.get(&handle_key) {
+                        Some(&ptr) => ptr,
+                        None => match ipc_cache_open(&cache, &handle_key, handle.gpu_device_id) {
+                            Ok(ptr) => {
+                                local_ptrs.insert(handle_key, ptr);
+                                opened_keys.push(handle_key);
+                                ptr
+                            }
+                            Err(e) => {
+                                pre_errors[i] = Some(error_result(
+                                    entry.key,
+                                    &DispatcherError::IoError(format!("IPC open failed: {e}")),
+                                ));
+                                batch_entries.push((entry.key, Vec::new()));
+                                continue 'entries;
+                            }
+                        },
+                    };
+                    regions.push(IpcHandle {
+                        // dev_ptr is the per-region allocation base (deduped per
+                        // handle); offset addresses this block within that
+                        // layer's allocation.
                         address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
                         size: handle.size,
-                    },
-                ));
+                    });
+                }
+                batch_entries.push((entry.key, regions));
             }
 
             let valid_indices: Vec<usize> = (0..batch_entries.len())
                 .filter(|&i| pre_errors[i].is_none())
                 .collect();
-            // This proto variant carries one coalesced region per block (N==1);
-            // wrap it as a single-element region list for the multi-region API.
             let valid_batch: Vec<(u64, Vec<IpcHandle>)> = valid_indices
                 .iter()
                 .map(|&i| {
-                    let (key, ref ipc) = batch_entries[i];
-                    (
-                        key,
-                        vec![IpcHandle {
-                            address: ipc.address,
-                            size: ipc.size,
-                        }],
-                    )
+                    let (key, ref regions) = batch_entries[i];
+                    (key, regions.clone())
                 })
                 .collect();
 
@@ -441,9 +428,10 @@ impl Dispatcher for DispatcherService {
                     match batch_iter.next().unwrap() {
                         Ok(()) => {
                             hits_counter.fetch_add(1, Ordering::Relaxed);
-                            if let Some(h) = entry.ipc_handle.as_ref() {
-                                gpu_bytes_counter.fetch_add(h.size as u64, Ordering::Relaxed);
-                            }
+                            // Sum across all per-layer regions (N==1 for coalesced blocks).
+                            let bytes: u64 =
+                                handles_of(entry).iter().map(|h| h.size as u64).sum();
+                            gpu_bytes_counter.fetch_add(bytes, Ordering::Relaxed);
                             results.push(success_result(entry.key));
                         }
                         Err(ref e) if matches!(e, DispatcherError::KeyNotFound(_)) => {
@@ -594,41 +582,54 @@ impl Dispatcher for DispatcherService {
             let mut pre_errors: Vec<Option<EntryResult>> = vec![None; req.entries.len()];
             let mut local_ptrs: HashMap<[u8; 64], *mut std::ffi::c_void> = HashMap::new();
 
+            // One KV block = N per-layer regions (0.23+); a coalesced block
+            // (0.20/0.22) is N==1. Read the repeated `ipc_handles` if present,
+            // else fall back to the singular `ipc_handle`. The N regions land
+            // colocated in one reserved slot (store gather).
+            fn handles_of(entry: &proto::CopyToStoreEntry) -> Vec<&proto::IpcHandle> {
+                if !entry.ipc_handles.is_empty() {
+                    entry.ipc_handles.iter().collect()
+                } else {
+                    entry.ipc_handle.as_ref().into_iter().collect()
+                }
+            }
+
             for (i, entry) in req.entries.iter().enumerate() {
-                let handle = match entry.ipc_handle.as_ref() {
-                    Some(h) => h,
-                    None => {
-                        pre_errors[i] = Some(error_result(
-                            entry.key,
-                            &DispatcherError::InvalidParameter("missing ipc_handle".into()),
-                        ));
-                        continue;
-                    }
-                };
-                let key: [u8; 64] = match handle.cuda_ipc_handle.as_slice().try_into() {
-                    Ok(k) => k,
-                    Err(_) => {
-                        pre_errors[i] = Some(error_result(
-                            entry.key,
-                            &DispatcherError::InvalidParameter(format!(
-                                "cuda_ipc_handle must be 64 bytes, got {}",
-                                handle.cuda_ipc_handle.len()
-                            )),
-                        ));
-                        continue;
-                    }
-                };
-                if let std::collections::hash_map::Entry::Vacant(slot) = local_ptrs.entry(key) {
-                    match ipc_cache_open(&cache, &key, handle.gpu_device_id) {
-                        Ok(ptr) => {
-                            slot.insert(ptr);
-                            opened_keys.push(key);
-                        }
-                        Err(e) => {
+                let handles = handles_of(entry);
+                if handles.is_empty() {
+                    pre_errors[i] = Some(error_result(
+                        entry.key,
+                        &DispatcherError::InvalidParameter("missing ipc_handle".into()),
+                    ));
+                    continue;
+                }
+                for handle in handles {
+                    let key: [u8; 64] = match handle.cuda_ipc_handle.as_slice().try_into() {
+                        Ok(k) => k,
+                        Err(_) => {
                             pre_errors[i] = Some(error_result(
                                 entry.key,
-                                &DispatcherError::IoError(format!("IPC open failed: {e}")),
+                                &DispatcherError::InvalidParameter(format!(
+                                    "cuda_ipc_handle must be 64 bytes, got {}",
+                                    handle.cuda_ipc_handle.len()
+                                )),
                             ));
+                            break;
+                        }
+                    };
+                    if !local_ptrs.contains_key(&key) {
+                        match ipc_cache_open(&cache, &key, handle.gpu_device_id) {
+                            Ok(ptr) => {
+                                local_ptrs.insert(key, ptr);
+                                opened_keys.push(key);
+                            }
+                            Err(e) => {
+                                pre_errors[i] = Some(error_result(
+                                    entry.key,
+                                    &DispatcherError::IoError(format!("IPC open failed: {e}")),
+                                ));
+                                break;
+                            }
                         }
                     }
                 }
@@ -642,25 +643,29 @@ impl Dispatcher for DispatcherService {
                     if let Some(err) = pre_errors[i].take() {
                         return err;
                     }
-                    let handle = entry.ipc_handle.as_ref().unwrap();
-                    let ipc_key: [u8; 64] = handle.cuda_ipc_handle.as_slice().try_into().unwrap();
-                    let dev_ptr = match local_ptrs.get(&ipc_key) {
-                        Some(&ptr) => ptr,
-                        None => {
-                            return error_result(
-                                entry.key,
-                                &DispatcherError::IoError("IPC handle not cached".into()),
-                            )
-                        }
-                    };
-                    let ipc = IpcHandle {
-                        // dev_ptr is the allocation base; offset addresses this block within it.
-                        address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
-                        size: handle.size,
-                    };
+                    let mut regions: Vec<IpcHandle> = Vec::new();
+                    for handle in handles_of(entry) {
+                        let ipc_key: [u8; 64] =
+                            handle.cuda_ipc_handle.as_slice().try_into().unwrap();
+                        let dev_ptr = match local_ptrs.get(&ipc_key) {
+                            Some(&ptr) => ptr,
+                            None => {
+                                return error_result(
+                                    entry.key,
+                                    &DispatcherError::IoError("IPC handle not cached".into()),
+                                )
+                            }
+                        };
+                        regions.push(IpcHandle {
+                            // dev_ptr is the per-region allocation base; offset
+                            // addresses this block within that layer's allocation.
+                            address: (dev_ptr as usize + handle.offset as usize) as *mut u8,
+                            size: handle.size,
+                        });
+                    }
                     match dispatcher.copy_gpu_to_memory_async(
                         entry.key,
-                        &[ipc],
+                        &regions,
                         GpuStream(std::ptr::null_mut()),
                     ) {
                         Ok(()) => success_result(entry.key),
