@@ -18,7 +18,7 @@ The put flow moves a GPU tensor (cache block) from client GPU memory into a DRAM
 
 1. **Client submits request via gRPC.** The client sends the key and an IPC handle (64-byte CUDA IPC memory handle + size) in a BatchPopulateRequest. The server opens the IPC handle via `cudaIpcOpenMemHandle`.
 
-2. **Memory-tier eviction (if needed).** If the memory-tier pool lacks space, the dispatcher evicts LRU entries whose write-through has completed. Evicted entries transition from MemoryTier to BlockDevice in the dispatch-map.
+2. **Memory-tier eviction (if needed).** If the memory-tier pool lacks space, the dispatcher evicts entries (chosen by the bound eviction policy) whose write-through has completed. Evicted entries transition from MemoryTier to BlockDevice in the dispatch-map.
 
 3. **Memory-tier slot allocation.** The dispatcher allocates a slot from the memory-tier's mmap'd DRAM pool (first-fit, 4 KiB aligned). The pool is pre-registered with CUDA via `cudaHostRegister`.
 
@@ -37,7 +37,7 @@ The put flow moves a GPU tensor (cache block) from client GPU memory into a DRAM
 ## Split-Populate API (reserve_memory / populate_memory / memory_populated)
 
 Same as `full` profile:
-1. `reserve_memory(key, size)` — Reserve DRAM slot
+1. `reserve_memory(key, size, session_id)` — Reserve DRAM slot (`session_id`: opaque per-request id, 0 = unset, observability only)
 2. `populate_memory(key, ipc_handle)` — DMA into reserved slot
 3. `memory_populated(key, size)` — Finalize: register + enqueue write-through
 4. `release_memory(key)` — Cancel without populating
@@ -56,7 +56,7 @@ Same as `full`: AlreadyExists returned. Client must `remove` before re-populatin
 
 ## Eviction
 
-- **DRAM eviction:** LRU-based. Serving a peer uses one-sided RDMA WRITE out of the source entry and does not pin it, so remote traffic does not block eviction.
+- **DRAM eviction:** delegated to the bound eviction policy. Serving a peer uses one-sided RDMA WRITE out of the source entry and does not pin it, so remote traffic does not block eviction.
 - **SSD eviction:** Threshold-based background evictor. Entries removed from both DRAM and SSD can no longer be served to querying peers.
 
 ## Crash Recovery

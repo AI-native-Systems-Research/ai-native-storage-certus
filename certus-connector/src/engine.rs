@@ -342,7 +342,7 @@ impl EngineInner {
         Ok(())
     }
 
-    /// Update LRU ordering for the given keys.
+    /// Update eviction ordering for the given keys.
     pub fn touch(&self, keys: &[u64]) -> PyResult<()> {
         self.ensure_init()?;
         let cache_keys = keys::to_cache_keys(keys);

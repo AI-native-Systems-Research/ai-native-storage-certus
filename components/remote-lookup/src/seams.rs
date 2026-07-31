@@ -564,12 +564,12 @@ impl IMemoryTier for MockMemoryTier {
         MemoryTierTelemetrySnapshot::default()
     }
 
-    fn evict_lru(&self) -> Option<CacheKey> {
-        unimplemented!("mock: IMemoryTier::evict_lru not needed by remote-lookup tests")
+    fn evict_next(&self) -> Option<CacheKey> {
+        unimplemented!("mock: IMemoryTier::evict_next not needed by remote-lookup tests")
     }
 
-    fn evict_lru_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
-        unimplemented!("mock: IMemoryTier::evict_lru_for_key not needed by remote-lookup tests")
+    fn evict_next_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+        unimplemented!("mock: IMemoryTier::evict_next_for_key not needed by remote-lookup tests")
     }
 
     fn oldest_keys(&self, _n: usize) -> Vec<CacheKey> {

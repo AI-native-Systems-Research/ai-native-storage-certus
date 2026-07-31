@@ -625,8 +625,8 @@ impl DispatcherP2pComponent {
                         }
                     }
                     if !evicted {
-                        // No candidates evictable — fall back to blind LRU.
-                        if let Some(evicted_key) = mt.evict_lru_for_key(target_key) {
+                        // No candidates evictable — fall back to blind eviction.
+                        if let Some(evicted_key) = mt.evict_next_for_key(target_key) {
                             if dm.try_evict_to_block(evicted_key).is_err() {
                                 let _ = dm.remove(evicted_key);
                                 if let Some(tx) = eviction_tx {
@@ -658,8 +658,8 @@ impl DispatcherP2pComponent {
         extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
         job: WriteJob,
     ) {
-        // Get the memory-tier pointer without refreshing LRU — the write-through
-        // must not prevent this entry from being evicted under memory pressure.
+        // Get the memory-tier pointer without refreshing its eviction-order position —
+        // the write-through must not prevent this entry from being evicted under memory pressure.
         let (mem_ptr, _size) = match mt.peek(job.key) {
             Some(v) => v,
             None => {
@@ -2701,7 +2701,7 @@ mod tests {
             inner.slots.keys().take(n).copied().collect()
         }
 
-        fn evict_lru(&self) -> Option<CacheKey> {
+        fn evict_next(&self) -> Option<CacheKey> {
             let mut inner = self.inner.lock().unwrap();
             let key = inner.slots.keys().next().copied()?;
             let slot = inner.slots.remove(&key).unwrap();
@@ -2710,8 +2710,8 @@ mod tests {
             Some(key)
         }
 
-        fn evict_lru_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
-            self.evict_lru()
+        fn evict_next_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+            self.evict_next()
         }
 
         fn remove(&self, key: CacheKey) -> Result<(), MemoryTierError> {

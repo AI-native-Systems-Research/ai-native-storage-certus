@@ -15,7 +15,7 @@
 //!                 │                │              │
 //!          ┌──────▼──────┐  ┌─────▼─────┐  ┌──────▼──────┐
 //!          │ DispatchMap │  │ MemoryTier│  │ BlockDevice │
-//!          │ (key→loc)   │  │ (DRAM LRU)│  │ (NVMe SSD)  │
+//!          │ (key→loc)   │  │(DRAM tier)│  │ (NVMe SSD)  │
 //!          └─────────────┘  └───────────┘  └─────────────┘
 //! ```
 //!
@@ -23,7 +23,7 @@
 //!
 //! **Populate** (GPU → DRAM → SSD):
 //! 1. Open client GPU IPC handle
-//! 2. Allocate memory-tier slot - evict existing by LRU to make space if needed.
+//! 2. Allocate memory-tier slot - evict existing entries to make space if needed.
 //! 3. `cudaMemcpy` D2H from GPU into memory-tier
 //! 4. Background writer asynchronously flushes to SSD via extent manager
 //!
@@ -34,7 +34,7 @@
 //!
 //! **Cold Lookup** (SSD → DRAM → GPU):
 //! 1. `DispatchMap::lookup(key)` → `BlockDevice { offset }`
-//! 2. Evict LRU entries from memory-tier to make space
+//! 2. Evict entries from memory-tier to make space
 //! 3. Insert new slot in memory-tier
 //! 4. Pipelined NVMe reads directly into memory-tier (zero-copy)
 //! 5. Async H2D DMA to client GPU (overlapped with reads)
@@ -796,7 +796,7 @@ impl DispatcherComponent {
         res
     }
 
-    /// Free one pin-safe LRU victim, returning `true` if a slot was freed.
+    /// Free one pin-safe eviction victim, returning `true` if a slot was freed.
     ///
     /// Scans the `scan` oldest keys. For each candidate, in order of preference:
     ///  1. **Demote** to BlockDevice via `dm.try_evict_to_block` (keeps the data
@@ -808,7 +808,7 @@ impl DispatcherComponent {
     /// Both dispatch-map operations reject entries with `read_ref > 0`, and in
     /// both branches the dispatch-map transition happens *before* the DRAM slot
     /// is freed. So this NEVER frees a slot that a pinned, in-flight load still
-    /// points at — the bug that let the old blind `evict_lru` path reclaim a
+    /// points at — the bug that let the old blind-eviction path reclaim a
     /// pinned slot and corrupt the concurrent load (invalid H2D DMA / stale
     /// data). A pinned candidate is skipped; the next one is tried.
     ///
@@ -843,7 +843,7 @@ impl DispatcherComponent {
 
     /// Evict entries from the memory-tier until `needed` bytes are free.
     ///
-    /// Every iteration frees one pin-safe LRU victim via [`Self::evict_one_clean`],
+    /// Every iteration frees one pin-safe eviction victim via [`Self::evict_one_clean`],
     /// widening the scan as pressure persists. Evicted entries transition
     /// MemoryTier → BlockDevice in the dispatch-map (data remains on SSD from the
     /// prior write-through). If no candidate in the widening scan is evictable —
@@ -886,7 +886,7 @@ impl DispatcherComponent {
             }
 
             // Free one pin-safe victim, widening the scan as pressure persists so
-            // we look deeper into the LRU past pinned/unpersisted entries.
+            // we look deeper into the eviction order past pinned/unpersisted entries.
             let scan = (MAX_SCAN * attempts).min(1024);
             if !self.evict_one_clean(dm, mt, scan) {
                 // Every scanned candidate is pinned by an in-flight load. Do NOT
@@ -1063,8 +1063,8 @@ impl DispatcherComponent {
         extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
         job: WriteJob,
     ) {
-        // Get the memory-tier pointer without refreshing LRU — the write-through
-        // must not prevent this entry from being evicted under memory pressure.
+        // Get the memory-tier pointer without refreshing its eviction-order position —
+        // the write-through must not prevent this entry from being evicted under memory pressure.
         let (mem_ptr, _size) = match mt.peek(job.key) {
             Some(v) => v,
             None => {
@@ -3119,7 +3119,7 @@ mod tests {
             inner.slots.keys().take(n).copied().collect()
         }
 
-        fn evict_lru(&self) -> Option<CacheKey> {
+        fn evict_next(&self) -> Option<CacheKey> {
             let mut inner = self.inner.lock().unwrap();
             let key = inner.slots.keys().next().copied()?;
             let slot = inner.slots.remove(&key).unwrap();
@@ -3128,8 +3128,8 @@ mod tests {
             Some(key)
         }
 
-        fn evict_lru_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
-            self.evict_lru()
+        fn evict_next_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+            self.evict_next()
         }
 
         fn remove(&self, key: CacheKey) -> Result<(), MemoryTierError> {
@@ -4658,7 +4658,7 @@ mod tests {
     }
 
     /// Regression: eviction under memory pressure must never free the DRAM slot
-    /// of a pinned entry. The old blind-LRU fallback freed the LRU victim before
+    /// of a pinned entry. The old blind-eviction fallback freed the victim before
     /// checking the pin, leaving the dispatch-map pointing at reclaimed DRAM and
     /// corrupting a concurrent load (observed as cudaMemcpyAsync H2D
     /// "invalid argument" / key-not-found and an engine crash under TP).

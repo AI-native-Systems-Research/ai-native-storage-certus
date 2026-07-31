@@ -14,9 +14,9 @@ Centralized repository for all component interface trait definitions. Allows com
 |-----------|---------|---------|
 | `IGreeter` | -- | `greeting_prefix(&self) -> &str` |
 | `ILogger` | -- | `error`, `warn`, `info`, `debug` (all `&self, msg: &str`) |
-| `IEvictionPolicy` | -- | `create_pool`, `track`, `touch`, `batch_touch`, `remove`, `pop_oldest`, `peek_oldest`, `len`, `clear_pool` |
+| `IEvictionPolicy` | -- | `create_pool`, `track`, `touch`, `batch_touch`, `remove`, `identify_next_to_evict`, `get_eviction_candidates`, `len`, `clear_pool` |
 | `IGpuServices` | -- | `initialize`, `shutdown`, `get_devices`, `deserialize_ipc_handle`, `verify_memory`, `pin_memory`, `unpin_memory`, `create_dma_buffer`, `create_stream`, `set_device`, `device_of_ptr`, `destroy_stream`, `stream_query`, `stream_synchronize`; *(spdk)*: `dma_copy_to_host`, `dma_copy_to_device`, `dma_copy_to_device_async`, `memcpy_h2d_async`, `dma_copy_to_host_async`, `memcpy_d2h_async`, `prepare_memory_for_spdk`, `allocate_pinned_dma_buffer`, `register_host_memory`, `unregister_host_memory` |
-| `IMemoryTier` | -- | `initialize`, `insert`, `get`, `peek`, `evict_lru`, `evict_lru_for_key`, `oldest_keys`, `remove`, `touch`, `batch_touch`, `contains`, `capacity`, `used`, `pool_info`, `is_dma_capable`, `clear`, `telemetry_snapshot` |
+| `IMemoryTier` | -- | `initialize`, `insert`, `get`, `peek`, `evict_next`, `evict_next_for_key`, `oldest_keys`, `remove`, `touch`, `batch_touch`, `contains`, `capacity`, `used`, `pool_info`, `is_dma_capable`, `clear`, `telemetry_snapshot` |
 | `IRemoteLookup` | -- | `initialize`, `batch_lookup`, `join_cluster`, `leave_cluster` |
 | `IRemoteLookupRdmaInitiator` | -- | `push`, `connect`, `disconnect`, `disconnect_all`, `set_local_peer_id` |
 | `IRemoteLookupRdmaResponder` | -- | `open_control_channel`, `local_endpoint`, `local_region` |
