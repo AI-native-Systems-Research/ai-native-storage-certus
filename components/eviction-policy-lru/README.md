@@ -13,8 +13,8 @@ LRU eviction policy component for the Certus storage system. Provides a pluggabl
 Each pool contains an intrinsic doubly-linked LRU list (`LruList`) where:
 - New entries are inserted at the tail (most recently used)
 - `touch()` moves an entry to the tail
-- `pop_oldest()` removes from the head (least recently used)
-- `peek_oldest(n)` returns the N oldest keys without removal
+- `identify_next_to_evict()` removes from the head (least recently used)
+- `get_eviction_candidates(n)` returns the N oldest keys without removal
 
 ### Pool Isolation
 
@@ -28,8 +28,8 @@ Pools are independent — entries in one pool are not affected by operations on 
 | `track(pool, key) -> EvictionHandle` | Start tracking a key in a pool |
 | `touch(handle)` | Move entry to most-recently-used position |
 | `remove(handle)` | Stop tracking an entry |
-| `pop_oldest(pool) -> Option<CacheKey>` | Remove and return the LRU entry |
-| `peek_oldest(pool, n) -> Vec<CacheKey>` | View the N oldest entries without removal |
+| `identify_next_to_evict(pool) -> Option<CacheKey>` | Select the next entry to evict (LRU), remove it, and return it |
+| `get_eviction_candidates(pool, n) -> Vec<CacheKey>` | View the next N eviction candidates (oldest-first) without removal |
 | `len(pool) -> usize` | Number of tracked entries in a pool |
 | `clear_pool(pool)` | Remove all entries from a pool |
 
@@ -54,7 +54,7 @@ let h2 = ep.track(pool, 99).unwrap();
 
 ep.touch(h1).unwrap(); // 42 is now most-recently-used
 
-let oldest = ep.pop_oldest(pool); // returns Some(99)
+let oldest = ep.identify_next_to_evict(pool); // returns Some(99)
 ```
 
 ## Build & Test

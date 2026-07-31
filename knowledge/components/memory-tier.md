@@ -7,7 +7,7 @@
 
 ## Description
 
-DRAM memory-tier pool for caching data between GPU and SSD. Allocates a large contiguous region (via hugepages or SPDK DMA memory) and sub-allocates fixed-size slots keyed by `CacheKey`. Supports NUMA-aware placement via `mbind(MPOL_BIND)`. Delegates LRU ordering to an `IEvictionPolicy` receptacle for eviction decisions.
+DRAM memory-tier pool for caching data between GPU and SSD. Allocates a large contiguous region (via hugepages or SPDK DMA memory) and sub-allocates fixed-size slots keyed by `CacheKey`. Supports NUMA-aware placement via `mbind(MPOL_BIND)`. Delegates eviction ordering to an `IEvictionPolicy` receptacle for eviction decisions.
 
 The pool is sharded into 16 independent sub-pools for reduced lock contention. Each shard holds its own allocation bitmap and slot map. Key-to-shard mapping is deterministic (key % 16).
 
@@ -33,8 +33,8 @@ define_interface! {
         fn insert(&self, key: CacheKey, size: u32) -> Result<*mut u8, MemoryTierError>;
         fn get(&self, key: CacheKey) -> Option<(*mut u8, u32)>;
         fn peek(&self, key: CacheKey) -> Option<(*mut u8, u32)>;
-        fn evict_lru(&self) -> Option<CacheKey>;
-        fn evict_lru_for_key(&self, key: CacheKey) -> Option<CacheKey>;
+        fn evict_next(&self) -> Option<CacheKey>;
+        fn evict_next_for_key(&self, key: CacheKey) -> Option<CacheKey>;
         fn oldest_keys(&self, n: usize) -> Vec<CacheKey>;
         fn remove(&self, key: CacheKey) -> Result<(), MemoryTierError>;
         fn touch(&self, key: CacheKey);
@@ -65,7 +65,7 @@ The following invariants are formally proved with Creusot (see `components/memor
 | P7 | used-within-capacity | `used()` never exceeds `capacity()` |
 | P8 | pool-full | `insert` returns PoolFull when used + size > capacity |
 | P9 | remove-key-not-found | `remove` on absent key returns KeyNotFound |
-| P10 | evict-round-robin | `evict_lru` cycles through all 16 shards |
+| P10 | evict-round-robin | `evict_next` cycles through all 16 shards |
 
 Total: 10 properties, 21 verification conditions discharged by SMT solvers.
 
@@ -74,7 +74,7 @@ Total: 10 properties, 21 verification conditions discharged by SMT solvers.
 | Name | Interface | Required | Purpose |
 |------|-----------|----------|---------|
 | `logger` | `ILogger` | No | Optional logging |
-| `eviction_policy` | `IEvictionPolicy` | Yes | LRU ordering for eviction decisions |
+| `eviction_policy` | `IEvictionPolicy` | Yes | Eviction ordering for eviction decisions |
 
 ## Key Types
 

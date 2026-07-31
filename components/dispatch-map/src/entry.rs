@@ -31,7 +31,7 @@ pub(crate) struct DispatchEntry {
     pub size_blocks: u32,
     pub read_ref: u32,
     pub write_ref: u32,
-    /// Handle into the eviction policy's LRU ordering.
+    /// Handle into the eviction policy's ordering.
     pub eviction_handle: EvictionHandle,
     /// Number of times this entry has been reused (read hits).
     pub reuse_count: AtomicU32,

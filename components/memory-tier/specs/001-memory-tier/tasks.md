@@ -21,7 +21,7 @@
 - [ ] Add stress test for allocator fragmentation (random size allocation/deallocation)
 - [ ] Add test for batch_touch with mixed present/absent keys
 - [ ] Add test for oldest_keys ordering correctness
-- [ ] Add test for evict_lru_for_key targeting correct shard
+- [ ] Add test for evict_next_for_key targeting correct shard
 
 ## Add Benchmarks
 

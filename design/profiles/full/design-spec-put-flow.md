@@ -10,13 +10,13 @@ The put flow moves a GPU tensor (cache block) from client GPU memory into a DRAM
 - **Single dispatcher process.** One certus-server process handles all client requests. No sharding or multi-instance coordination.
 - **No ordering guarantees across keys.** Puts to different keys are fully independent and may reach SSD in any order. Puts to the same key are rejected (AlreadyExists) — the client must remove before re-populating.
 - **Cache semantics.** Memory-tier data is volatile. A crash between steps 3–8 loses the block; this is acceptable because the data is recoverable from the original source.
-- **Memory-tier pool sizing.** The pool must be large enough to absorb the working set. When full, LRU eviction frees slots — entries that have completed write-through are eligible for eviction (dispatch-map transitions from MemoryTier to BlockDevice).
+- **Memory-tier pool sizing.** The pool must be large enough to absorb the working set. When full, eviction frees slots — entries that have completed write-through are eligible for eviction (dispatch-map transitions from MemoryTier to BlockDevice).
 
 ## Put Flow
 
 1. **Client submits request via gRPC.** The client sends the key and an IPC handle (64-byte CUDA IPC memory handle + size) to the certus-server in a BatchPopulateRequest. The server opens the IPC handle via `cudaIpcOpenMemHandle` to obtain a device pointer in its own CUDA context.
 
-2. **Memory-tier eviction (if needed).** If the memory-tier pool lacks space for the new entry, the dispatcher evicts LRU entries whose write-through has completed (ssd_offset is set). Evicted entries transition from MemoryTier to BlockDevice in the dispatch-map — their data remains on SSD. If nothing is evictable (all entries are still writing through), the put fails with AllocationFailed.
+2. **Memory-tier eviction (if needed).** If the memory-tier pool lacks space for the new entry, the dispatcher evicts entries (chosen by the bound eviction policy) whose write-through has completed (ssd_offset is set). Evicted entries transition from MemoryTier to BlockDevice in the dispatch-map — their data remains on SSD. If nothing is evictable (all entries are still writing through), the put fails with AllocationFailed.
 
 3. **Memory-tier slot allocation.** The dispatcher allocates a slot from the memory-tier's mmap'd DRAM pool (first-fit, 4 KiB aligned). The pool is pre-registered with CUDA via `cudaHostRegister` for zero-copy DMA.
 
@@ -42,7 +42,7 @@ The put flow moves a GPU tensor (cache block) from client GPU memory into a DRAM
 
 An alternative to the single-call `populate` is the split-populate path, which separates reservation from DMA:
 
-1. **`reserve_memory(key, size)`** — Reserves a DRAM slot in the memory-tier (runs eviction if needed). Returns a raw pointer to the allocated slot. Does NOT register in the dispatch-map.
+1. **`reserve_memory(key, size, session_id)`** — Reserves a DRAM slot in the memory-tier (runs eviction if needed). Returns a raw pointer to the allocated slot. Does NOT register in the dispatch-map. `session_id` is an opaque per-request identifier (0 = unset) supplied by the client for observability only; it has no allocation semantics.
 2. **`populate_memory(key, ipc_handle)`** — Issues `cudaMemcpy` D2H into the previously reserved slot.
 3. **`memory_populated(key, size)`** — Finalizes the entry: registers in the dispatch-map and enqueues background write-through (equivalent to steps 5–9 of the put flow).
 4. **`release_memory(key)`** — Cancellation path: frees the reserved slot without populating.
@@ -59,7 +59,7 @@ A lookup arriving while background write-through is in progress finds the entry 
 
 ## Eviction
 
-- **DRAM eviction:** LRU-based. Only entries with a completed write-through (ssd_offset set) and no active references are eligible. The dispatch-map entry transitions from MemoryTier to BlockDevice; subsequent lookups use the cold path.
+- **DRAM eviction:** delegated to the bound eviction policy. Only entries with a completed write-through (ssd_offset set) and no active references are eligible. The dispatch-map entry transitions from MemoryTier to BlockDevice; subsequent lookups use the cold path.
 - **SSD eviction (BackgroundEvictor):** When SSD usage exceeds a configurable threshold, the evictor scans for oldest keys, removes their extents, and frees space. Entries evicted from SSD are fully removed from the system — a subsequent lookup returns KeyNotFound.
 
 ## Crash Recovery

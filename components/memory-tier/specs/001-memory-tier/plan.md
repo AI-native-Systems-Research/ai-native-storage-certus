@@ -117,13 +117,13 @@ All error cases are captured in the `MemoryTierError` enum:
 | `insert_duplicate_fails` | AlreadyExists error |
 | `insert_zero_size_fails` | InvalidSize error |
 | `remove_and_reuse` | Remove frees slot, allows re-insert |
-| `evict_lru_returns_some` | Eviction produces a key |
+| `evict_next_returns_some` | Eviction produces a key |
 | `pool_full_returns_error` | PoolFull when shard exhausted |
 | `capacity_and_used` | Accounting correctness |
 | `contains` | Presence check |
 | `clear_resets_all` | Full cache clear |
-| `touch_updates_lru` | Touch promotes entry, eviction respects order |
-| `peek_does_not_update_lru` | Peek does not promote |
+| `touch_updates_eviction_order` | Touch promotes entry, eviction respects order |
+| `peek_does_not_update_eviction_order` | Peek does not promote |
 
 ### Unit Tests (src/allocator.rs)
 
