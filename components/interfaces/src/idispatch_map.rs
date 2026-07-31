@@ -274,5 +274,24 @@ component_macros::define_interface! {
             offset: u64,
             size_blocks: u32,
         ) -> Result<(), DispatchMapError>;
+
+        /// Record the CRC-32 integrity checksum for a stored block's data.
+        ///
+        /// Called on the store path once the block has landed in its slot, so
+        /// the checksum travels with the index entry (and survives
+        /// demote/promote) rather than living in caller-local state. Returns
+        /// `KeyNotFound` if the entry is absent.
+        ///
+        /// Only present under the `integrity-check` feature.
+        #[cfg(feature = "integrity-check")]
+        fn set_checksum(&self, key: CacheKey, checksum: u32) -> Result<(), DispatchMapError>;
+
+        /// Fetch the recorded CRC-32 for `key`, or `None` if the entry is
+        /// absent or has no checksum recorded (e.g. never stored under this
+        /// feature). Callers treat `None` as "skip verification".
+        ///
+        /// Only present under the `integrity-check` feature.
+        #[cfg(feature = "integrity-check")]
+        fn get_checksum(&self, key: CacheKey) -> Option<u32>;
     }
 }

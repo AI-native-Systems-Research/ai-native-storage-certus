@@ -60,7 +60,6 @@ impl DispatchMapComponent {
 }
 
 impl IDispatchMap for DispatchMapComponent {
-
     /// Recover dispatch map state from the extent manager's persisted extents.
     /// Each extent is re-inserted as a BlockDevice location with zero reference
     /// counts, restoring the map to a consistent view of committed storage.
@@ -99,6 +98,8 @@ impl IDispatchMap for DispatchMapComponent {
                 write_ref: 0,
                 eviction_handle,
                 reuse_count: AtomicU32::new(0),
+                #[cfg(feature = "integrity-check")]
+                checksum: 0,
             };
             inner.entries.insert(extent.key, entry);
             count += 1;
@@ -113,12 +114,12 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {
-        let satisfied = self
-            .state
-            .wait_for(DEFAULT_TIMEOUT, |inner| match inner.entries.get(&key) {
-                None => true,
-                Some(e) => e.write_ref == 0,
-            });
+        let satisfied =
+            self.state
+                .wait_for(DEFAULT_TIMEOUT, |inner| match inner.entries.get(&key) {
+                    None => true,
+                    Some(e) => e.write_ref == 0,
+                });
 
         let mut inner = self.state.inner.lock().unwrap();
         let entry = match inner.entries.get_mut(&key) {
@@ -134,7 +135,9 @@ impl IDispatchMap for DispatchMapComponent {
             .read_ref
             .checked_add(1)
             .ok_or(DispatchMapError::RefCountOverflow(key))?;
-        entry.reuse_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        entry
+            .reuse_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let handle = entry.eviction_handle;
 
         let result = match &entry.location {
@@ -210,7 +213,9 @@ impl IDispatchMap for DispatchMapComponent {
             .read_ref
             .checked_add(1)
             .ok_or(DispatchMapError::RefCountOverflow(key))?;
-        entry.reuse_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        entry
+            .reuse_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: take_read key {key}"));
         }
@@ -298,7 +303,9 @@ impl IDispatchMap for DispatchMapComponent {
             .read_ref
             .checked_add(1)
             .ok_or(DispatchMapError::RefCountOverflow(key))?;
-        entry.reuse_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        entry
+            .reuse_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!("dispatch-map: downgrade_reference key {key}"));
         }
@@ -394,6 +401,8 @@ impl IDispatchMap for DispatchMapComponent {
             write_ref: 1,
             eviction_handle,
             reuse_count: AtomicU32::new(0),
+            #[cfg(feature = "integrity-check")]
+            checksum: 0,
         };
 
         inner.entries.insert(key, entry);
@@ -504,7 +513,10 @@ impl IDispatchMap for DispatchMapComponent {
                     && entry.write_ref == 0
                     && matches!(
                         entry.location,
-                        Location::MemoryTier { ssd_offset: Some(_), .. }
+                        Location::MemoryTier {
+                            ssd_offset: Some(_),
+                            ..
+                        }
                     )
             }
             None => false,
@@ -565,17 +577,42 @@ impl IDispatchMap for DispatchMapComponent {
             write_ref: 0,
             eviction_handle,
             reuse_count: AtomicU32::new(0),
+            #[cfg(feature = "integrity-check")]
+            checksum: 0,
         };
         inner.entries.insert(key, entry);
         Ok(())
+    }
+
+    #[cfg(feature = "integrity-check")]
+    fn set_checksum(&self, key: CacheKey, checksum: u32) -> Result<(), DispatchMapError> {
+        let mut inner = self.state.inner.lock().unwrap();
+        let entry = inner
+            .entries
+            .get_mut(&key)
+            .ok_or(DispatchMapError::KeyNotFound(key))?;
+        entry.checksum = checksum;
+        Ok(())
+    }
+
+    #[cfg(feature = "integrity-check")]
+    fn get_checksum(&self, key: CacheKey) -> Option<u32> {
+        let inner = self.state.inner.lock().unwrap();
+        // A recorded checksum of 0 is treated as "not set" — the caller skips
+        // verification rather than comparing against a sentinel.
+        inner
+            .entries
+            .get(&key)
+            .map(|e| e.checksum)
+            .filter(|&c| c != 0)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use component_core::query_interface;
+    use std::sync::Arc;
 
     fn setup_component() -> Arc<DispatchMapComponent> {
         let ep_comp = eviction_policy_lru::EvictionPolicyLruComponent::new_default();

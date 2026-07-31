@@ -58,6 +58,16 @@ impl HwDispatchMap {
 }
 
 impl IDispatchMap for HwDispatchMap {
+    #[cfg(feature = "integrity-check")]
+    fn set_checksum(&self, _key: CacheKey, _checksum: u32) -> Result<(), DispatchMapError> {
+        Ok(())
+    }
+
+    #[cfg(feature = "integrity-check")]
+    fn get_checksum(&self, _key: CacheKey) -> Option<u32> {
+        None
+    }
+
     fn initialize(&self) -> Result<(), DispatchMapError> {
         Ok(())
     }
@@ -243,7 +253,9 @@ impl IDispatchMap for HwDispatchMap {
     }
 
     fn try_evict_to_block(&self, _key: CacheKey) -> Result<(), DispatchMapError> {
-        Err(DispatchMapError::InvalidState("not supported in mock".into()))
+        Err(DispatchMapError::InvalidState(
+            "not supported in mock".into(),
+        ))
     }
 
     fn recover_extent(

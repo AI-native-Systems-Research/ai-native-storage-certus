@@ -35,6 +35,16 @@ impl BenchDispatchMap {
 }
 
 impl IDispatchMap for BenchDispatchMap {
+    #[cfg(feature = "integrity-check")]
+    fn set_checksum(&self, _key: CacheKey, _checksum: u32) -> Result<(), DispatchMapError> {
+        Ok(())
+    }
+
+    #[cfg(feature = "integrity-check")]
+    fn get_checksum(&self, _key: CacheKey) -> Option<u32> {
+        None
+    }
+
     fn initialize(&self) -> Result<(), DispatchMapError> {
         Ok(())
     }
