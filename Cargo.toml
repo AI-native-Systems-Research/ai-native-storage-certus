@@ -39,6 +39,7 @@ members = [
     "apps/dynamic-loading-example",
     "apps/certus-server-yaml",
     "apps/baseline-generalized-fs",
+    "apps/remote-lookup-bench",
     "components/zyre"
 ]
 

@@ -75,6 +75,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PYDIR="$REPO_ROOT/apps/python"
 
+# Cluster launch/wait/teardown is shared with bench-remote-lookup-multinode.sh.
+# shellcheck source=lib/cluster-launch.sh
+. "$SCRIPT_DIR/lib/cluster-launch.sh"
+
 # --- defaults (env-overridable) ---
 SERVER_BIN="${CERTUS_SERVER_BIN:-$REPO_ROOT/target/release/certus-server-yaml}"
 # The binary is NOT rpath'd against the in-tree zyre/czmq/zmq build, so every
@@ -148,33 +152,19 @@ RUN_TAG="$$"
 DRIVER="$PYDIR/remote-lookup-clustertest.py"
 STUBS=("$PYDIR/dispatcher_pb2.py" "$PYDIR/dispatcher_pb2_grpc.py")
 REMOTE_DRIVER="/tmp/remote-lookup-clustertest-${RUN_TAG}.py"
-remote_log() { echo "/tmp/certus-clustertest-${RUN_TAG}-$1.log"; }
 
 for f in "$DRIVER" "${STUBS[@]}"; do
     [[ -f "$f" ]] || { echo "error: missing $f" >&2; exit 1; }
 done
 
-log() { echo "[$(printf '%(%H:%M:%S)T' -1)] $*"; }
-
+# Also remove this run's driver and the (untagged) generated stubs.
 cleanup() {
-    log "Tearing down cluster (group $GROUP)..."
-    for node in "${NODES[@]}"; do
-        # Scope the kill to OUR group so we never touch another tester's servers.
-        ssh "${SSH_OPTS[@]}" "$node" \
-            "pkill -f 'rl-group ${GROUP}' 2>/dev/null || true; \
-             rm -f '$(remote_log "$node")' '$REMOTE_DRIVER' \
-                   /tmp/dispatcher_pb2.py /tmp/dispatcher_pb2_grpc.py 2>/dev/null || true" \
-            2>/dev/null || true
-    done
+    cluster_cleanup "'$REMOTE_DRIVER'" \
+        "/tmp/dispatcher_pb2.py" "/tmp/dispatcher_pb2_grpc.py"
 }
 trap cleanup EXIT
 
-dump_log() {
-    local node="$1"
-    echo "----- server log ($node) -----" >&2
-    ssh "${SSH_OPTS[@]}" "$node" "cat '$(remote_log "$node")' 2>/dev/null" >&2 || true
-    echo "-------------------------------" >&2
-}
+dump_log() { cluster_dump_log "$1"; }
 
 echo "=== Certus remote-lookup multi-node RDMA test ==="
 log "Nodes:     ${NODES[*]}  (holder=$HOLDER, requester=$REQUESTER)"
@@ -191,28 +181,10 @@ REMOTE_ENV="RUST_LOG=${CERTUS_TEST_RUST_LOG:-info} LD_LIBRARY_PATH=\"$LIB_PATH:\
 [[ -n "$TEARDOWN_MS" ]] && REMOTE_ENV="$REMOTE_ENV CERTUS_RL_TEARDOWN_MS=$TEARDOWN_MS"
 [[ -n "$RDMA_BIND_IP" ]] && REMOTE_ENV="$REMOTE_ENV CERTUS_RDMA_BIND_IP=$RDMA_BIND_IP"
 
-for node in "${NODES[@]}"; do
-    log "Launching server on $node ..."
-    ssh "${SSH_OPTS[@]}" "$node" \
-        "nohup env $REMOTE_ENV '$SERVER_BIN' --rl-group '$GROUP' \
-             --listen 0.0.0.0:$GRPC_PORT $SERVER_ARGS \
-             > '$(remote_log "$node")' 2>&1 </dev/null & echo launched" \
-        >/dev/null
-done
+cluster_launch
 
 # --- 2. Wait for every gRPC endpoint, then let zyre beacon peers discover ---
-for node in "${NODES[@]}"; do
-    log "Waiting for gRPC on $node:$GRPC_PORT ..."
-    if ! ssh "${SSH_OPTS[@]}" "$node" \
-        "for _ in \$(seq 1 120); do (exec 3<>/dev/tcp/127.0.0.1/$GRPC_PORT) 2>/dev/null && exit 0; sleep 0.5; done; exit 1"
-    then
-        echo "error: server on $node did not become ready" >&2
-        dump_log "$node"
-        exit 1
-    fi
-done
-log "All servers up; allowing 5s for zyre peer discovery ..."
-sleep 5
+cluster_wait_ready || exit 1
 
 # --- 3. Ship the driver + stubs to holder and requester ---
 for node in "$HOLDER" "$REQUESTER"; do

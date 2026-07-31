@@ -39,7 +39,10 @@ Additional behavior:
   preferred, then disk), bounded by `max_retry_rounds`.
 - **Phase-2 disk fallback** — keys satisfiable only from a peer's disk tier are
   fetched once the memory phase stalls; the serving peer promotes the value
-  (`dispatcher.promote_to_memory_tier`) before writing it.
+  (`dispatcher.promote_to_memory_tier`) before writing it. All disk-resident keys
+  in one RDMA_REQUEST are promoted in a single call, so the dispatcher can spread
+  the SSD reads across drives (one thread and channel per drive) instead of
+  serializing on the drive that owns each key.
 - **Completion / timeout** — an operation finalizes when every key is satisfied,
   when every expected peer has replied with nothing left in flight, or when
   `op_deadline` elapses (unsatisfied keys return `NotFound`, and the caller's

@@ -32,9 +32,9 @@ use interfaces::{
     CacheKey, ControlChannel, DispatchMapError, DispatcherConfig, DispatcherError, Endpoint,
     GpuStream, IDispatchMap, IDispatcher, IMemoryTier, IRemoteLookupRdmaInitiator,
     IRemoteLookupRdmaResponder, IRemoteLookupRdmaResponderAdmin, IpcHandle, LocalRegion,
-    LookupResult, MemoryTierError, MemoryTierTelemetrySnapshot, PeerId, PushStatus, ReadWriteStats,
-    RemoteLookupRdmaInitiatorError, RemoteLookupRdmaResponderError, RemoteRegion, ResponderCommand,
-    ResponderEvent,
+    LookupResult, MemoryTierError, MemoryTierTelemetrySnapshot, PeerId, PushCompletion, PushStatus,
+    ReadWriteStats, RemoteLookupRdmaInitiatorError, RemoteLookupRdmaResponderError, RemoteRegion,
+    ResponderCommand, ResponderEvent,
 };
 
 /// Default byte-backing pool size for a [`NodeWorld`] (64 MiB).
@@ -101,6 +101,11 @@ struct NodeWorldInner {
     /// Every endpoint this node's initiator was asked to warm via `connect`, in
     /// order — lets tests assert warm-at-discovery (connect-hardening).
     warm_log: Vec<String>,
+    /// Key slices passed to `IDispatcher::promote_to_memory_tier`, one entry per
+    /// call, in order — lets tests assert the responder batches disk→memory
+    /// promotion into a single call per RDMA_REQUEST (so the dispatcher can fan
+    /// the SSD reads out across drives) rather than promoting key-by-key.
+    promote_log: Vec<Vec<CacheKey>>,
     /// Artificial delay applied inside `push` before it returns, so a serve (and
     /// thus the RDMA_STATUS) can be held while other events are processed
     /// (research Decision 8 app-level delays; used by the single-flight test).
@@ -169,6 +174,7 @@ impl NodeWorld {
             rkey: MOCK_RKEY,
             push_log: Vec::new(),
             warm_log: Vec::new(),
+            promote_log: Vec::new(),
             serve_delay: Duration::ZERO,
             lookup_delay: Duration::ZERO,
         };
@@ -274,6 +280,13 @@ impl NodeWorld {
     /// order — used to assert warm-at-discovery (connect-hardening).
     pub fn warms(&self) -> Vec<String> {
         self.lock().warm_log.clone()
+    }
+
+    /// Key slices passed to `IDispatcher::promote_to_memory_tier`, one entry per
+    /// call, in call order — used to assert that a served RDMA_REQUEST promotes
+    /// all of its disk-resident keys in a single batched call.
+    pub fn promote_calls(&self) -> Vec<Vec<CacheKey>> {
+        self.lock().promote_log.clone()
     }
 
     /// Whether a memory-tier landing-slot reservation for `key` is still held
@@ -610,6 +623,7 @@ impl IDispatcher for MockDispatcher {
 
     fn promote_to_memory_tier(&self, keys: &[CacheKey]) {
         let mut inner = self.0.lock();
+        inner.promote_log.push(keys.to_vec());
         for &key in keys {
             if inner.promote_failures.contains(&key) {
                 continue;
@@ -764,20 +778,11 @@ impl MockInitiator {
     }
 }
 
-impl IRemoteLookupRdmaInitiator for MockInitiator {
-    fn push(
-        &self,
-        _endpoint: &str,
-        items: &[(CacheKey, RemoteRegion)],
-    ) -> Result<Vec<PushStatus>, RemoteLookupRdmaInitiatorError> {
-        // Optionally hold the serve (and thus the RDMA_STATUS) without keeping
-        // the world locked, so the requester can process other events meanwhile.
-        let delay = self.world.lock().serve_delay;
-        if !delay.is_zero() {
-            thread::sleep(delay);
-        }
-
-        let mut inner = self.world.lock();
+impl MockInitiator {
+    /// Decide the per-item outcome of a push, applying any staged forcing or
+    /// evict-on-serve. Mutates the world, so it runs when the push "completes".
+    fn outcomes(world: &NodeWorld, items: &[(CacheKey, RemoteRegion)]) -> Vec<PushStatus> {
+        let mut inner = world.lock();
         let mut out = Vec::with_capacity(items.len());
         for (key, region) in items {
             inner.push_log.push(*key);
@@ -797,7 +802,53 @@ impl IRemoteLookupRdmaInitiator for MockInitiator {
             };
             out.push(status);
         }
-        Ok(out)
+        out
+    }
+}
+
+impl IRemoteLookupRdmaInitiator for MockInitiator {
+    fn push_async(
+        &self,
+        _endpoint: &str,
+        items: &[(CacheKey, RemoteRegion)],
+        on_complete: PushCompletion,
+    ) -> Result<(), RemoteLookupRdmaInitiatorError> {
+        let delay = self.world.lock().serve_delay;
+        let world = self.world.clone();
+        let items = items.to_vec();
+
+        if delay.is_zero() {
+            on_complete(Self::outcomes(&world, &items));
+            return Ok(());
+        }
+
+        // A staged delay defers the *completion*, off this thread — mirroring the
+        // real initiator, where submitting does not occupy the caller and a slow
+        // transfer to one peer does not hold up serves to another. (Before
+        // submission was asynchronous, this slept inline and blocked the worker.)
+        thread::spawn(move || {
+            thread::sleep(delay);
+            on_complete(Self::outcomes(&world, &items));
+        });
+        Ok(())
+    }
+
+    fn push(
+        &self,
+        endpoint: &str,
+        items: &[(CacheKey, RemoteRegion)],
+    ) -> Result<Vec<PushStatus>, RemoteLookupRdmaInitiatorError> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.push_async(
+            endpoint,
+            items,
+            Box::new(move |statuses| {
+                let _ = tx.send(statuses);
+            }),
+        )?;
+        Ok(rx
+            .recv()
+            .unwrap_or_else(|_| vec![PushStatus::UnableToConnect; items.len()]))
     }
 
     fn connect(&self, endpoint: &str) -> Result<(), RemoteLookupRdmaInitiatorError> {
