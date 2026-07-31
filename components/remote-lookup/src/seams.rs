@@ -577,12 +577,12 @@ impl IMemoryTier for MockMemoryTier {
         MemoryTierTelemetrySnapshot::default()
     }
 
-    fn evict_lru(&self) -> Option<CacheKey> {
-        unimplemented!("mock: IMemoryTier::evict_lru not needed by remote-lookup tests")
+    fn evict_next(&self) -> Option<CacheKey> {
+        unimplemented!("mock: IMemoryTier::evict_next not needed by remote-lookup tests")
     }
 
-    fn evict_lru_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
-        unimplemented!("mock: IMemoryTier::evict_lru_for_key not needed by remote-lookup tests")
+    fn evict_next_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+        unimplemented!("mock: IMemoryTier::evict_next_for_key not needed by remote-lookup tests")
     }
 
     fn oldest_keys(&self, _n: usize) -> Vec<CacheKey> {
@@ -658,7 +658,10 @@ impl IDispatcher for MockDispatcher {
         unimplemented!("mock: IDispatcher::lookup_async not needed by remote-lookup tests")
     }
 
-    fn batch_lookup(&self, _entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> {
+    fn batch_lookup(
+        &self,
+        _entries: &[(CacheKey, Vec<IpcHandle>)],
+    ) -> Vec<Result<(), DispatcherError>> {
         unimplemented!("mock: IDispatcher::batch_lookup not needed by remote-lookup tests")
     }
 
@@ -686,7 +689,7 @@ impl IDispatcher for MockDispatcher {
     fn copy_gpu_to_memory_async(
         &self,
         _key: CacheKey,
-        _ipc_handle: IpcHandle,
+        _regions: &[IpcHandle],
         _stream: GpuStream,
     ) -> Result<(), DispatcherError> {
         unimplemented!(

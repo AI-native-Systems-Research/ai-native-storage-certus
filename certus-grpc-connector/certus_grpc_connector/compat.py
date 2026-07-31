@@ -22,10 +22,10 @@ Three techniques, each handling a different kind of change:
    touching vLLM's shapes directly. Each version branch lives in exactly one
    place.
 
-Supported (built + smoke-tested) versions: 0.20, 0.22, 0.24, 0.26. Values in the
-matrix are seeded from the 0.20 baseline; each is confirmed or corrected as the
-even-version walk builds and smoke-tests that release. Entries still awaiting
-empirical confirmation on a given version are marked ``# TODO(verify @0.xx)``.
+Supported (built + smoke-tested) versions: 0.20, 0.22, 0.23, 0.24, 0.26. Values in
+the matrix are seeded from the 0.20 baseline; each is confirmed or corrected as the
+version walk builds and smoke-tests that release. Entries still awaiting empirical
+confirmation on a given version are marked ``# TODO(verify @0.xx)``.
 """
 
 from __future__ import annotations
@@ -35,8 +35,14 @@ import sys
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version as _dist_version
 
-# Even versions we support as first-class, runnable rows.
-SUPPORTED_VERSIONS: tuple[tuple[int, int], ...] = ((0, 20), (0, 22), (0, 24), (0, 26))
+# Versions we support as first-class, runnable rows.
+SUPPORTED_VERSIONS: tuple[tuple[int, int], ...] = (
+    (0, 20),
+    (0, 22),
+    (0, 23),
+    (0, 24),
+    (0, 26),
+)
 
 
 # ── version detection ──────────────────────────────────────────────────────
@@ -92,13 +98,21 @@ FEATURES: dict[str, "callable"] = {
     # both eras. This flag records where the arg actually starts being passed;
     # it is declarative (the superset signature needs no runtime branch).
     "req_context_arg": lambda v: v >= (0, 22),  # verified @0.20 (absent), @0.22 (present)
-    # ``TransferResult`` carries the 5th ``transfer_type`` field. Confirmed on
-    # 0.20 and 0.22 (worker.worker.TransferResult has all 5 fields on both).
-    "transfer_result_has_type": lambda v: v >= (0, 20),  # verified @0.20,0.22; TODO(verify @0.24/0.26)
-    # ``get_handlers`` receives an object exposing ``.tensors[i].tensor``.
-    # True on 0.20; re-confirm per hop (attention/cache-layout churn is the
-    # highest-risk silent break).
-    "kv_caches_tensors_attr": lambda v: v >= (0, 20),  # TODO(verify @0.22/0.24/0.26)
+    # ``TransferResult`` carries the 5th ``transfer_type`` field. Present on
+    # 0.20/0.22/0.24; 0.26 DROPPED it (worker direction is explicit via
+    # submit_store/submit_load, so the medium pair is no longer carried on the
+    # result). ``make_transfer_result`` builds the 4-field shape when this is off.
+    "transfer_result_has_type": lambda v: v < (0, 26),  # verified @0.20,0.22,0.24 (present), @0.26 (dropped)
+    # ``get_handlers``/``get_worker`` receives an object exposing ``.tensors[i]``
+    # (each ``.tensor`` + ``.page_size_bytes``). The ATTRIBUTE is present across the
+    # whole range — but its length is a runtime KV-allocation property that changed:
+    # measured 0.20/0.22 coalesce all layers into ONE tensor (stride = full block),
+    # while 0.23+ split it per-layer (Llama-3: 32 tensors). ``extract_gpu_ptrs``
+    # maps EACH tensor to its own IPC region (multi-region offload), so both the
+    # single-tensor (N==1) and per-layer-split (N==32) layouts are handled — this
+    # flag only gates the access pattern, not the layout. Verified @0.20,0.22
+    # (len==1), @0.23,0.24,0.26 (len==32).
+    "kv_caches_tensors_attr": lambda v: v >= (0, 20),
     # ``KVCacheConfig.kv_cache_groups[i]`` exposes ``.layer_names`` and
     # ``.kv_cache_spec.page_size_bytes``. True on 0.20; re-confirm per hop.
     "kv_cache_group_attrs": lambda v: v >= (0, 20),  # TODO(verify @0.22/0.24/0.26)
@@ -115,16 +129,38 @@ FEATURES: dict[str, "callable"] = {
     # pass ``async_scheduling=False`` to opt out. 0.20 did not default it on, so
     # the flag (and the kwarg itself) only applies from 0.22.
     "needs_disable_async_scheduling": lambda v: v >= (0, 22),  # verified @0.22 (assert crash w/o it)
-    # 0.24 added a new ABSTRACT method OffloadingManager.on_new_request(req_context)
+    # 0.23 added a new ABSTRACT method OffloadingManager.on_new_request(req_context)
     # -> RequestOffloadingContext(policy=...), called once when the scheduler first
     # sees a request. Without an implementation the manager is abstract and vLLM
     # can't instantiate it (TypeError at engine init). We return the default
     # BLOCK_LEVEL context (offload newly-computed blocks, skip prefix hits — which
-    # matches our prepare_store Check filter). The return type only exists on
-    # 0.24+, so the manager builds it lazily via ``new_request_offloading_context``;
-    # older bases neither declare nor call the method. Declarative flag (the method
-    # is defined unconditionally; it is simply never invoked before 0.24).
-    "has_on_new_request": lambda v: v >= (0, 24),  # verified @0.24 (abstract; instantiation fails without it)
+    # matches our prepare_store Check filter). The return type first appears in the
+    # consolidated ``base`` module at 0.23, so the manager builds it lazily via
+    # ``new_request_offloading_context``; older bases neither declare nor call the
+    # method. Declarative flag (the method is defined unconditionally; it is simply
+    # never invoked before 0.23). Measured @0.23 (abstract in base.py) — the
+    # abstract method landed at 0.23, NOT 0.24, so the threshold is (0, 23).
+    "has_on_new_request": lambda v: v >= (0, 23),  # verified @0.23 (abstract; instantiation fails without it)
+    # ── 0.26 offloading-API rewrite (four related breaks, all ≥0.26) ──
+    # vLLM 0.26 rewrote vllm.v1.kv_offload.* ("experimental, subject to change").
+    # The worker interface changed from a per-direction OffloadingHandler with
+    # ``transfer_async(job_id, spec)`` (dispatched by (src_medium, dst_medium)
+    # tuples from ``get_handlers``) to a SINGLE ``OffloadingWorker`` with explicit
+    # ``submit_store(job_id, src, dst)`` / ``submit_load(job_id, src, dst)``,
+    # returned by ``get_worker``. Verified @0.26 (ImportError: worker.worker gone).
+    "worker_split_submit": lambda v: v >= (0, 26),
+    # ``OffloadingSpec.__init__`` takes a single ``OffloadingConfig`` (exposing
+    # ``worker_kv_bytes_per_block``, ``extra_config``, ``groups``, ``cache``)
+    # instead of ``(vllm_config, kv_cache_config)``; the old base's
+    # ``gpu_block_size`` / ``block_size_factor`` attributes are gone.
+    "spec_config_object": lambda v: v >= (0, 26),
+    # ``OffloadingManager.lookup`` returns a ``LookupResult`` enum
+    # (MISS/HIT/HIT_PENDING/RETRY) rather than ``bool | None``.
+    "lookup_returns_enum": lambda v: v >= (0, 26),
+    # ``get_worker`` receives ``CanonicalKVCaches`` (a list of per-block
+    # ``(num_blocks, page_size_bytes)`` int8 tensors + per-group refs) rather than
+    # the raw kv_caches object ``get_handlers`` used to get.
+    "canonical_kv_caches": lambda v: v >= (0, 26),
 }
 
 
@@ -137,6 +173,10 @@ class Caps:
     needs_disable_hybrid_kv_cache_manager: bool
     needs_disable_async_scheduling: bool
     has_on_new_request: bool
+    worker_split_submit: bool
+    spec_config_object: bool
+    lookup_returns_enum: bool
+    canonical_kv_caches: bool
 
 
 def caps_for(v: tuple[int, int]) -> Caps:
@@ -187,6 +227,15 @@ def _import_error(what: str, exc: Exception) -> ImportError:
 #   0.22  — all of the above consolidated into ``vllm.v1.kv_offload.base``
 #           (``abstract``/``mediums``/``spec`` modules removed). ``worker.worker``
 #           unchanged. Confirmed empirically against the v0.22.0 image.
+#   0.26  — offloading-API rewrite. ``TransferResult`` moved into ``base`` too;
+#           the worker base class became ``OffloadingWorker`` (in ``base``) and
+#           ``worker.worker`` was removed, so ``OffloadingHandler`` no longer
+#           exists — it is resolved via ``worker_base_class()`` (which also serves
+#           the ≤0.24 ``OffloadingHandler``) rather than the mandatory ladder,
+#           because a symbol that is absent on some supported version cannot live
+#           here (``_load_vllm_symbols`` resolves the whole dict at once).
+#           ``TransferSpec`` (a ≤0.24 type-only alias) is likewise not resolved
+#           here; it is only used as a string annotation.
 _SYMBOL_PATHS: dict[str, tuple[str, ...]] = {
     "LoadStoreSpec": ("vllm.v1.kv_offload.base", "vllm.v1.kv_offload.abstract"),
     "OffloadingEvent": ("vllm.v1.kv_offload.base", "vllm.v1.kv_offload.abstract"),
@@ -195,9 +244,10 @@ _SYMBOL_PATHS: dict[str, tuple[str, ...]] = {
     "PrepareStoreOutput": ("vllm.v1.kv_offload.base", "vllm.v1.kv_offload.abstract"),
     "GPULoadStoreSpec": ("vllm.v1.kv_offload.base", "vllm.v1.kv_offload.mediums"),
     "OffloadingSpec": ("vllm.v1.kv_offload.base", "vllm.v1.kv_offload.spec"),
-    "OffloadingHandler": ("vllm.v1.kv_offload.worker.worker",),
-    "TransferResult": ("vllm.v1.kv_offload.worker.worker",),
-    "TransferSpec": ("vllm.v1.kv_offload.worker.worker",),
+    "TransferResult": (
+        "vllm.v1.kv_offload.base",  # 0.26
+        "vllm.v1.kv_offload.worker.worker",  # <=0.24
+    ),
 }
 
 # Symbols whose module path has been stable across every supported version.
@@ -262,9 +312,7 @@ _VLLM_LAZY_NAMES = frozenset(
         "PrepareStoreOutput",
         "GPULoadStoreSpec",
         "OffloadingSpec",
-        "OffloadingHandler",
         "TransferResult",
-        "TransferSpec",
     ]
 )
 
@@ -284,14 +332,15 @@ __all__ = [
     "PrepareStoreOutput",
     "GPULoadStoreSpec",
     "OffloadingSpec",
-    "OffloadingHandler",
     "TransferResult",
-    "TransferSpec",
     "make_transfer_result",
     "extract_gpu_ptrs",
     "block_bytes_from_config",
+    "block_bytes_from_offloading_config",
     "gpu_block_ids",
     "new_request_offloading_context",
+    "lookup_result",
+    "worker_base_class",
 ]
 
 
@@ -327,19 +376,88 @@ def make_transfer_result(
     )
 
 
-def extract_gpu_ptrs(kv_caches) -> tuple[int, int]:
-    """GPU base pointer + per-block stride (bytes) from the KV-cache handoff.
+def _lazy_base_attr(name: str):
+    """Resolve a symbol from ``vllm.v1.kv_offload.base`` on demand.
 
-    On the known layout, ``get_handlers`` receives an object exposing
-    ``.tensors[0].tensor``; the per-block stride is ``stride(0)`` in bytes. This
-    is the single highest-risk silent-break point across vLLM versions — a new
-    attention/cache backend can change the shape — so it is isolated here and
-    gated on ``CAPS.kv_caches_tensors_attr``.
+    Used for 0.26-only types (``OffloadingWorker``, ``LookupResult``,
+    ``RequestOffloadingContext``) that must NOT sit in the mandatory
+    ``_SYMBOL_PATHS`` ladder — that resolves the whole dict at once, so a symbol
+    absent on an older supported version would break resolution there. These are
+    only ever touched on the versions that have them.
     """
+    import importlib
+
+    try:
+        return getattr(importlib.import_module("vllm.v1.kv_offload.base"), name)
+    except (ImportError, AttributeError) as _e:
+        raise _import_error(f"{name} (from vllm.v1.kv_offload.base)", _e)
+
+
+def extract_gpu_ptrs(kv_caches) -> list[tuple[int, int]]:
+    """(base pointer, per-block stride bytes) for EACH KV-cache tensor.
+
+    The per-block stride is ``stride(0)`` of each block tensor, in bytes. This is
+    the single highest-risk silent-break point across vLLM versions — a new
+    attention/cache backend can change the shape — so it is isolated here.
+
+    Measured 2026-07-30: vLLM 0.20/0.22 present ONE coalesced tensor (all layers,
+    stride = full 2 MiB block); 0.23+ split the KV cache into N per-layer tensors
+    (Llama-3-8B: 32 x ``(num_blocks, 65536)`` int8), each a SEPARATE allocation
+    with its own ``data_ptr``. We return one ``(ptr, stride)`` per tensor: the
+    caller opens one IPC handle per region and the block is stored/loaded as N
+    colocated regions in one slot. A single-tensor layout is simply ``N == 1`` —
+    there is no version branch here, only a per-tensor loop.
+
+    Two object shapes expose the same per-tensor layout:
+
+    * **0.26+ ``CanonicalKVCaches``** (``CAPS.canonical_kv_caches``): a list of
+      unique block tensors, each ``(num_blocks, page_size_bytes)`` int8, plus
+      per-group refs.
+    * **≤0.24** (``CAPS.kv_caches_tensors_attr``): the object ``get_handlers``
+      receives exposes the same ``.tensors[i].tensor`` layout.
+    """
+    if CAPS.canonical_kv_caches:
+        tensors = kv_caches.tensors
+        shapes = [
+            (tuple(t.tensor.shape), int(t.page_size_bytes)) for t in tensors
+        ]
+        print(
+            f"[certus-grpc] CanonicalKVCaches: {len(tensors)} tensor(s); "
+            f"(shape, page_size_bytes)={shapes}; "
+            f"groups={len(kv_caches.group_data_refs)}",
+            flush=True,
+        )
+        # One IPC region per canonical tensor; the server lands the N regions
+        # colocated in a single N*page slot. A single-tensor layout is N == 1.
+        regions: list[tuple[int, int]] = []
+        for t in tensors:
+            tensor = t.tensor
+            stride_bytes = tensor.stride(0) * tensor.element_size()
+            regions.append((tensor.data_ptr(), stride_bytes))
+        return regions
     if CAPS.kv_caches_tensors_attr:
-        tensor = kv_caches.tensors[0].tensor
-        stride_bytes = tensor.stride(0) * tensor.element_size()
-        return tensor.data_ptr(), stride_bytes
+        # ≤0.24 shares the CanonicalKVCaches-style ``.tensors`` layout. Measured
+        # 2026-07-30: 0.20/0.22 present ONE coalesced tensor (all layers, stride =
+        # full 2 MiB block); 0.23/0.24 split the KV cache into per-layer tensors
+        # (Llama-3: 32 x (num_blocks, 65536) int8). We export one IPC region per
+        # tensor and the server lands the N regions colocated in a single N*page
+        # slot — no truncation to layer 0, no version branch (N == 1 for 0.20/0.22).
+        tensors = kv_caches.tensors
+        shapes = [
+            (tuple(t.tensor.shape), int(t.page_size_bytes)) for t in tensors
+        ]
+        print(
+            f"[certus-grpc] KV tensors: {len(tensors)} tensor(s); "
+            f"(shape, page_size_bytes)={shapes}; "
+            f"groups={len(kv_caches.group_data_refs)}",
+            flush=True,
+        )
+        regions = []
+        for t in tensors:
+            tensor = t.tensor
+            stride_bytes = tensor.stride(0) * tensor.element_size()
+            regions.append((tensor.data_ptr(), stride_bytes))
+        return regions
     raise NotImplementedError(
         f"certus-grpc-connector: KV-cache tensor layout for vLLM {VERSION[0]}.{VERSION[1]} "
         f"is not yet mapped in compat.extract_gpu_ptrs. Inspect the object passed to "
@@ -402,13 +520,68 @@ def new_request_offloading_context():
     only exists on 0.24+; loading it there would break symbol resolution on 0.20/0.22.
     Only ever called on ``CAPS.has_on_new_request`` versions.
     """
+    return _lazy_base_attr("RequestOffloadingContext")()
+
+
+def lookup_result(exists: bool):
+    """Return the shape ``OffloadingManager.lookup`` must yield for this version.
+
+    * **0.26+** (``CAPS.lookup_returns_enum``): a ``LookupResult`` enum —
+      ``HIT`` when the key is present, ``MISS`` otherwise. (The richer
+      ``HIT_PENDING`` / ``RETRY`` states model in-flight/backpressure cases the
+      connector's synchronous certus-server lookup never produces.)
+    * **≤0.24**: a plain ``bool``.
+    """
+    if CAPS.lookup_returns_enum:
+        LookupResult = _lazy_base_attr("LookupResult")
+        return LookupResult.HIT if exists else LookupResult.MISS
+    return bool(exists)
+
+
+def block_bytes_from_offloading_config(config) -> int:
+    """Per-block offload size in bytes on 0.26, read straight off the
+    ``OffloadingConfig``.
+
+    0.26 exposes ``worker_kv_bytes_per_block`` directly (the full per-block bytes
+    across all layers in the group), so the connector no longer has to reconstruct
+    it from ``KVCacheConfig`` groups the way ``block_bytes_from_config`` does for
+    ≤0.24. Used to size the certus-server Reserve and cross-checked against the
+    canonical tensor's ``stride(0)`` at ``get_worker`` time.
+    """
+    block_bytes = int(config.worker_kv_bytes_per_block)
+    print(
+        f"[certus-grpc] per-block Reserve size from OffloadingConfig: "
+        f"worker_kv_bytes_per_block = {block_bytes} bytes",
+        flush=True,
+    )
+    return block_bytes
+
+
+def worker_base_class():
+    """The base class the connector's worker must subclass on this version.
+
+    * **0.26+** (``CAPS.worker_split_submit``): ``OffloadingWorker`` (in
+      ``vllm.v1.kv_offload.base``) — one instance, explicit
+      ``submit_store`` / ``submit_load``.
+    * **≤0.24**: ``OffloadingHandler`` (in ``vllm.v1.kv_offload.worker.worker``)
+      — per-direction ``transfer_async(job_id, spec)``.
+
+    Resolved lazily and referenced ONLY from the worker factory, so the base
+    absent on the other era is never imported. It cannot live in the mandatory
+    ``_SYMBOL_PATHS`` ladder for the same reason (that resolves the whole dict at
+    once).
+    """
+    if CAPS.worker_split_submit:
+        return _lazy_base_attr("OffloadingWorker")
     import importlib
 
     try:
-        base = importlib.import_module("vllm.v1.kv_offload.base")
-        return base.RequestOffloadingContext()
-    except (ImportError, AttributeError) as _e:  # pragma: no cover - 0.24+ only path
-        raise _import_error("RequestOffloadingContext (from vllm.v1.kv_offload.base)", _e)
+        mod = importlib.import_module("vllm.v1.kv_offload.worker.worker")
+        return mod.OffloadingHandler
+    except (ImportError, AttributeError) as _e:
+        raise _import_error(
+            "OffloadingHandler (from vllm.v1.kv_offload.worker.worker)", _e
+        )
 
 
 # ── matrix CLI ─────────────────────────────────────────────────────────────

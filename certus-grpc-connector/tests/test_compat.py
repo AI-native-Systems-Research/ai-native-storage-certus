@@ -17,6 +17,8 @@ of check:
 from __future__ import annotations
 
 import importlib
+import os
+from dataclasses import dataclass
 
 import pytest
 
@@ -37,8 +39,8 @@ def test_supported_versions_match_conftest():
 @pytest.mark.parametrize("version", compat.SUPPORTED_VERSIONS)
 def test_caps_for_every_supported_version(version):
     caps = compat.caps_for(version)
-    # Features true across the whole supported range today.
-    assert caps.transfer_result_has_type is True
+    # Features true across the whole supported range today. (transfer_result_has_type
+    # is NOT here — the 0.26 rewrite dropped the field; pinned separately below.)
     assert caps.kv_caches_tensors_attr is True
     assert caps.kv_cache_group_attrs is True
 
@@ -46,8 +48,46 @@ def test_caps_for_every_supported_version(version):
 @pytest.mark.parametrize(
     "version,expected",
     [
+        ((0, 20), True),
+        ((0, 22), True),
+        ((0, 23), True),
+        ((0, 24), True),
+        ((0, 26), False),  # 0.26 rewrite: submit_store/submit_load carry direction
+    ],
+)
+def test_transfer_result_has_type_dropped_at_0_26(version, expected):
+    # TransferResult lost its 5th ``transfer_type`` field in the 0.26 API rewrite
+    # (direction now lives in the method name). Pin the threshold so a matrix edit
+    # that moves it is caught.
+    assert compat.caps_for(version).transfer_result_has_type is expected
+
+
+@pytest.mark.parametrize(
+    "version,expected",
+    [
+        ((0, 20), False),
+        ((0, 22), False),
+        ((0, 23), False),
+        ((0, 24), False),
+        ((0, 26), True),
+    ],
+)
+def test_new_0_26_capabilities_gate_from_0_26(version, expected):
+    # The four capabilities the 0.26 offloading-API rewrite introduced, all keyed
+    # to the same v>=(0,26) threshold. Pin each so a matrix edit is caught.
+    caps = compat.caps_for(version)
+    assert caps.worker_split_submit is expected
+    assert caps.spec_config_object is expected
+    assert caps.lookup_returns_enum is expected
+    assert caps.canonical_kv_caches is expected
+
+
+@pytest.mark.parametrize(
+    "version,expected",
+    [
         ((0, 20), False),  # 0.20 scheduler calls manager methods without req_context
         ((0, 22), True),   # req_context added to every OffloadingManager method
+        ((0, 23), True),
         ((0, 24), True),
         ((0, 26), True),
     ],
@@ -64,6 +104,7 @@ def test_req_context_arg_from_0_22(version, expected):
     [
         ((0, 20), False),
         ((0, 22), False),
+        ((0, 23), False),
         ((0, 24), False),
         ((0, 26), True),
     ],
@@ -79,6 +120,7 @@ def test_disable_hybrid_kv_cache_manager_only_from_0_26(version, expected):
     [
         ((0, 20), False),  # 0.20 did not default async scheduling on
         ((0, 22), True),   # 0.22+ auto-enables it; breaks OffloadingConnector serialization
+        ((0, 23), True),
         ((0, 24), True),
         ((0, 26), True),
     ],
@@ -95,14 +137,15 @@ def test_disable_async_scheduling_from_0_22(version, expected):
     [
         ((0, 20), False),
         ((0, 22), False),
-        ((0, 24), True),   # 0.24 added the on_new_request abstract method
+        ((0, 23), True),   # 0.23 added the on_new_request abstract method
+        ((0, 24), True),
         ((0, 26), True),
     ],
 )
-def test_on_new_request_from_0_24(version, expected):
-    # 0.24 made OffloadingManager.on_new_request abstract; the manager must
-    # implement it or vLLM can't instantiate it. Pin the threshold so a matrix
-    # edit that moves it is caught.
+def test_on_new_request_from_0_23(version, expected):
+    # 0.23 made OffloadingManager.on_new_request abstract; the manager must
+    # implement it or vLLM can't instantiate it. (Measured: abstract at 0.23, not
+    # 0.24.) Pin the threshold so a matrix edit that moves it is caught.
     assert compat.caps_for(version).has_on_new_request is expected
 
 
@@ -134,6 +177,66 @@ def test_gpu_block_ids_coerces_to_plain_int_list():
     out = compat.gpu_block_ids(spec)
     assert out == [3, 7, 11]
     assert all(type(b) is int for b in out)  # not np.int64
+
+
+# ── adapters: extract_gpu_ptrs guards the per-layer split (≤0.24 branch) ──
+
+
+class _FakeTensor:
+    """Just-enough torch.Tensor stand-in for extract_gpu_ptrs: a per-block
+    ``stride(0)`` in elements, an element size, a data pointer, and a shape."""
+
+    def __init__(self, stride0: int, elem: int = 1, ptr: int = 0x1000):
+        self._stride0 = stride0
+        self._elem = elem
+        self._ptr = ptr
+        self.shape = (2740, stride0)
+
+    def stride(self, dim: int) -> int:
+        assert dim == 0
+        return self._stride0
+
+    def element_size(self) -> int:
+        return self._elem
+
+    def data_ptr(self) -> int:
+        return self._ptr
+
+
+@dataclass
+class _FakeCanonicalTensor:
+    tensor: object
+    page_size_bytes: int
+
+
+class _FakeKVCaches:
+    def __init__(self, tensors: list):
+        self.tensors = tensors
+        self.group_data_refs = [object()]
+
+
+def test_extract_gpu_ptrs_single_tensor_returns_one_region():
+    # 0.20/0.22 present ONE coalesced tensor (all layers). extract_gpu_ptrs
+    # returns a LIST regardless of version; the single-tensor case is just N==1,
+    # the one region the connector's one-region-per-key model started with.
+    kv = _FakeKVCaches(
+        [_FakeCanonicalTensor(_FakeTensor(2097152, ptr=0xDEAD000), 2097152)]
+    )
+    regions = compat.extract_gpu_ptrs(kv)
+    assert regions == [(0xDEAD000, 2097152)]
+
+
+def test_extract_gpu_ptrs_returns_one_region_per_layer_tensor():
+    # 0.23+ split the KV cache into per-layer tensors (Llama-3: 32). Multi-region
+    # offload maps each to its own IPC region colocated in one slot, so this
+    # returns a 32-element list (one (ptr, stride) per tensor) instead of the
+    # pre-multiregion guard that refused a split (see multi-region-kv-offload.md).
+    kv = _FakeKVCaches(
+        [_FakeCanonicalTensor(_FakeTensor(65536), 65536) for _ in range(32)]
+    )
+    regions = compat.extract_gpu_ptrs(kv)
+    assert len(regions) == 32
+    assert regions == [(0x1000, 65536)] * 32
 
 
 # ── adapters: make_transfer_result, both CAPS branches ──
@@ -186,8 +289,15 @@ def test_make_transfer_result_omits_type_when_capability_unset(monkeypatch):
 def restore_compat():
     """Rebuild the 0.20 baseline fakes and reload compat after a test that
     reloaded it against a different version, so modules that imported compat
-    symbols at collection time keep valid references."""
+    symbols at collection time keep valid references.
+
+    Clears ``CERTUS_VLLM_VERSION`` FIRST: this fixture's teardown runs before the
+    ``monkeypatch`` fixture's (teardown is reverse-of-setup order), so the env
+    override set by test_env_override_beats_installed_version would otherwise
+    still be live and make this reload re-detect 0.26 — leaving CAPS stuck at
+    0.26 and breaking every later test that touches a 0.26-only symbol."""
     yield
+    os.environ.pop("CERTUS_VLLM_VERSION", None)
     conftest.build_fake_vllm((0, 20))
     importlib.reload(compat)
 

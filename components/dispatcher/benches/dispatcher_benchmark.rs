@@ -407,10 +407,10 @@ impl IMemoryTier for BenchMemoryTier {
         let pool = self.pool.lock().unwrap();
         Some((pool.as_ptr() as *mut u8, pool.len() as u32))
     }
-    fn evict_lru(&self) -> Option<CacheKey> {
+    fn evict_next(&self) -> Option<CacheKey> {
         None
     }
-    fn evict_lru_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+    fn evict_next_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
         None
     }
     fn remove(&self, _key: CacheKey) -> Result<(), MemoryTierError> {

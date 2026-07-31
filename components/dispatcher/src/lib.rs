@@ -15,7 +15,7 @@
 //!                 │                │              │
 //!          ┌──────▼──────┐  ┌─────▼─────┐  ┌──────▼──────┐
 //!          │ DispatchMap │  │ MemoryTier│  │ BlockDevice │
-//!          │ (key→loc)   │  │ (DRAM LRU)│  │ (NVMe SSD)  │
+//!          │ (key→loc)   │  │(DRAM tier)│  │ (NVMe SSD)  │
 //!          └─────────────┘  └───────────┘  └─────────────┘
 //! ```
 //!
@@ -23,7 +23,7 @@
 //!
 //! **Populate** (GPU → DRAM → SSD):
 //! 1. Open client GPU IPC handle
-//! 2. Allocate memory-tier slot - evict existing by LRU to make space if needed.
+//! 2. Allocate memory-tier slot - evict existing entries to make space if needed.
 //! 3. `cudaMemcpy` D2H from GPU into memory-tier
 //! 4. Background writer asynchronously flushes to SSD via extent manager
 //!
@@ -34,7 +34,7 @@
 //!
 //! **Cold Lookup** (SSD → DRAM → GPU):
 //! 1. `DispatchMap::lookup(key)` → `BlockDevice { offset }`
-//! 2. Evict LRU entries from memory-tier to make space
+//! 2. Evict entries from memory-tier to make space
 //! 3. Insert new slot in memory-tier
 //! 4. Pipelined NVMe reads directly into memory-tier (zero-copy)
 //! 5. Async H2D DMA to client GPU (overlapped with reads)
@@ -718,8 +718,8 @@ impl DispatcherComponent {
         gpu: &Arc<dyn IGpuServices + Send + Sync>,
         key: CacheKey,
         offset: u64,
-        ipc_addr: *mut u8,
-        ipc_size: u32,
+        regions: &[IpcHandle],
+        total_size: u32,
         device: i32,
     ) -> Result<(), DispatcherError> {
         let sp = match self
@@ -728,7 +728,7 @@ impl DispatcherComponent {
             .as_ref()
             .and_then(|r| r.staging.clone())
         {
-            Some(s) if ipc_size as usize <= s.buf_bytes() => s,
+            Some(s) if total_size as usize <= s.buf_bytes() => s,
             _ => {
                 return Err(DispatcherError::AllocationFailed(
                     "no staging buffer available for cold load".into(),
@@ -736,7 +736,7 @@ impl DispatcherComponent {
             }
         };
         let lease = sp.checkout();
-        let total_bytes = ipc_size as usize;
+        let total_bytes = total_size as usize;
 
         let drives = self.data_drives.read();
         if drives.is_empty() {
@@ -773,9 +773,20 @@ impl DispatcherComponent {
             }
         };
 
+        // Single-region (N==1): fuse SSD->GPU (gpu_dst = the one region), as
+        // before. Multi-region (N>1): read SSD->staging only (gpu_dst null) then
+        // scatter the staging buffer to the N GPU allocations below — the N
+        // regions are colocated in one contiguous slot.
+        let gpu_dst = if regions.len() == 1 {
+            regions[0].address as *mut std::ffi::c_void
+        } else {
+            std::ptr::null_mut()
+        };
+
         // SAFETY: lease.ptr() is a valid CUDA-pinned + SPDK-registered buffer for
-        // `total_bytes`; ipc_addr is the GPU destination. The lease keeps the
-        // buffer alive until after the read completes below.
+        // `total_bytes`; gpu_dst is the GPU destination (null for the scatter
+        // case). The lease keeps the buffer alive until after the read completes
+        // below (and, for N>1, until the scatter completes).
         let res = unsafe {
             pipeline::pipelined_ssd_to_gpu_zero_copy(
                 &*block_dev,
@@ -783,7 +794,7 @@ impl DispatcherComponent {
                 &streams,
                 chan_lease.channels(),
                 lease.ptr(),
-                ipc_addr as *mut std::ffi::c_void,
+                gpu_dst,
                 start_lba,
                 total_bytes,
                 chunk_size,
@@ -792,11 +803,30 @@ impl DispatcherComponent {
         };
         drop(chan_lease); // return the channel to the pool
         drop(drives);
+
+        // Multi-region: the read only filled the staging buffer; scatter it to
+        // the client's N GPU regions before releasing the lease. Synchronize so
+        // the copies complete while lease.ptr() is still valid.
+        let res = res.and_then(|()| {
+            if regions.len() > 1 {
+                let warm_raw = dev_streams.as_ref().map_or(0, |s| s.warm);
+                self.serve_memory_tier_to_gpu(
+                    gpu,
+                    lease.ptr() as *mut u8,
+                    total_size,
+                    regions,
+                    warm_raw,
+                    true,
+                )
+            } else {
+                Ok(())
+            }
+        });
         drop(lease); // return the staging buffer; do NOT promote (stays BlockDevice)
         res
     }
 
-    /// Free one pin-safe LRU victim, returning `true` if a slot was freed.
+    /// Free one pin-safe eviction victim, returning `true` if a slot was freed.
     ///
     /// Scans the `scan` oldest keys. For each candidate, in order of preference:
     ///  1. **Demote** to BlockDevice via `dm.try_evict_to_block` (keeps the data
@@ -808,7 +838,7 @@ impl DispatcherComponent {
     /// Both dispatch-map operations reject entries with `read_ref > 0`, and in
     /// both branches the dispatch-map transition happens *before* the DRAM slot
     /// is freed. So this NEVER frees a slot that a pinned, in-flight load still
-    /// points at — the bug that let the old blind `evict_lru` path reclaim a
+    /// points at — the bug that let the old blind-eviction path reclaim a
     /// pinned slot and corrupt the concurrent load (invalid H2D DMA / stale
     /// data). A pinned candidate is skipped; the next one is tried.
     ///
@@ -843,7 +873,7 @@ impl DispatcherComponent {
 
     /// Evict entries from the memory-tier until `needed` bytes are free.
     ///
-    /// Every iteration frees one pin-safe LRU victim via [`Self::evict_one_clean`],
+    /// Every iteration frees one pin-safe eviction victim via [`Self::evict_one_clean`],
     /// widening the scan as pressure persists. Evicted entries transition
     /// MemoryTier → BlockDevice in the dispatch-map (data remains on SSD from the
     /// prior write-through). If no candidate in the widening scan is evictable —
@@ -886,7 +916,7 @@ impl DispatcherComponent {
             }
 
             // Free one pin-safe victim, widening the scan as pressure persists so
-            // we look deeper into the LRU past pinned/unpersisted entries.
+            // we look deeper into the eviction order past pinned/unpersisted entries.
             let scan = (MAX_SCAN * attempts).min(1024);
             if !self.evict_one_clean(dm, mt, scan) {
                 // Every scanned candidate is pinned by an in-flight load. Do NOT
@@ -960,26 +990,40 @@ impl DispatcherComponent {
         gpu: &Arc<dyn IGpuServices + Send + Sync>,
         pointer: *mut u8,
         size: u32,
-        ipc_handle: &IpcHandle,
+        regions: &[IpcHandle],
         warm_raw: u64,
         synchronize: bool,
     ) -> Result<(), DispatcherError> {
-        let copy_size = (ipc_handle.size as usize).min(size as usize);
+        // Scatter the one contiguous DRAM slot back to the client's N GPU
+        // regions: region L reads from `slot + sum(sizes[0..L])`. A single-region
+        // block (legacy / populate) is just the L==0 case. `size` is the slot's
+        // byte length; we never read past it even if the regions sum larger.
         // Use the caller-resolved warm stream for the destination's device; the
-        // stream must be on the same GPU as `ipc_handle.address` or the async
-        // copy fails with "invalid argument" under multi-GPU.
+        // stream must be on the same GPU as the region address or the async copy
+        // fails with "invalid argument" under multi-GPU.
         let raw = warm_raw;
         if raw != 0 {
             let s = GpuStream(raw as *mut std::ffi::c_void);
-            gpu.memcpy_h2d_async(
-                pointer as *const std::ffi::c_void,
-                ipc_handle.address as *mut std::ffi::c_void,
-                copy_size,
-                s,
-            )
-            .map_err(|e| {
-                DispatcherError::IoError(format!("GPU DMA copy (memory-tier→device) failed: {e}"))
-            })?;
+            let mut off: usize = 0;
+            for region in regions {
+                let copy_size =
+                    (region.size as usize).min((size as usize).saturating_sub(off));
+                if copy_size == 0 {
+                    break;
+                }
+                gpu.memcpy_h2d_async(
+                    (pointer as usize + off) as *const std::ffi::c_void,
+                    region.address as *mut std::ffi::c_void,
+                    copy_size,
+                    s,
+                )
+                .map_err(|e| {
+                    DispatcherError::IoError(format!(
+                        "GPU DMA copy (memory-tier→device) failed: {e}"
+                    ))
+                })?;
+                off += region.size as usize;
+            }
             if synchronize {
                 gpu.stream_synchronize(s).map_err(|e| {
                     DispatcherError::IoError(format!("stream_synchronize failed: {e}"))
@@ -987,20 +1031,39 @@ impl DispatcherComponent {
             }
             Ok(())
         } else {
-            let aligned = copy_size.next_multiple_of(4096).max(4096);
-            let buf = unsafe {
-                DmaBuffer::from_raw(pointer as *mut std::ffi::c_void, aligned, noop_free, -1)
+            let mut off: usize = 0;
+            for region in regions {
+                let copy_size =
+                    (region.size as usize).min((size as usize).saturating_sub(off));
+                if copy_size == 0 {
+                    break;
+                }
+                let aligned = copy_size.next_multiple_of(4096).max(4096);
+                let buf = unsafe {
+                    DmaBuffer::from_raw(
+                        (pointer as usize + off) as *mut std::ffi::c_void,
+                        aligned,
+                        noop_free,
+                        -1,
+                    )
+                }
+                .map_err(|e| DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}")))?;
+                let r = gpu
+                    .dma_copy_to_device(
+                        &buf,
+                        region.address as *mut std::ffi::c_void,
+                        copy_size,
+                    )
+                    .map_err(|e| {
+                        DispatcherError::IoError(format!(
+                            "GPU DMA copy (memory-tier→device) failed: {e}"
+                        ))
+                    });
+                std::mem::forget(buf);
+                r?;
+                off += region.size as usize;
             }
-            .map_err(|e| DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}")))?;
-            let r = gpu
-                .dma_copy_to_device(&buf, ipc_handle.address as *mut std::ffi::c_void, copy_size)
-                .map_err(|e| {
-                    DispatcherError::IoError(format!(
-                        "GPU DMA copy (memory-tier→device) failed: {e}"
-                    ))
-                });
-            std::mem::forget(buf);
-            r
+            Ok(())
         }
     }
 
@@ -1020,7 +1083,7 @@ impl DispatcherComponent {
         dm: &Arc<dyn IDispatchMap + Send + Sync>,
         gpu: &Arc<dyn IGpuServices + Send + Sync>,
         key: CacheKey,
-        ipc_handle: &IpcHandle,
+        regions: &[IpcHandle],
         warm_raw: u64,
     ) -> Result<(), DispatcherError> {
         let start = std::time::Instant::now();
@@ -1029,7 +1092,7 @@ impl DispatcherComponent {
             match dm.lookup(key) {
                 Ok(LookupResult::MemoryTier { pointer, size }) => {
                     let res = self
-                        .serve_memory_tier_to_gpu(gpu, pointer, size, ipc_handle, warm_raw, true);
+                        .serve_memory_tier_to_gpu(gpu, pointer, size, regions, warm_raw, true);
                     let _ = dm.release_read(key);
                     let _ = dm.touch(key);
                     return res;
@@ -1063,8 +1126,8 @@ impl DispatcherComponent {
         extent_mgrs: &[Arc<dyn IExtentManager + Send + Sync>],
         job: WriteJob,
     ) {
-        // Get the memory-tier pointer without refreshing LRU — the write-through
-        // must not prevent this entry from being evicted under memory pressure.
+        // Get the memory-tier pointer without refreshing its eviction-order position —
+        // the write-through must not prevent this entry from being evicted under memory pressure.
         let (mem_ptr, _size) = match mt.peek(job.key) {
             Some(v) => v,
             None => {
@@ -1917,7 +1980,10 @@ impl IDispatcher for DispatcherComponent {
     ///    - Spawn per-drive queue threads (up to 2 per drive)
     ///    - Each thread: evict → insert memory-tier slot → pipelined NVMe reads
     ///      directly into memory-tier → async H2D DMA to GPU
-    fn batch_lookup(&self, entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>> {
+    fn batch_lookup(
+        &self,
+        entries: &[(CacheKey, Vec<IpcHandle>)],
+    ) -> Vec<Result<(), DispatcherError>> {
         if entries.is_empty() {
             return Vec::new();
         }
@@ -1958,7 +2024,7 @@ impl IDispatcher for DispatcherComponent {
         // under tensor parallelism.
         let batch_device = entries
             .iter()
-            .map(|(_, h)| h.address)
+            .flat_map(|(_, regions)| regions.iter().map(|h| h.address))
             .find(|a| !a.is_null())
             .map_or(-1, |addr| set_batch_device(&*gpu, addr));
         let dev_streams = device_streams_for(&*gpu, batch_device);
@@ -1969,10 +2035,13 @@ impl IDispatcher for DispatcherComponent {
             idx: usize,
             key: CacheKey,
             offset: u64,
-            ipc_handle_addr: *mut u8,
-            ipc_handle_size: u32,
+            // One block = N per-layer regions (0.23+); N==1 for a coalesced
+            // block (0.20/0.22). They land colocated in one slot of `total_size`
+            // bytes, then scatter to the N GPU allocations on load.
+            regions: Vec<IpcHandle>,
+            total_size: u32,
         }
-        // SAFETY: ColdEntry contains a raw pointer from IpcHandle (GPU device pointer).
+        // SAFETY: ColdEntry contains raw pointers from IpcHandle (GPU device pointers).
         // These pointers are valid across threads — CUDA IPC handles are designed for
         // cross-process/thread use. We only read the pointer value to pass to CUDA APIs.
         unsafe impl Send for ColdEntry {}
@@ -1981,8 +2050,10 @@ impl IDispatcher for DispatcherComponent {
         let mut cold_entries: Vec<ColdEntry> = Vec::new();
         let mut deferred_touch_keys: Vec<CacheKey> = Vec::new();
 
-        for (i, (key, ipc_handle)) in entries.iter().enumerate() {
+        for (i, (key, regions)) in entries.iter().enumerate() {
             let key = *key;
+            // Σ of the per-region sizes = the reserved slot's byte length.
+            let total_size: u32 = regions.iter().map(|r| r.size).sum();
             match dm.lookup(key) {
                 Ok(lookup_result) => match lookup_result {
                     LookupResult::NotExist => {
@@ -1999,7 +2070,7 @@ impl IDispatcher for DispatcherComponent {
                         // Warm hit: defer the stream sync to one batched sync
                         // after the classification loop (synchronize = false).
                         let res = self.serve_memory_tier_to_gpu(
-                            &gpu, pointer, size, ipc_handle, warm_raw, false,
+                            &gpu, pointer, size, regions, warm_raw, false,
                         );
                         if let Some(ref m) = *self.pipeline_metrics.read() {
                             m.record_hot_gpu_dma(t_hot.elapsed().as_micros() as f64);
@@ -2014,8 +2085,8 @@ impl IDispatcher for DispatcherComponent {
                             idx: i,
                             key,
                             offset,
-                            ipc_handle_addr: ipc_handle.address,
-                            ipc_handle_size: ipc_handle.size,
+                            regions: regions.clone(),
+                            total_size,
                         });
                     }
                 },
@@ -2054,16 +2125,16 @@ impl IDispatcher for DispatcherComponent {
             if num_drives == 0 {
                 let max_attempts = self.max_eviction_attempts.load(Ordering::Relaxed);
                 for entry in &cold_entries {
-                    self.evict_for_space(&dm, &mt, entry.ipc_handle_size, entry.key, max_attempts)
+                    self.evict_for_space(&dm, &mt, entry.total_size, entry.key, max_attempts)
                         .ok();
                     let res = mt
-                        .insert(entry.key, entry.ipc_handle_size)
+                        .insert(entry.key, entry.total_size)
                         .map(|mem_ptr| {
                             // In-place, pin-safe promote (no remove/recreate).
                             let _ = dm.promote_block_to_memory_tier(
                                 entry.key,
                                 mem_ptr,
-                                entry.ipc_handle_size,
+                                entry.total_size,
                             );
                         })
                         .map_err(|e| match e {
@@ -2141,16 +2212,26 @@ impl IDispatcher for DispatcherComponent {
 
                         for &ci in chunk {
                             let entry = &cold_entries[ci];
-                            let ipc_size = entry.ipc_handle_size;
+                            let ipc_size = entry.total_size;
 
                             let prep =
                                 self.evict_and_insert(&dm, &mt, entry.key, ipc_size, max_attempts);
 
                             match prep {
                                 Ok(mem_ptr) => {
+                                    // Single-region (N==1): fuse SSD->GPU as before
+                                    // (gpu_dst = the one region). Multi-region (N>1):
+                                    // read SSD->DRAM slot only (gpu_dst null), then
+                                    // scatter the slot to the N GPU allocations after
+                                    // the promote below.
+                                    let gpu_dst = if entry.regions.len() == 1 {
+                                        entry.regions[0].address as *mut std::ffi::c_void
+                                    } else {
+                                        std::ptr::null_mut()
+                                    };
                                     jobs.push(pipeline::ColdReadJob {
                                         mem_ptr,
-                                        gpu_dst: entry.ipc_handle_addr as *mut std::ffi::c_void,
+                                        gpu_dst,
                                         start_lba: entry.offset / block_size as u64,
                                         total_bytes: ipc_size as usize,
                                     });
@@ -2275,12 +2356,31 @@ impl IDispatcher for DispatcherComponent {
                                 dm.promote_block_to_memory_tier(
                                     entry.key,
                                     mem_ptrs[job_idx],
-                                    entry.ipc_handle_size,
+                                    entry.total_size,
                                 )
                                 .map_err(|e| {
                                     DispatcherError::IoError(format!(
                                         "promote transition failed: {e}"
                                     ))
+                                })
+                                .and_then(|()| {
+                                    // Multi-region (N>1): the pipeline only filled
+                                    // the DRAM slot (gpu_dst was null). Scatter the
+                                    // now-resident slot to the N GPU allocations.
+                                    // N==1 already landed on the GPU via the fused
+                                    // SSD->GPU path, so skip it there.
+                                    if entry.regions.len() > 1 {
+                                        self.serve_memory_tier_to_gpu(
+                                            &gpu,
+                                            mem_ptrs[job_idx],
+                                            entry.total_size,
+                                            &entry.regions,
+                                            warm_raw,
+                                            true,
+                                        )
+                                    } else {
+                                        Ok(())
+                                    }
                                 })
                             }
                             Err(e) => Err(e),
@@ -2301,8 +2401,8 @@ impl IDispatcher for DispatcherComponent {
                             &gpu,
                             entry.key,
                             entry.offset,
-                            entry.ipc_handle_addr,
-                            entry.ipc_handle_size,
+                            &entry.regions,
+                            entry.total_size,
                             batch_device,
                         );
                         results[entry.idx] = Some(res);
@@ -2329,8 +2429,8 @@ impl IDispatcher for DispatcherComponent {
                 let remote_entries: Vec<(CacheKey, u32)> = not_found
                     .iter()
                     .map(|&i| {
-                        let (key, handle) = &entries[i];
-                        (*key, handle.size)
+                        let (key, regions) = &entries[i];
+                        (*key, regions.iter().map(|r| r.size).sum())
                     })
                     .collect();
 
@@ -2338,41 +2438,14 @@ impl IDispatcher for DispatcherComponent {
 
                 // On a successful remote fetch the value is now resident in the
                 // local memory tier; deliver it to the caller's GPU buffer with the
-                // same memory-tier->device copy used for a local hot-path hit.
+                // same memory-tier->device scatter used for a local hot-path hit.
                 let deliver = |key: CacheKey,
-                               ipc_handle: &IpcHandle|
+                               regions: &[IpcHandle]|
                  -> Result<(), DispatcherError> {
                     match dm.lookup(key) {
                         Ok(LookupResult::MemoryTier { pointer, size }) => {
-                            let copy_size = (ipc_handle.size as usize).min(size as usize);
-                            let aligned = copy_size.next_multiple_of(4096).max(4096);
-                            let r = match unsafe {
-                                DmaBuffer::from_raw(
-                                    pointer as *mut std::ffi::c_void,
-                                    aligned,
-                                    noop_free,
-                                    -1,
-                                )
-                            } {
-                                Ok(buf) => {
-                                    let res = gpu
-                                        .dma_copy_to_device(
-                                            &buf,
-                                            ipc_handle.address as *mut std::ffi::c_void,
-                                            copy_size,
-                                        )
-                                        .map_err(|e| {
-                                            DispatcherError::IoError(format!(
-                                                "GPU DMA copy (memory-tier->device) failed: {e}"
-                                            ))
-                                        });
-                                    std::mem::forget(buf);
-                                    res
-                                }
-                                Err(e) => Err(DispatcherError::IoError(format!(
-                                    "DmaBuffer wrap failed: {e}"
-                                ))),
-                            };
+                            let r = self
+                                .serve_memory_tier_to_gpu(&gpu, pointer, size, regions, warm_raw, true);
                             let _ = dm.release_read(key);
                             r
                         }
@@ -2398,10 +2471,10 @@ impl IDispatcher for DispatcherComponent {
         // means a sibling lookup (e.g. the other TP rank) won the mt.insert
         // race for this key. The block is resident (or being read in); wait for
         // the MemoryTier transition and serve the DMA warm instead of failing.
-        for (i, (key, ipc_handle)) in entries.iter().enumerate() {
+        for (i, (key, regions)) in entries.iter().enumerate() {
             if matches!(results[i], Some(Err(DispatcherError::AlreadyExists(_)))) {
                 results[i] =
-                    Some(self.serve_concurrently_promoted(&dm, &gpu, *key, ipc_handle, warm_raw));
+                    Some(self.serve_concurrently_promoted(&dm, &gpu, *key, regions, warm_raw));
             }
         }
 
@@ -2456,7 +2529,7 @@ impl IDispatcher for DispatcherComponent {
                             &gpu,
                             pointer,
                             size,
-                            &ipc_handle,
+                            std::slice::from_ref(&ipc_handle),
                             warm_raw,
                             true,
                         );
@@ -2573,7 +2646,7 @@ impl IDispatcher for DispatcherComponent {
         let device = set_batch_device(&*gpu, ipc_handle.address);
         let warm_raw = device_streams_for(&*gpu, device).map_or(0, |s| s.warm);
         let stream = GpuStream(warm_raw as *mut std::ffi::c_void);
-        self.copy_gpu_to_memory_async(key, ipc_handle, stream)?;
+        self.copy_gpu_to_memory_async(key, std::slice::from_ref(&ipc_handle), stream)?;
         gpu.stream_synchronize(stream)
             .map_err(|e| DispatcherError::IoError(format!("stream_synchronize failed: {e}")))?;
         let d2h_us = t_d2h.elapsed().as_micros() as f64;
@@ -2638,7 +2711,7 @@ impl IDispatcher for DispatcherComponent {
     fn copy_gpu_to_memory_async(
         &self,
         key: CacheKey,
-        ipc_handle: IpcHandle,
+        regions: &[IpcHandle],
         stream: GpuStream,
     ) -> Result<(), DispatcherError> {
         self.ensure_initialized()?;
@@ -2650,36 +2723,39 @@ impl IDispatcher for DispatcherComponent {
 
         let (mem_ptr, slot_size) = mt.get(key).ok_or(DispatcherError::KeyNotFound(key))?;
 
-        let aligned_size = (slot_size as usize).next_multiple_of(4096);
-        // SAFETY: mem_ptr is valid for aligned_size bytes, owned by memory-tier.
-        let temp_buf = unsafe {
-            DmaBuffer::from_raw(
-                mem_ptr as *mut std::ffi::c_void,
-                aligned_size,
-                noop_free,
-                -1,
-            )
+        // Gather the client's N GPU regions contiguously into the one reserved
+        // slot: region L lands at `slot + sum(sizes[0..L])`. A single-region
+        // block (legacy / populate) is the L==0 case. Reject a region set that
+        // overflows the slot rather than corrupt neighbouring DRAM.
+        let total: usize = regions.iter().map(|r| r.size as usize).sum();
+        if total > slot_size as usize {
+            return Err(DispatcherError::InvalidParameter(format!(
+                "regions total {total} bytes exceeds reserved slot {slot_size} for key {key}"
+            )));
         }
-        .map_err(|e| DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}")))?;
 
         let gpu = self
             .gpu_services
             .get()
             .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
 
-        gpu.dma_copy_to_host_async(
-            ipc_handle.address as *const std::ffi::c_void,
-            &temp_buf,
-            ipc_handle.size as usize,
-            stream,
-        )
-        .map_err(|e| {
-            let _ = mt.remove(key);
-            DispatcherError::IoError(format!("GPU async DMA copy failed: {e}"))
-        })?;
-
-        // Don't let the noop-free wrapper be dropped (it would call noop_free, which is fine, but let's be explicit).
-        std::mem::forget(temp_buf);
+        let mut off: usize = 0;
+        for region in regions {
+            // Raw-dst D2H: source is the GPU region, destination is the slot at
+            // the running offset. No DmaBuffer wrap needed (memcpy_d2h_async
+            // takes a raw pinned host pointer, which the slot is).
+            gpu.memcpy_d2h_async(
+                region.address as *const std::ffi::c_void,
+                (mem_ptr as usize + off) as *mut std::ffi::c_void,
+                region.size as usize,
+                stream,
+            )
+            .map_err(|e| {
+                let _ = mt.remove(key);
+                DispatcherError::IoError(format!("GPU async DMA copy failed: {e}"))
+            })?;
+            off += region.size as usize;
+        }
         Ok(())
     }
 
@@ -3119,7 +3195,7 @@ mod tests {
             inner.slots.keys().take(n).copied().collect()
         }
 
-        fn evict_lru(&self) -> Option<CacheKey> {
+        fn evict_next(&self) -> Option<CacheKey> {
             let mut inner = self.inner.lock().unwrap();
             let key = inner.slots.keys().next().copied()?;
             let slot = inner.slots.remove(&key).unwrap();
@@ -3128,8 +3204,8 @@ mod tests {
             Some(key)
         }
 
-        fn evict_lru_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
-            self.evict_lru()
+        fn evict_next_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+            self.evict_next()
         }
 
         fn remove(&self, key: CacheKey) -> Result<(), MemoryTierError> {
@@ -4332,7 +4408,7 @@ mod tests {
         dm.flip_to_memory_tier_on_next_lookup(1, mem_ptr, size);
 
         let mut out = vec![0u8; 4096];
-        let results = d.batch_lookup(&[(1, make_handle(&mut out))]);
+        let results = d.batch_lookup(&[(1, vec![make_handle(&mut out)])]);
         assert_eq!(results.len(), 1);
         assert!(
             results[0].is_ok(),
@@ -4658,7 +4734,7 @@ mod tests {
     }
 
     /// Regression: eviction under memory pressure must never free the DRAM slot
-    /// of a pinned entry. The old blind-LRU fallback freed the LRU victim before
+    /// of a pinned entry. The old blind-eviction fallback freed the victim before
     /// checking the pin, leaving the dispatch-map pointing at reclaimed DRAM and
     /// corrupting a concurrent load (observed as cudaMemcpyAsync H2D
     /// "invalid argument" / key-not-found and an engine crash under TP).

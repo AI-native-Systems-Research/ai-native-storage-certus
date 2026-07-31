@@ -12,9 +12,9 @@ The component implements the `IMemoryTier` interface and declares an optional `I
 
 On `initialize(pool_size)` the component maps a contiguous anonymous region via `mmap`. It first attempts `MAP_HUGETLB` for 2 MiB hugepage backing; if that fails (e.g., hugepages not configured), it falls back to regular 4 KiB pages. The default pool size is 256 MiB. All subsequent allocations come from within this region -- no further system calls are made on the data path.
 
-### LRU Eviction
+### Eviction
 
-An index-based doubly-linked list (`LruList`) provides O(1) promotion and eviction. Every `get()` or `touch()` call moves the entry to the tail (most recently used). `evict_lru()` removes the head (least recently used), freeing the corresponding allocation. Nodes are stored in a flat `Vec` with a recycling free-list so indices remain stable.
+Eviction ordering is delegated to a bound `IEvictionPolicy` component (currently `eviction-policy-lru`) via a receptacle — the memory-tier itself holds no eviction-order data structure and only tracks slot allocations. Every `get()` or `touch()` call updates the entry's position in the policy's ordering; `evict_next()` asks the policy for its next victim and frees the corresponding allocation.
 
 ### Allocator and DMA Integration
 

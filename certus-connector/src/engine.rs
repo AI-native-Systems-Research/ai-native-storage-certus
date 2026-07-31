@@ -342,7 +342,7 @@ impl EngineInner {
         Ok(())
     }
 
-    /// Update LRU ordering for the given keys.
+    /// Update eviction ordering for the given keys.
     pub fn touch(&self, keys: &[u64]) -> PyResult<()> {
         self.ensure_init()?;
         let cache_keys = keys::to_cache_keys(keys);
@@ -530,9 +530,10 @@ impl EngineInner {
             };
 
             // Async DMA from GPU into the DRAM slot reserved by prepare_store.
+            // In-process connector: one coalesced region per block (N==1).
             match self
                 .dispatcher
-                .copy_gpu_to_memory_async(*key, handle, stream)
+                .copy_gpu_to_memory_async(*key, &[handle], stream)
             {
                 Ok(()) => {}
                 Err(interfaces::DispatcherError::AlreadyExists(_)) => continue,

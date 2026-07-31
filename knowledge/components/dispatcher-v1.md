@@ -42,7 +42,7 @@ define_interface! {
         fn check(&self, key: CacheKey) -> Result<bool, DispatcherError>;
         fn remove(&self, key: CacheKey) -> Result<(), DispatcherError>;
         fn populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>;
-        fn reserve_memory(&self, key: CacheKey, size: u32) -> Result<*mut u8, DispatcherError>;
+        fn reserve_memory(&self, key: CacheKey, size: u32, session_id: u64) -> Result<*mut u8, DispatcherError>;
         fn copy_gpu_to_memory_async(&self, key: CacheKey, ipc_handle: IpcHandle, stream: GpuStream) -> Result<(), DispatcherError>;
         fn copy_gpu_to_memory_completed(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>;
         fn release_memory(&self, key: CacheKey) -> Result<(), DispatcherError>;

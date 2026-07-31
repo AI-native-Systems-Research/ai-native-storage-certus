@@ -414,16 +414,18 @@ impl Dispatcher for DispatcherService {
             let valid_indices: Vec<usize> = (0..batch_entries.len())
                 .filter(|&i| pre_errors[i].is_none())
                 .collect();
-            let valid_batch: Vec<(u64, IpcHandle)> = valid_indices
+            // This proto variant carries one coalesced region per block (N==1);
+            // wrap it as a single-element region list for the multi-region API.
+            let valid_batch: Vec<(u64, Vec<IpcHandle>)> = valid_indices
                 .iter()
                 .map(|&i| {
                     let (key, ref ipc) = batch_entries[i];
                     (
                         key,
-                        IpcHandle {
+                        vec![IpcHandle {
                             address: ipc.address,
                             size: ipc.size,
-                        },
+                        }],
                     )
                 })
                 .collect();
@@ -658,7 +660,7 @@ impl Dispatcher for DispatcherService {
                     };
                     match dispatcher.copy_gpu_to_memory_async(
                         entry.key,
-                        ipc,
+                        &[ipc],
                         GpuStream(std::ptr::null_mut()),
                     ) {
                         Ok(()) => success_result(entry.key),

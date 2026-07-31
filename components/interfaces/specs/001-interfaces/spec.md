@@ -36,7 +36,7 @@ The crate has two Cargo features:
 **Acceptance Criteria:**
 - `IDispatcher` provides `initialize`, `shutdown`, `lookup`, `lookup_async`, `batch_lookup`, `check`, `remove`, `populate`, `reserve_memory`, `copy_gpu_to_memory_async`, `copy_gpu_to_memory_completed`, `release_memory`, `touch`, `promote_to_memory_tier`, `clear_memory_tier`, and `flush_to_ssd` methods.
 - `IDispatchMap` provides reference-counted cache entry management with read/write locking semantics.
-- `IMemoryTier` provides a DRAM pool with LRU eviction, sharded allocation, and NUMA awareness.
+- `IMemoryTier` provides a DRAM pool with pluggable eviction (via `IEvictionPolicy`), sharded allocation, and NUMA awareness.
 
 ### User Story 3 - NVMe Block Device Actor (Priority: P1)
 
@@ -124,12 +124,12 @@ The crate has two Cargo features:
 
 #### FR-006: IEvictionPolicy Interface
 - **Method**: `create_pool(&self) -> PoolId` - Create a new eviction tracking pool.
-- **Method**: `track(&self, pool: PoolId, key: CacheKey) -> Result<EvictionHandle, EvictionPolicyError>` - Register a key as most-recently-used.
-- **Method**: `touch(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError>` - Mark entry as most-recently-used.
-- **Method**: `batch_touch(&self, handles: &[EvictionHandle]) -> Result<(), EvictionPolicyError>` - Batch MRU update.
+- **Method**: `track(&self, pool: PoolId, key: CacheKey) -> Result<EvictionHandle, EvictionPolicyError>` - Register a key for eviction tracking.
+- **Method**: `touch(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError>` - Record an access, updating the entry's eviction ranking (policy-defined).
+- **Method**: `batch_touch(&self, handles: &[EvictionHandle]) -> Result<(), EvictionPolicyError>` - Batched access update.
 - **Method**: `remove(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError>` - Stop tracking entry.
-- **Method**: `pop_oldest(&self, pool: PoolId) -> Option<CacheKey>` - Remove and return LRU key.
-- **Method**: `peek_oldest(&self, pool: PoolId, n: usize) -> Vec<CacheKey>` - Peek at N oldest keys.
+- **Method**: `identify_next_to_evict(&self, pool: PoolId) -> Option<CacheKey>` - Select the next key the policy would evict, remove it from tracking, and return it.
+- **Method**: `get_eviction_candidates(&self, pool: PoolId, n: usize) -> Vec<CacheKey>` - Return up to N keys the policy would evict next, in eviction order, without removing them.
 - **Method**: `len(&self, pool: PoolId) -> usize` - Return tracked entry count.
 - **Method**: `clear_pool(&self, pool: PoolId)` - Remove all entries from pool.
 
@@ -162,7 +162,7 @@ The crate has two Cargo features:
 - **Method**: `check(&self, key: CacheKey) -> Result<bool, DispatcherError>` - Check entry existence.
 - **Method**: `remove(&self, key: CacheKey) -> Result<(), DispatcherError>` - Remove entry and free resources.
 - **Method**: `populate(&self, key: CacheKey, ipc_handle: IpcHandle) -> Result<(), DispatcherError>` - Populate cache from GPU memory.
-- **Method**: `reserve_memory(&self, key: CacheKey, size: u32) -> Result<*mut u8, DispatcherError>` - Reserve memory-tier slot.
+- **Method**: `reserve_memory(&self, key: CacheKey, size: u32, session_id: u64) -> Result<*mut u8, DispatcherError>` - Reserve memory-tier slot. `session_id` is an opaque per-request identifier (0 = unset) supplied by the client; it carries no allocation semantics and is used only for observability.
 - **Method**: `copy_gpu_to_memory_async(&self, key: CacheKey, ipc_handle: IpcHandle, stream: GpuStream) -> Result<(), DispatcherError>` - DMA copy into reserved slot.
 - **Method**: `copy_gpu_to_memory_completed(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>` - Finalize populated slot.
 - **Method**: `release_memory(&self, key: CacheKey) -> Result<(), DispatcherError>` - Release reserved slot (cancellation path).
@@ -177,10 +177,10 @@ The crate has two Cargo features:
 #### FR-009: IMemoryTier Interface (feature: spdk)
 - **Method**: `initialize(&self, pool_size: usize, numa_node: Option<i32>) -> Result<(), MemoryTierError>` - Initialize pool with NUMA binding.
 - **Method**: `insert(&self, key: CacheKey, size: u32) -> Result<*mut u8, MemoryTierError>` - Allocate slot.
-- **Method**: `get(&self, key: CacheKey) -> Option<(*mut u8, u32)>` - Get pointer with LRU refresh.
-- **Method**: `peek(&self, key: CacheKey) -> Option<(*mut u8, u32)>` - Get pointer without LRU update.
-- **Method**: `evict_lru(&self) -> Option<CacheKey>` - Evict oldest entry.
-- **Method**: `evict_lru_for_key(&self, key: CacheKey) -> Option<CacheKey>` - Evict from target shard.
+- **Method**: `get(&self, key: CacheKey) -> Option<(*mut u8, u32)>` - Get pointer, refreshing eviction order.
+- **Method**: `peek(&self, key: CacheKey) -> Option<(*mut u8, u32)>` - Get pointer without eviction-order update.
+- **Method**: `evict_next(&self) -> Option<CacheKey>` - Evict the eviction policy's next victim.
+- **Method**: `evict_next_for_key(&self, key: CacheKey) -> Option<CacheKey>` - Evict the policy's next victim from the target shard.
 - **Method**: `oldest_keys(&self, n: usize) -> Vec<CacheKey>` - Peek N oldest.
 - **Method**: `remove(&self, key: CacheKey) -> Result<(), MemoryTierError>` - Remove specific entry.
 - **Method**: `touch(&self, key: CacheKey)` - Update LRU position.

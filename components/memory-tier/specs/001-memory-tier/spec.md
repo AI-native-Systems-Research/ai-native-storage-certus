@@ -37,24 +37,24 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 - `insert_and_get` - verifies pointer round-trip
 - `insert_duplicate_fails` - verifies AlreadyExists error
 - `contains` - verifies presence tracking
-- `peek_does_not_update_lru` - verifies peek does not promote
+- `peek_does_not_update_eviction_order` - verifies peek does not update eviction order
 
-### User Story 2 - LRU Eviction Under Memory Pressure (Priority: P1)
+### User Story 2 - Eviction Under Memory Pressure (Priority: P1)
 
 **As** the dispatch layer,
-**I want** to evict the least-recently-used entry when the pool is full,
+**I want** to evict the entry chosen by the eviction policy when the pool is full,
 **so that** space is freed for new insertions without requiring external coordination.
 
 **Acceptance Criteria:**
-- `evict_lru()` removes the globally-oldest entry across shards (round-robin)
-- `evict_lru_for_key(key)` evicts the oldest entry from the same shard as the target key
+- `evict_next()` removes the eviction policy's next victim across shards (round-robin)
+- `evict_next_for_key(key)` evicts the policy's next victim from the same shard as the target key
 - Eviction correctly frees the allocation and removes the slot from the index
 - After eviction, the freed space is available for new allocations
 - `oldest_keys(n)` returns up to N keys in oldest-first order without removing them
 
 **Test Coverage:**
-- `evict_lru_returns_some` - verifies eviction returns a key
-- `touch_updates_lru` - verifies touch promotes entry, oldest is evicted first
+- `evict_next_returns_some` - verifies eviction returns a key
+- `touch_updates_eviction_order` - verifies touch updates the entry's eviction-order position
 - `pool_full_returns_error` - verifies PoolFull when shard capacity exhausted
 
 ### User Story 3 - Pool Initialization with NUMA and DMA Awareness (Priority: P1)
@@ -156,12 +156,12 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 | FR-008 | insert() rejects zero size with InvalidSize | Creusot P1, unit test |
 | FR-009 | insert() rejects duplicate keys with AlreadyExists | Creusot P3, unit test |
 | FR-010 | insert() returns PoolFull when shard allocator cannot satisfy request | Creusot P8, unit test |
-| FR-011 | get() returns pointer and size, and updates LRU via eviction policy | Unit test |
-| FR-012 | peek() returns pointer and size without LRU update | Unit test |
-| FR-013 | evict_lru() cycles through shards via atomic counter (round-robin) | Creusot P10 |
-| FR-014 | evict_lru_for_key() evicts from the same shard as the target key | Creusot P4, P5 |
+| FR-011 | get() returns pointer and size, and updates eviction order via eviction policy | Unit test |
+| FR-012 | peek() returns pointer and size without eviction-order update | Unit test |
+| FR-013 | evict_next() cycles through shards via atomic counter (round-robin) | Creusot P10 |
+| FR-014 | evict_next_for_key() evicts from the same shard as the target key | Creusot P4, P5 |
 | FR-015 | remove() frees the slot and returns KeyNotFound for absent keys | Creusot P9, unit test |
-| FR-016 | touch() promotes entry in LRU without returning data | Unit test |
+| FR-016 | touch() updates the entry's eviction-order position without returning data | Unit test |
 | FR-017 | batch_touch() amortizes lock acquisition for multiple keys | Implementation |
 | FR-018 | clear() removes all entries, resets allocators, returns count | Unit test |
 | FR-019 | NUMA binding via mbind with graceful fallback on failure | Implementation |
@@ -249,6 +249,6 @@ Memory is allocated as a single contiguous region via `mmap` (preferring 2 MiB h
 > The following items are known drift between this spec and the current implementation. They are **intentionally left unresolved** in this document pending a design decision — see `.specify/sync/align-tasks.md` for the deferred alignment tasks and options. This spec continues to describe the originally-intended 16-way sharded architecture; it has **not** been rewritten to match the current single-pool implementation, because it is unclear whether sharding was deliberately dropped or is unfinished work.
 >
 > - FR-005, FR-006, FR-007, NFR-002 (16-way sharding), FR-013 (round-robin eviction counter), FR-021 (per-shard `oldest_keys` sampling), and SC-3 (16-thread concurrency via shard locks) describe a sharded pool that does not exist in `src/lib.rs` (single `RwLock<Pool>`, no shards). See align-task "sharding-not-implemented".
-> - FR-014 (`evict_lru_for_key` targets the key's shard) does not hold: the `key` parameter is ignored in the current implementation, making it a pure alias for `evict_lru()`. See align-task "evict-lru-for-key-ignores-key".
+> - FR-014 (`evict_next_for_key` targets the key's shard) does not hold: the `key` parameter is ignored in the current implementation, making it a pure alias for `evict_next()`. See align-task "evict-lru-for-key-ignores-key".
 > - SC-8 (10 Creusot-verified formal properties, 21 verification conditions) has no corresponding proof artifacts anywhere under `components/memory-tier/`. The `IMemoryTier` interface doc comments (`components/interfaces/src/imemory_tier.rs`) also assert "Verified: P4/P5/P10" claims that are stale. See align-task "creusot-proofs-absent".
 > - NFR-008 (component version `0.2.0`) does not match either `Cargo.toml` (`0.1.0`) or the `define_component!` macro's `version:` field (`0.3.0`). See align-task "version-mismatch".
