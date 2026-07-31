@@ -103,7 +103,15 @@ message BatchPopulateResponse {
 
 message LookupEntry {
   uint64 key = 1;
+  // Single-region (legacy): one IPC handle addressing the whole block. Used by
+  // clients that export one contiguous KV allocation (vLLM <=0.22, populate).
   IpcHandle ipc_handle = 2;
+  // Multi-region: one IPC handle per per-layer KV tensor (vLLM 0.23+ splits a
+  // block into N per-layer allocations). The server scatters the N regions from
+  // the one slot back to GPU in order (region L <- slot + sum(sizes[0..L])).
+  // When non-empty this supersedes ipc_handle. N is variable (bounded by the
+  // model's KV-cache layer count).
+  repeated IpcHandle ipc_handles = 3;
 }
 
 message BatchLookupRequest {
@@ -173,7 +181,13 @@ message BatchReserveResponse {
 
 message CopyToStoreEntry {
   uint64 key = 1;
+  // Single-region (legacy): one IPC handle addressing the whole block.
   IpcHandle ipc_handle = 2;
+  // Multi-region: one IPC handle per per-layer KV tensor (vLLM 0.23+). The
+  // server gathers the N regions into the one reserved slot in order
+  // (slot + sum(sizes[0..L]) <- region L). When non-empty this supersedes
+  // ipc_handle. Total copied = sum of region sizes = the reserved slot size.
+  repeated IpcHandle ipc_handles = 3;
 }
 
 message BatchCopyToStoreRequest {
