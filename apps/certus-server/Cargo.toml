@@ -14,6 +14,13 @@ otel = [
 ]
 # Enable per-direction SSD read/write byte counters exposed via GetIoStats.
 rw-telemetry = ["dispatcher/rw-telemetry"]
+# End-to-end per-block CRC-32 integrity: computed on store, verified before H2D
+# on load. Off by default; adds a 4-byte field per dispatch-map entry only when on.
+integrity-check = [
+    "dispatcher/integrity-check",
+    "dispatch-map/integrity-check",
+    "remote-lookup/integrity-check",
+]
 
 [dependencies]
 interfaces = { workspace = true, features = ["spdk"] }

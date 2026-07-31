@@ -35,12 +35,17 @@ pub(crate) struct DispatchEntry {
     pub eviction_handle: EvictionHandle,
     /// Number of times this entry has been reused (read hits).
     pub reuse_count: AtomicU32,
+    /// CRC-32 of the stored block data, set on the store path and verified on
+    /// load. `0` means "not yet recorded". Only compiled under the
+    /// `integrity-check` feature — when off, `DispatchEntry` stays 56 bytes.
+    #[cfg(feature = "integrity-check")]
+    pub checksum: u32,
 }
 
 impl std::fmt::Debug for DispatchEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DispatchEntry")
-            .field("location", &self.location)
+        let mut dbg = f.debug_struct("DispatchEntry");
+        dbg.field("location", &self.location)
             .field("size_blocks", &self.size_blocks)
             .field("read_ref", &self.read_ref)
             .field("write_ref", &self.write_ref)
@@ -48,7 +53,9 @@ impl std::fmt::Debug for DispatchEntry {
             .field(
                 "reuse_count",
                 &self.reuse_count.load(std::sync::atomic::Ordering::Relaxed),
-            )
-            .finish()
+            );
+        #[cfg(feature = "integrity-check")]
+        dbg.field("checksum", &self.checksum);
+        dbg.finish()
     }
 }
