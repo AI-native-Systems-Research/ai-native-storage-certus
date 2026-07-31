@@ -530,9 +530,10 @@ impl EngineInner {
             };
 
             // Async DMA from GPU into the DRAM slot reserved by prepare_store.
+            // In-process connector: one coalesced region per block (N==1).
             match self
                 .dispatcher
-                .copy_gpu_to_memory_async(*key, handle, stream)
+                .copy_gpu_to_memory_async(*key, &[handle], stream)
             {
                 Ok(()) => {}
                 Err(interfaces::DispatcherError::AlreadyExists(_)) => continue,
