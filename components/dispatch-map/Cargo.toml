@@ -5,6 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+# Store a per-entry CRC-32 (see interfaces/integrity-check). The 4-byte field
+# is cfg'd out when this is off, so DispatchEntry stays 56 bytes.
+integrity-check = ["interfaces/integrity-check"]
+
 [dependencies]
 component-framework.workspace = true
 component-core.workspace = true

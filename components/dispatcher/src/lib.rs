@@ -979,6 +979,36 @@ impl DispatcherComponent {
         }
     }
 
+    /// Verify a warm slot's CRC-32 before it is served to the GPU. `expected`
+    /// is the checksum recorded on the store path (`None` = never recorded, so
+    /// nothing to check). The slot is pinned by the caller's read-ref, so the
+    /// `size` bytes at `pointer` are stable while we hash them on the CPU. This
+    /// is the latest correct point to check — immediately before the H2D copy
+    /// that feeds the GPU consumer. Returns `IoError` on mismatch.
+    #[cfg(feature = "integrity-check")]
+    fn verify_slot_crc(
+        expected: Option<u32>,
+        key: CacheKey,
+        pointer: *mut u8,
+        size: u32,
+    ) -> Result<(), DispatcherError> {
+        let Some(expected) = expected else {
+            return Ok(());
+        };
+        // SAFETY: the warm hit is pinned by read_ref (no concurrent writer), so
+        // `size` bytes at `pointer` are the resident, immutable slot contents.
+        let bytes = unsafe { std::slice::from_raw_parts(pointer as *const u8, size as usize) };
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(bytes);
+        let actual = hasher.finalize();
+        if actual != expected {
+            return Err(DispatcherError::IoError(format!(
+                "integrity: CRC-32 mismatch for key {key:#018x}: expected {expected:#010x}, got {actual:#010x}"
+            )));
+        }
+        Ok(())
+    }
+
     /// Copy a resident memory-tier slot to a GPU block via DMA. Shared by the
     /// `batch_lookup` warm fast-path and the concurrent-promotion recovery
     /// serve. Uses the warm CUDA stream when one is bound, else the synchronous
@@ -1006,8 +1036,7 @@ impl DispatcherComponent {
             let s = GpuStream(raw as *mut std::ffi::c_void);
             let mut off: usize = 0;
             for region in regions {
-                let copy_size =
-                    (region.size as usize).min((size as usize).saturating_sub(off));
+                let copy_size = (region.size as usize).min((size as usize).saturating_sub(off));
                 if copy_size == 0 {
                     break;
                 }
@@ -1033,8 +1062,7 @@ impl DispatcherComponent {
         } else {
             let mut off: usize = 0;
             for region in regions {
-                let copy_size =
-                    (region.size as usize).min((size as usize).saturating_sub(off));
+                let copy_size = (region.size as usize).min((size as usize).saturating_sub(off));
                 if copy_size == 0 {
                     break;
                 }
@@ -1049,11 +1077,7 @@ impl DispatcherComponent {
                 }
                 .map_err(|e| DispatcherError::IoError(format!("DmaBuffer wrap failed: {e}")))?;
                 let r = gpu
-                    .dma_copy_to_device(
-                        &buf,
-                        region.address as *mut std::ffi::c_void,
-                        copy_size,
-                    )
+                    .dma_copy_to_device(&buf, region.address as *mut std::ffi::c_void, copy_size)
                     .map_err(|e| {
                         DispatcherError::IoError(format!(
                             "GPU DMA copy (memory-tier→device) failed: {e}"
@@ -1091,8 +1115,8 @@ impl DispatcherComponent {
         loop {
             match dm.lookup(key) {
                 Ok(LookupResult::MemoryTier { pointer, size }) => {
-                    let res = self
-                        .serve_memory_tier_to_gpu(gpu, pointer, size, regions, warm_raw, true);
+                    let res =
+                        self.serve_memory_tier_to_gpu(gpu, pointer, size, regions, warm_raw, true);
                     let _ = dm.release_read(key);
                     let _ = dm.touch(key);
                     return res;
@@ -2067,6 +2091,19 @@ impl IDispatcher for DispatcherComponent {
                     }
                     LookupResult::MemoryTier { pointer, size } => {
                         let t_hot = std::time::Instant::now();
+                        // Integrity: verify the slot's CRC-32 on the CPU before
+                        // the H2D copy feeds the GPU. A mismatch fails the load
+                        // for this key instead of serving corrupt KV.
+                        #[cfg(feature = "integrity-check")]
+                        {
+                            if let Err(e) =
+                                Self::verify_slot_crc(dm.get_checksum(key), key, pointer, size)
+                            {
+                                let _ = dm.release_read(key);
+                                results[i] = Some(Err(e));
+                                continue;
+                            }
+                        }
                         // Warm hit: defer the stream sync to one batched sync
                         // after the classification loop (synchronize = false).
                         let res = self.serve_memory_tier_to_gpu(
@@ -2444,8 +2481,9 @@ impl IDispatcher for DispatcherComponent {
                  -> Result<(), DispatcherError> {
                     match dm.lookup(key) {
                         Ok(LookupResult::MemoryTier { pointer, size }) => {
-                            let r = self
-                                .serve_memory_tier_to_gpu(&gpu, pointer, size, regions, warm_raw, true);
+                            let r = self.serve_memory_tier_to_gpu(
+                                &gpu, pointer, size, regions, warm_raw, true,
+                            );
                             let _ = dm.release_read(key);
                             r
                         }
@@ -2524,6 +2562,16 @@ impl IDispatcher for DispatcherComponent {
                         ))
                     }
                     LookupResult::MemoryTier { pointer, size } => {
+                        // Integrity: verify the slot CRC-32 before the H2D copy.
+                        #[cfg(feature = "integrity-check")]
+                        {
+                            if let Err(e) =
+                                Self::verify_slot_crc(dm.get_checksum(key), key, pointer, size)
+                            {
+                                let _ = dm.release_read(key);
+                                return Err(e);
+                            }
+                        }
                         // Synchronous serve via the shared, device-correct helper.
                         let r = self.serve_memory_tier_to_gpu(
                             &gpu,
@@ -2789,6 +2837,38 @@ impl IDispatcher for DispatcherComponent {
                     DispatcherError::IoError(other.to_string())
                 }
             })?;
+
+        // Integrity: compute the block's CRC-32 as soon as it has landed. The
+        // store D2H (issued on the null/default stream by copy_to_store) is
+        // async, so we synchronize it first, then hash the just-created slot
+        // while the write-ref still holds it exclusively, and record the
+        // checksum on the index entry. It travels with the entry through
+        // demote/promote and is verified before the load H2D.
+        #[cfg(feature = "integrity-check")]
+        {
+            let gpu = self
+                .gpu_services
+                .get()
+                .map_err(|_| DispatcherError::NotInitialized("gpu_services not bound".into()))?;
+            gpu.stream_synchronize(GpuStream(std::ptr::null_mut()))
+                .map_err(|e| {
+                    let _ = mt.remove(key);
+                    DispatcherError::IoError(format!(
+                        "integrity: stream_synchronize before hash failed: {e}"
+                    ))
+                })?;
+            // SAFETY: the entry was just created with write_ref==1 (exclusive),
+            // so no reader/writer can touch the slot; `size` bytes at `mem_ptr`
+            // are the reserved, now-populated slot.
+            let bytes = unsafe { std::slice::from_raw_parts(mem_ptr as *const u8, size as usize) };
+            let mut hasher = crc32fast::Hasher::new();
+            hasher.update(bytes);
+            let crc = hasher.finalize();
+            dm.set_checksum(key, crc).map_err(|e| {
+                let _ = mt.remove(key);
+                DispatcherError::IoError(format!("integrity: set_checksum failed: {e}"))
+            })?;
+        }
 
         dm.downgrade_reference(key)
             .map_err(|e| DispatcherError::IoError(e.to_string()))?;
@@ -3288,6 +3368,8 @@ mod tests {
         // SSD->DRAM read between our classification and recovery. Pointer stored
         // as usize to keep MockDmInner Send without an unsafe impl.
         flip_on_next_lookup: HashMap<CacheKey, (usize, u32)>,
+        #[cfg(feature = "integrity-check")]
+        checksums: HashMap<CacheKey, u32>,
     }
 
     struct MockDispatchMap {
@@ -3301,6 +3383,8 @@ mod tests {
                     entries: HashMap::new(),
                     mismatch_keys: HashSet::new(),
                     flip_on_next_lookup: HashMap::new(),
+                    #[cfg(feature = "integrity-check")]
+                    checksums: HashMap::new(),
                 }),
             }
         }
@@ -3629,6 +3713,27 @@ mod tests {
                 },
             );
             Ok(())
+        }
+
+        #[cfg(feature = "integrity-check")]
+        fn set_checksum(&self, key: CacheKey, checksum: u32) -> Result<(), DispatchMapError> {
+            let mut inner = self.inner.lock().unwrap();
+            if !inner.entries.contains_key(&key) {
+                return Err(DispatchMapError::KeyNotFound(key));
+            }
+            inner.checksums.insert(key, checksum);
+            Ok(())
+        }
+
+        #[cfg(feature = "integrity-check")]
+        fn get_checksum(&self, key: CacheKey) -> Option<u32> {
+            self.inner
+                .lock()
+                .unwrap()
+                .checksums
+                .get(&key)
+                .copied()
+                .filter(|&c| c != 0)
         }
     }
 
