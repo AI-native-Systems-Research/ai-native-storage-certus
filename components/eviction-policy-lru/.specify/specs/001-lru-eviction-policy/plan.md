@@ -59,8 +59,8 @@ Node { key: u64, prev: Option<u32>, next: Option<u32>, active: bool }
 | `track(pool, key)` | read(state) + lock(pool) | O(1) |
 | `touch(handle)` | read(state) + lock(pool) | O(1) |
 | `remove(handle)` | read(state) + lock(pool) | O(1) |
-| `pop_oldest(pool)` | read(state) + lock(pool) | O(1) |
-| `peek_oldest(pool, n)` | read(state) + lock(pool) | O(n) |
+| `identify_next_to_evict(pool)` | read(state) + lock(pool) | O(1) |
+| `get_eviction_candidates(pool, n)` | read(state) + lock(pool) | O(n) |
 | `len(pool)` | read(state) + lock(pool) | O(1) |
 | `clear_pool(pool)` | read(state) + lock(pool) | O(1) (drops Vec) |
 

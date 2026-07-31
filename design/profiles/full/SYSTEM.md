@@ -11,7 +11,7 @@ The system sits between GPU inference engines (e.g., vLLM) and NVMe storage, pro
 - **Sub-millisecond warm lookups** — GPU←DRAM via CUDA async memcpy
 - **Pipelined cold reads** — NVMe→DRAM→GPU with overlapped I/O and DMA
 - **Write-through persistence** — DRAM cache with background SSD write-through
-- **LRU eviction** — Two-tier eviction (DRAM pool and SSD capacity)
+- **Pluggable eviction** — Two-tier eviction (DRAM pool and SSD capacity)
 
 ## 2. High-Level Data Flow
 
@@ -168,7 +168,7 @@ The top-level orchestrator interface. Coordinates all cache operations.
 | `initialize(config)` | Creates N block devices + N extent managers from PCI addresses |
 | `shutdown()` | Drains background writes, shuts down all drives |
 | `populate(key, ipc_handle)` | GPU→DRAM DMA, registers entry, enqueues write-through |
-| `reserve_memory(key, size)` | Reserve a DRAM slot without DMA (returns raw pointer) |
+| `reserve_memory(key, size, session_id)` | Reserve a DRAM slot without DMA (returns raw pointer); `session_id` is an opaque per-request id (0 = unset) for observability only |
 | `populate_memory(key, ipc_handle)` | DMA into a previously reserved slot |
 | `memory_populated(key, size)` | Finalize reserved slot: register in dispatch-map + enqueue write-through |
 | `release_memory(key)` | Cancel a reserved slot without populating |
@@ -210,19 +210,19 @@ The key→location index with reader/writer reference counting.
 
 ### IMemoryTier
 
-DRAM cache pool with LRU eviction.
+DRAM cache pool with pluggable eviction (via `IEvictionPolicy`).
 
 | Method | Description |
 |--------|-------------|
 | `initialize(pool_size, numa_node)` | Allocates mmap'd pool, optionally NUMA-pinned |
 | `insert(key, size)` | Allocates slot, returns pointer |
-| `get(key)` | Returns (pointer, size), refreshes LRU |
-| `peek(key)` | Returns (pointer, size) without LRU update |
-| `evict_lru()` | Removes oldest entry |
-| `evict_lru_for_key(key)` | Evicts until space is available for key's size |
+| `get(key)` | Returns (pointer, size), refreshes eviction order |
+| `peek(key)` | Returns (pointer, size) without eviction-order update |
+| `evict_next()` | Removes the eviction policy's next victim |
+| `evict_next_for_key(key)` | Evicts the policy's next victim from the target key's shard |
 | `oldest_keys(n)` | Returns N oldest keys for eviction decisions |
 | `remove(key)` | Frees specific slot |
-| `touch(key) / batch_touch(keys)` | Refresh LRU timestamp(s) |
+| `touch(key) / batch_touch(keys)` | Refresh eviction-order position(s) |
 | `contains(key)` | Existence check |
 | `capacity() / used()` | Pool utilization metrics |
 | `pool_info()` | Returns base pointer + size for CUDA registration |
@@ -314,7 +314,7 @@ Key design decisions:
 DRAM cache pool using:
 - **mmap'd contiguous allocation** for the pool
 - **First-fit free-list allocator** with 4 KiB alignment (`allocator.rs`)
-- **Intrusive LRU list** for eviction ordering (`lru.rs`)
+- **Delegated eviction ordering** via a bound `IEvictionPolicy` component (currently `eviction-policy-lru`)
 - **HashMap<CacheKey, Slot>** for O(1) key lookup
 
 Default pool size: 256 MiB. The pool is CUDA-pinned at server startup for zero-copy GPU DMA.

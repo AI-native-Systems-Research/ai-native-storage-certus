@@ -63,7 +63,7 @@ impl std::error::Error for MemoryTierError {}
 // - P7 (used-within-capacity): used() never exceeds capacity()
 // - P8 (pool-full): insert returns PoolFull when used + size > capacity
 // - P9 (remove-key-not-found): remove on absent key returns KeyNotFound
-// - P10 (evict-round-robin): evict_lru cycles through all 16 shards
+// - P10 (evict-round-robin): evict_next cycles through all 16 shards
 //
 // Total: 10 properties, 21 verification conditions discharged by SMT solvers.
 
@@ -100,7 +100,8 @@ component_macros::define_interface! {
         /// Suggested technique: ASAN integration test.
         fn insert(&self, key: CacheKey, size: u32) -> Result<*mut u8, MemoryTierError>;
 
-        /// Get the pointer and size for an existing slot, refreshing its LRU position.
+        /// Get the pointer and size for an existing slot, refreshing its
+        /// eviction-order position (via the bound `IEvictionPolicy`).
         ///
         /// Returns `None` if the key is not present.
         ///
@@ -108,7 +109,8 @@ component_macros::define_interface! {
         /// Returns None when uninitialized. Shard lookup is in-bounds.
         fn get(&self, key: CacheKey) -> Option<(*mut u8, u32)>;
 
-        /// Get the pointer and size for an existing slot without updating LRU.
+        /// Get the pointer and size for an existing slot without updating its
+        /// eviction-order position.
         ///
         /// Use this for background operations (e.g., write-through) that should
         /// not prevent eviction of the entry.
@@ -117,7 +119,7 @@ component_macros::define_interface! {
         /// Returns None when uninitialized. Shard lookup is in-bounds.
         fn peek(&self, key: CacheKey) -> Option<(*mut u8, u32)>;
 
-        /// Evict the least-recently-used entry, freeing its slot.
+        /// Evict the entry selected by the bound eviction policy, freeing its slot.
         ///
         /// Returns the evicted key, or `None` if the pool is empty.
         ///
@@ -125,19 +127,19 @@ component_macros::define_interface! {
         /// Frees the evicted slot (used decreases). Cycles through shards
         /// starting from evict_counter % 16.
         ///
-        /// # Unchecked: Eviction selects truly oldest entry
+        /// # Unchecked: Eviction selects the policy's intended victim
         /// Depends on IEvictionPolicy::identify_next_to_evict correctness.
         /// Suggested technique: property-based test with known insertion order.
-        fn evict_lru(&self) -> Option<CacheKey>;
+        fn evict_next(&self) -> Option<CacheKey>;
 
-        /// Evict the least-recently-used entry from the same shard as `key`.
+        /// Evict the eviction policy's next victim from the same shard as `key`.
         ///
         /// This ensures the freed space is allocatable by a subsequent `insert(key, ...)`.
         /// Returns the evicted key, or `None` if the target shard is empty.
         ///
         /// # Verified: P4 (shard-bounded), P5 (shard-deterministic), P6 (capacity-accounting)
         /// Targets the correct shard deterministically. Frees evicted slot.
-        fn evict_lru_for_key(&self, key: CacheKey) -> Option<CacheKey>;
+        fn evict_next_for_key(&self, key: CacheKey) -> Option<CacheKey>;
 
         /// Peek at the N oldest keys without removing them.
         ///
@@ -153,13 +155,13 @@ component_macros::define_interface! {
         /// Returns KeyNotFound if key absent.
         fn remove(&self, key: CacheKey) -> Result<(), MemoryTierError>;
 
-        /// Update the LRU position for `key` without returning data.
+        /// Update the eviction-order position for `key` without returning data.
         ///
         /// # Verified: P4 (shard-bounded)
         /// Shard lookup is in-bounds.
         fn touch(&self, key: CacheKey);
 
-        /// Update LRU positions for multiple keys in a single batched operation.
+        /// Update eviction-order positions for multiple keys in a single batched operation.
         /// Amortizes lock acquisition over the batch for hot-path throughput.
         ///
         /// # Verified: P4 (shard-bounded)

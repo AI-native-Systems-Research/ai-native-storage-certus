@@ -25,9 +25,9 @@ so that bounded memory is reclaimed in LRU order under pressure.
 
 **Acceptance Scenarios**:
 
-1. **Given** entries tracked in FIFO order, **When** `pop_oldest` is called, **Then** the first-tracked entry is returned.
-2. **Given** a tracked entry is touched, **When** `pop_oldest` is called, **Then** the touched entry is NOT evicted first; the next-oldest is.
-3. **Given** a tracked entry is removed, **When** `pop_oldest` is called, **Then** the removed entry is never returned.
+1. **Given** entries tracked in FIFO order, **When** `identify_next_to_evict` is called, **Then** the first-tracked entry is returned.
+2. **Given** a tracked entry is touched, **When** `identify_next_to_evict` is called, **Then** the touched entry is NOT evicted first; the next-oldest is.
+3. **Given** a tracked entry is removed, **When** `identify_next_to_evict` is called, **Then** the removed entry is never returned.
 
 ### User Story 2 - Multiple Independent Pools (Priority: P1)
 
@@ -58,18 +58,18 @@ so that the eviction policy is safe under concurrent workloads.
 - **FR-002**: System MUST provide `track(pool, key)` that registers a key in the given pool as most-recently-used and returns an opaque `EvictionHandle` for O(1) subsequent operations.
 - **FR-003**: System MUST provide `touch(handle)` that moves the referenced entry to most-recently-used position in O(1) time.
 - **FR-004**: System MUST provide `remove(handle)` that unlinks the referenced entry from the ordering in O(1) time.
-- **FR-005**: System MUST provide `pop_oldest(pool)` that removes and returns the least-recently-used key from the pool in O(1) time, or `None` if the pool is empty.
-- **FR-006**: System MUST provide `peek_oldest(pool, n)` that returns up to `n` least-recently-used keys without removing them, in O(n) time.
+- **FR-005**: System MUST provide `identify_next_to_evict(pool)` that removes and returns the least-recently-used key from the pool in O(1) time, or `None` if the pool is empty.
+- **FR-006**: System MUST provide `get_eviction_candidates(pool, n)` that returns up to `n` least-recently-used keys without removing them, in O(n) time.
 - **FR-007**: System MUST provide `len(pool)` that returns the number of active entries in the pool.
 - **FR-008**: System MUST provide `clear_pool(pool)` that removes all entries from the pool, resetting it to empty.
-- **FR-009**: Methods returning `Result` (`track`, `touch`, `remove`) MUST return `EvictionPolicyError::InvalidPool` when given a non-existent pool. Methods returning `Option` or scalar (`pop_oldest`, `peek_oldest`, `len`, `clear_pool`) MUST gracefully degrade: returning `None`, empty collection, `0`, or no-op respectively.
+- **FR-009**: Methods returning `Result` (`track`, `touch`, `remove`) MUST return `EvictionPolicyError::InvalidPool` when given a non-existent pool. Methods returning `Option` or scalar (`identify_next_to_evict`, `get_eviction_candidates`, `len`, `clear_pool`) MUST gracefully degrade: returning `None`, empty collection, `0`, or no-op respectively.
 - **FR-010**: `touch` and `remove` on an already-removed handle MUST be idempotent (no panic, no effect). These return `Ok(())` silently rather than `Err(InvalidHandle)` — the `InvalidHandle` error variant is defined in the interface but is currently unused (reserved for future stricter validation).
 - **FR-012**: The component MUST provide a `batch_touch(handles: &[EvictionHandle])` method that marks multiple entries as most-recently-used in a single lock acquisition, amortizing lock overhead for the hot-path batch lookup use case.
 - **FR-011**: Removed node slots MUST be recycled via a free list to avoid unbounded memory growth for long-lived pools with high churn.
 
 ### Non-Functional Requirements
 
-- **NFR-001**: All single-entry operations (`track`, `touch`, `remove`, `pop_oldest`) MUST be O(1).
+- **NFR-001**: All single-entry operations (`track`, `touch`, `remove`, `identify_next_to_evict`) MUST be O(1).
 - **NFR-002**: The component MUST be thread-safe — concurrent access from multiple threads MUST NOT cause data corruption.
 - **NFR-003**: Per-pool locking granularity — operations on different pools MUST NOT contend with each other (except during pool creation).
 - **NFR-004**: The component MUST conform to the Certus component model (`define_component!`, provides `IEvictionPolicy`, receptacle for `ILogger`).

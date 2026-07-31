@@ -73,10 +73,10 @@ impl IMemoryTier for PoolMemoryTier {
     fn peek(&self, _key: CacheKey) -> Option<(*mut u8, u32)> {
         None
     }
-    fn evict_lru(&self) -> Option<CacheKey> {
+    fn evict_next(&self) -> Option<CacheKey> {
         None
     }
-    fn evict_lru_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
+    fn evict_next_for_key(&self, _key: CacheKey) -> Option<CacheKey> {
         None
     }
     fn oldest_keys(&self, _n: usize) -> Vec<CacheKey> {

@@ -111,7 +111,7 @@ impl CertusEngine {
         self.inner.complete_load(&keys)
     }
 
-    /// Update LRU ordering for the given keys.
+    /// Update eviction ordering for the given keys.
     fn touch(&self, keys: Vec<u64>) -> PyResult<()> {
         self.inner.touch(&keys)
     }
