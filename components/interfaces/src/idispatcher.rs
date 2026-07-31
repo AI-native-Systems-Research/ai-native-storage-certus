@@ -126,7 +126,7 @@ impl Default for DispatcherConfig {
 /// };
 /// assert_eq!(handle.size, 4096);
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct IpcHandle {
     /// GPU memory base address.
     pub address: *mut u8,
@@ -368,9 +368,15 @@ component_macros::define_interface! {
         /// # Unchecked: Result ordering matches input ordering
         /// The implementation uses thread::scope with per-drive parallelism;
         /// results are assembled by index. Suggested technique: property-based testing.
+        /// Each entry carries one or more GPU destination regions. A block that
+        /// the client exports as a single coalesced allocation (vLLM <=0.22,
+        /// `populate`) has exactly one region; a block split into N per-layer
+        /// allocations (vLLM 0.23+) has N. The server scatters the one resident
+        /// DRAM slot back to the N regions in order (region L <- slot + sum of
+        /// preceding region sizes), so index and storage stay 1:1 per key.
         fn batch_lookup(
             &self,
-            entries: &[(CacheKey, IpcHandle)],
+            entries: &[(CacheKey, Vec<IpcHandle>)],
         ) -> Vec<Result<(), DispatcherError>>;
 
         /// Check whether a cache entry exists without transferring data.
@@ -497,8 +503,13 @@ component_macros::define_interface! {
         /// DMA-copy from GPU into a previously reserved memory-tier slot.
         ///
         /// The slot must have been allocated by a prior `reserve_memory` call.
-        /// Issues `cudaMemcpyAsync` on the given stream and returns immediately.
-        /// Caller must synchronize the stream before calling `copy_gpu_to_memory_completed`.
+        /// Issues one `cudaMemcpyAsync` per region on the given stream and returns
+        /// immediately. The N regions are gathered contiguously into the one slot
+        /// (region L lands at `slot + sum of preceding region sizes`), so a block
+        /// split into N per-layer GPU allocations (vLLM 0.23+) is stored as one
+        /// colocated unit; a single-region block (`regions.len() == 1`) is the
+        /// legacy path. Caller must synchronize the stream before calling
+        /// `copy_gpu_to_memory_completed`.
         ///
         /// # Errors
         ///
@@ -512,7 +523,7 @@ component_macros::define_interface! {
         /// Caller protocol — no in-process enforcement. If violated, GPU DMA
         /// may not have completed and memory-tier slot contains partial data.
         /// Suggested technique: debug-mode runtime assertion via stream query.
-        fn copy_gpu_to_memory_async(&self, key: CacheKey, ipc_handle: IpcHandle, stream: GpuStream) -> Result<(), DispatcherError>;
+        fn copy_gpu_to_memory_async(&self, key: CacheKey, regions: &[IpcHandle], stream: GpuStream) -> Result<(), DispatcherError>;
 
         /// Finalize a populated memory-tier slot: register in the dispatch-map
         /// and enqueue background write-through to SSD.
