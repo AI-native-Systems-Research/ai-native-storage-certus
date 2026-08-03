@@ -542,3 +542,160 @@ fn recovery_empty() {
     let result = dm.lookup(1).unwrap();
     assert!(matches!(result, LookupResult::NotExist));
 }
+
+// ---------------------------------------------------------------------------
+// Mutual exclusion under contention
+//
+// These guard the atomicity of wait-then-act. `wait_for` returns the lock still
+// held; if it released it and let the caller re-acquire, the predicate it waited
+// on could be falsified in the gap. Both tests fail if that guard is dropped:
+// they are the regression tests for a real double-writer / reader-during-write
+// race, so they are written to hammer the boundary rather than probe it once.
+// ---------------------------------------------------------------------------
+
+/// Only one writer may hold a key at a time.
+///
+/// `take_write` assigns `write_ref = 1` rather than incrementing it, so two
+/// writers leave the refcount looking perfectly valid — the violation is only
+/// observable by watching how many threads are inside the critical section at
+/// once, which is what the shared counter does here.
+#[test]
+fn take_write_is_mutually_exclusive() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    const THREADS: usize = 8;
+    const ITERATIONS: usize = 200;
+
+    let c = setup_component();
+    let dm = query_interface!(c, IDispatchMap).unwrap();
+    create_entry(&dm, 1);
+    dm.release_write(1).unwrap();
+
+    let inside = Arc::new(AtomicUsize::new(0));
+    let violated = Arc::new(AtomicBool::new(false));
+    let acquisitions = Arc::new(AtomicUsize::new(0));
+
+    let handles: Vec<_> = (0..THREADS)
+        .map(|_| {
+            let dm = Arc::clone(&dm);
+            let inside = Arc::clone(&inside);
+            let violated = Arc::clone(&violated);
+            let acquisitions = Arc::clone(&acquisitions);
+            thread::spawn(move || {
+                for _ in 0..ITERATIONS {
+                    // A timeout under contention is legitimate; only count and
+                    // check the iterations that actually got the write ref.
+                    if dm.take_write(1).is_err() {
+                        continue;
+                    }
+                    acquisitions.fetch_add(1, Ordering::Relaxed);
+                    if inside.fetch_add(1, Ordering::AcqRel) != 0 {
+                        violated.store(true, Ordering::Relaxed);
+                    }
+                    std::thread::yield_now();
+                    inside.fetch_sub(1, Ordering::AcqRel);
+                    // A failed release means someone else already cleared the
+                    // reference we were holding — the same violation seen from
+                    // the other end. Record it rather than panicking, so the
+                    // assertion below reports it.
+                    if dm.release_write(1).is_err() {
+                        violated.store(true, Ordering::Relaxed);
+                    }
+                }
+            })
+        })
+        .collect();
+
+    for h in handles {
+        h.join().unwrap();
+    }
+
+    assert!(
+        !violated.load(Ordering::Relaxed),
+        "two threads held the write reference on key 1 at the same time"
+    );
+    // Guard against the test silently passing because every attempt timed out.
+    assert!(
+        acquisitions.load(Ordering::Relaxed) > THREADS,
+        "too few successful take_write calls ({}) to have exercised the race",
+        acquisitions.load(Ordering::Relaxed)
+    );
+}
+
+/// A reader must never be admitted while a writer holds the key.
+///
+/// `lookup` waits for `write_ref == 0` and then takes a read reference. If the
+/// lock is released in between, a writer can claim the entry in the gap and the
+/// reader still proceeds — handing out a `Location` pointer into a slot the
+/// writer believes it owns exclusively.
+#[test]
+fn no_reader_admitted_while_write_ref_held() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    const READERS: usize = 4;
+    const ITERATIONS: usize = 300;
+
+    let c = setup_component();
+    let dm = query_interface!(c, IDispatchMap).unwrap();
+    create_entry(&dm, 1);
+    dm.release_write(1).unwrap();
+
+    let writer_inside = Arc::new(AtomicBool::new(false));
+    let violated = Arc::new(AtomicBool::new(false));
+    let reads = Arc::new(AtomicUsize::new(0));
+    let stop = Arc::new(AtomicBool::new(false));
+
+    let writer = {
+        let dm = Arc::clone(&dm);
+        let writer_inside = Arc::clone(&writer_inside);
+        let stop = Arc::clone(&stop);
+        thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                if dm.take_write(1).is_err() {
+                    continue;
+                }
+                writer_inside.store(true, Ordering::Release);
+                std::thread::yield_now();
+                writer_inside.store(false, Ordering::Release);
+                dm.release_write(1).unwrap();
+            }
+        })
+    };
+
+    let readers: Vec<_> = (0..READERS)
+        .map(|_| {
+            let dm = Arc::clone(&dm);
+            let writer_inside = Arc::clone(&writer_inside);
+            let violated = Arc::clone(&violated);
+            let reads = Arc::clone(&reads);
+            thread::spawn(move || {
+                for _ in 0..ITERATIONS {
+                    if let Ok(LookupResult::MemoryTier { .. }) = dm.lookup(1) {
+                        // We hold a read reference: no writer may be inside.
+                        if writer_inside.load(Ordering::Acquire) {
+                            violated.store(true, Ordering::Relaxed);
+                        }
+                        reads.fetch_add(1, Ordering::Relaxed);
+                        dm.release_read(1).unwrap();
+                    }
+                }
+            })
+        })
+        .collect();
+
+    for h in readers {
+        h.join().unwrap();
+    }
+    stop.store(true, Ordering::Relaxed);
+    writer.join().unwrap();
+
+    assert!(
+        !violated.load(Ordering::Relaxed),
+        "lookup handed out a read reference while a writer held key 1"
+    );
+    assert!(
+        reads.load(Ordering::Relaxed) > READERS,
+        "too few successful lookups ({}) to have exercised the race",
+        reads.load(Ordering::Relaxed)
+    );
+}
