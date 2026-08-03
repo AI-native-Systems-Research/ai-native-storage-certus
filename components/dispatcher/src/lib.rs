@@ -2493,7 +2493,11 @@ impl IDispatcher for DispatcherComponent {
                 let t_fetch = probing.then(std::time::Instant::now);
                 let remote_results = rl.batch_lookup(&remote_entries);
                 let fetch_us = t_fetch.map_or(0, |t| t.elapsed().as_micros() as u64);
-                let t_submit = probing.then(std::time::Instant::now);
+                // Accumulated separately so the probe can tell a dispatch-map/LRU
+                // lock story apart from a CUDA-launch one; they are the same order
+                // of magnitude a priori and only one is fixed by lock work.
+                let mut lookup_us: u64 = 0;
+                let mut h2d_us: u64 = 0;
 
                 // On a successful remote fetch the value is now resident in the
                 // local memory tier; deliver it to the caller's GPU buffer with the
@@ -2517,7 +2521,12 @@ impl IDispatcher for DispatcherComponent {
                             Some(Err(DispatcherError::IoError(format!("remote lookup: {e}"))));
                         continue;
                     }
-                    match dm.lookup(key) {
+                    let t_lookup = probing.then(std::time::Instant::now);
+                    let looked_up = dm.lookup(key);
+                    if let Some(t) = t_lookup {
+                        lookup_us += t.elapsed().as_micros() as u64;
+                    }
+                    match looked_up {
                         Ok(LookupResult::MemoryTier { pointer, size }) => {
                             // `lookup` pinned the entry; the guard owns that pin now,
                             // including on the failure paths below.
@@ -2533,9 +2542,13 @@ impl IDispatcher for DispatcherComponent {
                                     continue;
                                 }
                             }
+                            let t_h2d = probing.then(std::time::Instant::now);
                             let res = self.serve_memory_tier_to_gpu(
                                 &gpu, pointer, size, regions, warm_raw, false,
                             );
+                            if let Some(t) = t_h2d {
+                                h2d_us += t.elapsed().as_micros() as u64;
+                            }
                             if res.is_ok() {
                                 submitted.push(pos);
                             }
@@ -2562,8 +2575,6 @@ impl IDispatcher for DispatcherComponent {
                     }
                 }
 
-                let submit_us = t_submit.map_or(0, |t| t.elapsed().as_micros() as u64);
-
                 // One sync for the whole batch, on the same per-device warm stream
                 // every submission above was issued to.
                 let t_sync = probing.then(std::time::Instant::now);
@@ -2584,9 +2595,13 @@ impl IDispatcher for DispatcherComponent {
 
                 if probing {
                     let sync_us = t_sync.map_or(0, |t| t.elapsed().as_micros() as u64);
-                    if let Some(line) =
-                        remote_probe::record(not_found.len() as u64, fetch_us, submit_us, sync_us)
-                    {
+                    if let Some(line) = remote_probe::record(
+                        not_found.len() as u64,
+                        fetch_us,
+                        lookup_us,
+                        h2d_us,
+                        sync_us,
+                    ) {
                         self.log_warn(&line);
                     }
                 }

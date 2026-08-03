@@ -5,8 +5,10 @@
 //!
 //! - **fetch** — `IRemoteLookup::batch_lookup`, i.e. everything from the zyre
 //!   request through the peer's RDMA write landing in local DRAM.
-//! - **submit** — the dispatcher's own loop: per-key dispatch-map lookup plus
-//!   the asynchronous H2D copy submissions.
+//! - **lookup** — the per-key `IDispatchMap::lookup` calls, which is where the
+//!   dispatch-map mutex and (via `ep.touch`) the LRU pool mutex are paid.
+//! - **h2d** — `serve_memory_tier_to_gpu`: the gpu-services state mutex plus the
+//!   `cudaMemcpyAsync` launch.
 //! - **sync** — the single batched `stream_synchronize` that waits for those
 //!   copies to complete.
 //!
@@ -16,7 +18,18 @@
 //! `set_pipeline_metrics` in the `certus-server-yaml` binary the multi-node
 //! benchmark actually runs, so those histograms are dead there.
 //!
-//! Cost when enabled is four `Instant::now()` calls and a few relaxed atomic
+//! Splitting `lookup` from `h2d` is what separates a lock-contention story from
+//! a CUDA-launch-overhead one. They are the same order of magnitude a priori —
+//! six mutex acquisitions per key versus one `cudaMemcpyAsync` launch — and only
+//! one of them is fixed by sharding a lock.
+//!
+//! **Read the percentages, not the per-key microseconds.** The per-key figures
+//! are a sum over concurrently-executing batches, so with N requests in flight
+//! they overstate real per-key latency by roughly N (measured: 192-221 µs/key
+//! reported against 11.55 µs/key actual at 4 workers x 4 inflight). The ratios
+//! are unaffected, which is why the line labels them as summed.
+//!
+//! Cost when enabled is five `Instant::now()` calls and a few relaxed atomic
 //! adds per *batch* (not per key), against a batch that takes on the order of a
 //! millisecond. Off by default; set `CERTUS_LOG_REMOTE_DELIVERY` to a truthy
 //! value (`1`/`true`/`yes`/`on`) to turn it on. Output goes out at `warn` level
@@ -32,7 +45,8 @@ const REPORT_EVERY: u64 = 256;
 static BATCHES: AtomicU64 = AtomicU64::new(0);
 static KEYS: AtomicU64 = AtomicU64::new(0);
 static FETCH_US: AtomicU64 = AtomicU64::new(0);
-static SUBMIT_US: AtomicU64 = AtomicU64::new(0);
+static LOOKUP_US: AtomicU64 = AtomicU64::new(0);
+static H2D_US: AtomicU64 = AtomicU64::new(0);
 static SYNC_US: AtomicU64 = AtomicU64::new(0);
 
 /// Whether the probe is switched on. Read from the environment once.
@@ -52,10 +66,17 @@ pub(crate) fn enabled() -> bool {
 /// singleton in every profile that binds remote-lookup, and keeping them out of
 /// the `define_component!` field list avoids touching its positional
 /// constructor at every call site for a diagnostic.
-pub(crate) fn record(keys: u64, fetch_us: u64, submit_us: u64, sync_us: u64) -> Option<String> {
+pub(crate) fn record(
+    keys: u64,
+    fetch_us: u64,
+    lookup_us: u64,
+    h2d_us: u64,
+    sync_us: u64,
+) -> Option<String> {
     KEYS.fetch_add(keys, Ordering::Relaxed);
     FETCH_US.fetch_add(fetch_us, Ordering::Relaxed);
-    SUBMIT_US.fetch_add(submit_us, Ordering::Relaxed);
+    LOOKUP_US.fetch_add(lookup_us, Ordering::Relaxed);
+    H2D_US.fetch_add(h2d_us, Ordering::Relaxed);
     SYNC_US.fetch_add(sync_us, Ordering::Relaxed);
 
     if BATCHES.fetch_add(1, Ordering::Relaxed) + 1 < REPORT_EVERY {
@@ -69,10 +90,11 @@ pub(crate) fn record(keys: u64, fetch_us: u64, submit_us: u64, sync_us: u64) -> 
     let batches = BATCHES.swap(0, Ordering::Relaxed);
     let keys = KEYS.swap(0, Ordering::Relaxed);
     let fetch = FETCH_US.swap(0, Ordering::Relaxed);
-    let submit = SUBMIT_US.swap(0, Ordering::Relaxed);
+    let lookup = LOOKUP_US.swap(0, Ordering::Relaxed);
+    let h2d = H2D_US.swap(0, Ordering::Relaxed);
     let sync = SYNC_US.swap(0, Ordering::Relaxed);
 
-    let total = (fetch + submit + sync) as f64;
+    let total = (fetch + lookup + h2d + sync) as f64;
     let share = |v: u64| {
         if total == 0.0 {
             0.0
@@ -90,15 +112,18 @@ pub(crate) fn record(keys: u64, fetch_us: u64, submit_us: u64, sync_us: u64) -> 
 
     Some(format!(
         "remote-delivery: {batches} batches / {keys} keys | \
-         fetch {:.1}% submit {:.1}% sync {:.1}% | \
-         per key: fetch {:.1}us submit {:.1}us sync {:.1}us total {:.1}us",
+         fetch {:.1}% lookup {:.1}% h2d {:.1}% sync {:.1}% | \
+         summed-per-key (concurrent batches overlap, ratios only): \
+         fetch {:.1}us lookup {:.1}us h2d {:.1}us sync {:.1}us total {:.1}us",
         share(fetch),
-        share(submit),
+        share(lookup),
+        share(h2d),
         share(sync),
         per_key(fetch),
-        per_key(submit),
+        per_key(lookup),
+        per_key(h2d),
         per_key(sync),
-        per_key(fetch + submit + sync),
+        per_key(fetch + lookup + h2d + sync),
     ))
 }
 
@@ -112,20 +137,24 @@ mod tests {
     fn reports_once_per_window() {
         for i in 1..REPORT_EVERY {
             assert!(
-                record(2, 100, 10, 40).is_none(),
+                record(2, 100, 40, 20, 40).is_none(),
                 "batch {i} should not emit yet"
             );
         }
-        let line = record(2, 100, 10, 40).expect("window boundary should emit");
+        let line = record(2, 100, 40, 20, 40).expect("window boundary should emit");
         assert!(line.contains(&format!("{REPORT_EVERY} batches")), "{line}");
         assert!(
             line.contains(&format!("{} keys", REPORT_EVERY * 2)),
             "{line}"
         );
-        // fetch 100 of 150 total per batch => ~66.7%, and 50us per key.
-        assert!(line.contains("fetch 66.7%"), "{line}");
+        // Per batch: fetch 100, lookup 40, h2d 20, sync 40 => total 200.
+        assert!(line.contains("fetch 50.0%"), "{line}");
+        assert!(line.contains("lookup 20.0%"), "{line}");
+        assert!(line.contains("h2d 10.0%"), "{line}");
+        assert!(line.contains("sync 20.0%"), "{line}");
+        // 100us of fetch over 2 keys per batch => 50us summed-per-key.
         assert!(line.contains("fetch 50.0us"), "{line}");
         // Counters reset, so the next window starts over.
-        assert!(record(1, 1, 1, 1).is_none());
+        assert!(record(1, 1, 1, 1, 1).is_none());
     }
 }
