@@ -11,6 +11,12 @@ Provided interfaces and receptacles are **preserved as-is**: they reference the 
 shared interface definitions in `components/interfaces`. Do **not** create new `I...`
 interface files for the clone.
 
+Only the *contract and scaffolding* are carried over — the component declaration, its
+`provides:`/`receptacles:`, and the interface `impl` blocks. The method bodies are left
+**empty** (`todo!()` stubs); the source's private implementation (helper modules, data
+structures, behavioral tests) is **not** copied. The clone also starts a **fresh** spec-kit
+session that inherits only the source's constitution.
+
 1. The source component is $0 and the new component is $1. Locate the source component's
    sub-directory under `components/` (the lower-case, hyphen-ized form of $0, or the
    directory whose `define_component!` block declares $0). If it does not exist, return an
@@ -31,11 +37,21 @@ interface files for the clone.
    `Cargo.toml`. Do **not** copy generated or spec directories: `target/`, `specs/`,
    `.specify/`, `info/`, or the source's `.claude/` directory.
 
-6. In the copied source, rename the component type from the $0 name to the $1 name
-   throughout (e.g. `FooBarComponent` → `BazComponent`), and update crate-name references,
-   `//!` module docs, and doc-comment examples to match. Keep the `provides:` and
-   `receptacles:` entries exactly as recorded in step 3 — the clone provides the same
-   interfaces and consumes the same receptacles as $0.
+6. Reduce the copied source to a compiling skeleton and rename it:
+   - Rename the component type from the $0 name to the $1 name throughout (e.g.
+     `FooBarComponent` → `BazComponent`), and update crate-name references, `//!` module
+     docs, and doc-comment examples to match.
+   - Keep the `define_component!` (and any `define_interface!`) declarations with their
+     `provides:` and `receptacles:` entries exactly as recorded in step 3 — the clone
+     provides the same interfaces and consumes the same receptacles as $0.
+   - Replace the body of **every** method that implements a provided interface with a
+     `todo!("$1: <method>")` stub, so the clone compiles but carries none of the source's
+     logic.
+   - Delete private helper modules, types, and fields that existed only to support the
+     source's implementation, keeping `fields:` minimal but sufficient to construct the
+     component. Remove any now-unused `use` imports.
+   - Replace the source's behavioral tests with a minimal smoke test that constructs the
+     component and queries each provided interface via `query_interface!`.
 
 7. In the new `Cargo.toml`, set `[package] name` to the lower-case, hyphen-ized form of $1.
    Preserve all `[dependencies]` from the source (they reflect the interfaces and
@@ -59,9 +75,15 @@ interface files for the clone.
     of truth for which skills are component-local — do not hard-code the list here. Skip any
     skill that does not match.
 
-11. Run `specify init . --ai claude` in the new component source directory.
+11. Run `specify init . --ai claude` in the new component source directory. This is a
+    **fresh** spec-kit session — do not copy the source's specs, plans, tasks, or
+    `.specify/sync` artifacts.
 
-12. Run `specify extension add spec-kit-sync --from https://github.com/bgervin/spec-kit-sync/archive/refs/heads/master.zip`
+12. Copy **only** the source component's constitution into the new component, overwriting
+    the freshly-initialized default: copy `.specify/memory/constitution.md` from the source
+    to the same path under the new component. Leave all other spec-kit state fresh.
+
+13. Run `specify extension add spec-kit-sync --from https://github.com/bgervin/spec-kit-sync/archive/refs/heads/master.zip`
     in the new component directory.
 
-13. Verify the clone builds with `cargo build -p <new-crate-name>`. Report any errors.
+14. Verify the clone builds with `cargo build -p <new-crate-name>`. Report any errors.
