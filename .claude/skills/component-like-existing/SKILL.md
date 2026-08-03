@@ -53,9 +53,11 @@ interface files for the clone.
    access to components that are not directly used. Model it on the source component's
    `.claude/settings.json` if present.
 
-10. Copy skills — except those named `component-make-new`, `component-make-new-actor`, or
-    `component-like-existing` — from `.claude/skills` into the new component directory's
-    `.claude/skills`.
+10. Copy into the new component directory's `.claude/skills` only the skills whose names
+    match an `include` pattern in `.claude/component-local-skills.json` (patterns support a
+    trailing `*` wildcard; other entries match exactly). This allowlist is the single source
+    of truth for which skills are component-local — do not hard-code the list here. Skip any
+    skill that does not match.
 
 11. Run `specify init . --ai claude` in the new component source directory.
 
