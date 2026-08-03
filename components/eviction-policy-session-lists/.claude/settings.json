@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(components/eviction-policy-session-lists/**)",
+      "Write(components/eviction-policy-session-lists/**)",
+      "Read(components/component-framework/**)",
+      "Read(components/interfaces/**)",
+      "Write(components/interfaces/**)",
+      "Read(components/logger/**)"
+    ],
+    "deny": [
+      "Read(components/spdk-sys/**)",
+      "Read(components/spdk-env/**)",
+      "Read(components/block-device-spdk-nvme/**)"
+    ],
+    "additionalDirectories": [
+      "../../interfaces",
+      "../../component-framework",
+      "../../logger"
+    ]
+  }
+}
