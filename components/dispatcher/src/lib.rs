@@ -2491,32 +2491,86 @@ impl IDispatcher for DispatcherComponent {
                 // On a successful remote fetch the value is now resident in the
                 // local memory tier; deliver it to the caller's GPU buffer with the
                 // same memory-tier->device scatter used for a local hot-path hit.
-                let deliver = |key: CacheKey,
-                               regions: &[IpcHandle]|
-                 -> Result<(), DispatcherError> {
+                //
+                // Submit every copy first and synchronize the warm stream ONCE, the
+                // way the local warm path does. Blocking per key instead — one round
+                // trip to the GPU for every key in the batch — is what pinned remote
+                // lookup to a fixed per-key cost that did not respond to batch size.
+                //
+                // The read pin each `lookup` takes must therefore outlive the batched
+                // sync, not merely the submission; `remote_pins` owns them until then.
+                let mut remote_pins = pins::PinnedKeys::new(Arc::clone(&dm));
+                let mut submitted: Vec<usize> = Vec::with_capacity(not_found.len());
+
+                for (&pos, remote_res) in not_found.iter().zip(remote_results.into_iter()) {
+                    let (key, regions) = &entries[pos];
+                    let key = *key;
+                    if let Err(e) = remote_res {
+                        results[pos] =
+                            Some(Err(DispatcherError::IoError(format!("remote lookup: {e}"))));
+                        continue;
+                    }
                     match dm.lookup(key) {
                         Ok(LookupResult::MemoryTier { pointer, size }) => {
-                            let r = self.serve_memory_tier_to_gpu(
-                                &gpu, pointer, size, regions, warm_raw, true,
+                            // `lookup` pinned the entry; the guard owns that pin now,
+                            // including on the failure paths below.
+                            remote_pins.adopt(key);
+                            // Integrity: verify the slot's CRC-32 on the CPU before
+                            // the H2D copy feeds the GPU, as the warm path does.
+                            #[cfg(feature = "integrity-check")]
+                            {
+                                if let Err(e) =
+                                    Self::verify_slot_crc(dm.get_checksum(key), key, pointer, size)
+                                {
+                                    results[pos] = Some(Err(e));
+                                    continue;
+                                }
+                            }
+                            let res = self.serve_memory_tier_to_gpu(
+                                &gpu, pointer, size, regions, warm_raw, false,
                             );
-                            let _ = dm.release_read(key);
-                            r
+                            if res.is_ok() {
+                                submitted.push(pos);
+                            }
+                            results[pos] = Some(res);
                         }
+                        // A block-tier answer still holds a pin — `lookup` increments
+                        // read_ref before it inspects the location — but the value is
+                        // not where the remote fetch promised it would be.
+                        Ok(LookupResult::BlockDevice { .. }) => {
+                            let _ = dm.release_read(key);
+                            results[pos] = Some(Err(DispatcherError::KeyNotFound(key)));
+                        }
+                        // NotExist returns before the read_ref increment, and
+                        // MismatchSize takes no pin either, so releasing here would
+                        // decrement some *other* reader's pin.
                         Ok(_) => {
-                            let _ = dm.release_read(key);
-                            Err(DispatcherError::KeyNotFound(key))
+                            results[pos] = Some(Err(DispatcherError::KeyNotFound(key)));
                         }
-                        Err(e) => Err(DispatcherError::IoError(format!("post-remote lookup: {e}"))),
+                        Err(e) => {
+                            results[pos] = Some(Err(DispatcherError::IoError(format!(
+                                "post-remote lookup: {e}"
+                            ))));
+                        }
                     }
-                };
-
-                for (pos, remote_res) in not_found.iter().zip(remote_results.into_iter()) {
-                    let res = match remote_res {
-                        Ok(()) => deliver(entries[*pos].0, &entries[*pos].1),
-                        Err(e) => Err(DispatcherError::IoError(format!("remote lookup: {e}"))),
-                    };
-                    results[*pos] = Some(res);
                 }
+
+                // One sync for the whole batch, on the same per-device warm stream
+                // every submission above was issued to.
+                if !submitted.is_empty() && warm_raw != 0 {
+                    let s = GpuStream(warm_raw as *mut std::ffi::c_void);
+                    if let Err(e) = gpu.stream_synchronize(s) {
+                        // The destination buffers may not hold the data, so none of
+                        // these keys can be reported as a hit.
+                        let msg = format!("remote-delivery stream_synchronize failed: {e}");
+                        self.log_warn(&msg);
+                        for &pos in &submitted {
+                            results[pos] = Some(Err(DispatcherError::IoError(msg.clone())));
+                        }
+                    }
+                }
+                // Every remote copy has completed: release the pins.
+                drop(remote_pins);
             }
         }
 
@@ -3818,6 +3872,13 @@ mod tests {
     struct PinProbe {
         dm: Arc<MockDispatchMap>,
         events: Mutex<Vec<(GpuEvent, u32)>>,
+        submissions: AtomicUsize,
+        /// 1-based index of the submission to fail; 0 fails none.
+        fail_submit_on: usize,
+        fail_sync: bool,
+        /// Report every pointer as belonging to no GPU, so the dispatcher resolves
+        /// no per-device streams and takes the synchronous fallback copy.
+        no_device: bool,
     }
 
     impl PinProbe {
@@ -3825,6 +3886,31 @@ mod tests {
             Self {
                 dm,
                 events: Mutex::new(Vec::new()),
+                submissions: AtomicUsize::new(0),
+                fail_submit_on: 0,
+                fail_sync: false,
+                no_device: false,
+            }
+        }
+
+        fn failing_submit_on(dm: Arc<MockDispatchMap>, nth: usize) -> Self {
+            Self {
+                fail_submit_on: nth,
+                ..Self::new(dm)
+            }
+        }
+
+        fn failing_sync(dm: Arc<MockDispatchMap>) -> Self {
+            Self {
+                fail_sync: true,
+                ..Self::new(dm)
+            }
+        }
+
+        fn without_gpu_device(dm: Arc<MockDispatchMap>) -> Self {
+            Self {
+                no_device: true,
+                ..Self::new(dm)
             }
         }
 
@@ -3916,6 +4002,9 @@ mod tests {
             Ok(())
         }
         fn device_of_ptr(&self, _ptr: *const std::ffi::c_void) -> Result<i32, String> {
+            if self.probe.as_ref().is_some_and(|p| p.no_device) {
+                return Ok(-1);
+            }
             Ok(0)
         }
         fn stream_query(&self, _stream: GpuStream) -> Result<bool, String> {
@@ -3927,6 +4016,9 @@ mod tests {
         fn stream_synchronize(&self, _stream: GpuStream) -> Result<(), String> {
             if let Some(ref p) = self.probe {
                 p.record(GpuEvent::Sync);
+                if p.fail_sync {
+                    return Err("mock: injected stream_synchronize failure".into());
+                }
             }
             Ok(())
         }
@@ -3952,6 +4044,10 @@ mod tests {
         ) -> Result<(), String> {
             if let Some(ref p) = self.probe {
                 p.record(GpuEvent::SubmitH2d);
+                let nth = p.submissions.fetch_add(1, Ordering::Relaxed) + 1;
+                if p.fail_submit_on == nth {
+                    return Err("mock: injected H2D submission failure".into());
+                }
             }
             unsafe {
                 std::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, size);
@@ -4810,6 +4906,165 @@ mod tests {
             .map(|(&k, buf)| (k, vec![make_handle(buf)]))
             .collect();
         (bufs, entries)
+    }
+
+    /// The load-bearing invariant: a read pin must still be held when the copy is
+    /// *submitted* and when the batched sync runs, because that pin is the only
+    /// thing keeping the memory-tier evictor off the DRAM slot the DMA is reading.
+    ///
+    /// Also pins down the batching shape. On a per-key-synchronize implementation
+    /// the event sequence is `[Submit, Sync, Submit, Sync]` with one pin held at
+    /// each sync; here it must be both submissions first, then a single sync, with
+    /// both pins still outstanding at that point.
+    #[test]
+    fn remote_delivery_holds_pin_until_after_batched_sync() {
+        let fx = setup_initialized_with_remote(&[1, 2], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (bufs, entries) = remote_batch(&[1, 2]);
+        let results = d.batch_lookup(&entries);
+        assert!(
+            results.iter().all(|r| r.is_ok()),
+            "both remote keys should be delivered, got: {results:?}"
+        );
+
+        assert_eq!(
+            fx.probe.events(),
+            vec![
+                (GpuEvent::SubmitH2d, 1),
+                (GpuEvent::SubmitH2d, 2),
+                (GpuEvent::Sync, 2),
+            ],
+            "each copy must be submitted with its own pin held (pins accumulate as \
+             the batch is walked), then ONE sync with both pins still outstanding"
+        );
+
+        // Bytes actually arrived, and every pin is released once the call returns.
+        assert_eq!(bufs[0][0], MockRemoteLookup::fill_byte(1));
+        assert_eq!(bufs[1][0], MockRemoteLookup::fill_byte(2));
+        assert_eq!(fx.dm.total_read_refs(), 0, "pins must not leak");
+
+        d.shutdown().unwrap();
+    }
+
+    /// The perf-shape lock: sync cost must amortize over the batch, not scale with
+    /// it. One `stream_synchronize` for eight keys, not eight.
+    #[test]
+    fn remote_delivery_issues_one_sync_per_batch() {
+        let keys: Vec<CacheKey> = (1..=8).collect();
+        let fx = setup_initialized_with_remote(&keys, PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&keys);
+        let results = d.batch_lookup(&entries);
+        assert!(results.iter().all(|r| r.is_ok()), "got: {results:?}");
+
+        assert_eq!(fx.probe.count(GpuEvent::SubmitH2d), 8);
+        assert_eq!(
+            fx.probe.count(GpuEvent::Sync),
+            1,
+            "one sync per batch, not per key"
+        );
+        assert_eq!(fx.dm.total_read_refs(), 0);
+
+        d.shutdown().unwrap();
+    }
+
+    /// A key the peer does not hold must fail on its own without disturbing its
+    /// neighbours, and must not leave a pin behind.
+    #[test]
+    fn remote_delivery_isolates_per_key_failure() {
+        let fx = setup_initialized_with_remote(&[1, 3], PinProbe::new);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (bufs, entries) = remote_batch(&[1, 2, 3]);
+        let results = d.batch_lookup(&entries);
+
+        assert!(results[0].is_ok(), "key 1: {:?}", results[0]);
+        assert!(results[1].is_err(), "key 2 is not held remotely");
+        assert!(results[2].is_ok(), "key 3: {:?}", results[2]);
+
+        assert_eq!(bufs[0][0], MockRemoteLookup::fill_byte(1));
+        assert_eq!(bufs[2][0], MockRemoteLookup::fill_byte(3));
+        assert_eq!(fx.probe.count(GpuEvent::Sync), 1);
+        assert_eq!(fx.dm.total_read_refs(), 0);
+
+        d.shutdown().unwrap();
+    }
+
+    /// The adopt-then-fail path: the pin is taken before submission, so a failed
+    /// submission must still release it, and the batch must carry on.
+    #[test]
+    fn remote_delivery_releases_pin_when_submission_fails() {
+        let fx = setup_initialized_with_remote(&[1, 2, 3], |dm| PinProbe::failing_submit_on(dm, 2));
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[1, 2, 3]);
+        let results = d.batch_lookup(&entries);
+
+        assert!(results[0].is_ok(), "key 1: {:?}", results[0]);
+        assert!(results[1].is_err(), "key 2's submission was made to fail");
+        assert!(results[2].is_ok(), "key 3: {:?}", results[2]);
+
+        assert_eq!(fx.probe.count(GpuEvent::SubmitH2d), 3);
+        assert_eq!(fx.probe.count(GpuEvent::Sync), 1);
+        assert_eq!(
+            fx.dm.total_read_refs(),
+            0,
+            "the failed key's pin must be released too"
+        );
+
+        d.shutdown().unwrap();
+    }
+
+    /// A failed batched sync means the destination buffers may not hold the data,
+    /// so every key that was submitted has to be reported as an error rather than
+    /// a hit.
+    #[test]
+    fn remote_delivery_reports_sync_failure_per_key() {
+        let fx = setup_initialized_with_remote(&[1, 2], PinProbe::failing_sync);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (_bufs, entries) = remote_batch(&[1, 2]);
+        let results = d.batch_lookup(&entries);
+
+        assert!(
+            results.iter().all(|r| r.is_err()),
+            "a failed sync must not be reported as a hit, got: {results:?}"
+        );
+        assert_eq!(fx.dm.total_read_refs(), 0);
+
+        d.shutdown().unwrap();
+    }
+
+    /// Without a warm stream the helper falls back to the synchronous `DmaBuffer`
+    /// copy, which has already completed on return. Results and pin release must be
+    /// unchanged. Reaching that branch needs `device_of_ptr` to disown the pointers,
+    /// since it otherwise resolves any address to device 0.
+    #[test]
+    fn remote_delivery_falls_back_without_warm_stream() {
+        let fx = setup_initialized_with_remote(&[1, 2], PinProbe::without_gpu_device);
+        let d = query_interface!(fx.component, IDispatcher).unwrap();
+
+        let (bufs, entries) = remote_batch(&[1, 2]);
+        let results = d.batch_lookup(&entries);
+
+        assert!(results.iter().all(|r| r.is_ok()), "got: {results:?}");
+        assert_eq!(bufs[0][0], MockRemoteLookup::fill_byte(1));
+        assert_eq!(bufs[1][0], MockRemoteLookup::fill_byte(2));
+        assert_eq!(
+            fx.probe.count(GpuEvent::SubmitH2d),
+            0,
+            "the fallback path uses the synchronous copy, not memcpy_h2d_async"
+        );
+        assert_eq!(
+            fx.probe.count(GpuEvent::Sync),
+            0,
+            "nothing to synchronize without a warm stream"
+        );
+        assert_eq!(fx.dm.total_read_refs(), 0);
+
+        d.shutdown().unwrap();
     }
 
     /// The same invariant on the local warm path: its copies are also submitted
