@@ -19,12 +19,17 @@ memory-tier.workspace = true
 libc = "0.2"
 crossbeam-channel = "0.5"
 parking_lot = "0.12"
+crc32fast = { version = "1", optional = true }
 
 [features]
 default = ["spdk-backend"]
 spdk-backend = ["dep:block-device-spdk-nvme"]
 hardware-test = []
 pipeline-telemetry = []
+# End-to-end data integrity: CRC-32 the block on store (verified before H2D on
+# load). Gates BOTH compute and check — one is useless without the other. Off
+# by default; the ~100us/block hash only runs when enabled.
+integrity-check = ["dep:crc32fast", "interfaces/integrity-check"]
 # Enable per-direction SSD read/write byte counters (IDispatcher::read_write_stats)
 # by turning on the underlying block device's telemetry counters.
 rw-telemetry = ["block-device-spdk-nvme?/telemetry"]

@@ -324,6 +324,16 @@ impl IDispatchMap for MockDispatchMap {
         Ok(())
     }
 
+    #[cfg(feature = "integrity-check")]
+    fn set_checksum(&self, _key: CacheKey, _checksum: u32) -> Result<(), DispatchMapError> {
+        Ok(())
+    }
+
+    #[cfg(feature = "integrity-check")]
+    fn get_checksum(&self, _key: CacheKey) -> Option<u32> {
+        None
+    }
+
     fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {
         // Optionally delay the classification/serve lookup without holding the
         // world lock, to stage KEY_RESPONSE ordering.

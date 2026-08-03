@@ -7,6 +7,11 @@ publish = false
 
 [features]
 default = []
+# Forwards `interfaces/integrity-check` so the IDispatchMap trait gains the
+# checksum accessors; the mock in seams.rs cfg's its stubs on this feature.
+# Enabled together with the other crates' integrity-check by the app so the
+# trait's presence and the impl's cfg stay in lockstep.
+integrity-check = ["interfaces/integrity-check"]
 # Gates the `#[ignore]` hardware loopback test (T034, tests/mesh_rdma.rs), which
 # swaps the mock RDMA seams for the real initiator/responder crates over
 # single-host RDMA loopback. Pulls those two crates (with their own `rdma`
