@@ -10,7 +10,7 @@ use std::sync::{Mutex, RwLock};
 
 use component_framework::define_component;
 use interfaces::{
-    EvictionHandle, CacheKey, EvictionPolicyError, IEvictionPolicy, ILogger, PoolId,
+    BlockSemantics, CacheKey, EvictionHandle, EvictionPolicyError, IEvictionPolicy, ILogger, PoolId,
 };
 
 use crate::lru_list::LruList;
@@ -54,11 +54,14 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
         &self,
         pool: PoolId,
         key: CacheKey,
+        _semantics: BlockSemantics,
     ) -> Result<EvictionHandle, EvictionPolicyError> {
         let state = self.state.read().unwrap();
         let pool_mutex = state.pools.get(pool as usize).ok_or_else(|| {
             if let Ok(logger) = self.logger.get() {
-                logger.warn(&format!("eviction-policy-lru: track on invalid pool {pool}"));
+                logger.warn(&format!(
+                    "eviction-policy-lru: track on invalid pool {pool}"
+                ));
             }
             EvictionPolicyError::InvalidPool(pool)
         })?;
@@ -89,9 +92,10 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
         }
         let state = self.state.read().unwrap();
         let mut current_pool_id = handles[0].pool_id();
-        let pool_mutex = state.pools.get(current_pool_id as usize).ok_or(
-            EvictionPolicyError::InvalidPool(current_pool_id),
-        )?;
+        let pool_mutex = state
+            .pools
+            .get(current_pool_id as usize)
+            .ok_or(EvictionPolicyError::InvalidPool(current_pool_id))?;
         let mut pool_guard = pool_mutex.lock().unwrap();
         pool_guard.lru.move_to_back(handles[0].index());
 
@@ -99,9 +103,10 @@ impl IEvictionPolicy for EvictionPolicyLruComponent {
             if handle.pool_id() != current_pool_id {
                 drop(pool_guard);
                 current_pool_id = handle.pool_id();
-                let pm = state.pools.get(current_pool_id as usize).ok_or(
-                    EvictionPolicyError::InvalidPool(current_pool_id),
-                )?;
+                let pm = state
+                    .pools
+                    .get(current_pool_id as usize)
+                    .ok_or(EvictionPolicyError::InvalidPool(current_pool_id))?;
                 pool_guard = pm.lock().unwrap();
             }
             pool_guard.lru.move_to_back(handle.index());
@@ -189,9 +194,9 @@ mod tests {
             query_interface!(comp, IEvictionPolicy).unwrap();
         let pool = ep.create_pool();
 
-        ep.track(pool, 100).unwrap();
-        ep.track(pool, 200).unwrap();
-        ep.track(pool, 300).unwrap();
+        ep.track(pool, 100, BlockSemantics::default()).unwrap();
+        ep.track(pool, 200, BlockSemantics::default()).unwrap();
+        ep.track(pool, 300, BlockSemantics::default()).unwrap();
 
         assert_eq!(ep.identify_next_to_evict(pool), Some(100));
         assert_eq!(ep.identify_next_to_evict(pool), Some(200));
@@ -206,9 +211,9 @@ mod tests {
             query_interface!(comp, IEvictionPolicy).unwrap();
         let pool = ep.create_pool();
 
-        let h1 = ep.track(pool, 100).unwrap();
-        ep.track(pool, 200).unwrap();
-        ep.track(pool, 300).unwrap();
+        let h1 = ep.track(pool, 100, BlockSemantics::default()).unwrap();
+        ep.track(pool, 200, BlockSemantics::default()).unwrap();
+        ep.track(pool, 300, BlockSemantics::default()).unwrap();
 
         ep.touch(h1).unwrap();
 
@@ -224,9 +229,9 @@ mod tests {
             query_interface!(comp, IEvictionPolicy).unwrap();
         let pool = ep.create_pool();
 
-        ep.track(pool, 100).unwrap();
-        let h2 = ep.track(pool, 200).unwrap();
-        ep.track(pool, 300).unwrap();
+        ep.track(pool, 100, BlockSemantics::default()).unwrap();
+        let h2 = ep.track(pool, 200, BlockSemantics::default()).unwrap();
+        ep.track(pool, 300, BlockSemantics::default()).unwrap();
 
         ep.remove(h2).unwrap();
 
@@ -242,9 +247,9 @@ mod tests {
             query_interface!(comp, IEvictionPolicy).unwrap();
         let pool = ep.create_pool();
 
-        ep.track(pool, 10).unwrap();
-        ep.track(pool, 20).unwrap();
-        ep.track(pool, 30).unwrap();
+        ep.track(pool, 10, BlockSemantics::default()).unwrap();
+        ep.track(pool, 20, BlockSemantics::default()).unwrap();
+        ep.track(pool, 30, BlockSemantics::default()).unwrap();
 
         assert_eq!(ep.get_eviction_candidates(pool, 2), vec![10, 20]);
         assert_eq!(ep.len(pool), 3);
@@ -258,9 +263,9 @@ mod tests {
         let pool_a = ep.create_pool();
         let pool_b = ep.create_pool();
 
-        ep.track(pool_a, 1).unwrap();
-        ep.track(pool_a, 2).unwrap();
-        ep.track(pool_b, 99).unwrap();
+        ep.track(pool_a, 1, BlockSemantics::default()).unwrap();
+        ep.track(pool_a, 2, BlockSemantics::default()).unwrap();
+        ep.track(pool_b, 99, BlockSemantics::default()).unwrap();
 
         assert_eq!(ep.len(pool_a), 2);
         assert_eq!(ep.len(pool_b), 1);
@@ -275,16 +280,16 @@ mod tests {
             query_interface!(comp, IEvictionPolicy).unwrap();
         let pool = ep.create_pool();
 
-        ep.track(pool, 1).unwrap();
-        ep.track(pool, 2).unwrap();
-        ep.track(pool, 3).unwrap();
+        ep.track(pool, 1, BlockSemantics::default()).unwrap();
+        ep.track(pool, 2, BlockSemantics::default()).unwrap();
+        ep.track(pool, 3, BlockSemantics::default()).unwrap();
 
         ep.clear_pool(pool);
         assert_eq!(ep.len(pool), 0);
         assert_eq!(ep.identify_next_to_evict(pool), None);
 
         // Can still track after clear
-        ep.track(pool, 10).unwrap();
+        ep.track(pool, 10, BlockSemantics::default()).unwrap();
         assert_eq!(ep.identify_next_to_evict(pool), Some(10));
     }
 
@@ -294,7 +299,7 @@ mod tests {
         let ep: std::sync::Arc<dyn IEvictionPolicy + Send + Sync> =
             query_interface!(comp, IEvictionPolicy).unwrap();
 
-        assert!(ep.track(99, 1).is_err());
+        assert!(ep.track(99, 1, BlockSemantics::default()).is_err());
         assert_eq!(ep.identify_next_to_evict(99), None);
         assert_eq!(ep.get_eviction_candidates(99, 5), Vec::<CacheKey>::new());
         assert_eq!(ep.len(99), 0);
@@ -316,7 +321,7 @@ mod tests {
                 thread::spawn(move || {
                     for i in 0..100 {
                         let key = (t * 1000 + i) as u64;
-                        let h = ep.track(pool, key).unwrap();
+                        let h = ep.track(pool, key, BlockSemantics::default()).unwrap();
                         ep.touch(h).unwrap();
                     }
                 })
