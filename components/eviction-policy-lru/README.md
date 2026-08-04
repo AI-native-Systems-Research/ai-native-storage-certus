@@ -25,7 +25,7 @@ Pools are independent — entries in one pool are not affected by operations on 
 | Method | Description |
 |--------|-------------|
 | `create_pool() -> PoolId` | Create a new isolated eviction pool |
-| `track(pool, key) -> EvictionHandle` | Start tracking a key in a pool |
+| `track(pool, key, semantics) -> EvictionHandle` | Start tracking a key in a pool (`semantics` ignored by LRU) |
 | `touch(handle)` | Move entry to most-recently-used position |
 | `remove(handle)` | Stop tracking an entry |
 | `identify_next_to_evict(pool) -> Option<CacheKey>` | Select the next entry to evict (LRU), remove it, and return it |
@@ -43,14 +43,14 @@ Pools are independent — entries in one pool are not affected by operations on 
 
 ```rust
 use component_core::query_interface;
-use interfaces::{IEvictionPolicy, CacheKey};
+use interfaces::{IEvictionPolicy, CacheKey, BlockSemantics};
 
 let comp = EvictionPolicyLruComponent::new_default();
 let ep = query_interface!(comp, IEvictionPolicy).unwrap();
 
 let pool = ep.create_pool();
-let h1 = ep.track(pool, 42).unwrap();
-let h2 = ep.track(pool, 99).unwrap();
+let h1 = ep.track(pool, 42, BlockSemantics::default()).unwrap();
+let h2 = ep.track(pool, 99, BlockSemantics::default()).unwrap();
 
 ep.touch(h1).unwrap(); // 42 is now most-recently-used
 

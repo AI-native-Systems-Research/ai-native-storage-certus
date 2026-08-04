@@ -33,6 +33,7 @@ members = [
     "certus-connector",
     "components/example-helloworld-dylib",
     "components/eviction-policy-lru",
+    "components/eviction-policy-session-lists",
     "components/remote-lookup",
     "components/remote-lookup-rdma-initiator",
     "components/remote-lookup-rdma-responder",
@@ -40,6 +41,7 @@ members = [
     "apps/certus-server-yaml",
     "apps/baseline-generalized-fs",
     "apps/remote-lookup-bench",
+    "apps/eviction-replay-benchmark",
     "components/zyre"
 ]
 
@@ -66,7 +68,9 @@ default-members = [
     "apps/dynamic-loading-example",
     "components/logger",
     "components/gpu-services",
-    "components/eviction-policy-lru"
+    "components/eviction-policy-lru",
+    "components/eviction-policy-session-lists",
+    "apps/eviction-replay-benchmark"
 ]
 
 resolver = "2"
@@ -100,6 +104,7 @@ disk-partition-manager = { path = "components/disk-partition-manager" }
 extent-manager = { path = "components/extent-manager" }
 gpu-services = { path = "components/gpu-services" }
 eviction-policy-lru = { path = "components/eviction-policy-lru" }
+eviction-policy-session-lists = { path = "components/eviction-policy-session-lists" }
 remote-lookup = { path = "components/remote-lookup" }
 remote-lookup-rdma-initiator = { path = "components/remote-lookup-rdma-initiator" }
 remote-lookup-rdma-responder = { path = "components/remote-lookup-rdma-responder" }
