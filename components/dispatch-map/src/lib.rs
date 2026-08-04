@@ -114,22 +114,23 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {
-        let satisfied =
+        // The guard comes back held, so `write_ref == 0` still holds below: no
+        // writer can claim the entry between the wait and our read reference.
+        let (satisfied, mut inner) =
             self.state
                 .wait_for(DEFAULT_TIMEOUT, |inner| match inner.entries.get(&key) {
                     None => true,
                     Some(e) => e.write_ref == 0,
                 });
 
-        let mut inner = self.state.inner.lock().unwrap();
+        if !satisfied {
+            return Err(DispatchMapError::Timeout(key));
+        }
+
         let entry = match inner.entries.get_mut(&key) {
             None => return Ok(LookupResult::NotExist),
             Some(e) => e,
         };
-
-        if !satisfied && entry.write_ref > 0 {
-            return Err(DispatchMapError::Timeout(key));
-        }
 
         entry.read_ref = entry
             .read_ref
@@ -195,19 +196,20 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn take_read(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        let satisfied = self.state.wait_for(DEFAULT_TIMEOUT, |inner| {
+        // Guard held from the wait through the increment, so no writer can slip in
+        // between observing `write_ref == 0` and taking the read reference.
+        let (satisfied, mut inner) = self.state.wait_for(DEFAULT_TIMEOUT, |inner| {
             inner.entries.get(&key).map_or(true, |e| e.write_ref == 0)
         });
 
-        let mut inner = self.state.inner.lock().unwrap();
+        if !satisfied {
+            return Err(DispatchMapError::Timeout(key));
+        }
+
         let entry = inner
             .entries
             .get_mut(&key)
             .ok_or(DispatchMapError::KeyNotFound(key))?;
-
-        if !satisfied && entry.write_ref > 0 {
-            return Err(DispatchMapError::Timeout(key));
-        }
 
         entry.read_ref = entry
             .read_ref
@@ -223,22 +225,25 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn take_write(&self, key: CacheKey) -> Result<(), DispatchMapError> {
-        let satisfied = self.state.wait_for(DEFAULT_TIMEOUT, |inner| {
+        // Mutual exclusion depends on holding the guard across both the wait and
+        // the assignment. Releasing it in between let two callers each observe an
+        // unreferenced entry and each set `write_ref = 1` — two writers on one key,
+        // invisible in the value because this is an assignment, not an increment.
+        let (satisfied, mut inner) = self.state.wait_for(DEFAULT_TIMEOUT, |inner| {
             inner
                 .entries
                 .get(&key)
                 .map_or(true, |e| e.read_ref == 0 && e.write_ref == 0)
         });
 
-        let mut inner = self.state.inner.lock().unwrap();
+        if !satisfied {
+            return Err(DispatchMapError::Timeout(key));
+        }
+
         let entry = inner
             .entries
             .get_mut(&key)
             .ok_or(DispatchMapError::KeyNotFound(key))?;
-
-        if !satisfied && (entry.read_ref > 0 || entry.write_ref > 0) {
-            return Err(DispatchMapError::Timeout(key));
-        }
 
         entry.write_ref = 1;
         if let Ok(logger) = self.logger.get() {
