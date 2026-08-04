@@ -47,15 +47,18 @@ SLAB_SIZE_BYTES=2097152
 TENSOR_PARALLEL_SIZE=1
 SERVER_WAIT=180        # seconds to wait for the Certus-SPDK server port
 DO_BUILD=0
+VLLM_VERSION=""        # pin the vLLM base-image version for ALL four backends
 ONLY=""
 SKIP=""
 LOGDIR=""
 
-# Image tags
-IMG_NOOFFLOAD="certus-nooffload-bench"
-IMG_CPU="certus-cpu-offload-bench"
-IMG_SHARED="certus-sharedstorage-bench"
-IMG_GRPC="localhost/certus-grpc-bench"
+# Image tags. Env-overridable (a caller can point this at externally-built
+# images). With --vllm-version set, an untagged name here gets a :vllm<ver> tag
+# appended below so multiple versions coexist.
+IMG_NOOFFLOAD="${IMG_NOOFFLOAD:-certus-nooffload-bench}"
+IMG_CPU="${IMG_CPU:-certus-cpu-offload-bench}"
+IMG_SHARED="${IMG_SHARED:-certus-sharedstorage-bench}"
+IMG_GRPC="${IMG_GRPC:-localhost/certus-grpc-bench}"
 
 DATASET_HOST="${SCRIPT_DIR}/sharegpt_12turn_450.json"
 SERVER_BIN="${REPO_ROOT}/target/release/certus-server-yaml"
@@ -90,6 +93,12 @@ Flags (all optional; defaults shown):
                                from --shared-fs when omitted).
   --build                      Build any missing bench image before its run
                                (SharedStorage needs FS_BACKEND_DIR; gRPC via Dockerfile).
+  --vllm-version <x.y.z>       Pin the vLLM base-image version for ALL four backends
+                               (--build-arg VLLM_VERSION). Images are tagged
+                               :vllm<x.y.z> so versions coexist. Implies the images
+                               must be built at that version — pass --build too (or
+                               pre-build them). SharedStorage's compiled wheel ABI is
+                               auto-matched to the base image's torch on build.
   --only a,b                   Run only these variants.
   --skip a,b                   Skip these variants.
                                Names: nooffload, cpuoffload, sharedstorage, certus-spdk.
@@ -117,6 +126,7 @@ while [[ $# -gt 0 ]]; do
         --dram)             DRAM="$2"; shift 2;;
         --disk-dev)         DISK_DEV="$2"; shift 2;;
         --build)            DO_BUILD=1; shift;;
+        --vllm-version)     VLLM_VERSION="$2"; shift 2;;
         --only)             ONLY="$2"; shift 2;;
         --skip)             SKIP="$2"; shift 2;;
         --logdir)           LOGDIR="$2"; shift 2;;
@@ -130,7 +140,23 @@ HF_CACHE="${MODEL_FS}/hf-cache"
 PODMAN_STORE="${MODEL_FS}/podman/storage"
 PODMAN_RUNROOT="${MODEL_FS}/podman/run"
 RUNID="$(date +%H%M%S 2>/dev/null || echo run)_$$"
-[[ -z "$LOGDIR" ]] && LOGDIR="${MODEL_FS}/kvprofile-${RUNID}"
+
+# ── vLLM version pinning ──────────────────────────────────────────────────────
+# When --vllm-version is set, all builds get --build-arg VLLM_VERSION and each
+# untagged image name gets a :vllm<ver> tag so versions don't collide.
+declare -a BUILD_ARGS=()
+VER_LABEL=""
+if [[ -n "$VLLM_VERSION" ]]; then
+    BUILD_ARGS=(--build-arg "VLLM_VERSION=${VLLM_VERSION}")
+    VER_LABEL="vllm${VLLM_VERSION}-"
+    _tag=":vllm${VLLM_VERSION}"
+    [[ "$IMG_NOOFFLOAD" != *:* ]] && IMG_NOOFFLOAD+="$_tag"
+    [[ "$IMG_CPU"       != *:* ]] && IMG_CPU+="$_tag"
+    [[ "$IMG_SHARED"    != *:* ]] && IMG_SHARED+="$_tag"
+    [[ "$IMG_GRPC"      != *:* ]] && IMG_GRPC+="$_tag"
+fi
+
+[[ -z "$LOGDIR" ]] && LOGDIR="${MODEL_FS}/kvprofile-${VER_LABEL}${RUNID}"
 
 # Auto-resolve the fs-backend repo if not set: prefer the model-fs copy (this
 # host keeps it at <model-fs>/llm-d-kv-cache/kv_connectors/llmd_fs_backend),
@@ -229,6 +255,14 @@ reap
 img_exists()      { command podman image exists "$1" >/dev/null 2>&1; }
 img_exists_grpc() { command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" image exists "$1" >/dev/null 2>&1; }
 
+# Build a self-contained image (default store) from one of our Dockerfiles,
+# honoring any --vllm-version build-arg. Returns build rc.
+build_simple() {  # image dockerfile logtag
+    log "building $1 from $2 ${VLLM_VERSION:+(vLLM ${VLLM_VERSION})}"
+    command podman build "${BUILD_ARGS[@]}" -f "${SCRIPT_DIR}/$2" -t "$1" "$REPO_ROOT" \
+        > "${LOGDIR}/build-$3.log" 2>&1
+}
+
 # Common container run for the three self-contained images (default podman store).
 run_container_bench() {  # variant image extra-args...
     local variant="$1" image="$2"; shift 2
@@ -254,8 +288,14 @@ run_container_bench() {  # variant image extra-args...
 # ══ NoOffload ═════════════════════════════════════════════════════════════════
 if want nooffload; then
     if ! img_exists "$IMG_NOOFFLOAD"; then
-        record "NoOffload" "SKIPPED" "" "" "" "" "" "image ${IMG_NOOFFLOAD} missing (build it: podman build -f benchmarks/kv-offload-replay/Dockerfile.nooffload -t ${IMG_NOOFFLOAD} .)" ""
-        warn "NoOffload SKIPPED: image ${IMG_NOOFFLOAD} not found"
+        if [[ "$DO_BUILD" -eq 1 ]] && build_simple "$IMG_NOOFFLOAD" Dockerfile.nooffload nooffload; then
+            run_container_bench "NoOffload" "$IMG_NOOFFLOAD"
+        else
+            reason="image ${IMG_NOOFFLOAD} missing (pass --build)"
+            [[ "$DO_BUILD" -eq 1 ]] && reason="image ${IMG_NOOFFLOAD} build failed (see build-nooffload.log)"
+            record "NoOffload" "SKIPPED" "" "" "" "" "" "$reason" ""
+            warn "NoOffload SKIPPED: $reason"
+        fi
     else
         run_container_bench "NoOffload" "$IMG_NOOFFLOAD"
     fi
@@ -264,8 +304,14 @@ fi
 # ══ CPUOffload ════════════════════════════════════════════════════════════════
 if want cpuoffload; then
     if ! img_exists "$IMG_CPU"; then
-        record "CPUOffload" "SKIPPED" "" "" "" "" "" "image ${IMG_CPU} missing" ""
-        warn "CPUOffload SKIPPED: image ${IMG_CPU} not found"
+        if [[ "$DO_BUILD" -eq 1 ]] && build_simple "$IMG_CPU" Dockerfile.cpu-offload cpu-offload; then
+            run_container_bench "CPUOffload" "$IMG_CPU" -e "CPU_BYTES=${CPU_BYTES}"
+        else
+            reason="image ${IMG_CPU} missing (pass --build)"
+            [[ "$DO_BUILD" -eq 1 ]] && reason="image ${IMG_CPU} build failed (see build-cpu-offload.log)"
+            record "CPUOffload" "SKIPPED" "" "" "" "" "" "$reason" ""
+            warn "CPUOffload SKIPPED: $reason"
+        fi
     else
         run_container_bench "CPUOffload" "$IMG_CPU" -e "CPU_BYTES=${CPU_BYTES}"
     fi
@@ -283,7 +329,23 @@ if want sharedstorage; then
         if [[ "$DO_BUILD" -eq 1 ]]; then
             if [[ -f "${FS_BACKEND_DIR}/Dockerfile.wheel" ]]; then
                 log "building ${IMG_SHARED} (FS_BACKEND_DIR=${FS_BACKEND_DIR})"
-                ( cd "$SCRIPT_DIR" && FS_BACKEND_DIR="$FS_BACKEND_DIR" bash build-sharedstorage.sh ) \
+                # When a vLLM version is pinned, match the compiled wheel's torch
+                # ABI to that base image by probing its torch/CUDA.
+                declare -a ss_env=(FS_BACKEND_DIR="$FS_BACKEND_DIR" RUNTIME_IMG="$IMG_SHARED")
+                if [[ -n "$VLLM_VERSION" ]]; then
+                    ss_env+=(VLLM_VERSION="$VLLM_VERSION")
+                    log "sharedstorage: probing torch in vllm/vllm-openai:v${VLLM_VERSION}"
+                    probe="$(command podman run --rm "docker.io/vllm/vllm-openai:v${VLLM_VERSION}" python3 -c \
+                        'import torch;print(torch.__version__.split("+")[0]);print((torch.version.cuda or "").replace(".",""))' 2>/dev/null)"
+                    tv="$(echo "$probe" | sed -n 1p)"; cd_digits="$(echo "$probe" | sed -n 2p)"
+                    if [[ -n "$tv" && -n "$cd_digits" ]]; then
+                        log "sharedstorage: base torch=${tv} cuda=cu${cd_digits}"
+                        ss_env+=(TORCH_VERSION="$tv" TORCH_CUDA_INDEX="cu${cd_digits}")
+                    else
+                        warn "sharedstorage: torch probe failed — using build-sharedstorage.sh defaults (may mismatch ABI; set TORCH_* / CUDA_BASE_TAG)"
+                    fi
+                fi
+                ( cd "$SCRIPT_DIR" && env "${ss_env[@]}" bash build-sharedstorage.sh ) \
                     > "${LOGDIR}/build-sharedstorage.log" 2>&1 \
                     || ss_skip="build failed (see build-sharedstorage.log)"
             else
@@ -340,8 +402,9 @@ if want certus-spdk; then
         if [[ "$DO_BUILD" -eq 1 ]]; then
             log "building ${IMG_GRPC} into ${PODMAN_STORE}"
             command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" build \
+                "${BUILD_ARGS[@]}" \
                 -f "${REPO_ROOT}/certus-grpc-connector/Dockerfile" \
-                -t certus-grpc-bench "$REPO_ROOT" \
+                -t "${IMG_GRPC#localhost/}" "$REPO_ROOT" \
                 > "${LOGDIR}/build-grpc.log" 2>&1 \
                 || cs_skip="gRPC image build failed (see build-grpc.log)"
         else
@@ -401,6 +464,7 @@ fi
 json="${LOGDIR}/results.json"
 {
     echo "{"
+    echo "  \"vllm_version\": $([[ -n "$VLLM_VERSION" ]] && echo "\"${VLLM_VERSION}\"" || echo null),"
     echo "  \"model\": \"${MODEL}\","
     echo "  \"num_convs\": ${NUM_CONVS},"
     echo "  \"output_tokens\": ${OUTPUT_TOKENS},"
@@ -426,7 +490,7 @@ json="${LOGDIR}/results.json"
 # ── Human table ───────────────────────────────────────────────────────────────
 echo ""
 echo "=============================== KV-Offload Profile ==============================="
-echo "model=${MODEL}  num_convs=${NUM_CONVS}  output_tokens=${OUTPUT_TOKENS}"
+echo "model=${MODEL}  num_convs=${NUM_CONVS}  output_tokens=${OUTPUT_TOKENS}${VLLM_VERSION:+  vllm=${VLLM_VERSION}}"
 echo "logdir=${LOGDIR}"
 echo ""
 printf "%-15s %-10s %10s %7s %8s %10s\n" "Variant" "Status" "wall(s)" "rounds" "gens" "tokens/s"
