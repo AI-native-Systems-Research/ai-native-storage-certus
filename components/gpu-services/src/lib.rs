@@ -65,6 +65,9 @@ define_component! {
         },
         fields: {
             gpu_state: Mutex<GpuState>,
+            // `initialized` mirrors `GpuState::initialized` so the per-key copy
+            // paths can read it without the mutex. See `is_initialized` below.
+            initialized: std::sync::atomic::AtomicBool,
         },
     }
 }
@@ -73,6 +76,21 @@ define_component! {
 impl GpuServicesComponent {
     fn state(&self) -> &Mutex<GpuState> {
         &self.gpu_state
+    }
+
+    /// Lock-free `initialized` check for the per-key copy paths.
+    ///
+    /// The async copy methods run once per key on the request path from every
+    /// worker thread. Taking the process-wide `gpu_state` mutex purely to read a
+    /// bool made those calls serialize against each other for no reason. The
+    /// atomic is written under that same lock in `initialize`/`shutdown`, so a
+    /// reader still sees either the state before or the state after the
+    /// transition — the same guarantee the lock provided.
+    /// Only the `spdk`-gated async copy methods need it, so it does not exist in
+    /// a gpu-only build.
+    #[cfg(feature = "spdk")]
+    fn is_initialized(&self) -> bool {
+        self.initialized.load(std::sync::atomic::Ordering::Acquire)
     }
 }
 
@@ -102,6 +120,8 @@ impl IGpuServices for GpuServicesComponent {
 
             state.devices = devices;
             state.initialized = true;
+            self.initialized
+                .store(true, std::sync::atomic::Ordering::Release);
             Ok(())
         }
     }
@@ -117,6 +137,8 @@ impl IGpuServices for GpuServicesComponent {
             let mut state = self.state().lock().map_err(|e| e.to_string())?;
             state.devices.clear();
             state.initialized = false;
+            self.initialized
+                .store(false, std::sync::atomic::Ordering::Release);
 
             if let Ok(log) = self.logger.get() {
                 log.info("GpuServices shut down");
@@ -722,11 +744,11 @@ impl IGpuServices for GpuServicesComponent {
 
         #[cfg(feature = "gpu")]
         {
-            let state = self.state().lock().map_err(|e| e.to_string())?;
-            if !state.initialized {
+            // Lock-free: this runs once per key on the request path from every
+            // worker thread, and the mutex made those calls serialize on a bool.
+            if !self.is_initialized() {
                 return Err("Not initialized: call initialize() first".to_string());
             }
-            drop(state);
 
             // SAFETY: Caller guarantees dst is a valid GPU device pointer covering
             // at least `size` bytes. src.as_ptr() is a valid DMA host buffer,
@@ -769,11 +791,11 @@ impl IGpuServices for GpuServicesComponent {
 
         #[cfg(feature = "gpu")]
         {
-            let state = self.state().lock().map_err(|e| e.to_string())?;
-            if !state.initialized {
+            // Lock-free: this runs once per key on the request path from every
+            // worker thread, and the mutex made those calls serialize on a bool.
+            if !self.is_initialized() {
                 return Err("Not initialized: call initialize() first".to_string());
             }
-            drop(state);
 
             let err = unsafe {
                 cuda_ffi::cudaMemcpyAsync(
@@ -820,11 +842,11 @@ impl IGpuServices for GpuServicesComponent {
 
         #[cfg(feature = "gpu")]
         {
-            let state = self.state().lock().map_err(|e| e.to_string())?;
-            if !state.initialized {
+            // Lock-free: this runs once per key on the request path from every
+            // worker thread, and the mutex made those calls serialize on a bool.
+            if !self.is_initialized() {
                 return Err("Not initialized: call initialize() first".to_string());
             }
-            drop(state);
 
             // SAFETY: Caller guarantees src is a valid GPU device pointer covering
             // at least `size` bytes. dst.as_ptr() is a valid pinned DMA host buffer,
@@ -867,11 +889,11 @@ impl IGpuServices for GpuServicesComponent {
 
         #[cfg(feature = "gpu")]
         {
-            let state = self.state().lock().map_err(|e| e.to_string())?;
-            if !state.initialized {
+            // Lock-free: this runs once per key on the request path from every
+            // worker thread, and the mutex made those calls serialize on a bool.
+            if !self.is_initialized() {
                 return Err("Not initialized: call initialize() first".to_string());
             }
-            drop(state);
 
             let err = unsafe {
                 cuda_ffi::cudaMemcpyAsync(
