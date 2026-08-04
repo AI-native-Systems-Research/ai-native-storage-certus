@@ -24,8 +24,8 @@ use std::sync::RwLock;
 
 use component_framework::define_component;
 use interfaces::{
-    CacheKey, EvictionHandle, IEvictionPolicy, ILogger, IMemoryTier, MemoryTierError,
-    MemoryTierTelemetrySnapshot, PoolId,
+    BlockSemantics, CacheKey, EvictionHandle, IEvictionPolicy, ILogger, IMemoryTier,
+    MemoryTierError, MemoryTierTelemetrySnapshot, PoolId,
 };
 
 use crate::allocator::FreeList;
@@ -362,7 +362,9 @@ impl IMemoryTier for MemoryTierComponent {
             .allocate(size as usize)
             .ok_or(MemoryTierError::PoolFull)?;
 
-        let eviction_handle = ep.track(state.pool_id, key).unwrap();
+        let eviction_handle = ep
+            .track(state.pool_id, key, BlockSemantics::default())
+            .unwrap();
         pool.slots.insert(
             key,
             Slot {

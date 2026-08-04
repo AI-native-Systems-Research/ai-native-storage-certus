@@ -24,8 +24,8 @@ use component_framework::define_component;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_millis(2000);
 use interfaces::{
-    CacheKey, DispatchMapError, IDispatchMap, IEvictionPolicy, IExtentManager, ILogger,
-    LookupResult,
+    BlockSemantics, CacheKey, DispatchMapError, IDispatchMap, IEvictionPolicy, IExtentManager,
+    ILogger, LookupResult,
 };
 
 use crate::entry::{DispatchEntry, Location};
@@ -88,7 +88,9 @@ impl IDispatchMap for DispatchMapComponent {
         let mut count: u64 = 0;
 
         em.for_each_extent(&mut |extent| {
-            let eviction_handle = ep.track(pool_id, extent.key).unwrap();
+            let eviction_handle = ep
+                .track(pool_id, extent.key, BlockSemantics::default())
+                .unwrap();
             let entry = DispatchEntry {
                 location: Location::BlockDevice {
                     offset: extent.offset,
@@ -389,7 +391,7 @@ impl IDispatchMap for DispatchMapComponent {
             return Err(DispatchMapError::AlreadyExists(key));
         }
 
-        let eviction_handle = ep.track(pool_id, key).unwrap();
+        let eviction_handle = ep.track(pool_id, key, BlockSemantics::default()).unwrap();
         let entry = DispatchEntry {
             location: Location::MemoryTier {
                 pointer,
@@ -569,7 +571,7 @@ impl IDispatchMap for DispatchMapComponent {
         if inner.entries.contains_key(&key) {
             return Err(DispatchMapError::AlreadyExists(key));
         }
-        let eviction_handle = ep.track(pool_id, key).unwrap();
+        let eviction_handle = ep.track(pool_id, key, BlockSemantics::default()).unwrap();
         let entry = DispatchEntry {
             location: Location::BlockDevice { offset },
             size_blocks,

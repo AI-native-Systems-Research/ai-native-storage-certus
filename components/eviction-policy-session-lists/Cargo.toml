@@ -10,3 +10,10 @@ component-framework.workspace = true
 component-core.workspace = true
 component-macros.workspace = true
 interfaces.workspace = true
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "session_list_benchmark"
+harness = false
