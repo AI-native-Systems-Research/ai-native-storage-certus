@@ -31,7 +31,7 @@ CERTUS_PROFILE=full-fs-block cargo build -p certus-server-yaml \
     --no-default-features --features filesys --release
 
 # Session-lineage eviction policy (drop-in for LRU); convenience wrapper:
-./apps/certus-server-yaml/build-session-lists.sh
+scripts/build-certus-session-lists.sh
 # equivalent to:
 CERTUS_PROFILE=full-session-lists cargo build -p certus-server-yaml --release
 ```

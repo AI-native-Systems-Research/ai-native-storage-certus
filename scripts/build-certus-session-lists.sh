@@ -8,14 +8,14 @@
 # time.
 #
 # Usage:
-#   ./build-session-lists.sh                # release build, spdk feature
-#   PROFILE_BUILD=debug ./build-session-lists.sh   # debug build
-#   ./build-session-lists.sh --features otel       # extra cargo args pass through
+#   scripts/build-certus-session-lists.sh                # release build, spdk feature
+#   PROFILE_BUILD=debug scripts/build-certus-session-lists.sh   # debug build
+#   scripts/build-certus-session-lists.sh --features otel       # extra cargo args pass through
 set -euo pipefail
 
-# Resolve repo root from this script's location (apps/certus-server-yaml/).
+# Resolve repo root from this script's location (scripts/).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 CERTUS_PROFILE="${CERTUS_PROFILE:-full-session-lists}"
 PROFILE_BUILD="${PROFILE_BUILD:-release}"
