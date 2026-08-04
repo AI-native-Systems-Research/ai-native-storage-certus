@@ -33,6 +33,7 @@ MODEL_FS="/mnt/certus1"
 SHARED_FS=""
 declare -a DEVICE_PCI=()
 NUM_CONVS=450
+MAX_ROUNDS=0           # 0 = replay all turns; N caps every backend at N rounds/turns
 OUTPUT_TOKENS=150
 MAX_MODEL_LEN=8192
 MAX_NUM_SEQS=64
@@ -80,6 +81,8 @@ Flags (all optional; defaults shown):
   --model <hf-id>               Model applied to all four variants.
                                 [NousResearch/Meta-Llama-3-8B]
   --num-convs <n>               Conversations to replay. [450]
+  --max-rounds <n>              Cap every backend at N rounds/turns (MAX_ROUNDS env).
+                                0 = replay all 12 turns. [0]
   --output-tokens <n>          Generated tokens per turn (for uniform tok/s). [150]
   --max-model-len <n>          vLLM max model length. [8192]
   --max-num-seqs <n>           vLLM max concurrent sequences. [64]
@@ -115,6 +118,7 @@ while [[ $# -gt 0 ]]; do
         --model-fs)         MODEL_FS="$2"; shift 2;;
         --model)            MODEL="$2"; shift 2;;
         --num-convs)        NUM_CONVS="$2"; shift 2;;
+        --max-rounds)       MAX_ROUNDS="$2"; shift 2;;
         --output-tokens)    OUTPUT_TOKENS="$2"; shift 2;;
         --max-model-len)    MAX_MODEL_LEN="$2"; shift 2;;
         --max-num-seqs)     MAX_NUM_SEQS="$2"; shift 2;;
@@ -136,7 +140,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Derived paths ─────────────────────────────────────────────────────────────
-HF_CACHE="${MODEL_FS}/hf-cache"
+# HF cache defaults under the model-fs but is env-overridable (this host keeps
+# the populated cache at ~/.cache/huggingface, not on the model-fs).
+HF_CACHE="${HF_CACHE:-${MODEL_FS}/hf-cache}"
 PODMAN_STORE="${MODEL_FS}/podman/storage"
 PODMAN_RUNROOT="${MODEL_FS}/podman/run"
 RUNID="$(date +%H%M%S 2>/dev/null || echo run)_$$"
@@ -273,6 +279,7 @@ run_container_bench() {  # variant image extra-args...
         --device "nvidia.com/gpu=${GPU}" \
         -e "MODEL=${MODEL}" \
         -e "NUM_CONVS=${NUM_CONVS}" \
+        -e "MAX_ROUNDS=${MAX_ROUNDS}" \
         -e "OUTPUT_TOKENS=${OUTPUT_TOKENS}" \
         -e "MAX_MODEL_LEN=${MAX_MODEL_LEN}" \
         -e "MAX_NUM_SEQS=${MAX_NUM_SEQS}" \
@@ -335,7 +342,10 @@ if want sharedstorage; then
                 if [[ -n "$VLLM_VERSION" ]]; then
                     ss_env+=(VLLM_VERSION="$VLLM_VERSION")
                     log "sharedstorage: probing torch in vllm/vllm-openai:v${VLLM_VERSION}"
-                    probe="$(command podman run --rm "docker.io/vllm/vllm-openai:v${VLLM_VERSION}" python3 -c \
+                    # NB: the vllm-openai base image has an ENTRYPOINT that wraps
+                    # args (`vllm ...`), so probe with --entrypoint python3 or the
+                    # command never runs and the probe comes back empty.
+                    probe="$(command podman run --rm --entrypoint python3 "docker.io/vllm/vllm-openai:v${VLLM_VERSION}" -c \
                         'import torch;print(torch.__version__.split("+")[0]);print((torch.version.cuda or "").replace(".",""))' 2>/dev/null)"
                     tv="$(echo "$probe" | sed -n 1p)"; cd_digits="$(echo "$probe" | sed -n 2p)"
                     if [[ -n "$tv" && -n "$cd_digits" ]]; then
@@ -366,7 +376,7 @@ if want sharedstorage; then
             [[ -z "$dev" ]] && dev="md0"
         fi
         run_container_bench "SharedStorage" "$IMG_SHARED" \
-            -v "${SHARED_FS}:/mnt/fs-backend-bench" \
+            -v "${SHARED_FS}:/mnt/fs-backend-bench:z" \
             -e "DRAM=${DRAM}" \
             -e "DISK_DEV=${dev}" \
             -e "SKIP_PREFLIGHT=1"
@@ -446,6 +456,7 @@ if want certus-spdk; then
             GPU="$GPU" \
             CERTUS_SERVER="host.containers.internal:50051" \
             NUM_CONVS="$NUM_CONVS" \
+            MAX_ROUNDS="$MAX_ROUNDS" \
             MODEL="$MODEL" \
             SLAB_SIZE_BYTES="$SLAB_SIZE_BYTES" \
             TENSOR_PARALLEL_SIZE="$TENSOR_PARALLEL_SIZE" \
@@ -467,6 +478,7 @@ json="${LOGDIR}/results.json"
     echo "  \"vllm_version\": $([[ -n "$VLLM_VERSION" ]] && echo "\"${VLLM_VERSION}\"" || echo null),"
     echo "  \"model\": \"${MODEL}\","
     echo "  \"num_convs\": ${NUM_CONVS},"
+    echo "  \"max_rounds\": ${MAX_ROUNDS},"
     echo "  \"output_tokens\": ${OUTPUT_TOKENS},"
     echo "  \"logdir\": \"${LOGDIR}\","
     echo "  \"variants\": ["

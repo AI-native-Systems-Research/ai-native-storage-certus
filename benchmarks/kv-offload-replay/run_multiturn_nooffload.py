@@ -30,6 +30,7 @@ if __name__ == "__main__":
     MAX_NUM_SEQS = int(os.environ.get("MAX_NUM_SEQS", 64))
     GPU_MEM_UTIL = float(os.environ.get("GPU_MEM_UTIL", 0.90))
     MODEL = os.environ.get("MODEL", "NousResearch/Meta-Llama-3-8B")
+    MAX_ROUNDS = int(os.environ.get("MAX_ROUNDS", 0))  # 0 = until convs exhausted
 
     PROMPT_BUDGET = MAX_MODEL_LEN - OUTPUT_TOKENS
     print(f"[run] model={MODEL}", file=sys.stderr)
@@ -80,6 +81,8 @@ if __name__ == "__main__":
     t_start = time.perf_counter()
 
     while True:
+        if MAX_ROUNDS and rounds_done >= MAX_ROUNDS:
+            break
         active_idx = []
         active_prompts = []
         for i, conv in enumerate(convs):

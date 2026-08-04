@@ -40,6 +40,7 @@ GPU="${GPU:-all}"
 # with an explicit IP if this name doesn't resolve on an older podman.
 CERTUS_SERVER="${CERTUS_SERVER:-host.containers.internal:50051}"
 NUM_CONVS="${NUM_CONVS:-450}"
+MAX_ROUNDS="${MAX_ROUNDS:-0}"   # 0 = replay all turns; N caps at N rounds/turns
 MODEL="${MODEL:-ibm-granite/granite-4.1-8b}"
 SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"
 TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
@@ -114,6 +115,7 @@ exec command podman "${store_flags[@]}" run --rm \
     "${hf_env[@]}" \
     -e "CERTUS_SERVER=${CERTUS_SERVER}" \
     -e "NUM_CONVS=${NUM_CONVS}" \
+    -e "MAX_ROUNDS=${MAX_ROUNDS}" \
     -e "MODEL=${MODEL}" \
     -e "TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE}"\
     -e "SLAB_SIZE_BYTES=${SLAB_SIZE_BYTES}" \
