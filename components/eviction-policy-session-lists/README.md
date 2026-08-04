@@ -121,14 +121,28 @@ protects the whole multi-turn prefix. Traces are named by short id
 
 ### Running it
 
+The tool lives in `apps/eviction-replay-benchmark`. On first use it downloads the
+chosen trace to `/tmp` (tens to ~130 MB, git-LFS backed) and reuses the cached
+copy on later runs — the first invocation therefore needs network access and
+`curl` on `$PATH`.
+
 ```bash
-# Both policies, chat trace (default), several cache sizes:
+# Both policies, chat trace (default), a sweep of cache sizes:
 cargo run --release -p eviction-replay-benchmark -- \
     --cache-size 256,1024,4096,16384,65536 --policy both
 
-# Just this policy, on the coder trace:
+# Both policies on the coder trace, sweeping small -> large caches:
+cargo run --release -p eviction-replay-benchmark -- \
+    --dataset coder --policy both \
+    --cache-size 256,1024,4096,16384,65536,262144
+
+# Just this policy, single cache size:
 cargo run --release -p eviction-replay-benchmark -- \
     --dataset coder --policy session-lists --cache-size 1024
+
+# Re-run against an already-downloaded trace without re-fetching:
+cargo run --release -p eviction-replay-benchmark -- \
+    --file /tmp/qwen_coder_blksz_16.jsonl --cache-size 4096
 
 # Offline property/regression tests (synthetic traces, no download):
 cargo test -p eviction-replay-benchmark
@@ -136,7 +150,9 @@ cargo test -p eviction-replay-benchmark
 
 Flags: `--dataset chat|api|thinking|coder` (default `chat`), `--file <PATH>`
 (local Qwen-format JSONL, overrides `--dataset`), `--cache-size <N[,N…]>`
-(blocks), `--policy lru|session-lists|both`.
+(comma-separated blocks, default `256,1024,4096`), `--policy lru|session-lists|both`
+(default `both`). The header line reports the trace's request count, total block
+references, and working-set (distinct-block) size.
 
 ### What it shows
 
