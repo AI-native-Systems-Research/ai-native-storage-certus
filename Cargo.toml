@@ -41,6 +41,7 @@ members = [
     "apps/certus-server-yaml",
     "apps/baseline-generalized-fs",
     "apps/remote-lookup-bench",
+    "apps/eviction-replay-benchmark",
     "components/zyre"
 ]
 
@@ -68,7 +69,8 @@ default-members = [
     "components/logger",
     "components/gpu-services",
     "components/eviction-policy-lru",
-    "components/eviction-policy-session-lists"
+    "components/eviction-policy-session-lists",
+    "apps/eviction-replay-benchmark"
 ]
 
 resolver = "2"

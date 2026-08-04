@@ -80,6 +80,10 @@ use crate::session_list::Pool;
 #[derive(Default)]
 struct EvictionState {
     pools: Vec<Mutex<Pool>>,
+    /// Set once the "selected as active policy" line has been logged, so the
+    /// startup announcement fires exactly once regardless of how many pools
+    /// memory-tier / dispatch-map create.
+    announced: bool,
 }
 
 define_component! {
@@ -101,6 +105,16 @@ impl IEvictionPolicy for EvictionPolicySessionListsComponent {
         let id = state.pools.len() as u32;
         state.pools.push(Mutex::new(Pool::default()));
         if let Ok(logger) = self.logger.get() {
+            // One-time, info-level so it is visible in certus-server-yaml's
+            // default (Info) output — confirms this session-lineage policy was
+            // selected instead of the plain LRU policy.
+            if !state.announced {
+                logger.info(
+                    "eviction-policy-session-lists: selected as active eviction policy \
+                     (session-lineage — only leaf blocks are evictable)",
+                );
+                state.announced = true;
+            }
             logger.debug(&format!("eviction-policy-session-lists: created pool {id}"));
         }
         id
