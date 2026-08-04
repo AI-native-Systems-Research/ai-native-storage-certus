@@ -108,50 +108,58 @@ reports, per cache size:
   `identify_next_to_evict` (plus `track`), and overall replay throughput.
 
 The eviction policy holds no cache; the tool layers a fixed-capacity cache on top
-of the policy and drives the trace's key references against it (resident key →
-`touch`; absent key → evict via `identify_next_to_evict` until there is room,
-then `track`). Trace block hashes are interned to dense `u64` keys, and each
-operation's `session_id` is the interned id of its first block (the conversation
-root), which this policy uses to protect the prefix.
+of the policy and drives the trace's block references against it (resident block
+→ `touch`; absent block → evict via `identify_next_to_evict` until there is room,
+then `track`). The workload is a [Qwen-Bailian anonymized usage trace][qwen]:
+`hash_ids` are globally-shared 16-token block ids used directly as keys, and each
+request's `session_id` is its **conversation root** (`parent_chat_id` followed
+transitively), so every turn of a conversation shares a session and this policy
+protects the whole multi-turn prefix. Traces are named by short id
+(`chat` / `api` / `thinking` / `coder`) and downloaded to `/tmp` on first use.
+
+[qwen]: https://github.com/alibaba-edu/qwen-bailian-usagetraces-anon
 
 ### Running it
 
 ```bash
-# Both policies, committed 199-prompt ShareGPT trace, several cache sizes:
+# Both policies, chat trace (default), several cache sizes:
 cargo run --release -p eviction-replay-benchmark -- \
-    --trace benchmarks/kv-offload-replay/traces/sharegpt/199-prompts.mgr.jsonl \
-    --cache-size 16,32,64,128,256,442 \
-    --policy both
+    --cache-size 256,1024,4096,16384,65536 --policy both
 
-# Just this policy:
-cargo run --release -p eviction-replay-benchmark -- --policy session-lists
+# Just this policy, on the coder trace:
+cargo run --release -p eviction-replay-benchmark -- \
+    --dataset coder --policy session-lists --cache-size 1024
 
-# Property/regression tests over the committed trace:
+# Offline property/regression tests (synthetic traces, no download):
 cargo test -p eviction-replay-benchmark
 ```
 
-Flags: `--trace <FILE>` (`*.mgr.jsonl`), `--cache-size <N[,N…]>` (blocks),
-`--policy lru|session-lists|both`.
+Flags: `--dataset chat|api|thinking|coder` (default `chat`), `--file <PATH>`
+(local Qwen-format JSONL, overrides `--dataset`), `--cache-size <N[,N…]>`
+(blocks), `--policy lru|session-lists|both`.
 
 ### What it shows
 
-On the 199-prompt ShareGPT trace (4,555 references, 442 distinct keys),
-session-lineage converts far more references into hits under memory pressure than
-plain LRU:
+On the `chat` trace (43,058 requests, 6.29M references, 2.53M distinct blocks),
+session-lineage converts more references into hits under memory pressure than
+plain LRU by keeping each conversation's shared prefix resident:
 
 ```
 policy           cache      hits    hit%    evicts    touch(ns)    evict(ns)
-lru                 32       536   11.8%      3987         51.8         52.5
-session-lists       32      1277   28.0%      3246         63.8        149.6
-lru                256      3773   82.8%       526         51.1         52.2
-session-lists      256      3977   87.3%       322        130.5        189.8
+lru                256    455891    7.2%   5837829         51.9         53.6
+session-lists      256    515132    8.2%   5778588         32.2         93.1
+lru               1024    809653   12.9%   5483299         31.7         33.3
+session-lists     1024    818746   13.0%   5474206         34.2        100.1
+lru              65536   2001497   31.8%   4226943         49.8         50.7
+session-lists    65536   1930678   30.7%   4297762         36.9        125.5
 ```
 
-The gain comes from protecting shared prefixes, at the cost of higher
-per-operation latency from lineage bookkeeping. At a cache the size of the
-working set (≥442) neither policy evicts and both reach the same 90.3% ceiling.
-The advantage is workload-dependent: on traces with many short, interleaved
-sessions and little prefix reuse the two policies converge at all cache sizes.
+The gain is largest when the cache is small relative to the working set, at the
+cost of higher `identify_next_to_evict` / `track` latency from lineage
+bookkeeping. As the cache approaches the working set the policies converge, and
+once eviction is rare recency-only LRU can edge ahead. The effect is
+workload-dependent — the `coder` trace shows a larger *relative* gain under
+pressure (1.6% vs 0.3% hits at cache 256).
 
 ## Build & Test
 

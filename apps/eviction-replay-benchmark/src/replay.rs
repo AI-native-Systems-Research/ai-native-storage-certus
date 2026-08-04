@@ -1,24 +1,30 @@
-//! Loading and normalizing a manager replay trace (`*.mgr.jsonl`).
+//! Loading and normalizing a Qwen-Bailian anonymized usage trace (JSONL).
 //!
-//! Each line is a JSON object such as
-//! `{"ts": 2.45, "method": "lookup", "keys": ["41176c…", "594304…"]}`.
-//! Only `method` and `keys` are used; `ts` and `success` are ignored.
+//! Each line is one request, e.g.
+//! `{"chat_id": 159, "parent_chat_id": 55, "timestamp": 61.1, "turn": 2,
+//!   "type": "text", "hash_ids": [1089, 1090, 6326, …]}`.
 //!
-//! Block hashes are opaque 64-hex-char SHA-256 strings, but [`IEvictionPolicy`]
-//! keys are `u64` ([`CacheKey`]). We *intern* each distinct hash to a dense,
-//! sequential `u64` so the mapping is collision-free (parsing a 16-hex prefix
-//! could alias) and stable within a run.
+//! * `hash_ids` are already globally-shared, densely-remapped 16-token block
+//!   ids: an identical integer means an identical cached block (shared prefixes
+//!   across requests reuse the same ids). They are therefore used **directly**
+//!   as [`CacheKey`]s — no hashing or interning needed.
+//! * A request's `session_id` is its **conversation root**. `parent_chat_id`
+//!   links a turn to the previous one (`-1` marks a root request); following it
+//!   transitively groups every turn of one conversation under a single
+//!   `session_id`, so the block chain carries the full multi-turn lineage.
+//! * `type` (text / search / image / file / thinking / …) is retained as the
+//!   op's `method` for reporting; the simulator treats every listed key as an
+//!   access regardless.
+//! * `timestamp`, `turn`, `input_length`, and `output_length` are ignored.
 //!
-//! Each operation is also assigned a `session_id`: the interned id of the
-//! operation's **first** block hash. In prefix-cached LLM serving the first
-//! block identifies the shared conversation root, so every request that extends
-//! the same prefix shares a `session_id`. A lineage-aware policy (e.g.
-//! `eviction-policy-session-lists`) uses this to protect a conversation's
-//! shared prefix from eviction; recency-only policies ignore it.
+//! A lineage-aware policy (e.g. `eviction-policy-session-lists`) uses the
+//! `session_id` to protect a conversation's shared prefix from eviction;
+//! recency-only policies ignore it.
 //!
 //! [`IEvictionPolicy`]: interfaces::IEvictionPolicy
+//! [`CacheKey`]: interfaces::CacheKey
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::Path;
@@ -26,72 +32,67 @@ use std::path::Path;
 use interfaces::{CacheKey, SessionId};
 use serde::Deserialize;
 
-/// Raw JSON shape of one trace line. Unknown fields (`ts`, `success`) are
-/// ignored by serde's default behaviour.
+/// `parent_chat_id` default for records that omit it: `-1` (a root request).
+fn root_parent() -> i64 {
+    -1
+}
+
+/// Raw JSON shape of one Qwen-Bailian trace line. Unused fields (`timestamp`,
+/// `turn`, `input_length`, `output_length`) are ignored by serde's default
+/// behaviour.
 #[derive(Debug, Deserialize)]
 struct RawRecord {
     #[serde(default)]
-    method: String,
+    chat_id: i64,
+    #[serde(default = "root_parent")]
+    parent_chat_id: i64,
     #[serde(default)]
-    keys: Vec<String>,
+    hash_ids: Vec<CacheKey>,
+    #[serde(default, rename = "type")]
+    request_type: String,
 }
 
-/// One replayed manager operation, with block hashes interned to [`CacheKey`]s
-/// and a derived [`SessionId`].
+/// One replayed request, with block ids as [`CacheKey`]s and a derived
+/// [`SessionId`].
 #[derive(Debug, Clone)]
 pub struct Op {
-    /// Trace method (`touch` / `lookup` / `prepare_store` / `complete_store`).
-    /// Retained for reporting; the simulator treats every listed key as an
-    /// access regardless of method.
+    /// Request `type` (`text` / `search` / `image` / `file` / `thinking` / …),
+    /// retained for reporting. The simulator treats every listed key as an
+    /// access regardless of type.
     pub method: String,
-    /// Block keys referenced by this operation, in trace (prefix) order.
+    /// Block ids referenced by this request, in prefix order.
     pub keys: Vec<CacheKey>,
-    /// Session id for lineage-aware policies: the interned id of `keys[0]`.
+    /// Session id for lineage-aware policies: the conversation root reached by
+    /// following `parent_chat_id`.
     pub session_id: SessionId,
 }
 
 /// A parsed, normalized trace ready to drive [`crate::sim::simulate`].
 #[derive(Debug, Clone, Default)]
 pub struct Trace {
-    /// Operations in trace order. Operations with no keys are dropped on load.
+    /// Requests in trace order. Requests with no `hash_ids` are dropped on load.
     pub ops: Vec<Op>,
-    /// Number of distinct block keys across the whole trace (the working-set
+    /// Number of distinct block ids across the whole trace (the working-set
     /// size). A cache of this size or larger never evicts.
     pub distinct_keys: usize,
-    /// Total key references across all operations. Equals the total number of
+    /// Total block references across all requests. Equals the total number of
     /// cache accesses the simulator will perform.
     pub total_key_refs: usize,
 }
 
-/// Assigns a dense, sequential [`CacheKey`] to each distinct block hash.
-#[derive(Default)]
-struct Interner {
-    map: HashMap<String, CacheKey>,
-    next: CacheKey,
-}
-
-impl Interner {
-    fn intern(&mut self, hex: &str) -> CacheKey {
-        if let Some(&k) = self.map.get(hex) {
-            return k;
-        }
-        let k = self.next;
-        self.next += 1;
-        self.map.insert(hex.to_string(), k);
-        k
-    }
-}
-
-/// Load and normalize a `*.mgr.jsonl` trace from `path`.
+/// Load and normalize a Qwen-Bailian JSONL trace from `path`.
 ///
-/// Lines that are blank or have an empty `keys` array (e.g. the trace's
-/// `touch []` no-ops) are skipped. Returns an error if the file cannot be read
-/// or a line is not valid JSON in the expected shape.
+/// Lines that are blank or carry an empty `hash_ids` array (e.g. image/file
+/// requests with no cached token blocks) are skipped. Returns an error if the
+/// file cannot be read or a line is not valid JSON in the expected shape.
 pub fn load(path: &Path) -> io::Result<Trace> {
     let reader = BufReader::new(File::open(path)?);
-    let mut interner = Interner::default();
     let mut ops = Vec::new();
     let mut total_key_refs = 0usize;
+    let mut distinct: HashSet<CacheKey> = HashSet::new();
+    // chat_id -> conversation root, so a turn's root can be resolved from its
+    // parent in a single pass (parents always precede children in trace order).
+    let mut root_of: HashMap<i64, i64> = HashMap::new();
 
     for (lineno, line) in reader.lines().enumerate() {
         let line = line?;
@@ -109,22 +110,42 @@ pub fn load(path: &Path) -> io::Result<Trace> {
                 ),
             )
         })?;
-        if raw.keys.is_empty() {
+        if raw.hash_ids.is_empty() {
             continue;
         }
-        let keys: Vec<CacheKey> = raw.keys.iter().map(|h| interner.intern(h)).collect();
-        let session_id = keys[0];
+
+        // Resolve the conversation root: a root request (`parent_chat_id < 0`)
+        // is its own root; otherwise inherit the parent's resolved root, falling
+        // back to the parent id itself if the parent was not seen (defensive).
+        let root = if raw.parent_chat_id < 0 {
+            raw.chat_id
+        } else {
+            *root_of
+                .get(&raw.parent_chat_id)
+                .unwrap_or(&raw.parent_chat_id)
+        };
+        root_of.insert(raw.chat_id, root);
+
+        let keys = raw.hash_ids;
+        for &k in &keys {
+            distinct.insert(k);
+        }
         total_key_refs += keys.len();
+        let method = if raw.request_type.is_empty() {
+            "request".to_string()
+        } else {
+            raw.request_type
+        };
         ops.push(Op {
-            method: raw.method,
+            method,
             keys,
-            session_id,
+            session_id: root as SessionId,
         });
     }
 
     Ok(Trace {
         ops,
-        distinct_keys: interner.map.len(),
+        distinct_keys: distinct.len(),
         total_key_refs,
     })
 }

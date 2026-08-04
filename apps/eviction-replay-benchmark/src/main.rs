@@ -1,11 +1,11 @@
-//! CLI: replay a manager trace through one or more `IEvictionPolicy`
+//! CLI: replay a Qwen-Bailian usage trace through one or more `IEvictionPolicy`
 //! implementations and report cache-hits (effectiveness) and mean per-call
-//! latency (performance) for one or more cache sizes.
+//! latency (performance) for one or more cache sizes. The selected dataset is
+//! downloaded to `/tmp` on first use.
 //!
 //! ```text
 //! cargo run -p eviction-replay-benchmark -- \
-//!     --trace benchmarks/kv-offload-replay/traces/sharegpt/199-prompts.mgr.jsonl \
-//!     --cache-size 64,256,1024 --policy both
+//!     --dataset chat --cache-size 64,256,1024 --policy both
 //! ```
 
 use std::path::PathBuf;
@@ -15,6 +15,7 @@ use clap::{Parser, ValueEnum};
 use component_core::query_interface;
 use interfaces::IEvictionPolicy;
 
+use eviction_replay_benchmark::dataset;
 use eviction_replay_benchmark::replay;
 use eviction_replay_benchmark::sim::{simulate, SimStats};
 
@@ -26,6 +27,30 @@ enum PolicyArg {
     SessionLists,
     /// Run both and print them side by side (default).
     Both,
+}
+
+/// Which Qwen-Bailian trace to replay. Downloaded to `/tmp` on first use.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+enum Dataset {
+    /// To-C interactive chat, multi-turn (`qwen_traceA`).
+    Chat,
+    /// To-B API-driven task automation (`qwen_traceB`).
+    Api,
+    /// Reasoning-intensive chat (`qwen_thinking`).
+    Thinking,
+    /// Code generation (`qwen_coder`).
+    Coder,
+}
+
+impl Dataset {
+    fn id(self) -> &'static str {
+        match self {
+            Dataset::Chat => "chat",
+            Dataset::Api => "api",
+            Dataset::Thinking => "thinking",
+            Dataset::Coder => "coder",
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -66,15 +91,16 @@ impl PolicyKind {
 #[derive(Parser, Debug)]
 #[command(
     version,
-    about = "Replay a manager trace through an IEvictionPolicy: cache-hits + latency"
+    about = "Replay a Qwen-Bailian usage trace through an IEvictionPolicy: cache-hits + latency"
 )]
 struct Cli {
-    /// Path to a `*.mgr.jsonl` manager replay trace.
-    #[arg(
-        long,
-        default_value = "benchmarks/kv-offload-replay/traces/sharegpt/199-prompts.mgr.jsonl"
-    )]
-    trace: PathBuf,
+    /// Which Qwen-Bailian trace to replay (downloaded to /tmp on first use).
+    #[arg(long, value_enum, default_value_t = Dataset::Chat)]
+    dataset: Dataset,
+
+    /// Use a local Qwen-format JSONL file instead of downloading a dataset.
+    #[arg(long)]
+    file: Option<PathBuf>,
 
     /// Cache size(s) in blocks to evaluate (comma-separated or repeated).
     #[arg(
@@ -92,17 +118,36 @@ struct Cli {
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    let trace = match replay::load(&cli.trace) {
+    // Resolve the trace file: an explicit --file, else download-on-demand.
+    let (path, source) = match &cli.file {
+        Some(p) => (p.clone(), format!("file {}", p.display())),
+        None => match dataset::ensure(cli.dataset.id()) {
+            Ok(p) => (
+                p,
+                format!(
+                    "dataset {} ({})",
+                    cli.dataset.id(),
+                    dataset::describe(cli.dataset.id()).unwrap_or("")
+                ),
+            ),
+            Err(e) => {
+                eprintln!("error: could not obtain dataset: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+    };
+
+    let trace = match replay::load(&path) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("error: failed to load trace {}: {e}", cli.trace.display());
+            eprintln!("error: failed to load trace {}: {e}", path.display());
             return ExitCode::FAILURE;
         }
     };
     if trace.ops.is_empty() {
         eprintln!(
             "error: trace {} has no key-bearing operations",
-            cli.trace.display()
+            path.display()
         );
         return ExitCode::FAILURE;
     }
@@ -113,9 +158,10 @@ fn main() -> ExitCode {
         PolicyArg::Both => &[PolicyKind::Lru, PolicyKind::SessionLists],
     };
 
-    println!("trace: {}", cli.trace.display());
+    println!("{source}");
+    println!("  file: {}", path.display());
     println!(
-        "  operations={}  accesses(key-refs)={}  working-set(distinct keys)={}",
+        "  requests={}  accesses(block-refs)={}  working-set(distinct blocks)={}",
         trace.ops.len(),
         trace.total_key_refs,
         trace.distinct_keys

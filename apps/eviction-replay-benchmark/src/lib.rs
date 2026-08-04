@@ -14,15 +14,19 @@
 //!    [`IEvictionPolicy::identify_next_to_evict`] (plus
 //!    [`IEvictionPolicy::track`] for context)?
 //!
-//! The workload is a *manager* replay trace (`*.mgr.jsonl`): one JSON object
-//! per line with a `method` (`touch` / `lookup` / `prepare_store` /
-//! `complete_store`) and a `keys` array of block hashes. See [`replay`] for the
-//! parsing and key-interning details and [`sim`] for the cache simulator.
+//! The workload is a [Qwen-Bailian anonymized usage trace][qwen]: one JSON
+//! object per line describing a request, with a `hash_ids` array of shared
+//! 16-token block ids and `chat_id` / `parent_chat_id` conversation lineage.
+//! Traces are named by short id (`chat` / `api` / `thinking` / `coder`) and
+//! fetched on demand to `/tmp` — see [`dataset`]. See [`replay`] for parsing and
+//! conversation-root derivation, and [`sim`] for the cache simulator.
 //!
+//! [qwen]: https://github.com/alibaba-edu/qwen-bailian-usagetraces-anon
 //! [`IEvictionPolicy`]: interfaces::IEvictionPolicy
 //! [`IEvictionPolicy::touch`]: interfaces::IEvictionPolicy::touch
 //! [`IEvictionPolicy::identify_next_to_evict`]: interfaces::IEvictionPolicy::identify_next_to_evict
 //! [`IEvictionPolicy::track`]: interfaces::IEvictionPolicy::track
 
+pub mod dataset;
 pub mod replay;
 pub mod sim;
