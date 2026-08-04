@@ -1,0 +1,1 @@
+../../certus-grpc-connector/run-bench.sh

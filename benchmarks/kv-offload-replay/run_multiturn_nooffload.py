@@ -91,7 +91,12 @@ if __name__ == "__main__":
                 continue
             human = conv[k]
             candidate = human if k == 0 else contexts[i] + "\n\n" + human
-            if n_tokens(candidate) > PROMPT_BUDGET:
+            # Guard both bounds: some ShareGPT turns are empty strings, which
+            # granite tokenizes to 0 tokens. An empty decoder prompt makes vLLM
+            # raise "The decoder prompt cannot be empty" and abort the engine, so
+            # drop those convs (nt == 0) alongside the over-budget ones.
+            nt = n_tokens(candidate)
+            if nt == 0 or nt > PROMPT_BUDGET:
                 alive[i] = False
                 continue
             contexts[i] = candidate
