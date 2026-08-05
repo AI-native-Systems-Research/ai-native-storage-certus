@@ -233,6 +233,16 @@ struct RunArgs {
     #[arg(long, default_value_t = 0)]
     warmup_keys: usize,
 
+    /// Also remove the fetched keys after the *last* pass, not just between
+    /// passes. Without it a `lookup` run leaves its keys published in the local
+    /// tier, so a second invocation against the same cluster is served locally
+    /// and measures nothing. With it every invocation is a genuine remote fetch,
+    /// which is what lets one cluster bring-up serve a whole config sweep.
+    /// The removal is outside the timed window, exactly as between passes.
+    /// Ignored by `populate`.
+    #[arg(long)]
+    cleanup: bool,
+
     /// CUDA device ordinal.
     #[arg(long, default_value_t = 0)]
     gpu_device: i32,
@@ -917,8 +927,9 @@ async fn cmd_run(args: RunArgs, mode: Mode) -> Result<(), String> {
         elapsed += d;
         // A remote hit is published into this node's local tier, so a second pass
         // over the same keys would be served locally. Drop them to keep every
-        // pass a genuine remote fetch.
-        if mode == Mode::Lookup && iter + 1 < args.iterations.max(1) {
+        // pass a genuine remote fetch. `--cleanup` extends that to the final pass
+        // so the *next invocation* starts from the same clean state.
+        if mode == Mode::Lookup && (args.cleanup || iter + 1 < args.iterations.max(1)) {
             remove_all(&mut ctl, &keys).await?;
         }
     }
@@ -1071,6 +1082,7 @@ mod tests {
             inflight: 1,
             iterations: 1,
             warmup_keys: 0,
+            cleanup: false,
             gpu_device: 0,
             verify: false,
         }
