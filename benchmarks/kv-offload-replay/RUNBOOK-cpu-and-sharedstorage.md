@@ -44,7 +44,7 @@ There is no offload tier, so no `CPU_BYTES` / `DRAM`.
 
 ### Container
 A self-contained image (`Dockerfile.nooffload`) packages the driver + dataset on
-a `vllm/vllm-openai` base (default `v0.20.0`; override with `--build-arg
+a `vllm/vllm-openai` base (default `v0.23.0`; override with `--build-arg
 VLLM_VERSION=...`) — the same base family as the other bench images. No server, no
 gRPC, no `--ipc=host`, and no offload tier to size. Its `ENV` defaults match this
 section (`NUM_CONVS=450`, 450×12 dataset).
@@ -109,7 +109,7 @@ default 4 GiB) · `TRACE_OFFLOAD` (0 = built-in connector, no tracing — defaul
 
 ### Container
 A self-contained image (`Dockerfile.cpu-offload`) packages the driver + dataset
-on a `vllm/vllm-openai` base (default `v0.20.0`; override with `--build-arg
+on a `vllm/vllm-openai` base (default `v0.23.0`; override with `--build-arg
 VLLM_VERSION=...`). No server, no gRPC, no `--ipc=host`. Its `ENV` defaults match
 this section (`NUM_CONVS=450`, `CPU_BYTES=16 GiB`, `TRACE_OFFLOAD=0`, 450×12
 dataset). Note: the in-process `CPUOffloadingSpec`/`OffloadingConnector` API
@@ -179,7 +179,7 @@ Same workload knobs as above, plus: `DRAM` (staging buffer bytes →
 
 ### Container
 `Dockerfile.sharedstorage` packages the driver + dataset on a `vllm/vllm-openai`
-base (default `v0.20.0`) as the other backends. The catch: the `llmd_fs_backend`
+base (default `v0.23.0`) as the other backends. The catch: the `llmd_fs_backend`
 connector is a **compiled torch C++ extension** living in a separate repo, so it
 must be built into a wheel whose torch/CUDA/GPU-arch match this base image.
 `build-sharedstorage.sh` does that in two steps — it reuses the connector repo's
@@ -202,7 +202,7 @@ not the wheel.
 #        TORCH_CUDA_ARCH_LIST              — target GPU compute cap
 #          (check: nvidia-smi --query-gpu=compute_cap --format=csv,noheader)
 #        FS_BACKEND_DIR                    — path to the llmd_fs_backend repo
-#        VLLM_VERSION                      — runtime base tag (default 0.20.0);
+#        VLLM_VERSION                      — runtime base tag (default 0.23.0);
 #          if bumped, set the torch args above to match or the wheel won't load
 benchmarks/kv-offload-replay/build-sharedstorage.sh
 

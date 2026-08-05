@@ -17,10 +17,10 @@ repo_root="$(cd "${_here}/../.." && pwd)"
 ENGINE="${ENGINE:-podman}"
 FS_BACKEND_DIR="${FS_BACKEND_DIR:-$HOME/llm-d-kv-cache/kv_connectors/llmd_fs_backend}"
 
-# vLLM base-image version for the runtime image (step 2). Default 0.20.0. If you
+# vLLM base-image version for the runtime image (step 2). Default 0.23.0. If you
 # bump this, also update the torch args below to match that base's torch/CUDA, or
 # the compiled wheel's ABI will not match at run time.
-VLLM_VERSION="${VLLM_VERSION:-0.20.0}"
+VLLM_VERSION="${VLLM_VERSION:-0.23.0}"
 
 # Match the runtime base image's torch. Check with:
 #   <venv>/bin/python -c "import torch;print(torch.__version__, torch.version.cuda)"

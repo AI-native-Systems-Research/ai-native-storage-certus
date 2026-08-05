@@ -20,7 +20,7 @@ evictions without re-running the model.
 > build needs the connector Python package in its context, but building via the symlink
 > works (build context is still the repo root: `podman build -f
 > benchmarks/kv-offload-replay/Dockerfile.certus-grpc -t certus-grpc-bench .`). All four
-> Dockerfiles take `--build-arg VLLM_VERSION=<x.y.z>` (default `0.20.0`).
+> Dockerfiles take `--build-arg VLLM_VERSION=<x.y.z>` (default `0.23.0`).
 
 ## Files
 

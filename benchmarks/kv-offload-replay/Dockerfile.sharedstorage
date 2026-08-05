@@ -18,13 +18,13 @@
 #       -v $HOME/.cache/huggingface:/root/.cache/huggingface \
 #       certus-sharedstorage-bench
 
-# vLLM version is a build-time choice (default 0.20.0); override with
+# vLLM version is a build-time choice (default 0.23.0); override with
 #   podman build --build-arg VLLM_VERSION=0.26.0 ...
 # NOTE: the llmd_fs_backend wheel installed below is a torch C++ extension built
 # against THIS base image's torch/CUDA ABI. If you bump VLLM_VERSION, rebuild the
 # wheel against the matching base (build-sharedstorage.sh) or the extension will
 # fail to load at runtime (ABI mismatch).
-ARG VLLM_VERSION=0.20.0
+ARG VLLM_VERSION=0.23.0
 FROM docker.io/vllm/vllm-openai:v${VLLM_VERSION}
 ENTRYPOINT []
 
