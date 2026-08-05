@@ -96,6 +96,22 @@ never forces `interfaces/spdk` onto a default build.
   DRAM, local SSD, a peer's DRAM, or a peer's SSD, and nothing distinguishes them.
   `GetIoStats` gives only aggregate local-SSD bytes and latency clustering is too fragile to
   attribute per-key. A `served_by` enum must be added to `EntryResult` (see Dependencies).
+  **Now specified**: `components/dispatcher/specs/002-served-by-tier-attribution/`, whose
+  `contracts/served-by.md` is the normative taxonomy this spec consumes.
+- Q: How many attribution values are there? → A: **Seven**, not the five originally assumed
+  here: `DRAM | SSD | REMOTE_DRAM | REMOTE_SSD | MISS | SIZE_MISMATCH | ERROR`.
+  `SIZE_MISMATCH` is separate from `MISS` because the key *is* present — just at another
+  size — and folding the two would make size-mismatched keys remote-eligible, a behaviour
+  change smuggled in under an attribution feature. `ERROR` exists because a lookup that was
+  attempted and failed is neither a hit nor a miss, and without it the identity
+  `hits + misses + errors = requests` cannot hold. The first four are hits; the last three
+  are not.
+- Q: Is `REMOTE_SSD` a stable property of a holder configuration? → A: **No — it is a
+  first-touch property.** Serving from a peer's disk promotes the entry into that peer's
+  memory tier, so the next remote fetch of the same key reports `REMOTE_DRAM`. Any test or
+  report that expects a fixed `REMOTE_SSD` fraction from a fixed `holder_tier` is
+  mis-specified. (The fabric transfer itself is *always* out of the peer's DRAM;
+  `REMOTE_SSD` means "a peer's disk read was on this request's critical path.")
 - Q: Is the plan generated independently on each node, or generated once and distributed?
   → A: **Generated once on the orchestrator, content-hashed, and distributed**; each node
   verifies the hash before running its slice. Bit-identical independent generation would
@@ -105,19 +121,38 @@ never forces `interfaces/spdk` onto a default build.
 ### Dependencies on other components (implied by the above)
 
 1. **`apps/certus-server-yaml` / `apps/certus-server` proto** — add `served_by` to
-   `EntryResult` (`DRAM | SSD | REMOTE_DRAM | REMOTE_SSD | MISS`) and plumb the dispatcher's
-   existing internal knowledge of which tier resolved a lookup out through the gRPC layer.
-   **Blocks all hit-rate measurement (US3, US4).** It does not block US1 or US2.
-2. **`components/eviction-policy-lru`** — no change; consumed through `IEvictionPolicy`
+   `EntryResult` (`DRAM | SSD | REMOTE_DRAM | REMOTE_SSD | MISS | SIZE_MISMATCH | ERROR`) and
+   plumb the dispatcher's existing internal knowledge of which tier resolved a lookup out
+   through the gRPC layer. **Specified in
+   `components/dispatcher/specs/002-served-by-tier-attribution/`**; this spec depends on that
+   feature's `contracts/served-by.md` as the normative taxonomy and does not restate its
+   semantics. **Blocks all hit-rate measurement (US3, US4).** It does not block US1 or US2.
+   Note that it also requires an `IRemoteLookup::batch_lookup` signature change to carry the
+   peer's advertised tier, and that the tier must derive from that advertisement rather than
+   from the operation's phase — phase is per-operation and transitions on quorum and timeout,
+   so it is not a tier proxy.
+2. **`certus-server-yaml` `rw-telemetry` forwarding** — the `GetIoStats` read/write byte
+   counters this spec wants for its independent cross-check are zeroed unless the *active*
+   dispatcher is built with `rw-telemetry`, and `apps/certus-server-yaml/Cargo.toml:53`
+   forwards that feature only to `dispatcher`, not to `dispatcher-p2p`. Under
+   `--features p2p-native` — the configuration US3 and US4 actually run — nothing enables
+   them, and `components/dispatcher-p2p/src/lib.rs:2589` returns a zeroed aggregate. Enabling
+   the cross-check therefore requires a Cargo feature change in `certus-server-yaml`
+   (forwarding to `dispatcher-p2p`, which already defines the feature at
+   `components/dispatcher-p2p/Cargo.toml:28`). **Blocks SC-007a and the byte-provenance
+   cross-check in FR-042a, not attribution itself (SC-007).**
+3. **`components/eviction-policy-lru`** — no change; consumed through `IEvictionPolicy`
    (`create_pool`, `track`, `touch`, `batch_touch`, `remove`, `identify_next_to_evict`,
    `get_eviction_candidates`, `len`, `clear_pool`).
-3. **`components/dispatcher`** — no change required. `DispatcherConfig` already exposes the
-   tier capacities and eviction thresholds the `system:` section maps onto
+4. **`components/dispatcher`** — no change required *for configuration*. `DispatcherConfig`
+   already exposes the tier capacities and eviction thresholds the `system:` section maps onto
    (`max_cache_entries`, `memory_tier_eviction_threshold` / `_low_watermark`,
-   `ssd_eviction_threshold` / `_low_watermark`).
-4. **`components/remote-lookup`** — no change. The `topology:` section is realised entirely
-   by *where the generator populates*, plus the existing `CERTUS_RL_*` environment
-   overrides for group, deadlines, and quorum percentage.
+   `ssd_eviction_threshold` / `_low_watermark`). It does change under dependency 1, which is
+   that feature's scope rather than this one's.
+5. **`components/remote-lookup`** — the `topology:` section is realised entirely by *where the
+   generator populates*, plus the existing `CERTUS_RL_*` environment overrides for group,
+   deadlines, and quorum percentage. No change for placement; it does change under dependency
+   1 to surface the peer's advertised tier through `IRemoteLookup::batch_lookup`.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -193,22 +228,34 @@ delivers value with one machine. Latency percentiles that mix DRAM hits with SSD
 meaningless, so the per-outcome breakdown is the point, not a refinement.
 
 **Independent Test**: Run against a single node with a plan whose working set exceeds DRAM
-capacity, and confirm the reported DRAM/SSD split is consistent with the `GetIoStats` read
-byte delta over the same window.
+capacity, and assert the reported DRAM/SSD split is internally consistent — every entry
+attributed, hits + misses + errors equal to entries requested, and the SSD fraction rising
+monotonically as capacity is reduced across a sweep. The `GetIoStats` byte cross-check is a
+*conditional* addition to this test, available only when the server was built with
+`rw-telemetry` forwarded to the active dispatcher (Dependencies 2); the report states whether
+it ran.
 
 **Acceptance Scenarios**:
 
 1. **Given** a plan and a running server, **When** `run` completes, **Then** every request's
-   outcome is classified as `DRAM | SSD | REMOTE_DRAM | REMOTE_SSD | MISS` from the response's
-   `served_by` field, with no "unknown" bucket.
+   outcome is classified into exactly one of the seven `served_by` values
+   (`DRAM | SSD | REMOTE_DRAM | REMOTE_SSD | MISS | SIZE_MISMATCH | ERROR`) with no "unknown"
+   bucket, and hits + misses + errors equals the number of entries requested.
 2. **Given** a completed run, **When** the report is produced, **Then** p50/p90/p99/p99.9
    latency is reported *per outcome class* as well as in aggregate.
-3. **Given** a run whose reported SSD-served bytes disagree with the `GetIoStats` read-byte
-   delta by more than 5%, **When** the report is produced, **Then** the discrepancy is
-   flagged rather than silently reported.
-4. **Given** `run.warmup: 20s`, **When** the report is produced, **Then** operations inside
+3. **Given** a server that predates serving-tier attribution, **When** `run` completes,
+   **Then** the responses carry `SERVED_BY_UNSPECIFIED` and the report says "attribution
+   unsupported by server" rather than guessing a tier or inventing an unknown bucket.
+4. **Given** a server built with `rw-telemetry` reaching the active dispatcher, **When** the
+   report is produced, **Then** reported SSD-served bytes are compared against the
+   `GetIoStats` read-byte delta and any disagreement beyond the derived tolerance is flagged
+   rather than silently reported.
+5. **Given** a server without that telemetry, **When** the report is produced, **Then** the
+   cross-check is reported as `unavailable` with the reason, and MUST NOT be reported as
+   passing. A zeroed counter must never read as agreement.
+6. **Given** `run.warmup: 20s`, **When** the report is produced, **Then** operations inside
    the warmup window are excluded from all steady-state statistics and counted separately.
-5. **Given** the generator running at the platform's measured ceiling, **When** the run
+7. **Given** the generator running at the platform's measured ceiling, **When** the run
    completes, **Then** the report includes a generator-overhead figure demonstrating the
    harness was not the bottleneck.
 
@@ -236,15 +283,27 @@ counter is ~zero.
 2. **Given** `self_affinity: 0.0`, **When** the run completes, **Then** essentially every
    hit is remote-served and the fabric byte count accounts for the delivered bytes.
 3. **Given** `holder_tier: {dram: 0.0, ssd: 1.0}`, **When** the run completes, **Then**
-   remote hits resolve predominantly as `REMOTE_SSD`, exercising the Phase-2 fallback.
-4. **Given** `global_miss_fraction: 0.30`, **When** the run completes, **Then** the report
+   **first** remote touches of each key resolve predominantly as `REMOTE_SSD`, exercising the
+   Phase-2 fallback, **and** repeat touches of the same key resolve as `REMOTE_DRAM`, because
+   serving from a peer's disk promotes the entry into that peer's memory tier. The report MUST
+   therefore split remote hits by first-touch versus repeat rather than reporting one
+   `REMOTE_SSD` fraction — a single aggregate fraction here is a function of the plan's reuse
+   depth, not of `holder_tier`, and comparing it across plans is meaningless.
+4. **Given** a sustained `holder_tier: {ssd: 1.0}` run, **When** the `REMOTE_SSD` fraction is
+   observed over time, **Then** it decays toward zero, and the report MUST NOT present that
+   decay as a regression. Holding it steady would require re-demoting peer entries mid-run,
+   which this feature does not do.
+5. **Given** `global_miss_fraction: 0.30`, **When** the run completes, **Then** the report
    attributes the resulting latency to deadline expiry (`CERTUS_RL_OP_DEADLINE_MS`) and
    reports what fraction of total wall time was spent on negative lookups.
-5. **Given** a plan with many nodes requesting one absent-then-arriving key simultaneously,
+6. **Given** a plan with many nodes requesting one absent-then-arriving key simultaneously,
    **When** the run completes, **Then** the count of distinct remote fetches issued for that
    key is reported, exercising remote-lookup's single-flight dedup.
-6. **Given** a plan run across N nodes, **When** each node loads its slice, **Then** each
+7. **Given** a plan run across N nodes, **When** each node loads its slice, **Then** each
    verifies the distributed plan's content hash and aborts on mismatch.
+8. **Given** any remote hit, **When** it is attributed, **Then** the reported tier is the
+   peer's *advertisement*, and the report MUST label it as such rather than as serve-time
+   ground truth. No wire-protocol change is available to obtain the latter.
 
 ---
 
@@ -498,16 +557,39 @@ report segments statistics into before/after windows around the event.
 
 ### Metrics and reporting
 
-- **FR-039**: Every lookup outcome MUST be classified into exactly one of `DRAM`, `SSD`,
-  `REMOTE_DRAM`, `REMOTE_SSD`, or `MISS`, from the server's `served_by` field. There MUST NOT
-  be an "unknown" class.
+- **FR-039**: Every lookup outcome MUST be classified into exactly one of the seven values
+  defined by `components/dispatcher/specs/002-served-by-tier-attribution/contracts/served-by.md`
+  — `DRAM`, `SSD`, `REMOTE_DRAM`, `REMOTE_SSD`, `MISS`, `SIZE_MISMATCH`, `ERROR` — from the
+  server's `served_by` field. There MUST NOT be an "unknown" class. The first four MUST be
+  counted as hits and the last three MUST NOT, and `hits + misses + errors` MUST equal entries
+  requested for every batch.
+- **FR-039a**: The runner MUST treat `SERVED_BY_UNSPECIFIED` as "server does not support
+  attribution" and MUST refuse to emit tiered hit rates for that run, rather than mapping the
+  zero value onto any tier or into an unknown bucket.
+- **FR-039b**: `SIZE_MISMATCH` MUST be reported as its own class and MUST NOT be folded into
+  `MISS`. Because size is a pure function of key identity (FR-011), a non-zero
+  `SIZE_MISMATCH` count indicates a generator or plan defect, and the report MUST flag it as
+  such rather than absorbing it into the miss rate.
+- **FR-039c**: Remote hits MUST be reported split by first-touch versus repeat touch of the
+  same key, because `REMOTE_SSD` is a first-touch property that decays to `REMOTE_DRAM` on
+  reuse.
 - **FR-040**: The report MUST present both object hit rate and byte hit rate, per tier and
   in aggregate.
 - **FR-041**: Latency percentiles MUST be reported per outcome class as well as in
   aggregate, at minimum p50, p90, p99, and p99.9.
 - **FR-042**: The report MUST include throughput in both GB/s and keys/s, and MUST report
-  bytes delivered over the fabric separately from bytes read off local disk, cross-checked
-  against the `GetIoStats` delta.
+  bytes delivered over the fabric separately from bytes read off local disk.
+- **FR-042a**: The `GetIoStats` cross-check of local-disk bytes MUST be performed when the
+  server exposes non-zero counters, and MUST be reported as `unavailable` with its reason
+  otherwise. The runner MUST distinguish "counters absent because `rw-telemetry` did not reach
+  the active dispatcher" from "counters present and reading zero", and MUST NOT report the
+  former as agreement.
+- **FR-042b**: The cross-check's tolerance MUST be derived rather than assumed, and the
+  derivation MUST be documented in `research.md`. `GetIoStats` is aggregated across all data
+  drives and includes background traffic — staging writes and promotion reads — that no lookup
+  in the plan requested, so the runner MUST subtract or bound that background component and
+  state which it did. A tolerance asserted without this derivation would fail for reasons
+  unrelated to attribution correctness.
 - **FR-043**: The report MUST include eviction churn (evictions per unit time, and
   demote-versus-remove split from `TakeEvents`) and MUST report `dropped_count` when the
   event channel overflowed rather than silently under-reporting.
@@ -576,8 +658,12 @@ report segments statistics into before/after windows around the event.
   and an ordered list of `(key, size)`.
 - **Plan** — the ordered, content-hashed sequence of Requests, plus the normalised YAML and
   a per-node partitioning. The unit of reproducibility.
-- **Outcome** — the classification of a single lookup: one of `DRAM`, `SSD`, `REMOTE_DRAM`,
-  `REMOTE_SSD`, `MISS`, plus latency and byte count.
+- **Outcome** — the classification of a single lookup: exactly one of `DRAM`, `SSD`,
+  `REMOTE_DRAM`, `REMOTE_SSD`, `MISS`, `SIZE_MISMATCH`, `ERROR`, plus latency, byte count, and
+  a first-touch flag (needed because `REMOTE_SSD` is a first-touch property). The four
+  remote/local hit values are hits; the other three are not. Defined normatively by
+  `components/dispatcher/specs/002-served-by-tier-attribution/contracts/served-by.md`;
+  this spec does not maintain a second definition.
 - **SymmetryCertificate** — the preflight result: per-node attribute inventory plus a verdict,
   embedded in reports.
 - **Report** — outcomes aggregated per FR-039..FR-048, in human and JSON form, carrying the
@@ -602,8 +688,19 @@ report segments statistics into before/after windows around the event.
   analytic value within 1%, validating the harness independently of the policy.
 - **SC-006**: The measured remote-served fraction tracks configured `self_affinity` across a
   0.0→1.0 sweep, and at 1.0 fabric bytes in the measured window are ~0.
-- **SC-007**: Every lookup in every report is attributed to exactly one serving tier, with no
-  unknown bucket, and reported SSD-served bytes agree with the `GetIoStats` delta within 5%.
+- **SC-007**: Every lookup in every report is attributed to exactly one of the seven
+  `served_by` values, with no unknown bucket, and for every batch
+  `hits + misses + errors == entries requested`. This is the attribution criterion and it
+  depends only on the `served_by` field.
+- **SC-007a**: When the server exposes non-zero `GetIoStats` counters, reported SSD-served
+  bytes agree with the `GetIoStats` read-byte delta within the tolerance derived per FR-042b,
+  after accounting for drive aggregation and background promotion traffic. When the counters
+  are unavailable, every report states the cross-check was not performed. **No report ever
+  presents an unavailable cross-check as a passing one.** SC-007a is deliberately separate
+  from SC-007: the cross-check is corroborating evidence for byte provenance, not the
+  definition of correct attribution, and gating attribution on a Cargo feature that
+  `p2p-native` builds cannot currently set would make SC-007 unmeetable for the very
+  configuration US3 and US4 run.
 - **SC-008**: Harness overhead is demonstrated to be under 5% of the measured figure at the
   platform's throughput ceiling, so reported numbers describe Certus rather than the
   generator.
@@ -641,7 +738,7 @@ The cases the generator exists to produce. Simulator-gradeable cases need no har
 | --- | --- | --- |
 | **Affinity sweep** | `self_affinity` 0.0→1.0 | The remote-hit fraction directly; the single most useful remote knob |
 | **Replication sweep** | `holders_per_key` 1→N | The shout/Phase-1 quorum (`CERTUS_RL_QUORUM_PCT`): more holders should reach quorum sooner but load more responders |
-| **Holder-tier split** | `holder_tier` DRAM-only vs SSD-only | Separates Phase-1 (peer memory) from Phase-2 (peer disk) latency |
+| **Holder-tier split** | `holder_tier` DRAM-only vs SSD-only, **measured on first touch** | Separates Phase-1 (peer memory) from Phase-2 (peer disk) latency. Must be read first-touch-only: serving from a peer's disk promotes into that peer's DRAM, so the `REMOTE_SSD` fraction decays with reuse and a whole-run aggregate measures the plan's reuse depth instead |
 | **Global-miss storm** | `global_miss_fraction` 0.05→0.30 | Negative-lookup cost. Each miss burns the full `op_deadline` (50 ms default), so a high-miss workload may be *entirely* deadline-dominated — the case most likely to surprise |
 | **Thundering herd** | many nodes, one absent-then-arriving key | remote-lookup's single-flight dedup: distinct fetches issued per key |
 | **Holder hotspot** | popularity skewed onto one holder | Responder-side saturation |
@@ -668,7 +765,21 @@ The cases the generator exists to produce. Simulator-gradeable cases need no har
 - Size mismatch continues to be treated as a cache miss by the dispatcher, which is why size
   must be a pure function of key identity (FR-011).
 - The dispatcher already knows internally which tier resolved a lookup, so exposing
-  `served_by` is a plumbing change rather than new bookkeeping.
+  `served_by` is largely a plumbing change rather than new bookkeeping — **but not purely
+  so**: the remote values require an `IRemoteLookup::batch_lookup` signature change to carry
+  the peer's advertised tier, and two paths need deliberate handling rather than plumbing
+  (a single-flight follower owns no landing slot and must take its tier from the leading
+  operation; an `AlreadyExists` publish path has a recorded peer that did not fill DRAM and
+  must not be read as an advertisement). This spec assumes feature 002 resolves those; it does
+  not assume they are free.
+- **Remote tier is the peer's advertisement, not serve-time ground truth.** No wire-protocol
+  change is available to obtain the latter (`WIRE_VERSION` stays at 1; the codec frames by
+  record count with no length prefix, so appending a field would mis-align an old decoder
+  silently). Reports must not claim to measure where a peer actually read from.
+- **`GetIoStats` is corroboration, not ground truth.** Its counters are zeroed unless the
+  active dispatcher was built with `rw-telemetry`, they are aggregated across all data drives,
+  and they include background staging and promotion traffic. Every use of them in this spec is
+  conditional and tolerance-derived (FR-042a, FR-042b).
 - The mandatory `CERTUS_PROFILE=full-remote` build requirement for multi-node remote runs
   continues to apply.
 - Trace fitting targets vLLM-shaped KV workloads. Other workload families would need
@@ -701,6 +812,8 @@ Following the speckit flow, still to be written for this feature:
 - `contracts/workload-schema.md` — **written** (normative YAML schema reference).
 - `contracts/plan-format.md` — **written** (plan artifact encoding and hashing).
 - `research.md` — Pitman–Yor parameterisation choices, reuse-distance estimation method,
-  and the significance-testing approach.
+  the significance-testing approach, and **the derivation of the `GetIoStats` cross-check
+  tolerance required by FR-042b** (how background staging and promotion traffic is bounded or
+  subtracted out of a drive-aggregated counter).
 - `quickstart.md` — the shortest path from a checked-in preset to a report.
 - `tasks.md` — task breakdown.

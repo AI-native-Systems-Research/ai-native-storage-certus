@@ -113,8 +113,24 @@ Under `closed_loop`, `t_ns` is advisory ordering only; the runner issues as sess
 
 The simulator consumes the identical `events.bin`. It maintains modelled DRAM and SSD tiers of
 the capacities in `system.capacity`, drives admission and eviction through `IEvictionPolicy`,
-and classifies each event into the same five outcomes as the hardware runner
-(`DRAM | SSD | REMOTE_DRAM | REMOTE_SSD | MISS`).
+and classifies each event into the same taxonomy as the hardware runner — the seven values of
+`components/dispatcher/specs/002-served-by-tier-attribution/contracts/served-by.md`
+(`DRAM | SSD | REMOTE_DRAM | REMOTE_SSD | MISS | SIZE_MISMATCH | ERROR`).
+
+Two of those seven are structurally unreachable in the simulator, and that is a property worth
+asserting rather than a gap:
+
+- **`SIZE_MISMATCH`** cannot occur, because size is a pure function of key identity
+  (spec FR-011) and the simulator has no independent store to disagree with. The simulator
+  MUST assert a zero count; a non-zero one is a generator defect, not a cache result.
+- **`ERROR`** cannot occur, because there is no I/O to fail. The simulator MUST assert a zero
+  count.
+
+So the simulator's reachable classes are the four hits plus `MISS`, and it reports all seven so
+that a simulated report and a measured report are directly comparable column-for-column. The
+simulator MUST model the `REMOTE_SSD` → `REMOTE_DRAM` first-touch decay (serving from a peer's
+disk promotes into that peer's memory tier); a simulator that reported a stable `REMOTE_SSD`
+fraction would disagree with hardware for a reason unrelated to the policy under test.
 
 What the simulator deliberately does **not** model, and which therefore requires hardware to
 measure (spec FR-035 requires this list be documented and kept current):
