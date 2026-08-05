@@ -60,6 +60,28 @@
 #   --workers N       gRPC connections per node (default 4)
 #   --inflight N      concurrent requests per connection (default 4)
 #   --iterations N    passes over each requester's key list (default 1)
+#   --sweep SPECS     run the lookup phase once per config instead of once, all
+#                     against a SINGLE cluster bring-up and a single populate.
+#                     SPECS is `;`-separated, each `batch:workers:inflight`; an
+#                     empty field keeps the corresponding --batch-size/--workers/
+#                     --inflight value. Example:
+#                       --sweep '64:4:4;64:4:8;64:4:16;32:4:8;16:4:16'
+#                     Requesters pass --cleanup so each round removes the keys it
+#                     fetched, which is what keeps every round a genuine remote
+#                     fetch rather than a local hit on keys the previous round
+#                     published. Holder state is untouched, so the populate is
+#                     paid once for the whole matrix.
+#                     Sweeping answers a question a single config cannot: whether
+#                     throughput is limited by bytes-in-flight or by a serialized
+#                     resource. Throughput = in-flight-bytes / per-batch latency
+#                     identically, so read the reported p50 alongside GB/s — if
+#                     p50 holds flat as concurrency rises the path had queueing
+#                     headroom; if it rises proportionally, something is serial.
+#   --replicates N    repeat every config N times (default 1). Run-to-run sd on
+#                     this bench is ~5-16%, so N>=4 per config and a rank test;
+#                     never compare two configs off one sample each.
+#   --results-dir D   copy every JSON into D instead of losing it with the temp
+#                     dir at exit. Sweep results are worth keeping.
 #   --warmup-keys N   keys fetched before timing, to pay cold RDMA connect costs
 #                     outside the measurement (default 1024)
 #   --verify          check the key stamp in every returned object. Costs a
@@ -139,6 +161,9 @@ ITERATIONS=1
 WARMUP_KEYS=1024
 VERIFY=""
 DRY_RUN=""
+SWEEP=""
+REPLICATES=1
+RESULTS_DIR=""
 # shellcheck disable=SC2206
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new ${CERTUS_TEST_SSH_OPTS:-})
 
@@ -159,6 +184,9 @@ while [[ $# -gt 0 ]]; do
         --inflight)    INFLIGHT="$2"; shift 2 ;;
         --iterations)  ITERATIONS="$2"; shift 2 ;;
         --warmup-keys) WARMUP_KEYS="$2"; shift 2 ;;
+        --sweep)       SWEEP="$2"; shift 2 ;;
+        --replicates)  REPLICATES="$2"; shift 2 ;;
+        --results-dir) RESULTS_DIR="$2"; shift 2 ;;
         --verify)      VERIFY="--verify"; shift ;;
         --dry-run)     DRY_RUN=1; shift ;;
         --server-args) SERVER_ARGS="$2"; shift 2 ;;
@@ -264,8 +292,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-BENCH_COMMON="--server http://127.0.0.1:$GRPC_PORT --keys $KEY_RANGE \
---object-size $OBJECT_SIZE --batch-size $BATCH_SIZE --workers $WORKERS \
+# Everything a bench invocation needs that a sweep never varies. The populate and
+# the no-sweep lookup add the baseline batch/workers/inflight on top; a sweep
+# round substitutes its own.
+BENCH_BASE="--server http://127.0.0.1:$GRPC_PORT --keys $KEY_RANGE \
+--object-size $OBJECT_SIZE"
+BENCH_COMMON="$BENCH_BASE --batch-size $BATCH_SIZE --workers $WORKERS \
 --inflight $INFLIGHT"
 
 # ---------------------------------------------------------------------------
@@ -329,6 +361,32 @@ if [[ -n "$DRY_RUN" ]]; then
     echo ""
     echo "Keyspace $KEY_RANGE ($KEY_COUNT keys) over $HOLDERS holder shard(s);"
     echo "each holder takes key % $HOLDERS == its index, each requester asks for the rest."
+    if [[ -n "$SWEEP" ]]; then
+        echo ""
+        echo "=== Sweep plan (the lookup line above repeats once per row) ==="
+        objb=$(python3 -c '
+import sys
+s = sys.argv[1]
+m = {"K": 2**10, "M": 2**20, "G": 2**30}
+print(int(s[:-1]) * m[s[-1].upper()] if s[-1].upper() in m else int(s))' "$OBJECT_SIZE")
+        printf '%8s %8s %10s %8s %14s\n' batch workers inflight concur inflight_MiB
+        IFS=';' read -r -a raw_specs <<< "$SWEEP"
+        nspec=0
+        for s in "${raw_specs[@]}"; do
+            [[ -n "$s" ]] || continue
+            b="${s%%:*}"; rest="${s#*:}"; w="${rest%%:*}"; f="${rest##*:}"
+            b="${b:-$BATCH_SIZE}"; w="${w:-$WORKERS}"; f="${f:-$INFLIGHT}"
+            printf '%8s %8s %10s %8s %14s\n' "$b" "$w" "$f" "$((w * f))" \
+                "$(( w * f * b * objb / 1048576 ))"
+            nspec=$((nspec + 1))
+        done
+        echo ""
+        echo "$nspec config(s) x $REPLICATES replicate(s) = $((nspec * REPLICATES)) rounds,"
+        echo "all against ONE cluster bring-up and ONE populate. Requesters get"
+        echo "--cleanup so each round starts from keys absent locally."
+        echo "inflight_MiB = workers*inflight*batch*object_size is the GPU landing"
+        echo "buffer each requester allocates — check it against GPU memory."
+    fi
     exit 0
 fi
 
@@ -412,33 +470,110 @@ if [[ "$TIER" == "disk" ]]; then
     fi
 fi
 
-# --- 4. Sample NIC counters, run the lookup phase, sample again ---
+# --- 4. Sample NIC counters, run the lookup phase(s), sample again ---
 declare -a NIC_BEFORE NIC_AFTER
 for ((i = 0; i < N; i++)); do NIC_BEFORE[i]="$(nic_counters "${NODES[i]}")"; done
 
+# Parse --sweep into configs. Without it there is exactly one config, built from
+# --batch-size/--workers/--inflight — the historical single-round behaviour.
+SPECS=()
+if [[ -n "$SWEEP" ]]; then
+    IFS=';' read -r -a raw_specs <<< "$SWEEP"
+    for s in "${raw_specs[@]}"; do
+        [[ -n "$s" ]] || continue
+        b="${s%%:*}"; rest="${s#*:}"; w="${rest%%:*}"; f="${rest##*:}"
+        SPECS+=("${b:-$BATCH_SIZE}:${w:-$WORKERS}:${f:-$INFLIGHT}")
+    done
+    [[ ${#SPECS[@]} -gt 0 ]] || { echo "error: --sweep parsed to no configs" >&2; exit 1; }
+else
+    SPECS=("$BATCH_SIZE:$WORKERS:$INFLIGHT")
+fi
+[[ "$REPLICATES" =~ ^[0-9]+$ && "$REPLICATES" -ge 1 ]] || \
+    { echo "error: --replicates must be a positive integer" >&2; exit 1; }
+
+# Any round after the first would otherwise be served from keys the previous
+# round published into the requester's own tier, so it would measure the local
+# path. --cleanup drops them between rounds, outside the timed window.
+TOTAL_ROUNDS=$(( ${#SPECS[@]} * REPLICATES ))
+CLEANUP_FLAG=""
+[[ $TOTAL_ROUNDS -gt 1 ]] && CLEANUP_FLAG="--cleanup"
+
+# Run one lookup round on every requester concurrently. Args: tag b w f.
+lookup_round() {
+    local tag="$1" batch="$2" workers="$3" inflight="$4"
+    local i p pids=() failed=0
+    local args="$BENCH_BASE --batch-size $batch --workers $workers --inflight $inflight"
+    for ((i = 0; i < N; i++)); do
+        [[ -n "${REQ_ARGS[i]}" ]] || continue
+        run_bench "${NODES[i]}" "lookup${tag}-$i.json" \
+            lookup $args ${REQ_ARGS[i]} \
+            --iterations "$ITERATIONS" --warmup-keys "$WARMUP_KEYS" \
+            $CLEANUP_FLAG $VERIFY &
+        pids+=("$!")
+    done
+    for p in "${pids[@]}"; do wait "$p" || failed=1; done
+    return $failed
+}
+
 log "Looking up from $(for ((i=0;i<N;i++)); do [[ -n "${REQ_ARGS[i]}" ]] && printf '%s ' "${NODES[i]}"; done)..."
-phase_start=$(date +%s.%N)
-pids=(); failed=0
-for ((i = 0; i < N; i++)); do
-    [[ -n "${REQ_ARGS[i]}" ]] || continue
-    run_bench "${NODES[i]}" "lookup-$i.json" \
-        lookup $BENCH_COMMON ${REQ_ARGS[i]} \
-        --iterations "$ITERATIONS" --warmup-keys "$WARMUP_KEYS" $VERIFY &
-    pids+=("$!")
-done
-for p in "${pids[@]}"; do wait "$p" || failed=1; done
-phase_end=$(date +%s.%N)
+
+failed=0
+if [[ -n "$SWEEP" ]]; then
+    log "Sweep: ${#SPECS[@]} config(s) x $REPLICATES replicate(s) = $TOTAL_ROUNDS round(s)"
+    SWEEP_TSV="$RESULT_DIR/sweep.tsv"
+    : > "$SWEEP_TSV"
+    round=0
+    for ci in "${!SPECS[@]}"; do
+        spec="${SPECS[ci]}"
+        b="${spec%%:*}"; rest="${spec#*:}"; w="${rest%%:*}"; f="${rest##*:}"
+        for ((r = 1; r <= REPLICATES; r++)); do
+            round=$((round + 1))
+            tag="-c${ci}r${r}"
+            printf '  [%d/%d] batch=%-4s workers=%-3s inflight=%-3s rep %d ... ' \
+                "$round" "$TOTAL_ROUNDS" "$b" "$w" "$f" "$r"
+            if lookup_round "$tag" "$b" "$w" "$f"; then
+                : # per-requester JSON is parsed below
+            else
+                echo "FAILED"
+                failed=1
+                for ((i = 0; i < N; i++)); do
+                    [[ -n "${REQ_ARGS[i]}" ]] || continue
+                    [[ -s "$RESULT_DIR/lookup${tag}-$i.json.err" ]] && \
+                        { echo "--- ${NODES[i]} ---" >&2
+                          cat "$RESULT_DIR/lookup${tag}-$i.json.err" >&2; }
+                done
+                continue
+            fi
+            # One TSV row per requester so a multi-requester topology is not
+            # silently collapsed into one number.
+            for ((i = 0; i < N; i++)); do
+                [[ -n "${REQ_ARGS[i]}" ]] || continue
+                python3 "$SCRIPT_DIR/lib/sweep-row.py" \
+                    "$RESULT_DIR/lookup${tag}-$i.json" \
+                    "$b" "$w" "$f" "$r" "remote:${NODES[i]}" "$OBJECT_SIZE" \
+                    >> "$SWEEP_TSV"
+            done
+            tail -n 1 "$SWEEP_TSV" | awk -F'\t' '{printf "%8s GB/s  p50 %8s us\n", $7, $8}'
+        done
+    done
+else
+    phase_start=$(date +%s.%N)
+    lookup_round "" "$BATCH_SIZE" "$WORKERS" "$INFLIGHT" || failed=1
+    phase_end=$(date +%s.%N)
+fi
 
 for ((i = 0; i < N; i++)); do NIC_AFTER[i]="$(nic_counters "${NODES[i]}")"; done
 
 # --- 5. Report ---
-echo ""
-echo "=== Per-node results ==="
-for ((i = 0; i < N; i++)); do
-    [[ -n "${REQ_ARGS[i]}" ]] || continue
-    echo "${NODES[i]}: $(cat "$RESULT_DIR/lookup-$i.json" 2>/dev/null)"
-    [[ -s "$RESULT_DIR/lookup-$i.json.err" ]] && cat "$RESULT_DIR/lookup-$i.json.err" >&2
-done
+if [[ -z "$SWEEP" ]]; then
+    echo ""
+    echo "=== Per-node results ==="
+    for ((i = 0; i < N; i++)); do
+        [[ -n "${REQ_ARGS[i]}" ]] || continue
+        echo "${NODES[i]}: $(cat "$RESULT_DIR/lookup-$i.json" 2>/dev/null)"
+        [[ -s "$RESULT_DIR/lookup-$i.json.err" ]] && cat "$RESULT_DIR/lookup-$i.json.err" >&2
+    done
+fi
 
 echo ""
 echo "=== NIC per-direction deltas (units are 4-byte words on mlx5; see header) ==="
@@ -449,11 +584,19 @@ for ((i = 0; i < N; i++)); do
     printf '%-20s %18s %18s\n' "${NODES[i]}" "$((xa - xb))" "$((ra - rb))"
 done
 
+if [[ -n "$SWEEP" ]]; then
+    echo ""
+    echo "=== Sweep summary (per requester, across replicates) ==="
+    python3 "$SCRIPT_DIR/lib/sweep-summary.py" "$SWEEP_TSV"
+    log "Raw sweep rows: $SWEEP_TSV (use --results-dir to keep them)"
+fi
+
 # Aggregate across requesters. Reported as a bracket rather than one number: the
 # phase span includes serial ssh spawn (understates), while the longest per-node
 # elapsed assumes the requesters fully overlapped (overstates). The truth is
 # between them, and they converge as the run gets longer — which is the argument
 # for running long enough that they do.
+if [[ -z "$SWEEP" ]]; then
 echo ""
 echo "=== Aggregate ==="
 python3 - "$RESULT_DIR" "$phase_start" "$phase_end" <<'PY'
@@ -517,6 +660,16 @@ if vf:
 if bad:
     print(f"  NOTE: {bad} key(s) failed; see per-node first_error above")
 PY
+fi
+
+# The temp dir dies with the EXIT trap, so a sweep worth analysing later has to
+# be copied out. Preserving the raw JSON matters more than the summary: a later
+# question about a config almost never fits the columns chosen today.
+if [[ -n "$RESULTS_DIR" ]]; then
+    mkdir -p "$RESULTS_DIR"
+    cp -a "$RESULT_DIR"/. "$RESULTS_DIR"/ 2>/dev/null || true
+    log "Results copied to $RESULTS_DIR"
+fi
 
 echo ""
 if [[ $failed -ne 0 ]]; then
