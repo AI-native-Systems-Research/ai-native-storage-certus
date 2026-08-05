@@ -1,5 +1,4 @@
 import os, sys, json, time
-os.chdir("/home/bdh/kvconn-trace")
 
 
 def _pin_to_numa_node():

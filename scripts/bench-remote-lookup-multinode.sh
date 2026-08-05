@@ -89,6 +89,13 @@
 #   CERTUS_RL_TEARDOWN_MS    orphaned-landing-slot reclaim grace (default 2000)
 #   CERTUS_TEST_RUST_LOG     RUST_LOG for every server (default warn — `info`
 #                            per-op logging distorts a throughput measurement)
+#   CERTUS_TEST_EXTRA_ENV    extra VAR=VALUE pairs exported to every server, e.g.
+#                            CERTUS_LOG_REMOTE_DELIVERY=1 for the dispatcher's
+#                            fetch/submit/sync split. Those lines are emitted at
+#                            warn, so they survive the default RUST_LOG.
+#   CERTUS_TEST_DUMP_LOGS    set to a truthy value to dump every requester's
+#                            server log on success too (the failure path always
+#                            does); otherwise cluster_cleanup deletes them
 #   CERTUS_TEST_SSH_OPTS     extra ssh options
 #
 # Prerequisites (per node):
@@ -340,6 +347,7 @@ REMOTE_ENV="RUST_LOG=${CERTUS_TEST_RUST_LOG:-warn} LD_LIBRARY_PATH=\"$LIB_PATH:\
 [[ -n "$CALLER_WAIT_MS" ]] && REMOTE_ENV="$REMOTE_ENV CERTUS_RL_CALLER_WAIT_MS=$CALLER_WAIT_MS"
 [[ -n "$TEARDOWN_MS" ]] && REMOTE_ENV="$REMOTE_ENV CERTUS_RL_TEARDOWN_MS=$TEARDOWN_MS"
 [[ -n "$RDMA_BIND_IP" ]] && REMOTE_ENV="$REMOTE_ENV CERTUS_RDMA_BIND_IP=$RDMA_BIND_IP"
+[[ -n "${CERTUS_TEST_EXTRA_ENV:-}" ]] && REMOTE_ENV="$REMOTE_ENV $CERTUS_TEST_EXTRA_ENV"
 
 cluster_launch
 CLUSTER_UP=1
@@ -518,4 +526,17 @@ if [[ $failed -ne 0 ]]; then
     done
     exit 1
 fi
+
+# On success the logs are about to be deleted by cluster_cleanup, so a run that
+# asked for server-side diagnostics (e.g. CERTUS_LOG_REMOTE_DELIVERY) has to
+# collect them here. Goes to stderr, which is outside $RESULT_DIR — the EXIT
+# trap removes that directory.
+case "${CERTUS_TEST_DUMP_LOGS:-}" in
+    1 | true | TRUE | yes | on)
+        for ((i = 0; i < N; i++)); do
+            [[ -n "${REQ_ARGS[i]}" ]] && cluster_dump_log "${NODES[i]}"
+        done
+        ;;
+esac
+
 echo "=== DONE: $TOPOLOGY / $TIER ==="

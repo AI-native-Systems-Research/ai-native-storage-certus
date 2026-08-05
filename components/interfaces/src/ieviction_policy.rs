@@ -28,6 +28,27 @@ impl EvictionHandle {
 /// Identifier for an independent eviction tracking pool.
 pub type PoolId = u32;
 
+/// Identifies the session (logical stream of related cache blocks) that a
+/// tracked block belongs to. Supplied by lineage-aware callers at registration.
+pub type SessionId = u64;
+
+/// Per-block semantic hints supplied to [`IEvictionPolicy::track`] at registration.
+///
+/// Always passed to `track` by value. Extensible: new hint fields may be added
+/// without changing the `track` signature or breaking existing callers /
+/// implementations. Policies that do not use a given hint MUST ignore it (for
+/// example `eviction-policy-lru` ignores `BlockSemantics` entirely).
+/// [`Default`] yields `session_id = 0` for session-unaware callers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BlockSemantics {
+    /// Session this block belongs to, enabling lineage-aware eviction.
+    ///
+    /// Required: every tracked block is associated with a session. There is no
+    /// interface-level "no session" case — session-unaware callers pass
+    /// [`BlockSemantics::default()`].
+    pub session_id: SessionId,
+}
+
 /// Errors returned by `IEvictionPolicy` operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EvictionPolicyError {
@@ -55,7 +76,15 @@ component_macros::define_interface! {
 
         /// Register a key in the pool for eviction tracking.
         /// Returns a handle for O(1) touch/remove.
-        fn track(&self, pool: PoolId, key: CacheKey) -> Result<EvictionHandle, EvictionPolicyError>;
+        ///
+        /// `semantics` carries per-block hints (see [`BlockSemantics`]) and is
+        /// always supplied. Policies that do not use a hint MUST ignore it;
+        /// session-unaware callers pass [`BlockSemantics::default()`]. A
+        /// lineage-aware policy reads `semantics.session_id` to place the block
+        /// into its session's chain. Re-registering a key already tracked in
+        /// `pool` is idempotent: it refreshes recency and returns the existing
+        /// handle without creating a new node or altering lineage.
+        fn track(&self, pool: PoolId, key: CacheKey, semantics: BlockSemantics) -> Result<EvictionHandle, EvictionPolicyError>;
 
         /// Record an access to the entry, updating its eviction ranking.
         /// (For a recency policy this marks it most-recently-used; other

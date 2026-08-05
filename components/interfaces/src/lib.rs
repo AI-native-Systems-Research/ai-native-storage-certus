@@ -30,10 +30,12 @@ pub use idispatcher::DispatcherError;
 #[cfg(feature = "spdk")]
 pub use idispatcher::IDispatcher;
 pub use idispatcher::IpcHandle;
+pub use ieviction_policy::BlockSemantics;
 pub use ieviction_policy::EvictionHandle;
 pub use ieviction_policy::EvictionPolicyError;
 pub use ieviction_policy::IEvictionPolicy;
 pub use ieviction_policy::PoolId;
+pub use ieviction_policy::SessionId;
 pub use igpu_services::GpuDeviceInfo;
 pub use igpu_services::GpuDmaBuffer;
 pub use igpu_services::GpuIpcHandle;
