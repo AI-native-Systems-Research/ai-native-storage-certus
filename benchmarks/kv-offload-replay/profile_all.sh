@@ -154,6 +154,23 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Reject unknown --only/--skip tokens up front. want() does substring-on-comma
+# matching, so a typo (e.g. --only cpu, --only certus) silently selects nothing and
+# that variant just never runs — fail loudly instead.
+VALID_VARIANTS="nooffload cpuoffload certus-spdk sharedstorage"
+for _list in "$ONLY" "$SKIP"; do
+    [[ -z "$_list" ]] && continue
+    IFS=',' read -ra _toks <<<"$_list"
+    for _t in "${_toks[@]}"; do
+        [[ -z "$_t" ]] && continue
+        [[ " $VALID_VARIANTS " == *" $_t "* ]] || {
+            echo "error: unknown variant '${_t}' in --only/--skip" >&2
+            echo "       valid variants: ${VALID_VARIANTS// /, }" >&2
+            exit 2
+        }
+    done
+done
+
 # ── Derived paths ─────────────────────────────────────────────────────────────
 # HF cache defaults under the model-fs but is env-overridable (this host keeps
 # the populated cache at ~/.cache/huggingface, not on the model-fs).
