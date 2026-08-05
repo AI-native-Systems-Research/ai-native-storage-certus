@@ -4,13 +4,15 @@
 #
 # Variants (run in this order):
 #   NoOffload      GPU-only baseline                 (image certus-nooffload-bench)
-#   CPUOffload     vLLM OffloadingConnector -> host RAM (image certus-cpu-offload-bench)
 #   Certus-SPDK    gRPC client + certus-server-yaml  (image certus-grpc-bench + host server)
+#   CPUOffload     vLLM OffloadingConnector -> host RAM (image certus-cpu-offload-bench)
 #   SharedStorage  llmd_fs_backend RAID0/XFS         (image certus-sharedstorage-bench)
 #
-# Certus-SPDK runs before SharedStorage on purpose: it consumes the boot-reserved
-# 1G hugepage pool while it is still intact (no runtime realloc, no reboot), then
-# SharedStorage frees that pool back to XFS page cache.
+# Certus-SPDK runs first (of the storage backends) on purpose: it consumes the
+# boot-reserved 1G hugepage pool while it is still intact (no runtime realloc, no
+# reboot). Once it has run, the pool is released back to normal RAM (see
+# free_1g_hugepages) so the host-RAM backends (CPUOffload) and the XFS page cache
+# (SharedStorage) get that ~16 GiB back under mem=32G.
 #
 # Each variant is preflighted independently: ready ones run, the rest are marked
 # SKIPPED with a reason. Missing bench images are built only when --build is
@@ -20,9 +22,10 @@
 # This is runtime-only (no reboot); a reboot is requested only if the 1G-hugepage
 # allocation falls short. Needs sudo (cached once, up front).
 #
-# Outputs: <logdir>/<variant>.log per run, <logdir>/results.json, and a table on
-# stdout. Never exits non-zero for a per-variant failure — those are reported in
-# the table.
+# Outputs: <logdir>/<variant>.log per run, <logdir>/result-<variant>.json flushed as
+# each backend finishes (survives a crash or a --only subset), <logdir>/results.json
+# aggregate at the end, and a table on stdout. Never exits non-zero for a per-variant
+# failure — those are reported in the table.
 #
 # Usage:
 #   profile_all.sh --help
@@ -211,7 +214,8 @@ HUGEPAGES_1G_NODE="${RESOURCE_NUMA:-0}"
 # Runtime-only; configure-bench.sh never reboots. Output tee'd for audit. Assumes
 # sudo was already cached (see preflight). Returns configure-bench.sh's exit code.
 reconfigure() {  # mode
-    local mode="$1" f="${LOGDIR}/reconfigure-${mode}.log"
+    local mode="$1"
+    local f="${LOGDIR}/reconfigure-${mode}.log"
     log "reconfigure host -> ${mode} on [${NVME_BDFS}] (see reconfigure-${mode}.log)"
     sudo env \
         NVME_BDFS="$NVME_BDFS" \
@@ -219,6 +223,20 @@ reconfigure() {  # mode
         ${CERTUS_HUGEPAGES:+CERTUS_HUGEPAGES="$CERTUS_HUGEPAGES"} \
         ${RESOURCE_NUMA:+RESOURCE_NUMA="$RESOURCE_NUMA"} \
         "$CONFIG_SH" "$mode" > "$f" 2>&1
+}
+
+# Release the boot-reserved 1G hugepages back to normal RAM (runtime; no reboot).
+# Only Certus-SPDK needs the pool, so once it has run we free the ~16 GiB so the
+# host-RAM backends (CPUOffload) and page cache aren't starved under mem=32G. Safe
+# after stop_server; pages still held by a live process simply won't drop to 0.
+free_1g_hugepages() {
+    log "releasing 1G hugepages -> RAM (post Certus-SPDK; see free-hugepages.log)"
+    sudo bash -c '
+        for f in /sys/devices/system/node/node*/hugepages/hugepages-1048576kB/nr_hugepages; do
+            [ -w "$f" ] && echo 0 > "$f"
+        done
+        awk "/HugePages_Total/ && \$2!=0 {print \"WARN: \" \$2 \" hugepages still reserved (held by a process?)\"}" /proc/meminfo
+    ' > "${LOGDIR}/free-hugepages.log" 2>&1 || warn "free_1g_hugepages: see free-hugepages.log"
 }
 
 # ── Result accumulation (parallel arrays keyed by index) ──────────────────────
@@ -235,9 +253,27 @@ want() {
     return 0
 }
 
+# Emit "null" for an empty/"null" numeric field, else the raw value (JSON literal).
+_num_or_null() { local v="$1"; { [[ -z "$v" || "$v" == "null" ]] && echo null; } || echo "$v"; }
+
+# Print one variant's JSON object (args in record() order). Shared by the per-variant
+# result files and the aggregate results.json so both stay byte-for-byte consistent.
+variant_json() {  # variant status wall rounds gens tps native reason log
+    printf '{"variant": "%s", "status": "%s", "wall_s": %s, "rounds": %s, "generations": %s, "tokens_per_sec": %s, "native_metric": %s, "reason": "%s", "log": "%s"}' \
+        "$1" "$2" "$(_num_or_null "$3")" "$(_num_or_null "$4")" "$(_num_or_null "$5")" \
+        "$(_num_or_null "$6")" "$(_num_or_null "$7")" "${8//\"/\\\"}" "$9"
+}
+
 record() {  # variant status wall rounds gens tps native reason log
     R_VARIANT+=("$1"); R_STATUS+=("$2"); R_WALL+=("$3"); R_ROUNDS+=("$4")
     R_GENS+=("$5"); R_TPS+=("$6"); R_NATIVE+=("$7"); R_REASON+=("$8"); R_LOG+=("$9")
+    # Flush this variant's result to its own file the instant it finishes, so a later
+    # crash (or a --only subset run) can never lose an already-completed backend. The
+    # aggregate results.json is still written at the end from the in-memory arrays.
+    if [[ -n "${LOGDIR:-}" && -d "${LOGDIR:-}" ]]; then
+        local slug; slug="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+        variant_json "$@" > "${LOGDIR}/result-${slug}.json"
+    fi
 }
 
 # Parse a driver log; echoes "wall|gens|rounds|native|tps".
@@ -365,25 +401,10 @@ if want nooffload; then
     fi
 fi
 
-# ══ CPUOffload ════════════════════════════════════════════════════════════════
-if want cpuoffload; then
-    if ! img_exists "$IMG_CPU"; then
-        if [[ "$DO_BUILD" -eq 1 ]] && build_simple "$IMG_CPU" Dockerfile.cpu-offload cpu-offload; then
-            run_container_bench "CPUOffload" "$IMG_CPU" -e "CPU_BYTES=${CPU_BYTES}"
-        else
-            reason="image ${IMG_CPU} missing (pass --build)"
-            [[ "$DO_BUILD" -eq 1 ]] && reason="image ${IMG_CPU} build failed (see build-cpu-offload.log)"
-            record "CPUOffload" "SKIPPED" "" "" "" "" "" "$reason" ""
-            warn "CPUOffload SKIPPED: $reason"
-        fi
-    else
-        run_container_bench "CPUOffload" "$IMG_CPU" -e "CPU_BYTES=${CPU_BYTES}"
-    fi
-fi
-
 # ══ Certus-SPDK ═══════════════════════════════════════════════════════════════
-# Runs BEFORE SharedStorage so it uses the boot-reserved 1G hugepage pool intact
-# (no runtime realloc). SharedStorage then frees those pages for its page cache.
+# Runs BEFORE CPUOffload and SharedStorage so it consumes the boot-reserved 1G
+# hugepage pool while it is still intact (no runtime realloc, no reboot). The pool
+# is released right after (free_1g_hugepages) so the host-RAM backends get it back.
 SERVER_PID=""
 stop_server() {
     [[ -z "$SERVER_PID" ]] && return 0
@@ -490,9 +511,33 @@ if want certus-spdk; then
     fi
 fi
 
+# ══ Free 1G hugepages ═════════════════════════════════════════════════════════
+# Certus-SPDK is the only backend that needs the boot-reserved 1G pool. Now that it
+# has run (and its server is stopped), release those ~16 GiB back to normal RAM so
+# the host-RAM backends below aren't starved under mem=32G. Runtime, no reboot.
+if want cpuoffload || want sharedstorage; then
+    free_1g_hugepages
+fi
+
+# ══ CPUOffload ════════════════════════════════════════════════════════════════
+if want cpuoffload; then
+    if ! img_exists "$IMG_CPU"; then
+        if [[ "$DO_BUILD" -eq 1 ]] && build_simple "$IMG_CPU" Dockerfile.cpu-offload cpu-offload; then
+            run_container_bench "CPUOffload" "$IMG_CPU" -e "CPU_BYTES=${CPU_BYTES}"
+        else
+            reason="image ${IMG_CPU} missing (pass --build)"
+            [[ "$DO_BUILD" -eq 1 ]] && reason="image ${IMG_CPU} build failed (see build-cpu-offload.log)"
+            record "CPUOffload" "SKIPPED" "" "" "" "" "" "$reason" ""
+            warn "CPUOffload SKIPPED: $reason"
+        fi
+    else
+        run_container_bench "CPUOffload" "$IMG_CPU" -e "CPU_BYTES=${CPU_BYTES}"
+    fi
+fi
+
 # ══ SharedStorage ═════════════════════════════════════════════════════════════
-# Runs AFTER Certus-SPDK: reconfigure frees the 1G hugepage pool (returning that
-# RAM to XFS page cache) and rebinds the group from vfio-pci back to kernel nvme.
+# Runs AFTER Certus-SPDK (1G pool already released by free_1g_hugepages above): the
+# reconfigure rebinds the shared group from vfio-pci back to kernel nvme + RAID0/XFS.
 if want sharedstorage; then
     ss_skip=""
     # Bring the shared group up as kernel nvme + RAID0/XFS at $SHARED_FS.
@@ -565,15 +610,9 @@ json="${LOGDIR}/results.json"
     echo "  \"variants\": ["
     n=${#R_VARIANT[@]}
     for i in "${!R_VARIANT[@]}"; do
-        wall="${R_WALL[$i]:-null}";   [[ -z "$wall"   || "$wall" == "null" ]]   && wall=null
-        rounds="${R_ROUNDS[$i]:-null}"; [[ -z "$rounds" || "$rounds" == "null" ]] && rounds=null
-        gens="${R_GENS[$i]:-null}";   [[ -z "$gens"   || "$gens" == "null" ]]   && gens=null
-        tps="${R_TPS[$i]:-null}";     [[ -z "$tps"    || "$tps" == "null" ]]    && tps=null
-        native="${R_NATIVE[$i]:-null}"; [[ -z "$native" || "$native" == "null" ]] && native=null
-        reason="${R_REASON[$i]//\"/\\\"}"
-        logp="${R_LOG[$i]}"
-        printf '    {"variant": "%s", "status": "%s", "wall_s": %s, "rounds": %s, "generations": %s, "tokens_per_sec": %s, "native_metric": %s, "reason": "%s", "log": "%s"}' \
-            "${R_VARIANT[$i]}" "${R_STATUS[$i]}" "$wall" "$rounds" "$gens" "$tps" "$native" "$reason" "$logp"
+        printf '    %s' "$(variant_json \
+            "${R_VARIANT[$i]}" "${R_STATUS[$i]}" "${R_WALL[$i]}" "${R_ROUNDS[$i]}" \
+            "${R_GENS[$i]}" "${R_TPS[$i]}" "${R_NATIVE[$i]}" "${R_REASON[$i]}" "${R_LOG[$i]}")"
         [[ $((i+1)) -lt $n ]] && echo "," || echo ""
     done
     echo "  ]"
@@ -597,4 +636,5 @@ for i in "${!R_VARIANT[@]}"; do
     fi
 done
 echo "================================================================================="
-echo "results.json -> ${json}"
+echo "results.json    -> ${json}"
+echo "per-variant     -> ${LOGDIR}/result-<variant>.json"
