@@ -317,6 +317,25 @@ mkdir -p "$LOGDIR" "$HF_CACHE" || { echo "error: cannot create logdir/HF cache" 
 # only when a storage backend is actually selected.
 if want sharedstorage || want certus-spdk; then
     log "shared NVMe group for storage backends: [${NVME_BDFS}]"
+    # Fail fast on a mistyped or absent PCI address: every device in the group must
+    # exist in sysfs. Otherwise a bad BDF (e.g. a dropped domain digit, 000:61:00.0
+    # instead of 0000:61:00.0) aborts configure-bench.sh deep inside its rebind loop
+    # with a cryptic driver_override ENOENT, skipping the storage backend after work
+    # has already been spent on the others.
+    missing=()
+    for bdf in "${DEVICE_PCI[@]}"; do
+        [[ -e "/sys/bus/pci/devices/${bdf}" ]] || missing+=("$bdf")
+    done
+    if (( ${#missing[@]} )); then
+        echo "error: NVMe device(s) not present on this host: ${missing[*]}" >&2
+        echo "       checked /sys/bus/pci/devices/<bdf>; each --device-pci must be a full" >&2
+        echo "       PCI address DDDD:BB:DD.F with a four-digit domain (e.g. 0000:61:00.0)." >&2
+        echo "       NVMe controllers present on this host:" >&2
+        for d in /sys/bus/pci/devices/*; do
+            [[ "$(cat "$d/class" 2>/dev/null)" == 0x0108* ]] && echo "         $(basename "$d")" >&2
+        done
+        exit 1
+    fi
     if ! sudo -v; then
         echo "error: sudo is required to reconfigure the NVMe group via ${CONFIG_SH}" >&2
         exit 1
