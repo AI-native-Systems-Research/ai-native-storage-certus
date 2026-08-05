@@ -40,8 +40,6 @@ def _pin_to_numa_node():
         print(f"[pin] WARNING: NUMA pin failed ({e}); running unpinned", flush=True)
 
 
-_pin_to_numa_node()
-
 SUBSET_PATH = os.environ.get("DATASET_PATH", "sharegpt_12turn_450.json")
 NUM_CONVS = int(os.environ.get("NUM_CONVS", 450))
 MAX_MODEL_LEN = int(os.environ.get("MAX_MODEL_LEN", 8192))
@@ -66,6 +64,29 @@ KV_CONFIG = {
         "threads_per_gpu": 64,
     },
 }
+
+# --- Per-round disk I/O accounting -------------------------------------------
+# /sys/block/<dev>/stat exposes cumulative sectors read (field 3) and sectors
+# written (field 7), always in 512-byte units. Snapshot around each generate()
+# to get bytes moved to/from the physical device per round. Reading md0 captures
+# all filesystem I/O across the RAID0 members in one place.
+DISK_DEV = os.environ.get("DISK_DEV", "md0")
+DISK_STAT = f"/sys/block/{DISK_DEV}/stat"
+SECTOR = 512
+
+
+def disk_rw_bytes():
+    """Return (bytes_read, bytes_written) cumulative for DISK_DEV, or (None, None)."""
+    try:
+        with open(DISK_STAT) as f:
+            fields = f.read().split()
+        return int(fields[2]) * SECTOR, int(fields[6]) * SECTOR
+    except (OSError, IndexError, ValueError):
+        return None, None
+
+
+def gib(n):
+    return "n/a" if n is None else f"{n / (1024**3):.2f} GiB"
 
 
 def preflight():
@@ -94,160 +115,146 @@ def preflight():
           file=sys.stderr, flush=True)
 
 
-preflight()
+def main():
+    # NUMA pin must happen in the parent so the spawned EngineCore inherits the
+    # CPU/mem affinity. Guarded under __main__ (below) so vLLM's spawn-based
+    # EngineCore re-import of this module does NOT re-run the workload.
+    _pin_to_numa_node()
+    preflight()
 
-t0 = time.perf_counter()
-print(f"[trace] +0.0s loading dataset", file=sys.stderr, flush=True)
-with open(SUBSET_PATH) as f:
-    all_data = json.load(f)
-convs = []
-for entry in all_data:
-    if len(convs) >= NUM_CONVS:
-        break
-    turns = entry.get("conversations", [])
-    human_turns = [t["value"] for t in turns if t.get("from") == "human"]
-    if len(human_turns) >= 2:
-        convs.append(human_turns)
-print(f"[trace] +{time.perf_counter()-t0:.1f}s loaded {len(convs)} conversations", file=sys.stderr, flush=True)
+    t0 = time.perf_counter()
+    print(f"[trace] +0.0s loading dataset", file=sys.stderr, flush=True)
+    with open(SUBSET_PATH) as f:
+        all_data = json.load(f)
+    convs = []
+    for entry in all_data:
+        if len(convs) >= NUM_CONVS:
+            break
+        turns = entry.get("conversations", [])
+        human_turns = [t["value"] for t in turns if t.get("from") == "human"]
+        if len(human_turns) >= 2:
+            convs.append(human_turns)
+    print(f"[trace] +{time.perf_counter()-t0:.1f}s loaded {len(convs)} conversations", file=sys.stderr, flush=True)
 
-print(f"[trace] +{time.perf_counter()-t0:.1f}s importing vllm", file=sys.stderr, flush=True)
-from vllm import LLM, SamplingParams
+    print(f"[trace] +{time.perf_counter()-t0:.1f}s importing vllm", file=sys.stderr, flush=True)
+    from vllm import LLM, SamplingParams
 
-print(f"[trace] +{time.perf_counter()-t0:.1f}s creating LLM", file=sys.stderr, flush=True)
-llm = LLM(
-    model=MODEL,
-    max_model_len=MAX_MODEL_LEN,
-    max_num_seqs=MAX_NUM_SEQS,
-    gpu_memory_utilization=GPU_MEM_UTIL,
-    dtype="float16",
-    enable_prefix_caching=True,
-    enforce_eager=True,
-    kv_transfer_config=KV_CONFIG,
-    disable_log_stats=True,
-)
-print(f"[trace] +{time.perf_counter()-t0:.1f}s LLM ready", file=sys.stderr, flush=True)
+    print(f"[trace] +{time.perf_counter()-t0:.1f}s creating LLM", file=sys.stderr, flush=True)
+    llm = LLM(
+        model=MODEL,
+        max_model_len=MAX_MODEL_LEN,
+        max_num_seqs=MAX_NUM_SEQS,
+        gpu_memory_utilization=GPU_MEM_UTIL,
+        dtype="float16",
+        enable_prefix_caching=True,
+        enforce_eager=True,
+        kv_transfer_config=KV_CONFIG,
+        disable_log_stats=True,
+    )
+    print(f"[trace] +{time.perf_counter()-t0:.1f}s LLM ready", file=sys.stderr, flush=True)
 
-sp = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=OUTPUT_TOKENS)
-tokenizer = llm.get_tokenizer()
+    sp = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=OUTPUT_TOKENS)
+    tokenizer = llm.get_tokenizer()
 
-def n_tokens(text):
-    return len(tokenizer.encode(text))
+    def n_tokens(text):
+        return len(tokenizer.encode(text))
 
-# --- Per-round disk I/O accounting -------------------------------------------
-# /sys/block/<dev>/stat exposes cumulative sectors read (field 3) and sectors
-# written (field 7), always in 512-byte units. Snapshot around each generate()
-# to get bytes moved to/from the physical device per round. Reading md0 captures
-# all filesystem I/O across the RAID0 members in one place.
-DISK_DEV = os.environ.get("DISK_DEV", "md0")
-DISK_STAT = f"/sys/block/{DISK_DEV}/stat"
-SECTOR = 512
+    if disk_rw_bytes()[1] is None:
+        print(f"[trace] WARNING: {DISK_STAT} unreadable — per-round disk bytes disabled "
+              f"(set DISK_DEV or check mode)", file=sys.stderr, flush=True)
 
-def disk_rw_bytes():
-    """Return (bytes_read, bytes_written) cumulative for DISK_DEV, or (None, None)."""
+    alive = [True] * len(convs)
+    next_turn = [0] * len(convs)
+    contexts = [""] * len(convs)
+    total_generations = 0
+    rounds_done = 0
+    round_io = []  # (round, prompts, read_bytes, write_bytes)
+    t_start = time.perf_counter()
+    print(f"[trace] +{time.perf_counter()-t0:.1f}s entering generate loop", file=sys.stderr, flush=True)
+
+    while True:
+        if MAX_ROUNDS and rounds_done >= MAX_ROUNDS:
+            break
+        active_idx = []
+        active_prompts = []
+        for i, conv in enumerate(convs):
+            if not alive[i]:
+                continue
+            k = next_turn[i]
+            if k >= len(conv):
+                alive[i] = False
+                continue
+            human = conv[k]
+            candidate = human if k == 0 else contexts[i] + "\n\n" + human
+            if n_tokens(candidate) > PROMPT_BUDGET:
+                alive[i] = False
+                continue
+            contexts[i] = candidate
+            active_idx.append(i)
+            active_prompts.append(candidate)
+
+        if not active_prompts:
+            break
+
+        rounds_done += 1
+        print(f"[trace] +{time.perf_counter()-t0:.1f}s calling generate round {rounds_done} ({len(active_prompts)} prompts)", file=sys.stderr, flush=True)
+        rd0, wr0 = disk_rw_bytes()
+        round_start = time.perf_counter()
+        outs = llm.generate(active_prompts, sp)
+        round_elapsed = time.perf_counter() - round_start
+        rd1, wr1 = disk_rw_bytes()
+        for i, out in zip(active_idx, outs):
+            response = out.outputs[0].text if out.outputs else ""
+            contexts[i] = contexts[i] + response
+            next_turn[i] += 1
+        total_generations += len(active_prompts)
+        n_alive = sum(alive)
+        # Delta of cumulative counters = bytes moved during this round.
+        d_rd = (rd1 - rd0) if (rd0 is not None and rd1 is not None) else None
+        d_wr = (wr1 - wr0) if (wr0 is not None and wr1 is not None) else None
+        round_io.append((rounds_done, len(active_prompts), d_rd, d_wr))
+        print(f"[run] round {rounds_done}: {len(active_prompts)} prompts in "
+              f"{round_elapsed:.1f}s  ({n_alive} convs still alive)  "
+              f"disk_read={gib(d_rd)} disk_write={gib(d_wr)}",
+              file=sys.stderr, flush=True)
+
+    elapsed = time.perf_counter() - t_start
+    print(f"\n[run] done. wall={elapsed:.1f}s  generations={total_generations} rounds={rounds_done}",
+          file=sys.stderr)
+
+    # --- Per-round disk I/O summary ------------------------------------------
+    tot_rd = sum(r for _, _, r, _ in round_io if r is not None)
+    tot_wr = sum(w for _, _, _, w in round_io if w is not None)
+    print(f"\n[io] per-round disk bytes (dev={DISK_DEV}):", file=sys.stderr)
+    print(f"[io] {'round':>5} {'prompts':>7} {'read':>12} {'written':>12}", file=sys.stderr)
+    for rnd, npr, rd, wr in round_io:
+        print(f"[io] {rnd:>5} {npr:>7} {gib(rd):>12} {gib(wr):>12}", file=sys.stderr)
+    print(f"[io] {'TOTAL':>5} {'':>7} {gib(tot_rd):>12} {gib(tot_wr):>12}", file=sys.stderr)
     try:
-        with open(DISK_STAT) as f:
-            fields = f.read().split()
-        return int(fields[2]) * SECTOR, int(fields[6]) * SECTOR
-    except (OSError, IndexError, ValueError):
-        return None, None
+        io_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               f"ss_round_io_{int(elapsed)}.json")
+        with open(io_path, "w") as f:
+            json.dump({"dev": DISK_DEV, "wall": elapsed, "rounds": [
+                {"round": r, "prompts": n, "read_bytes": rd, "write_bytes": wr}
+                for r, n, rd, wr in round_io],
+                "total_read_bytes": tot_rd, "total_write_bytes": tot_wr}, f, indent=2)
+        print(f"[io] saved {io_path}", file=sys.stderr)
+    except OSError as e:
+        print(f"[io] could not save json: {e}", file=sys.stderr)
 
-def gib(n):
-    return "n/a" if n is None else f"{n / (1024**3):.2f} GiB"
+    try:
+        from prometheus_client import REGISTRY
+        print("\n[PROM] vLLM Offloading Metrics:", file=sys.stderr)
+        for metric in REGISTRY.collect():
+            if "kv_offload" in metric.name:
+                for sample in metric.samples:
+                    if sample.value > 0:
+                        if "_bucket" in sample.name:
+                            continue
+                        print(f"[PROM] {sample.name} {sample.labels} = {sample.value}", file=sys.stderr)
+    except Exception as e:
+        print(f"[PROM] error: {e}", file=sys.stderr)
 
-if disk_rw_bytes()[1] is None:
-    print(f"[trace] WARNING: {DISK_STAT} unreadable — per-round disk bytes disabled "
-          f"(set DISK_DEV or check mode)", file=sys.stderr, flush=True)
 
-alive = [True] * len(convs)
-next_turn = [0] * len(convs)
-contexts = [""] * len(convs)
-total_generations = 0
-rounds_done = 0
-round_io = []  # (round, prompts, read_bytes, write_bytes)
-t_start = time.perf_counter()
-print(f"[trace] +{time.perf_counter()-t0:.1f}s entering generate loop", file=sys.stderr, flush=True)
-
-while True:
-    if MAX_ROUNDS and rounds_done >= MAX_ROUNDS:
-        break
-    active_idx = []
-    active_prompts = []
-    for i, conv in enumerate(convs):
-        if not alive[i]:
-            continue
-        k = next_turn[i]
-        if k >= len(conv):
-            alive[i] = False
-            continue
-        human = conv[k]
-        candidate = human if k == 0 else contexts[i] + "\n\n" + human
-        if n_tokens(candidate) > PROMPT_BUDGET:
-            alive[i] = False
-            continue
-        contexts[i] = candidate
-        active_idx.append(i)
-        active_prompts.append(candidate)
-
-    if not active_prompts:
-        break
-
-    rounds_done += 1
-    print(f"[trace] +{time.perf_counter()-t0:.1f}s calling generate round {rounds_done} ({len(active_prompts)} prompts)", file=sys.stderr, flush=True)
-    rd0, wr0 = disk_rw_bytes()
-    round_start = time.perf_counter()
-    outs = llm.generate(active_prompts, sp)
-    round_elapsed = time.perf_counter() - round_start
-    rd1, wr1 = disk_rw_bytes()
-    for i, out in zip(active_idx, outs):
-        response = out.outputs[0].text if out.outputs else ""
-        contexts[i] = contexts[i] + response
-        next_turn[i] += 1
-    total_generations += len(active_prompts)
-    n_alive = sum(alive)
-    # Delta of cumulative counters = bytes moved during this round.
-    d_rd = (rd1 - rd0) if (rd0 is not None and rd1 is not None) else None
-    d_wr = (wr1 - wr0) if (wr0 is not None and wr1 is not None) else None
-    round_io.append((rounds_done, len(active_prompts), d_rd, d_wr))
-    print(f"[run] round {rounds_done}: {len(active_prompts)} prompts in "
-          f"{round_elapsed:.1f}s  ({n_alive} convs still alive)  "
-          f"disk_read={gib(d_rd)} disk_write={gib(d_wr)}",
-          file=sys.stderr, flush=True)
-
-elapsed = time.perf_counter() - t_start
-print(f"\n[run] done. wall={elapsed:.1f}s  generations={total_generations} rounds={rounds_done}",
-      file=sys.stderr)
-
-# --- Per-round disk I/O summary ----------------------------------------------
-tot_rd = sum(r for _, _, r, _ in round_io if r is not None)
-tot_wr = sum(w for _, _, _, w in round_io if w is not None)
-print(f"\n[io] per-round disk bytes (dev={DISK_DEV}):", file=sys.stderr)
-print(f"[io] {'round':>5} {'prompts':>7} {'read':>12} {'written':>12}", file=sys.stderr)
-for rnd, npr, rd, wr in round_io:
-    print(f"[io] {rnd:>5} {npr:>7} {gib(rd):>12} {gib(wr):>12}", file=sys.stderr)
-print(f"[io] {'TOTAL':>5} {'':>7} {gib(tot_rd):>12} {gib(tot_wr):>12}", file=sys.stderr)
-try:
-    io_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           f"ss_round_io_{int(elapsed)}.json")
-    with open(io_path, "w") as f:
-        json.dump({"dev": DISK_DEV, "wall": elapsed, "rounds": [
-            {"round": r, "prompts": n, "read_bytes": rd, "write_bytes": wr}
-            for r, n, rd, wr in round_io],
-            "total_read_bytes": tot_rd, "total_write_bytes": tot_wr}, f, indent=2)
-    print(f"[io] saved {io_path}", file=sys.stderr)
-except OSError as e:
-    print(f"[io] could not save json: {e}", file=sys.stderr)
-
-import sys
-try:
-    from prometheus_client import REGISTRY
-    print("\n[PROM] vLLM Offloading Metrics:", file=sys.stderr)
-    for metric in REGISTRY.collect():
-        if "kv_offload" in metric.name:
-            for sample in metric.samples:
-                if sample.value > 0:
-                    if "_bucket" in sample.name:
-                        continue
-                    print(f"[PROM] {sample.name} {sample.labels} = {sample.value}", file=sys.stderr)
-except Exception as e:
-    print(f"[PROM] error: {e}", file=sys.stderr)
-
+if __name__ == "__main__":
+    main()

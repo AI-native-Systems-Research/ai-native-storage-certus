@@ -41,7 +41,12 @@ WORKDIR /workspace
 # The wheel's distribution name is llmd_fs_connector-*, but the import module is
 # llmd_fs_backend (verified below). wheels/ holds only this one wheel.
 COPY benchmarks/kv-offload-replay/wheels/ /tmp/wheels/
-RUN python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl \
+# The connector wheel is installed --no-deps so it can't replace the base's
+# torch/vllm. That also skips its pure-Python deps, so install the ones the
+# base image lacks explicitly. As of llm-d-kv-cache v0.9.0 the backend imports
+# msgpack at module load (event_publisher); zmq/nixl are already in the base.
+RUN python3 -m pip install --no-cache-dir msgpack \
+    && python3 -m pip install --no-cache-dir --no-deps /tmp/wheels/*.whl \
     && python3 -c "import llmd_fs_backend.spec; print('llmd_fs_backend import OK')" \
     && rm -rf /tmp/wheels
 
