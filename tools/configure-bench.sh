@@ -923,6 +923,15 @@ setup_raid() {
     fi
     mkdir -p "$MOUNT_POINT/shared-kv"
 
+    # The KV backend writes here, and podman's :z relabel runs, as the invoking
+    # (rootless) user. A root-owned mount blocks both the writes and the
+    # lsetxattr relabel (EPERM). Hand ownership to that user.
+    local owner="${SUDO_USER:-$(id -un)}"
+    if [[ "$owner" != "root" ]]; then
+        chown -R "$owner" "$MOUNT_POINT"
+        echo "  Owner: $owner"
+    fi
+
     echo
     echo "  RAID0 ready at $MOUNT_POINT"
     df -h "$MOUNT_POINT" | tail -1 | awk '{printf "  Capacity: %s, Used: %s\n", $2, $3}'
