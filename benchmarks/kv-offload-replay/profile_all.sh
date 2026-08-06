@@ -31,7 +31,7 @@
 #   profile_all.sh --help
 #   profile_all.sh --only nooffload,cpuoffload
 #   profile_all.sh --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 \
-#                  --shared-fs /mnt/fs-backend-bench --model-fs /mnt/certus1 --build
+#                  --model-fs /mnt/fs-backend-bench --build
 
 set -uo pipefail   # NOT -e: per-variant failures are handled, not fatal.
 
@@ -41,7 +41,6 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # ── Defaults ──────────────────────────────────────────────────────────────────
 MODEL="NousResearch/Meta-Llama-3-8B"
 MODEL_FS="/mnt/certus1"
-SHARED_FS=""
 declare -a DEVICE_PCI=()
 NUM_CONVS=450
 MAX_ROUNDS=0           # 0 = replay all turns; N caps every backend at N rounds/turns
@@ -54,7 +53,6 @@ MEM_TIER_SIZE="32G"
 EVICT_THRESH="0.6"
 CPU_BYTES=$((16 * (1 << 30)))
 DRAM=$((32 * (1 << 30)))
-DISK_DEV=""
 SLAB_SIZE_BYTES=2097152
 TENSOR_PARALLEL_SIZE=1
 SERVER_WAIT=180        # seconds to wait for the Certus-SPDK server port
@@ -90,8 +88,6 @@ Flags (all optional; defaults shown):
                                 between the two phases via tools/configure-bench.sh, so
                                 the storage backends compare on identical devices.
                                 [default 0000:61:00.0 0000:62:00.0 0000:63:00.0 0000:64:00.0]
-  --shared-fs <dir>             Override the SharedStorage mount. Default is the RAID0/XFS
-                                that configure-bench.sh builds at /mnt/fs-backend-bench.
   --model-fs <dir>              Filesystem for HF cache + gRPC podman store. [/mnt/certus1]
   --model <hf-id>               Model applied to all four variants.
                                 [NousResearch/Meta-Llama-3-8B]
@@ -107,8 +103,6 @@ Flags (all optional; defaults shown):
   --evict-threshold <f>        Certus-SPDK DRAM->SSD demotion threshold. [0.6]
   --cpu-bytes <n>              CPUOffload host-RAM budget in bytes. [16Gi]
   --dram <n>                   SharedStorage DRAM budget in bytes. [32Gi]
-  --disk-dev <name>            SharedStorage block device for io accounting (auto-derived
-                               from --shared-fs when omitted).
   --build                      Build any missing bench image before its run
                                (SharedStorage needs FS_BACKEND_DIR; gRPC via Dockerfile).
   --vllm-version <x.y.z>       Pin the vLLM base-image version for ALL four backends
@@ -129,7 +123,6 @@ EOF
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --device-pci)       DEVICE_PCI+=("$2"); shift 2;;
-        --shared-fs)        SHARED_FS="$2"; shift 2;;
         --model-fs)         MODEL_FS="$2"; shift 2;;
         --model)            MODEL="$2"; shift 2;;
         --num-convs)        NUM_CONVS="$2"; shift 2;;
@@ -143,7 +136,6 @@ while [[ $# -gt 0 ]]; do
         --evict-threshold)  EVICT_THRESH="$2"; shift 2;;
         --cpu-bytes)        CPU_BYTES="$2"; shift 2;;
         --dram)             DRAM="$2"; shift 2;;
-        --disk-dev)         DISK_DEV="$2"; shift 2;;
         --build)            DO_BUILD=1; shift;;
         --vllm-version)     VLLM_VERSION="$2"; shift 2;;
         --only)             ONLY="$2"; shift 2;;
@@ -221,16 +213,23 @@ NVME_BDFS="${DEVICE_PCI[*]}"
 CONFIG_SH="${REPO_ROOT}/tools/configure-bench.sh"
 HUGEPAGES_1G_TARGET="${CERTUS_HUGEPAGES:-16}"   # configure-bench.sh certus default
 HUGEPAGES_1G_NODE="${RESOURCE_NUMA:-0}"
-# SharedStorage uses the RAID0/XFS that configure-bench.sh builds on the shared
-# NVMe group ($NVME_BDFS), unless overridden. These MUST NOT collide with any
-# other array on the host: on this bench box /dev/md0 // /mnt/fs-backend-bench is
-# a separate persistent model-fs RAID (the build/HF-cache store), so the shared
-# group's RAID defaults to md1 // /mnt/ss-kv with a distinct XFS label. certus'
-# teardown_raid_if_active is driven by these same values (forwarded below), so it
-# only ever stops the shared-group RAID — never the model-fs md0.
-[[ -z "$SHARED_FS" ]] && SHARED_FS="/mnt/ss-kv"
-[[ -z "$DISK_DEV"  ]] && DISK_DEV="md1"
-SS_XFS_LABEL="${SS_XFS_LABEL:-sskv}"
+# The shared NVMe group ($NVME_BDFS) is reconfigured into a RAID0/XFS for
+# SharedStorage and vfio for Certus-SPDK. The RAID's device/mount/label are chosen
+# automatically (no flags) so they can never collide with another array on the host
+# — e.g. a separate persistent model-fs RAID at /dev/md0 // /mnt/fs-backend-bench:
+#   device — reuse whatever is already mounted at the SharedStorage mountpoint (a
+#            leftover from an interrupted run), else the lowest /dev/mdN that does
+#            not yet exist (md0 taken by model-fs -> md1, and so on);
+#   mount  — a dedicated SharedStorage mountpoint nothing else uses;
+#   label  — a distinct XFS label.
+# certus' teardown_raid_if_active acts on these same values (forwarded below), so it
+# only ever stops the shared-group RAID — never the model-fs array.
+SHARED_FS="/mnt/ss-kv"
+SS_XFS_LABEL="sskv"
+DISK_DEV="$(findmnt -no SOURCE --target "$SHARED_FS" 2>/dev/null | xargs -r basename)"
+if [[ -z "$DISK_DEV" ]]; then
+    _n=0; while [[ -e "/dev/md${_n}" ]]; do _n=$((_n + 1)); done; DISK_DEV="md${_n}"
+fi
 
 # Reconfigure the shared NVMe group for a phase via tools/configure-bench.sh.
 #   sharedstorage -> kernel nvme + RAID0/XFS at $SHARED_FS
