@@ -504,7 +504,7 @@ if want certus-spdk; then
     if [[ ${#DEVICE_PCI[@]} -eq 0 ]]; then
         cs_skip="no --device-pci given (Certus-SPDK server needs an NVMe device)"
     elif [[ ! -x "$SERVER_BIN" ]]; then
-        cs_skip="server binary not built at ${SERVER_BIN} (cargo build --release -p certus-server-yaml)"
+        cs_skip="server binary not built at ${SERVER_BIN} (cargo build --release -p certus-server-yaml --features rw-telemetry)"
     fi
     if [[ -z "$cs_skip" ]] && ! img_exists_grpc "$IMG_GRPC"; then
         if [[ "$DO_BUILD" -eq 1 ]]; then
