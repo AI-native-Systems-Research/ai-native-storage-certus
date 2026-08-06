@@ -221,9 +221,16 @@ NVME_BDFS="${DEVICE_PCI[*]}"
 CONFIG_SH="${REPO_ROOT}/tools/configure-bench.sh"
 HUGEPAGES_1G_TARGET="${CERTUS_HUGEPAGES:-16}"   # configure-bench.sh certus default
 HUGEPAGES_1G_NODE="${RESOURCE_NUMA:-0}"
-# SharedStorage uses the RAID0/XFS that configure-bench.sh builds, unless overridden.
-[[ -z "$SHARED_FS" ]] && SHARED_FS="/mnt/fs-backend-bench"
-[[ -z "$DISK_DEV"  ]] && DISK_DEV="md0"
+# SharedStorage uses the RAID0/XFS that configure-bench.sh builds on the shared
+# NVMe group ($NVME_BDFS), unless overridden. These MUST NOT collide with any
+# other array on the host: on this bench box /dev/md0 // /mnt/fs-backend-bench is
+# a separate persistent model-fs RAID (the build/HF-cache store), so the shared
+# group's RAID defaults to md1 // /mnt/ss-kv with a distinct XFS label. certus'
+# teardown_raid_if_active is driven by these same values (forwarded below), so it
+# only ever stops the shared-group RAID — never the model-fs md0.
+[[ -z "$SHARED_FS" ]] && SHARED_FS="/mnt/ss-kv"
+[[ -z "$DISK_DEV"  ]] && DISK_DEV="md1"
+SS_XFS_LABEL="${SS_XFS_LABEL:-sskv}"
 
 # Reconfigure the shared NVMe group for a phase via tools/configure-bench.sh.
 #   sharedstorage -> kernel nvme + RAID0/XFS at $SHARED_FS
@@ -236,6 +243,9 @@ reconfigure() {  # mode
     log "reconfigure host -> ${mode} on [${NVME_BDFS}] (see reconfigure-${mode}.log)"
     sudo env \
         NVME_BDFS="$NVME_BDFS" \
+        MD_DEVICE="/dev/${DISK_DEV}" \
+        MOUNT_POINT="$SHARED_FS" \
+        XFS_LABEL="$SS_XFS_LABEL" \
         ${MEM_METHOD:+MEM_METHOD="$MEM_METHOD"} \
         ${CERTUS_HUGEPAGES:+CERTUS_HUGEPAGES="$CERTUS_HUGEPAGES"} \
         ${RESOURCE_NUMA:+RESOURCE_NUMA="$RESOURCE_NUMA"} \

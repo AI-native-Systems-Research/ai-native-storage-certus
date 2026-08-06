@@ -52,10 +52,14 @@ NVME_BDFS=(${NVME_BDFS:-"0000:61:00.0" "0000:62:00.0" "0000:63:00.0" "0000:64:00
 # CPUs on the resource NUMA node ($RESOURCE_NUMA). Node 0 = 0-15,32-47.
 NUMA_CPUS="${NUMA_CPUS:-0-15,32-47}"
 
-# RAID / filesystem
-MD_DEVICE="/dev/md0"
-MOUNT_POINT="/mnt/fs-backend-bench"
-XFS_LABEL="fs-bench"
+# RAID / filesystem. Env-overridable so the SharedStorage RAID can target a
+# device/mount/label distinct from any pre-existing array (e.g. a separate
+# model-fs RAID that already occupies /dev/md0 // /mnt/fs-backend-bench). The
+# certus-mode teardown (bind_to_vfio -> teardown_raid_if_active) acts on these
+# same vars, so overriding them keeps certus from tearing down an unrelated array.
+MD_DEVICE="${MD_DEVICE:-/dev/md0}"
+MOUNT_POINT="${MOUNT_POINT:-/mnt/fs-backend-bench}"
+XFS_LABEL="${XFS_LABEL:-fs-bench}"
 
 # Memory cap. `mem=32G` truncates total physical RAM to 32 GiB; because node 0
 # occupies the low addresses, all 32G lands on node 0 and node 1 gets 0 MB — so
