@@ -239,6 +239,19 @@ fi
 reconfigure() {  # mode
     local mode="$1"
     local f="${LOGDIR}/reconfigure-${mode}.log"
+    # The 1G hugepage BOOT reservation is global host state and must satisfy the
+    # most-demanding selected variant. Certus-SPDK needs CERTUS_HUGEPAGES reserved
+    # at boot; SharedStorage needs none and normally sets hugepages=0. But in a
+    # combined run the phases go certus -> free -> sharedstorage, so letting the
+    # sharedstorage phase write 0 clobbers the reservation the certus phase just
+    # set — and the required "reboot once and re-run" can then never get its pool
+    # (it re-skips and re-writes 0, forever). Pin the sharedstorage phase's boot
+    # count to CERTUS_HUGEPAGES whenever certus-spdk is also selected; its runtime
+    # pages are still released (free_1g_hugepages) so SharedStorage's RAM is fair.
+    local hp_env=()
+    if [[ "$mode" == "sharedstorage" ]] && want certus-spdk; then
+        hp_env=(SS_HUGEPAGES="${CERTUS_HUGEPAGES:-16}")
+    fi
     log "reconfigure host -> ${mode} on [${NVME_BDFS}] (see reconfigure-${mode}.log)"
     sudo env \
         NVME_BDFS="$NVME_BDFS" \
@@ -247,6 +260,7 @@ reconfigure() {  # mode
         XFS_LABEL="$SS_XFS_LABEL" \
         ${MEM_METHOD:+MEM_METHOD="$MEM_METHOD"} \
         ${CERTUS_HUGEPAGES:+CERTUS_HUGEPAGES="$CERTUS_HUGEPAGES"} \
+        "${hp_env[@]}" \
         ${RESOURCE_NUMA:+RESOURCE_NUMA="$RESOURCE_NUMA"} \
         "$CONFIG_SH" "$mode" > "$f" 2>&1
 }

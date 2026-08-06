@@ -72,7 +72,12 @@ TOTAL_USABLE_GIB="${TOTAL_USABLE_GIB:-32}"  # GiB usable on node $RESOURCE_NUMA 
 
 # Hugepages (1 GiB pages)
 CERTUS_HUGEPAGES="${CERTUS_HUGEPAGES:-16}"  # 16 GiB SPDK DRAM tier on node $RESOURCE_NUMA
-SS_HUGEPAGES=0           # all regular memory for page cache
+# SharedStorage needs no boot-reserved hugepages (all RAM -> page cache), so the
+# default is 0. Overridable: when SharedStorage runs in the same invocation as
+# Certus-SPDK, the orchestrator sets this to CERTUS_HUGEPAGES so this phase does
+# not clobber the boot reservation Certus-SPDK requires (its runtime pages are
+# still released via free_all_hugepages, so page cache is unaffected this run).
+SS_HUGEPAGES="${SS_HUGEPAGES:-0}"
 
 # DPDK single-allocation ceiling. spdk_zmalloc -> rte_malloc cannot return a
 # block spanning more than one memseg list (RTE_MAX_MEM_MB_PER_LIST), so a
