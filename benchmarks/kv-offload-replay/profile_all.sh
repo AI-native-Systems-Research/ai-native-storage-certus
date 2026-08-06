@@ -49,7 +49,12 @@ MAX_MODEL_LEN=8192
 MAX_NUM_SEQS=64
 GPU_MEM_UTIL=0.90
 GPU="all"
-MEM_TIER_SIZE="32G"
+# The DRAM tier is a single contiguous spdk_zmalloc from the reserved 1G hugepage
+# pool (CERTUS_HUGEPAGES, default 16 — configure-bench.sh sizes the pool to leave
+# node-0 RAM for vLLM). It cannot exceed the pool, and DPDK keeps ~1 page of it for
+# its own heap, so a request equal to the pool returns NULL ("insufficient
+# hugepages"). Default to pool-minus-1 so a plain run fits; override to taste.
+MEM_TIER_SIZE="${MEM_TIER_SIZE:-$(( ${CERTUS_HUGEPAGES:-16} - 1 ))G}"
 EVICT_THRESH="0.6"
 CPU_BYTES=$((16 * (1 << 30)))
 DRAM=$((32 * (1 << 30)))
