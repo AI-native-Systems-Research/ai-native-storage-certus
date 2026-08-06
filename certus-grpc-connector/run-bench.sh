@@ -94,7 +94,10 @@ hf_env=()
 # ── HF cache mount (only if the dir exists) ──
 cache_mount=()
 if [[ -d "${HF_CACHE}" ]]; then
-    cache_mount+=(-v "${HF_CACHE}:/root/.cache/huggingface")
+    # :z lets rootless podman relabel the cache to a shared container SELinux
+    # context. Without it, a cache on a freshly-formatted/relabeled fs is
+    # unlabeled_t and the container is denied (EPERM statting CACHEDIR.TAG).
+    cache_mount+=(-v "${HF_CACHE}:/root/.cache/huggingface:z")
 else
     echo "warning: HF cache dir ${HF_CACHE} missing — model will download fresh." >&2
 fi

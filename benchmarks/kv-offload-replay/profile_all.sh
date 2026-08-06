@@ -442,7 +442,7 @@ run_container_bench() {  # variant image extra-args...
         -e "MAX_NUM_SEQS=${MAX_NUM_SEQS}" \
         -e "GPU_MEM_UTIL=${GPU_MEM_UTIL}" \
         -e "HF_HUB_OFFLINE=0" \
-        -v "${HF_CACHE}:/root/.cache/huggingface" \
+        -v "${HF_CACHE}:/root/.cache/huggingface:z" \
         "${extra[@]}" \
         "$image" 2>&1 | tee "$f"
     local rc="${PIPESTATUS[0]}"
