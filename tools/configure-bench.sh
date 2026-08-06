@@ -711,6 +711,23 @@ allocate_hugepages_node() {
     else
         echo -e "  ${GREEN}Allocated $actual × 1G hugepages on node $RESOURCE_NUMA${NC}"
     fi
+
+    # The certus-server (SPDK/DPDK) runs as the invoking user, NOT root — its uid
+    # must match the rootless container's vLLM process for CUDA IPC. DPDK creates a
+    # per-segment file under the hugetlbfs mount, so that mount has to be writable
+    # by that user or EAL dies with "get_seg_fd(): ... Permission denied". The vfio
+    # nodes are already opened to the user in bind_to_vfio; do the same for the
+    # hugepage dir here (root:root by default).
+    local hp_owner="${SUDO_USER:-}"
+    if [[ -n "$hp_owner" && "$hp_owner" != "root" ]]; then
+        local hp_mnt
+        hp_mnt=$(awk '$3=="hugetlbfs" && $4 ~ /pagesize=1024M/ {print $2; exit}' /proc/mounts)
+        [[ -z "$hp_mnt" ]] && hp_mnt=$(awk '$3=="hugetlbfs" {print $2; exit}' /proc/mounts)
+        if [[ -n "$hp_mnt" ]]; then
+            chown "$hp_owner" "$hp_mnt" \
+                && echo "  Owner of $hp_mnt: $hp_owner (SPDK runs as this user)"
+        fi
+    fi
 }
 
 # Free ALL 1G hugepages (all nodes) at runtime — for sharedstorage, which wants
