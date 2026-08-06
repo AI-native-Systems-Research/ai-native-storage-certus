@@ -1054,7 +1054,7 @@ main() {
     if [[ "$mode" == "certus" ]]; then
         echo "  Certus server should use:"
         echo "    --pci-allowlist ${NVME_BDFS[0]},${NVME_BDFS[1]},${NVME_BDFS[2]},${NVME_BDFS[3]}"
-        echo "    --memory-tier-size $((CERTUS_HUGEPAGES))G"
+        echo "    --memory-tier-size $((CERTUS_HUGEPAGES - DPDK_HUGEPAGE_OVERHEAD_GIB))G"
     else
         echo "  SharedStorage KV path:"
         echo "    $MOUNT_POINT/shared-kv"
