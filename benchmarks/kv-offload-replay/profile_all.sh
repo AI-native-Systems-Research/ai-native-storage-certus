@@ -538,8 +538,18 @@ if want certus-spdk; then
     else
         dev_flags=()
         for d in "${DEVICE_PCI[@]}"; do dev_flags+=(--device-pci "$d"); done
-        log "starting Certus-SPDK server: ${dev_flags[*]} --memory-tier-size ${MEM_TIER_SIZE}"
-        "$SERVER_BIN" "${dev_flags[@]}" \
+        # Pin the whole server to the NVMe/hugepage NUMA node (HUGEPAGES_1G_NODE,
+        # normally node 0). The 1G pages and the NVMe group both live there; without
+        # this the SPDK reactor can land on the other socket and try to allocate the
+        # memory tier from that node's (empty) 1G pool — "set_mempolicy failed" +
+        # spdk_zmalloc failure. GPU access is NUMA-agnostic, so binding host CPU and
+        # memory to node 0 (everything but the GPU) is exactly what we want.
+        numa_prefix=()
+        if command -v numactl >/dev/null 2>&1; then
+            numa_prefix=(numactl "--cpunodebind=${HUGEPAGES_1G_NODE}" "--membind=${HUGEPAGES_1G_NODE}")
+        fi
+        log "starting Certus-SPDK server: ${dev_flags[*]} --memory-tier-size ${MEM_TIER_SIZE} (numa node ${HUGEPAGES_1G_NODE})"
+        "${numa_prefix[@]}" "$SERVER_BIN" "${dev_flags[@]}" \
             --memory-tier-size "$MEM_TIER_SIZE" \
             --memory-tier-eviction-threshold "$EVICT_THRESH" \
             --listen 0.0.0.0:50051 \
