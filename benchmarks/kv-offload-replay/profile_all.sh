@@ -362,7 +362,12 @@ if want sharedstorage || want certus-spdk; then
         done
         exit 1
     fi
-    if ! sudo -v; then
+    # Confirm we can sudo. `sudo -n true` succeeds without a tty when sudo is
+    # passwordless/NOPASSWD or already cached, so the whole run works headless
+    # (background, no controlling terminal). Only when that fails do we fall back
+    # to interactive `sudo -v`, which prompts once up front on hosts that require
+    # a password (and have a tty to type it into).
+    if ! sudo -n true 2>/dev/null && ! sudo -v; then
         echo "error: sudo is required to reconfigure the NVMe group via ${CONFIG_SH}" >&2
         exit 1
     fi
