@@ -138,7 +138,7 @@ header() { echo -e "\n${BOLD}=== $* ===${NC}"; }
 
 check_root() {
     if [[ $EUID -ne 0 ]]; then
-        error "This script must be run as root (use sudo)."
+        echo -e "${RED}error: this script must be run as root (use sudo).${NC}" >&2
         exit 1
     fi
 }
