@@ -55,7 +55,7 @@ so that the eviction policy is safe under concurrent workloads.
 ### Functional Requirements
 
 - **FR-001**: System MUST provide `create_pool()` returning a new, unique `PoolId`. Pool IDs are sequential starting from 0.
-- **FR-002**: System MUST provide `track(pool, key)` that registers a key in the given pool as most-recently-used and returns an opaque `EvictionHandle` for O(1) subsequent operations.
+- **FR-002**: System MUST provide `track(pool, key, semantics)` that registers a key in the given pool as most-recently-used and returns an opaque `EvictionHandle` for O(1) subsequent operations. The `semantics: BlockSemantics` argument carries per-block hints (e.g. `session_id`) for lineage-aware policies; this LRU policy accepts it for interface conformance but ignores it.
 - **FR-003**: System MUST provide `touch(handle)` that moves the referenced entry to most-recently-used position in O(1) time.
 - **FR-004**: System MUST provide `remove(handle)` that unlinks the referenced entry from the ordering in O(1) time.
 - **FR-005**: System MUST provide `identify_next_to_evict(pool)` that removes and returns the least-recently-used key from the pool in O(1) time, or `None` if the pool is empty.
@@ -79,6 +79,7 @@ so that the eviction policy is safe under concurrent workloads.
 - **EvictionKey** (`u64`): The cache key tracked for eviction ordering. Same underlying type as `CacheKey`.
 - **PoolId** (`u32`): Identifier for an independent eviction-tracking pool.
 - **EvictionHandle**: Opaque handle embedding `(pool_id, index)` returned by `track()` for O(1) touch/remove.
+- **BlockSemantics**: Per-block hint struct passed by value to `track()` (currently `session_id: SessionId`, `Default` yields `session_id = 0`). Ignored by this LRU policy; consumed by lineage-aware policies. Extensible without changing the `track` signature.
 - **EvictionPolicyError**: Error enum with variants `InvalidPool(PoolId)` and `InvalidHandle`.
 - **LruList**: Internal index-based doubly-linked list with free-list recycling.
 
