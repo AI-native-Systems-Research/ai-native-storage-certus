@@ -391,29 +391,35 @@ if [[ ! -f "$DATASET_HOST" ]]; then
     warn "dataset $DATASET_HOST not found on host (images bake their own copy; container runs are unaffected)"
 fi
 
-# GPU-free check (informational).
-if command -v nvidia-smi >/dev/null 2>&1; then
-    used="$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | sort -rn | head -1)"
-    if [[ -n "$used" && "$used" -gt 1024 ]]; then
-        warn "a GPU already has ${used} MiB in use — a stale process may starve the benchmark"
-    fi
-else
-    warn "nvidia-smi not found — cannot verify GPU availability"
-fi
-
-# Reap stale bench containers (the earlier GPU-pin foot-gun).
+# Reap stale bench containers (the earlier GPU-pin foot-gun). Match on IMAGE, not
+# just NAME: a bench container started without --name gets a random name (e.g.
+# "inspiring_swartz") that a name-only pattern misses, yet it still pins the GPU.
+# rm -f stops the container, releasing its GPU memory. Runs BEFORE the GPU-free
+# check below so that check only flags usage we did not just clear.
 reap() {
     local names ids
-    names="$(command podman ps -a --format '{{.ID}} {{.Names}}' 2>/dev/null | grep -E 'certus-(nooffload|cpu-offload|sharedstorage|grpc)-bench|-bench$' | awk '{print $1}')"
+    names="$(command podman ps -a --format '{{.ID}} {{.Names}} {{.Image}}' 2>/dev/null | grep -E 'certus-(nooffload|cpu-offload|sharedstorage|grpc)-bench' | awk '{print $1}')"
     if [[ -n "$names" ]]; then
         warn "reaping stale bench containers: $(echo "$names" | tr '\n' ' ')"
         echo "$names" | xargs -r command podman rm -f >/dev/null 2>&1
     fi
     # Same for the gRPC store.
-    ids="$(command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" ps -a --format '{{.ID}} {{.Names}}' 2>/dev/null | grep -E 'grpc-bench|-bench$' | awk '{print $1}')"
+    ids="$(command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" ps -a --format '{{.ID}} {{.Names}} {{.Image}}' 2>/dev/null | grep -E 'certus-grpc-bench|grpc-bench' | awk '{print $1}')"
     [[ -n "$ids" ]] && echo "$ids" | xargs -r command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" rm -f >/dev/null 2>&1
 }
 reap
+
+# GPU-free check — after reaping our own stale containers, so it only flags usage
+# from a foreign process (which we must not kill). Informational: warns, does not
+# abort — the benchmark may still fit, or the user may want to intervene.
+if command -v nvidia-smi >/dev/null 2>&1; then
+    used="$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | sort -rn | head -1)"
+    if [[ -n "$used" && "$used" -gt 1024 ]]; then
+        warn "a GPU still has ${used} MiB in use after reaping bench containers — a foreign process may starve the benchmark"
+    fi
+else
+    warn "nvidia-smi not found — cannot verify GPU availability"
+fi
 
 img_exists()      { command podman image exists "$1" >/dev/null 2>&1; }
 img_exists_grpc() { command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" image exists "$1" >/dev/null 2>&1; }
