@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use component_framework::define_component;
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_millis(2000);
+const DEFAULT_TIMEOUT: Duration = Duration::from_millis(5000);
 use interfaces::{
     BlockSemantics, CacheKey, DispatchMapError, IDispatchMap, IEvictionPolicy, IExtentManager,
     ILogger, LookupResult,
@@ -116,6 +116,12 @@ impl IDispatchMap for DispatchMapComponent {
     }
 
     fn lookup(&self, key: CacheKey) -> Result<LookupResult, DispatchMapError> {
+        // When this env var is set, report every key as absent so a caller can
+        // force cold-path behavior without tearing down the map.
+        if std::env::var("CERTUS_DISPATCH_BYPASS").is_ok() {
+            return Ok(LookupResult::NotExist);
+        }
+
         // The guard comes back held, so `write_ref == 0` still holds below: no
         // writer can claim the entry between the wait and our read reference.
         let (satisfied, mut inner) =
@@ -181,10 +187,6 @@ impl IDispatchMap for DispatchMapComponent {
             }
         }
 
-        if entry.read_ref > 0 {
-            entry.read_ref -= 1;
-        }
-
         if let Ok(logger) = self.logger.get() {
             logger.debug(&format!(
                 "dispatch-map: converted key {key} to storage at offset {offset}"
@@ -232,10 +234,7 @@ impl IDispatchMap for DispatchMapComponent {
         // unreferenced entry and each set `write_ref = 1` — two writers on one key,
         // invisible in the value because this is an assignment, not an increment.
         let (satisfied, mut inner) = self.state.wait_for(DEFAULT_TIMEOUT, |inner| {
-            inner
-                .entries
-                .get(&key)
-                .map_or(true, |e| e.read_ref == 0 && e.write_ref == 0)
+            inner.entries.get(&key).map_or(true, |e| e.write_ref == 0)
         });
 
         if !satisfied {
@@ -366,7 +365,7 @@ impl IDispatchMap for DispatchMapComponent {
             .entries
             .get(&key)
             .ok_or(DispatchMapError::KeyNotFound(key))?;
-        Ok(entry.size_blocks * 4096)
+        Ok(entry.size_blocks * 512)
     }
 
     fn oldest_keys(&self, n: usize) -> Vec<CacheKey> {
@@ -403,7 +402,7 @@ impl IDispatchMap for DispatchMapComponent {
                 size,
                 ssd_offset: None,
             },
-            size_blocks: size.div_ceil(4096),
+            size_blocks: size / 4096,
             read_ref: 0,
             write_ref: 1,
             eviction_handle,
@@ -517,7 +516,6 @@ impl IDispatchMap for DispatchMapComponent {
         match inner.entries.get(&key) {
             Some(entry) => {
                 entry.read_ref == 0
-                    && entry.write_ref == 0
                     && matches!(
                         entry.location,
                         Location::MemoryTier {

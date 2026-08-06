@@ -30,7 +30,7 @@ pub(crate) struct DispatchEntry {
     #[allow(dead_code)]
     pub size_blocks: u32,
     pub read_ref: u32,
-    pub write_ref: u32,
+    pub write_ref: u64,
     /// Handle into the eviction policy's ordering.
     pub eviction_handle: EvictionHandle,
     /// Number of times this entry has been reused (read hits).
