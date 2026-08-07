@@ -918,16 +918,20 @@ setup_raid() {
             # detects them and STOPS at an interactive "partition table exists ...
             # Continue creating array [y/N]?" prompt. profile_all.sh redirects this
             # command's output to a log, so that prompt is invisible and the whole
-            # run looks hung. wipefs removes the trigger; `yes |` auto-confirms any
-            # residual prompt so the create is fully non-interactive.
+            # run looks hung. wipefs removes the trigger; the `<<<"y"` here-string is
+            # a harmless fallback that auto-confirms any residual prompt.
+            # NB: do NOT pipe `yes |` here — under `set -o pipefail`, `yes` dies with
+            # SIGPIPE (141) when mdadm closes the pipe, and that non-zero propagates
+            # through the pipeline, tripping `set -e` right after the array starts
+            # (before mkfs/mount). A here-string has no such pipe.
             for _d in "${blkdevs[@]}"; do
                 wipefs -a "$_d" 2>/dev/null || true
             done
-            yes | mdadm --create "$MD_DEVICE" \
+            mdadm --create "$MD_DEVICE" \
                 --level=0 \
                 --raid-devices=${#blkdevs[@]} \
                 --chunk=512K \
-                "${blkdevs[@]}"
+                "${blkdevs[@]}" <<<"y"
             echo "  Created $MD_DEVICE (RAID0, 512K chunks, ${#blkdevs[@]} devices)"
 
             # Format with XFS
