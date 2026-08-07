@@ -1,23 +1,26 @@
 #!/usr/bin/env bash
-# profile_all.sh — run the four KV-offload benchmark variants against the same
+# profile_all.sh — run the KV-offload benchmark variants against the same
 # 12-turn ShareGPT replay workload and emit a side-by-side throughput table.
 #
 # Variants (run in this order):
 #   NoOffload      GPU-only baseline                 (image certus-nooffload-bench)
 #   Certus-SPDK    gRPC client + certus-server-yaml  (image certus-grpc-bench + host server)
 #   CPUOffload     vLLM OffloadingConnector -> host RAM (image certus-cpu-offload-bench)
-#   SharedStorage  llmd_fs_backend RAID0/XFS         (image certus-sharedstorage-bench)
+#   SharedStorage  llmd_fs_backend on RAID0/XFS      (image certus-sharedstorage-bench)
+#                  vLLM <= 0.23 path (native tiering not yet available)
+#   Tiered-CPU-FS  vLLM TieringOffloadingManager: CPU primary + FS secondary
+#                  vLLM >= 0.23 path (reuses certus-cpu-offload-bench; FS tier on RAID0/XFS)
 #
 # Certus-SPDK runs first (of the storage backends) on purpose: it consumes the
 # boot-reserved 1G hugepage pool while it is still intact (no runtime realloc, no
 # reboot). Once it has run, the pool is released back to normal RAM (see
-# free_1g_hugepages) so the host-RAM backends (CPUOffload) and the XFS page cache
-# (SharedStorage) get that ~16 GiB back under mem=32G.
+# free_1g_hugepages) so the host-RAM backends (CPUOffload) and the RAID0/XFS
+# page cache (SharedStorage, Tiered-CPU-FS) get that ~16 GiB back under mem=32G.
 #
 # Each variant is preflighted independently: ready ones run, the rest are marked
 # SKIPPED with a reason. Missing bench images are built only when --build is
 # passed. The shared NVMe group (--device-pci) is reconfigured in-run between the
-# SharedStorage (kernel nvme + RAID0/XFS) and Certus-SPDK (vfio-pci + 1G hugepages)
+# FS backends (kernel nvme + RAID0/XFS) and Certus-SPDK (vfio-pci + 1G hugepages)
 # phases via tools/configure-bench.sh — so all storage backends use the SAME drives.
 # This is runtime-only (no reboot); a reboot is requested only if the 1G-hugepage
 # allocation falls short. Needs sudo (cached once, up front).
@@ -64,7 +67,7 @@ SLAB_SIZE_BYTES=2097152
 TENSOR_PARALLEL_SIZE=1
 SERVER_WAIT=180        # seconds to wait for the Certus-SPDK server port
 DO_BUILD=0
-VLLM_VERSION=""        # pin the vLLM base-image version for ALL four backends
+VLLM_VERSION="0.26.0"  # pin the vLLM base-image version for ALL backends (override with --vllm-version)
 ONLY=""
 SKIP=""
 LOGDIR=""
@@ -86,13 +89,13 @@ FS_BACKEND_DIR="${FS_BACKEND_DIR:-}"
 
 usage() {
     cat <<'EOF'
-profile_all.sh — run the four KV-offload benchmark variants and print one table.
+profile_all.sh — run the KV-offload benchmark variants and print one table.
 
 Flags (all optional; defaults shown):
   --device-pci <DDDD:BB:DD.F>   NVMe PCIe addr of the SHARED drive group (repeatable).
-                                Used for BOTH SharedStorage (RAID0/XFS) and Certus-SPDK
-                                (vfio/SPDK): the host is reconfigured onto this group
-                                between the two phases via tools/configure-bench.sh, so
+                                Used for BOTH the RAID0/XFS FS backends (SharedStorage,
+                                Tiered-CPU-FS) and Certus-SPDK (vfio/SPDK): the host is reconfigured onto this
+                                group between the two phases via tools/configure-bench.sh, so
                                 the storage backends compare on identical devices.
                                 [default 0000:61:00.0 0000:62:00.0 0000:63:00.0 0000:64:00.0]
   --model-fs <dir>              Filesystem for HF cache + gRPC podman store. [/mnt/certus1]
@@ -108,19 +111,23 @@ Flags (all optional; defaults shown):
   --gpu <sel>                  CDI GPU selector (all | 0 | 0,1 | <uuid>). [all]
   --memory-tier-size <sz>      Certus-SPDK server DRAM pool (e.g. 32G). [32G]
   --evict-threshold <f>        Certus-SPDK DRAM->SSD demotion threshold. [0.6]
-  --cpu-bytes <n>              CPUOffload host-RAM budget in bytes. [16Gi]
-  --dram <n>                   SharedStorage DRAM budget in bytes. [32Gi]
+  --cpu-bytes <n>              CPU tier size in bytes — CPUOffload tier, and the
+                               Tiered-CPU-FS PRIMARY tier (overflow spills to the FS tier). [16Gi]
+  --dram <n>                   SharedStorage DRAM budget (DRAM env). [32Gi]
   --build                      Build any missing bench image before its run
-                               (SharedStorage needs FS_BACKEND_DIR; gRPC via Dockerfile).
-  --vllm-version <x.y.z>       Pin the vLLM base-image version for ALL four backends
+                               (all images via their Dockerfiles). Tiered-CPU-FS
+                               reuses the CPUOffload image; SharedStorage builds
+                               certus-sharedstorage-bench (needs FS_BACKEND_DIR).
+  --vllm-version <x.y.z>       Pin the vLLM base-image version for ALL backends
                                (--build-arg VLLM_VERSION). Images are tagged
                                :vllm<x.y.z> so versions coexist. Implies the images
                                must be built at that version — pass --build too (or
-                               pre-build them). SharedStorage's compiled wheel ABI is
-                               auto-matched to the base image's torch on build.
+                               pre-build them). Tiered-CPU-FS needs the native
+                               TieringOffloadingSpec (vLLM >= 0.23); use SharedStorage
+                               on older. [default 0.26.0]
   --only a,b                   Run only these variants.
   --skip a,b                   Skip these variants.
-                               Names: nooffload, cpuoffload, sharedstorage, certus-spdk.
+                               Names: nooffload, cpuoffload, certus-spdk, sharedstorage, tiered-cpu-fs.
   --logdir <dir>               Output dir. [<model-fs>/kvprofile-<runid>]
   -h, --help                   This help.
 EOF
@@ -156,7 +163,7 @@ done
 # Reject unknown --only/--skip tokens up front. want() does substring-on-comma
 # matching, so a typo (e.g. --only cpu, --only certus) silently selects nothing and
 # that variant just never runs — fail loudly instead.
-VALID_VARIANTS="nooffload cpuoffload certus-spdk sharedstorage"
+VALID_VARIANTS="nooffload cpuoffload certus-spdk sharedstorage tiered-cpu-fs"
 for _list in "$ONLY" "$SKIP"; do
     [[ -z "$_list" ]] && continue
     IFS=',' read -ra _toks <<<"$_list"
@@ -362,7 +369,7 @@ mkdir -p "$LOGDIR" "$HF_CACHE" || { echo "error: cannot create logdir/HF cache" 
 # Reconfiguring the shared NVMe group (RAID0/XFS <-> vfio/hugepages) needs root.
 # Cache the sudo credential ONCE, up front — before any long-running work — but
 # only when a storage backend is actually selected.
-if want sharedstorage || want certus-spdk; then
+if want sharedstorage || want tiered-cpu-fs || want certus-spdk; then
     log "shared NVMe group for storage backends: [${NVME_BDFS}]"
     # Fail fast on a mistyped or absent PCI address: every device in the group must
     # exist in sysfs. Otherwise a bad BDF (e.g. a dropped domain digit, 000:61:00.0
@@ -602,7 +609,7 @@ fi
 # Certus-SPDK is the only backend that needs the boot-reserved 1G pool. Now that it
 # has run (and its server is stopped), release those ~16 GiB back to normal RAM so
 # the host-RAM backends below aren't starved under mem=32G. Runtime, no reboot.
-if want cpuoffload || want sharedstorage; then
+if want cpuoffload || want sharedstorage || want tiered-cpu-fs; then
     free_1g_hugepages
 fi
 
@@ -623,6 +630,8 @@ if want cpuoffload; then
 fi
 
 # ══ SharedStorage ═════════════════════════════════════════════════════════════
+# vLLM <= 0.23 path: llmd_fs_backend on kernel nvme + RAID0/XFS. (For 0.23+ prefer
+# the Tiered variant below, which uses vLLM's native TieringOffloadingManager.)
 # Runs AFTER Certus-SPDK (1G pool already released by free_1g_hugepages above): the
 # reconfigure rebinds the shared group from vfio-pci back to kernel nvme + RAID0/XFS.
 if want sharedstorage; then
@@ -681,6 +690,50 @@ if want sharedstorage; then
             -e "DRAM=${DRAM}" \
             -e "DISK_DEV=${dev}" \
             -e "SKIP_PREFLIGHT=1"
+    fi
+fi
+
+# ══ Tiered-CPU-FS (CPU primary + FS secondary) ═══════════════════════════════
+# vLLM 0.23+ path: the native TieringOffloadingManager — CPU tier as primary, a
+# filesystem tier as secondary. Reuses the CPUOffload image (same
+# OffloadingConnector); the only difference is SECONDARY_TIER=fs, which selects
+# TieringOffloadingSpec + the fs secondary written to FS_ROOT_DIR on the RAID0/XFS
+# group. Runs in the same kernel-nvme/RAID0 phase as SharedStorage (after
+# Certus-SPDK + free_1g_hugepages).
+if want tiered-cpu-fs; then
+    t_skip=""
+    # Native TieringOffloadingSpec requires vLLM >= 0.23 (SharedStorage covers older).
+    if [[ -n "$VLLM_VERSION" ]]; then
+        _mm="${VLLM_VERSION%.*}"
+        _min="$(printf '%s\n0.23\n' "$_mm" | sort -V | head -1)"
+        [[ "$_min" == "$_mm" && "$_mm" != "0.23" ]] && \
+            t_skip="Tiered-CPU-FS needs vLLM >= 0.23 (got ${VLLM_VERSION}); use SharedStorage for older"
+    fi
+    # Bring the shared group up as kernel nvme + RAID0/XFS at $SHARED_FS (the fs tier).
+    if [[ -z "$t_skip" ]] && ! reconfigure sharedstorage; then
+        t_skip="host reconfigure -> RAID0/XFS failed (see reconfigure-sharedstorage.log)"
+    elif [[ -z "$t_skip" && ! -d "$SHARED_FS" ]]; then
+        t_skip="'$SHARED_FS' not present after reconfigure (see reconfigure-sharedstorage.log)"
+    fi
+    # Reuses the CPUOffload image. Build it here if it is missing (e.g. --only tiered-cpu-fs).
+    if [[ -z "$t_skip" ]] && ! img_exists "$IMG_CPU"; then
+        if [[ "$DO_BUILD" -eq 1 ]] && ! build_simple "$IMG_CPU" Dockerfile.cpu-offload cpu-offload; then
+            t_skip="image ${IMG_CPU} build failed (see build-cpu-offload.log)"
+        elif [[ "$DO_BUILD" -ne 1 ]]; then
+            t_skip="image ${IMG_CPU} missing (pass --build)"
+        fi
+    fi
+    if [[ -n "$t_skip" ]]; then
+        record "Tiered-CPU-FS" "SKIPPED" "" "" "" "" "" "$t_skip" ""
+        warn "Tiered-CPU-FS SKIPPED: $t_skip"
+    else
+        # fs secondary-tier root on the RAID0/XFS group, mounted into the container.
+        mkdir -p "${SHARED_FS}/kv-tier"
+        run_container_bench "Tiered-CPU-FS" "$IMG_CPU" \
+            -v "${SHARED_FS}:/mnt/fs-tier:z" \
+            -e "CPU_BYTES=${CPU_BYTES}" \
+            -e "SECONDARY_TIER=fs" \
+            -e "FS_ROOT_DIR=/mnt/fs-tier/kv-tier"
     fi
 fi
 
