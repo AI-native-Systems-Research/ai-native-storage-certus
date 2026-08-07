@@ -18,14 +18,7 @@
 #       -v $HOME/.cache/huggingface:/root/.cache/huggingface \
 #       certus-grpc-bench
 
-# vLLM base-image version. Supported (built + smoke-tested): 0.20.0, 0.22.0,
-# 0.23.0, 0.24.0, 0.26.0. The connector self-adapts at RUN time via
-# certus_grpc_connector.compat (version detection + capability matrix) — this
-# arg only selects the base image, no code keys off it. Build another version:
-#   podman build --build-arg VLLM_VERSION=0.22.0 -f certus-grpc-connector/Dockerfile \
-#       -t certus-grpc-bench:vllm0.22 .
-ARG VLLM_VERSION=0.23.0
-FROM docker.io/vllm/vllm-openai:v${VLLM_VERSION}
+FROM docker.io/vllm/vllm-openai:v0.20.0
 ENTRYPOINT []
 
 # GPU is REQUIRED at run time: vLLM loads the model on the GPU and the connector
@@ -59,8 +52,7 @@ RUN chmod +x /usr/local/bin/certus-entrypoint
 ENV PYTHONUNBUFFERED=1 \
     CERTUS_SERVER=localhost:50051 \
     NUM_CONVS=450 \
-    MODEL=ibm-granite/granite-4.1-8b \
-    DTYPE=bfloat16 \
+    MODEL=NousResearch/Meta-Llama-3-8B \
     SLAB_SIZE_BYTES=2097152 \
     DATASET_PATH=/workspace/certus-connector/sharegpt_12turn_450.json \
     WORKLOAD=/workspace/certus-grpc-connector/run_multiturn_grpc_certus.py
