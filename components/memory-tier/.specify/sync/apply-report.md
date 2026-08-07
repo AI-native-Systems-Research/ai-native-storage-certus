@@ -74,3 +74,39 @@ pass.
 4. Reconcile `0.1.0` / `0.2.0` / `0.3.0` version strings against actual release history.
 5. Optionally fix `README.md`'s stale `lru.rs` description (outside spec-sync scope;
    plain doc edit).
+
+---
+
+# 2026-08-07 Sweep (branch `sync/spec-drift-sweep-20260807`) — NO_ACTION (verify + note)
+
+Mode: sweep re-analysis. Pacing: auto-apply safe BACKFILL; **defer HIGH
+architectural decisions**. Regenerated drift report: 30 aligned, 9 drifted.
+Every drifted item is already captured in the 2026-07-22 `align-tasks.md`
+with recorded remediation options awaiting **maintainer sign-off**, so this
+sweep applied **no new spec edits** and drafted **no code** — deliberately, per
+the standing rule that architectural decisions already tracked/deferred are not
+code bugs to draft.
+
+## Verified still-tracked (no new action taken)
+
+| Align-task | Severity | Status this sweep |
+|---|---|---|
+| sharding-not-implemented (FR-005/006/007, NFR-002, FR-013, FR-021, SC-3) | **High** | Still open. Spec's 16-way shard design vs. single unsharded `RwLock<Pool>`. Two options (implement / backfill-down) recorded; needs maintainer decision. **Not drafted** — architectural choice, not a mechanical bug fix. |
+| evict-lru-for-key-ignores-key (FR-014) | **High** | Still open. `evict_lru_for_key(key)` binds `_key` and is a pure alias for `evict_lru()` (`src/lib.rs:465-467`). Resolution is coupled to the sharding decision; **remains tracked pending maintainer sign-off**. |
+| creusot-proofs-absent (SC-8) | Medium | Still open. No Creusot artifacts exist; `imemory_tier.rs` doc comments still assert P4/P5/P10 "Verified" for behavior not in code. **SC-8 is a phantom "verified" claim** — flagged, not silently backfilled. |
+| version-mismatch (NFR-008) | Medium | Still open. `Cargo.toml` 0.1.0 / `define_component!` 0.3.0 / spec 0.2.0 unreconciled; not guessed. |
+| readme-source-layout-drift | Low | Still open. `README.md` describes a nonexistent `lru.rs`/`LruList`; outside `specs/**`. |
+
+## Why NO_ACTION
+
+Per sweep pacing, HIGH-severity items are only *drafted* when they are code
+**bugs** with a clear correct fix. The two HIGH memory-tier items
+(sharding, `evict_lru_for_key` key-ignore) are **design decisions** — whether
+sharding was intentionally dropped or is unfinished is exactly the open
+question the 2026-07-22 report refused to guess. Drafting either direction would
+pre-empt a maintainer architectural choice, so both are left tracked. The
+SC-8 phantom-Creusot claim and version mismatch likewise await the same
+decision. No spec was rewritten to match the single-pool reality this sweep.
+
+## Verification
+- No files modified this sweep for memory-tier (verify-only). Existing `align-tasks.md` remains the authoritative open-item list.

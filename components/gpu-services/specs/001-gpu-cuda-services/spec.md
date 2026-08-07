@@ -96,9 +96,15 @@ providing unpinned memory and verifying the check fails.
 1. **Given** an IPC handle referencing contiguous, pinned GPU memory,
    **When** the contiguity/pin check is performed, **Then** the check
    returns success.
-2. **Given** an IPC handle referencing non-contiguous or unpinned GPU
-   memory, **When** the check is performed, **Then** the component
-   returns a failure indicating which condition was not met.
+2. **Given** an IPC handle referencing memory that is not CUDA device
+   memory (e.g. host or unregistered memory), **When** the check is
+   performed, **Then** the component returns a failure. *(Backfilled
+   2026-08-07: the implemented check `check_memory_attributes`
+   (`src/memory.rs:26`) is a device-type check via
+   `cudaPointerGetAttributes` per FR-004; it does not separately diagnose
+   contiguity vs pin status. IPC-opened device memory is inherently
+   contiguous and pinned by the CUDA runtime, so a separate contiguity/pin
+   distinction is not required.)*
 
 ---
 
@@ -234,9 +240,15 @@ by a verification read-back.
   `unpin_memory` returns an error if the pointer is not in the pinned
   set. For IPC-imported memory, `unpin_memory` removes internal
   tracking only — CUDA unregistration is not needed since the memory
-  was registered in the originating process. For locally-pinned memory,
-  full CUDA unregistration is performed. As an optimization,
-  `pin_memory` MAY skip re-verification (via
+  was registered in the originating process. `unpin_memory` performs
+  tracking-removal only in all cases and never calls `cudaHostUnregister`;
+  there is no locally-pinned host-registration path in
+  `pin_memory`/`unpin_memory`. Full CUDA un/registration of *host* memory is
+  handled exclusively by `register_host_memory`/`unregister_host_memory`
+  (FR-015/FR-016). *(Backfilled 2026-08-07: prior wording claimed
+  `unpin_memory` performed full CUDA unregistration for locally-pinned
+  memory; the code has no such path — `src/lib.rs:249-267`.)* As an
+  optimization, `pin_memory` MAY skip re-verification (via
   `cudaPointerGetAttributes`) for pointers already present in the
   verified set, since verification is a prerequisite in the standard
   IPC workflow.
@@ -247,9 +259,18 @@ by a verification read-back.
   SPDK `DmaBuffer` instead (see spec 002).
 - **FR-007**: All operations MUST return descriptive errors on failure
   without panicking or leaking GPU/system resources.
-- **FR-008**: Component MUST expose all functionality exclusively
+- **FR-008**: Component MUST expose its interface-level operations
   through the `IGpuServices` interface defined in
-  `components/interfaces`.
+  `components/interfaces`. *Exception (clarified 2026-08-07):* the
+  `p2p`/GDRCopy DMA-buffer builders in the `dma` module
+  (`create_spdk_dma_buffer_from_gpu`/`_from_cuda_malloc`/
+  `_from_cuda_host_alloc`/`_from_gpu_bar`/`_from_phys`/`_from_bar_direct`,
+  and `get_phys_addr`) are intentionally `pub` module functions consumed
+  directly by the `gpu-p2p-server` binary (specs 002 FR-021..024 / 003),
+  not `IGpuServices` methods. The "exclusively through the interface"
+  scope applies to the CUDA-services operations of spec 001; the p2p
+  module helpers are a documented, deliberate exception. This resolves
+  the FR-008-vs-002/003 conflict noted in the 2026-08-07 drift report.
 - **FR-009**: Component build MUST be gated behind `--features gpu`
   feature flag.
 - **FR-010**: Component MUST include unit tests and Criterion benchmarks
@@ -364,6 +385,13 @@ by a verification read-back.
   `pci_bus_id` string.
 - **GpuIpcHandle**: Deserialized CUDA IPC memory handle enabling
   cross-process GPU memory sharing. Contains a raw pointer and size.
+  *(Note, 2026-08-07: the shared `interfaces::GpuIpcHandle` struct also
+  defines `verified`/`pinned` boolean fields with `set_*`/`is_*`
+  accessors (`components/interfaces/src/igpu_services.rs:63-118`). These
+  are **reserved for future use** and are not currently read or written
+  by this component, which tracks verified/pinned state in its own
+  `HashSet<usize>` sets (see GpuState). They are retained deliberately as
+  reserved API surface rather than removed.)*
 - **GpuDmaBuffer**: Buffer object (defined in `interfaces`) wrapping a
   GPU device pointer with custom free semantics, usable for
   GPU-memory-backed DMA transfers.

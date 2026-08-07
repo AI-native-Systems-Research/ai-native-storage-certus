@@ -1,39 +1,24 @@
 {
-  "generated": "2026-07-22T21:31:26Z",
+  "generated": "2026-08-07T15:29:55Z",
   "project": "example-helloworld",
   "summary": {
     "specs_analyzed": 1,
-    "requirements_checked": 10,
-    "aligned": 9,
-    "drifted": 1,
+    "aligned": 10,
+    "drifted": 0,
     "not_implemented": 0,
-    "unspecced_features": 0
+    "unspecced": 0,
+    "conflicts": 0
   },
   "specs": [
     {
       "id": "001-example-helloworld",
       "title": "Example Hello World Component",
+      "spec_path": "components/example-helloworld/specs/001-example-helloworld/spec.md",
       "aligned": [
-        "FR-1",
-        "FR-2",
-        "FR-3",
-        "FR-4",
-        "FR-5",
-        "FR-6",
-        "FR-7",
-        "NFR-1",
-        "NFR-2",
-        "NFR-3"
+        "FR-1", "FR-2", "FR-3", "FR-4", "FR-5", "FR-6", "FR-7",
+        "NFR-1", "NFR-2", "NFR-3"
       ],
-      "drifted": [
-        {
-          "requirement": "Implementation Notes / Testing claim: logger wiring demonstrated in apps/helloworld-mainline/",
-          "spec_text": "spec.md:99 \"A full integration example wiring this component with a logger lives in apps/helloworld-mainline/.\"; plan.md:63 \"Integration: The apps/helloworld-mainline/ application provides a full integration test with logger wiring.\"",
-          "actual": "apps/helloworld-mainline/src/main.rs instantiates GreeterHandler::new() (no logger); apps/helloworld-mainline/Cargo.toml does not depend on the logger crate at all. No logger wiring exists in the app.",
-          "location": "apps/helloworld-mainline/src/main.rs:26; apps/helloworld-mainline/Cargo.toml:8-10",
-          "severity": "medium"
-        }
-      ],
+      "drifted": [],
       "not_implemented": []
     }
   ],

@@ -1,0 +1,78 @@
+{
+  "generated": "2026-08-07",
+  "based_on": "drift-report 2026-08-07",
+  "component": "block-device-filesys",
+  "branch": "sync/spec-drift-sweep-20260807",
+  "backups": ".specify/sync/backups/20260807T160256Z/",
+  "proposals": [
+    {
+      "id": "filesys-2026-08-07-1",
+      "requirement": "telemetry-latency / FR-019",
+      "direction": "ALIGN",
+      "severity": "major",
+      "confidence": "HIGH",
+      "approved": true,
+      "status": "DRAFTED_ON_BRANCH",
+      "spec_says": "telemetry reports real per-op min/max/mean latency",
+      "code_did": "record_op(0, bytes) at every site; InflightOp.start_ns used Instant::now().elapsed() on a fresh instant",
+      "resolution": "InflightOp.start_ns:u64 -> gated start:Instant; Instant::now() at submit; start.elapsed() at all 5 sync/fallback sites + async completion",
+      "files": ["src/actor.rs"],
+      "note": "Drafted on branch per user decision 'Telemetry latency = Draft code fix (all)'. Latency-accuracy test still deferred."
+    },
+    {
+      "id": "filesys-2026-08-07-2",
+      "requirement": "IBlockDevice::Command::FlushSync",
+      "direction": "ALIGN",
+      "severity": "high",
+      "confidence": "HIGH",
+      "approved": true,
+      "status": "DRAFTED_ON_BRANCH",
+      "spec_says": "(new shared command not previously in this spec)",
+      "code_did": "command match was non-exhaustive; crate failed to compile (E0004) at HEAD",
+      "resolution": "Add Command::FlushSync{ns_id} arm: validate ns_id==1, issue real fdatasync(2) on backing fd, map failure to WriteFailed, return FlushDone",
+      "files": ["src/actor.rs"],
+      "note": "DISCOVERED PRE-EXISTING BREAKAGE beyond planned telemetry scope. Unnoticed because block-device-filesys is a workspace member but not a default-member. Filesys can fall back to buffered IO so a real fdatasync (not a no-op) is required. Needs reviewer confirmation of the barrier contract."
+    },
+    {
+      "id": "filesys-2026-08-07-3",
+      "requirement": "FR-015",
+      "direction": "BACKFILL",
+      "severity": "moderate",
+      "confidence": "HIGH",
+      "approved": true,
+      "status": "APPLIED",
+      "spec_says": "create(), DeviceConfig, and open_or_create_backing_file have doc examples",
+      "code_did": "open_or_create_backing_file has prose doc only, no runnable example; interface/lifecycle methods covered by integration tests",
+      "resolution": "Soften FR-015: carve out open_or_create_backing_file alongside interface/lifecycle methods; create()/DeviceConfig::new retain examples",
+      "files": ["specs/001-block-device-filesys/spec.md"],
+      "note": "Supersedes the 2026-07-22 FR-015-doc-examples align-task via spec-softening rather than adding examples."
+    },
+    {
+      "id": "filesys-2026-08-07-4",
+      "requirement": "FR-021 (new) / FR-022 (new) / US2 scenario 1",
+      "direction": "BACKFILL",
+      "severity": "low",
+      "confidence": "HIGH",
+      "approved": true,
+      "status": "APPLIED",
+      "spec_says": "(device-info surface + FlushSync omitted)",
+      "code_did": "numa_node()==-1, nvme_version()==\"N/A (file-backed)\", num_io_queues()==1, max_transfer_size()==block_size*256; FlushSync fdatasync handler",
+      "resolution": "Add FR-021 (device-info placeholders), FR-022 (FlushSync fdatasync); extend US2 acceptance scenario",
+      "files": ["specs/001-block-device-filesys/spec.md"]
+    },
+    {
+      "id": "filesys-2026-08-07-5",
+      "requirement": "dead pub(crate) setters",
+      "direction": "ALIGN",
+      "severity": "low",
+      "confidence": "MEDIUM",
+      "approved": false,
+      "status": "QUEUED_NOT_DRAFTED",
+      "spec_says": "(public path is create(); setters not part of API)",
+      "code_did": "set_file_path/set_block_size/set_num_blocks are #[allow(dead_code)] pub(crate) and unused",
+      "resolution": "Either remove (and drop the allow) or document/wire intended internal use",
+      "files": ["src/lib.rs:95", "src/lib.rs:101", "src/lib.rs:107"],
+      "note": "Do NOT auto-remove — possible intended internal-configuration API. API-intent decision."
+    }
+  ]
+}

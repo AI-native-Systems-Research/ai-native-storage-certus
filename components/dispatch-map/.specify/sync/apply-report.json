@@ -1,0 +1,24 @@
+{
+  "applied_at": "2026-08-07T14:55:33Z",
+  "based_on": "proposals from 2026-08-06T23:27:50Z",
+  "backups": ".specify/sync/backups/20260807T145533Z/",
+  "specs_updated": [
+    { "spec": "001-dispatch-map", "requirement": "FR-014", "change": "modified", "direction": "BACKFILL" },
+    { "spec": "001-dispatch-map", "requirement": "SC-004", "change": "modified", "direction": "BACKFILL" },
+    { "spec": "001-dispatch-map", "requirement": "US2-AS4", "change": "modified", "direction": "BACKFILL" },
+    { "spec": "001-dispatch-map", "requirement": "US12", "change": "added", "direction": "BACKFILL" },
+    { "spec": "001-dispatch-map", "requirement": "FR-027", "change": "added", "direction": "BACKFILL" },
+    { "spec": "001-dispatch-map", "requirement": "FR-028", "change": "added", "direction": "BACKFILL" },
+    { "spec": "001-dispatch-map", "requirement": "contracts/idispatch_map.md", "change": "added", "direction": "BACKFILL" }
+  ],
+  "new_specs": [],
+  "align_tasks": [
+    { "requirement": "FR-012", "summary": "initialize() must return Err(NotInitialized) instead of panicking on unbound IEvictionPolicy", "effort": "small" },
+    { "requirement": "US1-AS3", "summary": "Add null-pointer guard + DispatchMapError::NullPointer to create_memory_tier_entry", "effort": "small" },
+    { "requirement": "reuse_count", "summary": "Remove dead hot-path reuse_count field and fetch_add sites", "effort": "small" },
+    { "requirement": "creusot-verification-claims", "summary": "Correct/soften P1-P10 comment referencing non-existent verif/ directory", "effort": "small-medium" }
+  ],
+  "not_applied": [],
+  "tasks_file": ".specify/sync/align-tasks.md",
+  "report_file": ".specify/sync/apply-report.md"
+}

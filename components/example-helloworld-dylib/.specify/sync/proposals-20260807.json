@@ -1,0 +1,25 @@
+{
+  "generated": "2026-08-07",
+  "branch": "sync/spec-drift-sweep-20260807",
+  "component": "example-helloworld-dylib",
+  "based_on": "drift-report.{json,md} (2026-08-07T15:29:55Z)",
+  "mode": "interactive",
+  "summary": { "backfill": 0, "human_decision": 0, "align_queued": 1, "no_action": 0 },
+  "proposals": [
+    {
+      "id": "dylib-001-FR-4-doccomment",
+      "spec": "001-example-helloworld-dylib",
+      "requirement": "FR-4 / Overview",
+      "direction": "ALIGN",
+      "confidence": "HIGH",
+      "spec_says": "Each side statically embeds its own rlib copy; no shared .so linkage; TypeId equality is a same-rustc compile-time property (FR-4 corrected in the 2026-07-22 run).",
+      "code_does": "Module doc comment src/lib.rs:4-7 still claims the dylib and host 'dynamically link the same shared libraries' — stale, contradicts the corrected spec.",
+      "resolution": "Rewrite src/lib.rs:4-7 to match the spec (static rlib embedding; same-rustc TypeId identity). Doc-only, no logic change.",
+      "pacing": "Non-HIGH ALIGN — QUEUED as align-tasks Task 2, not drafted.",
+      "approved": true,
+      "applied": false,
+      "queued_as": "align-tasks.md Task 2"
+    }
+  ],
+  "notes": "Spec text is already correct; the single drift is spec->code (source comment). No spec BACKFILL applied this sweep."
+}

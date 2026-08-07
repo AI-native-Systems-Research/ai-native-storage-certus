@@ -58,6 +58,8 @@ pub enum DispatchMapError {
 | `oldest_keys` | `(&self, n: usize) -> Vec<CacheKey>` | Delegates to `IEvictionPolicy::get_eviction_candidates(pool, n)`; returns up to `n` keys oldest-first. Used by the dispatcher's eviction logic to select victims. |
 | `entry_size` | `(&self, key: CacheKey) -> Result<u32, DispatchMapError>` | Returns the stored size in block-aligned bytes (`size_blocks * 4096`) without acquiring any reference. Error (`KeyNotFound`) if key not found. |
 | `recover_extent` | `(&self, key: CacheKey, offset: u64, size_blocks: u32) -> Result<(), DispatchMapError>` | Directly inserts a `BlockDevice` entry and registers it with `IEvictionPolicy`, for incremental recovery. Error (`AlreadyExists`) if key already present. |
+| `set_checksum` *(feature `integrity-check`)* | `(&self, key: CacheKey, checksum: u32) -> Result<(), DispatchMapError>` | Records a CRC-32 on the entry so it travels with the index across demote/promote. Error (`KeyNotFound`) if key absent. Present only under the `integrity-check` feature. |
+| `get_checksum` *(feature `integrity-check`)* | `(&self, key: CacheKey) -> Option<u32>` | Returns the recorded CRC-32, or `None` if the key is absent or no checksum recorded (a stored `0` is treated as unset). Present only under the `integrity-check` feature. |
 
 ## Invariants
 

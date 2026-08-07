@@ -2,9 +2,15 @@
 
 **Feature Branch**: `002-remote-lookup-rdma`
 **Created**: 2026-07-12
-**Status**: Synced (2026-07-22) — implementation matches this spec (see
-`.specify/sync/drift-report.md`); two prior low-severity drift items (FR-023, FR-009) were
-backfilled into the text below on that date.
+**Status**: Synced (2026-07-22; re-swept 2026-08-07 on branch `sync/spec-drift-sweep-20260807`)
+— implementation matches this spec (see `.specify/sync/drift-report.md`); two prior
+low-severity drift items (FR-023, FR-009) were backfilled into the text below on 2026-07-22.
+The 2026-08-07 sweep backfilled five previously-unspecced, load-bearing behaviors as FR-030…FR-034
+(caller-wait / background-continue, orphan force-reclaim backstop, orphan-reuse guard, extra
+`LookupConfig` fields, and the `integrity-check` feature). Two code-side items were left as ALIGN
+tasks (not applied): the stale `src/lib.rs` module/`batch_lookup` docstrings that still claim the
+protocol is unbuilt (FR-001 doc-drift, Medium), and the missing log on unknown wire frames
+(FR-018, Low). See `.specify/sync/align-tasks.md` and `apply-report.md`.
 **Supersedes**: `001-remote-lookup-placeholder` (placeholder implementation)
 **Input**: Refresh of the remote-lookup design against the two now-built RDMA components
 (`remote-lookup-rdma-initiator`, `remote-lookup-rdma-responder`). The remote-lookup
@@ -438,6 +444,38 @@ one-sided write into a reclaimed slot).
     worker thread (in that order, so the worker's channel closes deterministically once the actor —
     the sole sender — has exited). Idempotent and safe to call before `initialize`; also invoked
     from `Drop`.
+
+- **FR-030** *(Backfilled 2026-08-07 — documents implemented behavior beyond FR-020.)* The
+  `LookupConfig.caller_wait` knob MUST decouple how long the calling thread blocks from the
+  operation's own `op_deadline`. When set, `batch_lookup` MAY return to its caller (with the
+  results known so far) while the underlying operation continues running in the actor to
+  completion — a key resolved after the caller returns is still published to the local memory
+  tier. This is a deliberate extension of FR-020 ("blocks until its operation finalizes"): the
+  operation still finalizes on the FR-012 criteria; only the *caller's* blocking window is
+  shortened. Tested in `tests/mesh.rs`.
+
+- **FR-031** *(Backfilled 2026-08-07 — documents a memory-safety backstop beyond FR-014.)* In
+  addition to the departure-triggered teardown-before-reclaim of FR-014, the actor MUST run a
+  timer-driven force-reclaim backstop (`LookupConfig.connection_teardown_timeout`, `tick_orphans`)
+  for a peer that neither reports a late RDMA_STATUS nor emits a zyre `Exit`. When the timeout
+  elapses for an orphaned landing slot, the actor force-tears-down the connection and reclaims the
+  slot, so a silently-vanished peer cannot pin a slot indefinitely. Tested in `tests/mesh.rs`.
+
+- **FR-032** *(Backfilled 2026-08-07 — memory-safety detail, previously unspecced.)* The actor
+  MUST NOT re-reserve a key whose landing slot is currently orphaned (awaiting teardown/reclaim);
+  the orphan-reuse guard prevents a new fetch from aliasing DRAM that a late one-sided write from
+  the prior peer could still touch. This complements FR-014/FR-031.
+
+- **FR-033** *(Backfilled 2026-08-07 — completes the FR-022 configuration surface.)* Beyond the
+  quorum/phase-1/deadline/retry-cap/max-keys knobs of FR-022, `LookupConfig` MUST also carry
+  `actor_cpu` (best-effort NUMA/CPU pinning of the actor thread), `discovery` (zyre gossip
+  discovery configuration), and `node_endpoint` (the advertised node endpoint). All derive sensible
+  defaults per FR-022's `Default` contract.
+
+- **FR-034** *(Backfilled 2026-08-07 — build plumbing, previously unspecced.)* The crate MUST expose
+  an `integrity-check` Cargo feature that forwards to `interfaces/integrity-check`, enabling the
+  checksum accessors on cache values. This is build configuration with no runtime-behavior
+  requirement of its own.
 
 ### Key Entities
 

@@ -6,6 +6,21 @@
 **Status**: Active
 **Source**: Generated from implementation, updated for index-free key-vector design
 
+> **Last Synced 2026-08-07** (spec-drift-sweep, branch `sync/spec-drift-sweep-20260807`):
+> - FR-030 corrected — the `volatile_write_cache` feature now reads "enabled = issue
+>   flush" (was inverted: "compiled out when enabled"). As shipped the feature does not
+>   compile (`BlockDeviceClient::flush()` missing; `Command::FlushSync`/`Completion::FlushDone`
+>   absent from the interfaces crate). A cross-crate compile fix is drafted on the branch and
+>   an align-task is queued in `.specify/sync/align-tasks.md`; add a CI job building
+>   `--features volatile_write_cache`.
+> - FR-032 corrected to "usable data capacity" (matches code + interfaces-crate wording).
+> - FR-036 clarified — `data_base_lba` is caller-consumed; the component does no data-device I/O.
+> - FR-016 remediation applied in code (stale "five minutes" doc strings → 30 seconds).
+> - Four benign unspecced helpers documented (see "Additional Support Surface").
+> - Informational (not fixed here): `plan.md`/`tasks.md`/`README.md` still reference a
+>   `block_device` receptacle, a `v2/` source path, and CERTUSV5/v5 — spec.md and code
+>   agree on CERTUSV4 / FORMAT_VERSION 6. Refresh those planning docs separately.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Two-Phase Extent Allocation (Priority: P1)
@@ -412,20 +427,29 @@ again to verify the old slot is now reusable.
 - **FR-029**: The component MUST provide a `set_dma_alloc(alloc)` method
   for overriding the DMA memory allocator.
 - **FR-030**: The component supports a `volatile_write_cache` feature
-  gate that controls whether `BlockDeviceClient::flush()` calls are
-  issued to the metadata device. When enabled, flush calls in
-  checkpoint and format paths are conditionally compiled out,
-  improving performance on devices with volatile write caches where
-  the caller accepts the associated durability risk.
+  gate that controls whether explicit flush commands are issued to the
+  metadata device. When **enabled**, the component issues a
+  `BlockDeviceClient::flush()` to the metadata device after checkpoint
+  writes (and in the format path), forcing data onto non-volatile media
+  at a throughput cost — appropriate for devices whose write cache is
+  volatile and where durability must be guaranteed once `checkpoint()`
+  returns. When **disabled** (the default), no explicit flush is issued,
+  improving performance where the caller accepts the associated
+  durability risk. (Implementation status 2026-08-07: this feature does
+  not yet compile — see the Sync note at the top of this spec and
+  `.specify/sync/align-tasks.md`.)
 - **FR-036**: The component MUST provide
   `set_metadata_base_lba(base_lba: u64)`, `set_data_base_lba(base_lba:
   u64)`, and `data_base_lba() -> u64` methods on `IExtentManager` for
   partition-relative addressing. These let the component operate on
   a sub-range (partition) of an NVMe namespace rather than owning an
   entire namespace: `metadata_base_lba` shifts all metadata-device
-  I/O (superblock, checkpoint regions) by the given LBA offset, and
-  `data_base_lba` shifts all data-device I/O similarly. Both default
-  to `0` (whole-namespace addressing) until explicitly set. Used by
+  I/O (superblock, checkpoint regions) by the given LBA offset.
+  `data_base_lba` is a caller-consumed configuration value: the
+  component stores and returns it but performs **no** data-device I/O
+  itself — the `dispatcher`/`dispatcher-p2p` owns the data path and
+  applies the offset when addressing extents. Both default to `0`
+  (whole-namespace addressing) until explicitly set. Used by
   `dispatcher` and `dispatcher-p2p` to host multiple logical
   extent-manager instances on distinct partitions of a shared
   physical NVMe namespace.
@@ -437,8 +461,11 @@ again to verify the old slot is now reusable.
   allocated at slab-level buddy allocation granularity (i.e., the sum
   of slab capacities for all allocated slabs, not per-extent byte sums).
 - **FR-032**: The component MUST provide a `capacity_bytes()` method on
-  IExtentManager that returns the total data device capacity in bytes
-  as configured during `format()`.
+  IExtentManager that returns the usable data capacity in bytes — the
+  data device size minus any in-device metadata region reserved during
+  `format()` (shared-device mode, `metadata_region_size > 0`). In
+  separate-device mode (`metadata_region_size == 0`) this equals the
+  full data device capacity configured during `format()`.
 
 #### Write Handle
 
@@ -457,6 +484,26 @@ again to verify the old slot is now reusable.
   `fail_all_writes` options) to verify crash-safety and recovery
   behavior under failure conditions. Read-failure injection is not
   currently supported but may be added in a future iteration.
+
+#### Additional Support Surface *(documented 2026-08-07; additive)*
+
+The following exist in the implementation as intentional support surface
+and are documented here for completeness (previously unspecced):
+
+- **Checkpoint telemetry**: on each successful `checkpoint()` the component
+  emits a `checkpoint_complete` log line reporting extent count, bytes
+  written, and percentage of capacity used (`lib.rs:288,323-363`). This is
+  observability output, not a functional contract.
+- **`WriteHandle` read accessors**: `key()`, `extent_offset()`, and
+  `extent_size()` (`iextent_manager.rs:120-130`) expose the handle's fields
+  read-only, beyond the `publish()`/`abort()` commit contract of FR-033.
+- **Extended mock helpers**: beyond `FaultConfig` (FR-034), the mock block
+  device provides `set_fault_config`, `clear_faults`, `shared_state`,
+  `reboot_from`, and `with_fault_config` (`test_support.rs:55-78`) to support
+  reboot/recovery integration tests.
+- **`BuddyAllocator::mark_allocated`**: a recovery-time reconstruction helper
+  (`buddy.rs:117-157`) used when rebuilding allocator state from key vectors;
+  implied by FR-018 but not individually specced.
 
 ### Key Entities
 

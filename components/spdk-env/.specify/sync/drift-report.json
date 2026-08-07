@@ -1,105 +1,61 @@
 {
-  "generated": "2026-07-22T22:33:36Z",
+  "generated": "2026-08-07T15:31:01Z",
   "project": "spdk-env",
   "summary": {
     "specs_analyzed": 2,
-    "requirements_checked": 24,
-    "aligned": 19,
-    "drifted": 4,
+    "aligned": 25,
+    "drifted": 1,
     "not_implemented": 1,
-    "unspecced_features": 3
+    "unspecced": 0,
+    "notes": "002-spdk-env-vfio-init substantially aligned; 001-spdk-vfio-env is a superseded unfilled template."
   },
   "specs": [
     {
       "id": "001-spdk-vfio-env",
-      "title": "[FEATURE NAME] (unfilled template)",
-      "aligned": [],
-      "drifted": [],
-      "not_implemented": [
-        "Spec is the raw spec-template.md scaffold (placeholder text such as 'System MUST [specific capability]') and was never filled in — it contains no concrete FR-*/SC-* requirements to compare against code. Superseded in practice by 002-spdk-env-vfio-init, which specifies the same feature area. Recommend deleting or formally marking 001 as superseded/abandoned."
-      ]
+      "path": "specs/001-spdk-vfio-env/spec.md",
+      "status": "superseded",
+      "note": "Raw spec-template.md scaffold, self-marked SUPERSEDED by 002. Placeholder FR/SC only; nothing to evaluate.",
+      "requirements": []
     },
     {
       "id": "002-spdk-env-vfio-init",
-      "title": "SPDK/DPDK Environment Component with VFIO Device Iteration",
-      "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
-        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
-        "FR-016", "FR-017", "FR-018", "SC-003", "SC-004"
-      ],
-      "drifted": [
-        {
-          "requirement": "SC-001",
-          "spec_text": "The component discovers 100% of available (not in-use) VFIO-bound devices on a properly configured system, matching the devices visible in /sys/bus/pci/drivers/vfio-pci minus those locked by other processes.",
-          "actual": "enumerate_devices() only calls spdk_pci_enumerate() against the driver returned by spdk_pci_get_driver(\"nvme\"), so only NVMe-class VFIO devices are ever discovered. virtio-blk and other SPDK-supported device types bound to vfio-pci are never enumerated, contradicting the 'all VFIO-bound devices' claim.",
-          "location": "components/spdk-env/src/env.rs:164-181",
-          "severity": "medium"
-        },
-        {
-          "requirement": "SC-002",
-          "spec_text": "On a misconfigured system (no VFIO, wrong permissions, no hugepages, missing logger), the component reports the specific issue within its first error message...",
-          "actual": "There is no logger receptacle in the implementation (per FR-007/Clarifications), so 'missing logger' is not a possible error condition. SC-002's text was not updated after the logger receptacle was removed from scope.",
-          "location": "components/spdk-env/src/lib.rs:58-67 (no receptacles field); components/spdk-env/specs/002-spdk-env-vfio-init/spec.md:135",
-          "severity": "low"
-        },
-        {
-          "requirement": "SC-005",
-          "spec_text": "The component produces structured log messages through the framework's logging system during initialization and device discovery, including warnings for skipped devices.",
-          "actual": "All diagnostics use bare eprintln!() macro calls (unstructured, not routed through the component-framework logging actor), directly per FR-007 ('there is no logger receptacle'). SC-005 directly contradicts FR-007 in the same spec.",
-          "location": "components/spdk-env/src/env.rs:43,48,53-56,173,176-180",
-          "severity": "high"
-        },
-        {
-          "requirement": "Edge Case: \"SPDK/DPDK initialization fails mid-way (partial initialization cleanup)\"",
-          "spec_text": "The component cleans up any partially initialized state and returns an error from init().",
-          "actual": "do_init() only clears the SPDK_ENV_ACTIVE singleton flag when do_init_inner() errors; it never calls spdk_sys::spdk_env_fini() to unwind a successful init_spdk_env() if a later step were to fail. This path is currently unreachable because enumerate_devices() is written to always return Ok(..) (SpdkEnvError::DeviceProbeFailed is defined in interfaces but never constructed here), but the cleanup logic the spec describes does not exist.",
-          "location": "components/spdk-env/src/env.rs:17-34 (do_init); components/spdk-env/src/env.rs:115-185 (enumerate_devices never returns Err)",
-          "severity": "medium"
-        }
-      ],
-      "not_implemented": [
-        "FR-015: 'skip devices that cannot be probed ... log a warning ... return only successfully probed devices' — the FR text itself flags this as future work ('Future: not yet implemented. Currently all matching devices are claimed...'), and no such skip/retry logic exists in enumerate_devices(). Acceptance Scenario 4 of User Story 1 (spec.md:33) still describes this as working today, which is inconsistent with FR-015's own caveat."
+      "path": "specs/002-spdk-env-vfio-init/spec.md",
+      "status": "draft",
+      "requirements": [
+        {"id": "FR-001", "status": "aligned", "location": "src/lib.rs:34,58"},
+        {"id": "FR-002", "status": "aligned", "location": "src/lib.rs:34-56"},
+        {"id": "FR-003", "status": "aligned", "location": "src/lib.rs:70-72; src/env.rs:17"},
+        {"id": "FR-004", "status": "aligned", "location": "src/checks.rs:16-38"},
+        {"id": "FR-005", "status": "aligned", "location": "src/checks.rs:44-149"},
+        {"id": "FR-006", "status": "aligned", "location": "src/env.rs:115-185"},
+        {"id": "FR-007", "status": "aligned", "location": "src/env.rs:43,48,53; src/lib.rs:58-67"},
+        {"id": "FR-008", "status": "aligned", "location": "src/checks.rs:77-149"},
+        {"id": "FR-009", "status": "aligned", "location": "src/env.rs:115-185"},
+        {"id": "FR-010", "status": "aligned", "location": "examples/spdk-env-example.rs"},
+        {"id": "FR-011", "status": "aligned", "location": "src/lib.rs:58-67"},
+        {"id": "FR-012", "status": "aligned", "location": "src/lib.rs:100-107"},
+        {"id": "FR-013", "status": "aligned", "location": "src/checks.rs:154-175"},
+        {"id": "FR-014", "status": "aligned", "location": "src/env.rs:11,19-33,199"},
+        {"id": "FR-015", "status": "not_implemented", "severity": "low", "location": "src/env.rs:115-185", "note": "Spec-acknowledged future item; devices are not skipped/warned individually when in use."},
+        {"id": "FR-016", "status": "aligned", "location": "src/lib.rs:54,95-97"},
+        {"id": "FR-017", "status": "aligned", "location": "src/lib.rs:51,88-93"},
+        {"id": "FR-018", "status": "aligned", "location": "src/lib.rs:34; components/interfaces/src/ispdk_env.rs"},
+        {"id": "FR-019", "status": "aligned", "location": "src/lib.rs:44,74-79; src/env.rs:188-200"},
+        {"id": "FR-020", "status": "aligned", "location": "src/dma.rs:6; components/interfaces/src/spdk_types.rs:190,208,213,293"},
+        {"id": "FR-021", "status": "aligned", "location": "scripts/"},
+        {"id": "SC-001", "status": "aligned", "location": "src/env.rs:164-181"},
+        {"id": "SC-002", "status": "drifted", "severity": "low", "location": "specs/002-spdk-env-vfio-init/spec.md:175", "note": "Stale 'missing logger' misconfiguration wording; component has no logger receptacle."},
+        {"id": "SC-003", "status": "aligned", "location": "examples/spdk-env-example.rs"},
+        {"id": "SC-004", "status": "aligned", "location": "src/lib.rs; src/env.rs"},
+        {"id": "SC-005", "status": "aligned", "location": "src/env.rs:43,48,53,173,176"}
       ]
     }
   ],
   "unspecced": [
-    {
-      "feature": "DmaBuffer: DMA-safe buffer allocation/lifecycle API (new(), from_raw(), Deref/DerefMut, Drop-time SPDK deallocation gated by a process-global active flag)",
-      "location": "components/spdk-env/src/dma.rs:6 (re-export); components/interfaces/src/spdk_types.rs:177-420 (definition); coordination flag set in components/spdk-env/src/env.rs:102,191",
-      "lines": 6,
-      "suggested_spec": "Add a User Story / FR set to 002-spdk-env-vfio-init (or a new spec) covering DmaBuffer's allocation contract, from_raw() safety obligations, and the set_spdk_env_active() coordination protocol that prevents SPDK deallocators from running after spdk_env_fini()."
-    },
-    {
-      "feature": "Explicit fini() teardown method on ISPDKEnv, for callers that must detach NVMe controllers / free DMA buffers before dropping the component",
-      "location": "components/spdk-env/src/lib.rs:40-45 (interface), src/lib.rs:74-79 (impl), src/env.rs:187-200 (do_fini)",
-      "lines": 20,
-      "suggested_spec": "Add an FR describing the explicit fini() lifecycle step and its precondition (all NVMe controllers detached / DMA buffers freed first), distinct from the implicit Drop-based cleanup already covered by FR-012."
-    },
-    {
-      "feature": "Operator/dev-ops shell scripts for VFIO binding, kernel boot params, permission setup, and dnf cache repair (bind_vfio.sh interactive/status/bind/reset/bind-all/reset-all workflow, add_kernel_options.sh grubby IOMMU/hugepage flags, cfg_user_spdk.sh chmod of /dev/vfio and /dev/hugepages, show_spdk_devices.sh listing)",
-      "location": "components/spdk-env/scripts/bind_vfio.sh (355 lines), components/spdk-env/scripts/add_kernel_options.sh, components/spdk-env/scripts/cfg_user_spdk.sh, components/spdk-env/scripts/show_spdk_devices.sh, components/spdk-env/scripts/fix_dnf_cache.sh (129 lines)",
-      "lines": 565,
-      "suggested_spec": "Document these as sanctioned operator setup tooling in 002-spdk-env-vfio-init's Assumptions section, which currently says binding/hugepages are 'performed externally' without naming these scripts."
-    }
+    {"item": "check_*_at testable path variants", "location": "src/checks.rs:21,49,162", "assessment": "internal test seams; acceptable"},
+    {"item": "SpdkEnvError variant set", "location": "components/interfaces/src/spdk_types.rs", "assessment": "implied by FR-002/004/005/013/014; no drift"}
   ],
   "conflicts": [
-    {
-      "description": "Clarifications session answer ('All SPDK-supported device types bound to VFIO (NVMe, virtio-blk, etc.)') and User Story 1 narrative ('probes for all SPDK-supported device types (NVMe, virtio-blk, etc.)') contradict FR-006, which explicitly narrows scope to NVMe-only enumeration via spdk_pci_enumerate with the NVMe PCI driver. The implementation follows the narrower FR-006, not the Clarifications answer or User Story 1 text.",
-      "locations": [
-        "components/spdk-env/specs/002-spdk-env-vfio-init/spec.md:12 (Clarifications)",
-        "components/spdk-env/specs/002-spdk-env-vfio-init/spec.md:22 (User Story 1)",
-        "components/spdk-env/specs/002-spdk-env-vfio-init/spec.md:104 (FR-006)",
-        "components/spdk-env/src/env.rs:164-181"
-      ]
-    },
-    {
-      "description": "Supporting design artifacts contracts/ispdk-env.md and data-model.md were not updated when the logger receptacle was removed from spec.md via clarification. They still document a `logger: ILogger` receptacle, a construct->connect(logger)->init() usage contract, and a `SpdkEnvError::LoggerNotConnected` variant/state-transition, none of which exist in the code or in the current spec.md (which explicitly annotates '(Removed: no logger receptacle exists in the implementation.)').",
-      "locations": [
-        "components/spdk-env/specs/002-spdk-env-vfio-init/contracts/ispdk-env.md:16,25,56-58,69,83",
-        "components/spdk-env/specs/002-spdk-env-vfio-init/data-model.md:58,69,81-90",
-        "components/spdk-env/src/lib.rs:58-67",
-        "components/interfaces/src/spdk_types.rs:19-34"
-      ]
-    }
+    {"id": "SC-002", "type": "stale-wording", "severity": "low", "description": "SC-002 references a logger that does not exist (contradicts FR-007 and removed US2 scenario 4)."}
   ]
 }

@@ -1,0 +1,89 @@
+{
+  "generated": "2026-08-07",
+  "branch": "sync/spec-drift-sweep-20260807",
+  "component": "gpu-services",
+  "based_on": "drift-report.{json,md} (2026-08-07 sweep re-analysis)",
+  "mode": "interactive",
+  "summary": { "backfill": 4, "human_decision": 2, "align_open": 2, "no_action": 0 },
+  "proposals": [
+    {
+      "id": "gpu-001-FR-005",
+      "spec": "001-gpu-cuda-services",
+      "requirement": "FR-005",
+      "direction": "BACKFILL",
+      "confidence": "HIGH",
+      "spec_says": "For locally-pinned memory, full CUDA unregistration is performed.",
+      "code_does": "unpin_memory removes internal tracking only; never calls cudaHostUnregister (src/lib.rs:249-267). No locally-pinned host-registration path exists.",
+      "resolution": "Reword FR-005: unpin_memory is tracking-removal-only in all cases; full host un/registration is FR-015/FR-016 only.",
+      "resolves_align_task": "2026-07-22 FR-005 (option 1, documentation trim)",
+      "approved": true,
+      "applied": true
+    },
+    {
+      "id": "gpu-001-US3-scenario2",
+      "spec": "001-gpu-cuda-services",
+      "requirement": "US3 acceptance scenario 2",
+      "direction": "BACKFILL",
+      "confidence": "HIGH",
+      "spec_says": "IPC handle referencing non-contiguous / unpinned memory is diagnosed and rejected.",
+      "code_does": "check_memory_attributes (src/memory.rs:26) is a device-type check via cudaPointerGetAttributes (FR-004); does not separately diagnose contiguity vs pin status.",
+      "resolution": "Soften scenario 2 to a device-type-only check.",
+      "approved": true,
+      "applied": true
+    },
+    {
+      "id": "gpu-002-aux-helpers",
+      "spec": "002-gpu-ssd-dma-prepare",
+      "requirement": "(unspecced public helpers)",
+      "direction": "BACKFILL",
+      "confidence": "HIGH",
+      "code_does": "create_spdk_dma_buffer_from_cuda_malloc / spdk_unregister_and_cuda_free / get_phys_addr / GPU_PAGE_SHIFT are intentionally pub, not IGpuServices methods.",
+      "resolution": "Add an 'Auxiliary Public Helpers (backfilled)' subsection before Key Entities documenting them as intentional pub helpers.",
+      "approved": true,
+      "applied": true
+    },
+    {
+      "id": "gpu-001-FR-008",
+      "spec": "001-gpu-cuda-services",
+      "requirement": "FR-008",
+      "direction": "HUMAN_DECISION",
+      "confidence": "MEDIUM",
+      "conflict_with": "002-gpu-ssd-dma-prepare FR-021/022/023 (mandate standalone p2p DMA-buffer constructors)",
+      "options": [
+        "Soften FR-008 wording (backfill): add an explicit p2p carve-out",
+        "Move the constructors onto IGpuServices (breaks spec 002)"
+      ],
+      "user_decision": "Soften FR-008 wording (backfill)",
+      "resolution": "FR-008 relaxed with a documented carve-out for the p2p/GDRCopy dma-module builders and get_phys_addr.",
+      "resolves_align_task": "2026-07-22 FR-008 conflict (recommended direction, human-approved)",
+      "approved": true,
+      "applied": true
+    },
+    {
+      "id": "gpu-ipc-handle-reserved",
+      "spec": "001-gpu-cuda-services",
+      "requirement": "Key Entities / GpuIpcHandle",
+      "direction": "HUMAN_DECISION",
+      "confidence": "MEDIUM",
+      "code_does": "interfaces::GpuIpcHandle defines verified/pinned fields + set_*/is_* accessors (igpu_services.rs:63-118) not read/written by this component.",
+      "options": [
+        "Document as reserved (backfill)",
+        "Remove the unused API surface (align/code change)"
+      ],
+      "user_decision": "Document as reserved (backfill)",
+      "resolution": "Key Entities GpuIpcHandle note appended marking verified/pinned as reserved-for-future, deliberately retained.",
+      "approved": true,
+      "applied": true
+    },
+    {
+      "id": "gpu-001-FR-015-ebusy",
+      "spec": "001-gpu-cuda-services",
+      "requirement": "FR-015",
+      "direction": "ALIGN",
+      "confidence": "LOW",
+      "note": "register_host_memory treats SPDK EBUSY (-16) as success and skips rollback; not re-surfaced as drift this sweep. Remains an open align-task pending maintainer decision.",
+      "approved": false,
+      "applied": false
+    }
+  ]
+}
