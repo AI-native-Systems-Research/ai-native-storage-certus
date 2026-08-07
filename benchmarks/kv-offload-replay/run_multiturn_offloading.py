@@ -79,6 +79,15 @@ if __name__ == "__main__":
     DISK_READ_THREADS = int(os.environ.get("DISK_READ_THREADS", 16))
     DISK_WRITE_THREADS = int(os.environ.get("DISK_WRITE_THREADS", 16))
 
+    # Secondary offload tier. "" (default) = CPU-only (CPUOffloadingSpec, host RAM).
+    # "fs" = vLLM's native TieringOffloadingManager with the CPU tier as PRIMARY and
+    # a filesystem tier as SECONDARY (spills overflow blocks to FS_ROOT_DIR). CPU_BYTES
+    # then sizes only the primary tier; blocks the primary evicts fall through to disk.
+    SECONDARY_TIER = os.environ.get("SECONDARY_TIER", "").strip().lower()
+    FS_ROOT_DIR = os.environ.get("FS_ROOT_DIR", "/mnt/fs-tier/kv-tier")
+    FS_READ_THREADS = int(os.environ.get("FS_READ_THREADS", 16))
+    FS_WRITE_THREADS = int(os.environ.get("FS_WRITE_THREADS", 16))
+
     PROMPT_BUDGET = MAX_MODEL_LEN - OUTPUT_TOKENS
     print(f"[run] model={MODEL}", file=sys.stderr)
     print(f"[run] num_convs={NUM_CONVS} max_model_len={MAX_MODEL_LEN} "
@@ -151,6 +160,33 @@ if __name__ == "__main__":
                 "eviction_policy": "lru",
             },
         }
+    elif SECONDARY_TIER == "fs":
+        # Tiered: CPU primary + filesystem secondary. TieringOffloadingSpec is a
+        # CPUOffloadingSpec subclass registered by name in vLLM's
+        # OffloadingSpecFactory (vLLM >= 0.26); "fs" resolves to FileSystemTierManager
+        # via the SecondaryTierFactory. CPU_BYTES sizes the primary tier; primary
+        # evictions spill to FS_ROOT_DIR. root_dir must exist and be writable.
+        os.makedirs(FS_ROOT_DIR, exist_ok=True)
+        KV_CONFIG = {
+            "kv_connector": "OffloadingConnector",
+            "kv_role": "kv_both",
+            "kv_connector_extra_config": {
+                "cpu_bytes_to_use": CPU_BYTES,
+                "spec_name": "TieringOffloadingSpec",
+                "eviction_policy": "lru",
+                "secondary_tiers": [
+                    {
+                        "type": "fs",
+                        "root_dir": FS_ROOT_DIR,
+                        "n_read_threads": FS_READ_THREADS,
+                        "n_write_threads": FS_WRITE_THREADS,
+                    },
+                ],
+            },
+        }
+        print(f"[run] secondary_tier=fs root_dir={FS_ROOT_DIR} "
+              f"read_threads={FS_READ_THREADS} write_threads={FS_WRITE_THREADS}",
+              file=sys.stderr)
     else:
         # CPUOffloadingSpec is registered by name in vLLM's OffloadingSpecFactory,
         # so no spec_module_path is needed.
@@ -164,6 +200,7 @@ if __name__ == "__main__":
             },
         }
     print(f"[run] kv_connector={KV_CONFIG['kv_connector']} "
+          f"spec={KV_CONFIG['kv_connector_extra_config'].get('spec_name')} "
           f"(TRACE_OFFLOAD={os.environ.get('TRACE_OFFLOAD', '0')})", file=sys.stderr)
 
     # Clear stale trace files
