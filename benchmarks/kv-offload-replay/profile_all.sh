@@ -738,7 +738,15 @@ if want tiered-cpu-fs; then
     else
         # fs secondary-tier root on the RAID0/XFS group, mounted into the container.
         mkdir -p "${SHARED_FS}/kv-tier"
+        # The TieringOffloadingSpec CPU primary tier is a SINGLE mmap in /dev/shm
+        # (/dev/shm/vllm_offload_*.mmap), sized to cpu_bytes_to_use and faulted in
+        # with MADV_POPULATE_WRITE. The container's default /dev/shm is 64 MiB, so
+        # populating a 16 GiB region dies with "OSError: [Errno 14] Bad address".
+        # (Plain CPUOffload uses a CUDA pinned buffer, not /dev/shm, so it is fine.)
+        # Give /dev/shm the tier size + 2 GiB headroom.
+        tier_shm=$((CPU_BYTES + 2 * (1 << 30)))
         run_container_bench "Tiered-CPU-FS" "$IMG_CPU" \
+            --shm-size="${tier_shm}" \
             -v "${SHARED_FS}:/mnt/fs-tier:z" \
             -e "CPU_BYTES=${CPU_BYTES}" \
             -e "SECONDARY_TIER=fs" \
