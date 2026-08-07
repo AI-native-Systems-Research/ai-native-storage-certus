@@ -914,7 +914,16 @@ setup_raid() {
         else
             # Create new RAID0
             echo -e "  ${YELLOW}Creating new RAID0 — this will DESTROY data on ${blkdevs[*]}${NC}"
-            mdadm --create "$MD_DEVICE" \
+            # Wipe stale partition-table / fs signatures first: otherwise mdadm
+            # detects them and STOPS at an interactive "partition table exists ...
+            # Continue creating array [y/N]?" prompt. profile_all.sh redirects this
+            # command's output to a log, so that prompt is invisible and the whole
+            # run looks hung. wipefs removes the trigger; `yes |` auto-confirms any
+            # residual prompt so the create is fully non-interactive.
+            for _d in "${blkdevs[@]}"; do
+                wipefs -a "$_d" 2>/dev/null || true
+            done
+            yes | mdadm --create "$MD_DEVICE" \
                 --level=0 \
                 --raid-devices=${#blkdevs[@]} \
                 --chunk=512K \

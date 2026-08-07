@@ -240,8 +240,17 @@ HUGEPAGES_1G_NODE="${RESOURCE_NUMA:-0}"
 # only ever stops the shared-group RAID — never the model-fs array.
 SHARED_FS="/mnt/ss-kv"
 SS_XFS_LABEL="sskv"
-DISK_DEV="$(findmnt -no SOURCE --target "$SHARED_FS" 2>/dev/null | xargs -r basename)"
-if [[ -z "$DISK_DEV" ]]; then
+# Reuse an EXISTING md array only if one is mounted at the exact SharedStorage
+# mountpoint. Note: NO --target here. `findmnt --target <dir>` resolves the mount
+# that *contains* <dir>, walking UP to the parent when <dir> itself isn't a mount —
+# so when $SHARED_FS is unmounted (e.g. the drives are on vfio for the certus phase)
+# it returned the ROOT device /dev/mapper/rhel-root, which then became mdadm's array
+# node (MD_DEVICE=/dev/rhel-root) — creating a RAID over the live root device node.
+# Plain `findmnt <mountpoint>` matches only an exact mountpoint (empty otherwise).
+DISK_DEV="$(findmnt -no SOURCE "$SHARED_FS" 2>/dev/null | xargs -r basename)"
+# Accept only a real md array; otherwise pick the lowest free /dev/mdN
+# (md0 is the persistent model-fs array -> md1, and so on).
+if [[ "$DISK_DEV" != md* ]]; then
     _n=0; while [[ -e "/dev/md${_n}" ]]; do _n=$((_n + 1)); done; DISK_DEV="md${_n}"
 fi
 
