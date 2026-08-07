@@ -924,8 +924,26 @@ setup_raid() {
             # SIGPIPE (141) when mdadm closes the pipe, and that non-zero propagates
             # through the pipeline, tripping `set -e` right after the array starts
             # (before mkfs/mount). A here-string has no such pipe.
+            # Reclaim the member drives from any STRAY array first. A prior failed
+            # run can leave an array assembled on these drives under a DIFFERENT name
+            # (the upstream picker chooses the lowest free /dev/mdN, so md1 left over
+            # -> this run targets md2). teardown_raid_if_active only stops $MD_DEVICE,
+            # so it misses the stray, and mdadm --create then fails "Device or
+            # resource busy". Stop whatever md device currently holds each member.
+            for _d in "${blkdevs[@]}"; do
+                for _h in "/sys/block/$(basename "$_d")/holders/"md*; do
+                    [[ -e "$_h" ]] || continue
+                    _md="/dev/$(basename "$_h")"
+                    echo "  Reclaiming ${_d} from stray array ${_md}"
+                    umount "$_md" 2>/dev/null || true
+                    mdadm --stop "$_md" 2>/dev/null || true
+                done
+            done
+            # Now clear signatures on the (freed) members: wipefs for partition/fs
+            # signatures, --zero-superblock for any residual md metadata.
             for _d in "${blkdevs[@]}"; do
                 wipefs -a "$_d" 2>/dev/null || true
+                mdadm --zero-superblock "$_d" 2>/dev/null || true
             done
             mdadm --create "$MD_DEVICE" \
                 --level=0 \
