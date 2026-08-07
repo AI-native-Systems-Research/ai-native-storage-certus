@@ -52,11 +52,13 @@ NVME_BDFS=(${NVME_BDFS:-"0000:61:00.0" "0000:62:00.0" "0000:63:00.0" "0000:64:00
 # CPUs on the resource NUMA node ($RESOURCE_NUMA). Node 0 = 0-15,32-47.
 NUMA_CPUS="${NUMA_CPUS:-0-15,32-47}"
 
-# RAID / filesystem. Env-overridable so the SharedStorage RAID can target a
-# device/mount/label distinct from any pre-existing array (e.g. a separate
-# model-fs RAID that already occupies /dev/md0 // /mnt/fs-backend-bench). The
-# certus-mode teardown (bind_to_vfio -> teardown_raid_if_active) acts on these
-# same vars, so overriding them keeps certus from tearing down an unrelated array.
+# RAID / filesystem. Used ONLY by the SharedStorage path (bind_to_nvme +
+# setup_raid); env-overridable so the SS RAID can target a device/mount/label
+# distinct from any pre-existing array (e.g. a separate model-fs RAID that
+# already occupies /dev/md0 // /mnt/fs-backend-bench). The certus/vfio path no
+# longer touches these vars at all — it reclaims only the array(s) actually
+# built on the NVME_BDFS drives it is about to bind (see reclaim_member_arrays),
+# so certus can never tear down an unrelated array like the model-fs RAID.
 MD_DEVICE="${MD_DEVICE:-/dev/md0}"
 MOUNT_POINT="${MOUNT_POINT:-/mnt/fs-backend-bench}"
 XFS_LABEL="${XFS_LABEL:-fs-bench}"
@@ -689,27 +691,33 @@ allocate_hugepages_node() {
         fi
     done
 
+    # Reconcile the page count to `target`. NOTE: even when it already matches
+    # (the common case — the boot param `hugepages=N` pre-reserves them), we must
+    # NOT return early: the hugetlbfs chown below has to run on every invocation,
+    # or a fresh boot leaves /dev/hugepages root:root and the certus-server dies
+    # with EAL "get_seg_fd(): ... Permission denied".
     local current
     current=$(cat "$node_path")
     if [[ $current -eq $target ]]; then
         echo "  Node $RESOURCE_NUMA already has $current × 1G hugepages"
-        return
-    elif [[ $current -gt $target ]]; then
-        # Over-allocated (e.g. target lowered) — shrink to exactly target so the
-        # regular-RAM budget grows accordingly. Free pages release live.
-        echo "  Node $RESOURCE_NUMA has $current × 1G, reducing to $target..."
     else
-        echo "  Allocating $target × 1G hugepages on node $RESOURCE_NUMA..."
-    fi
-    echo "$target" > "$node_path"
+        if [[ $current -gt $target ]]; then
+            # Over-allocated (e.g. target lowered) — shrink to exactly target so the
+            # regular-RAM budget grows accordingly. Free pages release live.
+            echo "  Node $RESOURCE_NUMA has $current × 1G, reducing to $target..."
+        else
+            echo "  Allocating $target × 1G hugepages on node $RESOURCE_NUMA..."
+        fi
+        echo "$target" > "$node_path"
 
-    local actual
-    actual=$(cat "$node_path")
-    if [[ $actual -lt $target ]]; then
-        echo -e "  ${YELLOW}Only got $actual / $target — 1G pages require contiguous memory${NC}"
-        echo "  Reboot required for full allocation (boot param handles it)."
-    else
-        echo -e "  ${GREEN}Allocated $actual × 1G hugepages on node $RESOURCE_NUMA${NC}"
+        local actual
+        actual=$(cat "$node_path")
+        if [[ $actual -lt $target ]]; then
+            echo -e "  ${YELLOW}Only got $actual / $target — 1G pages require contiguous memory${NC}"
+            echo "  Reboot required for full allocation (boot param handles it)."
+        else
+            echo -e "  ${GREEN}Allocated $actual × 1G hugepages on node $RESOURCE_NUMA${NC}"
+        fi
     fi
 
     # The certus-server (SPDK/DPDK) runs as the invoking user, NOT root — its uid
@@ -717,15 +725,19 @@ allocate_hugepages_node() {
     # per-segment file under the hugetlbfs mount, so that mount has to be writable
     # by that user or EAL dies with "get_seg_fd(): ... Permission denied". The vfio
     # nodes are already opened to the user in bind_to_vfio; do the same for the
-    # hugepage dir here (root:root by default).
+    # hugepage dir here (root:root on a fresh boot). Runs unconditionally — see the
+    # note above about not returning early when the page count already matches.
     local hp_owner="${SUDO_USER:-}"
     if [[ -n "$hp_owner" && "$hp_owner" != "root" ]]; then
         local hp_mnt
         hp_mnt=$(awk '$3=="hugetlbfs" && $4 ~ /pagesize=1024M/ {print $2; exit}' /proc/mounts)
         [[ -z "$hp_mnt" ]] && hp_mnt=$(awk '$3=="hugetlbfs" {print $2; exit}' /proc/mounts)
-        if [[ -n "$hp_mnt" ]]; then
-            chown "$hp_owner" "$hp_mnt" \
-                && echo "  Owner of $hp_mnt: $hp_owner (SPDK runs as this user)"
+        if [[ -z "$hp_mnt" ]]; then
+            echo -e "  ${YELLOW}No hugetlbfs mount found — cannot chown for $hp_owner${NC}"
+        elif chown "$hp_owner" "$hp_mnt"; then
+            echo "  Owner of $hp_mnt: $hp_owner (SPDK runs as this user)"
+        else
+            echo -e "  ${YELLOW}chown $hp_mnt -> $hp_owner failed; certus-server may hit EAL Permission denied${NC}"
         fi
     fi
 }
@@ -774,7 +786,14 @@ bind_to_vfio() {
         exit 1
     fi
 
-    teardown_raid_if_active
+    # Reclaim ONLY the array(s) built on the drives we are about to bind to
+    # vfio-pci (NVME_BDFS). NEVER an unrelated array such as the node-1 model-fs
+    # RAID: the old teardown_raid_if_active blindly stopped $MD_DEVICE /
+    # $MOUNT_POINT (default /dev/md0 // /mnt/fs-backend-bench), which on this host
+    # IS that data array — silently unmounting it on every certus setup.
+    local _vblks=() _b
+    for _b in "${NVME_BDFS[@]}"; do _vblks+=("$(get_blkdev "$_b")"); done
+    reclaim_member_arrays "${_vblks[@]}"
 
     # Runtime bind
     for bdf in "${NVME_BDFS[@]}"; do
@@ -877,16 +896,31 @@ bind_to_nvme() {
 # RAID0 Setup (SharedStorage)
 # ============================================================================
 
-teardown_raid_if_active() {
-    if mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
-        echo "  Unmounting $MOUNT_POINT"
-        umount "$MOUNT_POINT"
-    fi
-
-    if [[ -e "$MD_DEVICE" ]]; then
-        echo "  Stopping $MD_DEVICE"
-        mdadm --stop "$MD_DEVICE" 2>/dev/null || true
-    fi
+# Stop (and unmount) every md array that any of the given block devices is a
+# member of — scoped STRICTLY to the drives passed in, so it never touches an
+# unrelated array (e.g. the node-1 model-fs RAID on other drives). Used by both
+# the certus/vfio path (reclaim the NVME_BDFS drives before binding them to
+# vfio-pci) and setup_raid (reclaim members from a stray leftover array before
+# --create). Args: block-dev basenames (e.g. nvme0n1) as returned by get_blkdev;
+# "-" / empty entries (drive already on vfio, no block device) are skipped.
+reclaim_member_arrays() {
+    local blk holder md mp seen=""
+    for blk in "$@"; do
+        [[ -z "$blk" || "$blk" == "-" ]] && continue
+        for holder in "/sys/block/$blk/holders/"md*; do
+            [[ -e "$holder" ]] || continue
+            md="/dev/$(basename "$holder")"
+            case " $seen " in *" $md "*) continue ;; esac
+            seen="$seen $md"
+            mp=$(findmnt -n -o TARGET "$md" 2>/dev/null || true)
+            if [[ -n "$mp" ]]; then
+                echo "  Unmounting $md ($mp) — holds $blk"
+                umount "$md" 2>/dev/null || umount "$mp" 2>/dev/null || true
+            fi
+            echo "  Stopping array $md — holds $blk"
+            mdadm --stop "$md" 2>/dev/null || true
+        done
+    done
 }
 
 setup_raid() {
@@ -927,18 +961,12 @@ setup_raid() {
             # Reclaim the member drives from any STRAY array first. A prior failed
             # run can leave an array assembled on these drives under a DIFFERENT name
             # (the upstream picker chooses the lowest free /dev/mdN, so md1 left over
-            # -> this run targets md2). teardown_raid_if_active only stops $MD_DEVICE,
-            # so it misses the stray, and mdadm --create then fails "Device or
-            # resource busy". Stop whatever md device currently holds each member.
-            for _d in "${blkdevs[@]}"; do
-                for _h in "/sys/block/$(basename "$_d")/holders/"md*; do
-                    [[ -e "$_h" ]] || continue
-                    _md="/dev/$(basename "$_h")"
-                    echo "  Reclaiming ${_d} from stray array ${_md}"
-                    umount "$_md" 2>/dev/null || true
-                    mdadm --stop "$_md" 2>/dev/null || true
-                done
-            done
+            # -> this run targets md2), and mdadm --create then fails "Device or
+            # resource busy". reclaim_member_arrays stops whatever md device holds
+            # each member, regardless of its name.
+            local _bases=() _d
+            for _d in "${blkdevs[@]}"; do _bases+=("$(basename "$_d")"); done
+            reclaim_member_arrays "${_bases[@]}"
             # Now clear signatures on the (freed) members: wipefs for partition/fs
             # signatures, --zero-superblock for any residual md metadata.
             for _d in "${blkdevs[@]}"; do
