@@ -1,73 +1,44 @@
 {
-  "generated": "2026-07-22T22:35:42Z",
+  "generated": "2026-08-07T15:31:21Z",
   "project": "dispatcher-p2p",
+  "spec": "specs/001-gpudirect-cold-path/spec.md",
   "summary": {
     "specs_analyzed": 1,
-    "requirements_checked": 21,
-    "aligned": 21,
-    "drifted": 2,
+    "functional_requirements": 17,
+    "success_criteria": 6,
+    "aligned": 23,
+    "drifted": 0,
     "not_implemented": 0,
-    "unspecced_features": 2
+    "unspecced": 1
   },
   "specs": [
     {
-      "id": "001-gpudirect-cold-path",
-      "title": "GPUDirect Storage Cold Path",
+      "spec": "specs/001-gpudirect-cold-path/spec.md",
+      "findings": [],
       "aligned": [
-        "FR-001",
-        "FR-002",
-        "FR-003",
-        "FR-004",
-        "FR-005",
-        "FR-006",
-        "FR-007",
-        "FR-008",
-        "FR-009",
-        "FR-010",
-        "FR-011",
-        "FR-012",
-        "FR-013",
-        "FR-014",
-        "FR-015",
-        "SC-001",
-        "SC-002",
-        "SC-003",
-        "SC-004",
-        "SC-005",
-        "SC-006"
+        "FR-001","FR-002","FR-003","FR-004","FR-005","FR-006","FR-007","FR-008","FR-009",
+        "FR-010","FR-011","FR-012","FR-013","FR-014","FR-015","FR-016","FR-017",
+        "SC-001","SC-002","SC-003","SC-004","SC-005","SC-006"
       ],
-      "drifted": [
-        {
-          "requirement": "data-model.md: P2pRing.streams",
-          "spec_text": "streams | [GpuStream; 2] | Alternating CUDA streams for D2D copies",
-          "actual": "NUM_STREAMS = 4; ring allocates 4 (min 2) CUDA streams, matching spec.md FR-003/FR-005",
-          "location": "components/dispatcher-p2p/specs/001-gpudirect-cold-path/data-model.md:12",
-          "severity": "minor"
-        },
-        {
-          "requirement": "data-model.md: PathSelection / OnceLock<PathSelection>",
-          "spec_text": "One-time decision stored for component lifetime ... Storage: OnceLock<PathSelection> — set during initialization, immutable thereafter.",
-          "actual": "Component stores two independent fields, p2p_ring: RwLock<Option<P2pRing>> and pipeline_ring: RwLock<Option<PipelineRing>>, not a single enum in a OnceLock; path is chosen per-call.",
-          "location": "components/dispatcher-p2p/src/lib.rs:167-168,458-522",
-          "severity": "moderate"
-        }
-      ],
+      "aligned_evidence": {
+        "FR-001/002": "src/pipeline.rs:703 (pipelined_ssd_to_gpu_p2p); src/cold_pool.rs:153 (pipelined_multi_object_p2p)",
+        "FR-003": "src/p2p_ring.rs:19 P2P_RING_SLOTS=64, :30 NUM_STREAMS=4, :58 cudaMalloc, :108 min-2, :5/:34 GDRCopy+spdk_mem_register",
+        "FR-004": "src/p2p_ring.rs:25 MAX_QD_PER_THREAD=16, :161 ThreadPartition, :9 MAX_QUEUES_PER_DRIVE",
+        "FR-006/007": "src/lib.rs:1754 batch_lookup panic; src/lib.rs:1552-1563 single-lookup DRAM fallback; :1211 non-fatal init warn; :1199-1207 ring allocated once",
+        "FR-008": "src/lib.rs:67 IRemoteLookup receptacle; :3524 batch_lookup(&[(CacheKey,u32)])",
+        "FR-009/014": "src/background.rs:236 DramBackfillWorker; src/lib.rs:1300-1305 gated on backfill_delay_ms>0",
+        "FR-013": "src/lib.rs:2457,1358,2574 promote_to_memory_tier; src/pipeline.rs:1128 pipelined_ssd_to_dram_only",
+        "FR-015": "src/lib.rs:3355,3358 set_device/device_of_ptr on receptacle; NOT wired into src/pipeline.rs/src/cold_pool.rs cold path - matches spec NOTE",
+        "FR-016": "src/cold_pool.rs:41 P2pColdReadPool; :61-63 non-fatal inline fallback",
+        "FR-017": "src/lib.rs:215-227 create_eviction_channel(capacity)+eviction_dropped_count; :420 evict_for_space_emit"
+      },
       "not_implemented": []
     }
   ],
   "unspecced": [
-    {
-      "feature": "P2pColdReadPool persistent cold-path worker pool (pre-connected ClientChannels per drive/queue-slot, long-lived worker threads, ~24% cold-path throughput improvement per commit 959fdd4)",
-      "location": "components/dispatcher-p2p/src/cold_pool.rs; components/dispatcher-p2p/src/lib.rs:1247-1256,1743-1842,1473",
-      "lines": 271,
-      "suggested_spec": "001-gpudirect-cold-path (new FR near FR-004/FR-005)"
-    },
-    {
-      "feature": "Eviction-event notification channel: create_eviction_channel(), EvictionEvent/EvictionReason, eviction_dropped_count(), emitted on every memory-tier eviction",
-      "location": "components/dispatcher-p2p/src/lib.rs:50-60,172-173,213-232,546-650",
-      "lines": 110,
-      "suggested_spec": "002-eviction-telemetry (new spec)"
-    }
+    {"item": "set_block_device_factory / set_extent_manager_factory (DI/test hooks)", "location": "components/dispatcher-p2p/src/lib.rs:205,211", "notes": "Public injection hooks on the component struct, not in spec. Minor."}
   ],
-  "conflicts": []
+  "conflicts": [
+    {"type": "spec-references-nonexistent", "detail": "Shared interface components/interfaces/src/idispatcher.rs:185-198 claims Creusot 'Verified Properties (see components/dispatcher/verif/)' (P1-P10, 24 VCs); no verif/ directory exists under dispatcher or dispatcher-p2p.", "location": "components/interfaces/src/idispatcher.rs:185-198"}
+  ]
 }

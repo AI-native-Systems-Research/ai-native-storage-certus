@@ -1,0 +1,73 @@
+{
+  "generated": "2026-08-07T16:02:56Z",
+  "based_on_drift_report": "2026-08-07T15:30:30Z",
+  "component": "disk-partition-manager",
+  "branch": "sync/spec-drift-sweep-20260807",
+  "interactive": true,
+  "strategy": "fully-interactive",
+  "summary": {
+    "align_drafted": 1,
+    "backfill": 4,
+    "human_decision": 0,
+    "new_specs": 0
+  },
+  "proposals": [
+    {
+      "id": "P1",
+      "spec": "001-gpt-partition-management",
+      "requirement": "FR-003",
+      "direction": "ALIGN",
+      "severity": "HIGH",
+      "title": "Backup GPT fallback only fires on CRC mismatch, not on primary signature corruption",
+      "current_state": {
+        "spec": "FR-003 / US2 scenario 2: if the primary header is corrupt, the backup MUST be attempted.",
+        "code": "read_gpt (src/gpt.rs) falls through to backup only on CorruptTable (CRC). A bad/zeroed primary signature returns NoPartitionTable and is propagated; initialize_or_format then reformats a disk whose backup is still valid (data loss)."
+      },
+      "proposed_resolution": "Draft fix: in read_gpt, fall through to the backup attempt on NoPartitionTable as well as CorruptTable.",
+      "confidence": "HIGH",
+      "user_decision": "Draft fix (ALIGN, HIGH)",
+      "approved": true,
+      "applied": true,
+      "files": ["components/disk-partition-manager/src/gpt.rs"],
+      "verification": "cargo build -p disk-partition-manager clean. No unit tests exist; backup-signature-recovery test queued in align-tasks.md.",
+      "outcome": "Fix drafted on branch; FR-003 spec text clarified + noted."
+    },
+    {
+      "id": "P2",
+      "spec": "001-gpt-partition-management",
+      "requirement": "PR-002",
+      "direction": "BACKFILL",
+      "severity": "MEDIUM",
+      "title": "Read performs ~33 round-trips (per-sector) vs the stated 'at most 2'",
+      "current_state": {
+        "spec": "PR-002: initialize read requires at most 2 I/O round-trips.",
+        "code": "read_bytes loops one ReadSync per sector; 16 KiB entry array = 32 round-trips @512B (4 @4096B) + 1 header."
+      },
+      "proposed_resolution": "Backfill PR-002 to describe per-sector reads; reframe as O(1) in device size; note batching as a future perf task.",
+      "confidence": "HIGH",
+      "user_decision": "Backfill spec to reality",
+      "approved": true,
+      "applied": true,
+      "files": ["components/disk-partition-manager/.specify/specs/001-gpt-partition-management/spec.md"],
+      "outcome": "PR-002 backfilled."
+    },
+    {
+      "id": "P3",
+      "spec": "001-gpt-partition-management",
+      "requirement": "Unspecced: hardcoded LBA 2 read; generate_guid zero-fallback; FR-011 sector-size validation",
+      "direction": "BACKFILL",
+      "severity": "LOW",
+      "title": "Document low-severity behaviors in spec",
+      "current_state": {
+        "code": "Read hardcodes entry LBA 2 instead of parsed partition_entry_lba; generate_guid returns near-zero GUID if /dev/urandom fails; no explicit 512/4096 sector-size validation."
+      },
+      "proposed_resolution": "Document all three in Implementation Notes (and FR-008/FR-011 context). No code change.",
+      "confidence": "HIGH",
+      "user_decision": "Document all in spec",
+      "approved": true,
+      "applied": true,
+      "files": ["components/disk-partition-manager/.specify/specs/001-gpt-partition-management/spec.md"],
+      "outcome": "Documented in Implementation Notes."
+    }
+  ]
+}

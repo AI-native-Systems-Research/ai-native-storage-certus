@@ -98,8 +98,9 @@ struct InflightOp {
     deadline: Option<Instant>,
     is_read: bool,
     tag: u64,
+    /// Submission timestamp; elapsed time at completion is the op latency.
     #[cfg(feature = "telemetry")]
-    start_ns: u64,
+    start: Instant,
     #[cfg(feature = "telemetry")]
     bytes: u64,
 }
@@ -245,6 +246,34 @@ impl FilesysHandler {
             Command::NsProbe => {
                 self.handle_ns_probe(client_id);
             }
+            Command::FlushSync { ns_id } => {
+                // Flush the backing file's data to stable storage. Individual
+                // writes already fdatasync (FR-007/FR-008), but an explicit
+                // FlushSync issues a full fdatasync so callers relying on the
+                // barrier (e.g. the extent-manager volatile-write-cache path)
+                // get a well-defined durability point.
+                let handle = self.next_op_handle();
+                let result = if ns_id != 1 {
+                    Err(NvmeBlockError::InvalidNamespace(format!(
+                        "ns_id {ns_id} invalid; only ns_id=1 supported"
+                    )))
+                } else {
+                    let fd = self.fd.as_raw_fd();
+                    // SAFETY: fd is the valid, open backing-file descriptor.
+                    let ret = unsafe { libc::fdatasync(fd) };
+                    if ret < 0 {
+                        Err(NvmeBlockError::BlockDevice(
+                            interfaces::BlockDeviceError::WriteFailed(format!(
+                                "fdatasync failed: {}",
+                                std::io::Error::last_os_error()
+                            )),
+                        ))
+                    } else {
+                        Ok(())
+                    }
+                };
+                self.send_completion(client_id, Completion::FlushDone { handle, result });
+            }
             Command::NsCreate { .. }
             | Command::NsDelete { .. }
             | Command::NsFormat { .. }
@@ -292,6 +321,9 @@ impl FilesysHandler {
         let offset = self.offset_for_lba(lba);
         let fd = self.fd.as_raw_fd();
 
+        #[cfg(feature = "telemetry")]
+        let start = Instant::now();
+
         let result = {
             let mut guard = buf.lock().expect("DmaBuffer lock poisoned");
             let slice = guard.as_mut_slice();
@@ -317,7 +349,8 @@ impl FilesysHandler {
 
         #[cfg(feature = "telemetry")]
         if result.is_ok() {
-            self.telemetry.record_op(0, buf_len as u64);
+            self.telemetry
+                .record_op(start.elapsed().as_nanos() as u64, buf_len as u64);
         }
 
         self.send_completion(client_id, Completion::ReadDone { handle, tag: 0, result });
@@ -343,6 +376,9 @@ impl FilesysHandler {
         let offset = self.offset_for_lba(lba);
         let fd = self.fd.as_raw_fd();
         let slice = buf.as_slice();
+
+        #[cfg(feature = "telemetry")]
+        let start = Instant::now();
 
         // SAFETY: fd is valid, slice is valid for buf_len bytes.
         let ret = unsafe {
@@ -378,7 +414,8 @@ impl FilesysHandler {
 
         #[cfg(feature = "telemetry")]
         if result.is_ok() {
-            self.telemetry.record_op(0, buf_len as u64);
+            self.telemetry
+                .record_op(start.elapsed().as_nanos() as u64, buf_len as u64);
         }
 
         self.send_completion(client_id, Completion::WriteDone { handle, tag: 0, result });
@@ -460,7 +497,7 @@ impl FilesysHandler {
                     is_read: true,
                     tag,
                     #[cfg(feature = "telemetry")]
-                    start_ns: Instant::now().elapsed().as_nanos() as u64,
+                    start: Instant::now(),
                     #[cfg(feature = "telemetry")]
                     bytes: buf_len as u64,
                 },
@@ -468,6 +505,8 @@ impl FilesysHandler {
         } else {
             // Fallback: sync pread
             let fd = self.fd.as_raw_fd();
+            #[cfg(feature = "telemetry")]
+            let start = Instant::now();
             let result = {
                 let mut guard = buf.lock().expect("DmaBuffer lock poisoned");
                 let slice = guard.as_mut_slice();
@@ -493,7 +532,8 @@ impl FilesysHandler {
 
             #[cfg(feature = "telemetry")]
             if result.is_ok() {
-                self.telemetry.record_op(0, buf_len as u64);
+                self.telemetry
+                    .record_op(start.elapsed().as_nanos() as u64, buf_len as u64);
             }
 
             self.send_completion(client_id, Completion::ReadDone { handle, tag, result });
@@ -583,7 +623,7 @@ impl FilesysHandler {
                     is_read: false,
                     tag,
                     #[cfg(feature = "telemetry")]
-                    start_ns: Instant::now().elapsed().as_nanos() as u64,
+                    start: Instant::now(),
                     #[cfg(feature = "telemetry")]
                     bytes: buf_len as u64,
                 },
@@ -592,6 +632,9 @@ impl FilesysHandler {
             // Fallback: sync pwrite + fdatasync
             let fd = self.fd.as_raw_fd();
             let slice = buf.as_slice();
+
+            #[cfg(feature = "telemetry")]
+            let start = Instant::now();
 
             // SAFETY: fd is valid, slice is valid for buf_len bytes.
             let ret = unsafe {
@@ -626,7 +669,8 @@ impl FilesysHandler {
 
             #[cfg(feature = "telemetry")]
             if result.is_ok() {
-                self.telemetry.record_op(0, buf_len as u64);
+                self.telemetry
+                    .record_op(start.elapsed().as_nanos() as u64, buf_len as u64);
             }
 
             self.send_completion(client_id, Completion::WriteDone { handle, tag, result });
@@ -673,6 +717,9 @@ impl FilesysHandler {
             ptr
         };
 
+        #[cfg(feature = "telemetry")]
+        let start = Instant::now();
+
         // SAFETY: fd is valid, zeros_ptr is aligned and valid for total_bytes.
         let ret = unsafe { libc::pwrite(fd, zeros_ptr, total_bytes, offset as i64) };
 
@@ -702,7 +749,8 @@ impl FilesysHandler {
 
         #[cfg(feature = "telemetry")]
         if result.is_ok() {
-            self.telemetry.record_op(0, total_bytes as u64);
+            self.telemetry
+                .record_op(start.elapsed().as_nanos() as u64, total_bytes as u64);
         }
 
         self.send_completion(client_id, Completion::WriteZerosDone { handle, result });
@@ -771,7 +819,8 @@ impl FilesysHandler {
                     }
                 } else {
                     #[cfg(feature = "telemetry")]
-                    self.telemetry.record_op(0, op.bytes);
+                    self.telemetry
+                        .record_op(op.start.elapsed().as_nanos() as u64, op.bytes);
                     Ok(())
                 };
 

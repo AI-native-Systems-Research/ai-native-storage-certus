@@ -96,8 +96,9 @@ struct InflightOp {
     client_id: u64,
     deadline: Option<Instant>,
     is_read: bool,
+    /// Submission timestamp; elapsed time at completion is the op latency.
     #[cfg(feature = "telemetry")]
-    start_ns: u64,
+    start: Instant,
     #[cfg(feature = "telemetry")]
     bytes: u64,
 }
@@ -229,6 +230,21 @@ impl KernelHandler {
             Command::NsProbe => {
                 self.handle_ns_probe(client_id);
             }
+            Command::FlushSync { ns_id } => {
+                // The device is opened O_DIRECT|O_DSYNC, so every write is
+                // already forced to non-volatile media on completion — there
+                // is no volatile write cache to drain. An explicit flush is
+                // therefore a validated no-op returning success.
+                let handle = self.next_op_handle();
+                let result = if ns_id == 1 {
+                    Ok(())
+                } else {
+                    Err(NvmeBlockError::InvalidNamespace(format!(
+                        "ns_id {ns_id} invalid; only ns_id=1 supported"
+                    )))
+                };
+                self.send_completion(client_id, Completion::FlushDone { handle, result });
+            }
             Command::NsCreate { .. }
             | Command::NsDelete { .. }
             | Command::NsFormat { .. }
@@ -303,13 +319,17 @@ impl KernelHandler {
             }
         }
 
+        #[cfg(feature = "telemetry")]
+        let start = Instant::now();
+
         self.ring.submit_and_wait(1).ok();
 
         let result = self.wait_for_cqe(handle.0);
 
         #[cfg(feature = "telemetry")]
         if result.is_ok() {
-            self.telemetry.record_op(0, buf_len as u64);
+            self.telemetry
+                .record_op(start.elapsed().as_nanos() as u64, buf_len as u64);
         }
 
         let result = result.map_err(|msg| {
@@ -364,13 +384,17 @@ impl KernelHandler {
             }
         }
 
+        #[cfg(feature = "telemetry")]
+        let start = Instant::now();
+
         self.ring.submit_and_wait(1).ok();
 
         let result = self.wait_for_cqe(handle.0);
 
         #[cfg(feature = "telemetry")]
         if result.is_ok() {
-            self.telemetry.record_op(0, buf_len as u64);
+            self.telemetry
+                .record_op(start.elapsed().as_nanos() as u64, buf_len as u64);
         }
 
         let result = result.map_err(|msg| {
@@ -453,7 +477,7 @@ impl KernelHandler {
                 deadline,
                 is_read: true,
                 #[cfg(feature = "telemetry")]
-                start_ns: Instant::now().elapsed().as_nanos() as u64,
+                start: Instant::now(),
                 #[cfg(feature = "telemetry")]
                 bytes: buf_len as u64,
             },
@@ -527,7 +551,7 @@ impl KernelHandler {
                 deadline,
                 is_read: false,
                 #[cfg(feature = "telemetry")]
-                start_ns: Instant::now().elapsed().as_nanos() as u64,
+                start: Instant::now(),
                 #[cfg(feature = "telemetry")]
                 bytes: buf_len as u64,
             },
@@ -597,6 +621,9 @@ impl KernelHandler {
             }
         }
 
+        #[cfg(feature = "telemetry")]
+        let start = Instant::now();
+
         self.ring.submit_and_wait(1).ok();
 
         let result = self.wait_for_cqe(handle.0);
@@ -606,7 +633,8 @@ impl KernelHandler {
 
         #[cfg(feature = "telemetry")]
         if result.is_ok() {
-            self.telemetry.record_op(0, total_bytes as u64);
+            self.telemetry
+                .record_op(start.elapsed().as_nanos() as u64, total_bytes as u64);
         }
 
         let result = result.map_err(|msg| {
@@ -686,7 +714,8 @@ impl KernelHandler {
                         }
                     } else {
                         #[cfg(feature = "telemetry")]
-                        self.telemetry.record_op(0, op.bytes);
+                        self.telemetry
+                            .record_op(op.start.elapsed().as_nanos() as u64, op.bytes);
                         Ok(())
                     };
 

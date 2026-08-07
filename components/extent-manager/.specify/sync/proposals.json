@@ -1,46 +1,69 @@
 {
-  "spec": "components/extent-manager/specs/001-extent-manager-v2/spec.md",
-  "generated": "2026-05-21",
+  "generated": "2026-08-07T16:02:56Z",
+  "based_on": "drift-report 2026-08-07T15:31:39Z",
+  "component": "extent-manager",
+  "summary": { "backfill": 3, "align": 1, "human_decision": 1, "new_specs": 0, "remove_from_spec": 0 },
   "proposals": [
     {
-      "id": "BACKFILL-FR-001",
-      "type": "backfill",
-      "status": "applied",
-      "requirement": "FR-001",
-      "title": "Rename ExtentManagerV2 to ExtentManager in spec",
-      "rationale": "The V2 suffix was intentionally removed from the component name during development. The spec lagged behind this deliberate naming decision.",
-      "change": "Replace all occurrences of 'ExtentManagerV2' with 'ExtentManager' throughout the spec.",
-      "files_modified": ["components/extent-manager/specs/001-extent-manager-v2/spec.md"]
+      "id": "P1",
+      "requirement": "FR-030",
+      "direction": "HUMAN_DECISION",
+      "severity": "HIGH",
+      "spec_text": "volatile_write_cache: 'When enabled, flush calls in checkpoint and format paths are conditionally compiled OUT, improving performance...'",
+      "actual": "Code compiles flush IN only when the feature is enabled (lib.rs:309-310, checkpoint.rs:102-103) — inverse of spec. AND the feature is non-functional/non-compiling: BlockDeviceClient has no flush() method, and Command::FlushSync / Completion::FlushDone do not exist in the interfaces crate (only the extent-manager mock references them, under the same gate). Enabling --features volatile_write_cache fails to compile in three places across two crates. Cargo.toml + README confirm code INTENT is 'enabled = issue flush'.",
+      "options": {
+        "a_backfill_and_draft": "Backfill FR-030 to the real intended semantics (enabled = issue an explicit metadata-device flush after checkpoint/format writes) AND draft the cross-crate compile fix on the branch: add Command::FlushSync + Completion::FlushDone to interfaces/iblock_device.rs, add BlockDeviceClient::flush() (sends FlushSync, awaits FlushDone), and add an actor handler in block-device-spdk-nvme. Flag the actor's NVMe flush opcode for hardware review. Also queue a CI job building with the feature. RECOMMENDED.",
+        "b_queue_only": "Backfill FR-030 semantics but only queue an align-task for the code work (no drafted code this sweep) — safest given it touches the SPDK hardware actor.",
+        "c_invert_cfg": "Treat spec's 'compiled out when enabled' wording as authoritative and invert the #[cfg] gates. WARNING: this makes the DEFAULT build (feature off) call the still-nonexistent flush() -> breaks default build. Not advised.",
+        "d_defer": "Defer; leave the non-functional feature and inverted wording as-is."
+      },
+      "recommendation": "a_backfill_and_draft",
+      "confidence": "HIGH",
+      "approved": null
     },
     {
-      "id": "BACKFILL-FORMAT-VERSION",
-      "type": "backfill",
-      "status": "applied",
-      "requirement": "On-Disk Format Reference / Key Entities (Superblock)",
-      "title": "Update on-disk format version from 4 to 5 in spec",
-      "rationale": "Code uses FORMAT_VERSION=5 with magic 'CERTUSV5'. The spec documented the previous version 4. This is a code-correct backfill.",
-      "change": "Update magic constant from 0x4345_5254_5553_5634 ('CERTUSV4') to 0x4345_5254_5553_5635 ('CERTUSV5') and version field from 4 to 5 in both the Key Entities section and the Superblock table.",
-      "files_modified": ["components/extent-manager/specs/001-extent-manager-v2/spec.md"]
+      "id": "P2",
+      "requirement": "FR-016",
+      "direction": "ALIGN",
+      "severity": "Low",
+      "spec_text": "FR-016 already documents that iextent_manager.rs:244 and README.md:13 wrongly say 'five minutes' and instructs they be corrected to the true 30-second default.",
+      "actual": "Code default is correctly 30s (lib.rs:112); the two doc strings remain stale ('five minutes' / 'default 5 minutes').",
+      "proposed": "ALIGN (docs): update iextent_manager.rs:244 and README.md:13 from five-minutes wording to 30 seconds, satisfying FR-016's own remediation clause. Drafted on the feature branch.",
+      "confidence": "HIGH",
+      "approved": null
     },
     {
-      "id": "DEFERRED-SC-005",
-      "type": "deferred",
-      "status": "pending_human_decision",
-      "requirement": "SC-005",
-      "title": "100M extent scalability claim has no test verification",
-      "rationale": "The spec claims ~100M extent support but no test exercises this scale. Options: (a) add a large-scale benchmark, (b) relax the claim to 'design supports' without a hard test, (c) accept the claim as an architectural statement. Requires human decision.",
-      "change": null,
-      "files_modified": []
+      "id": "P3",
+      "requirement": "FR-032",
+      "direction": "BACKFILL",
+      "severity": "Low",
+      "spec_text": "capacity_bytes() 'returns the total data device capacity in bytes as configured during format()'.",
+      "actual": "Returns buddy total_usable_size (= data_disk_size - data_start_offset). Equals total in separate-device mode; under-reports by the reserved metadata area when metadata_region_size>0 (shared-device mode). lib.rs:710-715.",
+      "proposed": "Backfill FR-032 to state it returns the USABLE data capacity (data device size minus any reserved in-device metadata region), matching the implementation and the interfaces-crate wording.",
+      "confidence": "HIGH",
+      "approved": null
     },
     {
-      "id": "DEFERRED-UNSPECCED-METHODS",
-      "type": "deferred",
-      "status": "pending_human_decision",
-      "requirement": null,
-      "title": "Unspecified code: used_bytes(), capacity_bytes(), FaultConfig, WriteHandle location",
-      "rationale": "Several implemented features are not captured in the spec: used_bytes()/capacity_bytes() monitoring methods, FORMAT_VERSION=5 (now resolved), fault injection test infrastructure, and WriteHandle defined in the interfaces crate. Human decision needed on whether to add spec requirements for these.",
-      "change": null,
-      "files_modified": []
+      "id": "P4",
+      "requirement": "FR-036",
+      "direction": "BACKFILL",
+      "severity": "Low",
+      "spec_text": "'data_base_lba shifts all data-device I/O similarly.'",
+      "actual": "data_base_lba is stored (lib.rs:98,721) and returned (lib.rs:725) but never applied — this component performs NO data-device I/O; the caller (dispatcher) owns the data path and consumes the offset. metadata_base_lba IS applied.",
+      "proposed": "Backfill FR-036 to clarify data_base_lba is a caller-consumed configuration value: the component stores/returns it for the dispatcher to apply to the data path, and performs no internal data-device I/O itself. metadata_base_lba wording unchanged.",
+      "confidence": "HIGH",
+      "approved": null
+    },
+    {
+      "id": "P5",
+      "requirement": "Unspecced (4 benign helpers)",
+      "direction": "BACKFILL",
+      "severity": "Info",
+      "spec_text": "No FR/SC covers: checkpoint telemetry log line; WriteHandle key()/extent_offset()/extent_size() accessors; MockBlockDevice reboot/fault helpers beyond FaultConfig; BuddyAllocator::mark_allocated.",
+      "actual": "lib.rs:288,323-363; iextent_manager.rs:120-130; test_support.rs:55-78; buddy.rs:117-157.",
+      "proposed": "Add short additive notes to the spec documenting these as intentional support surface (telemetry logging under Observability; WriteHandle read-only accessors under FR-033; extended mock helpers under FR-034; mark_allocated as a recovery helper implied by FR-018). Purely additive documentation.",
+      "confidence": "MEDIUM",
+      "approved": null
     }
   ]
 }

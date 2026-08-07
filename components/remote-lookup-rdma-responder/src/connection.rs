@@ -55,6 +55,15 @@ pub enum CmEvent {
     },
     /// A control command arrived from `remote-lookup`.
     Command(ResponderCommand),
+    /// A non-fatal accept-loop error (e.g. a child QP could not be formed, so the
+    /// inbound connect was rejected). Surfaced to `remote-lookup` as
+    /// [`ResponderEvent::Error`] and counted via
+    /// [`ConnectionTable::record_accept_loop_error`] (FR-016). Distinct from a
+    /// fatal HCA/programming fault, which fail-stops rather than surfacing here.
+    AcceptError {
+        /// Human-readable description of the non-fatal failure.
+        message: String,
+    },
     /// The listener was asked to stop (stop signalled or command channel closed).
     Stop,
 }
@@ -198,6 +207,16 @@ impl ConnectionTable {
         }
     }
 
+    /// Record a non-fatal accept-loop error against telemetry (FR-016).
+    ///
+    /// Paired with emitting [`ResponderEvent::Error`] on the control channel; a
+    /// no-op unless the `telemetry` feature is enabled. Keeps the telemetry
+    /// collector encapsulated in the table, mirroring the accept/teardown
+    /// counters above.
+    pub fn record_accept_loop_error(&self) {
+        self.telemetry.record_accept_loop_error();
+    }
+
     /// Number of identified (`PeerId`-keyed) connections currently tracked.
     pub fn identified_len(&self) -> usize {
         self.identified.len()
@@ -243,13 +262,10 @@ fn parse_peer_id(private_data: Option<&[u8]>) -> Option<PeerId> {
 /// so an enqueued `Disconnect` is serviced without waiting a poll cycle and
 /// without being stuck behind a pending accept (SC-003). A raised stop flag or a
 /// closed command channel yields [`CmEvent::Stop`].
-/// A queued inbound connect: its `private_data` and accepted queue pair.
-type PendingConnect = (Option<Vec<u8>>, Box<dyn CmConnection>);
-
 pub struct MockCmSeam {
     command_rx: Receiver<ResponderCommand>,
     stop: Arc<AtomicBool>,
-    pending: Mutex<VecDeque<PendingConnect>>,
+    pending: Mutex<VecDeque<CmEvent>>,
 }
 
 impl MockCmSeam {
@@ -267,7 +283,18 @@ impl MockCmSeam {
         self.pending
             .lock()
             .expect("pending lock poisoned")
-            .push_back((private_data, conn));
+            .push_back(CmEvent::ConnectRequest { private_data, conn });
+    }
+
+    /// Queue a non-fatal accept-loop error to be surfaced by the next
+    /// `next_events` call (models the `RealCmSeam` child-QP-formation reject path).
+    pub fn inject_accept_error(&self, message: impl Into<String>) {
+        self.pending
+            .lock()
+            .expect("pending lock poisoned")
+            .push_back(CmEvent::AcceptError {
+                message: message.into(),
+            });
     }
 }
 
@@ -279,10 +306,7 @@ impl CmListener for MockCmSeam {
         {
             let mut q = self.pending.lock().expect("pending lock poisoned");
             if !q.is_empty() {
-                return q
-                    .drain(..)
-                    .map(|(private_data, conn)| CmEvent::ConnectRequest { private_data, conn })
-                    .collect();
+                return q.drain(..).collect();
             }
         }
         // Event-driven wait: a send unparks this recv immediately.

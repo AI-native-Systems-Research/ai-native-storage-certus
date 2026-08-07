@@ -92,3 +92,77 @@ pass does not do).
 **Required Change**: Add a CI step or script that parses Criterion's `estimates.json` output for the relevant benchmark groups and fails if the reported CV exceeds 15%, or explicitly reword SC-005 to state this is checked manually during review rather than automated.
 
 **Files to Modify**: CI workflow (`.github/workflows/rust.yml` or component-local CI script), `components/block-device-filesys/benches/latency.rs`, `components/block-device-filesys/benches/throughput.rs`.
+
+---
+
+# 2026-08-07 Sweep (branch `sync/spec-drift-sweep-20260807`)
+
+Drift source: `.specify/sync/drift-report.{json,md}` (regenerated 2026-08-07).
+Pacing: auto-apply safe backfills; the telemetry-latency fix was **drafted on
+the branch** per the user decision "Telemetry latency = Draft code fix (all)".
+Pre-edit backups in `.specify/sync/backups/20260807T160256Z/` (`actor.rs`).
+
+## Task: telemetry-latency — ✅ DRAFTED on branch (was "major" above)
+
+The 2026-07-22 `telemetry-latency` align-task above is now **addressed in
+code** on the branch, mirroring the sibling `block-device-kernel` fix:
+
+- `InflightOp.start_ns: u64` → `#[cfg(feature = "telemetry")] start: Instant`
+  (a real submission timestamp, not `.elapsed()` of a fresh instant).
+- Both async insert sites (`is_read: true`/`false`) store `start: Instant::now()`.
+- The five sync/fallback paths (`read_sync`, `write_sync`, io_uring
+  sync-fallback read + write, `write_zeros`) capture
+  `#[cfg(feature="telemetry")] let start = Instant::now();` immediately before
+  the blocking IO and pass `start.elapsed().as_nanos()` to `record_op`.
+- The async-completion site passes `op.start.elapsed().as_nanos()`.
+
+**Verification**: `cargo build -p block-device-filesys`, `--features
+telemetry`, and `cargo test` (both feature sets) — all clean; my edits are
+`cargo fmt`-clean (remaining fmt diffs in the crate are pre-existing
+committed long-line drift). **Still open**: a dedicated telemetry-accuracy
+test asserting non-zero `min/max/mean_latency_ns` under an artificial delay is
+NOT yet written — the fix is code-complete but its test is deferred.
+
+## Task: FlushSync command was unhandled — ✅ FIXED on branch (compile-unblocker)
+
+**Severity**: High (crate did not compile)
+
+**Discovered during this sweep**: `interfaces::Command` gained a `FlushSync
+{ ns_id }` variant (handled by `block-device-spdk-nvme`), but the filesys
+actor's command match never covered it — so `cargo build -p
+block-device-filesys` failed with `E0004` (non-exhaustive patterns) at HEAD.
+Unnoticed because `block-device-filesys` is a workspace member but **not** a
+`default-member`, so CI / `cargo test --all` never builds it. (The sibling
+`block-device-kernel` had the identical breakage.)
+
+**Fix (staged on branch)**: added a `Command::FlushSync { ns_id }` arm that
+validates `ns_id == 1` and issues a **real `fdatasync(2)`** on the backing
+file descriptor, mapping failure to `WriteFailed` and returning
+`Completion::FlushDone { handle, result }`. Unlike the kernel device (opened
+`O_DIRECT|O_DSYNC`, so a no-op flush is correct), the filesys device can fall
+back to buffered IO, so `FlushSync` must perform an actual `fdatasync` to give
+callers a well-defined durability barrier. Backfilled as spec FR-022.
+**Review note**: code change beyond the planned telemetry fix, made to keep
+the branch buildable; confirm the `fdatasync` barrier is the desired contract.
+
+## Task: dead pub(crate) setters — LOW, queued (do NOT auto-remove)
+
+**Severity**: Low
+
+`src/lib.rs` carries three `#[allow(dead_code)]` setters —
+`set_file_path` (:95), `set_block_size` (:101), `set_num_blocks` (:107) — that
+are `pub(crate)` and currently unused (the public path is
+`create(file_path, block_size, num_blocks)`; `quickstart.md` was already
+corrected in the 2026-07-22 pass to stop referencing them). Left in place:
+they may be an intended internal-configuration API. If they are truly dead,
+remove them and drop the `#[allow(dead_code)]`; otherwise wire up a caller or
+document the intended use. Not drafted (API-intent decision).
+
+**Files**: `components/block-device-filesys/src/lib.rs:95,101,107`.
+
+## Note: io-uring-backpressure / SC-002 / SC-003 / SC-005 — unchanged
+
+The four remaining 2026-07-22 align-tasks (io_uring backpressure, and the
+SC-002/003/005 unenforced-criterion tasks) are **not** addressed by this
+sweep and remain open as written above. They were outside the telemetry /
+compile-unblock scope of this pass.

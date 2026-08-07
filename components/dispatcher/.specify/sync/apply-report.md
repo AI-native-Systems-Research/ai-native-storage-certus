@@ -77,3 +77,52 @@ None. Single spec directory for this component.
 - Only Markdown under `components/dispatcher/specs/**` and `.specify/sync/**` was modified. No source code
   (`src/**`) was touched.
 - Backup of `spec.md` prior to this apply: `components/dispatcher/.specify/sync/backups/spec.md.bak.20260722T162308`.
+
+---
+
+# 2026-08-07 Sweep (branch `sync/spec-drift-sweep-20260807`)
+
+Mode: **fully-interactive** (per-component approval via the drift-sweep workflow).
+Drift source: `.specify/sync/drift-report.{json,md}` (generated 2026-08-07).
+Pre-edit backups: `.specify/sync/backups/20260807T160256Z/{spec.md, idispatcher.rs}` (from git HEAD).
+Nothing committed to `unstable` — all changes staged on the feature branch.
+
+## User Decisions Driving This Pass
+
+- **API drift (FR-001, FR-039, FR-042, config fields, primitives)** = **Backfill all to spec**.
+- **Phantom Creusot proofs in `idispatcher.rs`** = **Soften doc to match reality**.
+
+## Changes Made
+
+### Specs Updated (BACKFILL — applied directly)
+
+| Requirement | Change |
+|-------------|--------|
+| Header | Added "Last Synced 2026-08-07" note summarizing this sweep. |
+| FR-001 | Expanded the method inventory to the full shipped `IDispatcher` surface (added `reserve_memory`, `copy_gpu_to_memory_async`, `copy_gpu_to_memory_completed`, `release_memory`, `pin`, `unpin`, `flush_to_ssd`, `read_write_stats`), grouped by role; noted `create_eviction_channel`/`eviction_dropped_count` are inherent methods on the concrete component, not trait methods. |
+| FR-039 | Signature backfilled to `batch_lookup(entries: &[(CacheKey, Vec<IpcHandle>)])` with a multi-region-scatter note. |
+| FR-042 | Signature backfilled to `create_eviction_channel(capacity: usize)`. |
+| FR-033 | Extended with `metadata_partition_size` (u64, 128 MiB), `extended_metadata_partition_size` (u64, 128 MiB), and `backfill_delay_ms` (u64, 10 — noted p2p-only, inert for local caching). |
+| **FR-056 (new)** | Documents the GPU-staged memory-lifecycle primitives (`reserve_memory`/`copy_gpu_to_memory_async`/`copy_gpu_to_memory_completed`/`release_memory`/`pin`/`unpin`) and the durability/introspection methods (`flush_to_ssd`, `read_write_stats`). |
+
+### Code Doc Corrected on Branch (ALIGN — doc-only, no behavior change)
+
+| File | Change |
+|------|--------|
+| `components/interfaces/src/idispatcher.rs` | Softened the "Verified Properties" block comment: reframed P1–P10 as **informal design invariants** (exercised by tests, not machine-checked), explicitly recorded that the previously-advertised Creusot proof tree at `components/dispatcher/verif/` ("24 verification conditions discharged by SMT solvers") **does not exist** and the claim was removed. Changed all 16 per-method `# Verified: Pn` doc headings to `# Design invariants (informal, not machine-checked): Pn`. Also completed the P9/P10 list entries that were previously cited only in method docs. |
+
+## Verification
+
+- `cargo build -p interfaces` — **clean** (doc-comment edits only).
+- Dispatcher crate (`dispatcher-v1`) requires SPDK + hardware and was not built in this pass; the interface edits are comment-only and cannot change codegen.
+
+## Not Applied / Deferred
+
+| Item | Reason |
+|------|--------|
+| Restoring real Creusot proofs | Out of scope; noted in the softened doc as possible future work. Per the soften-doc decision, docs were corrected rather than proofs restored. |
+
+## Next Steps
+
+1. Review the softened `idispatcher.rs` doc comment and the six spec edits on the branch.
+2. Commit on `sync/spec-drift-sweep-20260807` (do NOT commit to `unstable`).

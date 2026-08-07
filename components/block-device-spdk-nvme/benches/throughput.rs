@@ -4,7 +4,7 @@
 //! Criterion benchmarks for batch write throughput at varying batch sizes.
 //!
 //! Measures throughput at batch sizes 1, 8, 32, 128 for 4KB blocks using
-//! crossbeam bounded channels (64 slots) as the SPSC transport.
+//! the `component_core` SpscChannel (256 slots) as the transport.
 //! Hardware-dependent benchmarks use runtime detection via
 //! `spdk_env::checks` and are skipped when no SPDK hardware is available.
 //!

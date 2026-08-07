@@ -59,3 +59,72 @@ All items below are explicitly excluded from spec rewriting per the hard rules; 
 - `components/block-device-filesys/.specify/sync/backups/*` (pre-edit backups of the four Markdown files above)
 
 No `.rs`, `Cargo.toml`, or `build.rs` files were modified.
+
+---
+
+# 2026-08-07 Sweep
+
+**Component**: `block-device-filesys`
+**Mode**: Interactive drift sweep (`component-sync-specs`, all specced components)
+**Date**: 2026-08-07 on branch `sync/spec-drift-sweep-20260807`
+**Source**: `.specify/sync/drift-report.{json,md}` (regenerated 2026-08-07).
+**Backups**: `.specify/sync/backups/20260807T160256Z/actor.rs`.
+
+## ⚠️ Discovered pre-existing breakage (surface to reviewer)
+
+`block-device-filesys` **did not compile at HEAD**. The shared
+`interfaces::Command` gained a `FlushSync { ns_id }` variant (handled by
+`block-device-spdk-nvme`), but this crate's command match never covered it →
+`E0004` non-exhaustive patterns. Unnoticed because `block-device-filesys` is a
+workspace **member but not a `default-member`**, so neither `cargo build`,
+`cargo test --all`, nor CI ever builds it. The sibling `block-device-kernel`
+had the identical breakage. CI blind spot, independent of the telemetry work.
+
+## Changes Made (all staged on branch, nothing committed to `unstable`)
+
+### Code (drafted for review — NOT auto-applied to `unstable`)
+
+| File | Change | Category |
+|------|--------|----------|
+| `src/actor.rs` | Telemetry latency: `InflightOp.start_ns: u64` → gated `start: Instant`; `Instant::now()` at submit; `start.elapsed()` at all 5 sync/fallback sites + async completion | ALIGN (resolves 2026-07-22 `telemetry-latency` defect task) |
+| `src/actor.rs` | Added `Command::FlushSync { ns_id }` arm — validates `ns_id==1`, issues **real `fdatasync(2)`** on backing fd, maps failure to `WriteFailed` | Compile-unblocker (pre-existing breakage) |
+
+Verified: `cargo build -p block-device-filesys`, `--features telemetry`, and
+`cargo test` (both feature sets) all clean; my edits are `cargo fmt`-clean
+(remaining fmt diffs are pre-existing committed long-line drift).
+
+### Specs Updated (BACKFILL — document reality)
+
+| Spec | Requirement | Change |
+|------|-------------|--------|
+| 001-block-device-filesys | Header | `Last Synced 2026-08-07` note |
+| 001-block-device-filesys | FR-015 | Softened — `open_or_create_backing_file` has prose doc but no runnable example; carved out alongside interface/lifecycle methods |
+| 001-block-device-filesys | FR-019 | "Known defect" latency text replaced with "now fixed" note (start captured before blocking IO, elapsed recorded) |
+| 001-block-device-filesys | US2 scenario 1 | Added `max_transfer_size==block_size*256`, `num_io_queues==1`, `numa_node==-1`, `nvme_version=="N/A (file-backed)"` |
+| 001-block-device-filesys | FR-021 (new) | Device-info surface placeholder semantics |
+| 001-block-device-filesys | FR-022 (new) | `FlushSync` → real `fdatasync` handler |
+
+### Implementation Tasks (see align-tasks.md 2026-08-07 section)
+
+- `telemetry-latency` — **DRAFTED on branch** (accuracy test still deferred).
+- FlushSync arm — **DRAFTED on branch**, flagged as pre-existing-breakage fix
+  needing review of the `fdatasync` barrier contract.
+- Dead `pub(crate)` setters (`set_file_path`/`set_block_size`/`set_num_blocks`,
+  lib.rs:95/101/107) — LOW, queued; do NOT auto-remove (possible intended API).
+- io-uring-backpressure, SC-002/003/005 — unchanged, remain open from 2026-07-22.
+
+### Not Applied / Deferred
+
+The FR-015 doc-example align-task from 2026-07-22 was addressed by
+**softening the spec** (BACKFILL) rather than adding runnable examples, since
+`open_or_create_backing_file` is carved out alongside the interface/lifecycle
+methods that are covered by integration tests. The two code fixes are
+drafted-but-uncommitted pending user review per the branch-work-only directive.
+
+## Next Steps
+
+1. Review the two drafted `src/actor.rs` code changes (telemetry + FlushSync).
+2. Confirm the filesys `FlushSync` `fdatasync` barrier contract is intended.
+3. Decide the fate of the dead `pub(crate)` setters.
+4. Fix the CI blind spot (kernel/filesys are non-default-members, never built).
+5. Commit on the branch only — never to `unstable`.

@@ -58,3 +58,27 @@ Pre-modification backups saved to `.specify/sync/backups/2026-07-22/`:
 1. Review the updated `003-actor-channels` spec.md, contracts/public-api.md, and data-model.md for accuracy.
 2. Review `align-tasks.md` and decide whether to convert the `activate()` double-consume panic into a typed `ActorError` variant.
 3. Commit changes: `git add components/component-framework/specs/003-actor-channels components/component-framework/.specify/sync && git commit -m "spec-sync: backfill actor on_idle/signal_stop/try_send/register_for_unpark into 003-actor-channels"`
+
+---
+
+# 2026-08-07 Sweep (branch `sync/spec-drift-sweep-20260807`)
+
+Mode: sweep re-analysis of all 6 component-framework specs. Pacing:
+auto-apply safe BACKFILL on-branch; ask on forks. Regenerated drift report:
+148/149 requirements aligned; only spec-004 FR-016 drifted (bench-naming
+example, minor); 10 unspecced items, all benign.
+
+## Fork resolution applied (user decision, spec-only BACKFILL)
+
+| Fork | User decision | Change applied |
+|------|---------------|----------------|
+| 004-channel-benchmarks FR-016 bench-ID example vs. actual emitted tokens | **"Relax spec to match code (backfill)"** | FR-016 (line 93) relaxed: the group-ID example now uses the tokens the benches actually emit — `spsc_throughput_u64/builtin/1024` with a bare `builtin` backend token and bare numeric capacity — rather than the stale `built_in`/`capacity_1024`. Cites `benches/channel_spsc_benchmark.rs:64-70`. Annotated *(Backfilled 2026-08-07)*. |
+
+## No action
+
+- **10 unspecced items** — benign helper/internal surface, no standalone spec warranted; NO_ACTION (consistent with the 2026-07-22 run's treatment of the four actor extensions, which were folded into 003 rather than given new specs).
+- The `activate()` double-consume panic align-task (003/FR-004, 005/FR-001) from the 2026-07-22 run remains open — a code-side behavior question, not re-surfaced as spec drift this sweep.
+- Note: this component carries a `conflicts.*` artifact set under `.specify/sync/` from a prior conflict-analysis pass; no new conflicts were introduced this sweep.
+
+## Verification
+- Single additive edit confined to `specs/004-channel-benchmarks/spec.md` FR-016. No `.rs` source touched.
