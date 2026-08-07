@@ -745,12 +745,15 @@ if want tiered-cpu-fs; then
         # (Plain CPUOffload uses a CUDA pinned buffer, not /dev/shm, so it is fine.)
         # Give /dev/shm the tier size + 2 GiB headroom.
         tier_shm=$((CPU_BYTES + 2 * (1 << 30)))
+        # DISK_DEV lets the runner snapshot /sys/block/<md>/stat per round so the
+        # fs secondary tier's real SSD read/write is recorded (like SharedStorage).
         run_container_bench "Tiered-CPU-FS" "$IMG_CPU" \
             --shm-size="${tier_shm}" \
             -v "${SHARED_FS}:/mnt/fs-tier:z" \
             -e "CPU_BYTES=${CPU_BYTES}" \
             -e "SECONDARY_TIER=fs" \
-            -e "FS_ROOT_DIR=/mnt/fs-tier/kv-tier"
+            -e "FS_ROOT_DIR=/mnt/fs-tier/kv-tier" \
+            -e "DISK_DEV=${DISK_DEV}"
     fi
 fi
 
