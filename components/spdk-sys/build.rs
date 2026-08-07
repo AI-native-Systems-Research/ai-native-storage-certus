@@ -211,6 +211,10 @@ fn main() {
         .allowlist_function("spdk_nvme_ns_cmd_write")
         .allowlist_function("spdk_nvme_ns_cmd_write_zeroes")
         .allowlist_function("spdk_nvme_ns_cmd_flush")
+        // Abort an outstanding NVMe command, matched by its cmd_cb_arg.
+        // Used by the block-device actor to cancel an in-flight async read/write
+        // on AbortOp so the controller does not DMA into a released buffer.
+        .allowlist_function("spdk_nvme_ctrlr_cmd_abort_ext")
         .allowlist_function("spdk_nvme_qpair_process_completions")
         // DMA memory allocation
         .allowlist_function("spdk_dma_zmalloc")

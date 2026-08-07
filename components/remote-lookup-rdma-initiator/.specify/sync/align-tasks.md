@@ -78,3 +78,45 @@ Limitations section) — no source file changes implied either way.
 - [ ] Human decision: does `tests/mr_registration_bench.rs` warrant a Known
       Limitations line in spec-002, or is it fine to remain unspecced research?
 - [ ] If yes, add one bullet under spec-002 "Known Limitations / Follow-ups"
+
+---
+
+# 2026-08-07 Sweep (branch `sync/spec-drift-sweep-20260807`)
+
+Spec-002 (design-of-record) shows **zero drift** — no new ALIGN items. The two
+tasks from the July pass are reconciled below; no new code-align work surfaced.
+All resolvable spec-side items were BACKFILLED and applied (see apply-report.md
+2026-08-07 section).
+
+## Task A — (carried forward) SC-004 stale bench header comment (Low)
+
+- **Status**: still **queued, not drafted** (unchanged from July align-task 1).
+- **Spec**: `002-rdma-push-initiator` SC-004.
+- **Current code**: `benches/push_telemetry.rs:1-18` header comment still states
+  the pre-revision literal `<5% vs disabled` pass/fail bar; spec-002 SC-004 was
+  reframed (2026-07-15) as "small fixed absolute cost / ZST-when-off". Benchmark
+  mechanics and shipped behavior already match the spec — only the comment's
+  stated bar is outdated.
+- **Required change**: reword the header comment to the fixed-absolute-cost /
+  ZST-when-off criterion and cross-reference SC-004's 2026-07-15 note.
+- **Files**: `components/remote-lookup-rdma-initiator/benches/push_telemetry.rs`
+  (doc comment only; no benchmark logic).
+- **Why queued, not drafted**: Low severity, doc-comment only — per the sweep
+  pacing, only HIGH code bugs get a drafted fix; this stays a queued task.
+- **Owner**: remote-lookup-rdma-initiator maintainer.
+
+## Task B — (resolved this pass) mr_registration_bench Known-Limitations note
+
+- **Status**: **RESOLVED** — the July "DEFERRED" human-decision item is closed.
+- The `tests/mr_registration_bench.rs` (and `src/loopback_test.rs`) validation
+  tooling is now documented under spec-002's Known Limitations as deliberately
+  unspecced engineering/validation tooling (option (a) from the July deferral).
+  No source change; no further action.
+
+## Note — spec-001 stale annotations (FR-014, FR-015)
+
+Not align-tasks (spec-001 is superseded; there is no code to align to it). The
+two stale self-annotations were **annotated in place** this pass to mark them as
+describing the opposite of current code (telemetry IS integrated; trait methods
+are functional, no `serve` module exists). Full retirement of spec-001 to an
+archive path is a maintainer follow-up, tracked in apply-report.md Next Steps.

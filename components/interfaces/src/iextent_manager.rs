@@ -241,7 +241,7 @@ define_interface! {
         /// `Some(duration)` enables the background checkpoint thread to fire
         /// every `duration`. `None` disables automatic checkpoints entirely;
         /// callers must then invoke `checkpoint()` manually. The default is
-        /// five minutes.
+        /// 30 seconds.
         fn set_checkpoint_interval(&self, interval: Option<std::time::Duration>);
 
         /// Return the number of bytes currently allocated across all regions.

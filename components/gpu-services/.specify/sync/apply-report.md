@@ -143,3 +143,37 @@ to any spec or code file. Full detail in `.specify/sync/align-tasks.md`.
   align-tasks.md only).
 - `components/gpu-services/CLAUDE.md` was intentionally left unmodified
   per hard rules; its staleness is tracked in align-tasks.md instead.
+
+---
+
+# 2026-08-07 Sweep (branch `sync/spec-drift-sweep-20260807`)
+
+Mode: sweep re-analysis of all three gpu-services specs. Pacing: auto-apply
+safe BACKFILL/doc-soften on-branch; stop-and-ask only on genuine forks.
+Regenerated drift report found spec-001 the only drifted spec (FR-005, FR-008
+minor) plus the unspecced `GpuIpcHandle::{verified,pinned}` API surface and the
+FR-008-vs-002/003 conflict carried over from the 2026-07-22 run.
+
+## Safe BACKFILL / doc-soften applied (spec Markdown only)
+
+| Spec | Item | Change |
+|------|------|--------|
+| 001-gpu-cuda-services | FR-005 | Reworded to remove the false "for locally-pinned memory, full CUDA unregistration is performed" clause. New text states `unpin_memory` is tracking-removal-only in all cases and never calls `cudaHostUnregister`; full host un/registration is handled exclusively by `register_host_memory`/`unregister_host_memory` (FR-015/FR-016). Cites `src/lib.rs:249-267`. **Resolves 2026-07-22 align-task FR-005 (option 1, documentation trim).** |
+| 001-gpu-cuda-services | US3 acceptance scenario 2 | Softened to a device-type-only check: the implemented `check_memory_attributes` (`src/memory.rs:26`) is a `cudaPointerGetAttributes` device-type check per FR-004; it does not separately diagnose contiguity vs pin status. |
+| 002-gpu-ssd-dma-prepare | Auxiliary Public Helpers | Added a new "### Auxiliary Public Helpers *(backfilled)*" subsection before Key Entities, documenting `create_spdk_dma_buffer_from_cuda_malloc`/`spdk_unregister_and_cuda_free`, `get_phys_addr`, `GPU_PAGE_SHIFT` as intentionally-`pub` helpers (not `IGpuServices` methods). |
+
+## Fork resolutions applied (user decisions, all spec-only BACKFILL)
+
+| Fork | User decision | Change applied |
+|------|---------------|----------------|
+| FR-008 vs 002/003 conflict (2026-07-22 align-task, Medium) | **"Soften FR-008 wording (backfill)"** | FR-008 relaxed with an explicit documented carve-out for the `p2p`/GDRCopy DMA-buffer builders in the `dma` module (`create_spdk_dma_buffer_from_gpu`/`_from_cuda_malloc`/`_from_cuda_host_alloc`/`_from_gpu_bar`/`_from_phys`/`_from_bar_direct`, and `get_phys_addr`) being intentionally `pub`. **Resolves the 2026-07-22 align-task FR-008 (recommended direction, human-approved).** |
+| `GpuIpcHandle::{verified,pinned}` unspecced API | **"Document as reserved (backfill)"** | Key Entities `GpuIpcHandle` note appended marking the shared struct's `verified`/`pinned` fields + `set_*`/`is_*` accessors (`components/interfaces/src/igpu_services.rs:63-118`) as **reserved for future use**, deliberately retained rather than removed. |
+
+## Still open (carried forward, NOT resolved this sweep)
+
+- **FR-015 EBUSY special-case** (2026-07-22 align-task, Low) — `register_host_memory` treats SPDK `EBUSY` (-16) as success and skips rollback; not re-surfaced as drift this sweep (spec-001 drift was FR-005/FR-008 only). Remains an open align-task pending maintainer decision (document idempotency vs. remove the special-case).
+- **CLAUDE.md staleness** (2026-07-22 align-task, Low, doc-only) — component-root `CLAUDE.md` Overview still describes a bare skeleton; outside `specs/**`, still tracked in align-tasks.md only.
+
+## Verification
+- All edits confined to Markdown under `specs/**`. No `.rs` source touched.
+- No new backup dir created this sweep (edits are additive annotations dated 2026-08-07 and recoverable via git on-branch).

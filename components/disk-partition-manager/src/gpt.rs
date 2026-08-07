@@ -67,7 +67,17 @@ impl GptManager {
         // Try primary header at LBA 1
         match self.try_read_gpt_at(1, 2) {
             Ok(table) => return Ok(table),
-            Err(PartitionTableError::CorruptTable(_)) => {
+            // Both a CRC mismatch (`CorruptTable`) and a damaged/zeroed primary
+            // signature (`NoPartitionTable` from `parse_header`) are recoverable
+            // via the backup header — spec FR-003 / US2 scenario 2 requires the
+            // backup to be attempted whenever the primary is corrupt. A torn or
+            // partial write can damage the signature bytes just as easily as the
+            // CRC, so both must fall through rather than propagate. (If the disk
+            // is genuinely unformatted, the backup read also yields
+            // `NoPartitionTable` and callers such as `initialize_or_format` still
+            // treat it as "no table present".)
+            Err(PartitionTableError::CorruptTable(_))
+            | Err(PartitionTableError::NoPartitionTable(_)) => {
                 // Fall through to try backup
             }
             Err(e) => return Err(e),

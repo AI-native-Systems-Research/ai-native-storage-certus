@@ -8,7 +8,7 @@
 
 **Source**: Generated from existing implementation
 
-**Last Synced**: 2026-07-22 (spec-sync AUTO-BACKFILL — see `.specify/sync/apply-report.md`)
+**Last Synced**: 2026-08-07 (drift sweep on branch `sync/spec-drift-sweep-20260807`) — the FR-021/SC-006 telemetry-latency defect (record_op previously passed a hardcoded `0`) was **fixed in code** on the branch (per-op start time captured, elapsed ns recorded), so those requirements now hold as written; backfilled FR-009 (async `tag` currently emitted as `0`), added FR-026 (device-info methods `read_write_stats`/`numa_node`/`nvme_version`), and extended the US2 device-info acceptance scenario. See `.specify/sync/apply-report.md`. Prior sync: 2026-07-22 AUTO-BACKFILL.
 
 ## Backfill Notice
 
@@ -52,7 +52,7 @@ A developer working on higher-level Certus components (dispatcher, extent-manage
 
 **Acceptance Scenarios**:
 
-1. **Given** the `block-device-kernel` component, **When** queried via `IBlockDevice` methods, **Then** `sector_size(1)` returns the configured block size, `num_sectors(1)` returns the configured block count, `block_size()` returns the configured block size, `max_queue_depth()` returns 128 (ring depth), `num_io_queues()` returns 1, `max_transfer_size()` returns `block_size * 256`.
+1. **Given** the `block-device-kernel` component, **When** queried via `IBlockDevice` methods, **Then** `sector_size(1)` returns the configured block size, `num_sectors(1)` returns the configured block count, `block_size()` returns the configured block size, `max_queue_depth()` returns 128 (ring depth), `num_io_queues()` returns 1, `max_transfer_size()` returns `block_size * 256`, `numa_node()` returns `-1` (NUMA affinity not modeled for a kernel block device), and `nvme_version()` returns `"N/A (kernel block device)"` (no NVMe controller behind the kernel block layer). See FR-026.
 2. **Given** the component, **When** queried via `IUnknown`, **Then** it provides `IBlockDevice` and `IBlockDeviceAdmin` interfaces.
 3. **Given** the component, **When** `NsCreate`, `NsDelete`, `NsFormat`, or `ControllerReset` commands are sent, **Then** a `NotSupported` error completion is returned.
 4. **Given** the component, **When** `NsProbe` is sent, **Then** a single `NamespaceInfo` is returned with `ns_id=1`, the configured `num_sectors`, and the configured `sector_size`.
@@ -116,7 +116,7 @@ A developer needs to benchmark the kernel block device to compare latency and th
 - **FR-006**: Component MUST use a raw Linux block device (`S_IFBLK`) as the backing store; regular files are rejected.
 - **FR-007**: Component MUST support configurable block size (minimum 512, must be power of 2) and device capacity (number of blocks, or 0 for auto-detect via `BLKGETSIZE64`).
 - **FR-008**: Component MUST support synchronous read/write (`ReadSync`, `WriteSync`) by submitting io_uring SQEs and calling `submit_and_wait(1)`.
-- **FR-009**: Component MUST support asynchronous read/write (`ReadAsync`, `WriteAsync`) with configurable timeout in milliseconds and `OpHandle` tracking via an inflight operation map.
+- **FR-009**: Component MUST support asynchronous read/write (`ReadAsync`, `WriteAsync`) with configurable timeout in milliseconds and `OpHandle` tracking via an inflight operation map. *(Backfilled 2026-08-07 — the caller-supplied `tag` field is currently NOT propagated to the completion: `ReadDone`/`WriteDone` are always emitted with `tag: 0`. Clients correlate async completions via the returned `OpHandle`, not the tag. This differs from the sibling `block-device-filesys`, which echoes the tag; parity is tracked as a low-severity follow-up in `.specify/sync/align-tasks.md`.)*
 - **FR-010**: Component MUST support `WriteZeros` by allocating a 512-byte-aligned zero buffer via `posix_memalign`, writing via io_uring, and freeing the buffer after completion.
 - **FR-011**: Component MUST support `BatchSubmit` by processing each operation in the batch sequentially via recursive `process_command` dispatch.
 - **FR-012**: Component MUST support `AbortOp` by submitting an `AsyncCancel` SQE to io_uring and sending an `AbortAck` completion.
@@ -133,6 +133,8 @@ A developer needs to benchmark the kernel block device to compare latency and th
 - **FR-023**: `IBlockDeviceAdmin` methods `set_pci_address`, `set_actor_cpu`, `signal_stop`, and `detach_controller` MUST be no-ops (not applicable to kernel block devices).
 - **FR-024**: Component MUST support graceful shutdown via `ControlMessage::Shutdown` which causes `on_idle()` to return `false`, terminating the actor loop.
 - **FR-025**: Component MUST deliver completions to clients without ever blocking the actor thread. `ClientSession::deliver()` attempts a non-blocking `try_send`; on failure (callback ring full, or receiver disconnected) the completion is appended to an unbounded per-client FIFO backlog (`pending: VecDeque<Completion>`) instead of being dropped. `KernelHandler::poll_clients()` retries the backlog oldest-first on every idle-loop tick (`ClientSession::flush_pending`), stopping at the first entry that still can't be sent to preserve ordering. *(Backfilled 2026-07-22 — this is deliberate anti-head-of-line-blocking behavior: a slow or stalled client must never block completion delivery to every other client sharing the device.)*
+
+- **FR-026**: *(Backfilled 2026-08-07 — documents interface-required device-info methods the original spec omitted.)* Because `IBlockDevice` is shared with `block-device-spdk-nvme`, the component MUST implement the full device-info surface, including the fields that have no meaningful value for a kernel block device: `numa_node()` MUST return `-1` (device-to-NUMA affinity is not discovered/modeled here), `nvme_version()` MUST return the fixed string `"N/A (kernel block device)"` (there is no NVMe controller behind the kernel block layer), and `read_write_stats()` MUST return a well-formed `ReadWriteStats` value (currently zero-initialized — per-direction read/write counters are not separately tracked by this component; aggregate telemetry under FR-021 is the supported path). These are stable, intentional constants, not runtime-discovered values.
 
 ### Non-Functional Requirements
 

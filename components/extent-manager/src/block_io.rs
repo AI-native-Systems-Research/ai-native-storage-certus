@@ -157,4 +157,25 @@ impl BlockDeviceClient {
     pub fn sector_size(&self) -> u32 {
         self.sector_size
     }
+
+    /// Issue a synchronous flush of the metadata device's volatile write
+    /// cache, forcing previously written blocks onto non-volatile media.
+    ///
+    /// Only compiled when the `volatile_write_cache` feature is enabled
+    /// (spec FR-030); when the feature is off, no flush is issued and this
+    /// method does not exist.
+    #[cfg(feature = "volatile_write_cache")]
+    pub fn flush(&self) -> Result<(), interfaces::ExtentManagerError> {
+        self.channels
+            .command_tx
+            .send(Command::FlushSync { ns_id: self.ns_id })
+            .map_err(|_| error::io_error("flush command send failed"))?;
+
+        match self.channels.completion_rx.recv() {
+            Ok(Completion::FlushDone { result, .. }) => result.map_err(error::nvme_to_em),
+            Ok(Completion::Error { error: e, .. }) => Err(error::nvme_to_em(e)),
+            Ok(_) => Err(error::io_error("unexpected completion type")),
+            Err(_) => Err(error::io_error("flush completion recv failed")),
+        }
+    }
 }

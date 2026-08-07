@@ -182,9 +182,18 @@ impl fmt::Display for DispatcherError {
 
 impl std::error::Error for DispatcherError {}
 
-// # Verified Properties (see `components/dispatcher/verif/`)
+// # Design Invariants (informal — NOT machine-checked)
 //
-// The following invariants are formally proved with Creusot:
+// The properties below (P1–P10) are the intended safety/liveness invariants of
+// the dispatcher implementation. They are documented as design intent and are
+// exercised by the unit/integration tests; they are NOT formally proved. An
+// earlier revision of this comment claimed a Creusot proof tree at
+// `components/dispatcher/verif/` with "24 verification conditions discharged by
+// SMT solvers" — no such proofs or directory exist. The claim has been removed
+// to stop the interface docs asserting verification that was never present.
+// (Sync 2026-08-07, branch `sync/spec-drift-sweep-20260807`.) Re-introducing
+// real Creusot proofs remains possible future work; if done, restore the
+// verified-status wording and point it at the actual proof artifacts.
 //
 // - P1 (drive-index-bounded): drive_index(key, N) always returns a value < N
 // - P2 (eviction-terminates): evict_for_space loop exits after at most max_attempts iterations
@@ -194,8 +203,10 @@ impl std::error::Error for DispatcherError {}
 // - P6 (drive-index-deterministic): same key always maps to same drive
 // - P7 (eviction-progress): each successful eviction strictly decreases memory used
 // - P8 (reserve-complete-lifecycle): reserve→copy→complete yields MemoryTier entry with read_ref=1
+// - P9 (eviction-progress): flush→clear leaves no resident dirty entry for the flushed key
+// - P10 (reserve-complete-lifecycle): reserve→copy→complete is atomic w.r.t. concurrent lookup
 //
-// Total: 10 properties, 24 verification conditions discharged by SMT solvers.
+// Total: 10 documented design invariants (informal; no SMT verification conditions).
 
 #[cfg(feature = "spdk")]
 component_macros::define_interface! {
@@ -212,7 +223,7 @@ component_macros::define_interface! {
         /// (dispatch_map, memory_tier) are not bound.
         /// Returns [`DispatcherError::InvalidParameter`] if `data_pci_addrs` is empty.
         ///
-        /// # Verified: P3 (size-validation), P4 (init-guard)
+        /// # Design invariants (informal, not machine-checked):P3 (size-validation), P4 (init-guard)
         /// Rejects empty `data_pci_addrs` (InvalidParameter). After success,
         /// sets initialized=true enabling all other operations.
         ///
@@ -246,7 +257,7 @@ component_macros::define_interface! {
         /// Blocks until all pending memory-tier-to-SSD writes finish, then shuts down
         /// all managed block devices and extent managers.
         ///
-        /// # Verified: P4 (init-guard)
+        /// # Design invariants (informal, not machine-checked):P4 (init-guard)
         /// After shutdown completes, initialized=false and all subsequent
         /// operations return NotInitialized.
         ///
@@ -282,7 +293,7 @@ component_macros::define_interface! {
         /// Returns [`DispatcherError::KeyNotFound`] if the key does not exist.
         /// Returns [`DispatcherError::NotInitialized`] if called before [`initialize`].
         ///
-        /// # Verified: P1 (drive-index-bounded), P4 (init-guard)
+        /// # Design invariants (informal, not machine-checked):P1 (drive-index-bounded), P4 (init-guard)
         /// Drive selection for cold-path reads is always within [0, num_drives).
         /// Returns NotInitialized if called before initialize().
         ///
@@ -321,7 +332,7 @@ component_macros::define_interface! {
         /// Returns [`DispatcherError::KeyNotFound`] if the key does not exist.
         /// Returns [`DispatcherError::IoError`] if the DMA copy fails.
         ///
-        /// # Verified: P1 (drive-index-bounded), P4 (init-guard)
+        /// # Design invariants (informal, not machine-checked):P1 (drive-index-bounded), P4 (init-guard)
         /// Cold-path drive selection bounded. Rejects uninitialized.
         ///
         /// # Unchecked: Caller must synchronize returned stream before memory access
@@ -361,7 +372,7 @@ component_macros::define_interface! {
         ///
         /// Returns one `Result` per input entry, in the same order.
         ///
-        /// # Verified: P1 (drive-index-bounded), P2 (eviction-terminates), P4 (init-guard)
+        /// # Design invariants (informal, not machine-checked):P1 (drive-index-bounded), P2 (eviction-terminates), P4 (init-guard)
         /// Cold-path drive selection is bounded. Eviction during promotion
         /// terminates. Rejects calls before initialization.
         ///
@@ -384,7 +395,7 @@ component_macros::define_interface! {
         /// Returns `true` if the key is present in the cache (any tier),
         /// `false` otherwise.
         ///
-        /// # Verified: P4 (init-guard)
+        /// # Design invariants (informal, not machine-checked):P4 (init-guard)
         /// Returns NotInitialized before initialize().
         ///
         /// # Examples
@@ -412,7 +423,7 @@ component_macros::define_interface! {
         ///
         /// Returns [`DispatcherError::KeyNotFound`] if the key does not exist.
         ///
-        /// # Verified: P1 (drive-index-bounded), P4 (init-guard)
+        /// # Design invariants (informal, not machine-checked):P1 (drive-index-bounded), P4 (init-guard)
         /// Drive index for extent removal is bounded. Rejects uninitialized.
         ///
         /// # Unchecked: Blocks until background write completes
@@ -446,7 +457,7 @@ component_macros::define_interface! {
         /// Returns [`DispatcherError::AlreadyExists`] if the key is already cached.
         /// Returns [`DispatcherError::AllocationFailed`] if the memory-tier pool is full.
         ///
-        /// # Verified: P3 (size-validation), P4 (init-guard), P5 (populate-lifecycle), P2 (eviction-terminates)
+        /// # Design invariants (informal, not machine-checked):P3 (size-validation), P4 (init-guard), P5 (populate-lifecycle), P2 (eviction-terminates)
         /// Rejects zero-size. Rejects uninitialized. On success, entry is
         /// registered in MemoryTier with read_ref=1 (held by background writer)
         /// and no write_ref. Eviction terminates within max_attempts.
@@ -486,7 +497,7 @@ component_macros::define_interface! {
         /// Returns [`DispatcherError::AlreadyExists`] if the key already has a slot.
         /// Returns [`DispatcherError::AllocationFailed`] if the pool is full after eviction.
         ///
-        /// # Verified: P2 (eviction-terminates), P3 (size-validation), P4 (init-guard), P10 (reserve-complete-lifecycle)
+        /// # Design invariants (informal, not machine-checked):P2 (eviction-terminates), P3 (size-validation), P4 (init-guard), P10 (reserve-complete-lifecycle)
         /// Eviction terminates. Rejects zero-size. Rejects uninitialized.
         /// Part of the reserve→copy→complete lifecycle.
         ///
@@ -516,7 +527,7 @@ component_macros::define_interface! {
         /// Returns [`DispatcherError::KeyNotFound`] if no reserved slot exists for `key`.
         /// Returns [`DispatcherError::IoError`] if the DMA copy fails.
         ///
-        /// # Verified: P4 (init-guard), P10 (reserve-complete-lifecycle)
+        /// # Design invariants (informal, not machine-checked):P4 (init-guard), P10 (reserve-complete-lifecycle)
         /// Rejects uninitialized. Part of the reserve→copy→complete lifecycle.
         ///
         /// # Unchecked: Stream must be synchronized before copy_gpu_to_memory_completed
@@ -534,7 +545,7 @@ component_macros::define_interface! {
         ///
         /// Returns [`DispatcherError::KeyNotFound`] if the key is not in memory-tier.
         ///
-        /// # Verified: P4 (init-guard), P5 (populate-lifecycle), P10 (reserve-complete-lifecycle)
+        /// # Design invariants (informal, not machine-checked):P4 (init-guard), P5 (populate-lifecycle), P10 (reserve-complete-lifecycle)
         /// Rejects uninitialized. Produces entry with read_ref=1 (for background
         /// writer) via downgrade_reference. Enqueues write job.
         fn copy_gpu_to_memory_completed(&self, key: CacheKey, size: u32) -> Result<(), DispatcherError>;
@@ -544,7 +555,7 @@ component_macros::define_interface! {
         /// Used on the cancellation path (e.g., `complete_store(success=false)`).
         /// Idempotent — returns Ok if the key has no slot.
         ///
-        /// # Verified: P4 (init-guard)
+        /// # Design invariants (informal, not machine-checked):P4 (init-guard)
         /// Rejects uninitialized.
         fn release_memory(&self, key: CacheKey) -> Result<(), DispatcherError>;
 
@@ -580,7 +591,7 @@ component_macros::define_interface! {
         ///
         /// Returns [`DispatcherError::KeyNotFound`] if the key does not exist.
         ///
-        /// # Verified: P4 (init-guard)
+        /// # Design invariants (informal, not machine-checked):P4 (init-guard)
         /// Rejects uninitialized.
         ///
         /// # Examples
@@ -606,7 +617,7 @@ component_macros::define_interface! {
         /// from a background task. Errors on individual keys are logged but not
         /// propagated.
         ///
-        /// # Verified: P1 (drive-index-bounded), P2 (eviction-terminates), P4 (init-guard)
+        /// # Design invariants (informal, not machine-checked):P1 (drive-index-bounded), P2 (eviction-terminates), P4 (init-guard)
         /// Drive selection bounded. Eviction terminates. Rejects uninitialized.
         ///
         /// # Unchecked: Per-drive parallelism correctness
@@ -621,7 +632,7 @@ component_macros::define_interface! {
         /// state in the dispatch map. Entries still being written are removed entirely.
         /// Returns the number of entries cleared.
         ///
-        /// # Verified: P4 (init-guard), P9 (eviction-progress)
+        /// # Design invariants (informal, not machine-checked):P4 (init-guard), P9 (eviction-progress)
         /// Rejects uninitialized. Each eviction decreases memory used.
         ///
         /// # Unchecked: Entries still being written are removed without data loss
@@ -650,7 +661,7 @@ component_macros::define_interface! {
         ///
         /// Returns the number of entries that now have a valid SSD offset.
         ///
-        /// # Verified: P4 (init-guard)
+        /// # Design invariants (informal, not machine-checked):P4 (init-guard)
         /// Rejects uninitialized.
         ///
         /// # Unchecked: All populated entries persisted after return

@@ -1,86 +1,102 @@
-# Spec Drift Report
+# Spec Drift Report — dispatcher
 
-Generated: 2026-07-22
-Project: dispatcher (components/dispatcher)
-Spec: specs/001-dispatcher-cache-interface/spec.md
-Base commit: 833e9f36e01f1df8a0e0fc57d5cd223d823d3199 .. bb9569dde029cc7cd98306e88f7904b8cd4cdbee (HEAD)
-Sources analyzed: src/lib.rs, src/pipeline.rs, src/cold_pool.rs, src/background.rs, src/io_segmenter.rs, src/metrics.rs, Cargo.toml, README.md, CLAUDE.md
-
-This report supersedes the 2026-07-21 report. Since that report, two commits
-landed: `3db1e6c` (partition-table compatibility guard on init) and `327306b`
-("per-drive channel pool to stop cold-read completion theft"). The latter is
-the primary driver of new drift below: it replaced the single cached
-`ClientChannels` per drive (`DataDrive.cached_channels: Option<ClientChannels>`)
-with a `ChannelPool` that lazily grows a per-drive pool of leasable channels,
-specifically to fix a hang where two concurrent readers on the same drive
-(`batch_lookup` and the prefetch path) shared one SPSC completion channel and
-stole each other's completions.
+Generated: 2026-08-07T15:31:21Z
+Project: dispatcher (spec: specs/001-dispatcher-cache-interface/spec.md)
 
 ## Summary
 
 | Category | Count |
 |----------|-------|
 | Specs Analyzed | 1 |
-| Requirements Checked | 50 (active FR-* and SC-*; excluding 5 REMOVED FRs and 1 REMOVED SC) |
-| Aligned | 47 |
-| Drifted | 3 (FR-024, FR-034, FR-037) |
-| Not Implemented | 0 |
-| Unspecced Code | 5 |
-| Inter-Spec Conflicts | 0 |
+| Functional Requirements (active, excl. 5 removed) | 50 |
+| Success Criteria (active, excl. SC-008 removed) | 14 |
+| ✓ Aligned | 61 |
+| ⚠️ Drifted | 3 |
+| ✗ Not Implemented | 0 |
+| 🆕 Unspecced Code | 3 groups |
 
-## Per-Spec Findings — 001-dispatcher-cache-interface
+Overall the implementation closely tracks the spec: every functional data-path,
+eviction, and lifecycle requirement is present in code. The drift is confined to
+(a) the interface-method inventory in FR-001, (b) the `batch_lookup` signature in
+FR-039, and (c) the `create_eviction_channel` signature in FR-042 — all cases where
+the spec text lags a since-evolved API. Plus unspecced config fields, injection
+hooks, and the reserve/copy/complete primitive set, and an interface doc block that
+references a nonexistent Creusot `verif/` proof tree.
 
-### Aligned
-
-All active requirements not listed under "Drifted" remain aligned with the
-code (FR-001..FR-023, FR-025, FR-028..FR-033, FR-035, FR-036,
-FR-038..FR-050 and SC-001..SC-014). Neither of the two new commits touches
-eviction (`evict_for_space`), per-device CUDA stream selection, or any other
-requirement's logic — their scope is limited to channel-lifecycle management
-(327306b) and an init-time partition-count guard (3db1e6c).
+## Detailed Findings
 
 ### Drifted
 
-| Req | Spec says | Code now does | Severity |
-|-----|-----------|---------------|----------|
-| FR-034 | "The dispatcher SHOULD also cache block-device `ClientChannels` per data drive at init time to avoid per-operation connection overhead." (i.e. one `Option<ClientChannels>` cached at `initialize()` and reused by every reader.) | `DataDrive.cached_channels: Option<ClientChannels>` has been replaced by `DataDrive.channel_pool: ChannelPool` (`src/lib.rs:110,122-163`). The pool starts **empty** at init (`ChannelPool::new` at `src/lib.rs:1525` does not connect any channel eagerly — the "at init time" caching described by the spec no longer happens) and instead grows on demand: each concurrent reader calls `channel_pool.checkout()` (`src/lib.rs:641-642` in `promote_and_serve`, `:752-754` in `serve_cold_staged`, `:2861-2876` in `promote_to_memory_tier`'s per-drive prefetch threads) to obtain an exclusive, RAII-leased `ClientChannels`; the channel is connected lazily on first checkout and returned to the pool on `Drop`. This was a deliberate bug fix: a single shared channel let two concurrent readers on the same drive (`batch_lookup` and the prefetch path) dequeue each other's NVMe completions ("completion theft"), causing a permanent, non-timing-out hang. The spec's "cache at init time, single instance" model is no longer what the code does or should do. | High |
-| FR-024 | `evict_for_space` uses sparse-probe + **shard-targeted blind LRU primary** (`evict_lru_for_key(target_key)`); when no clean candidate is found it **blind-frees** the LRU victim and removes the dispatch-map entry if the BlockDevice transition fails ("data loss accepted"). | `evict_for_space` now frees one **pin-safe** victim per iteration via `evict_one_clean`, scanning a **widening** `oldest_keys(4×attempts, cap 1024)` window. Each candidate is demoted (`try_evict_to_block`) or, if unpinned, dropped (`dm.remove`); pinned candidates are skipped. The blind `evict_lru`/`evict_lru_for_key(target_key)` fallback is **removed** — `target_key` is now unused (`_target_key`). If every scanned candidate is pinned it returns `AllocationFailed` rather than free a slot an in-flight load points at. `evict_and_insert`'s fragmentation-relief path likewise uses `evict_one_clean` instead of blind `evict_lru_for_key`. | High |
-| FR-037 | The dispatcher pre-allocates **a single warm CUDA stream** stored as an `AtomicU64` (`warm_stream`); "a single CUDA stream is used for GPU operations (lock-free access via atomic load). Multi-stream round-robin is reserved for future scaling." | The warm/pipeline paths now select **per-GPU-device** streams from a process-global `DEVICE_STREAMS` map (`device_streams_for`): one warm stream + one pipeline pair per device, created lazily on the target device. The device is resolved per request from the IPC destination pointer (`device_of_ptr`/`set_batch_device`) and made current before issuing the copy; the shared `warm_stream` AtomicU64 is now a fallback only. | Medium |
+- **FR-001 — Interface method inventory** — severity: moderate.
+  Spec lists the `IDispatcher` methods as `initialize, shutdown, lookup, lookup_async,
+  batch_lookup, check, remove, populate, touch, promote_to_memory_tier`.
+  The actual interface (`components/interfaces/src/idispatcher.rs:200-668`) additionally
+  defines: `reserve_memory` (`:501`), `copy_gpu_to_memory_async` (`:526`),
+  `copy_gpu_to_memory_completed` (`:540`), `release_memory` (`:549`), `pin` (`:561`),
+  `unpin` (`:572`), `flush_to_ssd` (`:660`), `read_write_stats` (`:667`). (`clear_memory_tier`
+  is separately covered by FR-038.) These 8 methods are implemented
+  (`components/dispatcher/src/lib.rs:2817-3266`) but absent from FR-001's enumerated list.
+
+- **FR-039 — `batch_lookup` signature** — severity: moderate.
+  Spec: `batch_lookup(entries: &[(CacheKey, IpcHandle)]) -> Vec<Result<(), DispatcherError>>`.
+  Code: `batch_lookup(entries: &[(CacheKey, Vec<IpcHandle>)])`
+  (`idispatcher.rs:377-380`, impl `lib.rs:2009-2012`). Each key now carries a *vector* of
+  IPC regions (multi-region scatter for vLLM 0.23+ per-layer allocations); the single-handle
+  form in the spec is stale. FR-039 step (2) also says hot-path copies use "the warm stream
+  (FR-037)", but FR-052 supersedes this with per-device streams (internal, minor).
+
+- **FR-042 — `create_eviction_channel` signature** — severity: minor.
+  Spec: `create_eviction_channel() -> crossbeam_channel::Receiver<EvictionEvent>` (no arg).
+  Code: `create_eviction_channel(&self, capacity: usize) -> Receiver<EvictionEvent>`
+  (`lib.rs:378-385`). The channel is bounded by the caller-supplied `capacity`; the spec
+  omits the parameter. Drop-and-count semantics and `eviction_dropped_count()` (`lib.rs:388`)
+  match the spec otherwise.
+
+### Aligned (representative evidence; all other active FR/SC verified present)
+
+- FR-002 `DispatcherError` variants — `idispatcher.rs:151-167` (7 variants covering all modes).
+- FR-003/004/005 populate + write-through + slot retention — `lib.rs:2770`; `peek()`/`convert_to_storage` in `background.rs`.
+- FR-006/007 lookup MemoryTier/BlockDevice + miss — `lib.rs:1982` → `lookup_async` `:2625`; `memcpy_h2d_async` warm-stream path present.
+- FR-008 check — `lib.rs:2702`. FR-009 remove — `lib.rs:2723`.
+- FR-010 `define_component!` single interface; FR-011/012 receptacles + `initialize` validation — `lib.rs:1642`; `poller_base_cpu`→`set_actor_cpu` at `lib.rs:1319,1370`; `IRemoteLookup` receptacle `lib.rs:243`, `remote_probe.rs`.
+- FR-014 shutdown drain + extent-manager `checkpoint()` — `lib.rs:1892`. FR-015/016 N block devices + extent managers + FormatParams.
+- FR-017 silent write-through drop; FR-018 non-blocking remove; FR-019 MDTS segmentation + zero-copy pipelines (`pipeline.rs:9,14`, `max_queue_depth` `:33`).
+- FR-023 touch — `lib.rs:3042`. FR-024 pin-safe `evict_for_space`/`evict_one_clean` + `MAX_SCAN` — `lib.rs:849,897`; `try_evict_to_block` `pins.rs:10`.
+- FR-025 `format_on_init` recovery + `for_each_extent`/`recover_extent` — `lib.rs:1678,1679`.
+- FR-028 promotion re-register; FR-029..033 SSD evictor + all `DispatcherConfig` eviction/staging fields present — `idispatcher.rs:34-111`.
+- FR-034 `register_host_memory` + per-drive `ChannelPool`/`checkout` — `lib.rs:112`, `pipeline.rs:226`; FR-035 `unregister_host_memory` `lib.rs:1927`.
+- FR-036 `lookup_async` returning `GpuStream`; FR-037 warm stream + `DEVICE_STREAMS`/`device_streams_for` — `lib.rs:253,287`, `cold_pool.rs:192`.
+- FR-038 `clear_memory_tier` — `lib.rs:3208`. FR-040/041 `promote_to_memory_tier` + `pipelined_ssd_to_dram_only`/`_multi_` — `lib.rs:3060`, `pipeline.rs:784,897`.
+- FR-043 `PipelineMetrics` — `remote_probe.rs:17`, `metrics.rs`. FR-044 `ColdReadPool` — `cold_pool.rs:45`. FR-045 remote-lookup batch fallback — `remote_probe.rs`.
+- FR-046..050 memory-tier evictor + quadratic pressure + `try_evict_to_block` + `EvictionEvent` — `background.rs:11`.
+- FR-051 `serve_concurrently_promoted` — `lib.rs:1107`. FR-052 per-device streams + `device_of_ptr` — `pipeline.rs:620`.
+- FR-053 `StagingPool`/`StagingLease`/`serve_cold_staged` — `pipeline.rs:75,77`, `lib.rs:718`.
+- FR-054 drain-all-no-early-break + `stop_submitting` — `pipeline.rs:308`. FR-055 `EXPECTED_PARTITIONS` guard — `lib.rs:1531`.
+- SC-001..015 (excl. SC-008 removed) exercised by tests in `lib.rs` (`populate_*`, `lookup_*`, `remove_*`, `batch_lookup_recovers_from_concurrent_promotion_race` `:4897`, `populate_triggers_eviction_on_full_pool` `:5393`) and `tests/`.
 
 ### Not Implemented
-None.
+
+None. All active requirements have corresponding implementation.
 
 ## Unspecced Code
 
-| Feature | Location | Suggested FR |
-|---------|----------|--------------|
-| Per-drive `ChannelPool` / `ChannelLease` for concurrent cold-path readers: replaces the single per-drive cached channel with a lazily-grown pool of exclusive, RAII-leased `ClientChannels`. Checkout drains stale completions so a recycled channel never matches an old op's tag against a new op's segments. `connect_client` runs outside the pool lock. | `lib.rs:110` (`DataDrive.channel_pool`), `lib.rs:122-163` (`ChannelPool`, `ChannelLease`), checkout call sites at `lib.rs:641-642` (`promote_and_serve`), `lib.rs:752-754` (`serve_cold_staged`), `lib.rs:2861-2876` (`promote_to_memory_tier` per-drive prefetch threads) | Rewrite **FR-034**'s second sentence (see Recommendations) |
-| Init-time partition-table compatibility guard: validates that a data drive's GPT has the expected 3 Certus partitions (metadata, extended metadata, data) before indexing `table.partitions[0]`/`[2]`, returning a descriptive `DispatcherError::IoError` with remediation guidance instead of panicking with an out-of-bounds index on a disk with a valid-but-non-Certus (e.g. empty/zeroed) GPT. | `lib.rs` `initialize()`, `EXPECTED_PARTITIONS` check (~line 1373-1391, commit `3db1e6c`) | New **FR-055** (edge case of FR-025) |
-| Concurrent-promotion-race recovery: a `batch_lookup` cold promotion that loses the `mt.insert` race (`MemoryTierError::AlreadyExists`) is treated as a hit — mapped to `DispatcherError::AlreadyExists`, then a bounded-wait recovery pass serves the winner's resident slot to the GPU. | `lib.rs` `serve_concurrently_promoted`, `serve_memory_tier_to_gpu`, batch_lookup recovery post-pass; AlreadyExists error mapping | Already covered — see FR-051 |
-| Per-GPU-device CUDA stream routing for multi-GPU / tensor-parallel: `DEVICE_STREAMS` map, `device_streams_for`, `set_batch_device`; `cold_pool::ColdReadRequest.gpu_device` + worker `set_device`. | `lib.rs` `DeviceStreams`/`DEVICE_STREAMS`/`device_streams_for`/`set_batch_device`; `cold_pool.rs` `ColdReadRequest.gpu_device` | Already covered — see FR-052 |
-| Cold-load staging pool: bounded pool of pinned, pre-registered host DRAM buffers (`StagingPool`/`StagingLease`) used to serve cold reads uncached (`SSD→staging→GPU`) when the memory tier is saturated, instead of failing with `AllocationFailed`. | `pipeline.rs` `StagingPool`/`StagingLease`, `PipelineRing::new` staging arg; `lib.rs` `serve_cold_staged`, `promote_and_serve` staging fallback, batch_lookup staging post-pass | Already covered — see FR-053 |
-| Cold-read drain-to-completion / no-early-break: pipelined cold paths drain until `completed == submitted` and use a `stop_submitting` flag on error instead of breaking early. | `pipeline.rs` `pipelined_ssd_to_gpu_zero_copy`, `pipelined_multi_object_zero_copy` | Already covered — see FR-054 |
+| Item | Location | Notes |
+|------|----------|-------|
+| `reserve_memory(key,size,session_id)`, `copy_gpu_to_memory_async(regions,stream)`, `copy_gpu_to_memory_completed`, `release_memory` | `idispatcher.rs:501-549`; impl `lib.rs:2817-2995` | reserve→copy→complete primitive set + `session_id` field; no FR describes them (US6/FR-020..022 direct-store workflow was *removed*, but these replacement primitives were never re-specced). |
+| `pin` / `unpin` eviction-protection refs | `idispatcher.rs:561,572`; impl `lib.rs:3010,3027` | Ref-count pin API; unspecced. |
+| `flush_to_ssd`, `read_write_stats` | `idispatcher.rs:660,667`; impl `lib.rs:3241,3256` | Barrier + telemetry; unspecced. |
+| Config `metadata_partition_size`, `extended_metadata_partition_size` | `idispatcher.rs:62-67`; used `lib.rs:1500,1505` | Not listed in FR-033; drive partition sizing. |
+| Config `backfill_delay_ms` | `idispatcher.rs:57-61` | Belongs to dispatcher-p2p (its FR-014); present but unused by the standard dispatcher — shared `DispatcherConfig`. |
+| `set_block_device_factory`, `set_extent_manager_factory`, `set_pipeline_metrics` | `lib.rs:360-372` | Public test/DI injection hooks on the component struct; not in spec. |
 
-Note: the last three rows (FR-051/052/053/054) were already added as spec text in the prior sync
-(`bb427f1`); they are listed here only for completeness/traceability and are not new drift.
-The two genuinely new unspecced items introduced since the last sync are the **ChannelPool**
-and the **partition-table guard**.
+## Conflicts / Spec-Referencing-Nonexistent
 
-## Inter-Spec Conflicts
-
-None. (Single spec directory for this component.)
+- **Nonexistent Creusot proof tree.** `idispatcher.rs:185-198` documents "Verified Properties (see `components/dispatcher/verif/`)" claiming P1–P10 and "10 properties, 24 verification conditions discharged by SMT solvers", and per-method `# Verified: Pn` doc tags throughout. The directory `components/dispatcher/verif/` does **not exist**. Either the proofs were removed or never committed; the interface doc overstates the current verification state.
 
 ## Recommendations
 
-1. **FR-034 (drift, High)** — Rewrite the second sentence to describe the `ChannelPool`:
-   replace "The dispatcher SHOULD also cache block-device `ClientChannels` per data drive at
-   init time to avoid per-operation connection overhead" with a description of the lazily-grown,
-   RAII-leased per-drive channel pool and *why* a single shared channel is unsafe (completion
-   theft between concurrent readers on the same drive). This is the most user-visible drift since
-   it is a documented behavioral guarantee ("cached at init") that the code deliberately no longer
-   provides, for a hang-prevention reason a spec reader should know about.
-2. **FR-024 (drift, High)** — Rewrite to match pin-safe eviction (unchanged since last report).
-3. **FR-037 (drift, Medium)** — Update to describe per-device streams (unchanged since last report).
-4. **FR-055 (backfill)** — Add a requirement documenting the partition-table compatibility guard
-   added in `3db1e6c`, as a refinement/edge case of FR-025 (recovery/format_on_init behavior).
-5. No action needed for FR-051..FR-054 — already synced in `bb427f1`.
+1. Update FR-001 to enumerate the full current interface, or fold the reserve/copy/complete/pin/unpin/flush/stats primitives into new FRs (backfill).
+2. Fix FR-039 to `&[(CacheKey, Vec<IpcHandle>)]` and describe the multi-region scatter contract.
+3. Fix FR-042 to include the `capacity: usize` parameter.
+4. Add FR coverage (or a config-fields FR) for `metadata_partition_size` / `extended_metadata_partition_size`; note `backfill_delay_ms` is p2p-only in the shared config.
+5. Reconcile the `verif/` proof references in `idispatcher.rs`: restore the proof tree or soften the doc claims to match reality.

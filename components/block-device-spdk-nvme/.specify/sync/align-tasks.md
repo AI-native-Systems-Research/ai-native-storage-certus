@@ -118,6 +118,12 @@ leave it as unreachable dead code.
 
 ## Task: Align 001-spdk-nvme-block-device/unused-crossbeam-dependency
 
+**Status**: ✅ RESOLVED 2026-08-07 (branch `sync/spec-drift-sweep-20260807`) — removed
+`crossbeam-channel` from `Cargo.toml` and corrected the stale doc comments in
+`benches/latency.rs:7` and `benches/throughput.rs:7` to describe the 256-slot
+`component_core` `SpscChannel`. `cargo build -p block-device-spdk-nvme` and
+`cargo bench -p block-device-spdk-nvme --no-run` both clean afterward.
+
 **Severity**: Low
 
 **Spec Requirement**: Spec Assumptions section (as of this sync) now
@@ -172,5 +178,105 @@ capacity (256 slots), consistent with the corrected Assumptions section in
 | 001/FR-010 | Medium | DEFECT (nvme_version/max_transfer_size hardcoded) |
 | 001/FR-011 | High | DEFECT (telemetry test suite fails to compile) |
 | 001/dead-code-DisconnectClient | Low | DEFECT (dead code) |
-| 001/unused-crossbeam-dependency | Low | ALIGN (unused dep + stale bench doc comments) |
+| 001/unused-crossbeam-dependency | Low | ALIGN (unused dep + stale bench doc comments) — ✅ RESOLVED 2026-08-07 |
 | 001/readme-channel-capacity | Low | ALIGN (non-spec doc, out of edit scope) |
+
+---
+
+# 2026-08-07 Sweep (branch `sync/spec-drift-sweep-20260807`)
+
+Drift source: `.specify/sync/drift-report.{json,md}` (generated 2026-08-07).
+Pacing this sweep: auto-apply safe backfills/doc-softens; the one HIGH item
+(FR-005 abort use-after-free) had its code fix **drafted on the branch** per the
+user decision "Draft fix + queue task", staged for review — NOT committed to
+`unstable`. Pre-edit backups in `.specify/sync/backups/20260807T160256Z/`.
+
+## Task BD-1 (DRAFTED — needs hardware validation) — FR-005 abort use-after-free
+
+**Severity**: High (memory safety)
+
+**Spec Requirement**: FR-005 — abort an in-flight async op identified by its
+component-assigned handle.
+
+**Defect**: The old `AbortOp` handler (`actor.rs`) removed the `PendingOp` from
+`pending_ops` and immediately delivered `Completion::AbortAck`. Removing the
+`PendingOp` dropped its pinned `DmaBuffer` `Arc` while the NVMe command could
+still be in flight — the controller could DMA into freed/reclaimed memory
+(use-after-free). It also never issued a real NVMe abort, so the hardware
+completion arrived later against an unknown handle and was silently discarded.
+
+**Drafted fix (staged on branch, compiles clean, unit tests pass)**:
+- `spdk-sys/build.rs`: allowlisted `spdk_nvme_ctrlr_cmd_abort_ext` (binding
+  confirmed generated in `OUT_DIR/bindings.rs`).
+- `PendingOp` gained `cmd_cb_arg: *mut c_void` (the leaked `AsyncIoContext`
+  pointer, captured after `Box::into_raw` at both ReadAsync/WriteAsync submit
+  sites) and `aborting: bool`.
+- `AbortOp` handler: on a known outstanding handle, set `aborting = true`, issue
+  `spdk_nvme_ctrlr_cmd_abort_ext(ctrlr, qpair, cmd_cb_arg, abort_completion_cb,
+  null)`, and **keep** the `PendingOp` (and its buffer) alive. Unknown/already-
+  completed handle → ack immediately (idempotent).
+- `process_completions`: when the real completion for an `aborting` op arrives,
+  deliver `Completion::AbortAck` (instead of Read/WriteDone) and only then drop
+  the `PendingOp`, releasing the pinned buffer. Telemetry is not recorded for an
+  aborted op.
+- Added no-op `abort_completion_cb` (the aborted I/O's own callback is where the
+  buffer is reclaimed; the abort admin completion carries nothing we need).
+
+**Behavior change to validate**: `AbortAck` is now **deferred** until the
+original command actually completes (aborted-by-request or otherwise), rather
+than acked synchronously. This is the correct buffer-reclaim contract but
+changes client-observable timing. **Cannot be exercised against real hardware in
+this environment** — must be validated on an RDMA/NVMe test node before merge.
+
+**Files**: `components/spdk-sys/build.rs`,
+`components/block-device-spdk-nvme/src/actor.rs`.
+
+### Related follow-up (NOT drafted) — `check_timeouts` has the same UAF shape
+
+`check_timeouts()` (`actor.rs`, ~`fn check_timeouts`) removes a `PendingOp` from
+`pending_ops` the moment its TSC deadline passes and delivers
+`Completion::Timeout`, **without** issuing an NVMe abort — the same class of bug
+as the old `AbortOp`: the buffer's `Arc` can drop while the command is still in
+flight. The `handle_controller_reset` path resets the controller (which does
+quiesce outstanding commands) but the plain per-op timeout path does not. This
+should get the same treatment as BD-1 (issue a real abort + defer buffer release
+until the hardware completion), tracked here as a related follow-up. Left
+undrafted to keep BD-1 reviewable in isolation.
+
+## Task BD-2 (OPEN — continues July FR-013 + FR-010) — real device NUMA / identify data
+
+**Severity**: High (FR-013/SC-007) + Medium (FR-010/SC-005)
+
+Supersedes the two July tasks "Align .../FR-013" and "Align .../FR-010" above as
+a single hardware-discovery work item. The 2026-08-07 spec backfill **documents**
+the current reality (NUMA node hardcoded 0; `nvme_version`=1.0.0 and
+`max_transfer_size`=131072 fixed) as a known limitation in FR-010/FR-013/SC-005/
+SC-007, so the spec is now honest — but the enhancement to read real values from
+sysfs / SPDK Identify Controller (VER, MDTS) and the device's true NUMA node
+remains open. Resolving it makes SC-005/SC-007 and iops-benchmark FR-025 pinning
+fully correct.
+
+**Files**: `components/block-device-spdk-nvme/src/lib.rs` (probe_controller NUMA),
+`components/block-device-spdk-nvme/src/controller.rs:150-159` (version/MDTS).
+
+## Task BD-3 (OPEN, Low) — iops-benchmark telemetry cross-check (spec 002 SC-006)
+
+The iops-benchmark depends on `block-device-spdk-nvme` without the `telemetry`
+feature, so SC-006's "cross-check with component telemetry" clause is inert
+(backfilled in spec 002 to reflect this). To fully satisfy SC-006, enable the
+`telemetry` feature on the dependency and add an optional post-run cross-check of
+client-side latency stats against `telemetry()` output.
+
+**Files**: `apps/iops-benchmark/Cargo.toml`, `apps/iops-benchmark/src/report.rs`.
+
+## Resolved by BACKFILL this sweep (no code change; spec now documents reality)
+
+- **FR-004** — async submit is fire-and-forget; `tag` is the client correlation
+  key, handle not returned synchronously.
+- **FR-028** — shipped `on_stop` order is drain → `Error{Aborted}` → park (safe
+  because submission has already stopped); spec corrected from park-before-drain.
+- **FR-030 (new)** — `read_write_stats()` / `ReadWriteStats` per-direction
+  counters documented.
+- **002/FR-022** — sync QD1 realized by actor-side serialization, not a strict
+  worker submit-one-wait loop.
+- **002/FR-024** — per-sub-op latency timing (not aggregate-per-batch).

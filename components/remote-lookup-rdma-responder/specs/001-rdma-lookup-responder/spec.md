@@ -340,6 +340,21 @@ cycles over the loopback/mock CM seam, and read the recorded metrics.
   (`ibv_dereg_mr`) before its PD is freed on shutdown. If the `memory_tier` receptacle
   is unbound, the pool is uninitialized, or `ibv_reg_mr` fails, `initialize()` MUST
   return `Registration`.
+  > **Access-flags note (backfilled 2026-08-07).** The registration is the minimum
+  > the data path requires: `REMOTE_WRITE` so initiators can RDMA-write results into
+  > the pool. The shipped code additionally sets `LOCAL_WRITE | REMOTE_READ`
+  > (`src/rdma.rs:297-299`): `LOCAL_WRITE` is mandatory for any MR that is also a
+  > local write target, and `REMOTE_READ` grants trusted-fabric peers one-sided read
+  > of the pool. `REMOTE_READ` exceeds the strict write-only minimum this
+  > requirement states and no current requirement exercises remote reads; it is
+  > retained deliberately under the trusted-fabric isolation assumption (see
+  > Assumptions / the network-isolation security model), which is the same trust
+  > boundary that lets initiators write with caller-supplied rkeys. Narrowing to
+  > `REMOTE_WRITE`-only (dropping `REMOTE_READ`) if no remote-read consumer
+  > materializes is tracked as a follow-up in Known Limitations. **Security note:**
+  > this is a real widening of peer capability over the fabric — it is acceptable
+  > *only* because the fabric is assumed isolated/trusted; it must be revisited if
+  > that assumption ever weakens.
 - **FR-011**: `open_control_channel()` MUST hand `remote-lookup` a single-client
   control channel (command sender + event receiver); a second call MUST return
   `ChannelClosed`.
@@ -474,3 +489,21 @@ cycles over the loopback/mock CM seam, and read the recorded metrics.
 - **SC-006 telemetry overhead** is covered by a Criterion benchmark (`benches/`); run
   the two-baseline (feature on/off) workflow to confirm the < 5% budget on target
   hardware, mirroring the initiator's `push_telemetry` benchmark.
+- **Device async-event instrumentation (backfilled 2026-08-07).** Under the `rdma`
+  feature the accept loop additionally multiplexes the verbs device's async-event fd
+  (`TAG_ASYNC` in the `epoll` set) and drains `ibv_get_async_event` on wake, naming
+  and logging fatal/error async events (QP_FATAL, QP_REQ_ERR, device errors, etc.) via
+  `drain_async_events`/`async_event_name` (`src/rdma.rs:44-70,351-356,437-462`, FFI
+  shims `responder_async_fd`/`responder_drain_async_event` in `src/ffi.rs:296-302` and
+  `src/wrapper.c`). No FR mandates this diagnostic path — it is best-effort operator
+  instrumentation, not a correctness requirement, so it is documented here rather than
+  promoted to an FR. **Known gap:** these diagnostics currently emit via `eprintln!`
+  rather than the FR-014 `ILogger` receptacle; routing them through `ILogger` is
+  tracked as an align-task (`.specify/sync/align-tasks.md`, FR-014 accept-loop
+  diagnostics).
+- **MR `REMOTE_READ` narrowing (follow-up).** FR-010's registration sets
+  `REMOTE_READ` in addition to the required `REMOTE_WRITE` (see FR-010 access-flags
+  note). No current consumer performs remote reads; if none materializes, narrowing
+  the MR to `REMOTE_WRITE`-only is a low-risk hardening follow-up. Retained for now
+  under the trusted-fabric assumption; no code change was made in the 2026-08-07 sweep
+  (deliberate keep).

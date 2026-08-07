@@ -99,6 +99,25 @@ All pinning and non-pinning decisions made during `prepare_memory_for_spdk` are 
 - **FR-023**: The component MUST provide a `create_spdk_dma_buffer_from_bar_direct(bar_ptr, size)` function (gated behind `p2p` feature) that programs DPDK IOMMU access for an existing GDRCopy BAR mapping using `rte_extmem_register` and `rte_vfio_container_dma_map` (identity VA-to-IOVA mapping). On drop: VFIO DMA unmap and DPDK extmem unregister without munmap (caller owns the BAR VA). This supports the cross-process case where the storage server registers DMA access to GPU BAR pages mapped by a remote application process.
 - **FR-024**: The `p2p` feature MUST expose GDRCopy FFI bindings (`gdr_open`, `gdr_close`, `gdr_pin_buffer`, `gdr_unpin_buffer`, `gdr_map`, `gdr_unmap`) and a `GPU_PAGE_SIZE` constant (64 KiB) to allow callers to perform decomposed GDRCopy operations when finer control over the P2P pipeline is required (e.g., separating pin/map from SPDK registration across process boundaries).
 
+### Auxiliary Public Helpers *(backfilled 2026-08-07)*
+
+Beyond the FR-numbered `IGpuServices` methods and the `p2p` builders above,
+the `dma` module exposes a few additional public helpers that support the same
+P2P/DMA pipeline but are not individually FR-scoped:
+
+- `create_spdk_dma_buffer_from_cuda_malloc` / `spdk_unregister_and_cuda_free`
+  (`src/dma.rs`): SPDK builder + paired free for `cudaMalloc`-backed GPU
+  memory, analogous to the IPC-handle and host-alloc paths but for device
+  memory the storage server owns directly.
+- `get_phys_addr` (`src/dma.rs`): p2p helper wrapping `spdk_vtophys` for the
+  BAR/phys paths (FR-022/FR-023).
+- `GPU_PAGE_SHIFT` (`src/gdrcopy_ffi.rs`): exported alongside the FR-024
+  `GPU_PAGE_SIZE` (64 KiB) constant.
+
+These are intentionally `pub` for the `gpu-p2p-server` binary (spec 003) and
+cross-process callers; they are documented here so the surface is spec-tracked
+rather than unspecced. They are not part of the `IGpuServices` interface.
+
 ### Key Entities
 
 - **CUDA IPC Handle Payload**: A base64-encoded binary blob containing a 64-byte `cudaIpcMemHandle_t` plus an 8-byte little-endian size field (72 bytes total), originating from a PyTorch process and transmitted via gRPC.

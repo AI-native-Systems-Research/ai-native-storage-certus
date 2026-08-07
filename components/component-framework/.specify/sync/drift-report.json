@@ -1,122 +1,151 @@
 {
-  "generated": "2026-07-22T21:28:00Z",
+  "generated": "2026-08-07T15:27:06Z",
   "project": "component-framework",
   "summary": {
-    "specs_analyzed": 6,
-    "requirements_checked": 77,
-    "aligned": 74,
-    "drifted": 2,
-    "not_implemented": 1,
-    "unspecced_features": 4
+    "specs": 6,
+    "requirements": 149,
+    "aligned": 148,
+    "drifted": 1,
+    "not_implemented": 0,
+    "unspecced": 10,
+    "conflicts": 0
   },
   "specs": [
     {
       "id": "001-com-component-framework",
-      "title": "COM-Style Component Framework",
-      "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
-        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013"
-      ],
-      "drifted": [],
-      "not_implemented": []
+      "title": "COM-style component framework",
+      "requirements": 19,
+      "aligned": 19,
+      "drifted": 0,
+      "not_implemented": 0,
+      "unspecced": 2,
+      "status": "clean",
+      "findings": []
     },
     {
       "id": "002-registry-refcount-binding",
-      "title": "Registry, Reference Counting, and Binding",
-      "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
-        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
-        "FR-015", "FR-016", "FR-017", "FR-018", "FR-019", "FR-020"
-      ],
-      "drifted": [],
-      "not_implemented": []
+      "title": "Registry, refcount, binding",
+      "requirements": 27,
+      "aligned": 27,
+      "drifted": 0,
+      "not_implemented": 0,
+      "unspecced": 1,
+      "status": "clean",
+      "findings": []
     },
     {
       "id": "003-actor-channels",
-      "title": "Actor Model with Channel Components",
-      "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
-        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
-        "FR-015", "FR-016", "FR-017", "FR-018", "FR-019", "FR-020", "FR-021",
-        "FR-022", "FR-023", "FR-024", "FR-025", "FR-026", "FR-027"
-      ],
-      "drifted": [],
-      "not_implemented": []
+      "title": "Actor model with channel components",
+      "requirements": 38,
+      "aligned": 38,
+      "drifted": 0,
+      "not_implemented": 0,
+      "unspecced": 3,
+      "status": "clean",
+      "findings": []
     },
     {
       "id": "004-channel-benchmarks",
-      "title": "Channel Backend Benchmarks",
-      "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
-        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
-        "FR-016", "FR-017"
-      ],
-      "drifted": [
+      "title": "Channel backend benchmarks",
+      "requirements": 24,
+      "aligned": 23,
+      "drifted": 1,
+      "not_implemented": 0,
+      "unspecced": 1,
+      "status": "drifted",
+      "findings": [
         {
-          "requirement": "FR-015",
-          "spec_text": "All third-party channel components MUST have documentation examples on public types.",
-          "actual": "Public structs and sender()/receiver() methods have doc examples, but backends expose native construction APIs rather than the split() convenience method used by built-in channels, making examples less uniform across backends.",
-          "location": "components/component-framework/crates/component-core/src/channel/crossbeam_bounded.rs, kanal_bounded.rs, rtrb_spsc.rs, tokio_mpsc.rs",
-          "severity": "minor"
+          "requirement": "FR-016",
+          "classification": "drifted",
+          "severity": "minor",
+          "location": "crates/component-framework/benches/channel_spsc_benchmark.rs:64-70",
+          "description": "Benchmark group-ID naming diverges from spec example. Spec states pattern {topology}_throughput_{type}/{backend}/{capacity} with example spsc_throughput_u64/built_in/capacity_1024; code emits BenchmarkId::new(\"builtin\", capacity) producing spsc_throughput_u64/builtin/1024 (token 'builtin' not 'built_in'; bare capacity number, no 'capacity_' prefix). Analogous IDs in channel_mpsc_benchmark.rs. Cosmetic; results remain self-describing and comparable."
         }
-      ],
-      "not_implemented": []
-    },
-    {
-      "id": "005-numa-aware-actors",
-      "title": "NUMA-Aware Actor Thread Pinning and Memory Allocation",
-      "aligned": [
-        "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007", "FR-008",
-        "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014", "FR-015",
-        "FR-016", "FR-017", "FR-018", "FR-019", "FR-020"
-      ],
-      "drifted": [
-        {
-          "requirement": "FR-001",
-          "spec_text": "CPU affinity is configurable before activation via set_cpu_affinity(). Actors are single-use; re-activation requires constructing a new Actor instance.",
-          "actual": "activate() permanently consumes handler and receiver via Option::take(). A second activate() call after deactivate() panics via .expect(\"handler already taken\") instead of returning a typed Result::Err, and no re-activation path exists; the earlier User Story/Edge-Cases narrative implies multi-cycle affinity changes that are not actually supported.",
-          "location": "components/component-framework/crates/component-core/src/actor.rs:604-617",
-          "severity": "minor"
-        }
-      ],
-      "not_implemented": [
-        "FR-001 (partial): true re-activation of a deactivated Actor with new affinity is not supported; callers must construct a new Actor instance."
       ]
     },
     {
+      "id": "005-numa-aware-actors",
+      "title": "NUMA-aware actor thread pinning and memory allocation",
+      "requirements": 28,
+      "aligned": 28,
+      "drifted": 0,
+      "not_implemented": 0,
+      "unspecced": 3,
+      "status": "clean",
+      "findings": []
+    },
+    {
       "id": "006-log-handler",
-      "title": "Generic Log Handler",
-      "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007", "FR-008"
-      ],
-      "drifted": [],
-      "not_implemented": []
+      "title": "Generic log handler",
+      "requirements": 13,
+      "aligned": 13,
+      "drifted": 0,
+      "not_implemented": 0,
+      "unspecced": 0,
+      "status": "clean",
+      "findings": []
     }
   ],
   "unspecced": [
     {
-      "feature": "on_idle() hook on ActorHandler",
-      "location": "components/component-framework/crates/component-core/src/actor.rs",
-      "lines": 90,
-      "suggested_spec": "003-actor-channels (extend Actor lifecycle FRs to cover background-polling handlers)"
+      "item": "ReceptacleInfo.interface_name field",
+      "location": "crates/component-macros/src/define_component.rs:243",
+      "spec": "001",
+      "note": "Extra introspection metadata beyond FR-003; used by bind(). Benign."
     },
     {
-      "feature": "ActorHandle::signal_stop()",
-      "location": "components/component-framework/crates/component-core/src/actor.rs",
-      "lines": 190,
-      "suggested_spec": "003-actor-channels (extend deactivation FR-004 to cover non-blocking signal-then-join shutdown pattern)"
+      "item": "ComponentRef::ref_count()",
+      "location": "crates/component-core/src/component_ref.rs:72",
+      "spec": "002",
+      "note": "Public testing/debug helper not called out in any FR."
     },
     {
-      "feature": "ActorHandle::try_send() / MpscSender::try_send()",
-      "location": "components/component-framework/crates/component-core/src/actor.rs:173, crates/component-core/src/channel/mpsc.rs:114",
-      "lines": 173,
-      "suggested_spec": "003-actor-channels (document non-blocking send alternative to the default blocking-backpressure behavior)"
+      "item": "ActorHandler::on_start / on_stop lifecycle hooks",
+      "location": "crates/component-core/src/actor.rs:76-81",
+      "spec": "003",
+      "note": "Public hooks; only on_idle (FR-028) and handle are specced in 003. on_stop is depended on by 006 FR-006 but not defined in 003."
     },
     {
-      "feature": "MpscReceiver::register_for_unpark()",
-      "location": "components/component-framework/crates/component-core/src/channel/mpsc.rs",
-      "lines": 297,
-      "suggested_spec": "003-actor-channels (internal detail of the actor poll loop's park/unpark optimization; likely stays unspecced as an implementation detail)"
+      "item": "Actor::with_capacity()",
+      "location": "crates/component-core/src/actor.rs:453",
+      "spec": "003",
+      "note": "Explicit-capacity ctor variant; capacity config is FR-020 but this ctor is unnamed in the spec."
+    },
+    {
+      "item": "SpscChannel::with_default_capacity()",
+      "location": "crates/component-core/src/channel/spsc.rs:119",
+      "spec": "003",
+      "note": "Convenience ctor not specced."
+    },
+    {
+      "item": "Channel park/unpark backoff (escalate, SPIN/YIELD/PARK limits, force_closed)",
+      "location": "crates/component-core/src/channel/mod.rs:33-70,183",
+      "spec": "003",
+      "note": "Internal blocking strategy; reasonable impl detail not surfaced in spec."
+    },
+    {
+      "item": "NumaTopology::node_for_cpu(), nodes()",
+      "location": "crates/component-core/src/numa/topology.rs:194,211",
+      "spec": "005",
+      "note": "Extra topology introspection beyond FR-007/008."
+    },
+    {
+      "item": "parse_range_list() (pub)",
+      "location": "crates/component-core/src/numa/mod.rs:35 (re-export)",
+      "spec": "005",
+      "note": "Public sysfs range-parser helper, not specced."
+    },
+    {
+      "item": "get_thread_affinity()",
+      "location": "crates/component-core/src/numa/cpuset.rs:333",
+      "spec": "005",
+      "note": "Public affinity read-back not required by any FR."
+    },
+    {
+      "item": "NumaAllocator exposed but not wired into channels/handlers",
+      "location": "crates/component-core/src/numa/allocator.rs",
+      "spec": "005",
+      "note": "Satisfies FR-015 but not used by first-touch paths (FR-016/017); standalone public API."
     }
   ],
   "conflicts": []

@@ -61,3 +61,67 @@ are non-zero and consistent with the delay.
       `--features telemetry`
 - [ ] `cargo clippy -p block-device-kernel --all-targets -- -D warnings`
       remains clean after the change
+
+---
+
+# 2026-08-07 Sweep (branch `sync/spec-drift-sweep-20260807`)
+
+Drift source: `.specify/sync/drift-report.{json,md}` (generated 2026-08-07).
+Pacing: auto-apply safe backfills; the telemetry-latency fix was **drafted on
+the branch** per the user decision "Telemetry latency = Draft code fix (all)".
+Pre-edit backups in `.specify/sync/backups/20260807T160256Z/` (`actor.rs`).
+
+## Task: FR-021 / SC-006 telemetry latency — ✅ DRAFTED on branch (was "major" above)
+
+The 2026-07-22 align-task above is now **addressed in code** on the branch:
+
+- `InflightOp.start_ns: u64` → `start: Instant` (a real submission timestamp,
+  not `.elapsed()` of a fresh instant).
+- Both async insert sites now store `start: Instant::now()`.
+- The three sync paths (`handle_read_sync`, `handle_write_sync`, `write_zeros`)
+  capture `#[cfg(feature="telemetry")] let start = Instant::now();` immediately
+  before `submit_and_wait`, and pass `start.elapsed().as_nanos()` to `record_op`.
+- The two async-completion sites pass `op.start.elapsed().as_nanos()`.
+
+**Verification**: `cargo build -p block-device-kernel` and
+`--features telemetry`, plus `cargo test` (both feature sets) — all clean;
+hardware-dependent tests remain `#[ignore]`. **Still open**: the acceptance
+test that asserts non-zero `min/max/mean_latency_ns` under an artificial delay
+(criterion above) is NOT yet written — the fix is code-complete but its
+dedicated telemetry-accuracy test is deferred to a hardware/loopback run.
+
+## Task: FlushSync command was unhandled — ✅ FIXED on branch (compile-unblocker)
+
+**Severity**: High (crate did not compile)
+
+**Discovered during this sweep**: `interfaces::Command` gained a `FlushSync
+{ ns_id }` variant (handled by the sibling `block-device-spdk-nvme`), but the
+kernel actor's `process_command` match never covered it — so
+`cargo build -p block-device-kernel` failed with `E0004` (non-exhaustive
+patterns) at HEAD. This went unnoticed because `block-device-kernel` is a
+workspace member but **not** a `default-member`, so CI / `cargo test --all`
+never builds it. (`block-device-filesys` had the identical breakage.)
+
+**Fix (staged on branch)**: added a `Command::FlushSync { ns_id }` arm that
+validates `ns_id == 1` and returns `Completion::FlushDone { handle, Ok(()) }`.
+The device is opened `O_DIRECT|O_DSYNC`, so every write is already forced to
+non-volatile media on completion — there is no volatile write cache to drain,
+making an explicit flush a correct validated no-op. Backfilled as spec FR-014
+context is unaffected; the new command is documented indirectly via the
+`IBlockDevice` contract. **Review note**: this is a code change beyond the
+planned telemetry fix, made to keep the branch buildable; confirm the no-op
+semantics are the desired `FlushSync` contract for a kernel block device.
+
+## Task: async `tag` not propagated to completions (parity with filesys) — LOW, queued
+
+**Severity**: Low
+
+`ReadAsync`/`WriteAsync` carry a caller `tag`, but kernel completions are
+always emitted with `tag: 0` (`ReadDone`/`WriteDone`); clients correlate via
+`OpHandle`. The sibling `block-device-filesys` echoes the tag. Backfilled into
+FR-009 as documented current behavior; if tag-parity across block-device
+implementations is desired, propagate the stored `tag` into the completion.
+Not drafted (behavioral choice, not a defect).
+
+**Files**: `components/block-device-kernel/src/actor.rs` (async completion
+delivery sites).

@@ -1,0 +1,98 @@
+{
+  "generated": "2026-08-07",
+  "based_on": "drift-report 2026-08-07T15:28:11Z",
+  "component": "remote-lookup-rdma-responder",
+  "branch": "sync/spec-drift-sweep-20260807",
+  "note": "Sweep proposals. The July 2026-07-22 pass filed align-tasks for FR-016 wiring, ResponderEvent::Error, FR-014 logger, and the interfaces-doc conflict; those still stand. This file records the NEW items surfaced 2026-08-07 plus the FR-016 human-decision fork.",
+  "proposals": [
+    {
+      "id": "rlr-2026-08-07-1",
+      "requirement": "001 FR-010 (MR access flags)",
+      "direction": "BACKFILL",
+      "severity": "low",
+      "confidence": "HIGH",
+      "approved": true,
+      "status": "APPLIED",
+      "spec_says": "register the pool once with ibv_reg_mr (REMOTE_WRITE)",
+      "code_did": "registers LOCAL_WRITE | REMOTE_WRITE | REMOTE_READ (src/rdma.rs:297-299); REMOTE_READ grants peers one-sided read, unspecced",
+      "resolution": "Add an FR-010 access-flags note documenting the actual superset and the trusted-fabric rationale + explicit security caveat; keep the code (deliberate keep per maintainer). Track REMOTE_READ narrowing as a Known-Limitations follow-up.",
+      "files": ["specs/001-rdma-lookup-responder/spec.md"],
+      "note": "drift-report Unspecced[2] + Recommendation 2. Security-relevant widening; documented, not silently normalized. NO code change per user decision."
+    },
+    {
+      "id": "rlr-2026-08-07-2",
+      "requirement": "001 async-event instrumentation (unspecced)",
+      "direction": "BACKFILL",
+      "severity": "low",
+      "confidence": "HIGH",
+      "approved": true,
+      "status": "APPLIED",
+      "spec_says": "(no FR mentions device async-event diagnostics)",
+      "code_did": "TAG_ASYNC epoll wiring + drain_async_events/async_event_name logging QP_FATAL/QP_REQ_ERR/etc. (src/rdma.rs:44-70,351-356,437-462; ffi.rs:296-302; wrapper.c)",
+      "resolution": "Backfill a Known-Limitations bullet documenting it as best-effort operator instrumentation (not a correctness FR); note the eprintln!-vs-ILogger gap ties to the FR-014 align-task",
+      "files": ["specs/001-rdma-lookup-responder/spec.md"],
+      "note": "drift-report Unspecced[1] + Recommendation 4."
+    },
+    {
+      "id": "rlr-2026-08-07-3",
+      "requirement": "001 FR-010 (error mapping)",
+      "direction": "ALIGN",
+      "severity": "medium",
+      "confidence": "HIGH",
+      "approved": true,
+      "status": "QUEUED_NOT_DRAFTED",
+      "spec_says": "if ibv_reg_mr fails, initialize() MUST return Registration",
+      "code_did": "RealCmSeam::bind returns Err(String) mapped uniformly to Bind (src/lib.rs:195-196), so ibv_reg_mr failure surfaces as Bind not Registration",
+      "resolution": "Split bind's error channel so registration failures route to Registration; queue as align-task 5",
+      "files": ["src/rdma.rs", "src/lib.rs:195-196"],
+      "note": "drift-report FR-010 Drifted (Medium) + Recommendation 1. Medium (not HIGH) -> queued per sweep pacing. Only reachable under --features rdma on hardware."
+    },
+    {
+      "id": "rlr-2026-08-07-4",
+      "requirement": "001 FR-008 (Drop logging)",
+      "direction": "ALIGN",
+      "severity": "low",
+      "confidence": "HIGH",
+      "approved": true,
+      "status": "QUEUED_NOT_DRAFTED",
+      "spec_says": "best-effort rdma_destroy_qp failure MUST be logged",
+      "code_did": "RealCmConn::drop ignores rdma_disconnect/rdma_destroy_qp return values and logs nothing (src/rdma.rs:144-169)",
+      "resolution": "Capture return codes and emit a best-effort log on nonzero; preserve QP->ERROR-before-ack ordering and infallible Drop; queue as align-task 6",
+      "files": ["src/rdma.rs:144-169"],
+      "note": "drift-report FR-008 Drifted (Low) + Recommendation 3. Ordering guarantee already correct; only the logging half is unmet. Pairs with FR-014 logger-threading task."
+    },
+    {
+      "id": "rlr-2026-08-07-5",
+      "requirement": "001 FR-016 (dead accept-loop-errors metric / ResponderEvent::Error)",
+      "direction": "HUMAN_DECISION",
+      "severity": "low",
+      "confidence": "HIGH",
+      "approved": true,
+      "status": "DRAFTED",
+      "decision": "A_wire_up",
+      "spec_says": "Metric set includes accept-loop errors; ResponderEvent::Error reports a non-fatal accept-loop error",
+      "code_did": "record_accept_loop_error() never called in production; ResponderEvent::Error never constructed anywhere (src/telemetry.rs, src/connection.rs:148-158,184)",
+      "options": {
+        "A_wire_up": "Emit ResponderEvent::Error + call record_accept_loop_error() on non-fatal accept-loop failures (e.g. accept_child QP-creation reject, src/rdma.rs:421-423). Behavioral change: remote-lookup begins receiving Error events (must handle losslessly per FR-011a). Matches July align-tasks 1+2.",
+        "B_drop": "Remove the unused record_accept_loop_error metric and the ResponderEvent::Error variant; update FR-016 metric set + contract to match actual behavior."
+      },
+      "resolution": "Maintainer chose (A) wire it up. DRAFTED on branch: CmEvent::AcceptError variant + ConnectionTable::record_accept_loop_error() + MockCmSeam::inject_accept_error (connection.rs); accept_child -> Result<_,String> + reject-branch AcceptError push (rdma.rs); run_accept_loop AcceptError arm -> record + ResponderEvent::Error, plus new test (lib.rs). Verified: 22 mock / 24 telemetry tests, --features rdma type-checks, fmt+clippy clean. Not committed to unstable. Closes July align-tasks 1+2.",
+      "files": ["src/telemetry.rs", "src/connection.rs", "src/rdma.rs", "src/lib.rs"],
+      "note": "drift-report FR-016 Drifted (Low) + Recommendation 5. The one genuine HUMAN_DECISION fork in this component; raised with the user per sweep pacing and resolved to wire-up."
+    },
+    {
+      "id": "rlr-2026-08-07-6",
+      "requirement": "interfaces set_bind_ip doc (conflict)",
+      "direction": "ALIGN",
+      "severity": "low",
+      "confidence": "HIGH",
+      "approved": true,
+      "status": "QUEUED_NOT_DRAFTED",
+      "spec_says": "FR-002a: explicit-IP-else-auto-detect",
+      "code_did": "IRemoteLookupRdmaResponderAdmin::set_bind_ip doc says 'never auto-detects' + initialize fails with Bind if no IP (pre-clarification behavior); contradicts FR-002a and shipped code (iremote_lookup_rdma_responder.rs:253-263)",
+      "resolution": "Update the interface doc comment to FR-002a precedence; carried forward from July align-task 4 (shared crate, out of this Markdown-only pass's scope)",
+      "files": ["components/interfaces/src/iremote_lookup_rdma_responder.rs:253-263"],
+      "note": "drift-report Conflicts[1] + Recommendation 6. Unchanged from July task 4; still open."
+    }
+  ]
+}
