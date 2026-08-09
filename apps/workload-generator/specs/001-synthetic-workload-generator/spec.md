@@ -1313,6 +1313,30 @@ report segments statistics into before/after windows around the event.
   fixed-width, indexable by ordinal, and streamable, none of which the interchange formats are; FR-037's
   allocation-free requirement depends on it. Modes 2 and 3 are interchange, not a replacement, and
   the generator MUST be able to produce them from an existing `events.bin` without regenerating.
+- **FR-021d**: A **file** output mode MUST require an explicit budget in **blocks** and MUST refuse
+  to run without one. Blocks are the generator's own unit — one plan event is one block reference —
+  so a block budget converts directly to a file size, which neither `duration` nor a request count
+  does: request length is drawn per session, so a request-count cap leaves the output size varying
+  by whatever the fitted length distribution happens to be. Without this, a long `duration` at a high
+  rate fills the filesystem, which is a failure of the tool rather than of the experiment.
+- **FR-021e**: Direct-to-server output MUST additionally permit an **unbounded** run, expressed as
+  such rather than as a very large number, because nothing accumulates on disk and a steady-state
+  measurement is exactly what wants to run until stopped. This closes a contradiction: FR-014c
+  requires the generator to run for an arbitrary duration by retiring and creating sessions, but the
+  schema previously demanded exactly one of a finite `duration` or a finite `requests`, so the
+  capability existed and could not be asked for. Unbounded MUST be rejected for file modes.
+- **FR-021f**: An unbounded run MUST generate **ahead in bounded chunks** rather than materialising a
+  whole plan, and this MUST be reconciled with FR-037 rather than treated as an exception to it:
+  events are still pre-generated into a flat allocation-free representation and still not generated
+  on the cores issuing requests — only the horizon is finite. The look-ahead depth MUST be reported,
+  since a horizon too short makes the generator the bottleneck FR-037 exists to prevent, and a
+  horizon too long is what an unbounded run cannot afford.
+- **FR-021g**: An unbounded run has no whole-plan content hash, so the identity that FR-026 and
+  FR-027 require MUST be the hash of the **normalised YAML plus seed plus `plan_format`** — the
+  generator's identity rather than the realised plan's. Every node MUST verify *that*, which is
+  sufficient because FR-024 makes generation fully determined by exactly those inputs. A report from
+  an unbounded run MUST state which kind of hash it carries, so a plan hash and a parameter hash are
+  never mistaken for one another.
 - **FR-022**: The generator MUST emit the event plan as a first-class, persistable artifact
   distinct from execution, so that the identical stream can be replayed against any consumer —
   the hardware runner, an emitted trace file, or a tool this feature never anticipated.
@@ -1557,7 +1581,9 @@ report segments statistics into before/after windows around the event.
   because the ground truth is known exactly rather than estimated — any divergence is a defect in
   `fit`, in the emitter, or in the reader, and not a property of some real workload. It also
   exercises the emitter and the reader against each other, which no other test does. Divergence MUST
-  be reported per parameter against the FR-057a tolerances.
+  be reported per parameter against the FR-057a tolerances, and the round trip MUST be exercised
+  through **both** file containers, since a container-specific defect in either the emitter or the
+  reader is invisible to a round trip through the other.
 
 ### Warnings that protect the measurement
 

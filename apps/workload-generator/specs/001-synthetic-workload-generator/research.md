@@ -123,6 +123,53 @@ against 160–768 private). A model fitted only on one misses the other entirely
 evidence the delta reconstruction is correct, since an error in it would not cancel across two
 blockings of the same source.
 
+### Cross-session sharing versus intra-session reuse — the ceiling on remote lookup
+
+**The § Shape taxonomy "shared prefix" column conflates two things**, and separating them changes what
+it means. That column is the longest common prefix against *all* earlier requests, which includes the
+requesting session's **own** earlier turns. For a cache that is one number; for **remote** lookup it
+is the wrong one, because a session's own history is local under any placement that keeps a session on
+one node. Only *cross-session* sharing can be served remotely.
+
+Re-measured, tracking which sessions have touched each block, so a block counts as cross-session only
+if some *other* session touched it first:
+
+| Trace character | p50 LCP vs any earlier | p50 LCP vs **other sessions** | cross / any |
+| --- | --- | --- | --- |
+| Agentic, transactional | 476 blk | **292 blk** (4 672 tok) | 61.3% |
+| Agentic, long-context | 1 360 blk | **468 blk** (7 488 tok) | 34.4% |
+| Production code assistant | 67 blk | **8 blk** (128 tok) | 11.9% |
+| Production chat | 9 blk | **1 blk** (16 tok) | 11.1% |
+| Retrieval / RAG | 24 blk | **24 blk** (384 tok) | 100% |
+
+(`block_size` 16 throughout; the long-context trace probed at 60 000 invocations.)
+
+Two conclusions:
+
+1. **Remote lookup's ceiling varies by roughly 300× across workload classes** — 468 blocks per request
+   of remotely-servable prefix in the long-context agentic case against 1 block in chat. A remote-cache
+   result measured on a chat-shaped workload says almost nothing about the agentic case, and vice
+   versa. This is the single most important number for characterising the remote-lookup feature, and
+   it is why the multi-node test matrix has to span classes rather than pick one.
+2. **RAG is the clean case at 100%**: every session is a single request, so *all* of its sharing is
+   cross-session by construction. It is the natural first workload for a remote-lookup measurement
+   because nothing about the result depends on placement keeping sessions together.
+
+The generator can already express the *aggregate* of this through `topology.self_affinity`. What no
+trace can supply is the **placement** that produces it — see § What the traces cannot say about nodes.
+
+### What the traces cannot say about nodes
+
+**No trace in the collection carries node or GPU attribution of any kind.** There is no field for
+which node served a request, and none of the manifests describes one. So the entire multi-node axis —
+which node asks for which key, how sessions map to nodes, whether an agent's children land elsewhere —
+is **unfittable from this data and must be declared rather than inferred.**
+
+What the traces *do* bound is what any placement could achieve, via the cross-session table above:
+remote lookup can only ever serve content some other session touched first, so that column is a hard
+ceiling on remotely-servable traffic regardless of how nodes are assigned. That is a genuinely useful
+constraint from data that has nothing to say about topology directly.
+
 ### Trunk width is piecewise — the measurement behind FR-009e1
 
 Fanout events, defined as `width(d+1)/width(d) > 1.8` while more than 20% of requests are still

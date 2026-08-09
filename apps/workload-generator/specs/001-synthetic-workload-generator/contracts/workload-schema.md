@@ -55,8 +55,15 @@ input compact: the file holds *fitted statistical parameters*, never an access t
 version: 1                  # required; generator refuses versions it does not implement
 seed: 0xC0FFEE              # required; every random draw derives from this
 extends: presets/conv.yaml  # optional; deep-merged, this document wins
-duration: 120s              # exactly one of duration | requests is required
+# Run length. Exactly one of duration | requests | blocks | unbounded.
+#   duration / requests / blocks  -- any output mode
+#   blocks                        -- REQUIRED for a file output mode: it is the only
+#                                    one that converts directly to a file size, since
+#                                    request length is drawn per session
+#   unbounded: true               -- direct-to-server ONLY; rejected for file modes
+duration: 120s
 requests: 2_000_000
+blocks: 50_000_000
 corpus:   {...}             # required
 workload: {...}             # required
 topology: {...}             # optional; omitted ⇒ a single node asks for everything
@@ -811,8 +818,14 @@ The generator rejects, rather than silently accepting:
     that turns over faster than the warmup takes to fill means the measured window opens on a
     trunk with no history at any depth, so nothing that follows describes the configured sharing.
 18. `churn.half_life` set together with `mode` writing a trace file, **unless** `duration` is also
-    set. Churn is a function of elapsed plan time, so a plan of a fixed *request count* with no
-    duration has no clock against which a half-life means anything.
+    set. Churn is a function of elapsed plan time, so a plan of a fixed *request count* or *block
+    count* with no duration has no clock against which a half-life means anything.
+19. More or fewer than one of `duration` | `requests` | `blocks` | `unbounded`.
+20. A **file** output mode without `blocks`. A file's size is a block count; `duration` and
+    `requests` both leave it at the mercy of the drawn request-length distribution, and an
+    overlong run fills the filesystem (spec FR-021d).
+21. `unbounded: true` with a **file** output mode (spec FR-021e). Unbounded is meaningful only when
+    nothing accumulates — that is, when driving a server directly.
 
 ## Worked example — the headline mixture experiment
 
