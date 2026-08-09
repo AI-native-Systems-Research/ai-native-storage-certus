@@ -9,8 +9,12 @@ One schema, two containers. This is both the format `fit` reads from real traces
 the generator emits when it is not talking to a server, so that a generated workload and a real
 one are directly comparable and interchangeable as inputs to any third-party tool.
 
-The reference corpus is `traces/` at the repository root — 24 traces, described by
-`traces/<id>/manifest.json`, which is the corpus's only documentation.
+**Trace collections in this format are not part of this repository.** They are large, come from
+many sources under differing licences, and which ones are on hand will change; a path is supplied on
+the command line. So what is normative here is the **format**, and every trace is self-describing
+through its own `manifest.json` — a reader learns what a trace supports by reading it, never by
+recognising the trace. Observations below are drawn from traces examined while writing this contract
+and are given by character rather than by name, so that nothing depends on a particular file.
 
 ## Layout
 
@@ -52,7 +56,8 @@ map onto `CacheKey` directly.
 ## Two encodings, and they are mutually exclusive
 
 A reader MUST detect which is in use — `full_input_blocks` non-empty versus empty — and MUST NOT
-assume either. Both rules below were verified exhaustively against the reference corpus.
+assume either. Both rules below were verified exhaustively — every row, not a sample — against real
+traces of each kind.
 
 **Delta encoding** (`source_class: raw_text`). Only newly-minted blocks are listed;
 `full_input_blocks` is empty. Reconstruct:
@@ -62,7 +67,7 @@ full_input(n) = concat over a in reuse_from(n) of (new_input(a) ++ new_output(a)
 ```
 
 with the invariant `len(full_input(n)) == input_length(n) / block_size`, rounded down.
-*Verified 10916/10916 rows of `exgentic_tau2_airline`.*
+*Verified on 10 916/10 916 rows of an agentic tool-use trace.*
 
 **Full encoding** (`source_class: pre_hashed`). `full_input_blocks` is complete; the delta fields
 are empty. Invariants:
@@ -72,7 +77,7 @@ are empty. Invariants:
 len(full_input_blocks) == (input_length - partial_final_valid) / block_size + 1
 ```
 
-*Verified 12031/12031 rows of `mooncake_conv`.*
+*Verified on 12 031/12 031 rows of a pre-hashed production trace.*
 
 **The trailing partial block is handled differently by the two**, and this is the trap: the delta
 encoding **excludes** it, the full encoding **includes** it with `partial_final_valid` giving its
@@ -84,21 +89,22 @@ on 12009 of 12031 rows.
 
 `reuse_from` is **intra-session compression only**. Genuine sharing *between* sessions appears as
 two sessions listing the same global block ID — 16188 of 364645 minted blocks in
-`exgentic_tau2_airline`. A reader that treats `reuse_from` as the sharing signal will conclude
-there is no cross-session sharing at all, which is wrong. In `mooncake_conv`, block 0 appears in
-all 12031 invocations.
+one agentic trace examined. A reader that treats `reuse_from` as the sharing signal will conclude
+there is no cross-session sharing at all, which is wrong. In a production conversational trace, a
+single block appeared in **every one** of its 12 031 invocations — a universal shared prefix.
 
 ## Fan-in
 
-`parent_invocations` MAY carry more than one predecessor. In the reference corpus only
-`paper_review_dag` does (100 invocations, fan-in 2), and for those rows **`reuse_from` is empty** —
-so it is a *scheduling* dependency, not prefix reuse. Readers MAY ignore fan-in for cache purposes.
-The generator does not emit it (spec Out of Scope).
+`parent_invocations` MAY carry more than one predecessor. It is rare — in the traces examined only a
+single map-reduce-shaped benchmark had it, at fan-in 2 — and in every such row **`reuse_from` was
+empty**, so it is a *scheduling* dependency rather than prefix reuse. Readers MAY ignore fan-in for
+cache purposes, and the generator does not emit it (spec Out of Scope).
 
 ## `manifest.json`
 
 Load-bearing fields. `source_class` selects the encoding; `id_semantics` MUST be `rolling_prefix`
-for the trace to be usable by `fit`, and is so for all 17 corpus traces that carry blocks.
+for the trace to be usable by `fit`; every trace examined that carried blocks declared it, which is
+what makes this format a good match for the generator's own key model (spec FR-008).
 
 | Field | Use |
 | --- | --- |
@@ -113,16 +119,17 @@ for the trace to be usable by `fit`, and is so for all 17 corpus traces that car
 
 ## What `fit` can take from which trace
 
-| Class | Traces | Fittable |
+| `source_class` | What it means | Fittable |
 | --- | --- | --- |
-| `raw_text` | 12 incl. `exgentic_*`, `wildchat`, `swe_agent` | everything, plus roles |
-| `pre_hashed` | 6: `mooncake_*`, `qwen_*` | structure and arrival; roles unavailable |
-| `metadata_only` | 7: `azure_*`, `burstgpt_*` | **arrival and token-length distributions only** — no block data exists, so nothing structural |
+| `raw_text` | tokenised from source text; blocks reconstructed | everything, plus block roles |
+| `pre_hashed` | block IDs supplied by the source | structure and arrival; roles unavailable |
+| `metadata_only` | no block data at all (`block_size_0`) | **arrival and token-length distributions only** — nothing structural |
 
-A trace with a null `session_id` (`mooncake_*`) cannot supply `turns`, `growth_per_turn`, or the
-sticky root binding of FR-009a, because requests cannot be grouped into sessions. A trace with no
-timestamps (`ragbench`, `swe_agent`) gives no arrival model, and its reuse statistics depend on file
-order, so `fit` MUST report them as order-dependent rather than as measured.
+Two properties disqualify a trace from parts of a fit regardless of its class, and both are readable
+from `field_status` rather than from the trace's identity. A trace with a null `session_id` cannot
+supply `turns`, `growth_per_turn`, or the sticky root binding of FR-009a, because requests cannot be
+grouped into sessions. A trace with no timestamps gives no arrival model, and its reuse statistics
+depend on file order, so `fit` MUST report them as order-dependent rather than as measured.
 
 ## Output modes
 

@@ -362,10 +362,10 @@ with **`target_occupancy = 4`**, giving ~1.18 for that configuration. This is a 
 an iterative calibration**: nothing in this schema requires a nonlinear fit.
 
 `target_occupancy = 4` began as a judgement. It is now **corroborated by measurement**: across the
-reference corpus, occupancy below the fanout points settles at **3.0–3.2** (`qwen_code` holds ~3.0
-from depth 8 to depth 512; `ragbench` holds ~3.1 from depth 4 to depth 256). Reality sits just
-under the chosen target, which is the right side to err on — the target is a floor to design
-against, not an estimate of the mean.
+traces examined during design, occupancy below the fanout points settled in the **low single digits**
+and held there across hundreds of depths. That sits just under the chosen target, which is the right
+side to err on. The target remains a floor to design against, not an estimate of any population: the
+traces examined were a sample of convenience and are not claimed to be representative.
 
 **When sweeping `shared_depth`, pin `branching` explicitly.** `auto` re-solves at every sweep
 point, which would vary the trunk shape along with the swept axis and confound the comparison.
@@ -374,16 +374,18 @@ Pin it to the profile valid at the deepest point of the sweep.
 ### Trunk width is piecewise, not smooth
 
 The scalar this replaced assumed width grows as `branch_factor^depth` — smooth exponential
-branching at every level. **Measured tries do not look like that.** In the reference corpus, width
-stays *exactly constant* for long stretches and then jumps at particular depths:
+branching at every level. **Real tries do not look like that.** Width stays *exactly constant* for
+long stretches and then jumps at particular depths. Measured on traces examined during design, and
+given by character rather than by name because the files are not part of this repository and no
+requirement rests on them:
 
-| Trace | Fanout events (>1.8× at one depth) | Longest run of *constant* width |
+| Trace character | Fanout events (>1.8× at one depth) | Longest run of *constant* width |
 | --- | --- | --- |
-| `exgentic_appworld` | depth 1 (2.1×) **and depth 23 (2.1×)** | 40 depths at width 639 |
-| `exgentic_tau2_airline` | depth 124 (2.1×) | 21 depths at width 78 |
-| `exgentic_tau2_retail` | depth 110 (1.9×) | 16 depths at width 521 |
-| `qwen_code` | depth 1 (31×) | plateau ~12 000 from depth 8 to 512 |
-| `ragbench` | depth 2 (9 761×) | plateau ~21 000 from depth 4 to 256 |
+| Agentic, tool-heavy | depth 1 **and depth 23** (2.1× each) | 40 depths at constant width |
+| Agentic, long-context | depth 124 (2.1×) | 21 depths at constant width |
+| Agentic, transactional | depth 110 (1.9×) | 16 depths at constant width |
+| Production code assistant | depth 1 (31×) | plateau from depth 8 to 512 |
+| Retrieval / RAG | depth 2 (four orders of magnitude) | plateau from depth 4 to 256 |
 
 A constant width across 40 consecutive depths means **every node in that band has exactly one
 child**. A uniform fanout of even 1.05 would widen by 7× over those 40 levels. So the shape a
@@ -396,17 +398,17 @@ Two consequences, and the second is why the profile exists at all:
    for chat and retrieval the same estimator gives 7.6–82, which is not a trunk width but an
    artifact of one enormous jump near the root.
 2. **Fanout happens deep, so it cannot be folded into `roots.count`.** A single fanout event at
-   depth 1 or 2 can be absorbed by redefining what counts as a root — `qwen_code` is better
-   described as ~4 900 roots than as 155 roots that each split 31 ways. But `exgentic_tau2_airline`
-   fans out at **depth 124**, after 124 levels of genuinely shared path, and no choice of root
-   boundary reaches that. Only a depth-indexed profile does.
+   depth 1 or 2 can be absorbed by redefining what counts as a root — a trace showing 155 roots that
+   each split 31 ways is better described as ~4 900 roots. But fanout has been observed at **depth
+   124**, after that many levels of genuinely shared path, and no choice of root boundary reaches
+   that. Only a depth-indexed profile does.
 
 The shape the profile buys is the one real traces actually have, and it is worth naming because it
 is the interesting case for a cache: **a global prefix shared by everything, a fanout, then a
 second shared segment on each branch** — a tool definition, a retrieved document, or a system
 preamble common to that branch but not to the others — **and only then the private tail.** Two
 sessions on the same branch share far more than the global prefix; two on different branches share
-only it. `exgentic_appworld` is exactly this, with fanouts at depths 1 and 23.
+only it. An agentic tool-use trace showed exactly this, with fanouts at depths 1 and 23.
 
 **This does not reopen the non-monotone-sharing question**, and the distinction is worth being
 precise about because the two look similar. Divergence remains irreversible: once two sessions
@@ -438,7 +440,7 @@ nonparametric branching process with no closed-form fit:
 | `branch_skew` | Zipf exponent fitted to the visit-count distribution over the keys at one depth, per segment |
 | `private_depth` | turn-1 path depth − that longest common prefix |
 | `growth_per_turn` | path-depth increment between consecutive turns of one session |
-| `churn.half_life` | **not fittable from the reference corpus** — see below |
+| `churn.half_life` | **not fittable from a trace of ordinary length** — see below |
 
 `shared_depth` **is** the FR-056 validation statistic, so the model is parameterised in the
 space it is validated in, and `empirical` is the natural default rather than an escape hatch.
@@ -451,20 +453,19 @@ generator cannot realise is exactly what FR-057 exists to refuse.
 **The root boundary is chosen at the first fanout, not at depth 0.** Real traces begin with a
 handful of keys — sometimes exactly one — shared by nearly every request, and then fan out sharply
 within the first level or two. Taking `roots.count` literally as the depth-0 count would report
-`roots.count: 1` for `ragbench` and `roots.count: 155` for `qwen_code`, and would then have to
-express the 9 761× and 31× fanouts immediately below as trunk branching, where they would fail the
-occupancy floor at any useful depth. So `fit` MUST place the root boundary at the depth **below the
+`roots.count: 1` for a trace whose every request shares one preamble, and would then have to express
+the fanout immediately below — observed at up to four orders of magnitude in a single level — as
+trunk branching, where it would fail the occupancy floor at any useful depth. So `fit` MUST place the root boundary at the depth **below the
 last near-root fanout event**, report `roots.count` as the width there, and treat the levels above
-it as a global preamble prepended to every session. `qwen_code` is then ~4 900 roots rather than
-155-with-a-31×-split, and the profile below the boundary is flat, which is both true and
-realisable. The chosen boundary depth MUST appear in the fit report, since it changes what
+it as a global preamble prepended to every session. A trace measuring 155-roots-with-a-31×-split is
+then ~4 900 roots, and the profile below the boundary is flat, which is both true and realisable. The chosen boundary depth MUST appear in the fit report, since it changes what
 `roots.count` means. This rule is only about *near-root* fanout; a fanout deep in the trunk (
-`exgentic_tau2_airline` at depth 124) is a genuine `branching` segment and MUST NOT be absorbed
-this way.
+observed beyond depth 100) is a genuine `branching` segment and MUST NOT be absorbed this way.
 
 **`churn.half_life` MUST be left unset rather than estimated.** Its observable signature is a trunk
 key that is used and then never used again for the rest of the trace — but every trace in the
-reference corpus spans hours at most, while plausible real churn periods run to days or weeks. A
+trace of ordinary length spans hours at most, while plausible real churn periods run to days or
+weeks. A
 half-life longer than the observation window is indistinguishable from no churn at all, so any
 fitted value would be an artifact of trace length rather than a property of the workload, and it
 would be biased *short* — the direction that manufactures cache misses. What `fit` MAY legitimately

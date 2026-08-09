@@ -42,12 +42,14 @@ never forces `interfaces/spdk` onto a default build.
   issues a *modelled key stream*. Long-term, `remote-lookup-bench`'s `lookup` subcommand
   is expressible as a trivial workload YAML, and consolidating is a follow-up, not part of
   this feature.
-- **`traces/` at the repository root** — the **reference corpus and source of ground truth**: 24
-  curated LLM traces, each with a self-describing `manifest.json`, spanning production and
-  benchmark provenance. Documented as an input in `contracts/trace-io.md`. It is the input to
-  `certus-workload fit` and the reference for validating that synthetic output resembles real
-  behaviour. It supersedes the ShareGPT files below for fitting, being larger, self-describing,
-  and structurally richer.
+- **External LLM trace corpora** — the input to `certus-workload fit` and the reference for
+  validating that synthetic output resembles real behaviour. What this feature depends on is the
+  **format**, specified in `contracts/trace-io.md`: a self-describing `manifest.json` plus
+  block-level invocation records. Trace collections in that format are **not part of this
+  repository** — they are large, they come from many sources under differing licences, and which
+  ones are on hand will change. Any particular collection is therefore a sample, not a dependency:
+  a path is supplied at the command line, `fit` reads the manifest to learn what that trace can
+  support, and no requirement here may rest on a specific trace existing.
 - **`benchmarks/kv-offload-replay`** — a secondary, vLLM-mediated view. Its `traces/sharegpt/`
   files remain useful as an end-to-end cross-check. Note that the **`*.mgr.jsonl`** files are the
   KV key trace (`{ts, method, keys: [<hash>…]}`); the **`*.handler.jsonl`** files are GPU↔CPU
@@ -402,10 +404,14 @@ never forces `interfaces/spdk` onto a default build.
   that say what the workload was. Those hold whether the comparison runs here, in
   `tools/simulator/`, or somewhere that does not exist yet.
 
-### Session 2026-08-07 (measured against the reference corpus)
+### Session 2026-08-07 (measured against real traces)
 
-24 real traces arrived at `traces/`. Everything below is measured from them, not reasoned about;
-the schema is documented in `contracts/trace-io.md`.
+A collection of real LLM traces became available and the model was checked against it rather than
+reasoned about. The traces themselves are **not in this repository and are not a dependency** — they
+were a sample of convenience, and what survives here is the *format* (`contracts/trace-io.md`) plus
+structural observations that any similar trace would show. Traces are described below by character
+rather than by name, deliberately: a name would be a dangling reference, and no requirement should
+rest on one file.
 
 - Q: Are the `.jsonl` and parquet files different levels of detail — tokens versus blocks? → A:
   **No, they are the same schema in two containers.** The jsonl is a 3–136 line eyeball sample of
@@ -413,29 +419,28 @@ the schema is documented in `contracts/trace-io.md`.
   anywhere; both are block-level, carrying block IDs plus token *counts*. So there is one input
   format to support, not two, and the generator's file output modes can emit exactly it.
 - Q: Can these traces actually drive `fit`? → A: **Yes, with a three-way split by what they carry.**
-  `raw_text` (12 traces) gives everything including block roles; `pre_hashed` (6) gives structure
-  and arrival but no roles; `metadata_only` (7: `azure_*`, `burstgpt_*`) has **no block data at
-  all** and can only supply arrival and token-length distributions. Two further disqualifications
-  matter more than the class: a null `session_id` (`mooncake_*`) makes `turns`, `growth_per_turn`
-  and the FR-009a root binding unfittable, and no timestamps (`ragbench`, `swe_agent`) makes reuse
-  statistics order-dependent. Best fit target is `qwen_code`/`qwen_toc` — production, native
-  session IDs, real timestamps, ~43 000 invocations — with `wildchat` as the cross-validation set
-  at the opposite end of the sharing spectrum.
+  `raw_text` traces give everything including block roles; `pre_hashed` gives structure
+  and arrival but no roles; `metadata_only` traces have **no block data at all** and can only supply arrival
+  and token-length distributions. Two further disqualifications matter more than the class: a null
+  `session_id` makes `turns`, `growth_per_turn` and the FR-009a root binding unfittable, and absent
+  timestamps make reuse statistics order-dependent. So the best fit target is a *production* trace
+  with native session IDs and real timestamps, cross-validated against one at the opposite end of
+  the sharing spectrum — the selection criteria matter, the particular files do not.
 - Q: Do the traces confirm the model, or contradict it? → A: **Confirm the sharing model, refute
-  the trunk-shape model.** `id_semantics: rolling_prefix` in all 17 traces that carry blocks is
+  the trunk-shape model.** `id_semantics: rolling_prefix` in every trace examined that carried blocks is
   exactly the FR-008 key design, which is strong external validation. But the **width-by-depth
   profile is piecewise, not smooth**: width stays *exactly* constant for 16–40 consecutive depths
   and then jumps at particular depths. A uniform `branch_factor` of even 1.05 would widen 7× across
   40 flat levels, so the scalar was not a coarse approximation of the real shape but a different
   shape. Hence `branch_factor` → the `branching` profile (FR-009e, FR-009e1).
 - Q: Is the interesting case a global prefix, then per-branch commonality from tool use, then
-  fanout? → A: **Yes, and the corpus has it.** `exgentic_appworld` fans out at depth 1 *and* depth
-  23 with a flat region between. That shape — everything shares the preamble, each branch then
+  fanout? → A: **Yes, and real traces have it.** An agentic tool-use trace fanned out at depth 1
+  *and* again at depth 23, with a flat region between. That shape — everything shares the preamble, each branch then
   shares a tool definition or retrieved document, and only then does the private tail begin — is
   the one that matters most for a cache, because two sessions on the same branch share far more
   than two on different branches, which no single `shared_depth` expresses. The profile makes it
   statable. **What is still not expressible** is fanout depths that differ *between* branches: the
-  profile is global, so the trie is self-similar. No corpus trace demands more.
+  profile is global, so the trie is self-similar. No trace examined demanded more.
 - Q: Does a depth-varying fanout reopen the non-monotone-sharing question that killed the
   Pitman–Yor `by_depth` table? → A: **No, and the earlier note conflated two things.** Divergence
   is still irreversible and sharing is still a monotone prefix property of any *pair* of sessions —
@@ -446,15 +451,16 @@ the schema is documented in `contracts/trace-io.md`.
 - Q: Then why did the scalar fit look fine? → A: **It averaged flat runs against rare jumps.** The
   measured scalar comes out 1.009–1.078 on agentic traces, and the same estimator gives 7.6–82 on
   chat and retrieval, which is not a trunk width but one enormous near-root jump. A near-root jump
-  *can* be absorbed by redefining the root boundary — `qwen_code` is better described as ~4 900
-  roots than 155 roots splitting 31 ways, which is now FR-055c — but `exgentic_tau2_airline` fans
-  out at **depth 124**, and no choice of root boundary reaches that.
+  *can* be absorbed by redefining the root boundary — a trace showing 155 roots that each split 31
+  ways is better described as ~4 900 roots, which is now FR-055c — but fanout has been observed at
+  **depth 124**, and no choice of root boundary reaches that.
 - Q: Anything that validates a number previously taken on faith? → A: **`target_occupancy = 4`.**
-  Measured occupancy settles at 3.0–3.2 below the fanout points (`qwen_code` ~3.0 from depth 8 to
-  512; `ragbench` ~3.1 from depth 4 to 256). Reality sits just under the target, which is the right
-  side for a floor to design against, so the judgement is promoted to corroborated (FR-009g1).
-- Q: The corpus's `block_size` counts tokens and every manifest's `model_config` is null, so KV
-  bytes are not recoverable. How serious? → A: **Not serious, because entry size is a chosen
+  Observed occupancy settled in the low single digits below the fanout points and held there across
+  hundreds of depths. That sits just under the target, which is the right side for a floor to design
+  against — so the judgement stands *consistent with* observation rather than established by it,
+  which is as far as a small incidental sample licenses (FR-009g1).
+- Q: The format's `block_size` counts tokens and `model_config` was null in every trace on hand, so
+  KV bytes are not recoverable. How serious? → A: **Not serious, because entry size is a chosen
   parameter and not a fitted one.** Size does not affect the generated reference pattern; it affects
   only when a consumer's storage fills. So `block_bytes` stays an input, is recorded in every
   report, and is never derived from a trace (FR-011a). Two consequences worth stating: the payload
@@ -465,10 +471,10 @@ the schema is documented in `contracts/trace-io.md`.
   presenting two numbers as two findings.
 - Q: What about block roles and the fan-in DAG? → A: **Both deferred, with reasons.** Roles explain
   *why* blocks are reused while the generator models *that* they are, and the statistics that drive
-  cache behaviour are role-agnostic; 12 traces carry roles so it stays recoverable. Fan-in appears
-  on 100 invocations in the entire corpus and **`reuse_from` is empty for every one of them**, so it
-  is a scheduling dependency rather than prefix reuse — not something a prefix model omits.
-- Q: Did reading the corpus find a defect in this spec? → A: **Yes, in US6's own command line.** It
+  cache behaviour are role-agnostic; the format carries roles, so it stays recoverable. Fan-in was
+  vanishingly rare and **`reuse_from` was empty in every instance of it**, so it is a scheduling
+  dependency rather than prefix reuse — not something a prefix model omits.
+- Q: Did reading real traces find a defect in this spec? → A: **Yes, in US6's own command line.** It
   passed `500convs-64g.handler.jsonl.gz` to `fit`, but the `*.handler.jsonl` files are GPU↔CPU
   *transfer* records (`medium`, `block_ids`, `group_sizes`); the KV key trace is `*.mgr.jsonl`. The
   example named a file that is not a key trace at all.
@@ -573,7 +579,7 @@ the schema is documented in `contracts/trace-io.md`.
   distinguishing them is the point of the new Test Matrix rows — policies that cope well with drift
   need not cope well with invalidation.
 - Q: Can churn be fitted? → A: **No, and it must not be faked.** Its signature is a trunk key used
-  and then never used again, but the corpus spans hours while plausible content cadences run to days
+  and then never used again, but available traces span hours while plausible content cadences run to days
   or weeks, and a half-life beyond the observation window is indistinguishable from no churn. A
   fitted value would be an artifact of trace length, biased **short** — the direction that
   manufactures misses. So `fit` leaves it unset and MAY report a lower bound (FR-055d); setting it
@@ -825,7 +831,7 @@ that specific attribute.
 
 ### User Story 6 - Fit a Model from a Real Trace (Priority: P2)
 
-The engineer runs `certus-workload fit --trace traces/qwen_code -o fitted.yaml` and gets a
+The engineer runs `certus-workload fit --trace <path-to-a-trace> -o fitted.yaml` and gets a
 starting YAML whose synthetic output statistically resembles that real workload, plus a validation
 report comparing the two.
 
@@ -1011,11 +1017,11 @@ report segments statistics into before/after windows around the event.
   counts are integers, so the mean is the only load-bearing moment, and a median-and-sigma
   parameterisation would let the realised mean drift from the stated value.
 - **FR-009e1**: A profile is required rather than a single exponent because **measured tries are
-  flat for long stretches and then fan out at particular depths**. In the reference corpus,
-  `exgentic_appworld` holds width *exactly* constant across 40 consecutive depths and fans out at
-  two separate depths (1 and 23); `exgentic_tau2_airline` fans out at depth 124 after 124 levels
-  of shared path. A uniform fanout of even 1.05 would widen by 7× across 40 levels, so a scalar
-  does not approximate this shape — it describes a different one. The profile MUST therefore be
+  flat for long stretches and then fan out at particular depths**. Agentic tool-use traces examined
+  during design held width *exactly* constant across runs of 20-40 consecutive depths, fanned out at
+  more than one depth, and did so as deep as depth 124 after that many levels of shared path. A
+  uniform fanout of even 1.05 would widen by 7× across 40 levels, so a scalar does not approximate
+  this shape — it describes a different one. The profile MUST therefore be
   able to express a global preamble, a fanout, a **second shared segment** carrying per-branch
   commonality such as a tool definition or retrieved document, a further fanout, and only then the
   private tail. The generator MUST document that the profile is global, so the trie is
@@ -1057,10 +1063,11 @@ report segments statistics into before/after windows around the event.
   resolves to a uniform profile deliberately: a non-uniform profile encodes a claim about where
   branches diverge, which the generator has no basis to invent and which MUST come either from the
   user or from `fit`.
-- **FR-009g1**: `target_occupancy = 4` MUST be documented as corroborated by measurement rather
-  than as a bare judgement. Across the reference corpus, occupancy below the fanout points settles
-  at **3.0–3.2** (`qwen_code` holds ~3.0 from depth 8 to 512; `ragbench` ~3.1 from depth 4 to 256).
-  Reality sits just below the target, which is the correct side for a floor to design against.
+- **FR-009g1**: `target_occupancy = 4` is a **judgement, consistent with what has been observed**.
+  In the traces examined during design, occupancy below the fanout points settled in the low single
+  digits and held there across hundreds of depths. That is just below the chosen target, which is the
+  correct side for a floor to design against, but the sample was small and incidental and the value
+  MUST NOT be presented as measured. It is a design floor, not an estimate of any population.
 - **FR-009h**: `run.wss_window` — the window for both trunk occupancy and the reported
   working-set size — MUST be defined canonically as a **request count**, not a wall-clock
   span. A duration MAY be accepted as sugar and converted via the configured rate, and a duration
@@ -1078,7 +1085,7 @@ report segments statistics into before/after windows around the event.
 - **FR-011**: Entry size MUST be a pure, deterministic function of key identity.
 - **FR-011a**: Entry size is a **chosen parameter, not a fitted one**. It does not affect the
   generated reference pattern — it affects only when a consumer's storage fills — so no trace
-  needs to supply it and no trace in the reference corpus can: the corpus's `block_size` counts
+  needs to supply it and the trace formats this tool reads cannot: their `block_size` counts
   *tokens*, and converting to KV bytes would need a model's layer count, KV head count, head
   dimension and dtype width, for which every manifest's `model_config` is null. The generator MUST
   therefore take `corpus.block_bytes` as an input, MUST record the value used in every report, and
@@ -1424,7 +1431,7 @@ report segments statistics into before/after windows around the event.
 
 ### Fitting and validation
 
-- **FR-055**: `fit` MUST accept the reference-corpus format of `contracts/trace-io.md` — both block
+- **FR-055**: `fit` MUST accept the trace format of `contracts/trace-io.md` — both block
   encodings, detected per trace rather than assumed — and emit a schema-valid YAML. It MUST consult
   the manifest's `field_status` and refuse to fit a parameter whose source field is `unavailable`
   rather than producing a default: a trace with a null `session_id` cannot supply `turns`,
@@ -1434,8 +1441,8 @@ report segments statistics into before/after windows around the event.
   rather than measured.
 - **FR-055d**: `fit` MUST leave `churn.half_life` **unset** rather than estimating it, and MUST say
   so in the fit report. Churn's observable signature is a trunk key used and then never used again,
-  but every reference-corpus trace spans hours at most while plausible content cadences run to days
-  or weeks, and a half-life longer than the observation window is indistinguishable from no churn.
+  but available traces span hours at most while plausible content cadences run to days or weeks, and
+  a half-life longer than the observation window is indistinguishable from no churn.
   Any fitted value would therefore be an artifact of trace length, biased **short** — the direction
   that manufactures misses. `fit` MAY report a lower bound ("no trunk rotation observed within the
   trace's N-hour span, so `half_life` ≫ N"). Setting churn MUST remain a deliberate act by whoever
@@ -1444,11 +1451,12 @@ report segments statistics into before/after windows around the event.
   fanout event, report `roots.count` as the width at that depth, and treat the levels above it as a
   global preamble prepended to every session. The boundary depth MUST appear in the fit report,
   because it changes what `roots.count` means. Taking depth 0 literally would report
-  `roots.count: 1` for `ragbench` and `155` for `qwen_code` and then have to express the 9 761× and
-  31× fanouts immediately below as trunk branching, which fails the FR-009f occupancy floor at any
-  useful depth. This rule applies only to near-root fanout: a fanout deep in the trunk
-  (`exgentic_tau2_airline` at depth 124) is a genuine `branching` segment and MUST NOT be absorbed
-  into `roots.count`, because no choice of root boundary can reach it.
+  `roots.count: 1` for a trace whose every request shares one preamble, and then have to express the
+  fanout immediately below — observed at up to four orders of magnitude in a single level — as trunk
+  branching, which fails the FR-009f occupancy floor at any useful depth. This rule applies only to
+  near-root fanout: a fanout deep in the trunk, which has been observed beyond depth 100, is a
+  genuine `branching` segment and MUST NOT be absorbed into `roots.count`, because no choice of root
+  boundary can reach it.
 - **FR-055a**: `fit` MUST emit the **measured** `branching` profile rather than `auto`, because trunk
   structure is a physical property of the trace. It MUST also record the value `auto` would have
   chosen, and MUST **fail** per FR-057 — never silently substitute — when the measured combination
@@ -1591,7 +1599,7 @@ not a claim that the generator measures any of it.
 | **Pure shared-preamble** | `turns: 1`, `roots.count: 1`, high `shared_depth` | Frequency-friendly; LRU underperforms. Hot root blocks must never be evicted |
 | **Forest width sweep** | `roots.count` 1→1000 at fixed `shared_depth` | How sharing breadth (many tenants/templates) trades against sharing depth — a case the superseded single-root model could not state |
 | **Sharing depth sweep** | sweep the `shared_depth` median, `branching` **pinned** | Where the trunk ends — the only sharing quantity a *session* freely chooses. Pinning is required: `auto` would re-solve per point and vary the trunk shape along with the swept axis |
-| **Per-branch commonality** | `branching` with a fanout, a flat segment, then a second fanout — the `exgentic_appworld` shape | A global preamble shared by everything, then a tool definition or retrieved document shared only within a branch. Two sessions on one branch share far more than two on different branches, which no single `shared_depth` can express on its own |
+| **Per-branch commonality** | `branching` with a fanout, a flat segment, then a second fanout — the shape agentic tool-use traces show | A global preamble shared by everything, then a tool definition or retrieved document shared only within a branch. Two sessions on one branch share far more than two on different branches, which no single `shared_depth` can express on its own |
 | **Trunk width sweep** | sweep a uniform `branching` fanout 1.0→1.25 at fixed `roots.count` | Width *at depth*, as against width at the root: a linear preamble shared by everyone (1.0) versus a trunk fanning out fast enough that occupancy falls and sharing decays. The range is narrow because the occupancy floor (FR-009f) is what bounds it |
 | **Mixture sweep** | sweep the geometric-`turns` weight against the `turns: 1` weight | **The headline experiment.** Real workloads are a mixture; the crossover point says whether an adaptive policy (ARC/LIRS/S3-FIFO) is worth building |
 | **Scan resistance** | 5% at `turns: 1, private_depth: 4000` over a hot conversational set | Classic LRU-killer, with `benchmarks/long-doc-qa` as the real analogue |
@@ -1704,12 +1712,11 @@ Following the speckit flow, still to be written for this feature:
   event encoding.
 - `contracts/workload-schema.md` — **written** (normative YAML schema reference).
 - `contracts/plan-format.md` — **written** (plan artifact encoding and hashing).
-- `contracts/trace-io.md` — **written** (reference-corpus schema, both block encodings with their
+- `contracts/trace-io.md` — **written** (trace interchange schema, both block encodings with their
   verified invariants, and the mode-2/3 output formats).
 - `research.md` — the derivation of the trunk-occupancy bound and the `auto` closed form
-  (FR-009f/FR-009g). *(The `target_occupancy = 4` choice is no longer an open question: measured
-  occupancy in the reference corpus settles at 3.0–3.2, so the value is corroborated — see
-  FR-009g1.)* Still open here: **the segmentation rule for fitting a `branching` profile** — what
+  (FR-009f/FR-009g), including the `target_occupancy = 4` choice — a judgement consistent with the
+  low-single-digit occupancy observed in the traces examined, but not established by them (FR-009g1).* Still open here: **the segmentation rule for fitting a `branching` profile** — what
   jump ratio counts as a fanout event, how to choose segment boundaries robustly when width is
   noisy, and how the near-root boundary of FR-055c interacts with it; *(the LP/flow relaxation for a true offline upper bound under
   heterogeneous entry sizes is parked with the rest of cache simulation — it was only ever needed
