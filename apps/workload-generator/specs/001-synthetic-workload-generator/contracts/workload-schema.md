@@ -2,27 +2,52 @@
 
 **Version**: 1
 **Status**: Draft
-**Consumers**: `certus-workload plan | simulate | fit | validate`, `certus-workload-run run`
+**Consumers**: `certus-workload plan | report | fit | validate`, `certus-workload-run run`
 
 This is the normative reference for the generator's input. It is the contract that keeps the
 input compact: the file holds *fitted statistical parameters*, never an access trace.
 
 ## Design rules
 
-1. **Five orthogonal sections.** `corpus` (what keys exist and how they overlap), `workload`
-   (who asks for what, when), `topology` (where copies live), `system` (the cache under
-   test), `run` (execution and measurement). Changing one axis never requires editing
-   another. This factoring is what prevents combinatorial enumeration.
+1. **Four orthogonal sections.** `corpus` (what keys exist and how they overlap), `workload`
+   (who asks for what, when), `topology` (which node asks for what), `run` (execution and
+   measurement). Changing one axis never requires editing another. This factoring is what
+   prevents combinatorial enumeration.
 2. **One distribution syntax everywhere** (§ Distributions).
-3. **Reuse is specified exactly once**, inside a `workload.mix` archetype. A top-level
-   `gets_per_key` or `lifetime` is a schema error, because the archetypes already imply
-   reuse and a second specification would silently disagree with the first.
+3. **Each kind of reuse is specified in exactly one place.** There are two, and the schema
+   keeps them apart because they are physically different phenomena:
+   - **Inter-session** sharing — different sessions walking the same trunk — lives only in
+     `corpus.trees` (`roots.popularity` for *which* trunk, `shared_depth` for *how far down*
+     it is shared, `branching`/`branch_skew` for the trunk's shape).
+   - **Intra-session** sharing — turn N+1 re-reading turn N's blocks — lives only in
+     `workload.sessions` (`turns`, `growth_per_turn`), along with the session's own private
+     path length (`private_depth`).
+
+   So `corpus` describes the **shared** key structure and `workload` describes how a session
+   **traverses** it and how far past it that session goes alone. A top-level `gets_per_key` or
+   `lifetime` is a schema error, and so is restating a *shared* quantity — `popularity` or
+   `shared_depth` — inside `workload.mix`, because the two statements could silently disagree.
+   Path length is stated once, by the formula in § `workload`.
 4. **No puts.** The model describes *requests*; populates are whatever the system missed.
    Specifying puts would assume the hit rate the experiment measures.
 5. **Unknown fields are errors**, so a mistyped distribution parameter cannot silently take
    a default.
-6. **Relative capacities.** Cache sizes are expressible as a fraction of the realised working
-   set so a sweep means the same thing on machines with different DRAM.
+6. **The document describes a workload, never a storage system.** There is deliberately no
+   `system:` section and no mention anywhere of tiers, caches, memory, or disks. A workload is
+   a statistical statement about *which blocks are asked for, by whom, in what order, at what
+   size* — and it must mean exactly the same thing whether the consumer is Certus with two
+   tiers, Certus with five, a single flat cache, a simulator, or a plain file on disk. Anything
+   describing the system under test — capacities, eviction policy, watermarks, pinning, tier
+   placement — is a property of *that consumer*, supplied by the consumer's own configuration
+   or command line, and never of the workload. What the generator publishes instead is the
+   **realised working-set size** over `run.wss_window` (§ `run`), which is a workload
+   statistic: a consumer that wants a cache sized to a quarter of the working set can compute
+   that from the report without the workload ever having named a cache.
+7. **The document describes a workload, never a tool operation.** Parameters governing what the
+   tool *does to* a model — `fit`/`validate` tolerances above all — are command-line options, not
+   schema fields (spec FR-057b). There is deliberately no `fit:` section: two documents with
+   identical workload content must compare equal, and a tolerance embedded here would make them
+   differ while describing the same workload. Adding one later would breach rule 1.
 
 ## Top-level document
 
@@ -34,8 +59,7 @@ duration: 120s              # exactly one of duration | requests is required
 requests: 2_000_000
 corpus:   {...}             # required
 workload: {...}             # required
-topology: {...}             # optional; omitted ⇒ single node, no remote traffic
-system:   {...}             # required
+topology: {...}             # optional; omitted ⇒ a single node asks for everything
 run:      {...}             # required
 sweep:    {...}             # optional
 ```
@@ -76,23 +100,87 @@ corpus:
   # one key would manufacture phantom misses.
   block_bytes: {dist: const, value: 128KiB}
 
-  prefix_tree:
-    # Blocks per request == depth of the path walked through the trie.
-    depth: {dist: lognormal, median: 24, sigma: 0.8}
+  # A FOREST, not a single tree. Real KV traces show several independent prefix trees at
+  # the top levels (many levels deep for RAG and multi-turn), each descending into
+  # branches with no reuse at all at the bottom.
+  trees:
+    roots:
+      count: 12                              # number of distinct depth-0 keys
+      # Which root a SESSION binds to, drawn once per session and then sticky.
+      # Root count << session count, so the binding is many sessions : one root.
+      # The support size is `count`; supplying `n` here is a schema error.
+      popularity: {dist: zipf, s: 0.9}
 
-    sharing:
-      model: pitman_yor
-      # Per-depth bands. The nearest *preceding* band applies to unlisted depths;
-      # there is no interpolation. Band keys are the depth at which the band starts.
-      #
-      #   concentration (theta) -> mass on minting a NEW child. Low = everyone shares.
-      #   discount (alpha)      -> tail heaviness among EXISTING children.
-      #                            High = a few children absorb most descents.
-      by_depth:
-        0:  {discount: 0.10, concentration: 0.2}    # shared system prompt / few-shot preamble
-        8:  {discount: 0.60, concentration: 8.0}    # task templates, conversation trunks
-        24: {discount: 0.90, concentration: 500}    # each request's private suffix
+    # Depth at which INTER-session sharing ends: the length of the trunk this
+    # session walks in common with other sessions bound to the same root.
+    # This is the same quantity as the FR-056 prefix-sharing depth histogram, so a
+    # fitted value and a validated value are measured the same way (see § Fitting).
+    shared_depth: {dist: empirical, points: [[4, 0.10], [18, 0.75], [40, 1.0]]}
+
+    # How the trunk WIDENS with depth, as a piecewise profile rather than one number.
+    # Each entry says "from this depth onward, each trunk node has this many children",
+    # until the next entry. Real tries are flat for long stretches and then fan out at
+    # particular depths (see § Trunk width is piecewise, not smooth), so a single
+    # exponent cannot describe them.
+    #
+    # MEANS, not distributions: child counts are integers and the mean is the only
+    # moment that matters. A non-integer mean is realised exactly by giving each node
+    # floor(m) or ceil(m) children with the probabilities that make E[children] = m.
+    # Decided ONCE per node from that node's own identity plus the seed -- never from
+    # arrival order (see below). Domain: >= 1 at every depth, so the trunk is unbounded
+    # in depth and no session can run off the end of it.
+    #
+    # A fanout is a MEAN and the realised counts vary around it: a node with
+    # fanout 1.18 gets 1 child with probability 0.82 and 2 with probability 0.18, so
+    # the width at any depth is stochastic and converges on the stated value as more
+    # of the trie is visited. The draw is keyed on the NODE, not on the visit, which
+    # is what keeps a long run reproducible and independent of arrival order.
+    #
+    # `auto` solves for a profile that keeps sharing realisable (FR-009g). A bare
+    # scalar is accepted as sugar for a single segment at depth 0, which is the old
+    # `branch_factor` and still the right thing for a smoothly-branching trunk.
+    branching: auto
+    #   auto
+    #   1.15                                     # sugar: uniform, all depths
+    #   - {from_depth: 0,   fanout: 1.0}         # a flat shared preamble...
+    #   - {from_depth: 12,  fanout: 40.0}        # ...one fanout event...
+    #   - {from_depth: 13,  fanout: 1.0}         # ...a flat shared segment (a tool
+    #                                            #    preamble common to that branch)
+    #   - {from_depth: 30,  fanout: 8.0}         # ...and a second fanout
+    #   - {from_depth: 31,  fanout: 1.02}
+
+    # How shared CONTENT is replaced over time -- documents re-indexed, system
+    # prompts redeployed, threads aging out of relevance. Each trunk node carries a
+    # generation in its identity, and a node's generation advances on this half-life,
+    # drawn from the node's own identity so it stays deterministic. Because the key is
+    # a rolling hash, rotating a node automatically invalidates its whole subtree, so
+    # this one number produces the full range of behaviours: the root rotating is a
+    # whole-tree replacement, a mid-trunk node rotating replaces one branch's shared
+    # content.
+    #
+    # 0 (the DEFAULT) means no churn: shared content, once minted, exists forever.
+    # That is what every run before this parameter existed did.
+    #
+    # A depth-d path survives only while all d+1 of its nodes do, so the effective
+    # half-life of a path is ~half_life/(d+1) -- shallow shared prefixes are stable and
+    # deep ones are fragile, which is the way round real deployments behave.
+    churn:
+      half_life: 0            # e.g. 6h; 0 = never (default)
+
+    # Which of those children a descending session picks: a Zipf exponent over child
+    # rank. 0 = uniform; higher = a few children absorb most descents, giving a
+    # heavy-tailed trunk-popularity distribution. Domain: >= 0 (0.9-1.2 is typical;
+    # values above 1 are legitimate and common). May be given per segment inside
+    # `branching` as `skew:`, which overrides this default for that segment; a fanout
+    # into tool variants is often far more skewed than a fanout into user content.
+    # A segment may likewise override `churn.half_life` as `churn_half_life:`, which is
+    # how you say "prompts are stable for weeks, retrieved documents turn over daily".
+    branch_skew: 0.9
 ```
+
+The session's private path length lives in `workload.sessions`, not here, because it is a
+property of the session rather than of the shared structure. There is no `depth` field
+anywhere: path length is stated once, by the formula in § `workload`.
 
 ### Why this generates prefix trees compactly
 
@@ -102,17 +190,294 @@ node identity is the hash of its path. Key identity is therefore
 `child_id = H(parent_id, child_index)` — the trie is never stored, and resident memory is
 O(active paths) regardless of how many distinct keys a run mints.
 
-A Pitman–Yor process over that trie gives realistic heavy-tailed sharing from two numbers per
-band. Three bands, six numbers, reproduce the whole practical family:
+**Sharing is necessarily a monotone prefix property, and that is what makes the model this
+small.** Because the key is a rolling hash over the chain, divergence is *irreversible*: once
+two paths differ at depth *d*, every key below *d* differs too, whatever the content. Two
+requests can therefore share a prefix of some length and nothing else — they can never
+re-converge. So the only free quantity per session is **where sharing ends**, which is exactly
+`shared_depth`. A per-depth sharing table would offer degrees of freedom the key model cannot
+realise (it could ask for "tight at depth 0, loose at 8, tight again at 16", which no
+assignment of keys can satisfy), so this schema does not offer one.
 
-| Band | `concentration` | Effect |
+### Trunk children are minted deterministically, not by arrival order
+
+A node's children are decided **once, from the node's own identity and the seed**, by drawing the
+fanout that `branching` gives for that node's depth. A descending session then chooses among those
+children by `branch_skew`. It never invents one. Depth-indexing the fanout keeps this property
+intact: depth is a property of the node, so the child count still depends only on the node's
+identity and the seed, never on who arrived first.
+
+The alternative — a Chinese-restaurant rule where a session either descends into a previously
+visited child or mints a fresh one, which is what Pitman–Yor's discount did — is rejected for
+three reasons, and they are the same reason wearing different hats:
+
+- It makes the trie a function of **arrival order**, so `corpus` would no longer be orthogonal
+  to `workload` (design rule 1): changing the request rate would change which keys exist.
+- A key's identity would no longer be computable from its path alone; reconstructing it would
+  require replaying every prior session in order, which defeats `child_id = H(parent_id,
+  child_index)` and the O(active paths) memory bound.
+- Per-node plan generation and plan verification both depend on any key being derivable from
+  the seed without history.
+
+**Private descents use a disjoint child namespace.** Below `shared_depth` a session walks
+`child_id = H(parent_id, PRIVATE_TAG, session_id, i)`, so two sessions can never collide on a
+private node. Without the tag, "private" would be only probabilistically private, and the
+inter/intra separation that design rule 3 rests on would leak in a way no test would reliably
+catch.
+
+A handful of numbers then reproduce the whole practical family:
+
+| Shape | Configuration | Models |
 | --- | --- | --- |
-| near-root | → 0 | Almost every request shares the same first blocks — a global system prompt |
-| mid-depth | moderate | A moderate number of trunks — task templates, conversations |
-| deep | → ∞ | Almost every key is novel — the request's own tokens |
+| One global preamble | `roots.count: 1`, `shared_depth` median high | A single system prompt every request shares |
+| A few task families | `roots.count` 5–20, `roots.popularity` skewed | Distinct prompt templates or tenants, unevenly used |
+| Broad shallow sharing | `shared_depth` median low, `private_depth` median high | Requests agree on a short preamble then go their own way |
+| Essentially no sharing | `roots.count` large, `shared_depth` → 0 | Scan / long-document ingest; every key novel |
 
-Degenerate settings are detected: a configuration that can never mint a new child makes the
-key space finite and the run meaningless, and is reported rather than run.
+| A shared tool or document per branch | `branching` with a fanout, then a flat segment, then another fanout | A global preamble, then per-branch commonality (a tool definition, a retrieved document), then the private tail — see § Trunk width is piecewise |
+
+`branch_skew` shapes the popularity of trunks *within* a root, which is what makes the
+mid-depth trunk population heavy-tailed rather than uniform. Trunk **width** is still not
+configured directly: `w(0) = roots.count` and `w(d+1) = w(d) × fanout(d+1)`, so width remains
+emergent from the profile, and the realised `w(d)` is reported per depth in the realised-corpus
+summary rather than assumed. What the profile changes is that the fanout is no longer forced to be
+the same at every depth — which is what lets a *flat* segment exist at all, and a flat segment is
+what "everything on this branch shares this" means.
+
+### Shared content churns on its own schedule, not on its readers'
+
+`churn.half_life` exists because the trunk is otherwise **immortal**. Every trunk key is a pure
+function of its path, so once minted it can be re-derived forever; on a long run every trunk key is
+touched and then re-touched indefinitely, and all novelty comes from private branches. Real shared
+content does not behave that way — documents are re-indexed, system prompts are redeployed, popular
+threads stop being asked about — and because that discrepancy *grows* with run length rather than
+staying constant, an arbitrarily long run gets progressively less representative without it.
+
+The mechanism is a **generation term in node identity**:
+
+```
+child_id = H(parent_id, child_index, generation(node))
+```
+
+where `generation` advances on `churn.half_life`, drawn from the node's own identity and the seed.
+Rotating a node changes its key, and because the key is a rolling hash **its entire subtree rotates
+with it automatically** — which is why one parameter covers whole-tree replacement (the root
+rotates), per-branch content replacement (a mid-trunk node rotates), and everything between.
+
+The measurable event is a **compulsory-miss shock**: at the instant a shared node rotates, every
+session that would have hit its old key now misses, all at once, and must re-populate. That is a
+real and sharp phenomenon in a KV cache — a redeployed system prompt invalidates the most-shared
+prefix in the system — and it is exactly the sort of transient that distinguishes replacement
+policies from one another. Rotation events and the miss shock they cause are reported.
+
+**Why not reference counting?** The obvious alternative is for sessions to hold refcounts on the
+shared nodes they use and retire a node when the last user leaves. It does not work, for three
+reasons that are worth recording because the idea is a natural one:
+
+1. **It cannot create novelty.** Node identity is a pure function of the path, so a retired node is
+   re-derived *identically* the moment another session walks the same child indices. Deletion hides
+   a key briefly; it does not produce a new one. Only a generation term does.
+2. **Refcount-zero fires in the wrong places.** For the § Worked example parameters there are ~833
+   live sessions on each of the 12 roots but only ~1.1 per distinct path at depth 40. So refcounts
+   essentially never reach zero near the root and reach it constantly deep down: the scheme would
+   churn the nearly-private deep nodes and never touch the popular shallow ones. Real churn is
+   driven by content lifecycle, which is uncorrelated with popularity — and the case that matters
+   most hits the *top* of the trunk.
+3. **It would couple `corpus` to `workload` again.** If a node exists only while some session holds
+   it, then which keys exist depends on arrival timing, so changing the request rate would change
+   the key space — the same objection that ruled out a Chinese-restaurant minting rule
+   (§ Trunk children are minted deterministically). Generation-based churn keeps the key space a
+   function of the seed and the clock, and of nothing about who is reading.
+
+Reference counting *is* the right model for the part of the tree where the reader owns the content,
+and that part is already handled: a session's private keys are dead the moment it retires
+(§ Sessions are born and retired), with no refcount needed because the count is known to be one.
+
+### Sharing is only realised if trunk paths are occupied
+
+`shared_depth` is what a session *attempts*: it says "I leave the trunk at depth *s*." Whether
+those *s* levels are actually **shared** depends on whether any earlier session walked the same
+*s* steps. The drawn value is therefore an **upper bound** on realised sharing, and the quantity
+that decides whether the bound is tight is **trunk occupancy** — how many sessions traverse each
+distinct trunk path:
+
+```
+sessions_per_window = sessions begun within one window of run.wss_window REQUESTS
+paths(d)            = roots.count * PRODUCT of fanout(k) for k in 1..d      # from `branching`
+occupancy(d)        = sessions_per_window / paths(d)
+```
+
+Expressing `paths(d)` as a product over the profile rather than as `branch_factor^d` is what
+makes occupancy computable for a piecewise trunk, and it is exact for the uniform case too, where
+the product collapses back to `roots.count * branch_factor^d`.
+
+**Churn shortens the window, and this is not optional bookkeeping.** A trunk path only accumulates
+sharers for as long as it exists, so with `churn.half_life` set, the sessions that count toward
+occupancy are those arriving within the path's *lifetime* rather than within the whole
+`wss_window`:
+
+```
+path_lifetime(d)    = churn.half_life / (d + 1)      # all d+1 nodes must survive
+effective_window(d) = min(wss_window, path_lifetime(d) expressed in requests)
+occupancy(d)        = sessions arriving during effective_window(d) / paths(d)
+```
+
+Without this term the occupancy floor would pass a configuration whose sharing churn silently
+destroys — the check would count a window's worth of sessions against a path that only lived for a
+fraction of it. Note the interaction bites hardest exactly where sharing is deepest, since
+`path_lifetime` falls as `1/(d+1)`: a `churn.half_life` generous at depth 4 can be far too short at
+depth 40. This is the same failure shape as a warmup shorter than the session ramp — a
+configuration that is internally consistent, passes every other check, and does not measure what it
+claims to.
+
+When `occupancy(s) ≫ 1`, every trunk path at depth *s* has been walked before, realised sharing
+equals the drawn `shared_depth`, and § Fitting's one-pass measurements are exact. When
+`occupancy(s) < 1`, sessions land on virgin trunk and realised sharing collapses far below the
+drawn value — while the configuration still looks entirely reasonable.
+
+**The window is part of the definition, not a refinement.** Occupancy counts sessions per
+*eviction-relevant* window, because a block touched once a million requests ago has long since
+been evicted. Counted over the whole run instead, a configuration could "achieve" sharing merely
+by running longer, which is not a physical effect.
+
+Worked, for the § Worked example parameters — 12 roots and ~40 000 sessions per 60 s window, so
+~3 300 sessions per root:
+
+| depth | trunk paths per root at `branch_factor: 1.25` | sessions per path | realised sharing |
+| --- | --- | --- | --- |
+| 4 | 2.4 | 1 400 | = drawn |
+| 18 | 55 | 60 | = drawn |
+| 40 | 7 500 | **0.4** | **≪ drawn** |
+
+That example's `shared_depth` runs to depth 40, so at a uniform fanout of 1.25 the deepest-sharing
+quartile — exactly the long-preamble and RAG cases the forest model exists to capture — would
+silently fail to achieve its drawn sharing. Hence the `auto` default, which for a single uniform
+segment solves
+
+```
+fanout = (sessions_per_window / roots.count / target_occupancy) ^ (1 / p99(shared_depth))
+```
+
+with **`target_occupancy = 4`**, giving ~1.18 for that configuration. This is a **closed form, not
+an iterative calibration**: nothing in this schema requires a nonlinear fit.
+
+`target_occupancy = 4` began as a judgement. It is now **corroborated by measurement**: across the
+reference corpus, occupancy below the fanout points settles at **3.0–3.2** (`qwen_code` holds ~3.0
+from depth 8 to depth 512; `ragbench` holds ~3.1 from depth 4 to depth 256). Reality sits just
+under the chosen target, which is the right side to err on — the target is a floor to design
+against, not an estimate of the mean.
+
+**When sweeping `shared_depth`, pin `branching` explicitly.** `auto` re-solves at every sweep
+point, which would vary the trunk shape along with the swept axis and confound the comparison.
+Pin it to the profile valid at the deepest point of the sweep.
+
+### Trunk width is piecewise, not smooth
+
+The scalar this replaced assumed width grows as `branch_factor^depth` — smooth exponential
+branching at every level. **Measured tries do not look like that.** In the reference corpus, width
+stays *exactly constant* for long stretches and then jumps at particular depths:
+
+| Trace | Fanout events (>1.8× at one depth) | Longest run of *constant* width |
+| --- | --- | --- |
+| `exgentic_appworld` | depth 1 (2.1×) **and depth 23 (2.1×)** | 40 depths at width 639 |
+| `exgentic_tau2_airline` | depth 124 (2.1×) | 21 depths at width 78 |
+| `exgentic_tau2_retail` | depth 110 (1.9×) | 16 depths at width 521 |
+| `qwen_code` | depth 1 (31×) | plateau ~12 000 from depth 8 to 512 |
+| `ragbench` | depth 2 (9 761×) | plateau ~21 000 from depth 4 to 256 |
+
+A constant width across 40 consecutive depths means **every node in that band has exactly one
+child**. A uniform fanout of even 1.05 would widen by 7× over those 40 levels. So the shape a
+scalar produces is not a coarse approximation of the real one; it is a different shape.
+
+Two consequences, and the second is why the profile exists at all:
+
+1. **A scalar fitted to a real trace comes out near 1.0 and means nothing.** It averages long flat
+   runs against rare large jumps. The measured means were 1.009–1.078 for the agentic traces, and
+   for chat and retrieval the same estimator gives 7.6–82, which is not a trunk width but an
+   artifact of one enormous jump near the root.
+2. **Fanout happens deep, so it cannot be folded into `roots.count`.** A single fanout event at
+   depth 1 or 2 can be absorbed by redefining what counts as a root — `qwen_code` is better
+   described as ~4 900 roots than as 155 roots that each split 31 ways. But `exgentic_tau2_airline`
+   fans out at **depth 124**, after 124 levels of genuinely shared path, and no choice of root
+   boundary reaches that. Only a depth-indexed profile does.
+
+The shape the profile buys is the one real traces actually have, and it is worth naming because it
+is the interesting case for a cache: **a global prefix shared by everything, a fanout, then a
+second shared segment on each branch** — a tool definition, a retrieved document, or a system
+preamble common to that branch but not to the others — **and only then the private tail.** Two
+sessions on the same branch share far more than the global prefix; two on different branches share
+only it. `exgentic_appworld` is exactly this, with fanouts at depths 1 and 23.
+
+**This does not reopen the non-monotone-sharing question**, and the distinction is worth being
+precise about because the two look similar. Divergence remains irreversible: once two sessions
+take different children, every key below that point differs, forever. Sharing is still a *monotone
+prefix* property of any *pair* of sessions, which is what the rolling hash requires and what
+killed the old per-depth sharing table. What varies by depth here is only **how many children a
+node has** — a property of the trie's shape, not of any pair's sharing — and that is realisable at
+any profile, because a node having one child at depth 20 and forty at depth 21 contradicts
+nothing. The earlier note that depth-varying branching "was unrealisable anyway" conflated the two;
+only depth-varying *sharing* is unrealisable.
+
+**What the profile still cannot express**: fanout depths that differ *between* branches — branch A
+carrying a tool preamble that branch B lacks. The profile is global, so the trie is self-similar:
+every branch fans out at the same depths. Modelling per-subtree structure would require a stage
+table per branch, and the corpus does not yet show a case that demands it.
+
+### Fitting from a real trace
+
+Every structural parameter — the `corpus.trees` fields plus the session path lengths — is one
+pass over a trace, which is the main reason this parameterisation was chosen over a
+nonparametric branching process with no closed-form fit:
+
+| Parameter | Measurement |
+| --- | --- |
+| `roots.count` | distinct keys at the **root boundary**, which is not always depth 0 — see below |
+| `roots.popularity` | histogram of sessions per root |
+| `shared_depth` | longest common prefix of each request against all earlier requests *within one `wss_window`* |
+| `branching` | the **width-by-depth profile** `w(d) = distinct keys at depth d`, segmented at the depths where `w(d+1)/w(d)` jumps; each segment's fanout is the geometric mean of the ratios inside it. **Trustworthy only where occupancy is high** (see below) |
+| `branch_skew` | Zipf exponent fitted to the visit-count distribution over the keys at one depth, per segment |
+| `private_depth` | turn-1 path depth − that longest common prefix |
+| `growth_per_turn` | path-depth increment between consecutive turns of one session |
+| `churn.half_life` | **not fittable from the reference corpus** — see below |
+
+`shared_depth` **is** the FR-056 validation statistic, so the model is parameterised in the
+space it is validated in, and `empirical` is the natural default rather than an escape hatch.
+
+`fit` emits the **measured** `branching` profile, not `auto` — trunk structure is a property of the
+trace — and records what `auto` would have chosen beside it. If the measured combination violates
+the occupancy floor, `fit` fails rather than substituting (spec FR-055a): a combination the
+generator cannot realise is exactly what FR-057 exists to refuse.
+
+**The root boundary is chosen at the first fanout, not at depth 0.** Real traces begin with a
+handful of keys — sometimes exactly one — shared by nearly every request, and then fan out sharply
+within the first level or two. Taking `roots.count` literally as the depth-0 count would report
+`roots.count: 1` for `ragbench` and `roots.count: 155` for `qwen_code`, and would then have to
+express the 9 761× and 31× fanouts immediately below as trunk branching, where they would fail the
+occupancy floor at any useful depth. So `fit` MUST place the root boundary at the depth **below the
+last near-root fanout event**, report `roots.count` as the width there, and treat the levels above
+it as a global preamble prepended to every session. `qwen_code` is then ~4 900 roots rather than
+155-with-a-31×-split, and the profile below the boundary is flat, which is both true and
+realisable. The chosen boundary depth MUST appear in the fit report, since it changes what
+`roots.count` means. This rule is only about *near-root* fanout; a fanout deep in the trunk (
+`exgentic_tau2_airline` at depth 124) is a genuine `branching` segment and MUST NOT be absorbed
+this way.
+
+**`churn.half_life` MUST be left unset rather than estimated.** Its observable signature is a trunk
+key that is used and then never used again for the rest of the trace — but every trace in the
+reference corpus spans hours at most, while plausible real churn periods run to days or weeks. A
+half-life longer than the observation window is indistinguishable from no churn at all, so any
+fitted value would be an artifact of trace length rather than a property of the workload, and it
+would be biased *short* — the direction that manufactures cache misses. What `fit` MAY legitimately
+report is a **lower bound**: "no trunk rotation observed within the trace's N-hour span, so
+`half_life` ≫ N". Setting churn is then a deliberate act by whoever knows the deployment's real
+content cadence, which is not something a trace of this length can tell them.
+
+**A measured fanout is only trustworthy where occupancy is high.** A trace reveals only
+*visited* nodes. Where many sessions traverse each trunk path, most children are observed and the
+measured width ratio approaches the true value; where occupancy is low, each session sits alone on
+its own path and the ratio collapses toward **1 whatever the true branching**. So the fit report
+states the occupancy at which each ratio was measured, and a ratio near 1 from a low-occupancy
+region means "not observable here", not "the trunk is linear".
 
 ## `workload` — who asks for what, when
 
@@ -124,26 +489,89 @@ workload:
     burstiness: 1.8             # index of dispersion; 1.0 == Poisson (neutral value)
     concurrency: 256            # closed_loop only: bounded in-flight sessions
 
-  # Weighted mixture. Weights are normalised, not required to sum to 1.
+  # The SESSION is the only behavioural unit. A session binds to one root at birth
+  # (see corpus.trees.roots.popularity) and every one of its turns starts from that
+  # same root, which is what produces many sessions : one root. Defaults for the
+  # whole population; `mix` entries override individual fields.
+  sessions:
+    turns: {dist: geometric, mean: 6}          # 1 == a one-shot request
+    think_time: {dist: lognormal, median: 3s, sigma: 1.1}
+
+    # Depth walked BELOW corpus.trees.shared_depth at TURN 1, on a branch private to
+    # this session. These keys are reused only within the session, by later turns,
+    # never across sessions.
+    private_depth: {dist: lognormal, median: 8, sigma: 0.8}
+
+    # Blocks added by each turn after the first. Drawn once PER TURN, not per session.
+    growth_per_turn: {dist: lognormal, median: 6, sigma: 0.5}
+
+  # Weighted mixture over the SAME session model — each entry is a parameter set,
+  # not a distinct code path. Weights are normalised, not required to sum to 1.
+  # Any `sessions` field may be overridden. No `corpus` field may be: a mixture entry
+  # varies how a session behaves, never what is shared (design rule 3).
   mix:
-    - archetype: conversation
-      weight: 0.70
-      turns: {dist: geometric, mean: 6}
-      think_time: {dist: lognormal, median: 3s, sigma: 1.1}
-      growth_blocks_per_turn: {dist: lognormal, median: 6, sigma: 0.5}
-
-    - archetype: one_shot
-      weight: 0.25
-      popularity: {dist: zipf, s: 0.9, n: 50_000}
-
-    - archetype: scan
-      weight: 0.05
-      length_blocks: {dist: const, value: 4000}
-      novel_fraction: 0.98
+    - {weight: 0.70, turns: {dist: geometric, mean: 6}}     # "conversation"
+    - {weight: 0.25, turns: 1}                              # "one_shot"
+    - {weight: 0.05, turns: 1, private_depth: 4000}         # "scan"
 
   drift:
-    half_life: 300s             # popularity non-stationarity; 0 (default) = stationary
+    half_life: 300s             # root-popularity non-stationarity; 0 (default) = stationary
 ```
+
+Sessions are sticky in the root, not in the branch: turn N+1 re-reads turn N's blocks and
+extends the path by `growth_per_turn`, so **intra**-session reuse comes from `turns` while
+**inter**-session reuse comes from `corpus.trees`. Those are the two mechanisms of design
+rule 3, and neither is expressible in the other's section.
+
+### Sessions are born and retired, so a run has no natural end
+
+A session is born on arrival, binds its root, issues `turns` requests separated by `think_time`,
+and is **retired** when its last turn completes; its private keys are dead from that moment and
+are never read again by anyone. So the generator runs for as long as you ask by continuously
+retiring old sessions and creating new ones, and the distinct-key count grows without bound
+because every new session mints a fresh private branch.
+
+**There is deliberately no `lifetime` field.** Lifetime is `Σ think_time` over the session's turns
+— already determined by `turns` and `think_time` — and a third statement of it could disagree with
+them (design rule 3). For the same reason there is no field for how many sessions are live at
+once: under `open_loop` that follows from Little's law,
+
+```
+session_rate  = arrival.rate / mean(turns)          # 4000/s / 6   = ~667 sessions/s
+mean_lifetime = (mean(turns) - 1) * mean(think_time) # 5 * 3s      = 15 s
+live_sessions = session_rate * mean_lifetime         #             = ~10 000
+```
+
+and under `closed_loop` it *is* `arrival.concurrency`, which is legitimate there because
+`closed_loop` supplies no rate. Both are reported rather than configured.
+
+Two consequences that are easy to miss:
+
+- **`run.warmup` must cover the ramp-up, not just the cache.** At t=0 no session is live and the
+  population fills over roughly one `mean_lifetime`. A window that opens sooner sees fewer
+  concurrent sessions and therefore less sharing than the model asks for. 20 s of warmup covers the
+  15 s above, but `turns: geometric(50)` with `think_time` median 30 s implies a **~24 minute**
+  ramp. The generator rejects a warmup shorter than the computed ramp (spec FR-015b).
+- **Shared content turns over only if you ask it to.** `drift` changes which roots are *popular*; it
+  does not retire trunk keys or mint new ones. Set `corpus.trees.churn.half_life` for that
+  (§ Shared content churns on its own schedule) — at the default of 0 the trunk is immortal, every
+  trunk key stays live forever, and all novelty comes from private branches. That default is fine
+  for a run short relative to the deployment's real content cadence and progressively wrong for a
+  long one, since the discrepancy *grows* with run length rather than staying constant.
+
+### Path length, stated once
+
+Turn N's path is a strict prefix of turn N+1's — the rolling hash requires it, since a changed
+prefix would rehash every block below it — so depth grows monotonically across a session:
+
+```
+depth(turn N) = shared_depth + private_depth + Σ(i = 2..N) growth_per_turn(i)
+```
+
+`private_depth` is the turn-1 private path and `growth_per_turn` is the per-turn increment;
+they measure different things, which is why both can exist without restating each other. A
+session with the defaults above ends at roughly `18 + 8 + 5×6 = 56` blocks, or ~7 MB at
+128 KiB. With `turns: 1` the sum is empty and depth is just `shared_depth + private_depth`.
 
 ### `open_loop` vs `closed_loop` — this choice affects validity
 
@@ -157,37 +585,46 @@ confounded by the system's own speed. Use:
 - **`closed_loop`** for throughput and saturation measurement, where queueing is the
   phenomenon of interest.
 
-### Archetypes
+### The three familiar archetypes are presets, not schema
 
-| Archetype | Reuse mechanism | Models |
+`conversation`, `one_shot`, and `scan` are the names of three points in the session
+parameter space. They are shipped as presets and are useful vocabulary in reports, but they
+are **not** distinguishable modes in the schema, and there is no `archetype:` field:
+
+| Name | Parameter set | Models |
 | --- | --- | --- |
-| `conversation` | Turn N+1 re-reads turn N's blocks, then extends the path by `growth_blocks_per_turn`; gets separated by `think_time` | Multi-turn chat. Recency-friendly — the dominant real KV-cache pattern |
-| `one_shot` | Single request; reuse arises from `popularity` over shared prefixes | Independent requests over a shared preamble. Frequency-friendly |
-| `scan` | Essentially none (`novel_fraction` → 1) | Long-document ingest. The classic LRU-polluting case |
+| `conversation` | `turns: {dist: geometric, mean: 6}` | Multi-turn chat. Recency-friendly — the dominant real KV-cache pattern |
+| `one_shot` | `turns: 1` | Independent requests over a shared trunk. Frequency-friendly |
+| `scan` | `turns: 1, private_depth: 4000` | Long-document ingest. The classic LRU-polluting case |
 
-Reuse lives **only** here. There is no top-level `gets_per_key` or `lifetime`; supplying one
-is a schema error (spec FR-007).
+Collapsing them removes three bespoke fields that each restated something `corpus` already
+says: `popularity` (now `roots.popularity`), `novel_fraction` (now implied by
+`private_depth` ≫ `shared_depth`), and `length_blocks` (now `private_depth`). One model means
+one sampling path and one fitting routine.
 
-## `topology` — where copies live
+There is no top-level `gets_per_key` or `lifetime`, and no per-entry `popularity`; supplying
+either is a schema error (spec FR-007).
+
+## `topology` — which node asks for what
 
 ```yaml
 topology:
   nodes: [node2, node7, node9, node11]
 
-  # Probability the node serving a request already holds the key locally.
-  # 1.0 = never remote; 0.0 = always remote. The single most useful remote knob.
+  # Probability that the node asking for a key is one of the nodes that earlier
+  # asked for it -- i.e. how much the per-node request streams overlap.
+  # 1.0 = each node walks its own keys and no key is ever shared across nodes;
+  # 0.0 = a key is always asked for by a node other than the ones that saw it.
   self_affinity: 0.25
 
+  # How many distinct nodes ask for the same key, across the whole run.
   replication:
-    holders_per_key: {dist: const, value: 1}
+    nodes_per_key: {dist: const, value: 1}
 
-  # Forced tier of the authoritative copy, realised via the existing
-  # FlushToSsd / ClearMemoryTier RPCs during plan setup.
-  holder_tier: {dram: 0.7, ssd: 0.3}
-
-  # Keys no node holds -> exercises the negative-lookup path, which burns the
-  # full CERTUS_RL_OP_DEADLINE_MS (50ms default) per miss.
-  global_miss_fraction: 0.05
+  # Fraction of keys that the warmup phase deliberately does not pre-request,
+  # so their first appearance in the measured window is their first appearance
+  # anywhere.
+  cold_fraction: 0.05
 
   membership_events:
     - {at: 60s, action: stop,  node: node9}
@@ -199,31 +636,44 @@ Every node both requests and holds. Real cross-node KV copies are essentially sy
 role assignment would model the lab rather than the deployment. Hardware asymmetry is handled
 by `preflight` refusing to run (spec FR-049..FR-053), not by steering load.
 
-## `system` — the cache under test
+## There is no `system` section
 
-```yaml
-system:
-  capacity:
-    # fraction_of_wss is preferred: it makes a sweep mean the same thing across
-    # machines with different DRAM. `bytes` is accepted for absolute pinning.
-    dram: {fraction_of_wss: 0.25}
-    ssd:  {fraction_of_wss: 1.5}
-  eviction_policy: lru          # component providing IEvictionPolicy
-  pin_fraction: 0.0             # fraction of live entries held pinned
-  thresholds:                   # optional; maps onto DispatcherConfig
-    memory_tier_eviction: {high: 0.80, low: 0.70}
-    ssd_eviction:         {high: 0.90, low: 0.80}
-```
+Earlier drafts carried one — capacities per tier, an eviction policy, watermarks mapping onto
+`DispatcherConfig`, a pinned fraction. It is gone, along with `topology.holder_tier`, under
+design rule 6: the generator has no business knowing what tiers the consumer has, or whether it
+has tiers at all. Where those quantities went:
 
-The working set size used by `fraction_of_wss` is computed from the realised plan over
-`run.wss_window` and recorded in the plan summary, so the absolute capacity a given run used
-is always recoverable from its report.
+| Was | Now |
+| --- | --- |
+| `system.capacity.dram` / `.ssd` | the consumer's own configuration — a server's config file, or a simulator's `--capacity` |
+| `system.eviction_policy` | the consumer's choice, expressed on the consumer's own command line |
+| `system.thresholds` | server-side configuration only; never expressed here |
+| `system.pin_fraction` | not a workload property at all; whoever operates the cache decides what it pins |
+| `topology.holder_tier` | removed with no replacement — see § No tier placement |
+
+What replaces the useful part of `fraction_of_wss` is a *published statistic* rather than an
+input: the generator reports the **realised working-set size** over `run.wss_window`, so a
+consumer that wants a cache at a quarter of the working set computes that itself. This keeps the
+same ergonomics for capacity sweeps — the sweep is over the consumer's capacity flag, and the
+working set it is a fraction *of* is still a single number in the report — without the workload
+document ever naming a cache.
+
+### No tier placement
+
+`holder_tier` used to force the authoritative copy onto DRAM or SSD by driving `FlushToSsd` and
+`ClearMemoryTier` during plan setup. Both the field and that setup step are removed. A workload
+cannot state where a copy lives, because in general it does not know that anything *is* a copy,
+or that there is more than one place for one to be. Where a block is resolved from is an
+*outcome* the consumer reports, not an input the workload supplies — so a run that wants to
+exercise a slower medium gets there by asking for more distinct bytes than the faster medium
+holds, which is a statement about the workload, and reads the resulting split out of the
+consumer's own reporting.
 
 ## `run` — execution and measurement
 
 ```yaml
 run:
-  mode: hardware              # hardware | simulate
+  mode: hardware              # where the requests go; see the note below on output modes
   endpoint_template: "{node}:50051"
   batch_size: 64              # keys per RPC
   workers: 8                  # client threads
@@ -231,10 +681,28 @@ run:
   gpu_buffer: 8GiB            # one process-wide CUDA allocation, addressed by offset
   warmup: 20s                 # excluded from steady-state statistics
   warm_connections: true      # explicit RDMA connection-warm phase before measuring
-  wss_window: 60s             # window for the working-set-size calculation
+  # Window for the working-set-size calculation AND for trunk occupancy. Canonically a
+  # REQUEST COUNT, because the plan is a sequence and a count is knowable at plan time in
+  # both arrival modes. A duration is accepted as sugar and converted via the configured
+  # rate, which only open_loop has -- a duration under closed_loop is a schema error.
+  wss_window: 240_000         # or `60s` under open_loop at 4000/s (identical)
   clock_skew_bound: 1ms       # preflight fails above this
   emit_trace: /tmp/plan.jsonl # optional, debugging only; never an input
 ```
+
+`mode` names **where the generated requests go**. The set of modes is being reworked: the
+intended set is a live Certus server, a `.jsonl` trace file, and a parquet trace file, of which
+only the first involves Certus at all. The earlier `simulate` mode is gone with cache simulation
+(spec Out of Scope). Until the trace-file formats are pinned down against real examples, treat
+`hardware` as the only defined value.
+
+`wss_window` is a **request count**, not a wall-clock span, so that the working-set size and the
+trunk occupancy it feeds are determined by the plan rather than by how fast the consumer happened
+to run it. Under `closed_loop` a time window would be unknowable at plan time (arrivals depend on
+the consumer's response, and `t_ns` is advisory ordering only), and under `open_loop` it would
+drift whenever the schedule slips, which FR-061 exists to report. A count is exact in both cases.
+The realised working-set size over the window is recorded in the plan summary, which is what
+makes it usable by a consumer sizing a cache (design rule 6) without the workload naming one.
 
 ## `sweep` — the experiment matrix
 
@@ -242,8 +710,7 @@ run:
 sweep:
   axes:
     topology.self_affinity: [0.0, 0.25, 0.5, 1.0]
-    system.capacity.dram.fraction_of_wss: [0.1, 0.25, 0.5, 1.0]
-  policies: [lru, arc]        # optional extra axis over system.eviction_policy
+    corpus.trees.shared_depth.median: [4, 8, 16, 32]
   repeat: 8                   # default 8
   order: interleaved          # interleaved (default) | blocked
 ```
@@ -251,6 +718,16 @@ sweep:
 Axes form a cartesian product. Dotted paths address any scalar in the document. Each
 `(point, repeat)` gets a seed derived deterministically from the root `seed`, so an entire
 sweep is reproducible from one number.
+
+**`sweep` sweeps the workload only.** Every axis is a dotted path into this document, so a
+consumer-side quantity — a cache capacity, an eviction policy — is not addressable here and
+never was a legitimate axis (design rule 6). Those sweeps belong to the consumer, and are
+already expressed that way: capacity and policy are command-line options of whatever grades
+them, so a capacity sweep is a loop over that flag against one fixed plan. That division is the
+stronger arrangement for a further reason — a workload axis changes the key stream and so needs
+a fresh plan per point, while a consumer axis must hold the key stream *identical* across points
+for its comparison to mean anything (FR-036). Keeping them in different places makes it hard to
+accidentally vary both at once, which is the mistake that silently invalidates a comparison.
 
 `repeat` defaults to **8** because prior measurement on this bench established that n = 3
 produced misleading conclusions and n ≥ 8 is needed for significance. `order: interleaved`
@@ -275,13 +752,13 @@ Presets to ship, one per Test Matrix family:
 
 | Preset | Shape |
 | --- | --- |
-| `presets/zipf-baseline.yaml` | No prefix tree, pure Zipf. Harness validation — LRU hit rate is analytic |
-| `presets/conversational.yaml` | `conversation` 1.0. Recency-friendly |
-| `presets/shared-preamble.yaml` | `one_shot` 1.0 over a `concentration → 0` root band. Frequency-friendly |
+| `presets/zipf-baseline.yaml` | `shared_depth: 0`, `private_depth: 1`, Zipf over many roots — a flat key space. Harness validation: LRU hit rate is analytic |
+| `presets/conversational.yaml` | `turns` geometric 1.0 weight. Recency-friendly |
+| `presets/shared-preamble.yaml` | `turns: 1`, `roots.count: 1`, `shared_depth` median high. Frequency-friendly |
 | `presets/mixed.yaml` | The mixture, set up for a weight sweep. The headline experiment |
-| `presets/scan-pollution.yaml` | Hot conversational set plus 5% `scan` |
+| `presets/scan-pollution.yaml` | Hot conversational set plus 5% at `turns: 1, private_depth: 4000` |
 | `presets/conversational-multinode.yaml` | `presets/conversational.yaml` plus a 4-node `topology` |
-| `presets/global-miss-storm.yaml` | High `global_miss_fraction`, for negative-lookup cost |
+| `presets/cold-storm.yaml` | High `cold_fraction`, for the cost of keys nothing has seen before |
 | `presets/fitted-sharegpt.yaml` | Emitted by `fit` against the checked-in ShareGPT trace |
 
 ## Validation rules
@@ -290,25 +767,55 @@ The generator rejects, rather than silently accepting:
 
 1. Unknown fields anywhere in the document.
 2. A `version` it does not implement.
-3. Reuse specified outside a `workload.mix` archetype (FR-007).
+3. Either kind of reuse specified outside its own section (FR-007) — a `gets_per_key` or
+   `lifetime` anywhere, a `depth` field anywhere, or any `corpus` field inside
+   `workload.mix`, `popularity` and `shared_depth` in particular.
 4. Any populate/put specification (FR-023).
 5. Both `duration` and `requests`, or neither.
 6. A `mix` with no entries, or all weights zero.
 7. Distribution parameters outside their domain (`zipf.s <= 0`, `sigma < 0`, negative sizes,
    fractions outside `[0, 1]`).
-8. `by_depth` bands not in ascending depth order, or with no band starting at depth 0.
-9. A Pitman–Yor configuration that can never mint a new child (finite, degenerate key space).
-10. `holder_tier` fractions that do not sum to 1.0 within tolerance.
-11. `replication.holders_per_key` exceeding `len(topology.nodes)`.
-12. `topology.membership_events` referencing a node not in `topology.nodes`, or an `at` beyond
+8. `roots.count < 1`, `branch_skew < 0`, any `branching` segment with `fanout < 1` (a trunk node
+   with no children
+   would let a session run off the end of the trunk), or an `n` supplied to
+   `roots.popularity` (its support is `roots.count`).
+9. A corpus that mints no keys below the trunk — `sessions.private_depth` const 0 with
+   `roots.count` and `shared_depth` also fixed makes the key space finite, so no eviction is
+   ever exercised and the run is meaningless. Also rejected: `empirical` `shared_depth`
+   points not in ascending value order or with a final cumulative probability ≠ 1.0.
+10. `replication.nodes_per_key` exceeding `len(topology.nodes)`.
+11. `topology.membership_events` referencing a node not in `topology.nodes`, or an `at` beyond
     `duration`.
-13. `pin_fraction` high enough to drive effective capacity to zero.
-14. `mode: hardware` with no `topology.nodes` and no endpoint.
-15. `sweep.axes` dotted paths that do not resolve to a scalar in the document.
+12. `mode: hardware` with no `topology.nodes` and no endpoint.
+13. Any of the removed consumer-side keys — a `system:` section at top level, or
+    `topology.holder_tier` — which rule 5 already rejects as unknown, but which MUST be
+    rejected with a message naming design rule 6 and saying where the quantity now lives,
+    because these were documented schema in an earlier draft and a stale document is a likely
+    input rather than a typo.
+14. `sweep.axes` dotted paths that do not resolve to a scalar in the document. Note that this
+    is what now rejects a capacity or policy axis: there is no path for it to resolve to.
+15. A `run.wss_window` expressed as a **duration** together with `arrival.model: closed_loop` —
+    the conversion to a request count needs a configured rate, which only `open_loop` has.
+    State the window as a request count instead.
+16. **`occupancy(p99(shared_depth)) < 1.0`** — the trunk is wider than the session population
+    can occupy, so sessions land on virgin trunk and realised sharing is far below the drawn
+    `shared_depth` (§ Sharing is only realised if trunk paths are occupied). Occupancy below
+    4.0 is a warning rather than a rejection, and the realised value is always reported. This
+    is the one rule that catches a configuration which is internally consistent, passes every
+    other check, and still does not measure what it claims to. When `churn.half_life` is set, the
+    occupancy this rule tests MUST be the churn-adjusted one — sessions arriving within the
+    *path's* lifetime, not within the whole window — since otherwise churn destroys sharing that
+    the check has already approved.
+17. `churn.half_life < 0`, or a `churn.half_life` shorter than `run.warmup`. A shared structure
+    that turns over faster than the warmup takes to fill means the measured window opens on a
+    trunk with no history at any depth, so nothing that follows describes the configured sharing.
+18. `churn.half_life` set together with `mode` writing a trace file, **unless** `duration` is also
+    set. Churn is a function of elapsed plan time, so a plan of a fixed *request count* with no
+    duration has no clock against which a half-life means anything.
 
 ## Worked example — the headline mixture experiment
 
-Complete and runnable; 44 lines including comments.
+Complete and runnable; 50 lines including comments.
 
 ```yaml
 version: 1
@@ -317,38 +824,31 @@ duration: 180s
 
 corpus:
   block_bytes: 128KiB
-  prefix_tree:
-    depth: {dist: lognormal, median: 24, sigma: 0.8}
-    sharing:
-      model: pitman_yor
-      by_depth:
-        0:  {discount: 0.10, concentration: 0.2}
-        8:  {discount: 0.60, concentration: 8.0}
-        24: {discount: 0.90, concentration: 500}
+  trees:
+    roots:
+      count: 12
+      popularity: {dist: zipf, s: 0.9}
+    shared_depth: {dist: empirical, points: [[4, 0.10], [18, 0.75], [40, 1.0]]}
+    branching: auto            # resolves to a uniform ~1.18 here; 1.25 would starve depth 40
+    branch_skew: 0.9
 
 workload:
   arrival: {model: open_loop, rate: 4000/s, burstiness: 1.8}
+  sessions:
+    turns: {dist: geometric, mean: 6}
+    think_time: {dist: lognormal, median: 3s, sigma: 1.1}
+    private_depth: {dist: lognormal, median: 8, sigma: 0.8}
+    growth_per_turn: {dist: lognormal, median: 6, sigma: 0.5}
   mix:
-    - {archetype: conversation, weight: 0.70,
-       turns: {dist: geometric, mean: 6},
-       think_time: {dist: lognormal, median: 3s, sigma: 1.1},
-       growth_blocks_per_turn: {dist: lognormal, median: 6, sigma: 0.5}}
-    - {archetype: one_shot, weight: 0.25,
-       popularity: {dist: zipf, s: 0.9, n: 50_000}}
-    - {archetype: scan, weight: 0.05, length_blocks: 4000, novel_fraction: 0.98}
+    - {weight: 0.70}                                   # conversation: the defaults above
+    - {weight: 0.25, turns: 1}                         # one_shot
+    - {weight: 0.05, turns: 1, private_depth: 4000}    # scan
 
 topology:
   nodes: [node2, node7, node9, node11]
   self_affinity: 0.25
-  replication: {holders_per_key: 1}
-  holder_tier: {dram: 0.7, ssd: 0.3}
-  global_miss_fraction: 0.05
-
-system:
-  capacity:
-    dram: {fraction_of_wss: 0.25}
-    ssd:  {fraction_of_wss: 1.5}
-  eviction_policy: lru
+  replication: {nodes_per_key: 1}
+  cold_fraction: 0.05
 
 run:
   mode: hardware
@@ -358,7 +858,11 @@ run:
   warmup: 20s
 
 sweep:
-  axes: {system.capacity.dram.fraction_of_wss: [0.1, 0.25, 0.5, 1.0]}
-  policies: [lru]
+  axes: {workload.mix.0.weight: [0.4, 0.55, 0.70, 0.85]}
   repeat: 8
 ```
+
+The swept axis is the conversational share of the mixture — the headline experiment — because
+that is a property of the workload. The capacity sweep this example previously carried is now a
+loop over the consumer's own capacity option against this one plan, which is both where it
+belongs and what keeps the key stream identical across capacity points.
