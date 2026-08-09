@@ -585,6 +585,45 @@ rest on one file.
   manufactures misses. So `fit` leaves it unset and MAY report a lower bound (FR-055d); setting it
   stays a deliberate act by whoever knows the deployment's cadence.
 
+### Session 2026-08-09 (containers, encodings, and reading JSONL)
+
+- Q: Are there two different parquet *formats* for trace input? → A: **No — one schema with two
+  population patterns.** Every column exists in every invocations file; what differs is which are
+  *populated*. Delta fills `new_*`/`reuse_from` and leaves `full_*` empty; full does the reverse. So
+  it is one parser with a branch, not two parsers, and `contracts/trace-io.md` now separates the three
+  things that were easy to conflate: **container** (parquet or JSONL), **population pattern** (delta
+  or full), and **capability** (`field_status`). Only the second needs a decision from a reader, and
+  the contract recommends **normalising on ingest** — reconstruct full block lists once at the
+  boundary — because otherwise the branch leaks into every statistic that walks a block list, and each
+  such site is a chance to get the trailing-partial-block convention wrong.
+- Q: Should JSONL be supported too, or does it carry less information? → A: **Same information per
+  record; drastically less coverage — and the distinction matters more than either fact.** Measured
+  against the corresponding parquet: the only JSONL-only field is a redundant `block_size` (already in
+  the path and manifest), the only parquet-only field is `parent_invocations`, and that is omitted
+  exactly where it would be empty in every record — the one trace with real fan-in does carry it. Every
+  sampled row was located in the parquet (6/6, 136/136, 3/3). But the shipped files are eyeball
+  samples: **6 lines against 1 960 074 parquet rows** in one trace, 136 against 2 115 623 in another.
+- Q: So what is the requirement? → A: **Read both containers, and refuse to fit from a partial
+  trace.** FR-055 now requires either container and either population pattern, symmetric with
+  FR-021a's output modes — and that symmetry is the argument, not a preference: the generator *emits*
+  JSONL, so refusing to read it would leave its own output unconsumable by its own tools. FR-055e
+  refuses a partial trace and judges partiality by comparing records consumed against
+  `block_stats.<block_size>.invocations`, **not** by filename, because a `sample_` prefix is a
+  convention rather than a guarantee. `validate` may proceed on a sample but must label its size.
+  Two smaller rules follow from the field differences: a per-record `block_size` disagreeing with the
+  manifest or path is rejected rather than resolved, and an absent `parent_invocations` means empty
+  rather than unknown.
+- Q: Did requiring JSONL input buy anything beyond symmetry? → A: **Yes — the round trip, which is now
+  the best test `fit` has** (FR-058a). Generate a plan from a known YAML, emit it as a trace, re-fit,
+  and compare recovered parameters against the originals. Ground truth is *exact* rather than
+  estimated, so any divergence is a defect in `fit`, the emitter, or the reader rather than a property
+  of some real workload — and it is the only check that exercises emitter and reader against each
+  other. It also needs no external data, so unlike fitting a real trace it runs in CI.
+- Q: Did that expose a contradiction? → A: **Yes, in US6's Independent Test**, which said "fit against
+  a checked-in trace excerpt". Traces are not checked in, and FR-055e now forbids fitting from an
+  excerpt, so the stated test was both impossible and prohibited. It is now the round trip, with
+  fitting a real trace kept as a separate non-CI check.
+
 ### Dependencies on other components (implied by the above)
 
 1. **`apps/certus-server-yaml` / `apps/certus-server` proto** — add `served_by` to
@@ -839,9 +878,12 @@ report comparing the two.
 "where did these numbers come from?" — and it is what keeps the YAML compact: the file holds
 *fitted parameters*, not a trace. P2 because US1–US3 deliver value with hand-written YAML.
 
-**Independent Test**: Fit against a checked-in trace excerpt, generate a plan from the
-fitted YAML, and assert each of the four validation statistics matches the real trace within its
-own tolerance.
+**Independent Test**: the **round trip** of FR-058a, which needs no external data and is therefore
+CI-runnable. Generate a plan from a known YAML, emit it as a trace file, re-run `fit` against that
+file, and assert the recovered parameters match the original within the FR-057a tolerances. Ground
+truth is exact here rather than estimated, so any divergence is a defect in `fit`, the emitter, or the
+reader — not a property of some real workload. Fitting against a real trace is a *separate*,
+non-CI check, since traces are external (§ Scope) and FR-055e forbids fitting from an excerpt.
 
 **Acceptance Scenarios**:
 
@@ -857,6 +899,15 @@ own tolerance.
 4. **Given** a fit whose validation exceeds tolerance on any statistic, **When** `fit`
    completes, **Then** it reports which statistic failed and by how much rather than
    emitting a silently unfaithful model.
+5. **Given** a YAML, **When** a plan is generated from it, emitted as a trace file, and re-fitted,
+   **Then** the recovered parameters match the originals within the FR-057a tolerances — the round
+   trip of FR-058a, which is the only check whose ground truth is exact.
+6. **Given** the same trace content in parquet and in JSONL, **When** each is fitted, **Then** the
+   two fits are identical. The container is not information (FR-055).
+7. **Given** a trace file holding fewer records than its manifest's `block_stats` declares — the
+   shape of the sample files that ship beside real traces — **When** `fit` runs, **Then** it
+   **refuses**, naming the records-consumed and records-declared counts, rather than fitting a
+   confident model from a handful of requests (FR-055e).
 
 ---
 
@@ -1431,8 +1482,21 @@ report segments statistics into before/after windows around the event.
 
 ### Fitting and validation
 
-- **FR-055**: `fit` MUST accept the trace format of `contracts/trace-io.md` — both block
-  encodings, detected per trace rather than assumed — and emit a schema-valid YAML. It MUST consult
+- **FR-055**: `fit` MUST accept the trace format of `contracts/trace-io.md` in **either container**,
+  parquet or JSONL, and with **either block-encoding population pattern**, detected per trace rather
+  than assumed, and MUST emit a schema-valid YAML. The two population patterns are not two schemas —
+  every column exists in every file and only the populated subset differs — so this is one reader
+  with a branch, and it SHOULD normalise to full ordered block lists at ingest so the branch does not
+  leak into each statistic. Container support MUST be symmetric with FR-021a's output modes:
+  the generator emits JSONL, so refusing to read JSONL would leave its own output unconsumable by its
+  own tools and would make the FR-058a round trip impossible.
+- **FR-055e**: `fit` MUST **refuse to fit from a partial trace**, and MUST determine partiality by
+  comparing the records it consumed against the manifest's declared
+  `block_stats.<block_size>.invocations` rather than by a filename convention. The
+  `sample_block_size_<N>.jsonl` files shipped beside real traces are eyeball samples — measured at 6
+  records against 1 960 074, and 136 against 2 115 623 — and every parameter in the model would fit
+  "successfully" against six requests while meaning nothing. `validate` MAY proceed on a partial
+  trace but MUST label every statistic as computed from a sample of stated size. It MUST consult
   the manifest's `field_status` and refuse to fit a parameter whose source field is `unavailable`
   rather than producing a default: a trace with a null `session_id` cannot supply `turns`,
   `growth_per_turn`, or the FR-009a root binding, and a `metadata_only` trace cannot supply anything
@@ -1487,6 +1551,13 @@ report segments statistics into before/after windows around the event.
   reproducible.
 - **FR-058**: The generator MUST provide a `validate` mode that runs FR-056's comparison
   between any two plans or between a plan and a trace.
+- **FR-058a**: The tool MUST support a **round trip** as a self-test: generate a plan from a YAML,
+  emit it as a trace file (FR-021a mode 2 or 3), re-run `fit` against that file, and compare the
+  recovered parameters against the original YAML. This is the strongest available check on `fit`,
+  because the ground truth is known exactly rather than estimated — any divergence is a defect in
+  `fit`, in the emitter, or in the reader, and not a property of some real workload. It also
+  exercises the emitter and the reader against each other, which no other test does. Divergence MUST
+  be reported per parameter against the FR-057a tolerances.
 
 ### Warnings that protect the measurement
 

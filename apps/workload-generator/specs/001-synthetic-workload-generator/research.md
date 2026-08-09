@@ -64,6 +64,34 @@ differ on the trailing partial block: the delta form excludes it, the full form 
 off by one block per request on the other, which is why `contracts/trace-io.md` requires detection
 rather than assumption.
 
+### JSONL against parquet: same records, sample-sized coverage
+
+Six `sample_block_size_<N>.jsonl` files ship beside parquet traces. Compared field-by-field and
+row-by-row against the corresponding parquet:
+
+| Trace | JSONL lines | Parquet rows | Coverage | JSONL-only field | Parquet-only field |
+| --- | --- | --- | --- | --- | --- |
+| `wildchat` | 6 | 1 960 074 | 0.0003% | `block_size` | `parent_invocations` |
+| `swe_agent` | 136 | 2 115 623 | 0.006% | `block_size` | `parent_invocations` |
+| `paper_review_dag` | 3 | 300 | 1% | `block_size` | — |
+
+Every sampled row was located in the parquet by `(session_id, invocation_index, input_length)`: 6/6,
+136/136, 3/3. So the JSONL is a strict sample of the same data, not a different view of it.
+
+The two field differences are both benign and both need a stated rule:
+
+- `block_size` per record is **redundant** — parquet leaves it to the path and the manifest. Three
+  sources that can disagree, so a reader rejects on disagreement rather than picking a winner.
+- `parent_invocations` is absent exactly where it would be empty in every record. `paper_review_dag`,
+  the one trace with real fan-in, **does** carry it. So absence means empty, not unknown.
+
+**The conclusion that matters**: JSONL loses nothing *per record*, so it is a legitimate container for
+a full trace — and the generator emits it (FR-021a mode 2), which makes reading it necessary for the
+FR-058a round trip. But these particular files are eyeball samples, and fitting a model from six
+requests would succeed while meaning nothing. Hence FR-055e: partiality is judged by comparing
+records consumed against `block_stats.<block_size>.invocations`, because a `sample_` filename prefix
+is a convention rather than a guarantee.
+
 ### Shape taxonomy
 
 Normalised to **tokens**, since block counts are not comparable across traces with different
@@ -74,14 +102,15 @@ Normalised to **tokens**, since block counts are not comparable across traces wi
 | Agentic, tool-heavy | `exgentic_appworld` | 48 453 | 1 500 | 32.3 | 93 088 tok | 208 tok |
 | Agentic, long-context | `exgentic_swebench` | 91 768 | 1 959 | 46.8 | 18 272 tok | 288 tok |
 | Agentic, transactional | `exgentic_tau2_airline` | 10 916 | 957 | 11.4 | 7 616 tok | 192 tok |
-| Agentic, SWE | `swe_agent` | 250 000¹ | 9 661 | 25.9 | 9 136 tok | 240 tok |
+| Agentic, SWE | `swe_agent` | 2 115 623 (probed 250 000¹) | 9 661¹ | 25.9 | 9 136 tok | 240 tok |
 | Production code assistant | `qwen_code` | 43 011 | 26 406 | 1.6 | 1 072 tok | 768 tok |
 | Production chat | `qwen_toc` | 43 058 | 23 101 | 1.9 | 720 tok | 352 tok |
-| Production chat | `wildchat` | 249 216¹ | 86 975 | 2.9 | 128 tok | 160 tok |
+| Production chat | `wildchat` | 1 960 074 (probed 249 216¹) | 86 975¹ | 2.9 | 128 tok | 160 tok |
 | Retrieval / RAG | `ragbench` | 67 351 | 67 351 | 1.0 | 384 tok | 16 tok |
 | Pre-hashed conversational | `mooncake_conv` | 12 031 | —² | —² | 512 tok | 2 560 tok |
 
-¹ capped by the probe, not the trace's true length.
+¹ the probe read a prefix of these two traces, so their session counts and width profiles are lower
+bounds; the invocation totals are the traces' true sizes, read from the parquet metadata.
 ² `session_id` is null, so sessions cannot be recovered and `turns` is unfittable.
 
 **Two regimes, ~60× apart in shared-prefix length.** Agentic traces are sharing-dominated (7.6k–93k
@@ -218,8 +247,9 @@ requests, which is the FR-056 statistic.
 3. **Order dependence.** `ragbench` and `swe_agent` have no usable timestamps, so "already seen" is
    file order and their sharing figures are indicative only. `qwen_*`, `exgentic_*`, `wildchat` and
    `mooncake_*` have real timestamps.
-4. **Truncation.** `wildchat` and `swe_agent` were capped at 120k–250k invocations, so their session
-   counts and width profiles are lower bounds.
+4. **Truncation.** `wildchat` (1 960 074 invocations) and `swe_agent` (2 115 623) were probed at
+   120k–250k, i.e. 6-13% of each, so their session counts and width profiles are lower bounds. The
+   sharing medians are less affected, being medians over the prefix read rather than extrapolations.
 5. **The fanout threshold is arbitrary.** 1.8× was chosen to make the structure visible, not
    derived. The segmentation rule is an open derivation below, and the flat-run evidence does not
    depend on the threshold.

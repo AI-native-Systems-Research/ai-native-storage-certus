@@ -53,6 +53,24 @@ blockings of the same source. `block_size_0` means the trace has no block data a
 Block IDs are **dense integers in mint order**, not hashes, and are **global to the trace**. They
 map onto `CacheKey` directly.
 
+## One schema, two containers, two population patterns
+
+Three things are easy to conflate and are worth separating, because only one of them needs a
+decision from a reader:
+
+- **Container** — parquet or JSONL. Same records either way; JSONL is one object per line. A reader
+  supports both (§ JSONL is a container, not a lesser format).
+- **Population pattern** — delta or full, below. This is **not a second schema**: every column
+  exists in every invocations file, and what differs is which ones are *populated*. So a reader
+  needs one parser with a branch, not two parsers.
+- **Capability** — what the trace can support, declared per field in the manifest's `field_status`
+  and unrelated to either of the above.
+
+A reader SHOULD **normalise on ingest**: reconstruct full ordered block lists once, at the boundary,
+and let everything downstream see a single representation. Otherwise the delta/full branch leaks
+into every statistic that walks a block list, and each such site becomes a place to get the
+trailing-partial-block convention wrong.
+
 ## Two encodings, and they are mutually exclusive
 
 A reader MUST detect which is in use — `full_input_blocks` non-empty versus empty — and MUST NOT
@@ -130,6 +148,31 @@ from `field_status` rather than from the trace's identity. A trace with a null `
 supply `turns`, `growth_per_turn`, or the sticky root binding of FR-009a, because requests cannot be
 grouped into sessions. A trace with no timestamps gives no arrival model, and its reuse statistics
 depend on file order, so `fit` MUST report them as order-dependent rather than as measured.
+
+## JSONL is a container, not a lesser format
+
+A JSONL file holds **the same records** as the parquet — one JSON object per line, same field names.
+It is not an abbreviated or lossy view, and a reader MUST accept either container for any operation.
+Two details, both measured on real traces:
+
+- **`block_size` may appear per record**, which parquet leaves to the path and the manifest. It is
+  redundant. A reader MUST reject a file whose per-record `block_size` disagrees with the manifest or
+  the path rather than picking a winner, since the three disagreeing means the file's block lists
+  cannot be interpreted at all.
+- **`parent_invocations` may be absent** where it would be empty in every record. A reader MUST treat
+  an absent `parent_invocations` as empty, not as unknown. Traces that actually have fan-in do carry
+  it.
+
+**But a JSONL file may be a sample, and that is the hazard.** The `sample_block_size_<N>.jsonl` files
+that ship alongside a parquet trace exist for eyeballing and are *tiny* — 6 lines against 1 960 074
+parquet rows in one measured trace, 136 against 2 115 623 in another, with every sampled row present
+in the parquet. Fitting from one would produce a confident-looking model derived from six requests.
+
+So a reader MUST distinguish *a full trace that happens to be in JSONL* from *a sample of a trace*,
+and the manifest makes that checkable: `block_stats.<block_size>.invocations` declares how many
+records the trace has. A tool that consumes fewer than that MUST say so, and `fit` MUST refuse
+outright (spec FR-055e). Naming alone is not a sufficient test — a `sample_` prefix is a convention,
+not a guarantee — so the count is the test.
 
 ## Output modes
 
