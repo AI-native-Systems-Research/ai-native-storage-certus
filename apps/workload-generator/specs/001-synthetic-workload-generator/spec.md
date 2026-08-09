@@ -1714,20 +1714,23 @@ Following the speckit flow, still to be written for this feature:
 - `contracts/plan-format.md` — **written** (plan artifact encoding and hashing).
 - `contracts/trace-io.md` — **written** (trace interchange schema, both block encodings with their
   verified invariants, and the mode-2/3 output formats).
-- `research.md` — the derivation of the trunk-occupancy bound and the `auto` closed form
-  (FR-009f/FR-009g), including the `target_occupancy = 4` choice — a judgement consistent with the
-  low-single-digit occupancy observed in the traces examined, but not established by them (FR-009g1).* Still open here: **the segmentation rule for fitting a `branching` profile** — what
-  jump ratio counts as a fanout event, how to choose segment boundaries robustly when width is
-  noisy, and how the near-root boundary of FR-055c interacts with it; *(the LP/flow relaxation for a true offline upper bound under
-  heterogeneous entry sizes is parked with the rest of cache simulation — it was only ever needed
-  to make OPT a sound ceiling, and OPT is deferred per FR-034b)*; **the derivation of the four
-  default per-statistic
-  `fit`/`validate` tolerances required by FR-057b**, including which divergence measure each
-  statistic uses (the four are on different scales, so each needs its own measure as well as its
-  own threshold); the `branch_skew` parameterisation; the fitting procedure for
-  `shared_depth` and `roots.popularity`, reuse-distance estimation method,
-  the significance-testing approach, and **the derivation of the `GetIoStats` cross-check
-  tolerance required by FR-042b** (how background staging and promotion traffic is bounded or
-  subtracted out of a drive-aggregated counter).
+- `research.md` — **partially written.** The trace measurements are complete: the two block
+  encodings with their exhaustively verified invariants, the shape taxonomy in tokens, the
+  width-and-occupancy-by-depth profiles behind FR-009e1 and FR-055c, cross-session sharing, the role
+  distribution, fan-in, and a threats-to-validity section recording that the traces were a
+  convenience sample not checked into this repository. Still **open** there, and enumerated in its
+  own § Open derivations: the full derivation of the trunk-occupancy bound and the `auto` closed
+  form (FR-009f/FR-009g) including the `target_occupancy = 4` choice, which the measurements support
+  but do not establish (FR-009g1); **the segmentation rule for fitting a `branching` profile** — what
+  jump ratio counts as a fanout event, how to choose boundaries when width is noisy, and how the
+  near-root boundary of FR-055c interacts with it; **the four default per-statistic `fit`/`validate`
+  tolerances** (FR-057b) and which divergence measure each statistic uses, the four being on
+  different scales; the `branch_skew` parameterisation and the fitting procedures for `shared_depth`
+  and `roots.popularity`; reuse-distance estimation method; the significance-testing approach behind
+  `repeat: 8`; and **the `GetIoStats` cross-check tolerance** (FR-042b) — how background staging and
+  promotion traffic is bounded or subtracted out of a drive-aggregated counter. An **LP/flow
+  relaxation** for a true offline upper bound under heterogeneous entry sizes is parked rather than
+  open: it existed only to make Belady/OPT a sound ceiling, and OPT defers with cache simulation
+  (FR-034b).
 - `quickstart.md` — the shortest path from a checked-in preset to a report.
 - `tasks.md` — task breakdown.
