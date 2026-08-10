@@ -65,12 +65,15 @@ CPU_BYTES=$((16 * (1 << 30)))
 DRAM=$((32 * (1 << 30)))
 SLAB_SIZE_BYTES=2097152
 TENSOR_PARALLEL_SIZE=1
-# Certus-SPDK client→server transport. "bridge" (default): the vLLM container
-# reaches the host server via host.containers.internal over the rootless-podman
-# userspace network (slirp4netns/pasta). "host": share the host net namespace
-# (--network=host) and dial localhost:50051 — loopback, no proxy. Only affects
+# Certus-SPDK client→server transport. "host" (default): share the host net
+# namespace (--network=host) and dial localhost:50051 — loopback, no proxy. This
+# is ~10% faster: the rootless-podman bridge otherwise routes every gRPC control
+# RPC through the slirp4netns/pasta userspace proxy (measured +125.8 s / +10.6%
+# on the 450×12 v0.20 run). "bridge": the vLLM container reaches the host server
+# via host.containers.internal over that userspace proxy — kept for hosts where
+# --network=host is unavailable or the port would collide. Only affects
 # Certus-SPDK; NoOffload/CPUOffload/SharedStorage don't use the gRPC socket.
-CLIENT_NET="bridge"
+CLIENT_NET="host"
 SERVER_WAIT=180        # seconds to wait for the Certus-SPDK server port
 DO_BUILD=0
 VLLM_VERSION="0.26.0"  # pin the vLLM base-image version for ALL backends (override with --vllm-version)
@@ -117,9 +120,9 @@ Flags (all optional; defaults shown):
   --gpu <sel>                  CDI GPU selector (all | 0 | 0,1 | <uuid>). [all]
   --memory-tier-size <sz>      Certus-SPDK server DRAM pool (e.g. 32G). [32G]
   --evict-threshold <f>        Certus-SPDK DRAM->SSD demotion threshold. [0.6]
-  --client-network <mode>      Certus-SPDK client transport: bridge (host.containers
-                               .internal, rootless proxy) or host (--network=host +
-                               localhost, loopback). [bridge]
+  --client-network <mode>      Certus-SPDK client transport: host (--network=host +
+                               localhost, loopback, no proxy) or bridge (host.containers
+                               .internal, rootless slirp4netns/pasta proxy). [host]
   --cpu-bytes <n>              CPU tier size in bytes — CPUOffload tier, and the
                                Tiered-CPU-FS PRIMARY tier (overflow spills to the FS tier). [16Gi]
   --dram <n>                   SharedStorage DRAM budget (DRAM env). [32Gi]
