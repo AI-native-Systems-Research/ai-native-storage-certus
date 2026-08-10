@@ -9,9 +9,9 @@ GPU block ids to build per-block IPC handles with offsets.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from vllm.v1.kv_offload.abstract import LoadStoreSpec
+from .compat import LoadStoreSpec
 
 
 @dataclass
