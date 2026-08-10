@@ -1,0 +1,532 @@
+//! The workload document: four orthogonal sections and nothing else.
+//!
+//! `corpus` (what keys exist and how they overlap), `workload` (who asks for
+//! what, when), `topology` (which node asks for what), `run` (execution and
+//! measurement). Normative reference: `contracts/workload-schema.md`.
+//!
+//! There is deliberately **no `system:` section**. Capacities, eviction policy,
+//! watermarks, pinning and the placement of copies are properties of whatever
+//! *consumes* a workload, not of the workload, and a document that named them
+//! would stop meaning the same thing across consumers. A stale document carrying
+//! one is rejected with a message saying where the quantity went, because such a
+//! document is a likely input rather than a typo.
+//!
+//! Every struct is `deny_unknown_fields`: a mistyped parameter must not silently
+//! take a default (spec FR-005).
+
+pub mod validate;
+
+use serde::{Deserialize, Serialize};
+
+use crate::dist::Dist;
+
+/// A complete workload document.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Document {
+    /// Schema version; the generator refuses versions it does not implement.
+    pub version: u32,
+    /// Every random draw derives from this.
+    pub seed: u64,
+    /// Optional preset to deep-merge beneath this document.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extends: Option<String>,
+    /// Run length: exactly one of these four.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration: Option<String>,
+    /// Run length as a request count.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requests: Option<u64>,
+    /// Run length as a block count. **Required** for file output, because it is
+    /// the only one that converts directly to a file size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocks: Option<u64>,
+    /// Run until stopped. Direct-to-server only; nothing accumulates on disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unbounded: Option<bool>,
+    /// What keys exist and how they overlap.
+    pub corpus: Corpus,
+    /// Who asks for what, when.
+    pub workload: Workload,
+    /// Which node asks for what. Omitted means a single node asks for everything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub topology: Option<Topology>,
+    /// Execution and measurement.
+    pub run: Run,
+    /// The experiment matrix.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sweep: Option<Sweep>,
+}
+
+/// What keys exist and how they overlap.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Corpus {
+    /// Payload size per key. A pure function of key identity (spec FR-011).
+    pub block_bytes: Dist,
+    /// The forest.
+    pub trees: Trees,
+}
+
+/// A forest of prefix trees, not a single tree.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Trees {
+    /// The depth-0 keys and how sessions bind to them.
+    pub roots: Roots,
+    /// Depth at which inter-session sharing ends.
+    pub shared_depth: Dist,
+    /// How the trunk widens with depth. Piecewise, not a single exponent.
+    #[serde(default)]
+    pub branching: Branching,
+    /// Zipf exponent over child rank; 0 is uniform.
+    #[serde(default = "default_branch_skew")]
+    pub branch_skew: f64,
+    /// How shared content is replaced over time. Absent means an immortal trunk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub churn: Option<Churn>,
+}
+
+fn default_branch_skew() -> f64 {
+    0.9
+}
+
+/// The depth-0 keys.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Roots {
+    /// Number of distinct depth-0 keys.
+    pub count: u32,
+    /// Which root a session binds to; drawn once per session and then sticky.
+    pub popularity: Dist,
+}
+
+/// How the trunk widens with depth.
+///
+/// A bare scalar is sugar for one uniform segment at depth 0 — the old
+/// `branch_factor`, and still right for a smoothly-branching trunk. `auto`
+/// resolves to a uniform profile by the FR-009g closed form.
+///
+/// A profile is offered rather than a scalar because measured tries are flat for
+/// long stretches and then fan out at particular depths: a scalar's shape is not
+/// a coarse approximation of the real one, it is a different shape.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Branching {
+    /// `auto` — solve for a uniform profile keeping sharing realisable.
+    Auto(AutoTag),
+    /// A single uniform fanout at every depth.
+    Uniform(f64),
+    /// Piecewise: each entry holds from its depth until the next.
+    Profile(Vec<Segment>),
+}
+
+impl Default for Branching {
+    fn default() -> Self {
+        Branching::Auto(AutoTag::Auto)
+    }
+}
+
+/// The literal `auto`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoTag {
+    /// Solve for the profile rather than stating one.
+    Auto,
+}
+
+/// One segment of a branching profile.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Segment {
+    /// This fanout holds from here until the next segment.
+    pub from_depth: u32,
+    /// Mean children per trunk node. Realised by randomised rounding keyed on
+    /// the node, so width is stochastic and averages this value.
+    pub fanout: f64,
+    /// Overrides `branch_skew` for this segment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skew: Option<f64>,
+    /// Overrides `churn.half_life` for this segment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub churn_half_life: Option<String>,
+}
+
+/// Replacement of shared content over time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Churn {
+    /// `0` or absent means never: shared content, once minted, exists forever.
+    pub half_life: String,
+}
+
+/// Who asks for what, when.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Workload {
+    /// How requests arrive.
+    pub arrival: Arrival,
+    /// Population defaults; `mix` entries override individual fields.
+    pub sessions: Sessions,
+    /// Weighted mixture over the same session model.
+    #[serde(default)]
+    pub mix: Vec<MixEntry>,
+    /// Non-stationary root popularity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drift: Option<Drift>,
+}
+
+/// How requests arrive.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Arrival {
+    /// `open_loop` (default) or `closed_loop`.
+    pub model: ArrivalModel,
+    /// `open_loop` only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate: Option<String>,
+    /// Index of dispersion; 1.0 reproduces Poisson.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub burstiness: Option<f64>,
+    /// `closed_loop` only: bounded in-flight sessions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<u32>,
+}
+
+/// Open or closed loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArrivalModel {
+    /// Absolute timestamps from a configured rate. The default.
+    OpenLoop,
+    /// Bounded concurrency, reactive. Arrival depends on system response.
+    ClosedLoop,
+}
+
+/// The session model. The only behavioural unit.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Sessions {
+    /// Requests per session; 1 is a one-shot.
+    pub turns: Dist,
+    /// Gap between turns.
+    pub think_time: Dist,
+    /// Turn-1 path depth below the shared trunk, private to this session.
+    pub private_depth: Dist,
+    /// Blocks added by each turn after the first. Drawn per turn.
+    pub growth_per_turn: Dist,
+    /// Agent fan-out. Disabled by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawn: Option<Spawn>,
+}
+
+/// Agent fan-out: a session spawning children that inherit its context.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Spawn {
+    /// Children per spawning session; 0 disables.
+    #[serde(default)]
+    pub fanout: u32,
+    /// Fraction of sessions that spawn.
+    #[serde(default)]
+    pub probability: f64,
+    /// Which turn triggers the spawn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at_turn: Option<Dist>,
+    /// How much of the parent's prefix a child inherits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<serde_yaml::Value>,
+    /// 1 means children do not themselves spawn.
+    #[serde(default = "one")]
+    pub generations: u32,
+    /// Where children land.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<SpawnPlacement>,
+}
+
+fn one() -> u32 {
+    1
+}
+
+/// Where a spawned child runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpawnPlacement {
+    /// Anywhere but the parent's node. The default, and the point of fan-out.
+    OtherNodes,
+    /// Uniform over all nodes.
+    Any,
+    /// The parent's node.
+    SameNode,
+}
+
+/// One entry of the mixture: a parameter set, not a behavioural mode.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MixEntry {
+    /// Normalised across entries; not required to sum to 1.
+    pub weight: f64,
+    /// Overrides `sessions.turns`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turns: Option<Dist>,
+    /// Overrides `sessions.think_time`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub think_time: Option<Dist>,
+    /// Overrides `sessions.private_depth`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub private_depth: Option<Dist>,
+    /// Overrides `sessions.growth_per_turn`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub growth_per_turn: Option<Dist>,
+}
+
+/// Non-stationary root popularity.
+///
+/// Re-weights **which** shared keys are popular. It never changes **which**
+/// shared keys exist — that is `churn`, and the two must stay separate because a
+/// popularity shift leaves a consumer's cached entries valid whereas a content
+/// replacement invalidates them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Drift {
+    /// `0` (default) is stationary.
+    pub half_life: String,
+}
+
+/// Which node asks for what.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Topology {
+    /// Participating nodes.
+    pub nodes: Vec<String>,
+    /// How a session maps onto nodes.
+    #[serde(default)]
+    pub placement: Placement,
+    /// How far the per-node request streams overlap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub self_affinity: Option<f64>,
+    /// How many distinct nodes ask for the same key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replication: Option<Replication>,
+    /// Keys the warmup phase deliberately does not pre-request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cold_fraction: Option<f64>,
+    /// Scheduled membership changes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub membership_events: Vec<MembershipEvent>,
+}
+
+/// How a session maps onto nodes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Placement {
+    /// A session binds to one node at birth, as it binds to one root, because a
+    /// session's KV lives where it was computed. The default.
+    #[default]
+    Sticky,
+    /// Each request placed independently. Makes a session remotely fetch its own
+    /// earlier turns, which no deployment does; for deliberate comparison only.
+    PerRequest,
+}
+
+/// How many distinct nodes ask for the same key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Replication {
+    /// Distinct asking nodes per key.
+    pub nodes_per_key: Dist,
+}
+
+/// A scheduled node stop or start.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MembershipEvent {
+    /// Absolute plan time.
+    pub at: String,
+    /// What happens.
+    pub action: MembershipAction,
+    /// Which node.
+    pub node: String,
+}
+
+/// Stop or start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MembershipAction {
+    /// Take the node out.
+    Stop,
+    /// Bring it back.
+    Start,
+}
+
+/// Execution and measurement.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Run {
+    /// Where the generated requests go.
+    pub mode: String,
+    /// Endpoint pattern for the direct-to-server mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint_template: Option<String>,
+    /// Keys per RPC.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch_size: Option<u32>,
+    /// Client threads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workers: Option<u32>,
+    /// Concurrent RPCs per worker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inflight: Option<u32>,
+    /// One process-wide device allocation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_buffer: Option<String>,
+    /// Excluded from steady-state statistics. Must cover the session-population
+    /// ramp, or the measured window opens on a partly-filled population.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warmup: Option<String>,
+    /// Explicit connection-warm phase before measuring.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warm_connections: Option<bool>,
+    /// Window for the working-set size and trunk occupancy. Canonically a
+    /// **request count**; a duration is sugar and needs a rate to convert.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wss_window: Option<serde_yaml::Value>,
+    /// Preflight fails above this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clock_skew_bound: Option<String>,
+    /// Optional human-readable trace, for debugging. Never an input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emit_trace: Option<String>,
+}
+
+/// The experiment matrix.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Sweep {
+    /// Dotted paths into this document. A consumer-side quantity is not
+    /// addressable here and never was a legitimate axis.
+    pub axes: std::collections::BTreeMap<String, Vec<serde_yaml::Value>>,
+    /// Repeats per point; 8 by default, because n = 3 has previously produced
+    /// misleading conclusions on this bench.
+    #[serde(default = "eight")]
+    pub repeat: u32,
+    /// `interleaved` (default) or `blocked`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<String>,
+}
+
+fn eight() -> u32 {
+    8
+}
+
+impl Document {
+    /// Parse a document from YAML, rejecting unknown fields.
+    pub fn from_yaml(s: &str) -> Result<Document, serde_yaml::Error> {
+        serde_yaml::from_str(s)
+    }
+
+    /// Re-serialise, so a report can embed the normalised input.
+    pub fn to_yaml(&self) -> Result<String, serde_yaml::Error> {
+        serde_yaml::to_string(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The worked example from `contracts/workload-schema.md`, trimmed to the
+    /// fields this phase parses. Using the contract's own example as a test is
+    /// deliberate: it is the one document guaranteed to be kept current.
+    const WORKED: &str = r#"
+version: 1
+seed: 0xC0FFEE
+duration: 180s
+corpus:
+  block_bytes: 131072
+  trees:
+    roots:
+      count: 12
+      popularity: {dist: zipf, s: 0.9}
+    shared_depth: {dist: empirical, points: [[4, 0.10], [18, 0.75], [40, 1.0]]}
+    branching: auto
+    branch_skew: 0.9
+workload:
+  arrival: {model: open_loop, rate: 4000/s, burstiness: 1.8}
+  sessions:
+    turns: {dist: geometric, mean: 6}
+    think_time: {dist: lognormal, median: 3, sigma: 1.1}
+    private_depth: {dist: lognormal, median: 8, sigma: 0.8}
+    growth_per_turn: {dist: lognormal, median: 6, sigma: 0.5}
+  mix:
+    - {weight: 0.70}
+    - {weight: 0.25, turns: 1}
+    - {weight: 0.05, turns: 1, private_depth: 4000}
+topology:
+  nodes: [node2, node7, node9, node11]
+  self_affinity: 0.25
+  replication: {nodes_per_key: 1}
+  cold_fraction: 0.05
+run:
+  mode: hardware
+  batch_size: 64
+  workers: 8
+  warmup: 20s
+  wss_window: 240000
+"#;
+
+    #[test]
+    fn parses_the_contracts_worked_example() {
+        let d = Document::from_yaml(WORKED).expect("worked example must parse");
+        assert_eq!(d.version, 1);
+        assert_eq!(d.corpus.trees.roots.count, 12);
+        assert_eq!(d.workload.mix.len(), 3);
+        assert_eq!(d.topology.as_ref().unwrap().nodes.len(), 4);
+        // Placement defaults to sticky (FR-019a), not per-request.
+        assert_eq!(d.topology.as_ref().unwrap().placement, Placement::Sticky);
+        // Churn absent means an immortal trunk, which is the default.
+        assert!(d.corpus.trees.churn.is_none());
+        // Fan-out is off unless asked for (FR-018e).
+        assert!(d.workload.sessions.spawn.is_none());
+    }
+
+    #[test]
+    fn round_trips_through_yaml() {
+        let d = Document::from_yaml(WORKED).unwrap();
+        let again = Document::from_yaml(&d.to_yaml().unwrap()).unwrap();
+        assert_eq!(again.corpus.trees.roots.count, d.corpus.trees.roots.count);
+    }
+
+    #[test]
+    fn a_system_section_is_rejected() {
+        // Rule 13: a stale document carrying the removed consumer-side section
+        // is a likely input rather than a typo, so it must not be ignored.
+        let y = WORKED.to_string() + "system:\n  capacity: {dram: {fraction_of_wss: 0.25}}\n";
+        assert!(Document::from_yaml(&y).is_err());
+    }
+
+    #[test]
+    fn an_unknown_field_is_rejected() {
+        let y = WORKED.replace("branch_skew: 0.9", "branch_skewness: 0.9");
+        assert!(Document::from_yaml(&y).is_err());
+    }
+
+    #[test]
+    fn branching_accepts_auto_scalar_and_profile() {
+        for b in [
+            "auto",
+            "1.18",
+            "[{from_depth: 0, fanout: 1.0}, {from_depth: 12, fanout: 40.0}]",
+        ] {
+            let y = WORKED.replace("branching: auto", &format!("branching: {b}"));
+            Document::from_yaml(&y).unwrap_or_else(|e| panic!("branching {b}: {e}"));
+        }
+    }
+
+    #[test]
+    fn sweep_repeat_defaults_to_eight() {
+        let y = WORKED.to_string() + "sweep:\n  axes: {topology.self_affinity: [0.0, 1.0]}\n";
+        let d = Document::from_yaml(&y).unwrap();
+        assert_eq!(d.sweep.unwrap().repeat, 8);
+    }
+}

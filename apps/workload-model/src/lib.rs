@@ -20,3 +20,5 @@ pub mod keys;
 pub mod rng;
 
 pub mod plan;
+
+pub mod schema;
