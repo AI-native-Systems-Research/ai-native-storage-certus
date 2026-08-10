@@ -2,8 +2,9 @@
 
 **Version**: 1
 **Status**: Draft
-**Producers**: `certus-workload plan`, `certus-workload fit`
-**Consumers**: `certus-workload report`, `certus-workload-run run`, and any external tool —
+**Producers**: `certus-workload plan`; `certus-trace fit` produces the YAML a plan is generated from
+**Consumers**: `certus-workload report | emit`, `certus-trace validate | convert`,
+`certus-workload-run run`, and any external tool —
 nothing in this format is specific to a Certus consumer.
 
 The plan is the unit of reproducibility. Making it a persistable artifact — rather than

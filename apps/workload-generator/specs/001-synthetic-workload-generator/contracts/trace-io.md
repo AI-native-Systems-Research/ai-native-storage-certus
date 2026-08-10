@@ -2,8 +2,8 @@
 
 **Version**: 1
 **Status**: Draft
-**Consumed by**: `certus-workload fit`, `certus-workload validate`
-**Produced by**: `certus-workload plan` output modes 2 and 3
+**Consumed by**: `certus-trace fit`, `certus-trace validate`
+**Produced by**: `certus-workload emit` (JSONL) and `certus-trace convert` (parquet) — see spec FR-021h
 
 One schema, two containers. This is both the format `fit` reads from real traces and the format
 the generator emits when it is not talking to a server, so that a generated workload and a real
@@ -176,12 +176,18 @@ not a guarantee — so the count is the test.
 
 ## Output modes
 
-`plan` emits the same schema, so a generated workload is substitutable for a real one:
+The generator emits this same schema, so a generated workload is substitutable for a real one.
+Which binary provides which mode follows the dependency rather than convenience (spec FR-021h):
 
-1. **Direct to a Certus server** — the runner path; no file. The only Certus-specific mode.
-2. **`.jsonl`** — one invocation record per line. Human-readable; the natural choice for small
-   plans and for diffing.
-3. **Parquet** — the same records, columnar, partitioned as `invocations/block_size_<N>/`.
+| Mode | Provided by | Notes |
+| --- | --- | --- |
+| 1. **Direct to a Certus server** | `certus-workload-run run` | No file. The only Certus-specific mode |
+| 2. **`.jsonl`** | `certus-workload emit` | One record per line. Needs nothing beyond `serde_json`, so it stays in the generator |
+| 3. **Parquet** | `certus-trace convert` | Same records, columnar, partitioned as `invocations/block_size_<N>/`. A columnar writer would otherwise put `arrow` in a crate that `cargo test --all` builds every run |
+
+Mode 3 living elsewhere is not a compromise: FR-021c already requires modes 2 and 3 to be producible
+from an existing `events.bin` **without regenerating**, so conversion was always independent of
+generation, and `convert` merely names where that independence lives.
 
 Modes 2 and 3 MUST write a `manifest.json` alongside, with `source_class: pre_hashed`
 (the generator knows every block ID it minted, so the full encoding is the honest one),

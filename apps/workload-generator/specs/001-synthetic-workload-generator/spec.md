@@ -21,13 +21,34 @@ This app is a **lab measurement tool**, in the same category as
 `apps/remote-lookup-bench` and `apps/iops-benchmark`: it is not part of the Certus data
 path and is not a `cargo test` target in its hardware mode.
 
-It is split into two crates so that the model, the plan format, and the plan statistics are
-testable in CI without SPDK, CUDA, or RDMA:
+It is split into **one library and three binaries**, so that the model, the plan format, and the
+statistics are testable in CI without SPDK, CUDA, RDMA, or a columnar-format dependency:
 
 | Crate | Binary | Deps | Workspace membership |
 | --- | --- | --- | --- |
-| `apps/workload-generator` | `certus-workload` (`plan`, `report`, `fit`) | `serde_yaml` and a hashing crate. **No dependency on `interfaces`, on `IEvictionPolicy`, or on any policy component** — with cache simulation deferred there is nothing here that needs them, and nothing in the generator that knows what a cache is (FR-018a, FR-034) | **`default-members`** — built and tested by `cargo test --all` |
-| `apps/workload-runner` | `certus-workload-run` (`run`) | above + `tonic`, local CUDA externs | `members` only — needs hardware |
+| `apps/workload-model` | *(library)* | `serde`, `serde_yaml`, a hashing crate. **No `interfaces`, no `IEvictionPolicy`, no policy component** — with cache simulation deferred nothing here needs them, and nothing in the generator knows what a cache is (FR-018a, FR-034) | **`default-members`** |
+| `apps/workload-generator` | `certus-workload` (`plan`, `report`, `emit`) | `workload-model`, `serde_json` | **`default-members`** |
+| `apps/workload-trace` | `certus-trace` (`fit`, `validate`, `convert`) | `workload-model`, `serde_json`; `arrow`/`parquet` behind a **`parquet` feature, default off** | **`default-members`** — so `fit` and `validate` are tested by `cargo test --all`, over JSONL |
+| `apps/workload-runner` | `certus-workload-run` (`run`) | `workload-model`, `tonic`, local CUDA externs | `members` only — needs hardware |
+
+**`apps/workload-model` exists for a correctness reason, not for tidiness.** FR-056's four statistics
+are computed on *both* real traces (by `fit`) and generated plans (by `report` and `validate`). Two
+implementations would drift, and then a comparison between a fitted model and the trace it was fitted
+from would be comparing two different definitions of reuse distance — meaningless while appearing to
+work. One library, one implementation, is what makes those comparisons mean anything.
+
+**The generator and the trace tool point in opposite directions**, which is why they are separate
+binaries: one turns parameters into keys, the other turns keys into parameters. They share a model and
+share nothing else — different inputs, different failure modes, and no shared control flow.
+
+**Why `parquet` is a default-off feature rather than a separate workspace member.** Excluding the
+trace tool from `default-members` would leave `fit` and `validate` untested by `cargo test --all`,
+which is worse than a slow build, since the FR-058a round trip is the strongest check either has. So
+the crate is a default member and only the columnar *container* is gated: the default build exercises
+every statistic, all of `fit`, and a complete round trip through JSONL, while the parquet path is
+enabled explicitly. This costs almost no coverage because the container is deliberately the thinnest
+seam in the design — the same records either way (`contracts/trace-io.md`), with normalisation to a
+single representation happening immediately on ingest.
 
 `apps/workload-runner` follows `apps/remote-lookup-bench`'s precedent of declaring its
 handful of CUDA entry points locally rather than depending on `gpu-services`, so that it
@@ -42,7 +63,7 @@ never forces `interfaces/spdk` onto a default build.
   issues a *modelled key stream*. Long-term, `remote-lookup-bench`'s `lookup` subcommand
   is expressible as a trivial workload YAML, and consolidating is a follow-up, not part of
   this feature.
-- **External LLM trace corpora** — the input to `certus-workload fit` and the reference for
+- **External LLM trace corpora** — the input to `certus-trace fit` and the reference for
   validating that synthetic output resembles real behaviour. What this feature depends on is the
   **format**, specified in `contracts/trace-io.md`: a self-describing `manifest.json` plus
   block-level invocation records. Trace collections in that format are **not part of this
@@ -675,6 +696,39 @@ rest on one file.
   exists for them, and the count is small and known, whereas trunk content has a lifecycle independent of
   its readers and its refcount never reaches zero near the root. Same mechanism, right scope.
 
+### Session 2026-08-09 (the companion-program split for `fit`)
+
+- Q: Should trace analysis be a companion program rather than part of the generator? → A: **Yes, and
+  the primary reason is direction rather than dependencies.** The generator turns parameters into keys;
+  `fit` turns keys into parameters. Opposite inputs, opposite failure modes, no shared control flow. So
+  `certus-trace` (`fit`, `validate`, `convert`) is a separate binary from `certus-workload` (`plan`,
+  `report`, `emit`), with `apps/workload-model` as a library beneath both.
+- Q: What forces the shared library — is it just to avoid duplication? → A: **No, it is a correctness
+  requirement.** FR-056's four statistics are computed on *both* real traces (by `fit`) and generated
+  plans (by `report` and `validate`). Two implementations would drift, and then a `validate` comparing
+  a fitted model against the very trace it was fitted from would be comparing two different definitions
+  of reuse distance — a comparison that fails by **appearing to succeed**. FR-021i therefore requires
+  both binaries to take every statistic from the library and implement none.
+- Q: Does the parquet dependency go in the companion, then? → A: **Yes, but as a default-off Cargo
+  feature rather than by excluding the crate from `default-members`.** Excluding it would leave `fit`
+  and `validate` untested by `cargo test --all`, which is worse than a slow build given the FR-058a
+  round trip is the strongest check either has. So the crate is a default member and only the columnar
+  *container* is gated: the default build exercises every statistic, all of `fit`, and a full round trip
+  through JSONL, and enabling `parquet` adds coverage of the container alone. That costs almost nothing
+  because the container is deliberately the thinnest seam in the design — same records either way, with
+  normalisation to one representation on ingest. SC-012 states this measurably: if the default build
+  ever needs `arrow`, the seam is in the wrong place.
+- Q: Then who emits parquet, if the generator cannot? → A: **`certus-trace convert`**, and this is not
+  a reinterpretation of FR-021a. FR-021c *already* required modes 2 and 3 to be producible from an
+  existing `events.bin` without regenerating, so conversion was already specified as independent of
+  generation; FR-021h only names where that independence lives. The generator emits `events.bin` and
+  JSONL, both of which need nothing beyond `serde_json`, and a user wanting parquet runs `plan` then
+  `convert`. FR-021a's wording moves from "the generator" to "the tool suite" to match.
+- Q: What does the split cost? → A: **The round trip stops being a unit test.** It spans
+  `certus-workload` emitting and `certus-trace` reading, so FR-021j makes it a workspace-level
+  integration test. That is a property of the split rather than a defect in it — the test's whole value
+  is crossing the seam between emitter and reader, which is exactly what no single-crate test can do.
+
 ### Dependencies on other components (implied by the above)
 
 1. **`apps/certus-server-yaml` / `apps/certus-server` proto** — add `served_by` to
@@ -936,7 +990,7 @@ that specific attribute.
 
 ### User Story 6 - Fit a Model from a Real Trace (Priority: P2)
 
-The engineer runs `certus-workload fit --trace <path-to-a-trace> -o fitted.yaml` and gets a
+The engineer runs `certus-trace fit --trace <path-to-a-trace> -o fitted.yaml` and gets a
 starting YAML whose synthetic output statistically resembles that real workload, plus a validation
 report comparing the two.
 
@@ -1402,7 +1456,7 @@ report segments statistics into before/after windows around the event.
   be invented. What a trace *does* bound is the ceiling: remote lookup can only ever serve content some
   other session touched first, so the measured cross-session sharing fraction is a hard upper bound on
   remotely-servable traffic under any placement, and `fit` SHOULD report it for exactly that purpose.
-- **FR-021a**: The generator MUST support three **output modes**, exactly one of which involves
+- **FR-021a**: The tool suite MUST support three **output modes**, exactly one of which involves
   Certus: (1) drive a Certus server directly, presenting the generated keys as lookups and storing
   what missed; (2) write a `.jsonl` trace file; (3) write a parquet trace file. Modes 2 and 3 MUST
   emit the schema of `contracts/trace-io.md` — the same schema `fit` reads from real traces — so
@@ -1418,6 +1472,27 @@ report segments statistics into before/after windows around the event.
   fixed-width, indexable by ordinal, and streamable, none of which the interchange formats are; FR-037's
   allocation-free requirement depends on it. Modes 2 and 3 are interchange, not a replacement, and
   the generator MUST be able to produce them from an existing `events.bin` without regenerating.
+- **FR-021h**: The three output modes MUST be divided between binaries as follows, and the division
+  MUST follow the direction of the dependency rather than convenience. `certus-workload` owns mode 1
+  (drive a server) and mode 2 (JSONL), both of which need nothing beyond `serde_json`.
+  `certus-trace convert` owns mode 3 (parquet), because a columnar writer would otherwise put
+  `arrow` in a crate that `cargo test --all` builds on every run. This is **not** a reinterpretation
+  of FR-021a: FR-021c already requires modes 2 and 3 to be producible from an existing `events.bin`
+  without regenerating, so conversion is already specified as independent of generation, and giving it
+  its own subcommand only names where that independence lives. A user wanting parquet runs `plan` then
+  `convert`; `events.bin` is the native artifact either way.
+- **FR-021i**: `fit` and `validate` MUST live in `certus-trace` rather than in the generator, because
+  they consume traces and the generator produces them — opposite directions, different failure modes,
+  no shared control flow. Both MUST obtain every statistic from `workload-model` rather than
+  implementing any, so that a statistic computed over a real trace and the same statistic computed
+  over a generated plan are the **same code**. Two implementations would drift, and a `validate`
+  comparing a fitted model against its source trace would then be comparing two different definitions
+  — a comparison that fails silently by appearing to succeed.
+- **FR-021j**: The FR-058a round trip MUST be a **workspace-level integration test**, since it spans
+  `certus-workload` emitting and `certus-trace` reading. Neither binary can self-test it, and that is
+  a property of the split rather than a defect in it: the test's value comes precisely from crossing
+  the seam between the emitter and the reader. It MUST run in the default build over JSONL, and MUST
+  additionally run over parquet whenever the `parquet` feature is enabled.
 - **FR-021d**: A **file** output mode MUST require an explicit budget in **blocks** and MUST refuse
   to run without one. Blocks are the generator's own unit — one plan event is one block reference —
   so a block budget converts directly to a file size, which neither `duration` nor a request count
@@ -1736,9 +1811,9 @@ report segments statistics into before/after windows around the event.
 
 ### Measurable Outcomes
 
-- **SC-001**: A workload exhibiting realistic multi-level prefix sharing, drawn from a real
-  ShareGPT trace, is expressible in **under 60 lines of YAML**, and a common variation on it
-  in **under 10 lines** using `extends`.
+- **SC-001**: A workload exhibiting realistic multi-level prefix sharing, fitted from a real trace,
+  is expressible in **under 60 lines of YAML**, and a common variation on it in **under 10 lines**
+  using `extends`.
 - **SC-002**: A plan generated from a fitted YAML matches the source trace's reuse-distance
   CDF within that statistic's tolerance — supplied on the `fit`/`validate` command line, per
   FR-057b, and recorded in the validation report — so that LRU hit rate agrees at every capacity
@@ -1785,6 +1860,11 @@ report segments statistics into before/after windows around the event.
   Neither requires this tool to model a cache.
 - **SC-011**: A single YAML expresses the full test matrix in the Test Matrix section below,
   and each case is runnable without editing code.
+- **SC-012**: `cargo test --all` builds and passes with **no columnar-format dependency compiled**,
+  and still exercises every FR-056 statistic, all of `fit` and `validate`, and a complete FR-058a
+  round trip through JSONL. Enabling the `parquet` feature adds coverage of the container only. This
+  is the measurable form of the crate split: if the default build ever needs `arrow`, the seam has
+  been drawn in the wrong place.
 
 ## Test Matrix
 

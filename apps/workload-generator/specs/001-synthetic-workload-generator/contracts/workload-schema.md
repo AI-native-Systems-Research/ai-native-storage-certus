@@ -2,7 +2,8 @@
 
 **Version**: 1
 **Status**: Draft
-**Consumers**: `certus-workload plan | report | fit | validate`, `certus-workload-run run`
+**Consumers**: `certus-workload plan | report | emit`, `certus-trace fit | validate | convert`,
+`certus-workload-run run`
 
 This is the normative reference for the generator's input. It is the contract that keeps the
 input compact: the file holds *fitted statistical parameters*, never an access trace.
