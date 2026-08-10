@@ -1272,12 +1272,13 @@ report segments statistics into before/after windows around the event.
   FR-030 already mandates a single process-wide allocation. The report MUST note that padding is
   zeros, so that no future bandwidth or capacity figure measured through a compressing path is
   mistaken for a realistic one.
-- **FR-012**: The generator MUST report, for any plan, a summary of realised corpus
-  properties: distinct keys, total bytes, working-set size over a configurable window, a
-  prefix-sharing depth histogram, and — because trunk width is emergent (`w(0) = roots.count`,
-  `w(d+1) = w(d) × fanout(d+1)`) rather than configured — the realised **trunk width per
-  depth** and **trunk occupancy per depth**, so that the shape actually generated is recoverable
-  from the report.
+- **FR-012**: Every quantity in the FR-034a report MUST be the **realised** value rather than the
+  configured one, so that the shape actually generated is recoverable from the report rather than
+  assumed from the input. This matters most for trunk shape, which is emergent — `w(0) = roots.count`,
+  `w(d+1) = w(d) × fanout(d+1)` — so a document states a *fanout* and the width and occupancy it
+  produces are only knowable after generating. FR-034a holds the enumeration; this requirement governs
+  what the values mean. *(An earlier draft enumerated a partially-overlapping list here, so a reader
+  had to reconcile two statements of the report's contents.)*
 - **FR-012a**: The report MUST state the **intended** `shared_depth` distribution and the
   **realised** prefix-sharing depth histogram as two separate statistics, and MUST NOT present
   the configured value as if it were the measured one. Where they diverge, the divergence is the
@@ -1561,10 +1562,11 @@ report segments statistics into before/after windows around the event.
   (see Out of Scope), and the generator takes no dependency, build-time or runtime, on
   `IEvictionPolicy` or on any policy component. What it publishes instead are the capacity-free
   statistics of FR-034a, from which a consumer derives whatever its own capacity would buy.
-- **FR-034a**: The generator MUST report, from the plan alone: the **reuse-distance CDF** (per
-  object and per byte), the **compulsory-miss floor** (FR-060), the prefix-sharing depth
-  histogram, the request-length distribution, unique keys over time, realised trunk occupancy,
-  and the realised working-set size over `run.wss_window`. Every one of these is a property of
+- **FR-034a**: The generator MUST report, from the plan alone, and this is the **single normative
+  enumeration** of a plan report's contents: the **reuse-distance CDF** (per object and per byte),
+  the **compulsory-miss floor** (FR-060), the prefix-sharing depth histogram, the request-length
+  distribution, unique keys over time, distinct keys, total bytes, realised **trunk width per depth**,
+  realised **trunk occupancy per depth**, and the realised working-set size over `run.wss_window`. Every one of these is a property of
   the reference stream and requires no capacity parameter and no cache model. The reuse-distance
   CDF is primary: it encodes the achievable hit-rate curve, so a consumer can read off any
   capacity point without this tool modelling a cache to tell it.
@@ -1977,6 +1979,20 @@ not a claim that the generator measures any of it.
     traffic, and nothing can bound promotion traffic without knowing how promotion works.
   - **Fabric-versus-disk byte split** (formerly FR-042's second clause) — a claim about data paths
     rather than about labelled data.
+
+  **Prospective separate work item: a per-tier statistics collector for Certus.** The data removed
+  above is wanted; it simply does not belong to a workload generator. And the reason it stands alone is
+  stronger than "it was cut from here": such a collector is **workload-agnostic**. It observes Certus,
+  not this tool's output, so it works identically against a *real* client workload — a production vLLM
+  deployment, `benchmarks/kv-offload-replay`, or anything else — and coupling it to a synthetic
+  generator would restrict it to synthetic traffic for no benefit. Its scope would be roughly: per-tier
+  hit and miss counts, eviction churn including the demote-versus-remove split and `dropped_count`, byte
+  provenance reconciled against `GetIoStats`, and the background-traffic bounding FR-042b asked for —
+  all computed *inside* Certus, where the internal knowledge already exists. It has one real dependency
+  that this feature has now shed: `rw-telemetry` reaching the active dispatcher under
+  `--features p2p-native` (see Dependencies §2 for the specifics). It should be its own feature spec
+  rather than a section here, and may ship in this PR or a later one; nothing in this feature blocks it,
+  and it does not block this feature.
 
   **The line, stated once so it need not be rediscovered.** Three things are permitted: what the
   client measures itself (latency, throughput, wasted populates); labels the server attaches per entry,

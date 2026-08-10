@@ -16,6 +16,8 @@ claims to be substantiated by Criterion benchmarks rather than asserted.
 
 - **[P]**: parallelisable — different files, no dependency on incomplete work
 - **[USn]**: the user story this task serves (user-story phases only)
+- **Suffixed IDs** (`T012a`) are tasks added after the first pass, kept in phase order rather than
+  appended out of sequence. Same convention the spec uses for `FR-009a`; it avoids renumbering.
 
 ## Path Conventions
 
@@ -47,11 +49,12 @@ Four crates per `plan.md` § Source code. Paths below are repo-relative.
 These are shared by every user story and nothing below can proceed without them.
 
 - [ ] T007 Implement the tagged-union distribution syntax in `apps/workload-model/src/dist.rs` — `const`, `uniform`, `normal`, `lognormal`, `exponential`, `geometric`, `zipf`, `pareto`, `empirical` — with bare scalars sugaring to `const`, and half-to-even rounding with every clamp counted rather than silently applied
-- [ ] T008 Implement the schema types in `apps/workload-model/src/schema/` per `contracts/workload-schema.md`, with `deny_unknown_fields` so a mistyped parameter cannot take a default (FR-005)
+- [ ] T008 Implement the schema types in `apps/workload-model/src/schema/` per `contracts/workload-schema.md`, with `deny_unknown_fields` so a mistyped parameter cannot take a default (FR-005), and refusal of any `version` the generator does not implement (FR-006)
 - [ ] T009 Implement `extends` deep-merge in `apps/workload-model/src/schema/extends.rs`, including-document-wins on every conflicting leaf, lists replacing rather than appending (FR-004)
 - [ ] T010 Implement validation rules 1–23 in `apps/workload-model/src/schema/validate.rs`, returning **all** violations rather than the first
 - [ ] T011 [P] Implement rule 13's rejection of removed consumer-side keys (`system:`, `topology.holder_tier`) with a message naming design rule 6 and where each quantity now lives — a stale document is a likely input, not a typo
 - [ ] T012 Implement the three key derivations in `apps/workload-model/src/keys.rs`: `trunk_child(parent, child_index, generation)`, `private_child(parent, minting_session, i)`, `root(root_index, generation)`
+- [ ] T012a Implement entry size as a pure, deterministic function of key identity in `apps/workload-model/src/keys.rs` — derived from the key's own hash, never from position in the stream (FR-011) — with `corpus.block_bytes` as the distribution it draws from and the value used recorded in the report (FR-011a)
 - [ ] T013 Implement the `events.bin` codec in `apps/workload-model/src/plan/record.rs` — 40 bytes, little-endian, fields naturally aligned per `contracts/plan-format.md`
 - [ ] T014 Implement `manifest.json` write/read in `apps/workload-model/src/plan/manifest.rs`, including `plan_format` versioning and reserved-byte rejection (FR-023b)
 - [ ] T015 Implement content hashing and stream digests in `apps/workload-model/src/plan/digest.rs`, distinguishing a whole-plan hash from the parameter hash an unbounded run carries (FR-021g)
@@ -62,6 +65,7 @@ These are shared by every user story and nothing below can proceed without them.
 - [ ] T017 [P] Test that `private_child` keys on the **minting** session: a spawned child passed its parent's id computes the parent's keys, and passing the reader's id instead produces different keys — the failure that would turn every fan-out into a miss storm (FR-009c)
 - [ ] T018 [P] Test trunk/private namespace disjointness by construction rather than by sampling (FR-007)
 - [ ] T019 [P] Assert `size_of::<PlanEvent>() == 40` and every field's offset and alignment as `const` assertions (`contracts/plan-format.md`)
+- [ ] T019a [P] Test that entry size is a pure function of key identity: the same key yields the same size across separate generation runs and across differing stream positions (FR-011). This is the invariant FR-039b's inference rests on — a non-zero `SIZE_MISMATCH` can only be read as a generator defect if this holds — and constitution principle VI requires depended-on invariants tested rather than documented
 - [ ] T020 [P] Test that each validation rule rejects what it should and reports **every** violation in a multiply-invalid document
 
 **Checkpoint**: a YAML document can be parsed, merged, validated and rejected; keys derive correctly; plan records round-trip.
@@ -123,7 +127,7 @@ on the stream itself rather than on any model of something consuming it.
 
 - [ ] T043 [US2] Implement the reuse-distance CDF in `apps/workload-model/src/stats/reuse_distance.rs` — the primary statistic, per object and per byte
 - [ ] T044 [P] [US2] Implement the compulsory-miss floor in `apps/workload-model/src/stats/floor.rs`
-- [ ] T045 [P] [US2] Implement the prefix-sharing depth histogram in `apps/workload-model/src/stats/sharing.rs`, reporting **intended** and **realised** as two separate statistics (FR-012a)
+- [ ] T045 [P] [US2] Implement the prefix-sharing depth histogram in `apps/workload-model/src/stats/sharing.rs`, reporting **intended** and **realised** as two separate statistics (FR-012a), and ensure every FR-034a quantity is the realised value rather than the configured one (FR-012)
 - [ ] T046 [P] [US2] Implement request-length distribution and unique-keys-over-time in `apps/workload-model/src/stats/`
 - [ ] T047 [P] [US2] Implement realised trunk width and occupancy per depth in `apps/workload-model/src/stats/trunk.rs`
 - [ ] T048 [P] [US2] Implement realised working-set size over `run.wss_window` as a request count in `apps/workload-model/src/stats/wss.rs`
@@ -162,6 +166,7 @@ independent count of what the runner sent and received.
 - [ ] T056 [US3] Implement populate-on-miss with populate cost accounted separately from lookup cost (FR-032), and the explicit connection-warm phase outside the measured window (FR-033)
 - [ ] T057 [US3] Implement `served_by` relay and aggregation — **verbatim, never derived** — with per-outcome-class latency percentiles and the hits+misses+errors identity (FR-039, FR-039d, FR-041)
 - [ ] T058 [US3] Implement harness self-overhead measurement, flagging any run where overhead could account for more than 5% of the figure (FR-038)
+- [ ] T058a [US3] Implement cumulative open-loop schedule-lag reporting, and refuse to present a configured offered rate as achieved when the schedule slipped (FR-061). This is the measurement-integrity counterpart of FR-009h: a count-based window exists precisely because a time window drifts when the schedule slips, so the slip must be visible
 - [ ] T059 [US3] Implement report output: throughput in GB/s and keys/s from the runner's own counts, byte totals **per `served_by` class** as arithmetic over labelled data, and byte hit rate with the FR-040 qualification that it carries no independent information at constant `block_bytes` (FR-042). Report **no** eviction counts, promotion traffic or byte provenance — all out of scope, since each needs a model of the consumer's internals
 
 **Checkpoint**: single-node measurement works; attribution is present or honestly absent.
@@ -178,6 +183,7 @@ tracks it, with fabric bytes ~0 at 1.0.
 ### Tests for User Story 4
 
 - [ ] T060 [P] [US4] Test that under sticky placement no session remotely fetches a key only it has asked for — so measured remote traffic is cross-session traffic and nothing else (FR-019a)
+- [ ] T060a [P] [US4] Test that the measured remote-served fraction tracks configured `self_affinity` across a 0.0→1.0 sweep, and that at 1.0 fabric bytes in the measured window are ~0 (SC-006)
 - [ ] T061 [P] [US4] Test that a spawned child hits rather than misses on its inherited prefix when the parent's turns have already completed (FR-018d)
 - [ ] T062 [P] [US4] Test that `spawn` and `self_affinity` together are attributed separately rather than as one aggregate remote fraction
 - [ ] T063 [P] [US4] Test that validation rejects a fan-out with nowhere to go, a half-configured fan-out, and fan-out combined with per-request placement (rules 22, 23)
@@ -189,6 +195,7 @@ tracks it, with fabric bytes ~0 at 1.0.
 - [ ] T066 [US4] Implement agent fan-out in `apps/workload-model/src/session.rs`: spawn at a drawn turn, children inheriting the parent's prefix and placed on other nodes (FR-018c)
 - [ ] T067 [US4] Implement lineage-scoped lifetime — a parent's private keys live until the parent and every descendant has retired (FR-018d)
 - [ ] T068 [US4] Implement per-node plan partitioning with each node verifying the plan hash, or the parameter hash for an unbounded run, before executing its slice (FR-026, FR-021g)
+- [ ] T068a [US4] Implement a cross-node start barrier so every node shares one plan time origin (FR-054). Without it each node's `t_ns` is relative to its own start and no cross-node timing comparison means anything, which would silently undermine every multi-node latency figure
 - [ ] T069 [US4] Implement remote-class reporting split by first touch versus repeat, with drift over a run reported as observed rather than as regression (FR-039c)
 
 **Checkpoint**: multi-node measurement works with both diffuse and fan-out shapes.
@@ -204,7 +211,7 @@ tracks it, with fabric bytes ~0 at 1.0.
 - [ ] T070 [P] [US5] Test that preflight refuses on each asymmetry class and names the differing attribute (FR-049..FR-053)
 - [ ] T071 [US5] Implement node inspection — NIC port speed, GPU model, NVMe count, hugepage capacity, `memlock` limit, Certus build identity — in `apps/workload-runner/src/preflight.rs`
 - [ ] T072 [US5] Implement clock-skew bounding against `run.clock_skew_bound`
-- [ ] T073 [US5] Implement the refusal path so an asymmetric cluster is a loud, actionable error rather than a silent confound
+- [ ] T073 [US5] Implement the refusal path so an asymmetric cluster is a loud, actionable error rather than a silent confound, **and** the `NON-COMPARABLE` marking that SC-009 requires on any report nonetheless produced from one — refusing to run and marking a report that exists anyway are two different protections and SC-009 needs both
 
 ---
 
@@ -260,6 +267,7 @@ recovered parameters against the originals. Ground truth is exact, so any diverg
 - [ ] T092 [P] [US8] Test that churn's `generation` term rotates a node's whole subtree implicitly and that a rotation produces the compulsory-miss shock (FR-016b, FR-016d)
 - [ ] T093 [P] [US8] Test the churn-adjusted occupancy floor, and that a half-life shorter than warmup or set without a `duration` is rejected (FR-016e, rules 17, 18)
 - [ ] T094 [US8] Implement `corpus.trees.churn` with the FR-008 generation term, per-node advance from node identity and seed, and per-segment half-life override
+- [ ] T094a [US8] Implement non-stationary root popularity via `drift.half_life`, 0 meaning stationary (FR-016), keeping it strictly separate from churn: drift re-weights **which** shared keys are popular and leaves a consumer's cached entries valid, whereas churn changes **which shared keys exist** and invalidates them (FR-016a). One half-life covering both would mean two physically different things
 - [ ] T095 [US8] Implement rotation-event and compulsory-miss-shock reporting, with FR-060's floor accounting for churn-induced misses
 - [ ] T096 [US8] Implement scheduled membership events (`stop`, `start`) at absolute plan times (FR-021)
 
@@ -269,6 +277,7 @@ recovered parameters against the originals. Ground truth is exact, so any diverg
 
 - [ ] T097 [P] Write doc comments with runnable examples for every public `workload-model` API and verify `cargo doc --no-deps` is warning-free
 - [ ] T098 [P] Ship the presets named in `contracts/workload-schema.md` under `apps/workload-generator/presets/`
+- [ ] T098a [P] Implement the optional human-readable plan trace at `run.emit_trace`, for debugging only, and assert it is never accepted as an input (FR-029)
 - [ ] T099 [P] Verify SC-012 in CI: `cargo test --all` compiles no columnar dependency while still exercising every statistic, all of `fit`, and a full round trip through JSONL
 - [ ] T100 [P] Add a `--features parquet` CI job covering the container path only
 - [ ] T101 [P] Verify SC-001: a realistic sharing workload in under 60 lines of YAML, and a variation in under 10 using `extends`
