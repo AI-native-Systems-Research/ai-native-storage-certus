@@ -14,6 +14,7 @@
 //! Every struct is `deny_unknown_fields`: a mistyped parameter must not silently
 //! take a default (spec FR-005).
 
+pub mod extends;
 pub mod validate;
 
 use serde::{Deserialize, Serialize};
