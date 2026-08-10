@@ -20,8 +20,9 @@
 # Env (all optional; defaults shown):
 #   IMAGE=certus-grpc-bench     container image tag
 #   GPU=all                     GPU selector (all | 0 | 0,1 | <uuid>)
-#   CERTUS_SERVER=host.containers.internal:50051  (host-gateway; NOT localhost —
-#                               that is the container's own loopback)
+#   CERTUS_SERVER=localhost:50051   paired with PODMAN_NETWORK=host (default,
+#                               loopback). For the bridge, set PODMAN_NETWORK= and
+#                               CERTUS_SERVER=host.containers.internal:50051.
 #   NUM_CONVS=450  MODEL=NousResearch/Meta-Llama-3-8B  SLAB_SIZE_BYTES=2097152
 #   HF_CACHE=$HOME/.cache/huggingface
 #   HF_TOKEN=<token>            passed through if set
@@ -33,17 +34,19 @@ set -euo pipefail
 # can't prompt without a TTY). Override IMAGE to point elsewhere.
 IMAGE="${IMAGE:-localhost/certus-grpc-bench}"
 GPU="${GPU:-all}"
-# Default to podman's host-gateway name, NOT localhost: inside the container
-# "localhost" is the container's own loopback, so the host-side certus-server is
-# unreachable there. host.containers.internal resolves to the host from within a
-# rootless container (server must listen on 0.0.0.0, which it does). Override
-# with an explicit IP if this name doesn't resolve on an older podman.
-CERTUS_SERVER="${CERTUS_SERVER:-host.containers.internal:50051}"
-# Optional podman network mode. Empty (default) = rootless bridge, reach the host
-# via host.containers.internal. Set PODMAN_NETWORK=host to share the host net
-# namespace so the client can dial localhost:50051 over loopback (no userspace
-# proxy). Pair with CERTUS_SERVER=localhost:50051.
-PODMAN_NETWORK="${PODMAN_NETWORK:-}"
+# Client→server transport (CERTUS_SERVER + PODMAN_NETWORK are a coupled pair).
+# Default: share the host network namespace (--network=host) and dial the server
+# over loopback (localhost:50051) — no userspace proxy, ~10% faster on the
+# KV-offload workload (the rootless bridge otherwise relays every gRPC control RPC
+# through slirp4netns/pasta: measured +125.8 s / +10.6% on the 450×12 v0.20 run).
+# For a host where --network=host is unavailable or would collide on :50051,
+# switch BOTH together to the rootless bridge:
+#     PODMAN_NETWORK=  (empty)  and  CERTUS_SERVER=host.containers.internal:50051
+# host.containers.internal is podman's host-gateway name — inside a bridged
+# container "localhost" is the container's own loopback, not the host. The server
+# listens on 0.0.0.0 either way.
+CERTUS_SERVER="${CERTUS_SERVER:-localhost:50051}"
+PODMAN_NETWORK="${PODMAN_NETWORK:-host}"
 NUM_CONVS="${NUM_CONVS:-450}"
 MODEL="${MODEL:-NousResearch/Meta-Llama-3-8B}"
 SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"
