@@ -353,8 +353,10 @@ Assigned to this file by `spec.md` and **not yet done**:
 - **The `branch_skew` parameterisation**, and the fitting procedures for `shared_depth` and
   `roots.popularity`.
 - **Reuse-distance estimation method** and the **significance-testing approach** behind `repeat: 8`.
-- **The `GetIoStats` cross-check tolerance** (FR-042b) — how background staging and promotion
-  traffic is bounded or subtracted out of a drive-aggregated counter.
+*(Discharged by removal: the `GetIoStats` cross-check tolerance was the seventh item here. FR-042a,
+FR-042b and SC-007a are out of scope — reconciling per-class byte totals against a drive-aggregated
+counter requires bounding the consumer's background staging and promotion traffic, which cannot be
+done without modelling how that consumer works. See spec § Out of Scope.)
 
 Parked rather than open: an **LP/flow relaxation** for a true offline upper bound under
 heterogeneous entry sizes. It was only ever needed to make Belady/OPT a sound ceiling, and OPT is

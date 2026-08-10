@@ -80,7 +80,7 @@ deliberately absent, replaced by principle I.
 | II. Determinism and Reproducibility | **PASS** | Path-computable keys (FR-009b); fanout keyed on node not visit (FR-009e); O(live sessions) memory (FR-010) enabling unbounded runs (FR-021e) |
 | III. One Definition per Statistic | **PASS** | `workload-model::stats` is the sole implementation; FR-021i forbids reimplementation. This principle is the reason the layout has a library at all |
 | IV. Evidence over Assertion | **PASS** | `research.md` separates measurement from requirement; `target_occupancy = 4` labelled a judgement (FR-009g1); the diffuse-sharing confound recorded beside its result |
-| V. Loud Failure over Quiet Wrongness | **PASS** | FR-015b and validation rules 17, 20-23 reject rather than warn; FR-055e refuses a partial fit; FR-039a and SC-007a refuse to let an absent capability read as a pass |
+| V. Loud Failure over Quiet Wrongness | **PASS** | FR-015b and validation rules 17, 20-23 reject rather than warn; FR-055e refuses a partial fit; FR-039a refuses to let an absent capability read as a pass |
 | VI. Code Quality and Correctness | **PASS, with an obligation** | fmt/clippy/doc standards adopted; **Criterion benchmarks are required, not optional**, because FR-037 and SC-004 are performance claims. Structural invariants (namespace disjointness, 40-byte record, digest agreement) must be *tested*, per the principle's second clause |
 | VII. Documentation as Contract | **PASS** | Three contracts written before implementation; reversals marked rather than deleted throughout the clarification log |
 
@@ -209,8 +209,8 @@ SC-012 holds — the default build compiles no `arrow`.
 **Gated on another feature**: per spec Dependencies §1, per-tier attribution needs `served_by` added
 to `EntryResult`, specified in `components/dispatcher/specs/002-served-by-tier-attribution/`. Until
 that lands the runner can measure throughput and latency but must report attribution as unsupported
-(FR-039a). SC-007a additionally needs a `rw-telemetry` Cargo change in `certus-server-yaml`
-(Dependencies §2) and is separate from SC-007 for exactly that reason.
+(FR-039a). Nothing else in this phase is gated — the `rw-telemetry` Cargo change that used to be
+needed went out of scope along with the byte-provenance cross-check (spec § Out of Scope).
 
 ### Phase 4 — multi-node (P2)
 

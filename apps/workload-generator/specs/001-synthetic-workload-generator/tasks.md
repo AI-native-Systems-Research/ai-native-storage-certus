@@ -140,17 +140,19 @@ on the stream itself rather than on any model of something consuming it.
 
 **⚠ Externally gated**: attribution requires `served_by` on `EntryResult`, owned by
 `components/dispatcher/specs/002-served-by-tier-attribution/` (spec Dependencies §1). Until it lands,
-T054–T056 are implementable but T057 cannot be demonstrated. SC-007a additionally needs a
-`rw-telemetry` Cargo change in `certus-server-yaml` (Dependencies §2).
+T054–T056 are implementable but T057 cannot be demonstrated. Nothing else in this phase is gated: the
+`rw-telemetry` Cargo change that used to be needed went out of scope with the byte-provenance
+cross-check.
 
 **Independent test**: run against one node with a plan whose reported working-set size exceeds what
 that server was configured to hold in memory, and assert every entry is attributed with
-`hits + misses + errors == entries requested`.
+`hits + misses + errors == entries requested`, and that throughput in GB/s and keys/s matches an
+independent count of what the runner sent and received.
 
 ### Tests for User Story 3
 
 - [ ] T051 [P] [US3] Test that a server returning `SERVED_BY_UNSPECIFIED` produces "attribution unsupported by server" rather than a guessed tier or an unknown bucket (FR-039a)
-- [ ] T052 [P] [US3] Test that an unavailable `GetIoStats` cross-check reports `unavailable` **with its reason** and never reads as passing (SC-007a)
+- [ ] T052 [P] [US3] Test that reported GB/s and keys/s agree with an independently counted byte and request total, and that per-`served_by`-class byte totals sum to the delivered total (FR-042)
 - [ ] T053 [P] [US3] Test that warmup operations are excluded from steady-state statistics and counted separately (FR-045)
 
 ### Implementation for User Story 3
@@ -160,7 +162,7 @@ that server was configured to hold in memory, and assert every entry is attribut
 - [ ] T056 [US3] Implement populate-on-miss with populate cost accounted separately from lookup cost (FR-032), and the explicit connection-warm phase outside the measured window (FR-033)
 - [ ] T057 [US3] Implement `served_by` relay and aggregation — **verbatim, never derived** — with per-outcome-class latency percentiles and the hits+misses+errors identity (FR-039, FR-039d, FR-041)
 - [ ] T058 [US3] Implement harness self-overhead measurement, flagging any run where overhead could account for more than 5% of the figure (FR-038)
-- [ ] T059 [US3] Implement byte hit rate with the FR-040 qualification that it carries no independent information at constant `block_bytes`
+- [ ] T059 [US3] Implement report output: throughput in GB/s and keys/s from the runner's own counts, byte totals **per `served_by` class** as arithmetic over labelled data, and byte hit rate with the FR-040 qualification that it carries no independent information at constant `block_bytes` (FR-042). Report **no** eviction counts, promotion traffic or byte provenance — all out of scope, since each needs a model of the consumer's internals
 
 **Checkpoint**: single-node measurement works; attribution is present or honestly absent.
 
@@ -270,7 +272,7 @@ recovered parameters against the originals. Ground truth is exact, so any diverg
 - [ ] T099 [P] Verify SC-012 in CI: `cargo test --all` compiles no columnar dependency while still exercising every statistic, all of `fit`, and a full round trip through JSONL
 - [ ] T100 [P] Add a `--features parquet` CI job covering the container path only
 - [ ] T101 [P] Verify SC-001: a realistic sharing workload in under 60 lines of YAML, and a variation in under 10 using `extends`
-- [ ] T102 Update `research.md` § Open derivations as each item is discharged, and close out the remaining two — the occupancy-bound derivation and the `GetIoStats` cross-check tolerance (FR-042b)
+- [ ] T102 Update `research.md` § Open derivations as each item is discharged, and close out the remaining one — the occupancy-bound derivation (FR-009f/FR-009g). The `GetIoStats` cross-check tolerance that used to be listed there is discharged by removal
 - [ ] T103 Run `component-check-leakage` and the repo's doc-sync skills, then re-verify `fmt`, `clippy -D warnings` and `cargo doc` across all four crates
 
 ---

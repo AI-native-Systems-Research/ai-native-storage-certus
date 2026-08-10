@@ -742,16 +742,15 @@ rest on one file.
    peer's advertised tier, and that the tier must derive from that advertisement rather than
    from the operation's phase — phase is per-operation and transitions on quorum and timeout,
    so it is not a tier proxy.
-2. **`certus-server-yaml` `rw-telemetry` forwarding** — the `GetIoStats` read/write byte
-   counters this spec wants for its independent cross-check are zeroed unless the *active*
-   dispatcher is built with `rw-telemetry`, and `apps/certus-server-yaml/Cargo.toml:53`
-   forwards that feature only to `dispatcher`, not to `dispatcher-p2p`. Under
-   `--features p2p-native` — the configuration US3 and US4 actually run — nothing enables
-   them, and `components/dispatcher-p2p/src/lib.rs:2589` returns a zeroed aggregate. Enabling
-   the cross-check therefore requires a Cargo feature change in `certus-server-yaml`
-   (forwarding to `dispatcher-p2p`, which already defines the feature at
-   `components/dispatcher-p2p/Cargo.toml:28`). **Blocks SC-007a and the byte-provenance
-   cross-check in FR-042a, not attribution itself (SC-007).**
+2. **`certus-server-yaml` `rw-telemetry` forwarding** — *(No longer required.)* This existed only to
+   enable the `GetIoStats` byte-provenance cross-check, which is now out of scope, so this feature
+   needs no Cargo change in `certus-server-yaml` and is not blocked by one. Recorded because the
+   underlying gap is real and still matters to anyone instrumenting Certus itself: under
+   `--features p2p-native`, `rw-telemetry` is forwarded to `dispatcher` but not `dispatcher-p2p`
+   (`apps/certus-server-yaml/Cargo.toml:53`), so `components/dispatcher-p2p/src/lib.rs:2589` returns
+   a zeroed aggregate even though the feature is defined at
+   `components/dispatcher-p2p/Cargo.toml:28`.
+
 3. **`components/eviction-policy-lru`** — **no dependency in either direction.** An earlier draft
    consumed it through `IEvictionPolicy`; cache simulation is deferred out of this feature
    (FR-034), so nothing here touches it.
@@ -862,11 +861,9 @@ exceeds what that server was configured to hold in memory — a comparison betwe
 workload statistic and the operator's own server configuration, not something the plan states —
 and assert the reported split is internally consistent: every entry attributed, hits + misses +
 errors equal to entries requested, and the slower-medium fraction rising monotonically as the
-server's configured capacity is reduced across a sweep driven from the server side. The
-`GetIoStats` byte cross-check is a
-*conditional* addition to this test, available only when the server was built with
-`rw-telemetry` forwarded to the active dispatcher (Dependencies 2); the report states whether
-it ran.
+server's configured capacity is reduced across a sweep driven from the server side. Client-side
+throughput — GB/s and keys/s, counted by the runner — is asserted in the same test, being the one
+figure here that needs no cooperation from the server at all.
 
 **Acceptance Scenarios**:
 
@@ -879,13 +876,13 @@ it ran.
 3. **Given** a server that predates serving-tier attribution, **When** `run` completes,
    **Then** the responses carry `SERVED_BY_UNSPECIFIED` and the report says "attribution
    unsupported by server" rather than guessing a tier or inventing an unknown bucket.
-4. **Given** a server built with `rw-telemetry` reaching the active dispatcher, **When** the
-   report is produced, **Then** reported SSD-served bytes are compared against the
-   `GetIoStats` read-byte delta and any disagreement beyond the derived tolerance is flagged
-   rather than silently reported.
-5. **Given** a server without that telemetry, **When** the report is produced, **Then** the
-   cross-check is reported as `unavailable` with the reason, and MUST NOT be reported as
-   passing. A zeroed counter must never read as agreement.
+4. **Given** a completed run, **When** the report is produced, **Then** throughput is stated in
+   both GB/s and keys/s from the runner's own counts, and byte totals are given **per `served_by`
+   class** — arithmetic over labelled data, never restated as a claim about which bytes crossed a
+   wire and which came off a disk (FR-042).
+5. **Given** any request for eviction counts, promotion traffic, or byte provenance, **When** the
+   report is produced, **Then** none is present, and the report says where such data comes from:
+   Certus's own instrumentation, which has the internal knowledge required (see Out of Scope).
 6. **Given** `run.warmup: 20s`, **When** the report is produced, **Then** operations inside
    the warmup window are excluded from all steady-state statistics and counted separately.
 7. **Given** the generator running at the platform's measured ceiling, **When** the run
@@ -898,10 +895,11 @@ it ran.
 
 The engineer runs the same plan across a symmetric 4-node cluster with
 `topology.self_affinity: 0.25`, and gets the remote-served fraction, whatever split the server
-reports across its remote classes, and the cost of keys nothing had seen before — plus proof
-from `GetIoStats` that the bytes came over the fabric rather than off local disk. Every one of
-those breakdowns is the *server's* account of what it did, relayed; the plan asked only for a
-set of keys in an order, at nodes.
+reports across its remote classes, and the cost of keys nothing had seen before. Every one of those
+breakdowns is the *server's* account of what it did, relayed; the plan asked only for a set of keys
+in an order, at nodes. Note what is deliberately absent: no claim about which bytes crossed the
+fabric. The runner can report how many bytes belonged to entries the server labelled remote, which
+is counting; asserting they travelled over a wire would be a claim about how Certus is built.
 
 **Why this priority**: This is the measurement that only Certus needs and that a generic
 cache simulator cannot produce. It is P2 only because it depends on US1–US3 and on a
@@ -1579,13 +1577,14 @@ report segments statistics into before/after windows around the event.
   with the simulator, the earlier caveat still applies and MUST be restated then: Belady is
   exact only for uniform entry size in a single tier, since with heterogeneous sizes offline
   optimal caching is NP-hard and furthest-next-use bounds neither optimality nor byte hit rate.
-- **FR-035**: Any offline replay of a plan MUST document explicitly which effects it does not
-  model — at minimum fabric transfer and connection setup, control-plane quorum timing, device
-  queue depth and per-device bandwidth, DMA bandwidth and interconnect topology, lock
-  contention, and the cost of absent keys — because a trace of block references reproduces the
-  reference pattern exactly and reproduces nothing about time. The generator itself MUST NOT
-  model a cache in order to make this statement: the structure of the consumer's storage is the
-  consumer's to describe (FR-018a).
+- **FR-035**: *(Retired.)* This required any offline replay of a plan to document which effects it
+  does not model. It was written when the generator still contained a cache simulator; with
+  simulation deferred out of scope nothing in the suite replays a plan offline, so the requirement
+  had no owner. The substance survives where it belongs — `contracts/plan-format.md` § What this
+  artifact does and does not carry states that a block-reference trace reproduces the reference
+  pattern exactly and nothing about time, and that any consumer turning it into a latency or
+  throughput claim without hardware is inventing one.
+
 - **FR-036**: Every consumer of a plan that this feature ships MUST emit a stream digest over
   the key sequence it consumed, and the plan MUST carry the digest of the sequence it encodes,
   so that any two arms — whatever they are, and whoever runs them — can be proven to have seen
@@ -1632,22 +1631,15 @@ report segments statistics into before/after windows around the event.
   heterogeneity, which is exactly why the size-heterogeneity row of the Test Matrix exists.
 - **FR-041**: Latency percentiles MUST be reported per outcome class as well as in
   aggregate, at minimum p50, p90, p99, and p99.9.
-- **FR-042**: The report MUST include throughput in both GB/s and keys/s, and MUST report
-  bytes delivered over the fabric separately from bytes read off local disk.
-- **FR-042a**: The `GetIoStats` cross-check of local-disk bytes MUST be performed when the
-  server exposes non-zero counters, and MUST be reported as `unavailable` with its reason
-  otherwise. The runner MUST distinguish "counters absent because `rw-telemetry` did not reach
-  the active dispatcher" from "counters present and reading zero", and MUST NOT report the
-  former as agreement.
-- **FR-042b**: The cross-check's tolerance MUST be derived rather than assumed, and the
-  derivation MUST be documented in `research.md`. `GetIoStats` is aggregated across all data
-  drives and includes background traffic — staging writes and promotion reads — that no lookup
-  in the plan requested, so the runner MUST subtract or bound that background component and
-  state which it did. A tolerance asserted without this derivation would fail for reasons
-  unrelated to attribution correctness.
-- **FR-043**: The report MUST include eviction churn (evictions per unit time, and
-  demote-versus-remove split from `TakeEvents`) and MUST report `dropped_count` when the
-  event channel overflowed rather than silently under-reporting.
+- **FR-042**: The report MUST include throughput in both **GB/s and keys/s**, measured by the runner
+  counting its own bytes and requests, and MUST report **byte totals per `served_by` class**.
+  Per-class byte totals are arithmetic over labelled data — the server said which class an entry
+  came from, and the runner sums the sizes it already knows — and are therefore permitted by
+  FR-039d. What the runner MUST NOT do is restate those totals as a claim about *data paths*:
+  "bytes delivered over the fabric" and "bytes read off local disk" are assertions about how the
+  consumer is built, and deciding that one class implies a wire and another a disk is exactly the
+  modelling FR-018a forbids. An earlier draft required that split, and the `GetIoStats`
+  byte-provenance cross-check that went with it; both are now out of scope (see Out of Scope).
 - **FR-044**: The report MUST include the wasted-populate ratio — entries populated and
   never subsequently read.
 - **FR-044a**: Hit rate MUST be reported broken down by `mix_index` and by `turn`, in addition
@@ -1834,15 +1826,11 @@ report segments statistics into before/after windows around the event.
   attribution criterion and it depends only on the `served_by` field the server returned.
   Reports produced without a server carry no attribution columns at all and are not held to this
   criterion: the generator has no tiers to attribute to (FR-018a, FR-039d).
-- **SC-007a**: When the server exposes non-zero `GetIoStats` counters, reported SSD-served
-  bytes agree with the `GetIoStats` read-byte delta within the tolerance derived per FR-042b,
-  after accounting for drive aggregation and background promotion traffic. When the counters
-  are unavailable, every report states the cross-check was not performed. **No report ever
-  presents an unavailable cross-check as a passing one.** SC-007a is deliberately separate
-  from SC-007: the cross-check is corroborating evidence for byte provenance, not the
-  definition of correct attribution, and gating attribution on a Cargo feature that
-  `p2p-native` builds cannot currently set would make SC-007 unmeetable for the very
-  configuration US3 and US4 run.
+- **SC-007a**: *(Retired with FR-042a.)* This gated a `GetIoStats` byte-provenance cross-check. It
+  is out of scope: reconciling per-class byte totals against a drive-aggregated counter requires
+  bounding the consumer's background staging and promotion traffic, which cannot be done without
+  modelling how that consumer works (see Out of Scope). Byte-provenance validation belongs to
+  Certus's own instrumentation, where the internal knowledge it needs already exists.
 - **SC-008**: Harness overhead is demonstrated to be under 5% of the measured figure at the
   platform's throughput ceiling, so reported numbers describe Certus rather than the
   generator.
@@ -1942,10 +1930,12 @@ not a claim that the generator measures any of it.
   change is available to obtain the latter (`WIRE_VERSION` stays at 1; the codec frames by
   record count with no length prefix, so appending a field would mis-align an old decoder
   silently). Reports must not claim to measure where a peer actually read from.
-- **`GetIoStats` is corroboration, not ground truth.** Its counters are zeroed unless the
-  active dispatcher was built with `rw-telemetry`, they are aggregated across all data drives,
-  and they include background staging and promotion traffic. Every use of them in this spec is
-  conditional and tolerance-derived (FR-042a, FR-042b).
+- **`GetIoStats` is not used at all.** An earlier draft cross-checked byte provenance against it.
+  Its counters are zeroed unless the active dispatcher was built with `rw-telemetry`, are aggregated
+  across all data drives, and include background staging and promotion traffic — so reconciling them
+  against per-class byte totals would require bounding that background component, which cannot be
+  done without modelling how the consumer works. That is Certus-side instrumentation, not workload
+  generation (see Out of Scope).
 - The mandatory `CERTUS_PROFILE=full-remote` build requirement for multi-node remote runs
   continues to apply.
 - Trace fitting targets vLLM-shaped KV workloads. Other workload families would need
@@ -1974,6 +1964,29 @@ not a claim that the generator measures any of it.
   already models the two-tier server in SimPy and already replays a block trace. Nothing in this
   feature forecloses it — a plan is a plain reference trace, so a simulator is just another
   consumer of one, and FR-036's digests let its results be compared against hardware honestly.
+- **Instrumenting the consumer's internals — the reporting boundary.** The runner reports what it can
+  observe as a client, plus whatever the server volunteers per entry. It does **not** report anything
+  that would require modelling how the consumer is built. Three requirements were removed on this
+  ground after they were found to have survived the FR-018a scope change:
+  - **Eviction churn** (formerly FR-043) — evictions per unit time, the demote-versus-remove split
+    from `TakeEvents`, and `dropped_count` on channel overflow. Evictions are a cache concept, demotion
+    is a tier operation, and `TakeEvents` is an internal event channel. This was the clearest
+    violation in the specification and the last to be caught.
+  - **Byte-provenance cross-check** (formerly FR-042a, FR-042b, SC-007a) — reconciling per-class byte
+    totals against `GetIoStats` requires subtracting or bounding background staging and promotion
+    traffic, and nothing can bound promotion traffic without knowing how promotion works.
+  - **Fabric-versus-disk byte split** (formerly FR-042's second clause) — a claim about data paths
+    rather than about labelled data.
+
+  **The line, stated once so it need not be rediscovered.** Three things are permitted: what the
+  client measures itself (latency, throughput, wasted populates); labels the server attaches per entry,
+  relayed verbatim; and arithmetic over those labels, such as summing the sizes of entries in a class.
+  One thing is not: any figure whose derivation requires a model of the consumer's internal structure.
+  Per-tier hit and miss rates sit on the permitted side **only** because the server volunteers the
+  classification per entry (FR-039, FR-039d) — if it did not, they would be unobtainable here, and the
+  right response would be to add the reporting to Certus rather than the inference to this tool. That
+  is also where the removed items belong: the data is wanted, and Certus is where the knowledge to
+  produce it already exists.
 - **Implementing new replacement policies.** Each policy is a separate component behind
   `IEvictionPolicy`, and grading them is now a consumer's concern rather than this feature's.
 - **Generating model activations or real KV tensor content.** Payloads are arbitrary bytes of
@@ -2013,8 +2026,7 @@ Following the speckit flow, still to be written for this feature:
   tolerances** (FR-057b) and which divergence measure each statistic uses, the four being on
   different scales; the `branch_skew` parameterisation and the fitting procedures for `shared_depth`
   and `roots.popularity`; reuse-distance estimation method; the significance-testing approach behind
-  `repeat: 8`; and **the `GetIoStats` cross-check tolerance** (FR-042b) — how background staging and
-  promotion traffic is bounded or subtracted out of a drive-aggregated counter. An **LP/flow
+  `repeat: 8`. The `GetIoStats` cross-check tolerance that used to be owed here is gone with FR-042b (see Out of Scope). An **LP/flow
   relaxation** for a true offline upper bound under heterogeneous entry sizes is parked rather than
   open: it existed only to make Belady/OPT a sound ceiling, and OPT defers with cache simulation
   (FR-034b).

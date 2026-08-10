@@ -208,7 +208,9 @@ though they were properties of the plan:
   device queue depth and per-device bandwidth, DMA bandwidth and interconnect topology, lock
   contention, and deadline expiry on absent keys are all invisible to a trace of this form. Any
   consumer that turns this artifact into a latency or throughput claim without hardware is
-  making that claim up, and spec FR-035 requires it to say which of these it does not model.
+  making that claim up, and MUST say which of these it does not model. (Spec FR-035 used to require
+  this; it was retired when offline replay left the suite, and the requirement now lives here, where
+  it is a property of the artifact rather than of a tool that no longer exists.)
 
 Any consumer that reports both kinds of number MUST mark which is which, so that a figure
 derived from a model can never be mistaken for one that was measured.
