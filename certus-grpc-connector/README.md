@@ -234,6 +234,24 @@ For a like-for-like comparison against no offloading, run the same workload with
 the connector disabled (baseline vLLM) and compare `gen/s` at matched
 `NUM_CONVS`/`OUTPUT_TOKENS`.
 
+**Multi-backend comparison.** To benchmark this connector head-to-head against
+the GPU-only baseline, vLLM's host-RAM `CPUOffloadingConnector`, and the
+`llmd_fs_backend` — same workload, same drives, one side-by-side throughput
+table — use the `profile_all.sh` harness with `--only certus-spdk` (or omit
+`--only` for all four). It builds the client image, launches `certus-server`,
+and reconfigures the host NVMe group automatically:
+
+```bash
+time benchmarks/kv-offload-replay/profile_all.sh \
+    --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 \
+    --device-pci 0000:63:00.0 --device-pci 0000:64:00.0 \
+    --max-rounds 12 --model-fs /mnt/fs-backend-bench \
+    --vllm-version 0.23.0 --only certus-spdk --evict-threshold 1 --build
+```
+
+See [`benchmarks/kv-offload-replay/README.md`](../benchmarks/kv-offload-replay/README.md#comparing-all-backends-profile_allsh)
+for the full flag reference and outputs.
+
 ### Manual run (without the wrapper)
 
 ```bash
