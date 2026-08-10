@@ -15,6 +15,7 @@
 //! implementations would drift — making a comparison between a fitted model and
 //! its source trace a comparison of two different definitions.
 
+pub mod corpus;
 pub mod dist;
 pub mod keys;
 pub mod rng;
