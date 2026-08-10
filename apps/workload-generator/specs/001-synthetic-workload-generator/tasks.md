@@ -48,24 +48,24 @@ Four crates per `plan.md` § Source code. Paths below are repo-relative.
 
 These are shared by every user story and nothing below can proceed without them.
 
-- [ ] T007 Implement the tagged-union distribution syntax in `apps/workload-model/src/dist.rs` — `const`, `uniform`, `normal`, `lognormal`, `exponential`, `geometric`, `zipf`, `pareto`, `empirical` — with bare scalars sugaring to `const`, and half-to-even rounding with every clamp counted rather than silently applied
+- [X] T007 Implement the tagged-union distribution syntax in `apps/workload-model/src/dist.rs` — `const`, `uniform`, `normal`, `lognormal`, `exponential`, `geometric`, `zipf`, `pareto`, `empirical` — with bare scalars sugaring to `const`, and half-to-even rounding with every clamp counted rather than silently applied
 - [ ] T008 Implement the schema types in `apps/workload-model/src/schema/` per `contracts/workload-schema.md`, with `deny_unknown_fields` so a mistyped parameter cannot take a default (FR-005), and refusal of any `version` the generator does not implement (FR-006)
 - [ ] T009 Implement `extends` deep-merge in `apps/workload-model/src/schema/extends.rs`, including-document-wins on every conflicting leaf, lists replacing rather than appending (FR-004)
 - [ ] T010 Implement validation rules 1–23 in `apps/workload-model/src/schema/validate.rs`, returning **all** violations rather than the first
 - [ ] T011 [P] Implement rule 13's rejection of removed consumer-side keys (`system:`, `topology.holder_tier`) with a message naming design rule 6 and where each quantity now lives — a stale document is a likely input, not a typo
-- [ ] T012 Implement the three key derivations in `apps/workload-model/src/keys.rs`: `trunk_child(parent, child_index, generation)`, `private_child(parent, minting_session, i)`, `root(root_index, generation)`
-- [ ] T012a Implement entry size as a pure, deterministic function of key identity in `apps/workload-model/src/keys.rs` — derived from the key's own hash, never from position in the stream (FR-011) — with `corpus.block_bytes` as the distribution it draws from and the value used recorded in the report (FR-011a)
-- [ ] T013 Implement the `events.bin` codec in `apps/workload-model/src/plan/record.rs` — 40 bytes, little-endian, fields naturally aligned per `contracts/plan-format.md`
+- [X] T012 Implement the three key derivations in `apps/workload-model/src/keys.rs`: `trunk_child(parent, child_index, generation)`, `private_child(parent, minting_session, i)`, `root(root_index, generation)`
+- [X] T012a Implement entry size as a pure, deterministic function of key identity in `apps/workload-model/src/keys.rs` — derived from the key's own hash, never from position in the stream (FR-011) — with `corpus.block_bytes` as the distribution it draws from and the value used recorded in the report (FR-011a)
+- [X] T013 Implement the `events.bin` codec in `apps/workload-model/src/plan/record.rs` — 40 bytes, little-endian, fields naturally aligned per `contracts/plan-format.md`
 - [ ] T014 Implement `manifest.json` write/read in `apps/workload-model/src/plan/manifest.rs`, including `plan_format` versioning and reserved-byte rejection (FR-023b)
-- [ ] T015 Implement content hashing and stream digests in `apps/workload-model/src/plan/digest.rs`, distinguishing a whole-plan hash from the parameter hash an unbounded run carries (FR-021g)
+- [X] T015 Implement content hashing and stream digests in `apps/workload-model/src/plan/digest.rs`, distinguishing a whole-plan hash from the parameter hash an unbounded run carries (FR-021g)
 
 ### Foundational tests
 
-- [ ] T016 [P] Test that `Generation(0)` reduces `trunk_child` to exactly `H(parent, child_index)`, so the no-churn default is bit-identical to a build with no churn concept (FR-008)
-- [ ] T017 [P] Test that `private_child` keys on the **minting** session: a spawned child passed its parent's id computes the parent's keys, and passing the reader's id instead produces different keys — the failure that would turn every fan-out into a miss storm (FR-009c)
-- [ ] T018 [P] Test trunk/private namespace disjointness by construction rather than by sampling (FR-007)
-- [ ] T019 [P] Assert `size_of::<PlanEvent>() == 40` and every field's offset and alignment as `const` assertions (`contracts/plan-format.md`)
-- [ ] T019a [P] Test that entry size is a pure function of key identity: the same key yields the same size across separate generation runs and across differing stream positions (FR-011). This is the invariant FR-039b's inference rests on — a non-zero `SIZE_MISMATCH` can only be read as a generator defect if this holds — and constitution principle VI requires depended-on invariants tested rather than documented
+- [X] T016 [P] Test that `Generation(0)` reduces `trunk_child` to exactly `H(parent, child_index)`, so the no-churn default is bit-identical to a build with no churn concept (FR-008)
+- [X] T017 [P] Test that `private_child` keys on the **minting** session: a spawned child passed its parent's id computes the parent's keys, and passing the reader's id instead produces different keys — the failure that would turn every fan-out into a miss storm (FR-009c)
+- [X] T018 [P] Test trunk/private namespace disjointness by construction rather than by sampling (FR-007)
+- [X] T019 [P] Assert `size_of::<PlanEvent>() == 40` and every field's offset and alignment as `const` assertions (`contracts/plan-format.md`)
+- [X] T019a [P] Test that entry size is a pure function of key identity: the same key yields the same size across separate generation runs and across differing stream positions (FR-011). This is the invariant FR-039b's inference rests on — a non-zero `SIZE_MISMATCH` can only be read as a generator defect if this holds — and constitution principle VI requires depended-on invariants tested rather than documented
 - [ ] T020 [P] Test that each validation rule rejects what it should and reports **every** violation in a multiply-invalid document
 
 **Checkpoint**: a YAML document can be parsed, merged, validated and rejected; keys derive correctly; plan records round-trip.
