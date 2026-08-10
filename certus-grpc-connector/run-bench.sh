@@ -23,7 +23,7 @@
 #   CERTUS_SERVER=localhost:50051   paired with PODMAN_NETWORK=host (default,
 #                               loopback). For the bridge, set PODMAN_NETWORK= and
 #                               CERTUS_SERVER=host.containers.internal:50051.
-#   NUM_CONVS=450  MODEL=NousResearch/Meta-Llama-3-8B  SLAB_SIZE_BYTES=2097152
+#   NUM_CONVS=450  MODEL=ibm-granite/granite-4.1-8b  SLAB_SIZE_BYTES=2097152
 #   HF_CACHE=$HOME/.cache/huggingface
 #   HF_TOKEN=<token>            passed through if set
 #   PODMAN_STORE / PODMAN_RUNROOT   override rootless storage location (this
@@ -48,7 +48,8 @@ GPU="${GPU:-all}"
 CERTUS_SERVER="${CERTUS_SERVER:-localhost:50051}"
 PODMAN_NETWORK="${PODMAN_NETWORK:-host}"
 NUM_CONVS="${NUM_CONVS:-450}"
-MODEL="${MODEL:-NousResearch/Meta-Llama-3-8B}"
+MAX_ROUNDS="${MAX_ROUNDS:-0}"   # 0 = replay all turns; N caps at N rounds/turns
+MODEL="${MODEL:-ibm-granite/granite-4.1-8b}"
 SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"
 TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
 HF_CACHE="${HF_CACHE:-$HOME/.cache/huggingface}"
@@ -101,7 +102,10 @@ hf_env=()
 # ── HF cache mount (only if the dir exists) ──
 cache_mount=()
 if [[ -d "${HF_CACHE}" ]]; then
-    cache_mount+=(-v "${HF_CACHE}:/root/.cache/huggingface")
+    # :z lets rootless podman relabel the cache to a shared container SELinux
+    # context. Without it, a cache on a freshly-formatted/relabeled fs is
+    # unlabeled_t and the container is denied (EPERM statting CACHEDIR.TAG).
+    cache_mount+=(-v "${HF_CACHE}:/root/.cache/huggingface:z")
 else
     echo "warning: HF cache dir ${HF_CACHE} missing — model will download fresh." >&2
 fi
@@ -126,6 +130,7 @@ exec command podman "${store_flags[@]}" run --rm \
     "${hf_env[@]}" \
     -e "CERTUS_SERVER=${CERTUS_SERVER}" \
     -e "NUM_CONVS=${NUM_CONVS}" \
+    -e "MAX_ROUNDS=${MAX_ROUNDS}" \
     -e "MODEL=${MODEL}" \
     -e "TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE}"\
     -e "SLAB_SIZE_BYTES=${SLAB_SIZE_BYTES}" \
