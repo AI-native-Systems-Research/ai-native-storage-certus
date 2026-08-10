@@ -370,6 +370,7 @@ parse_log() {
 
 finish_variant() {  # variant rc logfile
     local variant="$1" rc="$2" f="$3"
+    gpu_mark end "$variant"
     local parsed wall gens rounds native tps
     parsed="$(parse_log "$f")"
     IFS='|' read -r wall gens rounds native tps <<<"$parsed"
@@ -497,9 +498,60 @@ unlock_gpu_clocks() {
     GPU_CLOCK_LOCKED=0
 }
 lock_gpu_clocks
-# Reset clocks on any exit from here on. Superseded below by a combined handler
-# once the Certus-SPDK server exists, so an early exit here still unpins the GPU.
-trap unlock_gpu_clocks EXIT
+
+# ── GPU utilization sampler (time series over the whole run) ──
+# A background poller snapshots per-GPU utilization/clock/mem/power every
+# GPU_SAMPLE_SEC to gpu-timeline.csv; gpu_mark records the start/end epoch of each
+# variant's window to gpu-markers.csv. gpu_report (end of run) slices the timeline
+# by those windows into a per-variant table + an over-time sparkline. 2 s is fine
+# grain for a ~20 min/variant run (~600 samples) without flooding the file.
+GPU_SAMPLE_SEC="${GPU_SAMPLE_SEC:-2}"
+GPU_SAMPLER_PID=""
+start_gpu_sampler() {
+    command -v nvidia-smi >/dev/null 2>&1 || return 0
+    [[ -n "${LOGDIR:-}" && -d "${LOGDIR:-}" ]] || return 0
+    local tl="${LOGDIR}/gpu-timeline.csv"
+    echo "epoch_s,gpu_idx,util_gpu_pct,util_mem_pct,mem_used_mib,sm_clock_mhz,temp_c,power_w" > "$tl"
+    (
+        while true; do
+            ts="$(date +%s)"
+            nvidia-smi --query-gpu=index,utilization.gpu,utilization.memory,memory.used,clocks.sm,temperature.gpu,power.draw \
+                --format=csv,noheader,nounits 2>/dev/null \
+                | sed "s/^/${ts}, /; s/, /,/g" >> "$tl" || true
+            sleep "$GPU_SAMPLE_SEC"
+        done
+    ) &
+    GPU_SAMPLER_PID=$!
+    log "sampling GPU telemetry every ${GPU_SAMPLE_SEC}s -> $(basename "$tl")"
+}
+stop_gpu_sampler() {
+    [[ -n "${GPU_SAMPLER_PID:-}" ]] || return 0
+    kill "$GPU_SAMPLER_PID" 2>/dev/null
+    wait "$GPU_SAMPLER_PID" 2>/dev/null
+    GPU_SAMPLER_PID=""
+}
+# Record a variant-window boundary (start|end) with a wall-clock epoch.
+gpu_mark() {  # phase variant
+    [[ -n "${LOGDIR:-}" && -d "${LOGDIR:-}" ]] || return 0
+    local mk="${LOGDIR}/gpu-markers.csv"
+    [[ -f "$mk" ]] || echo "epoch_s,phase,variant" > "$mk"
+    echo "$(date +%s),$1,$2" >> "$mk"
+}
+# Slice the timeline by variant window and print a table + sparkline.
+gpu_report() {
+    local tl="${LOGDIR}/gpu-timeline.csv" mk="${LOGDIR}/gpu-markers.csv"
+    [[ -f "$tl" ]] || return 0
+    command -v python3 >/dev/null 2>&1 || { warn "python3 not found — skipping GPU report"; return 0; }
+    python3 "${SCRIPT_DIR}/gpu_report.py" "$tl" "$mk" 2>/dev/null | tee "${LOGDIR}/gpu-summary.txt"
+    echo "gpu timeline    -> ${tl}"
+    echo "gpu summary     -> ${LOGDIR}/gpu-summary.txt"
+}
+start_gpu_sampler
+
+# Reset clocks / stop the sampler on any exit from here on. Superseded below by a
+# combined handler once the Certus-SPDK server exists, so an early exit here still
+# unpins the GPU and reaps the sampler.
+trap 'stop_gpu_sampler; unlock_gpu_clocks' EXIT
 
 img_exists()      { command podman image exists "$1" >/dev/null 2>&1; }
 img_exists_grpc() { command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" image exists "$1" >/dev/null 2>&1; }
@@ -517,6 +569,7 @@ run_container_bench() {  # variant image extra-args...
     local variant="$1" image="$2"; shift 2
     local extra=("$@") f="${LOGDIR}/${variant}.log"
     log "starting ${variant} (image ${image})"
+    gpu_mark start "$variant"
     command podman run --rm \
         --pull=never \
         --device "nvidia.com/gpu=${GPU}" \
@@ -570,7 +623,7 @@ stop_server() {
     wait "$SERVER_PID" 2>/dev/null
     SERVER_PID=""
 }
-trap 'stop_server; unlock_gpu_clocks' EXIT
+trap 'stop_server; stop_gpu_sampler; unlock_gpu_clocks' EXIT
 
 if want certus-spdk; then
     cs_skip=""
@@ -658,6 +711,7 @@ if want certus-spdk; then
             fi
             log "server up on :50051 — launching gRPC client (network=${CLIENT_NET}, server=${cs_server})"
             f="${LOGDIR}/certus-spdk.log"
+            gpu_mark start "Certus-SPDK"
             IMAGE="$IMG_GRPC" \
             GPU="$GPU" \
             CERTUS_SERVER="$cs_server" \
@@ -820,6 +874,10 @@ if want tiered-cpu-fs; then
             -e "DISK_DEV=${DISK_DEV}"
     fi
 fi
+
+# ── GPU utilization report (stop the sampler first so the CSV is complete) ─────
+stop_gpu_sampler
+gpu_report
 
 # ── Emit results.json ─────────────────────────────────────────────────────────
 json="${LOGDIR}/results.json"
