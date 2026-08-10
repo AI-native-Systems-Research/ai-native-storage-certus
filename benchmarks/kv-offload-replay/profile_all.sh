@@ -457,6 +457,50 @@ else
     warn "nvidia-smi not found — cannot verify GPU availability"
 fi
 
+# ── Pin GPU clocks for stable cross-backend timing ──
+# The A30/A100 auto-boost clock drifts with temperature and power draw across
+# back-to-back runs, so generation throughput (and thus wall time) wanders even
+# on byte-identical work — measured ~12% wall spread on repeat Certus-SPDK runs,
+# larger than the backend differences we're trying to measure. Lock every GPU to
+# its OWN max SM clock (queried per host, never hardcoded) and enable persistence
+# mode so all four backends see the same clock. Applies host-wide (the bench uses
+# GPU=all). Needs root; this is a stability knob, so warn-and-continue if we can't
+# — and always reset to auto-boost on exit (see the EXIT trap) so the GPU isn't
+# left pinned after the run.
+GPU_CLOCK_LOCKED=0
+lock_gpu_clocks() {
+    command -v nvidia-smi >/dev/null 2>&1 || return 0
+    local maxsm
+    maxsm="$(nvidia-smi --query-gpu=clocks.max.sm --format=csv,noheader,nounits 2>/dev/null | sort -rn | head -1)"
+    if [[ ! "$maxsm" =~ ^[0-9]+$ ]]; then
+        warn "could not read GPU max SM clock — leaving clocks on auto-boost (runs may drift ~10%)"
+        return 0
+    fi
+    # Acquire sudo non-fatally (the storage-backend preflight may not have run for
+    # a GPU-only variant). Cached/NOPASSWD works headless; else prompt once here.
+    if ! sudo -n true 2>/dev/null && ! sudo -v; then
+        warn "no sudo — cannot pin GPU clocks; generation throughput may drift across backends"
+        return 0
+    fi
+    if sudo -n nvidia-smi -pm 1 >/dev/null 2>&1 \
+       && sudo -n nvidia-smi -lgc "${maxsm},${maxsm}" >/dev/null 2>&1; then
+        GPU_CLOCK_LOCKED=1
+        log "pinned GPU SM clock to ${maxsm} MHz (persistence on) — stable cross-backend timing"
+    else
+        warn "failed to pin GPU clocks (nvidia-smi -pm/-lgc) — continuing on auto-boost"
+    fi
+}
+unlock_gpu_clocks() {
+    [[ "${GPU_CLOCK_LOCKED:-0}" == 1 ]] || return 0
+    log "resetting GPU clocks to default (auto-boost)"
+    sudo -n nvidia-smi -rgc >/dev/null 2>&1 || warn "could not reset GPU clocks (sudo nvidia-smi -rgc)"
+    GPU_CLOCK_LOCKED=0
+}
+lock_gpu_clocks
+# Reset clocks on any exit from here on. Superseded below by a combined handler
+# once the Certus-SPDK server exists, so an early exit here still unpins the GPU.
+trap unlock_gpu_clocks EXIT
+
 img_exists()      { command podman image exists "$1" >/dev/null 2>&1; }
 img_exists_grpc() { command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" image exists "$1" >/dev/null 2>&1; }
 
@@ -526,7 +570,7 @@ stop_server() {
     wait "$SERVER_PID" 2>/dev/null
     SERVER_PID=""
 }
-trap stop_server EXIT
+trap 'stop_server; unlock_gpu_clocks' EXIT
 
 if want certus-spdk; then
     cs_skip=""
