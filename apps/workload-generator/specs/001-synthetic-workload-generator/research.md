@@ -158,6 +158,41 @@ Two conclusions:
 The generator can already express the *aggregate* of this through `topology.self_affinity`. What no
 trace can supply is the **placement** that produces it — see § What the traces cannot say about nodes.
 
+### Is cross-session sharing bursty or diffuse? — the shape behind FR-018e
+
+The cross-session ceiling says *how much* remote lookup could serve. This says *in what pattern*, which
+determines whether it faces thundering herds or steady demand — and it is measurable without any node
+information, because it is a question about time rather than placement.
+
+For each block first touched by session A and later by a **different** session B: the gap from A to B,
+and how many distinct sessions touch it within 10 s of first use.
+
+| Trace character | Cross-shared blocks | p50 gap | p90 gap | p50 herd ≤10 s | p99 herd |
+| --- | --- | --- | --- | --- | --- |
+| Agentic, transactional | 738 406 | 550 s | 878 428 s | 3 | 8 |
+| Agentic, long-context | 4 455 166 | 7 270 s | 105 233 s | 3 | 6 |
+| Production code assistant | 988 009 | 2 576 s | 6 138 s | 2 | 6 |
+| Production chat | 708 | 9 s | 2 181 s | 2 | 2 |
+
+**Sharing is diffuse, not bursty.** Minutes to hours pass between the first and second session touching
+a shared block, and herds are 2–3. That is **template-shaped** — a system prompt or tool definitions
+that many sessions independently start from, spread over time — not **fan-out-shaped**, where one
+parent's children would all hit a fresh deep prefix within seconds.
+
+So the agent-fan-out workload that motivates remote lookup **does not appear in this data**, which is
+why FR-018e disables it by default and requires the Test Matrix to label it as a modelled hypothesis.
+
+**The confound, which makes this weak evidence for absence rather than proof.** The agentic traces are
+benchmark *executions*. If the harness runs agents sequentially rather than concurrently — plausible,
+and not something the manifests record — it would inflate every gap and flatten every herd even if the
+production system fans out hard. A negative result from a serialised harness is uninformative about a
+concurrent deployment. Two further caveats: the p90 gaps of 10-29 hours indicate these traces span long
+wall-clock periods with idle stretches, so gap percentiles are sensitive to how the collection was
+assembled; and the chat trace's 708 cross-shared blocks are too few for its 9 s median to mean much.
+
+What would settle it is a trace with node or GPU attribution, or one collected from a concurrent agent
+deployment with real arrival times. Neither is in hand.
+
 ### What the traces cannot say about nodes
 
 **No trace in the collection carries node or GPU attribution of any kind.** There is no field for

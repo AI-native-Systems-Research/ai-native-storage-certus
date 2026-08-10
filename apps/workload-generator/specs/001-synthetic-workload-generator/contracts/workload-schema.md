@@ -513,6 +513,24 @@ workload:
     # Blocks added by each turn after the first. Drawn once PER TURN, not per session.
     growth_per_turn: {dist: lognormal, median: 6, sigma: 0.5}
 
+    # AGENT FAN-OUT. A session may spawn children that inherit its context and run
+    # elsewhere -- the shape of an agent delegating sub-tasks to other nodes/GPUs.
+    # This is the archetypal remote-lookup workload: the inherited prefix was minted
+    # by the parent and is resident on the PARENT's node, while the children asking
+    # for it are somewhere else, all at once. `self_affinity` cannot produce this --
+    # a per-request coin flip gives the right average remote fraction with the wrong
+    # structure, because a fan-out is correlated in BOTH node and time.
+    # Disabled by default (`fanout: 0`): measured traces show diffuse, template-like
+    # sharing rather than fan-out bursts, so a burst pattern must be asked for
+    # explicitly and never assumed (see spec FR-018e).
+    spawn:
+      fanout: 0                                  # children per spawning session; 0 = off
+      probability: 0.0                           # fraction of sessions that spawn
+      at_turn: {dist: geometric, mean: 2}        # which turn triggers the spawn
+      depth: inherit_all                         # inherit_all | {dist: ...} prefix depth
+      generations: 1                             # 1 = children do not themselves spawn
+      placement: other_nodes                     # other_nodes (default) | any | same_node
+
   # Weighted mixture over the SAME session model — each entry is a parameter set,
   # not a distinct code path. Weights are normalised, not required to sum to 1.
   # Any `sessions` field may be overridden. No `corpus` field may be: a mixture entry
@@ -530,6 +548,36 @@ Sessions are sticky in the root, not in the branch: turn N+1 re-reads turn N's b
 extends the path by `growth_per_turn`, so **intra**-session reuse comes from `turns` while
 **inter**-session reuse comes from `corpus.trees`. Those are the two mechanisms of design
 rule 3, and neither is expressible in the other's section.
+
+### Agent fan-out, and the two invariants it bends
+
+A spawn is the one place where **one session reads another session's private keys**, and that is
+exactly why it generates remote traffic: the inherited prefix was *minted* by the parent, so it lives
+on the parent's node, while the children asking for it are elsewhere and arrive together.
+
+Two existing invariants have to be stated more precisely for this to be coherent, and neither is
+weakened:
+
+1. **Private namespaces are per-*minter*, not per-reader.** A private key is
+   `H(parent_id, PRIVATE_TAG, minting_session_id, i)`, so a spawned child's inherited prefix keeps the
+   **parent's** id in the tag, and the child mints in its own namespace only below the spawn point.
+   Two sessions still cannot *collide*, because minting is still per-session; what a declared lineage
+   adds is the ability to *read* along it. Without this the child would compute different keys for the
+   parent's context, silently turning a fan-out into a cache miss storm and measuring nothing.
+2. **A parent's private keys die when the parent *and all its descendants* have retired** — a
+   lineage-scoped lifetime rather than a session-scoped one. Otherwise a parent that finishes while
+   its children are still working would take their context with it.
+
+That second rule is reference counting, and it is worth naming as such: refcounting was rejected for
+the shared trunk (§ Shared content churns on its own schedule) because content lifecycle there is
+independent of readers and refcount-zero never fires near the root. Within a lineage the relationship
+is the opposite — the children *are* the readers, the parent's context exists precisely for them, and
+the count is small and known. Same mechanism, right scope.
+
+**`spawn` and `self_affinity` are independent and both may be set**, but the report MUST then
+attribute remote traffic to each separately: one is structural and bursty, the other is a smooth
+per-request probability, and a single aggregate remote fraction would hide which mechanism produced
+it.
 
 ### Sessions are born and retired, so a run has no natural end
 
@@ -619,10 +667,21 @@ either is a schema error (spec FR-007).
 topology:
   nodes: [node2, node7, node9, node11]
 
+  # How a SESSION maps onto nodes. Default `sticky`: a session binds to one node at
+  # birth, exactly as it binds to one root, because a session's KV lives wherever it
+  # was computed. Under `per_request` each request is placed independently, which
+  # makes a session remotely fetch its OWN earlier turns -- occasionally what you
+  # want to measure, never what a deployment does, and it drowns the cross-session
+  # signal. Sessions are still distributed uniformly over nodes in aggregate, and
+  # there are still no requester/holder roles.
+  placement: sticky           # sticky (default) | per_request
+
   # Probability that the node asking for a key is one of the nodes that earlier
   # asked for it -- i.e. how much the per-node request streams overlap.
   # 1.0 = each node walks its own keys and no key is ever shared across nodes;
   # 0.0 = a key is always asked for by a node other than the ones that saw it.
+  # This is the STRUCTURE-FREE dial: it hits a target remote fraction without
+  # saying why. For structured remote traffic see workload.sessions.spawn.
   self_affinity: 0.25
 
   # How many distinct nodes ask for the same key, across the whole run.
@@ -826,6 +885,14 @@ The generator rejects, rather than silently accepting:
     overlong run fills the filesystem (spec FR-021d).
 21. `unbounded: true` with a **file** output mode (spec FR-021e). Unbounded is meaningful only when
     nothing accumulates — that is, when driving a server directly.
+22. `spawn.fanout > 0` with fewer than two `topology.nodes` under `placement: other_nodes`, since
+    there is nowhere else for a child to go. Also rejected: `spawn.generations < 1`, a
+    `spawn.probability` outside `[0, 1]`, and `spawn.fanout > 0` with `spawn.probability: 0` or the
+    reverse — a half-configured fan-out that silently does nothing.
+23. `spawn.fanout > 0` together with `topology.placement: per_request`. Per-request placement already
+    scatters a session across nodes, so the fan-out's defining property — an inherited prefix resident
+    on one specific node — does not hold, and the measurement would attribute to fan-out what
+    placement caused.
 
 ## Worked example — the headline mixture experiment
 

@@ -31,7 +31,7 @@ two configurations of one — is a controlled experiment.
   events.<node>.bin    # optional pre-partitioned per-node slices
 ```
 
-### `manifest.json`
+## `manifest.json`
 
 ```json
 {
@@ -128,6 +128,19 @@ rather than a behavioural mode.
 
 `depth` is retained even though it equals the key's ordinal within its request, because deriving
 it would require scanning back to `REQUEST_START` and so would defeat indexing by ordinal.
+
+### Agent-fan-out lineage is derived, not stored
+
+A spawned child (spec FR-018c) inherits its parent's prefix, and the record gains **no parent-session
+field** for it. None is needed: keys are unique to their path, so a child's leading keys *are* the
+parent's, and lineage is recovered by prefix-matching the key sequences. Grouping a report by fan-out
+family means grouping by that shared prefix.
+
+This is deliberate rather than a saving. A `parent_session` field would widen the record past 40 bytes
+to 48 once aligned, for information already present; and it would be a second, independently-writable
+statement of the same fact, so a plan could assert a lineage its keys contradict. The one thing that
+must hold is that the child's inherited keys carry the **parent's** minting id (FR-009c), which is a
+property of key derivation rather than of this format.
 
 ### Changing this record requires a `plan_format` bump
 

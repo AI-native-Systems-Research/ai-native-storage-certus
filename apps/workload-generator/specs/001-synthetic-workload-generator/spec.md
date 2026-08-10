@@ -624,6 +624,57 @@ rest on one file.
   excerpt, so the stated test was both impossible and prohibited. It is now the round trip, with
   fitting a real trace kept as a separate non-CI check.
 
+### Session 2026-08-09 (multi-node placement and agent fan-out)
+
+- Q: Can anything about multi-node access be intuited from the available traces? → A: **Nothing about
+  placement, but two things that constrain it.** No trace carries node or GPU attribution of any kind,
+  so placement is unfittable and FR-019b requires `fit` to leave it unset rather than invent it. What
+  the traces *do* give is (1) a hard **ceiling**: remote lookup can only serve content some *other*
+  session touched first, and separating that from a session's own earlier turns — which are local under
+  any sane placement — puts remotely-servable prefix at 468 blocks per request for long-context agentic
+  work against **1 block** for chat, a ~300× spread; and (2) the **shape** of that sharing over time,
+  which needs no node information because it is a question about when rather than where.
+- Q: What is that shape? → A: **Diffuse, not bursty**, which was not what I expected. The median gap
+  between the first session touching a shared block and a *different* session doing so ran from 9
+  minutes to 2 hours, with 2–3 sessions touching any block inside a 10-second window. That is
+  template-like sharing — a system prompt or tool definitions many sessions independently start from —
+  not fan-out-like, where one parent's children hit a fresh deep prefix at once. **The workload that
+  motivates remote lookup does not appear in the data.**
+- Q: Then should fan-out be modelled at all? → A: **Yes, but explicitly and labelled.** The negative
+  result is confounded: the agentic traces are benchmark *executions*, and a harness running agents
+  sequentially would inflate every gap and flatten every herd even if production fans out hard. So
+  absence here is weak evidence, not proof. FR-018e therefore disables fan-out by default, makes the
+  default multi-node preset diffuse, and requires the Test Matrix to carry **both** — labelling the
+  diffuse case evidence-based and the fan-out case a modelled hypothesis. The failure this avoids is
+  measuring remote lookup against a burst pattern no observed workload exhibits and reporting the number
+  as representative.
+- Q: Why can `self_affinity` not just express fan-out? → A: **Because it is a per-request probability
+  and a fan-out is a correlation.** It reproduces any target average remote fraction with the wrong
+  structure: real fan-out is correlated in **both node and time** — N children on N nodes asking for the
+  *same* prefix at the *same* moment. No independent coin flip generates that, which is also why the
+  thundering-herd row of the Test Matrix had nothing to produce it. So `spawn` (FR-018c) is a structural
+  mechanism alongside `self_affinity` as the structure-free dial, and when both are on the report must
+  attribute remote traffic to each separately.
+- Q: Does placement need anything else first? → A: **Session-sticky placement, which was missing and is
+  now the default** (FR-019a). Placement had been an independent draw per request, which makes a session
+  remotely fetch *its own* earlier turns — something no deployment does, and which swamps the
+  cross-session traffic a remote-lookup measurement exists to isolate. A session's KV lives where it was
+  computed, so it binds to a node at birth exactly as it binds to a root. Still uniform in aggregate and
+  role-free, so FR-019 is untouched.
+- Q: Did fan-out break an existing invariant? → A: **Yes, and catching it mattered.** FR-009c keyed
+  private namespaces on `session_id`, so a child could not compute its parent's private keys at all —
+  it would derive *different* keys for the inherited context and every fan-out would become a miss storm
+  that looks like a cache result but is a generator artifact. FR-009c is now keyed on the **minting**
+  session, so an inherited prefix keeps the parent's id while the child mints its own below the spawn
+  point. Two sessions still cannot collide, because minting is still per-session; what a declared lineage
+  adds is permission to *read* along it.
+- Q: And session lifetime? → A: **A second amendment, FR-018d.** A parent's private keys must live until
+  the parent *and every descendant* has retired, or a parent finishing first takes its children's context
+  with it. That is **reference counting** — and it is correct here for precisely the reason it was wrong
+  for the shared trunk (FR-016c): within a lineage the children *are* the readers, the parent's context
+  exists for them, and the count is small and known, whereas trunk content has a lifecycle independent of
+  its readers and its refcount never reaches zero near the root. Same mechanism, right scope.
+
 ### Dependencies on other components (implied by the above)
 
 1. **`apps/certus-server-yaml` / `apps/certus-server` proto** — add `served_by` to
@@ -833,6 +884,21 @@ counter is ~zero.
 8. **Given** any remote hit, **When** it is attributed, **Then** the reported tier is the
    peer's *advertisement*, and the report MUST label it as such rather than as serve-time
    ground truth. No wire-protocol change is available to obtain the latter.
+9. **Given** `placement: sticky` (the default), **When** the run completes, **Then** no session
+   remotely fetches a key that only it has ever asked for — a session's own earlier turns are
+   local — so the measured remote traffic is cross-session traffic and nothing else (FR-019a).
+10. **Given** `spawn.fanout: 8` on a 4-node cluster, **When** a parent spawns, **Then** its
+    children run on other nodes, ask for the parent's inherited prefix within a short window, and
+    the report shows both the resulting burst and how many distinct remote fetches the prefix
+    actually cost — which is remote-lookup's single-flight dedup measured against a load that
+    generates it structurally rather than by a per-request coin flip (FR-018c).
+11. **Given** a parent whose `turns` complete well before its children's, **When** the children
+    request the inherited prefix, **Then** they hit rather than miss: a parent's private keys stay
+    live until every descendant has retired (FR-018d). A miss here would be a generator defect
+    presented as a cache result.
+12. **Given** both `spawn` and a non-default `self_affinity`, **When** the report is produced,
+    **Then** remote traffic is attributed to each mechanism separately rather than as one
+    aggregate fraction, since one is a structural burst and the other a smooth probability.
 
 ---
 
@@ -1086,9 +1152,13 @@ report segments statistics into before/after windows around the event.
   seed. Every segment's `fanout` MUST be at least 1, so the trunk is unbounded in depth and no
   session can run off the end of it.
 - **FR-009c**: Descents below `shared_depth` MUST draw from a child namespace disjoint from
-  the trunk's — `child_id = H(parent_id, PRIVATE_TAG, session_id, i)` — so that two sessions
+  the trunk's — `child_id = H(parent_id, PRIVATE_TAG, minting_session_id, i)` — so that two sessions
   can never collide on a private node. Without this, private branches would be only
-  probabilistically private and the FR-007 separation would leak undetectably.
+  probabilistically private and the FR-007 separation would leak undetectably. The namespace is keyed
+  on the session that **mints** the key, not the one reading it: for an ordinary session the two are
+  the same, and for an agent fan-out (FR-018c) a child's inherited prefix keeps the **parent's** id, so
+  the child computes the parent's keys rather than different ones. Keying it on the reader would turn
+  every fan-out into a miss storm that looks like a cache result but is an artifact of the generator.
 - **FR-009a**: Each session MUST bind to exactly one root, drawn once at session creation
   from `roots.popularity` and fixed for the session's lifetime, so that many sessions map to
   one root and every turn of a session starts from the same key.
@@ -1284,6 +1354,29 @@ report segments statistics into before/after windows around the event.
   across nodes and the request streams that arrive at each node are a genuine property of the
   workload. It MUST be expressed without reference to any specific system: the generator states
   which node asks for which key at which time, and nothing about what any node stores.
+- **FR-018c**: The generator MUST support **agent fan-out**: a session MAY spawn a configurable
+  number of child sessions, at a drawn turn, which **inherit the parent's prefix** and are placed on
+  **other nodes** by default. This is the archetypal remote-lookup workload — the inherited prefix was
+  minted by the parent and is resident on the parent's node while the children asking for it are
+  elsewhere and arrive together — and `self_affinity` **cannot** express it: a per-request probability
+  reproduces the average remote fraction with the wrong structure, because a fan-out is correlated in
+  both node and time. It is also what generates the thundering-herd case the Test Matrix has long
+  listed and nothing produced. Both mechanisms MAY be enabled together, in which case the report MUST
+  attribute remote traffic to each separately rather than presenting one aggregate fraction.
+- **FR-018d**: A spawning parent's private keys MUST remain live until the parent **and every
+  descendant** has retired — a lineage-scoped lifetime rather than the session-scoped one of FR-014b —
+  since otherwise a parent finishing first takes its children's context with it. This is reference
+  counting, and it is correct **here** for the reason it was wrong for the shared trunk (FR-016c):
+  within a lineage the children *are* the readers, the parent's context exists for them, and the count
+  is small and known, whereas trunk content has a lifecycle independent of readers and its refcount
+  never reaches zero near the root.
+- **FR-018e**: Fan-out MUST be **disabled by default**, and the default multi-node preset MUST be
+  diffuse. Measured cross-session sharing is template-like, not bursty: in the traces examined the
+  median gap between the first session touching a shared block and a *different* session doing so ran
+  from 9 minutes to 2 hours, with 2–3 sessions touching it inside any 10-second window. A burst
+  pattern must therefore be asked for explicitly, so that a remote-lookup result is never reported as
+  representative when it was measured against a shape no observed workload exhibits. The Test Matrix
+  MUST carry both cases and MUST label which is evidence-based and which is hypothesis-based.
 - **FR-019**: Request placement MUST be uniform across nodes by default, and the schema MUST
   NOT provide dedicated requester or holder node roles. Every node both requests and, so far as
   the workload is concerned, is indistinguishable from every other.
@@ -1297,6 +1390,18 @@ report segments statistics into before/after windows around the event.
 
 ### Plan artifact and determinism
 
+- **FR-019a**: Session-to-node placement MUST default to **sticky** — a session binds to one node at
+  birth, as it already binds to one root (FR-009a) — because a session's KV lives where it was
+  computed. A `per_request` mode MAY be offered for deliberate comparison, but MUST NOT be the default:
+  placing each request independently makes a session remotely fetch **its own** earlier turns, which no
+  deployment does and which swamps the cross-session traffic a remote-lookup measurement is trying to
+  isolate. Sticky placement remains uniform in aggregate and role-free, so FR-019 is unaffected.
+- **FR-019b**: Placement — which node asks for what, how sessions map to nodes, and whether a spawned
+  child lands elsewhere — MUST NOT be fitted from a trace, and `fit` MUST leave every placement field
+  unset. **No available trace carries node or GPU attribution of any kind**, so any fitted value would
+  be invented. What a trace *does* bound is the ceiling: remote lookup can only ever serve content some
+  other session touched first, so the measured cross-session sharing fraction is a hard upper bound on
+  remotely-servable traffic under any placement, and `fit` SHOULD report it for exactly that purpose.
 - **FR-021a**: The generator MUST support three **output modes**, exactly one of which involves
   Certus: (1) drive a Certus server directly, presenting the generated keys as lookups and storing
   what missed; (2) write a `.jsonl` trace file; (3) write a parquet trace file. Modes 2 and 3 MUST
@@ -1714,7 +1819,11 @@ not a claim that the generator measures any of it.
 | **Affinity sweep** | `self_affinity` 0.0→1.0 | The remote-hit fraction directly; the single most useful remote knob |
 | **Replication sweep** | `nodes_per_key` 1→N | How the number of nodes that ask for the same key affects a consumer's lookup path — for Certus, whether a wider quorum is reached sooner at the cost of loading more responders |
 | **Cold storm** | `cold_fraction` 0.05→0.30 | The cost of keys nothing has seen before. A consumer may spend its full lookup deadline on each, so a high-`cold_fraction` workload can be *entirely* deadline-dominated — the case most likely to surprise |
-| **Thundering herd** | many nodes, one absent-then-arriving key | remote-lookup's single-flight dedup: distinct fetches issued per key |
+| **Diffuse sharing** *(evidence-based)* | `placement: sticky`, `spawn` off, cross-session sharing from a shared trunk | The shape measured in real traces: many sessions independently starting from common content, minutes to hours apart, 2-3 touching any block within 10 s. This is the **default** multi-node case and the one a headline remote-lookup number should come from |
+| **Agent fan-out** *(hypothesis-based)* | `spawn.fanout` 2→16, `placement: other_nodes` | Agents delegating sub-tasks to other nodes/GPUs: children inherit a prefix minted on the parent's node and ask for it together. Not observed in the traces examined — though those are benchmark executions that may serialise agent runs — so results MUST be labelled as a modelled hypothesis, not as measured behaviour |
+| **Fan-out generations** | `spawn.generations` 1→3 at low `fanout` | Whether a deep agent tree behaves like a wide one. Each generation moves the shared prefix one hop further from its minter, so the fraction of remote fetches that are *second-hand* rises |
+| **Lineage lifetime** | a parent whose `turns` end well before its children's | FR-018d's lineage-scoped lifetime: the parent's context must stay live for its descendants. Gets it wrong and children see a miss storm that looks like a cache result |
+| **Thundering herd** | many nodes, one absent-then-arriving key | remote-lookup's single-flight dedup: distinct fetches issued per key. `spawn` is what generates it: N children asking for one prefix at once |
 | **Node hotspot** | `roots.popularity` skewed so one node's stream carries the popular roots | Saturation of whichever node the consumer ends up serving those keys from |
 | **Membership churn** | `membership_events` mid-run | Graceful degradation vs a hit-rate cliff |
 
