@@ -44,12 +44,16 @@ There is no offload tier, so no `CPU_BYTES` / `DRAM`.
 
 ### Container
 A self-contained image (`Dockerfile.nooffload`) packages the driver + dataset on
-the same `vllm/vllm-openai:v0.20.0` base as the other bench images. No server, no
+a `vllm/vllm-openai` base (default `v0.23.0`; override with `--build-arg
+VLLM_VERSION=...`) — the same base family as the other bench images. No server, no
 gRPC, no `--ipc=host`, and no offload tier to size. Its `ENV` defaults match this
 section (`NUM_CONVS=450`, 450×12 dataset).
 ```bash
 # build from the repo root (context needs the bench dir + dataset)
 podman build -f benchmarks/kv-offload-replay/Dockerfile.nooffload -t certus-nooffload-bench .
+# ...or pin a newer vLLM (tag the image so versions don't collide):
+podman build --build-arg VLLM_VERSION=0.26.0 \
+    -f benchmarks/kv-offload-replay/Dockerfile.nooffload -t certus-nooffload-bench:vllm0.26 .
 # run (GPU required; mount the HF cache)
 podman run --rm --device nvidia.com/gpu=all \
     -v $HOME/.cache/huggingface:/root/.cache/huggingface \
@@ -105,12 +109,19 @@ default 4 GiB) · `TRACE_OFFLOAD` (0 = built-in connector, no tracing — defaul
 
 ### Container
 A self-contained image (`Dockerfile.cpu-offload`) packages the driver + dataset
-on the same `vllm/vllm-openai:v0.20.0` base as the Certus gRPC image. No server,
-no gRPC, no `--ipc=host`. Its `ENV` defaults match this section (`NUM_CONVS=450`,
-`CPU_BYTES=16 GiB`, `TRACE_OFFLOAD=0`, 450×12 dataset).
+on a `vllm/vllm-openai` base (default `v0.23.0`; override with `--build-arg
+VLLM_VERSION=...`). No server, no gRPC, no `--ipc=host`. Its `ENV` defaults match
+this section (`NUM_CONVS=450`, `CPU_BYTES=16 GiB`, `TRACE_OFFLOAD=0`, 450×12
+dataset). Note: the in-process `CPUOffloadingSpec`/`OffloadingConnector` API
+shifted across vLLM releases (the same multi-region change that broke the gRPC
+path at 0.23+), so a newer-version image builds but the driver may need
+connector-side fixes to run.
 ```bash
 # build from the repo root (context needs the bench dir + dataset)
 podman build -f benchmarks/kv-offload-replay/Dockerfile.cpu-offload -t certus-cpu-offload-bench .
+# ...or pin a newer vLLM:
+podman build --build-arg VLLM_VERSION=0.26.0 \
+    -f benchmarks/kv-offload-replay/Dockerfile.cpu-offload -t certus-cpu-offload-bench:vllm0.26 .
 # run (GPU required; mount the HF cache; free hugepages first if host was in Certus mode)
 podman run --rm --device nvidia.com/gpu=all \
     -v $HOME/.cache/huggingface:/root/.cache/huggingface \
@@ -167,13 +178,19 @@ Same workload knobs as above, plus: `DRAM` (staging buffer bytes →
 `BENCH_CPUS` (`0-15,32-47`) · `SKIP_PREFLIGHT=1` to bypass the host checks.
 
 ### Container
-`Dockerfile.sharedstorage` packages the driver + dataset on the same
-`vllm/vllm-openai:v0.20.0` base as the other backends. The catch: the
-`llmd_fs_backend` connector is a **compiled torch C++ extension** living in a
-separate repo, so it must be built into a wheel whose torch/CUDA/GPU-arch match
-this base image. `build-sharedstorage.sh` does that in two steps — it reuses the
-connector repo's *own* `Dockerfile.wheel` (no bespoke build logic) with build
-args overridden to match, then builds the runtime image installing that wheel.
+`Dockerfile.sharedstorage` packages the driver + dataset on a `vllm/vllm-openai`
+base (default `v0.23.0`) as the other backends. The catch: the `llmd_fs_backend`
+connector is a **compiled torch C++ extension** living in a separate repo, so it
+must be built into a wheel whose torch/CUDA/GPU-arch match this base image.
+`build-sharedstorage.sh` does that in two steps — it reuses the connector repo's
+*own* `Dockerfile.wheel` (no bespoke build logic) with build args overridden to
+match, then builds the runtime image installing that wheel.
+
+To target a newer vLLM, pass `VLLM_VERSION` to the helper — **but** because the
+wheel's ABI is pinned to the base's torch/CUDA, you must also set the matching
+`TORCH_VERSION`/`TORCH_CUDA_INDEX`/`CUDA_BASE_TAG` (below), or the extension
+fails to load at runtime. `VLLM_VERSION` alone only re-bases the runtime image,
+not the wheel.
 
 ```bash
 # 1+2. Build the wheel (matched args) then the image. Defaults target this host
@@ -185,6 +202,8 @@ args overridden to match, then builds the runtime image installing that wheel.
 #        TORCH_CUDA_ARCH_LIST              — target GPU compute cap
 #          (check: nvidia-smi --query-gpu=compute_cap --format=csv,noheader)
 #        FS_BACKEND_DIR                    — path to the llmd_fs_backend repo
+#        VLLM_VERSION                      — runtime base tag (default 0.23.0);
+#          if bumped, set the torch args above to match or the wheel won't load
 benchmarks/kv-offload-replay/build-sharedstorage.sh
 
 # Run: bind-mount the host RAID (from configure-bench.sh sharedstorage) + HF cache.

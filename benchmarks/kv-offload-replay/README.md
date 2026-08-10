@@ -12,6 +12,16 @@ evictions without re-running the model.
 > CPU-offload and SharedStorage backends, and `../../certus-grpc-connector/README.md`
 > for the Certus gRPC path.
 
+> **All four backends' container files live here.** The NoOffload / CPU-offload /
+> SharedStorage images are built from `Dockerfile.{nooffload,cpu-offload,sharedstorage}`
+> in this directory. The Certus gRPC backend's container files are **symlinks** into
+> `../../certus-grpc-connector/` (`Dockerfile.certus-grpc`, `run-bench-certus-grpc.sh`,
+> `docker-entrypoint-certus-grpc.sh`) — the real files stay there because that image's
+> build needs the connector Python package in its context, but building via the symlink
+> works (build context is still the repo root: `podman build -f
+> benchmarks/kv-offload-replay/Dockerfile.certus-grpc -t certus-grpc-bench .`). All four
+> Dockerfiles take `--build-arg VLLM_VERSION=<x.y.z>` (default `0.23.0`).
+
 ## Files
 
 | File | Purpose |

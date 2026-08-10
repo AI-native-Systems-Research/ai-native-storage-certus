@@ -63,6 +63,7 @@ if __name__ == "__main__":
     GPU_MEM_UTIL = float(os.environ.get("GPU_MEM_UTIL", 0.90))
     CPU_BYTES = int(os.environ.get("CPU_BYTES", 4 * (1 << 30)))
     MODEL = os.environ.get("MODEL", "NousResearch/Meta-Llama-3-8B")
+    MAX_ROUNDS = int(os.environ.get("MAX_ROUNDS", 0))  # 0 = until convs exhausted
 
     PROMPT_BUDGET = MAX_MODEL_LEN - OUTPUT_TOKENS
     print(f"[run] model={MODEL}", file=sys.stderr)
@@ -167,6 +168,8 @@ if __name__ == "__main__":
     t_start = time.perf_counter()
 
     while True:
+        if MAX_ROUNDS and rounds_done >= MAX_ROUNDS:
+            break
         # Build this round's batch
         active_idx = []
         active_prompts = []

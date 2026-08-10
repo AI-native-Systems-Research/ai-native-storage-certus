@@ -18,7 +18,10 @@
 #       certus-cpu-offload-bench
 #   # docker equivalent: --gpus all
 
-FROM docker.io/vllm/vllm-openai:v0.20.0
+# vLLM version is a build-time choice (default 0.23.0); override with
+#   podman build --build-arg VLLM_VERSION=0.26.0 ...
+ARG VLLM_VERSION=0.23.0
+FROM docker.io/vllm/vllm-openai:v${VLLM_VERSION}
 ENTRYPOINT []
 
 # GPU is REQUIRED at run time (vLLM loads the model on the GPU). WHICH GPU is a
