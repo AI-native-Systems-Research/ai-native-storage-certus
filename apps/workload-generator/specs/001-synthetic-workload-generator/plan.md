@@ -64,26 +64,32 @@ warning-free, public APIs documented with runnable examples.
 
 *GATE: must pass before Phase 0. Re-checked after Phase 1.*
 
-**The constitution cannot be evaluated: `.specify/memory/constitution.md` is an unfilled template.**
-Every principle is still a `[PRINCIPLE_N_NAME]` / `[PRINCIPLE_N_DESCRIPTION]` placeholder, the
-governance section is `[GOVERNANCE_RULES]`, and the version is `[CONSTITUTION_VERSION]`. There are
-therefore no gates to pass or violate, and reporting a pass would be reporting on nothing.
+Evaluated against `apps/workload-generator/.specify/memory/constitution.md` v1.0.0.
 
-Rather than invent principles, this plan is checked against the repo's **actual** written standards
-in `CLAUDE.md`, which is what the codebase is really held to:
+**Provenance note.** This constitution was authored for this app, not inherited. The
+repository-level `.specify/memory/constitution.md` is an unfilled template, and `specify init`
+scaffolds a fresh template rather than copying a parent's — which is why 7 of the 17 constitutions in
+this repository are still placeholders. Ten components have filled ones, individually written; they
+share a recognisable core but only two are identical. This app is not a component, so the
+component-framework-conformance and interface-only-exposure principles those open with are
+deliberately absent, replaced by principle I.
 
-| Standard (`CLAUDE.md`) | Status | Note |
+| Principle | Verdict | Evidence in this plan |
 | --- | --- | --- |
-| `rustfmt` default formatting | **Will comply** | No deviation needed |
-| `clippy -D warnings` | **Will comply** | Warnings are errors |
-| Public APIs documented, runnable examples, `cargo doc --no-deps` clean | **Will comply** | `workload-model` is the public surface and carries the doc burden |
-| Criterion benchmarks for performance-sensitive code | **Required here** | FR-037 and SC-004 are performance claims; they need benchmarks, not assertions |
-| `unsafe` requires `// SAFETY:` justification | **Expected to be N/A** | No `unsafe` is anticipated outside the runner's CUDA externs |
-| Default build excludes SPDK/hardware crates | **Complies, and extends it** | Three of four crates are default members; the runner is `members` only, and SC-012 adds the same discipline for `arrow` |
-| Components accessed only through interfaces | **N/A by construction** | FR-034 removed the only interface dependency (`IEvictionPolicy`) when cache simulation was deferred |
+| I. Consumer Independence *(non-negotiable)* | **PASS** | FR-018a; no `system:` section; attribution relayed not derived (FR-039d); `stats/` carries no capacity concept |
+| II. Determinism and Reproducibility | **PASS** | Path-computable keys (FR-009b); fanout keyed on node not visit (FR-009e); O(live sessions) memory (FR-010) enabling unbounded runs (FR-021e) |
+| III. One Definition per Statistic | **PASS** | `workload-model::stats` is the sole implementation; FR-021i forbids reimplementation. This principle is the reason the layout has a library at all |
+| IV. Evidence over Assertion | **PASS** | `research.md` separates measurement from requirement; `target_occupancy = 4` labelled a judgement (FR-009g1); the diffuse-sharing confound recorded beside its result |
+| V. Loud Failure over Quiet Wrongness | **PASS** | FR-015b and validation rules 17, 20-23 reject rather than warn; FR-055e refuses a partial fit; FR-039a and SC-007a refuse to let an absent capability read as a pass |
+| VI. Code Quality and Correctness | **PASS, with an obligation** | fmt/clippy/doc standards adopted; **Criterion benchmarks are required, not optional**, because FR-037 and SC-004 are performance claims. Structural invariants (namespace disjointness, 40-byte record, digest agreement) must be *tested*, per the principle's second clause |
+| VII. Documentation as Contract | **PASS** | Three contracts written before implementation; reversals marked rather than deleted throughout the clarification log |
 
-**Recommendation, outside this plan's scope**: fill in the constitution, or delete it. An unfilled
-template silently disables a gate that every `/speckit.plan` run in this repo claims to check.
+**Platform and tooling requirements**: satisfied — three of four crates are default members, the
+runner is `members` only, and `parquet` is feature-gated off (SC-012 is the measurable form of that
+same requirement).
+
+**No violations to justify.** See § Complexity Tracking for two decisions recorded as deliberate
+complexity rather than as exceptions.
 
 ## Project Structure
 
@@ -140,16 +146,29 @@ Workspace wiring: add all four to `members`; add `workload-model`, `workload-gen
 `workload-trace` to `default-members`; leave `workload-runner` out, following the existing pattern
 and comment style already used for the SPDK crates and `remote-lookup`.
 
-### Branch note
+### Branch note, and the speckit setup that fixes it
 
-The spec lives at `apps/workload-generator/specs/001-synthetic-workload-generator/` while the current
+The spec lives at `apps/workload-generator/specs/001-synthetic-workload-generator/` while the git
 branch is `002-served-by-tier-attribution`, because this work began as a dependency of that feature.
-`.specify/scripts/bash/setup-plan.sh` derives its feature directory from the branch name and would
-therefore have created a stray `specs/002-served-by-tier-attribution/` at the repo root and copied
-the template into it; this plan was written to the correct path by hand instead. `apps/workload-generator`
-is not speckit-initialised (no `.specify/`), so nothing pins the mapping. Running the
-`tools-speckit-init` skill against `apps/workload-generator` would fix that durably; until then every
-speckit command in this feature needs the same manual redirection.
+The repository-level `.specify/scripts/bash/setup-plan.sh` derives its feature directory from the
+branch name, so it would have created a stray `specs/002-served-by-tier-attribution/` at the repo root
+and copied the template into it. This plan was therefore written to the correct path by hand.
+
+**Now fixed at the source.** `apps/workload-generator` has been speckit-initialised
+(`specify init . --integration claude --script sh`) with `.specify/feature.json` pinning
+`specs/001-synthetic-workload-generator`, so the app-local scripts resolve correctly and independently
+of the git branch — verified: `check-prerequisites.sh --json` returns this feature's directory and
+detects all four Phase 0/1 documents. Use the **app-local** scripts and skills under
+`apps/workload-generator/`, not the repository-level ones, for anything scoped to this feature.
+
+**Version skew to be aware of.** The installed CLI is `specify 0.12.12.dev0`, whereas every component
+in this repository was initialised with `0.5.1` (recorded in each `.specify/init-options.json`). So this
+app's templates, scripts and skill set are a later generation than the rest of the repository: it gains
+`speckit-converge`, `speckit-implement` and `speckit-taskstoissues`, and lacks the `speckit-drift` and
+`speckit-git-*` skills the components carry from the `spec-kit-sync` extension. That extension has
+deliberately **not** been installed here, since it fetches code from a URL; without it this app has no
+`extensions.yml` and therefore none of the automatic `before_plan` / `after_clarify` commit hooks. That
+is a difference in behaviour, not a defect — commits have been made explicitly throughout.
 
 ## Phased build order
 
