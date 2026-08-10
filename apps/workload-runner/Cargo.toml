@@ -1,0 +1,28 @@
+[package]
+name = "workload-runner"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# `certus-workload-run` -- drives a generated plan against a live Certus server.
+#
+# NOT a default workspace member: it needs a server, CUDA, and for multi-node
+# work a symmetric RDMA cluster.
+#
+# Follows `apps/remote-lookup-bench`'s precedent of declaring its handful of CUDA
+# entry points locally rather than depending on `gpu-services`, so that it never
+# forces `interfaces/spdk` onto a default build.
+#
+# Reports only what a client can observe, plus the per-entry labels the server
+# volunteers, plus arithmetic over those labels. It reports no eviction counts,
+# no promotion traffic and no byte provenance: each would need a model of the
+# consumer's internals, which is a separate work item belonging inside Certus
+# (spec § Out of Scope).
+[[bin]]
+name = "certus-workload-run"
+path = "src/main.rs"
+
+[dependencies]
+workload-model = { path = "../workload-model" }
+clap = { version = "4", features = ["derive"] }

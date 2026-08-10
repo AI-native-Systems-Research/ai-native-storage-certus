@@ -1,0 +1,25 @@
+[package]
+name = "workload-generator"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# `certus-workload` -- turns a compact YAML statement of a workload's statistics
+# into a deterministic plan artifact, and emits that plan as a JSONL interchange
+# trace.
+#
+# Parquet emission lives in `workload-trace` instead (spec FR-021h): a columnar
+# writer would put `arrow` in a crate that `cargo test --all` builds on every
+# run. FR-021c already required the interchange formats to be producible from an
+# existing events.bin without regenerating, so conversion was always independent
+# of generation.
+[[bin]]
+name = "certus-workload"
+path = "src/main.rs"
+
+[dependencies]
+workload-model = { path = "../workload-model" }
+serde_json = "1"
+serde_yaml = "0.9"
+clap = { version = "4", features = ["derive"] }

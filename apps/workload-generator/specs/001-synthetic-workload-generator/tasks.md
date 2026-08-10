@@ -33,12 +33,12 @@ Four crates per `plan.md` § Source code. Paths below are repo-relative.
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [ ] T001 Create the four crate skeletons with `Cargo.toml` manifests at `apps/workload-model/`, `apps/workload-generator/`, `apps/workload-trace/`, `apps/workload-runner/`
-- [ ] T002 Add all four to `members` in the workspace `Cargo.toml`, and add `workload-model`, `workload-generator`, `workload-trace` to `default-members`, leaving `workload-runner` out with an explanatory comment in the style of the existing SPDK entries
-- [ ] T003 [P] Declare `workload-model` dependencies in `apps/workload-model/Cargo.toml`: `serde`, `serde_yaml`, and `blake3` — noting this is the workspace's first hashing crate, fixed by `contracts/plan-format.md`'s `blake3:` digest prefix
-- [ ] T004 [P] Declare the `parquet` feature in `apps/workload-trace/Cargo.toml` with `arrow`/`parquet` as optional dependencies, **default off** (SC-012)
-- [ ] T005 [P] Add `criterion` as a dev-dependency and a `[[bench]]` target to `apps/workload-model/Cargo.toml`
-- [ ] T006 Verify `cargo build`, `cargo fmt --check` and `cargo clippy -- -D warnings` pass on the empty skeletons before any logic exists
+- [X] T001 Create the four crate skeletons with `Cargo.toml` manifests at `apps/workload-model/`, `apps/workload-generator/`, `apps/workload-trace/`, `apps/workload-runner/`
+- [X] T002 Add all four to `members` in the workspace `Cargo.toml`, and add `workload-model`, `workload-generator`, `workload-trace` to `default-members`, leaving `workload-runner` out with an explanatory comment in the style of the existing SPDK entries
+- [X] T003 [P] Declare `workload-model` dependencies in `apps/workload-model/Cargo.toml`: `serde`, `serde_yaml`, and `blake3` — noting this is the workspace's first hashing crate, fixed by `contracts/plan-format.md`'s `blake3:` digest prefix
+- [X] T004 [P] Declare the `parquet` feature in `apps/workload-trace/Cargo.toml` with `arrow`/`parquet` as optional dependencies, **default off** (SC-012)
+- [X] T005 [P] Add `criterion` as a dev-dependency and a `[[bench]]` target to `apps/workload-model/Cargo.toml`
+- [X] T006 Verify `cargo build`, `cargo fmt --check` and `cargo clippy -- -D warnings` pass on the empty skeletons before any logic exists
 
 **Checkpoint**: workspace compiles, the four crates exist, and the default build pulls in no `arrow`.
 

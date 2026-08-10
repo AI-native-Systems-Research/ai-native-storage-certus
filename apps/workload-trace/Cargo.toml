@@ -1,0 +1,37 @@
+[package]
+name = "workload-trace"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# `certus-trace` -- fits a workload model from a real trace, validates a
+# generated plan against one, and converts a plan into the parquet interchange
+# container.
+#
+# A separate binary from `certus-workload` because the two point in opposite
+# directions: the generator turns parameters into keys, `fit` turns keys into
+# parameters. Different inputs, different failure modes, no shared control flow.
+#
+# `arrow`/`parquet` are behind a DEFAULT-OFF feature (spec SC-012). This crate is
+# still a default workspace member, because excluding it would leave `fit` and
+# `validate` untested by `cargo test --all` -- worse than a slow build, given the
+# FR-058a round trip is the strongest check either has. Gating only the columnar
+# container costs almost no coverage: the container is the thinnest seam in the
+# design, and readers normalise to one representation on ingest.
+[[bin]]
+name = "certus-trace"
+path = "src/main.rs"
+
+[features]
+default = []
+parquet = ["dep:arrow", "dep:parquet"]
+
+[dependencies]
+workload-model = { path = "../workload-model" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+clap = { version = "4", features = ["derive"] }
+arrow = { version = "53", optional = true }
+parquet = { version = "53", optional = true }

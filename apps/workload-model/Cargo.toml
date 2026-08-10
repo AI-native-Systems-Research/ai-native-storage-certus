@@ -1,0 +1,37 @@
+[package]
+name = "workload-model"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# The shared library beneath the workload-generator tool suite: the YAML schema,
+# key derivation, the corpus and session models, the plan codec, and the
+# statistics.
+#
+# Deliberately depends on NOTHING from the Certus component graph -- no
+# `interfaces`, no `IEvictionPolicy`, no policy component. The generator has no
+# concept of a tier, cache, memory or disk (spec FR-018a), and with cache
+# simulation deferred out of scope there is nothing here that needs them.
+#
+# The statistics live here rather than in a binary for a correctness reason
+# rather than for tidiness (spec FR-021i): they are computed over both real
+# traces (by `certus-trace fit`) and generated plans (by `certus-workload
+# report` and `certus-trace validate`). Two implementations would drift, and a
+# `validate` comparing a fitted model against the trace it was fitted from
+# would then compare two different definitions of reuse distance -- a failure
+# that appears to succeed.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1"
+# The workspace's first hashing crate. Fixed by contracts/plan-format.md, which
+# writes digests as "blake3:...".
+blake3 = "1"
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "generation"
+harness = false

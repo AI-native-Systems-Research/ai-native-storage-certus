@@ -44,7 +44,17 @@ members = [
     "components/zyre",
     "lib/shm-queue",
     "lib/shmq-dispatcher",
-    "apps/certus-server"
+    "apps/certus-server",
+    "apps/workload-model",
+    "apps/workload-generator",
+    "apps/workload-trace",
+    # NOTE (001-synthetic-workload-generator): `workload-runner` is a plain
+    # member, not a default member. It drives a live Certus server and needs
+    # CUDA, so it must not be built by a bare `cargo build`/`cargo test --all`.
+    # The other three carry no hardware dependency and are default members, and
+    # `workload-trace` keeps `arrow`/`parquet` behind a default-off feature so
+    # the default build compiles no columnar dependency (spec SC-012).
+    "apps/workload-runner"
 ]
 
 # SPDK crates require pre-built native libraries at deps/spdk-build/.
@@ -73,7 +83,10 @@ default-members = [
     "components/eviction-policy-lru",
     "components/eviction-policy-session-lists",
     "apps/eviction-replay-benchmark",
-    "lib/shm-queue"
+    "lib/shm-queue",
+    "apps/workload-model",
+    "apps/workload-generator",
+    "apps/workload-trace"
 ]
 
 resolver = "2"
@@ -114,3 +127,4 @@ certus-connector = { path = "certus-connector" }
 shm-queue = { path = "lib/shm-queue" }
 shmq-dispatcher = { path = "lib/shmq-dispatcher" }
 libloading = "0.8"
+workload-model = { path = "apps/workload-model" }
