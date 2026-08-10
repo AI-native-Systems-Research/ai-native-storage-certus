@@ -65,6 +65,12 @@ CPU_BYTES=$((16 * (1 << 30)))
 DRAM=$((32 * (1 << 30)))
 SLAB_SIZE_BYTES=2097152
 TENSOR_PARALLEL_SIZE=1
+# Certus-SPDK client→server transport. "bridge" (default): the vLLM container
+# reaches the host server via host.containers.internal over the rootless-podman
+# userspace network (slirp4netns/pasta). "host": share the host net namespace
+# (--network=host) and dial localhost:50051 — loopback, no proxy. Only affects
+# Certus-SPDK; NoOffload/CPUOffload/SharedStorage don't use the gRPC socket.
+CLIENT_NET="bridge"
 SERVER_WAIT=180        # seconds to wait for the Certus-SPDK server port
 DO_BUILD=0
 VLLM_VERSION="0.26.0"  # pin the vLLM base-image version for ALL backends (override with --vllm-version)
@@ -111,6 +117,9 @@ Flags (all optional; defaults shown):
   --gpu <sel>                  CDI GPU selector (all | 0 | 0,1 | <uuid>). [all]
   --memory-tier-size <sz>      Certus-SPDK server DRAM pool (e.g. 32G). [32G]
   --evict-threshold <f>        Certus-SPDK DRAM->SSD demotion threshold. [0.6]
+  --client-network <mode>      Certus-SPDK client transport: bridge (host.containers
+                               .internal, rootless proxy) or host (--network=host +
+                               localhost, loopback). [bridge]
   --cpu-bytes <n>              CPU tier size in bytes — CPUOffload tier, and the
                                Tiered-CPU-FS PRIMARY tier (overflow spills to the FS tier). [16Gi]
   --dram <n>                   SharedStorage DRAM budget (DRAM env). [32Gi]
@@ -152,6 +161,7 @@ while [[ $# -gt 0 ]]; do
         --dram)             DRAM="$2"; shift 2;;
         --build)            DO_BUILD=1; shift;;
         --vllm-version)     VLLM_VERSION="$2"; shift 2;;
+        --client-network)   CLIENT_NET="$2"; shift 2;;
         --only)             ONLY="$2"; shift 2;;
         --skip)             SKIP="$2"; shift 2;;
         --logdir)           LOGDIR="$2"; shift 2;;
@@ -593,11 +603,18 @@ if want certus-spdk; then
             warn "Certus-SPDK SKIPPED: server did not come up"
             stop_server
         else
-            log "server up on :50051 — launching gRPC client"
+            # Select client transport (see CLIENT_NET above).
+            if [[ "$CLIENT_NET" == "host" ]]; then
+                cs_server="localhost:50051"; cs_podman_net="host"
+            else
+                cs_server="host.containers.internal:50051"; cs_podman_net=""
+            fi
+            log "server up on :50051 — launching gRPC client (network=${CLIENT_NET}, server=${cs_server})"
             f="${LOGDIR}/certus-spdk.log"
             IMAGE="$IMG_GRPC" \
             GPU="$GPU" \
-            CERTUS_SERVER="host.containers.internal:50051" \
+            CERTUS_SERVER="$cs_server" \
+            PODMAN_NETWORK="$cs_podman_net" \
             NUM_CONVS="$NUM_CONVS" \
             MAX_ROUNDS="$MAX_ROUNDS" \
             MODEL="$MODEL" \

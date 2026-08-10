@@ -39,6 +39,11 @@ GPU="${GPU:-all}"
 # rootless container (server must listen on 0.0.0.0, which it does). Override
 # with an explicit IP if this name doesn't resolve on an older podman.
 CERTUS_SERVER="${CERTUS_SERVER:-host.containers.internal:50051}"
+# Optional podman network mode. Empty (default) = rootless bridge, reach the host
+# via host.containers.internal. Set PODMAN_NETWORK=host to share the host net
+# namespace so the client can dial localhost:50051 over loopback (no userspace
+# proxy). Pair with CERTUS_SERVER=localhost:50051.
+PODMAN_NETWORK="${PODMAN_NETWORK:-}"
 NUM_CONVS="${NUM_CONVS:-450}"
 MODEL="${MODEL:-NousResearch/Meta-Llama-3-8B}"
 SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"
@@ -143,8 +148,12 @@ echo "[run-bench] num_convs=${NUM_CONVS} model=${MODEL} tensor_parallel_size=${T
 # image isn't) and fails with "image not known" even though the preflight (which
 # goes through the function) found it in the custom store.
 
+net_flags=()
+[[ -n "$PODMAN_NETWORK" ]] && net_flags+=(--network="$PODMAN_NETWORK")
+
 exec command podman "${store_flags[@]}" run --rm \
     --pull=never \
+    "${net_flags[@]}" \
     --device "nvidia.com/gpu=${GPU}" \
     --ipc=host \
     "${prom_flags[@]}" \
