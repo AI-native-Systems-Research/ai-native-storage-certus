@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import sys
 from dataclasses import dataclass
 from types import SimpleNamespace
 
@@ -354,6 +355,12 @@ def restore_compat():
     os.environ.pop("CERTUS_VLLM_VERSION", None)
     conftest.build_fake_vllm((0, 20))
     importlib.reload(compat)
+    for mod_name in (
+        "certus_grpc_connector.handler",
+        "certus_grpc_connector.spec",
+    ):
+        if mod_name in sys.modules:
+            importlib.reload(sys.modules[mod_name])
 
 
 @pytest.mark.parametrize("version", compat.SUPPORTED_VERSIONS)
