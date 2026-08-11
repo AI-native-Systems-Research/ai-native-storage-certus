@@ -42,6 +42,12 @@ Select the base image for a given version with the Dockerfile's `VLLM_VERSION`
 build arg (see [Docker](#docker-workload-driver) below); the connector code is
 identical across versions.
 
+`profile_all.sh --vllm-version <x.y.z>` selects and tags the benchmark image's
+vLLM base. Inside that image, the connector still discovers the installed vLLM
+version at runtime through `certus_grpc_connector.compat`. Both layers matter:
+the script chooses what gets built, and the runtime matrix chooses the matching
+plugin API shape.
+
 ## How it fits into vLLM
 
 ```
@@ -53,7 +59,7 @@ vLLM OffloadingConnectorScheduler          ← vLLM's internal scheduler
 CertusGrpcOffloadingSpec (OffloadingSpec)  ← OUR plugin entry point
   │  opens ONE shared grpc channel/stub to certus-server:
   ├─ get_manager()  → GrpcCertusOffloadingManager  (index/alloc/eviction RPCs)
-  └─ get_handlers() → GpuToCertusHandler / CertusToGpuHandler  (DMA RPCs)
+  └─ get_handlers()/get_worker() → CertusGrpcWorker  (DMA RPCs)
                                   │
                                   ▼
                           certus-server (Dispatcher gRPC service)
@@ -67,11 +73,18 @@ CertusGrpcOffloadingSpec (OffloadingSpec)  ← OUR plugin entry point
 | `prepare_store(keys)` | `Check` (filter existing) + `Reserve(keys, sizes)` |
 | store `transfer_async` | `CopyToStore(keys, ipc_handles)` |
 | `complete_store(success)` | `CommitStore(keys)` / `AbortStore(keys)` |
-| `prepare_load(keys)` | `Pin(keys, promote=true)` |
+| `prepare_load(keys)` | `Pin(keys, promote=false)` |
 | load `transfer_async` | `Lookup(keys, ipc_handles)` |
 | `complete_load(keys)` | `Unpin(keys)` |
 | `touch(keys)` | `Touch(keys)` |
 | `take_events()` | `TakeEvents(max_events=0)` |
+
+Certus server keys stay `uint64`: the connector folds vLLM `OffloadKey` values
+to the first 8 bytes for the RPC boundary. The manager keeps a local
+`u64 -> original OffloadKey` map so eviction events are reported back to vLLM
+with the same key identity vLLM stored. If two different vLLM keys collide on the
+same u64 during one manager lifetime, the later key is skipped rather than
+cached as a possible false hit.
 
 ## GPU addressing: the `offset` field
 
@@ -245,8 +258,8 @@ and reconfigures the host NVMe group automatically:
 time benchmarks/kv-offload-replay/profile_all.sh \
     --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 \
     --device-pci 0000:63:00.0 --device-pci 0000:64:00.0 \
-    --max-rounds 12 --model-fs /mnt/fs-backend-bench \
-    --vllm-version 0.23.0 --only certus-spdk --evict-threshold 1 --build
+    --max-rounds 12 \
+    --vllm-version 0.26.0 --only certus-spdk --evict-threshold 1 --build
 ```
 
 See [`benchmarks/kv-offload-replay/README.md`](../benchmarks/kv-offload-replay/README.md#comparing-all-backends-profile_allsh)
@@ -276,9 +289,9 @@ podman --root /mnt/certus1/podman/storage --runroot /mnt/certus1/podman/run \
 
 ## Semantics preserved from the in-process path
 
-- **Eviction only at `prepare_store`** — `Reserve` does server-side LRU eviction;
-  a per-key `ALLOCATION_FAILED` maps to `prepare_store` → `None` (hard reject),
-  matching vLLM's worker which asserts store success.
+- **Best-effort stores** — `Reserve` does server-side LRU eviction. Per-key
+  reserve failures are skipped so vLLM can advance without retry/warning storms;
+  blocks that cannot be reserved simply remain uncached.
 - **Pin bracket** — `prepare_load` pins (protect from eviction), `complete_load`
   unpins; blocks between them cannot be evicted.
 - **Split-phase store** — `Reserve` (invisible slot) → `CopyToStore` (GPU→DRAM
