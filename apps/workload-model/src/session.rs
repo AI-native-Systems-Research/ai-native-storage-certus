@@ -134,6 +134,87 @@ pub fn check_warmup(pop: &Population, warmup_s: f64) -> Result<(), RampTooShort>
     }
 }
 
+/// Gaps between session arrivals, with `burstiness` as an index of dispersion.
+///
+/// The neutral value is **1.0**, which is exponential inter-arrivals — a Poisson
+/// process. Above that the process is over-dispersed: the same mean rate arriving
+/// in clumps. This is deliberately the *index of dispersion for counts* rather
+/// than some scale-free "burstiness knob", because IDC has a value that means
+/// "no burstiness at all", so a document that omits it and a document that states
+/// the neutral value describe the same arrival process.
+///
+/// Realised by a balanced-means two-phase hyperexponential, whose squared
+/// coefficient of variation of inter-arrivals *is* the asymptotic index of
+/// dispersion for a renewal process. So the configured number is the measured
+/// one, which [`Interarrival`]'s own test asserts rather than assumes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Interarrival {
+    mean_s: f64,
+    /// Probability of the fast phase; `None` for the neutral exponential case.
+    phase: Option<(f64, f64, f64)>,
+}
+
+impl Interarrival {
+    /// Gaps with mean `1/rate` seconds and the given index of dispersion.
+    ///
+    /// A `burstiness` below 1.0 asks for an *under*-dispersed process, which this
+    /// generator does not model; it is treated as the neutral 1.0 and
+    /// `validate` warns, rather than being silently reinterpreted as something
+    /// the document did not ask for.
+    pub fn new(rate_per_s: f64, burstiness: f64) -> Interarrival {
+        let mean_s = if rate_per_s > 0.0 {
+            1.0 / rate_per_s
+        } else {
+            0.0
+        };
+        let b = burstiness;
+        // Bound rather than negated inline, so that a NaN burstiness lands on the
+        // neutral case instead of on an unspecified branch.
+        let over_dispersed = b > 1.0 + 1e-12;
+        if !over_dispersed {
+            return Interarrival {
+                mean_s,
+                phase: None,
+            };
+        }
+        // Balanced means: p1 = ½(1 + √((b−1)/(b+1))), phase means chosen so that
+        // the mixture has mean `mean_s` and squared CoV exactly b.
+        let p1 = 0.5 * (1.0 + ((b - 1.0) / (b + 1.0)).sqrt());
+        let p2 = 1.0 - p1;
+        let m1 = mean_s / (2.0 * p1);
+        let m2 = if p2 > 0.0 { mean_s / (2.0 * p2) } else { m1 };
+        Interarrival {
+            mean_s,
+            phase: Some((p1, m1, m2)),
+        }
+    }
+
+    /// The mean gap in seconds.
+    pub fn mean_s(&self) -> f64 {
+        self.mean_s
+    }
+
+    /// Draw one gap, in seconds.
+    pub fn next_s(&self, st: &mut Stream) -> f64 {
+        let exp = |m: f64, st: &mut Stream| -> f64 { -m * (1.0 - st.next_f64()).ln() };
+        match self.phase {
+            None => exp(self.mean_s, st),
+            Some((p1, m1, m2)) => {
+                if st.next_f64() < p1 {
+                    exp(m1, st)
+                } else {
+                    exp(m2, st)
+                }
+            }
+        }
+    }
+
+    /// Draw one gap, in nanoseconds.
+    pub fn next_ns(&self, st: &mut Stream) -> u64 {
+        (self.next_s(st) * 1e9).max(0.0) as u64
+    }
+}
+
 /// The parameters one session actually draws from, after mixture selection.
 #[derive(Debug, Clone)]
 pub struct SessionParams {
@@ -408,6 +489,44 @@ mod tests {
         }
         let frac = f64::from(counts[0]) / 4000.0;
         assert!((frac - 0.7).abs() < 0.05, "weights not normalised: {frac}");
+    }
+
+    /// Mean and squared coefficient of variation of a sample of gaps.
+    fn gap_moments(ia: &Interarrival, n: usize) -> (f64, f64) {
+        let mut st = Stream::new(0xBEEF, 1);
+        let xs: Vec<f64> = (0..n).map(|_| ia.next_s(&mut st)).collect();
+        let mean = xs.iter().sum::<f64>() / n as f64;
+        let var = xs.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>() / n as f64;
+        (mean, var / (mean * mean))
+    }
+
+    #[test]
+    fn burstiness_one_is_poisson_and_is_the_neutral_value() {
+        // FR-017: the neutral value has to be a value, so that omitting the field
+        // and stating 1.0 describe the same process.
+        let ia = Interarrival::new(4000.0, 1.0);
+        assert_eq!(ia, Interarrival::new(4000.0, 1.0));
+        let (mean, scv) = gap_moments(&ia, 200_000);
+        assert!((mean - 1.0 / 4000.0).abs() < 1e-6, "mean {mean}");
+        assert!((scv - 1.0).abs() < 0.05, "exponential scv was {scv}");
+    }
+
+    #[test]
+    fn the_configured_index_of_dispersion_is_the_measured_one() {
+        // The point of choosing IDC over a scale-free knob: 1.8 in the document
+        // is 1.8 in the stream. Asserted rather than assumed.
+        for b in [1.8, 4.0] {
+            let ia = Interarrival::new(1000.0, b);
+            let (mean, scv) = gap_moments(&ia, 400_000);
+            assert!((mean - 1e-3).abs() < 1e-4, "mean moved with burstiness");
+            assert!((scv - b).abs() < 0.15 * b, "asked {b}, measured {scv}");
+        }
+    }
+
+    #[test]
+    fn under_dispersion_falls_back_to_poisson_rather_than_inventing_a_shape() {
+        // Not modelled, so not silently reinterpreted; validate warns about it.
+        assert_eq!(Interarrival::new(100.0, 0.4), Interarrival::new(100.0, 1.0));
     }
 
     #[test]

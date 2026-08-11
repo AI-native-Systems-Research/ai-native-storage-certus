@@ -236,6 +236,23 @@ impl Corpus {
         root(root_index, gen)
     }
 
+    /// One level down the trunk: the child of `cur` this session descends into.
+    ///
+    /// The unit of a trunk walk, so that a caller which cannot afford to
+    /// materialise the path — the generator, which walks a trunk per turn and
+    /// keeps nothing — uses the *same* derivation as one which can.
+    pub fn trunk_step(
+        &self,
+        cur: CacheKey,
+        depth: u32,
+        st: &mut Stream,
+        gen: Generation,
+    ) -> CacheKey {
+        let n = self.child_count(cur, depth);
+        let idx = self.pick_child(st, n);
+        trunk_child(cur, idx, gen)
+    }
+
     /// Walk `depth` levels of shared trunk from `from`, using `st` for the
     /// child choices, returning every key on the path.
     pub fn walk_trunk(
@@ -248,9 +265,7 @@ impl Corpus {
         let mut out = Vec::with_capacity(depth as usize);
         let mut cur = from;
         for d in 1..=depth {
-            let n = self.child_count(cur, d);
-            let idx = self.pick_child(st, n);
-            cur = trunk_child(cur, idx, gen);
+            cur = self.trunk_step(cur, d, st, gen);
             out.push(cur);
         }
         out

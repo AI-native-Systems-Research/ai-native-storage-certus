@@ -59,21 +59,35 @@ impl Identity {
 /// Every field is the **realised** value, not the configured one (spec FR-012):
 /// a document states a fanout, and the width and occupancy it produces are only
 /// knowable after generating.
+///
+/// The statistics that need a pass over the whole event stream are `Option` and
+/// are **absent rather than zero** when the producer did not compute them. That
+/// distinction is load-bearing twice over. Generation itself is bounded by the
+/// live session population (FR-010), so counting distinct keys while writing
+/// would trade that bound away for a number `report` computes anyway; and a zero
+/// standing in for "not counted" is a realised value that is simply wrong, which
+/// is the failure FR-012 exists to prevent.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CorpusSummary {
-    /// Distinct keys minted.
-    pub distinct_keys: u64,
-    /// Total payload bytes referenced.
+    /// Distinct keys minted; absent when not counted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distinct_keys: Option<u64>,
+    /// Total payload bytes referenced. Exact, and free to accumulate while
+    /// writing, so it is never absent.
     pub total_bytes: u64,
-    /// Working-set size over `wss_window_requests`.
-    pub working_set_bytes: u64,
+    /// Working-set size over `wss_window_requests`; absent when not computed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_set_bytes: Option<u64>,
     /// The window, as a request count.
     pub wss_window_requests: u64,
-    /// Realised trunk width by depth.
+    /// Realised trunk width by depth; empty when not computed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub trunk_width_per_depth: Vec<(u32, u64)>,
-    /// Realised trunk occupancy by depth.
+    /// Realised trunk occupancy by depth; empty when not computed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub trunk_occupancy_per_depth: Vec<(u32, f64)>,
     /// The resolved branching profile, including what `auto` chose.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub branching_resolved: Vec<(u32, f64)>,
     /// Where the root boundary was placed.
     pub root_boundary_depth: u32,
@@ -232,6 +246,23 @@ mod tests {
     fn malformed_json_is_reported_rather_than_panicking() {
         let e = Manifest::from_json("{not json").unwrap_err();
         assert!(matches!(e, ManifestError::Malformed(_)));
+    }
+
+    #[test]
+    fn an_uncomputed_statistic_is_absent_rather_than_zero() {
+        // A realised value of 0 would be wrong rather than merely missing, which
+        // is exactly what FR-012 is about. `report` fills these in; `plan` does
+        // not, because counting them would trade away FR-010's memory bound.
+        let m = bounded();
+        assert_eq!(m.corpus_summary.distinct_keys, None);
+        let json = m.to_json().unwrap();
+        assert!(!json.contains("distinct_keys"), "{json}");
+        assert!(
+            json.contains("total_bytes"),
+            "an exact count must be present"
+        );
+        let back = Manifest::from_json(&json).unwrap();
+        assert_eq!(back.corpus_summary.distinct_keys, None);
     }
 
     #[test]
