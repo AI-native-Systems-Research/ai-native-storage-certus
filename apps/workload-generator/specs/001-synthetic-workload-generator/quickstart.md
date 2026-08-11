@@ -47,7 +47,7 @@ workload:
     think_time: {dist: lognormal, median: 3s, sigma: 1.1}
     private_depth: {dist: lognormal, median: 8, sigma: 0.8}
     growth_per_turn: {dist: lognormal, median: 6, sigma: 0.5}
-run: {mode: hardware, batch_size: 64, workers: 8, warmup: 20s, wss_window: 240_000}
+run: {mode: hardware, batch_size: 64, workers: 8, warmup: 30s, wss_window: 240_000}
 ```
 
 **There is no `system:` section, and adding one is an error.** Capacities, eviction policy,

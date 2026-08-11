@@ -883,7 +883,7 @@ figure here that needs no cooperation from the server at all.
 5. **Given** any request for eviction counts, promotion traffic, or byte provenance, **When** the
    report is produced, **Then** none is present, and the report says where such data comes from:
    Certus's own instrumentation, which has the internal knowledge required (see Out of Scope).
-6. **Given** `run.warmup: 20s`, **When** the report is produced, **Then** operations inside
+6. **Given** `run.warmup: 30s`, **When** the report is produced, **Then** operations inside
    the warmup window are excluded from all steady-state statistics and counted separately.
 7. **Given** the generator running at the platform's measured ceiling, **When** the run
    completes, **Then** the report includes a generator-overhead figure demonstrating the

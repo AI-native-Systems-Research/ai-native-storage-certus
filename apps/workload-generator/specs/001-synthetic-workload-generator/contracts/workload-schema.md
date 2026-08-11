@@ -747,7 +747,11 @@ run:
   workers: 8                  # client threads
   inflight: 4                 # concurrent RPCs per worker
   gpu_buffer: 8GiB            # one process-wide CUDA allocation, addressed by offset
-  warmup: 20s                 # excluded from steady-state statistics
+  # Excluded from steady-state statistics, and it MUST cover the session-population
+  # ramp (rule 15b): (mean(turns) - 1) x mean(think_time) = 5 x 5.5s = 27.5s here, the
+  # lognormal's mean being median x exp(sigma^2/2) = 3 x 1.83 rather than its median.
+  # 20s would be rejected -- the measured window would open mid-ramp.
+  warmup: 30s
   warm_connections: true      # explicit RDMA connection-warm phase before measuring
   # Window for the working-set-size calculation AND for trunk occupancy. Canonically a
   # REQUEST COUNT, because the plan is a sequence and a count is knowable at plan time in
@@ -937,7 +941,7 @@ run:
   batch_size: 64
   workers: 8
   inflight: 4
-  warmup: 20s
+  warmup: 30s                 # >= the 27.5s population ramp; see rule 15b
 
 sweep:
   axes: {workload.mix.0.weight: [0.4, 0.55, 0.70, 0.85]}

@@ -514,7 +514,11 @@ pub fn occupancy_floor(d: &Document, r: &mut Report) {
                 corpus.profile.fanout_at(1)
             ),
         );
-    } else if occ < TARGET_OCCUPANCY {
+    // `branching: auto` solves for exactly TARGET_OCCUPANCY (FR-009g), so its own
+    // solution lands on the boundary and float rounding decides which side of it.
+    // Without the tolerance the documented default warns every time, which is both
+    // wrong and the fastest way to teach a reader to ignore rule 16.
+    } else if occ < TARGET_OCCUPANCY * (1.0 - 1e-9) {
         r.warn(
             "16",
             format!(
@@ -789,12 +793,15 @@ run:
     fn branching_auto_lands_inside_its_own_floor() {
         // FR-009g solves for TARGET_OCCUPANCY at p99(shared_depth), so `auto`
         // tripping rule 16 would mean the closed form and the check disagree.
+        // Warnings count, not just rejections: `auto` lands *on* the target, so a
+        // strict comparison warned on the documented default every time — the
+        // check contradicting the solver it is checking.
         for roots in [1u32, 12, 64] {
             for depth in [4u32, 18, 40] {
                 let r = validate(&occ_doc(roots, "auto", depth, 240_000));
                 assert!(
-                    !r.rejections().any(|f| f.rule == "16"),
-                    "auto rejected at roots={roots} depth={depth}: {:?}",
+                    !r.findings.iter().any(|f| f.rule == "16"),
+                    "auto flagged at roots={roots} depth={depth}: {:?}",
                     r.findings
                 );
             }
