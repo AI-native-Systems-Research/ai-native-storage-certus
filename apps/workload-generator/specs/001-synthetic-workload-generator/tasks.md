@@ -85,17 +85,17 @@ distributional assertions still hold.
 - [ ] T021 [P] [US1] Test byte-identical plans from the same YAML and seed, and differing hashes with equal distributional properties from a changed seed (SC-003)
 - [ ] T022 [P] [US1] Test that resident memory stays O(live sessions) as run length grows by an order of magnitude (FR-010)
 - [ ] T023 [P] [US1] Test the occupancy floor: a config whose `occupancy(p99(shared_depth))` falls below 1.0 is rejected and below 4.0 warns (validation rule 16)
-- [ ] T024 [P] [US1] Test that a warmup shorter than the computed session-population ramp is **rejected**, not warned (FR-015b)
+- [X] T024 [P] [US1] Test that a warmup shorter than the computed session-population ramp is **rejected**, not warned (FR-015b)
 
 ### Implementation for User Story 1
 
 - [X] T025 [US1] Implement the forest and the piecewise `branching` profile in `apps/workload-model/src/corpus.rs`, with `fanout_at`, `paths` and `occupancy`
 - [X] T026 [US1] Implement randomised rounding of a non-integer fanout keyed on **node identity** rather than on the visit, so a long run is reproducible while remaining stochastic (FR-009e)
 - [X] T027 [US1] Implement `branching: auto` resolution by the FR-009g closed form with `target_occupancy = 4`, recording the resolved profile in the normalised YAML
-- [ ] T028 [US1] Implement the session model in `apps/workload-model/src/session.rs`: sticky root binding, turns, think time, private depth, growth per turn, and the FR-014a path-depth formula
-- [ ] T029 [US1] Implement the session lifecycle — born, retired, private keys dead at retirement — with lifetime and live population **derived** rather than configured (FR-014b, FR-015a)
-- [ ] T030 [US1] Implement `open_loop` and `closed_loop` arrival with burstiness as an index of dispersion whose neutral value is 1.0 (FR-015, FR-017)
-- [ ] T031 [US1] Implement the mixture over one session model, with `conversation`/`one_shot`/`scan` as presets rather than schema (FR-013, FR-014)
+- [X] T028 [US1] Implement the session model in `apps/workload-model/src/session.rs`: sticky root binding, turns, think time, private depth, growth per turn, and the FR-014a path-depth formula
+- [X] T029 [US1] Implement the session lifecycle — born, retired, private keys dead at retirement — with lifetime and live population **derived** rather than configured (FR-014b, FR-015a)
+- [X] T030 [US1] Implement `open_loop` and `closed_loop` arrival with burstiness as an index of dispersion whose neutral value is 1.0 (FR-015, FR-017)
+- [X] T031 [US1] Implement the mixture over one session model, with `conversation`/`one_shot`/`scan` as presets rather than schema (FR-013, FR-014)
 - [ ] T032 [US1] Implement plan writing in `apps/workload-model/src/plan/writer.rs`, keys of a request contiguous and in path order, timestamps non-decreasing
 - [ ] T033 [US1] Implement chunked look-ahead generation so an unbounded run stays flat and allocation-free with only the horizon finite, and report the horizon (FR-021f)
 - [ ] T034 [US1] Implement the `certus-workload plan` subcommand in `apps/workload-generator/src/main.rs`

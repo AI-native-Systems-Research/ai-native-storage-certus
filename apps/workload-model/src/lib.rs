@@ -23,3 +23,4 @@ pub mod rng;
 pub mod plan;
 
 pub mod schema;
+pub mod session;
