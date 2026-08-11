@@ -459,12 +459,17 @@ pub fn occupancy_floor(d: &Document, r: &mut Report) {
     let roots = d.corpus.trees.roots.count.max(1);
     // Resolve exactly as generation will, so the number checked here is the
     // number the run realises -- including whatever `auto` solves for.
+    // Fanout *steps* to the deepest shared node, which is one less than the
+    // depth: a shared prefix of depth s occupies ordinals 0..s (FR-014a), so the
+    // walk from the root to its deepest node takes s-1 steps. p99 is at least 1
+    // here, the zero case having been reported above.
+    let trunk_steps = p99.saturating_sub(1);
     let corpus = Corpus::resolve(
         &d.corpus.trees,
         d.corpus.block_bytes.clone(),
         d.seed,
         sessions_per_window,
-        p99,
+        trunk_steps,
     );
     // Churn-adjusted where churn is configured: a path accumulates sharers only
     // while it exists, so without this term the floor approves sharing that churn
@@ -481,7 +486,7 @@ pub fn occupancy_floor(d: &Document, r: &mut Report) {
         &corpus.profile,
         roots,
         sessions_per_window,
-        p99,
+        trunk_steps,
         window_ns,
         half_life_ns,
     );

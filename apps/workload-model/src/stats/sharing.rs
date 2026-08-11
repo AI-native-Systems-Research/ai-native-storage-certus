@@ -102,10 +102,13 @@ impl Sharing {
             if self.prefix_len == 0 {
                 self.unshared_requests += 1;
             } else {
-                // A prefix of length L means depths 0..L-1 were shared, so the
-                // deepest shared depth is L-1 — reported as a depth, so it reads
-                // the same way `shared_depth` does in a document.
-                self.depth.add(self.prefix_len - 1);
+                // The prefix **length**, which is what `shared_depth` is: FR-014a
+                // makes a path of depth n occupy ordinals 0..n, so a document
+                // asking for `shared_depth: 4` and a request realising four shared
+                // leading blocks both read as 4. Reporting the deepest shared
+                // *ordinal* instead would put a systematic -1 between the intended
+                // and realised statistics that FR-012a asks a reader to compare.
+                self.depth.add(self.prefix_len);
             }
         }
         self.refs_in_request = 0;
@@ -143,7 +146,10 @@ pub struct SharingReport {
     pub unshared_requests: u64,
     /// Sharing requests as a fraction of all of them.
     pub shared_fraction: Option<f64>,
-    /// The realised shared depth, over sharing requests only.
+    /// The realised shared depth — a prefix **length** in blocks, on the same
+    /// scale as the configured `shared_depth`. Over sharing requests only, so its
+    /// support starts at 1; requests that shared nothing are
+    /// `unshared_requests`.
     pub realised_depth: Quantiles,
     /// The histogram as `(lower, upper, count)`, ascending.
     pub depth_buckets: Vec<(u64, u64, u64)>,
@@ -193,8 +199,7 @@ mod tests {
     fn a_repeated_path_shares_to_its_full_depth() {
         let r = feed(&[&[1, 2, 3], &[1, 2, 3]]);
         assert_eq!(r.sharing_requests, 1);
-        // Three shared levels, so the deepest shared depth is 2.
-        assert_eq!(r.realised_depth.max, Some(2));
+        assert_eq!(r.realised_depth.max, Some(3), "three shared blocks");
     }
 
     #[test]
@@ -203,19 +208,24 @@ mod tests {
         // extend the common prefix. If it did, realised sharing would exceed
         // what the key model can produce.
         let r = feed(&[&[1, 2, 3, 4], &[1, 2, 99, 4]]);
-        assert_eq!(r.realised_depth.max, Some(1), "two levels, depths 0 and 1");
+        assert_eq!(r.realised_depth.max, Some(2), "two blocks, then divergence");
     }
 
     #[test]
     fn a_request_sharing_only_its_root_is_not_the_same_as_one_sharing_nothing() {
-        // The conflation FR-012a's separate counts exist to prevent.
+        // The conflation FR-012a's separate counts exist to prevent: a length of 0
+        // is not a bucket, it is `unshared_requests`.
         let r = feed(&[&[1, 2], &[1, 9], &[7, 8]]);
         assert_eq!(r.sharing_requests, 1);
         assert_eq!(
             r.unshared_requests, 2,
             "the first request and the novel one"
         );
-        assert_eq!(r.realised_depth.max, Some(0), "shared depth 0 is sharing");
+        assert_eq!(
+            r.realised_depth.max,
+            Some(1),
+            "sharing one block is sharing; the histogram's support starts at 1"
+        );
     }
 
     #[test]

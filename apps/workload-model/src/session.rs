@@ -284,6 +284,12 @@ fn pick_mix<'a>(mix: &'a [MixEntry], st: &mut Stream) -> (u8, Option<&'a MixEntr
 /// `shared_depth + private_depth + Σ growth_per_turn(i)` for i in 2..=n. Turn n's
 /// path is necessarily a strict prefix of turn n+1's, which the rolling-hash key
 /// requires: a changed prefix would rehash every block below it.
+///
+/// A **length in blocks**, not the ordinal of the last one — the worked example's
+/// "~56 blocks" is this quantity. So a path of depth `n` occupies ordinals
+/// `0..n`, and `depth_at_turn(4, 30, .., 1, ..)` is 34 blocks of which 4 are
+/// shared. The floor of 1 is FR-009's zero-length-request clamp: a request for
+/// nothing is not a request, so a path that draws to zero becomes the root alone.
 pub fn depth_at_turn(
     shared_depth: u32,
     private_depth: u32,

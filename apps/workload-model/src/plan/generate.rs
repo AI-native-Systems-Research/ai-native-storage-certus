@@ -43,7 +43,7 @@ use crate::plan::record::{flags, PlanEvent};
 use crate::rng::Stream;
 use crate::schema::{ArrivalModel, Document, Placement};
 use crate::session::{draw_params, Interarrival, Session};
-use crate::units::{count_from_yaml, parse_duration_ns, parse_rate_per_s, UnitError};
+use crate::units::{parse_duration_ns, parse_rate_per_s, UnitError};
 
 /// Default look-ahead: 64Ki events, about 2.5 MiB of records.
 ///
@@ -305,22 +305,31 @@ impl Generator {
             })?,
             None => 0,
         };
-        // The occupancy window, needed only to resolve `branching: auto`.
-        let window_requests = d
-            .run
-            .wss_window
-            .as_ref()
-            .and_then(count_from_yaml)
-            .unwrap_or(crate::schema::DEFAULT_WSS_WINDOW_REQUESTS);
+        // The occupancy window, needed only to resolve `branching: auto`. Resolved
+        // through the same function the occupancy floor uses, so `auto` cannot
+        // solve against a different window than the one the document was validated
+        // against. The error cases are the ones validation rejects, so falling back
+        // to the default here only affects a caller that skipped validation.
+        let (window_requests, _) = crate::schema::wss_window_requests(d).unwrap_or((
+            crate::schema::DEFAULT_WSS_WINDOW_REQUESTS,
+            crate::schema::WindowSource::Defaulted,
+        ));
         let mean_turns = d.workload.sessions.turns.mean().unwrap_or(1.0).max(1.0);
         let sessions_per_window = window_requests as f64 / mean_turns;
-        let p99_shared = d.corpus.trees.shared_depth.quantile_u32(0.99);
+        // Fanout *steps* to the deepest shared node, one less than the depth: a
+        // shared prefix of depth s spans ordinals 0..s (FR-014a).
+        let trunk_steps = d
+            .corpus
+            .trees
+            .shared_depth
+            .quantile_u32(0.99)
+            .saturating_sub(1);
         let corpus = Corpus::resolve(
             &d.corpus.trees,
             d.corpus.block_bytes.clone(),
             d.seed,
             sessions_per_window,
-            p99_shared,
+            trunk_steps,
         );
         let nodes = d
             .topology
@@ -583,9 +592,18 @@ impl Generator {
         let mut walk = Stream::new(self.seed ^ TAG_TRUNK_WALK, u64::from(live.s.id.0));
         let depth = live.depth;
         let mut cur = self.corpus.root_key(live.s.root_index, gen);
-        for d in 0..=depth {
+        // `depth` is a path **length in blocks**, so the ordinals it covers are
+        // `0..depth` and the trunk's are `0..shared_depth`. Both bounds are
+        // exclusive, and both used to be inclusive: a document asking for
+        // `shared_depth: 4, private_depth: 30` got a 35-block path with 5 shared
+        // levels, against the 34 and 4 that FR-014a's formula states ("~56
+        // blocks" for the worked example). The root at ordinal 0 is shared
+        // whatever `shared_depth` says, since every session bound to a root
+        // traverses it — so a trunk of length 0 is not expressible, and
+        // `shared_depth` of 0 and 1 both mean "the root and nothing below it".
+        for d in 0..depth {
             if d > 0 {
-                cur = if d <= live.shared_depth {
+                cur = if d < live.shared_depth {
                     self.corpus.trunk_step(cur, d, &mut walk, gen)
                 } else {
                     private_child(cur, live.s.id, d)
@@ -595,7 +613,7 @@ impl Generator {
             if d == 0 {
                 f |= flags::REQUEST_START;
             }
-            if d == depth {
+            if d + 1 == depth {
                 f |= flags::REQUEST_END;
             }
             let size = entry_size(cur, &self.corpus.block_bytes);
@@ -764,23 +782,76 @@ run:
         let shared = 6u32;
         let private = 3u32;
         let growth = Dist::Scalar(2.0);
-        let mut depths: std::collections::BTreeMap<(u32, u16), u32> =
+        // Counted in **blocks**, which is what the formula states: a path of depth
+        // n occupies ordinals 0..n. Asserting the maximum ordinal instead would
+        // pass for a path one block too long, which is exactly the defect this
+        // test previously agreed with.
+        let mut blocks: std::collections::BTreeMap<(u32, u16), u32> =
+            std::collections::BTreeMap::new();
+        let mut top: std::collections::BTreeMap<(u32, u16), u32> =
             std::collections::BTreeMap::new();
         for e in &ev {
-            let d = depths.entry((e.session_id.0, e.turn)).or_insert(0);
-            *d = (*d).max(e.depth);
+            *blocks.entry((e.session_id.0, e.turn)).or_insert(0) += 1;
+            let t = top.entry((e.session_id.0, e.turn)).or_insert(0);
+            *t = (*t).max(e.depth);
         }
-        assert!(!depths.is_empty());
-        for ((_, turn), realised) in depths {
+        assert!(!blocks.is_empty());
+        for ((session, turn), realised) in &blocks {
             let stated = depth_at_turn(
                 shared,
                 private,
                 &growth,
-                turn,
+                *turn,
                 &mut Stream::new(g.seed ^ TAG_GROWTH, 0),
             );
-            assert_eq!(realised, stated, "turn {turn}");
+            assert_eq!(*realised, stated, "turn {turn}");
+            assert_eq!(
+                top[&(*session, *turn)],
+                stated - 1,
+                "the deepest ordinal is one below the length"
+            );
         }
+    }
+
+    #[test]
+    fn the_shared_prefix_is_exactly_shared_depth_blocks_long() {
+        // The other half of FR-014a's arithmetic, and the defect the length check
+        // above cannot see: a trunk one level too deep would still give every path
+        // the right total. Two sessions on the same root must agree on exactly
+        // `shared_depth` leading keys and disagree from there on.
+        let ev = drain(&mut Generator::new(&doc("requests: 400")).unwrap());
+        let shared = 6usize;
+        let mut paths: std::collections::BTreeMap<u32, Vec<CacheKey>> =
+            std::collections::BTreeMap::new();
+        for e in &ev {
+            if e.turn == 1 {
+                paths.entry(e.session_id.0).or_default().push(e.key);
+            }
+        }
+        // Group turn-1 paths by their root, then compare within a group.
+        let mut by_root: std::collections::BTreeMap<CacheKey, Vec<Vec<CacheKey>>> =
+            std::collections::BTreeMap::new();
+        for p in paths.values() {
+            if let Some(root) = p.first() {
+                by_root.entry(*root).or_default().push(p.clone());
+            }
+        }
+        let mut compared = 0;
+        for group in by_root.values() {
+            for pair in group.windows(2) {
+                let common = pair[0]
+                    .iter()
+                    .zip(pair[1].iter())
+                    .take_while(|(a, b)| a == b)
+                    .count();
+                assert_eq!(
+                    common, shared,
+                    "two sessions on one root shared {common} blocks, not {shared}"
+                );
+                compared += 1;
+            }
+        }
+        assert!(compared > 5, "only {compared} pairs compared");
     }
 
     #[test]

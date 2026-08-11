@@ -127,22 +127,29 @@ pub fn occupancy(
 
 /// Solve for the uniform fanout that keeps sharing realisable.
 ///
-/// `(sessions_per_window / roots / target) ^ (1 / p99_shared_depth)` — a closed
-/// form, never an iterative calibration against generated output, so no part of
-/// this model requires a nonlinear fit.
+/// `(sessions_per_window / roots / target) ^ (1 / trunk_steps)` — a closed form,
+/// never an iterative calibration against generated output, so no part of this
+/// model requires a nonlinear fit.
+///
+/// `trunk_steps` is the number of fanout *steps* from a root down to the deepest
+/// shared node, which is one less than `shared_depth`: FR-014a makes a shared
+/// prefix of depth `s` occupy ordinals `0..s`, so the walk from ordinal 0 to
+/// ordinal `s-1` takes `s-1` steps. Passing `s` instead solves for a slightly
+/// smaller fanout, hence fewer paths and higher occupancy than asked for — safe,
+/// but not what the closed form says.
 ///
 /// Resolves to a *uniform* profile deliberately: a non-uniform one encodes a
 /// claim about where branches diverge, which the generator has no basis to invent
 /// and which must come from the user or from `fit`.
-pub fn auto_fanout(sessions_per_window: f64, roots: u32, p99_shared_depth: u32) -> f64 {
-    if p99_shared_depth == 0 || roots == 0 {
+pub fn auto_fanout(sessions_per_window: f64, roots: u32, trunk_steps: u32) -> f64 {
+    if trunk_steps == 0 || roots == 0 {
         return 1.0;
     }
     let headroom = sessions_per_window / f64::from(roots) / TARGET_OCCUPANCY;
     if headroom <= 1.0 {
         return 1.0;
     }
-    headroom.powf(1.0 / f64::from(p99_shared_depth)).max(1.0)
+    headroom.powf(1.0 / f64::from(trunk_steps)).max(1.0)
 }
 
 /// The realised shared structure.
@@ -167,13 +174,13 @@ impl Corpus {
         block_bytes: Dist,
         seed: u64,
         sessions_per_window: f64,
-        p99_shared_depth: u32,
+        trunk_steps: u32,
     ) -> Corpus {
         let profile = match &trees.branching {
             Branching::Auto(_) => Profile::uniform(auto_fanout(
                 sessions_per_window,
                 trees.roots.count,
-                p99_shared_depth,
+                trunk_steps,
             )),
             Branching::Uniform(f) => Profile::uniform(*f),
             Branching::Profile(segs) => Profile::from_segments(segs),

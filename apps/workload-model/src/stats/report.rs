@@ -670,7 +670,7 @@ mod tests {
 
     #[test]
     fn intended_and_realised_sharing_are_two_statistics_not_one() {
-        // FR-012a. The configured median is 8; realised sharing here is 1 level,
+        // FR-012a. The configured median is 8; realised sharing here is 3 blocks,
         // and the report must show both rather than reconcile them.
         let r = run(10, &repeated(4, &[1, 90, 91])).with_intended_shared_depth(&Dist::Shaped(
             Shape::Lognormal {
@@ -680,7 +680,7 @@ mod tests {
         ));
         let intended = r.intended_shared_depth.as_ref().unwrap();
         assert_eq!(intended.p50.map(|v| v.round()), Some(8.0));
-        assert_eq!(r.sharing.realised_depth.max, Some(2));
+        assert_eq!(r.sharing.realised_depth.max, Some(3));
         assert!(intended.p50.unwrap() > r.sharing.realised_depth.max.unwrap() as f64);
     }
 
