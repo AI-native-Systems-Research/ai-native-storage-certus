@@ -125,7 +125,10 @@ if __name__ == "__main__":
                 name = getattr(m, "name", "")
                 val = getattr(m, "value", None)
                 if name.startswith("vllm:") and isinstance(val, (int, float)):
-                    vals[name] = float(val)
+                    # Sum across label sets: get_metrics() emits one Counter per
+                    # sample, so labeled metrics (request_success by finish_reason,
+                    # prompt_tokens_by_source, per-engine under TP>1) share a name.
+                    vals[name] = vals.get(name, 0.0) + float(val)
         except Exception:  # noqa: BLE001 - get_metrics() is V1-only; skip on V0
             pass
         try:
