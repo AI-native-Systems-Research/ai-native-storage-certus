@@ -467,6 +467,90 @@ steep CDF and not the ramp. Recorded because it was the obvious explanation and 
 floors come from three synthetic shapes rather than from the traces — a real trace's floor cannot be
 measured this way at all, since a trace cannot be re-sampled with a different seed.
 
+### Reuse-distance estimation, and the basis for `repeat: 8`
+
+Two derivations `spec.md` assigns here, both about when a measurement is affordable and when it means
+anything.
+
+#### When exact reuse distance stops fitting, and what replaces it
+
+Exact distances come from a Fenwick tree over stream positions (`stats::reuse_distance`), which is
+`O(log n)` per reference and `O(n)` in memory. Measured with `certus-workload report`, which also
+materialises the event vector:
+
+| plan | events | peak RSS | bytes/event |
+| --- | --- | --- | --- |
+| uniform fixture | 2 400 000 | 190 MB | 79 |
+| worked example | 2 128 875 | 169 MB | 79 |
+
+Linear, and decomposable: 40 bytes is the caller's own `Vec<PlanEvent>` from `read_plan`, leaving
+**~40 bytes per reference** for the statistics — the position tree, its doubling slack, and the key
+table at ~48 bytes per distinct key. A stream that never materialises its events pays only the latter.
+Varying entry sizes add the byte-distance tree, 8 bytes per position, since the uniform-size shortcut
+no longer applies; both fixtures above have constant `block_bytes` and so pay nothing for it.
+
+At a 16 GB budget that caps exact computation at roughly **4 × 10⁸ references** streaming, or 2 × 10⁸
+with the events resident. Whether that is enough is not hypothetical — it is decided inside this
+corpus:
+
+| trace | invocations | references | blocks/request |
+| --- | --- | --- | --- |
+| `exgentic_appworld` | 48 453 | **251 546 935** | 5 192 |
+| `swe_agent` (250 k of 2 115 623) | 250 000 | 187 610 747 | 750 |
+| `exgentic_swebench` | 91 768 | 125 818 574 | 1 371 |
+| `wildchat` (250 k of 1 960 074) | 250 000 | 13 409 733 | 54 |
+| `mooncake_conv` | 12 031 | 288 500 | 24 |
+
+`exgentic_appworld` at 2.5 × 10⁸ references fits, with little room. **`swe_agent` at full length does
+not**: 750 blocks per request over 2 115 623 invocations is ~1.6 × 10⁹ references, about 64 GB. So an
+estimator is needed for the tail of this corpus rather than for some hypothetical future trace, and
+the surprise is where the cost comes from — not the number of requests, but their length. A trace of
+48 000 requests is the most expensive one here.
+
+**The method is hash-based spatial sampling (SHARDS).** Sample the *key space* by hash at rate `R`,
+compute exact distances over the sampled subset, and scale each distance by `1/R`. Memory and time
+fall by `R`, and the reuse structure survives because every reference to a sampled key is kept.
+
+Sampling *references* instead — the obvious alternative — is wrong rather than merely less accurate:
+dropping references breaks the reuse chain, so a surviving pair of references to one key has other
+references to that key removed from between them, and the distance between them is measured across a
+stream that no consumer would ever have seen. The bias is one-directional and does not average out.
+
+**The exact implementation is what validates the estimator, and this corpus can do it.**
+`exgentic_appworld` is computable both ways, so the estimator's error is measurable on real data at
+the scale it will be used, instead of taken from the literature. That check belongs with the
+estimator; until one is written, `fit` is exact and must refuse a trace it cannot hold rather than
+silently sample it.
+
+#### Why `repeat: 8`
+
+FR-046 requires per-point n, mean, cv, a confidence interval and a pairwise verdict at p < 0.05, with
+`repeat` defaulting to 8. For a two-sample t-test at α = 0.05 two-sided and 80% power, the sample per
+arm is `n = 2(z₀.₉₇₅ + z₀.₈)² / d² = 15.68 / d²`, so **n = 8 detects a standardised effect of d = 1.40**
+and the 95% interval half-width is `t₀.₉₇₅,₇ / sqrt(8) = 0.836` standard deviations.
+
+In relative terms that depends entirely on the run-to-run cv, and this repository has measured its
+own:
+
+| condition | measured cv | detectable difference at n = 8 | 95% CI half-width |
+| --- | --- | --- | --- |
+| requester on the socket its NIC and GPU share | 2% | **2.8%** | ±0.6% |
+| requester split across sockets (NIC and GPU apart) | 16% | **22.4%** | ±4.7% |
+
+So `repeat: 8` is a good default *and* insufficient on its own: it resolves a few percent on a
+well-placed requester and nothing under 20% on a badly-placed one. The actionable part is that
+placement buys an order of magnitude more resolution than any affordable increase in `repeat` —
+reaching 2.8% at cv 16% would need n ≈ 400.
+
+Corroborated independently in this repository: a remote-delivery throughput change was first measured
+at n = 3, found unresolvable, and re-measured at n = 8, which resolved a 26.6% difference at p < 0.05.
+The default was chosen before that measurement and survived it.
+
+**What is still not derived.** The two cv figures come from one platform and one benchmark, so they
+calibrate the *interpretation* of `repeat: 8` rather than establishing it; a sweep on other hardware
+should re-measure its own cv, which is why FR-046 requires cv to be reported per point rather than
+assumed.
+
 ### Cross-session sharing rides on global block IDs
 
 - `exgentic_tau2_airline`: **16 188 of 364 645** minted blocks appear under more than one
@@ -565,7 +649,12 @@ Assigned to this file by `spec.md` and **not yet done**:
   and the use of synthetic shapes rather than traces remain limitations, named there.
 - **The `branch_skew` parameterisation**, and the fitting procedures for `shared_depth` and
   `roots.popularity`.
-- **Reuse-distance estimation method** and the **significance-testing approach** behind `repeat: 8`.
+- ~~**Reuse-distance estimation method** and the **significance-testing approach** behind
+  `repeat: 8`~~ — **discharged 2026-08-11** by § Reuse-distance estimation, and the basis for
+  `repeat: 8`. Exact costs ~40 bytes per reference, capping at ~4 × 10⁸ on a 16 GB budget, which one
+  trace in this corpus already exceeds at full length; SHARDS is the method beyond, validated against
+  exact on the largest trace that fits both. `repeat: 8` detects a standardised effect of 1.40, which
+  is 2.8% at the measured cv of 2% and 22.4% at 16%.
 *(Discharged by removal: the `GetIoStats` cross-check tolerance was the seventh item here. FR-042a,
 FR-042b and SC-007a are out of scope — reconciling per-class byte totals against a drive-aggregated
 counter requires bounding the consumer's background staging and promotion traffic, which cannot be
