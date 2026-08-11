@@ -96,7 +96,11 @@ IMG_CPU="${IMG_CPU:-certus-cpu-offload-bench}"
 IMG_SHARED="${IMG_SHARED:-certus-sharedstorage-bench}"
 IMG_GRPC="${IMG_GRPC:-localhost/certus-grpc-bench}"
 
+# Host copy of the replay dataset, used only for the preflight existence warn
+# (container runs bake their own copy). It lives in certus-connector/ but older
+# layouts kept it beside this script — accept either.
 DATASET_HOST="${SCRIPT_DIR}/sharegpt_12turn_450.json"
+[[ -f "$DATASET_HOST" ]] || DATASET_HOST="${REPO_ROOT}/certus-connector/sharegpt_12turn_450.json"
 SERVER_BIN="${REPO_ROOT}/target/release/certus-server-yaml"
 # llmd_fs_backend repo (for --build of the SharedStorage image). Empty = auto:
 # resolved after --model-fs is parsed, preferring <model-fs>/llm-d-kv-cache/...
