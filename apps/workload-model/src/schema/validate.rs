@@ -13,6 +13,8 @@
 //! still measurable, so it warns.
 
 use super::{ArrivalModel, Branching, Document, Placement};
+use crate::corpus::{occupancy, Corpus, TARGET_OCCUPANCY};
+use crate::units::{count_from_yaml, parse_duration_ns, parse_rate_per_s};
 
 /// How seriously a finding should be taken.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -310,21 +312,173 @@ pub fn validate(d: &Document) -> Report {
         }
     }
 
-    // Warn where the configuration is usable but likely not what was meant.
-    if let Branching::Uniform(f) = &d.corpus.trees.branching {
-        if *f > 1.25 {
+    // Rule 16: the occupancy floor. Last, because it depends on almost every
+    // other section being sane, and reported even when it passes.
+    occupancy_floor(d, &mut r);
+
+    // Under-dispersed arrival is not modelled; say so rather than silently
+    // substituting Poisson for something the document asked for.
+    if let Some(b) = d.workload.arrival.burstiness {
+        if b < 1.0 {
             r.warn(
-                "16",
+                "arrival",
                 format!(
-                    "a uniform fanout of {f} widens the trunk fast; check occupancy at p99 \
-                     shared_depth, since sessions landing on virgin trunk realise far less \
-                     sharing than they ask for"
+                    "arrival.burstiness {b} asks for an under-dispersed process, which this \
+                     generator does not model; arrivals will be Poisson (the neutral 1.0). \
+                     Burstiness is an index of dispersion, so 1.0 means no burstiness rather \
+                     than none meaning it"
                 ),
             );
         }
     }
 
     r
+}
+
+/// The realised occupancy at `p99(shared_depth)`, and what it implies.
+///
+/// This is the one check that catches a configuration which is internally
+/// consistent, passes every other rule, and still does not measure what it
+/// claims to. A `shared_depth` is what a session *attempts*; it is realised only
+/// if some earlier session walked the same steps. So a trunk wider than the
+/// session population can occupy produces sessions landing on virgin trunk, and
+/// the realised sharing is far below the drawn depth — which then reads as a
+/// property of the workload rather than of the arithmetic.
+///
+/// Below **1.0** rejects: on average not one other session has been down the
+/// path, so the sharing the document describes does not exist. Below
+/// [`TARGET_OCCUPANCY`] warns: still measurable, just thin.
+///
+/// When an input the arithmetic needs is missing, this **says so** rather than
+/// passing quietly. A silently skipped check reads exactly like a check that
+/// passed, and this is the one rule that catches a document which is wrong in a
+/// way nothing else notices.
+pub fn occupancy_floor(d: &Document, r: &mut Report) {
+    let uncheckable = |r: &mut Report, why: &str| {
+        r.warn(
+            "16",
+            format!(
+                "trunk occupancy at p99(shared_depth) could not be checked: {why}. This is the \
+                 one rule that catches a configuration which is internally consistent, passes \
+                 every other check, and still does not measure what it claims to, so a skipped \
+                 check is worth knowing about"
+            ),
+        );
+    };
+    let Some(mean_turns) = d.workload.sessions.turns.mean() else {
+        uncheckable(
+            r,
+            "sessions.turns has no closed-form mean, so sessions per window is not a number",
+        );
+        return;
+    };
+    let mean_turns = mean_turns.max(1.0);
+    let rate = d
+        .workload
+        .arrival
+        .rate
+        .as_deref()
+        .and_then(|s| parse_rate_per_s(s).ok());
+    // The window is canonically a request count; a duration needs a rate.
+    let mut defaulted = false;
+    let window_requests = match d.run.wss_window.as_ref() {
+        Some(v) => match count_from_yaml(v) {
+            Some(n) => n,
+            None => match (v.as_str().and_then(|s| parse_duration_ns(s).ok()), rate) {
+                (Some(ns), Some(rate)) => (ns as f64 / 1e9 * rate) as u64,
+                // Rule 15 already rejects the closed-loop case that gets here.
+                _ => {
+                    uncheckable(
+                        r,
+                        "run.wss_window is a duration and no rate is configured to convert it",
+                    );
+                    return;
+                }
+            },
+        },
+        None => {
+            defaulted = true;
+            super::DEFAULT_WSS_WINDOW_REQUESTS
+        }
+    };
+    if window_requests == 0 {
+        uncheckable(r, "run.wss_window is zero");
+        return;
+    }
+    let sessions_per_window = window_requests as f64 / mean_turns;
+    let p99 = d.corpus.trees.shared_depth.quantile_u32(0.99);
+    if p99 == 0 {
+        uncheckable(
+            r,
+            "shared_depth has no closed-form p99 (a zipf shared_depth carries no support), or its \
+             p99 is zero — in which case no sharing was asked for",
+        );
+        return;
+    }
+    let roots = d.corpus.trees.roots.count.max(1);
+    // Resolve exactly as generation will, so the number checked here is the
+    // number the run realises -- including whatever `auto` solves for.
+    let corpus = Corpus::resolve(
+        &d.corpus.trees,
+        d.corpus.block_bytes.clone(),
+        d.seed,
+        sessions_per_window,
+        p99,
+    );
+    // Churn-adjusted where churn is configured: a path accumulates sharers only
+    // while it exists, so without this term the floor approves sharing that churn
+    // then destroys.
+    let half_life_ns = d
+        .corpus
+        .trees
+        .churn
+        .as_ref()
+        .and_then(|c| parse_duration_ns(&c.half_life).ok())
+        .unwrap_or(0);
+    let window_ns = rate.map(|rate| (window_requests as f64 / rate * 1e9) as u64);
+    let occ = occupancy(
+        &corpus.profile,
+        roots,
+        sessions_per_window,
+        p99,
+        window_ns,
+        half_life_ns,
+    );
+    let mut churn_note = String::new();
+    if half_life_ns > 0 {
+        churn_note.push_str(" (churn-adjusted: a path accumulates sharers only while it exists)");
+    }
+    if defaulted {
+        // Occupancy scales linearly with the window, so a floor reported against
+        // an unstated one is reported against an assumption; name it.
+        churn_note.push_str(&format!(
+            ", computed against the default window of {} requests, which the document does not state",
+            super::DEFAULT_WSS_WINDOW_REQUESTS
+        ));
+    }
+    if occ < 1.0 {
+        r.reject(
+            "16",
+            format!(
+                "trunk occupancy at p99(shared_depth) = {p99} is {occ:.2}{churn_note}: fewer than \
+                 one session per distinct trunk path, so sessions land on virgin trunk and the \
+                 sharing this document describes is not realised. Widen the population, narrow \
+                 the trunk ({} roots at fanout {:.3}), or reduce shared_depth",
+                roots,
+                corpus.profile.fanout_at(1)
+            ),
+        );
+    } else if occ < TARGET_OCCUPANCY {
+        r.warn(
+            "16",
+            format!(
+                "trunk occupancy at p99(shared_depth) = {p99} is {occ:.2}{churn_note}, below the \
+                 {TARGET_OCCUPANCY:.1} this generator designs against: sharing is realised but \
+                 thin, so a hit rate measured here understates what the configured shared_depth \
+                 suggests"
+            ),
+        );
+    }
 }
 
 /// Whether a duration string denotes zero.
@@ -476,13 +630,23 @@ run:
     }
 
     #[test]
-    fn a_wide_uniform_fanout_warns_rather_than_rejects() {
-        // Usable but likely wrong: still measurable, so warn.
-        let mut d = doc("");
-        d.corpus.trees.branching = Branching::Uniform(2.0);
-        let r = validate(&d);
-        assert!(!r.is_rejected());
-        assert!(r.findings.iter().any(|f| f.severity == Severity::Warn));
+    fn a_wide_uniform_fanout_is_judged_by_computed_occupancy_not_by_its_value() {
+        // A fanout is not wrong for being large; it is wrong for outrunning the
+        // session population, and that is arithmetic rather than a threshold on
+        // the number itself. The same 2.0 that is fatal at depth 40 is harmless
+        // at depth 4, which no rule reading the fanout alone could express.
+        let deep = validate(&occ_doc(12, "2.0", 40, 240_000));
+        assert!(
+            deep.rejections().any(|f| f.rule == "16"),
+            "{:?}",
+            deep.findings
+        );
+        let shallow = validate(&occ_doc(12, "2.0", 4, 240_000));
+        assert!(
+            !shallow.rejections().any(|f| f.rule == "16"),
+            "{:?}",
+            shallow.findings
+        );
     }
 
     #[test]
@@ -503,6 +667,176 @@ run:
             },
         ]);
         assert!(validate(&d).rejections().any(|f| f.rule == "8"));
+    }
+
+    /// A document with the occupancy floor's inputs actually present: the floor
+    /// needs a window and a rate, which the minimal fixture above omits.
+    fn occ_doc(roots: u32, branching: &str, shared_depth: u32, window: u64) -> Document {
+        let y = format!(
+            r#"
+version: 1
+seed: 1
+duration: 60s
+corpus:
+  block_bytes: 131072
+  trees:
+    roots: {{count: {roots}, popularity: {{dist: zipf, s: 0.9}}}}
+    shared_depth: {{dist: const, value: {shared_depth}}}
+    branching: {branching}
+workload:
+  arrival: {{model: open_loop, rate: 4000/s}}
+  sessions:
+    turns: {{dist: geometric, mean: 6}}
+    think_time: {{dist: const, value: 3}}
+    private_depth: {{dist: const, value: 8}}
+    growth_per_turn: {{dist: const, value: 6}}
+run:
+  mode: hardware
+  wss_window: {window}
+"#
+        );
+        Document::from_yaml(&y).expect("occupancy fixture must parse")
+    }
+
+    #[test]
+    fn an_unoccupiable_trunk_is_rejected_rather_than_measured() {
+        // Rule 16, the reject half. Fanout 2.0 over 40 depths is 2^40 paths from
+        // each of 12 roots against ~40k sessions per window: every session walks
+        // virgin trunk, so the shared_depth it drew is fiction.
+        let d = occ_doc(12, "2.0", 40, 240_000);
+        let r = validate(&d);
+        assert!(r.is_rejected());
+        let f = r.rejections().find(|f| f.rule == "16").expect("rule 16");
+        assert!(f.message.contains("virgin trunk"), "{}", f.message);
+        assert!(f.message.contains("p99(shared_depth) = 40"));
+    }
+
+    #[test]
+    fn thin_but_real_occupancy_warns_rather_than_rejects() {
+        // Still measurable, so warn: the numbers are noisy rather than wrong,
+        // which is the whole reject-versus-warn distinction.
+        //
+        // 240k requests over mean 6 turns is 40k sessions a window; 12 roots at
+        // fanout 1.2 give 12 x 1.2^40 = 17.6k paths at depth 40, so occupancy is
+        // about 2.3 -- real, and under the 4.0 this generator designs against.
+        let r = validate(&occ_doc(12, "1.2", 40, 240_000));
+        assert!(!r.is_rejected(), "{:?}", r.findings);
+        let f = r.findings.iter().find(|f| f.rule == "16").expect("rule 16");
+        assert_eq!(f.severity, Severity::Warn);
+        assert!(f.message.contains("thin"), "{}", f.message);
+        assert!(f.message.contains("understates"), "{}", f.message);
+    }
+
+    #[test]
+    fn a_comfortably_occupied_trunk_says_nothing() {
+        // One root, flat trunk, 40k sessions a window: occupancy is enormous, and
+        // a rule that fired here would be noise rather than signal.
+        let r = validate(&occ_doc(1, "1.0", 18, 240_000));
+        assert!(
+            !r.findings.iter().any(|f| f.rule == "16"),
+            "{:?}",
+            r.findings
+        );
+    }
+
+    #[test]
+    fn branching_auto_lands_inside_its_own_floor() {
+        // FR-009g solves for TARGET_OCCUPANCY at p99(shared_depth), so `auto`
+        // tripping rule 16 would mean the closed form and the check disagree.
+        for roots in [1u32, 12, 64] {
+            for depth in [4u32, 18, 40] {
+                let r = validate(&occ_doc(roots, "auto", depth, 240_000));
+                assert!(
+                    !r.rejections().any(|f| f.rule == "16"),
+                    "auto rejected at roots={roots} depth={depth}: {:?}",
+                    r.findings
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn churn_tightens_the_floor_rather_than_being_ignored_by_it() {
+        // Rule 16's churn clause: a half-life short against the window shortens
+        // the interval over which a path can accumulate sharers, so a
+        // configuration that passes without churn can fail with it.
+        let base = occ_doc(1, "1.0", 40, 240_000);
+        assert!(!validate(&base).rejections().any(|f| f.rule == "16"));
+        let mut churned = base.clone();
+        churned.corpus.trees.churn = Some(super::super::Churn {
+            half_life: "50ms".into(),
+        });
+        let r = validate(&churned);
+        let f = r
+            .findings
+            .iter()
+            .find(|f| f.rule == "16")
+            .expect("churn should have moved the floor");
+        assert!(f.message.contains("churn-adjusted"), "{}", f.message);
+    }
+
+    #[test]
+    fn an_unstated_window_is_defaulted_and_the_finding_says_so() {
+        // The check still runs -- a skipped check reads exactly like a check that
+        // passed -- but occupancy scales linearly with the window, so a floor
+        // reported against an unstated one is reported against an assumption.
+        let mut d = occ_doc(12, "2.0", 40, 240_000);
+        d.run.wss_window = None;
+        let r = validate(&d);
+        let f = r.rejections().find(|f| f.rule == "16").expect("rule 16");
+        assert!(
+            f.message.contains("default window of 240000"),
+            "{}",
+            f.message
+        );
+    }
+
+    #[test]
+    fn the_validator_and_the_generator_default_the_window_identically() {
+        // Two different defaults would let a document pass validation and then be
+        // generated against a different check than the one it passed.
+        let mut d = occ_doc(12, "1.2", 40, 240_000);
+        let stated = validate(&d)
+            .findings
+            .iter()
+            .find(|f| f.rule == "16")
+            .map(|f| f.severity);
+        d.run.wss_window = None;
+        let defaulted = validate(&d)
+            .findings
+            .iter()
+            .find(|f| f.rule == "16")
+            .map(|f| f.severity);
+        assert_eq!(stated, defaulted);
+        assert_eq!(super::super::DEFAULT_WSS_WINDOW_REQUESTS, 240_000);
+    }
+
+    #[test]
+    fn a_floor_that_genuinely_cannot_be_computed_is_reported_as_such() {
+        // A zipf shared_depth carries no support, so its p99 is not a number and
+        // inventing one would make the floor a statement about a different corpus.
+        let mut d = occ_doc(12, "1.2", 40, 240_000);
+        d.corpus.trees.shared_depth =
+            crate::dist::Dist::Shaped(crate::dist::Shape::Zipf { s: 0.9, n: None });
+        let r = validate(&d);
+        let f = r.findings.iter().find(|f| f.rule == "16").expect("rule 16");
+        assert_eq!(f.severity, Severity::Warn);
+        assert!(f.message.contains("could not be checked"), "{}", f.message);
+    }
+
+    #[test]
+    fn under_dispersed_burstiness_warns_that_it_is_not_modelled() {
+        let mut d = doc("");
+        d.workload.arrival.burstiness = Some(0.4);
+        let r = validate(&d);
+        assert!(!r.is_rejected());
+        let f = r
+            .findings
+            .iter()
+            .find(|f| f.message.contains("under-dispersed"))
+            .unwrap();
+        assert_eq!(f.rule, "arrival", "not a numbered rule in the contract");
+        assert!(f.message.contains("index of dispersion"), "{}", f.message);
     }
 
     #[test]

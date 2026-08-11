@@ -311,10 +311,10 @@ impl Generator {
             .wss_window
             .as_ref()
             .and_then(count_from_yaml)
-            .unwrap_or(240_000);
+            .unwrap_or(crate::schema::DEFAULT_WSS_WINDOW_REQUESTS);
         let mean_turns = d.workload.sessions.turns.mean().unwrap_or(1.0).max(1.0);
         let sessions_per_window = window_requests as f64 / mean_turns;
-        let p99_shared = quantile_u32(&d.corpus.trees.shared_depth, 0.99);
+        let p99_shared = d.corpus.trees.shared_depth.quantile_u32(0.99);
         let corpus = Corpus::resolve(
             &d.corpus.trees,
             d.corpus.block_bytes.clone(),
@@ -631,110 +631,6 @@ fn with_support(d: &Dist, roots: u32) -> Dist {
         }),
         other => Dist::Shaped(other),
     }
-}
-
-/// The `q`-quantile of a distribution, by inverse transform where one exists.
-///
-/// Needed before anything is generated — validation rule 16 tests occupancy at
-/// `p99(shared_depth)` — so it may not be estimated from samples of a plan that
-/// does not exist yet.
-pub fn quantile_u32(d: &Dist, q: f64) -> u32 {
-    let q = q.clamp(0.0, 1.0 - 1e-12);
-    let v = match d.shape() {
-        Shape::Const { value } => value,
-        Shape::Uniform { min, max } => min + q * (max - min),
-        Shape::Normal { mean, stddev } => (mean + stddev * probit(q)).max(0.0),
-        Shape::Lognormal { median, sigma } => median * (sigma * probit(q)).exp(),
-        Shape::Exponential { mean } => -mean * (1.0 - q).ln(),
-        Shape::Geometric { mean } => {
-            let p = if mean <= 1.0 { 1.0 } else { 1.0 / mean };
-            ((1.0 - q).ln() / (1.0 - p).ln()).floor() + 1.0
-        }
-        Shape::Pareto { scale, alpha } => scale / (1.0 - q).powf(1.0 / alpha),
-        Shape::Empirical { points } => {
-            // The CDF is given explicitly; read it off rather than inverting.
-            let mut prev = (points.first().map(|p| p.0).unwrap_or(0.0), 0.0f64);
-            let mut out = prev.0;
-            for &(v, p) in &points {
-                if q <= p {
-                    let span = p - prev.1;
-                    let frac = if span <= 0.0 {
-                        0.0
-                    } else {
-                        (q - prev.1) / span
-                    };
-                    out = prev.0 + frac * (v - prev.0);
-                    return out.max(0.0) as u32;
-                }
-                prev = (v, p);
-                out = v;
-            }
-            out
-        }
-        // Zipf's quantile over an unspecified support is not a number; a caller
-        // needing one must say which support it means.
-        Shape::Zipf { .. } => 0.0,
-    };
-    if v <= 0.0 {
-        0
-    } else {
-        v as u32
-    }
-}
-
-/// Inverse standard normal CDF, Acklam's rational approximation.
-///
-/// Accurate to ~1e-9 in the tails, which is far more than a p99 depth needs. The
-/// coefficients are quoted at their published precision rather than trimmed to
-/// what an `f64` distinguishes, so that they can be checked against the source
-/// without a transcription step in the way.
-#[allow(clippy::excessive_precision)]
-fn probit(p: f64) -> f64 {
-    const A: [f64; 6] = [
-        -3.969683028665376e+01,
-        2.209460984245205e+02,
-        -2.759285104469687e+02,
-        1.383577518672690e+02,
-        -3.066479806614716e+01,
-        2.506628277459239e+00,
-    ];
-    const B: [f64; 5] = [
-        -5.447609879822406e+01,
-        1.615858368580409e+02,
-        -1.556989798598866e+02,
-        6.680131188771972e+01,
-        -1.328068155288572e+01,
-    ];
-    const C: [f64; 6] = [
-        -7.784894002430293e-03,
-        -3.223964580411365e-01,
-        -2.400758277161838e+00,
-        -2.549732539343734e+00,
-        4.374664141464968e+00,
-        2.938163982698783e+00,
-    ];
-    const D: [f64; 4] = [
-        7.784695709041462e-03,
-        3.224671290700398e-01,
-        2.445134137142996e+00,
-        3.754408661907416e+00,
-    ];
-    let p = p.clamp(1e-15, 1.0 - 1e-15);
-    let plow = 0.02425;
-    if p < plow {
-        let q = (-2.0 * p.ln()).sqrt();
-        return (((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5])
-            / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0);
-    }
-    if p > 1.0 - plow {
-        let q = (-2.0 * (1.0 - p).ln()).sqrt();
-        return -(((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5])
-            / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0);
-    }
-    let q = p - 0.5;
-    let r = q * q;
-    (((((A[0] * r + A[1]) * r + A[2]) * r + A[3]) * r + A[4]) * r + A[5]) * q
-        / (((((B[0] * r + B[1]) * r + B[2]) * r + B[3]) * r + B[4]) * r + 1.0)
 }
 
 #[cfg(test)]
@@ -1130,24 +1026,5 @@ run:
         d.duration = Some("180x".into());
         let e = Budget::from_document(&d).unwrap_err();
         assert!(format!("{e}").starts_with("duration:"), "{e}");
-    }
-
-    #[test]
-    fn quantiles_are_analytic_rather_than_sampled() {
-        // Rule 16 runs before anything is generated, so its p99 cannot come from
-        // a plan that does not exist yet.
-        assert_eq!(quantile_u32(&Dist::Scalar(18.0), 0.99), 18);
-        let ln = Dist::Shaped(Shape::Lognormal {
-            median: 18.0,
-            sigma: 0.6,
-        });
-        let q = quantile_u32(&ln, 0.99);
-        // median * exp(0.6 * 2.326) = 18 * 4.04 = 72.7
-        assert!((70..76).contains(&q), "lognormal p99 was {q}");
-        let emp = Dist::Shaped(Shape::Empirical {
-            points: vec![(4.0, 0.10), (18.0, 0.75), (40.0, 1.0)],
-        });
-        let q = quantile_u32(&emp, 0.99);
-        assert!((37..=40).contains(&q), "empirical p99 was {q}");
     }
 }

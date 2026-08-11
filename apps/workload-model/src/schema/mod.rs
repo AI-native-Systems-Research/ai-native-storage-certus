@@ -21,6 +21,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::dist::Dist;
 
+/// The measurement window used when `run.wss_window` is not stated.
+///
+/// The worked example's value. It is a real default rather than a fallback, and it
+/// is named here so that the occupancy floor and the generator cannot disagree
+/// about it: occupancy is sessions per path *per window*, so it scales linearly
+/// with this number, and two different defaults would make a document pass
+/// validation and then be generated against a different check than the one it
+/// passed. Where a finding is reported against the default, it says so.
+pub const DEFAULT_WSS_WINDOW_REQUESTS: u64 = 240_000;
+
 /// A complete workload document.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
