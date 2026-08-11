@@ -15,7 +15,7 @@
 use super::{ArrivalModel, Branching, Document, Placement};
 use crate::corpus::{occupancy, Corpus, TARGET_OCCUPANCY};
 use crate::session::{check_warmup, Population};
-use crate::units::{count_from_yaml, parse_duration_ns, parse_rate_per_s};
+use crate::units::{parse_duration_ns, parse_rate_per_s};
 
 /// How seriously a finding should be taken.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -436,32 +436,16 @@ pub fn occupancy_floor(d: &Document, r: &mut Report) {
         .rate
         .as_deref()
         .and_then(|s| parse_rate_per_s(s).ok());
-    // The window is canonically a request count; a duration needs a rate.
-    let mut defaulted = false;
-    let window_requests = match d.run.wss_window.as_ref() {
-        Some(v) => match count_from_yaml(v) {
-            Some(n) => n,
-            None => match (v.as_str().and_then(|s| parse_duration_ns(s).ok()), rate) {
-                (Some(ns), Some(rate)) => (ns as f64 / 1e9 * rate) as u64,
-                // Rule 15 already rejects the closed-loop case that gets here.
-                _ => {
-                    uncheckable(
-                        r,
-                        "run.wss_window is a duration and no rate is configured to convert it",
-                    );
-                    return;
-                }
-            },
-        },
-        None => {
-            defaulted = true;
-            super::DEFAULT_WSS_WINDOW_REQUESTS
+    // The window is canonically a request count; a duration needs a rate. Rule 15
+    // already rejects the closed-loop case that reaches the duration branch.
+    let (window_requests, window_source) = match super::wss_window_requests(d) {
+        Ok(v) => v,
+        Err(e) => {
+            uncheckable(r, &e);
+            return;
         }
     };
-    if window_requests == 0 {
-        uncheckable(r, "run.wss_window is zero");
-        return;
-    }
+    let defaulted = window_source == super::WindowSource::Defaulted;
     let sessions_per_window = window_requests as f64 / mean_turns;
     let p99 = d.corpus.trees.shared_depth.quantile_u32(0.99);
     if p99 == 0 {

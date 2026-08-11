@@ -24,5 +24,6 @@ pub mod plan;
 
 pub mod schema;
 pub mod session;
+pub mod stats;
 pub mod trace;
 pub mod units;

@@ -31,6 +31,56 @@ use crate::dist::Dist;
 /// passed. Where a finding is reported against the default, it says so.
 pub const DEFAULT_WSS_WINDOW_REQUESTS: u64 = 240_000;
 
+/// Whether the window came from the document or from the default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowSource {
+    /// Written in the document, as a count.
+    Stated,
+    /// Written as a duration and converted through the configured rate.
+    ConvertedFromDuration,
+    /// Not written; [`DEFAULT_WSS_WINDOW_REQUESTS`].
+    Defaulted,
+}
+
+/// Resolve `run.wss_window` to a request count (spec FR-009h).
+///
+/// The window is canonically a **count**; a duration is sugar and needs a rate to
+/// convert, which only `open_loop` supplies. One implementation, used by both the
+/// occupancy floor and the report, for the same reason the default itself is
+/// shared: a document that passed validation against one window and was then
+/// characterised against another would have been measured by a different check
+/// than the one it passed.
+pub fn wss_window_requests(d: &Document) -> Result<(u64, WindowSource), String> {
+    let v = match d.run.wss_window.as_ref() {
+        None => return Ok((DEFAULT_WSS_WINDOW_REQUESTS, WindowSource::Defaulted)),
+        Some(v) => v,
+    };
+    if let Some(n) = crate::units::count_from_yaml(v) {
+        return match n {
+            0 => Err("run.wss_window is zero".into()),
+            n => Ok((n, WindowSource::Stated)),
+        };
+    }
+    let ns = v
+        .as_str()
+        .and_then(|s| crate::units::parse_duration_ns(s).ok())
+        .ok_or_else(|| "run.wss_window is neither a request count nor a duration".to_string())?;
+    let rate = d
+        .workload
+        .arrival
+        .rate
+        .as_deref()
+        .and_then(|s| crate::units::parse_rate_per_s(s).ok())
+        .ok_or_else(|| {
+            "run.wss_window is a duration and no rate is configured to convert it".to_string()
+        })?;
+    let n = (ns as f64 / 1e9 * rate) as u64;
+    if n == 0 {
+        return Err("run.wss_window converts to zero requests".into());
+    }
+    Ok((n, WindowSource::ConvertedFromDuration))
+}
+
 /// A complete workload document.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

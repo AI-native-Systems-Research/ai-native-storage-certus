@@ -9,17 +9,22 @@
 //! lives in `certus-workload-run`, which is the only mode that involves Certus at
 //! all.
 //!
-//! `report` is deliberately absent from this build: the statistics it prints are
-//! Phase 4 work, and a subcommand that accepted the flag and printed nothing
-//! would be worse than one that is not there yet.
+//! `report` prints what a workload *is*, computed from the plan alone: the
+//! reuse-distance CDF, the compulsory-miss floor, realised sharing and trunk
+//! shape, and the working-set size. It involves no consumer, no capacity and no
+//! cache model (spec FR-034), and the statistics themselves live in
+//! `workload-model::stats` rather than here, because `certus-trace` computes the
+//! same ones over real traces and two implementations would drift (FR-021i).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use workload_model::plan::manifest::Identity;
 use workload_model::plan::{read_plan, unbounded_manifest, write_plan, Budget, Generator};
 use workload_model::schema::validate::{validate, Severity};
 use workload_model::schema::{extends, Document};
+use workload_model::stats::{Provenance, Statistics};
 use workload_model::trace::{requests, Emitter, TraceManifest, DEFAULT_BLOCK_SIZE_TOKENS};
 
 #[derive(Parser)]
@@ -56,6 +61,24 @@ enum Cmd {
         #[arg(long, value_name = "EVENTS")]
         horizon: Option<usize>,
     },
+    /// Characterise a plan, without running anything.
+    ///
+    /// Every statistic is a property of the reference stream: none needs a
+    /// capacity, a replacement policy or a consumer of any kind (FR-034a). The
+    /// reuse-distance CDF is the primary one — a consumer reads any capacity point
+    /// off it, so this tool never has to model a cache to tell it one.
+    Report {
+        /// The `.plan/` directory.
+        #[arg(short = 'p', long, value_name = "DIR")]
+        plan: PathBuf,
+        /// Emit the machine-readable form instead of the human summary (FR-048).
+        #[arg(long)]
+        json: bool,
+        /// Also print the normalised input the plan was generated from, which the
+        /// report embeds either way (FR-047).
+        #[arg(long)]
+        show_input: bool,
+    },
     /// Emit an existing plan as a JSONL interchange trace.
     ///
     /// Reads `events.bin` rather than regenerating, which FR-021c requires: the
@@ -89,6 +112,11 @@ fn main() -> ExitCode {
             check,
             horizon,
         } => cmd_plan(&config, out.as_deref(), print_normalised, check, horizon),
+        Cmd::Report {
+            plan,
+            json,
+            show_input,
+        } => cmd_report(&plan, json, show_input),
         Cmd::Emit {
             plan,
             out,
@@ -221,6 +249,52 @@ fn cmd_plan(
                 "note: {events} of the {n} block budget used; a plan stops at a request boundary"
             );
         }
+    }
+    Ok(())
+}
+
+/// Characterise a plan from its own events.
+///
+/// The window comes from the manifest rather than being re-derived from the
+/// embedded YAML: the manifest records what the plan was actually generated
+/// against, and occupancy scales linearly with the window, so re-resolving it here
+/// could characterise a plan against a different window than the one whose
+/// occupancy floor it passed.
+fn cmd_report(plan: &Path, json: bool, show_input: bool) -> Result<(), String> {
+    let (m, events) = read_plan(plan).map_err(|e| e.to_string())?;
+    let window = m.corpus_summary.wss_window_requests;
+    if window == 0 {
+        return Err("the plan's manifest carries no wss_window; refusing to invent one".into());
+    }
+
+    let mut stats = Statistics::new(window);
+    stats.push_events(&events);
+    let mut report = stats.finish();
+
+    // FR-047: a report must be attributable to the exact input that produced it,
+    // and FR-012a wants the configured sharing distribution stated beside the
+    // realised one -- as a second statistic, never as a stand-in for it.
+    let (content_hash, parameter_hash) = match &m.identity {
+        Identity::ContentHash(h) => (Some(h.clone()), None),
+        Identity::ParameterHash(h) => (None, Some(h.clone())),
+    };
+    report = report.with_provenance(Provenance {
+        content_hash,
+        parameter_hash,
+        stream_digest: Some(m.stream_digest.clone()),
+        normalised_yaml: Some(m.normalised_yaml.clone()),
+    });
+    if let Ok(doc) = serde_yaml::from_str::<Document>(&m.normalised_yaml) {
+        report = report.with_intended_shared_depth(&doc.corpus.trees.shared_depth);
+    }
+
+    if json {
+        println!("{}", report.to_json().map_err(|e| e.to_string())?);
+        return Ok(());
+    }
+    print!("{}", report.to_text());
+    if show_input {
+        println!("normalised input\n{}", m.normalised_yaml);
     }
     Ok(())
 }

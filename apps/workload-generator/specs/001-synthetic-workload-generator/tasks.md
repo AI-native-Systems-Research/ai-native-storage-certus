@@ -125,14 +125,14 @@ on the stream itself rather than on any model of something consuming it.
 
 ### Implementation for User Story 2
 
-- [ ] T043 [US2] Implement the reuse-distance CDF in `apps/workload-model/src/stats/reuse_distance.rs` — the primary statistic, per object and per byte
-- [ ] T044 [P] [US2] Implement the compulsory-miss floor in `apps/workload-model/src/stats/floor.rs`
-- [ ] T045 [P] [US2] Implement the prefix-sharing depth histogram in `apps/workload-model/src/stats/sharing.rs`, reporting **intended** and **realised** as two separate statistics (FR-012a), and ensure every FR-034a quantity is the realised value rather than the configured one (FR-012)
-- [ ] T046 [P] [US2] Implement request-length distribution and unique-keys-over-time in `apps/workload-model/src/stats/`
-- [ ] T047 [P] [US2] Implement realised trunk width and occupancy per depth in `apps/workload-model/src/stats/trunk.rs`
-- [ ] T048 [P] [US2] Implement realised working-set size over `run.wss_window` as a request count in `apps/workload-model/src/stats/wss.rs`
-- [ ] T049 [US2] Implement `certus-workload report` with human and JSON output, embedding the plan hash and normalised YAML (FR-047)
-- [ ] T050 [US2] Implement the FR-059/FR-060 warnings, including the plan-side half of the degenerate-workload check
+- [X] T043 [US2] Implement the reuse-distance CDF in `apps/workload-model/src/stats/reuse_distance.rs` — the primary statistic, per object and per byte
+- [X] T044 [P] [US2] Implement the compulsory-miss floor in `apps/workload-model/src/stats/floor.rs`
+- [X] T045 [P] [US2] Implement the prefix-sharing depth histogram in `apps/workload-model/src/stats/sharing.rs`, reporting **intended** and **realised** as two separate statistics (FR-012a), and ensure every FR-034a quantity is the realised value rather than the configured one (FR-012)
+- [X] T046 [P] [US2] Implement request-length distribution and unique-keys-over-time in `apps/workload-model/src/stats/`
+- [X] T047 [P] [US2] Implement realised trunk width and occupancy per depth in `apps/workload-model/src/stats/trunk.rs`
+- [X] T048 [P] [US2] Implement realised working-set size over `run.wss_window` as a request count in `apps/workload-model/src/stats/wss.rs`
+- [X] T049 [US2] Implement `certus-workload report` with human and JSON output, embedding the plan hash and normalised YAML (FR-047)
+- [X] T050 [US2] Implement the FR-059/FR-060 warnings, including the plan-side half of the degenerate-workload check
 
 **Checkpoint**: a workload can be characterised and rejected as degenerate before any hardware time is spent.
 
