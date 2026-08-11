@@ -82,9 +82,9 @@ distributional assertions still hold.
 
 ### Tests for User Story 1
 
-- [ ] T021 [P] [US1] Test byte-identical plans from the same YAML and seed, and differing hashes with equal distributional properties from a changed seed (SC-003)
-- [ ] T022 [P] [US1] Test that resident memory stays O(live sessions) as run length grows by an order of magnitude (FR-010)
-- [ ] T023 [P] [US1] Test the occupancy floor: a config whose `occupancy(p99(shared_depth))` falls below 1.0 is rejected and below 4.0 warns (validation rule 16)
+- [X] T021 [P] [US1] Test byte-identical plans from the same YAML and seed, and differing hashes with equal distributional properties from a changed seed (SC-003)
+- [X] T022 [P] [US1] Test that resident memory stays O(live sessions) as run length grows by an order of magnitude (FR-010)
+- [X] T023 [P] [US1] Test the occupancy floor: a config whose `occupancy(p99(shared_depth))` falls below 1.0 is rejected and below 4.0 warns (validation rule 16)
 - [X] T024 [P] [US1] Test that a warmup shorter than the computed session-population ramp is **rejected**, not warned (FR-015b)
 
 ### Implementation for User Story 1
@@ -96,12 +96,12 @@ distributional assertions still hold.
 - [X] T029 [US1] Implement the session lifecycle — born, retired, private keys dead at retirement — with lifetime and live population **derived** rather than configured (FR-014b, FR-015a)
 - [X] T030 [US1] Implement `open_loop` and `closed_loop` arrival with burstiness as an index of dispersion whose neutral value is 1.0 (FR-015, FR-017)
 - [X] T031 [US1] Implement the mixture over one session model, with `conversation`/`one_shot`/`scan` as presets rather than schema (FR-013, FR-014)
-- [ ] T032 [US1] Implement plan writing in `apps/workload-model/src/plan/writer.rs`, keys of a request contiguous and in path order, timestamps non-decreasing
-- [ ] T033 [US1] Implement chunked look-ahead generation so an unbounded run stays flat and allocation-free with only the horizon finite, and report the horizon (FR-021f)
-- [ ] T034 [US1] Implement the `certus-workload plan` subcommand in `apps/workload-generator/src/main.rs`
-- [ ] T035 [US1] Implement `certus-workload emit` for the JSONL container, writing a synthetic `manifest.json` with `provenance: synthetic` and the full block encoding (FR-021b)
-- [ ] T036 [US1] Enforce the run-length rules: exactly one of `duration`/`requests`/`blocks`/`unbounded`; `blocks` required for file output; `unbounded` rejected for file output (FR-021d, FR-021e)
-- [ ] T037 [P] [US1] Add a Criterion benchmark for generation throughput establishing FR-037's no-bottleneck claim as a measurement
+- [X] T032 [US1] Implement plan writing in `apps/workload-model/src/plan/writer.rs`, keys of a request contiguous and in path order, timestamps non-decreasing
+- [X] T033 [US1] Implement chunked look-ahead generation so an unbounded run stays flat and allocation-free with only the horizon finite, and report the horizon (FR-021f)
+- [X] T034 [US1] Implement the `certus-workload plan` subcommand in `apps/workload-generator/src/main.rs`
+- [X] T035 [US1] Implement `certus-workload emit` for the JSONL container, writing a synthetic `manifest.json` with `provenance: synthetic` and the full block encoding (FR-021b)
+- [X] T036 [US1] Enforce the run-length rules: exactly one of `duration`/`requests`/`blocks`/`unbounded`; `blocks` required for file output; `unbounded` rejected for file output (FR-021d, FR-021e)
+- [X] T037 [P] [US1] Add a Criterion benchmark for generation throughput establishing FR-037's no-bottleneck claim as a measurement
 
 **Checkpoint**: US1 is independently usable — YAML in, reproducible plan out.
 
