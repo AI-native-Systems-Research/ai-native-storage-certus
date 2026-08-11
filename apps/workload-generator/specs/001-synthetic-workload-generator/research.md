@@ -270,6 +270,128 @@ profile beneath — true and realisable. This absorption works only for *near-ro
 event in `tau2_airline` is beyond any choice of boundary, which is the independent argument for the
 profile.
 
+### The branching segmentation rule — the derivation behind FR-055a, FR-055b and FR-055c
+
+The measurements above used `width(d+1)/width(d) > 1.8` while >20% of requests were still alive.
+Both numbers were chosen to make the structure visible. This section replaces them. Nothing in the
+measurements depends on it: the flat-run evidence holds under any threshold, and this rule finds
+*more* structure than 1.8× did, not less.
+
+Measured with `research/width_profile.py` (profile) and `research/segment.py` (rule), 2026-08-11.
+
+**1. The model's own domain makes the estimator one-sided.** Schema rule 8 requires `fanout >= 1` at
+every depth, so that every trunk node has a child and the trunk is unbounded in depth. An observed
+*decrease* in width therefore cannot be a fanout — it is censoring by session retirement, and it
+carries no information about branching. An observed *increase* cannot be produced by censoring,
+since retirement only ever removes visited nodes. So
+
+```
+f(d) = max(1, w(d) / w(d-1))
+```
+
+is one-sided, and the fitted profile is a **lower bound** on the true fanout: where censoring partly
+cancels a real fanout the estimate is too small, and it can never be too large. The direction matters
+and must be reported, because a trunk fitted narrower than reality generates *more* sharing than the
+trace had.
+
+This is also why no jump threshold is needed to *identify* an event. Width is an integer count, so
+any increase is at least one extra node. The question a threshold was standing in for is not "is this
+a fanout" but "do two adjacent depths share one fanout", which is step 2.
+
+**2. The resolution comes from the generator, not from taste.** The generator realises a non-integer
+mean fanout by randomised rounding: each node gets `floor(f)` or `ceil(f)` children, taking the
+higher with probability `frac = f - floor(f)`. The realised mean over the `w` nodes of a depth is
+therefore a Bernoulli average, with standard error
+
+```
+se(f, w) = sqrt( frac(1 - frac) / w )        # in children per node
+```
+
+Checked against the generator: a uniform profile of `fanout: 1.05` over `roots.count: 200` and 40 000
+single-turn requests predicts `se = sqrt(0.05 × 0.95 / 200) = 0.0154`, and the realised per-depth
+fanout deviates from the configured one by **1.006× at p50, 1.014× at p90, 1.018× at worst** — the
+p90 matching the prediction to two decimal places.
+
+So the generator cannot reproduce a fanout distinction finer than a few percent at these widths, and
+a fitted distinction finer than that describes noise. Two adjacent depths are merged unless their
+fanouts differ by more than `Z = 3` such standard errors. `1.8×` is more than twenty times coarser
+than this resolution, which is why it finds only the largest events — and why it reports **no fanout
+event at all** for `qwen_reasoning`, whose largest ratio is exactly 1.8.
+
+**3. The fittable range is where the data stops contradicting the model.** A segment's fanout is a
+*product* over its depths, so censoring compounds through it. The share of ratios that decrease —
+which the model forbids — is the direct measure of how censored a depth range is. Against cumulative
+retention `survivors(d)/survivors(0)`:
+
+| retention floor | 0.999 | 0.99 | 0.95 | 0.90 | 0.75 |
+| --- | --- | --- | --- | --- | --- |
+| traces with **no** forbidden decrease | 15/16 | 12/16 | 6/16 | 4/16 | 0/16 |
+| worst trace's share of decreases | 4.8% | 33% | 50% | 67% | 75% |
+
+**0.99 is the knee**: the loosest floor at which most traces produce no observation the model cannot
+represent. Segmentation runs over the retained prefix; beyond it nothing is fitted and the observed
+width is reported as a lower bound. `roots.count` is exempt, being a single width reading rather than
+a product — it is taken at the fold boundary whatever the retention there, which is reported beside
+it.
+
+**4. The near-root fold follows from the occupancy floor (FR-055c).** Leading segments are absorbed
+into `roots.count` for exactly as long as absorbing them is what keeps occupancy at the fitted
+sharing depth above `target_occupancy`. So the fold goes as deep as FR-009f requires and no deeper,
+and a trace with a genuinely wide but shallow trunk keeps it. A *deep* fanout event cannot be folded
+at all and the rule stops rather than pretending — which is the `tau2_airline` depth-124 case.
+
+**This reproduces the hand judgement it replaces.** The eyeballed reading of § Width and occupancy by
+depth was "~4 900 roots for `qwen_code`, not 155 splitting 31 ways" and "~21 000 for `ragbench`". The
+derived fold gives **4 902** and **21 760**, from the occupancy floor alone.
+
+| Trace | depths | fitted | `roots.count` | retention at boundary | trunk segments | largest fanout |
+| --- | --- | --- | --- | --- | --- | --- |
+| `exgentic_appworld` | 47 230 | 169 | 635 | 0.997 | 1 | 1.000 |
+| `exgentic_browsecompplus` | 16 775 | 27 | 1 145 | 0.998 | 1 | 1.002 |
+| `exgentic_swebench` | 9 280 | 60 | 1 282 | 1.000 | 1 | 1.000 |
+| `exgentic_tau2_airline` | 3 583 | 48 | 27 | 1.000 | 4 | 1.492 |
+| `exgentic_tau2_retail` | 2 419 | 71 | 26 | 1.000 | 5 | 1.115 |
+| `exgentic_tau2_telecom` | 2 265 | 74 | 24 | 1.000 | 2 | 1.031 |
+| `mooncake_agent` | 247 | 1 | 4 | 1.000 | 1 | 1 638.5 |
+| `mooncake_conv` | 247 | 1 | 1 | 1.000 | 1 | 7 373.0 |
+| `qwen_code` | 1 612 | 2 | 4 902 | 0.999 | 1 | 1.355 |
+| `qwen_reasoning` | 3 227 | 2 | 852 | 1.000 | 2 | 1.751 |
+| `qwen_tob` | 4 153 | 3 | 2 283 | 1.000 | 3 | 7.051 |
+| `qwen_toc` | 5 581 | 4 | 8 034 | 1.000 | 1 | 1.443 |
+| `ragbench` | 5 152 | 12 | 21 760 | 0.995 | 1 | 1.004 |
+| `ragbench_canonical` | 5 152 | 12 | 21 214 | 0.999 | 1 | 1.005 |
+| `swe_agent` | 8 433 | 118 | 3 | 1.000 | 8 | 173.0 |
+| `wildchat` | 743 | 0 | — | 1.000 | 0 | — |
+
+Four readings, three of them consequences a `fit` implementation has to handle rather than results:
+
+- **Profiles are compact.** 0–8 trunk segments, against the 30–74 that segmenting the whole depth
+  range produces. Nearly all of that difference is censored noise, which step 3 removes.
+- **Agentic traces have a trunk to fit and chat and retrieval do not.** Fitted range 27–169 depths
+  for `exgentic_*` and `swe_agent`, against 0–12 for `qwen_*`, `ragbench` and `wildchat` — the same
+  ~60× split the shape taxonomy found, arrived at independently.
+- **`wildchat` supports no trunk fit at all** (fitted range 0): more than 1% of its requests are a
+  single block, so retention breaks at depth 1. `fit` must emit the "essentially no sharing" shape —
+  `roots.count` at the peak width, a flat profile — and say that is what it did, rather than report
+  the depth-0 width of 2 as `roots.count`.
+- **`mooncake_*` cannot have the fold decided at all.** Its `session_id` is `unavailable`, so
+  occupancy has no denominator, and the enormous near-root fanout stays in the profile where it
+  fails the floor. A trace without session identity can be fitted for arrival and size but not for
+  trunk shape, which is `supports: R = partial` doing exactly what it says.
+
+**Two independent criteria agree, which is the best evidence here that the rule is right.** The
+retention floor comes from the model's `fanout >= 1` domain; FR-055b's high-occupancy qualification
+comes from what a trace can reveal about unvisited nodes. They are unrelated arguments, and yet every
+segment the retention floor admits across all sixteen traces sits at **occupancy 4.0 or above** — the
+lowest being `qwen_code` at exactly 4.0 and `swe_agent`'s deepest fitted segment at 4.1. So the range
+the compounding argument admits is the range the visibility argument trusts, and `segment.py` prints
+the occupancy beside every fanout so the two can never be read apart.
+
+**What is still not derived.** `Z = 3` is conventional rather than derived; the sensitivity is mild,
+since the gap between a flat run and a real event is tens of standard errors, but it is a choice.
+And the retention knee at 0.99 is read off sixteen traces from a convenience sample — the *form* of
+the criterion follows from the model, the *value* does not.
+
 ### Cross-session sharing rides on global block IDs
 
 - `exgentic_tau2_airline`: **16 188 of 364 645** minted blocks appear under more than one
@@ -318,6 +440,18 @@ them, counting how many leading blocks of each request are already in a seen-set
 `rolling_prefix` identity that count *is* the longest common prefix against the union of all earlier
 requests, which is the FR-056 statistic.
 
+The width and segmentation figures have that walk written down, in two steps so the rule can be
+re-derived without re-reading 800 MB:
+
+```sh
+/tmp/pqenv/bin/python research/width_profile.py <trace> --out profile.json   # measurement
+/tmp/pqenv/bin/python research/segment.py profile.json                      # the rule
+```
+
+`width_profile.py` reports `survivors` and `sessions` beside `width` at every depth, because the
+censoring correction and the occupancy floor both need them and a width profile alone cannot be read
+honestly.
+
 ## Threats to validity
 
 1. **Convenience sample.** 24 traces, chosen by availability. Shapes are likely to recur; the
@@ -332,9 +466,11 @@ requests, which is the FR-056 statistic.
 4. **Truncation.** `wildchat` (1 960 074 invocations) and `swe_agent` (2 115 623) were probed at
    120k–250k, i.e. 6-13% of each, so their session counts and width profiles are lower bounds. The
    sharing medians are less affected, being medians over the prefix read rather than extrapolations.
-5. **The fanout threshold is arbitrary.** 1.8× was chosen to make the structure visible, not
-   derived. The segmentation rule is an open derivation below, and the flat-run evidence does not
-   depend on the threshold.
+5. **The fanout threshold was arbitrary, and is no longer used.** 1.8× was chosen to make the
+   structure visible. § The branching segmentation rule replaces it with a resolution derived from
+   the generator's own randomised rounding; the flat-run evidence never depended on the threshold,
+   and the derived rule finds more events than 1.8× did. What remains chosen there is `Z = 3` and
+   the 0.99 retention knee, both named as such.
 
 ## Open derivations
 
@@ -343,10 +479,11 @@ Assigned to this file by `spec.md` and **not yet done**:
 - **The trunk-occupancy bound and the `auto` closed form** (FR-009f/FR-009g) — full derivation, and
   the `target_occupancy = 4` choice, which § Width and occupancy by depth supports but does not
   establish.
-- **The segmentation rule for fitting a `branching` profile** — what jump ratio counts as a fanout
-  event, how to choose segment boundaries robustly when width is noisy, and how the near-root
-  boundary of FR-055c interacts with it. § Trunk width is piecewise used 1.8× as a threshold chosen
-  by eye; that is not a rule.
+- ~~**The segmentation rule for fitting a `branching` profile**~~ — **discharged 2026-08-11** by
+  § The branching segmentation rule. No jump ratio is used: increases are events by integrality,
+  decreases are censoring by rule 8, adjacent depths merge at the resolution of the generator's own
+  randomised rounding, and the near-root fold falls out of the FR-009f occupancy floor. `Z = 3` and
+  the 0.99 retention knee remain choices, and are named there as such.
 - **The four default per-statistic `fit`/`validate` tolerances** (FR-057b), including which
   divergence measure each statistic uses — the four are on different scales, so each needs its own
   measure as well as its own threshold.

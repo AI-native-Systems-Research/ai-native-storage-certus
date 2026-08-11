@@ -217,8 +217,11 @@ tracks it, with fabric bytes ~0 at 1.0.
 
 ## Phase 8: User Story 6 — Fit a Model from a Real Trace (Priority: P2)
 
-**⚠ Blocked on research**: T074 owes the `branching` segmentation rule. `fit` cannot be implemented
-without it — the 1.8× fanout threshold in `research.md` was chosen by eye, not derived.
+**Research prerequisite discharged 2026-08-11**: T074's `branching` segmentation rule is derived in
+`research.md` § The branching segmentation rule, and the eyeballed 1.8× threshold is gone — increases
+are events by integrality, decreases are censoring under rule 8, adjacent depths merge at the
+resolution of the generator's own randomised rounding, and the near-root fold falls out of the FR-009f
+occupancy floor. `research/width_profile.py` and `research/segment.py` are its executable form.
 
 **Goal**: a real trace produces a YAML whose synthetic output statistically resembles it.
 
@@ -228,7 +231,7 @@ recovered parameters against the originals. Ground truth is exact, so any diverg
 
 ### Research
 
-- [ ] T074 [US6] **Derive the `branching` segmentation rule** in `research.md`: what jump ratio counts as a fanout event, how boundaries are chosen when width is noisy, and how the FR-055c near-root boundary interacts with it
+- [X] T074 [US6] **Derive the `branching` segmentation rule** in `research.md`: what jump ratio counts as a fanout event, how boundaries are chosen when width is noisy, and how the FR-055c near-root boundary interacts with it
 - [ ] T075 [P] [US6] Derive the four per-statistic `fit`/`validate` tolerance defaults and each statistic's divergence measure, the four being on different scales (FR-057a, FR-057b)
 - [ ] T076 [P] [US6] Derive the reuse-distance estimation method and the significance-testing approach behind `repeat: 8`
 
