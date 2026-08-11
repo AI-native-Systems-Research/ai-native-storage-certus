@@ -104,9 +104,30 @@ if __name__ == "__main__":
     # named `vllm:*_total`, summed across label sets) at the end of every round
     # and log the delta; the full per-round series is also dumped to JSON.
     def prom_counters():
+        # Prefer the V1 offline snapshot: engine counters (prompt/generation
+        # tokens, prefix-cache queries/hits, preemptions) are exposed by
+        # llm.get_metrics() and are NOT on the global prometheus REGISTRY in
+        # offline mode — reading only the REGISTRY (or the log_stats logger) misses
+        # them. Then supplement with the REGISTRY for older (V0) engines, where
+        # get_metrics() is absent, and for connector-registered metrics
+        # (vllm:kv_offload_*) which only ever live on the global registry.
+        # Names differ by source: get_metrics() uses bare names
+        # (vllm:prefix_cache_queries); REGISTRY counter samples carry the _total
+        # suffix — we keep both keys so the delta shows under whichever the
+        # running version populates.
         vals = {}
         if not CAPTURE_METRICS:
             return vals
+        try:
+            for m in llm.get_metrics():
+                if type(m).__name__ != "Counter":
+                    continue
+                name = getattr(m, "name", "")
+                val = getattr(m, "value", None)
+                if name.startswith("vllm:") and isinstance(val, (int, float)):
+                    vals[name] = float(val)
+        except Exception:  # noqa: BLE001 - get_metrics() is V1-only; skip on V0
+            pass
         try:
             from prometheus_client import REGISTRY
             for metric in REGISTRY.collect():
