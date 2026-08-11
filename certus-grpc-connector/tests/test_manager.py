@@ -27,6 +27,8 @@ class FakeStub:
         self.exists: dict[int, bool] = {}
         self.reserve_fail: set[int] = set()
         self.copy_fail: set[int] = set()
+        self.commit_fail: set[int] = set()
+        self.abort_fail: set[int] = set()
         self.events: list[pb.EvictionEvent] = []
         self.dropped_count = 0
 
@@ -50,13 +52,19 @@ class FakeStub:
     def CommitStore(self, req):
         self.calls.append(("CommitStore", req))
         return pb.BatchCommitStoreResponse(
-            results=[pb.EntryResult(key=k, success=True) for k in req.keys]
+            results=[
+                pb.EntryResult(key=k, success=k not in self.commit_fail)
+                for k in req.keys
+            ]
         )
 
     def AbortStore(self, req):
         self.calls.append(("AbortStore", req))
         return pb.BatchAbortStoreResponse(
-            results=[pb.EntryResult(key=k, success=True) for k in req.keys]
+            results=[
+                pb.EntryResult(key=k, success=k not in self.abort_fail)
+                for k in req.keys
+            ]
         )
 
     def Pin(self, req):
@@ -247,6 +255,27 @@ def test_prepare_store_skips_check_for_known_present_key():
     assert out.keys_to_store == []
     assert _calls_of(stub, "Check") == []
     assert _calls_of(stub, "Reserve") == []
+
+
+def test_failed_commit_does_not_create_known_present_hint():
+    stub = FakeStub()
+    stub.commit_fail = {46}
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    key = (46).to_bytes(8, "big")
+
+    out = mgr.prepare_store([key])
+    assert out.keys_to_store == [key]
+    mgr.complete_store([key], success=True)
+    stub.calls.clear()
+
+    out = mgr.prepare_store([key])
+
+    assert out is not None
+    assert out.keys_to_store == [key]
+    # A failed commit is not authoritative local state. The next store attempt
+    # must ask the server again rather than skipping Check as "known present".
+    assert _calls_of(stub, "Check")
+    assert _calls_of(stub, "Reserve")
 
 
 def test_prepare_store_skips_same_u64_collision():

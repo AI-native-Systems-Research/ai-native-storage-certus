@@ -134,6 +134,10 @@ class GrpcCertusOffloadingManager(OffloadingManager):
             self._known_present_u64.discard(int_key)
             self._known_absent_u64.discard(int_key)
 
+    def _clear_presence_hint(self, int_key: int) -> None:
+        self._known_present_u64.discard(int_key)
+        self._known_absent_u64.discard(int_key)
+
     def _mark_present(self, key: OffloadKey, int_key: int) -> bool:
         if not self._remember_key(key, int_key):
             return False
@@ -328,13 +332,23 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         if not int_keys:
             return
         if success:
-            self._stub.CommitStore(pb.BatchCommitStoreRequest(keys=int_keys))
+            resp = self._stub.CommitStore(pb.BatchCommitStoreRequest(keys=int_keys))
+            committed = {r.key for r in resp.results if r.success}
             for key, int_key in zip(keys_list, int_keys):
-                self._mark_present(key, int_key)
+                if int_key in committed:
+                    self._mark_present(key, int_key)
+                else:
+                    # CommitStore failures can mean "not committed" or "already
+                    # present"; do not convert either into a trusted local hint.
+                    self._clear_presence_hint(int_key)
         else:
-            self._stub.AbortStore(pb.BatchAbortStoreRequest(keys=int_keys))
+            resp = self._stub.AbortStore(pb.BatchAbortStoreRequest(keys=int_keys))
+            aborted = {r.key for r in resp.results if r.success}
             for key, int_key in zip(keys_list, int_keys):
-                self._mark_absent(key, int_key)
+                if int_key in aborted:
+                    self._mark_absent(key, int_key)
+                else:
+                    self._clear_presence_hint(int_key)
 
     # ── load ──
 
