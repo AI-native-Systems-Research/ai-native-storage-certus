@@ -14,6 +14,7 @@
 
 use super::{ArrivalModel, Branching, Document, Placement};
 use crate::corpus::{occupancy, Corpus, TARGET_OCCUPANCY};
+use crate::session::{check_warmup, Population};
 use crate::units::{count_from_yaml, parse_duration_ns, parse_rate_per_s};
 
 /// How seriously a finding should be taken.
@@ -204,6 +205,11 @@ pub fn validate(d: &Document) -> Report {
         _ => {}
     }
 
+    // FR-015b: warmup must cover the session-population ramp, and the measured
+    // window must exist at all. Both are rejections rather than warnings: the
+    // numbers that follow describe the clock rather than the workload.
+    warmup_window(d, &mut r);
+
     // Rule 10: replication cannot exceed the node count.
     if let (Some(topo), Some(rep)) = (
         &d.topology,
@@ -333,6 +339,57 @@ pub fn validate(d: &Document) -> Report {
     }
 
     r
+}
+
+/// Check `run.warmup` against the population ramp and against the run length.
+///
+/// [`check_warmup`] states FR-015b's rejection and is exercised by its own tests,
+/// but nothing reached it: a rule that exists and cannot be triggered from the
+/// command line protects nobody. Two ways the measured window goes wrong, and
+/// they fail in opposite directions:
+///
+/// - **Warmup too short.** The window opens on a partly-filled session
+///   population, so it sees less concurrency, less occupancy and less sharing
+///   than configured — all of which read as properties of the workload.
+/// - **Warmup longer than the run.** There is no measured window at all. Every
+///   event is inside warmup, so a report over the steady state is a report over
+///   nothing.
+fn warmup_window(d: &Document, r: &mut Report) {
+    let Some(warmup) = d.run.warmup.as_deref() else {
+        return;
+    };
+    let Ok(warmup_ns) = parse_duration_ns(warmup) else {
+        r.reject("warmup", format!("run.warmup `{warmup}` is not a duration"));
+        return;
+    };
+    if let Some(dur) = d
+        .duration
+        .as_deref()
+        .and_then(|s| parse_duration_ns(s).ok())
+    {
+        if warmup_ns >= dur {
+            r.reject(
+                "warmup",
+                format!(
+                    "run.warmup ({warmup}) covers the whole {dur_s:.1}s run, so there is no \
+                     measured window: every event falls inside warmup and any steady-state \
+                     figure would be computed over nothing",
+                    dur_s = dur as f64 / 1e9
+                ),
+            );
+        }
+    }
+    let rate = d
+        .workload
+        .arrival
+        .rate
+        .as_deref()
+        .and_then(|s| parse_rate_per_s(s).ok());
+    if let Some(pop) = Population::derive(&d.workload, rate) {
+        if let Err(e) = check_warmup(&pop, warmup_ns as f64 / 1e9) {
+            r.reject("15b", e.to_string());
+        }
+    }
 }
 
 /// The realised occupancy at `p99(shared_depth)`, and what it implies.
@@ -837,6 +894,47 @@ run:
             .unwrap();
         assert_eq!(f.rule, "arrival", "not a numbered rule in the contract");
         assert!(f.message.contains("index of dispersion"), "{}", f.message);
+    }
+
+    #[test]
+    fn a_warmup_shorter_than_the_population_ramp_is_reachable_from_validate() {
+        // FR-015b was implemented and tested in `session.rs` and reachable from
+        // nowhere. A rule that cannot be triggered protects nobody, so what is
+        // asserted here is the wiring rather than the arithmetic.
+        let mut d = occ_doc(12, "1.2", 40, 240_000);
+        // mean 6 turns with a 3s think time is a ~15s ramp.
+        d.run.warmup = Some("2s".into());
+        let r = validate(&d);
+        let f = r.rejections().find(|f| f.rule == "15b").expect("rule 15b");
+        assert!(f.message.contains("measures the ramp"), "{}", f.message);
+        // And a warmup that covers the ramp passes.
+        d.run.warmup = Some("20s".into());
+        d.duration = Some("120s".into());
+        assert!(!validate(&d).rejections().any(|f| f.rule == "15b"));
+    }
+
+    #[test]
+    fn a_warmup_covering_the_whole_run_leaves_no_measured_window() {
+        // The opposite failure, and the one a hand-written config falls into: a
+        // 20s warmup on a 10s run means every event is warmup, so a steady-state
+        // figure is computed over nothing.
+        let mut d = occ_doc(12, "1.2", 40, 240_000);
+        d.duration = Some("10s".into());
+        d.run.warmup = Some("20s".into());
+        let r = validate(&d);
+        let f = r
+            .rejections()
+            .find(|f| f.rule == "warmup")
+            .expect("empty measured window");
+        assert!(f.message.contains("no measured window"), "{}", f.message);
+        assert!(f.message.contains("computed over nothing"), "{}", f.message);
+    }
+
+    #[test]
+    fn an_unparseable_warmup_is_refused_rather_than_treated_as_absent() {
+        let mut d = occ_doc(12, "1.2", 40, 240_000);
+        d.run.warmup = Some("20 seconds".into());
+        assert!(validate(&d).rejections().any(|f| f.rule == "warmup"));
     }
 
     #[test]
