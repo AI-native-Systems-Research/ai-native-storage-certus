@@ -60,6 +60,12 @@ GPU="all"
 # the same margin configure-bench.sh declares (DPDK_HUGEPAGE_OVERHEAD_GIB=3) so the
 # two scripts agree: pool 16 -> 13G tier.
 MEM_TIER_SIZE="${MEM_TIER_SIZE:-$(( ${CERTUS_HUGEPAGES:-16} - 3 ))G}"
+MEM_TIER_EXPLICIT=0     # set when --memory-tier-size is passed (wins over --total-mem)
+# --total-mem derives MEM_TIER_SIZE = total − vLLM floor − DPDK/SPDK overhead.
+# Values mirror configure-bench.sh so the two scripts agree.
+TOTAL_MEM_GIB=""        # set by --total-mem <GiB>; empty = derivation off
+VLLM_MIN_RAM_GIB="${VLLM_MIN_RAM_GIB:-16}"           # RAM floor reserved for vLLM
+DPDK_HUGEPAGE_OVERHEAD_GIB="${DPDK_HUGEPAGE_OVERHEAD_GIB:-3}"  # DPDK heap + SPDK DMA
 EVICT_THRESH="0.6"
 CPU_BYTES=$((16 * (1 << 30)))
 DRAM=$((32 * (1 << 30)))
@@ -118,7 +124,12 @@ Flags (all optional; defaults shown):
   --max-num-seqs <n>           vLLM max concurrent sequences. [64]
   --gpu-mem-util <f>           vLLM GPU memory utilization. [0.90]
   --gpu <sel>                  CDI GPU selector (all | 0 | 0,1 | <uuid>). [all]
-  --memory-tier-size <sz>      Certus-SPDK server DRAM pool (e.g. 32G). [32G]
+  --memory-tier-size <sz>      Certus-SPDK server DRAM pool (e.g. 32G). Wins over
+                               --total-mem if both are given. [CERTUS_HUGEPAGES-3 G]
+  --total-mem <GiB>            Derive the Certus-SPDK DRAM tier from total system
+                               memory: tier = GiB − vLLM floor (${VLLM_MIN_RAM_GIB}G) − DPDK/SPDK
+                               overhead (${DPDK_HUGEPAGE_OVERHEAD_GIB}G), clamped to the reserved 1G pool
+                               (CERTUS_HUGEPAGES − ${DPDK_HUGEPAGE_OVERHEAD_GIB}G). Ignored if --memory-tier-size set.
   --evict-threshold <f>        Certus-SPDK DRAM->SSD demotion threshold. [0.6]
   --client-network <mode>      Certus-SPDK client transport: host (--network=host +
                                localhost, loopback, no proxy) or bridge (host.containers
@@ -158,7 +169,8 @@ while [[ $# -gt 0 ]]; do
         --max-num-seqs)     MAX_NUM_SEQS="$2"; shift 2;;
         --gpu-mem-util)     GPU_MEM_UTIL="$2"; shift 2;;
         --gpu)              GPU="$2"; shift 2;;
-        --memory-tier-size) MEM_TIER_SIZE="$2"; shift 2;;
+        --memory-tier-size) MEM_TIER_SIZE="$2"; MEM_TIER_EXPLICIT=1; shift 2;;
+        --total-mem)        TOTAL_MEM_GIB="$2"; shift 2;;
         --evict-threshold)  EVICT_THRESH="$2"; shift 2;;
         --cpu-bytes)        CPU_BYTES="$2"; shift 2;;
         --dram)             DRAM="$2"; shift 2;;
@@ -320,6 +332,38 @@ declare -a R_VARIANT=() R_STATUS=() R_WALL=() R_ROUNDS=() R_GENS=() R_TPS=() R_N
 
 log()  { echo "[profile] $*"; }
 warn() { echo "[profile] WARN: $*" >&2; }
+
+# ── Derive the Certus DRAM tier from total system memory (--total-mem) ─────────
+# tier = total − vLLM RAM floor − DPDK/SPDK overhead, clamped to the reserved 1G
+# hugepage pool (the tier is a single spdk_zmalloc from that pool, so it can't
+# exceed CERTUS_HUGEPAGES − DPDK_HUGEPAGE_OVERHEAD_GIB regardless of total RAM).
+# An explicit --memory-tier-size always wins.
+if [[ -n "$TOTAL_MEM_GIB" ]]; then
+    if ! [[ "$TOTAL_MEM_GIB" =~ ^[0-9]+$ ]]; then
+        echo "error: --total-mem expects an integer GiB (got '${TOTAL_MEM_GIB}')" >&2; exit 2
+    fi
+    if [[ "$MEM_TIER_EXPLICIT" -eq 1 ]]; then
+        warn "--total-mem ignored: --memory-tier-size ${MEM_TIER_SIZE} was given explicitly"
+    else
+        _overhead=$(( VLLM_MIN_RAM_GIB + DPDK_HUGEPAGE_OVERHEAD_GIB ))
+        _derived=$(( TOTAL_MEM_GIB - _overhead ))
+        if [[ $_derived -le 0 ]]; then
+            echo "error: --total-mem ${TOTAL_MEM_GIB}G leaves no room for a DRAM tier after" \
+                 "vLLM ${VLLM_MIN_RAM_GIB}G + DPDK/SPDK ${DPDK_HUGEPAGE_OVERHEAD_GIB}G = ${_overhead}G" >&2
+            exit 2
+        fi
+        _ceiling=$(( ${CERTUS_HUGEPAGES:-16} - DPDK_HUGEPAGE_OVERHEAD_GIB ))
+        if [[ $_derived -gt $_ceiling ]]; then
+            warn "--total-mem implies a ${_derived}G tier, but the reserved 1G pool caps it at" \
+                 "${_ceiling}G (CERTUS_HUGEPAGES=${CERTUS_HUGEPAGES:-16} − ${DPDK_HUGEPAGE_OVERHEAD_GIB}G DPDK). Clamping;" \
+                 "raise CERTUS_HUGEPAGES and reboot for a larger tier."
+            _derived=$_ceiling
+        fi
+        MEM_TIER_SIZE="${_derived}G"
+        log "Certus DRAM tier ${MEM_TIER_SIZE} derived from --total-mem ${TOTAL_MEM_GIB}G" \
+            "(− vLLM ${VLLM_MIN_RAM_GIB}G − DPDK/SPDK ${DPDK_HUGEPAGE_OVERHEAD_GIB}G)"
+    fi
+fi
 
 # Selection helpers
 want() {
