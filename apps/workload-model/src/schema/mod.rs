@@ -15,6 +15,7 @@
 //! take a default (spec FR-005).
 
 pub mod extends;
+pub mod normalise;
 pub mod validate;
 
 use serde::{Deserialize, Serialize};
@@ -480,10 +481,60 @@ fn eight() -> u32 {
     8
 }
 
+/// Why a document could not be read.
+#[derive(Debug)]
+pub enum SchemaError {
+    /// The YAML did not parse, or did not match the schema.
+    Yaml(serde_yaml::Error),
+    /// A unit-suffixed scalar could not be read as its field's unit.
+    ///
+    /// Held apart from the serde error because it is a *better* error: it names
+    /// the path and the accepted forms, where serde can only report that nothing
+    /// matched an untagged enum.
+    Unit(normalise::NormaliseError),
+}
+
+impl std::fmt::Display for SchemaError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SchemaError::Yaml(e) => write!(f, "{e}"),
+            SchemaError::Unit(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for SchemaError {}
+
+impl From<serde_yaml::Error> for SchemaError {
+    fn from(e: serde_yaml::Error) -> Self {
+        SchemaError::Yaml(e)
+    }
+}
+
+impl From<normalise::NormaliseError> for SchemaError {
+    fn from(e: normalise::NormaliseError) -> Self {
+        SchemaError::Unit(e)
+    }
+}
+
 impl Document {
     /// Parse a document from YAML, rejecting unknown fields.
-    pub fn from_yaml(s: &str) -> Result<Document, serde_yaml::Error> {
-        serde_yaml::from_str(s)
+    ///
+    /// Unit-suffixed scalars are normalised first (see [`normalise`]), so
+    /// `block_bytes: 128KiB` and `block_bytes: 131072` are the same document.
+    pub fn from_yaml(s: &str) -> Result<Document, SchemaError> {
+        let v: serde_yaml::Value = serde_yaml::from_str(s)?;
+        Document::from_value(v)
+    }
+
+    /// Parse a document from an already-merged YAML tree.
+    ///
+    /// The entry point for a caller that has resolved an `extends` chain itself.
+    /// Normalisation happens **here** rather than in the caller so that there is
+    /// exactly one way into a `Document` that skips it: none.
+    pub fn from_value(mut v: serde_yaml::Value) -> Result<Document, SchemaError> {
+        normalise::normalise(&mut v)?;
+        Ok(serde_yaml::from_value(v)?)
     }
 
     /// Re-serialise, so a report can embed the normalised input.

@@ -121,6 +121,25 @@ pub fn parse_bytes(s: &str) -> Result<u64, UnitError> {
     Ok((n * scale) as u64)
 }
 
+/// Parse a bare number, allowing `_` separators and a fractional part.
+///
+/// Distinct from [`parse_count`] in admitting a non-integer: a distribution's
+/// `mean` is a real number even where the quantity it describes is a count, so
+/// `turns: {dist: geometric, mean: 6.5}` is meaningful and must not be truncated.
+/// A suffix is refused, because a unitless field has no unit to convert from.
+pub fn parse_number(s: &str) -> Result<f64, UnitError> {
+    let (n, suf) = parts(s);
+    let err = || UnitError {
+        input: s.trim().to_string(),
+        expected: "a number, optionally with `_` separators, such as `240_000` or `6.5`",
+    };
+    let n = n.ok_or_else(err)?;
+    if !suf.is_empty() {
+        return Err(err());
+    }
+    Ok(n)
+}
+
 /// Parse a bare count, allowing `_` separators.
 pub fn parse_count(s: &str) -> Result<u64, UnitError> {
     let (n, suf) = parts(s);

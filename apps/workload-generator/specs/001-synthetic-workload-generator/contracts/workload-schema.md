@@ -78,6 +78,25 @@ Durations accept `ns|us|ms|s|m|h`. Sizes accept `B|KiB|MiB|GiB` (binary) and `KB
 (decimal). Rates accept a `/s` suffix. Bare integers may use `_` separators. Fractions are
 plain floats in `[0, 1]` unless stated otherwise.
 
+**A suffix is resolved against the field, not the value.** A bare `3` is three *seconds* under
+`think_time` and three *bytes* under `block_bytes`, so the unit comes from where the scalar sits.
+Suffixed scalars are therefore rewritten into each field's base unit — bytes for sizes, seconds for
+times — as part of normalisation, after the `extends` merge and before anything reads the document.
+Two consequences worth stating:
+
+- **A spelling is not a workload.** `block_bytes: 128KiB` and `block_bytes: 131072` normalise to the
+  same document, so they produce the same content hash and the same `--print-normalised` output. Two
+  arms of a comparison cannot differ on punctuation alone.
+- **A mistyped suffix is refused, naming the path.** `128QiB` is the same class of mistake as a
+  mistyped field name, which the schema already rejects: a value silently read as `128` would give a
+  run of the wrong size that reports itself as correct.
+
+Within a distribution, only the parameters that *carry* the field's unit are converted: `value`,
+`min`, `max`, `mean`, `stddev`, `median`, `scale`, and the first element of each `empirical` point.
+`sigma`, `s`, `n`, `alpha` and a point's cumulative probability are dimensionless and are left
+alone — `{median: 128KiB, sigma: 0.4}` is a size beside a bare ratio, since `sigma` is the standard
+deviation of the *logarithm*.
+
 ## Distributions
 
 Every distribution-valued field takes the same tagged union. A bare scalar is sugar for

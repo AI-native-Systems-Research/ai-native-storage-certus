@@ -280,6 +280,13 @@ recovered parameters against the originals. Ground truth is exact, so any diverg
 - [ ] T098a [P] Implement the optional human-readable plan trace at `run.emit_trace`, for debugging only, and assert it is never accepted as an input (FR-029)
 - [ ] T099 [P] Verify SC-012 in CI: `cargo test --all` compiles no columnar dependency while still exercising every statistic, all of `fit`, and a full round trip through JSONL
 - [ ] T100 [P] Add a `--features parquet` CI job covering the container path only
+- [X] T100a [P] Normalise unit-suffixed scalars against the **field** they sit in, as a pass over the
+  merged YAML before deserialization (`schema::normalise`), so that the unit forms
+  `contracts/workload-schema.md` § Units documents — `128KiB`, `3s`, `240_000` — actually parse.
+  The unit cannot come from the value: a bare `3` is seconds under `think_time` and bytes under
+  `block_bytes`. Guard it with a test that extracts every complete example from the shipped
+  documentation and asserts it both parses and validates — neither of the two defects this
+  closes was catchable by reading
 - [ ] T101 [P] Verify SC-001: a realistic sharing workload in under 60 lines of YAML, and a variation in under 10 using `extends`
 - [ ] T102 Update `research.md` § Open derivations as each item is discharged, and close out the remaining one — the occupancy-bound derivation (FR-009f/FR-009g). The `GetIoStats` cross-check tolerance that used to be listed there is discharged by removal
 - [ ] T103 Run `component-check-leakage` and the repo's doc-sync skills, then re-verify `fmt`, `clippy -D warnings` and `cargo doc` across all four crates

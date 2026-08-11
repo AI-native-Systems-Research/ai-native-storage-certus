@@ -139,6 +139,11 @@ fn main() -> ExitCode {
 /// here and used for both the hash and `--print-normalised`. Two paths to it
 /// could differ, and then a plan's hash would not describe what the user was
 /// shown.
+///
+/// Unit normalisation happens inside [`Document::from_value`] rather than here,
+/// after the `extends` merge, so an inherited `128KiB` is converted once and a
+/// preset and the document that extends it cannot disagree about what a suffix
+/// meant.
 fn load(path: &Path) -> Result<(Document, String), String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let root: serde_yaml::Value =
@@ -155,7 +160,7 @@ fn load(path: &Path) -> Result<(Document, String), String> {
         std::fs::read_to_string(&candidate).map_err(|e| format!("{}: {e}", candidate.display()))
     })
     .map_err(|e| e.to_string())?;
-    let doc: Document = serde_yaml::from_value(merged).map_err(|e| e.to_string())?;
+    let doc = Document::from_value(merged).map_err(|e| e.to_string())?;
     let normalised = doc.to_yaml().map_err(|e| e.to_string())?;
     Ok((doc, normalised))
 }
