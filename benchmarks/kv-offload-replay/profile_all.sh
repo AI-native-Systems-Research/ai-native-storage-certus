@@ -342,6 +342,19 @@ if [[ -n "$TOTAL_MEM_GIB" ]]; then
     if ! [[ "$TOTAL_MEM_GIB" =~ ^[0-9]+$ ]]; then
         echo "error: --total-mem expects an integer GiB (got '${TOTAL_MEM_GIB}')" >&2; exit 2
     fi
+    # Reject values larger than the RAM physically present. MemTotal runs a bit
+    # below nominal (firmware/kernel reserve), so round it up to the next 4 GiB
+    # to recover the installed size before comparing — 29.6G MemTotal -> 32G.
+    _memtotal_kib=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null)
+    if [[ -n "$_memtotal_kib" ]]; then
+        _phys_gib=$(( _memtotal_kib / 1048576 ))
+        _phys_installed=$(( ( (_phys_gib + 3) / 4 ) * 4 ))   # round up to 4 GiB
+        if [[ $TOTAL_MEM_GIB -gt $_phys_installed ]]; then
+            echo "error: --total-mem ${TOTAL_MEM_GIB}G exceeds physical RAM" \
+                 "(MemTotal ${_phys_gib}G, ~${_phys_installed}G installed)" >&2
+            exit 2
+        fi
+    fi
     if [[ "$MEM_TIER_EXPLICIT" -eq 1 ]]; then
         warn "--total-mem ignored: --memory-tier-size ${MEM_TIER_SIZE} was given explicitly"
     else
