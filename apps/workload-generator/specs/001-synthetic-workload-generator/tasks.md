@@ -117,11 +117,11 @@ on the stream itself rather than on any model of something consuming it.
 
 ### Tests for User Story 2
 
-- [ ] T038 [P] [US2] Test the reuse-distance CDF for a pure-Zipf plan against the analytic distribution (SC-005)
-- [ ] T039 [P] [US2] Test that the compulsory-miss floor equals the miss rate at unbounded capacity and requires no capacity parameter (FR-034a)
-- [ ] T040 [P] [US2] Test that identical plans consumed twice yield identical stream digests, and that a comparison between differing digests is refused (FR-036, FR-062)
-- [ ] T041 [P] [US2] Test that a `scan`-shaped mixture entry shows the expected bimodality in the reuse-distance CDF
-- [ ] T042 [P] [US2] Add a Criterion benchmark asserting every statistic over a 10^7-event plan completes in under one minute on one core (SC-004)
+- [X] T038 [P] [US2] Test the reuse-distance CDF for a pure-Zipf plan against the analytic distribution (SC-005)
+- [X] T039 [P] [US2] Test that the compulsory-miss floor equals the miss rate at unbounded capacity and requires no capacity parameter (FR-034a)
+- [X] T040 [P] [US2] Test that identical plans consumed twice yield identical stream digests, and that a comparison between differing digests is refused (FR-036, FR-062)
+- [X] T041 [P] [US2] Test that a `scan`-shaped mixture entry shows the expected bimodality in the reuse-distance CDF
+- [X] T042 [P] [US2] Add a Criterion benchmark asserting every statistic over a 10^7-event plan completes in under one minute on one core (SC-004)
 
 ### Implementation for User Story 2
 
