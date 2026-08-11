@@ -377,7 +377,16 @@ if [[ -n "$TOTAL_MEM_GIB" ]]; then
             _pool=$(( TOTAL_MEM_GIB - VLLM_MIN_RAM_GIB ))
             (( _pool > DPDK_MEMSEG_LIST_GIB - 1 )) && _pool=$(( DPDK_MEMSEG_LIST_GIB - 1 ))
             (( _pool < 0 )) && _pool=0
+            # Propagate the derived pool so it actually gets reserved. Without this
+            # --total-mem only resized the tier: HUGEPAGES_1G_TARGET, the pre-start
+            # preflight, and the reconfigure hand-off (all keyed on CERTUS_HUGEPAGES)
+            # stayed at the 16-page default, so a 45G tier was aimed at a 16-page
+            # pool → spdk_zmalloc fails every time.
+            CERTUS_HUGEPAGES=$_pool
         fi
+        # HUGEPAGES_1G_TARGET was captured from CERTUS_HUGEPAGES above (before this
+        # block ran); re-sync it so the pre-start preflight checks the derived pool.
+        HUGEPAGES_1G_TARGET="$CERTUS_HUGEPAGES"
         _ceiling=$(( _pool - DPDK_HUGEPAGE_OVERHEAD_GIB ))
         if [[ $_derived -gt $_ceiling ]]; then
             warn "--total-mem implies a ${_derived}G tier, but the reserved 1G pool caps it at" \
