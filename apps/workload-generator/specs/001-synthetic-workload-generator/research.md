@@ -392,6 +392,81 @@ since the gap between a flat run and a real event is tens of standard errors, bu
 And the retention knee at 0.99 is read off sixteen traces from a convenience sample — the *form* of
 the criterion follows from the model, the *value* does not.
 
+### Fit tolerances and divergence measures — the derivation behind FR-057a and FR-057b
+
+FR-056 names four statistics to compare between a trace and the synthetic output fitted from it, and
+FR-057a requires a tolerance per statistic rather than one scalar. Neither the measures nor the
+thresholds were stated. Measured with `cargo run --release -p workload-model --example seed_floor`,
+2026-08-11.
+
+**The floor a tolerance must clear.** Two plans from the *same* document differing only in `seed` are
+the same workload sampled twice, so the divergence between them is irreducible. A tolerance below it
+fails a model that is correct. All 28 pairs of eight seeds, three shapes from the taxonomy above,
+three plan sizes:
+
+| statistic | measure | 2 000 req | 10 000 req | 50 000 req | default |
+| --- | --- | --- | --- | --- | --- |
+| reuse-distance CDF (objects) | area between CDFs | 0.0243 | 0.0201 | **0.0076** | 0.02 |
+| reuse-distance CDF (bytes) | area between CDFs | 0.0220 | 0.0189 | **0.0067** | 0.02 |
+| prefix-sharing depth | KS | 0.1155 | 0.0508 | **0.0283** | 0.05 |
+| request length | KS | 0.0630 | 0.0415 | **0.0116** | 0.02 |
+| unique keys over time | max log ratio | 0.3358 | 0.1758 | **0.0846** | 0.15 |
+
+Worst of the three shapes at each size. Defaults are 1.7–3.0× the floor at 50 000 requests, which is
+therefore part of the default: every floor falls with the sample, so a bare number is loose at one
+size and unreachable at another. `validate` must refuse to apply a default to a materially smaller
+plan rather than compare against a floor the plan cannot reach.
+
+**KS is the wrong measure for the primary statistic, and this is the finding.** The reuse-distance CDF
+is steep where the live session population puts a large mass, and a supremum over a steep region moves
+a long way for a small horizontal shift. Measured on the same seed pairs:
+
+| shape | references | KS (sup) | area | ratio |
+| --- | --- | --- | --- | --- |
+| agentic | 1.1 M | 0.3074 | 0.0135 | 22.7× |
+| agentic | 5.9 M | 0.1285 | 0.0031 | 41.1× |
+| agentic | 30.0 M | 0.1164 | 0.0034 | 34.2× |
+| chat | 6.6 M | 0.0597 | 0.0023 | 26.3× |
+| mixed | 29.7 M | 0.0716 | 0.0030 | 23.7× |
+
+A KS tolerance on the primary statistic would have to be ≥0.15 to avoid failing correct models, and
+at 0.15 it would pass almost anything. The area floor is two orders of magnitude smaller and far
+flatter across shapes — 0.0023 to 0.0034 at 30 M references against a KS spread of 0.06 to 0.12. So
+the comparison gates on the area and reports the sup beside it, a large sup next to a small area being
+informative in its own right: it says the two CDFs agree in bulk and disagree over a narrow band of
+distances.
+
+The other two distributions keep KS. Their floors are already small and fall as `1/sqrt(n)` — sharing
+depth 0.116 → 0.051 → 0.028 and request length 0.063 → 0.042 → 0.012 across a 25× sample increase —
+so nothing is gained by changing a standard, distribution-free measure.
+
+**Unique-keys-over-time needs a relative measure, and needs the ramp excluded.** It is a monotone
+curve of counts, not a distribution, so its measure is the largest log ratio between the two curves
+over the ordinals they share. Two exclusions, each removing a difference that is not a difference in
+workload shape:
+
+- points where either count is under 100, where the `1/sqrt(n)` noise on the count itself is already
+  10%;
+- the first 10% of the run, which is the **session-population ramp**. Its composition is
+  seed-dependent by construction: at request ordinal 7 one run had accumulated 413 distinct keys and
+  another 245, a log ratio of 0.52, while by ordinal 13 000 the same pair agreed to 3.9% and by 50 000
+  to 0.9%. This is the same exclusion FR-045 makes for warmup, for the same reason.
+
+Without both exclusions the floor measured **0.90 to 2.12 and identical across three plan sizes** —
+and a size-independent floor cannot be sampling noise, which is what identified the measure rather
+than the data as the problem.
+
+**One hypothesis tested and refuted.** The reuse-distance floor is large and *non-monotone* in the
+sample below ~6 M references (0.277 at 185 k, 0.350 at 1.1 M, 0.147 at 5.9 M, 0.065 at 30 M). The
+natural explanation was the population ramp sitting inside the measured window, since these fixtures
+set no `warmup`. Adding a warmup long enough to cover the ramp changed nothing — 0.42 against 0.56 at
+10 000 requests, 0.099 against 0.104 at 50 000 — so the instability is the sup's sensitivity to a
+steep CDF and not the ramp. Recorded because it was the obvious explanation and it was wrong.
+
+**What is still not derived.** The safety factor over the floor (1.7–3.0×) is a judgement, and the
+floors come from three synthetic shapes rather than from the traces — a real trace's floor cannot be
+measured this way at all, since a trace cannot be re-sampled with a different seed.
+
 ### Cross-session sharing rides on global block IDs
 
 - `exgentic_tau2_airline`: **16 188 of 364 645** minted blocks appear under more than one
@@ -484,9 +559,10 @@ Assigned to this file by `spec.md` and **not yet done**:
   decreases are censoring by rule 8, adjacent depths merge at the resolution of the generator's own
   randomised rounding, and the near-root fold falls out of the FR-009f occupancy floor. `Z = 3` and
   the 0.99 retention knee remain choices, and are named there as such.
-- **The four default per-statistic `fit`/`validate` tolerances** (FR-057b), including which
-  divergence measure each statistic uses — the four are on different scales, so each needs its own
-  measure as well as its own threshold.
+- ~~**The four default per-statistic `fit`/`validate` tolerances**~~ (FR-057b) — **discharged
+  2026-08-11** by § Fit tolerances and divergence measures. Three measures for four statistics, each
+  default set 1.7–3.0× above a measured seed-to-seed floor at a stated plan size. The safety factor
+  and the use of synthetic shapes rather than traces remain limitations, named there.
 - **The `branch_skew` parameterisation**, and the fitting procedures for `shared_depth` and
   `roots.popularity`.
 - **Reuse-distance estimation method** and the **significance-testing approach** behind `repeat: 8`.

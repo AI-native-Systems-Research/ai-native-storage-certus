@@ -232,7 +232,7 @@ recovered parameters against the originals. Ground truth is exact, so any diverg
 ### Research
 
 - [X] T074 [US6] **Derive the `branching` segmentation rule** in `research.md`: what jump ratio counts as a fanout event, how boundaries are chosen when width is noisy, and how the FR-055c near-root boundary interacts with it
-- [ ] T075 [P] [US6] Derive the four per-statistic `fit`/`validate` tolerance defaults and each statistic's divergence measure, the four being on different scales (FR-057a, FR-057b)
+- [X] T075 [P] [US6] Derive the four per-statistic `fit`/`validate` tolerance defaults and each statistic's divergence measure, the four being on different scales (FR-057a, FR-057b)
 - [ ] T076 [P] [US6] Derive the reuse-distance estimation method and the significance-testing approach behind `repeat: 8`
 
 ### Tests for User Story 6

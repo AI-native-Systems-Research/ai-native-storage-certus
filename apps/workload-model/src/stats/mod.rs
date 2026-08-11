@@ -35,6 +35,7 @@ use std::hash::{BuildHasherDefault, Hasher};
 use crate::keys::{CacheKey, SessionId};
 use crate::plan::{flags, PlanEvent};
 
+pub mod divergence;
 pub mod floor;
 pub mod hist;
 pub mod length;
