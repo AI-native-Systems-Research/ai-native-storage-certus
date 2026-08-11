@@ -34,7 +34,7 @@
 #   profile_all.sh --help
 #   profile_all.sh --only nooffload,cpuoffload
 #   profile_all.sh --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 \
-#                  --model-fs /mnt/fs-backend-bench --build
+#                  --only certus-spdk --build
 
 set -uo pipefail   # NOT -e: per-variant failures are handled, not fatal.
 
@@ -43,7 +43,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 MODEL="NousResearch/Meta-Llama-3-8B"
-MODEL_FS="/mnt/certus1"
+MODEL_FS="${MODEL_FS:-}"
 declare -a DEVICE_PCI=()
 NUM_CONVS=450
 MAX_ROUNDS=0           # 0 = replay all turns; N caps every backend at N rounds/turns
@@ -118,7 +118,9 @@ Flags (all optional; defaults shown):
                                 group between the two phases via tools/configure-bench.sh, so
                                 the storage backends compare on identical devices.
                                 [default 0000:61:00.0 0000:62:00.0 0000:63:00.0 0000:64:00.0]
-  --model-fs <dir>              Filesystem for HF cache + gRPC podman store. [/mnt/certus1]
+  --model-fs <dir>              Optional filesystem for HF cache + gRPC podman
+                                store. If omitted, uses the normal podman store,
+                                $HOME/.cache/huggingface, and results/ for logs.
   --model <hf-id>               Model applied to all four variants.
                                 [NousResearch/Meta-Llama-3-8B]
   --num-convs <n>               Conversations to replay. [450]
@@ -156,7 +158,8 @@ Flags (all optional; defaults shown):
   --only a,b                   Run only these variants.
   --skip a,b                   Skip these variants.
                                Names: nooffload, cpuoffload, certus-spdk, sharedstorage, tiered-cpu-fs.
-  --logdir <dir>               Output dir. [<model-fs>/kvprofile-<runid>]
+  --logdir <dir>               Output dir. [<model-fs>/kvprofile-<runid> if
+                               --model-fs is set, else results/kvprofile-<runid>]
   -h, --help                   This help.
 EOF
 }
@@ -208,11 +211,19 @@ for _list in "$ONLY" "$SKIP"; do
 done
 
 # ── Derived paths ─────────────────────────────────────────────────────────────
-# HF cache defaults under the model-fs but is env-overridable (this host keeps
-# the populated cache at ~/.cache/huggingface, not on the model-fs).
-HF_CACHE="${HF_CACHE:-${MODEL_FS}/hf-cache}"
-PODMAN_STORE="${MODEL_FS}/podman/storage"
-PODMAN_RUNROOT="${MODEL_FS}/podman/run"
+# If --model-fs is supplied, keep the previous behavior: put the HF cache,
+# custom gRPC podman store, and default logs there. For Certus-only runs this is
+# optional; without it we use normal podman storage, $HOME's HF cache, and repo
+# results/ logs.
+if [[ -n "$MODEL_FS" ]]; then
+    HF_CACHE="${HF_CACHE:-${MODEL_FS}/hf-cache}"
+    PODMAN_STORE="${PODMAN_STORE:-${MODEL_FS}/podman/storage}"
+    PODMAN_RUNROOT="${PODMAN_RUNROOT:-${MODEL_FS}/podman/run}"
+else
+    HF_CACHE="${HF_CACHE:-$HOME/.cache/huggingface}"
+    PODMAN_STORE="${PODMAN_STORE:-}"
+    PODMAN_RUNROOT="${PODMAN_RUNROOT:-}"
+fi
 RUNID="$(date +%H%M%S 2>/dev/null || echo run)_$$"
 
 # ── vLLM version pinning ──────────────────────────────────────────────────────
@@ -230,13 +241,19 @@ if [[ -n "$VLLM_VERSION" ]]; then
     [[ "$IMG_GRPC"      != *:* ]] && IMG_GRPC+="$_tag"
 fi
 
-[[ -z "$LOGDIR" ]] && LOGDIR="${MODEL_FS}/kvprofile-${VER_LABEL}${RUNID}"
+if [[ -z "$LOGDIR" ]]; then
+    if [[ -n "$MODEL_FS" ]]; then
+        LOGDIR="${MODEL_FS}/kvprofile-${VER_LABEL}${RUNID}"
+    else
+        LOGDIR="${REPO_ROOT}/results/kvprofile-${VER_LABEL}${RUNID}"
+    fi
+fi
 
 # Auto-resolve the fs-backend repo if not set: prefer the model-fs copy (this
 # host keeps it at <model-fs>/llm-d-kv-cache/kv_connectors/llmd_fs_backend),
 # fall back to $HOME.
 if [[ -z "$FS_BACKEND_DIR" ]]; then
-    if [[ -f "${MODEL_FS}/llm-d-kv-cache/kv_connectors/llmd_fs_backend/Dockerfile.wheel" ]]; then
+    if [[ -n "$MODEL_FS" && -f "${MODEL_FS}/llm-d-kv-cache/kv_connectors/llmd_fs_backend/Dockerfile.wheel" ]]; then
         FS_BACKEND_DIR="${MODEL_FS}/llm-d-kv-cache/kv_connectors/llmd_fs_backend"
     else
         FS_BACKEND_DIR="$HOME/llm-d-kv-cache/kv_connectors/llmd_fs_backend"
@@ -511,6 +528,12 @@ if [[ ! -f "$DATASET_HOST" ]]; then
     warn "dataset $DATASET_HOST not found on host (images bake their own copy; container runs are unaffected)"
 fi
 
+grpc_podman_flags=()
+[[ -n "$PODMAN_STORE" ]] && grpc_podman_flags+=(--root "$PODMAN_STORE")
+[[ -n "$PODMAN_RUNROOT" ]] && grpc_podman_flags+=(--runroot "$PODMAN_RUNROOT")
+GRPC_STORE_DESC="${PODMAN_STORE:-default podman store}"
+podman_grpc() { command podman "${grpc_podman_flags[@]}" "$@"; }
+
 # Reap stale bench containers (the earlier GPU-pin foot-gun). Match on IMAGE, not
 # just NAME: a bench container started without --name gets a random name (e.g.
 # "inspiring_swartz") that a name-only pattern misses, yet it still pins the GPU.
@@ -524,8 +547,8 @@ reap() {
         echo "$names" | xargs -r command podman rm -f >/dev/null 2>&1
     fi
     # Same for the gRPC store.
-    ids="$(command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" ps -a --format '{{.ID}} {{.Names}} {{.Image}}' 2>/dev/null | grep -E 'certus-grpc-bench|grpc-bench' | awk '{print $1}')"
-    [[ -n "$ids" ]] && echo "$ids" | xargs -r command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" rm -f >/dev/null 2>&1
+    ids="$(podman_grpc ps -a --format '{{.ID}} {{.Names}} {{.Image}}' 2>/dev/null | grep -E 'certus-grpc-bench|grpc-bench' | awk '{print $1}')"
+    [[ -n "$ids" ]] && podman_grpc rm -f $ids >/dev/null 2>&1
 }
 reap
 
@@ -637,7 +660,7 @@ start_gpu_sampler
 trap 'stop_gpu_sampler; unlock_gpu_clocks' EXIT
 
 img_exists()      { command podman image exists "$1" >/dev/null 2>&1; }
-img_exists_grpc() { command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" image exists "$1" >/dev/null 2>&1; }
+img_exists_grpc() { podman_grpc image exists "$1" >/dev/null 2>&1; }
 
 # Build a self-contained image (default store) from one of our Dockerfiles,
 # honoring any --vllm-version build-arg. Returns build rc.
@@ -717,8 +740,8 @@ if want certus-spdk; then
     fi
     if [[ -z "$cs_skip" ]] && ! img_exists_grpc "$IMG_GRPC"; then
         if [[ "$DO_BUILD" -eq 1 ]]; then
-            log "building ${IMG_GRPC} into ${PODMAN_STORE}"
-            command podman --root "$PODMAN_STORE" --runroot "$PODMAN_RUNROOT" build \
+            log "building ${IMG_GRPC} into ${GRPC_STORE_DESC}"
+            podman_grpc build \
                 "${BUILD_ARGS[@]}" \
                 -f "${REPO_ROOT}/certus-grpc-connector/Dockerfile" \
                 -t "${IMG_GRPC#localhost/}" "$REPO_ROOT" \

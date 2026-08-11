@@ -26,8 +26,8 @@
 #   NUM_CONVS=450  MODEL=ibm-granite/granite-4.1-8b  SLAB_SIZE_BYTES=2097152
 #   HF_CACHE=$HOME/.cache/huggingface
 #   HF_TOKEN=<token>            passed through if set
-#   PODMAN_STORE / PODMAN_RUNROOT   override rootless storage location (this
-#                               host builds into /mnt/certus1 — see below)
+#   PODMAN_STORE / PODMAN_RUNROOT   optional override for rootless storage
+#                               location. Empty/unset = Podman's default store.
 set -euo pipefail
 
 # Fully-qualified so rootless podman doesn't hit short-name resolution (which
@@ -54,10 +54,11 @@ SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"
 TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
 HF_CACHE="${HF_CACHE:-$HOME/.cache/huggingface}"
 
-# This host keeps the (large) image on the /mnt/certus1 filesystem, so podman
-# needs explicit store paths. Override or unset for a default install.
-PODMAN_STORE="${PODMAN_STORE:-/mnt/certus1/podman/storage}"
-PODMAN_RUNROOT="${PODMAN_RUNROOT:-/mnt/certus1/podman/run}"
+# Optional custom podman store. Some hosts keep the large image store on a
+# separate filesystem; Certus-only runs can leave these empty and use Podman's
+# default storage under the user's home/root configuration.
+PODMAN_STORE="${PODMAN_STORE:-}"
+PODMAN_RUNROOT="${PODMAN_RUNROOT:-}"
 store_flags=()
 [[ -n "${PODMAN_STORE}" ]] && store_flags+=(--root "${PODMAN_STORE}")
 [[ -n "${PODMAN_RUNROOT}" ]] && store_flags+=(--runroot "${PODMAN_RUNROOT}")
@@ -79,7 +80,7 @@ fi
 if ! podman image exists "${IMAGE}"; then
     cat >&2 <<EOF
 error: image '${IMAGE}' not found in the podman store
-       (${PODMAN_STORE}).
+       (${PODMAN_STORE:-default podman store}).
        Build it first:
 
          podman ${store_flags[*]} build \\

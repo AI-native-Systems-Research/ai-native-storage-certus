@@ -386,7 +386,6 @@ time benchmarks/kv-offload-replay/profile_all.sh \
     --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 \
     --device-pci 0000:63:00.0 --device-pci 0000:64:00.0 \
     --max-rounds 12 \
-    --model-fs /mnt/fs-backend-bench \
     --vllm-version 0.23.0 \
     --only certus-spdk \
     --evict-threshold 1 \
@@ -399,7 +398,7 @@ time benchmarks/kv-offload-replay/profile_all.sh \
 |------|---------|
 | `--device-pci <DDDD:BB:DD.F>` | NVMe PCIe address of the shared drive group; **repeatable** (one per drive). The `certus-spdk` phase binds these to `vfio-pci`; needed for that backend to run at all. |
 | `--max-rounds <n>` | Cap every backend at N replay rounds/turns (`0` = replay all turns). `12` matches the 12-turn dataset. |
-| `--model-fs <dir>` | Filesystem for the HF model cache and the gRPC podman image store. Default `/mnt/certus1`. Also the default location of the run's `--logdir`. |
+| `--model-fs <dir>` | Optional filesystem for large artifacts: HF model cache default, gRPC podman image store, and default logdir. If omitted, the script uses normal podman storage, `$HOME/.cache/huggingface`, and `results/kvprofile-<runid>`. |
 | `--vllm-version <x.y.z>` | Pin the vLLM base-image version for the built images (passed as the `VLLM_VERSION` build arg; images are tagged `:vllm<x.y.z>` so versions coexist). Implies the images must be built at that version — pass `--build` too. |
 | `--only certus-spdk` | Run only the Certus-SPDK backend. Other valid names: `nooffload`, `cpuoffload`, `sharedstorage` (comma-separated). |
 | `--evict-threshold <f>` | Certus-SPDK DRAM→SSD demotion threshold. Default `0.6`; `1` effectively defers demotion until the DRAM tier is full. |
@@ -407,14 +406,14 @@ time benchmarks/kv-offload-replay/profile_all.sh \
 
 Other useful flags: `--memory-tier-size <sz>` (Certus-SPDK server DRAM pool, e.g.
 `32G`), `--num-convs <n>` (conversations to replay, default 450), `--gpu <sel>` (CDI
-GPU selector: `all` | `0` | `0,1` | `<uuid>`), and `--logdir <dir>` (output dir;
-defaults to `<model-fs>/kvprofile-<runid>`). Run `profile_all.sh --help` for the full
-list.
+GPU selector: `all` | `0` | `0,1` | `<uuid>`), `--client-network host|bridge`
+(Certus gRPC client transport; default `host`), and `--logdir <dir>` (output dir).
+Run `profile_all.sh --help` for the full list.
 
-> **Note:** the container network mode is not a CLI flag — `profile_all.sh` launches
-> the gRPC client with `--ipc=host` already, so the host `certus-server` can open the
-> container's CUDA IPC handles. There is no `--client-network` option; passing an
-> unknown flag exits with an error.
+> **Note:** `profile_all.sh` launches the gRPC client with `--ipc=host`, so the
+> host `certus-server` can open the container's CUDA IPC handles. `--client-network`
+> only controls the client/server TCP path (`host` loopback by default, or rootless
+> podman bridge via `host.containers.internal`).
 
 ### Outputs
 
