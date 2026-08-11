@@ -72,8 +72,10 @@ NODE0_RESERVE=''
 MEM_LIMIT="${MEM_LIMIT:-32G}"
 TOTAL_USABLE_GIB="${TOTAL_USABLE_GIB:-32}"  # GiB usable on node $RESOURCE_NUMA after mem=
 
-# Hugepages (1 GiB pages)
-CERTUS_HUGEPAGES="${CERTUS_HUGEPAGES:-16}"  # 16 GiB SPDK DRAM tier on node $RESOURCE_NUMA
+# Hugepages (1 GiB pages). Derived from TOTAL_USABLE_GIB below (after the vLLM /
+# DPDK constants it depends on) unless set explicitly; capture the explicit value
+# here before it is defaulted.
+CERTUS_HUGEPAGES_ENV="${CERTUS_HUGEPAGES:-}"
 # SharedStorage needs no boot-reserved hugepages (all RAM -> page cache), so the
 # default is 0. Overridable: when SharedStorage runs in the same invocation as
 # Certus-SPDK, the orchestrator sets this to CERTUS_HUGEPAGES so this phase does
@@ -99,6 +101,19 @@ VLLM_MIN_RAM_GIB=16
 # single DRAM-tier spdk_zmalloc maxes at ~(CERTUS_HUGEPAGES - this) GiB. The run
 # script's dram_cache_bytes must stay under that, not the full pool.
 DPDK_HUGEPAGE_OVERHEAD_GIB=3
+
+# Derive the hugepage pool from the total memory budget unless set explicitly:
+# reserve everything above the vLLM RAM floor, capped just under the DPDK
+# single-alloc ceiling. 32G total -> 16 (13G tier), 64G -> 48 (45G tier),
+# 128G -> 63 (~60G tier). profile_all.sh --total-mem uses the same formula, so
+# the pool this reserves and the tier that run sizes always agree.
+if [[ -n "$CERTUS_HUGEPAGES_ENV" ]]; then
+    CERTUS_HUGEPAGES="$CERTUS_HUGEPAGES_ENV"
+else
+    CERTUS_HUGEPAGES=$(( TOTAL_USABLE_GIB - VLLM_MIN_RAM_GIB ))
+    (( CERTUS_HUGEPAGES > DPDK_MEMSEG_LIST_GIB - 1 )) && CERTUS_HUGEPAGES=$(( DPDK_MEMSEG_LIST_GIB - 1 ))
+    (( CERTUS_HUGEPAGES < 0 )) && CERTUS_HUGEPAGES=0
+fi
 
 # Built native module whose allocation path must include SPDK hugepage support.
 CERTUS_NATIVE_SO="certus-connector/certus_native/certus_native.cpython-312-x86_64-linux-gnu.so"
