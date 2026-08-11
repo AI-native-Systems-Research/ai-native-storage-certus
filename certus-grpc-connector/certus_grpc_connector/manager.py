@@ -9,7 +9,7 @@ mapping:
     prepare_store -> Check (filter) + Reserve (best-effort: store the subset
                      that fits, drop blocks the saturated tier can't reserve)
     complete_store-> CommitStore (success) / AbortStore (failure)
-    prepare_load  -> Pin(promote=true)
+    prepare_load  -> Pin(promote=false)
     complete_load -> Unpin
     touch         -> Touch
     take_events   -> TakeEvents(max_events=0)
@@ -84,6 +84,11 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         # the keys it indexed.
         self._original_keys_by_u64: dict[int, OffloadKey] = {}
         self._collision_keys_logged: set[int] = set()
+        # Local presence hints avoid redundant server Check RPCs on the store path.
+        # They are hints, not the authority: lookup() still verifies with the
+        # server before reporting a hit to vLLM.
+        self._known_present_u64: set[int] = set()
+        self._known_absent_u64: set[int] = set()
         # Cumulative count of blocks we could not offload because the server's
         # memory tier was saturated (Reserve failed). Logged in throttled
         # summaries rather than per-request, so a persistently-full tier does
@@ -126,6 +131,22 @@ class GrpcCertusOffloadingManager(OffloadingManager):
     def _forget_key(self, key: OffloadKey, int_key: int) -> None:
         if self._original_keys_by_u64.get(int_key) == key:
             self._original_keys_by_u64.pop(int_key, None)
+            self._known_present_u64.discard(int_key)
+            self._known_absent_u64.discard(int_key)
+
+    def _mark_present(self, key: OffloadKey, int_key: int) -> bool:
+        if not self._remember_key(key, int_key):
+            return False
+        self._known_absent_u64.discard(int_key)
+        self._known_present_u64.add(int_key)
+        return True
+
+    def _mark_absent(self, key: OffloadKey, int_key: int) -> bool:
+        if not self._remember_key(key, int_key):
+            return False
+        self._known_present_u64.discard(int_key)
+        self._known_absent_u64.add(int_key)
+        return True
 
     # ── request lifecycle ──
 
@@ -160,10 +181,14 @@ class GrpcCertusOffloadingManager(OffloadingManager):
                 # Preserve the old fast path for entries already present on the
                 # server before this manager saw their store. Once observed, keep
                 # the original key so future events use vLLM's identity.
-                self._original_keys_by_u64[int_key] = key
+                self._mark_present(key, int_key)
             elif original != key:
                 self._remember_key(key, int_key)
                 exists = False
+            else:
+                self._mark_present(key, int_key)
+        else:
+            self._mark_absent(key, int_key)
         return lookup_result(exists)
 
     def touch(self, keys: Iterable[OffloadKey], req_context=None) -> None:
@@ -181,20 +206,36 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         session_id = _session_id_to_u64(req_context)
 
         # Filter out keys already cached (consecutive dedup is vLLM's concern;
-        # here we just avoid re-storing existing entries).
-        check = self._stub.Check(pb.BatchCheckRequest(keys=int_keys))
-        exists = {r.key: r.exists for r in check.results}
+        # here we just avoid re-storing existing entries). Most store candidates
+        # were lookup misses earlier in the same request/step; for those, the
+        # local "known absent" hint lets us skip a redundant Check RPC.
         to_store_pairs = []
+        check_pairs = []
         for orig, k in zip(keys_list, int_keys):
             known = self._original_keys_by_u64.get(k)
             if known is not None and known != orig:
                 self._remember_key(orig, k)
                 continue
-            if exists.get(k, False):
+            if k in self._known_present_u64:
                 continue
-            if not self._remember_key(orig, k):
+            if k in self._known_absent_u64:
+                if self._remember_key(orig, k):
+                    to_store_pairs.append((orig, k))
                 continue
-            to_store_pairs.append((orig, k))
+            check_pairs.append((orig, k))
+
+        if check_pairs:
+            check = self._stub.Check(
+                pb.BatchCheckRequest(keys=[k for _, k in check_pairs])
+            )
+            exists = {r.key: r.exists for r in check.results}
+            for orig, k in check_pairs:
+                if exists.get(k, False):
+                    self._mark_present(orig, k)
+                    continue
+                if not self._mark_absent(orig, k):
+                    continue
+                to_store_pairs.append((orig, k))
 
         if not to_store_pairs:
             return PrepareStoreOutput(
@@ -288,10 +329,12 @@ class GrpcCertusOffloadingManager(OffloadingManager):
             return
         if success:
             self._stub.CommitStore(pb.BatchCommitStoreRequest(keys=int_keys))
+            for key, int_key in zip(keys_list, int_keys):
+                self._mark_present(key, int_key)
         else:
             self._stub.AbortStore(pb.BatchAbortStoreRequest(keys=int_keys))
             for key, int_key in zip(keys_list, int_keys):
-                self._forget_key(key, int_key)
+                self._mark_absent(key, int_key)
 
     # ── load ──
 
@@ -344,6 +387,8 @@ class GrpcCertusOffloadingManager(OffloadingManager):
             if e.reason != pb.EVICTION_REASON_REMOVED:
                 continue
             original = self._original_keys_by_u64.pop(e.key, None)
+            self._known_present_u64.discard(e.key)
+            self._known_absent_u64.add(e.key)
             removed.append(
                 original if original is not None else e.key.to_bytes(8, "big")
             )

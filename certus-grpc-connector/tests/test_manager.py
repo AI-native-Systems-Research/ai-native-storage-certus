@@ -214,6 +214,41 @@ def test_prepare_store_preserves_offload_order_in_partial():
     assert out.store_spec.keys == [10, 30]
 
 
+def test_prepare_store_skips_check_after_known_lookup_miss():
+    stub = FakeStub()
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    key = (44).to_bytes(8, "big")
+
+    assert mgr.lookup(key) is False
+    out = mgr.prepare_store([key])
+
+    assert out is not None
+    assert out.keys_to_store == [key]
+    assert out.store_spec.keys == [44]
+    # One Check from lookup(); prepare_store should trust the local miss hint and
+    # go straight to Reserve.
+    assert len(_calls_of(stub, "Check")) == 1
+    assert _calls_of(stub, "Reserve")
+
+
+def test_prepare_store_skips_check_for_known_present_key():
+    stub = FakeStub()
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    key = (45).to_bytes(8, "big")
+
+    out = mgr.prepare_store([key])
+    assert out.keys_to_store == [key]
+    mgr.complete_store([key], success=True)
+    stub.calls.clear()
+
+    out = mgr.prepare_store([key])
+
+    assert out is not None
+    assert out.keys_to_store == []
+    assert _calls_of(stub, "Check") == []
+    assert _calls_of(stub, "Reserve") == []
+
+
 def test_prepare_store_skips_same_u64_collision():
     stub = FakeStub()
     mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
