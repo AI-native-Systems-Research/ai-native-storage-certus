@@ -44,6 +44,12 @@ def _keys_to_u64s(keys: Iterable[OffloadKey]) -> list[int]:
     return [_key_to_u64(k) for k in keys]
 
 
+def _key_debug(key: OffloadKey) -> str:
+    if isinstance(key, int):
+        return str(key)
+    return bytes(key).hex()
+
+
 def _session_id_to_u64(req_context) -> int:
     """Extract a session id from the request context and fold it to a u64.
 
@@ -72,6 +78,12 @@ class GrpcCertusOffloadingManager(OffloadingManager):
     def __init__(self, stub, block_size_bytes: int):
         self._stub = stub
         self._block_size_bytes = int(block_size_bytes)
+        # Certus is keyed by u64, while vLLM's OffloadKey can be a longer bytes
+        # value. Keep the wire key narrow for server compatibility, but remember
+        # the original key identity so eviction events reported back to vLLM match
+        # the keys it indexed.
+        self._original_keys_by_u64: dict[int, OffloadKey] = {}
+        self._collision_keys_logged: set[int] = set()
         # Cumulative count of blocks we could not offload because the server's
         # memory tier was saturated (Reserve failed). Logged in throttled
         # summaries rather than per-request, so a persistently-full tier does
@@ -85,6 +97,35 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         resolve it). Reserve sizes are per-call, so changing this affects only
         subsequent stores."""
         self._block_size_bytes = int(block_size_bytes)
+
+    def _remember_key(self, key: OffloadKey, int_key: int) -> bool:
+        """Record the original vLLM key for a Certus u64 key.
+
+        Returns False if a different vLLM key already owns this u64. We then skip
+        caching the colliding key rather than risking a false hit to the wrong KV
+        block. Collisions should be vanishingly rare for the current workload, so
+        this stays a correctness guard instead of changing the server protocol.
+        """
+        existing = self._original_keys_by_u64.get(int_key)
+        if existing is None:
+            self._original_keys_by_u64[int_key] = key
+            return True
+        if existing == key:
+            return True
+        if int_key not in self._collision_keys_logged:
+            self._collision_keys_logged.add(int_key)
+            print(
+                f"[certus-grpc] WARNING: OffloadKey collision on Certus u64 "
+                f"key={int_key}: existing={_key_debug(existing)} "
+                f"new={_key_debug(key)}. The new key will not be cached.",
+                file=sys.stderr,
+                flush=True,
+            )
+        return False
+
+    def _forget_key(self, key: OffloadKey, int_key: int) -> None:
+        if self._original_keys_by_u64.get(int_key) == key:
+            self._original_keys_by_u64.pop(int_key, None)
 
     # ── request lifecycle ──
 
@@ -113,6 +154,16 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         int_key = _key_to_u64(key)
         resp = self._stub.Check(pb.BatchCheckRequest(keys=[int_key]))
         exists = bool(resp.results and resp.results[0].exists)
+        if exists:
+            original = self._original_keys_by_u64.get(int_key)
+            if original is None:
+                # Preserve the old fast path for entries already present on the
+                # server before this manager saw their store. Once observed, keep
+                # the original key so future events use vLLM's identity.
+                self._original_keys_by_u64[int_key] = key
+            elif original != key:
+                self._remember_key(key, int_key)
+                exists = False
         return lookup_result(exists)
 
     def touch(self, keys: Iterable[OffloadKey], req_context=None) -> None:
@@ -133,9 +184,17 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         # here we just avoid re-storing existing entries).
         check = self._stub.Check(pb.BatchCheckRequest(keys=int_keys))
         exists = {r.key: r.exists for r in check.results}
-        to_store_pairs = [
-            (orig, k) for orig, k in zip(keys_list, int_keys) if not exists.get(k, False)
-        ]
+        to_store_pairs = []
+        for orig, k in zip(keys_list, int_keys):
+            known = self._original_keys_by_u64.get(k)
+            if known is not None and known != orig:
+                self._remember_key(orig, k)
+                continue
+            if exists.get(k, False):
+                continue
+            if not self._remember_key(orig, k):
+                continue
+            to_store_pairs.append((orig, k))
 
         if not to_store_pairs:
             return PrepareStoreOutput(
@@ -223,13 +282,16 @@ class GrpcCertusOffloadingManager(OffloadingManager):
     def complete_store(
         self, keys: Iterable[OffloadKey], req_context=None, success: bool = True
     ) -> None:
-        int_keys = _keys_to_u64s(keys)
+        keys_list = list(keys)
+        int_keys = _keys_to_u64s(keys_list)
         if not int_keys:
             return
         if success:
             self._stub.CommitStore(pb.BatchCommitStoreRequest(keys=int_keys))
         else:
             self._stub.AbortStore(pb.BatchAbortStoreRequest(keys=int_keys))
+            for key, int_key in zip(keys_list, int_keys):
+                self._forget_key(key, int_key)
 
     # ── load ──
 
@@ -277,11 +339,14 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         # Only REMOVED means the key is no longer accessible. DEMOTED entries
         # stay on SSD and remain loadable, so they are not eviction events for
         # vLLM's accounting.
-        removed = [
-            e.key.to_bytes(8, "big")
-            for e in resp.events
-            if e.reason == pb.EVICTION_REASON_REMOVED
-        ]
+        removed = []
+        for e in resp.events:
+            if e.reason != pb.EVICTION_REASON_REMOVED:
+                continue
+            original = self._original_keys_by_u64.pop(e.key, None)
+            removed.append(
+                original if original is not None else e.key.to_bytes(8, "big")
+            )
         if removed:
             yield OffloadingEvent(
                 keys=removed,

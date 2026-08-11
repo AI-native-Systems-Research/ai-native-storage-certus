@@ -214,6 +214,21 @@ def test_prepare_store_preserves_offload_order_in_partial():
     assert out.store_spec.keys == [10, 30]
 
 
+def test_prepare_store_skips_same_u64_collision():
+    stub = FakeStub()
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    key_a = (42).to_bytes(8, "big") + b"a" * 24
+    key_b = (42).to_bytes(8, "big") + b"b" * 24
+
+    out = mgr.prepare_store([key_a, key_b])
+
+    assert out is not None
+    assert out.keys_to_store == [key_a]
+    assert out.store_spec.keys == [42]
+    (reserve,) = _calls_of(stub, "Reserve")
+    assert [e.key for e in reserve.entries] == [42]
+
+
 # ── manager: complete_store / load ──
 
 
@@ -231,6 +246,20 @@ def test_complete_store_failure_aborts():
     mgr.complete_store([(9).to_bytes(8, "big")], success=False)
     assert _calls_of(stub, "AbortStore")
     assert not _calls_of(stub, "CommitStore")
+
+
+def test_lookup_treats_same_u64_collision_as_miss():
+    stub = FakeStub()
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    key_a = (42).to_bytes(8, "big") + b"a" * 24
+    key_b = (42).to_bytes(8, "big") + b"b" * 24
+
+    out = mgr.prepare_store([key_a])
+    assert out.keys_to_store == [key_a]
+    stub.exists[42] = True
+
+    assert mgr.lookup(key_a) is True
+    assert mgr.lookup(key_b) is False
 
 
 def test_prepare_load_pins_with_promote_and_complete_load_unpins():
@@ -265,6 +294,22 @@ def test_take_events_surfaces_removed_not_demoted():
     assert events[0].keys == [(100).to_bytes(8, "big")]
     # second call drains the buffer
     assert list(mgr.take_events()) == []
+
+
+def test_take_events_surfaces_original_full_key_when_known():
+    stub = FakeStub()
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    full_key = (100).to_bytes(8, "big") + b"full-vllm-offload-key"
+    out = mgr.prepare_store([full_key])
+    assert out.keys_to_store == [full_key]
+    stub.events = [
+        pb.EvictionEvent(key=100, reason=pb.EVICTION_REASON_REMOVED),
+    ]
+
+    events = list(mgr.take_events())
+
+    assert len(events) == 1
+    assert events[0].keys == [full_key]
 
 
 # ── handler offset wiring ──
