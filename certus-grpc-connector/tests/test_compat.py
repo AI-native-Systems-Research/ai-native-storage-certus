@@ -19,6 +19,7 @@ from __future__ import annotations
 import importlib
 import os
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 
@@ -73,13 +74,19 @@ def test_transfer_result_has_type_dropped_at_0_26(version, expected):
     ],
 )
 def test_new_0_26_capabilities_gate_from_0_26(version, expected):
-    # The four capabilities the 0.26 offloading-API rewrite introduced, all keyed
-    # to the same v>=(0,26) threshold. Pin each so a matrix edit is caught.
+    # The capabilities the 0.26 offloading-API rewrite introduced. Pin each so a
+    # matrix edit is caught.
     caps = compat.caps_for(version)
     assert caps.worker_split_submit is expected
-    assert caps.spec_config_object is expected
     assert caps.lookup_returns_enum is expected
     assert caps.canonical_kv_caches is expected
+
+
+@pytest.mark.parametrize("version", compat.SUPPORTED_VERSIONS)
+def test_spec_config_object_not_used_through_local_0_26(version):
+    # The local 0.26 factory still calls spec_cls(vllm_config, kv_cache_config).
+    # Runtime version discovery can be correct while this flag remains false.
+    assert compat.caps_for(version).spec_config_object is False
 
 
 @pytest.mark.parametrize(
@@ -239,6 +246,53 @@ def test_extract_gpu_ptrs_returns_one_region_per_layer_tensor():
     assert regions == [(0x1000, 65536)] * 32
 
 
+# ── adapters: block_bytes_from_config ──
+
+
+def _kv_group(block_size: int = 16, page_size_bytes: int = 65536, layers: int = 2):
+    return SimpleNamespace(
+        layer_names=[f"layer.{i}" for i in range(layers)],
+        kv_cache_spec=SimpleNamespace(
+            block_size=block_size,
+            page_size_bytes=page_size_bytes,
+        ),
+    )
+
+
+def test_block_bytes_from_config_prefers_unpacked_kv_cache_tensors():
+    cfg = SimpleNamespace(
+        num_blocks=8,
+        kv_cache_tensors=[
+            SimpleNamespace(size=80, block_stride=0),
+            SimpleNamespace(size=240, block_stride=0),
+        ],
+        kv_cache_groups=[_kv_group()],
+    )
+
+    assert compat.block_bytes_from_config(cfg, block_size_factor=2) == 80
+
+
+def test_block_bytes_from_config_uses_first_tensor_for_packed_layout():
+    cfg = SimpleNamespace(
+        num_blocks=8,
+        kv_cache_tensors=[
+            SimpleNamespace(size=640, block_stride=80),
+            SimpleNamespace(size=999999, block_stride=80),
+        ],
+        kv_cache_groups=[_kv_group()],
+    )
+
+    assert compat.block_bytes_from_config(cfg, block_size_factor=1) == 80
+
+
+def test_block_bytes_from_config_falls_back_to_group_metadata():
+    cfg = SimpleNamespace(
+        kv_cache_groups=[_kv_group(page_size_bytes=1024, layers=3)],
+    )
+
+    assert compat.block_bytes_from_config(cfg, block_size_factor=2) == 6144
+
+
 # ── adapters: make_transfer_result, both CAPS branches ──
 
 
@@ -322,3 +376,37 @@ def test_env_override_beats_installed_version(monkeypatch, restore_compat):
     reloaded = importlib.reload(compat)
     assert reloaded.VERSION == (0, 26)
     assert reloaded.CAPS.needs_disable_hybrid_kv_cache_manager is True
+
+
+def test_0_26_spec_constructs_with_two_config_args(monkeypatch, restore_compat):
+    monkeypatch.delenv("CERTUS_VLLM_VERSION", raising=False)
+    conftest.build_fake_vllm((0, 26))
+    reloaded = importlib.reload(compat)
+
+    import certus_grpc_connector.spec as spec_mod
+
+    spec_mod = importlib.reload(spec_mod)
+    vllm_config = SimpleNamespace(
+        kv_transfer_config=SimpleNamespace(
+            kv_connector_extra_config={"slab_size_bytes": 123456}
+        ),
+        kv_events_config=SimpleNamespace(enable_kv_cache_events=False),
+        parallel_config=SimpleNamespace(
+            decode_context_parallel_size=1,
+            prefill_context_parallel_size=1,
+        ),
+    )
+    kv_cache_config = SimpleNamespace(
+        num_blocks=8,
+        kv_cache_tensors=[
+            SimpleNamespace(size=80, block_stride=0),
+            SimpleNamespace(size=240, block_stride=0),
+        ],
+        kv_cache_groups=[_kv_group()],
+    )
+
+    spec = spec_mod.CertusGrpcOffloadingSpec(vllm_config, kv_cache_config)
+
+    assert reloaded.CAPS.spec_config_object is False
+    assert spec._slab_size_bytes == 123456
+    assert spec._block_bytes == 40

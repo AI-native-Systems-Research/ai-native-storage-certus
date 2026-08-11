@@ -9,12 +9,10 @@ connector actually touches; they are not a functional vLLM.
 The fakes are produced by a per-version *factory* (``build_fake_vllm``) so a
 future vLLM whose plugin surface diverges gets its shape encoded in ONE place,
 alongside the ``compat.FEATURES`` entry that gates the connector's adaptation.
-Today the four supported even versions (0.20/0.22/0.24/0.26) share the 0.20
-shape for everything except engine flags (``needs_disable_hybrid_kv_cache_manager``,
-which is a run-driver concern, not an import-surface one), so the factory
-currently emits the same modules for every version — but the seam is here, keyed
-off the same predicates the connector branches on, so the fakes and the adapters
-cannot silently drift apart.
+The factory models the shape changes the connector branches on, including the
+0.26 consolidated ``base`` module and worker interface. It intentionally keeps
+0.26's spec constructor as ``(vllm_config, kv_cache_config)`` because the local
+vLLM factory still calls plugins that way.
 """
 
 from __future__ import annotations
@@ -51,8 +49,7 @@ def _transfer_result_has_type(version: tuple[int, int]) -> bool:
 
 def _is_0_26(version: tuple[int, int]) -> bool:
     """Whether this version uses the 0.26 consolidated-``base`` rewrite (single
-    OffloadingWorker, OffloadingConfig ctor, LookupResult enum, CanonicalKVCaches).
-    Mirrors the ``worker_split_submit`` / ``spec_config_object`` predicates."""
+    OffloadingWorker, LookupResult enum, CanonicalKVCaches)."""
     return version >= (0, 26)
 
 
@@ -130,6 +127,38 @@ def build_fake_vllm(version: tuple[int, int] = (0, 20)) -> None:
         tr_fields.append(("transfer_type", Any))
     TransferResult = make_dataclass("TransferResult", tr_fields)
 
+    def _init_offloading_spec(self, vllm_config, kv_cache_config) -> None:
+        self.vllm_config = vllm_config
+        self.kv_cache_config = kv_cache_config
+        self.extra_config = (
+            vllm_config.kv_transfer_config.kv_connector_extra_config
+        )
+        parallel_config = getattr(
+            vllm_config,
+            "parallel_config",
+            types.SimpleNamespace(
+                decode_context_parallel_size=1,
+                prefill_context_parallel_size=1,
+            ),
+        )
+        context_parallel_factor = (
+            parallel_config.decode_context_parallel_size
+            * parallel_config.prefill_context_parallel_size
+        )
+        self.gpu_block_size = tuple(
+            group.kv_cache_spec.block_size * context_parallel_factor
+            for group in kv_cache_config.kv_cache_groups
+        )
+        self.block_size_factor = 1
+        offloaded_block_size = self.extra_config.get("block_size")
+        if offloaded_block_size is not None:
+            gpu_block_sizes = set(self.gpu_block_size)
+            assert len(gpu_block_sizes) == 1
+            gpu_block_size = gpu_block_sizes.pop()
+            offloaded_block_size = int(offloaded_block_size)
+            assert offloaded_block_size % gpu_block_size == 0
+            self.block_size_factor = offloaded_block_size // gpu_block_size
+
     if _is_0_26(version):
         # ── 0.26 rewrite: everything consolidated into vllm.v1.kv_offload.base;
         # abstract/mediums/spec/worker.worker are GONE. ──
@@ -148,12 +177,12 @@ def build_fake_vllm(version: tuple[int, int] = (0, 20)) -> None:
         class RequestOffloadingContext:
             policy: Any = None
 
-        # OffloadingSpec base takes a single OffloadingConfig and exposes
-        # extra_config (the connector reads server/slab_size_bytes from it).
+        # Local 0.26 still constructs plugin specs as
+        # spec_cls(vllm_config, kv_cache_config), while the worker/manager API has
+        # moved to the consolidated base module.
         class OffloadingSpec:
-            def __init__(self, config):
-                self.config = config
-                self.extra_config = getattr(config, "extra_config", {})
+            def __init__(self, vllm_config, kv_cache_config):
+                _init_offloading_spec(self, vllm_config, kv_cache_config)
 
         # OffloadingWorker: the single-worker ABC. Not marked abstract in the
         # fake (the connector subclass provides every method anyway).
@@ -221,8 +250,8 @@ def build_fake_vllm(version: tuple[int, int] = (0, 20)) -> None:
         mediums.GPULoadStoreSpec = GPULoadStoreSpec
 
         class OffloadingSpec:
-            def __init__(self, *a, **k):
-                pass
+            def __init__(self, vllm_config, kv_cache_config):
+                _init_offloading_spec(self, vllm_config, kv_cache_config)
 
         spec.OffloadingSpec = OffloadingSpec
 

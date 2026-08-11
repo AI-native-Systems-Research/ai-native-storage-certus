@@ -149,11 +149,11 @@ FEATURES: dict[str, "callable"] = {
     # ``submit_store(job_id, src, dst)`` / ``submit_load(job_id, src, dst)``,
     # returned by ``get_worker``. Verified @0.26 (ImportError: worker.worker gone).
     "worker_split_submit": lambda v: v >= (0, 26),
-    # ``OffloadingSpec.__init__`` takes a single ``OffloadingConfig`` (exposing
-    # ``worker_kv_bytes_per_block``, ``extra_config``, ``groups``, ``cache``)
-    # instead of ``(vllm_config, kv_cache_config)``; the old base's
-    # ``gpu_block_size`` / ``block_size_factor`` attributes are gone.
-    "spec_config_object": lambda v: v >= (0, 26),
+    # Reserved for a future/experimental shape where ``OffloadingSpec.__init__``
+    # takes a single OffloadingConfig object. The local 0.26 tree still constructs
+    # specs as ``spec_cls(vllm_config, kv_cache_config)`` and its base still exposes
+    # ``gpu_block_size`` / ``block_size_factor``, so this stays false through 0.26.
+    "spec_config_object": lambda v: False,
     # ``OffloadingManager.lookup`` returns a ``LookupResult`` enum
     # (MISS/HIT/HIT_PENDING/RETRY) rather than ``bool | None``.
     "lookup_returns_enum": lambda v: v >= (0, 26),
@@ -465,14 +465,65 @@ def extract_gpu_ptrs(kv_caches) -> list[tuple[int, int]]:
     )
 
 
+def _block_bytes_from_kv_cache_tensors(
+    kv_cache_config,
+    block_size_factor: int,
+) -> int | None:
+    """Per-offloaded-block bytes from KVCacheConfig.kv_cache_tensors.
+
+    This mirrors vLLM's own CPU offload sizing path: for unpacked layouts, sum all
+    tensor byte sizes; for packed layouts, use the first packed tensor's byte size.
+    Divide by the number of GPU blocks to get bytes per GPU block, then scale by
+    ``block_size_factor`` if the offloaded block spans multiple GPU blocks.
+    """
+    tensors = getattr(kv_cache_config, "kv_cache_tensors", None)
+    num_blocks = int(getattr(kv_cache_config, "num_blocks", 0) or 0)
+    if not tensors or num_blocks <= 0:
+        return None
+
+    is_packed = any(int(getattr(t, "block_stride", 0) or 0) for t in tensors)
+    if is_packed and not all(int(getattr(t, "block_stride", 0) or 0) for t in tensors):
+        raise ValueError("mixed packed/unpacked kv_cache_tensors")
+
+    total_gpu_kv_bytes = (
+        int(tensors[0].size) if is_packed else sum(int(t.size) for t in tensors)
+    )
+    if total_gpu_kv_bytes <= 0:
+        return None
+
+    per_gpu_block, rem = divmod(total_gpu_kv_bytes, num_blocks)
+    if rem:
+        # Round up rather than under-reserving. This should not normally happen;
+        # sizes produced by vLLM are expected to be block-aligned.
+        per_gpu_block += 1
+        print(
+            f"[certus-grpc] WARNING: kv_cache_tensors total bytes "
+            f"{total_gpu_kv_bytes} not divisible by num_blocks={num_blocks}; "
+            f"rounding per-GPU-block Reserve size up to {per_gpu_block} bytes",
+            flush=True,
+        )
+
+    block_bytes = per_gpu_block * block_size_factor
+    layout = "packed" if is_packed else "unpacked"
+    print(
+        f"[certus-grpc] per-block Reserve size from kv_cache_tensors "
+        f"({layout}): total_gpu_kv_bytes={total_gpu_kv_bytes} / "
+        f"num_blocks={num_blocks} * block_size_factor={block_size_factor} = "
+        f"{block_bytes} bytes",
+        flush=True,
+    )
+    return block_bytes
+
+
 def block_bytes_from_config(kv_cache_config, block_size_factor: int) -> int | None:
     """True offloaded per-block size in bytes, derived from the KV-cache config
     (available to both the scheduler and worker roles, unlike the GPU tensor).
 
-    = per-GPU-block ``page_size_bytes`` * ``num_layers`` * ``block_size_factor``.
-    The connector offloads one GPU block across ALL layers in the group per key
-    (the KV tensor's ``stride(0)`` spans every layer). Returns None if the config
-    can't be read (caller falls back to ``slab_size_bytes``).
+    Prefer ``kv_cache_tensors`` because it captures split and packed tensor
+    layouts directly. Fall back to the older group-derived
+    ``page_size_bytes * num_layers * block_size_factor`` calculation only when the
+    tensor metadata is unavailable. Returns None if neither path can be read
+    (caller falls back to ``slab_size_bytes``).
     """
     if not CAPS.kv_cache_group_attrs:
         raise NotImplementedError(
@@ -480,6 +531,18 @@ def block_bytes_from_config(kv_cache_config, block_size_factor: int) -> int | No
             f"{VERSION[0]}.{VERSION[1]} is not yet mapped in "
             f"compat.block_bytes_from_config. Add a branch for this version."
         )
+    try:
+        if block_bytes := _block_bytes_from_kv_cache_tensors(
+            kv_cache_config, block_size_factor
+        ):
+            return block_bytes
+    except Exception as e:  # noqa: BLE001 - fall through to group fallback
+        print(
+            f"[certus-grpc] WARNING: could not derive per-block size from "
+            f"kv_cache_tensors ({e}); falling back to KV-cache groups.",
+            flush=True,
+        )
+
     try:
         groups = kv_cache_config.kv_cache_groups
         if len(groups) != 1:

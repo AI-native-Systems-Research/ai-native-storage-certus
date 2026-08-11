@@ -19,7 +19,6 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from .compat import (
-    CAPS,
     GPULoadStoreSpec,
     LoadStoreSpec,
     OffloadingManager,
@@ -51,13 +50,13 @@ class CertusGrpcOffloadingSpec(OffloadingSpec):
     """OffloadingSpec backed by a remote certus-server over gRPC."""
 
     def __init__(self, *args):
-        # The base ctor signature changed with the 0.26 API rewrite:
-        #   ≤0.24: __init__(vllm_config, kv_cache_config) — base exposes
-        #          ``gpu_block_size`` / ``block_size_factor``.
-        #   0.26 : __init__(config: OffloadingConfig) — base exposes ``config`` /
-        #          ``extra_config``; per-block bytes come from
-        #          ``config.worker_kv_bytes_per_block`` directly.
-        # Branch on the named capability so the two eras share one class.
+        # Normal supported path, including the local 0.26 tree:
+        #   __init__(vllm_config, kv_cache_config)
+        # The 0.26 API rewrote the worker/lookup/cache handoff shapes, but its
+        # factory still constructs specs with the two config objects. Keep a
+        # defensive one-arg branch for a future OffloadingConfig-style base, but do
+        # not select it from the version matrix unless vLLM actually changes its
+        # factory call shape.
         #
         # Per-block Reserve size. CRITICAL: the manager (which issues Reserve) and
         # the worker (which issues the GPU->DRAM copy) live in SEPARATE spec
@@ -70,13 +69,14 @@ class CertusGrpcOffloadingSpec(OffloadingSpec):
         # ever cached — silently, because the store path must report success. So
         # derive the true per-block byte size at construction (available to BOTH
         # roles), not from the tensor. slab_size_bytes is a last-resort fallback.
-        if CAPS.spec_config_object:
+        if len(args) == 1:
             (config,) = args
             super().__init__(config)
             self._slab_size_bytes = int(self.extra_config.get("slab_size_bytes", 131072))
-            # 0.26 hands the per-block bytes to us directly.
+            # Future/experimental shape: the config may hand per-block bytes to us
+            # directly.
             self._block_bytes: int | None = block_bytes_from_offloading_config(config)
-        else:
+        elif len(args) == 2:
             vllm_config, kv_cache_config = args
             super().__init__(vllm_config, kv_cache_config)
             assert len(self.gpu_block_size) == 1, (
@@ -89,6 +89,11 @@ class CertusGrpcOffloadingSpec(OffloadingSpec):
             # (per-GPU-block page_size_bytes * num_layers * block_size_factor).
             self._block_bytes = block_bytes_from_config(
                 kv_cache_config, self.block_size_factor
+            )
+        else:
+            raise TypeError(
+                "CertusGrpcOffloadingSpec expected either "
+                "(vllm_config, kv_cache_config) or (offloading_config,)"
             )
 
         self._server = str(self.extra_config.get("server", "localhost:50051"))
