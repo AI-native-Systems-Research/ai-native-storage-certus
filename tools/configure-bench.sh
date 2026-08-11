@@ -69,8 +69,13 @@ XFS_LABEL="${XFS_LABEL:-fs-bench}"
 # resource node were the HIGH one, NODE0_RESERVE would carve out node 0 via
 # memmap; leave it empty for the node-0 layout.)
 NODE0_RESERVE=''
-MEM_LIMIT="${MEM_LIMIT:-32G}"
+# TOTAL_USABLE_GIB is the single memory knob: it sets the accounting budget, the
+# hugepage derivation (below), and the kernel mem= cap. MEM_LIMIT (the mem= boot
+# param) derives from it so the RAM the kernel actually exposes matches the
+# budget everything else is sized against; set MEM_LIMIT explicitly only to
+# decouple them (e.g. a multi-node memmap layout).
 TOTAL_USABLE_GIB="${TOTAL_USABLE_GIB:-32}"  # GiB usable on node $RESOURCE_NUMA after mem=
+MEM_LIMIT="${MEM_LIMIT:-${TOTAL_USABLE_GIB}G}"
 
 # Hugepages (1 GiB pages). Derived from TOTAL_USABLE_GIB below (after the vLLM /
 # DPDK constants it depends on) unless set explicitly; capture the explicit value
