@@ -66,6 +66,7 @@ MEM_TIER_EXPLICIT=0     # set when --memory-tier-size is passed (wins over --tot
 TOTAL_MEM_GIB=""        # set by --total-mem <GiB>; empty = derivation off
 VLLM_MIN_RAM_GIB="${VLLM_MIN_RAM_GIB:-16}"           # RAM floor reserved for vLLM
 DPDK_HUGEPAGE_OVERHEAD_GIB="${DPDK_HUGEPAGE_OVERHEAD_GIB:-3}"  # DPDK heap + SPDK DMA
+DPDK_MEMSEG_LIST_GIB="${DPDK_MEMSEG_LIST_GIB:-64}"   # DPDK single-alloc ceiling (pool cap)
 EVICT_THRESH="0.6"
 CPU_BYTES=$((16 * (1 << 30)))
 DRAM=$((32 * (1 << 30)))
@@ -365,10 +366,22 @@ if [[ -n "$TOTAL_MEM_GIB" ]]; then
                  "vLLM ${VLLM_MIN_RAM_GIB}G + DPDK/SPDK ${DPDK_HUGEPAGE_OVERHEAD_GIB}G = ${_overhead}G" >&2
             exit 2
         fi
-        _ceiling=$(( ${CERTUS_HUGEPAGES:-16} - DPDK_HUGEPAGE_OVERHEAD_GIB ))
+        # Size the hugepage pool the same way configure-bench.sh does — reserve
+        # everything above the vLLM floor, capped just under the DPDK single-alloc
+        # ceiling — unless CERTUS_HUGEPAGES pins it explicitly. Deriving from the
+        # same total means the pool exactly fits the tier (no clamp); an explicit,
+        # smaller pool still clamps the tier down to what actually fits.
+        if [[ -n "${CERTUS_HUGEPAGES:-}" ]]; then
+            _pool=$CERTUS_HUGEPAGES
+        else
+            _pool=$(( TOTAL_MEM_GIB - VLLM_MIN_RAM_GIB ))
+            (( _pool > DPDK_MEMSEG_LIST_GIB - 1 )) && _pool=$(( DPDK_MEMSEG_LIST_GIB - 1 ))
+            (( _pool < 0 )) && _pool=0
+        fi
+        _ceiling=$(( _pool - DPDK_HUGEPAGE_OVERHEAD_GIB ))
         if [[ $_derived -gt $_ceiling ]]; then
             warn "--total-mem implies a ${_derived}G tier, but the reserved 1G pool caps it at" \
-                 "${_ceiling}G (CERTUS_HUGEPAGES=${CERTUS_HUGEPAGES:-16} − ${DPDK_HUGEPAGE_OVERHEAD_GIB}G DPDK). Clamping;" \
+                 "${_ceiling}G (CERTUS_HUGEPAGES=${_pool} − ${DPDK_HUGEPAGE_OVERHEAD_GIB}G DPDK). Clamping;" \
                  "raise CERTUS_HUGEPAGES and reboot for a larger tier."
             _derived=$_ceiling
         fi
