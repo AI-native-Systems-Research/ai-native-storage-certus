@@ -33,12 +33,34 @@ use crate::dist::{Dist, Shape};
 use crate::stats::hist::Hist;
 use crate::stats::sharing::SharingReport;
 
-/// Percentile points an `empirical` distribution is emitted at.
+/// Most steps an `empirical` distribution is emitted with.
 ///
-/// Enough to carry a bimodal shape — a `scan` arm beside a conversational one — and
-/// few enough that the emitted YAML stays readable. The contract's own worked example
-/// uses three points; these nine are a superset of its shape.
-const EMPIRICAL_POINTS: [f64; 9] = [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99, 1.00];
+/// **Not a readability budget.** A step CDF is exact at its atoms and wrong between
+/// them, in two ways that both scale with how much probability mass one step carries:
+///
+/// - Against the distribution it summarises, its KS distance is the mass of its
+///   largest step — the whole step appears at once where the original was spread out.
+///   So the step spacing is a **floor under the divergence the fit is gated on**.
+/// - Every value inside a step is emitted as one value, so a step biases the mean by
+///   the spread of what it absorbs.
+///
+/// This was measured, not reasoned about. Nine percentile points
+/// (`0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99, 1.00`) put the emitted median
+/// and every other target quantile within 0.005 of the trace's, and still failed the
+/// round trip on both counts at once: `shared_depth` came back as 8 atoms against the
+/// trace's 37 values, whose largest step carried 0.286 of the mass and set a KS
+/// distance of 0.234 against a 0.05 tolerance; and placing each step's mass at the
+/// top of its interval inflated `private_depth`'s mean by 24%, `turns`' by 25% and
+/// `growth_per_turn`'s by 9%, which came out as a synthetic plan running 35% more
+/// references than its source. **A distribution can match at every quantile you
+/// checked and still have the wrong mean**, and request length is a sum, so it is the
+/// mean that reaches it.
+///
+/// 64 steps puts the spacing floor at 0.016, inside the 0.02 of the tightest
+/// tolerance any gated statistic uses. Below that the emitted YAML is longer than a
+/// hand-written one, which is the correct trade: a fitted document is machine output
+/// checked by a gate, and the gate is on resemblance rather than on brevity.
+const EMPIRICAL_MAX_STEPS: usize = 64;
 
 /// Per-session state while fitting.
 #[derive(Debug, Clone, Copy)]
@@ -284,34 +306,74 @@ fn empirical_from(h: &Hist) -> Option<Dist> {
 /// Emitted as bare `(value, cumulative)` points, a session population of 1, 4 and 4
 /// turns comes back with a median of 2 — a value the trace never contained.
 ///
-/// So each distinct value contributes **two** points, `(v, c_before)` and `(v, c_after)`,
-/// which makes the interpolated CDF a staircase and reproduces the discrete
-/// distribution exactly. The zero-width segment between them is what
-/// `dist::empirical` already handles by taking the lower value.
+/// So each step contributes **two** points, `(v, c_before)` and `(v, c_after)`, which
+/// makes the interpolated CDF a staircase and reproduces a discrete distribution. The
+/// zero-width segment between them is what `dist::empirical` already handles by taking
+/// the lower value.
+///
+/// # Where the steps go, which is the part that decides whether the fit passes
+///
+/// One step per **occupied bucket** wherever that fits inside
+/// [`EMPIRICAL_MAX_STEPS`], which for a count distribution of modest range means the
+/// emitted distribution *is* the measured one — no spacing floor under the divergence
+/// and no bias in any moment. [`Hist`](crate::stats::hist) counts values below
+/// `LINEAR` exactly, so `turns`, `shared_depth` and most block counts land here.
+///
+/// Above the budget, consecutive buckets merge into equal-mass groups, and each
+/// group's atom sits at the **mass-weighted mean of the values it absorbs** rather
+/// than at the top of its interval. That placement is the whole difference between a
+/// summary that preserves the mean and one that inflates it: emitting the interval's
+/// top biased `private_depth`'s mean 24% high (see [`EMPIRICAL_MAX_STEPS`]), and a
+/// distribution the generator *sums* is one whose mean has to survive.
+///
+/// A bucket's own value is likewise its midpoint rather than its lower bound, which
+/// is the same argument one level down. Below `LINEAR` a bucket is a single integer
+/// and the midpoint *is* that integer, so the exact case stays exact.
 fn empirical_from_buckets(buckets: &[(u64, u64, u64)]) -> Option<Dist> {
     let total: u64 = buckets.iter().map(|(_, _, c)| *c).sum();
     if total == 0 {
         return None;
     }
-    // Values at the target quantiles, with the cumulative probability *at* each —
-    // not the probe that found it, which would understate it.
+    // Midpoint, not lower bound: it equals the value where the bucket is exact, and
+    // is the better estimate of the bucket's mean where it is not.
+    let occupied: Vec<(f64, u64)> = buckets
+        .iter()
+        .filter(|(_, _, c)| *c > 0)
+        .map(|(lo, hi, c)| ((*lo as f64 + *hi as f64) / 2.0, *c))
+        .collect();
+    if occupied.is_empty() {
+        return None;
+    }
+
+    let groups: Vec<(f64, u64)> = if occupied.len() <= EMPIRICAL_MAX_STEPS {
+        occupied
+    } else {
+        let per = total as f64 / EMPIRICAL_MAX_STEPS as f64;
+        let mut out: Vec<(f64, u64)> = Vec::new();
+        let mut weighted = 0.0f64;
+        let mut count = 0u64;
+        let mut closed = 0u64;
+        for (v, c) in &occupied {
+            weighted += v * *c as f64;
+            count += *c;
+            if ((closed + count) as f64) >= (out.len() + 1) as f64 * per {
+                out.push((weighted / count as f64, count));
+                closed += count;
+                weighted = 0.0;
+                count = 0;
+            }
+        }
+        if count > 0 {
+            out.push((weighted / count as f64, count));
+        }
+        out
+    };
+
     let mut steps: Vec<(f64, f64)> = Vec::new();
     let mut acc = 0u64;
-    let mut next = 0usize;
-    for (lo, _, c) in buckets {
+    for (v, c) in groups {
         acc += c;
-        let cumulative = acc as f64 / total as f64;
-        let mut wanted = false;
-        while next < EMPIRICAL_POINTS.len() && cumulative >= EMPIRICAL_POINTS[next] {
-            next += 1;
-            wanted = true;
-        }
-        if wanted {
-            steps.push((*lo as f64, cumulative));
-        }
-    }
-    if steps.is_empty() {
-        return None;
+        steps.push((v, acc as f64 / total as f64));
     }
     // The top of the support must reach 1.0, or a draw above the last point would
     // clamp to it and the tail would be lost.
@@ -438,7 +500,15 @@ mod tests {
         }
         let f = s.finish(&empty_sharing());
         let v = quantile_of(&f.think_time, 0.5);
-        assert!((v - 2.5).abs() < 0.01, "think time came out {v}s");
+        // Toleranced at the histogram's own resolution, not tighter. 2500 ms lands in
+        // the log bucket [2496, 2559], and the emitted value is that bucket's midpoint
+        // — so the answer carries up to half a bucket, about 1.6%, and an assertion
+        // inside that would be pinning which end of a bucket the estimator picks
+        // rather than the unit this test is about.
+        assert!(
+            (v - 2.5).abs() < 2.5 * 0.02,
+            "think time came out {v}s, which is not 2.5s to within a bucket"
+        );
     }
 
     #[test]

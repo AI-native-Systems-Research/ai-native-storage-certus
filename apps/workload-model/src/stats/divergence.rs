@@ -286,6 +286,85 @@ pub fn ks_from_buckets(
         .fold(0.0f64, f64::max)
 }
 
+/// One evaluation point of a bucket-by-bucket comparison of two CDFs.
+///
+/// A single divergence number says *how much* two distributions differ; it cannot say
+/// **where**. That distinction decides what to do next: a KS distance of 0.23 whose
+/// medians agree exactly is a tail or a shoulder problem, and is fixed by a different
+/// parameter than a uniform shift would be. So the comparison can be asked for its
+/// working, one row per shared bucket bound.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CdfRow {
+    /// The bucket's inclusive upper bound — the value at which both CDFs are exact.
+    pub upper: u64,
+    /// Samples `a` placed in this bucket. Zero where `a` has no bucket at this bound.
+    pub a_count: u64,
+    /// Samples `b` placed in this bucket.
+    pub b_count: u64,
+    /// `F_a(upper)`.
+    pub a_cdf: f64,
+    /// `F_b(upper)`.
+    pub b_cdf: f64,
+}
+
+impl CdfRow {
+    /// `F_a - F_b`, signed: positive where `a` has already accumulated mass that `b`
+    /// has not, which is to say where `a` is the *shorter*-tailed of the two.
+    pub fn delta(&self) -> f64 {
+        self.a_cdf - self.b_cdf
+    }
+}
+
+/// The bucket-by-bucket working behind [`ks_from_buckets`] and [`l1_from_buckets`].
+///
+/// Evaluated at the union of both bucket schemes' upper bounds, exactly as the two
+/// measures are, so the largest `|delta()|` here **is** the reported KS distance and
+/// the mean of them is the reported area. A diagnostic that recomputed the CDFs a
+/// second way could disagree with the verdict it is meant to explain.
+pub fn cdf_rows(
+    a: &[(u64, u64, u64)],
+    a_total: u64,
+    b: &[(u64, u64, u64)],
+    b_total: u64,
+) -> Vec<CdfRow> {
+    if a_total == 0 || b_total == 0 {
+        return Vec::new();
+    }
+    let mut bounds: Vec<u64> = a
+        .iter()
+        .map(|(_, hi, _)| *hi)
+        .chain(b.iter().map(|(_, hi, _)| *hi))
+        .collect();
+    bounds.sort_unstable();
+    bounds.dedup();
+
+    let at = |buckets: &[(u64, u64, u64)], x: u64| -> u64 {
+        buckets
+            .iter()
+            .filter(|(_, hi, _)| *hi == x)
+            .map(|(_, _, c)| *c)
+            .sum()
+    };
+    let mut a_acc = 0u64;
+    let mut b_acc = 0u64;
+    bounds
+        .iter()
+        .map(|x| {
+            let a_count = at(a, *x);
+            let b_count = at(b, *x);
+            a_acc += a_count;
+            b_acc += b_count;
+            CdfRow {
+                upper: *x,
+                a_count,
+                b_count,
+                a_cdf: a_acc as f64 / a_total as f64,
+                b_cdf: b_acc as f64 / b_total as f64,
+            }
+        })
+        .collect()
+}
+
 /// Counts below which a curve point is dominated by its own counting noise.
 ///
 /// The relative standard deviation of a count `n` is `1/sqrt(n)`, so at 100 the
@@ -368,15 +447,28 @@ pub fn l1_from_buckets(
 /// - points where either count is under [`CURVE_POINT_FLOOR`], where the measure
 ///   would report counting noise.
 pub fn max_log_ratio_curve(a: &UniqueKeysReport, b: &UniqueKeysReport) -> f64 {
+    worst_log_ratio_point(a, b)
+        .map(|p| p.log_ratio)
+        .unwrap_or(0.0)
+}
+
+/// The curve point where the two unique-keys curves disagree most, and by how much.
+///
+/// [`max_log_ratio_curve`] is this function's `log_ratio`, so the point it names is
+/// the one that set the verdict — the unique-keys equivalent of asking a KS distance
+/// where its supremum was. Returns `None` when the restrictions in
+/// [`max_log_ratio_curve`] leave no comparable point, which is a real outcome and not
+/// a divergence of zero.
+pub fn worst_log_ratio_point(a: &UniqueKeysReport, b: &UniqueKeysReport) -> Option<CurveDelta> {
     if a.points.is_empty() || b.points.is_empty() {
-        return 0.0;
+        return None;
     }
     let b_lo = b.points.first().unwrap().requests;
     let b_hi = b.points.last().unwrap().requests;
     let a_hi = a.points.last().unwrap().requests;
     let shared_hi = a_hi.min(b_hi);
     let start = b_lo.max((shared_hi as f64 * CURVE_RAMP_FRACTION) as u64);
-    let mut worst = 0.0f64;
+    let mut worst: Option<CurveDelta> = None;
     for p in &a.points {
         if p.requests < start || p.requests > b_hi || p.distinct_keys < CURVE_POINT_FLOOR {
             continue;
@@ -387,9 +479,96 @@ pub fn max_log_ratio_curve(a: &UniqueKeysReport, b: &UniqueKeysReport) -> f64 {
         if other < CURVE_POINT_FLOOR as f64 {
             continue;
         }
-        worst = worst.max(((p.distinct_keys as f64) / other).ln().abs());
+        let ratio = ((p.distinct_keys as f64) / other).ln();
+        // `map_or(true, ..)` rather than `is_none_or`, which is stable only since
+        // 1.82 and this workspace's MSRV is 1.75.
+        if worst.as_ref().map_or(true, |w| ratio.abs() > w.log_ratio) {
+            worst = Some(CurveDelta {
+                requests: p.requests,
+                a_distinct: p.distinct_keys,
+                b_distinct: other,
+                log_ratio: ratio.abs(),
+                signed_log_ratio: ratio,
+            });
+        }
     }
     worst
+}
+
+/// The worst-disagreeing point of a unique-keys curve comparison.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct CurveDelta {
+    /// The request ordinal the two curves were compared at.
+    pub requests: u64,
+    /// `a`'s distinct-key count there.
+    pub a_distinct: u64,
+    /// `b`'s count there, interpolated onto `a`'s ordinal.
+    pub b_distinct: f64,
+    /// `|ln(a/b)|` — the value the verdict used.
+    pub log_ratio: f64,
+    /// The same ratio with its sign, so a reader can tell which curve is above.
+    pub signed_log_ratio: f64,
+}
+
+/// The bucket table behind one statistic's verdict.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Explanation {
+    /// Which statistic these rows explain.
+    pub statistic: Statistic,
+    /// One row per shared bucket bound.
+    pub rows: Vec<CdfRow>,
+    /// The denominator behind `a_cdf` — often more than the bucketed samples.
+    pub a_total: u64,
+    /// The denominator behind `b_cdf`.
+    pub b_total: u64,
+}
+
+/// The bucket-by-bucket working behind a [`compare`] verdict.
+///
+/// Covers the four statistics that are distributions. Unique-keys is a monotone curve
+/// rather than a distribution and has no buckets to tabulate;
+/// [`worst_log_ratio_point`] is the equivalent question for it.
+pub fn explain(a: &super::Report, b: &super::Report) -> Vec<Explanation> {
+    let refs_a = a.reuse_distance.references;
+    let refs_b = b.reuse_distance.references;
+    [
+        (
+            Statistic::ReuseDistanceObjects,
+            &a.reuse_distance.object_buckets,
+            refs_a,
+            &b.reuse_distance.object_buckets,
+            refs_b,
+        ),
+        (
+            Statistic::ReuseDistanceBytes,
+            &a.reuse_distance.byte_buckets,
+            refs_a,
+            &b.reuse_distance.byte_buckets,
+            refs_b,
+        ),
+        (
+            Statistic::SharingDepth,
+            &a.sharing.depth_buckets,
+            a.sharing.requests,
+            &b.sharing.depth_buckets,
+            b.sharing.requests,
+        ),
+        (
+            Statistic::RequestLength,
+            &a.request_length.block_buckets,
+            a.request_length.requests,
+            &b.request_length.block_buckets,
+            b.request_length.requests,
+        ),
+    ]
+    .into_iter()
+    .map(|(statistic, ab, at, bb, bt)| Explanation {
+        statistic,
+        rows: cdf_rows(ab, at, bb, bt),
+        a_total: at,
+        b_total: bt,
+    })
+    .collect()
 }
 
 /// Linear interpolation of a curve's distinct-key count at `requests`.
@@ -689,6 +868,108 @@ mod tests {
         for x in d.failures() {
             assert!(x.value > x.tolerance);
             assert_eq!(x.measure, x.statistic.measure());
+        }
+    }
+
+    #[test]
+    fn the_bucket_table_reproduces_the_verdict_it_explains() {
+        // The whole point of the explanation is that it is the *same* arithmetic: the
+        // largest row delta must be the reported KS distance and the mean of them the
+        // reported area, or the diagnostic would send a reader after a divergence the
+        // verdict never saw.
+        let a = report(&shaped(500, 20, 6), 100);
+        let b = report(&shaped(500, 31, 11), 100);
+        let d = compare(&a, &b, &Tolerances::default());
+        for e in explain(&a, &b) {
+            let x = d
+                .divergences
+                .iter()
+                .find(|x| x.statistic == e.statistic)
+                .expect("every explained statistic is compared");
+            let sup = e
+                .rows
+                .iter()
+                .map(|r| r.delta().abs())
+                .fold(0.0f64, f64::max);
+            let area = e.rows.iter().map(|r| r.delta().abs()).sum::<f64>() / e.rows.len() as f64;
+            match x.measure {
+                Measure::KolmogorovSmirnov => assert!(
+                    (sup - x.value).abs() < 1e-12,
+                    "{}: table sup {sup} against reported {}",
+                    e.statistic.name(),
+                    x.value
+                ),
+                Measure::AreaBetweenCdfs => {
+                    assert!(
+                        (area - x.value).abs() < 1e-12,
+                        "{}: table area {area} against reported {}",
+                        e.statistic.name(),
+                        x.value
+                    );
+                    let reported_sup = x.sup.expect("area gates carry their sup");
+                    assert!((sup - reported_sup).abs() < 1e-12);
+                }
+                Measure::MaxLogRatio => unreachable!("curves are not tabulated"),
+            }
+        }
+    }
+
+    #[test]
+    fn the_bucket_table_says_where_and_not_only_how_much() {
+        // Two distributions with the same median and different tails: the divergence
+        // is real, and the table has to put it in the tail rather than at the median,
+        // since that difference is what decides which parameter to reach for.
+        let a = report(&shaped(600, 20, 4), 100);
+        let mut long = shaped(600, 20, 4);
+        for (i, (_, path)) in long.iter_mut().enumerate() {
+            if i % 10 == 0 {
+                let base = path[0];
+                path.extend((0..60).map(|d| base + 1000 + d));
+            }
+        }
+        let b = report(&long, 100);
+        let e = explain(&a, &b)
+            .into_iter()
+            .find(|e| e.statistic == Statistic::RequestLength)
+            .unwrap();
+        let median_row = e
+            .rows
+            .iter()
+            .find(|r| r.a_cdf >= 0.5)
+            .expect("a median exists");
+        let worst = e
+            .rows
+            .iter()
+            .max_by(|x, y| x.delta().abs().total_cmp(&y.delta().abs()))
+            .unwrap();
+        assert!(
+            worst.delta().abs() > 0.05,
+            "fixture does not diverge: {}",
+            worst.delta()
+        );
+        assert!(
+            median_row.upper <= worst.upper,
+            "the divergence landed at or below the median, so this fixture does not \
+             test tail attribution"
+        );
+        // `a` is the shorter-tailed side, so it accumulates its mass first.
+        assert!(worst.delta() > 0.0);
+    }
+
+    #[test]
+    fn the_curve_comparison_names_the_point_that_set_its_verdict() {
+        let small = report(&shaped(400, 400, 1), 1000);
+        let large = report(&shaped(4000, 40, 1), 10_000);
+        let v = max_log_ratio_curve(&small.unique_keys, &large.unique_keys);
+        let p = worst_log_ratio_point(&small.unique_keys, &large.unique_keys);
+        match p {
+            Some(p) => {
+                assert!((p.log_ratio - v).abs() < 1e-12);
+                assert_eq!(p.log_ratio, p.signed_log_ratio.abs());
+                assert!(p.requests > 0 && p.a_distinct >= CURVE_POINT_FLOOR);
+            }
+            // No comparable point is a real outcome, and then the measure is zero.
+            None => assert_eq!(v, 0.0),
         }
     }
 

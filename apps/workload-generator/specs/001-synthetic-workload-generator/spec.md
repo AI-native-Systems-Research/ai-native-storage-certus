@@ -1734,6 +1734,24 @@ report segments statistics into before/after windows around the event.
 - **FR-056**: `fit` MUST validate the fitted model by comparing four statistics between the
   real trace and synthetic output: reuse-distance CDF (primary), prefix-sharing depth
   histogram, request-length distribution, and unique-keys-over-time curve.
+- **FR-056a**: An `empirical` distribution that `fit` emits MUST be resolved finely enough that its
+  own step structure cannot fail FR-056's comparison, and each step's value MUST be the **mass-weighted
+  mean of the samples it absorbs** rather than either end of its interval. Both halves are forced by
+  the same fact: a step CDF is exact at its atoms and wrong between them, in proportion to the mass
+  one step carries. Its KS distance against the distribution it summarises **is** the mass of its
+  largest step, so the step spacing is a floor under the divergence FR-057 gates on; and every sample
+  inside a step is emitted as one value, so the placement within the step biases the mean by the
+  spread of what it absorbed. Measured: an emission at nine percentile points put the emitted median
+  and every other target quantile within 0.005 of the trace's and still failed the FR-058a round trip
+  twice over — `shared_depth` as 8 atoms against the trace's 37 values, largest step 0.286 of the mass
+  and so a KS of 0.234 against a 0.05 tolerance, while top-of-interval placement inflated
+  `private_depth`'s mean 24%, `turns`' 25% and `growth_per_turn`'s 9%, which surfaced as a synthetic
+  plan running 35% more references than its source. **A distribution can agree at every quantile
+  checked and still carry the wrong mean**, and request length is a *sum*, so the mean is what reaches
+  it. One step per occupied histogram bucket satisfies this exactly wherever the bucket count allows;
+  above that, buckets MUST merge into equal-mass groups. The resulting YAML is longer than a
+  hand-written one, which is the correct trade: a fitted document is machine output admitted by a
+  resemblance gate, and brevity is not what the gate measures.
 - **FR-057**: `fit` MUST report per-statistic divergence and MUST fail rather than emit a
   model whose divergence exceeds its tolerance.
 - **FR-057a**: Validation tolerances MUST be **per-statistic**, one per FR-056 statistic, and
