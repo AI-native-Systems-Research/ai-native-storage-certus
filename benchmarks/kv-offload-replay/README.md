@@ -358,6 +358,72 @@ python replay_offloading_traces.py \
 
 Diff `bench_native.json` and `bench_policy.json` for the "what did SPDK NVMe cost vs. what did Python cost" breakdown. For a backend comparison, run the same trace with `--target fs-backend --handler-target fs-backend` (matching `num_gpu_blocks` / `per_block_bytes`). For a lower-bound replay-driver cost, run with `--target simple-lru --num-blocks <big>` — no eviction, no backend, just the replay loop.
 
+## Comparing all backends: `profile_all.sh`
+
+`profile_all.sh` runs the same 12-turn ShareGPT replay workload through up to four
+KV-offload backends — `nooffload` (GPU-only baseline), `certus-spdk` (gRPC client +
+`certus-server` over DRAM + raw NVMe), `cpuoffload` (vLLM's host-RAM
+`OffloadingConnector`), and `sharedstorage` (`llmd_fs_backend` RAID0/XFS) — and emits
+a side-by-side throughput table. Each backend is preflighted independently: ready ones
+run, the rest are marked `SKIPPED` with a reason, and per-backend failures never fail
+the whole run.
+
+**The host reconfiguration is automatic.** The shared NVMe group you pass with
+`--device-pci` is flipped between phases *by the script itself* via
+`tools/configure-bench.sh` — bound to `vfio-pci` + 1G hugepages for the `certus-spdk`
+phase (SPDK), and to the kernel `nvme` driver + RAID0/XFS for the `sharedstorage`
+phase. You do **not** run `configure-bench.sh` yourself; `profile_all.sh` invokes it
+(runtime-only, no reboot) and requests a reboot only if the boot-reserved 1G-hugepage
+pool falls short. `sudo` is cached once, up front.
+
+### Running only the Certus-SPDK backend
+
+To profile just the Certus stack (`--only certus-spdk`) — building the client image
+first, pinning the vLLM base image, and capping the replay at 12 turns:
+
+```bash
+time benchmarks/kv-offload-replay/profile_all.sh \
+    --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 \
+    --device-pci 0000:63:00.0 --device-pci 0000:64:00.0 \
+    --max-rounds 12 \
+    --model-fs /mnt/fs-backend-bench \
+    --vllm-version 0.23.0 \
+    --only certus-spdk \
+    --evict-threshold 1 \
+    --build
+```
+
+### Parameters used above
+
+| Flag | Meaning |
+|------|---------|
+| `--device-pci <DDDD:BB:DD.F>` | NVMe PCIe address of the shared drive group; **repeatable** (one per drive). The `certus-spdk` phase binds these to `vfio-pci`; needed for that backend to run at all. |
+| `--max-rounds <n>` | Cap every backend at N replay rounds/turns (`0` = replay all turns). `12` matches the 12-turn dataset. |
+| `--model-fs <dir>` | Filesystem for the HF model cache and the gRPC podman image store. Default `/mnt/certus1`. Also the default location of the run's `--logdir`. |
+| `--vllm-version <x.y.z>` | Pin the vLLM base-image version for the built images (passed as the `VLLM_VERSION` build arg; images are tagged `:vllm<x.y.z>` so versions coexist). Implies the images must be built at that version — pass `--build` too. |
+| `--only certus-spdk` | Run only the Certus-SPDK backend. Other valid names: `nooffload`, `cpuoffload`, `sharedstorage` (comma-separated). |
+| `--evict-threshold <f>` | Certus-SPDK DRAM→SSD demotion threshold. Default `0.6`; `1` effectively defers demotion until the DRAM tier is full. |
+| `--build` | Build any missing bench image before its run. Required the first time (or after `--vllm-version` changes), since the image tag won't exist yet. |
+
+Other useful flags: `--memory-tier-size <sz>` (Certus-SPDK server DRAM pool, e.g.
+`32G`), `--num-convs <n>` (conversations to replay, default 450), `--gpu <sel>` (CDI
+GPU selector: `all` | `0` | `0,1` | `<uuid>`), and `--logdir <dir>` (output dir;
+defaults to `<model-fs>/kvprofile-<runid>`). Run `profile_all.sh --help` for the full
+list.
+
+> **Note:** the container network mode is not a CLI flag — `profile_all.sh` launches
+> the gRPC client with `--ipc=host` already, so the host `certus-server` can open the
+> container's CUDA IPC handles. There is no `--client-network` option; passing an
+> unknown flag exits with an error.
+
+### Outputs
+
+Per run: `<logdir>/<variant>.log` (per-backend stdout/stderr),
+`<logdir>/result-<variant>.json` flushed as each backend finishes (survives a crash or
+a `--only` subset), `<logdir>/results.json` (aggregate), and the comparison table on
+stdout. Wrapping the invocation in `time` (as above) captures total wall-clock across
+all selected phases including the host reconfiguration.
+
 ## Other datasets
 
 `--num-conversations` is ShareGPT-specific (the filter expects the ShareGPT V3 schema with `id` and `conversations[{from,value}]`). For other datasets, skip the flag and use `vllm bench throughput`'s native dataset options (`--dataset-name random`, `--dataset-name sonnet`, a custom `--dataset-path`, etc.) — the tracing connectors do not care where the prompts come from.
