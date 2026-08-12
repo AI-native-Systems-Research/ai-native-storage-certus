@@ -248,7 +248,11 @@ recovered parameters against the originals. Ground truth is exact, so any diverg
 - [X] T082 [US6] Implement manifest interpretation — `source_class`, `id_semantics`, `field_status`, `block_stats` — treating `supports.P` as undocumented and depending on nothing from it
 - [ ] T083 [US6] Implement the parquet reader and writer behind the `parquet` feature in `apps/workload-trace/src/parquet.rs`
 - [ ] T084 [US6] Implement `certus-trace convert` for events.bin → parquet (FR-021h)
-- [ ] T085 [US6] Implement `certus-trace fit`, including the FR-055c root-boundary rule and its reported boundary depth
+- [ ] T085 [US6] Implement `certus-trace fit`, including the FR-055c root-boundary rule and its reported
+  boundary depth — **the branching half is done**: `workload_model::fit::branching` ports the derived
+  segmentation rule (clip, merge at the rounding resolution, uncensored prefix, occupancy-driven root
+  fold) with its FR-055a/FR-055b caveats as code. Remaining: `shared_depth`, `private_depth`, `turns`,
+  `growth_per_turn`, `roots.popularity`, arrival, and the YAML emitter
 - [X] T086 [US6] Implement `certus-trace validate` for plan-vs-plan and plan-vs-trace, taking every statistic from `workload-model::stats` and implementing none (FR-021i)
 - [ ] T087 [US6] Implement the fit report: per-statistic divergence, tolerances used, provenance of `reconstructed` versus `native` fields, and order-dependence marking for traces without timestamps
 
