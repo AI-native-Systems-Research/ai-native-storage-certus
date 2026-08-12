@@ -237,19 +237,19 @@ recovered parameters against the originals. Ground truth is exact, so any diverg
 
 ### Tests for User Story 6
 
-- [ ] T077 [P] [US6] Test the round trip end to end through **both** containers (FR-058a, FR-021j)
-- [ ] T078 [P] [US6] Test that the same trace content in parquet and in JSONL yields identical fits — the container is not information
-- [ ] T079 [P] [US6] Test that `fit` refuses a partial trace, naming records-consumed against records-declared (FR-055e)
-- [ ] T080 [P] [US6] Test that `fit` refuses a parameter whose source field is `unavailable` rather than defaulting it, and leaves churn and placement unset (FR-055, FR-055d, FR-019b)
+- [ ] T077 [P] [US6] Test the round trip end to end through **both** containers (FR-058a, FR-021j) — **JSONL half done** in `apps/workload-trace/tests/round_trip.rs` and exact (0.00000 on every comparable statistic); the parquet half waits on T083
+- [ ] T078 [P] [US6] Test that the same trace content in parquet and in JSONL yields identical fits — the container is not information — **waits on T083**
+- [X] T079 [P] [US6] Test that `fit` refuses a partial trace, naming records-consumed against records-declared (FR-055e)
+- [X] T080 [P] [US6] Test that `fit` refuses a parameter whose source field is `unavailable` rather than defaulting it, and leaves churn and placement unset (FR-055, FR-055d, FR-019b)
 
 ### Implementation for User Story 6
 
-- [ ] T081 [US6] Implement the trace reader in `apps/workload-trace/src/read/`, detecting the population pattern per trace and **normalising to full block lists on ingest** so the delta/full branch cannot leak into each statistic
-- [ ] T082 [US6] Implement manifest interpretation — `source_class`, `id_semantics`, `field_status`, `block_stats` — treating `supports.P` as undocumented and depending on nothing from it
+- [X] T081 [US6] Implement the trace reader in `apps/workload-trace/src/read/`, detecting the population pattern per trace and **normalising to full block lists on ingest** so the delta/full branch cannot leak into each statistic
+- [X] T082 [US6] Implement manifest interpretation — `source_class`, `id_semantics`, `field_status`, `block_stats` — treating `supports.P` as undocumented and depending on nothing from it
 - [ ] T083 [US6] Implement the parquet reader and writer behind the `parquet` feature in `apps/workload-trace/src/parquet.rs`
 - [ ] T084 [US6] Implement `certus-trace convert` for events.bin → parquet (FR-021h)
 - [ ] T085 [US6] Implement `certus-trace fit`, including the FR-055c root-boundary rule and its reported boundary depth
-- [ ] T086 [US6] Implement `certus-trace validate` for plan-vs-plan and plan-vs-trace, taking every statistic from `workload-model::stats` and implementing none (FR-021i)
+- [X] T086 [US6] Implement `certus-trace validate` for plan-vs-plan and plan-vs-trace, taking every statistic from `workload-model::stats` and implementing none (FR-021i)
 - [ ] T087 [US6] Implement the fit report: per-statistic divergence, tolerances used, provenance of `reconstructed` versus `native` fields, and order-dependence marking for traces without timestamps
 
 **Checkpoint**: a real trace produces a model, and the round trip proves the tools agree with each other.

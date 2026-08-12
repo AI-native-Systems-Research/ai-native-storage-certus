@@ -124,6 +124,17 @@ pub struct Divergence {
     /// this statistic's own noise floor, so a reader can tell a real divergence
     /// from one a thin sample could produce on its own.
     pub samples: u64,
+    /// Why this statistic could not be compared, when it could not be.
+    ///
+    /// An incomparable statistic is **not** a passing one and not a failing one, so
+    /// it is excluded from the verdict and carries its reason instead. The case this
+    /// exists for: byte-weighted statistics between a plan and a trace. A plan's
+    /// sizes are KV bytes and a trace's are tokens, and no trace in the corpus
+    /// carries the `model_config` that would convert between them — so the two
+    /// numbers are in different units and the divergence between them measures the
+    /// unit, not the workload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incomparable: Option<String>,
     /// The KS distance, where the gated measure is the area.
     ///
     /// Reported rather than gated on, because it is the familiar number and because
@@ -141,14 +152,34 @@ pub struct Report {
 }
 
 impl Report {
-    /// Whether every statistic is within its tolerance.
+    /// Whether every *comparable* statistic is within its tolerance.
+    ///
+    /// An incomparable statistic neither passes nor fails: it was not measured on a
+    /// common footing, so counting it either way would put a units artefact into a
+    /// verdict about a workload.
     pub fn within_tolerance(&self) -> bool {
-        self.divergences.iter().all(|d| d.within)
+        self.divergences
+            .iter()
+            .filter(|d| d.incomparable.is_none())
+            .all(|d| d.within)
     }
 
     /// The statistics that exceeded their tolerance.
     pub fn failures(&self) -> impl Iterator<Item = &Divergence> {
-        self.divergences.iter().filter(|d| !d.within)
+        self.divergences
+            .iter()
+            .filter(|d| d.incomparable.is_none() && !d.within)
+    }
+
+    /// Mark a statistic incomparable, with the reason it could not be compared.
+    pub fn mark_incomparable(&mut self, statistic: Statistic, reason: impl Into<String>) {
+        if let Some(d) = self
+            .divergences
+            .iter_mut()
+            .find(|d| d.statistic == statistic)
+        {
+            d.incomparable = Some(reason.into());
+        }
     }
 }
 
@@ -423,6 +454,7 @@ pub fn compare(a: &super::Report, b: &super::Report, tol: &Tolerances) -> Report
             tolerance,
             within: area <= tolerance,
             samples: refs,
+            incomparable: None,
             sup: Some(sup),
         });
     }
@@ -435,6 +467,7 @@ pub fn compare(a: &super::Report, b: &super::Report, tol: &Tolerances) -> Report
             tolerance,
             within: value <= tolerance,
             samples,
+            incomparable: None,
             sup: None,
         });
     };
