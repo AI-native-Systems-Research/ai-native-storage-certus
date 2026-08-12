@@ -17,10 +17,13 @@
 //!    more than [`MERGE_Z`] such errors. A finer distinction would describe noise the
 //!    generator cannot reproduce.
 //!
-//! 3. **Fit only the uncensored prefix.** A segment's fanout is a *product* over its
-//!    depths, so censoring compounds through it. Segmentation stops where cumulative
-//!    retention falls under [`RETENTION_FLOOR`]; beyond that nothing is fitted and
-//!    the observed width is a lower bound.
+//! 3. **Fit only the uncensored prefix, and only the shared keys.** The trunk is the
+//!    keys two or more sessions reached — counting every key at a depth counts the
+//!    trunk plus every private descent. A segment's fanout is also a *product* over
+//!    its depths, so censoring compounds through it: segmentation stops at whichever
+//!    comes first, cumulative retention under [`RETENTION_FLOOR`] or a depth no two
+//!    sessions shared. Beyond that nothing is fitted and observed width is a lower
+//!    bound.
 //!
 //! 4. **Fold the near-root levels** into `roots.count` for exactly as long as that is
 //!    what keeps occupancy at the fitted sharing depth above the FR-009f floor — so
@@ -42,18 +45,6 @@ use crate::stats::trunk::TrunkReport;
 /// sensitivity is mild: the gap between a flat run and a real fanout event is tens of
 /// standard errors, so 2 or 4 would segment these traces the same way.
 pub const MERGE_Z: f64 = 3.0;
-
-/// Occupancy below which a width ratio is a count of private paths, not of trunk.
-///
-/// Two sessions per key is the point below which there is not, on average, even one
-/// *pair* sharing a key — so the distinct keys at that depth are overwhelmingly
-/// private descents, which the fit definition of `w(d)` cannot tell apart from trunk
-/// nodes. It is the same boundary [`FittedBranching::caveats`] uses to call a segment
-/// uninformative, and it is deliberately looser than `TARGET_OCCUPANCY`: the
-/// *near-root* levels a fold is about to absorb into `roots.count` routinely sit
-/// between the two, and excluding them would hide the very fanout FR-055c exists to
-/// fold.
-pub const OCCUPANCY_FLOOR: f64 = 2.0;
 
 /// Cumulative retention below which the width profile is not fitted.
 ///
@@ -107,10 +98,9 @@ impl FittedBranching {
             out.push(format!(
                 "depths {}..={} were not fitted: past depth {} the profile fails one of the \
                  two gates — cumulative retention under {RETENTION_FLOOR}, so censoring would \
-                 compound through a segment's product, or occupancy under {OCCUPANCY_FLOOR}, \
-                 where the distinct keys at a depth are private descents rather than trunk \
-                 (FR-055b). Observed width beyond it is a lower bound and nothing was fitted \
-                 from it",
+                 compound through a segment's product, or no key at that depth was reached \
+                 by two sessions, so there is no trunk left to measure. Observed width beyond \
+                 it is a lower bound and nothing was fitted from it",
                 self.fitted_to_depth + 1,
                 self.observed_to_depth,
                 self.fitted_to_depth
@@ -183,7 +173,20 @@ pub fn fit(report: &TrunkReport, sessions_at_sharing_depth: f64) -> Option<Fitte
     if depths.is_empty() || depths[0].width_run == 0 {
         return None;
     }
-    let widths: Vec<f64> = depths.iter().map(|d| d.width_run as f64).collect();
+    // The trunk is the **shared** keys, not every key at a depth.
+    //
+    // `contracts/workload-schema.md` § Fitting used to define this as "distinct keys
+    // at depth d", on the grounds that a trace cannot tell a shared node from a
+    // private one. It can, wherever it has session identity: a node two sessions
+    // reached is trunk, and a node one session reached is a private descent. Counting
+    // both is counting the trunk plus every private path, which for a deep-private
+    // workload is off by orders of magnitude — the fitted `roots.count` came out 1770
+    // against the 12 the source document stated, and the resulting model failed
+    // FR-009f's occupancy floor.
+    //
+    // The cost is that this is measurable only with session identity, which
+    // `Capabilities::trunk_fittable` already requires for exactly this reason.
+    let widths: Vec<f64> = depths.iter().map(|d| d.shared_keys_run as f64).collect();
     let observed_to_depth = (widths.len() - 1) as u32;
 
     // Step 3 first, since it bounds everything else: the prefix that is both
@@ -214,10 +217,13 @@ pub fn fit(report: &TrunkReport, sessions_at_sharing_depth: f64) -> Option<Fitte
         if (d.references_run as f64) / base < RETENTION_FLOOR {
             break;
         }
-        // Depth 0 is exempt: `roots.count` is a width reading rather than a fanout,
-        // and a trace whose very first level is thinly occupied has no trunk to fit
-        // either way.
-        if d.depth > 0 && d.occupancy.unwrap_or(0.0) < OCCUPANCY_FLOOR {
+        // The trunk simply ends where no key at a depth was reached by two sessions.
+        // There is nothing to measure past that, and no gate on *pooled* occupancy is
+        // needed any more: counting only shared keys is what the pooled figure was
+        // standing in for, and it stood in badly — a depth with five well-shared keys
+        // beside five thousand private ones has pooled occupancy near 1 while its
+        // shared width is perfectly measurable.
+        if d.shared_keys_run == 0 {
             break;
         }
         fitted_to = d.depth as usize;

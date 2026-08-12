@@ -463,7 +463,7 @@ nonparametric branching process with no closed-form fit:
 | `roots.count` | distinct keys at the **root boundary**, which is not always depth 0 — see below |
 | `roots.popularity` | histogram of sessions per root |
 | `shared_depth` | longest common prefix of each request against all earlier requests *within one `wss_window`* |
-| `branching` | the **width-by-depth profile** `w(d) = distinct keys at depth d`, segmented at the depths where `w(d+1)/w(d)` jumps; each segment's fanout is the geometric mean of the ratios inside it. **Trustworthy only where occupancy is high** (see below) |
+| `branching` | the **width-by-depth profile** `w(d) = distinct keys at depth d that **two or more sessions** reached`, segmented per `research.md` § The branching segmentation rule; each segment's fanout is the geometric mean of the ratios inside it |
 | `branch_skew` | Zipf exponent fitted to the visit-count distribution over the keys at one depth, per segment |
 | `private_depth` | turn-1 path depth − that longest common prefix |
 | `growth_per_turn` | path-depth increment between consecutive turns of one session |
@@ -471,6 +471,20 @@ nonparametric branching process with no closed-form fit:
 
 `shared_depth` **is** the FR-056 validation statistic, so the model is parameterised in the
 space it is validated in, and `empirical` is the natural default rather than an escape hatch.
+
+**`branching` counts only the shared keys, and this is load-bearing.** An earlier version of this
+table defined `w(d)` as every distinct key at a depth, on the grounds that a trace cannot tell a
+shared node from a private one. It can, wherever it has session identity: a node two sessions reached
+is trunk, and a node one session reached is a private descent. Counting both counts the trunk *plus
+every private path*, and for a workload with deep private descents that is wrong by orders of
+magnitude — fitting the generator's own emitted trace that way recovered `roots.count: 1770` against
+the 12 the source document stated, and the resulting model failed the FR-009f occupancy floor, so
+`fit` refused to emit it. Counting shared keys only recovers 11 of the 12.
+
+The consequence is that `branching` is fittable **only from a trace with session identity**, which is
+also what makes the occupancy figure FR-055b requires reportable at all. A trace without it can still
+supply arrival and size parameters; `fit` refuses the trunk rather than reading private width as
+shared.
 
 `fit` emits the **measured** `branching` profile, not `auto` — trunk structure is a property of the
 trace — and records what `auto` would have chosen beside it. If the measured combination violates
