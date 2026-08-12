@@ -465,12 +465,40 @@ nonparametric branching process with no closed-form fit:
 | `shared_depth` | longest common prefix of each request against all earlier requests *within one `wss_window`* |
 | `branching` | the **width-by-depth profile** `w(d) = distinct keys at depth d that **two or more sessions** reached`, segmented per `research.md` § The branching segmentation rule; each segment's fanout is the geometric mean of the ratios inside it |
 | `branch_skew` | Zipf exponent fitted to the visit-count distribution over the keys at one depth, per segment |
-| `private_depth` | turn-1 path depth − that longest common prefix |
-| `growth_per_turn` | path-depth increment between consecutive turns of one session |
+| `private_depth` | path depth of the **lowest-numbered turn** − that request's longest common prefix |
+| `growth_per_turn` | path-depth increment between consecutive turns of one session, **in turn-index order** |
 | `churn.half_life` | **not fittable from a trace of ordinary length** — see below |
 
 `shared_depth` **is** the FR-056 validation statistic, so the model is parameterised in the
 space it is validated in, and `empirical` is the natural default rather than an escape hatch.
+
+**Two of these are measured along the turn chain and the rest along the arrival stream, and the
+difference is load-bearing.** A reader hands invocations over in timestamp order, which is correct
+for `shared_depth` and for every reuse statistic — those are properties of a *stream*. It is wrong
+for `growth_per_turn` and `private_depth`, which are properties of the *turn chain* of FR-014a, and
+on real traces the two orders disagree: 14-17% of adjacent turn pairs in the agentic traces measured
+arrive in an order their turn indices contradict.
+
+Differencing the arrival sequence instead over-estimated the growth total by a measured **2.08x to
+2.28x** on three of them. Each apparent decrease is clamped to zero while the positive increments on
+either side of it are counted in full, so the sum exceeds the session's true span by twice the
+decreases — and FR-014a then accumulates that excess into every later turn. It surfaced as synthetic
+output 1.6x longer than its source and a `request_length` divergence of 0.18 against a 0.02
+tolerance. In turn order those same traces have **zero** decreasing steps and an inflation factor of
+exactly 1.000: they are perfect strict chains, and only their arrival order was disordered.
+`private_depth` fails the same way for the same reason — the first *arrival* of a disordered session
+is a mid-conversation request, so it puts a deeper path where turn one's belongs.
+
+`think_time` stays on the arrival stream deliberately. It is a wall-clock gap between one session's
+consecutive requests, so the stream is the axis that reproduces it, and in arrival order the gap is
+non-negative by construction. Differencing timestamps along the chain would yield negative gaps on
+16-17% of adjacent pairs of those traces, carrying 90% of the total positive magnitude; clamping
+those would trade one silent bias for another.
+
+A fit MUST therefore report arrival-order disorder and genuine chain violations **separately**. They
+are different findings: the first says the trace's timestamps and turn indices disagree, which no
+longer affects any fitted parameter, while the second says path depth decreases along the chain,
+which FR-014a forbids and the model cannot express.
 
 **`branching` counts only the shared keys, and this is load-bearing.** An earlier version of this
 table defined `w(d)` as every distinct key at a depth, on the grounds that a trace cannot tell a

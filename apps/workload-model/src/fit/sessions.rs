@@ -63,12 +63,30 @@ use crate::stats::sharing::SharingReport;
 const EMPIRICAL_MAX_STEPS: usize = 64;
 
 /// Per-session state while fitting.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Default)]
 struct Live {
+    /// Every `(turn, path length)` this session showed, in arrival order.
+    ///
+    /// Retained rather than differenced on the fly because `growth_per_turn` is a
+    /// property of the **turn chain** and a reader hands invocations over in
+    /// **arrival** order; the two disagree on real traces, and differencing the
+    /// arrival sequence measures something else entirely (see
+    /// [`SessionShapes::observe`]).
+    ///
+    /// Two `u32`-plus-`u64` per invocation against the hundreds of block ids each
+    /// invocation already costs, so this does not change the memory bound.
+    chain: Vec<(u32, u64)>,
+    /// The lowest turn seen so far, with its path length and realised prefix.
+    ///
+    /// The chain's first turn, which is not the first *arrival* when the two orders
+    /// disagree — and `private_depth` is defined against the chain's first turn.
+    first: Option<(u32, u64, u64)>,
+    /// The previous turn index in **arrival** order, for the disorder count.
     last_turn: u32,
-    last_depth: u64,
+    /// The previous timestamp in **arrival** order, for `think_time`.
     last_start: Option<f64>,
     turns: u64,
+    started: bool,
 }
 
 /// Accumulates the session-shape parameters.
@@ -92,12 +110,26 @@ pub struct SessionShapes {
     /// Think times in milliseconds, so the histogram's integer buckets have useful
     /// resolution: a think time of 3 s is 3000 buckets rather than 3.
     think_ms: Hist,
-    /// Requests whose turn index went backwards or repeated.
+    /// Requests whose turn index went backwards or repeated **in arrival order**.
     ///
-    /// Counted rather than corrected. Turn n+1's path must extend turn n's (FR-014a),
-    /// so out-of-order turns mean the trace is not the strict chain the model
-    /// assumes, and a fit from it is describing something else.
+    /// A statement about the trace's timestamps, not about its structure: it says the
+    /// order requests arrived in disagrees with the order their turn indices give.
+    /// `growth_per_turn` is measured along the turn chain and is unaffected;
+    /// `think_time` is measured along the arrival stream, which is where those two
+    /// orders parting company actually shows up. See [`SessionShapes::observe`] for
+    /// why the two statistics use different orders.
     out_of_order: u64,
+    /// Adjacent turns **in chain order** whose path got shorter.
+    ///
+    /// This is the genuine FR-014a violation, and the one the old `out_of_order`
+    /// caveat was reaching for and getting wrong: turn n+1's path must extend turn
+    /// n's, so a decrease along the *chain* means the trace is not the strict chain
+    /// the model assumes. Measured on the three agentic traces this was blamed for,
+    /// it is **zero** — they are perfect chains, and only the arrival order was
+    /// disordered.
+    non_monotone_steps: u64,
+    /// Whether [`SessionShapes::seal`] has folded the chains in already.
+    sealed: bool,
     /// Turn-1 requests whose shared prefix exceeded their own path length.
     ///
     /// Impossible if the prefix is a prefix, so a non-zero count means the two
@@ -115,6 +147,32 @@ impl SessionShapes {
     ///
     /// `shared_len` must be the request's longest common prefix as
     /// `stats::sharing` measured it, and `turn` its 0-based invocation index.
+    ///
+    /// # Two statistics, two orders, and the reason they differ
+    ///
+    /// Requests arrive here in the order the reader sorted them into, which is
+    /// **timestamp order** where a trace has real timestamps. That is the right order
+    /// for reuse distance and for sharing, which are properties of a stream. It is the
+    /// **wrong** order for `growth_per_turn`, which is a property of the *turn chain*
+    /// FR-014a describes — and on real traces the two orders disagree badly.
+    ///
+    /// So `growth_per_turn` is differenced along the chain, once the turns are back in
+    /// index order, when the accumulator is sealed. Differencing the arrival sequence
+    /// instead was a **measured 2.08x-2.28x over-estimate** on three agentic traces:
+    /// clamping each decrease to zero while counting the positive increments on either
+    /// side of it in full makes the sum exceed the session's true span by twice the
+    /// decreases, and FR-014a then accumulates that excess into every later turn. It
+    /// came out as synthetic output 1.6x longer than its source and a `request_length`
+    /// divergence of 0.18 against a 0.02 tolerance. In chain order those same traces
+    /// have **zero** decreasing steps and an inflation factor of exactly 1.000.
+    ///
+    /// `think_time` stays on the **arrival** order, and that is not an oversight. It is
+    /// a wall-clock gap between one session's consecutive requests, so the stream is
+    /// the axis that reproduces it; and in arrival order the gap is non-negative by
+    /// construction, so nothing is clamped. Differencing timestamps along the chain
+    /// would produce negative gaps on 16-17% of adjacent pairs of those same traces,
+    /// carrying 90% of the positive magnitude — clamping *those* would swap one silent
+    /// bias for another.
     pub fn observe(
         &mut self,
         session: u32,
@@ -123,41 +181,61 @@ impl SessionShapes {
         shared_len: u64,
         request_start: Option<f64>,
     ) {
-        match self.live.get_mut(&session) {
-            None => {
-                // Turn 1 in the model's terms, whatever the trace calls it: this is
-                // the first request of this session that the read saw.
+        let live = self.live.entry(session).or_default();
+        if live.started && turn <= live.last_turn {
+            self.out_of_order += 1;
+        }
+        // The chain's first turn is the **lowest** turn index, which is not the first
+        // arrival when the orders disagree. `private_depth` is defined against it, so
+        // taking whichever request happened to arrive first put a mid-conversation
+        // path where turn one's belonged.
+        // `map_or(true, ..)` rather than `is_none_or`, which is stable only since 1.82
+        // against this workspace's 1.75 MSRV.
+        if live.first.map_or(true, |(t, _, _)| turn < t) {
+            live.first = Some((turn, path_len, shared_len));
+        }
+        live.chain.push((turn, path_len));
+        if let (Some(prev), Some(now)) = (live.last_start, request_start) {
+            let gap = (now - prev).max(0.0);
+            self.think_ms.add((gap * 1000.0) as u64);
+        }
+        live.last_turn = turn;
+        live.last_start = request_start;
+        live.turns += 1;
+        live.started = true;
+    }
+
+    /// Difference every session's chain in turn order, once.
+    ///
+    /// Idempotent, because the fit's iteration loop calls [`SessionShapes::finish`]
+    /// and [`SessionShapes::private_depth_at`] repeatedly against one accumulator.
+    fn seal(&mut self) {
+        if self.sealed {
+            return;
+        }
+        self.sealed = true;
+        for live in self.live.values_mut() {
+            if let Some((_, path_len, shared_len)) = live.first {
                 if shared_len > path_len {
                     self.prefix_longer_than_path += 1;
                 }
                 self.turn_one.push((path_len, shared_len));
-                self.live.insert(
-                    session,
-                    Live {
-                        last_turn: turn,
-                        last_depth: path_len,
-                        last_start: request_start,
-                        turns: 1,
-                    },
-                );
             }
-            Some(live) => {
-                if turn <= live.last_turn {
-                    self.out_of_order += 1;
+            self.turns.add(live.turns);
+            // Stable by turn index. A trace with duplicate indices within a session
+            // keeps its arrival order among the duplicates, which is the only
+            // information left to order them by.
+            live.chain.sort_by_key(|(t, _)| *t);
+            for (&(_, a), &(_, b)) in live.chain.iter().zip(live.chain.iter().skip(1)) {
+                if b < a {
+                    self.non_monotone_steps += 1;
                 }
-                // Growth is the increment, which FR-014a makes non-negative: turn
-                // n+1's path extends turn n's. A decrease means the chain is not
-                // strict, which `out_of_order` and this floor both surface rather
-                // than silently absorbing into a distribution.
-                self.growth.add(path_len.saturating_sub(live.last_depth));
-                if let (Some(prev), Some(now)) = (live.last_start, request_start) {
-                    let gap = (now - prev).max(0.0);
-                    self.think_ms.add((gap * 1000.0) as u64);
-                }
-                live.last_turn = turn;
-                live.last_depth = path_len;
-                live.last_start = request_start;
-                live.turns += 1;
+                // Still clamped, because rule 8 and FR-014a both forbid a negative
+                // growth and the distribution has no way to carry one. The difference
+                // is that in chain order a clamp is a genuine violation being
+                // surfaced by `non_monotone_steps`, rather than an artefact of the
+                // order the requests happened to arrive in.
+                self.growth.add(b.saturating_sub(a));
             }
         }
     }
@@ -180,7 +258,8 @@ impl SessionShapes {
     ///
     /// Clamped at zero: a session whose attempted sharing exceeds its own path has no
     /// private part, and a negative one is not expressible.
-    pub fn private_depth_at(&self, scale: f64) -> Option<Dist> {
+    pub fn private_depth_at(&mut self, scale: f64) -> Option<Dist> {
+        self.seal();
         let mut h = Hist::new();
         for (path_len, shared_len) in &self.turn_one {
             let attempted = (*shared_len as f64 * scale).round().max(0.0) as u64;
@@ -190,7 +269,8 @@ impl SessionShapes {
     }
 
     /// Turn-1 path lengths, for a report that wants to show what was subtracted from.
-    pub fn turn_one_depth(&self) -> Option<Dist> {
+    pub fn turn_one_depth(&mut self) -> Option<Dist> {
+        self.seal();
         let mut h = Hist::new();
         for (path_len, _) in &self.turn_one {
             h.add(*path_len);
@@ -205,11 +285,7 @@ impl SessionShapes {
     /// consumes, so a caller iterating on the attempted sharing can keep calling
     /// [`SessionShapes::private_depth_at`] against the same measurements.
     pub fn finish(&mut self, sharing: &SharingReport) -> FittedSessions {
-        if self.turns.count() == 0 {
-            for live in self.live.values() {
-                self.turns.add(live.turns);
-            }
-        }
+        self.seal();
         FittedSessions {
             sessions: self.live.len() as u64,
             turns: empirical_from(&self.turns),
@@ -220,6 +296,7 @@ impl SessionShapes {
             shared_depth: empirical_from_buckets(&sharing.depth_buckets),
             unshared_requests: sharing.unshared_requests,
             out_of_order_turns: self.out_of_order,
+            non_monotone_steps: self.non_monotone_steps,
             prefix_longer_than_path: self.prefix_longer_than_path,
         }
     }
@@ -248,6 +325,9 @@ pub struct FittedSessions {
     pub unshared_requests: u64,
     /// Turns that arrived out of order, which FR-014a's strict chain forbids.
     pub out_of_order_turns: u64,
+    /// Adjacent turns **in chain order** whose path got shorter — the genuine FR-014a
+    /// violation, and non-zero only when the trace really is not a strict chain.
+    pub non_monotone_steps: u64,
     /// Turn-1 requests whose prefix exceeded their path — impossible, so non-zero
     /// means the two measurements disagree.
     pub prefix_longer_than_path: u64,
@@ -267,10 +347,23 @@ impl FittedSessions {
         }
         if self.out_of_order_turns > 0 {
             out.push(format!(
-                "{} turns arrived out of order. FR-014a makes turn n+1's path a strict \
-                 extension of turn n's, so growth_per_turn fitted from this trace is \
-                 describing something the model cannot express",
+                "{} turns arrived in an order that disagrees with their turn indices. This is a \
+                 property of the trace's timestamps, not of its structure: growth_per_turn is \
+                 differenced along the turn chain and is unaffected, while think_time is the \
+                 wall-clock gap between one session's consecutive arrivals and so is measured \
+                 along the stream. Where the two orders part company those are different \
+                 questions, and each statistic is answered on its own axis",
                 self.out_of_order_turns
+            ));
+        }
+        if self.non_monotone_steps > 0 {
+            out.push(format!(
+                "{} adjacent turns get SHORTER along the turn chain. FR-014a makes turn n+1's \
+                 path a strict extension of turn n's, so this trace is not the strict chain the \
+                 model assumes and growth_per_turn fitted from it is describing something the \
+                 model cannot express. The decrease is clamped to zero, which understates growth \
+                 for those turns rather than inventing a negative one",
+                self.non_monotone_steps
             ));
         }
         if self.prefix_longer_than_path > 0 {
@@ -529,17 +622,81 @@ mod tests {
     }
 
     #[test]
-    fn out_of_order_turns_are_counted_rather_than_absorbed() {
-        // FR-014a makes turn n+1 a strict extension of turn n, so a trace that
-        // breaks the chain cannot be fitted honestly and the report must say so.
+    fn growth_is_differenced_along_the_turn_chain_not_the_arrival_order() {
+        // THE regression test for the defect that made every real trace unfittable.
+        //
+        // One session whose paths grow 10 -> 20 -> 30 -> 40 along its turn chain, but
+        // whose requests *arrive* 0, 2, 1, 3 — which is what a real trace's timestamps
+        // do. Differencing arrivals gives +20, then a clamped 0 where the path appears
+        // to shrink, then +20 again: a total of 40 against a true span of 30, and a
+        // median growth of 20 instead of 10. On three real agentic traces that same
+        // error inflated the growth total 2.08x-2.28x, ran the synthetic output 1.6x
+        // longer than its source, and put `request_length` at 0.18 against a 0.02
+        // tolerance.
+        let mut s = SessionShapes::new();
+        s.observe(7, 0, 10, 0, None);
+        s.observe(7, 2, 30, 0, None);
+        s.observe(7, 1, 20, 0, None);
+        s.observe(7, 3, 40, 0, None);
+        let f = s.finish(&empty_sharing());
+        assert_eq!(
+            quantile_of(&f.growth_per_turn, 0.5),
+            10.0,
+            "growth was differenced in arrival order, which doubles it here"
+        );
+        // The chain is strict once it is in chain order, so the genuine violation
+        // count must be zero — this trace is perfectly expressible.
+        assert_eq!(
+            f.non_monotone_steps, 0,
+            "a chain that only ARRIVED out of order is still a strict chain"
+        );
+        // The arrival disorder is still reported, because it is what makes think_time
+        // and growth answer on different axes.
+        assert_eq!(f.out_of_order_turns, 1);
+        assert!(f
+            .caveats()
+            .iter()
+            .any(|c| c.contains("disagrees with their turn indices")));
+        // And it must NOT claim the model cannot express this trace, which is what the
+        // old caveat said and what sent the first investigation down the wrong path.
+        assert!(
+            !f.caveats().iter().any(|c| c.contains("cannot express")),
+            "arrival disorder is not a model-expressiveness problem: {:?}",
+            f.caveats()
+        );
+    }
+
+    #[test]
+    fn a_path_that_shrinks_along_the_chain_is_the_real_violation() {
+        // Distinguished from mere arrival disorder above: here turn 1's path is
+        // genuinely shorter than turn 0's, which FR-014a forbids, so the model really
+        // cannot express it and the caveat must say so.
         let mut s = SessionShapes::new();
         s.observe(7, 0, 20, 0, None);
-        s.observe(7, 0, 18, 0, None);
+        s.observe(7, 1, 18, 0, None);
         let f = s.finish(&empty_sharing());
-        assert_eq!(f.out_of_order_turns, 1);
-        assert!(f.caveats().iter().any(|c| c.contains("out of order")));
+        assert_eq!(f.non_monotone_steps, 1);
+        assert_eq!(f.out_of_order_turns, 0, "these arrived in chain order");
+        assert!(f.caveats().iter().any(|c| c.contains("cannot express")));
         // A shrinking path floors at zero growth rather than producing a negative.
         assert_eq!(quantile_of(&f.growth_per_turn, 0.5), 0.0);
+    }
+
+    #[test]
+    fn private_depth_comes_from_the_chains_first_turn_not_the_first_arrival() {
+        // `private_depth` is turn one's path less its own shared prefix. When the
+        // orders disagree the first *arrival* is a mid-conversation request, and using
+        // it put a deeper path where turn one's belonged — inflating private_depth and
+        // so every generated path built from it.
+        let mut s = SessionShapes::new();
+        s.observe(3, 5, 500, 100, None); // arrives first, but is turn 5
+        s.observe(3, 0, 60, 10, None); // the chain's actual first turn
+        let f = s.finish(&empty_sharing());
+        assert_eq!(
+            quantile_of(&f.private_depth, 0.5),
+            50.0,
+            "private_depth must be 60 - 10 from turn 0, not 500 - 100 from turn 5"
+        );
     }
 
     #[test]
