@@ -59,6 +59,25 @@ if __name__ == "__main__":
     # CAPTURE_METRICS=0 restores that baseline and skips the per-round snapshot.
     CAPTURE_METRICS = os.environ.get("CAPTURE_METRICS", "1") != "0"
 
+    # Model FLOPs Utilization (MFU): enable_mfu_metrics makes the engine emit
+    # estimated per-GPU FLOPs / read+write bytes as monotonic Counters
+    # (vllm:estimated_flops_per_gpu_total et al.), captured per round by the
+    # prom_counters() snapshot below. The arg only exists on newer vLLM — detect
+    # support at runtime so older versions don't reject the kwarg.
+    _mfu_kwargs = {}
+    if CAPTURE_METRICS:
+        try:
+            import dataclasses as _dc
+            from vllm.engine.arg_utils import EngineArgs as _EA
+            if any(f.name == "enable_mfu_metrics" for f in _dc.fields(_EA)):
+                _mfu_kwargs["enable_mfu_metrics"] = True
+        except Exception as e:  # noqa: BLE001
+            print(f"[prom] enable_mfu_metrics unavailable: {e}", file=sys.stderr)
+        print(f"[prom] enable_mfu_metrics={bool(_mfu_kwargs)} "
+              f"(estimated_flops_per_gpu_total "
+              f"{'captured per round' if _mfu_kwargs else 'ABSENT'})",
+              file=sys.stderr)
+
     llm = LLM(
         model=MODEL,
         max_model_len=MAX_MODEL_LEN,
@@ -67,6 +86,7 @@ if __name__ == "__main__":
         dtype="float16",
         enable_prefix_caching=True,
         enforce_eager=True,
+        **_mfu_kwargs,
         disable_log_stats=not CAPTURE_METRICS,
     )
 
@@ -143,6 +163,46 @@ if __name__ == "__main__":
             print(f"[prom] collect failed: {e}", file=sys.stderr, flush=True)
         return vals
 
+    def prom_histograms(names):
+        # Sample the named vLLM latency histograms ONCE (cumulative over the whole
+        # run). get_metrics() exposes each as Histogram(count, sum, buckets) where
+        # buckets maps an upper bound `le` -> cumulative count <= le; sum across
+        # label sets (per-engine / finish-reason) into one distribution per name.
+        out = {}
+        if not CAPTURE_METRICS:
+            return out
+        try:
+            for m in llm.get_metrics():
+                if type(m).__name__ != "Histogram":
+                    continue
+                name = getattr(m, "name", "")
+                if name not in names:
+                    continue
+                agg = out.setdefault(name, {"count": 0, "sum": 0.0, "buckets": {}})
+                agg["count"] += int(getattr(m, "count", 0))
+                agg["sum"] += float(getattr(m, "sum", 0.0))
+                for le, c in (getattr(m, "buckets", {}) or {}).items():
+                    agg["buckets"][le] = agg["buckets"].get(le, 0) + int(c)
+        except Exception as e:  # noqa: BLE001 - get_metrics() is V1-only
+            print(f"[prom] histogram sample failed: {e}", file=sys.stderr)
+        return out
+
+    def _hist_pct(buckets, count, p):
+        # Percentile from cumulative buckets: the smallest upper bound `le` whose
+        # cumulative count first reaches p*count. Bucket-granular approximation;
+        # returns inf when the crossing lands in the +Inf bucket.
+        if not count:
+            return None
+        target = p * count
+
+        def _le(k):
+            return float("inf") if k in ("+Inf", "inf", "Inf") else float(k)
+
+        for le in sorted(buckets, key=_le):
+            if buckets[le] >= target:
+                return _le(le)
+        return float("inf")
+
     prom_prev = prom_counters()
     prom_rounds = []  # (round, {counter_name: delta})
 
@@ -214,6 +274,33 @@ if __name__ == "__main__":
                           f, indent=2)
         except OSError as e:
             print(f"[prom] could not save json: {e}", file=sys.stderr)
+
+    # Latency-distribution histograms: sampled once here (cumulative over the run,
+    # not per round) — queue time (WAITING phase) and decode time (DECODE phase).
+    if CAPTURE_METRICS:
+        hists = prom_histograms({"vllm:request_queue_time_seconds",
+                                 "vllm:request_decode_time_seconds"})
+        for name, h in sorted(hists.items()):
+            cnt, tot = h["count"], h["sum"]
+            mean = tot / cnt if cnt else 0.0
+            fmt = lambda x: "n/a" if x is None else f"{x:.3f}s"  # noqa: E731
+            print(f"[prom] hist {name[len('vllm:'):]}: n={cnt} mean={mean:.3f}s "
+                  f"p50={fmt(_hist_pct(h['buckets'], cnt, 0.50))} "
+                  f"p90={fmt(_hist_pct(h['buckets'], cnt, 0.90))} "
+                  f"p99={fmt(_hist_pct(h['buckets'], cnt, 0.99))}",
+                  file=sys.stderr, flush=True)
+        if hists:
+            # Full buckets on one stderr line so the per-variant teed log is a
+            # complete source (the shared-name JSON below is overwritten when two
+            # variants share this driver / dir).
+            print(f"[prom] histjson {json.dumps(hists, separators=(',', ':'))}",
+                  file=sys.stderr, flush=True)
+            try:
+                with open(os.path.join(_here, "prom_histograms.json"), "w") as f:
+                    json.dump(hists, f, indent=2)
+            except OSError as e:
+                print(f"[prom] could not save histogram json: {e}", file=sys.stderr)
+
     tok_per_s = (total_generations * OUTPUT_TOKENS) / elapsed if elapsed else 0
     summary = {
         "elapsed_time": elapsed,
