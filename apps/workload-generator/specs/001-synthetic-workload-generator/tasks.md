@@ -251,8 +251,10 @@ recovered parameters against the originals. Ground truth is exact, so any diverg
 - [ ] T085 [US6] Implement `certus-trace fit`, including the FR-055c root-boundary rule and its reported
   boundary depth — **the branching half is done**: `workload_model::fit::branching` ports the derived
   segmentation rule (clip, merge at the rounding resolution, uncensored prefix, occupancy-driven root
-  fold) with its FR-055a/FR-055b caveats as code. Remaining: `shared_depth`, `private_depth`, `turns`,
-  `growth_per_turn`, `roots.popularity`, arrival, and the YAML emitter
+  fold) with its FR-055a/FR-055b caveats as code, and `workload_model::fit::sessions` measures
+  `turns`, `think_time`, `private_depth`, `growth_per_turn` and `shared_depth`. Remaining:
+  `roots.popularity`, arrival, `branch_skew` (an open derivation, so leave unset per FR-055), the
+  YAML emitter, and the `certus-trace fit` subcommand that drives them
 - [X] T086 [US6] Implement `certus-trace validate` for plan-vs-plan and plan-vs-trace, taking every statistic from `workload-model::stats` and implementing none (FR-021i)
 - [ ] T087 [US6] Implement the fit report: per-statistic divergence, tolerances used, provenance of `reconstructed` versus `native` fields, and order-dependence marking for traces without timestamps
 
