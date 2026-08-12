@@ -64,7 +64,7 @@ if __name__ == "__main__":
         disable_log_stats=True,
     )
 
-    sp = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=OUTPUT_TOKENS)
+    sp = SamplingParams(temperature=0.0, top_p=0.95, max_tokens=OUTPUT_TOKENS)
     tokenizer = llm.get_tokenizer()
 
     def n_tokens(text: str) -> int:

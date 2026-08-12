@@ -153,7 +153,7 @@ def main():
     )
     print(f"[trace] +{time.perf_counter()-t0:.1f}s LLM ready", file=sys.stderr, flush=True)
 
-    sp = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=OUTPUT_TOKENS)
+    sp = SamplingParams(temperature=0.0, top_p=0.95, max_tokens=OUTPUT_TOKENS)
     tokenizer = llm.get_tokenizer()
 
     def n_tokens(text):

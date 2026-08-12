@@ -257,7 +257,7 @@ if __name__ == "__main__":
     )
 
     sp = SamplingParams(
-        temperature=0.7,
+        temperature=0.0,
         top_p=0.95,
         max_tokens=OUTPUT_TOKENS,
     )
