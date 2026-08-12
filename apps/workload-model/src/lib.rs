@@ -17,6 +17,7 @@
 
 pub mod corpus;
 pub mod dist;
+pub mod fit;
 pub mod keys;
 pub mod rng;
 

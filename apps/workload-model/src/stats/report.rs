@@ -121,6 +121,7 @@ impl Statistics {
         }
         // Sharing must read the window before this request enters it, so that
         // "already seen" means seen in an *earlier* request.
+        self.trunk.observe(r);
         self.sharing.observe(r, &self.window);
         self.window.observe(r);
         self.length.observe(r);

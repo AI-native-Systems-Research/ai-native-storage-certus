@@ -53,6 +53,13 @@ pub struct Trunk {
     /// number of windows that saw the depth at all.
     windows: Vec<DepthAccum>,
     window_count: u64,
+    /// References at each depth over the whole run — the survivor curve.
+    ///
+    /// Run-wide rather than windowed, because it is what a `fit` needs: observed
+    /// width falls with depth partly because the trunk narrows and partly because
+    /// sessions have retired, and the two are separable only if the retirement is
+    /// measured. See `research.md` § The branching segmentation rule.
+    references: Vec<u64>,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -67,6 +74,15 @@ impl Trunk {
     /// An empty accumulator.
     pub fn new() -> Trunk {
         Trunk::default()
+    }
+
+    /// Record one measured reference, for the survivor curve.
+    pub fn observe(&mut self, r: &super::Ref) {
+        let d = r.depth as usize;
+        if self.references.len() <= d {
+            self.references.resize(d + 1, 0);
+        }
+        self.references[d] += 1;
     }
 
     /// Fold one closed window in.
@@ -117,13 +133,18 @@ impl Trunk {
             }
         }
 
-        let depth_count = self.windows.len().max(run_wide.len());
+        let depth_count = self
+            .windows
+            .len()
+            .max(run_wide.len())
+            .max(self.references.len());
         let mut depths = Vec::with_capacity(depth_count);
         for d in 0..depth_count {
             let w = self.windows.get(d).copied().unwrap_or_default();
             let (run_keys, run_shared) = run_wide.get(d).copied().unwrap_or((0, 0));
             depths.push(DepthReport {
                 depth: d as u32,
+                references_run: self.references.get(d).copied().unwrap_or(0),
                 width_run: run_keys,
                 shared_keys_run: run_shared,
                 width_window_mean: if w.windows == 0 {
@@ -171,6 +192,12 @@ impl Trunk {
 pub struct DepthReport {
     /// The depth described.
     pub depth: u32,
+    /// Measured references at this depth over the whole run.
+    ///
+    /// The survivor curve: `references_run(d) / references_run(0)` is the fraction
+    /// of requests reaching depth `d`, which is what separates a narrowing trunk
+    /// from a retiring population.
+    pub references_run: u64,
     /// Distinct keys at this depth over the whole run — the `branching` profile
     /// a `fit` recovers, private descents included.
     pub width_run: u64,

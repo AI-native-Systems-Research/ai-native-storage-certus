@@ -1,0 +1,481 @@
+//! Fitting a `branching` profile and `roots.count` (spec FR-055a, FR-055b, FR-055c).
+//!
+//! The executable form of `research.md` § The branching segmentation rule. Four
+//! steps, and **no jump-ratio threshold** anywhere:
+//!
+//! 1. **Clip.** `f(d) = max(1, w(d)/w(d-1))`. Schema rule 8 requires `fanout >= 1`
+//!    at every depth, so an observed *decrease* is not a fanout — it is censoring by
+//!    session retirement, and it says nothing about branching. An *increase* cannot
+//!    be produced by censoring, so it is genuine and is a **lower bound** on the true
+//!    fanout. Width being an integer count, any increase is already at least one
+//!    extra node, so nothing needs a threshold to be recognised.
+//!
+//! 2. **Merge at the generator's own resolution.** A non-integer mean fanout is
+//!    realised by randomised rounding, so the fanout actually produced at a depth of
+//!    width `w` is a Bernoulli average with standard error
+//!    `sqrt(frac(1-frac)/w)`. Adjacent depths merge unless their fanouts differ by
+//!    more than [`MERGE_Z`] such errors. A finer distinction would describe noise the
+//!    generator cannot reproduce.
+//!
+//! 3. **Fit only the uncensored prefix.** A segment's fanout is a *product* over its
+//!    depths, so censoring compounds through it. Segmentation stops where cumulative
+//!    retention falls under [`RETENTION_FLOOR`]; beyond that nothing is fitted and
+//!    the observed width is a lower bound.
+//!
+//! 4. **Fold the near-root levels** into `roots.count` for exactly as long as that is
+//!    what keeps occupancy at the fitted sharing depth above the FR-009f floor — so
+//!    FR-055c follows from FR-009f rather than being asserted, and a deep fanout event
+//!    stops the fold rather than being pretended away.
+//!
+//! The direction of error is stated in the result and must reach the report: a trunk
+//! fitted narrower than reality generates *more* sharing than the trace had.
+
+use serde::{Deserialize, Serialize};
+
+use crate::corpus::TARGET_OCCUPANCY;
+use crate::schema::Segment;
+use crate::stats::trunk::TrunkReport;
+
+/// Standard errors two adjacent depths must differ by to stay separate segments.
+///
+/// Conventional rather than derived, and named as such in `research.md`. The
+/// sensitivity is mild: the gap between a flat run and a real fanout event is tens of
+/// standard errors, so 2 or 4 would segment these traces the same way.
+pub const MERGE_Z: f64 = 3.0;
+
+/// Cumulative retention below which the width profile is not fitted.
+///
+/// The knee at which the data stops contradicting the model: at 0.99, 12 of the 16
+/// traces measured produce no forbidden decreasing ratio, against 6 of 16 at 0.95.
+pub const RETENTION_FLOOR: f64 = 0.99;
+
+/// A fitted trunk shape.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FittedBranching {
+    /// The depth whose width became `roots.count`.
+    ///
+    /// FR-055c requires this in the report, because it changes what `roots.count`
+    /// means: the levels above it are a global preamble prepended to every session.
+    pub root_boundary_depth: u32,
+    /// Distinct keys at the boundary depth.
+    pub roots: u64,
+    /// Retention at the boundary, so a `roots.count` read at a depth few requests
+    /// reached is visibly that.
+    pub retention_at_boundary: f64,
+    /// The fitted profile, ascending, first segment at depth 0.
+    pub segments: Vec<Segment>,
+    /// Mean occupancy over each segment's depths, in the same order.
+    ///
+    /// FR-055b: a fanout near 1 measured at occupancy near 1 is not evidence of a
+    /// linear trunk, so the two are never reported apart.
+    pub segment_occupancy: Vec<f64>,
+    /// Deepest depth that was fitted. Beyond it the profile says nothing.
+    pub fitted_to_depth: u32,
+    /// Deepest depth with any observed width, fitted or not.
+    pub observed_to_depth: u32,
+    /// Ratios discarded as censoring, i.e. observed decreases in width.
+    pub censored_ratios: u64,
+    /// Whether the whole profile is a lower bound — always true, and stated rather
+    /// than left for a reader to recall.
+    pub is_lower_bound: bool,
+}
+
+impl FittedBranching {
+    /// The caveats a fit report must carry (FR-055a, FR-055b).
+    pub fn caveats(&self) -> Vec<String> {
+        let mut out = vec![format!(
+            "the fanout profile is a LOWER BOUND: an observed decrease in width is \
+             censoring by session retirement rather than a fanout below 1, so where \
+             censoring partly cancelled a real fanout the estimate is too small and \
+             never too large. A trunk fitted narrower than reality generates more \
+             sharing than the trace had ({} ratios discarded as censoring)",
+            self.censored_ratios
+        )];
+        if self.observed_to_depth > self.fitted_to_depth {
+            out.push(format!(
+                "depths {}..={} were not fitted: cumulative retention fell below \
+                 {RETENTION_FLOOR}, and a segment's fanout is a product over its depths so \
+                 censoring compounds through it",
+                self.fitted_to_depth + 1,
+                self.observed_to_depth
+            ));
+        }
+        if self.root_boundary_depth > 0 {
+            out.push(format!(
+                "roots.count is the width at depth {}, not at depth 0: the levels above \
+                 it are a global preamble every session shares, and expressing that \
+                 near-root fanout as trunk branching would fail the occupancy floor at \
+                 any useful depth (FR-055c)",
+                self.root_boundary_depth
+            ));
+        }
+        for (s, occ) in self.segments.iter().zip(self.segment_occupancy.iter()) {
+            if *occ < 2.0 {
+                out.push(format!(
+                    "the segment from depth {} was measured at occupancy {occ:.1}: at \
+                     roughly one session per path the width ratio collapses toward 1 \
+                     whatever the true branching, so its fanout of {:.4} is not evidence \
+                     of a linear trunk (FR-055b)",
+                    s.from_depth, s.fanout
+                ));
+            }
+        }
+        out
+    }
+}
+
+/// Standard error of a realised fanout `f` at a depth of width `w`.
+///
+/// Randomised rounding gives each of the `w` nodes `floor(f)` or `ceil(f)` children,
+/// taking the higher with probability `frac`, so the realised mean is a Bernoulli
+/// average. Floored at half a child per node: a segment whose width is tiny resolves
+/// nothing and must not claim a small error.
+fn rounding_se(f: f64, w: f64) -> f64 {
+    let w = w.max(1.0);
+    let frac = f - f.floor();
+    (frac * (1.0 - frac) / w).sqrt().max(0.5 / w)
+}
+
+/// One segment under construction.
+#[derive(Debug, Clone)]
+struct Building {
+    from: u32,
+    to: u32,
+    ratios: Vec<f64>,
+    widths: Vec<f64>,
+}
+
+impl Building {
+    /// The geometric mean of the ratios inside, as the contract specifies.
+    fn fanout(&self) -> f64 {
+        let n = self.ratios.len() as f64;
+        (self.ratios.iter().map(|r| r.ln()).sum::<f64>() / n).exp()
+    }
+
+    fn mean_width(&self) -> f64 {
+        self.widths.iter().sum::<f64>() / self.widths.len() as f64
+    }
+}
+
+/// Fit a profile from a realised width-by-depth report.
+///
+/// `sessions_at_depth` supplies the occupancy numerator the root fold needs; it is the
+/// distinct sessions reaching the fitted sharing depth. Returns `None` when the report
+/// has no width to fit at all.
+pub fn fit(report: &TrunkReport, sessions_at_sharing_depth: f64) -> Option<FittedBranching> {
+    let depths = &report.depths;
+    if depths.is_empty() || depths[0].width_run == 0 {
+        return None;
+    }
+    let widths: Vec<f64> = depths.iter().map(|d| d.width_run as f64).collect();
+    let observed_to_depth = (widths.len() - 1) as u32;
+
+    // Step 3 first, since it bounds everything else: the uncensored prefix.
+    let base = depths[0].references_run.max(1) as f64;
+    let mut fitted_to = 0usize;
+    for d in depths {
+        if (d.references_run as f64) / base < RETENTION_FLOOR {
+            break;
+        }
+        fitted_to = d.depth as usize;
+    }
+    let fitted_to = fitted_to.min(widths.len() - 1);
+
+    // Step 1: clip. A decrease is censoring, not a fanout below 1.
+    let mut censored = 0u64;
+    let mut segments: Vec<Building> = Vec::new();
+    for d in 1..=fitted_to {
+        let prev = widths[d - 1];
+        if prev <= 0.0 {
+            continue;
+        }
+        let raw = widths[d] / prev;
+        let clipped = if raw < 1.0 {
+            censored += 1;
+            1.0
+        } else {
+            raw
+        };
+        segments.push(Building {
+            from: d as u32,
+            to: d as u32,
+            ratios: vec![clipped],
+            widths: vec![prev],
+        });
+    }
+
+    // Step 2: merge the most consistent adjacent pair until the best merge is
+    // distinguishable. Bottom-up rather than top-down because the null hypothesis is
+    // the one the traces support overwhelmingly — a flat trunk — so the procedure
+    // starts from the data and keeps only distinctions it can defend.
+    while segments.len() > 1 {
+        let mut best = 0usize;
+        let mut best_z = f64::INFINITY;
+        for i in 0..segments.len() - 1 {
+            let (a, b) = (&segments[i], &segments[i + 1]);
+            let (fa, fb) = (a.fanout(), b.fanout());
+            let se = ((rounding_se(fa, a.mean_width()).powi(2) / a.ratios.len() as f64)
+                + (rounding_se(fb, b.mean_width()).powi(2) / b.ratios.len() as f64))
+                .sqrt();
+            let z = if se > 0.0 {
+                (fa - fb).abs() / se
+            } else {
+                f64::INFINITY
+            };
+            if z < best_z {
+                best_z = z;
+                best = i;
+            }
+        }
+        if best_z > MERGE_Z {
+            break;
+        }
+        let b = segments.remove(best + 1);
+        let a = &mut segments[best];
+        a.to = b.to;
+        a.ratios.extend(b.ratios);
+        a.widths.extend(b.widths);
+    }
+
+    // Step 4: fold near-root segments into roots.count while the occupancy floor
+    // requires it.
+    let mut boundary = 0usize;
+    let mut roots = widths[0];
+    let mut kept: Vec<Building> = segments;
+    loop {
+        let paths: f64 = kept.iter().fold(roots, |acc, s| {
+            let span = (s.to.min(fitted_to as u32) as i64 - s.from as i64 + 1).max(0);
+            acc * s.fanout().powi(span as i32)
+        });
+        let occupancy = if paths > 0.0 {
+            sessions_at_sharing_depth / paths
+        } else {
+            0.0
+        };
+        if occupancy >= TARGET_OCCUPANCY || kept.len() <= 1 {
+            break;
+        }
+        // Only a near-root segment may be folded. A deep fanout event cannot be
+        // expressed as roots at all, so the fold stops rather than pretending.
+        let first = kept[0].clone();
+        if first.from as usize > fitted_to {
+            break;
+        }
+        boundary = first.to as usize;
+        roots = widths[boundary.min(widths.len() - 1)];
+        kept.remove(0);
+    }
+
+    let occupancy_of = |s: &Building| -> f64 {
+        let vals: Vec<f64> = (s.from..=s.to)
+            .filter_map(|d| depths.get(d as usize).and_then(|x| x.occupancy))
+            .collect();
+        if vals.is_empty() {
+            0.0
+        } else {
+            vals.iter().sum::<f64>() / vals.len() as f64
+        }
+    };
+
+    Some(FittedBranching {
+        root_boundary_depth: boundary as u32,
+        roots: roots as u64,
+        retention_at_boundary: depths
+            .get(boundary)
+            .map(|d| d.references_run as f64 / base)
+            .unwrap_or(0.0),
+        segment_occupancy: kept.iter().map(occupancy_of).collect(),
+        segments: kept
+            .iter()
+            .map(|s| Segment {
+                from_depth: s.from,
+                fanout: s.fanout(),
+                skew: None,
+                churn_half_life: None,
+            })
+            .collect(),
+        fitted_to_depth: fitted_to as u32,
+        observed_to_depth,
+        censored_ratios: censored,
+        is_lower_bound: true,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::keys::{CacheKey, SessionId};
+    use crate::stats::{Ref, Statistics};
+
+    /// A report over requests given as `(session, path)`.
+    fn report_of(requests: &[(u32, Vec<u64>)], window: u64) -> TrunkReport {
+        let mut s = Statistics::new(window);
+        for (session, path) in requests {
+            for (i, k) in path.iter().enumerate() {
+                s.push(&Ref {
+                    key: CacheKey(*k),
+                    size: 16,
+                    depth: i as u32,
+                    session: SessionId(*session),
+                    request_start: i == 0,
+                    warmup: false,
+                });
+            }
+        }
+        s.finish().trunk
+    }
+
+    /// `n` sessions all walking one shared path of `depth` blocks.
+    fn shared_trunk(n: u32, depth: usize) -> Vec<(u32, Vec<u64>)> {
+        (0..n)
+            .map(|s| (s, (0..depth).map(|d| d as u64).collect()))
+            .collect()
+    }
+
+    #[test]
+    fn a_perfectly_flat_trunk_fits_one_segment_at_fanout_one() {
+        // Every session on the same path: width 1 at every depth, so there is one
+        // segment and its fanout is exactly 1.
+        let r = report_of(&shared_trunk(200, 30), 200);
+        let f = fit(&r, 200.0).expect("should fit");
+        assert_eq!(f.segments.len(), 1);
+        assert!((f.segments[0].fanout - 1.0).abs() < 1e-12);
+        assert_eq!(f.censored_ratios, 0, "a flat trunk censors nothing");
+        assert!(f.is_lower_bound, "always a lower bound");
+    }
+
+    #[test]
+    fn a_decrease_in_width_is_censoring_and_never_a_fanout_below_one() {
+        // Schema rule 8 forbids fanout < 1, so a narrowing profile must not produce
+        // one — a fitted profile that did would be rejected by the validator it was
+        // fitted for.
+        let mut reqs = shared_trunk(100, 4);
+        // Ten sessions continue deeper on their own private paths, so width at depth
+        // 4 and 5 falls as they retire.
+        for s in 0..10u32 {
+            reqs.push((
+                s,
+                (0..6)
+                    .map(|d| {
+                        if d < 4 {
+                            d as u64
+                        } else {
+                            900 + u64::from(s) * 10 + d as u64
+                        }
+                    })
+                    .collect(),
+            ));
+        }
+        let r = report_of(&reqs, 500);
+        let f = fit(&r, 100.0).expect("should fit");
+        for s in &f.segments {
+            assert!(
+                s.fanout >= 1.0,
+                "fitted a fanout of {} below 1, which rule 8 forbids",
+                s.fanout
+            );
+        }
+    }
+
+    #[test]
+    fn a_fanout_event_survives_as_its_own_segment() {
+        // Twelve roots, one shared level, then each root splits three ways: the
+        // profile should carry a segment whose fanout is near 3 rather than average
+        // it into the flat run around it.
+        let mut reqs = Vec::new();
+        for root in 0..12u64 {
+            for child in 0..3u64 {
+                for rep in 0..6u32 {
+                    let session = (root * 18 + child * 6 + u64::from(rep)) as u32;
+                    reqs.push((
+                        session,
+                        vec![
+                            root,
+                            100 + root,
+                            1000 + root * 10 + child,
+                            5000 + root * 10 + child,
+                        ],
+                    ));
+                }
+            }
+        }
+        let r = report_of(&reqs, 1000);
+        let f = fit(&r, 216.0).expect("should fit");
+        let biggest = f.segments.iter().map(|s| s.fanout).fold(0.0f64, f64::max);
+        assert!(
+            biggest > 2.0,
+            "the 3x fanout was averaged away; segments {:?}",
+            f.segments
+        );
+    }
+
+    #[test]
+    fn the_near_root_fanout_is_folded_into_roots_when_occupancy_demands_it() {
+        // One root splitting many ways is better described as many roots: FR-055c,
+        // and the fold goes exactly as deep as the FR-009f floor requires.
+        let mut reqs = Vec::new();
+        for branch in 0..200u64 {
+            for rep in 0..2u32 {
+                reqs.push((
+                    (branch * 2 + u64::from(rep)) as u32,
+                    vec![0, 1000 + branch, 5000 + branch],
+                ));
+            }
+        }
+        let r = report_of(&reqs, 2000);
+        // 400 sessions over the 200 paths a depth-1 fanout of 200 produces is
+        // occupancy 2, below the target — so expressing that fanout as trunk
+        // branching fails the floor and the fold is what the floor requires. At four
+        // sessions per branch occupancy would be exactly 4 and no fold would be
+        // needed, which is the rule declining rather than failing.
+        let f = fit(&r, 400.0).expect("should fit");
+        assert!(
+            f.root_boundary_depth >= 1,
+            "the near-root fanout should have been folded, boundary {}",
+            f.root_boundary_depth
+        );
+        assert!(f.roots >= 100, "roots.count came out {}", f.roots);
+        assert!(f.caveats().iter().any(|c| c.contains("global preamble")));
+    }
+
+    #[test]
+    fn the_caveats_always_state_the_lower_bound() {
+        let r = report_of(&shared_trunk(50, 10), 50);
+        let f = fit(&r, 50.0).expect("should fit");
+        let c = f.caveats();
+        assert!(c[0].contains("LOWER BOUND"), "{c:?}");
+        assert!(c[0].contains("more sharing than the trace had"), "{c:?}");
+    }
+
+    #[test]
+    fn a_low_occupancy_segment_is_flagged_as_uninformative() {
+        // FR-055b: at one session per path the ratio collapses toward 1 whatever the
+        // truth, so a fanout measured there is not evidence.
+        let reqs: Vec<(u32, Vec<u64>)> = (0..40u32)
+            .map(|s| (s, vec![u64::from(s) * 10, u64::from(s) * 10 + 1]))
+            .collect();
+        let r = report_of(&reqs, 100);
+        let f = fit(&r, 40.0).expect("should fit");
+        assert!(
+            f.caveats().iter().any(|c| c.contains("FR-055b")),
+            "occupancy ~1 was not flagged: {:?}",
+            f.caveats()
+        );
+    }
+
+    #[test]
+    fn an_empty_report_fits_nothing_rather_than_a_degenerate_profile() {
+        let empty = Statistics::new(10).finish().trunk;
+        assert!(fit(&empty, 0.0).is_none());
+    }
+
+    #[test]
+    fn the_rounding_error_matches_the_generators_measured_resolution() {
+        // The number the merge criterion rests on: a 1.05 profile over 200 nodes
+        // predicts 0.0154, and the generator measured 1.014x at p90.
+        let se = rounding_se(1.05, 200.0);
+        assert!((se - 0.0154).abs() < 0.0005, "se came out {se}");
+        // Wider depths resolve finer, as 1/sqrt(w).
+        assert!(rounding_se(1.05, 800.0) < se / 1.9);
+    }
+}
