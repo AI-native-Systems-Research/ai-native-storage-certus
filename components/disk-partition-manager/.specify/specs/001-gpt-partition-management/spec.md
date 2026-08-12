@@ -4,6 +4,7 @@
 **Created**: 2026-07-01
 **Status**: Backfilled
 **Source**: Generated from existing implementation
+**Last Synced**: 2026-08-07 — drift sweep on branch `sync/spec-drift-sweep-20260807`. FR-003 backup-fallback fix drafted on branch (backup now attempted on a damaged primary *signature*, not just a CRC mismatch). PR-002 backfilled to the actual per-sector read behavior. Read-path LBA-2 assumption, GUID zero-fallback, and any-sector-size behavior documented in Implementation Notes.
 
 ## Backfill Notice
 
@@ -61,7 +62,7 @@ As a Certus dispatcher, I want to automatically format a drive only when no vali
 
 - **FR-002**: System MUST validate GPT header integrity via CRC32 (IEEE) on both the header and partition entry array.
 
-- **FR-003**: System MUST support primary/backup GPT redundancy — if the primary header is corrupt, the backup header at the last LBA MUST be attempted.
+- **FR-003**: System MUST support primary/backup GPT redundancy — if the primary header is corrupt, the backup header at the last LBA MUST be attempted. "Corrupt" includes **both** a header/entry-array CRC mismatch **and** a damaged or zeroed primary header *signature* (a torn write can damage either). *(Sync 2026-08-07: previously the backup was attempted only on a CRC mismatch; a bad signature returned `NoPartitionTable` directly, which `initialize_or_format` then treated as "unformatted" and destructively reformatted a disk whose backup was still intact. A fix routing signature failures through the backup path is drafted on branch `sync/spec-drift-sweep-20260807` — see `.specify/sync/align-tasks.md`.)*
 
 - **FR-004**: System MUST support a "rest of disk" partition (indicated by `size_bytes=0`) that consumes all remaining usable LBAs after fixed-size partitions are allocated.
 
@@ -91,7 +92,7 @@ As a Certus dispatcher, I want to automatically format a drive only when no vali
 
 - **PR-001**: Format operation MUST complete in O(1) I/O operations relative to device size (only header/entry sectors are written, not the full device).
 
-- **PR-002**: Initialize (read) operation MUST require at most 2 I/O round-trips (header + entries) for the happy path.
+- **PR-002**: Initialize (read) operation reads a fixed, device-size-independent set of sectors: 1 header sector plus the partition-entry array. *(Sync 2026-08-07 — backfilled to actual behavior: `read_bytes` issues one synchronous `Command::ReadSync` per sector, so the 128×128 B = 16 KiB entry array is read as 32 round-trips at 512 B sector size (4 at 4096 B), i.e. 33 (5) round-trips total for initialize — not the "at most 2" the requirement originally stated. This is O(1) in device size, satisfying the same intent as PR-001. Batching the entry-array read into a single multi-sector I/O to restore a 2-round-trip happy path is a deliberate optimization left for a future perf task, not tracked as drift.)*
 
 ## Key Entities
 
@@ -127,6 +128,8 @@ As a Certus dispatcher, I want to automatically format a drive only when no vali
 > belong in the spec long-term.
 
 - I/O is performed via synchronous `Command::ReadSync`/`Command::WriteSync` messages over the block device's client channel (not async).
-- GUIDs are generated from `/dev/urandom` — no fallback if unavailable (zeros used).
+- GUIDs are generated from `/dev/urandom`. *(Sync 2026-08-07: if `/dev/urandom` cannot be opened, `generate_guid` silently returns an all-zero GUID except for the version/variant bits — non-random and collision-prone. This contradicts FR-008's unconditional "random GUIDs" assertion. Documented here as a known behavior rather than an FR-level guarantee; erroring out on `/dev/urandom` failure would be a future code change.)*
 - The component uses `define_component!` with a single `block_device: IBlockDevice` receptacle and internal `Mutex<Option<PartitionTable>>` state.
 - Partition entries are always padded to 128 (GPT_MAX_ENTRIES) regardless of how many partitions are configured.
+- **Read path assumes Certus-written layout (Sync 2026-08-07):** on read, the primary partition-entry array is read from a hardcoded LBA 2 rather than honoring the parsed `header.partition_entry_lba`. Every Certus-written GPT uses LBA 2, so this is correct for round-tripping our own tables, but a GPT written by an external tool with a different entry offset would be read incorrectly. Low severity; honoring `partition_entry_lba` is a robustness improvement left for a future change. (US2's "read an existing partition table" is therefore scoped in practice to Certus-written and standard-layout tables.)
+- **Sector size (Sync 2026-08-07):** FR-011 requires supporting 512 B and 4096 B sectors. The implementation is fully sector-size-parameterized and does not hardcode 512; it also performs no explicit validation that `sector_size ∈ {512, 4096}` — any sector size passed in is accepted. Adding explicit validation (or broadening FR-011 to "any sector size") is a future decision.

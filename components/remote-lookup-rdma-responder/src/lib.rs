@@ -157,6 +157,13 @@ fn run_accept_loop(
                     table.disconnect(&node);
                     send_event(&event_tx, ResponderEvent::DisconnectAck { node });
                 }
+                CmEvent::AcceptError { message } => {
+                    // Non-fatal accept-loop error (FR-016): count it and surface
+                    // it to `remote-lookup` losslessly (FR-011a), same as any
+                    // other event. The connect was already rejected by the seam.
+                    table.record_accept_loop_error();
+                    send_event(&event_tx, ResponderEvent::Error { message });
+                }
             }
         }
         if stop.load(Ordering::Acquire) {
@@ -568,6 +575,53 @@ mod tests {
         assert!(
             saw_ack,
             "DisconnectAck must survive backpressure, not be dropped"
+        );
+    }
+
+    #[test]
+    fn accept_error_surfaces_a_responder_error_event() {
+        // FR-016: a non-fatal accept-loop error (child QP could not be formed →
+        // the connect was rejected) must be surfaced to `remote-lookup` as exactly
+        // one ResponderEvent::Error and counted via telemetry — not silently
+        // dropped. Drives run_accept_loop directly over the mock seam.
+        let stop = Arc::new(AtomicBool::new(false));
+        let (cmd_tx, cmd_rx) = SpscChannel::<ResponderCommand>::new(4).split().unwrap();
+        let seam = connection::MockCmSeam::new(cmd_rx, stop.clone());
+        seam.inject_accept_error("rdma_create_qp failed for inbound connect");
+
+        let telemetry = Arc::new(TelemetryCollector::new());
+        let table = ConnectionTable::new(telemetry.clone());
+        let (event_tx, event_rx) = SpscChannel::<ResponderEvent>::new(4).split().unwrap();
+
+        let handle = std::thread::spawn(move || {
+            run_accept_loop(Box::new(seam), table, event_tx, stop);
+        });
+
+        // The injected accept error is delivered first, as an Error event.
+        match event_rx.recv().expect("event") {
+            ResponderEvent::Error { message } => {
+                assert!(
+                    message.contains("rdma_create_qp"),
+                    "unexpected message: {message}"
+                );
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
+
+        // Closing the command inbox makes the seam's blocking recv return Stop,
+        // so the loop exits and joins cleanly (no further events expected).
+        drop(cmd_tx);
+        handle.join().unwrap();
+        assert!(
+            event_rx.recv().is_err(),
+            "exactly one Error event, then the channel closes"
+        );
+
+        #[cfg(feature = "telemetry")]
+        assert_eq!(
+            telemetry.accept_loop_errors(),
+            1,
+            "the accept-loop error must be counted exactly once"
         );
     }
 

@@ -4,8 +4,10 @@
 //! signalling) and RDMA (data path), per `specs/002-remote-lookup-rdma/`. On
 //! `initialize` the component creates and joins a zyre node and spawns a single
 //! actor poll-loop thread that owns all operation state (research Decision 1).
-//! The KEY_QUERY → RDMA protocol is built up across the US1–US7 tasks; until
-//! then `batch_lookup` finalizes every key as `NotFound`.
+//! The full KEY_QUERY → RDMA protocol (US1–US7) is implemented in `actor.rs`
+//! and exercised end-to-end by `tests/mesh.rs`: `batch_lookup` SHOUTs a
+//! KEY_QUERY, drives one-sided RDMA writes of peer values into local landing
+//! slots, and publishes each resolved key into the local memory tier.
 
 mod actor;
 mod operation;
@@ -248,9 +250,11 @@ impl IRemoteLookup for RemoteLookupComponent {
 
     /// Submit a batch of `(key, size)` entries to the actor and block until the
     /// operation finalizes, returning one positional result per entry. An empty
-    /// input returns immediately; an uninitialized component returns `NotFound`
-    /// for every entry. (The actor currently answers all-`NotFound` until the
-    /// KEY_QUERY → RDMA protocol lands in US1–US3.)
+    /// input returns immediately; an uninitialized component (no actor) returns
+    /// `NotFound` for every entry. Once initialized, the actor runs the full
+    /// KEY_QUERY → RDMA protocol: `Ok(())` means the key is now resident in the
+    /// local memory tier, `Err(NotFound)` that no peer supplied it before the
+    /// operation finalized (see FR-012).
     ///
     /// # Examples
     ///

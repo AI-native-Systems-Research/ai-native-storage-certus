@@ -88,3 +88,28 @@ Four tasks appended (details in that file):
   `fini()`, operator scripts) warranted a standalone spec; all were folded
   into `002-spdk-env-vfio-init` as new FRs.
 - No source code under `components/spdk-env/src/` or `scripts/` was modified.
+
+---
+
+# 2026-08-07 Sweep (branch `sync/spec-drift-sweep-20260807`)
+
+Mode: sweep re-analysis. Pacing: auto-apply safe BACKFILL on-branch; ask on
+forks (none arose for spdk-env). Regenerated drift report: spec-001 remains a
+superseded template (no action); spec-002 has 25 aligned FRs, one low-severity
+drift (SC-002 stale "missing logger" case), and FR-015 remains a
+spec-acknowledged future item.
+
+## Safe BACKFILL applied (spec Markdown only)
+
+| Spec | Item | Change |
+|------|------|--------|
+| 002-spdk-env-vfio-init | SC-002 | Dropped the stale "missing logger" misconfiguration case — the component has no logger receptacle per FR-007; the same correction was already applied to SC-005 in the 2026-07-22 run. Annotated *(Backfilled 2026-08-07)*. **Resolves 2026-07-22 align-task Task 2 (SC-002 stale logger clause).** |
+
+## No action (unchanged from prior analysis)
+
+- **spec-001-spdk-vfio-env** — already SUPERSEDED by 002 (2026-07-22 banner); no re-edit.
+- **FR-015** (skip-and-warn on in-use devices) — spec already self-flags as "Future: not yet implemented." Left as-is; no drift to apply. The prior-run note that User Story 1 Acceptance Scenario 4 / its Edge Case still read as present-tense working behavior remains an open align-task (Task 4), not resolved this sweep.
+- **Task 1** (NVMe-only enumeration vs. "all VFIO device types", Medium ALIGN) and **Task 3** (`do_init()` error path never unwinds `spdk_env_fini()`, Medium DEFECT) — both remain open align-tasks; neither is a HIGH code bug and neither was drafted per sweep pacing.
+
+## Verification
+- Single additive edit confined to `specs/002-spdk-env-vfio-init/spec.md` SC-002. No `.rs`/`scripts/` touched.

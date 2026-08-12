@@ -111,7 +111,7 @@ When the cache reports that a block was accessed, the policy refreshes that bloc
 
 ### Measurable Outcomes
 
-- **SC-001**: On representative multi-turn session traces, the policy retains session-prefix (head/interior) blocks longer than basic LRU, reducing re-loads of retained-lineage prefixes by at least 15% compared with basic LRU on the same trace and capacity.
+- **SC-001** *(design goal — not yet verified; downgraded 2026-08-07)*: On representative multi-turn session traces, the policy is intended to retain session-prefix (head/interior) blocks longer than basic LRU, reducing re-loads of retained-lineage prefixes relative to basic LRU on the same trace and capacity (design target: ≥15%). This is an aspirational design goal pending a comparative trace-replay harness (session-lists vs `eviction-policy-lru` on a multi-turn ShareGPT-style trace, reporting prefix-reload counts); no such comparative benchmark currently exists in the repo — `benches/session_list_benchmark.rs` measures only this component's hot-path throughput, not a hit-rate comparison. Until that harness exists, the ≥15% figure is a target, not a measured outcome.
 - **SC-002**: Registering a block, refreshing recency, and stopping tracking of a block each complete in effectively constant time — their per-operation cost does not grow as the number of tracked blocks increases from thousands to at least one million.
 - **SC-003**: Identifying the next victim completes in time that scales with the number of active sessions rather than the total number of tracked blocks, and remains bounded on a domain of at least one million blocks.
 - **SC-004**: Victim selection is correct in 100% of cases: the policy never selects a block that still has a tracked descendant, and always selects the oldest-accessed eligible leaf (deterministically under ties).
@@ -130,3 +130,13 @@ When the cache reports that a block was accessed, the policy refreshes that bloc
 - Hot-path operations (registration, recency refresh, removal, victim selection) may be invoked concurrently by the caching subsystem and must remain safe under the component framework's actor/interface model.
 - The component maps its per-session chains onto the interface's existing "pool" concept, where a pool is the eviction domain that groups the sessions compared in one decision.
 - The component targets Linux only, consistent with the project constitution.
+
+## Observability *(non-normative, backfilled 2026-08-07)*
+
+- On first selection as the active eviction policy, the component emits a
+  one-time informational log line (guarded by an internal `announced` flag;
+  `src/lib.rs:83-87,107-120`) via the optional `ILogger` receptacle. This is a
+  startup-announcement diagnostic only — it is operationally useful for
+  confirming which policy is bound, is not a functional requirement, and has no
+  effect on eviction behaviour. A missing logger does not turn any operation
+  into an error, consistent with the shared component logging convention.

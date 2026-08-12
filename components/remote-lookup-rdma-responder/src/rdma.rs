@@ -417,9 +417,13 @@ impl RealCmSeam {
                             private_data,
                             conn: Box::new(RealCmConn { id: child, qp }),
                         }),
-                        Err(_) => {
-                            // Could not form the QP; reject and drop.
+                        Err(message) => {
+                            // Could not form the QP; reject and drop. This is a
+                            // non-fatal accept-loop error (FR-016): reject the
+                            // connect, then surface it so the accept loop emits
+                            // `ResponderEvent::Error` and counts it.
                             ffi::rdma_reject(child, ptr::null(), 0);
+                            out.push(CmEvent::AcceptError { message });
                         }
                     }
                 }
@@ -465,7 +469,7 @@ impl RealCmSeam {
     ///
     /// # Safety
     /// `child` is a valid connect-request cm_id; `self.pd`/`self.cq` are live.
-    unsafe fn accept_child(&self, child: *mut ffi::rdma_cm_id) -> Result<*mut ffi::ibv_qp, ()> {
+    unsafe fn accept_child(&self, child: *mut ffi::rdma_cm_id) -> Result<*mut ffi::ibv_qp, String> {
         let mut init = ffi::ibv_qp_init_attr {
             qp_context: ptr::null_mut(),
             send_cq: self.cq,
@@ -482,7 +486,7 @@ impl RealCmSeam {
             sq_sig_all: 0,
         };
         if ffi::rdma_create_qp(child, self.pd, &mut init) != 0 {
-            return Err(());
+            return Err("rdma_create_qp failed for inbound connect".into());
         }
         let qp = (*child).qp;
         let mut conn_param = ffi::rdma_conn_param {
@@ -498,7 +502,7 @@ impl RealCmSeam {
         };
         if ffi::rdma_accept(child, &mut conn_param) != 0 {
             ffi::rdma_destroy_qp(child);
-            return Err(());
+            return Err("rdma_accept failed for inbound connect".into());
         }
         Ok(qp)
     }

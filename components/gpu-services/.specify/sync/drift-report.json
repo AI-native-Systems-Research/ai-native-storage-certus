@@ -1,142 +1,119 @@
 {
-  "generated": "2026-07-22T21:30:26Z",
+  "generated": "2026-08-07T15:27:21Z",
   "project": "gpu-services",
   "summary": {
-    "specs_analyzed": 2,
-    "requirements_checked": 59,
-    "aligned": 56,
-    "drifted": 3,
+    "specs_analyzed": 3,
+    "total_requirements": 61,
+    "aligned": 59,
+    "drifted": 2,
     "not_implemented": 0,
-    "unspecced_features": 4
+    "unspecced": 5,
+    "conflicts": 1
   },
   "specs": [
     {
       "id": "001-gpu-cuda-services",
-      "title": "GPU CUDA Services",
+      "path": "specs/001-gpu-cuda-services/spec.md",
+      "counts": { "aligned": 23, "drifted": 2, "not_implemented": 0 },
       "aligned": [
-        "FR-001 (initialize CUDA, src/lib.rs:80-107)",
-        "FR-002 (enumerate GPUs, compute cap >=7.0 filter, src/device.rs:11-75)",
-        "FR-003 (deserialize base64 IPC handle, src/ipc.rs:11-71; no internal cudaSetDevice, matches precondition)",
-        "FR-004 (verify device memory via cudaPointerGetAttributes, src/memory.rs:8-34; tracked in verified HashSet, src/lib.rs:170-191)",
-        "FR-006 (create_dma_buffer requires verified+pinned, src/lib.rs:247-275; dma::create_gpu_dma_buffer, src/dma.rs:727-742)",
-        "FR-007 (Result<_, String> error returns throughout, no panics observed in production paths)",
-        "FR-009 (gpu feature gate, Cargo.toml:9)",
-        "FR-010 (unit tests src/lib.rs:1027-1280; benches/ gated required-features=[\"gpu\"], Cargo.toml:30-38)",
-        "FR-011 (dma_copy_to_host, src/lib.rs:277-327, cudaMemcpy D2H, spdk-gated)",
-        "FR-012 (dma_copy_to_device, src/lib.rs:487-537, cudaMemcpy H2D, spdk-gated)",
-        "FR-013 (prepare_memory_for_spdk full pipeline, src/lib.rs:329-485, spdk-gated)",
-        "FR-014 (gpu-disabled paths return error; shutdown() no-op Ok(()), src/lib.rs:109-126)",
-        "FR-016 (unregister_host_memory: spdk_mem_unregister then cudaHostUnregister, src/lib.rs:987-1024)",
-        "FR-017 (create_stream/destroy_stream/stream_synchronize, src/lib.rs:539-564,635-654,680-699)",
-        "FR-018 (dma_copy_to_device_async via cudaMemcpyAsync H2D on stream, src/lib.rs:701-753)",
-        "FR-019 (memcpy_h2d_async, src/lib.rs:755-797)",
-        "FR-020 (allocate_pinned_dma_buffer via cudaHostAlloc + spdk_mem_register, src/lib.rs:897-935)",
-        "FR-021 (set_device via cudaSetDevice, src/lib.rs:566-592)",
-        "FR-022 (device_of_ptr via cudaPointerGetAttributes, returns -1 for non-device, src/lib.rs:594-633)",
-        "SC-001..SC-005 (latency budgets: implementation is O(1)/single-syscall for each operation; plausible given hand-rolled FFI, not independently benchmarked in this review)",
-        "SC-006 (cargo test -p gpu-services --features gpu: test suite present, src/lib.rs:1027-1280)",
-        "SC-007 (cargo bench -p gpu-services --features gpu: benches/gpu_services_benchmark.rs, benches/dma_transfer_benchmark.rs present)",
-        "SC-008 (Python-to-Rust demo apps exist at apps/gpu-handle-test-client and apps/gpu-handle-test-server, outside gpu-services component tree)"
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-006", "FR-007", "FR-009",
+        "FR-010", "FR-011", "FR-012", "FR-013", "FR-014", "FR-015", "FR-016",
+        "FR-017", "FR-018", "FR-019", "FR-020", "FR-021", "FR-022", "FR-023",
+        "FR-024", "FR-025",
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006", "SC-007", "SC-008"
       ],
       "drifted": [
         {
-          "requirement": "FR-005",
-          "spec_text": "For locally-pinned memory, full CUDA unregistration is performed [on unpin].",
-          "actual": "unpin_memory (src/lib.rs:227-245) only removes the pointer from the internal `pinned` HashSet; it never calls cudaHostUnregister or any CUDA unregistration API. pin_memory/unpin_memory do not distinguish 'IPC-imported' from 'locally-pinned' memory -- both are handled identically via HashSet bookkeeping on a GpuIpcHandle, which by construction (src/ipc.rs:70, GpuIpcHandle::new) is always IPC-derived. The 'locally-pinned memory / full CUDA unregistration' branch described in the spec has no corresponding implementation.",
-          "location": "components/gpu-services/src/lib.rs:227-245",
-          "severity": "low"
+          "id": "FR-005",
+          "severity": "minor",
+          "spec": "States 'For locally-pinned memory, full CUDA unregistration is performed.'",
+          "code": "unpin_memory only removes the pointer from the internal pinned HashSet; no cudaHostUnregister and no locally-pinned path exists in pin_memory/unpin_memory.",
+          "location": "src/lib.rs:249-267"
         },
         {
-          "requirement": "FR-008",
-          "spec_text": "Component MUST expose all functionality exclusively through the IGpuServices interface defined in components/interfaces.",
-          "actual": "src/dma.rs exposes create_spdk_dma_buffer_from_gpu_bar, create_spdk_dma_buffer_from_phys, create_spdk_dma_buffer_from_bar_direct, and get_phys_addr as public free functions (p2p feature) that are not methods on IGpuServices. They are called directly by src/bin/p2p_server.rs (lines 21, 231) and tests/gpu_nvme_p2p.rs, bypassing the interface. This follows spec 002 FR-021/022/023 (which explicitly require standalone functions, not interface methods) but contradicts spec 001 FR-008 as written -- see conflicts.",
-          "location": "components/gpu-services/src/dma.rs:352-702; components/gpu-services/src/bin/p2p_server.rs:20-21",
-          "severity": "medium"
-        },
-        {
-          "requirement": "FR-015",
-          "spec_text": "If cudaHostRegister succeeds but spdk_mem_register fails, the method MUST roll back by calling cudaHostUnregister before returning the error.",
-          "actual": "register_host_memory (src/lib.rs:937-985) implements the rollback correctly, but additionally treats spdk_mem_register rc == -16 (EBUSY, 'already registered with SPDK') as success rather than an error, silently skipping the rollback path in that case. This special-casing is not documented in FR-015 or its Assumptions.",
-          "location": "components/gpu-services/src/lib.rs:973-981",
-          "severity": "low"
+          "id": "FR-008",
+          "severity": "minor",
+          "spec": "Expose all functionality exclusively through the IGpuServices interface.",
+          "code": "P2P/GDRCopy DMA-buffer builders are pub functions in the dma module and are called directly by the p2p_server binary, not via IGpuServices.",
+          "location": "src/dma.rs:113-702; src/bin/p2p_server.rs:21"
         }
       ],
-      "not_implemented": []
+      "not_implemented": [],
+      "notes": [
+        "User Story 3 acceptance scenario 2 implies contiguity vs pin distinction; check_memory_attributes (src/memory.rs:26) only validates memory type == device. Normative FR-004 is aligned; narrative is broader. Minor/informational."
+      ]
     },
     {
       "id": "002-gpu-ssd-dma-prepare",
-      "title": "GPU-to-SSD DMA Buffer Preparation",
+      "path": "specs/002-gpu-ssd-dma-prepare/spec.md",
+      "counts": { "aligned": 24, "drifted": 0, "not_implemented": 0 },
       "aligned": [
-        "FR-001 (prepare_memory_for_spdk(base64_payload, Option<u32>) -> DmaBuffer, src/lib.rs:329-485)",
-        "FR-002 (opens IPC handle with CUDA_IPC_MEM_LAZY_ENABLE_PEER_ACCESS, src/ipc.rs:55)",
-        "FR-003 (pin-state check via internal pinned HashSet, not cudaPointerGetAttributes, src/lib.rs:404-416)",
-        "FR-004 (conditional pinning, src/lib.rs:419-448)",
-        "FR-005 (pin decisions logged via logger receptacle when connected, src/lib.rs:443-448)",
-        "FR-006/FR-007 (pin-state-aware free functions: spdk_unregister_unpin_and_ipc_close vs spdk_unregister_and_ipc_close, src/dma.rs:69-102,136-140)",
-        "FR-008 (both free-fn variants call cudaIpcCloseMemHandle, src/dma.rs:80,100)",
-        "FR-009 (returns error if not initialized, src/lib.rs:343-346)",
-        "FR-010 (IPC open failure returns error, src/lib.rs:393-399)",
-        "FR-011 (peer access failure surfaces as IPC open error; no separate handling needed)",
-        "FR-012 (rollback on every error path: verify failure, lock failure, DmaBuffer creation failure, src/lib.rs:405-468)",
-        "FR-013 (spdk feature gate, src/lib.rs:329)",
-        "FR-014 (device index sets context via cudaSetDevice before opening handle, src/lib.rs:350-372)",
-        "FR-015 (returns interfaces::DmaBuffer, not GpuDmaBuffer, src/lib.rs:334)",
-        "FR-016 (spdk_mem_register on GPU pointer, src/dma.rs:122-128)",
-        "FR-017 (spdk_mem_unregister rollback on DmaBuffer creation failure, src/dma.rs:151-159)",
-        "FR-018 (restore_device called on both success and error paths, src/lib.rs:388,396,412,426,436,465,474)",
-        "FR-019 (register_host_memory, src/lib.rs:937-985)",
-        "FR-020 (unregister_host_memory, src/lib.rs:987-1024)",
-        "FR-021 (create_spdk_dma_buffer_from_gpu_bar via GDRCopy pin/map + spdk_mem_register, src/dma.rs:352-466)",
-        "FR-022 (create_spdk_dma_buffer_from_phys via mmap + rte_extmem_register + VFIO DMA map, src/dma.rs:546-617; not invoked elsewhere in the repo, but present and correct per spec)",
-        "FR-023 (create_spdk_dma_buffer_from_bar_direct via rte_extmem_register + rte_vfio_container_dma_map without munmap, src/dma.rs:634-702)",
-        "FR-024 (GDRCopy FFI bindings gdr_open/close/pin_buffer/unpin_buffer/map/unmap + GPU_PAGE_SIZE=64KiB, src/gdrcopy_ffi.rs:16-33)",
-        "SC-001..SC-005 (single-call preparation, pin-state-correct cleanup, logging observability, no-leak error paths, consistent error conventions -- verified by code inspection above)"
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
+        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012", "FR-013", "FR-014",
+        "FR-015", "FR-016", "FR-017", "FR-018", "FR-019", "FR-020", "FR-021",
+        "FR-022", "FR-023", "FR-024",
+        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005"
       ],
       "drifted": [],
-      "not_implemented": []
+      "not_implemented": [],
+      "notes": [
+        "Clean. Key locations: src/lib.rs:352 (prepare_memory_for_spdk), src/ipc.rs:55 (lazy peer access), src/dma.rs:113/353/547/635, src/gdrcopy_ffi.rs:16-33 (GPU_PAGE_SIZE 64 KiB + GDRCopy FFI)."
+      ]
+    },
+    {
+      "id": "003-gpu-p2p-server",
+      "path": "specs/003-gpu-p2p-server/spec.md",
+      "counts": { "aligned": 12, "drifted": 0, "not_implemented": 0 },
+      "aligned": [
+        "FR-001", "FR-002", "FR-003", "FR-004", "FR-005", "FR-006", "FR-007",
+        "FR-008", "FR-009", "FR-010", "FR-011", "FR-012",
+        "SC-001", "SC-002", "SC-003", "SC-004"
+      ],
+      "drifted": [],
+      "not_implemented": [],
+      "notes": [
+        "Clean. Backfilled spec matches src/bin/p2p_server.rs and Cargo.toml:40-43 (required-features p2p)."
+      ]
     }
   ],
   "unspecced": [
     {
-      "feature": "IGpuServices::stream_query -- non-blocking check of whether a CUDA stream's queued operations have completed (cudaStreamQuery)",
-      "location": "components/interfaces/src/igpu_services.rs:596-619; components/gpu-services/src/lib.rs:656-678",
-      "lines": 23,
-      "suggested_spec": "Add an FR to 001-gpu-cuda-services covering non-blocking stream completion polling, distinct from the blocking stream_synchronize already specified in FR-017."
+      "item": "create_spdk_dma_buffer_from_cuda_malloc + spdk_unregister_and_cuda_free",
+      "location": "src/dma.rs:189, src/dma.rs:169",
+      "severity": "minor",
+      "notes": "Public SPDK builder for cudaMalloc-backed GPU memory; not referenced by any FR."
     },
     {
-      "feature": "IGpuServices::dma_copy_to_host_async -- async Device-to-Host cudaMemcpyAsync counterpart to dma_copy_to_device_async (FR-018)",
-      "location": "components/interfaces/src/igpu_services.rs:694-714; components/gpu-services/src/lib.rs:799-851",
-      "lines": 53,
-      "suggested_spec": "Add an FR mirroring FR-018 for the D2H async direction."
+      "item": "get_phys_addr",
+      "location": "src/dma.rs:522",
+      "severity": "minor",
+      "notes": "Public p2p helper wrapping spdk_vtophys; not mentioned in any spec."
     },
     {
-      "feature": "IGpuServices::memcpy_d2h_async -- async Device-to-Host cudaMemcpyAsync counterpart to memcpy_h2d_async (FR-019), operating on raw pointers instead of DmaBuffer",
-      "location": "components/interfaces/src/igpu_services.rs:716-735; components/gpu-services/src/lib.rs:853-895",
-      "lines": 43,
-      "suggested_spec": "Add an FR mirroring FR-019 for the D2H async direction."
+      "item": "GPU_PAGE_SHIFT constant",
+      "location": "src/gdrcopy_ffi.rs:16",
+      "severity": "trivial",
+      "notes": "Exported alongside spec'd GPU_PAGE_SIZE; spec 002 FR-024 names only GPU_PAGE_SIZE."
     },
     {
-      "feature": "gpu-p2p-server binary -- standalone NVMe-to-GPU P2P DMA server (Unix-socket protocol, three benchmarking transfer modes: bounce, p2p, p2p-cold) with its own CLI, staging-buffer pool, and signal handling",
-      "location": "components/gpu-services/src/bin/p2p_server.rs (678 lines, entire file)",
-      "lines": 678,
-      "suggested_spec": "Create a dedicated spec (e.g. 003-gpu-p2p-server) covering the binary's CLI contract, transfer modes, and the Unix socket protocol it implements (distinct from specs/001-gpu-cuda-services/contracts/unix_socket_protocol.md, which describes the Python/Rust IPC-handle-handoff demo, not this server)."
+      "item": "GpuServicesComponent::initialized (AtomicBool) + is_initialized()",
+      "location": "src/lib.rs:70, src/lib.rs:92",
+      "severity": "trivial",
+      "notes": "Lock-free mirror of GpuState.initialized for async-copy hot paths; not in GpuState Key Entity description."
+    },
+    {
+      "item": "GpuIpcHandle::{verified,pinned} fields + set_verified/set_pinned/is_verified/is_pinned",
+      "location": "components/interfaces/src/igpu_services.rs:63-118",
+      "severity": "minor",
+      "notes": "Defined but never read/written by the component, which tracks state via its own HashSet. Dead API surface."
     }
   ],
   "conflicts": [
     {
-      "description": "Spec 001 FR-008 requires all component functionality to be exposed exclusively through the IGpuServices interface. Spec 002 FR-021/022/023 explicitly require create_spdk_dma_buffer_from_gpu_bar, create_spdk_dma_buffer_from_phys, and create_spdk_dma_buffer_from_bar_direct to be standalone functions (not IGpuServices methods). The implementation follows spec 002, which puts it in violation of spec 001 FR-008 as written. The two specs disagree on whether the P2P/GDRCopy DMA-buffer constructors belong on the interface.",
-      "locations": [
-        "components/gpu-services/specs/001-gpu-cuda-services/spec.md:250-252 (FR-008)",
-        "components/gpu-services/specs/002-gpu-ssd-dma-prepare/spec.md:97-99 (FR-021, FR-022, FR-023)",
-        "components/gpu-services/src/dma.rs:352-702"
-      ]
-    },
-    {
-      "description": "components/gpu-services/CLAUDE.md describes the component as 'currently a skeleton -- initialize() and shutdown() lifecycle methods with an optional ILogger receptacle,' which is stale by roughly 22 functional requirements and ~3,700 lines of implementation across both specs (CUDA device discovery, IPC handle handling, pinning, DMA buffer creation, async streams, SPDK/GDRCopy P2P). Not a spec-vs-code drift, but a documentation-vs-code drift worth flagging.",
-      "locations": [
-        "components/gpu-services/CLAUDE.md:7",
-        "components/gpu-services/src/lib.rs (full IGpuServices impl)"
-      ]
+      "between": ["001-gpu-cuda-services:FR-008", "002-gpu-ssd-dma-prepare:FR-021..FR-024", "003-gpu-p2p-server"],
+      "severity": "minor",
+      "description": "FR-008 mandates exclusive exposure through IGpuServices, but P2P DMA-buffer builders are pub dma-module functions consumed directly by the gpu-p2p-server binary. Specs are behaviorally consistent; FR-008 'exclusively' wording is contradicted.",
+      "location": "src/dma.rs; src/bin/p2p_server.rs:21"
     }
   ]
 }

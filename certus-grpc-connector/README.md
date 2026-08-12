@@ -15,6 +15,33 @@ Same vLLM plugin contract; the difference is where the engine lives:
 | SPDK/CUDA init | inside the vLLM process | owned by the server |
 | Language | Rust + Python | pure Python |
 
+## Supported vLLM versions
+
+Built and smoke-tested against **vLLM 0.20, 0.22, 0.23, 0.24, 0.26**. One package
+serves all of them: the connector self-adapts at run time via
+`certus_grpc_connector.compat` (version detection + a capability matrix), so no
+code keys off a raw version number — only the small, version-varying slice of
+vLLM's `vllm.v1.kv_offload.*` plugin API is branched on, in one place.
+
+| vLLM | Status | Notes |
+|------|--------|-------|
+| 0.20 | ✅ supported | Baseline. Manager methods called without `req_context`; KV cache coalesced into one tensor. |
+| 0.22 | ✅ supported | Scheduler starts passing `req_context` to manager methods. |
+| 0.23 | ✅ supported | KV cache split per-layer (e.g. 32 tensors on Llama-3); handled by multi-region offload. |
+| 0.24 | ✅ supported | `TransferResult` still carries `transfer_type`. |
+| 0.26 | ✅ supported | `TransferResult` drops `transfer_type`; hybrid KV-cache manager must be disabled on the engine. |
+
+`compat` is the single source of truth for this list. Print the live
+feature × version matrix (also CI-assertable):
+
+```bash
+python -m certus_grpc_connector.compat
+```
+
+Select the base image for a given version with the Dockerfile's `VLLM_VERSION`
+build arg (see [Docker](#docker-workload-driver) below); the connector code is
+identical across versions.
+
 ## How it fits into vLLM
 
 ```
@@ -152,6 +179,78 @@ The container entrypoint waits for `CERTUS_SERVER` to accept connections
 **Overridable env** (`-e` on `podman run`, or exported before `run-bench.sh`):
 `GPU`, `CERTUS_SERVER`, `NUM_CONVS`, `MODEL`, `SLAB_SIZE_BYTES`, `DATASET_PATH`,
 `HF_TOKEN`, `HF_CACHE`, and `PODMAN_STORE` / `PODMAN_RUNROOT` for the store paths.
+
+### Measuring performance
+
+The workload driver (`run_multiturn_grpc_certus.py`) reports throughput and
+per-round storage I/O on **stderr** — no extra tooling required. Two lines
+matter:
+
+- **Per round** — offloaded SSD traffic polled from the server's `GetIoStats`
+  RPC as deltas around each round (read/write GiB, op counts, mean op latency):
+
+  ```
+  [run] round 3: 210 prompts, 630 total generations  ssd_read=1.84GiB ssd_write=2.02GiB r_ops=14980 w_ops=16512 r_lat=88.3us w_lat=41.7us
+  ```
+
+- **At the end** — the headline throughput number:
+
+  ```
+  [run] DONE rounds=12 generations=5400 elapsed=612.4s (8.8 gen/s)
+  ```
+
+  `gen/s` (generations per second) is the primary end-to-end metric; `elapsed`
+  is total wall-clock across all rounds.
+
+**Reading the numbers.** `ssd_read` climbing over successive rounds is the KV
+cache being served from the NVMe tier (cache hits reused across turns); a
+healthy multi-turn run shows reads growing as the working set exceeds the DRAM
+tier. `w_lat`/`r_lat` are mean per-op device latencies — watch these for tier
+saturation. Per-round SSD deltas require the server built with the
+`rw-telemetry` feature; without it the counters read zero (throughput still
+reports normally).
+
+**Deeper vLLM stats.** Set `LOG_STATS=1` to surface vLLM's periodic engine
+stats, including `KVConnectorStats` (offload hit/miss and transfer counters):
+
+```bash
+GPU=0 CERTUS_SERVER=localhost:50051 LOG_STATS=1 ./certus-grpc-connector/run-bench.sh
+```
+
+**Tuning knobs that move the numbers** (env vars, overridable per the list
+above and in the driver's docstring):
+
+| Var | Default | Effect on the measurement |
+|-----|---------|---------------------------|
+| `NUM_CONVS` | 450 | Concurrent working-set size; larger → more offload pressure. |
+| `CONV_MULTIPLIER` | 1 | Replicates the conversation set N× (distinct hashes) for a larger working set without a new dataset. |
+| `MAX_ROUNDS` | 0 (until exhausted) | Cap rounds for a shorter, fixed-length run. |
+| `OUTPUT_TOKENS` | 150 | Tokens generated per turn; scales compute vs. I/O. |
+| `SLAB_SIZE_BYTES` | 2097152 (2 MiB) | Offload block size; affects op count and per-op latency. |
+| `KV_CACHE_DTYPE` | auto | `fp8` halves per-sequence KV footprint (more fits before offload). |
+| `MAX_NUM_SEQS` | 64 | Batch width; higher → more concurrent KV, more offload. |
+
+For a like-for-like comparison against no offloading, run the same workload with
+the connector disabled (baseline vLLM) and compare `gen/s` at matched
+`NUM_CONVS`/`OUTPUT_TOKENS`.
+
+**Multi-backend comparison.** To benchmark this connector head-to-head against
+the GPU-only baseline, vLLM's host-RAM `CPUOffloadingConnector`, and the
+`llmd_fs_backend` — same workload, same drives, one side-by-side throughput
+table — use the `profile_all.sh` harness with `--only certus-spdk` (or omit
+`--only` for all four). It builds the client image, launches `certus-server`,
+and reconfigures the host NVMe group automatically:
+
+```bash
+time benchmarks/kv-offload-replay/profile_all.sh \
+    --device-pci 0000:61:00.0 --device-pci 0000:62:00.0 \
+    --device-pci 0000:63:00.0 --device-pci 0000:64:00.0 \
+    --max-rounds 12 --model-fs /mnt/fs-backend-bench \
+    --vllm-version 0.23.0 --only certus-spdk --evict-threshold 1 --build
+```
+
+See [`benchmarks/kv-offload-replay/README.md`](../benchmarks/kv-offload-replay/README.md#comparing-all-backends-profile_allsh)
+for the full flag reference and outputs.
 
 ### Manual run (without the wrapper)
 

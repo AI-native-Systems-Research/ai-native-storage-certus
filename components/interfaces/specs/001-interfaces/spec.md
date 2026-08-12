@@ -10,6 +10,17 @@
 > It documents current behavior, not original intent.
 > Review carefully and update to reflect desired behavior.
 
+> **Last Synced 2026-08-07**: FR-006 `track` gained the `semantics: BlockSemantics`
+> argument (+ `BlockSemantics`/`SessionId` documented under FR-020); `integrity-check`
+> feature and `set_checksum`/`get_checksum` added to the Overview and FR-007;
+> `push_async`/`PushCompletion` added to FR-030/FR-033; FR-018 `LookupResult`
+> label corrected to 4-variant. **Deferred (not applied):** FR-014/FR-025
+> `IExtendedMetadataStore` remains an orphaned module — it is defined in
+> `src/iextended_metadata_store.rs` but never declared/re-exported from `lib.rs`,
+> so it is not part of the compiled crate. A real consumer
+> (`extended-metadata-store`) implements it and would fail to build; this latent
+> break is masked only because that crate is excluded from the workspace.
+
 ## Overview
 
 The `interfaces` crate provides centralized trait definitions for all Certus component interfaces. It allows components to depend on interface definitions without pulling in implementation crates, enforcing low coupling and enabling independent development. Interfaces are defined using the `define_interface!` procedural macro from `component-macros`, and all components implement `IUnknown` for runtime interface discovery.
@@ -17,6 +28,7 @@ The `interfaces` crate provides centralized trait definitions for all Certus com
 The crate has two Cargo features:
 - **`spdk`** (optional): Gates SPDK-dependent interfaces and types (`IBlockDevice`, `IBlockDeviceAdmin`, `ISPDKEnv`, `IDispatcher`, `IDispatchMap`, `IMemoryTier`, `IExtentManager`, `IPartitionTable`) and supporting types (`DmaBuffer`, `PciAddress`, etc.).
 - **`gpu`** (optional): Reserved for GPU-specific conditional compilation.
+- **`integrity-check`** (optional): Adds optional per-entry CRC-32 checksums to `IDispatchMap` (`set_checksum`/`get_checksum`, see FR-007); off by default, with no trait or struct surface change when disabled.
 
 ## User Scenarios & Testing
 
@@ -124,7 +136,7 @@ The crate has two Cargo features:
 
 #### FR-006: IEvictionPolicy Interface
 - **Method**: `create_pool(&self) -> PoolId` - Create a new eviction tracking pool.
-- **Method**: `track(&self, pool: PoolId, key: CacheKey) -> Result<EvictionHandle, EvictionPolicyError>` - Register a key for eviction tracking.
+- **Method**: `track(&self, pool: PoolId, key: CacheKey, semantics: BlockSemantics) -> Result<EvictionHandle, EvictionPolicyError>` - Register a key for eviction tracking. `semantics` carries per-block metadata (currently `session_id`, see FR-020) that session-aware policies use to group related blocks; pass `BlockSemantics::default()` when not applicable (semantics-free policies such as LRU ignore it).
 - **Method**: `touch(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError>` - Record an access, updating the entry's eviction ranking (policy-defined).
 - **Method**: `batch_touch(&self, handles: &[EvictionHandle]) -> Result<(), EvictionPolicyError>` - Batched access update.
 - **Method**: `remove(&self, handle: EvictionHandle) -> Result<(), EvictionPolicyError>` - Stop tracking entry.
@@ -152,6 +164,8 @@ The crate has two Cargo features:
 - **Method**: `recover_extent(&self, key: CacheKey, offset: u64, size_blocks: u32) -> Result<(), DispatchMapError>` - Insert recovered extent.
 - **Method**: `promote_block_to_memory_tier(&self, key: CacheKey, pointer: *mut u8, size: u32) -> Result<(), DispatchMapError>` - Promote a block-device entry to a memory-tier location **in place**, preserving the entry's eviction handle and all reference counts (works while pinned, unlike remove+recreate); retains `ssd_offset` so the promoted entry stays demotable.
 - **Method**: `try_evict_to_block(&self, key: CacheKey) -> Result<(), DispatchMapError>` - Atomically check evictability (MemoryTier state, `ssd_offset: Some(_)`, zero read/write refs) and, if evictable, transition to BlockDevice under a single lock hold.
+- **Method**: `set_checksum(&self, key: CacheKey, checksum: u32) -> Result<(), DispatchMapError>` (feature: `integrity-check`) - Record a CRC-32 on the entry so it travels with the index across demote/promote. Error (`KeyNotFound`) if the key is absent. Present only under the `integrity-check` feature.
+- **Method**: `get_checksum(&self, key: CacheKey) -> Option<u32>` (feature: `integrity-check`) - Return the recorded CRC-32, or `None` if the key is absent or no checksum was recorded (a stored `0` is treated as unset). Present only under the `integrity-check` feature.
 
 #### FR-008: IDispatcher Interface (feature: spdk)
 - **Method**: `initialize(&self, config: DispatcherConfig) -> Result<(), DispatcherError>` - Initialize with PCI addresses and config.
@@ -304,7 +318,7 @@ The crate has two Cargo features:
 - `IpcHandle`: Opaque GPU memory handle (pointer + size).
 - `DispatcherError`: 7-variant error enum.
 - `CacheKey`: Type alias for `u64`.
-- `LookupResult`: 3-variant enum (NotExist, MismatchSize, BlockDevice, MemoryTier).
+- `LookupResult`: 4-variant enum (NotExist, MismatchSize, BlockDevice, MemoryTier).
 
 #### FR-019: Supporting Types - Memory Tier
 - `MemoryTierError`: 7-variant error enum.
@@ -314,6 +328,8 @@ The crate has two Cargo features:
 - `EvictionHandle`: Opaque handle with pool_id and index.
 - `EvictionPolicyError`: 2-variant error enum.
 - `PoolId`: Type alias for `u32`.
+- `SessionId`: Type alias for `u64` — opaque per-request session identifier (`0` = unset).
+- `BlockSemantics`: `Copy + Default` metadata struct carrying `session_id: SessionId`, passed to `IEvictionPolicy::track` (FR-006) so session-aware policies (e.g. session-lists) can group related blocks. The default (`session_id = 0`) is semantics-free; policies like LRU ignore it.
 
 #### FR-021: Supporting Types - Extent Manager
 - `Extent`: Committed extent (key, size, offset).
@@ -382,6 +398,7 @@ The crate has two Cargo features:
   - **Method**: `disconnect(&self, endpoint: &str)` - Tear down the connection to a single host, if any (idempotent).
   - **Method**: `disconnect_all(&self)` - Tear down all connections in the table.
   - **Method**: `set_local_peer_id(&self, peer: PeerId)` - Supply this node's own zyre `PeerId`, stamped into the `rdma_cm` connect `private_data` on every outbound connection so the remote responder can correlate an inbound queue pair to this peer (required for teardown-before-reclaim). Should be called once, before the first `push`.
+  - **Method**: `push_async(&self, endpoint: &str, items: &[(CacheKey, RemoteRegion)], on_complete: PushCompletion) -> Result<(), RemoteLookupRdmaInitiatorError>` - Non-blocking form of `push`: queues the batch against `endpoint` and returns before the NIC has read the local buffers. When every write in the batch has completed (on any outcome — success, per-item failure, connection loss, or teardown), `on_complete` is invoked **exactly once** with one `PushStatus` per input item, in request order; on an `Err` return the callback is dropped un-invoked. A submit-queue-full rejection is reported as `UnableToConnect` for every item and may invoke `on_complete` synchronously before returning `Ok(())` (callers must tolerate that reentrancy). The caller must keep the local buffers valid until `on_complete` runs. `push` is a blocking convenience wrapper over this method.
 
 #### FR-031: IRemoteLookupRdmaResponder / IRemoteLookupRdmaResponderAdmin Interfaces (Inbound RDMA Accept)
 - These interfaces belong to the **requesting** instance — the passive (accept) counterpart of `IRemoteLookupRdmaInitiator` (FR-030). The responder is an actor owning a dedicated thread running an `rdma_cm` accept loop; because writes are one-sided, this interface carries control traffic only, never data.
@@ -406,6 +423,7 @@ The crate has two Cargo features:
 #### FR-033: Supporting Types - Remote Lookup RDMA Initiator
 - `RemoteRegion`: `Copy` 3-field remote memory descriptor (`addr: u64`, `rkey: u32`, `length: u32`) supplied by the requesting node, identifying where a matching local value may be RDMA-written.
 - `PushStatus`: `Copy` 4-variant per-item outcome of `push` (`Success`, `UnableToConnect`, `KeyNotFound`, `SizeMismatch`).
+- `PushCompletion`: `Box<dyn FnOnce(Vec<PushStatus>) + Send>` — the completion callback passed to `push_async` (FR-030), invoked exactly once with the per-item `PushStatus` vector when the batch finishes. A callback that releases resources must do so on drop as well as on call, since it is dropped un-invoked when `push_async` returns `Err`.
 - `RemoteLookupRdmaInitiatorError`: 2-variant error enum (`NotInitialized`, `InvalidEndpoint`) for method-level (not per-item) failures.
 
 #### FR-034: Supporting Types - Remote Lookup RDMA Responder

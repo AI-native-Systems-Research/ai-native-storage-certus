@@ -3,7 +3,7 @@
 **Feature Branch**: `dispatch-map`  
 **Created**: 2026-04-27  
 **Status**: Complete  
-**Last Synced**: 2026-07-22 — backfilled User Story 10/11, FR-025, FR-026 (`promote_block_to_memory_tier`, `try_evict_to_block`) from implemented, consumed code per `.specify/sync/drift-report.md`  
+**Last Synced**: 2026-08-07 — backfilled User Story 12 + FR-027/FR-028 (`integrity-check` feature: `set_checksum`/`get_checksum`), reworded FR-014 (info/debug logging only) and SC-004 (compile-time enum sizing), and marked US2/AS4 deferred, per `.specify/sync/drift-report.md`. Code-side aligns (FR-012 panic→error, US1/AS3 null-pointer check, `reuse_count` removal, Creusot comment) tracked in `.specify/sync/align-tasks.md`. Previously (2026-07-22) backfilled User Story 10/11, FR-025, FR-026.  
 **Input**: User description: "FUNCTIONAL-DESIGN.md — dispatch map component for the Certus storage system"
 
 ## User Scenarios & Testing *(mandatory)*
@@ -37,7 +37,7 @@ A caller needs to read extent data. It looks up an extent key in the dispatch ma
 1. **Given** key 42 is a MemoryTier entry and the write reference has been released, **When** `lookup(key=42)` is called, **Then** the memory-tier pointer and size are returned and read_ref is incremented.
 2. **Given** key 42 has been committed to block-device storage at offset 8192, **When** `lookup(key=42)` is called, **Then** `BlockDevice(offset=8192)` is returned and read_ref is incremented.
 3. **Given** key 99 does not exist, **When** `lookup(key=99)` is called, **Then** `NotExist` is returned.
-4. **Given** key 42 is looked up with size mismatch, **When** the caller expects a different size than recorded, **Then** `ErrorMismatchSize` is returned.
+4. *(Deferred for v0)* **Given** key 42 is looked up with size mismatch, **When** the caller expects a different size than recorded, **Then** `ErrorMismatchSize` is returned. — `lookup(key)` currently takes no expected-size argument, so this path is unreachable. The `MismatchSize` variant is reserved for a future size-checked lookup variant; see FR-004.
 5. **Given** key 42 currently has an active write reference, **When** `lookup(key=42)` is called, **Then** the call blocks until write_ref reaches 0, then returns the data location with read_ref incremented.
 
 ---
@@ -197,6 +197,23 @@ The dispatcher's SSD-evictor background path needs to demote a memory-tier entry
 
 ---
 
+### User Story 12 - Optional Per-Entry Data-Integrity Checksums (Priority: P3)
+
+When the component is built with the `integrity-check` Cargo feature, a caller can associate a CRC-32 checksum with a stored block so the checksum travels with the dispatch-map index entry (surviving demote/promote transitions) rather than living in caller-local state. On the store path the caller records the checksum via `set_checksum(key, checksum)`; on the load path it fetches the recorded value via `get_checksum(key)` and verifies the loaded data against it. A returned `None` means "no checksum recorded — skip verification".
+
+**Why this priority**: Integrity checking is an optional, off-by-default hardening feature. It is not on the core read/write hot path and adds a 4-byte field only when the feature is enabled, so it follows the primary lifecycle stories in priority.
+
+**Independent Test**: With the `integrity-check` feature enabled, create an entry, call `set_checksum(key, 0xABCD1234)`, and verify `get_checksum(key)` returns `Some(0xABCD1234)`. Verify `get_checksum` on a key with no recorded checksum (or checksum 0) returns `None`, and `set_checksum` on an absent key returns `KeyNotFound`. With the feature disabled, neither method is present on the `IDispatchMap` trait and `DispatchEntry` carries no `checksum` field.
+
+**Acceptance Scenarios**:
+
+1. **Given** the `integrity-check` feature is enabled and key 42 exists, **When** `set_checksum(key=42, checksum=0xABCD1234)` then `get_checksum(key=42)` is called, **Then** `Some(0xABCD1234)` is returned.
+2. **Given** the `integrity-check` feature is enabled and key 42 exists but no checksum has been recorded, **When** `get_checksum(key=42)` is called, **Then** `None` is returned (a recorded checksum of `0` is treated as "not set").
+3. **Given** the `integrity-check` feature is enabled and key 99 does not exist, **When** `set_checksum(key=99, checksum=...)` is called, **Then** `KeyNotFound` is returned.
+4. **Given** the `integrity-check` feature is disabled, **When** the component is compiled, **Then** `set_checksum`/`get_checksum` are absent from the `IDispatchMap` trait and `DispatchEntry` has no `checksum` field (unchanged 56-byte layout).
+
+---
+
 ### Edge Cases
 
 - `create_memory_tier_entry` with a null pointer returns an error; no entry is recorded in the map.
@@ -227,7 +244,7 @@ The dispatcher's SSD-evictor background path needs to demote a memory-tier entry
 - **FR-011**: System MUST provide `remove(key)` that deletes the entry from the map. The call MUST return an error if any read or write references are still active; the caller is responsible for draining all references before removal.
 - **FR-012**: On initialization, the `IEvictionPolicy` receptacle MUST be connected (returns an error if unbound). If an `IExtentManager` is also bound, the system MUST recover all committed extents by calling `IExtentManager::for_each_extent` and populating the map with their metadata. If no `IExtentManager` is bound, initialization MUST succeed with an empty map (returns `Ok(())`).
 - **FR-013**: All `IDispatchMap` methods MUST be thread-safe and re-entrant, allowing concurrent calls from multiple threads.
-- **FR-014**: System MUST use the `ILogger` receptacle for info, debug, and error logging throughout the component.
+- **FR-014**: System MUST use the `ILogger` receptacle for info and debug logging throughout the component. Error conditions are surfaced to the caller as typed `DispatchMapError` return values rather than logged via `ILogger` — the component does not call `logger.error(...)` on its error-return paths.
 - **FR-015**: System MUST be implemented as a component using `define_component!` with `IDispatchMap` as a provided interface and `ILogger`, `IExtentManager`, and `IEvictionPolicy` as receptacles. The `IEvictionPolicy` receptacle is mandatory for initialization and provides LRU ordering for `touch()` and `oldest_keys()` operations.
 - **FR-016**: System MUST provide `touch(key)` that marks the entry as most-recently-used via the `IEvictionPolicy` component (calling `ep.touch(handle)`) without acquiring any reference. MUST return `KeyNotFound` if the key does not exist. MUST NOT block or modify reference counts.
 - **FR-017**: System MUST provide `oldest_keys(n)` that returns up to `n` keys ordered oldest-first by delegating to `IEvictionPolicy::get_eviction_candidates(pool, n)`. Used by the dispatcher's eviction logic to identify victim entries. MUST be thread-safe.
@@ -242,10 +259,13 @@ The dispatcher's SSD-evictor background path needs to demote a memory-tier entry
 - **FR-026**: System MUST provide `try_evict_to_block(key)` that, under a single lock hold, atomically verifies the entry is in `MemoryTier` state with `ssd_offset: Some(_)` (write-through complete) and `read_ref == 0 && write_ref == 0` (no active references), then transitions it to `BlockDevice { offset }` using the recorded `ssd_offset`. This combines the `is_evictable` predicate (FR-022) and the `convert_memory_tier_to_block` transition (FR-018) into one atomic operation, eliminating the check-then-act race window that exists when calling them separately. MUST return `KeyNotFound` if the key is absent, or `InvalidState` if the entry is not evictable (active references held, no `ssd_offset` recorded, or the entry is not in `MemoryTier` state) — with no partial state change on error. After a successful call, no new reader can obtain the memory-tier pointer, so the caller may safely free the associated DRAM slot. Consumed by the dispatcher's and dispatcher-p2p's SSD-evictor background paths.
 - **FR-027**: System MUST provide `clear()` that atomically removes all entries from the map, unregistering each from the `IEvictionPolicy` component, and returns the number of entries removed as a `usize`. Used by the dispatcher during namespace teardown to drop the entire cache in one call rather than iterating `oldest_keys`/`remove`. MUST succeed even when entries hold active references (teardown assumes all callers have already quiesced).
 
+- **FR-027**: When compiled with the `integrity-check` Cargo feature, the system MUST provide `set_checksum(key, checksum)` — which records a CRC-32 on the entry (returning `KeyNotFound` if the key is absent) — and `get_checksum(key) -> Option<u32>` — which returns `Some(checksum)` for a key with a recorded non-zero checksum, and `None` if the key is absent or no checksum has been recorded (a stored value of `0` is treated as "not set"). The recorded checksum travels with the entry across demote/promote transitions.
+- **FR-028**: The `integrity-check` feature MUST be off by default. When it is disabled, the `set_checksum`/`get_checksum` methods MUST be absent from the `IDispatchMap` trait and the `DispatchEntry` MUST carry no `checksum` field (the 4-byte field and both methods are compiled only under the feature gate), leaving the default trait surface and struct layout unchanged.
+
 ### Key Entities
 
 - **CacheKey**: A `u64` value uniquely identifying an extent in the dispatch map.
-- **Dispatch Entry**: Holds the location (`Location` enum), size in 4KiB blocks, read reference count (`u32`), write reference count (`u32`), and an `EvictionHandle` (opaque handle into the `IEvictionPolicy` component for LRU ordering). Protected by `Mutex`/`Condvar`.
+- **Dispatch Entry**: Holds the location (`Location` enum), size in 4KiB blocks, read reference count (`u32`), write reference count (`u32`), and an `EvictionHandle` (opaque handle into the `IEvictionPolicy` component for LRU ordering). Protected by `Mutex`/`Condvar`. Under the `integrity-check` feature it additionally carries a 4-byte CRC-32 `checksum` field (see FR-027/FR-028).
 - **Location**: An enum with two variants: `BlockDevice { offset: u64 }` for committed data on SSD, and `MemoryTier { pointer: *mut u8, size: u32, ssd_offset: Option<u64> }` for DRAM-cached entries. Note: `size_blocks` is stored on the `DispatchEntry`, not within the `Location` variant.
 
 ## Success Criteria *(mandatory)*
@@ -255,7 +275,7 @@ The dispatcher's SSD-evictor background path needs to demote a memory-tier entry
 - **SC-001**: All committed extents are recoverable from persistent storage on component initialization — 100% of extents reported by the extent manager appear in the map after startup.
 - **SC-002**: Concurrent readers accessing the same key experience no data corruption and no deadlocks under sustained multi-threaded access.
 - **SC-003**: Write-to-read downgrade completes atomically with no window where the entry is unprotected (neither read-locked nor write-locked).
-- **SC-004**: Per-entry metadata is kept compact. The `DispatchEntry` struct size varies by `Location` variant (`BlockDevice` stores a `u64` offset; `MemoryTier` stores a pointer, size, and optional offset).
+- **SC-004**: Per-entry metadata is kept compact. `DispatchEntry` is sized at compile time to fit its largest `Location` variant (`MemoryTier`: `*mut u8` pointer + `u32` size + `Option<u64>` ssd_offset); `BlockDevice` entries (a single `u64` offset) occupy the same footprint since `Location` is a Rust `enum`. `std::mem::size_of::<DispatchEntry>()` is a fixed constant, exposed via the free `entry_size()` function for benchmarks and assertions.
 - **SC-005**: Lookup of a cached key completes without blocking when no writer is active.
 - **SC-006**: All reference count operations (take_read, take_write, release_read, release_write, downgrade) maintain consistent counts under concurrent access — no reference leaks or underflows.
 

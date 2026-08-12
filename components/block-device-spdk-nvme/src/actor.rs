@@ -182,6 +182,24 @@ unsafe extern "C" fn async_completion_cb(
     pool.release(io_ctx);
 }
 
+/// Completion callback for `spdk_nvme_ctrlr_cmd_abort_ext`.
+///
+/// The abort admin command reports only whether the abort request itself was
+/// accepted by the controller; it carries no context we need to reclaim. The
+/// aborted I/O's own `async_completion_cb` still fires (with an
+/// aborted-by-request status) and is where the `PendingOp` and its pinned
+/// buffer are released, so this callback intentionally does nothing.
+///
+/// # Safety
+///
+/// `_cpl` must be a valid SPDK NVMe completion entry (unused). Runs on the
+/// actor thread during `process_completions()`.
+unsafe extern "C" fn abort_completion_cb(
+    _ctx: *mut std::ffi::c_void,
+    _cpl: *const spdk_sys::spdk_nvme_cpl,
+) {
+}
+
 /// Tracks an in-flight asynchronous IO operation.
 #[allow(dead_code)]
 pub(crate) struct PendingOp {
@@ -197,6 +215,18 @@ pub(crate) struct PendingOp {
     pub read_buf: Option<Arc<Mutex<DmaBuffer>>>,
     /// Pinned write buffer — keeps DMA memory alive until SPDK completion.
     pub write_buf: Option<Arc<DmaBuffer>>,
+    /// The `cmd_cb_arg` (leaked `AsyncIoContext` pointer) SPDK holds for this
+    /// in-flight command. Used to match the command in
+    /// `spdk_nvme_ctrlr_cmd_abort_ext`. SPDK only compares this pointer; it
+    /// never dereferences or frees it (the original completion callback owns
+    /// and frees the context), so storing a copy here is safe.
+    pub cmd_cb_arg: *mut std::ffi::c_void,
+    /// Set when the client has requested an abort for this op. The pinned
+    /// buffer is kept alive until the original command's completion arrives;
+    /// at that point an `AbortAck` (rather than `ReadDone`/`WriteDone`) is
+    /// delivered and the buffer is finally released. This prevents the
+    /// controller from DMAing into memory the client has already reclaimed.
+    pub aborting: bool,
 }
 
 // SAFETY: PendingOp is only accessed from the actor thread.
@@ -490,12 +520,22 @@ impl BlockDeviceHandler {
                 };
 
                 #[cfg(feature = "telemetry")]
-                if entry.result.is_ok() {
+                if entry.result.is_ok() && !pending.aborting {
                     self.telemetry
                         .record(entry.latency_ns, entry.bytes, entry.is_read);
                 }
 
-                let completion = if entry.is_read {
+                // FR-005: if this op was aborted, its buffer was kept alive
+                // until now (this real completion). Only here — once the
+                // controller can no longer DMA into the buffer — is it safe to
+                // drop the PendingOp (done by the remove above) and ack the
+                // abort. `pending` is dropped at end of scope, releasing the
+                // pinned DmaBuffer Arc.
+                let completion = if pending.aborting {
+                    Completion::AbortAck {
+                        handle: OpHandle(entry.handle),
+                    }
+                } else if entry.is_read {
                     Completion::ReadDone {
                         handle: OpHandle(entry.handle),
                         tag: pending.tag,
@@ -677,6 +717,8 @@ impl BlockDeviceHandler {
                         qpair_idx: qp_idx,
                         read_buf: Some(buf.clone()),
                         write_buf: None,
+                        cmd_cb_arg: std::ptr::null_mut(),
+                        aborting: false,
                     },
                 );
 
@@ -695,6 +737,11 @@ impl BlockDeviceHandler {
                 }
 
                 let ctx_raw = Box::into_raw(ctx);
+                // Record the cmd_cb_arg so a later AbortOp can target this exact
+                // command via spdk_nvme_ctrlr_cmd_abort_ext.
+                if let Some(p) = pending_ops.get_mut(&handle) {
+                    p.cmd_cb_arg = ctx_raw as *mut std::ffi::c_void;
+                }
                 let mut rc;
                 const ENOMEM: i32 = -12;
                 // On -ENOMEM the qpair's request pool is momentarily exhausted.
@@ -791,6 +838,8 @@ impl BlockDeviceHandler {
                         qpair_idx: qp_idx,
                         read_buf: None,
                         write_buf: Some(buf.clone()),
+                        cmd_cb_arg: std::ptr::null_mut(),
+                        aborting: false,
                     },
                 );
 
@@ -809,6 +858,11 @@ impl BlockDeviceHandler {
                 }
 
                 let ctx_raw = Box::into_raw(ctx);
+                // Record the cmd_cb_arg so a later AbortOp can target this exact
+                // command via spdk_nvme_ctrlr_cmd_abort_ext.
+                if let Some(p) = pending_ops.get_mut(&handle) {
+                    p.cmd_cb_arg = ctx_raw as *mut std::ffi::c_void;
+                }
                 let mut rc;
                 const ENOMEM: i32 = -12;
                 // See the read path: retry on -ENOMEM up to the op's timeout
@@ -884,6 +938,17 @@ impl BlockDeviceHandler {
                     result,
                 });
             }
+            Command::FlushSync { ns_id } => {
+                let handle = *next_handle;
+                *next_handle += 1;
+
+                let result = Self::do_sync_flush(controller, ns_id);
+
+                session.deliver(Completion::FlushDone {
+                    handle: OpHandle(handle),
+                    result,
+                });
+            }
             Command::BatchSubmit { ops } => {
                 let batch_size = ops.len();
                 let batch_qp_idx = controller.qpairs.select_index(batch_size);
@@ -906,9 +971,53 @@ impl BlockDeviceHandler {
             }
             Command::AbortOp { handle } => {
                 let h = handle.0;
-                // Remove from pending if present; ack regardless.
-                let _ = pending_ops.remove(&h);
-                session.deliver(Completion::AbortAck { handle });
+                // FR-005: aborting a still-outstanding command must NOT drop the
+                // pinned DmaBuffer while the controller may still DMA into it.
+                // The previous implementation removed the PendingOp (releasing
+                // its buffer Arc) and immediately acked — a use-after-free if the
+                // client then reclaimed the buffer while the NVMe command was
+                // still in flight, and a silently-discarded completion when SPDK
+                // finally reported it.
+                //
+                // Instead: issue a real NVMe abort for the command (matched by
+                // its cmd_cb_arg), mark the op `aborting`, and keep the PendingOp
+                // (and its buffer) alive. The AbortAck is deferred until the
+                // original command's completion arrives (aborted-by-request or
+                // otherwise), at which point the buffer is released — see
+                // `process_completions`.
+                if let Some(op) = pending_ops.get_mut(&h) {
+                    op.aborting = true;
+                    let cmd_cb_arg = op.cmd_cb_arg;
+                    let qpair_idx = op.qpair_idx;
+                    if !cmd_cb_arg.is_null() {
+                        let ctrlr = controller.as_ptr();
+                        if let Some(qp) = controller.qpairs.get_mut(qpair_idx) {
+                            // SAFETY: ctrlr and qpair pointers are valid while the
+                            // actor is running. cmd_cb_arg identifies the in-flight
+                            // command; SPDK matches it by value and never
+                            // dereferences or frees it (the original completion
+                            // callback owns the context). A non-zero rc means the
+                            // abort could not be submitted (e.g. the drive does not
+                            // support Abort, or the command already completed) — in
+                            // that case the op still completes normally and the
+                            // deferred AbortAck is delivered then.
+                            let _rc = unsafe {
+                                spdk_sys::spdk_nvme_ctrlr_cmd_abort_ext(
+                                    ctrlr,
+                                    qp.as_ptr(),
+                                    cmd_cb_arg,
+                                    Some(abort_completion_cb),
+                                    std::ptr::null_mut(),
+                                )
+                            };
+                        }
+                    }
+                    // Do NOT remove the op or ack here; both happen on completion.
+                } else {
+                    // Unknown or already-completed handle: ack immediately so the
+                    // abort request is idempotent and never hangs the client.
+                    session.deliver(Completion::AbortAck { handle });
+                }
             }
             Command::NsProbe => {
                 let namespaces = namespace::to_namespace_info_list(&controller.namespaces);
@@ -1100,6 +1209,54 @@ impl BlockDeviceHandler {
         }
 
         Self::poll_sync_completion(qp, &completion, "write")
+    }
+
+    /// Execute a synchronous flush of the namespace's volatile write cache
+    /// via `spdk_nvme_ns_cmd_flush`. Blocks until the controller signals
+    /// completion. Supports the extent-manager `volatile_write_cache`
+    /// feature (spec FR-030).
+    fn do_sync_flush(
+        controller: &mut NvmeController,
+        ns_id: u32,
+    ) -> Result<(), NvmeBlockError> {
+        // Validate the namespace exists; flush takes no LBA range.
+        let _ns = namespace::validate_ns_id(&controller.namespaces, ns_id)?;
+
+        // Capture the controller pointer before the mutable qpair borrow.
+        let ctrlr_ptr = controller.as_ptr();
+
+        // SAFETY: ctrlr_ptr is valid; the SPDK environment is initialized.
+        let ns_ptr = unsafe { spdk_sys::spdk_nvme_ctrlr_get_ns(ctrlr_ptr, ns_id) };
+
+        let completion = SyncCompletionCtx {
+            done: std::sync::atomic::AtomicBool::new(false),
+            sct: std::sync::atomic::AtomicU16::new(0),
+            sc: std::sync::atomic::AtomicU16::new(0),
+        };
+
+        let qp = controller.qpairs.select_qpair(1);
+
+        // SAFETY: ns_ptr and the qpair are valid for the initialized
+        // controller; `completion` outlives the poll loop below, so the raw
+        // pointer handed to the callback stays valid until completion.
+        let rc = unsafe {
+            spdk_sys::spdk_nvme_ns_cmd_flush(
+                ns_ptr,
+                qp.as_ptr(),
+                Some(sync_completion_cb),
+                &completion as *const SyncCompletionCtx as *mut std::ffi::c_void,
+            )
+        };
+
+        if rc != 0 {
+            return Err(NvmeBlockError::BlockDevice(
+                interfaces::BlockDeviceError::WriteFailed(format!(
+                    "spdk_nvme_ns_cmd_flush failed with rc={rc}"
+                )),
+            ));
+        }
+
+        Self::poll_sync_completion(qp, &completion, "flush")
     }
 
     /// Execute a write-zeros command via `spdk_nvme_ns_cmd_write_zeroes`.
@@ -1306,6 +1463,8 @@ mod tests {
             qpair_idx: 0,
             read_buf: None,
             write_buf: None,
+            cmd_cb_arg: std::ptr::null_mut(),
+            aborting: false,
         };
         assert_eq!(op.handle, 42);
         assert_eq!(op.qpair_idx, 0);

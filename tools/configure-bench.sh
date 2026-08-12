@@ -52,10 +52,14 @@ NVME_BDFS=(${NVME_BDFS:-"0000:61:00.0" "0000:62:00.0" "0000:63:00.0" "0000:64:00
 # CPUs on the resource NUMA node ($RESOURCE_NUMA). Node 0 = 0-15,32-47.
 NUMA_CPUS="${NUMA_CPUS:-0-15,32-47}"
 
-# RAID / filesystem
-MD_DEVICE="/dev/md0"
-MOUNT_POINT="/mnt/fs-backend-bench"
-XFS_LABEL="fs-bench"
+# RAID / filesystem. Env-overridable so the SharedStorage RAID can target a
+# device/mount/label distinct from any pre-existing array (e.g. a separate
+# model-fs RAID that already occupies /dev/md0 // /mnt/fs-backend-bench). The
+# certus-mode teardown (bind_to_vfio -> teardown_raid_if_active) acts on these
+# same vars, so overriding them keeps certus from tearing down an unrelated array.
+MD_DEVICE="${MD_DEVICE:-/dev/md0}"
+MOUNT_POINT="${MOUNT_POINT:-/mnt/fs-backend-bench}"
+XFS_LABEL="${XFS_LABEL:-fs-bench}"
 
 # Memory cap. `mem=32G` truncates total physical RAM to 32 GiB; because node 0
 # occupies the low addresses, all 32G lands on node 0 and node 1 gets 0 MB — so
@@ -68,7 +72,12 @@ TOTAL_USABLE_GIB="${TOTAL_USABLE_GIB:-32}"  # GiB usable on node $RESOURCE_NUMA 
 
 # Hugepages (1 GiB pages)
 CERTUS_HUGEPAGES="${CERTUS_HUGEPAGES:-16}"  # 16 GiB SPDK DRAM tier on node $RESOURCE_NUMA
-SS_HUGEPAGES=0           # all regular memory for page cache
+# SharedStorage needs no boot-reserved hugepages (all RAM -> page cache), so the
+# default is 0. Overridable: when SharedStorage runs in the same invocation as
+# Certus-SPDK, the orchestrator sets this to CERTUS_HUGEPAGES so this phase does
+# not clobber the boot reservation Certus-SPDK requires (its runtime pages are
+# still released via free_all_hugepages, so page cache is unaffected this run).
+SS_HUGEPAGES="${SS_HUGEPAGES:-0}"
 
 # DPDK single-allocation ceiling. spdk_zmalloc -> rte_malloc cannot return a
 # block spanning more than one memseg list (RTE_MAX_MEM_MB_PER_LIST), so a
@@ -129,7 +138,7 @@ header() { echo -e "\n${BOLD}=== $* ===${NC}"; }
 
 check_root() {
     if [[ $EUID -ne 0 ]]; then
-        error "This script must be run as root (use sudo)."
+        echo -e "${RED}error: this script must be run as root (use sudo).${NC}" >&2
         exit 1
     fi
 }
@@ -702,6 +711,23 @@ allocate_hugepages_node() {
     else
         echo -e "  ${GREEN}Allocated $actual × 1G hugepages on node $RESOURCE_NUMA${NC}"
     fi
+
+    # The certus-server (SPDK/DPDK) runs as the invoking user, NOT root — its uid
+    # must match the rootless container's vLLM process for CUDA IPC. DPDK creates a
+    # per-segment file under the hugetlbfs mount, so that mount has to be writable
+    # by that user or EAL dies with "get_seg_fd(): ... Permission denied". The vfio
+    # nodes are already opened to the user in bind_to_vfio; do the same for the
+    # hugepage dir here (root:root by default).
+    local hp_owner="${SUDO_USER:-}"
+    if [[ -n "$hp_owner" && "$hp_owner" != "root" ]]; then
+        local hp_mnt
+        hp_mnt=$(awk '$3=="hugetlbfs" && $4 ~ /pagesize=1024M/ {print $2; exit}' /proc/mounts)
+        [[ -z "$hp_mnt" ]] && hp_mnt=$(awk '$3=="hugetlbfs" {print $2; exit}' /proc/mounts)
+        if [[ -n "$hp_mnt" ]]; then
+            chown "$hp_owner" "$hp_mnt" \
+                && echo "  Owner of $hp_mnt: $hp_owner (SPDK runs as this user)"
+        fi
+    fi
 }
 
 # Free ALL 1G hugepages (all nodes) at runtime — for sharedstorage, which wants
@@ -919,6 +945,15 @@ setup_raid() {
     fi
     mkdir -p "$MOUNT_POINT/shared-kv"
 
+    # The KV backend writes here, and podman's :z relabel runs, as the invoking
+    # (rootless) user. A root-owned mount blocks both the writes and the
+    # lsetxattr relabel (EPERM). Hand ownership to that user.
+    local owner="${SUDO_USER:-$(id -un)}"
+    if [[ "$owner" != "root" ]]; then
+        chown -R "$owner" "$MOUNT_POINT"
+        echo "  Owner: $owner"
+    fi
+
     echo
     echo "  RAID0 ready at $MOUNT_POINT"
     df -h "$MOUNT_POINT" | tail -1 | awk '{printf "  Capacity: %s, Used: %s\n", $2, $3}'
@@ -1019,7 +1054,7 @@ main() {
     if [[ "$mode" == "certus" ]]; then
         echo "  Certus server should use:"
         echo "    --pci-allowlist ${NVME_BDFS[0]},${NVME_BDFS[1]},${NVME_BDFS[2]},${NVME_BDFS[3]}"
-        echo "    --memory-tier-size $((CERTUS_HUGEPAGES))G"
+        echo "    --memory-tier-size $((CERTUS_HUGEPAGES - DPDK_HUGEPAGE_OVERHEAD_GIB))G"
     else
         echo "  SharedStorage KV path:"
         echo "    $MOUNT_POINT/shared-kv"

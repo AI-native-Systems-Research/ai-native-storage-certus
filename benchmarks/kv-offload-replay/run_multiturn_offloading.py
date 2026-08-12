@@ -27,8 +27,13 @@ Configurable via env vars:
     MAX_NUM_SEQS   vLLM batch parallelism             (default 64)
     GPU_MEM_UTIL   vLLM gpu_memory_utilization        (default 0.90)
     CPU_BYTES      offload tier size (bytes)          (default 4 GiB)
+    DISK_DIR       if set, add a native "fs" disk tier below the CPU tier via
+                   vLLM 0.26 TieringOffloadingSpec (CPU+disk offload, the in-tree
+                   replacement for SharedStorage). Empty = host-RAM-only.
+    DISK_READ_THREADS / DISK_WRITE_THREADS   fs tier I/O threads (default 16/16)
     TRACE_OFFLOAD  1 = use Tracing* connector (writes offload traces);
                    0 = built-in OffloadingConnector, no tracing  (default 0)
+                   (ignored when DISK_DIR is set)
     MODEL          HF model id                        (default NousResearch/Meta-Llama-3-8B)
 
 Conversations whose next prompt would exceed MAX_MODEL_LEN - OUTPUT_TOKENS are
@@ -63,6 +68,16 @@ if __name__ == "__main__":
     GPU_MEM_UTIL = float(os.environ.get("GPU_MEM_UTIL", 0.90))
     CPU_BYTES = int(os.environ.get("CPU_BYTES", 4 * (1 << 30)))
     MODEL = os.environ.get("MODEL", "NousResearch/Meta-Llama-3-8B")
+    MAX_ROUNDS = int(os.environ.get("MAX_ROUNDS", 0))  # 0 = until convs exhausted
+
+    # DISK_DIR — when set, add a filesystem (disk) secondary tier below the CPU
+    # tier via vLLM 0.26's native TieringOffloadingSpec + "fs" tier. This is the
+    # in-tree CPU+disk offload path that replaces the (0.26-broken) SharedStorage
+    # llmd_fs_backend connector: CPU_BYTES is the CPU primary tier, DISK_DIR is
+    # an unbounded on-disk KV tier. Empty (default) = host-RAM-only CPUOffload.
+    DISK_DIR = os.environ.get("DISK_DIR", "").strip()
+    DISK_READ_THREADS = int(os.environ.get("DISK_READ_THREADS", 16))
+    DISK_WRITE_THREADS = int(os.environ.get("DISK_WRITE_THREADS", 16))
 
     PROMPT_BUDGET = MAX_MODEL_LEN - OUTPUT_TOKENS
     print(f"[run] model={MODEL}", file=sys.stderr)
@@ -96,7 +111,35 @@ if __name__ == "__main__":
     # gRPC backend, which also uses the plain OffloadingConnector. Set
     # TRACE_OFFLOAD=1 to instead use the local Tracing* wrappers, which record
     # per-op offload traces (offloading_mgr_<pid>.jsonl etc.) at some overhead.
-    if os.environ.get("TRACE_OFFLOAD", "0") == "1":
+    if DISK_DIR:
+        # CPU + disk offload via vLLM 0.26's native multi-tier framework.
+        # OffloadingConnector -> TieringOffloadingSpec: CPU primary tier
+        # (cpu_bytes_to_use) with an "fs" secondary tier rooted at DISK_DIR
+        # (FileSystemTierManager, registered in SecondaryTierFactory). Both are
+        # registered by name in vLLM, so no *_module_path is needed. This is the
+        # in-tree replacement for the SharedStorage llmd_fs_backend connector.
+        os.makedirs(DISK_DIR, exist_ok=True)
+        KV_CONFIG = {
+            "kv_connector": "OffloadingConnector",
+            "kv_role": "kv_both",
+            "kv_connector_extra_config": {
+                "cpu_bytes_to_use": CPU_BYTES,
+                "spec_name": "TieringOffloadingSpec",
+                "eviction_policy": "lru",
+                "secondary_tiers": [
+                    {
+                        "type": "fs",
+                        "root_dir": DISK_DIR,
+                        "n_read_threads": DISK_READ_THREADS,
+                        "n_write_threads": DISK_WRITE_THREADS,
+                    }
+                ],
+            },
+        }
+        print(f"[run] disk tier (fs) root_dir={DISK_DIR} "
+              f"read_threads={DISK_READ_THREADS} write_threads={DISK_WRITE_THREADS}",
+              file=sys.stderr)
+    elif os.environ.get("TRACE_OFFLOAD", "0") == "1":
         KV_CONFIG = {
             "kv_connector": "TracingOffloadingConnector",
             "kv_connector_module_path": "tracing_offloading_connector",
@@ -167,6 +210,8 @@ if __name__ == "__main__":
     t_start = time.perf_counter()
 
     while True:
+        if MAX_ROUNDS and rounds_done >= MAX_ROUNDS:
+            break
         # Build this round's batch
         active_idx = []
         active_prompts = []
@@ -219,6 +264,8 @@ if __name__ == "__main__":
         "max_model_len": MAX_MODEL_LEN,
         "output_tokens": OUTPUT_TOKENS,
         "cpu_bytes_to_use": CPU_BYTES,
+        "disk_dir": DISK_DIR or None,
+        "tier": "cpu+disk" if DISK_DIR else "cpu",
     }
     with open(os.path.join(_here, "sharegpt_multiturn_results.json"), "w") as f:
         json.dump(summary, f, indent=2)
