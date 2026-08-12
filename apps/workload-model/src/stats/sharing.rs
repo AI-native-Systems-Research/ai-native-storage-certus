@@ -59,6 +59,8 @@ pub struct Sharing {
     prefix_open: bool,
     prefix_len: u64,
     refs_in_request: u64,
+    /// The prefix length of the last request closed, for `fit`.
+    last_prefix_len: u64,
 }
 
 impl Sharing {
@@ -96,8 +98,20 @@ impl Sharing {
         self.flush();
     }
 
+    /// The shared prefix length of the most recently closed request.
+    ///
+    /// Exposed so a `fit` can compute `private_depth` — the contract defines it as
+    /// "turn-1 path depth − that longest common prefix" — without reimplementing the
+    /// longest-common-prefix rule. Two implementations of it would put the fitted
+    /// `private_depth` and the validated `shared_depth` on different definitions,
+    /// which is the drift FR-021i exists to prevent.
+    pub fn last_prefix_len(&self) -> u64 {
+        self.last_prefix_len
+    }
+
     fn flush(&mut self) {
         if self.refs_in_request > 0 {
+            self.last_prefix_len = self.prefix_len;
             self.requests += 1;
             if self.prefix_len == 0 {
                 self.unshared_requests += 1;
