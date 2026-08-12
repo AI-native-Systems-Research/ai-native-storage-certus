@@ -54,7 +54,18 @@ struct Live {
 pub struct SessionShapes {
     live: crate::stats::FastMap<u32, Live>,
     turns: Hist,
-    private_depth: Hist,
+    /// One `(turn-1 path length, realised shared prefix)` pair per session.
+    ///
+    /// Retained rather than reduced to a histogram of their difference, because
+    /// `private_depth` has to be recomputable against a *different* attempted shared
+    /// depth than the realised one — see [`SessionShapes::private_depth_at`]. The two
+    /// are correlated per session (a deeper path tends to share more), so subtracting
+    /// one histogram from another would not give the same answer as subtracting per
+    /// session, which is the answer the generator's path formula needs.
+    ///
+    /// Memory is one pair per session — 16 bytes against the tens of thousands of
+    /// bytes each session's blocks already cost, so it does not change the bound.
+    turn_one: Vec<(u64, u64)>,
     growth: Hist,
     /// Think times in milliseconds, so the histogram's integer buckets have useful
     /// resolution: a think time of 3 s is 3000 buckets rather than 3.
@@ -97,7 +108,7 @@ impl SessionShapes {
                 if shared_len > path_len {
                     self.prefix_longer_than_path += 1;
                 }
-                self.private_depth.add(path_len.saturating_sub(shared_len));
+                self.turn_one.push((path_len, shared_len));
                 self.live.insert(
                     session,
                     Live {
@@ -129,18 +140,58 @@ impl SessionShapes {
         }
     }
 
+    /// `private_depth` recomputed against an attempted shared depth `scale` times
+    /// the realised one.
+    ///
+    /// The generator's path is `attempted_shared + private_depth + Σ growth`
+    /// (FR-014a), while a fit measures `private_depth` as
+    /// `turn-1 depth − *realised* shared prefix`. Those agree only when the attempted
+    /// and realised sharing agree — and FR-012a says the drawn value is an *upper
+    /// bound* on the realised one, so they generally do not. Feed a `shared_depth`
+    /// fitted from realised sharing back in as an attempt and paths come out longer
+    /// than the trace's by exactly the shortfall.
+    ///
+    /// So an iteration that raises the attempted sharing to make *realised* sharing
+    /// match must lower `private_depth` by the same amount, per session, or it will
+    /// fix the sharing statistic by breaking the request-length one. `scale` of 1.0
+    /// reproduces the plain measurement.
+    ///
+    /// Clamped at zero: a session whose attempted sharing exceeds its own path has no
+    /// private part, and a negative one is not expressible.
+    pub fn private_depth_at(&self, scale: f64) -> Option<Dist> {
+        let mut h = Hist::new();
+        for (path_len, shared_len) in &self.turn_one {
+            let attempted = (*shared_len as f64 * scale).round().max(0.0) as u64;
+            h.add(path_len.saturating_sub(attempted));
+        }
+        empirical_from(&h)
+    }
+
+    /// Turn-1 path lengths, for a report that wants to show what was subtracted from.
+    pub fn turn_one_depth(&self) -> Option<Dist> {
+        let mut h = Hist::new();
+        for (path_len, _) in &self.turn_one {
+            h.add(*path_len);
+        }
+        empirical_from(&h)
+    }
+
     /// Freeze into a fitted set of parameters.
     ///
     /// `sharing` supplies `shared_depth`, so that the emitted parameter and the
-    /// statistic a validator recomputes are the same measurement.
-    pub fn finish(mut self, sharing: &SharingReport) -> FittedSessions {
-        for live in self.live.values() {
-            self.turns.add(live.turns);
+    /// statistic a validator recomputes are the same measurement. Borrows rather than
+    /// consumes, so a caller iterating on the attempted sharing can keep calling
+    /// [`SessionShapes::private_depth_at`] against the same measurements.
+    pub fn finish(&mut self, sharing: &SharingReport) -> FittedSessions {
+        if self.turns.count() == 0 {
+            for live in self.live.values() {
+                self.turns.add(live.turns);
+            }
         }
         FittedSessions {
             sessions: self.live.len() as u64,
             turns: empirical_from(&self.turns),
-            private_depth: empirical_from(&self.private_depth),
+            private_depth: self.private_depth_at(1.0),
             growth_per_turn: empirical_from(&self.growth),
             // Seconds, which is what `think_time` is in (`SessionParams::think_time_s`).
             think_time: empirical_from(&self.think_ms).map(|d| scale(&d, 1.0 / 1000.0)),
@@ -298,6 +349,23 @@ mod tests {
         d.as_ref().and_then(|d| d.quantile(q)).expect("a quantile")
     }
 
+    /// A sharing report over the given realised depths.
+    fn sharing_with(depths: &[u64]) -> SharingReport {
+        let mut h = Hist::new();
+        for d in depths {
+            h.add(*d);
+        }
+        h.seal();
+        SharingReport {
+            requests: depths.len() as u64,
+            sharing_requests: h.count(),
+            unshared_requests: 0,
+            shared_fraction: Some(1.0),
+            realised_depth: h.summary(),
+            depth_buckets: h.buckets(),
+        }
+    }
+
     fn empty_sharing() -> SharingReport {
         SharingReport {
             requests: 0,
@@ -442,6 +510,74 @@ mod tests {
         let f = SessionShapes::new().finish(&sharing);
         assert_eq!(f.unshared_requests, 9);
         assert!(f.caveats().iter().any(|c| c.contains("shared nothing")));
+    }
+
+    #[test]
+    fn private_depth_recomputes_against_a_raised_attempted_sharing() {
+        // The prerequisite for any iteration on the realised-versus-attempted gap.
+        // Turn-1 depth 30 with a realised prefix of 18 gives private_depth 12; if the
+        // attempt is raised to 24 the private part must fall to 6, or the generated
+        // path — attempted + private + growth — would run 6 blocks longer than the
+        // trace's and fix the sharing statistic by breaking request length.
+        let mut s = SessionShapes::new();
+        for session in 0..50u32 {
+            s.observe(session, 0, 30, 18, None);
+        }
+        assert_eq!(quantile_of(&s.private_depth_at(1.0), 0.5), 12.0);
+        let raised = 24.0 / 18.0;
+        assert_eq!(quantile_of(&s.private_depth_at(raised), 0.5), 6.0);
+        // And the sum is invariant, which is the property that keeps path length fixed
+        // while sharing moves.
+        assert_eq!(quantile_of(&s.turn_one_depth(), 0.5), 30.0);
+    }
+
+    #[test]
+    fn recomputing_at_scale_one_is_the_plain_measurement() {
+        // Otherwise an iteration's first step would already have moved the model.
+        let mut s = SessionShapes::new();
+        for session in 0..30u32 {
+            s.observe(
+                session,
+                0,
+                20 + u64::from(session % 5),
+                3 + u64::from(session % 3),
+                None,
+            );
+        }
+        let f = s.finish(&sharing_with(&[3]));
+        assert_eq!(
+            f.private_depth.as_ref().and_then(|d| d.quantile(0.5)),
+            s.private_depth_at(1.0).and_then(|d| d.quantile(0.5))
+        );
+    }
+
+    #[test]
+    fn an_attempt_deeper_than_the_path_clamps_to_no_private_part() {
+        // A negative private depth is not expressible, and the clamp is what keeps an
+        // over-raised iteration from emitting one.
+        let mut s = SessionShapes::new();
+        for session in 0..20u32 {
+            s.observe(session, 0, 10, 8, None);
+        }
+        assert_eq!(quantile_of(&s.private_depth_at(4.0), 0.5), 0.0);
+    }
+
+    #[test]
+    fn the_pairs_survive_finishing_so_an_iteration_can_keep_asking() {
+        // `finish` borrows rather than consumes, which is what lets a caller fit,
+        // generate, measure and come back for another private_depth.
+        let mut s = SessionShapes::new();
+        for session in 0..25u32 {
+            s.observe(session, 0, 40, 10, None);
+        }
+        let first = s.finish(&sharing_with(&[10]));
+        let second = s.finish(&sharing_with(&[10]));
+        assert_eq!(first.sessions, second.sessions);
+        assert_eq!(
+            first.private_depth.as_ref().and_then(|d| d.quantile(0.5)),
+            second.private_depth.as_ref().and_then(|d| d.quantile(0.5))
+        );
+        assert!(s.private_depth_at(2.0).is_some());
     }
 
     #[test]
