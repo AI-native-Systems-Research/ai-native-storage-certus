@@ -46,11 +46,17 @@ if __name__ == "__main__":
     if _here not in sys.path:
         sys.path.insert(0, _here)
 
+    # TOKEN_TRACE — replay a Qwen-derived synthetic token trace instead of the
+    # ShareGPT text workload (see benchmarks/kv-offload-replay/
+    # qwen_trace_to_tokentrace.py). DATASET_PATH is not needed in this mode.
+    TOKEN_TRACE = os.environ.get("TOKEN_TRACE", "").strip()
+    BLOCK_SIZE = int(os.environ.get("BLOCK_SIZE", 16))
+
     DEFAULT_DATASET = os.path.join(
         _here, "..", "certus-connector", "sharegpt_12turn_450.json"
     )
     DATASET_PATH = os.environ.get("DATASET_PATH", DEFAULT_DATASET)
-    if not os.path.exists(DATASET_PATH):
+    if not TOKEN_TRACE and not os.path.exists(DATASET_PATH):
         print(f"[run] missing dataset {DATASET_PATH}", file=sys.stderr)
         sys.exit(1)
 
@@ -86,6 +92,26 @@ if __name__ == "__main__":
     CONV_MULTIPLIER = int(os.environ.get("CONV_MULTIPLIER", 1))
     MAX_ROUNDS = int(os.environ.get("MAX_ROUNDS", 0))  # 0 = until convs exhausted
 
+    # Deterministic hash -> token-id expansion, shared with the offline drivers
+    # (benchmarks/kv-offload-replay/run_multiturn_offloading.py). splitmix64
+    # keyed by (hash_id * BLOCK_SIZE + j) makes each block token a pure function
+    # of the hash_id, so identical hashes expand identically everywhere and the
+    # trace's prefix-reuse pattern is reproduced at block granularity.
+    def _splitmix64(x):
+        x = (x + 0x9E3779B97F4A7C15) & 0xFFFFFFFFFFFFFFFF
+        z = x
+        z = ((z ^ (z >> 30)) * 0xBF58476D1CE4E5B9) & 0xFFFFFFFFFFFFFFFF
+        z = ((z ^ (z >> 27)) * 0x94D049BB133111EB) & 0xFFFFFFFFFFFFFFFF
+        return (z ^ (z >> 31)) & 0xFFFFFFFFFFFFFFFF
+
+    def expand_hashes(hash_ids, vocab_size, block):
+        ids = []
+        for h in hash_ids:
+            base = (int(h) * block) & 0xFFFFFFFFFFFFFFFF
+            for j in range(block):
+                ids.append(_splitmix64(base + j) % vocab_size)
+        return ids
+
     PROMPT_BUDGET = MAX_MODEL_LEN - OUTPUT_TOKENS
     print(f"[run] model={MODEL} server={CERTUS_SERVER}", file=sys.stderr)
     print(
@@ -105,23 +131,41 @@ if __name__ == "__main__":
         },
     }
 
-    with open(DATASET_PATH) as f:
-        all_data = json.load(f)
+    sessions = None
     convs = []
-    for entry in all_data:
-        if len(convs) >= NUM_CONVS:
-            break
-        turns = entry.get("conversations", [])
-        human_turns = [t["value"] for t in turns if t.get("from") == "human"]
-        if len(human_turns) >= 2:
-            convs.append(human_turns)
-    print(f"[run] loaded {len(convs)} conversations", file=sys.stderr)
+    if TOKEN_TRACE:
+        with open(TOKEN_TRACE) as f:
+            tt = json.load(f)
+        sessions = tt["sessions"] if isinstance(tt, dict) else tt
+        tt_block = (tt.get("meta", {}).get("block_size", BLOCK_SIZE)
+                    if isinstance(tt, dict) else BLOCK_SIZE)
+        if tt_block != BLOCK_SIZE:
+            print(f"[run] WARNING: token-trace block_size={tt_block} != "
+                  f"BLOCK_SIZE={BLOCK_SIZE}; using {tt_block}", file=sys.stderr)
+            BLOCK_SIZE = tt_block
+        if NUM_CONVS and len(sessions) > NUM_CONVS:
+            sessions = sessions[:NUM_CONVS]
+        n_turns = sum(len(s["turns"]) for s in sessions)
+        print(f"[run] TOKEN_TRACE {os.path.basename(TOKEN_TRACE)}: "
+              f"{len(sessions)} sessions, {n_turns} turns, block_size={BLOCK_SIZE}",
+              file=sys.stderr)
+    else:
+        with open(DATASET_PATH) as f:
+            all_data = json.load(f)
+        for entry in all_data:
+            if len(convs) >= NUM_CONVS:
+                break
+            turns = entry.get("conversations", [])
+            human_turns = [t["value"] for t in turns if t.get("from") == "human"]
+            if len(human_turns) >= 2:
+                convs.append(human_turns)
+        print(f"[run] loaded {len(convs)} conversations", file=sys.stderr)
 
     # Replicate for a larger concurrent working set. Each replica's first turn
     # is tagged with a unique marker so the accumulated context hashes
     # distinctly per replica -- otherwise byte-identical copies would dedup at
     # the prefix cache / KV-block layer and store no extra data.
-    if CONV_MULTIPLIER > 1:
+    if CONV_MULTIPLIER > 1 and not TOKEN_TRACE:
         base = convs
         convs = []
         for r in range(CONV_MULTIPLIER):
@@ -172,6 +216,10 @@ if __name__ == "__main__":
         dtype=os.environ.get("DTYPE", "bfloat16"),
         enable_prefix_caching=True,
         enforce_eager=(os.environ.get("ENFORCE_EAGER", "1") != "0"),
+        # Align KV-block granularity to the trace's 16-token hash blocks (1
+        # recorded Qwen block == 1 KV block == 1 offload slab-unit); harmless in
+        # ShareGPT mode where 16 is already vLLM's default.
+        block_size=BLOCK_SIZE,
         **_engine_kwargs,
         # KV_CACHE_DTYPE="fp8" stores KV-cache blocks in 8-bit, halving the
         # per-sequence KV footprint so larger MAX_NUM_SEQS fits before OOM.
@@ -225,6 +273,67 @@ if __name__ == "__main__":
         return f"{(lat_ns_sum / ops) / 1000:.1f}us" if ops else "n/a"
 
     io_prev = io_stats()
+
+    # ── Token-trace replay path ───────────────────────────────────────────
+    # Round k drives turn k of every session that still has one. The prompt is
+    # the recorded hash_ids expanded to token-ids (not accumulated from vLLM's
+    # own output); each request is tagged with its session_id so the server sees
+    # the same session grouping the real trace had. Per-round SSD I/O deltas are
+    # polled exactly as in the text path.
+    if TOKEN_TRACE:
+        vocab_size = tokenizer.vocab_size
+        max_turns = max(len(s["turns"]) for s in sessions)
+        rounds_done = 0
+        total_generations = 0
+        total_out_tokens = 0
+        t_start = time.perf_counter()
+        for k in range(max_turns):
+            if MAX_ROUNDS and rounds_done >= MAX_ROUNDS:
+                break
+            active_prompts = []
+            active_sps = []
+            for sidx, s in enumerate(sessions):
+                if k >= len(s["turns"]):
+                    continue
+                turn = s["turns"][k]
+                ptoks = len(turn["hash_ids"]) * BLOCK_SIZE
+                if ptoks == 0 or ptoks >= MAX_MODEL_LEN:
+                    continue
+                mt = min(int(turn["max_tokens"]), MAX_MODEL_LEN - ptoks)
+                if mt < 1:
+                    continue
+                ids = expand_hashes(turn["hash_ids"], vocab_size, BLOCK_SIZE)
+                active_prompts.append({"prompt_token_ids": ids})
+                sp_i = SamplingParams(temperature=0.7, top_p=0.95,
+                                      max_tokens=mt, ignore_eos=True)
+                sp_i.extra_args = {"kv_transfer_params": {"session_id": sidx + 1}}
+                active_sps.append(sp_i)
+            if not active_prompts:
+                break
+            llm.generate(active_prompts, active_sps)
+            total_generations += len(active_prompts)
+            total_out_tokens += sum(sp.max_tokens for sp in active_sps)
+            rounds_done += 1
+            io_now = io_stats()
+            d = [io_now[j] - io_prev[j] for j in range(6)]
+            io_prev = io_now
+            d_rops, d_rb, d_rlat, d_wops, d_wb, d_wlat = d
+            print(
+                f"[run] round {rounds_done}: {len(active_prompts)} prompts, "
+                f"{total_generations} total generations  "
+                f"ssd_read={gib(d_rb)} ssd_write={gib(d_wb)} "
+                f"r_ops={d_rops} w_ops={d_wops} "
+                f"r_lat={mean_us(d_rlat, d_rops)} w_lat={mean_us(d_wlat, d_wops)}",
+                file=sys.stderr, flush=True)
+        elapsed = time.perf_counter() - t_start
+        tok_s = total_out_tokens / elapsed if elapsed else 0
+        print(
+            f"[run] DONE rounds={rounds_done} generations={total_generations} "
+            f"out_tokens={total_out_tokens} elapsed={elapsed:.1f}s "
+            f"tok/s={tok_s:.0f}",
+            file=sys.stderr,
+        )
+        sys.exit(0)
 
     rounds_done = 0
     total_generations = 0

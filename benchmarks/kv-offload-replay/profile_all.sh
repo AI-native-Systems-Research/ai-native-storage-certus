@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# profile_all.sh — run the four KV-offload benchmark variants against the same
-# 12-turn ShareGPT replay workload and emit a side-by-side throughput table.
+# profile_all.sh — run the KV-offload benchmark variants against the same
+# 12-turn ShareGPT (or Qwen token-trace) replay workload and emit a side-by-side
+# throughput table.
 #
 # Variants (run in this order):
 #   NoOffload      GPU-only baseline                 (image certus-nooffload-bench)
 #   Certus-SPDK    gRPC client + certus-server-yaml  (image certus-grpc-bench + host server)
 #   CPUOffload     vLLM OffloadingConnector -> host RAM (image certus-cpu-offload-bench)
+#   CPUTier        vLLM TieringOffloadingSpec CPU+fs disk tier (reuses cpu-offload image)
 #   SharedStorage  llmd_fs_backend RAID0/XFS         (image certus-sharedstorage-bench)
 #
 # Certus-SPDK runs first (of the storage backends) on purpose: it consumes the
@@ -69,11 +71,26 @@ ONLY=""
 SKIP=""
 LOGDIR=""
 
+# ── Token-trace (Qwen) replay mode ──────────────────────────────────────────
+# When --token-trace <file> is set, all backends replay a Qwen-derived synthetic
+# token trace (see qwen_trace_to_tokentrace.py) instead of the ShareGPT text
+# workload: NUM_CONVS caps sessions, per-turn output length comes from the trace.
+# The host trace file and the (repo) driver scripts are bind-mounted into every
+# container so no image rebuild is needed to pick up the token-trace code path.
+TOKEN_TRACE=""                 # host path to the converted token-trace JSON
+BLOCK_SIZE=16                  # tokens per hash block (matches trace's blksz_N)
+DISK_DIR_HOST=""               # host dir backing the cputier fs disk tier
+                               # (default: <model-fs>/kv-fs-tier, resolved below)
+
 # Image tags. Env-overridable (a caller can point this at externally-built
 # images). With --vllm-version set, an untagged name here gets a :vllm<ver> tag
 # appended below so multiple versions coexist.
 IMG_NOOFFLOAD="${IMG_NOOFFLOAD:-certus-nooffload-bench}"
 IMG_CPU="${IMG_CPU:-certus-cpu-offload-bench}"
+# The CPU+FS tiering variant reuses the cpu-offload image (it already ships
+# vLLM 0.26 + the native TieringOffloadingSpec framework); only the DISK_DIR env
+# + a disk bind mount differ. Override IMG_CPUTIER to use a dedicated image.
+IMG_CPUTIER="${IMG_CPUTIER:-${IMG_CPU}}"
 IMG_SHARED="${IMG_SHARED:-certus-sharedstorage-bench}"
 IMG_GRPC="${IMG_GRPC:-localhost/certus-grpc-bench}"
 
@@ -108,8 +125,18 @@ Flags (all optional; defaults shown):
   --gpu <sel>                  CDI GPU selector (all | 0 | 0,1 | <uuid>). [all]
   --memory-tier-size <sz>      Certus-SPDK server DRAM pool (e.g. 32G). [32G]
   --evict-threshold <f>        Certus-SPDK DRAM->SSD demotion threshold. [0.6]
-  --cpu-bytes <n>              CPUOffload host-RAM budget in bytes. [16Gi]
+  --cpu-bytes <n>              CPUOffload/cputier host-RAM (hot tier) budget in bytes.
+                               Undersize this (e.g. 4-8Gi) with --token-trace so the
+                               working set overflows to the NVMe/fs tier. [16Gi]
   --dram <n>                   SharedStorage DRAM budget in bytes. [32Gi]
+  --token-trace <file>         Replay a Qwen-derived synthetic token trace (see
+                               qwen_trace_to_tokentrace.py) instead of ShareGPT text.
+                               NUM_CONVS caps sessions; per-turn output comes from the
+                               trace. The file + repo drivers are bind-mounted into
+                               every container (no rebuild needed).
+  --block-size <n>             KV-block / hash-block size for token-trace mode. [16]
+  --disk-dir <dir>             Host dir backing the cputier fs disk tier.
+                               [<model-fs>/kv-fs-tier]
   --build                      Build any missing bench image before its run
                                (SharedStorage needs FS_BACKEND_DIR; gRPC via Dockerfile).
   --vllm-version <x.y.z>       Pin the vLLM base-image version for ALL four backends
@@ -120,7 +147,7 @@ Flags (all optional; defaults shown):
                                auto-matched to the base image's torch on build.
   --only a,b                   Run only these variants.
   --skip a,b                   Skip these variants.
-                               Names: nooffload, cpuoffload, sharedstorage, certus-spdk.
+                               Names: nooffload, cpuoffload, cputier, sharedstorage, certus-spdk.
   --logdir <dir>               Output dir. [<model-fs>/kvprofile-<runid>]
   -h, --help                   This help.
 EOF
@@ -143,6 +170,9 @@ while [[ $# -gt 0 ]]; do
         --evict-threshold)  EVICT_THRESH="$2"; shift 2;;
         --cpu-bytes)        CPU_BYTES="$2"; shift 2;;
         --dram)             DRAM="$2"; shift 2;;
+        --token-trace)      TOKEN_TRACE="$2"; shift 2;;
+        --block-size)       BLOCK_SIZE="$2"; shift 2;;
+        --disk-dir)         DISK_DIR_HOST="$2"; shift 2;;
         --build)            DO_BUILD=1; shift;;
         --vllm-version)     VLLM_VERSION="$2"; shift 2;;
         --only)             ONLY="$2"; shift 2;;
@@ -156,7 +186,7 @@ done
 # Reject unknown --only/--skip tokens up front. want() does substring-on-comma
 # matching, so a typo (e.g. --only cpu, --only certus) silently selects nothing and
 # that variant just never runs — fail loudly instead.
-VALID_VARIANTS="nooffload cpuoffload certus-spdk sharedstorage"
+VALID_VARIANTS="nooffload cpuoffload cputier certus-spdk sharedstorage"
 for _list in "$ONLY" "$SKIP"; do
     [[ -z "$_list" ]] && continue
     IFS=',' read -ra _toks <<<"$_list"
@@ -177,6 +207,34 @@ HF_CACHE="${HF_CACHE:-${MODEL_FS}/hf-cache}"
 PODMAN_STORE="${MODEL_FS}/podman/storage"
 PODMAN_RUNROOT="${MODEL_FS}/podman/run"
 RUNID="$(date +%H%M%S 2>/dev/null || echo run)_$$"
+
+# ── Token-trace mode: resolve paths + build shared bind-mount/env args ────────
+# The trace JSON and the (repo) driver scripts are bind-mounted into each
+# container at fixed paths so a token-trace run always uses THIS checkout's code
+# without an image rebuild. TOKEN_ENV_ARGS / TOKEN_MOUNT_ARGS are appended to the
+# self-contained container runs (nooffload/cpuoffload/cputier); the Certus-SPDK
+# and cputier paths add their own driver mount (different baked location / image).
+declare -a TOKEN_ENV_ARGS=() TOKEN_MOUNT_ARGS=()
+[[ -z "$DISK_DIR_HOST" ]] && DISK_DIR_HOST="${MODEL_FS}/kv-fs-tier"
+BENCH_OFFLOAD_DRIVER="${SCRIPT_DIR}/run_multiturn_offloading.py"
+BENCH_NOOFFLOAD_DRIVER="${SCRIPT_DIR}/run_multiturn_nooffload.py"
+GRPC_DRIVER="${REPO_ROOT}/certus-grpc-connector/run_multiturn_grpc_certus.py"
+TT_CTR="/workspace/token_trace.json"   # container path for the trace file
+if [[ -n "$TOKEN_TRACE" ]]; then
+    if [[ ! -f "$TOKEN_TRACE" ]]; then
+        echo "error: --token-trace file '$TOKEN_TRACE' not found" >&2
+        exit 1
+    fi
+    TOKEN_TRACE="$(cd "$(dirname "$TOKEN_TRACE")" && pwd)/$(basename "$TOKEN_TRACE")"
+    TOKEN_ENV_ARGS=(-e "TOKEN_TRACE=${TT_CTR}" -e "BLOCK_SIZE=${BLOCK_SIZE}")
+    # Mount the trace read-only and overlay the offline drivers over the baked
+    # copies (self-contained images bake /workspace/bench/*.py).
+    TOKEN_MOUNT_ARGS=(
+        -v "${TOKEN_TRACE}:${TT_CTR}:ro"
+        -v "${BENCH_OFFLOAD_DRIVER}:/workspace/bench/run_multiturn_offloading.py:z"
+        -v "${BENCH_NOOFFLOAD_DRIVER}:/workspace/bench/run_multiturn_nooffload.py:z"
+    )
+fi
 
 # ── vLLM version pinning ──────────────────────────────────────────────────────
 # When --vllm-version is set, all builds get --build-arg VLLM_VERSION and each
@@ -344,6 +402,12 @@ finish_variant() {  # variant rc logfile
     local parsed wall gens rounds native tps
     parsed="$(parse_log "$f")"
     IFS='|' read -r wall gens rounds native tps <<<"$parsed"
+    # In token-trace mode the per-turn output length varies, so the fixed
+    # OUTPUT_TOKENS-based tps is meaningless — the driver prints an accurate
+    # aggregate `tok/s=` (parsed into `native`). Use it as the table throughput.
+    if [[ -n "$TOKEN_TRACE" && -n "$native" ]]; then
+        tps="$(awk -v n="$native" 'BEGIN{printf "%.0f", n}')"
+    fi
     if [[ "$rc" -eq 0 && -n "$tps" ]]; then
         record "$variant" "OK" "$wall" "$rounds" "$gens" "$tps" "$native" "" "$f"
         log "$variant OK: wall=${wall}s rounds=${rounds} gens=${gens} tokens/s=${tps}"
@@ -456,6 +520,8 @@ run_container_bench() {  # variant image extra-args...
         -e "GPU_MEM_UTIL=${GPU_MEM_UTIL}" \
         -e "HF_HUB_OFFLINE=0" \
         -v "${HF_CACHE}:/root/.cache/huggingface:z" \
+        "${TOKEN_ENV_ARGS[@]}" \
+        "${TOKEN_MOUNT_ARGS[@]}" \
         "${extra[@]}" \
         "$image" 2>&1 | tee "$f"
     local rc="${PIPESTATUS[0]}"
@@ -585,8 +651,14 @@ if want certus-spdk; then
             NUM_CONVS="$NUM_CONVS" \
             MAX_ROUNDS="$MAX_ROUNDS" \
             MODEL="$MODEL" \
+            MAX_MODEL_LEN="$MAX_MODEL_LEN" \
+            MAX_NUM_SEQS="$MAX_NUM_SEQS" \
+            GPU_MEM_UTIL="$GPU_MEM_UTIL" \
             SLAB_SIZE_BYTES="$SLAB_SIZE_BYTES" \
             TENSOR_PARALLEL_SIZE="$TENSOR_PARALLEL_SIZE" \
+            TOKEN_TRACE="$TOKEN_TRACE" \
+            BLOCK_SIZE="$BLOCK_SIZE" \
+            GRPC_DRIVER="$GRPC_DRIVER" \
             HF_CACHE="$HF_CACHE" \
             PODMAN_STORE="$PODMAN_STORE" \
             PODMAN_RUNROOT="$PODMAN_RUNROOT" \
@@ -619,6 +691,39 @@ if want cpuoffload; then
         fi
     else
         run_container_bench "CPUOffload" "$IMG_CPU" -e "CPU_BYTES=${CPU_BYTES}"
+    fi
+fi
+
+# ══ CPU+FS tiering (native) ═══════════════════════════════════════════════════
+# vLLM 0.26's native OffloadingConnector -> TieringOffloadingSpec: a CPU (host-
+# RAM) primary "hot" tier of CPU_BYTES plus an "fs" disk secondary tier under
+# DISK_DIR_HOST. This is the vLLM-native disk-tier counterpart to Certus-SPDK —
+# undersize CPU_BYTES so the working set overflows the hot tier onto real NVMe.
+# Reuses the cpu-offload image; the driver engages the tiering path purely from
+# the DISK_DIR env, and we size /dev/shm to the CPU tier (its mmap lives there).
+cputier_run() {
+    mkdir -p "$DISK_DIR_HOST"
+    local shm=$(( CPU_BYTES + 4 * (1 << 30) ))
+    run_container_bench "CPUTier" "$IMG_CPUTIER" \
+        --shm-size "$shm" \
+        -e "CPU_BYTES=${CPU_BYTES}" \
+        -e "DISK_DIR=/workspace/kv-fs-tier" \
+        -e "DISK_READ_THREADS=16" \
+        -e "DISK_WRITE_THREADS=16" \
+        -v "${DISK_DIR_HOST}:/workspace/kv-fs-tier:z"
+}
+if want cputier; then
+    if ! img_exists "$IMG_CPUTIER"; then
+        if [[ "$DO_BUILD" -eq 1 ]] && build_simple "$IMG_CPUTIER" Dockerfile.cpu-offload cputier; then
+            cputier_run
+        else
+            reason="image ${IMG_CPUTIER} missing (pass --build)"
+            [[ "$DO_BUILD" -eq 1 ]] && reason="image ${IMG_CPUTIER} build failed (see build-cputier.log)"
+            record "CPUTier" "SKIPPED" "" "" "" "" "" "$reason" ""
+            warn "CPUTier SKIPPED: $reason"
+        fi
+    else
+        cputier_run
     fi
 fi
 

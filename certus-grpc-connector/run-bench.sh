@@ -23,8 +23,16 @@
 #   CERTUS_SERVER=host.containers.internal:50051  (host-gateway; NOT localhost —
 #                               that is the container's own loopback)
 #   NUM_CONVS=450  MODEL=ibm-granite/granite-4.1-8b  SLAB_SIZE_BYTES=2097152
+#   MAX_MODEL_LEN=8192  MAX_NUM_SEQS=64  GPU_MEM_UTIL=0.90
 #   HF_CACHE=$HOME/.cache/huggingface
 #   HF_TOKEN=<token>            passed through if set
+#   TOKEN_TRACE=<host-path>     replay a Qwen-derived synthetic token trace (see
+#                               benchmarks/kv-offload-replay/qwen_trace_to_tokentrace.py);
+#                               bind-mounted read-only into the container. Requires
+#                               GRPC_DRIVER to overlay this checkout's driver.
+#   BLOCK_SIZE=16               tokens/hash-block for TOKEN_TRACE mode
+#   GRPC_DRIVER=<host-path>     repo run_multiturn_grpc_certus.py to bind-mount over
+#                               the baked copy (so the container runs current code)
 #   PODMAN_STORE / PODMAN_RUNROOT   override rootless storage location (this
 #                               host builds into /mnt/certus1 — see below)
 set -euo pipefail
@@ -42,9 +50,33 @@ CERTUS_SERVER="${CERTUS_SERVER:-host.containers.internal:50051}"
 NUM_CONVS="${NUM_CONVS:-450}"
 MAX_ROUNDS="${MAX_ROUNDS:-0}"   # 0 = replay all turns; N caps at N rounds/turns
 MODEL="${MODEL:-ibm-granite/granite-4.1-8b}"
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-8192}"
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-64}"
+GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.90}"
 SLAB_SIZE_BYTES="${SLAB_SIZE_BYTES:-2097152}"
 TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-1}"
 HF_CACHE="${HF_CACHE:-$HOME/.cache/huggingface}"
+
+# ── Token-trace (Qwen) replay passthrough ──
+# TOKEN_TRACE = host path to the converted token-trace JSON; when set it (and
+# the repo gRPC driver, via GRPC_DRIVER) are bind-mounted into the container so
+# the run replays the trace with THIS checkout's code — no image rebuild.
+token_args=()
+if [[ -n "${TOKEN_TRACE:-}" ]]; then
+    if [[ ! -f "${TOKEN_TRACE}" ]]; then
+        echo "error: TOKEN_TRACE '${TOKEN_TRACE}' not found on host" >&2
+        exit 1
+    fi
+    token_args+=(
+        -e "TOKEN_TRACE=/workspace/token_trace.json"
+        -e "BLOCK_SIZE=${BLOCK_SIZE:-16}"
+        -v "${TOKEN_TRACE}:/workspace/token_trace.json:ro"
+    )
+fi
+driver_args=()
+if [[ -n "${GRPC_DRIVER:-}" && -f "${GRPC_DRIVER}" ]]; then
+    driver_args+=(-v "${GRPC_DRIVER}:/workspace/certus-grpc-connector/run_multiturn_grpc_certus.py:z")
+fi
 
 # This host keeps the (large) image on the /mnt/certus1 filesystem, so podman
 # needs explicit store paths. Override or unset for a default install.
@@ -116,10 +148,15 @@ exec command podman "${store_flags[@]}" run --rm \
     --ipc=host \
     "${cache_mount[@]}" \
     "${hf_env[@]}" \
+    "${token_args[@]}" \
+    "${driver_args[@]}" \
     -e "CERTUS_SERVER=${CERTUS_SERVER}" \
     -e "NUM_CONVS=${NUM_CONVS}" \
     -e "MAX_ROUNDS=${MAX_ROUNDS}" \
     -e "MODEL=${MODEL}" \
+    -e "MAX_MODEL_LEN=${MAX_MODEL_LEN}" \
+    -e "MAX_NUM_SEQS=${MAX_NUM_SEQS}" \
+    -e "GPU_MEM_UTIL=${GPU_MEM_UTIL}" \
     -e "TENSOR_PARALLEL_SIZE=${TENSOR_PARALLEL_SIZE}"\
     -e "SLAB_SIZE_BYTES=${SLAB_SIZE_BYTES}" \
     "${IMAGE}"
