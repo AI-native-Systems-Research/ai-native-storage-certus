@@ -26,6 +26,7 @@
 #       -t certus-grpc-bench:vllm0.22 .
 ARG VLLM_VERSION=0.23.0
 FROM docker.io/vllm/vllm-openai:v${VLLM_VERSION}
+ARG VLLM_VERSION
 ENTRYPOINT []
 
 # GPU is REQUIRED at run time: vLLM loads the model on the GPU and the connector
@@ -52,6 +53,10 @@ RUN pip install --no-cache-dir grpcio>=1.60.0
 RUN pip install --no-cache-dir protobuf>=4.25.0
 
 RUN pip install --no-cache-dir -e /workspace/certus-grpc-connector
+RUN case "${VLLM_VERSION}" in \
+      0.26*) python3 /workspace/certus-grpc-connector/patch_vllm_batch_lookup.py ;; \
+      *) echo "Skipping vLLM 0.26 lookup_many patch for ${VLLM_VERSION}" ;; \
+    esac
 
 COPY certus-grpc-connector/docker-entrypoint.sh /usr/local/bin/certus-entrypoint
 RUN chmod +x /usr/local/bin/certus-entrypoint

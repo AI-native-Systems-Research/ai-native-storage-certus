@@ -7,8 +7,7 @@ conftest.py installs fake vllm modules so these import cleanly.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-
-import pytest
+from types import SimpleNamespace
 
 from certus_grpc_connector import dispatcher_pb2 as pb
 from certus_grpc_connector.gpu import KvCacheIpc
@@ -26,6 +25,7 @@ class FakeStub:
         self.calls: list[tuple[str, object]] = []
         self.exists: dict[int, bool] = {}
         self.reserve_fail: set[int] = set()
+        self.pin_fail: set[int] = set()
         self.copy_fail: set[int] = set()
         self.commit_fail: set[int] = set()
         self.abort_fail: set[int] = set()
@@ -70,7 +70,18 @@ class FakeStub:
     def Pin(self, req):
         self.calls.append(("Pin", req))
         return pb.BatchPinResponse(
-            results=[pb.EntryResult(key=k, success=True) for k in req.keys]
+            results=[
+                pb.EntryResult(
+                    key=k,
+                    success=k not in self.pin_fail,
+                    error_code=(
+                        pb.ERROR_CODE_UNSPECIFIED
+                        if k not in self.pin_fail
+                        else pb.ERROR_CODE_KEY_NOT_FOUND
+                    ),
+                )
+                for k in req.keys
+            ]
         )
 
     def Unpin(self, req):
@@ -141,6 +152,143 @@ def test_lookup_maps_to_check():
     mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
     assert mgr.lookup((7).to_bytes(8, "big")) is True
     assert mgr.lookup((8).to_bytes(8, "big")) is False
+
+
+def test_lookup_skips_repeated_check_after_known_miss():
+    stub = FakeStub()
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    key = (8).to_bytes(8, "big")
+
+    assert mgr.lookup(key) is False
+    assert mgr.lookup(key) is False
+
+    checks = _calls_of(stub, "Check")
+    assert len(checks) == 1
+    assert list(checks[0].keys) == [8]
+
+
+def test_lookup_many_batches_check_and_preserves_order():
+    stub = FakeStub()
+    stub.exists[1] = True
+    stub.exists[3] = True
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    keys = [
+        (1).to_bytes(8, "big"),
+        (2).to_bytes(8, "big"),
+        (3).to_bytes(8, "big"),
+    ]
+
+    assert mgr.lookup_many(keys) == [True, False, True]
+
+    checks = _calls_of(stub, "Check")
+    assert len(checks) == 1
+    assert list(checks[0].keys) == [1, 2, 3]
+
+
+def test_lookup_many_skips_known_miss_in_batch():
+    stub = FakeStub()
+    stub.exists[2] = True
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    key1 = (1).to_bytes(8, "big")
+    key2 = (2).to_bytes(8, "big")
+
+    assert mgr.lookup(key1) is False
+    stub.calls.clear()
+
+    assert mgr.lookup_many([key1, key2]) == [False, True]
+
+    checks = _calls_of(stub, "Check")
+    assert len(checks) == 1
+    assert list(checks[0].keys) == [2]
+
+
+def test_lookup_rechecks_after_failed_commit_clears_hint():
+    stub = FakeStub()
+    stub.commit_fail = {46}
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    key = (46).to_bytes(8, "big")
+
+    assert mgr.lookup(key) is False
+    out = mgr.prepare_store([key])
+    assert out.keys_to_store == [key]
+    mgr.complete_store([key], success=True)
+    stub.calls.clear()
+
+    assert mgr.lookup(key) is False
+
+    assert _calls_of(stub, "Check")
+
+
+def test_assume_lookup_hit_flag_skips_check(monkeypatch):
+    monkeypatch.setenv("CERTUS_GRPC_ASSUME_LOOKUP_HIT", "1")
+    stub = FakeStub()
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+
+    assert mgr.lookup((99).to_bytes(8, "big")) is True
+    assert _calls_of(stub, "Check") == []
+
+
+def test_pin_on_lookup_uses_pin_and_prepare_load_reuses_ref(monkeypatch):
+    monkeypatch.setenv("CERTUS_GRPC_PIN_ON_LOOKUP", "1")
+    stub = FakeStub()
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    req = SimpleNamespace(req_id="req-1", kv_transfer_params=None)
+    key = (7).to_bytes(8, "big")
+
+    assert mgr.lookup(key, req) is True
+    assert _calls_of(stub, "Check") == []
+    assert len(_calls_of(stub, "Pin")) == 1
+    assert list(_calls_of(stub, "Pin")[0].keys) == [7]
+
+    spec = mgr.prepare_load([key], req)
+    assert spec.keys == [7]
+    assert len(_calls_of(stub, "Pin")) == 1
+
+    mgr.complete_load([key], req)
+    (unpin,) = _calls_of(stub, "Unpin")
+    assert list(unpin.keys) == [7]
+
+
+def test_pin_on_lookup_releases_unused_speculative_pin(monkeypatch):
+    monkeypatch.setenv("CERTUS_GRPC_PIN_ON_LOOKUP", "1")
+    stub = FakeStub()
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    req = SimpleNamespace(req_id="req-1", kv_transfer_params=None)
+    key = (8).to_bytes(8, "big")
+
+    assert mgr.lookup(key, req) is True
+    mgr.on_request_finished(req)
+
+    (unpin,) = _calls_of(stub, "Unpin")
+    assert list(unpin.keys) == [8]
+
+
+def test_pin_on_lookup_without_req_id_falls_back_to_check(monkeypatch):
+    monkeypatch.setenv("CERTUS_GRPC_PIN_ON_LOOKUP", "1")
+    stub = FakeStub()
+    stub.exists[9] = True
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+
+    assert mgr.lookup((9).to_bytes(8, "big")) is True
+
+    assert _calls_of(stub, "Pin") == []
+    (check,) = _calls_of(stub, "Check")
+    assert list(check.keys) == [9]
+
+
+def test_pin_on_lookup_miss_records_negative_hint(monkeypatch):
+    monkeypatch.setenv("CERTUS_GRPC_PIN_ON_LOOKUP", "1")
+    stub = FakeStub()
+    stub.pin_fail = {10}
+    mgr = GrpcCertusOffloadingManager(stub, block_size_bytes=4096)
+    req = SimpleNamespace(req_id="req-1", kv_transfer_params=None)
+    key = (10).to_bytes(8, "big")
+
+    assert mgr.lookup(key, req) is False
+    assert mgr.lookup(key, req) is False
+
+    assert len(_calls_of(stub, "Pin")) == 1
+    assert _calls_of(stub, "Unpin") == []
 
 
 def test_touch_maps_to_touch_rpc_no_promote():
@@ -320,6 +468,7 @@ def test_lookup_treats_same_u64_collision_as_miss():
 
     out = mgr.prepare_store([key_a])
     assert out.keys_to_store == [key_a]
+    mgr.complete_store([key_a], success=True)
     stub.exists[42] = True
 
     assert mgr.lookup(key_a) is True

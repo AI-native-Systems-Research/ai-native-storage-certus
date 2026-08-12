@@ -18,10 +18,12 @@ mapping:
 from __future__ import annotations
 
 import hashlib
+import os
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 from .compat import (
+    CAPS,
     LoadStoreSpec,
     OffloadingEvent,
     OffloadingManager,
@@ -31,6 +33,12 @@ from .compat import (
 
 from . import dispatcher_pb2 as pb
 from .mediums import BlockLocation, CertusLoadStoreSpec
+from .telemetry import call_rpc
+
+
+def _env_flag(name: str, default: str = "0") -> bool:
+    value = os.environ.get(name, default).strip().lower()
+    return value not in {"", "0", "false", "no", "off"}
 
 
 def _key_to_u64(key: OffloadKey) -> int:
@@ -89,6 +97,14 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         # server before reporting a hit to vLLM.
         self._known_present_u64: set[int] = set()
         self._known_absent_u64: set[int] = set()
+        self._pending_store_u64: set[int] = set()
+        self._assume_lookup_hit = _env_flag("CERTUS_GRPC_ASSUME_LOOKUP_HIT", "0")
+        # Experimental optimization: use Pin(promote=false) as lookup's
+        # authoritative hit test, then consume that read-ref in prepare_load.
+        # It is opt-in because it trades Check's per-key RPCs for Pin's per-key
+        # RPCs and must be benchmarked on the target server/workload.
+        self._pin_on_lookup = _env_flag("CERTUS_GRPC_PIN_ON_LOOKUP", "0")
+        self._lookup_pins_by_req: dict[str, dict[OffloadKey, int]] = {}
         # Cumulative count of blocks we could not offload because the server's
         # memory tier was saturated (Reserve failed). Logged in throttled
         # summaries rather than per-request, so a persistently-full tier does
@@ -133,6 +149,7 @@ class GrpcCertusOffloadingManager(OffloadingManager):
             self._original_keys_by_u64.pop(int_key, None)
             self._known_present_u64.discard(int_key)
             self._known_absent_u64.discard(int_key)
+            self._pending_store_u64.discard(int_key)
 
     def _clear_presence_hint(self, int_key: int) -> None:
         self._known_present_u64.discard(int_key)
@@ -151,6 +168,90 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         self._known_present_u64.discard(int_key)
         self._known_absent_u64.add(int_key)
         return True
+
+    def _apply_check_result(self, key: OffloadKey, int_key: int, exists: bool) -> bool:
+        if exists:
+            original = self._original_keys_by_u64.get(int_key)
+            if original is None:
+                # Preserve the old fast path for entries already present on the
+                # server before this manager saw their store. Once observed, keep
+                # the original key so future events use vLLM's identity.
+                self._mark_present(key, int_key)
+            elif original != key:
+                self._remember_key(key, int_key)
+                exists = False
+            else:
+                self._mark_present(key, int_key)
+        else:
+            self._mark_absent(key, int_key)
+        return exists
+
+    def _known_absent_lookup(self, key: OffloadKey, int_key: int) -> bool | None:
+        if int_key not in self._known_absent_u64 or int_key in self._pending_store_u64:
+            return None
+        original = self._original_keys_by_u64.get(int_key)
+        if original is None:
+            self._mark_absent(key, int_key)
+            return False
+        if original == key:
+            return False
+        self._remember_key(key, int_key)
+        return False
+
+    def _sync_lookup_exists(self, key: OffloadKey, int_key: int) -> bool:
+        resp = call_rpc(
+            self._stub,
+            "Check",
+            pb.BatchCheckRequest(keys=[int_key]),
+            items=1,
+        )
+        exists = bool(resp.results and resp.results[0].exists)
+        return self._apply_check_result(key, int_key, exists)
+
+    def _pin_lookup_exists(self, key: OffloadKey, int_key: int, req_id: str) -> bool:
+        req_pins = self._lookup_pins_by_req.setdefault(req_id, {})
+        pinned_key = req_pins.get(key)
+        if pinned_key is not None:
+            return pinned_key == int_key
+
+        original = self._original_keys_by_u64.get(int_key)
+        if original is not None and original != key:
+            self._remember_key(key, int_key)
+            return False
+
+        resp = call_rpc(
+            self._stub,
+            "Pin",
+            pb.BatchPinRequest(keys=[int_key], promote=False),
+            items=1,
+        )
+        result = resp.results[0] if resp.results else None
+        if result is None or not result.success:
+            if result is not None and result.error_code == pb.ERROR_CODE_KEY_NOT_FOUND:
+                self._mark_absent(key, int_key)
+            else:
+                self._clear_presence_hint(int_key)
+            return False
+
+        if not self._mark_present(key, int_key):
+            self._unpin_int_keys([int_key])
+            return False
+
+        req_pins[key] = int_key
+        return True
+
+    def _req_id(self, req_context) -> str | None:
+        req_id = getattr(req_context, "req_id", None)
+        return str(req_id) if req_id is not None else None
+
+    def _unpin_int_keys(self, int_keys: list[int]) -> None:
+        if int_keys:
+            call_rpc(
+                self._stub,
+                "Unpin",
+                pb.BatchUnpinRequest(keys=int_keys),
+                items=len(int_keys),
+            )
 
     # ── request lifecycle ──
 
@@ -177,28 +278,74 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         from .compat import lookup_result
 
         int_key = _key_to_u64(key)
-        resp = self._stub.Check(pb.BatchCheckRequest(keys=[int_key]))
-        exists = bool(resp.results and resp.results[0].exists)
-        if exists:
-            original = self._original_keys_by_u64.get(int_key)
-            if original is None:
-                # Preserve the old fast path for entries already present on the
-                # server before this manager saw their store. Once observed, keep
-                # the original key so future events use vLLM's identity.
-                self._mark_present(key, int_key)
-            elif original != key:
-                self._remember_key(key, int_key)
-                exists = False
-            else:
-                self._mark_present(key, int_key)
-        else:
-            self._mark_absent(key, int_key)
+        if self._assume_lookup_hit:
+            self._mark_present(key, int_key)
+            return lookup_result(True)
+
+        known_absent = self._known_absent_lookup(key, int_key)
+        if known_absent is not None:
+            return lookup_result(known_absent)
+
+        req_id = self._req_id(req_context)
+        if self._pin_on_lookup and req_id is not None:
+            exists = self._pin_lookup_exists(key, int_key, req_id)
+            return lookup_result(exists)
+
+        exists = self._sync_lookup_exists(key, int_key)
         return lookup_result(exists)
+
+    def lookup_many(
+        self, keys: Sequence[OffloadKey], req_context=None
+    ) -> Sequence[object]:
+        from .compat import lookup_result
+
+        keys_list = list(keys)
+        int_keys = _keys_to_u64s(keys_list)
+        results: list[bool | None] = [None] * len(keys_list)
+        check_pairs: list[tuple[int, OffloadKey, int]] = []
+
+        for idx, (key, int_key) in enumerate(zip(keys_list, int_keys)):
+            if self._assume_lookup_hit:
+                self._mark_present(key, int_key)
+                results[idx] = True
+                continue
+
+            known_absent = self._known_absent_lookup(key, int_key)
+            if known_absent is not None:
+                results[idx] = known_absent
+                continue
+
+            original = self._original_keys_by_u64.get(int_key)
+            if original is not None and original != key:
+                self._remember_key(key, int_key)
+                results[idx] = False
+                continue
+
+            check_pairs.append((idx, key, int_key))
+
+        if check_pairs:
+            resp = call_rpc(
+                self._stub,
+                "Check",
+                pb.BatchCheckRequest(keys=[int_key for _, _, int_key in check_pairs]),
+                items=len(check_pairs),
+            )
+            exists_by_key = {r.key: bool(r.exists) for r in resp.results}
+            for idx, key, int_key in check_pairs:
+                exists = exists_by_key.get(int_key, False)
+                results[idx] = self._apply_check_result(key, int_key, exists)
+
+        return [lookup_result(bool(result)) for result in results]
 
     def touch(self, keys: Iterable[OffloadKey], req_context=None) -> None:
         int_keys = _keys_to_u64s(keys)
         if int_keys:
-            self._stub.Touch(pb.BatchTouchRequest(keys=int_keys, promote=False))
+            call_rpc(
+                self._stub,
+                "Touch",
+                pb.BatchTouchRequest(keys=int_keys, promote=False),
+                items=len(int_keys),
+            )
 
     # ── store ──
 
@@ -229,8 +376,11 @@ class GrpcCertusOffloadingManager(OffloadingManager):
             check_pairs.append((orig, k))
 
         if check_pairs:
-            check = self._stub.Check(
-                pb.BatchCheckRequest(keys=[k for _, k in check_pairs])
+            check = call_rpc(
+                self._stub,
+                "Check",
+                pb.BatchCheckRequest(keys=[k for _, k in check_pairs]),
+                items=len(check_pairs),
             )
             exists = {r.key: r.exists for r in check.results}
             for orig, k in check_pairs:
@@ -262,7 +412,9 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         # every scheduler step, each logging "cannot store blocks" — a warning
         # storm under sustained pressure. Storing the subset that fits advances
         # the index and offloads what it can.
-        reserve = self._stub.Reserve(
+        reserve = call_rpc(
+            self._stub,
+            "Reserve",
             pb.BatchReserveRequest(
                 entries=[
                     pb.ReserveEntry(
@@ -270,7 +422,8 @@ class GrpcCertusOffloadingManager(OffloadingManager):
                     )
                     for k in to_store_ints
                 ]
-            )
+            ),
+            items=len(to_store_ints),
         )
         reserved_ok = {r.key for r in reserve.results if r.success}
 
@@ -300,6 +453,9 @@ class GrpcCertusOffloadingManager(OffloadingManager):
 
         stored_orig = [orig for orig, _ in stored_pairs]
         stored_ints = [k for _, k in stored_pairs]
+        for k in stored_ints:
+            self._known_absent_u64.discard(k)
+            self._pending_store_u64.add(k)
         locations = [BlockLocation(key=k) for k in stored_ints]
         return PrepareStoreOutput(
             keys_to_store=stored_orig,
@@ -332,9 +488,15 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         if not int_keys:
             return
         if success:
-            resp = self._stub.CommitStore(pb.BatchCommitStoreRequest(keys=int_keys))
+            resp = call_rpc(
+                self._stub,
+                "CommitStore",
+                pb.BatchCommitStoreRequest(keys=int_keys),
+                items=len(int_keys),
+            )
             committed = {r.key for r in resp.results if r.success}
             for key, int_key in zip(keys_list, int_keys):
+                self._pending_store_u64.discard(int_key)
                 if int_key in committed:
                     self._mark_present(key, int_key)
                 else:
@@ -342,9 +504,15 @@ class GrpcCertusOffloadingManager(OffloadingManager):
                     # present"; do not convert either into a trusted local hint.
                     self._clear_presence_hint(int_key)
         else:
-            resp = self._stub.AbortStore(pb.BatchAbortStoreRequest(keys=int_keys))
+            resp = call_rpc(
+                self._stub,
+                "AbortStore",
+                pb.BatchAbortStoreRequest(keys=int_keys),
+                items=len(int_keys),
+            )
             aborted = {r.key for r in resp.results if r.success}
             for key, int_key in zip(keys_list, int_keys):
+                self._pending_store_u64.discard(int_key)
                 if int_key in aborted:
                     self._mark_absent(key, int_key)
                 else:
@@ -353,7 +521,23 @@ class GrpcCertusOffloadingManager(OffloadingManager):
     # ── load ──
 
     def prepare_load(self, keys: Iterable[OffloadKey], req_context=None) -> LoadStoreSpec:
-        int_keys = _keys_to_u64s(keys)
+        keys_list = list(keys)
+        int_keys = _keys_to_u64s(keys_list)
+        req_id = self._req_id(req_context)
+        req_pins = (
+            self._lookup_pins_by_req.get(req_id)
+            if self._pin_on_lookup and req_id is not None
+            else None
+        )
+        to_pin: list[int] = []
+        for key, int_key in zip(keys_list, int_keys):
+            if req_pins is not None and req_pins.get(key) == int_key:
+                del req_pins[key]
+                continue
+            to_pin.append(int_key)
+        if req_id is not None and req_pins == {}:
+            self._lookup_pins_by_req.pop(req_id, None)
+
         # Pin (promote=FALSE) only takes the eviction-protecting read-ref. We must
         # NOT ask Pin to promote: Pin's promote is async/fire-and-forget, and the
         # Lookup that immediately follows (in the load handler) already promotes
@@ -362,30 +546,42 @@ class GrpcCertusOffloadingManager(OffloadingManager):
         # surfaced as ALLOCATION_FAILED, which fails the load and crashes vLLM
         # (worker asserts transfer success). Lookup is self-sufficient: it serves
         # MemoryTier hits directly and promotes BlockDevice misses in one path.
-        resp = self._stub.Pin(pb.BatchPinRequest(keys=int_keys, promote=False))
+        resp = None
+        if to_pin:
+            resp = call_rpc(
+                self._stub,
+                "Pin",
+                pb.BatchPinRequest(keys=to_pin, promote=False),
+                items=len(to_pin),
+            )
         # Diagnostic: vLLM only reaches here for keys lookup()/Check reported as
         # present, and cannot drop keys from the returned spec (dst block ids are
         # positionally zipped). So a Pin failure here is the earliest signal that
         # a Check-hit entry vanished — log which key + why.
-        for r in resp.results:
-            if not r.success:
-                print(
-                    f"[certus-grpc] PIN FAILURE in prepare_load key={r.key} "
-                    f"error_code={r.error_code} msg={r.error_message!r} "
-                    f"(Check said present, Pin says gone — eviction race)",
-                    flush=True,
-                )
+        if resp is not None:
+            for r in resp.results:
+                if not r.success:
+                    print(
+                        f"[certus-grpc] PIN FAILURE in prepare_load key={r.key} "
+                        f"error_code={r.error_code} msg={r.error_message!r} "
+                        f"(Check said present, Pin says gone — eviction race)",
+                        flush=True,
+                    )
         return CertusLoadStoreSpec([BlockLocation(key=k) for k in int_keys])
 
     def complete_load(self, keys: Iterable[OffloadKey], req_context=None) -> None:
         int_keys = _keys_to_u64s(keys)
-        if int_keys:
-            self._stub.Unpin(pb.BatchUnpinRequest(keys=int_keys))
+        self._unpin_int_keys(int_keys)
 
     # ── events / shutdown ──
 
     def take_events(self) -> Iterable[OffloadingEvent]:
-        resp = self._stub.TakeEvents(pb.TakeEventsRequest(max_events=0))
+        resp = call_rpc(
+            self._stub,
+            "TakeEvents",
+            pb.TakeEventsRequest(max_events=0),
+            items=0,
+        )
         if resp.dropped_count:
             print(
                 f"[certus-grpc] WARNING: {resp.dropped_count} eviction events "
@@ -403,6 +599,7 @@ class GrpcCertusOffloadingManager(OffloadingManager):
             original = self._original_keys_by_u64.pop(e.key, None)
             self._known_present_u64.discard(e.key)
             self._known_absent_u64.add(e.key)
+            self._pending_store_u64.discard(e.key)
             removed.append(
                 original if original is not None else e.key.to_bytes(8, "big")
             )
@@ -413,6 +610,15 @@ class GrpcCertusOffloadingManager(OffloadingManager):
                 removed=True,
             )
 
+    def on_request_finished(self, req_context=None) -> None:
+        req_id = self._req_id(req_context)
+        if req_id is not None:
+            pins = self._lookup_pins_by_req.pop(req_id, None)
+            if pins:
+                self._unpin_int_keys(list(pins.values()))
+
     def shutdown(self) -> None:
-        # Channel is owned by the spec singleton; nothing per-manager to close.
-        pass
+        for req_id in list(self._lookup_pins_by_req):
+            pins = self._lookup_pins_by_req.pop(req_id, None)
+            if pins:
+                self._unpin_int_keys(list(pins.values()))

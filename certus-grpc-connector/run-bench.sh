@@ -26,6 +26,8 @@
 #   NUM_CONVS=450  MODEL=ibm-granite/granite-4.1-8b  SLAB_SIZE_BYTES=2097152
 #   HF_CACHE=$HOME/.cache/huggingface
 #   HF_TOKEN=<token>            passed through if set
+#   CERTUS_GRPC_RPC_TELEMETRY=1 emit aggregate connector RPC count/latency summary
+#   CERTUS_GRPC_RPC_TELEMETRY_INTERVAL_S=30  telemetry summary cadence
 #   PODMAN_STORE / PODMAN_RUNROOT   optional override for rootless storage
 #                               location. Empty/unset = Podman's default store.
 set -euo pipefail
@@ -99,6 +101,11 @@ IMAGE_ID="$(podman image inspect "${IMAGE}" --format '{{.Id}}' 2>/dev/null)"
 # ── HF token passthrough (only if set) ──
 hf_env=()
 [[ -n "${HF_TOKEN:-}" ]] && hf_env+=(-e "HF_TOKEN=${HF_TOKEN}")
+[[ -n "${CERTUS_GRPC_RPC_TELEMETRY:-}" ]] && hf_env+=(-e "CERTUS_GRPC_RPC_TELEMETRY=${CERTUS_GRPC_RPC_TELEMETRY}")
+[[ -n "${CERTUS_GRPC_RPC_TELEMETRY_SAMPLES:-}" ]] && hf_env+=(-e "CERTUS_GRPC_RPC_TELEMETRY_SAMPLES=${CERTUS_GRPC_RPC_TELEMETRY_SAMPLES}")
+[[ -n "${CERTUS_GRPC_RPC_TELEMETRY_INTERVAL_S:-}" ]] && hf_env+=(-e "CERTUS_GRPC_RPC_TELEMETRY_INTERVAL_S=${CERTUS_GRPC_RPC_TELEMETRY_INTERVAL_S}")
+[[ -n "${CERTUS_GRPC_ASSUME_LOOKUP_HIT:-}" ]] && hf_env+=(-e "CERTUS_GRPC_ASSUME_LOOKUP_HIT=${CERTUS_GRPC_ASSUME_LOOKUP_HIT}")
+[[ -n "${CERTUS_GRPC_PIN_ON_LOOKUP:-}" ]] && hf_env+=(-e "CERTUS_GRPC_PIN_ON_LOOKUP=${CERTUS_GRPC_PIN_ON_LOOKUP}")
 
 # ── HF cache mount (only if the dir exists) ──
 cache_mount=()

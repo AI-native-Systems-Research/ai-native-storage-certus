@@ -44,6 +44,7 @@ from . import dispatcher_pb2 as pb
 from .client import all_success
 from .gpu import KvCacheIpc
 from .mediums import CertusLoadStoreSpec
+from .telemetry import call_rpc
 
 # Direction tags. Only used to populate the ≤0.24 ``TransferResult.transfer_type``
 # (dropped on 0.26); kept as the natural label for a job's direction either way.
@@ -236,8 +237,11 @@ def _build_worker_class():
                 for block_id, key in zip(gpu_block_ids, keys)
             ]
             try:
-                resp = self._stub.CopyToStore(
-                    pb.BatchCopyToStoreRequest(entries=entries)
+                resp = call_rpc(
+                    self._stub,
+                    "CopyToStore",
+                    pb.BatchCopyToStoreRequest(entries=entries),
+                    items=len(entries),
                 )
             except Exception as e:  # noqa: BLE001 - store failure must not crash vLLM
                 # A whole-batch RPC failure: roll back all reservations and report
@@ -247,7 +251,12 @@ def _build_worker_class():
                     flush=True,
                 )
                 try:
-                    self._stub.AbortStore(pb.BatchAbortStoreRequest(keys=keys))
+                    call_rpc(
+                        self._stub,
+                        "AbortStore",
+                        pb.BatchAbortStoreRequest(keys=keys),
+                        items=len(keys),
+                    )
                 except Exception:  # noqa: BLE001
                     pass
                 return True
@@ -276,7 +285,12 @@ def _build_worker_class():
                     flush=True,
                 )
                 try:
-                    self._stub.AbortStore(pb.BatchAbortStoreRequest(keys=failed))
+                    call_rpc(
+                        self._stub,
+                        "AbortStore",
+                        pb.BatchAbortStoreRequest(keys=failed),
+                        items=len(failed),
+                    )
                 except Exception as e:  # noqa: BLE001 - best-effort rollback
                     print(f"[certus-grpc] AbortStore rollback failed: {e}", flush=True)
             return True
@@ -289,7 +303,12 @@ def _build_worker_class():
                 )
                 for block_id, key in zip(gpu_block_ids, keys)
             ]
-            resp = self._stub.Lookup(pb.BatchLookupRequest(entries=entries))
+            resp = call_rpc(
+                self._stub,
+                "Lookup",
+                pb.BatchLookupRequest(entries=entries),
+                items=len(entries),
+            )
             # Diagnostic: a load must not fail (vLLM asserts), and it shouldn't be
             # able to — prepare_load pinned these keys. If the server reports any
             # per-key failure, dump exactly which key + error so we can see WHY a
