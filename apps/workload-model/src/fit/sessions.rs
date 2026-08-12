@@ -331,6 +331,15 @@ fn empirical_from_buckets(buckets: &[(u64, u64, u64)]) -> Option<Dist> {
     Some(Dist::Shaped(Shape::Empirical { points }))
 }
 
+/// Scale an empirical distribution's values.
+///
+/// Used for a unit conversion (milliseconds to seconds) and by the iteration that
+/// raises an attempted `shared_depth` above the realised one. Values only: the
+/// cumulative probabilities are the shape and must not move.
+pub fn scale_values(d: &Dist, factor: f64) -> Dist {
+    scale(d, factor)
+}
+
 /// Scale an empirical distribution's values, for a unit conversion.
 fn scale(d: &Dist, factor: f64) -> Dist {
     match d {

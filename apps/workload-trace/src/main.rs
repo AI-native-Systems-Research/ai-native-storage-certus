@@ -19,7 +19,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use workload_model::fit::branching;
 use workload_model::fit::document::{assemble, RootPopularity, Supplied};
-use workload_model::fit::sessions::SessionShapes;
+use workload_model::fit::sessions::{scale_values, SessionShapes};
 use workload_model::plan::{read_plan, Generator, PlanEvent};
 use workload_model::stats::divergence::{
     compare, Measure, Statistic, Tolerances, DEFAULT_TOLERANCE_MIN_REQUESTS,
@@ -27,6 +27,14 @@ use workload_model::stats::divergence::{
 use workload_model::stats::{Ref, Report, Statistics};
 
 mod read;
+
+/// Iterations the fit will spend raising the attempted sharing to meet the realised.
+///
+/// Each one regenerates the whole plan, so the cap is a real cost bound rather than a
+/// formality. Eight is enough for the ratio step to converge geometrically from any
+/// starting shortfall within the clamp, and a fit that has not converged by then is
+/// reported as not converged rather than ground on.
+const MAX_FIT_ITERATIONS: usize = 8;
 
 #[derive(Parser)]
 #[command(
@@ -373,29 +381,147 @@ fn cmd_fit(
 
     // Generate from the fitted model and compare it against the trace it came from.
     // Ground truth is the trace, so this is the only check that says whether the fit
-    // is any good.
-    let mut g = Generator::new(&doc).map_err(|e| e.to_string())?;
-    let mut plan_stats = Statistics::new(wss_window);
-    let mut chunk: Vec<PlanEvent> = Vec::new();
-    while !g.is_done() {
-        chunk.clear();
-        if g.fill(&mut chunk) == 0 {
+    // is any good — and it is also the feedback the iteration below needs.
+    //
+    // Why iterate at all: `shared_depth` is fitted from *realised* sharing but the
+    // generator consumes it as what a session **attempts**, and FR-012a makes the drawn
+    // value an upper bound on the realised one. Feed the realised value back in as an
+    // attempt and realised sharing comes out short. So the attempt is raised until the
+    // realised sharing it produces matches the trace's.
+    //
+    // The two moves have to happen together. Raising the attempt alone lengthens every
+    // path by the shortfall, because `private_depth` was measured as
+    // `turn-1 depth − realised prefix`; so each iteration also recomputes
+    // `private_depth` against the raised attempt, which holds path length fixed while
+    // sharing moves. Without that, the loop appears to converge on sharing while
+    // quietly ruining request length.
+    let target_sharing = trace_report.sharing.realised_depth.p50.unwrap_or(0) as f64;
+    let mut scale = 1.0f64;
+    let mut best: Option<(f64, workload_model::schema::Document, Report, f64, usize)> = None;
+    let mut history: Vec<String> = Vec::new();
+
+    for iteration in 0..MAX_FIT_ITERATIONS {
+        let candidate = if iteration == 0 {
+            doc.clone()
+        } else {
+            // Re-assemble with the raised attempt and the matching private part.
+            let mut adjusted = fitted_sessions.clone();
+            adjusted.shared_depth = fitted_sessions
+                .shared_depth
+                .as_ref()
+                .map(|d| scale_values(d, scale));
+            adjusted.private_depth = shapes.private_depth_at(scale);
+            match assemble(
+                &fitted_branching,
+                &adjusted,
+                &roots,
+                &supplied,
+                trace_report.requests,
+                trace.chronological,
+            ) {
+                Ok(f) => f.document.expect("assembled"),
+                Err(e) => {
+                    history.push(format!("iteration {iteration}: {e}"));
+                    break;
+                }
+            }
+        };
+
+        // A raised attempt can push the combination past the occupancy floor, which is
+        // a real stop rather than something to iterate through (FR-055a).
+        if workload_model::schema::validate::validate(&candidate).is_rejected() {
+            history.push(format!(
+                "iteration {iteration} at scale {scale:.3}: the raised attempt no longer \
+                 passes the schema, so the search stops here"
+            ));
             break;
         }
-        plan_stats.push_events(&chunk);
-    }
-    let synthetic = plan_stats.finish();
 
+        let mut g = Generator::new(&candidate).map_err(|e| e.to_string())?;
+        let mut plan_stats = Statistics::new(wss_window);
+        let mut chunk: Vec<PlanEvent> = Vec::new();
+        while !g.is_done() {
+            chunk.clear();
+            if g.fill(&mut chunk) == 0 {
+                break;
+            }
+            plan_stats.push_events(&chunk);
+        }
+        let synthetic = plan_stats.finish();
+
+        let mut d = compare(&synthetic, &trace_report, &tol);
+        d.mark_incomparable(
+            Statistic::ReuseDistanceBytes,
+            "the synthetic plan's sizes are the supplied block_bytes and the trace's are \
+             tokens per block, so this compares units rather than workloads",
+        );
+        // Worst *relative* excess over tolerance, so statistics on different scales are
+        // comparable: a KS of 0.2 against 0.05 is as bad as a log-ratio of 0.6 against
+        // 0.15, and picking the best candidate by absolute divergence would let the
+        // loosest statistic decide.
+        let worst = d
+            .divergences
+            .iter()
+            .filter(|x| x.incomparable.is_none() && x.tolerance > 0.0)
+            .map(|x| x.value / x.tolerance)
+            .fold(0.0f64, f64::max);
+
+        let realised = synthetic.sharing.realised_depth.p50.unwrap_or(0) as f64;
+        history.push(format!(
+            "iteration {iteration}: attempt scale {scale:.3}, realised sharing p50 \
+             {realised:.0} against the trace's {target_sharing:.0}, worst divergence \
+             {worst:.2}x its tolerance"
+        ));
+
+        let improved = best.as_ref().map(|(w, ..)| worst < *w).unwrap_or(true);
+        if improved {
+            best = Some((worst, candidate, synthetic, scale, iteration));
+        }
+        if worst <= 1.0 {
+            break;
+        }
+
+        // Raise the attempt by the shortfall. Clamped per step so one noisy
+        // measurement cannot send the search somewhere it will not come back from.
+        if realised <= 0.0 || target_sharing <= 0.0 {
+            break;
+        }
+        let step = (target_sharing / realised).clamp(0.5, 2.0);
+        if (step - 1.0).abs() < 0.01 {
+            break;
+        }
+        scale = (scale * step).clamp(1.0, 16.0);
+    }
+
+    let (worst, doc, synthetic, best_scale, best_iteration) =
+        best.ok_or("no candidate model could be generated")?;
+
+    println!("\n  iterations");
+    for h in &history {
+        println!("    {h}");
+    }
+    println!(
+        "  best      iteration {best_iteration} at attempt scale {best_scale:.3}, worst \
+         divergence {worst:.2}x its tolerance"
+    );
+    if best_scale > 1.0 {
+        println!(
+            "  note      shared_depth is emitted {best_scale:.3}x the realised sharing, \
+             because the generator reads it as what a session *attempts* and realised \
+             sharing falls short of that (FR-012a). private_depth was lowered to match, so \
+             path length is unchanged"
+        );
+    }
+
+    println!(
+        "\n  synthetic {} requests, {} references from the fitted model",
+        synthetic.requests, synthetic.references
+    );
     let mut d = compare(&synthetic, &trace_report, &tol);
     d.mark_incomparable(
         Statistic::ReuseDistanceBytes,
         "the synthetic plan's sizes are the supplied block_bytes and the trace's are tokens \
          per block, so this compares units rather than workloads",
-    );
-
-    println!(
-        "\n  synthetic {} requests, {} references from the fitted model",
-        synthetic.requests, synthetic.references
     );
     println!(
         "\n  {:<24} {:>10} {:>10} {:>9}  verdict",
