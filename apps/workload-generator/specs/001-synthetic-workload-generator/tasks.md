@@ -248,15 +248,20 @@ recovered parameters against the originals. Ground truth is exact, so any diverg
 - [X] T082 [US6] Implement manifest interpretation — `source_class`, `id_semantics`, `field_status`, `block_stats` — treating `supports.P` as undocumented and depending on nothing from it
 - [ ] T083 [US6] Implement the parquet reader and writer behind the `parquet` feature in `apps/workload-trace/src/parquet.rs`
 - [ ] T084 [US6] Implement `certus-trace convert` for events.bin → parquet (FR-021h)
-- [ ] T085 [US6] Implement `certus-trace fit`, including the FR-055c root-boundary rule and its reported
-  boundary depth — **the branching half is done**: `workload_model::fit::branching` ports the derived
-  segmentation rule (clip, merge at the rounding resolution, uncensored prefix, occupancy-driven root
-  fold) with its FR-055a/FR-055b caveats as code, and `workload_model::fit::sessions` measures
-  `turns`, `think_time`, `private_depth`, `growth_per_turn` and `shared_depth`. Remaining:
-  `roots.popularity`, arrival, `branch_skew` (an open derivation, so leave unset per FR-055), the
-  YAML emitter, and the `certus-trace fit` subcommand that drives them
+- [X] T085 [US6] Implement `certus-trace fit`, including the FR-055c root-boundary rule and its reported
+  boundary depth. `workload_model::fit::branching` ports the derived segmentation rule (clip, merge at
+  the rounding resolution, uncensored prefix, occupancy-driven root fold) with its FR-055a/FR-055b
+  caveats as code; `workload_model::fit::sessions` measures `turns`, `think_time`, `private_depth`,
+  `growth_per_turn` and `shared_depth`; `fit::roots` measures `roots.popularity`; arrival comes from
+  the trace's own span where it has timestamps. `branch_skew` is left **unset** per FR-055, its
+  fitting procedure being an open derivation. The subcommand drives all of it in FR-057's order —
+  measure, assemble, generate, compare, and write only on a pass. Two findings are recorded against
+  it: the **trunk is fitted from shared keys** (those ≥2 sessions reached), not from every distinct
+  key at a depth, which otherwise counted the trunk plus every private path and recovered
+  `roots.count: 1770` against a source's 12; and a fitted `empirical` distribution needs step
+  resolution finer than the gate it is checked against, which is now FR-056a
 - [X] T086 [US6] Implement `certus-trace validate` for plan-vs-plan and plan-vs-trace, taking every statistic from `workload-model::stats` and implementing none (FR-021i)
-- [ ] T087 [US6] Implement the fit report: per-statistic divergence, tolerances used, provenance of `reconstructed` versus `native` fields, and order-dependence marking for traces without timestamps
+- [X] T087 [US6] Implement the fit report: per-statistic divergence, tolerances used, provenance of `reconstructed` versus `native` fields, and order-dependence marking for traces without timestamps. Provenance is keyed by *field* rather than by parameter, and names the block field the declared encoding actually caused the reader to open — attaching a status to a field no measurement went near reads as a claim about where the values came from. `--explain` adds the per-bucket CDF table that a bare divergence number cannot give
 
 **Checkpoint**: a real trace produces a model, and the round trip proves the tools agree with each other.
 

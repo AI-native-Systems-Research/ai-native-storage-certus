@@ -251,6 +251,98 @@ impl Capabilities {
     pub fn trunk_fittable(&self) -> bool {
         self.sessions_native
     }
+
+    /// Which trace field each fitted parameter came from, and that field's status.
+    ///
+    /// FR-055e requires the fit report to say which fitted values came from
+    /// `reconstructed` rather than `native` fields. The distinction is not a nicety:
+    /// a reconstructed field is the *corpus author's* inference about their own
+    /// trace, so a parameter fitted from one inherits that inference, and a reader
+    /// comparing two fitted models has no way to see it from the YAML — the emitted
+    /// document records values, never their pedigree.
+    ///
+    /// Keyed by field rather than by parameter, because the fields are few and each
+    /// feeds several parameters; the inverse table would repeat every status.
+    ///
+    /// The block field depends on the declared [`Encoding`], so this is derived here
+    /// rather than written as a constant: reporting `full_input_blocks` for a delta
+    /// trace would name a field the reader never opened.
+    pub fn provenance(&self) -> Vec<Provenance> {
+        let block_fields: &[&str] = match self.encoding {
+            Encoding::Full => &["full_input_blocks"],
+            Encoding::Delta => &["new_input_blocks", "new_output_blocks"],
+        };
+        let mut out = Vec::new();
+        for f in block_fields {
+            out.push(self.provenance_of(
+                f,
+                "every path measurement: corpus.trees.branching, corpus.roots.count, \
+                 sessions.private_depth, sessions.shared_depth, sessions.growth_per_turn",
+            ));
+        }
+        out.push(self.provenance_of(
+            "session_id",
+            "everything that needs to tell two conversations apart: sessions.turns, \
+             sessions.growth_per_turn, corpus.roots.popularity, and the cross-session \
+             sharing behind shared_depth and trunk occupancy",
+        ));
+        out.push(self.provenance_of(
+            "request_start",
+            "sessions.think_time and arrival.rate_per_s, and the chronological order \
+             every order-dependent statistic is measured in",
+        ));
+        out
+    }
+
+    fn provenance_of(&self, field: &str, feeds: &str) -> Provenance {
+        Provenance {
+            field: field.to_string(),
+            status: self
+                .field_status
+                .get(field)
+                .cloned()
+                .unwrap_or_else(|| "absent from the manifest".to_string()),
+            feeds: feeds.to_string(),
+        }
+    }
+}
+
+/// One trace field, its manifest status, and what was fitted from it (FR-055e).
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Provenance {
+    /// The trace field.
+    pub field: String,
+    /// What the manifest says about it, verbatim.
+    pub status: String,
+    /// The fitted parameters that consumed it.
+    pub feeds: String,
+}
+
+impl Provenance {
+    /// Whether this field was inferred by the corpus author rather than recorded.
+    pub fn is_reconstructed(&self) -> bool {
+        self.status == "reconstructed"
+    }
+}
+
+impl std::fmt::Display for Provenance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "`{}` is {} — it fed {}",
+            self.field, self.status, self.feeds
+        )?;
+        if self.is_reconstructed() {
+            write!(
+                f,
+                ". Reconstructed means the corpus author derived this field rather than \
+                 recording it, so those values carry that derivation's assumptions and are \
+                 not independent evidence of it"
+            )?;
+        }
+        Ok(())
+    }
 }
 
 /// A parameter that cannot be fitted, and why.
@@ -803,5 +895,87 @@ mod tests {
         assert!(refs.iter().all(|r| !r.warmup), "a trace has no warmup");
         assert_eq!(refs[0].size, 16, "sizes are tokens, the block size");
         assert_eq!(trace.references(), 3);
+    }
+
+    #[test]
+    fn provenance_names_the_block_field_the_reader_actually_opened() {
+        // Reporting `full_input_blocks` for a delta trace would attach a status to a
+        // field no measurement went near, which is worse than saying nothing: it
+        // reads as a claim about where the values came from.
+        let full = Capabilities::from_manifest(&manifest(Encoding::Full, 1), 16).unwrap();
+        let fields: Vec<String> = full.provenance().iter().map(|p| p.field.clone()).collect();
+        assert!(
+            fields.contains(&"full_input_blocks".to_string()),
+            "{fields:?}"
+        );
+        assert!(
+            !fields.contains(&"new_input_blocks".to_string()),
+            "a full-encoding trace's deltas were never read: {fields:?}"
+        );
+
+        let delta = Capabilities::from_manifest(&manifest(Encoding::Delta, 1), 16).unwrap();
+        let fields: Vec<String> = delta.provenance().iter().map(|p| p.field.clone()).collect();
+        assert!(
+            fields.contains(&"new_input_blocks".to_string()),
+            "{fields:?}"
+        );
+        assert!(
+            fields.contains(&"new_output_blocks".to_string()),
+            "{fields:?}"
+        );
+        assert!(
+            !fields.contains(&"full_input_blocks".to_string()),
+            "{fields:?}"
+        );
+
+        // Both shapes must always account for the two non-block fields, or a
+        // reconstructed session id could be fitted from and never mentioned.
+        for caps in [&full, &delta] {
+            let fields: Vec<String> = caps.provenance().iter().map(|p| p.field.clone()).collect();
+            assert!(fields.contains(&"session_id".to_string()), "{fields:?}");
+            assert!(fields.contains(&"request_start".to_string()), "{fields:?}");
+        }
+    }
+
+    #[test]
+    fn a_reconstructed_field_is_flagged_and_says_what_it_fed() {
+        // The delta fixture's block fields are reconstructed, which is the real
+        // corpus's common case — so the status must survive to the report rather
+        // than being flattened into "present".
+        let caps = Capabilities::from_manifest(&manifest(Encoding::Delta, 1), 16).unwrap();
+        let p = caps.provenance();
+        let blocks = p
+            .iter()
+            .find(|p| p.field == "new_input_blocks")
+            .expect("read");
+        assert!(blocks.is_reconstructed());
+        assert!(
+            blocks.feeds.contains("branching") && blocks.feeds.contains("shared_depth"),
+            "a flag with no consequence named is not provenance: {}",
+            blocks.feeds
+        );
+        let msg = blocks.to_string();
+        assert!(msg.contains("reconstructed"), "{msg}");
+        assert!(
+            msg.contains("rather than recording it"),
+            "the report must say what reconstructed means, since the YAML cannot: {msg}"
+        );
+
+        // `session_id` is native in the fixture, so it must not be flagged.
+        let s = p.iter().find(|p| p.field == "session_id").expect("read");
+        assert!(!s.is_reconstructed(), "status was {}", s.status);
+    }
+
+    #[test]
+    fn a_field_missing_from_the_manifest_is_reported_as_missing_not_as_native() {
+        // Defaulting an absent field to "native" would be the one wrong answer here:
+        // it claims evidence for a value nothing supports.
+        let mut m = manifest(Encoding::Full, 1);
+        m.field_status.remove("request_start");
+        let caps = Capabilities::from_manifest(&m, 16).unwrap();
+        let p = caps.provenance();
+        let ts = p.iter().find(|p| p.field == "request_start").expect("read");
+        assert_eq!(ts.status, "absent from the manifest");
+        assert!(!ts.is_reconstructed());
     }
 }

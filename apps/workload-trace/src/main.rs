@@ -378,6 +378,26 @@ fn cmd_fit(
         fitted_branching.observed_to_depth
     );
 
+    // FR-055e: which fitted values came from a reconstructed field. Printed before
+    // the values themselves, because it qualifies all of them.
+    let provenance = trace.capabilities.provenance();
+    println!("\n  provenance");
+    let reconstructed: Vec<_> = provenance.iter().filter(|p| p.is_reconstructed()).collect();
+    if reconstructed.is_empty() {
+        println!(
+            "    - every field this fit read is native: {}",
+            provenance
+                .iter()
+                .map(|p| p.field.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    } else {
+        for p in &provenance {
+            println!("    - {p}");
+        }
+    }
+
     println!("\n  not fitted");
     for u in &fitted.unset {
         println!("    - {u}");
