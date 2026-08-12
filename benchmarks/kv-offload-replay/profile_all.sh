@@ -68,6 +68,10 @@ VLLM_MIN_RAM_GIB="${VLLM_MIN_RAM_GIB:-16}"           # RAM floor reserved for vL
 DPDK_HUGEPAGE_OVERHEAD_GIB="${DPDK_HUGEPAGE_OVERHEAD_GIB:-3}"  # DPDK heap + SPDK DMA
 DPDK_MEMSEG_LIST_GIB="${DPDK_MEMSEG_LIST_GIB:-64}"   # DPDK single-alloc ceiling (pool cap)
 EVICT_THRESH="0.6"
+# CPU offload tier (CPUOffload's only tier; Tiered-CPU-FS's PRIMARY tier). Not a
+# CLI flag — it is derived from --total-mem minus the vLLM floor (see the
+# derivation block below). This value is only the fallback when --total-mem is
+# not given, and matches "32G total − 16G vLLM" on this host.
 CPU_BYTES=$((16 * (1 << 30)))
 DRAM=$((32 * (1 << 30)))
 SLAB_SIZE_BYTES=2097152
@@ -139,8 +143,6 @@ Flags (all optional; defaults shown):
   --client-network <mode>      Certus-SPDK client transport: host (--network=host +
                                localhost, loopback, no proxy) or bridge (host.containers
                                .internal, rootless slirp4netns/pasta proxy). [host]
-  --cpu-bytes <n>              CPU tier size in bytes — CPUOffload tier, and the
-                               Tiered-CPU-FS PRIMARY tier (overflow spills to the FS tier). [16Gi]
   --dram <n>                   SharedStorage DRAM budget (DRAM env). [32Gi]
   --build                      Build any missing bench image before its run
                                (all images via their Dockerfiles). Tiered-CPU-FS
@@ -177,7 +179,6 @@ while [[ $# -gt 0 ]]; do
         --memory-tier-size) MEM_TIER_SIZE="$2"; MEM_TIER_EXPLICIT=1; shift 2;;
         --total-mem)        TOTAL_MEM_GIB="$2"; shift 2;;
         --evict-threshold)  EVICT_THRESH="$2"; shift 2;;
-        --cpu-bytes)        CPU_BYTES="$2"; shift 2;;
         --dram)             DRAM="$2"; shift 2;;
         --build)            DO_BUILD=1; shift;;
         --vllm-version)     VLLM_VERSION="$2"; shift 2;;
@@ -360,8 +361,23 @@ if [[ -n "$TOTAL_MEM_GIB" ]]; then
             exit 2
         fi
     fi
+    # CPU offload tier = all RAM above the vLLM floor (independent of the Certus
+    # DRAM tier below, so derive it even when --memory-tier-size is explicit).
+    # CPUOffload uses this as its only tier; Tiered-CPU-FS uses it as the PRIMARY
+    # tier — NOTE a large value here leaves little to spill into the FS secondary
+    # tier, which is the thing that benchmark measures.
+    _cpu_gib=$(( TOTAL_MEM_GIB - VLLM_MIN_RAM_GIB ))
+    if [[ $_cpu_gib -le 0 ]]; then
+        echo "error: --total-mem ${TOTAL_MEM_GIB}G leaves no CPU offload tier after" \
+             "the vLLM ${VLLM_MIN_RAM_GIB}G floor" >&2
+        exit 2
+    fi
+    CPU_BYTES=$(( _cpu_gib * (1 << 30) ))
+    log "CPU offload tier ${_cpu_gib}G derived from --total-mem ${TOTAL_MEM_GIB}G" \
+        "(− vLLM ${VLLM_MIN_RAM_GIB}G)"
+
     if [[ "$MEM_TIER_EXPLICIT" -eq 1 ]]; then
-        warn "--total-mem ignored: --memory-tier-size ${MEM_TIER_SIZE} was given explicitly"
+        warn "--total-mem ignored for the Certus tier: --memory-tier-size ${MEM_TIER_SIZE} was given explicitly"
     else
         _overhead=$(( VLLM_MIN_RAM_GIB + DPDK_HUGEPAGE_OVERHEAD_GIB ))
         _derived=$(( TOTAL_MEM_GIB - _overhead ))
