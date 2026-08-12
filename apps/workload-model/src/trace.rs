@@ -117,7 +117,44 @@ pub struct BlockStats {
     pub unique_blocks: u64,
 }
 
+/// The `supports` capability summary, in either spelling a manifest may use.
+///
+/// Every real trace that carries it writes a **map** from capability letter to
+/// `no` | `partial` | `full` (23 of 24 examined; the 24th omits the field
+/// entirely). This tool once wrote a bare letter set, so both are accepted on
+/// read — a reader that refused the map form could not open a single real trace,
+/// and one that refused the letters could not open this tool's own older output.
+///
+/// Nothing consults it. `contracts/trace-io.md` records that the `P` letter's
+/// meaning is not established and that readers MUST NOT depend on it, and
+/// [`Capabilities`](../../../workload_trace/read/struct.Capabilities.html) derives
+/// every answer from `field_status` instead. It is carried verbatim so that a
+/// manifest survives a round trip through this type without losing what it said.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Supports {
+    /// Per-letter, the corpus's form: `{"R": "full", "T": "partial", ...}`.
+    ///
+    /// Ordered so that a manifest written twice is byte-identical, which is what
+    /// lets a fixture be compared as text.
+    PerCapability(std::collections::BTreeMap<String, String>),
+    /// A bare letter set, e.g. `RTV`.
+    Letters(String),
+}
+
 /// The trace manifest: what makes a trace self-describing.
+///
+/// # Optional is not pedantry here
+///
+/// Several fields are absent or null on real traces, and every one of those was
+/// measured across the 24-trace corpus rather than guessed: `id_semantics` and
+/// `block_size` are null on the 7 `metadata_only` traces, which have no blocks to
+/// describe; `block_stats` is absent on those same 7; and one trace omits both
+/// `supports` and `block_size` outright. A required field here is therefore a
+/// trace this tool cannot open, so the defaults exist to make a manifest readable
+/// — never to supply a value a caller might mistake for a measurement. That
+/// distinction is enforced downstream: `fit` refuses a parameter whose source
+/// field is unavailable rather than defaulting it (FR-055).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TraceManifest {
     /// Identifier shared by every row.
@@ -125,11 +162,15 @@ pub struct TraceManifest {
     /// `pre_hashed` for generated data: the full encoding is the honest one.
     pub source_class: String,
     /// `rolling_prefix`, required for structural fitting — and true of the
-    /// generator's keys by construction (spec FR-008).
-    pub id_semantics: String,
-    /// Tokens per block.
-    pub block_size: u32,
-    /// Every blocking this trace carries.
+    /// generator's keys by construction (spec FR-008). **Null on a trace with no
+    /// block data**, which is a refusal to fit structure rather than a default.
+    #[serde(default)]
+    pub id_semantics: Option<String>,
+    /// Tokens per block. Null or absent where the trace carries no blocks.
+    #[serde(default)]
+    pub block_size: Option<u32>,
+    /// Every blocking this trace carries. Empty on a `metadata_only` trace.
+    #[serde(default)]
     pub block_sizes_available: Vec<u32>,
     /// `synthetic`, so a generated trace is never read as production.
     pub provenance: String,
@@ -138,15 +179,20 @@ pub struct TraceManifest {
     /// Per-field `native` | `reconstructed` | `unavailable`. A reader consults
     /// this **before** fitting, because a field this trace does not carry must be
     /// refused rather than defaulted.
+    #[serde(default)]
     pub field_status: HashMap<String, String>,
-    /// Capability summary: `B` roles, `R` reuse, `T` timing, `V` token counts.
-    /// `P` is deliberately absent — the contract records that its meaning is not
-    /// established and that readers must not depend on it.
-    pub supports: String,
-    /// The role vocabulary. Empty: block roles need source text, which a
-    /// generated trace has none of.
-    pub role_codes: HashMap<String, String>,
-    /// Keyed by block size as a string, matching the on-disk layout.
+    /// Capability summary; see [`Supports`]. Absent on one trace examined, and
+    /// consulted by nothing.
+    #[serde(default)]
+    pub supports: Option<Supports>,
+    /// The role vocabulary for the `blocks` table: role name to the integer code
+    /// that table uses. Empty for a generated trace — block roles need source
+    /// text, which it has none of. Integer-valued in all 24 real traces.
+    #[serde(default)]
+    pub role_codes: HashMap<String, i64>,
+    /// Keyed by block size as a string, matching the on-disk layout. Absent on a
+    /// trace with no block data.
+    #[serde(default)]
     pub block_stats: HashMap<String, BlockStats>,
 }
 
@@ -185,15 +231,26 @@ impl TraceManifest {
         TraceManifest {
             trace_id: trace_id.to_string(),
             source_class: "pre_hashed".to_string(),
-            id_semantics: "rolling_prefix".to_string(),
-            block_size,
+            id_semantics: Some("rolling_prefix".to_string()),
+            block_size: Some(block_size),
             block_sizes_available: vec![block_size],
             provenance: "synthetic".to_string(),
             timestamp_is_synthetic: true,
             field_status,
             // Timing and token counts are real; reuse structure is present as
             // shared global ids; roles are not.
-            supports: "RTV".to_string(),
+            //
+            // Written in the corpus's per-capability form rather than as the bare
+            // letters this once emitted. The point of this format is that a
+            // generated trace is *substitutable* for a real one, and a consumer of
+            // both would otherwise need the same either/or branch on a field the
+            // contract says it must not depend on anyway.
+            supports: Some(Supports::PerCapability(
+                [("R", "full"), ("T", "full"), ("V", "full"), ("B", "no")]
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+            )),
             role_codes: HashMap::new(),
             block_stats,
         }
@@ -514,14 +571,24 @@ run: {mode: jsonl, wss_window: 60000}
         let (em, _) = emit_all(&plan());
         let m = TraceManifest::synthetic("t", em.block_size(), em.stats());
         assert_eq!(m.source_class, "pre_hashed");
-        assert_eq!(m.id_semantics, "rolling_prefix");
+        assert_eq!(m.id_semantics.as_deref(), Some("rolling_prefix"));
         assert_eq!(m.provenance, "synthetic");
         assert!(m.timestamp_is_synthetic);
         assert_eq!(m.field_status["full_input_blocks"], "native");
         assert_eq!(m.field_status["block_roles"], "unavailable");
         assert_eq!(m.field_status["output_length"], "unavailable");
-        assert!(!m.supports.contains('P'), "P's meaning is not established");
-        assert!(!m.supports.contains('B'), "roles need source text");
+        // Written in the corpus's per-capability form: a generated manifest is
+        // substitutable for a real one only if it has the same *shape*, and 23 of the
+        // 24 real traces that carry `supports` write it as a map.
+        let Some(Supports::PerCapability(s)) = &m.supports else {
+            panic!("supports must be written in the corpus's per-capability form");
+        };
+        assert!(
+            !s.contains_key("P"),
+            "P's meaning is not established, so this must not claim it either way"
+        );
+        assert_eq!(s["B"], "no", "roles need source text");
+        assert_eq!(s["R"], "full");
         assert!(m.role_codes.is_empty());
         // The count a reader uses to tell a full trace from a sample.
         assert_eq!(m.block_stats["16"].invocations, 300);
