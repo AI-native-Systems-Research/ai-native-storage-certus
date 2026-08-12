@@ -344,25 +344,93 @@ pub fn fit(report: &TrunkReport, sessions_at_sharing_depth: f64) -> Option<Fitte
         // requires: `paths(d)` multiplies `fanout(1..d)`, so `fanout_at(0)` is never
         // read and "from depth 0 onward" is the honest label for a segment covering
         // the step into depth 1.
-        segments: kept
-            .iter()
-            .enumerate()
-            .map(|(i, s)| Segment {
-                from_depth: if i == 0 {
-                    0
-                } else {
-                    s.from.saturating_sub(boundary as u32)
-                },
-                fanout: s.fanout(),
-                skew: None,
-                churn_half_life: None,
-            })
-            .collect(),
+        segments: terminate(
+            kept.iter()
+                .enumerate()
+                .map(|(i, s)| Segment {
+                    from_depth: if i == 0 {
+                        0
+                    } else {
+                        s.from.saturating_sub(boundary as u32)
+                    },
+                    fanout: s.fanout(),
+                    skew: None,
+                    churn_half_life: None,
+                })
+                .collect(),
+            fitted_to as u32,
+            boundary as u32,
+            observed_to_depth,
+        ),
         fitted_to_depth: fitted_to as u32,
         observed_to_depth,
         censored_ratios: censored,
         is_lower_bound: true,
     })
+}
+
+/// Close the profile at the last depth it was fitted from.
+///
+/// A segment's fanout holds "from here until the next segment", so the last segment in
+/// the list applies to **unbounded depth** — and a fitted profile that ends in a
+/// fanout above 1 therefore claims a trunk that widens forever, on evidence from a
+/// region that may be a fraction of the trace's depth. That is not a conservative
+/// error, because width is a *product*: it compounds.
+///
+/// Measured on a real agentic trace, fitted over depths 0..=71 and observed to 2418:
+/// the model's implied width at depth 1216 was **1 816 434 against an observed 66**,
+/// and at 2418 it was 1.2e11 against an observed 1. Rule 16 judges occupancy at
+/// `p99(shared_depth)`, which sat at 1231 — deep inside the extrapolated region — so
+/// the document was refused for a trunk the trace never had. Every individual segment
+/// looked reasonable; only the extrapolation was wrong.
+///
+/// So a terminal segment of fanout **1.0** is appended wherever the trace was observed
+/// deeper than it was fitted. This is not a conservative default picked for safety: it
+/// is what the estimator of `research.md` § The branching segmentation rule *already
+/// yields* in that region. The estimator is `max(1, w(d)/w(d-1))`, one-sided because
+/// schema rule 8 forbids fanout below 1, and the shared width beyond the fitted depth
+/// is flat or falling — 31 keys at depth 71 against 9 at 1216 in the trace above. The
+/// bug was never the estimate for those depths; it was that they silently inherited a
+/// shallower region's estimate instead of their own.
+///
+/// Nothing is appended when the fit reached the deepest observed depth: there is no
+/// unmeasured region to describe, and a redundant trailing segment would suggest one.
+fn terminate(
+    mut segments: Vec<Segment>,
+    fitted_to: u32,
+    boundary: u32,
+    observed_to: u32,
+) -> Vec<Segment> {
+    if observed_to <= fitted_to {
+        return segments;
+    }
+    // Re-based on the root boundary, like every other emitted depth. The step *into*
+    // the first unfitted depth is the first one no evidence covers.
+    //
+    // Except when there are no fitted segments at all — everything folded into
+    // `roots.count`, or nothing was fittable — in which case this is the *first*
+    // segment and schema rule 8 requires the first to start at 0. That is also the
+    // honest profile: with no fanout fitted anywhere, the claim is a flat trunk from
+    // the root, which is what a single fanout-1.0 segment at depth 0 says.
+    let from_depth = if segments.is_empty() {
+        0
+    } else {
+        fitted_to.saturating_sub(boundary).saturating_add(1)
+    };
+    // A segment already starting there would be one the fit produced, which cannot
+    // happen — nothing is fitted past `fitted_to` — but if the arithmetic ever made
+    // them coincide, overwriting the fitted value with 1.0 would discard a
+    // measurement.
+    if segments.last().is_some_and(|s| s.from_depth >= from_depth) {
+        return segments;
+    }
+    segments.push(Segment {
+        from_depth,
+        fanout: 1.0,
+        skew: None,
+        churn_half_life: None,
+    });
+    segments
 }
 
 #[cfg(test)]
@@ -532,6 +600,101 @@ mod tests {
             "the exclusion was not reported: {:?}",
             f.caveats()
         );
+    }
+
+    #[test]
+    fn the_profile_stops_claiming_fanout_where_it_stopped_being_fitted() {
+        // The defect this pins, measured on a real agentic trace: a fanout of 1.009
+        // fitted over depths 0..=71 was extrapolated to depth 1216, where the model's
+        // implied width came to 1_816_434 against an **observed 66** — and rule 16
+        // judges occupancy at p99(shared_depth), which sat deep inside that region.
+        // Width is a product, so the error compounds rather than staying small.
+        //
+        // Here: a wide shared trunk that a few sessions descend far past. The fitted
+        // region ends where the shared width does, so the profile must be closed off
+        // at fanout 1.0 rather than carrying the near-root fanout downward forever.
+        let mut reqs = Vec::new();
+        for root in 0..6u64 {
+            for child in 0..2u64 {
+                for rep in 0..8u32 {
+                    let session = (root * 16 + child * 8 + u64::from(rep)) as u32;
+                    let mut path = vec![root, 100 + root, 1000 + root * 10 + child];
+                    // Two sessions per root run on far past the shared region, on
+                    // paths no one else touches — the private tail every real
+                    // agentic trace has.
+                    if rep < 2 {
+                        path.extend((0..40u64).map(|i| 50_000 + session as u64 * 100 + i));
+                    }
+                    reqs.push((session, path));
+                }
+            }
+        }
+        let r = report_of(&reqs, 500);
+        let f = fit(&r, 96.0).expect("should fit");
+        assert!(
+            f.observed_to_depth > f.fitted_to_depth,
+            "the fixture must have an unfitted region for this test to mean anything"
+        );
+        let last = f.segments.last().expect("a profile");
+        assert_eq!(
+            last.fanout, 1.0,
+            "the profile's last segment claims fanout {} past depth {}, where nothing \
+             was fitted; segments {:?}",
+            last.fanout, f.fitted_to_depth, f.segments
+        );
+
+        // And the model's width must stay near what was actually observed, rather
+        // than compounding away from it. This is the assertion that would have
+        // caught the real-trace failure.
+        let width_at = |d: u32| -> f64 {
+            let mut w = f.roots as f64;
+            for (i, s) in f.segments.iter().enumerate() {
+                if s.from_depth > d {
+                    break;
+                }
+                let end = f
+                    .segments
+                    .get(i + 1)
+                    .map(|n| n.from_depth)
+                    .unwrap_or(u32::MAX)
+                    .min(d + 1);
+                w *= s.fanout.powi(end.saturating_sub(s.from_depth) as i32);
+            }
+            w
+        };
+        let deep = width_at(f.observed_to_depth);
+        let fitted_edge = width_at(f.fitted_to_depth);
+        assert!(
+            deep <= fitted_edge * 1.001,
+            "width grew from {fitted_edge} to {deep} across depths nothing was fitted from"
+        );
+    }
+
+    #[test]
+    fn a_profile_with_no_fitted_segments_still_starts_at_depth_zero() {
+        // Schema rule 8 requires the first segment at from_depth 0. When every fitted
+        // segment is folded into `roots.count`, the terminal segment *is* the first
+        // one — and emitting it at the depth where fitting stopped produced a document
+        // rule 8 rejected outright. A flat trunk from the root is both rule-8-valid and
+        // the honest claim when no fanout was fitted anywhere.
+        let closed = terminate(Vec::new(), 71, 71, 2418);
+        assert_eq!(closed.len(), 1);
+        assert_eq!(closed[0].from_depth, 0);
+        assert_eq!(closed[0].fanout, 1.0);
+    }
+
+    #[test]
+    fn a_profile_fitted_to_the_bottom_gets_no_terminal_segment() {
+        // Nothing unmeasured to describe, and a redundant trailing segment would
+        // suggest there was.
+        let one = vec![Segment {
+            from_depth: 0,
+            fanout: 2.0,
+            skew: None,
+            churn_half_life: None,
+        }];
+        assert_eq!(terminate(one.clone(), 9, 0, 9).len(), 1);
+        assert_eq!(terminate(one, 9, 0, 10).len(), 2);
     }
 
     #[test]
