@@ -85,6 +85,14 @@ enum Cmd {
         /// Per-statistic tolerance overrides, as `name=value`.
         #[arg(long = "tolerance", value_name = "NAME=VALUE")]
         tolerances: Vec<String>,
+        /// Print the bucket-by-bucket working behind each divergence.
+        ///
+        /// A divergence number says how much two distributions differ and cannot say
+        /// **where**, which is the part that decides what to change: a KS distance
+        /// whose medians agree is a tail or shoulder problem and wants a different
+        /// parameter than a uniform shift would.
+        #[arg(long)]
+        explain: bool,
     },
     /// Compare two reference streams statistic by statistic.
     ///
@@ -118,6 +126,9 @@ enum Cmd {
         /// Emit JSON instead of the human summary.
         #[arg(long)]
         json: bool,
+        /// Print the bucket-by-bucket working behind each divergence.
+        #[arg(long)]
+        explain: bool,
     },
 }
 
@@ -133,6 +144,7 @@ fn main() -> ExitCode {
             rate,
             allow_partial,
             tolerances,
+            explain,
         } => cmd_fit(
             &trace,
             out.as_deref(),
@@ -142,6 +154,7 @@ fn main() -> ExitCode {
             rate,
             allow_partial,
             &tolerances,
+            explain,
         ),
         Cmd::Validate {
             plan,
@@ -150,6 +163,7 @@ fn main() -> ExitCode {
             allow_partial,
             tolerances,
             json,
+            explain,
         } => cmd_validate(
             &plan,
             against_plan.as_deref(),
@@ -157,6 +171,7 @@ fn main() -> ExitCode {
             allow_partial,
             &tolerances,
             json,
+            explain,
         ),
     };
     match r {
@@ -215,6 +230,7 @@ fn cmd_fit(
     rate: Option<f64>,
     allow_partial: bool,
     tolerance_args: &[String],
+    explain: bool,
 ) -> Result<bool, String> {
     let tol = parse_tolerances(tolerance_args)?;
     let trace = read::jsonl::read_trace(trace_path, allow_partial).map_err(|e| e.to_string())?;
@@ -542,6 +558,10 @@ fn cmd_fit(
         );
     }
 
+    if explain {
+        print_explanation(&synthetic, &trace_report, &d, "synthetic", "trace");
+    }
+
     if !d.within_tolerance() {
         println!(
             "\n  REFUSED: the fitted model's synthetic output does not resemble its source. \
@@ -610,6 +630,107 @@ fn trace_report(path: &Path, window: u64, allow_partial: bool) -> Result<(Report
     Ok((s.finish(), note))
 }
 
+/// Print the bucket-by-bucket working behind a comparison (`--explain`).
+///
+/// One table per distributional statistic, each row a shared bucket bound with both
+/// counts, both CDFs and their signed difference; the row that set the KS distance is
+/// marked. The tables come from `divergence::explain`, which is the same arithmetic
+/// the verdict used — a diagnostic that recomputed the CDFs a second way could point
+/// somewhere the verdict never looked.
+fn print_explanation(
+    a: &Report,
+    b: &Report,
+    d: &workload_model::stats::divergence::Report,
+    a_label: &str,
+    b_label: &str,
+) {
+    use workload_model::stats::divergence::{explain, worst_log_ratio_point};
+
+    println!("\n  explanation — `{a_label}` is A, `{b_label}` is B");
+    println!(
+        "  delta is F_A - F_B, so a positive run means A has already accumulated mass \
+         that B has not:\n  A is the shorter-tailed side there."
+    );
+    for e in explain(a, b) {
+        let Some(x) = d.divergences.iter().find(|x| x.statistic == e.statistic) else {
+            continue;
+        };
+        println!(
+            "\n  {} ({}, {} against tolerance {}{})",
+            e.statistic.name(),
+            match x.measure {
+                Measure::KolmogorovSmirnov => "ks",
+                Measure::AreaBetweenCdfs => "area",
+                Measure::MaxLogRatio => "log-ratio",
+            },
+            format_args!("{:.5}", x.value),
+            format_args!("{:.5}", x.tolerance),
+            if x.incomparable.is_some() {
+                ", INCOMPARABLE — units differ, so these rows compare units too"
+            } else {
+                ""
+            }
+        );
+        if e.rows.is_empty() {
+            println!("    no shared buckets: one side has no samples");
+            continue;
+        }
+        let worst = e
+            .rows
+            .iter()
+            .map(|r| r.delta().abs())
+            .fold(0.0f64, f64::max);
+        println!(
+            "    {:>12} {:>12} {:>12} {:>9} {:>9} {:>9}",
+            "upper", "A count", "B count", "F_A", "F_B", "delta"
+        );
+        for r in &e.rows {
+            println!(
+                "    {:>12} {:>12} {:>12} {:>9.5} {:>9.5} {:>+9.5}{}",
+                r.upper,
+                r.a_count,
+                r.b_count,
+                r.a_cdf,
+                r.b_cdf,
+                r.delta(),
+                if r.delta().abs() >= worst - 1e-12 {
+                    "  <- sup"
+                } else {
+                    ""
+                }
+            );
+        }
+        println!(
+            "    totals: A {} samples, B {} samples",
+            e.a_total, e.b_total
+        );
+    }
+
+    // Unique-keys is a curve of counts rather than a distribution, so it has no
+    // buckets to tabulate; the equivalent question is which point set its verdict.
+    match worst_log_ratio_point(&a.unique_keys, &b.unique_keys) {
+        Some(p) => println!(
+            "\n  unique_keys (log-ratio {:.5}): worst at request {} — A {} distinct keys, \
+             B {:.1}, so A is {} by a factor of {:.3}",
+            p.log_ratio,
+            p.requests,
+            p.a_distinct,
+            p.b_distinct,
+            if p.signed_log_ratio > 0.0 {
+                "ahead"
+            } else {
+                "behind"
+            },
+            p.signed_log_ratio.abs().exp()
+        ),
+        None => println!(
+            "\n  unique_keys: no point survived the ramp and counting-floor \
+             restrictions, so the curves were not compared at all"
+        ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn cmd_validate(
     plan: &Path,
     against_plan: Option<&Path>,
@@ -617,6 +738,7 @@ fn cmd_validate(
     allow_partial: bool,
     tolerance_args: &[String],
     json: bool,
+    explain: bool,
 ) -> Result<bool, String> {
     let tol = parse_tolerances(tolerance_args)?;
     let (a, window) = plan_report(plan)?;
@@ -712,6 +834,9 @@ fn cmd_validate(
         if let Some(why) = &x.incomparable {
             println!("  {:<24} not compared: {why}", "");
         }
+    }
+    if explain {
+        print_explanation(&a, &b, &d, "plan", &what);
     }
     println!();
     if d.within_tolerance() {
