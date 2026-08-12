@@ -97,6 +97,28 @@ pub enum ReadError {
     },
     /// `id_semantics` is not `rolling_prefix`, so prefix structure is not recoverable.
     UnsupportedIdentity(String),
+    /// A blocking was asked for that the trace does not carry.
+    NoSuchBlocking {
+        /// Tokens per block requested.
+        requested: u32,
+        /// What the trace carries.
+        available: Vec<u32>,
+    },
+    /// The trace carries several blockings and declares no default.
+    AmbiguousBlocking {
+        /// What the trace carries.
+        available: Vec<u32>,
+    },
+    /// A parquet trace was named by a build without the `parquet` feature.
+    ///
+    /// Constructed only in a build without that feature, and kept in both so the
+    /// error type does not change shape with a feature flag — a caller matching on
+    /// `ReadError` should compile either way.
+    #[cfg_attr(feature = "parquet", allow(dead_code))]
+    ParquetUnavailable {
+        /// The directory.
+        path: String,
+    },
     /// A block list contradicted its own `input_length` under the declared encoding.
     EncodingMismatch {
         /// Which encoding was declared.
@@ -136,6 +158,28 @@ impl std::fmt::Display for ReadError {
                 "id_semantics is `{s}`, not `rolling_prefix`: without prefix-derived identity a \
                  shared block id does not imply a shared path, so no structural parameter is \
                  recoverable"
+            ),
+            ReadError::NoSuchBlocking {
+                requested,
+                available,
+            } => write!(
+                f,
+                "this trace carries no {requested}-token blocking; it has {available:?}. \
+                 Refusing rather than reading a different one: block size sets every depth and \
+                 every path length, so the fit would answer a question that was not asked"
+            ),
+            ReadError::AmbiguousBlocking { available } => write!(
+                f,
+                "this trace carries several blockings — {available:?} tokens — and declares no \
+                 default, so name one with --block-size. Choosing for you would be choosing the \
+                 structure the fit measures"
+            ),
+            ReadError::ParquetUnavailable { path } => write!(
+                f,
+                "{path} is a directory, so it is a parquet trace, but this binary was built \
+                 without the `parquet` feature. Rebuild with `--features parquet`. Not falling \
+                 back to JSONL: the directory is the trace, and reading none of it would look \
+                 like an empty one"
             ),
             ReadError::EncodingMismatch {
                 encoding,
@@ -194,8 +238,18 @@ pub struct Capabilities {
 impl Capabilities {
     /// Read from a manifest.
     pub fn from_manifest(m: &TraceManifest, block_size: u32) -> Result<Capabilities, ReadError> {
-        if m.id_semantics != "rolling_prefix" {
-            return Err(ReadError::UnsupportedIdentity(m.id_semantics.clone()));
+        // Null rather than absent on the `metadata_only` traces, which is a trace
+        // saying it has no block identity at all rather than one declining to name
+        // its scheme. Both land here, and both are refusals: without prefix-derived
+        // identity a shared block id does not imply a shared path.
+        match m.id_semantics.as_deref() {
+            Some("rolling_prefix") => {}
+            Some(other) => return Err(ReadError::UnsupportedIdentity(other.to_string())),
+            None => {
+                return Err(ReadError::UnsupportedIdentity(
+                    "null, which a trace with no block data declares".to_string(),
+                ))
+            }
         }
         let status = |f: &str| {
             m.field_status
@@ -454,6 +508,106 @@ pub fn read_manifest(path: &Path) -> Result<TraceManifest, ReadError> {
     let text = std::fs::read_to_string(&candidate)
         .map_err(|e| ReadError::Manifest(format!("{}: {e}", candidate.display())))?;
     serde_json::from_str(&text).map_err(|e| ReadError::Manifest(e.to_string()))
+}
+
+/// Read a trace from either container, picked by what the path is.
+///
+/// A directory is a parquet trace — `manifest.json` beside
+/// `invocations/block_size_<N>/part-*.parquet` — and a file is JSONL. That is the
+/// whole dispatch, and it is here rather than in either container module so that
+/// "the container is not information" holds at the only place a caller enters
+/// (FR-055, FR-021j): every operation accepts either, symmetric with FR-021a's
+/// output modes, and nothing downstream of this function can tell which it got.
+///
+/// `allow_partial` exists for `validate`, which compares shapes and can legitimately
+/// work from a sample, and is refused by default for `fit`, which cannot: sharing,
+/// width and reuse distance are properties of the whole stream and every one of them
+/// is understated by a prefix of it (FR-055e).
+pub fn read_trace(
+    path: &Path,
+    allow_partial: bool,
+    block_size: Option<u32>,
+) -> Result<Trace, ReadError> {
+    if path.is_dir() {
+        #[cfg(feature = "parquet")]
+        return crate::parquet::read_trace(path, allow_partial, block_size);
+        // Not a silent fallback to JSONL: the directory *is* a trace, and reading
+        // nothing from it would look like an empty one.
+        #[cfg(not(feature = "parquet"))]
+        return Err(ReadError::ParquetUnavailable {
+            path: path.display().to_string(),
+        });
+    }
+    jsonl::read_trace(path, allow_partial, block_size)
+}
+
+/// Everything both containers do once the rows are in hand.
+///
+/// Shared so that the two readers cannot disagree about normalisation, ordering or
+/// the completeness check — the only difference between them is how bytes become
+/// [`Invocation`] values.
+pub fn assemble(
+    manifest: TraceManifest,
+    rows: Vec<Invocation>,
+    block_size: u32,
+    allow_partial: bool,
+) -> Result<Trace, ReadError> {
+    let caps = Capabilities::from_manifest(&manifest, block_size)?;
+    if !allow_partial {
+        check_complete(rows.len() as u64, &manifest, block_size)?;
+    }
+    let mut invocations = normalise(&rows, &caps)?;
+    let chronological = order(&mut invocations, &caps);
+    Ok(Trace {
+        capabilities: caps,
+        manifest,
+        invocations,
+        chronological,
+    })
+}
+
+/// Which blocking of a trace to read, in tokens per block.
+///
+/// **A trace may carry several**, and the manifest's `block_size` is a *default*
+/// rather than the answer: of 24 real traces, 3 carry four blockings each
+/// (16/32/64/128 tokens) as sibling `invocations/block_size_<N>/` partitions, and
+/// one of those declares no default at all. So the block size is resolved here,
+/// once, from a caller's request and the manifest — never assumed from either alone.
+///
+/// The rules, in order:
+///
+/// 1. An explicit request wins, and MUST be one the trace actually carries.
+///    Silently reading a different blocking than the one asked for would change
+///    every depth and every path length in the fit.
+/// 2. Otherwise the manifest's `block_size`.
+/// 3. Otherwise, if exactly one blocking is available, that one — an unambiguous
+///    trace needs no ceremony.
+/// 4. Otherwise refuse and list what is available. Picking the smallest would be
+///    choosing the workload's structure on the caller's behalf.
+pub fn resolve_block_size(m: &TraceManifest, requested: Option<u32>) -> Result<u32, ReadError> {
+    let available = |m: &TraceManifest| -> Vec<u32> {
+        let mut v = m.block_sizes_available.clone();
+        if let Some(b) = m.block_size {
+            if !v.contains(&b) {
+                v.push(b);
+            }
+        }
+        v.sort_unstable();
+        v
+    };
+    let avail = available(m);
+    match requested {
+        Some(r) if avail.is_empty() || avail.contains(&r) => Ok(r),
+        Some(r) => Err(ReadError::NoSuchBlocking {
+            requested: r,
+            available: avail,
+        }),
+        None => match m.block_size {
+            Some(b) => Ok(b),
+            None if avail.len() == 1 => Ok(avail[0]),
+            None => Err(ReadError::AmbiguousBlocking { available: avail }),
+        },
+    }
 }
 
 /// Reconstruct full block lists and check the encoding's own length invariant.
@@ -794,7 +948,7 @@ mod tests {
     #[test]
     fn an_unsupported_identity_scheme_is_refused() {
         let mut m = manifest(Encoding::Full, 1);
-        m.id_semantics = "opaque".into();
+        m.id_semantics = Some("opaque".into());
         let e = Capabilities::from_manifest(&m, 16).expect_err("must refuse");
         assert!(e.to_string().contains("rolling_prefix"), "{e}");
     }

@@ -10,7 +10,7 @@ use std::path::Path;
 
 use workload_model::trace::Invocation;
 
-use super::{check_complete, normalise, order, Capabilities, ReadError, Trace};
+use super::{ReadError, Trace};
 
 /// Read every invocation from a `.jsonl` file.
 ///
@@ -34,30 +34,20 @@ pub fn read_invocations(path: &Path) -> Result<Vec<Invocation>, ReadError> {
     Ok(out)
 }
 
-/// Read a whole trace: manifest, invocations, normalisation and ordering.
+/// Read a whole JSONL trace: manifest, invocations, normalisation and ordering.
 ///
-/// `allow_partial` exists for `validate`, which compares shapes and can legitimately
-/// work from a sample, and is refused by default for `fit`, which cannot: sharing,
-/// width and reuse distance are properties of the whole stream and every one of them
-/// is understated by a prefix of it (FR-055e).
-pub fn read_trace(path: &Path, allow_partial: bool) -> Result<Trace, ReadError> {
+/// Prefer [`super::read_trace`], which picks the container. This stays public
+/// because a caller that knows it has a `.jsonl` file — the round-trip test, for
+/// one — should not have to route through a dispatch on the path's shape.
+pub fn read_trace(
+    path: &Path,
+    allow_partial: bool,
+    block_size: Option<u32>,
+) -> Result<Trace, ReadError> {
     let manifest = super::read_manifest(path)?;
-    let block_size = manifest.block_size;
-    let caps = Capabilities::from_manifest(&manifest, block_size)?;
-
+    let block_size = super::resolve_block_size(&manifest, block_size)?;
     let rows = read_invocations(path)?;
-    if !allow_partial {
-        check_complete(rows.len() as u64, &manifest, block_size)?;
-    }
-
-    let mut invocations = normalise(&rows, &caps)?;
-    let chronological = order(&mut invocations, &caps);
-    Ok(Trace {
-        capabilities: caps,
-        manifest,
-        invocations,
-        chronological,
-    })
+    super::assemble(manifest, rows, block_size, allow_partial)
 }
 
 #[cfg(test)]
@@ -91,7 +81,7 @@ mod tests {
         }
         let file = dir.join("trace.jsonl");
         std::fs::write(&file, text).unwrap();
-        let out = read_trace(&file, false);
+        let out = read_trace(&file, false, None);
         let _ = std::fs::remove_dir_all(&dir);
         out
     }

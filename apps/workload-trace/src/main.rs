@@ -11,7 +11,10 @@
 //! reuse distance would make that a comparison of two definitions rather than of two
 //! measurements — a failure that reports itself as a success.
 //!
-//! `convert` is not in this build yet; `fit` and `validate` are.
+//! `convert` — the parquet output mode of FR-021h — is behind the default-off
+//! `parquet` feature, together with the parquet reader. `fit` and `validate` accept
+//! either container in either build; a parquet trace named by a build without the
+//! feature is refused by name rather than read as empty.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -26,6 +29,8 @@ use workload_model::stats::divergence::{
 };
 use workload_model::stats::{Ref, Report, Statistics};
 
+#[cfg(feature = "parquet")]
+mod parquet;
 mod read;
 
 /// Iterations the fit will spend raising the attempted sharing to meet the realised.
@@ -57,12 +62,19 @@ enum Cmd {
     /// than emit a model whose divergence exceeds tolerance, so the YAML is written
     /// only when the comparison passes.
     Fit {
-        /// The `.jsonl` trace to fit.
-        #[arg(short = 't', long, value_name = "FILE")]
+        /// The trace to fit: a `.jsonl` file, or a directory holding a parquet trace.
+        #[arg(short = 't', long, value_name = "PATH")]
         trace: PathBuf,
         /// Where to write the fitted YAML. Omit to print the report only.
         #[arg(short = 'o', long, value_name = "FILE")]
         out: Option<PathBuf>,
+        /// Which blocking to read, in **tokens** per block.
+        ///
+        /// Distinct from `--block-bytes`, which is a payload size. A trace may carry
+        /// several blockings as sibling partitions; this names one. Defaults to the
+        /// manifest's `block_size`, and is required where a trace declares none.
+        #[arg(long, value_name = "TOKENS")]
+        block_size: Option<u32>,
         /// `corpus.block_bytes`, which no trace can supply: its block size is
         /// **tokens**, and converting needs the model geometry no trace carries.
         #[arg(long, value_name = "BYTES")]
@@ -107,9 +119,12 @@ enum Cmd {
         /// A second plan to compare against.
         #[arg(long, value_name = "DIR", conflicts_with = "trace")]
         against_plan: Option<PathBuf>,
-        /// A `.jsonl` trace to compare against.
-        #[arg(long, value_name = "FILE")]
+        /// A trace to compare against: a `.jsonl` file or a parquet directory.
+        #[arg(long, value_name = "PATH")]
         trace: Option<PathBuf>,
+        /// Which blocking to read, in **tokens** per block. See `fit --block-size`.
+        #[arg(long, value_name = "TOKENS")]
+        block_size: Option<u32>,
         /// Accept a trace shorter than its manifest declares.
         ///
         /// `fit` may never do this (FR-055e); `validate` may, because comparing
@@ -130,6 +145,36 @@ enum Cmd {
         #[arg(long)]
         explain: bool,
     },
+    /// Convert a plan's `events.bin` into a parquet trace (FR-021h, mode 3).
+    ///
+    /// The columnar half of the interchange format. It lives in this binary rather
+    /// than the generator because `arrow` would otherwise be built by every
+    /// `cargo test --all`, and because FR-021c already requires modes 2 and 3 to be
+    /// producible from an existing `events.bin` **without regenerating** — so
+    /// conversion was always independent of generation.
+    ///
+    /// Writes the same records `certus-workload emit` writes as JSONL, including
+    /// skipping warmup requests: a warmup window is a property of a measured run,
+    /// not of a workload, and this schema gives an invocation no field to say it was
+    /// one.
+    #[cfg(feature = "parquet")]
+    Convert {
+        /// The plan directory to convert.
+        #[arg(short = 'p', long, value_name = "DIR")]
+        plan: PathBuf,
+        /// The trace directory to write: `manifest.json` plus
+        /// `invocations/block_size_<N>/part-0.parquet`.
+        #[arg(short = 'o', long, value_name = "DIR")]
+        out: PathBuf,
+        /// Tokens per block, which sets the partition name.
+        #[arg(long, default_value_t = workload_model::trace::DEFAULT_BLOCK_SIZE_TOKENS, value_name = "TOKENS")]
+        block_size: u32,
+        /// Block budget, in references. Honoured at request granularity: a truncated
+        /// request is not a request, and a reader reconstructing block lists from one
+        /// would see a shorter conversation rather than an obviously partial file.
+        #[arg(long, default_value_t = u64::MAX, value_name = "N")]
+        blocks: u64,
+    },
 }
 
 fn main() -> ExitCode {
@@ -138,6 +183,7 @@ fn main() -> ExitCode {
         Cmd::Fit {
             trace,
             out,
+            block_size,
             block_bytes,
             wss_window,
             seed,
@@ -148,6 +194,7 @@ fn main() -> ExitCode {
         } => cmd_fit(
             &trace,
             out.as_deref(),
+            block_size,
             block_bytes,
             wss_window,
             seed,
@@ -160,6 +207,7 @@ fn main() -> ExitCode {
             plan,
             against_plan,
             trace,
+            block_size,
             allow_partial,
             tolerances,
             json,
@@ -168,11 +216,19 @@ fn main() -> ExitCode {
             &plan,
             against_plan.as_deref(),
             trace.as_deref(),
+            block_size,
             allow_partial,
             &tolerances,
             json,
             explain,
         ),
+        #[cfg(feature = "parquet")]
+        Cmd::Convert {
+            plan,
+            out,
+            block_size,
+            blocks,
+        } => cmd_convert(&plan, &out, block_size, blocks),
     };
     match r {
         Ok(true) => ExitCode::SUCCESS,
@@ -220,10 +276,83 @@ fn parse_tolerances(args: &[String]) -> Result<Tolerances, String> {
 /// then write. A fitted model whose synthetic output does not resemble its source is
 /// not a weak result — it is a wrong one, and emitting it would put a plausible YAML
 /// in front of someone who would reasonably trust it.
+/// Convert a plan into a parquet trace (T084, FR-021h mode 3).
+///
+/// Deliberately the same record construction as `certus-workload emit`'s JSONL path,
+/// through the same `trace::Emitter`: the two modes are one schema in two containers,
+/// and a second emitter would make that a claim rather than a fact. What differs is
+/// only where the bytes go.
+#[cfg(feature = "parquet")]
+fn cmd_convert(plan: &Path, out: &Path, block_size: u32, blocks: u64) -> Result<bool, String> {
+    use workload_model::plan::record::flags;
+    use workload_model::trace::{requests, Emitter, TraceManifest};
+
+    let (m, events) = workload_model::plan::read_plan(plan).map_err(|e| e.to_string())?;
+    let trace_id = out
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("synthetic")
+        .to_string();
+    let mut em = Emitter::new(&trace_id, block_size, m.time_origin_ns);
+    let mut rows = Vec::new();
+    let mut written = 0u64;
+    let mut truncated = false;
+    let mut warmup_skipped = 0u64;
+    for r in requests(&events) {
+        // Warmup is withheld here for the same reason `emit` withholds it: a warmup
+        // window says which operations a *report* excludes (FR-045), which is a
+        // property of a measured run rather than of a workload, and this schema gives
+        // an invocation no field in which to say it was one. `events.bin` keeps the
+        // flag, so nothing is lost from the native artifact.
+        if r.first().is_some_and(|e| e.has(flags::WARMUP)) {
+            warmup_skipped += 1;
+            continue;
+        }
+        if written + r.len() as u64 > blocks {
+            truncated = true;
+            break;
+        }
+        if let Some(rec) = em.request(r) {
+            rows.push(rec);
+            written += r.len() as u64;
+        }
+    }
+
+    let stats = em.stats();
+    let manifest = TraceManifest::synthetic(&trace_id, em.block_size(), stats.clone());
+    std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let part = crate::parquet::write_trace(out, &manifest, em.block_size(), &rows)
+        .map_err(|e| e.to_string())?;
+    println!(
+        "{} invocations, {} sessions, {} unique blocks, {written} blocks\n{}\nmanifest: {} \
+         (provenance synthetic, timestamps synthetic)",
+        stats.invocations,
+        stats.sessions,
+        stats.unique_blocks,
+        part.display(),
+        out.join("manifest.json").display(),
+    );
+    if warmup_skipped > 0 {
+        println!(
+            "note: {warmup_skipped} warmup requests were not converted. A warmup window \
+             belongs to a measured run, not to a workload, so the trace is the plan's \
+             measured window — which is also what makes the two compare exactly"
+        );
+    }
+    if truncated {
+        eprintln!(
+            "note: stopped at the {blocks}-block budget; the plan carries {} events",
+            events.len()
+        );
+    }
+    Ok(true)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn cmd_fit(
     trace_path: &Path,
     out: Option<&Path>,
+    block_size: Option<u32>,
     block_bytes: u64,
     wss_window: u64,
     seed: u64,
@@ -233,7 +362,8 @@ fn cmd_fit(
     explain: bool,
 ) -> Result<bool, String> {
     let tol = parse_tolerances(tolerance_args)?;
-    let trace = read::jsonl::read_trace(trace_path, allow_partial).map_err(|e| e.to_string())?;
+    let trace =
+        read::read_trace(trace_path, allow_partial, block_size).map_err(|e| e.to_string())?;
     if !trace.capabilities.trunk_fittable() {
         return Err(
             "this trace has no session identity, so cross-session sharing is invisible and \
@@ -405,6 +535,13 @@ fn cmd_fit(
     println!("\n  caveats");
     for c in &fitted.caveats {
         println!("    - {c}");
+    }
+
+    // Printed before any refusal, because a schema rejection is usually *about* the
+    // trunk and the profile is what says whether the fit read the trace wrongly or
+    // the trace genuinely describes something the model cannot express.
+    if explain {
+        print_trunk_profile(&trace_report, &fitted_branching);
     }
 
     if !rejections.is_empty() {
@@ -623,8 +760,13 @@ fn plan_report(dir: &Path) -> Result<(Report, u64), String> {
 /// windowed statistics — realised sharing, trunk occupancy, working-set size —
 /// comparable at all. Two reports over different windows would differ for that reason
 /// alone, and the divergence would be attributed to the workload.
-fn trace_report(path: &Path, window: u64, allow_partial: bool) -> Result<(Report, String), String> {
-    let trace = read::jsonl::read_trace(path, allow_partial).map_err(|e| e.to_string())?;
+fn trace_report(
+    path: &Path,
+    window: u64,
+    allow_partial: bool,
+    block_size: Option<u32>,
+) -> Result<(Report, String), String> {
+    let trace = read::read_trace(path, allow_partial, block_size).map_err(|e| e.to_string())?;
     let mut s = Statistics::new(window);
     for r in trace.refs() {
         s.push(&r);
@@ -657,6 +799,95 @@ fn trace_report(path: &Path, window: u64, allow_partial: bool) -> Result<(Report
 /// marked. The tables come from `divergence::explain`, which is the same arithmetic
 /// the verdict used — a diagnostic that recomputed the CDFs a second way could point
 /// somewhere the verdict never looked.
+/// The observed width-by-depth profile beside what was fitted from it.
+///
+/// The instrument for a schema rejection about the trunk, which is otherwise a number
+/// with no working shown. Rule 16 evaluates occupancy at `p99(shared_depth)`, and that
+/// depth is routinely far beyond `fitted_to_depth` — so the printed rows say whether
+/// the model's implied width there resembles the trace's observed width, or whether a
+/// fanout fitted over a shallow region has been carried somewhere it was never
+/// measured. A product compounds, so those two can differ by orders of magnitude
+/// while every individual segment looks reasonable.
+///
+/// `shared` is the count of keys at a depth that **two or more sessions** reached,
+/// which is the trunk as the fit defines it; `width` counts every distinct key there,
+/// trunk plus every private descent. Where the two diverge, the trunk has ended and
+/// what remains is private.
+fn print_trunk_profile(trace: &Report, fitted: &workload_model::fit::branching::FittedBranching) {
+    let depths = &trace.trunk.depths;
+    if depths.is_empty() {
+        return;
+    }
+    let p99 = trace.sharing.realised_depth.p99.unwrap_or(0) as usize;
+
+    // The depths worth showing: the fitted region's ends, each segment boundary, the
+    // depth rule 16 judges, and the deepest observed. Printing every depth would be
+    // thousands of rows for an agentic trace and would bury exactly this comparison.
+    let mut want: Vec<usize> = vec![0, fitted.root_boundary_depth as usize];
+    want.extend(fitted.segments.iter().map(|s| s.from_depth as usize));
+    want.push(fitted.fitted_to_depth as usize);
+    want.push(p99);
+    want.push(fitted.observed_to_depth as usize);
+    want.retain(|d| *d < depths.len());
+    want.sort_unstable();
+    want.dedup();
+
+    println!("\n  trunk profile — observed against fitted");
+    println!(
+        "  the model's width at depth d is roots x PROD(fanout) over the segments up to d, and \
+         it is\n  extrapolated past depth {} because nothing was fitted beyond there.",
+        fitted.fitted_to_depth
+    );
+    println!(
+        "    {:>7}  {:>10}  {:>10}  {:>12}  {:>9}  note",
+        "depth", "width", "shared", "model width", "occupancy"
+    );
+    for d in want {
+        let row = &depths[d];
+        // The model's width at this depth: roots times the product of every fanout
+        // that applies at or below it. This is the quantity rule 16 divides into the
+        // session population, so it is the one worth showing.
+        let mut model = fitted.roots as f64;
+        for (i, s) in fitted.segments.iter().enumerate() {
+            if (s.from_depth as usize) > d {
+                break;
+            }
+            let end = fitted
+                .segments
+                .get(i + 1)
+                .map(|n| n.from_depth as usize)
+                .unwrap_or(usize::MAX)
+                .min(d + 1);
+            let levels = end.saturating_sub(s.from_depth as usize);
+            model *= s.fanout.powi(levels as i32);
+        }
+        let mut note = Vec::new();
+        if d == fitted.root_boundary_depth as usize {
+            note.push("root boundary");
+        }
+        if d == fitted.fitted_to_depth as usize {
+            note.push("last fitted depth");
+        }
+        if d == p99 {
+            note.push("p99(shared_depth): the depth rule 16 judges");
+        }
+        if d == fitted.observed_to_depth as usize {
+            note.push("deepest observed");
+        }
+        println!(
+            "    {:>7}  {:>10}  {:>10}  {:>12.1}  {:>9}  {}",
+            d,
+            row.width_run,
+            row.shared_keys_run,
+            model,
+            row.occupancy
+                .map(|o| format!("{o:.2}"))
+                .unwrap_or_else(|| "-".into()),
+            note.join(", ")
+        );
+    }
+}
+
 fn print_explanation(
     a: &Report,
     b: &Report,
@@ -755,6 +986,7 @@ fn cmd_validate(
     plan: &Path,
     against_plan: Option<&Path>,
     trace: Option<&Path>,
+    block_size: Option<u32>,
     allow_partial: bool,
     tolerance_args: &[String],
     json: bool,
@@ -769,7 +1001,7 @@ fn cmd_validate(
             (b, format!("plan {}", other.display()), String::new(), false)
         }
         (None, Some(t)) => {
-            let (b, note) = trace_report(t, window, allow_partial)?;
+            let (b, note) = trace_report(t, window, allow_partial, block_size)?;
             (b, format!("trace {}", t.display()), note, true)
         }
         _ => return Err("give exactly one of --against-plan or --trace to compare against".into()),

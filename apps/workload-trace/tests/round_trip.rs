@@ -10,6 +10,13 @@
 //! Only the JSONL container is exercised here. The parquet reader is behind a
 //! default-off feature (SC-012), and the round trip through it belongs with that
 //! feature rather than in a test `cargo test --all` runs.
+//!
+//! That leaves nothing untested, because the parquet claim is pinned one level lower
+//! and more strictly: `parquet::tests::a_record_survives_the_container_exactly`
+//! asserts **record equality** through a write and read, and identical records make
+//! every statistic derived from them identical by construction. Measured end to end
+//! as well — `fit` over the same plan in both containers reports the same divergence
+//! to five decimals on every statistic.
 
 use std::path::PathBuf;
 
