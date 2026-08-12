@@ -22,14 +22,10 @@ use workload_model::trace::{requests, Emitter, TraceManifest, DEFAULT_BLOCK_SIZE
 /// The window both sides are measured over.
 const WINDOW: u64 = 5_000;
 
-/// A plan with sharing, multiple turns and a mixture.
+/// A plan with sharing, multiple turns and a mixture, and no `warmup`.
 ///
-/// **No `warmup`.** A plan's warmup window is excluded from its own statistics
-/// (FR-045), and `contracts/trace-io.md` gives an invocation no way to say it was a
-/// warmup request — so an emitted trace of a warmed plan contains requests the plan's
-/// own report excluded, and the two are genuinely different streams. That is a real
-/// gap, recorded rather than papered over; this fixture avoids it so the test
-/// measures the emitter and the reader rather than the gap.
+/// `warmed_doc` covers the other case. Without a warmup window the plan's measured
+/// stream *is* its whole stream, so the round trip must be exact to the last bucket.
 fn doc(seed: u64) -> Document {
     let y = format!(
         r#"
@@ -91,6 +87,12 @@ fn emit(ev: &[PlanEvent], tag: &str) -> PathBuf {
     let mut em = Emitter::new("round-trip", DEFAULT_BLOCK_SIZE_TOKENS, 0);
     let mut text = String::new();
     for r in requests(ev) {
+        // Mirrors `certus-workload emit`: warmup requests are not written.
+        if r.first()
+            .is_some_and(|e| e.has(workload_model::plan::flags::WARMUP))
+        {
+            continue;
+        }
         if let Some(rec) = em.request(r) {
             text.push_str(&serde_json::to_string(&rec).expect("record"));
             text.push('\n');
@@ -176,6 +178,88 @@ fn the_jsonl_round_trip_is_exact_on_every_comparable_statistic() {
             x.value
         );
     }
+    assert!(d.within_tolerance());
+    let _ = std::fs::remove_dir_all(file.parent().unwrap());
+}
+
+/// The same workload with a warmup window long enough to cover the population ramp.
+fn warmed_doc(seed: u64) -> Document {
+    let text = doc(seed)
+        .to_yaml()
+        .expect("re-serialise")
+        .replace("mode: plan", "mode: plan\n  warmup: 2s");
+    Document::from_yaml(&text).expect("warmed fixture must parse")
+}
+
+#[test]
+fn a_warmed_plan_round_trips_to_its_measured_window() {
+    // `emit` does not write warmup requests: a warmup window says which operations a
+    // *report* excludes (FR-045), so it belongs to a measured run rather than to a
+    // workload, and a trace is a record of a workload. Nothing is lost from the
+    // native artifact — `events.bin` still carries the WARMUP flag on every one of
+    // them.
+    //
+    // Before that decision the emitted trace was a different stream from the plan's
+    // own report and request length diverged by exactly the extra requests.
+    let ev = events(&warmed_doc(31337));
+    let warmup_requests = ev
+        .iter()
+        .filter(|e| {
+            e.has(workload_model::plan::flags::REQUEST_START)
+                && e.has(workload_model::plan::flags::WARMUP)
+        })
+        .count();
+    assert!(
+        warmup_requests > 100,
+        "the fixture warmed only {warmup_requests} requests, so this proves nothing"
+    );
+
+    let plan = plan_report(&ev);
+    let file = emit(&ev, "warmed");
+    let trace = trace_report(&file);
+
+    // The trace is exactly the measured window: the plan's own report excluded the
+    // same requests.
+    assert_eq!(
+        plan.requests, trace.requests,
+        "the trace is not the plan's measured window"
+    );
+    assert_eq!(plan.references, trace.references);
+    assert_eq!(plan.warmup.requests as usize, warmup_requests);
+
+    let mut d = compare(&plan, &trace, &Tolerances::default());
+    d.mark_incomparable(Statistic::ReuseDistanceBytes, "tokens against KV bytes");
+
+    // Three of the four are exact, as for an unwarmed plan.
+    for s in [
+        Statistic::SharingDepth,
+        Statistic::RequestLength,
+        Statistic::UniqueKeys,
+    ] {
+        let x = d.divergences.iter().find(|x| x.statistic == s).unwrap();
+        assert_eq!(x.value, 0.0, "{} diverged by {}", s.name(), x.value);
+    }
+
+    // The reuse-distance CDF is *not* exact, and cannot be. A warmup reference
+    // really did occupy the consumer's capacity, so the plan counts it inside the
+    // reuse distance of whatever follows (see `stats` § How warmup is handled); the
+    // trace does not contain it at all. So the trace's distances are shorter,
+    // one-directionally, by the warmup references that sat between two measured
+    // references to the same key. Small and explainable rather than zero — and the
+    // assertion is on the bound rather than the value, since the exact figure is a
+    // property of the fixture.
+    let rd = d
+        .divergences
+        .iter()
+        .find(|x| x.statistic == Statistic::ReuseDistanceObjects)
+        .unwrap();
+    assert!(rd.value > 0.0, "expected warmup to shift reuse distance");
+    assert!(
+        rd.within,
+        "reuse distance diverged by {} against a tolerance of {}; warmup should shift \
+         it slightly, not materially",
+        rd.value, rd.tolerance
+    );
     assert!(d.within_tolerance());
     let _ = std::fs::remove_dir_all(file.parent().unwrap());
 }

@@ -195,6 +195,24 @@ Modes 2 and 3 MUST write a `manifest.json` alongside, with `source_class: pre_ha
 They MUST use the **full encoding** and MUST populate `partial_final_valid`, so that a reader
 applying the rules above gets the documented invariants. Neither mode involves Certus in any way.
 
+**Modes 2 and 3 MUST NOT emit warmup requests.** A warmup window says which operations a *report*
+excludes (FR-045); it is a property of a measured run, not of a workload, and this schema gives an
+invocation no field in which to say it was one. Emitting them unmarked would make the trace a
+different stream from the plan's own report — measured against a warmed plan, request length and the
+unique-keys curve diverged by exactly the extra requests, while an unwarmed plan round-tripped at
+exactly zero. So the emitted trace is the plan's **measured window**, and the emitter states how many
+requests it withheld.
+
+Nothing is lost from the native artifact: `events.bin` keeps the `WARMUP` flag on every one of those
+events, and a consumer that wants the warmed stream reads the plan rather than the interchange copy.
+
+One consequence to expect rather than debug: the reuse-distance CDF of a warmed plan and of its
+emitted trace are **close but not identical**. A warmup reference really did occupy the consumer's
+capacity, so the plan counts it inside the reuse distance of whatever follows it, and the trace does
+not contain it at all — so the trace's distances are shorter, one-directionally, by the warmup
+references that sat between two measured references to one key. The other three FR-056 statistics are
+unaffected and round-trip exactly.
+
 Note that `certus-workload plan`'s native artifact remains `events.bin`
 (`contracts/plan-format.md`): it is fixed-width, indexable, and streamable, which these formats are
 not. Modes 2 and 3 are interchange, not a replacement.

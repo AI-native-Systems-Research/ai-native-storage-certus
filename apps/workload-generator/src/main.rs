@@ -21,7 +21,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use workload_model::plan::manifest::Identity;
-use workload_model::plan::{read_plan, unbounded_manifest, write_plan, Budget, Generator};
+use workload_model::plan::{flags, read_plan, unbounded_manifest, write_plan, Budget, Generator};
 use workload_model::schema::validate::{validate, Severity};
 use workload_model::schema::{extends, Document};
 use workload_model::stats::{Provenance, Statistics};
@@ -316,7 +316,24 @@ fn cmd_emit(plan: &Path, out: &Path, blocks: u64, block_size: u32) -> Result<(),
     let mut w = std::io::BufWriter::new(file);
     let mut written = 0u64;
     let mut truncated = false;
+    let mut warmup_skipped = 0u64;
     for r in requests(&events) {
+        // Warmup requests are not emitted. A warmup window is a property of a
+        // *measured run* — it says which operations a report excludes (FR-045) —
+        // and a trace is a record of a workload, which has no such window. Nothing
+        // is lost from the native artifact: `events.bin` still carries the WARMUP
+        // flag on every one of these events, and `contracts/trace-io.md` gives an
+        // invocation no field in which to say it was one.
+        //
+        // The alternative was emitting them unmarked, and that made the emitted
+        // trace a different stream from the plan's own report: measured against a
+        // warmed plan, request length and the unique-keys curve diverged by exactly
+        // the extra requests, while a plan with no warmup round-tripped at exactly
+        // zero. Skipping them is what makes the trace the measured window.
+        if r.first().is_some_and(|e| e.has(flags::WARMUP)) {
+            warmup_skipped += 1;
+            continue;
+        }
         // The budget is honoured at request granularity for the same reason the
         // plan's is: a truncated request is not a request, and a reader
         // reconstructing block lists from one would get a shorter conversation
@@ -349,6 +366,15 @@ fn cmd_emit(plan: &Path, out: &Path, blocks: u64, block_size: u32) -> Result<(),
         stats.unique_blocks,
         manifest_path.display(),
     );
+    if warmup_skipped > 0 {
+        // Said out loud, because the emitted invocation count will not match the
+        // plan's own and a reader comparing the two should know why.
+        println!(
+            "note: {warmup_skipped} warmup requests were not emitted. A warmup window \
+             belongs to a measured run, not to a workload, so the trace is the plan's \
+             measured window — which is also what makes the two compare exactly"
+        );
+    }
     if truncated {
         // A reader tells a full trace from a sample by the manifest's invocation
         // count, and that count is what was written -- so this note is about the
