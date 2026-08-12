@@ -11,17 +11,20 @@
 //! reuse distance would make that a comparison of two definitions rather than of two
 //! measurements — a failure that reports itself as a success.
 //!
-//! `fit` and `convert` are not in this build yet; `validate` is.
+//! `convert` is not in this build yet; `fit` and `validate` are.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use workload_model::plan::read_plan;
+use workload_model::fit::branching;
+use workload_model::fit::document::{assemble, RootPopularity, Supplied};
+use workload_model::fit::sessions::SessionShapes;
+use workload_model::plan::{read_plan, Generator, PlanEvent};
 use workload_model::stats::divergence::{
     compare, Measure, Statistic, Tolerances, DEFAULT_TOLERANCE_MIN_REQUESTS,
 };
-use workload_model::stats::{Report, Statistics};
+use workload_model::stats::{Ref, Report, Statistics};
 
 mod read;
 
@@ -39,6 +42,42 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Fit a workload model from a trace, and validate it against that trace.
+    ///
+    /// The whole loop in one command: measure the trace, emit the YAML, generate a
+    /// plan from it, and compare the two. FR-057 requires the fit to **fail** rather
+    /// than emit a model whose divergence exceeds tolerance, so the YAML is written
+    /// only when the comparison passes.
+    Fit {
+        /// The `.jsonl` trace to fit.
+        #[arg(short = 't', long, value_name = "FILE")]
+        trace: PathBuf,
+        /// Where to write the fitted YAML. Omit to print the report only.
+        #[arg(short = 'o', long, value_name = "FILE")]
+        out: Option<PathBuf>,
+        /// `corpus.block_bytes`, which no trace can supply: its block size is
+        /// **tokens**, and converting needs the model geometry no trace carries.
+        #[arg(long, value_name = "BYTES")]
+        block_bytes: u64,
+        /// The measurement window, in requests (FR-009h).
+        #[arg(long, default_value_t = 20_000, value_name = "N")]
+        wss_window: u64,
+        /// The seed the emitted document carries. A property of the sample rather
+        /// than of the workload, so it is stated rather than invented.
+        #[arg(long, default_value_t = 1, value_name = "N")]
+        seed: u64,
+        /// Requests per second, for a trace whose timestamps cannot supply one.
+        #[arg(long, value_name = "RATE")]
+        rate: Option<f64>,
+        /// Accept a trace shorter than its manifest declares. Refused by default:
+        /// sharing, width and reuse distance are properties of the whole stream and
+        /// every one is understated by a prefix of it (FR-055e).
+        #[arg(long)]
+        allow_partial: bool,
+        /// Per-statistic tolerance overrides, as `name=value`.
+        #[arg(long = "tolerance", value_name = "NAME=VALUE")]
+        tolerances: Vec<String>,
+    },
     /// Compare two reference streams statistic by statistic.
     ///
     /// Either two plans, or a plan against a trace. Both forms answer the same
@@ -77,6 +116,25 @@ enum Cmd {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let r = match cli.cmd {
+        Cmd::Fit {
+            trace,
+            out,
+            block_bytes,
+            wss_window,
+            seed,
+            rate,
+            allow_partial,
+            tolerances,
+        } => cmd_fit(
+            &trace,
+            out.as_deref(),
+            block_bytes,
+            wss_window,
+            seed,
+            rate,
+            allow_partial,
+            &tolerances,
+        ),
         Cmd::Validate {
             plan,
             against_plan,
@@ -131,6 +189,251 @@ fn parse_tolerances(args: &[String]) -> Result<Tolerances, String> {
         }
     }
     Ok(t)
+}
+
+/// Fit a model from a trace, validate it against that trace, and write it (T085, T087).
+///
+/// The order matters and is FR-057's: measure, assemble, generate, compare, and only
+/// then write. A fitted model whose synthetic output does not resemble its source is
+/// not a weak result — it is a wrong one, and emitting it would put a plausible YAML
+/// in front of someone who would reasonably trust it.
+#[allow(clippy::too_many_arguments)]
+fn cmd_fit(
+    trace_path: &Path,
+    out: Option<&Path>,
+    block_bytes: u64,
+    wss_window: u64,
+    seed: u64,
+    rate: Option<f64>,
+    allow_partial: bool,
+    tolerance_args: &[String],
+) -> Result<bool, String> {
+    let tol = parse_tolerances(tolerance_args)?;
+    let trace = read::jsonl::read_trace(trace_path, allow_partial).map_err(|e| e.to_string())?;
+    if !trace.capabilities.trunk_fittable() {
+        return Err(
+            "this trace has no session identity, so cross-session sharing is invisible and \
+             occupancy has no denominator: the trunk cannot be fitted from it at all. Arrival \
+             and size parameters would still be available, which is `supports: R = partial` \
+             doing what it says"
+                .into(),
+        );
+    }
+
+    // One pass drives every measurement, so the sharing prefix a `private_depth`
+    // subtracts is the same one a validator recomputes.
+    let mut stats = Statistics::new(wss_window);
+    let mut sharing = workload_model::stats::sharing::Sharing::new();
+    let mut window = workload_model::stats::WindowTable::new();
+    let mut shapes = SessionShapes::new();
+    let mut roots = RootPopularity::new();
+    let mut window_requests = 0u64;
+
+    for inv in &trace.invocations {
+        if inv.blocks.is_empty() {
+            continue;
+        }
+        if let Some(root) = inv.blocks.first() {
+            roots.observe(inv.session.0, *root);
+        }
+        let refs: Vec<Ref> = inv
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(depth, key)| Ref {
+                key: *key,
+                size: trace.capabilities.block_size,
+                depth: depth as u32,
+                session: inv.session,
+                request_start: depth == 0,
+                warmup: false,
+            })
+            .collect();
+        for r in &refs {
+            stats.push(r);
+            sharing.observe(r, &window);
+            window.observe(r);
+        }
+        sharing.end_request();
+        window.end_request();
+        shapes.observe(
+            inv.session.0,
+            inv.turn,
+            inv.blocks.len() as u64,
+            sharing.last_prefix_len(),
+            inv.request_start,
+        );
+        window_requests += 1;
+        if window_requests >= wss_window {
+            window.reset();
+            window_requests = 0;
+        }
+    }
+
+    let trace_report = stats.finish();
+    let sharing_report = sharing.finish();
+    let fitted_sessions = shapes.finish(&sharing_report);
+
+    // The occupancy numerator the root fold needs: sessions reaching the depth the
+    // fit treats as the sharing depth.
+    let sessions_at_sharing = trace_report
+        .sharing
+        .realised_depth
+        .p99
+        .and_then(|d| trace_report.trunk.depths.get(d as usize))
+        .and_then(|d| d.occupancy.map(|o| o * d.width_run as f64))
+        .unwrap_or(trace.sessions() as f64);
+    let fitted_branching = branching::fit(&trace_report.trunk, sessions_at_sharing)
+        .ok_or("the trace has no width profile to fit")?;
+
+    // A rate from the trace's own span where it has one; the caller's otherwise.
+    let measured_rate = if trace.chronological {
+        let firsts: Vec<f64> = trace
+            .invocations
+            .iter()
+            .filter_map(|i| i.request_start)
+            .collect();
+        match (firsts.first(), firsts.last()) {
+            (Some(a), Some(b)) if b > a => Some(firsts.len() as f64 / (b - a)),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    let supplied = Supplied {
+        block_bytes: workload_model::dist::Dist::Scalar(block_bytes as f64),
+        rate_per_s: rate.or(measured_rate),
+        wss_window_requests: wss_window,
+        seed,
+    };
+    let fitted = assemble(
+        &fitted_branching,
+        &fitted_sessions,
+        &roots,
+        &supplied,
+        trace_report.requests,
+        trace.chronological,
+    )
+    .map_err(|e| e.to_string())?;
+    let doc = fitted.document.clone().expect("assembled");
+
+    // FR-055a: fail rather than emit a combination the generator cannot realise.
+    let findings = workload_model::schema::validate::validate(&doc);
+    let rejections: Vec<String> = findings
+        .rejections()
+        .map(|f| format!("[rule {}] {}", f.rule, f.message))
+        .collect();
+
+    println!("fit");
+    println!("  trace     {}", trace_path.display());
+    println!(
+        "  measured  {} requests, {} references, {} sessions, {} roots, block size {} tokens",
+        trace_report.requests,
+        trace_report.references,
+        fitted.sessions,
+        roots.roots(),
+        trace.capabilities.block_size
+    );
+    println!(
+        "  order     {}",
+        if trace.chronological {
+            "chronological"
+        } else {
+            "FILE ORDER (FR-055d)"
+        }
+    );
+    println!(
+        "  trunk     roots.count {} at boundary depth {} (retention {:.3}), {} segments, \
+         fitted to depth {} of {}",
+        fitted_branching.roots,
+        fitted_branching.root_boundary_depth,
+        fitted_branching.retention_at_boundary,
+        fitted_branching.segments.len(),
+        fitted_branching.fitted_to_depth,
+        fitted_branching.observed_to_depth
+    );
+
+    println!("\n  not fitted");
+    for u in &fitted.unset {
+        println!("    - {u}");
+    }
+    println!("\n  caveats");
+    for c in &fitted.caveats {
+        println!("    - {c}");
+    }
+
+    if !rejections.is_empty() {
+        println!("\n  REFUSED: the fitted document does not pass the schema");
+        for r in &rejections {
+            println!("    {r}");
+        }
+        return Ok(false);
+    }
+
+    // Generate from the fitted model and compare it against the trace it came from.
+    // Ground truth is the trace, so this is the only check that says whether the fit
+    // is any good.
+    let mut g = Generator::new(&doc).map_err(|e| e.to_string())?;
+    let mut plan_stats = Statistics::new(wss_window);
+    let mut chunk: Vec<PlanEvent> = Vec::new();
+    while !g.is_done() {
+        chunk.clear();
+        if g.fill(&mut chunk) == 0 {
+            break;
+        }
+        plan_stats.push_events(&chunk);
+    }
+    let synthetic = plan_stats.finish();
+
+    let mut d = compare(&synthetic, &trace_report, &tol);
+    d.mark_incomparable(
+        Statistic::ReuseDistanceBytes,
+        "the synthetic plan's sizes are the supplied block_bytes and the trace's are tokens \
+         per block, so this compares units rather than workloads",
+    );
+
+    println!(
+        "\n  synthetic {} requests, {} references from the fitted model",
+        synthetic.requests, synthetic.references
+    );
+    println!(
+        "\n  {:<24} {:>10} {:>10} {:>9}  verdict",
+        "statistic", "divergence", "tolerance", "samples"
+    );
+    for x in &d.divergences {
+        println!(
+            "  {:<24} {:>10.5} {:>10.5} {:>9}  {}",
+            x.statistic.name(),
+            x.value,
+            x.tolerance,
+            x.samples,
+            match &x.incomparable {
+                Some(_) => "incomparable",
+                None if x.within => "within",
+                None => "EXCEEDED",
+            }
+        );
+    }
+
+    if !d.within_tolerance() {
+        println!(
+            "\n  REFUSED: the fitted model's synthetic output does not resemble its source. \
+             FR-057 fails rather than emitting it — a plausible YAML nobody can tell is wrong \
+             is worse than no YAML"
+        );
+        return Ok(false);
+    }
+
+    match out {
+        Some(path) => {
+            let yaml = doc.to_yaml().map_err(|e| e.to_string())?;
+            std::fs::write(path, &yaml).map_err(|e| format!("{}: {e}", path.display()))?;
+            println!("\n  wrote {}", path.display());
+        }
+        None => println!("\n  every statistic is within tolerance (no --out, so nothing written)"),
+    }
+    Ok(true)
 }
 
 /// The report for a plan directory, and the window it was generated against.

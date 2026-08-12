@@ -43,6 +43,18 @@ use crate::stats::trunk::TrunkReport;
 /// standard errors, so 2 or 4 would segment these traces the same way.
 pub const MERGE_Z: f64 = 3.0;
 
+/// Occupancy below which a width ratio is a count of private paths, not of trunk.
+///
+/// Two sessions per key is the point below which there is not, on average, even one
+/// *pair* sharing a key — so the distinct keys at that depth are overwhelmingly
+/// private descents, which the fit definition of `w(d)` cannot tell apart from trunk
+/// nodes. It is the same boundary [`FittedBranching::caveats`] uses to call a segment
+/// uninformative, and it is deliberately looser than `TARGET_OCCUPANCY`: the
+/// *near-root* levels a fold is about to absorb into `roots.count` routinely sit
+/// between the two, and excluding them would hide the very fanout FR-055c exists to
+/// fold.
+pub const OCCUPANCY_FLOOR: f64 = 2.0;
+
 /// Cumulative retention below which the width profile is not fitted.
 ///
 /// The knee at which the data stops contradicting the model: at 0.99, 12 of the 16
@@ -93,11 +105,15 @@ impl FittedBranching {
         )];
         if self.observed_to_depth > self.fitted_to_depth {
             out.push(format!(
-                "depths {}..={} were not fitted: cumulative retention fell below \
-                 {RETENTION_FLOOR}, and a segment's fanout is a product over its depths so \
-                 censoring compounds through it",
+                "depths {}..={} were not fitted: past depth {} the profile fails one of the \
+                 two gates — cumulative retention under {RETENTION_FLOOR}, so censoring would \
+                 compound through a segment's product, or occupancy under {OCCUPANCY_FLOOR}, \
+                 where the distinct keys at a depth are private descents rather than trunk \
+                 (FR-055b). Observed width beyond it is a lower bound and nothing was fitted \
+                 from it",
                 self.fitted_to_depth + 1,
-                self.observed_to_depth
+                self.observed_to_depth,
+                self.fitted_to_depth
             ));
         }
         if self.root_boundary_depth > 0 {
@@ -170,11 +186,38 @@ pub fn fit(report: &TrunkReport, sessions_at_sharing_depth: f64) -> Option<Fitte
     let widths: Vec<f64> = depths.iter().map(|d| d.width_run as f64).collect();
     let observed_to_depth = (widths.len() - 1) as u32;
 
-    // Step 3 first, since it bounds everything else: the uncensored prefix.
+    // Step 3 first, since it bounds everything else: the prefix that is both
+    // uncensored *and* high-occupancy. Two gates, because they fail for different
+    // reasons and neither implies the other.
+    //
+    // Retention protects against **compounding**: a segment's fanout is a product
+    // over its depths, so censoring by session retirement accumulates through it.
+    //
+    // Occupancy protects against **misreading private descents as trunk**. The fit
+    // definition of `w(d)` counts every key at a depth, private ones included,
+    // because a trace cannot tell them apart — and where occupancy has collapsed to
+    // roughly one session per key, that is what nearly all of them are. Taking the
+    // width there as trunk width inflates `paths(d)` by orders of magnitude, and the
+    // model that results fails FR-009f's occupancy floor: the fit would emit a
+    // document the generator cannot realise. FR-055b already says a measured fanout
+    // is trustworthy only in the high-occupancy region; this is that, enforced rather
+    // than reported.
+    //
+    // `research.md` § The branching segmentation rule found the two gates coinciding
+    // across all sixteen traces measured — every segment the retention floor admitted
+    // sat at occupancy >= 4. That was corroboration, not a guarantee: a synthetic
+    // trace with short sessions and deep private paths holds retention long after
+    // occupancy has gone, which is exactly the case that needs the second gate.
     let base = depths[0].references_run.max(1) as f64;
     let mut fitted_to = 0usize;
     for d in depths {
         if (d.references_run as f64) / base < RETENTION_FLOOR {
+            break;
+        }
+        // Depth 0 is exempt: `roots.count` is a width reading rather than a fanout,
+        // and a trace whose very first level is thinly occupied has no trunk to fit
+        // either way.
+        if d.depth > 0 && d.occupancy.unwrap_or(0.0) < OCCUPANCY_FLOOR {
             break;
         }
         fitted_to = d.depth as usize;
@@ -285,10 +328,25 @@ pub fn fit(report: &TrunkReport, sessions_at_sharing_depth: f64) -> Option<Fitte
             .map(|d| d.references_run as f64 / base)
             .unwrap_or(0.0),
         segment_occupancy: kept.iter().map(occupancy_of).collect(),
+        // Depths are **re-based on the root boundary**. After a fold, the emitted
+        // profile's depth 0 is the trace's `boundary`, because `roots.count` is the
+        // width there and every fitted fanout applies beneath it — a profile still
+        // numbered in the trace's depths would place its first fanout `boundary`
+        // levels too deep and describe a different trunk.
+        //
+        // The first segment then lands at 0, which is also what schema rule 8
+        // requires: `paths(d)` multiplies `fanout(1..d)`, so `fanout_at(0)` is never
+        // read and "from depth 0 onward" is the honest label for a segment covering
+        // the step into depth 1.
         segments: kept
             .iter()
-            .map(|s| Segment {
-                from_depth: s.from,
+            .enumerate()
+            .map(|(i, s)| Segment {
+                from_depth: if i == 0 {
+                    0
+                } else {
+                    s.from.saturating_sub(boundary as u32)
+                },
                 fanout: s.fanout(),
                 skew: None,
                 churn_half_life: None,
@@ -448,17 +506,24 @@ mod tests {
     }
 
     #[test]
-    fn a_low_occupancy_segment_is_flagged_as_uninformative() {
-        // FR-055b: at one session per path the ratio collapses toward 1 whatever the
-        // truth, so a fanout measured there is not evidence.
+    fn a_low_occupancy_depth_is_not_fitted_at_all() {
+        // FR-055b, enforced rather than merely reported: at one session per key the
+        // distinct keys at a depth are private descents, so a width ratio there is a
+        // count of private paths. Fitting it as trunk inflates `paths(d)` and produces
+        // a document that fails FR-009f's occupancy floor — a fit that emits a model
+        // the generator cannot realise.
         let reqs: Vec<(u32, Vec<u64>)> = (0..40u32)
             .map(|s| (s, vec![u64::from(s) * 10, u64::from(s) * 10 + 1]))
             .collect();
         let r = report_of(&reqs, 100);
         let f = fit(&r, 40.0).expect("should fit");
+        assert_eq!(
+            f.fitted_to_depth, 0,
+            "depth 1 sits at occupancy 1 and must be excluded"
+        );
         assert!(
-            f.caveats().iter().any(|c| c.contains("FR-055b")),
-            "occupancy ~1 was not flagged: {:?}",
+            f.caveats().iter().any(|c| c.contains("were not fitted")),
+            "the exclusion was not reported: {:?}",
             f.caveats()
         );
     }

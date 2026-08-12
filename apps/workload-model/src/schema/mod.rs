@@ -149,7 +149,12 @@ pub struct Trees {
     pub churn: Option<Churn>,
 }
 
-fn default_branch_skew() -> f64 {
+/// The `branch_skew` a document takes when it does not state one.
+///
+/// Public because `fit` omits `branch_skew` — its fitting procedure is an open
+/// derivation — and must construct a document carrying the schema's own default
+/// rather than a value of its choosing.
+pub fn default_branch_skew() -> f64 {
     0.9
 }
 
