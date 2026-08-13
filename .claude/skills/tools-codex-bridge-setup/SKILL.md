@@ -41,19 +41,15 @@ codex --version
 
 ### Codex Authentication
 
-After installing Codex CLI, check if auth is already configured:
+After installing Codex CLI, run `codex doctor` to check if auth is working:
 
 ```bash
-# Check if config.toml exists with a provider
-if [[ -f ~/.codex/config.toml ]] && grep -q "model_provider" ~/.codex/config.toml; then
-  echo "Codex config found — using configured provider"
-  grep "model_provider" ~/.codex/config.toml
-elif [[ -n "$OPENAI_API_KEY" ]]; then
-  echo "OPENAI_API_KEY found — Codex will use OpenAI directly"
-else
-  echo "No auth configured — setup needed (see options below)"
-fi
+codex doctor 2>&1 | grep -A2 "auth"
 ```
+
+If it shows `✓ auth` with a provider env var marked `(present)`, auth is good — skip to Setup.
+
+If auth is missing, pick one of the options below:
 
 **Option 1: OpenAI direct** — interactive browser login:
 ```bash
