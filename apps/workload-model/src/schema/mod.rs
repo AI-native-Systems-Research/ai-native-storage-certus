@@ -281,7 +281,9 @@ pub struct Sessions {
     /// Turn-1 path depth below the shared trunk, private to this session.
     pub private_depth: Dist,
     /// Blocks added by each turn after the first. Drawn per turn.
-    pub growth_per_turn: Dist,
+    ///
+    /// Either one distribution, or one **per session-length band** — see [`Growth`].
+    pub growth_per_turn: Growth,
     /// Ceiling on a session's path depth, in blocks — the context window.
     ///
     /// A prompt cannot exceed the model's context window, so a conversation that runs
@@ -325,6 +327,112 @@ pub struct Sessions {
     /// Agent fan-out. Disabled by default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spawn: Option<Spawn>,
+}
+
+/// Per-turn path growth: one distribution, or one per session-length band.
+///
+/// A bare distribution — `{dist: lognormal, median: 6, sigma: 0.5}`, or the scalar
+/// sugar `6` — means every session draws its growth from the same place. That is the
+/// original behaviour and remains the default spelling.
+///
+/// # Why a session's length has to select the distribution
+///
+/// Because a session's accumulated depth is `Σᵢ (T − i)·gᵢ`: the increment at position
+/// `i` is inherited by every turn after it, so it enters with weight `T − i`, and
+/// summed over a session that weight is **quadratic in the turn count**. One
+/// distribution for every session is therefore only correct if growth rate does not
+/// vary with session length — and in real agentic traces it varies a great deal, and
+/// **non-monotonically**: measured on two of them the rate climbs from about 21 blocks
+/// per turn at 2–3 turns to 37–38 around 8–16 turns, then falls away to 3–9 beyond 96.
+/// A conversation that runs very long is one that grows slowly, which is what lets it
+/// run long.
+///
+/// The cost of ignoring it was measured (FR-054c): a single pooled distribution
+/// accumulates **1.478x and 1.545x** the depth the traces actually have, which came out
+/// as synthetic output running 1.2–1.6x long. Banding by turn count brings the same
+/// arithmetic to **1.001x and 1.004x**.
+///
+/// A Pearson correlation between session length and rate reads only −0.12 and −0.25 on
+/// those traces and invites exactly the wrong conclusion; the relationship rises and
+/// then collapses, which is what a linear coefficient cannot see. Bands were chosen
+/// over a fitted functional form for that reason: there is no monotone shape to fit.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Growth {
+    /// One distribution for every session, whatever its length.
+    Uniform(Dist),
+    /// One distribution per session-length band.
+    Banded(GrowthBands),
+}
+
+/// `growth_per_turn` banded by session length.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GrowthBands {
+    /// Ascending by `from_turns`; the applicable band is the last one whose
+    /// `from_turns` does not exceed the session's turn count.
+    pub by_turns: Vec<GrowthBand>,
+}
+
+/// One session-length band and the growth distribution sessions in it draw from.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GrowthBand {
+    /// This band applies to sessions of at least this many turns, until the next band.
+    pub from_turns: u32,
+    /// Blocks added per turn by a session in this band.
+    pub growth: Dist,
+}
+
+impl Growth {
+    /// The distribution a session of `turns` turns draws its growth from.
+    ///
+    /// Resolved **once per session**, at birth, where the turn count is drawn — so
+    /// everything downstream still sees a single [`Dist`] and FR-014a's path formula
+    /// does not learn about banding.
+    ///
+    /// A turn count below the first band falls into the first band rather than
+    /// producing nothing: bands describe where the population was observed, and a
+    /// session shorter than anything observed is closer to the shortest band than to
+    /// no growth at all.
+    pub fn at(&self, turns: u64) -> &Dist {
+        match self {
+            Growth::Uniform(d) => d,
+            Growth::Banded(b) => {
+                let mut chosen = &b.by_turns[0].growth;
+                for band in &b.by_turns {
+                    if u64::from(band.from_turns) <= turns {
+                        chosen = &band.growth;
+                    } else {
+                        break;
+                    }
+                }
+                chosen
+            }
+        }
+    }
+
+    /// Every distribution this may resolve to, for checks that must cover all of them.
+    pub fn distributions(&self) -> Vec<&Dist> {
+        match self {
+            Growth::Uniform(d) => vec![d],
+            Growth::Banded(b) => b.by_turns.iter().map(|x| &x.growth).collect(),
+        }
+    }
+
+    /// The mean over bands, unweighted, for a report that wants one number.
+    ///
+    /// Unweighted because the band weights depend on the `turns` distribution, which
+    /// this type does not have; a caller needing the population mean should weight it
+    /// itself rather than trusting this.
+    pub fn mean(&self) -> Option<f64> {
+        let ds = self.distributions();
+        let means: Vec<f64> = ds.iter().filter_map(|d| d.mean()).collect();
+        if means.is_empty() {
+            return None;
+        }
+        Some(means.iter().sum::<f64>() / means.len() as f64)
+    }
 }
 
 /// Agent fan-out: a session spawning children that inherit its context.
@@ -384,7 +492,7 @@ pub struct MixEntry {
     pub private_depth: Option<Dist>,
     /// Overrides `sessions.growth_per_turn`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub growth_per_turn: Option<Dist>,
+    pub growth_per_turn: Option<Growth>,
 }
 
 /// Non-stationary root popularity.

@@ -119,6 +119,50 @@ impl Hist {
         self.max = self.max.max(v);
     }
 
+    /// Fold another histogram into this one.
+    ///
+    /// Exact for count, sum, min and max, and bucket-for-bucket for the occupancy — so
+    /// a merged histogram is indistinguishable from one that saw both sample sets
+    /// directly. That matters because the merge exists to combine sparse
+    /// session-length bands when fitting `growth_per_turn`, and a band that reported a
+    /// different mean after merging than before would make the band boundaries
+    /// load-bearing in a way they are not meant to be.
+    ///
+    /// Either side may be sealed. A sealed histogram keeps its occupancy in the frozen
+    /// bucket list rather than the dense table, so both are re-expanded before folding:
+    /// merging into a sealed receiver without doing so would start an empty dense table
+    /// beside a stale frozen list, and the receiver's own samples would vanish from every
+    /// quantile while `count` still reported them. The result is always unsealed, and
+    /// [`Hist::seal`] may be called on it afterwards.
+    pub fn merge(&mut self, other: &Hist) {
+        if other.count == 0 {
+            return;
+        }
+        if self.counts.is_empty() {
+            self.counts = vec![0; BUCKETS];
+            // Sealed receiver: recover its own occupancy from the frozen list, then drop
+            // that list, since the dense table is now the authority for both sides.
+            for (lo, _, c) in std::mem::take(&mut self.buckets) {
+                self.counts[bucket(lo)] += c;
+            }
+        }
+        if !other.counts.is_empty() {
+            for (a, b) in self.counts.iter_mut().zip(other.counts.iter()) {
+                *a += *b;
+            }
+        } else {
+            // Sealed source: same recovery, at each bucket's own index so the merged
+            // occupancy lands where it did before.
+            for (lo, _, c) in &other.buckets {
+                self.counts[bucket(*lo)] += *c;
+            }
+        }
+        self.count += other.count;
+        self.sum += other.sum;
+        self.min = self.min.min(other.min);
+        self.max = self.max.max(other.max);
+    }
+
     /// Samples recorded.
     pub fn count(&self) -> u64 {
         self.count
@@ -391,6 +435,74 @@ mod tests {
         assert_eq!(h.count(), 4);
         // Totals survive; the table does not.
         assert_eq!(h.max(), Some(1_000_000));
+    }
+
+    #[test]
+    fn merging_is_indistinguishable_from_seeing_both_sample_sets() {
+        // `fit::sessions` merges sparse session-length bands, and a merge that shifted
+        // any moment would make the band boundaries load-bearing when they are only a
+        // fitting convenience. So the assertion is equality with the direct histogram,
+        // not a tolerance.
+        let a: [u64; 5] = [1, 1, 5, 40, 1_000_000];
+        let b: [u64; 4] = [0, 5, 5, 97];
+        let mut direct = Hist::new();
+        let mut left = Hist::new();
+        let mut right = Hist::new();
+        for v in a {
+            direct.add(v);
+            left.add(v);
+        }
+        for v in b {
+            direct.add(v);
+            right.add(v);
+        }
+        left.merge(&right);
+        assert_eq!(left.count(), direct.count());
+        assert_eq!(left.mean(), direct.mean());
+        assert_eq!(left.min(), direct.min());
+        assert_eq!(left.max(), direct.max());
+        assert_eq!(left.buckets(), direct.buckets());
+        for p in [0.0, 0.1, 0.5, 0.9, 0.99, 1.0] {
+            assert_eq!(left.quantile(p), direct.quantile(p), "quantile {p}");
+        }
+    }
+
+    #[test]
+    fn merging_a_sealed_histogram_into_a_sealed_one_loses_nothing() {
+        // A sealed histogram keeps its occupancy in the frozen bucket list and has no
+        // dense table. Merging into one used to start a fresh dense table beside the
+        // stale frozen list, so the receiver's own samples vanished from every quantile
+        // while `count` went on reporting them -- the same class of defect as reading a
+        // quantile off a sealed histogram, and just as invisible at a glance.
+        let a: [u64; 4] = [2, 2, 60, 5_000];
+        let b: [u64; 3] = [7, 60, 900_000];
+        let mut direct = Hist::new();
+        for v in a.iter().chain(b.iter()) {
+            direct.add(*v);
+        }
+        let mut left = Hist::new();
+        for v in a {
+            left.add(v);
+        }
+        let mut right = Hist::new();
+        for v in b {
+            right.add(v);
+        }
+        left.seal();
+        right.seal();
+        left.merge(&right);
+        assert_eq!(left.count(), direct.count());
+        assert_eq!(left.mean(), direct.mean());
+        assert_eq!(left.min(), direct.min());
+        assert_eq!(left.max(), direct.max());
+        // The frozen list was dropped in favour of the recovered dense table, so the
+        // merged histogram is a normal unsealed one and sealing it again agrees.
+        assert_eq!(left.buckets(), direct.buckets());
+        left.seal();
+        assert_eq!(left.buckets(), direct.buckets());
+        for p in [0.0, 0.5, 0.9, 1.0] {
+            assert_eq!(left.quantile(p), direct.quantile(p), "quantile {p}");
+        }
     }
 
     #[test]

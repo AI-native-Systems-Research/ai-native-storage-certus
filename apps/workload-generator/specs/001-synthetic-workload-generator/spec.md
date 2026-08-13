@@ -1724,7 +1724,8 @@ report segments statistics into before/after windows around the event.
   the accumulation to 1.000× and 1.072×, while substituting a position-dependent mean only reaches
   1.214× and 1.244× — so the variation that matters is between sessions and not within them, and the
   model needs `growth_per_turn` to be a **per-session rate**, drawn once and plausibly conditioned
-  on `turns`, rather than an independent per-turn draw.
+  on `turns`, rather than an independent per-turn draw. **Closed by FR-054f**, which conditions it on
+  session length; the accumulation identity above comes out at ~1.00x once it is.
   Two traps are recorded with it, because both cost time here. A Pearson correlation between session
   length and growth rate reads only **−0.12 and −0.25** and looks negligible — the relationship is
   **non-monotonic**, rising then collapsing, which is precisely what a linear coefficient cannot
@@ -1759,7 +1760,13 @@ report segments statistics into before/after windows around the event.
   it changes nothing — while `fit` reports the ceiling it measured without emitting it. Emitting it
   would trade a gated statistic for an ungated one, and FR-054a asks for a limitation to be named
   rather than papered over. **Closing FR-054c properly requires the growth rate to depend on session
-  length, rather than the depth to be clamped.**
+  length, rather than the depth to be clamped** — which is what FR-054f does.
+  One caution carries forward from here and is worth keeping separate from the negative result itself:
+  the argument above rejects `max_depth` because it worsened gated statistics, and that reasoning is
+  sound *for a change that manufactures an artefact*. It does not generalise to every change that
+  worsens one. FR-054g is the case where it does not: there a gated statistic got worse precisely
+  because the model got more faithful, and applying this paragraph's rule mechanically would have
+  rejected the fix FR-054c asked for.
 - **FR-054d**: `fit --explain` MUST print the path budget: the trace's mean request length decomposed
   into turn-weighted turn-1 depth and accumulated growth, the shared prefix **drawn** beside the one
   **subtracted** to form `private_depth`, and the accumulated growth an i.i.d. per-turn draw would
@@ -1767,6 +1774,82 @@ report segments statistics into before/after windows around the event.
   that two distributions differ and cannot say which of FR-014a's three terms is responsible;
   this can, by arithmetic, and both defects found in this area were mean shifts that every
   quantile-based check passed.
+- **FR-054f**: `growth_per_turn` MAY be stated, and `fit` MUST emit it, as **one distribution per
+  session-length band** rather than a single pooled distribution. This closes FR-054c, which named
+  conditioning the growth rate on session length as the fix and ruled out the two alternatives
+  recorded in FR-054e.
+  A band table is a list of `{from_turns, growth}` entries; the applicable band is the last one whose
+  `from_turns` does not exceed the session's turn count, and the band is resolved **once per session**
+  at the point the turn count is drawn, so FR-014a's path formula continues to see a single
+  distribution and nothing downstream learns about bands. Growth is still drawn **per turn** from that
+  distribution: what a session's length selects is where its increments come from, not their value.
+  The bare distribution remains the default spelling and MUST keep working unchanged — the banded form
+  is an alternative shape of the same field, not a new field, so every document written before this
+  requirement parses and means exactly what it did.
+  **Fitting procedure.** Increments are accumulated per rung of a **geometric** ladder of turn counts
+  (`2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128`), geometric because turn counts span orders of
+  magnitude and a linear grid would put nearly every session in the first cell while spreading the
+  long sessions — the ones a quadratically-weighted sum is most sensitive to — thinly across the rest.
+  Rungs are then **merged upward until a band carries at least 25 sessions**, and a final band short
+  of that folds back into its neighbour, so the emitted ladder is as fine as the data supports rather
+  than as fine as the ladder. A trace supporting only one band MUST emit the bare spelling, because a
+  one-row table asserts a length dependence the trace has not shown. On two agentic traces the
+  13-rung ladder collapses to 8 bands, whose fitted rates reproduce the non-monotonic shape FR-054c
+  measured: 21.6, 29.0, 32.0, 37.7, 36.2, 35.5, 30.5, 14.9 blocks per turn.
+  **What it buys, measured as a paired A/B over three agentic traces and three seeds.** The
+  accumulation identity goes from 1.478x and 1.545x to ~1.00x, and synthetic reference counts fall
+  from 1.14–1.28x the trace's to 1.05–1.11x, improving in **9 of 9** cells.
+  Judged instead at a **matched reference count** — which is the comparison that isolates the
+  conditioning from the volume, and the one that matters, per FR-054g — banding is better or equal on
+  five of six cells:
+  | trace | statistic | pooled | banded |
+  | --- | --- | --- | --- |
+  | tau2_airline | `request_length` | 0.0695 | **0.0231** |
+  | tau2_airline | `unique_keys` | 0.6108 | **0.3884** |
+  | tau2_airline | reuse distance | 0.0280 | 0.0323 |
+  | tau2_retail | `request_length` | 0.0593 | 0.0609 |
+  | tau2_retail | `unique_keys` | 0.4590 | **0.3476** |
+  | tau2_retail | reuse distance | 0.0409 | 0.0415 |
+  **Validation.** A banded table MUST be rejected — not warned about — when it is empty, when its
+  first band starts above one turn, or when its bands do not ascend by `from_turns`, and the check
+  MUST cover every `workload.mix` arm's override as well as `workload.sessions`. Same grounds as
+  rule 8's branching profile: a table that does not ascend, or that starts above the shortest session,
+  silently routes some sessions to the wrong band, and every path they generate is then wrong in a way
+  no later check attributes back to here.
+- **FR-054g**: **`reuse_distance_objects` is minimised where the generated stream carries about 18%
+  *more* references than the trace, not at parity — so a correctly calibrated model cannot satisfy it,
+  and this is a limitation of the statistic as tolerance-checked here rather than of any model that
+  fails it** (FR-054a). Recorded because the surface appearance is the exact opposite: adopting
+  FR-054f took this statistic from inside tolerance to outside it on 8 of 9 trace-seed cells, which
+  reads as a regression caused by banding and is not one.
+  The evidence is a sweep of 19 configurations over three traces, and its point is that the divergence
+  is a function of the **reference volume alone**. Driving the volume by three unrelated mechanisms —
+  scaling a pooled distribution, scaling a banded one, and changing the band ladder — traces one
+  U-shaped curve with its floor at about 1.18x:
+  | mechanism | references vs trace | reuse distance |
+  | --- | --- | --- |
+  | pooled x 0.60 | 0.995 | 0.02801 |
+  | pooled x 0.68 | 1.043 | 0.02065 |
+  | banded (adopted) | 1.071 | 0.02175 |
+  | coarse ladder | 1.078 | 0.02089 |
+  | pooled x 0.85 | 1.148 | 0.00912 |
+  | two-band ladder | 1.175 | **0.00729** |
+  | pooled, unscaled | 1.239 | 0.01116 |
+  | banded x 1.40 | 1.247 | 0.01189 |
+  Three consequences follow, and each one is a trap on its own. **A statistic passing before a change
+  and failing after it is not evidence the change caused the failure**: at matched volume pooled and
+  banded give the same reuse distance, so what crossed the tolerance was correcting the reference
+  count, which any faithful model must do. **No amount of tuning recovers it** — varying the ladder
+  and the merge threshold moves only the volume while `request_length` stays within 0.0582–0.0622 —
+  so this MUST NOT be pursued as a fitting-parameter problem. And **the tolerance was calibrated where
+  the bias is invisible**: FR-056's reuse-distance tolerance comes from seed-to-seed variation of the
+  generator against itself (T075), a comparison in which a bias shared by both sides cancels exactly.
+  Direction and leading cause, so the next investigation does not start over: at matched volume the
+  synthetic's reuse distances are too **short**, and `unique_keys` is far outside tolerance on every
+  real trace (0.21–0.88), which is the same finding from the other end — too few distinct keys
+  concentrates references onto them and shortens every distance between repeats. That points at the
+  shared-prefix mismatch FR-054d prints as term 1, worth +33.3 and +74.6 blocks per request on the two
+  traces measured, and **not** at growth, which FR-054f has now accounted for.
 - **FR-055**: `fit` MUST accept the trace format of `contracts/trace-io.md` in **either container**,
   parquet or JSONL, and with **either block-encoding population pattern**, detected per trace rather
   than assumed, and MUST emit a schema-valid YAML. The two population patterns are not two schemas —

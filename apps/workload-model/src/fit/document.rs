@@ -234,7 +234,7 @@ pub fn assemble(
                  trace showed"
                     .to_string(),
             );
-            Dist::Scalar(0.0)
+            crate::schema::Growth::Uniform(Dist::Scalar(0.0))
         }
     };
 

@@ -535,6 +535,34 @@ fn cmd_fit(
         );
     }
 
+    if let Some(workload_model::schema::Growth::Banded(b)) = &fitted_sessions.growth_per_turn {
+        // The bands are a fitting decision, so they are shown with the sessions behind
+        // them: a band fitted from a handful of sessions is a thin measurement and
+        // FR-055 requires a reader to be able to see that.
+        let counts = shapes.growth_band_sessions();
+        println!(
+            "\n  growth bands   growth_per_turn is banded by session length, because a session's \
+             accumulated\n                 depth weights each increment by (turns - position) and \
+             so is quadratic in\n                 length (FR-054c). {} bands from {} rungs:",
+            b.by_turns.len(),
+            counts.len()
+        );
+        for band in &b.by_turns {
+            let sessions: u64 = counts
+                .iter()
+                .filter(|(from, _)| *from >= u64::from(band.from_turns))
+                .map(|(_, n)| *n)
+                .sum();
+            println!(
+                "                   from {:>4} turns: mean {:>6.1} blocks/turn, {} sessions at or \
+                 above this rung",
+                band.from_turns,
+                band.growth.mean().unwrap_or(0.0),
+                sessions
+            );
+        }
+    }
+
     println!("\n  provenance");
     let reconstructed: Vec<_> = provenance.iter().filter(|p| p.is_reconstructed()).collect();
     if reconstructed.is_empty() {

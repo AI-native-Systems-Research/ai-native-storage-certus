@@ -12,7 +12,7 @@
 //! the workload, so it is refused; occupancy below the comfortable threshold is
 //! still measurable, so it warns.
 
-use super::{ArrivalModel, Branching, Document, Placement};
+use super::{ArrivalModel, Branching, Document, Growth, Placement};
 use crate::corpus::{occupancy, Corpus, TARGET_OCCUPANCY};
 use crate::session::{check_warmup, Population};
 use crate::units::{parse_duration_ns, parse_rate_per_s};
@@ -87,6 +87,69 @@ pub fn validate(d: &Document) -> Report {
                 d.version
             ),
         );
+    }
+
+    /// Where a mixture arm's finding should say it came from.
+    fn mix_label(i: usize) -> String {
+        format!("workload.mix[{i}]")
+    }
+
+    // Rule 24: a banded `growth_per_turn` must be a usable table (FR-054f).
+    //
+    // Rejections rather than warnings for the same reason rule 8 rejects a malformed
+    // branching profile: a table whose bands do not ascend, or which starts above the
+    // shortest session, silently sends some sessions to the wrong band, and every path
+    // those sessions generate is then wrong in a way no later check attributes here.
+    let banded: Vec<(String, &Growth)> = std::iter::once((
+        "workload.sessions".to_string(),
+        &d.workload.sessions.growth_per_turn,
+    ))
+    .chain(
+        d.workload
+            .mix
+            .iter()
+            .enumerate()
+            .filter_map(|(i, m)| m.growth_per_turn.as_ref().map(|g| (mix_label(i), g))),
+    )
+    .collect();
+    for (where_, growth) in banded {
+        if let Growth::Banded(b) = growth {
+            if b.by_turns.is_empty() {
+                r.reject(
+                    "24",
+                    format!(
+                        "{where_}.growth_per_turn.by_turns is empty; state a distribution or bands"
+                    ),
+                );
+                continue;
+            }
+            if b.by_turns[0].from_turns > 1 {
+                r.reject(
+                    "24",
+                    format!(
+                        "{}.growth_per_turn.by_turns starts at from_turns {}, so a session \
+                         shorter than that names no band. The first band must start at 1",
+                        where_, b.by_turns[0].from_turns
+                    ),
+                );
+            }
+            let mut prev: Option<u32> = None;
+            for band in &b.by_turns {
+                if let Some(p) = prev {
+                    if band.from_turns <= p {
+                        r.reject(
+                            "24",
+                            format!(
+                                "{where_}.growth_per_turn bands must ascend by from_turns; \
+                                 {} follows {}",
+                                band.from_turns, p
+                            ),
+                        );
+                    }
+                }
+                prev = Some(band.from_turns);
+            }
+        }
     }
 
     // Rule 19: exactly one run length.
@@ -938,5 +1001,108 @@ run:
         let mut d = doc("");
         d.version = 99;
         assert!(validate(&d).rejections().any(|f| f.rule == "version"));
+    }
+
+    /// A document whose `growth_per_turn` is the banded spelling (FR-054f).
+    ///
+    /// `bands` is `(from_turns, blocks per turn)`; an empty slice emits `by_turns: []`,
+    /// which is the degenerate table rule 24 has to catch.
+    fn banded_doc(bands: &[(u32, u32)]) -> Document {
+        let table = if bands.is_empty() {
+            " []".to_string()
+        } else {
+            let mut s = String::new();
+            for (from, growth) in bands {
+                s.push_str(&format!(
+                    "\n      - {{from_turns: {from}, growth: {{dist: const, value: {growth}}}}}"
+                ));
+            }
+            s
+        };
+        let y = format!(
+            r#"
+version: 1
+seed: 1
+duration: 60s
+corpus:
+  block_bytes: 131072
+  trees:
+    roots: {{count: 4, popularity: {{dist: zipf, s: 0.9}}}}
+    shared_depth: {{dist: const, value: 8}}
+workload:
+  arrival: {{model: open_loop, rate: 1000/s}}
+  sessions:
+    turns: {{dist: geometric, mean: 4}}
+    think_time: {{dist: const, value: 1}}
+    private_depth: {{dist: const, value: 4}}
+    growth_per_turn:
+      by_turns:{table}
+run:
+  mode: hardware
+"#
+        );
+        Document::from_yaml(&y).expect("banded fixture must parse")
+    }
+
+    /// Rule 24's message for a document, or `None` if it did not fire.
+    fn rule_24(d: &Document) -> Option<String> {
+        validate(d)
+            .rejections()
+            .find(|f| f.rule == "24")
+            .map(|f| f.message.clone())
+    }
+
+    #[test]
+    fn a_banded_growth_table_is_accepted_and_the_bare_spelling_still_is() {
+        // The untagged enum is what keeps every pre-FR-054f document working, so both
+        // spellings are asserted together: `doc("")` above uses the bare one.
+        assert!(!validate(&doc("")).is_rejected());
+        let d = banded_doc(&[(1, 2), (8, 20)]);
+        let r = validate(&d);
+        assert!(!r.is_rejected(), "{:?}", r.findings);
+    }
+
+    #[test]
+    fn a_growth_table_that_starts_above_one_turn_is_refused() {
+        // Rule 24. A session shorter than the first band names no band at all;
+        // `Growth::at` clamps it into the first one, and a table that starts higher is
+        // then silently disagreeing with what it says.
+        let m = rule_24(&banded_doc(&[(4, 2)])).expect("rule 24 should fire");
+        assert!(m.contains("must start at 1"), "{m}");
+    }
+
+    #[test]
+    fn a_growth_table_whose_bands_do_not_ascend_is_refused() {
+        let m = rule_24(&banded_doc(&[(1, 2), (8, 20), (8, 30)])).expect("rule 24 should fire");
+        assert!(m.contains("must ascend"), "{m}");
+    }
+
+    #[test]
+    fn an_empty_growth_table_is_refused() {
+        // `by_turns: []` parses — an empty list is a valid list — and would panic in
+        // `Growth::at`, which indexes the first band. Rule 24 is what stops it here.
+        let m = rule_24(&banded_doc(&[])).expect("rule 24 should fire");
+        assert!(m.contains("is empty"), "{m}");
+    }
+
+    #[test]
+    fn a_mixture_arms_growth_table_is_checked_too() {
+        // An arm's override is a `growth_per_turn` like any other, and a document whose
+        // arms went unchecked would put exactly the sessions the arm describes in the
+        // wrong band.
+        let mut d = banded_doc(&[(1, 2), (8, 20)]);
+        let bad = match banded_doc(&[(4, 2)]).workload.sessions.growth_per_turn {
+            super::Growth::Banded(b) => b,
+            super::Growth::Uniform(_) => panic!("fixture is banded"),
+        };
+        d.workload.mix = vec![super::super::MixEntry {
+            weight: 1.0,
+            turns: None,
+            think_time: None,
+            private_depth: None,
+            growth_per_turn: Some(super::Growth::Banded(bad)),
+        }];
+        let m = rule_24(&d).expect("rule 24 should fire for an arm");
+        assert!(m.contains("workload.mix[0]"), "{m}");
     }
 }

@@ -466,7 +466,7 @@ nonparametric branching process with no closed-form fit:
 | `branching` | the **width-by-depth profile** `w(d) = distinct keys at depth d that **two or more sessions** reached`, segmented per `research.md` § The branching segmentation rule; each segment's fanout is the geometric mean of the ratios inside it |
 | `branch_skew` | Zipf exponent fitted to the visit-count distribution over the keys at one depth, per segment |
 | `private_depth` | path depth of the **lowest-numbered turn** − that request's longest common prefix |
-| `growth_per_turn` | path-depth increment between consecutive turns of one session, **in turn-index order** |
+| `growth_per_turn` | path-depth increment between consecutive turns of one session, **in turn-index order**, accumulated **per session-length band** — see below |
 | `churn.half_life` | **not fittable from a trace of ordinary length** — see below |
 
 `shared_depth` **is** the FR-056 validation statistic, so the model is parameterised in the
@@ -499,6 +499,60 @@ A fit MUST therefore report arrival-order disorder and genuine chain violations 
 are different findings: the first says the trace's timestamps and turn indices disagree, which no
 longer affects any fitted parameter, while the second says path depth decreases along the chain,
 which FR-014a forbids and the model cannot express.
+
+**`growth_per_turn` is fitted per session-length band, and a document may state it that way.**
+A session's accumulated depth is `Σᵢ (T − i)·gᵢ` — an increment is inherited by every later turn, so
+it enters with weight `T − i` and that weight is **quadratic in the turn count** once summed over the
+session. One pooled distribution is therefore only right if the growth rate does not vary with session
+length, and in real agentic traces it varies a great deal and **non-monotonically**: the rate climbs
+from about 21 blocks/turn at 2–3 turns to 37–38 around 8–16 turns, then falls away sharply beyond 96.
+A conversation that runs very long is one that grows slowly, which is what lets it run long. Ignoring
+it made the accumulated depth come out 1.478x and 1.545x what the traces have; banding brings the same
+arithmetic to ~1.00x (spec FR-054f).
+
+So the table is accumulated **per rung of a geometric ladder** of turn counts
+(`2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128`) — geometric because turn counts span orders of
+magnitude and a linear grid would put nearly every session in the first cell — and rungs are then
+**merged upward until a band carries at least 25 sessions**, with a short final band folded into its
+neighbour. The emitted ladder is thus as fine as the data supports rather than as fine as the ladder,
+and a trace that supports only one band emits the bare distribution, since a one-row table would
+assert a length dependence the trace has not shown.
+
+Both spellings are the same field. The bare form is unchanged and remains the default; the banded form
+replaces the distribution with a `by_turns` list, and the applicable band is the last one whose
+`from_turns` does not exceed the session's turn count:
+
+```yaml
+version: 1
+seed: 1
+duration: 60s
+corpus:
+  block_bytes: 128KiB
+  trees:
+    roots: {count: 12, popularity: {dist: zipf, s: 0.9}}
+    shared_depth: {dist: lognormal, median: 12, sigma: 0.6}
+workload:
+  arrival: {model: open_loop, rate: 400/s}
+  sessions:
+    turns: {dist: geometric, mean: 6}
+    think_time: {dist: const, value: 2s}
+    private_depth: {dist: lognormal, median: 8, sigma: 0.8}
+    # Banded by session length. Short conversations grow fastest; the very long
+    # ones grow slowly, which is what lets them run long. The band is resolved
+    # ONCE per session from its drawn turn count, then growth is drawn per turn
+    # from that band -- a session's length selects the distribution, not the value.
+    growth_per_turn:
+      by_turns:
+        - {from_turns: 1, growth: {dist: lognormal, median: 21, sigma: 0.7}}
+        - {from_turns: 8, growth: {dist: lognormal, median: 37, sigma: 0.7}}
+        - {from_turns: 32, growth: {dist: lognormal, median: 15, sigma: 0.7}}
+run:
+  mode: hardware
+```
+
+The first band MUST start at `from_turns: 1` and the bands MUST ascend, or the document is rejected by
+rule 24 — a table that starts higher, or that does not ascend, routes some sessions to the wrong band
+and every path they generate is then wrong with nothing later attributing it back here.
 
 **`branching` counts only the shared keys, and this is load-bearing.** An earlier version of this
 table defined `w(d)` as every distinct key at a depth, on the grounds that a trace cannot tell a
@@ -573,6 +627,7 @@ workload:
     private_depth: {dist: lognormal, median: 8, sigma: 0.8}
 
     # Blocks added by each turn after the first. Drawn once PER TURN, not per session.
+    # May instead be a table BANDED BY SESSION LENGTH -- see below.
     growth_per_turn: {dist: lognormal, median: 6, sigma: 0.5}
 
     # AGENT FAN-OUT. A session may spawn children that inherit its context and run

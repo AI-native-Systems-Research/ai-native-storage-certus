@@ -88,11 +88,20 @@ const DIST_PATHS: &[(&str, Unit)] = &[
     ("workload.sessions.think_time", Unit::Seconds),
     ("workload.sessions.private_depth", Unit::Count),
     ("workload.sessions.growth_per_turn", Unit::Count),
+    // The banded spelling puts each distribution one level down, under an index.
+    (
+        "workload.sessions.growth_per_turn.by_turns.*.growth",
+        Unit::Count,
+    ),
     ("workload.sessions.spawn.at_turn", Unit::Count),
     ("workload.mix.*.turns", Unit::Count),
     ("workload.mix.*.think_time", Unit::Seconds),
     ("workload.mix.*.private_depth", Unit::Count),
     ("workload.mix.*.growth_per_turn", Unit::Count),
+    (
+        "workload.mix.*.growth_per_turn.by_turns.*.growth",
+        Unit::Count,
+    ),
     ("topology.replication.nodes_per_key", Unit::Count),
 ];
 

@@ -256,12 +256,17 @@ pub fn draw_params(w: &Workload, st: &mut Stream) -> SessionParams {
     let growth_d = entry
         .and_then(|e| e.growth_per_turn.clone())
         .unwrap_or(s.growth_per_turn.clone());
+    let turns = turns_d.sample_u64(st).clamp(1, u64::from(u16::MAX)) as u16;
     SessionParams {
         mix_index,
-        turns: turns_d.sample_u64(st).clamp(1, u64::from(u16::MAX)) as u16,
+        turns,
         private_depth: priv_d.sample_u64(st).min(u64::from(u32::MAX)) as u32,
         think_time_s: think_d.sample(st).max(0.0),
-        growth_per_turn: growth_d,
+        // Banding resolved HERE, once, where the turn count is known — so
+        // `depth_at_turn` and the incremental advance both still see one `Dist` and
+        // FR-014a's formula does not learn about bands. Drawn per turn from it as
+        // before; what a session's length selects is the distribution, not the value.
+        growth_per_turn: growth_d.at(u64::from(turns)).clone(),
         // Drawn per session: a single ceiling piles every long conversation onto one
         // depth, which is visible as a spike in `request_length` (see
         // `Sessions::max_depth`). Not per-arm, though — a context window is a property
@@ -394,7 +399,7 @@ mod tests {
                 turns: Dist::Shaped(Shape::Geometric { mean: turns_mean }),
                 think_time: Dist::Scalar(think),
                 private_depth: Dist::Scalar(8.0),
-                growth_per_turn: Dist::Scalar(6.0),
+                growth_per_turn: crate::schema::Growth::Uniform(Dist::Scalar(6.0)),
                 spawn: None,
             },
             mix: vec![],

@@ -30,6 +30,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::dist::{Dist, Shape};
+use crate::schema::{Growth, GrowthBand, GrowthBands};
 use crate::stats::hist::Hist;
 use crate::stats::sharing::SharingReport;
 
@@ -61,6 +62,28 @@ use crate::stats::sharing::SharingReport;
 /// hand-written one, which is the correct trade: a fitted document is machine output
 /// checked by a gate, and the gate is on resemblance rather than on brevity.
 const EMPIRICAL_MAX_STEPS: usize = 64;
+
+/// Session-length bands `growth_per_turn` is fitted over, as lower bounds in turns.
+///
+/// Geometric, because turn counts span orders of magnitude: a linear grid would put
+/// almost every session in the first cell and leave the long sessions — the ones whose
+/// growth rate the accumulated depth is most sensitive to, since the weight is
+/// quadratic in turn count — spread thinly across the rest.
+///
+/// The ladder is finer than the effect needs and then **merged down to whatever the
+/// data supports**, rather than being chosen to match a particular trace. See
+/// [`MIN_BAND_SESSIONS`].
+const GROWTH_BANDS: [u64; 13] = [2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128];
+
+/// Sessions a band needs before it is emitted as its own band.
+///
+/// A band carrying three sessions is a fitted number that means nothing, and the
+/// emitted document gives a reader no way to see how thin it was — so thin bands are
+/// merged into their neighbour instead. Measured on two agentic traces, the 13-rung
+/// ladder above collapses to 6 or 7 bands at this threshold, and the tail bands (96+
+/// turns, 1-5 sessions each) fold into their neighbours where they carry almost no
+/// weight anyway.
+const MIN_BAND_SESSIONS: u64 = 25;
 
 /// Per-session state while fitting.
 #[derive(Debug, Clone, Default)]
@@ -139,6 +162,11 @@ pub struct SessionShapes {
     weighted_turn_one_depth: u64,
     accumulated_growth: u64,
     accumulated_steps: u64,
+    /// `growth_per_turn` increments, split by the session-length band the session that
+    /// produced them falls in. See [`GROWTH_BANDS`].
+    growth_bands: Vec<Hist>,
+    /// Sessions per band, so a band too thin to fit can be merged rather than emitted.
+    band_sessions: Vec<u64>,
     /// One `(turns, turn-1 depth)` pair per session, for fitting the depth ceiling.
     ///
     /// The ceiling is solved against the accumulation it governs, and that calculation
@@ -260,10 +288,26 @@ impl SessionShapes {
             for (_, p) in &live.chain {
                 self.accumulated_growth += p.saturating_sub(turn_one_depth);
             }
+            // Which band this session's increments belong to. Its LENGTH selects the
+            // band, so every increment a session contributes lands in the same one —
+            // that is the whole point: growth rate is a property of the session, and
+            // the session's length is what predicts it.
+            let band = GROWTH_BANDS
+                .iter()
+                .rposition(|b| *b <= live.turns)
+                .unwrap_or(0);
+            if self.growth_bands.is_empty() {
+                self.growth_bands = (0..GROWTH_BANDS.len()).map(|_| Hist::new()).collect();
+                self.band_sessions = vec![0; GROWTH_BANDS.len()];
+            }
+            if live.turns >= 2 {
+                self.band_sessions[band] += 1;
+            }
             for (&(_, a), &(_, b)) in live.chain.iter().zip(live.chain.iter().skip(1)) {
                 if b < a {
                     self.non_monotone_steps += 1;
                 }
+                self.growth_bands[band].add(b.saturating_sub(a));
                 // Still clamped, because rule 8 and FR-014a both forbid a negative
                 // growth and the distribution has no way to carry one. The difference
                 // is that in chain order a clamp is a genuine violation being
@@ -418,6 +462,95 @@ impl SessionShapes {
         Some(pick.clamp(1, u64::from(u32::MAX)) as u32)
     }
 
+    /// `growth_per_turn`, banded by session length (FR-054c, FR-054f).
+    ///
+    /// One distribution per band, over the increments of sessions whose turn count falls
+    /// in that band — so a session's length selects where its growth comes from, and the
+    /// accumulated depth stops being wrong by a factor that no marginal distribution can
+    /// reveal.
+    ///
+    /// Sparse bands are **merged into their neighbour** rather than emitted, since a band
+    /// fitted from three sessions is noise the emitted document gives a reader no way to
+    /// discount. Merging is upward-accumulating: rungs are absorbed until the band has
+    /// `MIN_BAND_SESSIONS` of them, and a short final band folds back into the one before
+    /// it.
+    ///
+    /// Falls back to a single unbanded distribution when the trace supports only one
+    /// band, so a trace of uniform-length sessions emits the simpler spelling rather
+    /// than a one-element table pretending to a structure it has not shown.
+    pub fn fit_growth(&mut self) -> Option<Growth> {
+        self.seal();
+        if self.growth_bands.is_empty() {
+            return None;
+        }
+        // Absorb rungs until each band is thick enough to mean something.
+        let mut bands: Vec<(u64, Hist, u64)> = Vec::new();
+        let mut open: Option<(u64, Hist, u64)> = None;
+        for (i, from) in GROWTH_BANDS.iter().enumerate() {
+            let (h, n) = (&self.growth_bands[i], self.band_sessions[i]);
+            match open.as_mut() {
+                None => open = Some((*from, h.clone(), n)),
+                Some((_, acc_h, acc_n)) => {
+                    acc_h.merge(h);
+                    *acc_n += n;
+                }
+            }
+            if let Some((_, _, acc_n)) = open.as_ref() {
+                if *acc_n >= MIN_BAND_SESSIONS {
+                    bands.push(open.take().expect("open"));
+                }
+            }
+        }
+        // Whatever is left over is too thin to stand alone: fold it back.
+        if let Some((_, h, n)) = open.take() {
+            match bands.last_mut() {
+                Some((_, last_h, last_n)) => {
+                    last_h.merge(&h);
+                    *last_n += n;
+                }
+                None => bands.push((GROWTH_BANDS[0], h, n)),
+            }
+        }
+        bands.retain(|(_, h, _)| h.count() > 0);
+        if bands.is_empty() {
+            return None;
+        }
+        if bands.len() == 1 {
+            return empirical_from(&bands[0].1).map(Growth::Uniform);
+        }
+        // The first band must start at the bottom, or a session shorter than anything
+        // observed would fall outside the table. `Growth::at` clamps into the first band
+        // anyway; stating it keeps the emitted document readable on its own terms.
+        let mut by_turns = Vec::new();
+        for (i, (from, h, _)) in bands.iter().enumerate() {
+            let growth = match empirical_from(h) {
+                Some(d) => d,
+                None => continue,
+            };
+            by_turns.push(GrowthBand {
+                from_turns: if i == 0 { 1 } else { *from as u32 },
+                growth,
+            });
+        }
+        if by_turns.len() < 2 {
+            return by_turns.pop().map(|b| Growth::Uniform(b.growth));
+        }
+        Some(Growth::Banded(GrowthBands { by_turns }))
+    }
+
+    /// Sessions per emitted band, for the fit report.
+    ///
+    /// Reported because a band's width is a fitting decision a reader should be able to
+    /// see: FR-055 requires a thin measurement to be visible as one.
+    pub fn growth_band_sessions(&mut self) -> Vec<(u64, u64)> {
+        self.seal();
+        GROWTH_BANDS
+            .iter()
+            .zip(self.band_sessions.iter())
+            .map(|(a, b)| (*a, *b))
+            .collect()
+    }
+
     /// The depth ceiling as a distribution over blocks, drawn once per session.
     ///
     /// Fitted as the **empirical distribution of the depth each session actually
@@ -504,7 +637,7 @@ impl SessionShapes {
             sessions: self.live.len() as u64,
             turns: empirical_from(&self.turns),
             private_depth: self.private_depth_at(1.0),
-            growth_per_turn: empirical_from(&self.growth),
+            growth_per_turn: self.fit_growth(),
             // Seconds, which is what `think_time` is in (`SessionParams::think_time_s`).
             think_time: empirical_from(&self.think_ms).map(|d| scale(&d, 1.0 / 1000.0)),
             shared_depth: empirical_from_buckets(&sharing.depth_buckets),
@@ -605,7 +738,7 @@ pub struct FittedSessions {
     /// Turn-1 depth beyond the shared prefix.
     pub private_depth: Option<Dist>,
     /// Depth increment between consecutive turns.
-    pub growth_per_turn: Option<Dist>,
+    pub growth_per_turn: Option<Growth>,
     /// Seconds between consecutive turns of one session; `None` without timestamps.
     pub think_time: Option<Dist>,
     /// The realised sharing histogram, as the schema's `shared_depth`.
@@ -818,6 +951,18 @@ mod tests {
         d.as_ref().and_then(|d| d.quantile(q)).expect("a quantile")
     }
 
+    /// The single distribution a `Growth` resolves to when it is not banded.
+    ///
+    /// Fixtures whose sessions are all one length fit one band, so `fit_growth` emits
+    /// the unbanded spelling and these assertions read as they did before banding.
+    fn growth_dist(g: &Option<Growth>) -> Option<Dist> {
+        match g {
+            Some(Growth::Uniform(d)) => Some(d.clone()),
+            Some(Growth::Banded(b)) => b.by_turns.first().map(|x| x.growth.clone()),
+            None => None,
+        }
+    }
+
     /// A sharing report over the given realised depths.
     fn sharing_with(depths: &[u64]) -> SharingReport {
         let mut h = Hist::new();
@@ -882,7 +1027,7 @@ mod tests {
             s.observe(session, 2, 36, 0, None);
         }
         let f = s.finish(&empty_sharing());
-        assert_eq!(quantile_of(&f.growth_per_turn, 0.5), 8.0);
+        assert_eq!(quantile_of(&growth_dist(&f.growth_per_turn), 0.5), 8.0);
         // Turn 1 contributes to private_depth, not to growth.
         assert_eq!(quantile_of(&f.private_depth, 0.5), 20.0);
     }
@@ -945,7 +1090,7 @@ mod tests {
         s.observe(7, 3, 40, 0, None);
         let f = s.finish(&empty_sharing());
         assert_eq!(
-            quantile_of(&f.growth_per_turn, 0.5),
+            quantile_of(&growth_dist(&f.growth_per_turn), 0.5),
             10.0,
             "growth was differenced in arrival order, which doubles it here"
         );
@@ -1063,7 +1208,7 @@ mod tests {
             f.caveats()
         );
         // A shrinking path floors at zero growth rather than producing a negative.
-        assert_eq!(quantile_of(&f.growth_per_turn, 0.5), 0.0);
+        assert_eq!(quantile_of(&growth_dist(&f.growth_per_turn), 0.5), 0.0);
     }
 
     #[test]
@@ -1223,6 +1368,126 @@ mod tests {
         assert_eq!(
             back.as_ref().and_then(|d| d.quantile(0.5)),
             f.private_depth.as_ref().and_then(|d| d.quantile(0.5))
+        );
+    }
+
+    /// Observe `sessions` sessions of `turns` turns each, every turn adding `growth`.
+    ///
+    /// Session ids are offset by `base` so several populations can share one
+    /// accumulator without colliding.
+    fn population(s: &mut SessionShapes, base: u32, sessions: u32, turns: u32, growth: u64) {
+        for i in 0..sessions {
+            for t in 0..turns {
+                s.observe(base + i, t, 100 + u64::from(t) * growth, 0, None);
+            }
+        }
+    }
+
+    #[test]
+    fn growth_is_banded_by_session_length_and_thin_bands_are_merged() {
+        // FR-054f. Two populations that differ in length *and* in growth rate, which is
+        // the situation a single pooled distribution cannot represent, plus a third that
+        // is too thin to stand as its own band.
+        let mut s = SessionShapes::new();
+        population(&mut s, 0, 40, 3, 10); // short and slow
+        population(&mut s, 1000, 40, 40, 100); // long and fast
+        population(&mut s, 2000, 3, 100, 7); // three sessions: not a band
+
+        let g = s.fit_growth().expect("a fit");
+        let b = match &g {
+            Growth::Banded(b) => b,
+            Growth::Uniform(_) => panic!("two populations must not collapse to one band"),
+        };
+        // Exactly two bands: the 100-turn rung carries three sessions, below
+        // MIN_BAND_SESSIONS, so it folds into its neighbour rather than being emitted as
+        // a band fitted from three samples.
+        assert_eq!(
+            b.by_turns.iter().map(|x| x.from_turns).collect::<Vec<_>>(),
+            vec![1, 4],
+            "thin rungs should merge, and the first band must start at 1"
+        );
+        // A session's *length* selects which distribution it draws from.
+        assert!(
+            (g.at(3).mean().expect("mean") - 10.0).abs() < 0.2,
+            "a 3-turn session drew from {:?}",
+            g.at(3)
+        );
+        // The thin rung's samples are *absorbed* by the band below it, not dropped and
+        // not emitted separately — so the upper band's mean is the exact pooled mean of
+        // both sets of increments. Written as the arithmetic rather than as its value,
+        // because what this pins is that the merge loses nothing: 40 sessions of 40 turns
+        // contribute 39 increments of 100 each, and 3 sessions of 100 turns contribute 99
+        // increments of 7 each.
+        let expect = (40.0 * 39.0 * 100.0 + 3.0 * 99.0 * 7.0) / (40.0 * 39.0 + 3.0 * 99.0);
+        let long = g.at(40).mean().expect("mean");
+        // Toleranced at the histogram's own resolution rather than tighter: an increment
+        // of 100 lands in the log bucket [100, 101] and the fit emits that bucket's
+        // midpoint, so the answer carries up to half a bucket -- about 0.5% here. An
+        // assertion inside that would be pinning which end of a bucket the estimator
+        // picks, which is not what this test is about.
+        assert!(
+            (long - expect).abs() < expect * 0.01,
+            "the upper band came out {long}, not the {expect} its own samples average to"
+        );
+        // Which is also to say the 100-turn sessions draw from that band, not their own.
+        assert_eq!(g.at(100).mean(), g.at(40).mean());
+    }
+
+    #[test]
+    fn one_population_emits_the_unbanded_spelling() {
+        // A trace whose sessions are all one length has shown no length dependence, so
+        // banding it would be a one-row table pretending to a structure it has not
+        // demonstrated — and the unbanded spelling is what every pre-FR-054f document
+        // already uses.
+        let mut s = SessionShapes::new();
+        population(&mut s, 0, 40, 3, 8);
+        let g = s.fit_growth().expect("a fit");
+        assert!(
+            matches!(g, Growth::Uniform(_)),
+            "one population must emit a bare distribution, got {g:?}"
+        );
+        assert!((g.at(3).mean().expect("mean") - 8.0).abs() < 0.2);
+    }
+
+    #[test]
+    fn a_banded_fit_reproduces_the_accumulation_the_pooled_one_overstates() {
+        // The measurement FR-054f exists for. A session's accumulated depth is
+        // `Σᵢ (T − i)·gᵢ`, so an increment's weight is quadratic in the turn count once
+        // summed over the session — and when growth rate varies with length, a draw from
+        // the pooled marginal reproduces every marginal correctly and the *total*
+        // wrongly. Short-and-fast beside long-and-slow, which is the real traces' shape.
+        const POP: [(u32, u64, u64); 2] = [(60, 4, 40), (30, 40, 5)];
+        let mut s = SessionShapes::new();
+        population(&mut s, 0, 60, 4, 40);
+        population(&mut s, 1000, 30, 40, 5);
+
+        let budget = s.path_budget();
+        let g = s.fit_growth().expect("a fit");
+
+        // What each scheme predicts for `Σ over sessions (mean growth) × T(T−1)/2`.
+        let steps = |turns: u64| turns * turns.saturating_sub(1) / 2;
+        let banded: f64 = POP
+            .iter()
+            .map(|(n, turns, _)| {
+                f64::from(*n) * g.at(*turns).mean().expect("a band mean") * steps(*turns) as f64
+            })
+            .sum();
+        let pooled = budget.growth.expect("a pooled mean") * budget.accumulated_steps as f64;
+        let truth = budget.accumulated_growth as f64;
+
+        // The pooled marginal is *correct as a marginal* — it is the mean increment —
+        // and still overstates the accumulation by three quarters, because the long
+        // sessions carry most of the quadratic weight and grow the most slowly.
+        let inflation = pooled / truth;
+        assert!(
+            inflation > 1.5,
+            "the pooled draw should overstate here; it came out {inflation:.3}x"
+        );
+        // Banding recovers it, because each session's length now selects its rate.
+        assert!(
+            (banded / truth - 1.0).abs() < 0.02,
+            "banded predicted {banded} against the trace's {truth} ({:.3}x)",
+            banded / truth
         );
     }
 }
