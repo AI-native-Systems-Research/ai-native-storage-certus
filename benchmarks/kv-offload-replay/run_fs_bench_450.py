@@ -149,9 +149,29 @@ def main():
         enable_prefix_caching=True,
         enforce_eager=True,
         kv_transfer_config=KV_CONFIG,
-        disable_log_stats=True,
+        # LOG_STATS=1 keeps vLLM's stats logging on so its PrometheusStatLogger
+        # registers metrics (incl. kv_offload counters). Default off.
+        disable_log_stats=(os.environ.get("LOG_STATS", "0") == "0"),
     )
     print(f"[trace] +{time.perf_counter()-t0:.1f}s LLM ready", file=sys.stderr, flush=True)
+
+    # Optional Prometheus exporter. When PROM_PORT is set, expose vLLM's engine
+    # + KV-offload metrics over HTTP at :PROM_PORT/metrics for live scraping.
+    # Requires LOG_STATS=1 (above) so metrics are registered — otherwise the
+    # endpoint serves an empty registry. No-op when PROM_PORT is unset. (The
+    # end-of-run REGISTRY dump below still works independently of this.)
+    _prom_port = os.environ.get("PROM_PORT")
+    if _prom_port:
+        from prometheus_client import start_http_server
+
+        start_http_server(int(_prom_port))
+        print(f"[prom] metrics exporter listening on :{_prom_port}/metrics", file=sys.stderr)
+        if os.environ.get("LOG_STATS", "0") == "0":
+            print(
+                "[prom] warning: LOG_STATS is off — vLLM metrics are not "
+                "registered, so /metrics will be empty. Set LOG_STATS=1.",
+                file=sys.stderr,
+            )
 
     sp = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=OUTPUT_TOKENS)
     tokenizer = llm.get_tokenizer()
