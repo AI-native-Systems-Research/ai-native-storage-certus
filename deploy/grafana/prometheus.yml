@@ -5,6 +5,11 @@ global:
   evaluation_interval: 10s
 
 scrape_configs:
-  - job_name: otel-collector
+  - job_name: 'vllm'
+    scrape_interval: 5s
     static_configs:
-      - targets: ["otel-collector:8889"]
+      # host.docker.internal = the Docker host as seen from this container. The
+      # vLLM bench publishes :8000 on the host, so scrape it there (NOT localhost
+      # — that is this Prometheus container's own loopback). Requires the
+      # extra_hosts:host-gateway mapping in docker-compose.yml on Linux.
+      - targets: ['host.docker.internal:8000']
