@@ -9,12 +9,25 @@ connector actually touches; they are not a functional vLLM.
 The fakes are produced by a per-version *factory* (``build_fake_vllm``) so a
 future vLLM whose plugin surface diverges gets its shape encoded in ONE place,
 alongside the ``compat.FEATURES`` entry that gates the connector's adaptation.
-Today the four supported even versions (0.20/0.22/0.24/0.26) share the 0.20
-shape for everything except engine flags (``needs_disable_hybrid_kv_cache_manager``,
-which is a run-driver concern, not an import-surface one), so the factory
-currently emits the same modules for every version — but the seam is here, keyed
-off the same predicates the connector branches on, so the fakes and the adapters
-cannot silently drift apart.
+The plugin surface has THREE distinct module layouts across the supported range,
+and the factory reproduces each so the connector's import ladder is exercised
+against the shape it will really meet (verified against the release images):
+
+  * **0.20/0.21 — split modules.** ``OffloadKey``/``LoadStoreSpec``/
+    ``OffloadingEvent``/``PrepareStoreOutput``/``OffloadingManager`` live in
+    ``vllm.v1.kv_offload.abstract``, ``GPULoadStoreSpec`` in ``.mediums``,
+    ``OffloadingSpec`` in ``.spec``; ``OffloadingHandler``/``TransferResult`` in
+    ``.worker.worker``.
+  * **0.22/0.23/0.24 — consolidated ``base``.** ``abstract``/``mediums``/``spec``
+    were removed and their classes moved into ``vllm.v1.kv_offload.base``;
+    ``.worker.worker`` is retained (still holds ``OffloadingHandler``/
+    ``TransferResult``). 0.23 added ``RequestOffloadingContext`` to ``base``.
+  * **0.26 — offloading-API rewrite.** ``TransferResult`` moved into ``base``,
+    the worker base became ``OffloadingWorker`` (in ``base``, no more
+    ``.worker.worker``), and ``OffloadingConfig`` lives in a new ``.config``.
+
+Keying the layout off the same version thresholds the connector's ``compat``
+branches on keeps the fakes and the adapters from silently drifting apart.
 """
 
 from __future__ import annotations
@@ -54,6 +67,17 @@ def _is_0_26(version: tuple[int, int]) -> bool:
     OffloadingWorker, OffloadingConfig ctor, LookupResult enum, CanonicalKVCaches).
     Mirrors the ``worker_split_submit`` / ``spec_config_object`` predicates."""
     return version >= (0, 26)
+
+
+def _is_consolidated_base(version: tuple[int, int]) -> bool:
+    """Whether the classes live in the consolidated ``vllm.v1.kv_offload.base``
+    module (0.22–0.24) rather than the 0.20-era split abstract/mediums/spec.
+
+    0.22 removed abstract/mediums/spec and moved their classes into ``base``,
+    while KEEPING ``.worker.worker``; the 0.26 rewrite then absorbed
+    ``.worker.worker`` too (handled by ``_is_0_26``). Confirmed empirically
+    against the release images."""
+    return (0, 22) <= version < (0, 26)
 
 
 def _module(name: str) -> types.ModuleType:
@@ -110,9 +134,20 @@ def build_fake_vllm(version: tuple[int, int] = (0, 20)) -> None:
         pass
 
     class GPULoadStoreSpec(LoadStoreSpec):
-        # Mirror vLLM: block_ids stored as an np.int64 array. 0.26 added required
-        # group_sizes/block_indices; the connector only reads .block_ids.
-        def __init__(self, block_ids, group_sizes=None, block_indices=None):
+        # Mirror vLLM (all versions v0.20+): ``block_ids``, ``group_sizes`` and
+        # ``block_indices`` are ALL required positional args, tied together by
+        # two asserts. block_ids is stored as an np.int64 array. The connector
+        # only reads ``.block_ids``, but the fake keeps the real signature so a
+        # test that constructs one the way vLLM's scheduler does is validated
+        # against the shape real vLLM would accept (bare ``GPULoadStoreSpec(ids)``
+        # is a TypeError against real vLLM and must be here too).
+        def __init__(self, block_ids, group_sizes, block_indices):
+            assert sum(group_sizes) == len(block_ids), (
+                "group_sizes must sum to len(block_ids)"
+            )
+            assert len(block_indices) == len(group_sizes), (
+                "block_indices must be one per group"
+            )
             self.block_ids = np.array(block_ids, dtype=np.int64)
             self.group_sizes = group_sizes
             self.block_indices = block_indices
@@ -120,15 +155,38 @@ def build_fake_vllm(version: tuple[int, int] = (0, 20)) -> None:
     # TransferResult's field set is version-varying: the ``transfer_type`` field
     # is present iff the matching FEATURES predicate says so, so the fake matches
     # exactly the shape make_transfer_result will construct on this version.
+    # transfer_size/transfer_time/transfer_type default to None, as in real vLLM
+    # (``TransferResult(job_id=1, success=True)`` is valid there and must be here).
     tr_fields = [
         ("job_id", int),
         ("success", bool),
-        ("transfer_size", int),
-        ("transfer_time", float),
+        ("transfer_size", "int | None", None),
+        ("transfer_time", "float | None", None),
     ]
     if _transfer_result_has_type(version):
-        tr_fields.append(("transfer_type", Any))
+        tr_fields.append(("transfer_type", "Any | None", None))
     TransferResult = make_dataclass("TransferResult", tr_fields)
+
+    # ≤0.24 base ``OffloadingSpec.__init__(vllm_config, kv_cache_config)``. Real
+    # vLLM's base sets six attributes on ``self``; the connector's spec.py reads
+    # ``gpu_block_size`` / ``block_size_factor`` / ``extra_config`` off ``self``
+    # AFTER ``super().__init__()``. Mirror that here (derived from the passed
+    # configs, with fallbacks so a minimal stub config still works) so the fake
+    # actually validates that the base produces those attributes — the earlier
+    # ``def __init__(self, *a, **k): pass`` set nothing and hid that dependency.
+    class LegacyOffloadingSpec:
+        def __init__(self, vllm_config, kv_cache_config):
+            self.vllm_config = vllm_config
+            self.kv_cache_config = kv_cache_config
+            kv_transfer = getattr(vllm_config, "kv_transfer_config", None)
+            self.extra_config = (
+                getattr(kv_transfer, "kv_connector_extra_config", None) or {}
+            )
+            self.hash_block_size = getattr(vllm_config, "hash_block_size", 0)
+            # Real base exposes gpu_block_size as a tuple (one entry per KV-cache
+            # group); the connector asserts len == 1.
+            self.gpu_block_size = getattr(vllm_config, "gpu_block_size", (16,))
+            self.block_size_factor = getattr(vllm_config, "block_size_factor", 1)
 
     if _is_0_26(version):
         # ── 0.26 rewrite: everything consolidated into vllm.v1.kv_offload.base;
@@ -180,10 +238,23 @@ def build_fake_vllm(version: tuple[int, int] = (0, 20)) -> None:
             tensors: list
             group_data_refs: list
 
+        # Full 0.26 OffloadingConfig field set (config.py). The connector reads
+        # ``worker_kv_bytes_per_block`` and ``extra_config``; the other six fields
+        # (groups/enable_kv_cache_events/engine_id/model/cache/parallel) are real
+        # too, so the fake carries them — otherwise a connector change that starts
+        # reading one would pass here but fail against real vLLM. All are given
+        # defaults so a test can build a minimal config, but every real attribute
+        # name is present.
         @dataclass
         class OffloadingConfig:
-            worker_kv_bytes_per_block: int
-            extra_config: Any
+            worker_kv_bytes_per_block: int = 0
+            extra_config: Any = None
+            groups: Any = ()
+            enable_kv_cache_events: bool = False
+            engine_id: str = ""
+            model: Any = None
+            cache: Any = None
+            parallel: Any = None
 
         for name, obj in {
             "OffloadKey": OffloadKey,
@@ -202,11 +273,43 @@ def build_fake_vllm(version: tuple[int, int] = (0, 20)) -> None:
         }.items():
             setattr(base, name, obj)
         config_mod.OffloadingConfig = OffloadingConfig
+    elif _is_consolidated_base(version):
+        # ── 0.22–0.24: abstract/mediums/spec removed; their classes live in the
+        # consolidated ``base`` module. ``.worker.worker`` is retained (still
+        # holds OffloadingHandler + TransferResult). 0.23 added
+        # RequestOffloadingContext to ``base``. ──
+        base = _module("vllm.v1.kv_offload.base")
+        _module("vllm.v1.kv_offload.worker")
+        worker = _module("vllm.v1.kv_offload.worker.worker")
+
+        base.OffloadKey = OffloadKey
+        base.LoadStoreSpec = LoadStoreSpec
+        base.OffloadingEvent = OffloadingEvent
+        base.PrepareStoreOutput = PrepareStoreOutput
+        base.OffloadingManager = OffloadingManager
+        base.GPULoadStoreSpec = GPULoadStoreSpec
+        base.OffloadingSpec = LegacyOffloadingSpec
+
+        # 0.23 added the abstract on_new_request whose return type
+        # RequestOffloadingContext lives in ``base``; the connector's compat
+        # gates on has_on_new_request (>= 0.23) and resolves it lazily from base.
+        if version >= (0, 23):
+
+            @dataclass
+            class RequestOffloadingContext:
+                policy: Any = None
+
+            base.RequestOffloadingContext = RequestOffloadingContext
+
+        class OffloadingHandler:
+            pass
+
+        worker.OffloadingHandler = OffloadingHandler
+        worker.TransferResult = TransferResult
+        worker.TransferSpec = tuple
+        worker.TransferType = tuple
     else:
-        # ── ≤0.24 layout: split modules (abstract/mediums/spec/worker.worker).
-        # 0.23 added an abstract on_new_request whose return type
-        # RequestOffloadingContext lives in the consolidated ``base`` module, so
-        # a partial base is provided from 0.23 for the lazy resolver to find. ──
+        # ── 0.20/0.21: split modules (abstract/mediums/spec/worker.worker). ──
         abstract = _module("vllm.v1.kv_offload.abstract")
         mediums = _module("vllm.v1.kv_offload.mediums")
         spec = _module("vllm.v1.kv_offload.spec")
@@ -219,12 +322,7 @@ def build_fake_vllm(version: tuple[int, int] = (0, 20)) -> None:
         abstract.PrepareStoreOutput = PrepareStoreOutput
         abstract.OffloadingManager = OffloadingManager
         mediums.GPULoadStoreSpec = GPULoadStoreSpec
-
-        class OffloadingSpec:
-            def __init__(self, *a, **k):
-                pass
-
-        spec.OffloadingSpec = OffloadingSpec
+        spec.OffloadingSpec = LegacyOffloadingSpec
 
         class OffloadingHandler:
             pass
@@ -233,15 +331,6 @@ def build_fake_vllm(version: tuple[int, int] = (0, 20)) -> None:
         worker.TransferResult = TransferResult
         worker.TransferSpec = tuple
         worker.TransferType = tuple
-
-        if version >= (0, 24):
-            base = _module("vllm.v1.kv_offload.base")
-
-            @dataclass
-            class RequestOffloadingContext:
-                policy: Any = None
-
-            base.RequestOffloadingContext = RequestOffloadingContext
 
 
 # Auto-install the baseline (0.20) fakes at collection time so the version-blind
