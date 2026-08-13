@@ -1,0 +1,103 @@
+{
+  "generated": "2026-08-07T16:02:56Z",
+  "based_on_drift_report": "2026-08-07T15:31:25Z",
+  "component": "extended-metadata-store",
+  "branch": "sync/spec-drift-sweep-20260807",
+  "interactive": true,
+  "strategy": "fully-interactive",
+  "note": "All resolutions reflect explicit user AskUserQuestion answers this sweep. HIGH code/build defects: queue task + draft fix on branch (never commit to unstable). ALIGN-001 kept deferred per user.",
+  "summary": {
+    "backfill": 6,
+    "align_drafted": 1,
+    "align_deferred": 1,
+    "reconcile_docs": 4,
+    "human_decision": 0,
+    "new_specs": 0
+  },
+  "proposals": [
+    {
+      "id": "P1",
+      "spec": "001-extended-metadata-store",
+      "requirement": "SC-1/2/3/6/7 (ALIGN-001)",
+      "direction": "ALIGN",
+      "severity": "MAJOR",
+      "title": "Crate absent from workspace [members]; tests/clippy/doc unexercised by CI",
+      "current_state": {
+        "spec": "Success Criteria assume standard workspace build/test/CI.",
+        "code": "extended-metadata-store is not in root Cargo.toml [workspace] members; additionally MockBlockDevice (src/test_support.rs) is missing read_write_stats, so the testing-feature build does not compile."
+      },
+      "proposed_resolution": "Add crate to workspace members and refresh the mock; then re-run analyze.",
+      "confidence": "HIGH",
+      "user_decision": "Keep deferred",
+      "approved": false,
+      "applied": false,
+      "outcome": "Deferred by user this sweep. Task remains open in align-tasks.md (ALIGN-001), now also noting the read_write_stats mock defect. Documented in 001 spec (SC note + Known Gaps)."
+    },
+    {
+      "id": "P2",
+      "spec": "001-extended-metadata-store",
+      "requirement": "FR-05 (ALIGN-002)",
+      "direction": "ALIGN",
+      "severity": "MAJOR",
+      "title": "force_flush() is an unconditional no-op contradicting the durability contract",
+      "current_state": {
+        "spec": "FR-05: force_flush() ensures all mutations are durable on disk.",
+        "code": "force_flush() logged and returned Ok(()) in all configs; never called flush_to_disk/trigger_flush."
+      },
+      "proposed_resolution": "Draft a code fix: add a type-erased FlushTrigger installed by the wiring layer via attach_flush_trigger; force_flush() invokes it and blocks, mapping errors to StorageError; no-op only when no trigger is installed.",
+      "confidence": "HIGH",
+      "user_decision": "Draft code fix",
+      "approved": true,
+      "applied": true,
+      "files": [
+        "components/extended-metadata-store/src/lib.rs"
+      ],
+      "verification": "cargo build -p extended-metadata-store (default) clean + doc-test passes (via throwaway workspace wiring, since reverted). Unit tests under --features testing blocked by ALIGN-001 (deferred) and the pre-existing read_write_stats mock defect.",
+      "outcome": "Fix drafted on branch. 001 spec FR-05 status/Known Gaps updated to describe the trigger mechanism and the deferred verification."
+    },
+    {
+      "id": "P3",
+      "spec": "002-ssd-integration-test",
+      "requirement": "FR-007, FR-011, US5-2, capacity edge case",
+      "direction": "BACKFILL",
+      "severity": "MEDIUM/HIGH",
+      "title": "Persistence/interface scenarios rely on internal APIs; capacity enforced only at flush time",
+      "current_state": {
+        "spec": "FR-007 persistence via force_flush; FR-011 interface-only; US5-2 expects put()-level capacity exhaustion.",
+        "code": "Durability obtained via internal flush_to_disk (force_flush was a no-op); CapacityExhausted never constructed — capacity enforced at flush time as a String error; test_capacity_exhaustion never reaches the branch."
+      },
+      "proposed_resolution": "Backfill 002 spec to describe flush-time capacity enforcement and the current internal-API dependence, with notes to re-point FR-007/FR-011 at the interface once the drafted FR-05 fix is verified.",
+      "confidence": "HIGH",
+      "user_decision": "Backfill 002 spec",
+      "approved": true,
+      "applied": true,
+      "files": [
+        "components/extended-metadata-store/specs/002-ssd-integration-test/spec.md"
+      ],
+      "outcome": "Applied: header sync note, US3/US5 scenario rewording + sync notes, FR-007/FR-011 annotations, and a Capacity note under Functional Requirements."
+    },
+    {
+      "id": "P4",
+      "spec": "002-ssd-integration-test",
+      "requirement": "Conflicts 1 & 3 (plan/tasks); Unspecced code (dead APIs)",
+      "direction": "BACKFILL",
+      "severity": "LOW/COSMETIC",
+      "title": "Plan/tasks reference nonexistent receptacles and wrong names; document dead public APIs",
+      "current_state": {
+        "spec": "002 plan.md/tasks.md reference IBlockDevice/IPartitionTable receptacles, create_store_instance(), and console-logger dev-dep.",
+        "code": "Store declares only an ILogger receptacle; block I/O via manually-constructed BlockDeviceClient; helper is create_store; dev-dep is logger. Three dead public items exist (region_capacity_bytes, create_test_component_from_state, CapacityExhausted/StorageError variants)."
+      },
+      "proposed_resolution": "Reconcile 002 plan/tasks to reality (ILogger-only + BlockDeviceClient, create_store, logger) and add a dead-public-API note to the 001 spec.",
+      "confidence": "HIGH",
+      "user_decision": "Reconcile + note",
+      "approved": true,
+      "applied": true,
+      "files": [
+        "components/extended-metadata-store/specs/002-ssd-integration-test/plan.md",
+        "components/extended-metadata-store/specs/002-ssd-integration-test/tasks.md",
+        "components/extended-metadata-store/specs/001-extended-metadata-store/spec.md"
+      ],
+      "outcome": "Applied: plan Prerequisites + dev-dep name; tasks T001/T007/External-Deps/Notes; dead-API note added to 001 spec Known Gaps. StorageError now produced by the drafted force_flush."
+    }
+  ]
+}

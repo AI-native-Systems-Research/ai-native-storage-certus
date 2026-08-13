@@ -24,7 +24,7 @@
 # arg only selects the base image, no code keys off it. Build another version:
 #   podman build --build-arg VLLM_VERSION=0.22.0 -f certus-grpc-connector/Dockerfile \
 #       -t certus-grpc-bench:vllm0.22 .
-ARG VLLM_VERSION=0.20.0
+ARG VLLM_VERSION=0.23.0
 FROM docker.io/vllm/vllm-openai:v${VLLM_VERSION}
 ENTRYPOINT []
 

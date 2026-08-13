@@ -282,7 +282,7 @@ def test_store_handler_sends_offsets_per_block():
     # worker holds a LIST of KV regions (N==1 here — single-tensor block).
     h = worker_class()(stub, [kv], block_size_bytes=1024, executor=executor)
 
-    src = GPULoadStoreSpec(block_ids=[3, 7])
+    src = GPULoadStoreSpec(block_ids=[3, 7], group_sizes=[2], block_indices=[0])
     dst = CertusLoadStoreSpec([BlockLocation(key=30), BlockLocation(key=70)])
     assert h.transfer_async(job_id=1, spec=(src, dst)) is True
     h.wait({1})
@@ -312,7 +312,7 @@ def test_store_handler_never_reports_failure_and_aborts_failed_keys():
     executor = ThreadPoolExecutor(max_workers=1)
     h = worker_class()(stub, [kv], block_size_bytes=1024, executor=executor)
 
-    src = GPULoadStoreSpec(block_ids=[3, 7])
+    src = GPULoadStoreSpec(block_ids=[3, 7], group_sizes=[2], block_indices=[0])
     dst = CertusLoadStoreSpec([BlockLocation(key=30), BlockLocation(key=70)])
     h.transfer_async(job_id=9, spec=(src, dst))
     h.wait({9})

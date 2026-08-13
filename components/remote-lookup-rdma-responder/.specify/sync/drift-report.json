@@ -1,67 +1,48 @@
 {
-  "generated": "2026-07-22T22:39:05Z",
+  "generated": "2026-08-07T15:28:11Z",
   "project": "remote-lookup-rdma-responder",
   "summary": {
-    "specs_analyzed": 1,
-    "requirements_checked": 25,
-    "aligned": 22,
-    "drifted": 3,
+    "aligned": 19,
+    "drifted": 4,
     "not_implemented": 0,
-    "unspecced_features": 1
+    "unspecced": 2
   },
   "specs": [
     {
-      "id": "001-rdma-lookup-responder",
-      "title": "RDMA Lookup Responder",
-      "aligned": [
-        "FR-001", "FR-002", "FR-002a", "FR-003", "FR-004", "FR-005", "FR-006",
-        "FR-007", "FR-008", "FR-009", "FR-010", "FR-011", "FR-011a", "FR-012",
-        "FR-013", "FR-015",
-        "SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006"
-      ],
-      "drifted": [
-        {
-          "requirement": "FR-016",
-          "spec_text": "The component MUST optionally collect telemetry behind a `telemetry` feature... Metric set: inbound connections accepted, identified vs unidentified (node: None), teardowns (disconnect-acks emitted), and accept-loop errors.",
-          "actual": "TelemetryCollector::record_accept_loop_error()/accept_loop_errors() are defined and unit-tested in isolation but never called from any production code path (RealCmSeam::bind, RealCmSeam::drain_cm_events, ConnectionTable). The counter is permanently 0.",
-          "location": "components/remote-lookup-rdma-responder/src/telemetry.rs:58-60,107 (defined, no call sites in src/rdma.rs or src/connection.rs)",
-          "severity": "medium"
-        },
-        {
-          "requirement": "ResponderEvent::Error (spec Key Entities; contracts/responder-control-interface.md §3 rule 3)",
-          "spec_text": "`Error { message }` reports a non-fatal accept-loop error.",
-          "actual": "ResponderEvent::Error is never constructed anywhere in the crate. The only candidate non-fatal failure in production code (QP-creation failure in the accept path) is silently rejected via rdma_reject with no Error event, no log, and no telemetry.",
-          "location": "components/remote-lookup-rdma-responder/src/rdma.rs:373-382 (accept_child error branch)",
-          "severity": "medium"
-        },
-        {
-          "requirement": "FR-014",
-          "spec_text": "Diagnostics MUST route through an optional `ILogger` receptacle; a missing logger MUST NOT turn any operation into an error.",
-          "actual": "Only initialize()/shutdown() call log_debug(); the accept-loop closure captures no logger reference, so internal accept-loop failures (RealCmSeam::next_events/drain_cm_events/accept_child) can never reach ILogger. The 'missing logger is not an error' half is satisfied; the 'route diagnostics through it' half is not, for most of the module.",
-          "location": "components/remote-lookup-rdma-responder/src/lib.rs:115-120,244,334 (only call sites); src/rdma.rs has no ILogger reference",
-          "severity": "low"
-        }
-      ],
-      "not_implemented": []
+      "spec": "specs/001-rdma-lookup-responder/spec.md",
+      "requirements": [
+        {"id": "FR-001", "status": "aligned", "severity": null, "location": "src/lib.rs:312", "note": "Dedicated rdma-responder-accept thread runs run_accept_loop."},
+        {"id": "FR-002", "status": "aligned", "severity": null, "location": "src/rdma.rs:239", "note": "Ephemeral bind (htons(0)), rdma_listen, rdma_get_src_port; AlreadyInitialized guarded at lib.rs:268."},
+        {"id": "FR-002a", "status": "aligned", "severity": null, "location": "src/rdma.rs:215", "note": "Explicit set_bind_ip else first_active_rdma_ipv4() auto-detect. CERTUS_RDMA_BIND_IP wiring is in the mainline, out of this crate."},
+        {"id": "FR-003", "status": "aligned", "severity": null, "location": "src/lib.rs:382", "note": "Returns bound {ip,port}; NotInitialized before init."},
+        {"id": "FR-004", "status": "aligned", "severity": null, "location": "src/rdma.rs:507", "note": "epoll over {cm fd, cmd eventfd, stop eventfd}; SPSC command inbox bridged to cmd_eventfd."},
+        {"id": "FR-005", "status": "aligned", "severity": null, "location": "src/rdma.rs:410", "note": "Reads private_data, keys table by PeerId, accepts, emits ConnectionEstablished{Some}."},
+        {"id": "FR-006", "status": "aligned", "severity": null, "location": "src/connection.rs:152", "note": "Absent/malformed private_data -> unidentified side-list, Established(None); reclaimed only via shutdown/teardown_all."},
+        {"id": "FR-007", "status": "aligned", "severity": null, "location": "src/connection.rs:134", "note": "Active->Draining->Dead; connect refused while Draining (transient in single-threaded loop; refusal exercised via force_state test)."},
+        {"id": "FR-008", "status": "drifted", "severity": "Low", "location": "src/rdma.rs:154", "note": "QP->ERROR ordered before ack and asserted; but spec requires best-effort rdma_destroy_qp failure be logged, and Drop ignores return values and logs nothing."},
+        {"id": "FR-009", "status": "aligned", "severity": null, "location": "src/lib.rs", "note": "No data path; responder is registrar/connection-manager only."},
+        {"id": "FR-010", "status": "drifted", "severity": "Medium", "location": "src/lib.rs:195", "note": "Whole-pool ibv_reg_mr, local_region, dereg-before-PD-free all present, but ibv_reg_mr failure is mapped to Bind (map_err(...::Bind)) instead of the spec-mandated Registration."},
+        {"id": "FR-011", "status": "aligned", "severity": null, "location": "src/lib.rs:365", "note": "Single-client channel; second open_control_channel -> ChannelClosed."},
+        {"id": "FR-011a", "status": "aligned", "severity": null, "location": "src/lib.rs:129", "note": "send_event uses blocking tx.send (backpressure, never drop); lossless-under-backpressure test present."},
+        {"id": "FR-012", "status": "aligned", "severity": null, "location": "src/lib.rs:310", "note": "set_actor_cpu stored pre-init; thread pins via set_thread_affinity (best-effort)."},
+        {"id": "FR-013", "status": "aligned", "severity": null, "location": "src/lib.rs:214", "note": "signal_stop exits without join; shutdown stops+joins, teardown_all tears down connections, idempotent via state.take()."},
+        {"id": "FR-014", "status": "drifted", "severity": "Low", "location": "src/rdma.rs:455", "note": "Diagnostics route through optional ILogger and missing logger is not an error, but the async-event diagnostic path logs via eprintln! directly, bypassing ILogger."},
+        {"id": "FR-015", "status": "aligned", "severity": null, "location": "src/lib.rs:395", "note": "Unit tests cover lifecycle, NotInitialized/AlreadyInitialized/ChannelClosed, and the state machine."},
+        {"id": "FR-016", "status": "drifted", "severity": "Low", "location": "src/connection.rs:184", "note": "Feature-gated ZST no-op telemetry present and wired for accepted/identified/unidentified/teardowns, but record_accept_loop_error is never called and ResponderEvent::Error is never emitted, so the accept-loop-errors metric is never recorded."},
+        {"id": "SC-001", "status": "aligned", "severity": null, "location": "src/lib.rs:402", "note": "NotInitialized-before-init tested; non-placeholder ephemeral port asserted only in the #[ignore] hardware loopback test (mock uses port 0)."},
+        {"id": "SC-002", "status": "aligned", "severity": null, "location": "src/connection.rs:377", "note": "Exactly one ack; QP->ERROR ordered strictly before ack."},
+        {"id": "SC-003", "status": "aligned", "severity": null, "location": "src/connection.rs:438", "note": "Structural: command serviced on event-driven wake with no pending connect and no poll cycle."},
+        {"id": "SC-004", "status": "aligned", "severity": null, "location": "src/loopback_test.rs:317", "note": "Distinct-ephemeral-port check in #[ignore] hardware test; mock test only asserts independent IPs (both port 0)."},
+        {"id": "SC-005", "status": "aligned", "severity": null, "location": "src/connection.rs:330", "note": "Known UUID -> Some(peer); empty private_data -> None."},
+        {"id": "SC-006", "status": "aligned", "severity": null, "location": "benches/connection_telemetry.rs", "note": "Criterion benchmark drives accept/disconnect over the seam; two-baseline on/off workflow documented. Actual <5% is a runtime measurement, not asserted in code."}
+      ]
     }
   ],
   "unspecced": [
-    {
-      "feature": "Cargo feature `rdma` gating the whole real rdma_cm/ibv_reg_mr implementation; `initialize()` returns a hard-coded Bind error when built without it",
-      "location": "components/remote-lookup-rdma-responder/Cargo.toml; components/remote-lookup-rdma-responder/src/lib.rs",
-      "lines": 20,
-      "suggested_spec": "Add a 'Build & feature flags' subsection naming the `rdma` Cargo feature explicitly, and document the build-configuration Bind error as distinct from the FR-002/FR-010 runtime failure modes it currently shares an error variant with."
-    }
+    {"item": "Device async-event instrumentation (TAG_ASYNC epoll wiring, drain_async_events/async_event_name, responder_async_fd/responder_drain_async_event shims)", "location": "src/rdma.rs:44,351,437; src/ffi.rs:296; src/wrapper.c", "note": "Logs QP_FATAL/QP_REQ_ERR/etc. No FR mentions async-event diagnostics."},
+    {"item": "MR access widened beyond REMOTE_WRITE (LOCAL_WRITE | REMOTE_WRITE | REMOTE_READ)", "location": "src/rdma.rs:297", "note": "FR-010 specifies only REMOTE_WRITE; REMOTE_READ grants peers one-sided read of the pool with no requirement calling for it."}
   ],
   "conflicts": [
-    {
-      "description": "IRemoteLookupRdmaResponderAdmin::set_bind_ip/initialize doc comments in the shared interfaces crate state the responder 'never auto-detects the address' and that initialize() fails with Bind if no IP was supplied — this is the pre-clarification (2026-07-10) behavior. It contradicts FR-002a in spec.md (explicit-IP-else-auto-detect precedence) and the shipped code/tests (src/rdma.rs first_active_rdma_ipv4; src/lib.rs initialize_without_bind_ip_defers_to_autodetect test), which both implement auto-detection.",
-      "locations": [
-        "components/interfaces/src/iremote_lookup_rdma_responder.rs:256-262",
-        "components/remote-lookup-rdma-responder/specs/001-rdma-lookup-responder/spec.md:297-305",
-        "components/remote-lookup-rdma-responder/src/rdma.rs:184-189",
-        "components/remote-lookup-rdma-responder/src/lib.rs:421-429"
-      ]
-    }
+    {"note": "Interface trait doc for set_bind_ip states 'The responder never auto-detects the address' and that initialize fails Bind if no IP supplied (pre-clarification behavior), contradicting the current spec FR-002a auto-detect which the implementation actually follows. Stale interface doc.", "location": "components/interfaces/src/iremote_lookup_rdma_responder.rs:253"}
   ]
 }

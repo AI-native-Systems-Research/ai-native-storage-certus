@@ -4,9 +4,9 @@
 
 **Created**: 2026-07-09
 
-**Status**: Draft
+**Status**: Draft (drift-swept 2026-08-07 on branch `sync/spec-drift-sweep-20260807` — zero drift against code; corrected the `Supersedes:` id, added the `set_local_peer_id` after-build no-op note to FR-015, and backfilled the `rdma` Cargo feature and validation-tooling items below. See `.specify/sync/apply-report.md`.)
 
-**Supersedes**: `001-rdma-remote-lookup-rdma-initiator` (RDMA Remote Lookup Initiator)
+**Supersedes**: `001-rdma-remote-request-handler` (RDMA Remote Lookup Initiator) *(corrected 2026-08-07: the id previously read `001-rdma-remote-lookup-rdma-initiator`, which does not match the actual spec directory name)*
 
 **Input**: The data-holding (server) side of a remote lookup. Driven by the
 `remote-lookup` component: given a peer's host endpoint and a batch of
@@ -273,7 +273,11 @@ mock transport, and read metrics via `RemoteLookupRdmaInitiatorComponent::teleme
   teardown-before-reclaim flow. It SHOULD be called once, before the first
   `push`; connections established before it is set carry no peer identification
   (the responder sees `node: None` for them, reclaimable only via its backstop
-  shutdown).
+  shutdown). *(Clarified 2026-08-07:* the `local_peer_id` is **snapshotted when
+  the connection table is lazily constructed on the first `push`/`connect`**; a
+  `set_local_peer_id` call *after* that point is silently ignored. The
+  "call once before the first push" guidance above is therefore load-bearing —
+  the reverse ordering is a no-op, not an error.*)*
 
 ### Key Entities
 
@@ -333,6 +337,12 @@ mock transport, and read metrics via `RemoteLookupRdmaInitiatorComponent::teleme
   registration (remote-write access), and the zyre control plane that delivers keys
   and `RemoteRegion` descriptors.
 - Telemetry is opt-in (feature-gated) and disabled by default.
+- *(Backfilled 2026-08-07.)* The real rdma-core transport is gated behind the
+  `rdma` Cargo feature. Without it the crate still builds and its unit tests run
+  over an in-process **mock transport** (no rdma-core present); in that no-`rdma`
+  build the `IRemoteLookupRdmaInitiator` methods (`push`/`push_async`/`connect`)
+  return `NotInitialized`. This is real, tested behavior and the default build
+  configuration for CI, which has no RDMA hardware.
 
 ## Known Limitations / Follow-ups
 
@@ -348,3 +358,12 @@ mock transport, and read metrics via `RemoteLookupRdmaInitiatorComponent::teleme
 - **SC-004 telemetry overhead** is covered by the `push_telemetry` benchmark
   (`benches/push_telemetry.rs`); run the two-baseline workflow (README) to confirm
   the < 5% budget on target hardware.
+- **Validation tooling (backfilled 2026-08-07, no FR behind it).** Two
+  hardware-gated engineering artifacts exist and are not tied to any functional
+  requirement (FR-013 mandates only unit tests over the mock seam): the
+  single-host real-hardware loopback end-to-end test
+  (`src/loopback_test.rs`, `#[cfg(all(test, feature = "rdma"))]`, `#[ignore]`,
+  with test-only `rdma_cm` responder scaffolding), and the `ibv_reg_mr`
+  cost-measurement benchmark (`tests/mr_registration_bench.rs`) that fed the
+  single-MR-vs-per-connection registration decision. Both are validation/
+  measurement tooling, not shippable behavior.

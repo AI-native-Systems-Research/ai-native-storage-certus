@@ -1,77 +1,70 @@
-# Spec Drift Report
+# Drift Report: eviction-policy-lru
 
-Generated: 2026-06-19
-Project: eviction-policy-lru
+Generated: 2026-08-07T15:28:26Z
+
+Spec: `.specify/specs/001-lru-eviction-policy/spec.md` (Status: Backfilled)
+Implementation: `src/lib.rs`, `src/lru_list.rs`
+Interface: `components/interfaces/src/ieviction_policy.rs`
 
 ## Summary
 
-| Category | Count |
-|----------|-------|
-| Specs Analyzed | 1 |
-| Requirements Checked | 15 (11 FR + 4 NFR) |
-| ✓ Aligned | 12 (80%) |
-| ⚠️ Drifted | 3 (20%) |
-| ✗ Not Implemented | 0 (0%) |
-| 🆕 Unspecced Code | 1 |
+| Class | Count |
+|-------|-------|
+| Aligned | 20 |
+| Drifted | 0 |
+| Not Implemented | 0 |
+| Unspecced | 0 |
+
+Result: **clean**. Every functional and non-functional requirement and success
+criterion maps to implementing code. This matches the recent commit
+`8a3ebc3f docs(eviction-policy-lru): fix FR-002 track signature drift`, which
+resolved the last known divergence (the `semantics: BlockSemantics` argument).
 
 ## Detailed Findings
 
-### Spec: 001-lru-eviction-policy - LRU Eviction Policy Component
+### Functional Requirements
 
-#### Aligned ✓
-- FR-001: `create_pool()` returns sequential PoolIds → `src/lib.rs:41-48`
-- FR-002: `track(pool, key)` registers key, returns EvictionHandle → `src/lib.rs:50-63`
-- FR-003: `touch(handle)` moves to MRU position in O(1) → `src/lib.rs:65-74`
-- FR-004: `remove(handle)` unlinks entry in O(1) → `src/lib.rs:76-85`
-- FR-005: `pop_oldest(pool)` removes and returns LRU key → `src/lib.rs:87-92`
-- FR-006: `peek_oldest(pool, n)` returns up to n oldest keys → `src/lib.rs:94-103`
-- FR-007: `len(pool)` returns active entry count → `src/lib.rs:105-114`
-- FR-008: `clear_pool(pool)` resets pool to empty → `src/lib.rs:116-123`
-- FR-011: Free-list recycling for removed slots → `src/lru_list.rs:38-55`
-- NFR-001: All single-entry operations are O(1) → linked-list operations are constant-time
-- NFR-002: Thread-safe via RwLock + per-pool Mutex → `src/lib.rs:9,23-25`
-- NFR-003: Per-pool locking granularity → each pool is `Mutex<Pool>`, read-lock on outer state
+| ID | Status | Location |
+|----|--------|----------|
+| FR-001 create_pool sequential from 0 | Aligned | `src/lib.rs:41-51` |
+| FR-002 track(pool,key,semantics), ignores semantics | Aligned | `src/lib.rs:53-71` (`_semantics` unused) |
+| FR-003 touch O(1) → MRU | Aligned | `src/lib.rs:73-87`; `lru_list.rs:70-96` |
+| FR-004 remove O(1) unlink | Aligned | `src/lib.rs:117-131`; `lru_list.rs:121-145` |
+| FR-005 identify_next_to_evict removes+returns LRU or None | Aligned | `src/lib.rs:133-138`; `lru_list.rs:99-104` |
+| FR-006 get_eviction_candidates(n) no removal | Aligned | `src/lib.rs:140-149`; `lru_list.rs:107-118` |
+| FR-007 len(pool) | Aligned | `src/lib.rs:151-160` |
+| FR-008 clear_pool(pool) | Aligned | `src/lib.rs:162-168`; `lru_list.rs:148-154` |
+| FR-009 Result methods → InvalidPool; Option/scalar degrade | Aligned | `src/lib.rs:60-67, 75-83, 119-127, 135, 142-147, 153-158, 164` |
+| FR-010 touch/remove idempotent on stale handle, Ok(()); InvalidHandle unused | Aligned | `lru_list.rs:71-73, 122-124` (active flag) |
+| FR-011 free-list node recycling | Aligned | `lru_list.rs:21, 38-45, 143` |
+| FR-012 batch_touch amortizes lock | Aligned | `src/lib.rs:89-115` |
 
-#### Drifted ⚠️
+### Non-Functional Requirements
 
-- **FR-009**: Spec says "Operations on an invalid PoolId MUST return `EvictionPolicyError::InvalidPool`"
-  - Actual: Only `track`, `touch`, and `remove` return `Result` and can report `InvalidPool`. `pop_oldest` returns `None`, `peek_oldest` returns empty `Vec`, `len` returns `0`, `clear_pool` silently no-ops.
-  - Location: `src/lib.rs:87-123`
-  - Severity: **moderate** — spec overstates error reporting vs. actual graceful-degradation behavior
+| ID | Status | Location |
+|----|--------|----------|
+| NFR-001 O(1) single-entry ops | Aligned | index-based DLL, `lru_list.rs` |
+| NFR-002 thread-safe, no corruption | Aligned | `RwLock`+per-pool `Mutex`; test `concurrent_access` `src/lib.rs:308-336` |
+| NFR-003 per-pool locking granularity | Aligned | `Vec<Mutex<Pool>>` behind `RwLock` `src/lib.rs:22-25` |
+| NFR-004 conforms to component model, provides IEvictionPolicy, ILogger receptacle | Aligned | `define_component!` `src/lib.rs:27-38` |
 
-- **FR-010**: Spec references "`remove` and `move_to_back` on an already-removed entry"
-  - Actual: The public interface exposes `touch`, not `move_to_back`. The method `move_to_back` is an internal `LruList` detail.
-  - Location: `src/lib.rs:65-74` (touch delegates to move_to_back)
-  - Severity: **minor** — spec uses internal name instead of public API name
+### Success Criteria
 
-- **NFR-004**: Spec says component declares `ILogger` receptacle
-  - Actual: The receptacle is declared but never used — no log calls exist anywhere in the implementation.
-  - Location: `src/lib.rs:32`
-  - Severity: **minor** — dead receptacle, no behavioral impact
+| ID | Status | Notes |
+|----|--------|-------|
+| SC-001 lib.rs + lru_list.rs tests pass | Aligned | 10 tests in `lib.rs`, 13 in `lru_list.rs` |
+| SC-002 4×100 concurrent, no corruption | Aligned | `concurrent_access` `src/lib.rs:308-336` |
+| SC-003 clippy -D warnings + fmt | Aligned (assumed; not re-run here) | — |
+| SC-004 integrates via query_interface!/receptacle in consumers | Aligned (spec-declared consumers not re-verified) | — |
 
-#### Not Implemented ✗
+## Unspecced Code
 
-(None — all requirements have corresponding implementation)
-
-### Success Criteria Drift
-
-- **SC-001**: Spec says "8 unit tests in `lib.rs` and 12 unit tests in `lru_list.rs`"
-  - Actual: 9 tests in `lib.rs` and 13 tests in `lru_list.rs` (22 total)
-  - Severity: **minor** — spec undercounts; tests are a superset
-
-### Unspecced Code 🆕
-
-| Feature | Location | Lines | Suggested Action |
-|---------|----------|-------|------------------|
-| `ILogger` receptacle (declared but unused) | `src/lib.rs:32` | 1 | Either add logging or remove receptacle |
-
-## Inter-Spec Conflicts
-
-None — single spec in this component.
+| Item | Location | Notes |
+|------|----------|-------|
+| (none) | — | `peek_front_n` and `Node.active` are internal helpers already described in Implementation Notes; no public surface beyond the interface. |
 
 ## Recommendations
 
-1. **Update FR-009** to distinguish between `Result`-returning methods (which report `InvalidPool`) and `Option`/scalar-returning methods (which gracefully degrade).
-2. **Update FR-010** to use public API name `touch` instead of internal method name `move_to_back`.
-3. **Update SC-001** to remove hard-coded test counts or replace with "All tests pass".
-4. **Decide on ILogger**: Either add meaningful log calls (e.g., pool creation, clear events) or remove the unused receptacle declaration.
+- No action required. Component and spec are synchronized.
+- SC-003/SC-004 are asserted but not machine-checked in this analysis; the repo's
+  CI gate already covers clippy/fmt per project conventions.

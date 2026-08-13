@@ -48,12 +48,24 @@ define_component! {
             store: RwLock<HashMap<String, Vec<u8>>>,
             dirty_count: AtomicU64,
             flush_seq: AtomicU64,
+            // Optional durable-flush trigger installed by the wiring layer
+            // (see `attach_flush_trigger`). When present, `force_flush()`
+            // invokes it to make data durable; when absent (pure in-memory
+            // mode) `force_flush()` is a no-op. Type-erased (see `FlushTrigger`)
+            // so the field type does not depend on the `testing`/`spdk`-gated
+            // FlushManager.
+            flush_trigger: RwLock<Option<FlushTrigger>>,
         },
     }
 }
 
 /// Maximum value size: 128 KiB.
 pub const MAX_VALUE_SIZE: usize = 128 * 1024;
+
+/// Type-erased durable-flush trigger installed by the wiring layer via
+/// [`ExtendedMetadataStoreComponent::attach_flush_trigger`]. Invoking it makes
+/// all pending writes durable and blocks until complete.
+pub type FlushTrigger = Box<dyn Fn() -> Result<(), String> + Send + Sync>;
 
 impl ExtendedMetadataStoreComponent {
     /// Get the current dirty count (mutations since last flush).
@@ -86,6 +98,18 @@ impl ExtendedMetadataStoreComponent {
     pub fn mark_flushed(&self, seq: u64) {
         self.flush_seq.store(seq, Ordering::Relaxed);
         self.dirty_count.store(0, Ordering::Relaxed);
+    }
+
+    /// Install a durable-flush trigger used by [`IExtendedMetadataStore::force_flush`].
+    ///
+    /// The wiring layer (which owns the `FlushManager`/`BlockDeviceClient`)
+    /// passes a closure that makes all pending writes durable and blocks until
+    /// complete — typically `move || flush_manager.trigger_flush()`. Once
+    /// installed, callers holding only the `IExtendedMetadataStore` interface
+    /// get real durability from `force_flush()`. Replaces any previously
+    /// installed trigger.
+    pub fn attach_flush_trigger(&self, trigger: FlushTrigger) {
+        *self.flush_trigger.write().unwrap() = Some(trigger);
     }
 
     /// Initialize the store from a BlockDeviceClient.
@@ -178,9 +202,16 @@ impl IExtendedMetadataStore for ExtendedMetadataStoreComponent {
         if let Ok(logger) = self.logger.get() {
             logger.debug("extended-metadata-store: force_flush");
         }
-        // Persistence is handled by the flush module when the testing/spdk feature is active.
-        // In pure in-memory mode, this is a no-op.
-        Ok(())
+        // If the wiring layer installed a durable-flush trigger (via
+        // `attach_flush_trigger`), invoke it and block until it completes so
+        // the interface's "returns when all data is durable" contract holds.
+        // In pure in-memory mode (no trigger installed) there is no durable
+        // backing store, so this is a no-op.
+        let guard = self.flush_trigger.read().unwrap();
+        match guard.as_ref() {
+            Some(trigger) => trigger().map_err(ExtendedMetadataStoreError::StorageError),
+            None => Ok(()),
+        }
     }
 }
 

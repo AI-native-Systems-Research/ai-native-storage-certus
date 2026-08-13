@@ -148,3 +148,31 @@ task instead.
 
 **Files to Modify** (follow-up, out of scope for this pass):
 - `components/gpu-services/CLAUDE.md` (Overview section)
+
+---
+
+# 2026-08-07 Sweep — Resolutions & Remaining Open Items
+
+Branch: `sync/spec-drift-sweep-20260807`. Status update on the 2026-07-22
+align-tasks after the sweep re-analysis and maintainer fork decisions.
+
+## RESOLVED this sweep (spec-only BACKFILL applied)
+
+- **FR-008 vs 002/003 conflict (Medium)** — ✅ RESOLVED. Maintainer chose
+  "Soften FR-008 wording (backfill)". FR-008 now carries an explicit documented
+  carve-out for the `p2p`-gated DMA-buffer builders. See apply-report.md
+  2026-08-07 sweep section.
+- **FR-005 locally-pinned unregistration (Low)** — ✅ RESOLVED via option 1
+  (documentation trim). FR-005 reworded to state `unpin_memory` is
+  tracking-removal-only in all cases; host un/registration lives in
+  FR-015/FR-016. No code change.
+
+## STILL OPEN (not addressed this sweep)
+
+- **FR-015 EBUSY special-case (Low)** — ⏳ OPEN. `register_host_memory` treats
+  SPDK `EBUSY` (-16) as success and skips rollback. Not re-surfaced as drift
+  this sweep. Still needs a maintainer decision: document the idempotency
+  accommodation in FR-015 Assumptions, or remove the special-case in code.
+- **CLAUDE.md skeleton staleness (Low, doc-only)** — ⏳ OPEN. Component-root
+  `CLAUDE.md` Overview still describes a bare `initialize()`/`shutdown()`
+  skeleton; outside `specs/**`, deliberately not edited by spec-sync.

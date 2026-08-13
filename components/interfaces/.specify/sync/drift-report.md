@@ -1,88 +1,77 @@
-# Spec Drift Report — `interfaces`
+# Drift Report: interfaces
 
-**Generated**: 2026-07-22T22:41:32Z
-**Spec**: `components/interfaces/specs/001-interfaces/spec.md` (FR-001..FR-028, backfilled + previously sync-applied through FR-027/028)
-**Head**: `bb9569dde029cc7cd98306e88f7904b8cd4cdbee` (branch `feat/speckit-backfill-remaining-components`)
-**Code**: `components/interfaces/src/**`, `Cargo.toml`, `README.md`
+Generated: 2026-08-07T15:29:55Z
+Spec: components/interfaces/specs/001-interfaces/spec.md
+Implementation: components/interfaces/src/*.rs, Cargo.toml
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Specs analyzed | 1 |
-| Requirements checked (FR-001..FR-028) | 28 |
-| Aligned | 17 |
-| Drifted | 8 |
-| Not implemented | 3 |
-| Unspecced features | 8 |
-| Conflicts | 0 |
+| Aligned | 37 |
+| Drifted | 3 |
+| Not Implemented | 1 |
+| Unspecced | 4 |
 
-The spec was last brought up to date for the `IGpuServices` multi-GPU routing
-methods and the dispatcher cold-load staging fields (see prior
-`drift-report.md`/`apply-report.md` in this directory, applied against an
-earlier `HEAD`). Since that pass, the crate has grown substantially:
-`zyre`, `remote-lookup-rdma-initiator`, and `remote-lookup-rdma-responder`
-landed as brand-new interfaces; `IDispatchMap`, `IDispatcher`, `IMemoryTier`,
-and `IBlockDevice` each gained new methods; `IRemoteLookup` was reshaped for a
-002 rewrite; and one committed source file (`iextended_metadata_store.rs`) was
-never wired into the crate at all.
+The `interfaces` crate is largely aligned with its backfilled spec: the bulk of FR-001..FR-034 interface/type requirements match trait definitions and `lib.rs` re-exports. Most divergences reported in the prior (2026-07-22) pass have since been absorbed into the spec (read_write_stats, promote_block_to_memory_tier/try_evict_to_block, pin/unpin, RDMA split, zyre). Remaining divergences: (1) an orphaned `IExtendedMetadataStore` module defined on disk but never wired into `lib.rs`, so FR-014/FR-025 are effectively not part of the compiled crate; (2) the `IEvictionPolicy::track` signature carries an extra `BlockSemantics` argument absent from FR-006; and (3) several unspecced items (`BlockSemantics`, `SessionId`, the `integrity-check` feature with `set/get_checksum`, and `push_async`/`PushCompletion`).
 
-## Per-Spec Classification
+## Detailed Findings
 
-### `components/interfaces/specs/001-interfaces/spec.md`
+### Aligned (representative)
 
-| FR | Subject | Status | Detail |
-|----|---------|--------|--------|
-| FR-001 | IGreeter | Aligned | `greeting_prefix` unchanged. `src/igreeter.rs:5`. |
-| FR-002 | ILogger | Aligned | `error/warn/info/debug` unchanged. `src/ilogger.rs:5-8`. |
-| FR-003 | ISPDKEnv | Aligned | `src/ispdk_env.rs:9-25`. |
-| FR-004 | IBlockDevice | **Drifted** | Actual interface has an 11th method, `read_write_stats(&self) -> ReadWriteStats`, not listed. `src/iblock_device.rs:494`. New `ReadWriteStats` type (`:134-176`) also absent from FR-017. |
-| FR-005 | IBlockDeviceAdmin | Aligned | `src/iblock_device.rs:506-538`. |
-| FR-006 | IEvictionPolicy | Aligned | `src/ieviction_policy.rs:54-80`. |
-| FR-007 | IDispatchMap | **Drifted** | Two methods exist beyond the spec's 16: `promote_block_to_memory_tier(key, pointer, size)` (`src/idispatch_map.rs:234-239`) and `try_evict_to_block(key)` (`:262`). Together they implement an in-place block↔memory-tier promotion/demotion path (preserving ref counts and eviction handle) that the spec does not describe. |
-| FR-008 | IDispatcher | **Drifted** | Three methods exist beyond the spec's 16: `pin(key)` / `unpin(key)` (eviction-protection references, `src/idispatcher.rs:546,557`) and `read_write_stats(&self) -> ReadWriteStats` (`:652`, cumulative SSD telemetry). |
-| FR-009 | IMemoryTier | **Drifted** | `telemetry_snapshot(&self) -> MemoryTierTelemetrySnapshot` (`src/imemory_tier.rs:206`) is not listed; `MemoryTierTelemetrySnapshot` (`:12`) is exported from `lib.rs` but has no FR entry (spec's supporting-types section, FR-019, mentions only `MemoryTierError`). |
-| FR-010 | IExtentManager | Aligned | All 14 methods match. `src/iextent_manager.rs:197-260`. |
-| FR-011 | IGpuServices | Aligned | 23 methods incl. `set_device`/`device_of_ptr` match the (previously backfilled) spec text exactly. `src/igpu_services.rs:271-782`. |
-| FR-012 | IRemoteLookup | **Drifted** | Spec describes `batch_lookup(&self, entries: &[(CacheKey, IpcHandle)])`; actual signature is `batch_lookup(&self, entries: &[(CacheKey, u32)])` — a size hint, not a GPU IPC handle (`src/iremote_lookup.rs:141-144`), consistent with remote-lookup now being CPU/DRAM-only. A new `initialize(&self, config: LookupConfig) -> Result<(), RemoteLookupError>` method (`:118`) is entirely unlisted, as is the `LookupConfig` type (`:27-59`, 10 fields incl. zyre group, quorum %, phase timeouts, gossip discovery). This is the aftermath of the "002 remote-lookup rewrite" (commit `9516f2d`). |
-| FR-013 | IRemoteRequestHandler | **Not implemented** | The interface (`handle_lookup`, `handle_check`, `handle_batch_lookup`, `release_lookup`) does not exist anywhere in the crate. It was removed by commit `29902a2` ("refactor: split remote-request-handler into remote-lookup-rdma-{initiator,responder}") and replaced by the unspecced `IRemoteLookupRdmaInitiator`/`IRemoteLookupRdmaResponder` pair (see Unspecced table). |
-| FR-014 | IExtendedMetadataStore | **Not implemented (unreachable)** | `src/iextended_metadata_store.rs` exists with a full, correct implementation of `put/get/delete/iterate_all/force_flush` (added in commit `9f1f6d5`), but `src/lib.rs` has no `mod iextended_metadata_store;` declaration and no re-exports — the trait and its error type are not part of the compiled `interfaces` crate at all. The consuming component `components/extended-metadata-store` (`use interfaces::{ExtendedMetadataStoreError, IExtendedMetadataStore, ILogger};`, `src/lib.rs:21`) additionally is **not listed in the workspace `members`** in the root `Cargo.toml`, so neither crate builds today. This is a broken integration, not merely a doc-drift. |
-| FR-015 | IPartitionTable | Aligned | `src/ipartition_table.rs:118-127`. |
-| FR-016 | Supporting Types — SPDK | Aligned | `SpdkEnvError` 7 variants, `BlockDeviceError` 10 variants — both match. `src/spdk_types.rs`. |
-| FR-017 | Supporting Types — Block Device | **Drifted** | `Command` now has 12 variants (spec says 11) and `Completion` now has 11 (spec says 10) — `src/iblock_device.rs:241-436`. Both variant counts have been off since the file's initial commit (not a new regression), but the spec text is currently inaccurate. `ReadWriteStats` (see FR-004) is also missing from this FR. |
-| FR-018 | Supporting Types — Dispatcher | **Drifted** | Spec (last amended to) "16-field configuration"; `DispatcherConfig` actually has **18 fields** (`src/idispatcher.rs:26-88`). Four fields undocumented: `memory_tier_eviction_threshold`, `memory_tier_eviction_low_watermark`, `memory_tier_eviction_batch_size`, `memory_tier_eviction_interval_secs` (DRAM→SSD proactive demotion sweep) and `extended_metadata_partition_size`. |
-| FR-019 | Supporting Types — Memory Tier | Aligned | `MemoryTierError` 7 variants match. `src/imemory_tier.rs:20-32`. (Method/type additions tracked under FR-009.) |
-| FR-020 | Supporting Types — Eviction Policy | Aligned | `EvictionHandle`, `EvictionPolicyError` (2 variants), `PoolId`. `src/ieviction_policy.rs`. |
-| FR-021 | Supporting Types — Extent Manager | Aligned | `src/iextent_manager.rs`. |
-| FR-022 | Supporting Types — GPU Services | Aligned | `src/igpu_services.rs`. |
-| FR-023 | Supporting Types — Remote | **Drifted (partially removed)** | `RemoteLookupError` (2 variants) still matches (`src/iremote_lookup.rs:80-85`). `LookupRef` and `RemoteRequestHandlerError` no longer exist anywhere in the crate — removed along with FR-013's `IRemoteRequestHandler`. |
-| FR-024 | Supporting Types — Partition Table | Aligned | `src/ipartition_table.rs`. |
-| FR-025 | Supporting Types — Extended Metadata Store | **Not implemented (unreachable)** | `ExtendedMetadataStoreError` (4 variants) is correctly defined in `src/iextended_metadata_store.rs:6-16` but, per FR-014, the module is not compiled into the crate. |
-| FR-026 | Supporting Types — Dispatch Map | Aligned | `DispatchMapError` has exactly 11 variants as specified. `src/idispatch_map.rs:39-62`. (New methods using it tracked under FR-007.) |
-| FR-027 | IDispatcher Cold-Load Staging Configuration | Aligned | `cold_staging_slots` (default 64), `cold_staging_buf_bytes` (default 4 MiB). `src/idispatcher.rs:81-87,109-110`. |
-| FR-028 | IGpuServices Multi-GPU Device Routing | Aligned | `set_device`, `device_of_ptr`. `src/igpu_services.rs:555,577`. |
+- FR-001 IGreeter — `src/igreeter.rs:5`.
+- FR-002 ILogger — `src/ilogger.rs:5-8`.
+- FR-003 ISPDKEnv (spdk) — exported `src/lib.rs:87`.
+- FR-004 IBlockDevice incl. `read_write_stats` — exported `src/lib.rs:90-93`.
+- FR-005 IBlockDeviceAdmin — exported `src/lib.rs:96`.
+- FR-007 IDispatchMap incl. `promote_block_to_memory_tier`, `try_evict_to_block`, `recover_extent`, `convert_to_storage` — `src/idispatch_map.rs:125,234,262,271`.
+- FR-008 IDispatcher (incl. pin/unpin, read_write_stats) — `src/idispatcher.rs`.
+- FR-009 IMemoryTier, FR-010 IExtentManager, FR-011/FR-028 IGpuServices (set_device/device_of_ptr) — present and exported.
+- FR-012 IRemoteLookup (initialize + `batch_lookup(&[(CacheKey,u32)])`) — `src/iremote_lookup.rs`, exported `src/lib.rs:49-51`.
+- FR-013 IRemoteRequestHandler correctly SUPERSEDED — no such trait exists in code (matches spec note).
+- FR-030 IRemoteLookupRdmaInitiator (push/connect/disconnect/disconnect_all/set_local_peer_id) — `src/iremote_lookup_rdma_initiator.rs:221,247,254,257,266`.
+- FR-031 IRemoteLookupRdmaResponder/Admin — exported `src/lib.rs:57-60`.
+- FR-029/FR-032 IZyre/IZyreNode/types — exported `src/lib.rs:61-67`.
+- FR-016..FR-024, FR-033/FR-034 supporting types — present/exported (spot-checked via lib.rs).
+- NFR-001..006, SC-1..7 — structurally satisfied (feature gating in Cargo.toml/lib.rs; Send/Sync and error-type conventions present).
+
+### Drifted
+
+1. **FR-006 IEvictionPolicy — `track` signature drift** — MEDIUM
+   - Spec: `track(&self, pool: PoolId, key: CacheKey) -> Result<EvictionHandle, EvictionPolicyError>`.
+   - Code: `track(&self, pool: PoolId, key: CacheKey, semantics: BlockSemantics) -> Result<EvictionHandle, EvictionPolicyError>` (`src/ieviction_policy.rs:87`).
+   - The extra `semantics: BlockSemantics` parameter is not described in FR-006.
+
+2. **FR-018 LookupResult — variant count mismatch** — LOW
+   - Spec FR-018: "3-variant enum (NotExist, MismatchSize, BlockDevice, MemoryTier)" — label says 3 but lists 4.
+   - Code: 4 variants `NotExist, MismatchSize, BlockDevice{..}, MemoryTier{..}` (`src/idispatch_map.rs:11-22`). Spec text is internally inconsistent (should read 4-variant).
+
+3. **FR-014 IExtendedMetadataStore / FR-025 ExtendedMetadataStoreError — defined but not exported** — HIGH
+   - `src/iextended_metadata_store.rs` defines `IExtendedMetadataStore` (`:30-45`) and `ExtendedMetadataStoreError` (`:6`), but `lib.rs` does NOT declare `mod iextended_metadata_store` nor re-export the interface/error (confirmed: no reference in `src/lib.rs`).
+   - Consequence: the file is orphaned/dead code and the types FR-014/FR-025 claim to be part of the `interfaces` crate are not compiled or reachable through the crate's public API.
+
+### Not Implemented
+
+- FR-014 IExtendedMetadataStore (and its FR-025 error type) — not wired into the crate (see Drifted #3). No reachable public API despite the spec listing it as a crate interface.
 
 ## Unspecced Code
 
-| Feature | Location | Suggested Spec Treatment |
-|---------|----------|---------------------------|
-| `IZyre` (factory) + `IZyreNode` (handle) interfaces, plus `PeerId`, `ZyreEvent`, `NodeConfig`, `GossipConfig`, `ZyreError` — LAN/gossip peer discovery and messaging (zyre/ZeroMQ bindings) | `src/izyre.rs:1-438` | New FR (e.g. FR-029) documenting the zyre interface pair as a new user story ("Peer Discovery and Messaging"). |
-| `IRemoteLookupRdmaInitiator` interface + `RemoteRegion`, `PushStatus`, `RemoteLookupRdmaInitiatorError` — outbound RDMA push of local cache values to remote hosts | `src/iremote_lookup_rdma_initiator.rs:1-170` | New FR replacing part of the removed FR-013; note this is the "push" (serving) side. |
-| `IRemoteLookupRdmaResponder` + `IRemoteLookupRdmaResponderAdmin` interfaces + `ControlChannel`, `Endpoint`, `LocalRegion`, `RemoteLookupRdmaResponderError`, `ResponderCommand`, `ResponderEvent` — accept side of RDMA lookups (control-plane only; writes are one-sided) | `src/iremote_lookup_rdma_responder.rs:1-285` | New FR replacing the other part of the removed FR-013; note the teardown-before-reclaim handshake. |
-| `LookupConfig` type + `IRemoteLookup::initialize(config)` method | `src/iremote_lookup.rs:9-118` | Fold into amended FR-012. |
-| `IDispatchMap::promote_block_to_memory_tier` / `try_evict_to_block` | `src/idispatch_map.rs:234-262` | Fold into amended FR-007. |
-| `IDispatcher::pin` / `unpin` (eviction-protection ref-counting) | `src/idispatcher.rs:546,557` | Fold into amended FR-008. |
-| `IDispatcher::read_write_stats` / `IBlockDevice::read_write_stats` + `ReadWriteStats` type | `src/idispatcher.rs:652`, `src/iblock_device.rs:134-176,494` | Fold into amended FR-004/FR-008/FR-017. |
-| `IMemoryTier::telemetry_snapshot` + `MemoryTierTelemetrySnapshot` type | `src/imemory_tier.rs:12-19,206` | Fold into amended FR-009/FR-019. |
+| Item | Location | Notes |
+|------|----------|-------|
+| `BlockSemantics` struct + `session_id` field | `src/ieviction_policy.rs:43` | Not listed in FR-020 (Eviction Policy supporting types); introduced as the extra `track` arg. |
+| `SessionId` type alias (`u64`) | `src/ieviction_policy.rs:33` | Not in spec; exported at `src/lib.rs:38`. |
+| `integrity-check` Cargo feature + `set_checksum`/`get_checksum` | `Cargo.toml:507`; `src/idispatch_map.rs:287,295` | Overview lists only `spdk`/`gpu` features; FR-007 does not include these CRC-32 methods. |
+| `push_async` method + `PushCompletion` type | `src/iremote_lookup_rdma_initiator.rs:158,198`; exported `src/lib.rs:53` | FR-030 lists only push/connect/disconnect/disconnect_all/set_local_peer_id; FR-033 supporting types omit `PushCompletion`. |
 
-## Conflicts
+## Conflicts / Spec references to nonexistent artifacts
 
-None found between specs (only one spec, `001-interfaces`, exists for this component).
+- FR-014/FR-025 reference an `IExtendedMetadataStore` interface that the `interfaces` crate does not actually expose (orphaned module) — spec asserts export, code does not deliver.
+- Implementation Notes reference "formally verified properties documented in comments (IDispatchMap: 10 props, IDispatcher: 10 props, IExtentManager: 10 props, IGpuServices: 10 props, IMemoryTier: 10 props)" — not independently verified in this pass.
 
 ## Recommendations
 
-1. **Fix the broken integration first (severity: critical).** Add `mod iextended_metadata_store;` plus the corresponding `pub use` lines to `src/lib.rs`, and add `"components/extended-metadata-store"` to the root `Cargo.toml` workspace `members`. Until both are done, FR-014/FR-025 describe code that cannot be built, and `components/extended-metadata-store` is dead weight in the tree.
-2. **Backfill the three new interface modules** (`izyre`, `iremote_lookup_rdma_initiator`, `iremote_lookup_rdma_responder`) as new FRs/user stories — they are substantial, tested, documented interfaces with no spec coverage at all.
-3. **Amend FR-012/FR-013/FR-023** to reflect the 002 remote-lookup rewrite: replace the removed `IRemoteRequestHandler`/`LookupRef`/`RemoteRequestHandlerError` narrative with the new initiator/responder split, and update `IRemoteLookup`'s `batch_lookup` signature and `initialize`/`LookupConfig` addition.
-4. **Amend FR-004, FR-007, FR-008, FR-009** to add the newly-shipped methods (`read_write_stats`, `promote_block_to_memory_tier`, `try_evict_to_block`, `pin`, `unpin`, `telemetry_snapshot`) and their supporting types (`ReadWriteStats`, `MemoryTierTelemetrySnapshot`).
-5. **Correct FR-017 and FR-018 counts**: `Command` is 12 variants, `Completion` is 11, `DispatcherConfig` is 18 fields (list the 4 memory-tier-eviction fields and `extended_metadata_partition_size` explicitly).
+1. Decide the intent of `IExtendedMetadataStore`: either add `mod iextended_metadata_store;` + re-exports to `lib.rs` (making FR-014/FR-025 real), or remove the orphaned file and delete FR-014/FR-025 from the spec.
+2. Update FR-006 to include the `semantics: BlockSemantics` parameter and document `BlockSemantics`/`SessionId` under FR-020 (or backfill a dedicated FR).
+3. Add the `integrity-check` feature and `set_checksum`/`get_checksum` to the Overview features list and FR-007.
+4. Add `push_async`/`PushCompletion` to FR-030/FR-033.
+5. Fix the FR-018 "3-variant" label to "4-variant" for `LookupResult`.

@@ -10,7 +10,7 @@ Crash-consistent fixed-size extent allocator for the Certus storage system. Maps
 - Region-sharded concurrency (power-of-two count, each with its own lock, buddy allocator, slab allocator, and per-slab key vectors)
 - Crash-consistent checkpointing on a dedicated metadata device (dual-copy rotation with CRC32 protection)
 - Checkpoint coalescing (at most two IO rounds regardless of concurrent callers)
-- Background periodic checkpoint thread (configurable interval, default 5 minutes)
+- Background periodic checkpoint thread (configurable interval, default 30 seconds)
 - Recovery from the most recent valid checkpoint on initialization
 
 ## Architecture

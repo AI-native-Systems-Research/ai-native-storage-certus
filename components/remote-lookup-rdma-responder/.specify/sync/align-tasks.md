@@ -160,3 +160,76 @@ for other stale copies of the same claim while in there.
 ### Acceptance Criteria
 - [ ] `set_bind_ip`/`initialize` doc comments on `IRemoteLookupRdmaResponderAdmin` describe the FR-002a precedence (explicit IP, else auto-detect) instead of "never auto-detects".
 - [ ] No other stale copies of the pre-clarification claim remain in `components/interfaces/src/iremote_lookup_rdma_responder.rs`.
+
+---
+
+# 2026-08-07 Sweep (branch `sync/spec-drift-sweep-20260807`)
+
+Regenerated drift report (2026-08-07T15:28:11Z) surfaced two **new** ALIGN
+items not present in the July pass, plus two spec BACKFILLs (already applied —
+see apply-report.md 2026-08-07 section: FR-010 access-flags note documenting the
+`REMOTE_READ` widening, and the async-event-instrumentation + `REMOTE_READ`-
+narrowing Known-Limitations bullets). The four July align-tasks above still
+stand (FR-016 wiring, `ResponderEvent::Error`, FR-014 logger, interfaces doc).
+
+Per the sweep pacing, non-HIGH ALIGN items are **queued, not drafted** (only
+HIGH code bugs get a drafted fix). Both new items are Low/Medium and are queued
+below.
+
+**FR-016 wire-up-vs-drop fork — RESOLVED.** The genuine HUMAN_DECISION fork was
+raised with the maintainer, who chose **(A) wire it up**. It is now **DRAFTED on
+the branch** (`src/connection.rs`, `src/rdma.rs`, `src/lib.rs` + new test;
+verified 22/24 tests, `--features rdma` type-checks, fmt + clippy clean — see
+apply-report.md 2026-08-07 "Human Decision Resolved"). This **closes July
+align-tasks 1 (FR-016 wiring) and 2 (`ResponderEvent::Error`)** — they are now
+implemented, not queued. July tasks 3 (FR-014 logger) and 4 (interfaces doc)
+remain open.
+
+## Task 5 — Align FR-010: map `ibv_reg_mr` failure to `Registration`, not `Bind` (Medium)
+
+- **Severity**: medium (wrong error variant on a real failure path).
+- **Spec**: FR-010 — "If ... `ibv_reg_mr` fails, `initialize()` MUST return `Registration`."
+- **Current code**: `RealCmSeam::bind` returns `Err(String)` for *all* real-CM
+  failures, mapped uniformly via `.map_err(RemoteLookupRdmaResponderError::Bind)`
+  at `src/lib.rs:195-196`. So an `ibv_reg_mr` registration failure surfaces to the
+  caller as `Bind`, not `Registration`. (The unbound-receptacle / uninitialized-pool
+  precondition paths *are* correctly mapped to `Registration` in `lib.rs`; only the
+  real-hardware `ibv_reg_mr` failure inside `bind` is mis-mapped.)
+- **Required change**: split `RealCmSeam::bind`'s error channel so registration
+  failures are distinguishable from listen/bind failures — e.g. return a typed enum
+  (or a dedicated `Err` marker) that `src/lib.rs:195-196` routes to `Registration`
+  for the `ibv_reg_mr` case and `Bind` for the listen/`rdma_get_src_port` case.
+- **Files**: `src/rdma.rs` (`RealCmSeam::bind`), `src/lib.rs:195-196`.
+- **Why queued, not drafted**: Medium severity (not HIGH); per sweep pacing it is
+  queued. Only reachable under `--features rdma` on real hardware, so it is invisible
+  to the default-members/CI build.
+- **Owner**: remote-lookup-rdma-responder maintainer.
+
+### Acceptance Criteria
+- [ ] An `ibv_reg_mr` failure at `initialize()` returns `RemoteLookupRdmaResponderError::Registration`.
+- [ ] A `bind`/`rdma_listen`/`rdma_get_src_port` failure still returns `Bind`.
+- [ ] Precondition `Registration` paths (unbound receptacle, uninitialized pool) unchanged.
+
+## Task 6 — Align FR-008: log best-effort teardown failures in `RealCmConn::drop` (Low)
+
+- **Severity**: low (missing diagnostic on a best-effort cleanup path).
+- **Spec**: FR-008 — best-effort `rdma_destroy_qp` failure "MUST be logged".
+- **Current code**: `RealCmConn::drop` (`src/rdma.rs:144-169`) calls `rdma_disconnect`
+  / `rdma_destroy_qp` and ignores their return values, logging nothing. The
+  load-bearing ordering guarantee (QP→ERROR *before* ack) is correctly enforced and
+  asserted (`src/connection.rs:172-186`, `src/rdma.rs:145-151`); only the "log the
+  best-effort teardown failure" half of FR-008 is unmet.
+- **Required change**: capture the `rdma_disconnect`/`rdma_destroy_qp` return codes in
+  `Drop` and emit a best-effort log (via the accept-loop logger handle once FR-014's
+  logger-threading task lands, or `eprintln!` as an interim consistent with the
+  current async-event path) on nonzero return. Must not change the teardown ordering
+  or make `Drop` fallible.
+- **Files**: `src/rdma.rs:144-169` (`RealCmConn::drop`); depends on / pairs with the
+  July FR-014 logger-threading align-task.
+- **Why queued, not drafted**: Low severity; queued per sweep pacing.
+- **Owner**: remote-lookup-rdma-responder maintainer.
+
+### Acceptance Criteria
+- [ ] A nonzero `rdma_destroy_qp`/`rdma_disconnect` return in `Drop` produces a log line.
+- [ ] The QP→ERROR-before-ack ordering (SC-002 / FR-008) is unchanged.
+- [ ] `Drop` remains infallible and idempotent for an unknown/already-torn-down node.

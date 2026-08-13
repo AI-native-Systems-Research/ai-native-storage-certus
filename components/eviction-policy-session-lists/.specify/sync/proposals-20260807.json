@@ -1,0 +1,49 @@
+{
+  "generated": "2026-08-07",
+  "branch": "sync/spec-drift-sweep-20260807",
+  "component": "eviction-policy-session-lists",
+  "based_on": "drift-report.{json,md} (2026-08-07T08:32Z; 22 aligned, 0 drifted)",
+  "mode": "interactive",
+  "summary": { "backfill": 1, "human_decision": 1, "align_queued": 1, "no_action": 0 },
+  "proposals": [
+    {
+      "id": "esl-001-startup-log",
+      "spec": "001-session-list-eviction",
+      "requirement": "(unspecced startup-announcement log)",
+      "direction": "BACKFILL",
+      "confidence": "HIGH",
+      "code_does": "One-time informational log on first selection as active policy (announced flag; src/lib.rs:83-87,107-120) via optional ILogger.",
+      "resolution": "Added a non-normative 'Observability' section documenting the startup-announcement log; a missing logger turns no operation into an error.",
+      "approved": true,
+      "applied": true
+    },
+    {
+      "id": "esl-001-SC-001",
+      "spec": "001-session-list-eviction",
+      "requirement": "SC-001",
+      "direction": "HUMAN_DECISION",
+      "confidence": "MEDIUM",
+      "spec_says": "≥15% reduction in prefix re-loads vs basic LRU on a representative multi-turn trace.",
+      "code_does": "No comparative trace-replay harness exists; benches/session_list_benchmark.rs measures only this component's hot-path throughput. Target unverifiable.",
+      "options": [
+        "Downgrade to design goal (backfill)",
+        "Build the comparative harness and measure"
+      ],
+      "user_decision": "Downgrade to design goal (backfill)",
+      "resolution": "SC-001 relabelled '(design goal — not yet verified; downgraded 2026-08-07)'; ≥15% is now a target pending a comparative harness. Harness queued as align-task Task 1.",
+      "approved": true,
+      "applied": true
+    },
+    {
+      "id": "esl-001-harness",
+      "spec": "001-session-list-eviction",
+      "requirement": "SC-001 (verification)",
+      "direction": "ALIGN",
+      "confidence": "MEDIUM",
+      "note": "Build a comparative prefix-reload trace-replay harness (session-lists vs eviction-policy-lru) to verify/retire the ≥15% target. Non-HIGH — queued, not drafted.",
+      "approved": true,
+      "applied": false,
+      "queued_as": "align-tasks.md Task 1"
+    }
+  ]
+}

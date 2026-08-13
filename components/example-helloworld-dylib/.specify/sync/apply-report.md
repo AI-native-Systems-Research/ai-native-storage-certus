@@ -40,3 +40,34 @@ None.
 - Status field on `spec.md` left as `Backfilled` (not flipped to `Reviewed`) since only one of the five human-review checklist items in `tasks.md` has been resolved by this pass; full human review is still pending.
 - The `cdylib` variant decision (`tasks.md` checklist item 4) is an open design choice, not a drift finding — left untouched.
 - Source code (`src/lib.rs`, `Cargo.toml`) was not modified; all changes were confined to `specs/**` and `.specify/sync/**` under this component.
+
+---
+
+# 2026-08-07 Sweep (branch `sync/spec-drift-sweep-20260807`)
+
+Mode: sweep re-analysis. Pacing: auto-apply safe BACKFILL on-branch; queue
+non-HIGH ALIGN items as align-tasks (do not draft). No forks arose.
+
+Regenerated drift report (2026-08-07T15:29:55Z): 7 aligned, 1 drifted (Low,
+doc-only), 0 not-implemented, 0 unspecced.
+
+## No spec BACKFILL needed
+
+The spec text is already correct — FR-4/Overview were backfilled to the
+static-rlib-embedding mechanism in the 2026-07-22 run. The single remaining
+drift is the reverse direction: the **source** module doc comment
+(`src/lib.rs:4-7`) still carries the old "dynamically link the same shared
+libraries" wording the spec has since corrected. That is an ALIGN (spec→code)
+item, not a BACKFILL.
+
+## Queued to align-tasks.md (non-HIGH ALIGN — queued, not drafted)
+
+| Task | Severity | Summary |
+|------|----------|---------|
+| Task 2 — Align FR-4 stale module doc comment | Low (doc-only) | Rewrite `src/lib.rs:4-7` to state each side statically embeds its own rlib and that `TypeId` equality is a same-`rustc` compile-time property; drop the "dynamically link the same shared libraries" claim. No logic change. Full task + acceptance criteria appended to `align-tasks.md`. |
+
+Task 1 (missing automated dylib-loading integration test, Low) from the
+2026-07-22 run remains open.
+
+## Verification
+- No files edited under `specs/**` this sweep (spec already aligned). Only `.specify/sync/align-tasks.md` appended (Task 2). No `.rs` source modified.

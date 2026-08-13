@@ -1,0 +1,40 @@
+{
+  "generated": "2026-08-07T15:30:30Z",
+  "project": "disk-partition-manager",
+  "summary": {
+    "aligned": 18,
+    "drifted": 2,
+    "not_implemented": 0,
+    "unspecced": 2
+  },
+  "specs": [
+    {"id": "FR-001", "status": "Aligned", "location": "gpt.rs:9,197,206,344", "severity": "", "notes": "Rev 1.0, 128x128B entries, primary@LBA1, backup@last, protective MBR@LBA0."},
+    {"id": "FR-002", "status": "Aligned", "location": "gpt.rs:97-119,416", "severity": "", "notes": "CRC32 (crc32fast=IEEE) on header and entry array."},
+    {"id": "FR-003", "status": "Drifted", "location": "gpt.rs:66-86,73,353-357", "severity": "Medium", "notes": "Backup fallback only fires on CorruptTable (CRC). Corrupt primary signature returns NoPartitionTable and is propagated without trying backup; initialize_or_format then reformats destructively."},
+    {"id": "FR-004", "status": "Aligned", "location": "gpt.rs:240-267,270", "severity": "", "notes": "size_bytes=0 rest-of-disk supported."},
+    {"id": "FR-005", "status": "Aligned", "location": "gpt.rs:246-250", "severity": "", "notes": ">1 rest-of-disk rejected."},
+    {"id": "FR-006", "status": "Aligned", "location": "gpt.rs:260-265", "severity": "", "notes": "Overflow of fixed partitions rejected."},
+    {"id": "FR-007", "status": "Aligned", "location": "gpt.rs:329,344", "severity": "", "notes": "Protective MBR type 0xEE at LBA 0."},
+    {"id": "FR-008", "status": "Aligned", "location": "gpt.rs:554-564", "severity": "", "notes": "RFC 4122 v4 GUIDs; see unspecced urandom-failure fallback."},
+    {"id": "FR-009", "status": "Aligned", "location": "gpt.rs:566-585", "severity": "", "notes": "UTF-16LE encode/decode capped at 36 chars."},
+    {"id": "FR-010", "status": "Aligned", "location": "lib.rs:30-36,91", "severity": "", "notes": "Configurable ns_id via set_ns_id and config.ns_id."},
+    {"id": "FR-011", "status": "Aligned", "location": "gpt.rs:314-317,437-543", "severity": "", "notes": "Sector size parameterized; no explicit 512/4096 validation."},
+    {"id": "IR-001", "status": "Aligned", "location": "ipartition_table.rs:116-128;lib.rs:67-120", "severity": "", "notes": "initialize/format/partition_info/num_partitions provided."},
+    {"id": "IR-002", "status": "Aligned", "location": "lib.rs:17-19", "severity": "", "notes": "block_device: IBlockDevice receptacle."},
+    {"id": "IR-003", "status": "Aligned", "location": "lib.rs:45-64", "severity": "", "notes": "initialize_or_format returns (PartitionTable, formatted:bool)."},
+    {"id": "PR-001", "status": "Aligned", "location": "gpt.rs:194-206", "severity": "", "notes": "Fixed set of sector writes independent of device size."},
+    {"id": "PR-002", "status": "Drifted", "location": "gpt.rs:441-485,68,110", "severity": "Medium", "notes": "read_bytes does one ReadSync/recv per sector; entry array (16KiB=32 sectors @512B) plus header = 33 round-trips, not the specified <=2."},
+    {"id": "SC-001", "status": "Aligned", "location": "gpt.rs:142-227,88-140", "severity": "", "notes": "Round-trip offsets identical; no automated test."},
+    {"id": "SC-002", "status": "Aligned", "location": "gpt.rs:66-86", "severity": "", "notes": "CRC-corrupt primary falls back to backup; signature corruption does not (see FR-003). No test."},
+    {"id": "SC-003", "status": "Aligned", "location": "gpt.rs:566-585", "severity": "", "notes": "ASCII names preserved on round-trip; no test."},
+    {"id": "SC-004", "status": "Aligned", "location": "dispatcher/src/lib.rs:1517,1670", "severity": "", "notes": "Dispatcher wires format_on_init -> initialize_or_format; false path avoids reformat."}
+  ],
+  "unspecced": [
+    {"item": "Hardcoded primary entry LBA on read", "location": "gpt.rs:68", "notes": "try_read_gpt_at(1,2) ignores parsed header.partition_entry_lba (gpt.rs:370); breaks reading externally-created GPTs. Low."},
+    {"item": "generate_guid silent zero-fallback on /dev/urandom failure", "location": "gpt.rs:556-559", "notes": "Non-random collision-prone GUID if urandom unavailable; only in Implementation Notes, not any FR. Low."}
+  ],
+  "conflicts": [
+    {"description": "SC-001/SC-002/SC-003 have no automated tests; plan.md and tasks.md confirm no test files exist and [dev-dependencies] is empty.", "location": "spec.md:119-121"},
+    {"description": "FR-003/US2 scenario 2 requires backup fallback for a 'corrupt primary', but only CRC corruption is covered; signature corruption is not.", "location": "spec.md:64"}
+  ]
+}

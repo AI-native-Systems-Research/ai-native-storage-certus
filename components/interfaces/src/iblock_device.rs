@@ -324,6 +324,13 @@ pub enum Command {
     },
     /// Issue a hardware controller reset.
     ControllerReset,
+    /// Synchronous flush: force the namespace's volatile write cache to
+    /// non-volatile media. Blocks until completion. Used by the
+    /// extent-manager `volatile_write_cache` feature (spec FR-030).
+    FlushSync {
+        /// NVMe namespace identifier.
+        ns_id: u32,
+    },
 }
 
 // Command contains Arc<DmaBuffer> which is Send.
@@ -407,6 +414,13 @@ pub enum Completion {
     /// A controller reset completed.
     ResetDone {
         /// Result of the reset.
+        result: Result<(), NvmeBlockError>,
+    },
+    /// A flush operation completed.
+    FlushDone {
+        /// Operation handle.
+        handle: OpHandle,
+        /// Result of the flush.
         result: Result<(), NvmeBlockError>,
     },
     /// A general error not tied to a specific operation.

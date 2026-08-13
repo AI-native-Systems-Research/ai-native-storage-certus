@@ -1,100 +1,85 @@
-# Spec Sync — Align Tasks
-Project: extent-manager
-Source drift cycle: 2026-07-22T22:37:58Z (`drift-report.json` / `drift-report.md`)
+# Align Tasks — extent-manager
 
-Items below were deferred during AUTO-BACKFILL apply (2026-07-22) because resolving them
-requires either a code change (outside the scope of a Markdown-only spec-sync apply) or a
-decision beyond what is verifiable from `src/` and existing specs alone.
+Generated: 2026-08-07T16:02:56Z
+Branch: `sync/spec-drift-sweep-20260807`
+Source: proposals 2026-08-07T16:02:56Z (drift-report 2026-08-07T15:31:39Z)
 
----
-
-## Task: Align 001-extent-manager-v2/FR-030
-
-**Severity**: Major (DEFECT)
-
-**Spec Requirement**: FR-030 states: "The component supports a `volatile_write_cache`
-feature gate that controls whether `BlockDeviceClient::flush()` calls are issued to the
-metadata device. When enabled, flush calls in checkpoint and format paths are
-conditionally compiled out, improving performance on devices with volatile write caches
-where the caller accepts the associated durability risk." I.e., the *intended* design is:
-default (feature disabled) = durable/flushing behavior; opt-in `volatile_write_cache`
-feature = flush calls compiled out for performance, accepting durability risk.
-
-**Current Code**: The implementation has the cfg-polarity inverted relative to the spec's
-intent. `#[cfg(feature = "volatile_write_cache")]` guards in
-`components/extent-manager/src/checkpoint.rs:99-103` and
-`components/extent-manager/src/lib.rs:308-310` cause the `flush()` call to be compiled
-**IN** only when the feature is **enabled**, and compiled out (absent entirely) when the
-feature is **disabled (the default)**. This is the opposite of what FR-030 describes: today,
-the default build never flushes the metadata device after a checkpoint write, and the
-"risky" opt-in feature is actually what restores the flush/durability behavior. Separately,
-the spec's claim that flushes are also conditionally compiled out of the `format()` path is
-inaccurate under either polarity — `format()` (`src/lib.rs:383-512`) contains no `flush()`
-call at all, feature-gated or otherwise; only the checkpoint path is affected.
-
-**Required Change**: This is a correctness/durability question, not a wording nit, and must
-not be resolved by silently editing the spec to match the buggy code. A maintainer must
-decide and then implement one of:
-1. Fix the code so that flush() is issued by default (feature disabled) and is skipped only
-   when `volatile_write_cache` is explicitly enabled — matching FR-030's documented intent
-   (recommended, since the current default silently sacrifices metadata durability).
-2. Or, if the current code's polarity is actually the intended behavior (e.g. because the
-   crate's dependents always run with a real NVMe write-cache flush already handled at a
-   lower layer), rewrite FR-030 to accurately describe that opt-in-to-flush semantics — but
-   this changes the durability contract for every caller and needs explicit sign-off from
-   crate consumers (`dispatcher`, `dispatcher-p2p`, `dispatch-map`).
-Either way, also correct FR-030 (or a new FR) to state plainly that no flush call exists in
-the `format()` path under any feature configuration, if that remains true after the fix.
-
-**Files to Modify**: `components/extent-manager/src/checkpoint.rs`,
-`components/extent-manager/src/lib.rs` (code fix, option 1); or
-`components/extent-manager/specs/001-extent-manager-v2/spec.md` (FR-030 rewrite, option 2) —
-pending maintainer decision. Not modified by this apply pass.
+These are spec→code (ALIGN) items. Per the user's decision for HIGH code/build
+bugs, the fixes were **drafted on the feature branch** (not committed to
+`unstable`) for review.
 
 ---
 
-## Task: Align 001-extent-manager-v2/FR-016 (README default-interval doc string)
+## Task 1: FR-030 — make `volatile_write_cache` compile and flush for real  [HIGH]
 
-**Severity**: Low (ALIGN — documentation drift outside spec-sync edit scope)
+**Spec Requirement**: FR-030 (backfilled 2026-08-07 to "enabled = issue flush").
+**Problem (before)**: Enabling `--features volatile_write_cache` failed to compile
+in three places across two crates:
+- `extent-manager/src/lib.rs:309-310` and `checkpoint.rs:102-103` call
+  `metadata_client.flush()` — but `BlockDeviceClient` had no `flush()` method.
+- `extent-manager/src/test_support.rs:231` (mock) referenced
+  `Command::FlushSync` / `Completion::FlushDone`, which did not exist in the
+  `interfaces` crate.
 
-**Spec Requirement**: FR-016 (already updated by this apply pass) discloses that both the
-`IExtentManager` interface doc comment and this component's `README.md` incorrectly state
-a "five minutes" default checkpoint interval, when the actual default is 30 seconds
-(`ExtentManager::new_inner`, `src/lib.rs:109-112`).
+The feature was therefore entirely non-functional, and its spec wording was
+additionally inverted ("compiled out when enabled").
 
-**Current Code**: `components/extent-manager/README.md:12` — "Background periodic
-checkpoint thread (configurable interval, default 5 minutes)" — is stale.
-`components/interfaces/src/iextent_manager.rs:244` doc comment on
-`set_checkpoint_interval` similarly says "The default is five minutes."
+**Change (drafted on branch)**:
+- `components/interfaces/src/iblock_device.rs`: added `Command::FlushSync { ns_id }`
+  and `Completion::FlushDone { handle, result }`.
+- `components/extent-manager/src/block_io.rs`: added
+  `BlockDeviceClient::flush()` (feature-gated on `volatile_write_cache`) that
+  sends `FlushSync` and awaits `FlushDone`, mirroring `write_blocks`.
+- `components/block-device-spdk-nvme/src/actor.rs`: added a `Command::FlushSync`
+  dispatch arm and a `do_sync_flush()` helper issuing
+  `spdk_nvme_ns_cmd_flush` (binding already allowlisted in `spdk-sys/build.rs`),
+  modeled on `do_sync_write`.
+- `components/extent-manager/specs/.../spec.md`: FR-030 wording corrected.
 
-**Required Change**: Update `README.md`'s feature bullet to say "default 30 seconds," and
-update the `set_checkpoint_interval` doc comment in `iextent_manager.rs` to say 30 seconds
-(or remove the specific number and point readers to `ExtentManager::new_inner()`). Both are
-non-Markdown-spec or out-of-component files, so they are outside the edit scope of this
-spec-sync apply pass (which is restricted to `components/extent-manager/specs/**` and
-`.specify/sync/**`).
+**Files Modified**:
+- `components/interfaces/src/iblock_device.rs`
+- `components/extent-manager/src/block_io.rs`
+- `components/block-device-spdk-nvme/src/actor.rs`
 
-**Files to Modify**: `components/extent-manager/README.md`,
-`components/interfaces/src/iextent_manager.rs` (doc comment only).
+**Estimated Effort**: medium (cross-crate).
+
+### Acceptance Criteria
+- [x] `cargo build -p interfaces` — clean.
+- [x] `cargo build` (default members) — clean.
+- [x] `cargo build -p block-device-spdk-nvme` — clean (SPDK prebuilt).
+- [x] `cargo build -p extent-manager --features volatile_write_cache` — clean
+      (previously a compile error).
+- [x] `cargo test -p extent-manager --features volatile_write_cache` — 16 passed
+      (checkpoint round-trips exercise the mock flush path).
+- [ ] **REMAINING**: add a CI job that builds `--features volatile_write_cache`
+      to prevent silent re-breakage (guideline: extend
+      `.github/workflows/rust.yml`, but note SPDK crates need a runner with the
+      SPDK build — likely a separate self-hosted job).
+- [ ] **HARDWARE REVIEW**: `do_sync_flush` issues a real
+      `spdk_nvme_ns_cmd_flush`; verify on hardware that the flush actually
+      forces the volatile write cache and that the completion/status handling
+      matches the write path under fault conditions.
 
 ---
 
-## Task: Align 001-extent-manager-v2/Key Entities (Superblock) — README format-version doc string
+## Task 2: FR-016 — correct stale "five minutes" doc strings  [LOW]
 
-**Severity**: Low (ALIGN — documentation drift outside spec-sync edit scope)
+**Spec Requirement**: FR-016 (its own text instructs these be corrected to 30s).
+**Change (applied on branch)**:
+- `components/interfaces/src/iextent_manager.rs:244`: "five minutes" → "30 seconds".
+- `components/extent-manager/README.md:13`: "default 5 minutes" → "default 30 seconds".
 
-**Spec Requirement**: The spec's Key Entities section and On-Disk Format Reference
-correctly state the superblock format version is `6` (`FORMAT_VERSION: u32 = 6`,
-`src/superblock.rs:6`), matching the code.
+**Estimated Effort**: small.
 
-**Current Code**: `components/extent-manager/README.md:19` still describes the on-disk
-format as "format version (5)" — stale from an earlier format revision, and inconsistent
-with both the current spec and the current code.
-
-**Required Change**: Update `README.md`'s on-disk format description to say "format
-version (6)". Out of scope for this spec-sync apply pass (README.md is not under
-`components/extent-manager/specs/**` or `.specify/sync/**`).
-
-**Files to Modify**: `components/extent-manager/README.md`.
+### Acceptance Criteria
+- [x] Both doc strings now state 30 seconds, matching `lib.rs:112`.
+- [x] `cargo build -p interfaces` — clean.
 
 ---
+
+## Informational (not tasked here)
+
+- `plan.md` / `tasks.md` / `README.md` still reference a `block_device`
+  receptacle, a `v2/` source path, `AtomicU64` interval, and CERTUSV5/v5.
+  `spec.md` and code agree (CERTUSV4, FORMAT_VERSION 6). Refresh these planning
+  docs in a separate docs pass — out of scope for this drift sync.

@@ -1,0 +1,46 @@
+{
+  "generated": "2026-08-07",
+  "branch": "sync/spec-drift-sweep-20260807",
+  "component": "component-framework",
+  "based_on": "drift-report.{json,md} (2026-08-07 sweep re-analysis; 6 specs, 148/149 aligned)",
+  "mode": "interactive",
+  "summary": { "backfill": 1, "human_decision": 1, "align_open": 1, "no_action": 1 },
+  "proposals": [
+    {
+      "id": "cf-004-FR-016",
+      "spec": "004-channel-benchmarks",
+      "requirement": "FR-016",
+      "direction": "HUMAN_DECISION",
+      "confidence": "MEDIUM",
+      "spec_says": "Benchmark group IDs follow {topology}_throughput_{type}/{backend}/{capacity} e.g. built_in / capacity_1024.",
+      "code_does": "Benches emit bare tokens: builtin backend and a bare numeric capacity (benches/channel_spsc_benchmark.rs:64-70).",
+      "options": [
+        "Relax spec to match code (backfill)",
+        "Change bench IDs to match the spec example (align/code change)"
+      ],
+      "user_decision": "Relax spec to match code (backfill)",
+      "resolution": "FR-016 example relaxed to spsc_throughput_u64/builtin/1024 (bare backend token + bare capacity).",
+      "approved": true,
+      "applied": true
+    },
+    {
+      "id": "cf-unspecced-10",
+      "direction": "NO_ACTION",
+      "confidence": "HIGH",
+      "note": "10 unspecced items are benign helper/internal surface; no standalone spec warranted (consistent with folding the 4 actor extensions into 003 on 2026-07-22).",
+      "approved": true,
+      "applied": false
+    },
+    {
+      "id": "cf-003-005-activate-panic",
+      "spec": "003-actor-channels / 005-numa-aware-actors",
+      "requirement": "FR-004 / FR-001",
+      "direction": "ALIGN",
+      "confidence": "LOW",
+      "note": "activate() double-consume panics via .expect() instead of typed Err. Code-behavior question from 2026-07-22 align-task; not re-surfaced as spec drift. Remains open.",
+      "approved": false,
+      "applied": false
+    }
+  ],
+  "notes": "Component carries a conflicts.* artifact set from a prior conflict-analysis pass; no new conflicts introduced this sweep."
+}

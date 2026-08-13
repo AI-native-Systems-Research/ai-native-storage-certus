@@ -16,6 +16,30 @@ be reviewed separately from feature work.
 
 ---
 
+## The core rule — verify at function granularity, against a spec-derived contract
+
+Before anything else: **the unit of verification is a whole function plus a property
+from the spec — never a cherry-picked statement.** Lifting a suspect line and checking
+it for overflow/out-of-bounds is *bug-hunting*: it proves a fragment that has no
+contract, so a green result only says "this one line does not panic." Instead, for each
+target produce three things and label the global `Pn`:
+
+1. **precondition** — `kani::assume(...)` the spec's precondition (mirror the production guard);
+2. **function** — **call the real function** (preferred: the proof then tracks shipped
+   code). A faithful *whole-function* copy carrying the same contract is acceptable only
+   where the crate cannot be built under Kani, and must carry a drift/equality check;
+3. **postcondition** — `assert!(...)` the spec's postcondition.
+
+Then **validate the harness by fault injection**: make a change to the function that
+violates the contract and confirm the harness *fails*. If it still passes, the harness is
+not bound to the real code — fix it. (`--harness` substring-matches; use `--exact` with the
+fully-qualified `module::name` to run one harness in isolation.)
+
+The statement scan in Phase 1 is only for *finding candidate functions and their
+properties* — not for lifting statements into harnesses.
+
+---
+
 ## Phase 1 — Reconnaissance
 
 Before writing a single line of Kani code, read:

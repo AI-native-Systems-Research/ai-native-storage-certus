@@ -1,90 +1,78 @@
 {
-  "generated": "2026-07-22T21:28:04Z",
+  "generated": "2026-08-07T15:28:26Z",
   "project": "memory-tier",
   "summary": {
-    "specs_analyzed": 1,
-    "requirements_checked": 44,
-    "aligned": 34,
-    "drifted": 5,
-    "not_implemented": 5,
-    "unspecced_features": 3
+    "aligned": 30,
+    "drifted": 9,
+    "not_implemented": 1,
+    "unspecced": 0,
+    "result": "drifted-known-deferred",
+    "note": "Most drift is pre-documented in spec 'Spec-Sync Notes (2026-07-22)' and .specify/sync/align-tasks.md. Central issue: spec describes 16-way sharding not present in code."
   },
   "specs": [
-    {
-      "id": "001-memory-tier",
-      "title": "Memory Tier (DRAM Cache Pool)",
-      "aligned": [
-        "FR-001", "FR-002", "FR-003", "FR-004", "FR-008", "FR-009", "FR-010",
-        "FR-011", "FR-012", "FR-015", "FR-016", "FR-017", "FR-018", "FR-019",
-        "FR-020", "FR-022", "FR-023", "FR-024", "FR-025", "FR-026",
-        "NFR-001", "NFR-003", "NFR-004", "NFR-005", "NFR-006", "NFR-007", "NFR-009", "NFR-010",
-        "SC-1", "SC-2", "SC-4", "SC-5", "SC-6", "SC-7"
-      ],
-      "drifted": [
-        {
-          "requirement": "FR-013",
-          "spec_text": "evict_lru() cycles through shards via atomic counter (round-robin)",
-          "actual": "No evict_counter or shards exist; evict_lru() calls ep.pop_oldest(state.pool_id) on the single global pool",
-          "location": "components/memory-tier/src/lib.rs:431-463",
-          "severity": "high"
-        },
-        {
-          "requirement": "FR-014",
-          "spec_text": "evict_lru_for_key() evicts from the same shard as the target key",
-          "actual": "The key argument is ignored (bound as _key); function is a pure alias for evict_lru() with no shard-targeted behavior",
-          "location": "components/memory-tier/src/lib.rs:465-467",
-          "severity": "high"
-        },
-        {
-          "requirement": "FR-021",
-          "spec_text": "oldest_keys(n) peeks at N oldest keys across shards, sampling (n / NUM_SHARDS).max(1) per shard",
-          "actual": "Single call to ep.peek_oldest(state.pool_id, n); no per-shard sampling logic exists",
-          "location": "components/memory-tier/src/lib.rs:421-429",
-          "severity": "medium"
-        },
-        {
-          "requirement": "NFR-008",
-          "spec_text": "Component version is 0.2.0",
-          "actual": "Cargo.toml package version is 0.1.0; define_component! macro version field is 0.3.0; neither matches 0.2.0",
-          "location": "components/memory-tier/Cargo.toml:3; components/memory-tier/src/lib.rs:139",
-          "severity": "medium"
-        },
-        {
-          "requirement": "SC-3",
-          "spec_text": "Concurrent access from 16+ threads does not deadlock or corrupt state",
-          "actual": "Correctness likely holds via single RwLock<Pool>, but the claimed 16-way shard-lock parallelism mechanism does not exist; all keys contend for one lock instead of one of 16",
-          "location": "components/memory-tier/src/lib.rs:75-89",
-          "severity": "medium"
-        }
-      ],
-      "not_implemented": [
-        "FR-005 (pool divided into 16 independent shards)",
-        "FR-006 (shard selection uses key modulo 16)",
-        "FR-007 (each shard has its own Mutex-protected allocator and slot map)",
-        "NFR-002 (per-shard locking, 16-way parallelism)",
-        "SC-8 (10 formal properties verified with Creusot, 21 verification conditions)"
+    { "spec": "specs/001-memory-tier/spec.md", "status": "Backfilled",
+      "requirements": [
+        { "id": "FR-001", "status": "aligned", "location": "src/lib.rs:190-257" },
+        { "id": "FR-002", "status": "aligned", "location": "src/lib.rs:195-223" },
+        { "id": "FR-003", "status": "aligned", "location": "src/lib.rs:277-303" },
+        { "id": "FR-004", "status": "aligned", "location": "src/allocator.rs:5,42,60" },
+        { "id": "FR-005", "status": "drifted", "severity": "high", "location": "src/lib.rs:76-90", "detail": "no shards; single Pool in RwLock" },
+        { "id": "FR-006", "status": "drifted", "severity": "high", "location": "src/lib.rs", "detail": "no key-mod-16 sharding; stale Creusot P4/P5 claim" },
+        { "id": "FR-007", "status": "drifted", "severity": "high", "location": "src/lib.rs:76-90", "detail": "single pool+lock, not per-shard" },
+        { "id": "FR-008", "status": "aligned", "location": "src/lib.rs:329-331" },
+        { "id": "FR-009", "status": "aligned", "location": "src/lib.rs:356-358" },
+        { "id": "FR-010", "status": "aligned", "location": "src/lib.rs:360-363" },
+        { "id": "FR-011", "status": "aligned", "location": "src/lib.rs:381-410" },
+        { "id": "FR-012", "status": "aligned", "location": "src/lib.rs:412-422" },
+        { "id": "FR-013", "status": "drifted", "severity": "high", "location": "src/lib.rs:434-466", "detail": "no evict_counter/round-robin; delegates to policy; stale Creusot P10" },
+        { "id": "FR-014", "status": "drifted", "severity": "high", "location": "src/lib.rs:468-470", "detail": "key ignored; alias for evict_next" },
+        { "id": "FR-015", "status": "aligned", "location": "src/lib.rs:472-503" },
+        { "id": "FR-016", "status": "aligned", "location": "src/lib.rs:505-518" },
+        { "id": "FR-017", "status": "aligned", "location": "src/lib.rs:520-555" },
+        { "id": "FR-018", "status": "aligned", "location": "src/lib.rs:594-608" },
+        { "id": "FR-019", "status": "aligned", "location": "src/lib.rs:225-254" },
+        { "id": "FR-020", "status": "aligned", "location": "src/lib.rs:610-613" },
+        { "id": "FR-021", "status": "drifted", "severity": "medium", "location": "src/lib.rs:424-432", "detail": "returns N oldest via policy; 'per-shard sampling/across shards' wording is false" },
+        { "id": "FR-022", "status": "aligned", "location": "src/lib.rs:585-592" },
+        { "id": "FR-023", "status": "aligned", "location": "src/lib.rs:334,383,414,426,436,474,507,525,559,569,578,587,596" },
+        { "id": "FR-024", "status": "aligned", "location": "src/lib.rs:142-145" },
+        { "id": "FR-025", "status": "aligned", "location": "src/lib.rs:142-145,153-163" },
+        { "id": "FR-026", "status": "aligned", "location": "src/allocator.rs:59-83" },
+        { "id": "FR-027", "status": "aligned", "location": "src/lib.rs:37-68" },
+        { "id": "FR-028", "status": "aligned", "location": "src/lib.rs:166-177,615-635" },
+        { "id": "FR-029", "status": "aligned", "location": "src/lib.rs:180-187" },
+        { "id": "NFR-001", "status": "aligned", "location": "delegated to IEvictionPolicy" },
+        { "id": "NFR-002", "status": "drifted", "severity": "high", "location": "src/lib.rs:85", "detail": "single RwLock<Pool>, no 16-way parallelism" },
+        { "id": "NFR-003", "status": "aligned", "location": "src/lib.rs" },
+        { "id": "NFR-004", "status": "aligned", "location": "src/lib.rs:92-96" },
+        { "id": "NFR-005", "status": "aligned", "location": "src/allocator.rs:3,10" },
+        { "id": "NFR-006", "status": "aligned", "location": "src/lib.rs:116-136" },
+        { "id": "NFR-007", "status": "aligned", "location": "src/lib.rs:34", "detail": "DEFAULT_POOL_SIZE defined but unused (reserved)" },
+        { "id": "NFR-008", "status": "drifted", "severity": "medium", "location": "Cargo.toml:3 (0.1.0) vs src/lib.rs:140 (0.3.0) vs spec (0.2.0)" },
+        { "id": "NFR-009", "status": "aligned", "location": "Cargo.toml:9,18" },
+        { "id": "NFR-010", "status": "aligned", "location": "src/lib.rs" },
+        { "id": "NFR-011", "status": "aligned", "location": "src/lib.rs:20,37,45,62,88" },
+        { "id": "SC-1", "status": "aligned", "location": "src/lib.rs, src/allocator.rs tests" },
+        { "id": "SC-2", "status": "aligned", "location": "src/lib.rs:116-136" },
+        { "id": "SC-3", "status": "drifted", "severity": "medium", "location": "src/lib.rs:85", "detail": "concurrency via single RwLock, not shard locks" },
+        { "id": "SC-4", "status": "aligned", "location": "src/allocator.rs tests" },
+        { "id": "SC-5", "status": "aligned", "location": "src/lib.rs tests" },
+        { "id": "SC-6", "status": "aligned", "location": "src/lib.rs:225-254" },
+        { "id": "SC-7", "status": "aligned", "location": "src/lib.rs:277-303" },
+        { "id": "SC-8", "status": "not_implemented", "severity": "high", "location": "no verif/ dir", "detail": "10 Creusot properties / 21 VCs claimed but no proof artifacts; interface doc comments assert stale 'Verified' claims" }
       ]
     }
   ],
   "unspecced": [
-    {
-      "feature": "telemetry Cargo feature: MemoryTierTelemetry / TelemetrySnapshot / telemetry() / reset_telemetry() / telemetry_snapshot() (eviction count, write/read lock-contention counters)",
-      "location": "components/memory-tier/Cargo.toml:10; components/memory-tier/src/lib.rs:19-20,35-67,164-176,341-351,386-396,439-449,479-489,530-540,612-632; components/interfaces/src/imemory_tier.rs:7-16,202-206",
-      "lines": 90,
-      "suggested_spec": "Add a User Story / FR block documenting the optional telemetry feature: eviction count and read/write lock-contention counters exposed via telemetry_snapshot()."
-    },
-    {
-      "feature": "free_capacity() inherent method (capacity - used)",
-      "location": "components/memory-tier/src/lib.rs:178-186",
-      "lines": 9,
-      "suggested_spec": "Add FR under Capacity Monitoring: free_capacity() returns capacity() minus used() for proactive eviction triggers."
-    },
-    {
-      "feature": "DEFAULT_POOL_SIZE constant declared but never consumed by any call site (initialize() always requires an explicit pool_size argument)",
-      "location": "components/memory-tier/src/lib.rs:33",
-      "lines": 1,
-      "suggested_spec": "Either wire DEFAULT_POOL_SIZE into a default constructor/initialize path, or document it in plan.md as reserved-for-future (as done for the NotEvictable error variant)."
-    }
+    { "item": "MemoryTierError::NotEvictable variant (defined, never constructed)", "location": "components/interfaces/src/imemory_tier.rs:32", "severity": "low", "note": "reserved-for-future, already documented in spec" },
+    { "item": "DEFAULT_POOL_SIZE public constant with no call site", "location": "src/lib.rs:34", "severity": "low", "note": "reserved-for-future, already documented in spec" }
   ],
-  "conflicts": []
+  "conflicts": [
+    { "type": "spec-references-nonexistent-path", "severity": "high",
+      "detail": "components/interfaces/src/imemory_tier.rs:53 references components/memory-tier/verif/ which does not exist; SC-008 and per-method '# Verified: P1..P10' annotations claim Creusot proofs with no backing artifacts." },
+    { "type": "version-mismatch", "severity": "medium",
+      "detail": "Cargo.toml 0.1.0 vs define_component! 0.3.0 vs spec NFR-008 0.2.0." },
+    { "type": "architecture-mismatch", "severity": "high",
+      "detail": "Spec describes 16-way sharded pool (FR-005/006/007, FR-013, FR-021, NFR-002, SC-3); implementation is a single RwLock<Pool>. Pre-documented and deferred in .specify/sync/align-tasks.md." }
+  ]
 }
