@@ -41,27 +41,53 @@ codex --version
 
 ### Codex Authentication
 
-Codex needs an API key persisted in the shell profile (not just exported for the current shell):
+After installing Codex CLI, check if auth is already configured:
 
-**If using OpenAI directly**, add to `~/.bashrc` or `~/.zshrc`:
+```bash
+# Check if config.toml exists with a provider
+if [[ -f ~/.codex/config.toml ]] && grep -q "model_provider" ~/.codex/config.toml; then
+  echo "Codex config found — using configured provider"
+  grep "model_provider" ~/.codex/config.toml
+elif [[ -n "$OPENAI_API_KEY" ]]; then
+  echo "OPENAI_API_KEY found — Codex will use OpenAI directly"
+else
+  echo "No auth configured — setup needed (see options below)"
+fi
+```
+
+**Option 1: OpenAI direct** — interactive browser login:
+```bash
+codex login
+```
+Or set the key manually (persist in `~/.bashrc` or `~/.zshrc`):
 ```bash
 export OPENAI_API_KEY="sk-..."
 ```
 
-**If using a LiteLLM proxy or custom provider**, configure `~/.codex/config.toml`:
-```toml
+**Option 2: LiteLLM proxy** (recommended for teams) — create `~/.codex/config.toml`:
+```bash
+mkdir -p ~/.codex
+cat > ~/.codex/config.toml << 'TOML_EOF'
 model = "<your-proxy-model-name>"    # e.g. "gpt-5.5" — must match what your proxy serves
 model_provider = "litellm"
+model_reasoning_effort = "high"
 
 [model_providers.litellm]
 name = "My Proxy"
 base_url = "https://my-proxy.example.com"
 env_key = "LITELLM_API_KEY"           # name of the env var holding your key
+TOML_EOF
 ```
 
-And persist the key in your shell profile:
+Then persist the key in your shell profile (`~/.bashrc` or `~/.zshrc`):
 ```bash
-export LITELLM_API_KEY="your-key-here"
+echo 'export LITELLM_API_KEY="your-key-here"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+**Option 3: Already have a key in env** — pipe it directly:
+```bash
+printenv OPENAI_API_KEY | codex login --with-api-key
 ```
 
 ## Setup
