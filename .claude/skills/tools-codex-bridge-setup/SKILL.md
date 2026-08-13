@@ -12,19 +12,28 @@ Set up the claude-codex-bridge MCP server so that Claude Code can call Codex for
 Verify and enforce these before proceeding:
 
 ```bash
-# Node.js >= 18 (required)
-NODE_VER=$(node --version 2>/dev/null | sed 's/v//' | cut -d. -f1)
-if [[ -z "$NODE_VER" ]] || [[ "$NODE_VER" -lt 18 ]]; then
-  echo "ERROR: Node.js >= 18 required. Install via: fnm install 22 && fnm use 22"
-  exit 1
+# fnm (Fast Node Manager) — install if missing
+if ! command -v fnm >/dev/null 2>&1; then
+  echo "Installing fnm (Fast Node Manager)..."
+  curl -fsSL https://fnm.vercel.app/install | bash
+  export PATH="$HOME/.local/share/fnm:$PATH"
+  eval "$(fnm env)"
 fi
 
-# npx available
-command -v npx >/dev/null || { echo "ERROR: npx not found"; exit 1; }
+# Node.js >= 18 — install via fnm if missing or too old
+NODE_VER=$(node --version 2>/dev/null | sed 's/v//' | cut -d. -f1)
+if [[ -z "$NODE_VER" ]] || [[ "$NODE_VER" -lt 18 ]]; then
+  echo "Installing Node.js 22 via fnm..."
+  fnm install 22
+  fnm use 22
+fi
 
-# Codex CLI
+# Verify npx is available (comes with Node)
+command -v npx >/dev/null || { echo "ERROR: npx not found after Node install"; exit 1; }
+
+# Codex CLI — install if missing
 if ! command -v codex >/dev/null 2>&1; then
-  echo "Codex CLI not found. Installing..."
+  echo "Installing Codex CLI..."
   npm install -g @openai/codex
 fi
 codex --version
