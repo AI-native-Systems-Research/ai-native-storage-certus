@@ -130,8 +130,15 @@ pub struct SessionShapes {
     /// old caveat blamed, it is **zero**: they are perfect chains, and only their
     /// arrival order was disordered.
     non_monotone_steps: u64,
-    /// Whether [`SessionShapes::seal`] has folded the chains in already.
+    /// Whether the chains have been folded in already.
     sealed: bool,
+    /// `Σ turns`, `Σ turns × turn-1 depth`, `Σ (depth − turn-1 depth)` and
+    /// `Σ turns(turns−1)/2` — the exact terms behind FR-014a's path formula, kept so a
+    /// report can account for a mean-length gap by arithmetic. See [`PathBudget`].
+    requests: u64,
+    weighted_turn_one_depth: u64,
+    accumulated_growth: u64,
+    accumulated_steps: u64,
     /// Turn-1 requests whose shared prefix exceeded their own path length.
     ///
     /// Impossible if the prefix is a prefix, so a non-zero count means the two
@@ -228,6 +235,16 @@ impl SessionShapes {
             // keeps its arrival order among the duplicates, which is the only
             // information left to order them by.
             live.chain.sort_by_key(|(t, _)| *t);
+            // Turn-weighted, because a session with many turns contributes many
+            // requests: what a *request* carries of turn-1 depth is the turn-weighted
+            // mean, not the plain one.
+            let turn_one_depth = live.chain.first().map(|(_, p)| *p).unwrap_or(0);
+            self.requests += live.turns;
+            self.weighted_turn_one_depth += live.turns * turn_one_depth;
+            self.accumulated_steps += live.turns * live.turns.saturating_sub(1) / 2;
+            for (_, p) in &live.chain {
+                self.accumulated_growth += p.saturating_sub(turn_one_depth);
+            }
             for (&(_, a), &(_, b)) in live.chain.iter().zip(live.chain.iter().skip(1)) {
                 if b < a {
                     self.non_monotone_steps += 1;
@@ -270,6 +287,48 @@ impl SessionShapes {
         empirical_from(&h)
     }
 
+    /// The means the generator's path formula is built from, for a report that has to
+    /// account for a difference in *mean* request length rather than in shape.
+    ///
+    /// FR-014a builds a path as `shared_depth + private_depth + Σ growth_per_turn`, so a
+    /// synthetic stream that runs longer than its source does so through one of exactly
+    /// three terms. A divergence figure cannot say which; these can, by arithmetic.
+    ///
+    /// `turn_one_shared` is here because it is the term the other two are defined
+    /// against: `private_depth` is `turn-1 depth − turn-1 shared prefix`, so if the
+    /// `shared_depth` the generator draws has a different mean from the turn-1 prefix
+    /// that was subtracted, every generated path is off by that difference before any
+    /// growth is added.
+    pub fn path_budget(&mut self) -> PathBudget {
+        self.seal();
+        let sessions = self.turn_one.len() as u64;
+        let mean = |sum: u64| {
+            if sessions == 0 {
+                0.0
+            } else {
+                sum as f64 / sessions as f64
+            }
+        };
+        PathBudget {
+            sessions,
+            turn_one_depth: mean(self.turn_one.iter().map(|(p, _)| *p).sum()),
+            turn_one_shared: mean(self.turn_one.iter().map(|(_, s)| *s).sum()),
+            private_depth: mean(
+                self.turn_one
+                    .iter()
+                    .map(|(p, s)| p.saturating_sub(*s))
+                    .sum(),
+            ),
+            growth: self.growth.mean(),
+            growth_steps: self.growth.count(),
+            turns: self.turns.mean(),
+            requests: self.requests,
+            weighted_turn_one_depth: self.weighted_turn_one_depth,
+            accumulated_growth: self.accumulated_growth,
+            accumulated_steps: self.accumulated_steps,
+        }
+    }
+
     /// Turn-1 path lengths, for a report that wants to show what was subtracted from.
     pub fn turn_one_depth(&mut self) -> Option<Dist> {
         self.seal();
@@ -301,6 +360,83 @@ impl SessionShapes {
             non_monotone_steps: self.non_monotone_steps,
             prefix_longer_than_path: self.prefix_longer_than_path,
         }
+    }
+}
+
+/// The means behind FR-014a's path formula, for accounting for a mean-length gap.
+///
+/// Every field is a mean over what the trace showed, so a report can compare the sum
+/// the generator will build against the length the trace actually had, term by term.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct PathBudget {
+    /// Sessions the means are over.
+    pub sessions: u64,
+    /// Mean path length of each session's lowest-numbered turn.
+    pub turn_one_depth: f64,
+    /// Mean realised shared prefix **of those turn-1 requests only**.
+    pub turn_one_shared: f64,
+    /// Mean `turn_one_depth − turn_one_shared`, which is what `private_depth` carries.
+    pub private_depth: f64,
+    /// Mean increment between consecutive turns, along the chain.
+    pub growth: Option<f64>,
+    /// Increments the mean is over — turns beyond the first.
+    pub growth_steps: u64,
+    /// Mean turns per session.
+    pub turns: Option<f64>,
+    /// Requests, i.e. `Σ turns`. The denominator every per-request figure below uses.
+    pub requests: u64,
+    /// `Σ turns × turn-1 depth`. Turn-**weighted**, because a session with many turns
+    /// contributes many requests, so the plain mean of turn-1 depth is not the amount
+    /// of turn-1 depth a request carries.
+    pub weighted_turn_one_depth: u64,
+    /// `Σ over sessions Σ over turns (this turn's depth − turn 1's depth)`.
+    ///
+    /// What the trace's accumulated growth actually totals, which is the quantity the
+    /// generator has to reproduce.
+    pub accumulated_growth: u64,
+    /// `Σ turns(turns−1)/2` — how many increments the accumulation sums over.
+    ///
+    /// Beside [`PathBudget::accumulated_growth`] this gives the mean increment
+    /// *weighted as the accumulation weights it*, which is the number an i.i.d. draw
+    /// from the pooled marginal implicitly claims equals the pooled mean.
+    pub accumulated_steps: u64,
+}
+
+impl PathBudget {
+    /// Accumulated growth per request, as the trace has it.
+    pub fn accumulated_per_request(&self) -> f64 {
+        if self.requests == 0 {
+            0.0
+        } else {
+            self.accumulated_growth as f64 / self.requests as f64
+        }
+    }
+
+    /// Accumulated growth per request that an **i.i.d.** per-turn draw from the pooled
+    /// mean would produce.
+    ///
+    /// The increment at position `i` of a session with `T` turns is inherited by every
+    /// turn after it, so it enters the accumulation with weight `T − i`; summed over a
+    /// session that is `T(T−1)/2`. An i.i.d. draw therefore yields
+    /// `pooled mean × Σ T(T−1)/2`, and that equals the truth only if the mean increment
+    /// under that weighting is the pooled mean. The weighting is quadratic in `T`, so
+    /// the longest sessions dominate it — and where their growth rate differs from the
+    /// population's, this diverges while every marginal distribution stays correct.
+    pub fn accumulated_per_request_iid(&self) -> Option<f64> {
+        if self.requests == 0 {
+            return None;
+        }
+        self.growth
+            .map(|g| g * self.accumulated_steps as f64 / self.requests as f64)
+    }
+
+    /// How far an i.i.d. per-turn draw overstates the accumulated depth.
+    pub fn iid_inflation(&self) -> Option<f64> {
+        let truth = self.accumulated_per_request();
+        if truth <= 0.0 {
+            return None;
+        }
+        self.accumulated_per_request_iid().map(|i| i / truth)
     }
 }
 
@@ -685,6 +821,68 @@ mod tests {
             "arrival disorder is not a model-expressiveness problem: {:?}",
             f.caveats()
         );
+    }
+
+    #[test]
+    fn the_path_budget_accounts_for_the_mean_exactly() {
+        // Two identities, and the whole diagnosis of the residual request-length gap
+        // rests on the second one.
+        //
+        // 1. mean request length == turn-weighted turn-1 depth + accumulated growth,
+        //    both per request. If this drifts, the budget stops adding up and any
+        //    conclusion drawn from it is arithmetic on sand.
+        // 2. accumulated growth == SUM over i of (T - i) * g_i. This is why an i.i.d.
+        //    per-turn draw is not neutral: increment i is inherited by every later
+        //    turn, so it enters with weight (T - i), and the mean increment under that
+        //    weighting is what the draw has to match — not the pooled mean.
+        // Session 7: depths 10, 20, 40 (increments 10, 20). Session 8: depths 100, 130.
+        let mut s = SessionShapes::new();
+        for (sess, turn, p) in [
+            (7u32, 0u32, 10u64),
+            (7, 1, 20),
+            (7, 2, 40),
+            (8, 0, 100),
+            (8, 1, 130),
+        ] {
+            s.observe(sess, turn, p, 0, None);
+        }
+        let b = s.path_budget();
+
+        assert_eq!(b.requests, 5);
+        // 3 turns x 10 + 2 turns x 100 = 230.
+        assert_eq!(b.weighted_turn_one_depth, 230);
+        // Session 7: 0 + 10 + 30 = 40. Session 8: 0 + 30 = 30.
+        assert_eq!(b.accumulated_growth, 70);
+        // SUM (T - i) g_i, written as the formula rather than as its total, since the
+        // weight is the whole point: session 7 is 2x10 + 1x20 = 40, session 8 is 1x30.
+        let weighted = |turns: u64, increments: &[(u64, u64)]| -> u64 {
+            increments.iter().map(|(i, g)| (turns - i) * g).sum()
+        };
+        assert_eq!(
+            b.accumulated_growth,
+            weighted(3, &[(1, 10), (2, 20)]) + weighted(2, &[(1, 30)]),
+            "the weighted-sum identity the i.i.d. comparison depends on"
+        );
+        // T(T-1)/2: 3 + 1 = 4 increments' worth of weight.
+        assert_eq!(b.accumulated_steps, 4);
+
+        // Identity 1, to a rounding tolerance: 230/5 + 70/5 == (10+20+40+100+130)/5.
+        let mean = (10 + 20 + 40 + 100 + 130) as f64 / 5.0;
+        let from_terms = b.weighted_turn_one_depth as f64 / 5.0 + b.accumulated_per_request();
+        assert!(
+            (from_terms - mean).abs() < 1e-9,
+            "budget does not add up: {from_terms} against {mean}"
+        );
+
+        // And the i.i.d. counterfactual overstates here, because the long session's
+        // increments are smaller than the pooled mean of (10, 20, 30) = 20.
+        assert_eq!(b.accumulated_per_request(), 14.0);
+        let iid = b.accumulated_per_request_iid().expect("growth measured");
+        assert!(
+            (iid - 20.0 * 4.0 / 5.0).abs() < 1e-9,
+            "i.i.d. accumulation is pooled mean x steps / requests, got {iid}"
+        );
+        assert!(b.iid_inflation().expect("both") > 1.0);
     }
 
     #[test]

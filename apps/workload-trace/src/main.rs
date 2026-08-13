@@ -727,6 +727,7 @@ fn cmd_fit(
     }
 
     if explain {
+        print_path_budget(&trace_report, &synthetic, &shapes.path_budget());
         print_explanation(&synthetic, &trace_report, &d, "synthetic", "trace");
     }
 
@@ -813,6 +814,153 @@ fn trace_report(
 /// marked. The tables come from `divergence::explain`, which is the same arithmetic
 /// the verdict used — a diagnostic that recomputed the CDFs a second way could point
 /// somewhere the verdict never looked.
+/// Account for a difference in *mean* request length, term by term.
+///
+/// A `request_length` divergence says the two distributions differ and cannot say which
+/// of FR-014a's three terms did it. This can, by arithmetic: the generator builds a path
+/// as `shared_depth + private_depth + Σ growth_per_turn`, and `private_depth` is defined
+/// as `turn-1 depth − turn-1 shared prefix`. So the identity that must hold for a
+/// generated turn-1 path to match the trace's is
+///
+/// ```text
+/// E[shared_depth drawn]  ==  E[turn-1 shared prefix subtracted]
+/// ```
+///
+/// and any gap between those two is added to **every** generated path before a single
+/// increment of growth. It is worth printing precisely because it is invisible in every
+/// distributional check: both sides can be individually well-fitted measurements of
+/// *different populations*.
+fn print_path_budget(
+    trace: &Report,
+    synthetic: &Report,
+    budget: &workload_model::fit::sessions::PathBudget,
+) {
+    let per_request = |r: &Report| {
+        if r.requests == 0 {
+            0.0
+        } else {
+            r.references as f64 / r.requests as f64
+        }
+    };
+    let trace_mean = per_request(trace);
+    // Turn-weighted: what a *request* carries of turn-1 depth, not the mean over
+    // sessions. The two differ whenever session length varies, and it is the weighted
+    // one that has to add up to the mean request length.
+    let weighted_turn_one = if budget.requests == 0 {
+        0.0
+    } else {
+        budget.weighted_turn_one_depth as f64 / budget.requests as f64
+    };
+    let syn_mean = per_request(synthetic);
+    // The population `shared_depth` is fitted over: every sharing request, at every
+    // turn. The generator draws from it once per session.
+    let all_shared = trace
+        .sharing
+        .depth_buckets
+        .iter()
+        .fold((0.0, 0u64), |acc, (lo, hi, c)| {
+            (
+                acc.0 + (*lo as f64 + *hi as f64) / 2.0 * *c as f64,
+                acc.1 + c,
+            )
+        });
+    let all_shared_mean = if all_shared.1 == 0 {
+        0.0
+    } else {
+        all_shared.0 / all_shared.1 as f64
+    };
+
+    println!("\n  path budget — where a mean request length comes from");
+    println!(
+        "  FR-014a: path = shared_depth + private_depth + SUM(growth_per_turn). Every figure below\n          is PER REQUEST and turn-weighted, because a session with many turns contributes many\n          requests — the plain mean over sessions is not what a request carries."
+    );
+    println!(
+        "    {:<46} {:>10}",
+        "trace mean blocks/request",
+        format!("{trace_mean:.1}")
+    );
+    println!(
+        "    {:<46} {:>10}",
+        "synthetic mean blocks/request",
+        format!("{syn_mean:.1}")
+    );
+    println!(
+        "    {:<46} {:>10}",
+        "  excess to account for",
+        format!("{:+.1}", syn_mean - trace_mean)
+    );
+
+    println!("\n    the trace's own decomposition");
+    println!(
+        "    {:<46} {:>10}",
+        "  turn-1 depth (turn-weighted)",
+        format!("{:.1}", weighted_turn_one)
+    );
+    println!(
+        "    {:<46} {:>10}",
+        "  accumulated growth",
+        format!("{:.1}", budget.accumulated_per_request())
+    );
+
+    println!("\n    term 1: the shared prefix, drawn against subtracted");
+    println!(
+        "    {:<46} {:>10}",
+        "  SUBTRACTED to get private_depth (turn 1 only)",
+        format!("{:.1}", budget.turn_one_shared)
+    );
+    println!(
+        "    {:<46} {:>10}",
+        "  DRAWN by the generator (all turns)",
+        format!("{all_shared_mean:.1}")
+    );
+    println!(
+        "    {:<46} {:>10}   added to every path",
+        "  mismatch",
+        format!("{:+.1}", all_shared_mean - budget.turn_one_shared)
+    );
+
+    println!("\n    term 2: accumulated growth, true against i.i.d. per turn");
+    if let (Some(g), Some(iid), Some(inflation)) = (
+        budget.growth,
+        budget.accumulated_per_request_iid(),
+        budget.iid_inflation(),
+    ) {
+        let weighted_g = if budget.accumulated_steps == 0 {
+            0.0
+        } else {
+            budget.accumulated_growth as f64 / budget.accumulated_steps as f64
+        };
+        println!(
+            "    {:<46} {:>10}",
+            "  pooled mean increment (what is drawn from)",
+            format!("{g:.2}")
+        );
+        println!(
+            "    {:<46} {:>10}",
+            "  mean increment as the SUM weights it",
+            format!("{weighted_g:.2}")
+        );
+        println!(
+            "    {:<46} {:>10}",
+            "  accumulated if drawn i.i.d. at the pooled mean",
+            format!("{iid:.1}")
+        );
+        println!(
+            "    {:<46} {:>10}   <- overstates by this factor",
+            "  against the trace's actual accumulation",
+            format!("{inflation:.3}x")
+        );
+        println!(
+            "    {:<46} {:>10}",
+            "  excess from this term alone",
+            format!("{:+.1}", iid - budget.accumulated_per_request())
+        );
+        println!(
+            "  An increment at position i of a T-turn session is inherited by every later turn, so\n              it enters the sum with weight (T - i) — quadratic in T once summed over a session. An\n              i.i.d. per-turn draw is right only if the mean increment under THAT weighting equals\n              the pooled mean. Where the longest sessions grow at a different rate from the\n              population, these two diverge while every marginal distribution stays correct."
+        );
+    }
+}
+
 /// The observed width-by-depth profile beside what was fitted from it.
 ///
 /// The instrument for a schema rejection about the trunk, which is otherwise a number

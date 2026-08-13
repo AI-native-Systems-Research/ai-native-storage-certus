@@ -1706,6 +1706,39 @@ report segments statistics into before/after windows around the event.
      trace was never obliged to record.
   3. **Caller input** — an ambiguous or absent option, a partial file, a blocking the trace does not
      carry. Fixable by the person running the command, and about neither the model nor the data.
+- **FR-054c**: **`growth_per_turn` is drawn i.i.d. per turn, and that is a known limitation of this
+  model** (FR-054a), not a defect in any trace. It is the dominant reason a fit of a real agentic
+  trace still runs long, and it is recorded here because every marginal distribution is *correct*
+  while the result is wrong, so no distributional check can find it.
+  A session's accumulated depth is `Σᵢ (T − i)·gᵢ`: the increment at position `i` is inherited by
+  every turn after it, so it enters the total with weight `T − i`, and summed over a session that
+  weight is **quadratic in `T`**. An i.i.d. draw from the pooled marginal reproduces the total only
+  if the mean increment *under that weighting* equals the pooled mean. On two agentic traces
+  measured it does not: the pooled mean increment is 32.1 and 32.4 blocks while the weighted mean is
+  **21.7 and 21.0**, so the accumulated depth comes out **1.478× and 1.545×** what the trace has —
+  +122 and +118 blocks on a mean request length of 694 and 712.
+  The cause is **between-session** variation in growth rate, and it is not subtle once weighted
+  correctly: growth rate rises to about 37 blocks/turn for sessions of 7–20 turns and then collapses
+  to **12.5 and 10.6** for sessions beyond 40 turns, which carry ~10% of requests but dominate a
+  quadratically-weighted sum. Substituting each increment by **its own session's mean** reproduces
+  the accumulation to 1.000× and 1.072×, while substituting a position-dependent mean only reaches
+  1.214× and 1.244× — so the variation that matters is between sessions and not within them, and the
+  model needs `growth_per_turn` to be a **per-session rate**, drawn once and plausibly conditioned
+  on `turns`, rather than an independent per-turn draw.
+  Two traps are recorded with it, because both cost time here. A Pearson correlation between session
+  length and growth rate reads only **−0.12 and −0.25** and looks negligible — the relationship is
+  **non-monotonic**, rising then collapsing, which is precisely what a linear coefficient cannot
+  see. And the per-request arithmetic must be **turn-weighted** throughout: a session with many
+  turns contributes many requests, so the plain mean over sessions does not add up to the mean
+  request length, and an unweighted version of this accounting predicted a mean *below* the trace's
+  while the synthetic ran above it.
+- **FR-054d**: `fit --explain` MUST print the path budget: the trace's mean request length decomposed
+  into turn-weighted turn-1 depth and accumulated growth, the shared prefix **drawn** beside the one
+  **subtracted** to form `private_depth`, and the accumulated growth an i.i.d. per-turn draw would
+  produce beside what the trace actually accumulates. A `request_length` divergence is a statement
+  that two distributions differ and cannot say which of FR-014a's three terms is responsible;
+  this can, by arithmetic, and both defects found in this area were mean shifts that every
+  quantile-based check passed.
 - **FR-055**: `fit` MUST accept the trace format of `contracts/trace-io.md` in **either container**,
   parquet or JSONL, and with **either block-encoding population pattern**, detected per trace rather
   than assumed, and MUST emit a schema-valid YAML. The two population patterns are not two schemas —
